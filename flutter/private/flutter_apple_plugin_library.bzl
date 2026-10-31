@@ -23,6 +23,7 @@ load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@rules_apple//apple:apple.bzl", "apple_dynamic_framework_import", "apple_dynamic_xcframework_import")
 load("@rules_cc//cc:objc_library.bzl", "objc_library")
 load("@rules_swift//swift:swift.bzl", "swift_library")
+load(":apple_engine.bzl", "ios_engine_xcframework", "macos_engine_framework")
 
 def _split_srcs(srcs):
     """Split srcs into (swift_files, objc_files, headers).
@@ -121,12 +122,14 @@ def flutter_apple_plugin_library(
     # flutter_macos_engine / flutter_ios_engine elsewhere). For
     # compile-time symbol resolution we depend on a framework import that
     # brings in the framework headers. macOS ships a dynamic framework;
-    # iOS ships an xcframework wrapper.
+    # iOS ships an xcframework wrapper. The import is the build mode's
+    # engine, the one the application bundles: an import of another mode's
+    # engine under the same framework name breaks the bundle.
     framework_target = "_%s__flutter_framework" % name
     if platform == "macos":
         apple_dynamic_framework_import(
             name = framework_target,
-            framework_imports = [Label("@flutter_macos_engine//:engine_library")],
+            framework_imports = macos_engine_framework(),
             tags = tags,
             target_compatible_with = target_compatible_with,
             visibility = ["//visibility:private"],
@@ -134,7 +137,7 @@ def flutter_apple_plugin_library(
     else:
         apple_dynamic_xcframework_import(
             name = framework_target,
-            xcframework_imports = [Label("@flutter_ios_engine//:Flutter_xcframework")],
+            xcframework_imports = ios_engine_xcframework(),
             tags = tags,
             target_compatible_with = target_compatible_with,
             visibility = ["//visibility:private"],

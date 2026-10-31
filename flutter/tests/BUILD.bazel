@@ -1,6 +1,7 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load(":app_defines_test.bzl", "app_defines_test_suite")
 load(":app_entrypoint_test.bzl", "app_entrypoint_test_suite")
+load(":apple_plugin_engine_test.bzl", "apple_plugin_engine_test_suite")
 load(":artifact_urls_test.bzl", "artifact_urls_test_suite")
 load(":asset_bundle_test.bzl", "asset_bundle_test_suite")
 load(":code_asset_native_library_test.bzl", "code_asset_native_library_test_suite")
@@ -108,6 +109,8 @@ native_hot_patch_test_suite(name = "native_hot_patch_test")
 native_sources_test_suite(name = "native_sources_test")
 
 code_asset_native_library_test_suite(name = "code_asset_native_library_test")
+
+apple_plugin_engine_test_suite(name = "apple_plugin_engine_test")
 
 shared_code_asset_test_suite(name = "shared_code_asset_test")
 

@@ -62,6 +62,7 @@ load("@rules_apple//apple:apple.bzl", "apple_dynamic_framework_import", "apple_d
 load("@rules_apple//apple:ios.bzl", "ios_application")
 load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
 load("@rules_swift//swift:swift.bzl", "swift_library")
+load("//flutter/private:apple_engine.bzl", _ios_engine_xcframework = "ios_engine_xcframework")
 load("//flutter/private:constants.bzl", _IOS_MINIMUM_OS_VERSION = "IOS_MINIMUM_OS_VERSION")
 load("//flutter/private:debug_build.bzl", _debug_build = "debug_build")
 load("//flutter/private:flutter_apple_plugin_library.bzl", _flutter_apple_plugin_library_macro = "flutter_apple_plugin_library")
@@ -88,20 +89,6 @@ flutter_entitlements_merge = _flutter_entitlements_merge
 # the engine can advertise the service over mDNS. Matches flutter_tools'
 # xcode_backend.dart, which only adds them for non-release configurations.
 _DART_VM_SERVICE_PLIST = "@rules_flutter//flutter/private/runners/ios:DartVmServiceMdns.plist"
-
-def _engine_xcframework_select():
-    """Selects the Flutter.xcframework engine for the active compilation mode.
-
-    Debug (-c dbg): JIT engine (simulator). Profile (-c opt with
-    `//flutter:profile`): the profile AOT engine (device). Release (-c opt /
-    default): AOT engine (device). The labels resolve through rules_flutter's
-    own repo mapping, so a consumer needs none of these repos in `use_repo`.
-    """
-    return select({
-        Label("@rules_flutter//flutter/private:dbg"): [Label("@flutter_ios_engine//:Flutter_xcframework_debug")],
-        Label("@rules_flutter//flutter/private:profile"): [Label("@flutter_ios_engine_profile//:Flutter_xcframework")],
-        "//conditions:default": [Label("@flutter_ios_engine//:Flutter_xcframework")],
-    })
 
 # -- Composable rules (Tier 2) ------------------------------------------------
 #
@@ -211,7 +198,7 @@ def flutter_ios_engine(name, **kwargs):
 
     apple_dynamic_xcframework_import(
         name = name,
-        xcframework_imports = _engine_xcframework_select(),
+        xcframework_imports = _ios_engine_xcframework(),
         tags = tags,
         **kwargs
     )
@@ -533,7 +520,7 @@ def flutter_ios_app(
     # 5. Import Flutter.xcframework engine — auto-selects debug/release.
     apple_dynamic_xcframework_import(
         name = "__%s_engine" % name,
-        xcframework_imports = _engine_xcframework_select(),
+        xcframework_imports = _ios_engine_xcframework(),
         tags = tags,
     )
 

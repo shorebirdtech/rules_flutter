@@ -62,6 +62,7 @@ load("@rules_apple//apple:apple.bzl", "apple_dynamic_framework_import")
 load("@rules_apple//apple:macos.bzl", "macos_application")
 load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
 load("@rules_swift//swift:swift.bzl", "swift_library")
+load("//flutter/private:apple_engine.bzl", _macos_engine_framework = "macos_engine_framework")
 load("//flutter/private:constants.bzl", _MACOS_MINIMUM_OS_VERSION = "MACOS_MINIMUM_OS_VERSION")
 load("//flutter/private:flutter_apple_plugin_library.bzl", _flutter_apple_plugin_library_macro = "flutter_apple_plugin_library")
 load("//flutter/private:flutter_apple_plugins_aggregator.bzl", _flutter_apple_plugins_aggregator = "flutter_apple_plugins_aggregator")
@@ -79,14 +80,6 @@ MACOS_MINIMUM_OS_VERSION = _MACOS_MINIMUM_OS_VERSION
 # Wired into flutter_macos_app as `additional_entitlements`; exposed for
 # Tier 2 users assembling a macos_application themselves.
 flutter_entitlements_merge = _flutter_entitlements_merge
-
-def _engine_framework_select():
-    """Selects FlutterMacOS.framework for the build mode: debug, profile or release."""
-    return select({
-        Label("@rules_flutter//flutter/private:dbg"): [Label("@flutter_macos_engine//:engine_debug_library")],
-        Label("@rules_flutter//flutter/private:profile"): [Label("@flutter_macos_engine//:engine_profile_library")],
-        "//conditions:default": [Label("@flutter_macos_engine//:engine_library")],
-    })
 
 # -- Composable rules (Tier 2) ------------------------------------------------
 #
@@ -167,7 +160,7 @@ def flutter_macos_engine(name, **kwargs):
 
     apple_dynamic_framework_import(
         name = name,
-        framework_imports = _engine_framework_select(),
+        framework_imports = _macos_engine_framework(),
         tags = tags,
         **kwargs
     )
@@ -460,7 +453,7 @@ def flutter_macos_app(
     # 4. Import FlutterMacOS.framework engine — auto-select debug/release.
     apple_dynamic_framework_import(
         name = "__%s_engine" % name,
-        framework_imports = _engine_framework_select(),
+        framework_imports = _macos_engine_framework(),
         tags = tags,
     )
 
