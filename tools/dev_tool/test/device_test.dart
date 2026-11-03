@@ -393,6 +393,56 @@ void main() {
       expect(launchCall.$2, contains('com.example.test'));
     });
 
+    // Measured against `xcrun simctl` (Xcode 27.2): booting a device that is
+    // already booted exits 149, "Unable to boot device in current state:
+    // Booted". That is the ordinary case of every run after the first on a
+    // simulator someone left booted, so a launch has to treat it as the device
+    // being ready, not as a boot that failed.
+    test('a simulator that is already booted is launched on', () async {
+      final calls = <String>[];
+      final device = IOSSimulatorDevice(
+        udid: 'TEST-UDID',
+        bundleId: 'com.example.test',
+        runProcess: (exe, args) async {
+          calls.add(args.join(' '));
+          if (args.take(2).join(' ') == 'simctl boot') {
+            return ProcessResult(
+              0,
+              149,
+              '',
+              'Unable to boot device in current state: Booted',
+            );
+          }
+          return simctlOk(args);
+        },
+        startProcess: (exe, args) async {
+          final p = FakeProcess();
+          if (args.contains('ndjson')) {
+            unawaited(
+              p.outputAttached.then(
+                (_) => p.emitStdout(
+                  json.encode({
+                    'processID': 1234,
+                    'eventMessage': _vmServiceLine,
+                  }),
+                ),
+              ),
+            );
+          }
+          return p;
+        },
+      );
+
+      final instance = await device.launch('/path/to/MyApp.app');
+
+      expect(instance.vmServiceUri, isNotNull);
+      expect(
+        calls.where((c) => c.startsWith('simctl install')),
+        hasLength(1),
+        reason: 'the app has to be installed on the booted device',
+      );
+    });
+
     test('throws on simctl install failure', () async {
       final device = IOSSimulatorDevice(
         udid: 'TEST-UDID',

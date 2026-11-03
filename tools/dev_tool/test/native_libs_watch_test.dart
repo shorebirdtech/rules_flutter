@@ -37,6 +37,10 @@ void main() {
     // advances an output's mtime whenever it re-runs the action that writes it,
     // so the case constructed here is one no build produces.
     final lib = file('liba.dylib', [1, 2, 3]);
+    // Written an hour ago: a library a build produced long before this run. A
+    // stamp only vouches for bytes it has had time to settle on, so a file
+    // written a moment before the baseline is read is a different case.
+    lib.setLastModifiedSync(DateTime.now().subtract(const Duration(hours: 1)));
     final stamp = lib.statSync();
     final watch = await NativeLibsWatch.of({lib.path: const []});
 

@@ -514,7 +514,28 @@ class FakeVmService implements VmService {
     if (failingStreams.contains(streamId)) {
       throw RPCError('streamListen', 104, 'Stream cannot be subscribed');
     }
+    afterAnswering?.call('streamListen', streamId);
     return Success();
+  }
+
+  /// Called once an RPC's answer is settled and before the caller sees it:
+  /// `('getVM', null)` or `('streamListen', <stream id>)`.
+  ///
+  /// This is where the VM keeps running while a client is between two requests.
+  /// A hook here that calls [startIsolate] is an isolate starting in exactly
+  /// the gap after the client asked its question and before it asked the next
+  /// one, which no test that emits events from outside the handshake can reach.
+  void Function(String method, String? argument)? afterAnswering;
+
+  /// Start an isolate the way a VM does: it joins [isolates] from now on, and
+  /// an `IsolateStart` goes out to a client that subscribed to the Isolate
+  /// stream with [streamListen] — and only to one. A client that has not asked
+  /// for the stream is never told, whatever it later reads with `getVM`.
+  void startIsolate(String id, {String name = 'main'}) {
+    isolates.add(IsolateRef(id: id, name: name, number: id));
+    if (streamListens.contains(EventStreams.kIsolate)) {
+      emitIsolateStart(id, name: name);
+    }
   }
 
   @override
@@ -695,8 +716,8 @@ class FakeVmService implements VmService {
   }
 
   Future<VM> _getVM() async {
-    return VM(
-      isolates: isolates,
+    final answer = VM(
+      isolates: List.of(isolates),
       name: 'fake_vm',
       architectureBits: 64,
       hostCPU: 'fake',
@@ -706,6 +727,8 @@ class FakeVmService implements VmService {
       pid: 12345,
       startTime: 0,
     );
+    afterAnswering?.call('getVM', null);
+    return answer;
   }
 
   @override
