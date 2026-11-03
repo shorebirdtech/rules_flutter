@@ -6,6 +6,8 @@ not a kernel .dill.
 """
 
 load("//flutter/private:common.bzl", "flutter_build_mode")
+load("//flutter/private:exec_groups.bzl", "PORTABLE")
+load("//flutter/private:path_mapping.bzl", "sdk_action")
 
 def web_build_mode(ctx):
     """The web build mode for the current Bazel compilation mode.
@@ -166,15 +168,22 @@ def web_experiment_flags(enable_experiments):
     """
     return ["--enable-experiment=" + e for e in enable_experiments]
 
-def _sandbox_env(dart, writable_dir):
-    """Build env dict that suppresses analytics and provides a writable HOME."""
-    env = {"CI": "true", "FLUTTER_SUPPRESS_ANALYTICS": "true"}
-    if dart.basename.endswith(".exe"):
-        env["USERPROFILE"] = writable_dir
-        env["LOCALAPPDATA"] = writable_dir
-    else:
-        env["HOME"] = writable_dir
-    return env
+# The memory reservation covers a small app; a larger program needs more. An
+# optimizing dart2wasm (`-O1` and up) hands the module to Binaryen's
+# wasm-opt, which optimizes on several threads, so it reserves
+# `//flutter:wasm_opt_cores` CPUs. wasm-opt starts a thread per core unless
+# BINARYEN_CORES caps it, so the action caps it at what it reserves.
+# Everything else stays within about one core.
+def _web_compiler_resources(_os, _inputs):
+    return {"memory": 800}
+
+def _main_dart_js(output_dir):
+    return output_dir.path + "/main.dart.js"
+
+def _libraries_spec(platform_dill):
+    # libraries.json is one level above the kernel/ directory holding the
+    # dill; the web SDK's includes the Dart SDK's via a relative path.
+    return platform_dill.dirname + "/../libraries.json"
 
 def flutter_dart2wasm_action(
         ctx,
@@ -188,6 +197,7 @@ def flutter_dart2wasm_action(
         output_wasm,
         output_mjs,
         mode,
+        optimizing_cores,
         output_source_map = None,
         strip_wasm = True,
         optimization_level = "auto",
@@ -211,6 +221,8 @@ def flutter_dart2wasm_action(
         mode: A `web_build_mode` value; selects the mode defines and, in
             debug, enables asserts (upstream `WasmCompilerConfig` does the
             same for debug builds).
+        optimizing_cores: The cores an optimizing compile reserves and its
+            wasm-opt may use; `//flutter:wasm_opt_cores`.
         output_source_map: Output .wasm.map File, or None to disable source
             maps. dart2wasm writes the map at `<output_wasm>.map`, so the
             declared File must sit exactly there.
@@ -225,6 +237,8 @@ def flutter_dart2wasm_action(
         defines: Dart -D defines.
         renderer: Web renderer ("skwasm" or "canvaskit").
     """
+    if optimizing_cores < 1:
+        fail("--@rules_flutter//flutter:wasm_opt_cores must be at least 1, got %d" % optimizing_cores)
     if output_source_map != None and output_source_map.path != output_wasm.path + ".map":
         fail("output_source_map must be declared at <output_wasm>.map " +
              "(dart2wasm writes it there): got %s for %s" %
@@ -235,18 +249,19 @@ def flutter_dart2wasm_action(
     args.add("wasm")
 
     # Platform dill.
-    args.add("--extra-compiler-option=--platform=" + dart2wasm_platform_dill.path)
+    args.add(dart2wasm_platform_dill, format = "--extra-compiler-option=--platform=%s")
 
     # Package config.
-    args.add("--packages=" + package_config.path)
+    args.add(package_config, format = "--packages=%s")
 
     args.add_all(web_experiment_flags(enable_experiments))
 
     # Optimization.
-    args.add("-O%d" % resolve_web_optimization_level(
+    level = resolve_web_optimization_level(
         optimization_level,
         default_dart2wasm_optimization_level(mode),
-    ))
+    )
+    args.add("-O%d" % level)
     args.add("--strip-wasm" if (mode == "release" and strip_wasm) else "--no-strip-wasm")
     args.add("--minify" if resolve_web_minify(minify, mode) else "--no-minify")
     if output_source_map == None:
@@ -283,6 +298,9 @@ def flutter_dart2wasm_action(
     args.add("-o", output_wasm)
     args.add(main_dart)
 
+    home = sdk_action(**(
+        {"BINARYEN_CORES": str(optimizing_cores)} if level > 0 else {}
+    ))
     ctx.actions.run(
         executable = dart,
         arguments = [args],
@@ -292,8 +310,16 @@ def flutter_dart2wasm_action(
         ),
         outputs = [output_wasm, output_mjs] + ([output_source_map] if output_source_map != None else []),
         mnemonic = "FlutterDart2Wasm",
+        exec_group = PORTABLE,
+        # A `cpu:<n>` requirement sets the cores Bazel reserves, overriding
+        # the resource set's, and unlike the resource set it can come from a
+        # flag.
+        execution_requirements = home["execution_requirements"] | (
+            {"cpu:%d" % optimizing_cores: ""} if level > 0 else {}
+        ),
+        resource_set = _web_compiler_resources,
         progress_message = "Compiling Flutter to WASM %s" % ctx.label,
-        env = _sandbox_env(dart, output_wasm.dirname),
+        env = home["env"],
     )
 
 def flutter_dart2js_action(
@@ -358,12 +384,10 @@ def flutter_dart2js_action(
     args.add("compile")
     args.add("js")
 
-    # libraries.json is one level above the kernel/ directory containing the dill.
-    # The web SDK's libraries.json includes the Dart SDK's via a relative path.
-    args.add("--libraries-spec=" + dart2js_platform_dill.dirname + "/../libraries.json")
+    args.add_all([dart2js_platform_dill], map_each = _libraries_spec, format_each = "--libraries-spec=%s")
 
     # Package config.
-    args.add("--packages=" + package_config.path)
+    args.add(package_config, format = "--packages=%s")
 
     args.add_all(web_experiment_flags(enable_experiments))
 
@@ -396,7 +420,7 @@ def flutter_dart2js_action(
         args.add("-D" + d)
 
     # Output into the directory — dart2js writes main.dart.js + *.part.js here.
-    args.add("-o", output_dir.path + "/main.dart.js")
+    args.add_all("-o", [output_dir], map_each = _main_dart_js, expand_directories = False)
     args.add(main_dart)
 
     ctx.actions.run(
@@ -408,6 +432,8 @@ def flutter_dart2js_action(
         ),
         outputs = [output_dir],
         mnemonic = "FlutterDart2JS",
+        exec_group = PORTABLE,
+        resource_set = _web_compiler_resources,
         progress_message = "Compiling Flutter to JavaScript %s" % ctx.label,
-        env = _sandbox_env(dart, output_dir.path),
+        **sdk_action()
     )

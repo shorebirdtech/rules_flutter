@@ -432,6 +432,7 @@ def flutter_android_app(
         resources = [],
         deps = [],
         pub_hub_name = "deps",
+        namespace = None,
         **kwargs):
     """Builds a Flutter Android APK from a flutter_application target.
 
@@ -481,8 +482,10 @@ def flutter_android_app(
     android/app/src/profile/AndroidManifest.xml, which `flutter create`
     writes with the `INTERNET` permission the VM service needs.
 
-    When Kotlin sources are found in android/app/src/main/kotlin/, they are
-    compiled via kt_android_library with the Flutter engine and AndroidX deps.
+    The runner's sources, where Gradle looks for them (Kotlin under
+    android/app/src/main/kotlin/ or java/, Java under java/, as
+    `flutter create --android-language java` writes it), are compiled via
+    kt_android_library with the Flutter engine and AndroidX deps.
 
     Plugin auto-wiring:
       - Generates a `flutter_android_registrant` target whose application is
@@ -504,7 +507,16 @@ def flutter_android_app(
     Args:
         name: Target name (Bazel identifier). Produces an android_binary.
         application: A flutter_application target (required).
-        package_name: Android package name, e.g. "com.example.myapp" (required).
+        package_name: The application id, e.g. "com.example.myapp"
+            (required).
+        namespace: The package the runner's code lives in, as Gradle's
+            `namespace` (and AGP's R class package) in build.gradle.
+            Defaults to `package_name`, which `flutter create` sets equal
+            to it. Set it when the runner declares another package, e.g.
+            one runner shipped under several application ids. The
+            manifest's relative class names (`.MainActivity`,
+            `.sub.Receiver`, a bare `MainActivity`) are written out in
+            full against it, as AGP does; qualified names are untouched.
         app_name: User-facing display name. Defaults to name.
         android_abi: Target ABI — "arm64" (default) or "x64". Selects the
             engine and the Android platform the application is built for.
@@ -542,6 +554,7 @@ def flutter_android_app(
         **kwargs: Passed through to android_binary.
     """
     display_name = app_name or name
+    namespace = namespace or package_name
     tags = kwargs.pop("tags", ["manual"])
 
     # -- Internal targets (all __{name}_ prefixed) --
@@ -661,16 +674,26 @@ def flutter_android_app(
             )
             resources = list(resources) + discovered_resources
 
-            # Discover and compile Kotlin sources from flutter create output.
-            discovered_kotlin = native.glob(
-                ["android/app/src/main/kotlin/**/*.kt"],
+            # Discover and compile the runner from flutter create output:
+            # Gradle's main source directories for Kotlin and Java. Not the
+            # plugin registrant `flutter run` writes there: the
+            # `__{name}_registrant` above is this app's.
+            runner_sources = native.glob(
+                [
+                    "android/app/src/main/kotlin/**/*.kt",
+                    "android/app/src/main/java/**/*.java",
+                    "android/app/src/main/java/**/*.kt",
+                ],
+                exclude = [
+                    "android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java",
+                ],
                 allow_empty = True,
             )
-            if discovered_kotlin:
+            if runner_sources:
                 _kt_android_library(
                     name = "__%s_runner" % name,
-                    srcs = discovered_kotlin,
-                    custom_package = package_name,
+                    srcs = runner_sources,
+                    custom_package = namespace,
                     tags = tags,
                     deps = ["__%s_engine" % name],
                 )
@@ -737,11 +760,18 @@ def flutter_android_app(
     # AARs) into its own manifest, as Gradle does. Bazel's merger drops them
     # unless --merge_android_manifest_permissions is set; done here, they
     # reach the APK whatever the flags.
+    #
+    # The same action writes the manifest's relative class names
+    # (`.MainActivity`) in full against the namespace, as AGP does. Left
+    # relative, Android resolves them against `package_name`, the application
+    # id, which need not be the code's package: a second app shipping the
+    # same runner under its own id would name a class that does not exist.
     flutter_android_manifest_merge(
         name = "__%s_manifest_with_library_permissions" % name,
         base = actual_manifest,
         libraries = binary_deps + deps,
         placeholders = ["applicationId", "minSdkVersion", "targetSdkVersion"],
+        namespace = namespace,
         tags = tags,
     )
     actual_manifest = "__%s_manifest_with_library_permissions" % name

@@ -32,12 +32,8 @@ dart_binary(
     name = "flutter_bazel",
     srcs = glob(["lib/**/*.dart"]),
     compile_mode = "exe",
-    # iOS device screenshots (pymobiledevice3) work from any host, so they are
-    # always available. The desktop screen-capture helpers are local to their OS.
-    data = [
-        "//tools/ios_screenshot:screenshot",
-        "//tools/ios_screenshot:tunneld",
-    ] + select({
+    # The desktop screen-capture helpers are local to their OS.
+    data = select({
         # Every `bazel` command starts through it, off Windows. See its target.
         "@platforms//os:windows": [],
         "//conditions:default": [":process_group_exec"],
@@ -129,7 +125,7 @@ _UNIT_TESTS = {
     "fake_process_stdin_test": {"fakes": True},
     "cdp_console_test": {},
     "cdp_viewport_test": {},
-    "cli_args_test": {},
+    "cli_args_test": {"deps": ["@dev_tool_deps//:args"]},
     "command_runner_test": {},
     "compiler_config_test": {},
     "compiler_test": {"fakes": True},
@@ -170,7 +166,12 @@ _UNIT_TESTS = {
         "deps": _PATH_DEP,
     },
     "native_pipeline_assembler_test": {"fakes": True},
+    "native_restart_advice_test": {
+        "fakes": True,
+        "deps": _PATH_DEP,
+    },
     "outcome_renderer_test": {"fakes": True},
+    "process_cpu_time_test": {},
     "source_uri_resolver_test": {"deps": _PATH_DEP},
     "readiness_gate_test": {},
     "reload_pipeline_test": {
@@ -231,6 +232,7 @@ _UNIT_TESTS = {
     "package_roots_test": {},
     "process_group_exec_test": {"data": [":process_group_exec"]},
     "shutdown_signals_test": {},
+    "semantics_dump_test": {},
     "screenshot_blankness_test": {
         "harness": True,
         "lifetime": True,

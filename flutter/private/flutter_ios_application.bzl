@@ -21,9 +21,38 @@ load("@bazel_skylib//lib:dicts.bzl", "dicts")
 # (it accepts a single .framework). This is the same helper that rule uses.
 # buildifier: disable=bzl-visibility
 load("@rules_apple//apple/internal:framework_import_support.bzl", "framework_import_support")
+load("@rules_cc//cc:find_cc_toolchain.bzl", "CC_TOOLCHAIN_TYPE", "use_cc_toolchain")
+load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
 load("//flutter:providers.bzl", "FlutterApplicationInfo")
 load("//flutter/private:constants.bzl", "IOS_MINIMUM_OS_VERSION")
+load("//flutter/private:exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
 load("//flutter/private:flutter_native_assets.bzl", "native_asset_framework_name")
+
+def _run_xcode_tool(ctx, **kwargs):
+    """Registers a shell action that runs Xcode's tools (`xcrun`).
+
+    `apple_support.run_shell` gives the action the selected Xcode's
+    environment (`DEVELOPER_DIR`, `SDKROOT`) and execution requirements, so the
+    Xcode version is part of the action's key. The workspace's shell
+    environment is left out: an `--action_env` such as
+    `MACOSX_DEPLOYMENT_TARGET` would otherwise retarget clang. The action runs
+    in the auto exec group of the C++ toolchain resolved for this Apple target:
+    that toolchain is Xcode's clang, and its registration says which hosts can
+    run Xcode.
+
+    Args:
+      ctx: A rule context with apple_support's action and platform attrs and
+        the C++ toolchain type.
+      **kwargs: Forwarded to `ctx.actions.run_shell`.
+    """
+    apple_support.run_shell(
+        actions = ctx.actions,
+        xcode_config = ctx.attr._xcode_config[apple_common.XcodeVersionConfig],
+        apple_platform_info = apple_support.platform_info_from_rule_ctx(ctx),
+        toolchain = CC_TOOLCHAIN_TYPE,
+        use_default_shell_env = False,
+        **kwargs
+    )
 
 def _flutter_ios_application_impl(ctx):
     """Bundles Flutter compilation outputs for iOS packaging."""
@@ -101,7 +130,7 @@ def _flutter_ios_framework_impl(ctx):
     stub is never loaded — the engine uses kernel_blob.bin instead.
     """
     app_info = ctx.attr.application[FlutterApplicationInfo]
-    flutter_sdk_info = ctx.toolchains["@rules_flutter//flutter:toolchain_type"].flutter_sdk_info
+    tools = portable_tools(ctx)
     flutter_assets = app_info.flutter_assets
     minimum_os_version = ctx.attr.minimum_os_version
 
@@ -152,22 +181,26 @@ def _flutter_ios_framework_impl(ctx):
         dylib = app_info.aot_output
 
         # Copy the dylib and rewrite its LC_BUILD_VERSION with vtool.
-        ctx.actions.run_shell(
+        _run_xcode_tool(
+            ctx,
             command = 'cp "$1" "$2" && xcrun vtool -set-build-version "$3" "$4" "$4" -replace -output "$2" "$2"',
-            arguments = [dylib.path, framework_binary.path, vtool_platform, minimum_os_version],
+            arguments = [ctx.actions.args().add_all([dylib, framework_binary, vtool_platform, minimum_os_version])],
             inputs = [dylib],
             outputs = [framework_binary],
             mnemonic = "FlutterIOSRetagDylib",
+            execution_requirements = PATH_MAPPING,
             progress_message = "Retagging App dylib for %s (min %s)" % (vtool_platform, minimum_os_version),
         )
 
         # Copy flutter_assets into the framework.
         ctx.actions.run_shell(
             command = 'cp -RL "$1"/. "$2"',
-            arguments = [flutter_assets.path, framework_assets.path],
+            arguments = [ctx.actions.args().add_all([flutter_assets, framework_assets], expand_directories = False)],
             inputs = [flutter_assets],
             outputs = [framework_assets],
             mnemonic = "FlutterIOSCopyAssets",
+            exec_group = PORTABLE,
+            execution_requirements = PATH_MAPPING,
             progress_message = "Copying flutter_assets into App.framework",
         )
 
@@ -180,11 +213,13 @@ def _flutter_ios_framework_impl(ctx):
 
         # Create a stub dylib — rules_apple's framework processor requires a
         # binary file. bundle_only=True prevents linking so it's never loaded.
-        ctx.actions.run_shell(
+        _run_xcode_tool(
+            ctx,
             command = 'echo "" | xcrun -sdk "$1" clang -shared -o "$2" -x c - && xcrun vtool -set-build-version "$3" "$4" "$4" -replace -output "$2" "$2"',
-            arguments = [sdk, framework_binary.path, vtool_platform, minimum_os_version],
+            arguments = [ctx.actions.args().add_all([sdk, framework_binary, vtool_platform, minimum_os_version])],
             outputs = [framework_binary],
             mnemonic = "FlutterIOSStubDylib",
+            execution_requirements = PATH_MAPPING,
             progress_message = "Creating stub App.framework binary for debug mode",
         )
 
@@ -192,28 +227,27 @@ def _flutter_ios_framework_impl(ctx):
         # The vm_isolate_snapshot.bin and isolate_snapshot.bin are required for
         # the Dart VM to bootstrap the kernel service isolate, which enables
         # hot reload (reloadSources) and expression evaluation.
-        vm_snapshot = flutter_sdk_info.vm_isolate_snapshot
-        iso_snapshot = flutter_sdk_info.isolate_snapshot
+        vm_snapshot = tools.vm_isolate_snapshot
+        iso_snapshot = tools.isolate_snapshot
 
-        copy_cmd = 'cp -RL "$1"/. "$2" && cp "$3" "$2/kernel_blob.bin"'
-        copy_args = [flutter_assets.path, framework_assets.path, kernel_dill.path]
-        copy_inputs = [flutter_assets, kernel_dill]
-
-        if vm_snapshot:
-            copy_cmd += ' && cp "$4" "$2/vm_snapshot_data"'
-            copy_args.append(vm_snapshot.path)
-            copy_inputs.append(vm_snapshot)
-        if iso_snapshot:
-            copy_cmd += ' && cp "%s" "$2/isolate_snapshot_data"' % ("$5" if vm_snapshot else "$4")
-            copy_args.append(iso_snapshot.path)
-            copy_inputs.append(iso_snapshot)
+        copy_cmd = (
+            'cp -RL "$1"/. "$2" && cp "$3" "$2/kernel_blob.bin"' +
+            ' && cp "$4" "$2/vm_snapshot_data" && cp "$5" "$2/isolate_snapshot_data"'
+        )
+        copy_args = ctx.actions.args().add_all(
+            [flutter_assets, framework_assets, kernel_dill, vm_snapshot, iso_snapshot],
+            expand_directories = False,
+        )
+        copy_inputs = [flutter_assets, kernel_dill, vm_snapshot, iso_snapshot]
 
         ctx.actions.run_shell(
             command = copy_cmd,
-            arguments = copy_args,
+            arguments = [copy_args],
             inputs = copy_inputs,
             outputs = [framework_assets],
             mnemonic = "FlutterIOSDebugAssets",
+            exec_group = PORTABLE,
+            execution_requirements = PATH_MAPPING,
             progress_message = "Assembling debug App.framework with kernel and VM snapshots",
         )
 
@@ -222,6 +256,7 @@ def _flutter_ios_framework_impl(ctx):
 flutter_ios_framework = rule(
     implementation = _flutter_ios_framework_impl,
     attrs = dicts.add(
+        apple_support.action_required_attrs(),
         apple_support.platform_constraint_attrs(),
         {
             "application": attr.label(
@@ -235,7 +270,11 @@ flutter_ios_framework = rule(
             ),
         },
     ),
-    toolchains = ["@rules_flutter//flutter:toolchain_type"],
+    # The copies are the same bytes on any host; vtool and clang run where
+    # the Apple C++ toolchain does.
+    exec_groups = PORTABLE_EXEC_GROUPS,
+    fragments = ["apple"],
+    toolchains = use_cc_toolchain(mandatory = True),
     doc = "Assembles Flutter artifacts into App.framework for iOS (release: AOT binary + assets; debug: assets + kernel).",
 )
 
@@ -302,16 +341,18 @@ def _flutter_ios_native_frameworks_impl(ctx):
 
         # Copy the dylib into the framework and rewrite its install name so the
         # dynamic linker resolves it from the embedded framework via @rpath.
-        ctx.actions.run_shell(
+        _run_xcode_tool(
+            ctx,
             command = 'cp "$1" "$2" && xcrun install_name_tool -id "$3" "$2"',
-            arguments = [
-                dylib.path,
-                binary.path,
+            arguments = [ctx.actions.args().add_all([
+                dylib,
+                binary,
                 "@rpath/%s.framework/%s" % (name, name),
-            ],
+            ])],
             inputs = [dylib],
             outputs = [binary],
             mnemonic = "FlutterIOSNativeAssetFramework",
+            execution_requirements = PATH_MAPPING,
             progress_message = "Wrapping %s into %s.framework" % (dylib.basename, name),
         )
 
@@ -336,6 +377,7 @@ def _flutter_ios_native_frameworks_impl(ctx):
 flutter_ios_native_frameworks = rule(
     implementation = _flutter_ios_native_frameworks_impl,
     attrs = dicts.add(
+        apple_support.action_required_attrs(),
         apple_support.platform_constraint_attrs(),
         {
             "application": attr.label(
@@ -349,6 +391,9 @@ flutter_ios_native_frameworks = rule(
             ),
         },
     ),
+    # install_name_tool runs where the Apple C++ toolchain does.
+    fragments = ["apple"],
+    toolchains = use_cc_toolchain(mandatory = True),
     doc = "Wraps native plugin/native-asset dylibs in signed .frameworks for iOS bundling.",
 )
 
