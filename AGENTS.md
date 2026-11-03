@@ -62,3 +62,11 @@ with `args`, say), use it rather than a script that only forwards arguments.
 Shell is acceptable only where an outside interface requires it, such as the
 `release_prep.sh` the bazel-contrib release workflow calls; keep it to the
 lines that interface needs.
+
+## Public repository
+
+This repository is public: it names only itself and the public projects it
+depends on or serves, never private ones, and a comment that came from a
+downstream report describes the behaviour, not who reported it. The
+`private-names` hooks enforce this when a maintainer has configured them
+(CONTRIBUTING.md, "Private names").

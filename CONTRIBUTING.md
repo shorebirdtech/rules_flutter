@@ -39,6 +39,25 @@ bazel run //tools/changelog:check -- <message-file>
 `bazel run //tools/changelog` prints the release notes the unreleased commits
 would produce.
 
+## Private names
+
+rules_flutter names only itself and the public projects it depends on or
+serves. Comments, docs, fixtures, build configs and commit messages describe a
+behaviour, not the private project that showed it. The hooks refuse a commit
+that adds a private name to a file or to its message, and
+`bazel run //tools/private_names:check -- --tree` scans every tracked file.
+
+The names themselves are not in the repository, which would publish them. A
+maintainer who has private projects keeps them in a file outside the clone,
+one per line, and points git at it:
+
+```shell
+git config --global rulesflutter.privateNamesFile ~/.config/rules_flutter/private_names
+```
+
+Without that setting the check prints `not configured` and passes: it has
+nothing to enforce. A setting that points at a missing or empty file fails.
+
 ## Using this as a development dependency of other rules
 
 You'll commonly find that you develop in another repository that
