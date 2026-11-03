@@ -32,7 +32,17 @@ local_path_override(
 single_version_override(
     module_name = "rules_android",
     patch_strip = 1,
-    patches = ["//patches:rules_android_auto_exec_groups.patch"],
+    patches = [
+        "//patches:rules_android_auto_exec_groups.patch",
+        # rules_android starts its tool JVMs with an initial heap as large as
+        # the cap: -Xms3G for resource processing, -Xms8g for desugar, D8 and
+        # R8. A JVM commits its initial heap the moment it starts. Linux and
+        # macOS commit lazily and never notice; Windows charges it against the
+        # commit limit (RAM plus pagefile), and two persistent desugar workers
+        # exhaust that on a 16 GB machine. The patch keeps every cap and drops
+        # the initial sizes. Drop it once a rules_android release does.
+        "//patches:rules_android_no_initial_heap.patch",
+    ],
 )
 
 single_version_override(
