@@ -192,6 +192,16 @@ jobs:
         run: |
           $ndk = $env:ANDROID_NDK_HOME ?? $env:ANDROID_NDK_ROOT
           "ANDROID_NDK_HOME=$($ndk -replace '\\','/')" >> $env:GITHUB_ENV
+      # The workspace's MODULE.bazel.lock, checked before the build. Its
+      # `.bazelrc` already builds with --lockfile_mode=error, which refuses a
+      # lock that lacks an entry the build needs; `bazel mod deps` also catches
+      # an entry that has gone stale, which a build never reads. A runner has no
+      # `.bazelrc.user` to switch the check off. See docs/TESTING.md, "Lock
+      # files".
+      - name: bazel mod deps (e2e/${{ matrix.workspace }})
+        if: runner.os != 'Windows'
+        working-directory: e2e/${{ matrix.workspace }}
+        run: bazel mod deps --lockfile_mode=error
       # --test_output=errors so a failure's assertion reaches this log. Without
       # it the output stays in a test.log on the runner and is discarded with
       # the machine.
@@ -199,6 +209,12 @@ jobs:
         if: runner.os != 'Windows'
         working-directory: e2e/${{ matrix.workspace }}
         run: bazel test //... --test_output=errors
+      # On Windows the same lock check runs under the short output root the test
+      # step below explains, so both use one Bazel server.
+      - name: bazel mod deps (e2e/${{ matrix.workspace }})
+        if: runner.os == 'Windows'
+        working-directory: e2e/${{ matrix.workspace }}
+        run: bazel --output_user_root=C:/b mod deps --lockfile_mode=error
       # On Windows, Bazel's default output root lives under a long per-user
       # temp path; nested runfiles (e.g. the hermetic Python interpreter's
       # _socket.pyd used by rules_android's aar_embedded_jars_extractor) then

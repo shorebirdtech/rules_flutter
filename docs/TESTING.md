@@ -154,7 +154,7 @@ upstream `flutter_tools` exactly.
 
 ### A green sweep does not test the published rules_dart pin
 
-The repo root and all fifteen `e2e/*` workspaces carry a gitignored
+The repo root and every `e2e/` workspace carry a gitignored
 `.bazelrc.user` holding:
 
     common --override_module=rules_dart=/Users/aran/Projects/rules_dart
@@ -189,14 +189,8 @@ merely load:
     bazel build --lockfile_mode=error //path/to:target
     mv .bazelrc.user.aside .bazelrc.user
 
-In an `e2e/*` workspace the committed `.bazelrc` already says
-`common --lockfile_mode=off`, so passing `--lockfile_mode=error` on the command
-line is what turns the lock check on. Their `MODULE.bazel.lock` files resolve
-under `error` (checked at 3.47.9), so a failure there is yours. Run both
-`bazel mod deps` and `bazel build --nobuild //...` to check one: each passed a
-lock the other rejected (`mod deps` caught a stale `rules_dart` `pub` entry in
-`e2e/smoke` and a missing protobuf entry in `e2e/_overlay_tests/native_assets_synthetic`;
-`build --nobuild` passed both).
+To check one workspace's lock by hand, use the lock check below, which moves
+nothing aside.
 
 Two cautions:
 
@@ -210,6 +204,51 @@ When the right fix is a newer rules_dart, say so upstream rather than reaching
 for a toolchain override locally. When the offending code is dead in this
 context, deleting it is the better answer, and should be commented as
 deliberate so nobody later "restores" it.
+
+### Lock files
+
+Every `e2e/` workspace commits a `MODULE.bazel.lock`, and the committed
+`.bazelrc` of each says `common --lockfile_mode=error`: a build fails rather
+than rewrite or quietly ignore a lock that is stale or incomplete. Your own
+`.bazelrc.user` turns that off (see above), which is why a local sweep cannot
+tell you a lock has drifted. This does:
+
+    bazel run //tools/lockfile_check
+
+For every workspace under `e2e/` with a `MODULE.bazel` — found by walking the
+tree, so a new workspace is covered without being listed anywhere — it runs
+both `bazel mod deps` and `bazel build --nobuild //...` with
+`--lockfile_mode=error`. Run both: each has passed a lock the other rejected
+(`mod deps` caught a stale `rules_dart` `pub` entry in `e2e/smoke` and a
+missing protobuf entry in `e2e/_overlay_tests/native_assets_synthetic`;
+`build --nobuild` passed both; and a `build --nobuild` has caught a stale lock
+`mod deps` passed).
+
+It runs Bazel with each workspace's committed `.bazelrc` but without its
+gitignored `.bazelrc.user`, by handing Bazel a copy of the `.bazelrc` that lacks
+the `try-import` line (`--noworkspace_rc --bazelrc=<copy>`). Bazel has no way
+to leave out one imported file, and `--ignore_all_rc_files` would also drop the
+committed flags that decide what resolves. Nothing in your tree is moved or
+edited. Your `~/.bazelrc` still applies.
+
+It lists each stale workspace with the command that fixes it:
+
+    bazel run //tools/lockfile_check -- --refresh e2e/smoke
+
+which runs `bazel mod tidy --lockfile_mode=refresh`, then
+`bazel build --nobuild --lockfile_mode=update //...`, then the two checks, again
+without the `.bazelrc.user` (regenerating through it writes a lock that omits
+the registry entry for rules_dart). Commit the changed lock with the change that
+made it stale.
+
+Analysing `//...` needs every platform's toolchain, so run it on macOS. CI does
+not run it. Each `E2E` job builds with the workspace's committed `.bazelrc`, so
+a lock that lacks an entry the build needs fails there, and runs
+`bazel mod deps --lockfile_mode=error` in the workspace first, which also fails
+on a stale entry that no build reads. That covers the workspaces and systems
+the `E2E` jobs cover, not the rest of `//...` (the iOS rules cannot be analysed
+from a Linux host); run the check yourself before a release or after a change
+to a `MODULE.bazel`.
 
 ## 2. dev_tool tests
 

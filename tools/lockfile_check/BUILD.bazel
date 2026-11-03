@@ -1,0 +1,20 @@
+load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_test")
+
+# Checks that every e2e workspace's MODULE.bazel.lock is complete, running
+# `bazel mod deps` and `bazel build --nobuild //...` in each with
+# `--lockfile_mode=error` and without its gitignored `.bazelrc.user`.
+#   bazel run //tools/lockfile_check                          every workspace
+#   bazel run //tools/lockfile_check -- --refresh e2e/smoke   regenerate one lock
+dart_binary(
+    name = "lockfile_check",
+    srcs = ["lockfile_check.dart"],
+    main = "check_lockfiles.dart",
+)
+
+dart_test(
+    name = "lockfile_check_test",
+    size = "small",
+    srcs = ["lockfile_check.dart"],
+    main = "test/lockfile_check_test.dart",
+    deps = ["@dev_tool_deps//:test"],
+)
