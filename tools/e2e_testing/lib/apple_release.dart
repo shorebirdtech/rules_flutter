@@ -1,0 +1,83 @@
+/// What a release Apple app must carry, checked on its built `App` binary.
+///
+/// `flutter build ios --release` and `flutter build macos --release` ship the
+/// Dart snapshot (`App.framework/App`) with its local symbols and debugging map
+/// removed, and leave a dSYM beside the app so crash reports symbolicate. These
+/// checks hold a bazel-built bundle to that.
+library;
+
+import 'dart:io';
+
+import 'package:runfiles/runfiles.dart';
+
+import 'bundle_check.dart';
+import 'mach_o.dart';
+
+/// Checks that the `App` binary at [path] is stripped: no local symbols (the
+/// names of the Dart functions in it) and no debugging-map entries.
+///
+/// Its external symbols stay: the engine looks up the snapshot's data and
+/// instructions through them.
+void checkAppBinaryStripped(BundleCheck check, String path) {
+  final SymbolCounts counts;
+  try {
+    counts = MachO(path).symbolCounts();
+  } on StateError catch (e) {
+    check.fail('cannot read the symbol table of $path: $e');
+    return;
+  }
+  check
+    ..expect(
+      'App binary has no local symbols',
+      condition: counts.local == 0,
+      detail: 'it lists $counts, named after the app\'s Dart functions',
+    )
+    ..expect(
+      'App binary has no debugging-map (stab) entries',
+      condition: counts.stabs == 0,
+      detail: 'it lists $counts',
+    );
+}
+
+/// Every `.dSYM` bundle among the test's runfiles, whatever the target that
+/// produced it.
+List<String> runfilesDsyms() {
+  final root = Directory(Runfiles.create().rlocation('_main'));
+  if (!root.existsSync()) return const [];
+  return [
+    for (final entity in root.listSync(recursive: true, followLinks: false))
+      if (entity.path.endsWith('.dSYM')) entity.path,
+  ];
+}
+
+/// Checks that one of [dsyms] holds debug info for the `App` binary at [path]:
+/// its UUID is the binary's. A crash report names the UUID of the binary that
+/// crashed, and a dSYM of another UUID does not symbolicate it.
+void checkDsymMatches(BundleCheck check, String path, List<String> dsyms) {
+  final Set<String> binaryUuids;
+  try {
+    binaryUuids = MachO(path).uuids();
+  } on StateError catch (e) {
+    check.fail('cannot read the UUID of $path: $e');
+    return;
+  }
+  if (binaryUuids.isEmpty) {
+    check.fail('App binary carries no LC_UUID, so no dSYM can match it');
+    return;
+  }
+  final found = <String, Set<String>>{};
+  for (final dsym in dsyms) {
+    try {
+      found[dsym] = MachO(dsym).uuids();
+    } on StateError {
+      found[dsym] = {};
+    }
+  }
+  check.expect(
+    'a dSYM matches the App binary (UUID ${binaryUuids.join(', ')})',
+    condition: found.values.any((uuids) => uuids.containsAll(binaryUuids)),
+    detail: dsyms.isEmpty
+        ? 'the build produced no dSYM'
+        : 'dSYMs found: $found',
+  );
+}

@@ -1,5 +1,16 @@
 load("@rules_dart//dart:defs.bzl", "dart_library", "dart_test")
 
+# The target platform of a Linux machine, for the tests of what a build there
+# skips.
+platform(
+    name = "linux_arm64",
+    constraint_values = [
+        "@platforms//cpu:arm64",
+        "@platforms//os:linux",
+    ],
+    visibility = ["//visibility:public"],
+)
+
 # The checks the e2e workspaces' `verify_*_test`s share, as a library:
 # checking that a built bundle holds the files and symbols it should, unpacking
 # an archive, launching an app and waiting for it to report. Each workspace is
@@ -27,5 +38,20 @@ dart_library(
             "@dev_tool_deps//:test",
         ],
     )
-    for test in glob(["test/*_test.dart"])
+    for test in glob(
+        ["test/*_test.dart"],
+        exclude = ["test/apple_release_test.dart"],
+    )
 ]
+
+# Builds Mach-O binaries with Xcode's tools.
+dart_test(
+    name = "apple_release_test",
+    size = "small",
+    main = "test/apple_release_test.dart",
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = [
+        ":e2e_testing",
+        "@dev_tool_deps//:test",
+    ],
+)

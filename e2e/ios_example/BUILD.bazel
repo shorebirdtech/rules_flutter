@@ -17,6 +17,7 @@ load(
     "flutter_ios_simulator_build",
     "flutter_ios_simulator_build_test",
 )
+load("@rules_flutter//tools/e2e_testing:apple_analysis_test.bzl", "analyses_test", "command_line_tests")
 load("@rules_swift//swift:swift.bzl", "swift_library")
 load(":simulator_mode_test.bzl", "simulator_fastbuild_refused_test")
 
@@ -403,4 +404,39 @@ flutter_library(
         "@deps//:flutter",
         "@rules_flutter//flutter:material_icons",
     ],
+)
+
+# =============================================================================
+# The build as a whole
+# =============================================================================
+
+# Property: the simulator wrappers build debug mode whatever mode flags the
+# command line carries, `--@rules_flutter//flutter:profile` among them. A
+# `bazel test //... -c opt --@rules_flutter//flutter:profile` run (the way to
+# test a profile build of the other targets) must still analyse them.
+test_suite(
+    name = "simulator_command_line_tests",
+    tests = command_line_tests(
+        name = "simulator_build",
+        profile = False,
+        target = ":app_simulator",
+    ) + command_line_tests(
+        name = "simulator_build_test",
+        profile = False,
+        target = ":ios_app_build_test",
+    ),
+)
+
+# Control for the tests that an app is skipped where it is not for: the same
+# app analyses where it is compatible.
+flutter_ios_app(
+    name = "app_macos_only",
+    application = ":app_flutter",
+    bundle_id = "com.rulesflutter.ios.example.macosonly",
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
+analyses_test(
+    name = "ios_app_macos_only_control_test",
+    target = ":app_macos_only",
 )

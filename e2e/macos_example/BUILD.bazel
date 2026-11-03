@@ -18,6 +18,7 @@ load(
     "flutter_macos_registrant_gen",
     "flutter_macos_runner_lib_gen",
 )
+load("@rules_flutter//tools/e2e_testing:apple_analysis_test.bzl", "analyses_test", "skipped_test")
 load("@rules_swift//swift:swift.bzl", "swift_library")
 
 exports_files(["pubspec.lock"])
@@ -481,4 +482,30 @@ dart_analysis_test(
     name = "verify_macos_profile_app_test_analysis",
     target_compatible_with = ["@platforms//os:macos"],
     targets = [":verify_macos_profile_app_test"],
+)
+
+# =============================================================================
+# The build as a whole
+# =============================================================================
+
+# Control for the tests that an app is skipped where it is not for: the same
+# app analyses where it is compatible.
+analyses_test(
+    name = "macos_app_control_test",
+    target = ":app",
+)
+
+# Property: a constraint the user declares on the app is kept. This app is for
+# Windows, so it is skipped on the Mac that builds it.
+flutter_macos_app(
+    name = "app_windows_only",
+    app_name = "Windows Only",
+    application = ":app_flutter",
+    bundle_id = "com.example.flutterapp.windowsonly",
+    target_compatible_with = ["@platforms//os:windows"],
+)
+
+skipped_test(
+    name = "macos_app_user_constraint_skipped_test",
+    target = ":app_windows_only",
 )
