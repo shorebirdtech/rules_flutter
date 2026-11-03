@@ -1,0 +1,13 @@
+load("@rules_flutter//flutter:defs.bzl", "flutter_library")
+
+# A library that holds a constant breaking a `const` constructor's assertion,
+# for `//:const_violation_dep_test`. Building a test over it must fail, and so
+# does analysing it: it stays out of `//...` and is built only by that manual test.
+flutter_library(
+    name = "asserts_violation_dep",
+    package_name = "assert_violation_dep",
+    srcs = ["lib/const_violation.dart"],
+    tags = ["manual"],
+    visibility = ["//:__pkg__"],
+    deps = ["//asserts_dep"],
+)

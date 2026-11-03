@@ -1,0 +1,12 @@
+load("@rules_flutter//flutter:defs.bzl", "flutter_library")
+
+# A library the asserts tests (`//:asserts_fire_test`) and
+# `//asserts_violation_dep` reach as a dependency, so its code compiles apart
+# from the test's own file in the modular kernel mode and together with it in
+# the whole-program one.
+flutter_library(
+    name = "asserts_dep",
+    package_name = "assert_dep",
+    srcs = ["lib/guarded.dart"],
+    visibility = ["//visibility:public"],
+)

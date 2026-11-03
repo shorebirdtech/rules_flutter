@@ -21,6 +21,7 @@ load("@rules_flutter//flutter:linux.bzl", "flutter_linux_app")
 load("@rules_flutter//flutter:macos.bzl", "flutter_macos_app")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
 load("@rules_flutter//flutter:windows.bzl", "flutter_windows_app")
+load(":build_variant_test.bzl", "build_variant_tests")
 
 exports_files(["pubspec.lock"])
 
@@ -232,6 +233,50 @@ flutter_test(
         "@rules_flutter//flutter:material_icons",
     ],
 )
+
+# `assert`s fire in a `flutter_test`, as under `flutter test`, whichever way the
+# test is built: per-library kernel modules or one whole-program compile
+# (`--@rules_dart//dart:modular_kernel=false`), `-c fastbuild` or `-c dbg`. The
+# plain target is the default build (modules, fastbuild); `build_variant_tests`
+# declares the other three beside it. See test/asserts/asserts_fire_test.dart.
+flutter_test(
+    name = "asserts_fire_test",
+    package_name = "hello_world",
+    main = "test/asserts/asserts_fire_test.dart",
+    deps = [
+        "//asserts_dep",
+        "@deps//:flutter",
+        "@deps//:flutter_test",
+    ],
+)
+
+build_variant_tests(
+    name = "asserts_fire_builds",
+    test = ":asserts_fire_test",
+)
+
+# Constants that break a `const` constructor's assertion. `flutter test` fails
+# to compile a test that holds one, so building each of these MUST FAIL, with a
+# "Constant evaluation error" naming the assertion. They are `manual` because a
+# failing build has no place in `bazel test //...`; docs/TESTING.md (the
+# "`flutter_test` build modes" section) says how to check them.
+[
+    flutter_test(
+        name = "const_violation_%s_test" % where,
+        package_name = "hello_world",
+        main = "test/asserts/const_violation_%s_test.dart" % where,
+        tags = ["manual"],
+        deps = [
+            "//asserts_dep",
+            "//asserts_violation_dep",
+            "@deps//:flutter_test",
+        ],
+    )
+    for where in [
+        "entry",
+        "dep",
+    ]
+]
 
 # Bazel's test protocol under `flutter_test`: `--test_filter` selects cases,
 # `shard_count` splits them, and each case is reported in the XML Bazel

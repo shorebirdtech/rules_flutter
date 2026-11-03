@@ -1579,6 +1579,7 @@ script's own package requires ≥ 3.13.
 | dev_tool screens and screenshots (`screen.dart`, `devicectl_screens.dart`, `Device.screenshot`, the `screenshot/native` and `screens` endpoints) | dev_tool unit **and** `ios_simulator_e2e_test.dart` and `plugin_example_e2e_test.dart`'s iOS case on the iPhone Duo simulator **and** the manual posture check in "Multi-screen screenshots (manual)" |
 | dev_tool iOS device paths (`mdns_vm_service_discovery.dart`, `IOSDevice` in `device.dart`) | dev_tool unit **and** manual hot reload + hot restart on hardware, **wired and wireless** — see "iOS hardware (manual)" |
 | New or changed analysis coverage (a target's `srcs` glob or `main`, a new `manual` tag, a new `analysis_options.yaml`) | Root `//...` **and** the probe — see § 1 |
+| `flutter_test` compile flags, runfiles or kernel mode (`flutter/private/flutter_test.bzl`) | Root `//...`, hello_world `//...` (the `asserts_fire_test` variants) **and** the by-hand const-violation builds in § "`flutter_test` build modes" |
 | Golden comparator (`flutter/private/goldens/`, `flutter_test.bzl` bootstrap) | Root `//...` + codegen `//...` **and** the manual regeneration round trip below |
 | Everything | All sections above |
 
@@ -1629,6 +1630,36 @@ The root workspace already has the ingredients — `dev_tool_deps` and
 `gen_l10n_deps` share eleven package names and disagree on `clock` and `meta` —
 but no target reaches both, so nothing there observes it. Do not add one: the
 edge that would make it observable is the bug.
+
+### `flutter_test` build modes
+
+A `flutter_test` has to behave as `flutter test` does on the same code, however
+it is built: per-library kernel modules (the default) or one whole-program
+compile (`--@rules_dart//dart:modular_kernel=false`), under `-c fastbuild` or
+`-c dbg`. `e2e/hello_world` declares each test below once, and
+`build_variant_tests` (`build_variant_test.bzl`) adds the other three builds as
+`<name>_dbg`, `<name>_whole_program` and `<name>_dbg_whole_program`. They run in
+`bazel test //...`.
+
+- `asserts_fire_test` — an `assert` trips in the test's own file, in a
+  dependency's library, in an initializer list and in the framework.
+
+A constant that breaks a `const` constructor's `assert` must not compile, as
+under `flutter test`; a build cannot be a passing test, so the two targets are
+`manual` and are checked by hand:
+
+```sh
+cd e2e/hello_world
+for flags in "" "-c dbg" "--@rules_dart//dart:modular_kernel=false" \
+    "-c dbg --@rules_dart//dart:modular_kernel=false"; do
+  bazel build //:const_violation_entry_test //:const_violation_dep_test $flags --keep_going
+done
+```
+
+Every one of the eight builds must fail with `Constant evaluation error` and
+`This assertion failed with message: Positive: -1 is not positive`. `_entry`
+holds the constant in the test's own file and `_dep` in a library it depends on,
+which in the modular build compile in different programs.
 
 ### Golden regeneration (manual)
 
