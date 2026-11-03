@@ -6,7 +6,7 @@ See https://docs.bazel.build/versions/main/skylark/deploying.html#dependencies
 
 load("//flutter/private:artifact_urls.bzl", "android_engine_artifact_path", "cpp_client_wrapper_artifact_path", "dart_sdk_artifact_path", "desktop_engine_artifact_path", "engine_artifact_url", "gen_snapshot_cross_artifact_path", "host_artifacts_path", "ios_engine_artifact_path")
 load("//flutter/private:constants.bzl", "ANDROID_ABI_FOR_ARCH")
-load("//flutter/private:engine_helpers.bzl", "ENGINE_MODES", "PLATFORM_PREFIX_TO_OS", "dart_binary_name", "dartaotruntime_binary_name", "engine_arch_for_os", "engine_filegroup_for_os", "extract_macos_inner_framework", "gen_snapshot_host_platform", "host_engine_targets")
+load("//flutter/private:engine_helpers.bzl", "ENGINE_MODES", "PLATFORM_PREFIX_TO_OS", "dart_binary_name", "dartaotruntime_binary_name", "engine_arch_for_os", "engine_filegroup_for_os", "extract_macos_inner_framework", "gen_snapshot_binary_name", "gen_snapshot_host_platform", "host_engine_targets")
 load("//flutter/private:flutter_android_engine_repo.bzl", "flutter_android_engine_repo")
 load("//flutter/private:flutter_cross_repo.bzl", "flutter_cross_compilation_repo")
 load("//flutter/private:flutter_desktop_cross_repo.bzl", "flutter_desktop_cross_repo")
@@ -440,9 +440,11 @@ def flutter_register_toolchains(name, **kwargs):
                     engine_revision = meta.engine_revision,
                     downloads = {profile_gen_snapshot_path: ""},
                     sha256s = {profile_gen_snapshot_path: checksums.get(profile_gen_snapshot_path, "")},
-                    build_file_content = 'exports_files(["gen_snapshot"], visibility = ["//visibility:public"])\n',
+                    build_file_content = 'exports_files(["{}"], visibility = ["//visibility:public"])\n'.format(
+                        gen_snapshot_binary_name(host_platform),
+                    ),
                 )
-                profile_gen_snapshot_label = "@{}//:gen_snapshot".format(profile_repo)
+                profile_gen_snapshot_label = "@{}//:{}".format(profile_repo, gen_snapshot_binary_name(host_platform))
 
             flutter_cross_compilation_repo(
                 name = name + "_cross_" + host_platform + "_" + target_platform,

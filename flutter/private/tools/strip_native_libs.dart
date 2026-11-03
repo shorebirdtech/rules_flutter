@@ -35,6 +35,12 @@ List<String> nativeLibraries(Iterable<String> entries) => [
     if (entry.startsWith('lib/') && entry.endsWith('.so')) entry,
 ];
 
+/// The jar entry name of the file at [relativePath] in the unpacked jar,
+/// whose path segments are joined by [separator]. Entry names always use
+/// `/`; on Windows the unpacked paths use `\`.
+String jarEntryName(String relativePath, String separator) =>
+    relativePath.replaceAll(separator, '/');
+
 /// The arguments the Android Gradle Plugin passes its strip tool.
 List<String> stripArguments({required String input, required String output}) =>
     ['--strip-unneeded', '-o', output, input];
@@ -92,7 +98,10 @@ Future<void> main(List<String> args) async {
 
     final entries = [
       for (final file in unpacked.listSync(recursive: true).whereType<File>())
-        file.path.substring(unpacked.path.length + 1),
+        jarEntryName(
+          file.path.substring(unpacked.path.length + 1),
+          Platform.pathSeparator,
+        ),
     ]..sort();
 
     final libraries = nativeLibraries(entries);

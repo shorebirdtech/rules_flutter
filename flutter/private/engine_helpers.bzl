@@ -173,6 +173,19 @@ def dart_binary_name(platform):
         return "dart.exe"
     return "dart"
 
+def gen_snapshot_binary_name(platform):
+    """Return the gen_snapshot binary filename for the given host platform.
+
+    Args:
+        platform: Host platform string (e.g. "darwin-arm64", "windows-x64").
+
+    Returns:
+        "gen_snapshot.exe" on Windows, "gen_snapshot" otherwise.
+    """
+    if platform.startswith("windows"):
+        return "gen_snapshot.exe"
+    return "gen_snapshot"
+
 def dartaotruntime_binary_name(platform):
     """Return the dartaotruntime binary filename for the given host platform.
 
