@@ -28,6 +28,7 @@ void main() {
     'dartDefines': const <String>[],
     'assetsDir': assetsDir,
     'targetPlatform': 'ios',
+    'nativeAssetsManifest': '',
   });
 
   group('resolveAssetsDir', () {
@@ -174,6 +175,7 @@ void main() {
           'platformBuildArgs': <String>[],
           'dartDefines': <String>[],
           'targetPlatform': 'ios',
+          'nativeAssetsManifest': '',
           // assetsDir missing — a rules/dev-tool version skew.
         }),
         throwsA(
@@ -209,6 +211,46 @@ void main() {
       );
     });
 
+    test('requires the native-assets manifest, so skew fails by name', () {
+      // A dev tool that guessed "none" here would compile hot restarts with no
+      // asset-id map, and a restarted Android app would throw in `main()`.
+      expect(
+        () => BuildInfo.fromJson(const {
+          'label': '@@//:app_flutter',
+          'compilationMode': 'dbg',
+          'platformBuildArgs': <String>[],
+          'dartDefines': <String>[],
+          'assetsDir': 'bazel-out/x/bin/app_flutter_flutter_assets',
+          'targetPlatform': 'android',
+          // nativeAssetsManifest missing — a rules/dev-tool version skew.
+        }),
+        throwsA(
+          isA<DevToolException>().having(
+            (e) => e.message,
+            'message',
+            contains('nativeAssetsManifest'),
+          ),
+        ),
+      );
+    });
+
+    test('carries the native-assets manifest through', () {
+      final parsed = BuildInfo.fromJson(const {
+        'label': '@@//:app_flutter',
+        'compilationMode': 'dbg',
+        'platformBuildArgs': <String>[],
+        'dartDefines': <String>[],
+        'assetsDir': 'bazel-out/x/bin/app_flutter_flutter_assets',
+        'targetPlatform': 'android',
+        'nativeAssetsManifest':
+            'bazel-out/x/bin/app_flutter.native_assets.json',
+      });
+      expect(
+        parsed.nativeAssetsManifest,
+        'bazel-out/x/bin/app_flutter.native_assets.json',
+      );
+    });
+
     test('carries the target platform through', () {
       final parsed = BuildInfo.fromJson(const {
         'label': '@@//:app_flutter',
@@ -217,6 +259,7 @@ void main() {
         'dartDefines': <String>[],
         'assetsDir': 'bazel-out/x/bin/app_flutter_flutter_assets',
         'targetPlatform': 'ios',
+        'nativeAssetsManifest': '',
       });
       expect(parsed.targetPlatform, 'ios');
     });
@@ -235,6 +278,7 @@ void main() {
         'dartDefines': ['E2E_FLAG=from,flag'],
         'assetsDir': 'bazel-out/x/bin/app_flutter_flutter_assets',
         'targetPlatform': 'ios',
+        'nativeAssetsManifest': '',
       };
       final parsed = BuildInfo.fromJson(record);
 
@@ -267,6 +311,7 @@ void main() {
         'dartDefines': <String>[],
         'assetsDir': 'bazel-out/x/bin/app_flutter_flutter_assets',
         'targetPlatform': 'ios',
+        'nativeAssetsManifest': '',
         'somethingNewerRulesBake': 'keep me',
       });
 
@@ -282,6 +327,7 @@ void main() {
         'dartDefines': ['E2E_FLAG=from,flag'],
         'assetsDir': 'bazel-out/x/bin/app_flutter_flutter_assets',
         'targetPlatform': 'ios',
+        'nativeAssetsManifest': '',
       });
       expect(parsed.buildArgs(extra: const ['--//custom:flag']), [
         '--ios_multi_cpus=sim_arm64',
@@ -424,6 +470,7 @@ void main() {
           'dartDefines': <String>[],
           'assetsDir': 'bazel-out/x/bin/app_flutter_flutter_assets',
           'targetPlatform': 'macos',
+          'nativeAssetsManifest': '',
         },
       );
 

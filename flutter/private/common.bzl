@@ -473,6 +473,12 @@ def flutter_compile_kernel(ctx, tools, aot = None, platform_dill = None, target_
             # build runs in the host configuration, so only the app can say
             # which platform-filtered plugin registrant its reloads need.
             "targetPlatform": target_platform,
+            # The manifest this kernel's `@Native(assetId:)` bindings resolve
+            # through, written for this configuration's OS and CPU. The dev
+            # tool's compiler is started from the host configuration, whose
+            # manifest names the host's libraries, so only the app can say
+            # which one a hot restart's kernel has to carry. "" when none.
+            "nativeAssetsManifest": native_assets_manifest.path if native_assets_manifest else "",
         }))
 
     kernel_dill = ctx.actions.declare_file(ctx.label.name + ".dill")

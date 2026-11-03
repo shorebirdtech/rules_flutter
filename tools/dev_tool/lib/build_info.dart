@@ -70,6 +70,18 @@ class BuildInfo {
   /// plugin set after a hot restart, silently.
   final String targetPlatform;
 
+  /// The `native_assets.json` this app's kernel was compiled with, as an
+  /// exec-root-relative bazel path, or `''` when its build had none.
+  ///
+  /// It maps each `@Native(assetId:)` id to the library that serves it on
+  /// this app's OS and CPU, and the frontend server compiles it into every
+  /// kernel it writes. The dev tool's own compiler is started from the host
+  /// configuration, whose manifest names the host's libraries, so it takes
+  /// this one instead: a hot restart's kernel without it binds every such
+  /// call by symbol lookup in the process, which on Android finds nothing
+  /// and makes `main()` throw.
+  final String nativeAssetsManifest;
+
   /// The record exactly as the running app served it.
   ///
   /// Kept alongside the parsed fields rather than re-derived from them, so a
@@ -84,6 +96,7 @@ class BuildInfo {
     required this.dartDefines,
     required this.assetsDir,
     required this.targetPlatform,
+    required this.nativeAssetsManifest,
     required this.record,
   });
 
@@ -131,6 +144,7 @@ class BuildInfo {
       dartDefines: need<List<dynamic>>('dartDefines').cast<String>(),
       assetsDir: need<String>('assetsDir'),
       targetPlatform: need<String>('targetPlatform'),
+      nativeAssetsManifest: need<String>('nativeAssetsManifest'),
       record: json,
     );
   }

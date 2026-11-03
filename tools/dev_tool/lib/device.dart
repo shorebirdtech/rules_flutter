@@ -516,6 +516,7 @@ abstract class Device {
     String fileSystemScheme = '',
     List<String> dartDefines = const [],
     String dartPluginRegistrantUri = '',
+    String nativeAssetsManifest = '',
     List<String> enableExperiments = const [],
   }) => NativeCompilerConfig(
     patchedSdkRoot: toolchain.patchedSdkRoot,
@@ -523,6 +524,7 @@ abstract class Device {
     fileSystemScheme: fileSystemScheme,
     dartDefines: dartDefines,
     dartPluginRegistrantUri: dartPluginRegistrantUri,
+    nativeAssetsManifest: nativeAssetsManifest,
     enableExperiments: enableExperiments,
   );
 
@@ -4343,6 +4345,7 @@ class WebDevice extends Device {
     String fileSystemScheme = '',
     List<String> dartDefines = const [],
     String dartPluginRegistrantUri = '',
+    String nativeAssetsManifest = '',
     List<String> enableExperiments = const [],
   }) {
     // Web builds its own filesystem roots (synthetic entrypoint dir + workspace)
