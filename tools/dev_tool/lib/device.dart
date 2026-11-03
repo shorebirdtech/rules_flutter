@@ -4448,7 +4448,11 @@ Future<int> _discoverCdpPort(
           // wrong before Chrome even starts, and Chrome says nothing when it
           // cannot take one.
           '${requestedPort == null ? '' : ' --web-browser-debug-port '
-                    '$requestedPort may already be in use.'}',
+                    '$requestedPort may already be in use.'}'
+          // What a browser that is up but not announcing has printed so far
+          // shows how far its startup got, and on a CI runner this error is
+          // the only place it lands.
+          ' ${_browserLastWords(browserDiagnostics)}',
         ),
       );
     }
@@ -4494,19 +4498,20 @@ Future<int> _discoverCdpPort(
 ///
 /// Read back off [AppLogStream] rather than accumulated by the listener above:
 /// the buffer survives the stream closing, so the lines are still there at the
-/// moment the launch is known to have failed, and there is no second copy of
-/// the same output to keep in step with the first.
+/// moment the launch is known to have failed, whether by exit or by timeout,
+/// and there is no second copy of the same output to keep in step with the
+/// first.
 ///
-/// Says so explicitly when there is nothing to quote. "Chrome exited and
-/// printed nothing" is a real and different diagnosis from "Chrome exited" —
+/// Says so explicitly when there is nothing to quote. "Chrome printed nothing"
+/// is a real and different diagnosis from "Chrome exited" —
 /// it rules out every cause that announces itself, and says the search belongs
 /// somewhere other than the browser's output. An empty tail rendered as
 /// nothing at all would instead read as if the quoting had been forgotten.
 String _browserLastWords(AppLogStream browserDiagnostics, {int lines = 20}) {
   final tail = browserDiagnostics.read(-lines).lines;
   if (tail.isEmpty) {
-    return 'It printed nothing at all on the way out, so its own output does '
-        'not hold the reason.';
+    return 'It printed nothing at all, so its own output does not hold the '
+        'reason.';
   }
   return 'It last said:\n${tail.map((l) => '  ${l.text}').join('\n')}';
 }

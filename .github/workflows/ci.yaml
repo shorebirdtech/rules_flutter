@@ -128,6 +128,13 @@ jobs:
       # run works, which a weakened browser would not establish.
       - name: Allow Chrome's sandbox to create user namespaces
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      # A fresh runner's disk is cold: the first Chrome launch pages Chrome in
+      # and took 0.5-14.8s to announce its DevTools port on an idle runner
+      # (every later launch, 0.2s), past the dev tool's 15s once the build is
+      # competing for the disk. One throwaway launch here pays that cost
+      # outside the test; after it the test's launch measured 0.2-1.0s.
+      - name: Page Chrome in from the cold disk
+        run: timeout 120 google-chrome --headless --no-first-run --user-data-dir="$(mktemp -d)" --dump-dom about:blank > /dev/null
       # google-chrome is preinstalled on this runner and is on PATH, which is
       # exactly how the dev tool resolves it on Linux (host_tools.dart) — no
       # CHROME_EXECUTABLE needed. xvfb gives that Chrome a display.
