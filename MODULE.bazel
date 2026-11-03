@@ -3,13 +3,6 @@
 # NOTE: The version field is intentionally omitted. Leaving it unset (the
 # default "") prevents issues when the module is used via non-registry
 # overrides (e.g. https://github.com/bazel-contrib/rules_go/issues/4380).
-# The publish.yaml GitHub Action patches in the release version when
-# submitting to the Bazel Central Registry.
-#
-# That patcher edits the first occurrence of the declaration's opening text in
-# this file, comments included, and does not parse Starlark. Keep that text out
-# of everything above the declaration, and keep this note outside it.
-#
 # For more info, see this Slack thread:
 # https://bazelbuild.slack.com/archives/CA31HN1T3/p1750406404452179
 #

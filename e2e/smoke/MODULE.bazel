@@ -1,4 +1,4 @@
-"Smoke test module for rules_flutter BCR presubmit"
+"Smoke test module for rules_flutter"
 
 module(name = "rules_flutter_smoke_test")
 

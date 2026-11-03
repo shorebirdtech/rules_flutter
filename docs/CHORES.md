@@ -55,13 +55,11 @@ The latest tag is the current stable release.
   otherwise fetches the newest release, so a missing file silently runs a
   different Bazel than the rest of the sweep.
   `find . -name .bazelversion -not -path '*/bazel-*'` is the list.
-- `.bcr/presubmit.yml` — `bazel:` matrix value (if major version changes)
 
 **Procedure**:
 
 1. Update all `.bazelversion` files to the new version
-2. If the major version changed, update `.bcr/presubmit.yml` matrix
-3. Regenerate lock files
+2. Regenerate lock files
 
 **Verification**: `bazel build //...` passes.
 
@@ -135,52 +133,6 @@ included. To check the lock the way CI does, move `.bazelrc.user` aside and run
 `bazel mod deps --lockfile_mode=error`.
 
 **Automation**: none.
-
----
-
-## Release Archive Contents
-
-**Trigger**: Adding or removing an e2e workspace, or any top-level directory.
-
-**Files**: `.gitattributes`
-
-The release archive is `git archive` output, so `export-ignore` decides what a
-consumer downloads — and what BCR presubmit runs against. Extracting an archive
-and building it is the only thing that catches either of these:
-
-- **Patterns must be anchored with a leading `/`.** Without one they match a
-  basename at any depth: `e2e/` also stripped `tools/dev_tool/test/e2e/`, and
-  that package's `glob(["test/e2e/**/*.dart"])` then failed the whole archive at
-  load time with "glob pattern didn't match anything, but allow_empty is set to
-  False". The archive did not build at all, and nothing in CI looks at it.
-- **`e2e/smoke` has to stay in.** `.bcr/presubmit.yml` names it as
-  `module_path`, and BCR resolves that inside the extracted archive. It was
-  excluded along with the rest of `e2e/`.
-
-So `/e2e/` is excluded workspace by workspace rather than wholesale. **A new e2e
-workspace needs a line here**, or it ships in the archive: the whole tree is 12MB
-against a 1.5MB archive.
-
-**Verification**: `git archive --format=tar HEAD | tar t` and check that
-`e2e/smoke/` and `tools/dev_tool/test/e2e/` are present and no other e2e
-workspace is. To check it builds, extract the archive somewhere clean and run
-`bazel build --nobuild //...` — the load phase is what these mistakes break.
-
----
-
-## BCR Presubmit Config
-
-**Trigger**: When changing the test module or Bazel version requirements.
-
-**Files**:
-
-- `.bcr/presubmit.yml` — module_path, platform matrix, bazel matrix
-
-**Procedure**: Update the YAML to match current requirements.
-
-**Verification**: BCR presubmit passes after publishing.
-
-**Automation**: Manual — changes are rare and coupled to other chores.
 
 ---
 

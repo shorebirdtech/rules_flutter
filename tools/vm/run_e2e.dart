@@ -72,13 +72,6 @@ Future<void> main(List<String> args) async {
   _warnIfDirty(repoRoot);
 
   // 1. Package the committed tree.
-  //
-  // Deliberately not `git archive`: it honours `export-ignore`, and
-  // `.gitattributes` marks `e2e/` as one so release tarballs stay small. An
-  // archive built that way arrives on the VM with every workspace this tool
-  // exists to run stripped out, and the run fails on a missing directory.
-  // `git ls-files` names the same committed tree without consulting
-  // export-ignore.
   final tgz = '${Directory.systemTemp.path}/rules_flutter_src.tgz';
   print('Packaging committed HEAD -> $tgz');
   final listing = File('${Directory.systemTemp.path}/rules_flutter_files.txt');
