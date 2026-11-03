@@ -5571,43 +5571,98 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       await waitForLocalTcpPort(server.port, what: 'test listener');
     });
 
-    test('waits for a listener that binds late', () async {
-      // Grab a free port, then release it so nothing is listening when the
-      // wait starts; bind for real shortly after.
-      final probe = await ServerSocket.bind('127.0.0.1', 0);
-      final port = probe.port;
-      await probe.close();
+    // The rest of the wait is time and answers, not sockets: the probe is
+    // faked and `fakeAsync` moves the clock, so each outcome below is exact.
+    group('against a faked probe', () {
+      /// A probe that refuses until [acceptsFrom] on the (fake) clock, and
+      /// records when it was asked.
+      ({TcpProbe probe, List<Duration> asked}) listener(
+        FakeAsync async, {
+        Duration? acceptsFrom,
+      }) {
+        final asked = <Duration>[];
+        return (
+          asked: asked,
+          probe: (port) async {
+            asked.add(async.elapsed);
+            if (acceptsFrom == null || async.elapsed < acceptsFrom) {
+              throw const SocketException('Connection refused');
+            }
+          },
+        );
+      }
 
-      ServerSocket? server;
-      addTearDown(() => server?.close());
-      final lateBind = Future<void>.delayed(
-        const Duration(milliseconds: 300),
-        () async => server = await ServerSocket.bind('127.0.0.1', port),
-      );
-      await waitForLocalTcpPort(port, what: 'late listener');
-      await lateBind;
-      expect(server, isNotNull);
-    });
+      test('waits for a listener that binds late', () {
+        fakeAsync((async) {
+          final l = listener(async, acceptsFrom: const Duration(seconds: 1));
+          final outcome = track(
+            waitForLocalTcpPort(1, what: 'late listener', probe: l.probe),
+          );
 
-    test('throws a StateError naming the forward when nothing binds', () async {
-      final probe = await ServerSocket.bind('127.0.0.1', 0);
-      final port = probe.port;
-      await probe.close();
+          async.elapse(const Duration(milliseconds: 999));
+          expect(outcome.done, isFalse);
 
-      await expectLater(
-        waitForLocalTcpPort(
-          port,
-          what: 'iproxy forward',
-          budget: const Duration(milliseconds: 400),
-        ),
-        throwsA(
-          isA<StateError>().having(
-            (e) => e.message,
-            'message',
-            contains('iproxy forward'),
-          ),
-        ),
-      );
+          // Asks at 0, 50, 150, 350, 750 ms, then every 500 ms: 1250 is the
+          // first ask after the bind at 1000.
+          async.elapse(const Duration(milliseconds: 251));
+          expect(outcome.done, isTrue);
+          expect(outcome.error, isNull);
+          expect(
+            l.asked.map((d) => d.inMilliseconds),
+            [0, 50, 150, 350, 750, 1250],
+          );
+        });
+      });
+
+      test('throws a StateError naming the forward when nothing binds', () {
+        fakeAsync((async) {
+          final l = listener(async);
+          final outcome = track(
+            waitForLocalTcpPort(
+              4242,
+              what: 'iproxy forward',
+              budget: const Duration(seconds: 2),
+              probe: l.probe,
+            ),
+          );
+
+          // The budget is spent by the ask at 2250 ms (0, 50, 150, 350, 750,
+          // 1250, 1750, 2250); nothing is asked before it, and it fails then.
+          async.elapse(const Duration(milliseconds: 2249));
+          expect(outcome.done, isFalse);
+          async.elapse(const Duration(milliseconds: 1));
+
+          expect(outcome.done, isTrue);
+          expect(
+            outcome.error,
+            isA<StateError>().having(
+              (e) => e.message,
+              'message',
+              'iproxy forward on 127.0.0.1:4242 did not accept connections '
+                  'within 2s of starting.',
+            ),
+          );
+          expect(l.asked.last, const Duration(milliseconds: 2250));
+        });
+      });
+
+      test('an ask that lands past the budget still succeeds if it is up', () {
+        fakeAsync((async) {
+          final l = listener(async, acceptsFrom: const Duration(seconds: 2));
+          final outcome = track(
+            waitForLocalTcpPort(
+              1,
+              what: 'edge listener',
+              budget: const Duration(seconds: 2),
+              probe: l.probe,
+            ),
+          );
+          async.elapse(const Duration(seconds: 3));
+
+          expect(outcome.done, isTrue);
+          expect(outcome.error, isNull);
+        });
+      });
     });
   });
 
@@ -5748,17 +5803,20 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
 
         final device = MacOSDevice()
           ..teardownBound = const Duration(milliseconds: 200);
-        final sw = Stopwatch()..start();
-        await device
-            .stop(AppInstance(process: real))
-            .timeout(
-              const Duration(seconds: 10),
-              onTimeout: () => fail(
-                'stop() never returned against a real '
-                'SIGTERM-trapping process',
+        // The 10 s is a guard against hanging, not a claim about speed: how
+        // long the stop took is load, and it is not asserted. That the wait
+        // was bounded is the escalation itself, the record below.
+        final records = await recording(
+          () => device
+              .stop(AppInstance(process: real))
+              .timeout(
+                const Duration(seconds: 10),
+                onTimeout: () => fail(
+                  'stop() never returned against a real '
+                  'SIGTERM-trapping process',
+                ),
               ),
-            );
-        sw.stop();
+        );
 
         expect(
           await real.exitCode,
@@ -5768,8 +5826,8 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
               'what dart:io reports for it',
         );
         expect(
-          sw.elapsed,
-          lessThan(const Duration(seconds: 3)),
+          records.where((r) => r.message.contains('process_kill_escalated')),
+          isNotEmpty,
           reason: 'the wait is bounded, not merely eventual',
         );
       },

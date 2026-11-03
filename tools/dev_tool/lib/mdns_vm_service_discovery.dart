@@ -26,6 +26,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:clock/clock.dart';
 import 'package:multicast_dns/multicast_dns.dart';
 
 /// The mDNS service type every debug/profile Flutter app advertises under.
@@ -176,7 +177,7 @@ class MdnsVmServiceDiscovery {
     // sends exactly one packet per lookup and stops, so retransmission has to
     // happen here. This is not a fallback between mechanisms; it is the one
     // mechanism, implemented to spec.
-    final elapsed = Stopwatch()..start();
+    final elapsed = clock.stopwatch()..start();
     // Every advertisement this query saw and did not take, and which host sent
     // it — the two things needed to tell "the app never started" apart from
     // "that was the copy running in a simulator on this Mac".

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter_bazel_dev_tool/vm_service_client.dart';
 import 'package:path/path.dart' as p;
 import 'package:vm_service/vm_service.dart';
@@ -389,12 +390,12 @@ void main() {
             // Long enough that waiting it out could not pass for an answer.
             client.frameTimeout = const Duration(seconds: 30);
 
-            final took = Stopwatch()..start();
+            // Waiting out the 30 s would answer with "none came within 30s"
+            // instead of the app's own reason, which is what is asserted.
             final verdict = verb == 'restart'
                 ? await client.hotRestart(dillPath)
                 : await client.hotReload(dillPath);
 
-            expect(took.elapsed, lessThan(const Duration(seconds: 5)));
             expect(verdict, isA<VerdictApplied>());
             expect(
               (verdict as VerdictApplied).notShown,
@@ -2644,16 +2645,30 @@ void main() {
         final client = await connected(fake);
         fake.callServiceExtensionGate = Completer<void>();
 
-        final elapsed = Stopwatch()..start();
-        final answer = await client.waitForFirstFrame(
-          timeout: const Duration(milliseconds: 200),
+        final async = FakeAsync();
+        final answer = async.run(
+          (_) => track(
+            client.waitForFirstFrame(
+              timeout: const Duration(milliseconds: 200),
+            ),
+          ),
         );
-        elapsed.stop();
 
-        expect(answer, isFalse);
+        async.elapse(const Duration(milliseconds: 199));
+        expect(answer.done, isFalse);
+        async.elapse(const Duration(milliseconds: 1));
+
+        // The wait ends by cancelling a stream subscription, and that future
+        // completes on the real microtask queue, which `fakeAsync` does not
+        // drive. Let it run (this moves no time), then hand the wait back.
+        await pumpEventQueue();
+        async.flushMicrotasks();
+
+        expect(answer.done, isTrue);
+        expect(answer.error, isNull);
         expect(
-          elapsed.elapsed,
-          lessThan(const Duration(seconds: 2)),
+          answer.value,
+          isFalse,
           reason:
               'the bound is the bound: a query the app never answers must not '
               'hold the wait open past it, or the caller that sized the budget '

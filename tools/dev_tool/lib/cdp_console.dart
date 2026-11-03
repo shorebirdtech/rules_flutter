@@ -13,6 +13,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:clock/clock.dart';
+
 import 'app_log.dart';
 
 /// Choose the WebSocket debugger URL for the app's page from a CDP
@@ -107,19 +109,24 @@ const maxCdpPollInterval = Duration(milliseconds: 500);
 /// [appUrl] is typed nullable only because callers hold it in nullable
 /// fields populated at launch; passing null is a caller bug and throws
 /// immediately rather than degrading into driving an arbitrary page.
+///
+/// Time is the ambient `package:clock` and the waits are the zone's timers;
+/// [fetchTargets] is the listing request. A test that fakes the second runs
+/// the whole poll under `fakeAsync`.
 Future<String> resolveCdpPageTarget(
   int cdpPort, {
   String? appUrl,
   Duration timeout = const Duration(seconds: 15),
   Duration pollInterval = const Duration(milliseconds: 50),
+  Future<List<dynamic>> Function(int cdpPort) fetchTargets = fetchCdpTargets,
 }) async {
   if (appUrl == null) {
     throw ArgumentError.notNull('appUrl');
   }
-  final stopwatch = Stopwatch()..start();
+  final stopwatch = clock.stopwatch()..start();
   var delay = pollInterval;
   while (true) {
-    final targets = await fetchCdpTargets(cdpPort);
+    final targets = await fetchTargets(cdpPort);
     final ws = pickCdpPageTarget(targets, appUrl: appUrl);
     if (ws != null) return ws;
     if (stopwatch.elapsed >= timeout) {

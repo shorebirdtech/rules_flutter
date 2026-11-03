@@ -47,6 +47,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:clock/clock.dart';
 import 'package:path/path.dart' as p;
 
 import 'app_log.dart';
@@ -1869,31 +1870,45 @@ class AndroidDevice extends Device {
       : Process.start(exe, args, environment: environment);
 }
 
+/// One attempt to reach a local TCP listener: completes when it accepts,
+/// throws when it does not. The seam [waitForLocalTcpPort] takes so a test can
+/// answer without a socket.
+typedef TcpProbe = Future<void> Function(int port);
+
+Future<void> _connectToLocalPort(int port) async {
+  final probe = await Socket.connect(
+    '127.0.0.1',
+    port,
+    timeout: const Duration(seconds: 1),
+  );
+  probe.destroy();
+}
+
 /// Wait until a local TCP listener on 127.0.0.1:[port] accepts connections.
 ///
 /// Port forwarders (iproxy, adb forward) bind their local listener
 /// asynchronously after `Process.start` returns; dialing the forward before
-/// it is bound gets ECONNREFUSED. Polls `Socket.connect` with exponential
-/// backoff and destroys each probe socket. Throws [StateError] naming [what]
-/// if the listener never accepts within [budget].
+/// it is bound gets ECONNREFUSED. Calls [probe] (a real connect that destroys
+/// its socket, by default) with exponential backoff. Throws [StateError]
+/// naming [what] if the listener never accepts within [budget].
+///
+/// The budget is read from the ambient `package:clock` and the backoff is the
+/// zone's timer, so a test under `fakeAsync` drives the whole wait with
+/// `elapse`.
 Future<void> waitForLocalTcpPort(
   int port, {
   required String what,
   Duration budget = const Duration(seconds: 10),
+  TcpProbe probe = _connectToLocalPort,
 }) async {
-  final deadline = DateTime.now().add(budget);
+  final deadline = clock.now().add(budget);
   var delay = const Duration(milliseconds: 50);
   while (true) {
     try {
-      final probe = await Socket.connect(
-        '127.0.0.1',
-        port,
-        timeout: const Duration(seconds: 1),
-      );
-      probe.destroy();
+      await probe(port);
       return;
     } catch (_) {
-      if (DateTime.now().isAfter(deadline)) {
+      if (clock.now().isAfter(deadline)) {
         throw StateError(
           '$what on 127.0.0.1:$port did not accept connections within '
           '${budget.inSeconds}s of starting.',
