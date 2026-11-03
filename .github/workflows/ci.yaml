@@ -159,10 +159,14 @@ jobs:
         os:
           - macos-latest
         include:
-          # Run hello_world on Linux for native Linux bundle testing.
+          # Run hello_world on Linux for native Linux bundle testing. Its
+          # `bazel test //...` also builds the bundle in Flutter's profile mode
+          # (`verify_linux_profile_bundle_test`): a profile AOT snapshot can only
+          # be built on its own OS, so this is the one place CI can.
           - workspace: hello_world
             os: ubuntu-latest
-          # Run hello_world on Windows for native Windows bundle testing.
+          # Run hello_world on Windows for native Windows bundle testing, and
+          # the same profile-mode build (`verify_windows_profile_bundle_test`).
           - workspace: hello_world
             os: windows-latest
           # Run codegen on Linux (no platform-specific code).

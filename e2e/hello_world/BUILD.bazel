@@ -21,6 +21,7 @@ load("@rules_flutter//flutter:linux.bzl", "flutter_linux_app")
 load("@rules_flutter//flutter:macos.bzl", "flutter_macos_app")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
 load("@rules_flutter//flutter:windows.bzl", "flutter_windows_app")
+load(":profile_build.bzl", "profile_build")
 
 exports_files(["pubspec.lock"])
 
@@ -441,6 +442,59 @@ build_test(
 build_test(
     name = "web_build_test",
     targets = [":hello_world_web"],
+)
+
+# -- Profile mode on Linux and Windows -----------------------------------------
+#
+# The desktop bundles built with `-c opt --@rules_flutter//flutter:profile`,
+# whatever the command line says, so the CI jobs that run `bazel test //...` on
+# those hosts build profile mode too. A profile AOT snapshot cannot be built
+# for another desktop OS, so each runs on its own host only.
+
+profile_build(
+    name = "hello_world_linux_profile",
+    tags = ["manual"],
+    target_compatible_with = ["@platforms//os:linux"],
+    targets = [":hello_world_linux"],
+)
+
+profile_build(
+    name = "hello_world_windows_profile",
+    tags = ["manual"],
+    target_compatible_with = ["@platforms//os:windows"],
+    targets = [":hello_world_windows"],
+)
+
+# Builds the bundle in profile mode, then checks its AOT snapshot is a profile
+# one. Names the bundle by its target and the snapshot by its place in it.
+dart_test(
+    name = "verify_linux_profile_bundle_test",
+    args = [
+        "hello_world_linux",
+        "lib/libapp.so",
+    ],
+    data = [":hello_world_linux_profile"],
+    main = "test/verify_profile_bundle_test.dart",
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        "@deps//:test",
+        "@rules_dart//dart/runfiles",
+    ],
+)
+
+dart_test(
+    name = "verify_windows_profile_bundle_test",
+    args = [
+        "hello_world_windows",
+        "data/app.so",
+    ],
+    data = [":hello_world_windows_profile"],
+    main = "test/verify_profile_bundle_test.dart",
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        "@deps//:test",
+        "@rules_dart//dart/runfiles",
+    ],
 )
 
 # Verifies the asset bundle structure for pub-package fonts/assets:

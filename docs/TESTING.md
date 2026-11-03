@@ -815,7 +815,7 @@ cd e2e/windows_example && bazel test //...  # Windows-only (target_compatible_wi
 | Workspace | Key tests |
 |-----------|-----------|
 | smoke | Toolchain resolution for all platforms |
-| hello_world | Kernel, AOT, application, and per-platform bundle builds; flutter_test |
+| hello_world | Kernel, AOT, application, and per-platform bundle builds; flutter_test; on Linux and Windows, a profile-mode bundle whose AOT snapshot is a profile one (`verify_linux_profile_bundle_test`, `verify_windows_profile_bundle_test`) |
 | codegen | Per-file and aggregate dart_codegen, custom generators, hot-reload-with-codegen |
 | ffi_example | Both FFI mechanisms — Native Assets (`add_plugin`, `@Native` asset-id bind) and `native_deps` (`mul_plugin`, conventional-path open) — bundle structure on macOS/Linux plus manual runtime proof on iOS simulator and macOS |
 | ffi_plugin_example | FFI plugin build + macOS/Linux bundle structure with `libmultiply.dylib`/`.so` |
@@ -1370,6 +1370,26 @@ it is a profile build and not a release one:
 - `libapp.so` / `app.so` and the engine library differ in size from a
   `-c opt` build without the flag.
 
+#### What CI covers
+
+CI builds profile mode on both hosts, so a regression that stops the profile
+build or ships a release snapshot in it fails a push, not a VM session. The
+`E2E (hello_world, ubuntu-latest)` and `E2E (hello_world, windows-latest)` jobs
+run `bazel test //...` in `e2e/hello_world`, which includes
+`verify_linux_profile_bundle_test` and `verify_windows_profile_bundle_test`.
+Each builds `hello_world_linux` or `hello_world_windows` through `profile_build`
+(`-c opt --@rules_flutter//flutter:profile`, whatever the command line says),
+downloading the profile engine and building the profile AOT snapshot, then
+checks the snapshot. The Dart VM records the mode it was built for at the start
+of every AOT snapshot: `release` from Flutter's profile `gen_snapshot`,
+`product` from its release one. The test fails unless the bundle's `libapp.so`
+(Linux) or `data/app.so` (Windows) says `release`.
+
+CI does not start the app, so it does not show that the VM service answers or
+that the main isolate lists the `ext.flutter.profile*` extensions; the manual
+checks above still cover those. `e2e/linux_example` and `e2e/windows_example`
+are in no CI matrix, so the profile build is exercised through `hello_world`.
+
 ## 5. Web rendering verification
 
 Web rendering is verified from Dart, through the dev tool, as part of the e2e
@@ -1420,7 +1440,7 @@ script's own package requires ≥ 3.13.
 | Linux runner / bundle (`flutter/private/*linux*`) | linux_example, cross_compile_example, GCP VM visual test |
 | Windows runner / bundle (`flutter/private/*windows*`) | windows_example (on Windows), GCP VM visual test |
 | Desktop engine selection (debug/release) | cross_compile_example `bazel build :cross_linux` + verify on VM |
-| Profile mode (`flutter:profile` selects, profile engine repos) | Root `//...`, macOS and a device by hand, and a profile build on the Linux and Windows VMs (§ Profile mode on Linux and Windows) |
+| Profile mode (`flutter:profile` selects, profile engine repos) | Root `//...`, macOS and a device by hand, hello_world `//...` on Linux and Windows (CI does this), and the profile run on the Linux and Windows VMs (§ Profile mode on Linux and Windows) |
 | Dart compilation / AOT | hello_world, ffi_example, macos_example |
 | Asset bundling | hello_world, plugin_example |
 | Shader compilation, bundling or hot reload, or how a workspace plugin is wired | `glass_plugin_e2e_test.dart` on every platform it covers, and by hand: `bazel build //impeller_shader:app_flutter_sksl_required` in plugin_example must **fail**, saying the shader does not compile for Skia |
