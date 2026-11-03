@@ -1,0 +1,196 @@
+@Tags(['e2e'])
+library;
+
+import 'dart:convert';
+
+import 'package:test/test.dart';
+
+import 'digest_probe.dart';
+
+/// Fetches of rules_flutter's repositories that are given a digest.
+///
+/// The property (with `digest_missing_e2e_test.dart`, its other half): every
+/// byte a repository fetches is checked against a digest that was pinned for
+/// it. This half is the cases where one *was* given:
+///
+///  * a correct digest fetches, with no network (the control: it shows the
+///    refusals in the other file are about the digest and not about the
+///    harness);
+///  * a wrong digest, or one that is not a SHA-256 at all, fails the fetch.
+///    (Bazel does not check a digest's shape: it compares it with the bytes
+///    it fetched and refuses a mismatch, so a malformed one can never be
+///    satisfied. Refusing it *before* any request, naming the digest, is
+///    `digest_missing_e2e_test.dart`.)
+///
+/// These pass today, because Bazel itself enforces a digest it is handed.
+/// They stay as the floor under whatever rules_flutter adds in front of that.
+void main() {
+  late Probe fetcher;
+
+  final archive = zipOf({'sky_engine/lib/a.dart': '// a', 'a.txt': 'a'});
+  final digest = sha256Hex(archive);
+  final wrongDigest = '0' * 64;
+  const revision = fakeEngineRevision;
+
+  // One archive under each file name the rules ask for. Bazel serves a
+  // download that names a digest from the distdir by file name.
+  final archives = {
+    for (final name in [
+      'sky_engine.zip',
+      'artifacts.zip',
+      'linux-x64-flutter-gtk.zip',
+      'windows-x64-flutter.zip',
+      'flutter-cpp-client-wrapper.zip',
+      'darwin-x64.zip',
+    ])
+      name: archive,
+  };
+
+  final pubArchive = tarGzOf({
+    'pubspec.yaml':
+        'name: sample\nversion: 1.0.0\nenvironment:\n  sdk: ^3.0.0\n',
+    'lib/sample.dart': 'const x = 1;\n',
+  });
+  final pubDigest = sha256Hex(pubArchive);
+  late String pubBase;
+
+  setUpAll(() async {
+    expect(
+      sha256Hex(utf8.encode('abc')),
+      'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
+      reason: 'the test\'s own SHA-256 is wrong',
+    );
+
+    pubBase = await servePubArchive('sample', '1.0.0', pubArchive);
+
+    ProbeRepo pub(String name, String d) =>
+        ProbeRepo(name, 'flutter_pub_package', {
+          'package_name': str('sample'),
+          'version': str('1.0.0'),
+          'sha256': str(d),
+          'base_url': str(pubBase),
+          'hub_name': str('probe_hub'),
+        });
+    ProbeRepo profile(String name, String d) =>
+        ProbeRepo(name, 'flutter_profile_repo', {
+          'engine_revision': str(revision),
+          'downloads': strDict({'android-arm64-profile/artifacts.zip': ''}),
+          'sha256s': strDict({'android-arm64-profile/artifacts.zip': d}),
+          'build_file_content': str(''),
+        });
+
+    fetcher = await probe(
+      archives: archives,
+      repos: [
+        ProbeRepo('sky_ok', 'flutter_sky_engine_repo', {
+          'engine_revision': str(revision),
+          'sha256': str(digest),
+        }),
+        profile('profile_ok', digest),
+        ProbeRepo('android_ok', 'flutter_android_engine_repo', {
+          'engine_revision': str(revision),
+          'android_arch': str('arm64'),
+          'release_sha256': str(digest),
+          'debug_sha256': str(digest),
+          'profile_repo_name': str('profile_ok'),
+        }),
+        ProbeRepo('ios_ok', 'flutter_ios_engine_repo', {
+          'engine_revision': str(revision),
+          'release_sha256': str(digest),
+          'debug_sha256': str(digest),
+          'profile_repo_name': str('profile_ok'),
+        }),
+        ProbeRepo('desktop_linux_ok', 'flutter_desktop_engine_repo', {
+          'engine_revision': str(revision),
+          'target_os': str('linux'),
+          'target_arch': str('x64'),
+          'sha256': str(digest),
+        }),
+        ProbeRepo('desktop_windows_ok', 'flutter_desktop_engine_repo', {
+          'engine_revision': str(revision),
+          'target_os': str('windows'),
+          'target_arch': str('x64'),
+          'sha256': str(digest),
+          'cpp_wrapper_sha256': str(digest),
+        }),
+        ProbeRepo('cross_ok', 'flutter_cross_compilation_repo', {
+          'flutter_version': str(fakeFlutterVersion),
+          'engine_revision': str(revision),
+          'host_platform': str('darwin-arm64'),
+          'target_platform': str('android-arm64'),
+          'host_repo_name': str('host'),
+          'gen_snapshot_sha256': str(digest),
+        }, bzl: 'flutter_cross_repo'),
+        pub('pub_ok', pubDigest),
+        // A digest that is a SHA-256 but not these bytes'.
+        ProbeRepo('sky_wrong', 'flutter_sky_engine_repo', {
+          'engine_revision': str(revision),
+          'sha256': str(wrongDigest),
+        }),
+        pub('pub_wrong', wrongDigest),
+        // Not a SHA-256 at all: too short, not hex, an SRI string.
+        for (final (name, bad) in _malformed(digest))
+          ProbeRepo('sky_$name', 'flutter_sky_engine_repo', {
+            'engine_revision': str(revision),
+            'sha256': str(bad),
+          }),
+        for (final (name, bad) in _malformed(pubDigest)) pub('pub_$name', bad),
+      ],
+    );
+  });
+
+  group('a correct digest fetches, offline', () {
+    for (final name in [
+      'sky_ok',
+      'profile_ok',
+      'android_ok',
+      'ios_ok',
+      'desktop_linux_ok',
+      'desktop_windows_ok',
+      'cross_ok',
+      'pub_ok',
+    ]) {
+      test(name, () async {
+        final result = await fetcher.fetch(name);
+        expect(result.succeeded, isTrue, reason: '$result');
+      });
+    }
+  });
+
+  group('a digest that does not match the bytes fails the fetch', () {
+    for (final name in ['sky_wrong', 'pub_wrong']) {
+      test(name, () async {
+        final result = await fetcher.fetch(name);
+        expect(
+          result.succeeded,
+          isFalse,
+          reason: 'fetched with a wrong digest',
+        );
+      });
+    }
+  });
+
+  group(
+    'a digest that is not a SHA-256 fails the fetch',
+    () {
+      for (final (name, _) in _malformed(digest)) {
+        for (final prefix in ['sky', 'pub']) {
+          test('${prefix}_$name', () async {
+            final result = await fetcher.fetch('${prefix}_$name');
+            expect(
+              result.succeeded,
+              isFalse,
+              reason: 'fetched with a malformed digest',
+            );
+          });
+        }
+      }
+    },
+  );
+}
+
+List<(String, String)> _malformed(String good) => [
+  ('short', good.substring(0, 40)),
+  ('nonhex', 'z' * 64),
+  ('sri', 'sha256-${'A' * 43}='),
+];

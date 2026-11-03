@@ -1,0 +1,11 @@
+load("@rules_dart//dart:defs.bzl", "dart_test")
+
+# Guards against a repository rule downloading bytes it has not checked against
+# a pinned digest.
+dart_test(
+    name = "download_sites_test",
+    size = "small",
+    srcs = ["download_sites.dart"],
+    main = "test/download_sites_test.dart",
+    deps = ["@dev_tool_deps//:test"],
+)

@@ -149,7 +149,38 @@ Future<EditableWorkspace> editableWorkspace(String name) async {
   _writeLocalConfig(source: source, root: root);
 
   printOnFailure('workspace copy for "$name": $root');
+  _disposeAtTeardown(parent: parent, root: root);
 
+  return EditableWorkspace._(name, root);
+}
+
+/// A workspace made from [files] (relative path to contents), for a test that
+/// needs a project of its own rather than a copy of one under `e2e/`.
+///
+/// Disposed like a copy: its Bazel server is shut down and its output base and
+/// tree removed when the test ends (when the scope is a `setUpAll`, after the
+/// group). Nothing is copied or rewritten, so [files] must be a complete
+/// workspace, `MODULE.bazel` included.
+Future<EditableWorkspace> generatedWorkspace(
+  String name,
+  Map<String, String> files,
+) async {
+  final parent = await Directory.systemTemp.createTemp('e2e_ws_');
+  final root = p.join(parent.path, name);
+  Directory(root).createSync(recursive: true);
+  for (final entry in files.entries) {
+    final file = File(p.join(root, entry.key));
+    file.parent.createSync(recursive: true);
+    file.writeAsStringSync(entry.value);
+  }
+  printOnFailure('generated workspace "$name": $root');
+  _disposeAtTeardown(parent: parent, root: root);
+  return EditableWorkspace._(name, root);
+}
+
+/// Shut down the Bazel server of the workspace at [root], remove its output
+/// base, and delete [parent], when the current test (or group) ends.
+void _disposeAtTeardown({required Directory parent, required String root}) {
   addTearDown(() async {
     // Asked BEFORE the shutdown, for two reasons. The server is still up from
     // the test's own builds, so answering is nearly free; and after a shutdown
@@ -181,8 +212,6 @@ Future<EditableWorkspace> editableWorkspace(String name) async {
     if (outputBase != null) await _removeOutputBase(outputBase);
     if (parent.existsSync()) parent.deleteSync(recursive: true);
   });
-
-  return EditableWorkspace._(name, root);
 }
 
 /// The output base Bazel uses for the workspace at [root], or null if it will
