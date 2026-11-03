@@ -19,6 +19,7 @@ load(":flutter_pub_package_test.bzl", "flutter_pub_package_test_suite")
 load(":flutter_pubspec_test.bzl", "flutter_pubspec_test_suite")
 load(":flutter_sdk_package_test.bzl", "flutter_sdk_package_test_suite")
 load(":flutter_test_bootstrap_test.bzl", "flutter_test_bootstrap_test_suite")
+load(":gradle_dependency_forms_test.bzl", "gradle_dependency_forms_test_suite")
 load(":ios_test.bzl", "ios_test_suite")
 load(":language_version_test.bzl", "language_version_test_suite")
 load(":libraries_spec_test.bzl", "libraries_spec_test_suite")
@@ -77,6 +78,8 @@ flutter_plugin_test_suite(name = "flutter_plugin_test")
 android_bundle_test_suite(name = "android_bundle_test")
 
 android_plugin_maven_test_suite(name = "android_plugin_maven_test")
+
+gradle_dependency_forms_test_suite(name = "gradle_dependency_forms_test")
 
 flutter_pub_package_test_suite(name = "flutter_pub_package_test")
 
