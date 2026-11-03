@@ -178,7 +178,7 @@ dart_test(
         ":app_wasm_subpath",
     ],
     main = "test/verify_index_html_test.dart",
-    deps = ["@rules_dart//dart/runfiles"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 dart_test(
@@ -189,7 +189,7 @@ dart_test(
         ":app_wasm",
     ],
     main = "test/verify_service_worker_test.dart",
-    deps = ["@rules_dart//dart/runfiles"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 # The workspace's lint ruleset, bundled with the pub package whose YAML its
@@ -364,5 +364,5 @@ dart_test(
         ":app_wasm_only",
     ],
     main = "test/verify_compiler_flags_test.dart",
-    deps = ["@rules_dart//dart/runfiles"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )

@@ -286,7 +286,7 @@ dart_test(
     main = "test/verify_rendered_swatch_test.dart",
     deps = [
         "@deps//:test",
-        "@rules_dart//dart/runfiles",
+        "@rules_flutter//tools/e2e_testing",
     ],
 )
 
@@ -477,7 +477,7 @@ dart_test(
     target_compatible_with = ["@platforms//os:linux"],
     deps = [
         "@deps//:test",
-        "@rules_dart//dart/runfiles",
+        "@rules_flutter//tools/e2e_testing",
     ],
 )
 
@@ -492,7 +492,7 @@ dart_test(
     target_compatible_with = ["@platforms//os:windows"],
     deps = [
         "@deps//:test",
-        "@rules_dart//dart/runfiles",
+        "@rules_flutter//tools/e2e_testing",
     ],
 )
 
@@ -508,7 +508,7 @@ dart_test(
     main = "test/verify_pub_assets_test.dart",
     deps = [
         "@deps//:test",
-        "@rules_dart//dart/runfiles",
+        "@rules_flutter//tools/e2e_testing",
     ],
 )
 
@@ -530,6 +530,7 @@ dart_test(
     data = [":hello_world_macos"],
     main = "test/verify_macos_entitlements_test.dart",
     target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 # The app icon `flutter create` leaves in the tree, which this BUILD file
@@ -541,6 +542,7 @@ dart_test(
     data = [":hello_world_macos"],
     main = "test/verify_macos_app_icon_test.dart",
     target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 # The workspace's lint ruleset, bundled with the pub package its `include:`

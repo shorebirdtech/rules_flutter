@@ -12,7 +12,7 @@ library;
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:runfiles/runfiles.dart';
+import 'package:rules_flutter_e2e_testing/runfiles_paths.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -21,18 +21,12 @@ void main() {
   setUpAll(() {
     // The data dep `:hello_world_app` produces a tree artifact
     // `hello_world_app_flutter_assets`, staged in the test's runfiles.
-    // Resolve it via the runfiles library rather than guessing paths: that
-    // works under both the Unix symlink tree and the Windows manifest
-    // (windows-latest runs with --noenable_runfiles, so no directory exists).
-    final path = Runfiles.create().rlocation(
-      '_main/hello_world_app_flutter_assets',
+    bundleDir = Directory(
+      requireRunfile(
+        'hello_world_app_flutter_assets',
+        what: 'hello_world_app_flutter_assets',
+      ),
     );
-    bundleDir = Directory(path);
-    if (!bundleDir.existsSync()) {
-      throw StateError(
-        'hello_world_app_flutter_assets not found at runfiles path: $path',
-      );
-    }
   });
 
   test('cupertino_icons font lands at packages/cupertino_icons/...', () {
@@ -51,9 +45,8 @@ void main() {
   test(
     'FontManifest.json contains packages/cupertino_icons/CupertinoIcons',
     () {
-      final manifest = File(
-        '${bundleDir.path}/FontManifest.json',
-      ).readAsStringSync();
+      final manifest = File('${bundleDir.path}/FontManifest.json')
+          .readAsStringSync();
       final entries = jsonDecode(manifest) as List<dynamic>;
       final cupertino = entries.firstWhere(
         (e) =>
@@ -82,9 +75,8 @@ void main() {
     // material_icons target uses package_name = "" sentinel, so the family
     // is bare "MaterialIcons" (not packages/material_icons/...). Matches
     // const_finder's expectations for IconData with no fontPackage.
-    final manifest = File(
-      '${bundleDir.path}/FontManifest.json',
-    ).readAsStringSync();
+    final manifest = File('${bundleDir.path}/FontManifest.json')
+        .readAsStringSync();
     final entries = jsonDecode(manifest) as List<dynamic>;
     final material = entries.firstWhere(
       (e) => (e as Map<String, dynamic>)['family'] == 'MaterialIcons',
@@ -123,9 +115,7 @@ void main() {
     // serializes string keys as UTF-8 bytes inline in the binary, so
     // base64-decoding the wrapper and searching for the path matches).
     final wrapped = jsonDecode(
-      File(
-        '${bundleDir.path}/AssetManifest.bin.json',
-      ).readAsStringSync(),
+      File('${bundleDir.path}/AssetManifest.bin.json').readAsStringSync(),
     ) as String;
     final raw = base64Decode(wrapped);
     final asString = utf8.decode(raw, allowMalformed: true);

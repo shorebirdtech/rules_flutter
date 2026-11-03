@@ -10,49 +10,26 @@
 /// Runs as a Bazel dart_test with the bundles as data dependencies.
 library;
 
-// This script's diagnostics are its product: it reports what it found in
-// the built artifact to the bazel test log, so `print` is its output
-// channel rather than a stray debugging statement.
-// ignore_for_file: avoid_print
-
-import 'dart:io';
-
-import 'package:runfiles/runfiles.dart';
+import 'package:rules_flutter_e2e_testing/bundle_check.dart';
+import 'package:rules_flutter_e2e_testing/web_bundle.dart';
 
 void main() {
-  // Through the runfiles library, not `$TEST_SRCDIR` paths: `windows-latest`
-  // runs with `--noenable_runfiles`, so there is no tree to walk there.
-  final runfiles = Runfiles.create();
-  String bundle(String path) => runfiles.rlocation('_main/$path');
-
-  var failed = false;
-
-  void fail(String label, String message) {
-    stderr.writeln('$label: FAIL — $message');
-    failed = true;
-  }
-
-  String? read(String label, String path) {
-    final file = File(path);
-    if (!file.existsSync()) {
-      fail(label, 'expected file not found at $path');
-      return null;
-    }
-    return file.readAsStringSync();
-  }
+  final check = BundleCheck();
 
   /// Asserts the shape of a bundle that ships the worker (`pwa = True`).
-  void checkPwaBundle({required String label, required String bundlePath}) {
-    final worker = read(label, '$bundlePath/flutter_service_worker.js');
+  void checkPwaBundle(String label, String workspacePath) {
+    final bundle = WebBundle.fromRunfiles(workspacePath, check, label: label);
+    final failuresBefore = check.failures.length;
+
+    final worker = bundle.read('flutter_service_worker.js');
     if (worker != null) {
       if (!worker.contains('self.registration.unregister()')) {
-        fail(label, 'the worker does not unregister itself');
+        check.fail('$label: the worker does not unregister itself');
       }
       if (!worker.contains('client.navigate(client.url)')) {
-        fail(
-          label,
-          'the worker does not reload its clients, so a client controlled '
-          'by the old caching worker keeps reading its cache',
+        check.fail(
+          '$label: the worker does not reload its clients, so a client '
+          'controlled by the old caching worker keeps reading its cache',
         );
       }
       // A worker that touches the Cache API is the bug this test exists for.
@@ -63,65 +40,66 @@ void main() {
         'CACHE_NAME',
       ]) {
         if (worker.contains(banned)) {
-          fail(label, 'the worker caches (`$banned` present)');
+          check.fail('$label: the worker caches (`$banned` present)');
         }
       }
     }
 
-    final bootstrap = read(label, '$bundlePath/flutter_bootstrap.js');
+    final bootstrap = bundle.read('flutter_bootstrap.js');
     if (bootstrap != null) {
       if (!bootstrap.contains('serviceWorkerSettings')) {
-        fail(
-          label,
-          'flutter_bootstrap.js does not pass serviceWorkerSettings, so '
-          'flutter.js never registers the worker and a visitor holding the '
-          'old caching worker is never freed',
+        check.fail(
+          '$label: flutter_bootstrap.js does not pass serviceWorkerSettings, '
+          'so flutter.js never registers the worker and a visitor holding '
+          'the old caching worker is never freed',
         );
       }
       // Passing serviceWorkerUrl takes flutter.js's unconditional-register
       // branch, which installs a worker for first-time visitors who have
       // nothing to tear down — and warns about deprecation in their console.
       if (bootstrap.contains('serviceWorkerUrl')) {
-        fail(label, 'flutter_bootstrap.js sets serviceWorkerUrl');
+        check.fail('$label: flutter_bootstrap.js sets serviceWorkerUrl');
       }
     }
 
-    final index = read(label, '$bundlePath/index.html');
+    final index = bundle.read('index.html');
     if (index != null && index.contains('navigator.serviceWorker.register')) {
-      fail(
-        label,
-        'index.html registers the worker itself; registration belongs to '
-        'flutter.js, which also waits for activation and times out',
+      check.fail(
+        '$label: index.html registers the worker itself; registration '
+        'belongs to flutter.js, which also waits for activation and times out',
       );
     }
 
-    if (!failed) print('$label: OK (teardown worker, registered via loader).');
+    if (check.failures.length == failuresBefore) {
+      check.pass('$label: teardown worker, registered via loader');
+    }
   }
 
   /// Asserts a `pwa = False` bundle ships and says nothing about workers.
-  void checkNoPwaBundle({required String label, required String bundlePath}) {
-    if (File('$bundlePath/flutter_service_worker.js').existsSync()) {
-      fail(label, 'pwa = False still emitted flutter_service_worker.js');
+  void checkNoPwaBundle(String label, String workspacePath) {
+    final bundle = WebBundle.fromRunfiles(workspacePath, check, label: label);
+    final failuresBefore = check.failures.length;
+
+    if (bundle.file('flutter_service_worker.js').existsSync()) {
+      check.fail('$label: pwa = False still emitted flutter_service_worker.js');
     }
-    final bootstrap = read(label, '$bundlePath/flutter_bootstrap.js');
+    final bootstrap = bundle.read('flutter_bootstrap.js');
     if (bootstrap != null && bootstrap.contains('serviceWorkerSettings')) {
-      fail(label, 'pwa = False still registers a service worker');
+      check.fail('$label: pwa = False still registers a service worker');
     }
-    if (!failed) print('$label: OK (no worker, no registration).');
+    if (check.failures.length == failuresBefore) {
+      check.pass('$label: no worker, no registration');
+    }
   }
 
   // Tier 1 (flutter_web_app), user-provided web/index.html.
-  checkPwaBundle(label: 'app_wasm', bundlePath: bundle('app_wasm_web'));
+  checkPwaBundle('app_wasm', 'app_wasm_web');
 
   // Tier 2 (flutter_web_bundle) with a generated index.html — the other path
   // through index.html generation, and a dart2js-only bundle.
-  checkPwaBundle(label: 'app_js', bundlePath: bundle('app_js_web'));
+  checkPwaBundle('app_js', 'app_js_web');
 
-  checkNoPwaBundle(label: 'app_no_pwa', bundlePath: bundle('app_no_pwa_web'));
+  checkNoPwaBundle('app_no_pwa', 'app_no_pwa_web');
 
-  if (failed) {
-    exit(1);
-  }
-  print('');
-  print('All service worker checks passed.');
+  check.finish('All service worker checks passed.');
 }

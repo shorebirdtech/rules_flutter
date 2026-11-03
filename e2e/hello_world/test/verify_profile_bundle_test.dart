@@ -22,7 +22,7 @@ library;
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:runfiles/runfiles.dart';
+import 'package:rules_flutter_e2e_testing/runfiles_paths.dart';
 import 'package:test/test.dart';
 
 /// `<32-hex snapshot hash><mode> <flags...>`, as the Dart VM writes it.
@@ -35,12 +35,7 @@ void main(List<String> args) {
   late Directory bundle;
 
   setUpAll(() {
-    // Through the runfiles library, as `windows-latest` runs with
-    // `--noenable_runfiles` and so has no tree to walk.
-    bundle = Directory(Runfiles.create().rlocation('_main/$bundleName'));
-    if (!bundle.existsSync()) {
-      throw StateError('Bundle not found at ${bundle.path}');
-    }
+    bundle = Directory(requireRunfile(bundleName, what: 'Bundle'));
   });
 
   test('the AOT snapshot is a profile snapshot', () {
