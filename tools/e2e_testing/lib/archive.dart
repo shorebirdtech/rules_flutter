@@ -12,14 +12,21 @@ class ExtractedArchive {
   /// Extracts the archive at [workspacePath] in the test's runfiles
   /// (`app.zip`, `ios/app.ipa`). [prefix] names the temporary directory.
   ///
-  /// Exits 1 if the archive is missing or `unzip` fails.
+  /// Extracts with `unzip`, or with `ditto` if [preserveSignature]: a signed
+  /// bundle's symlinks and extended attributes have to survive for `codesign`
+  /// to verify it.
+  ///
+  /// Exits 1 if the archive is missing or extracting fails.
   factory ExtractedArchive.fromRunfiles(
     String workspacePath, {
     String prefix = 'archive_test',
+    bool preserveSignature = false,
   }) {
     final archive = requireRunfile(workspacePath, what: 'Archive');
     final dir = Directory.systemTemp.createTempSync(prefix);
-    final result = Process.runSync('unzip', ['-q', archive, '-d', dir.path]);
+    final result = preserveSignature
+        ? Process.runSync('ditto', ['-x', '-k', archive, dir.path])
+        : Process.runSync('unzip', ['-q', archive, '-d', dir.path]);
     if (result.exitCode != 0) {
       stderr.writeln('Failed to extract $archive: ${result.stderr}');
       dir.deleteSync(recursive: true);

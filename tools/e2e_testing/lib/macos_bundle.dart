@@ -12,14 +12,20 @@ class MacosBundle {
 
   /// Unpacks the zip at [zip] (a workspace path) and finds the app in it:
   /// `<appName>.app`, whose runner binary is [executable] (default [appName]).
-  /// Call [dispose] when done.
+  /// Call [dispose] when done. With [preserveSignature], the zip is extracted
+  /// so that `codesign` can verify the result.
   factory MacosBundle.fromRunfiles(
     String zip, {
     required String appName,
     String? executable,
     String prefix = 'macos_bundle_test',
+    bool preserveSignature = false,
   }) {
-    final archive = ExtractedArchive.fromRunfiles(zip, prefix: prefix);
+    final archive = ExtractedArchive.fromRunfiles(
+      zip,
+      prefix: prefix,
+      preserveSignature: preserveSignature,
+    );
     return MacosBundle._(
       archive,
       '${archive.path}/$appName.app',

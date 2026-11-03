@@ -22,9 +22,11 @@ library;
 // channel rather than a stray debugging statement.
 // ignore_for_file: avoid_print
 
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+
+import 'package:rules_flutter_e2e_testing/app_process.dart';
+import 'package:rules_flutter_e2e_testing/macos_bundle.dart';
 
 const _overall = Duration(seconds: 60);
 const _profileExtension = 'ext.flutter.profileWidgetBuilds';
@@ -35,78 +37,35 @@ final _serviceLine = RegExp(
 );
 
 Future<void> main() async {
-  final testSrcDir = Platform.environment['TEST_SRCDIR'];
-  final testWorkspace = Platform.environment['TEST_WORKSPACE'];
-  if (testSrcDir == null || testWorkspace == null) {
-    stderr.writeln('Missing TEST_SRCDIR or TEST_WORKSPACE env vars');
-    exit(1);
-  }
-
   // Runfiles paths do not carry the configuration, so the transitioned zip is
   // at the same place `app.zip` is in an untransitioned build.
-  final zipPath = '$testSrcDir/$testWorkspace/app.zip';
-  if (!File(zipPath).existsSync()) {
-    stderr.writeln('Bundle zip not found at $zipPath');
-    exit(1);
-  }
-
-  final tmpDir = Directory.systemTemp.createTempSync('macos_profile_app_test');
-  Process? process;
+  final bundle = MacosBundle.fromRunfiles(
+    'app.zip',
+    appName: 'Flutter App',
+    prefix: 'macos_profile_app_test',
+  );
+  AppProcess? app;
   final client = HttpClient();
   try {
-    final unzip = Process.runSync('unzip', ['-q', zipPath, '-d', tmpDir.path]);
-    if (unzip.exitCode != 0) {
-      stderr.writeln('Failed to extract zip: ${unzip.stderr}');
-      exit(1);
-    }
-
-    const bundleName = 'Flutter App';
-    final executable =
-        '${tmpDir.path}/$bundleName.app/Contents/MacOS/$bundleName';
-    print('Launching $executable ...');
-    final launched = process = await Process.start(executable, const []);
-    print('PID: ${launched.pid}');
-
-    // Drain both streams for the life of the process — an undrained pipe can
-    // block the app on a write — and keep them for the failure report.
-    final output = StringBuffer();
-    final serviceUri = Completer<Uri>();
-    for (final stream in [launched.stdout, launched.stderr]) {
-      stream.transform(utf8.decoder).transform(const LineSplitter()).listen((
-        line,
-      ) {
-        output.writeln(line);
-        final match = _serviceLine.firstMatch(line);
-        if (match != null && !serviceUri.isCompleted) {
-          serviceUri.complete(Uri.parse(match.group(1)!));
-        }
-      });
-    }
-
-    int? exitCode;
-    unawaited(launched.exitCode.then((code) => exitCode = code));
+    final launched = app = await AppProcess.start(bundle.runner);
     final deadline = DateTime.now().add(_overall);
 
     Never fail(String message) {
-      stderr
-        ..writeln('FAIL: $message')
-        ..writeln('--- app output ---')
-        ..write(output);
+      stderr.writeln('FAIL: $message');
+      launched.dumpOutput();
       exit(1);
     }
 
     // A crash ends the wait at once rather than after the timeout.
-    final uri = await Future.any<Uri?>([
-      serviceUri.future,
-      launched.exitCode.then((_) => null),
-    ]).timeout(_overall, onTimeout: () => null);
-    if (uri == null) {
+    final line = await launched.waitForLine(_serviceLine, timeout: _overall);
+    if (line == null) {
       fail(
         'the app printed no "The Dart VM service is listening on" line '
-        '(exit code: ${exitCode ?? 'still running'}); a profile build must '
-        'serve a VM service',
+        '(exit code: ${launched.exitCode ?? 'still running'}); a profile '
+        'build must serve a VM service',
       );
     }
+    final uri = Uri.parse(_serviceLine.firstMatch(line)!.group(1)!);
     print('VM service: $uri');
 
     Future<Map<String, dynamic>> call(
@@ -128,9 +87,10 @@ Future<void> main() async {
     var extensions = <String>[];
     while (!extensions.contains(_profileExtension) &&
         !extensions.contains(_debugOnlyExtension)) {
-      if (exitCode != null) {
+      if (launched.exited) {
         fail(
-          'the app exited with code $exitCode before registering extensions',
+          'the app exited with code ${launched.exitCode} before registering '
+          'extensions',
         );
       }
       if (DateTime.now().isAfter(deadline)) {
@@ -160,10 +120,10 @@ Future<void> main() async {
     // the app dies, or the overall deadline passes.
     var events = 0;
     while (events == 0) {
-      if (exitCode != null) {
+      if (launched.exited) {
         fail(
-          'the app exited with code $exitCode before the timeline had any '
-          'event',
+          'the app exited with code ${launched.exitCode} before the timeline '
+          'had any event',
         );
       }
       final timeline = await call('getVMTimeline');
@@ -173,11 +133,8 @@ Future<void> main() async {
     print('PASS');
   } finally {
     client.close(force: true);
-    if (process != null) {
-      process.kill(ProcessSignal.sigkill);
-      await process.exitCode;
-    }
-    tmpDir.deleteSync(recursive: true);
+    await app?.stop();
+    bundle.dispose();
   }
 }
 

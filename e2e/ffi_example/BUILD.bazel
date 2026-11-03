@@ -541,6 +541,7 @@ dart_test(
     main = "test/verify_ios_simulator_test.dart",
     tags = ["manual"],
     target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 # `manual`, so `bazel test //...` never gives it to the analysis aspect; this

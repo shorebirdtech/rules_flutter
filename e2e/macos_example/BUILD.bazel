@@ -398,6 +398,7 @@ dart_test(
     data = [":app_intents"],
     main = "test/verify_macos_app_intents_test.dart",
     target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 # Each extension is embedded in Contents/PlugIns/, names its extension point,
@@ -408,6 +409,7 @@ dart_test(
     data = [":app_extensions"],
     main = "test/verify_macos_extensions_test.dart",
     target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 # Every bundle in the team-signed app has one TeamIdentifier, not an ad hoc
@@ -421,6 +423,7 @@ dart_test(
     main = "test/verify_macos_team_signing_test.dart",
     tags = ["manual"],
     target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 dart_test(
@@ -428,6 +431,7 @@ dart_test(
     data = [":app"],
     main = "test/verify_macos_entitlements_test.dart",
     target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 dart_test(
@@ -439,6 +443,7 @@ dart_test(
         "manual",
     ],
     target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 # `manual`, so `bazel test //...` never gives it to the analysis aspect; this
@@ -469,6 +474,7 @@ dart_test(
         "manual",
     ],
     target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 dart_analysis_test(

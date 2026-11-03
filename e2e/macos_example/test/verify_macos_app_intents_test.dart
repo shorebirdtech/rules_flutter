@@ -3,49 +3,29 @@
 /// the intent, and the runner binary links the library that declares it.
 library;
 
-import 'dart:io';
+import 'package:rules_flutter_e2e_testing/app_intents.dart';
+import 'package:rules_flutter_e2e_testing/mach_o.dart';
+import 'package:rules_flutter_e2e_testing/macos_bundle.dart';
 
 void main() {
-  final testSrcDir = Platform.environment['TEST_SRCDIR'];
-  final testWorkspace = Platform.environment['TEST_WORKSPACE'];
-  if (testSrcDir == null || testWorkspace == null) {
-    stderr.writeln('Missing TEST_SRCDIR or TEST_WORKSPACE env vars');
-    exit(1);
-  }
-  final zipPath = '$testSrcDir/$testWorkspace/app_intents.zip';
-  if (!File(zipPath).existsSync()) {
-    stderr.writeln('Bundle zip not found at $zipPath');
-    exit(1);
-  }
-
-  final tmpDir = Directory.systemTemp.createTempSync('macos_intents_test');
+  final bundle = MacosBundle.fromRunfiles(
+    'app_intents.zip',
+    appName: 'Intents App',
+    prefix: 'macos_intents_test',
+  );
   try {
-    final unzip = Process.runSync('unzip', ['-q', zipPath, '-d', tmpDir.path]);
-    if (unzip.exitCode != 0) {
-      stderr.writeln('Failed to extract zip: ${unzip.stderr}');
-      exit(1);
-    }
-
-    final bundle = '${tmpDir.path}/Intents App.app';
-    final actions = File(
-      '$bundle/Contents/Resources/Metadata.appintents/extract.actionsdata',
-    );
-    if (!actions.existsSync()) {
-      stderr.writeln('FAIL: no extract.actionsdata in the bundle: $actions');
-      exit(1);
-    }
-    if (!actions.readAsStringSync().contains('PingIntent')) {
-      stderr.writeln('FAIL: extract.actionsdata does not name PingIntent');
-      exit(1);
-    }
+    final check = bundle.check;
+    AppIntentsMetadata('${bundle.contents}/Resources')
+        .checkNames(check, 'PingIntent', owner: 'the bundle');
 
     // The metadata alone is not the app: the runner has to carry the code.
-    final nm = Process.runSync('nm', ['$bundle/Contents/MacOS/Intents App']);
-    if (nm.exitCode != 0 || !(nm.stdout as String).contains('PingIntent')) {
-      stderr.writeln('FAIL: the runner binary does not link PingIntent');
-      exit(1);
-    }
+    check.expect(
+      'the runner binary links PingIntent',
+      condition: MachO(bundle.runner).hasSymbolContaining('PingIntent'),
+    );
+
+    bundle.finish('All macOS App Intents checks passed.');
   } finally {
-    tmpDir.deleteSync(recursive: true);
+    bundle.dispose();
   }
 }
