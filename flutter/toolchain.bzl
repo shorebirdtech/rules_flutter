@@ -152,7 +152,8 @@ flutter_toolchain = rule(
             allow_single_file = True,
         ),
         "engine_library": attr.label(
-            doc = "The platform-specific Flutter engine library (framework/so/dll). " +
+            doc = "The platform-specific Flutter engine library (framework/so/dll) of the build mode, " +
+                  "so a `select()` on the mode picks it. " +
                   "None for mobile/web targets or when engine is not available.",
         ),
         "target_os": attr.string(

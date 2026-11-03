@@ -67,7 +67,7 @@ filegroup(
 # the lazily fetched profile repo.
 alias(
     name = "Flutter_xcframework_profile",
-    actual = "@{profile_repo}//:Flutter_xcframework",
+    actual = "@{profile_repo}//:Flutter_xcframework_profile",
     visibility = ["//visibility:public"],
 )
 
@@ -85,7 +85,7 @@ flutter_ios_engine_repo = repository_rule(
         "release_sha256": attr.string(doc = "Expected SHA-256 of the release archive."),
         "debug_sha256": attr.string(doc = "Expected SHA-256 of the debug archive."),
         "profile_repo_name": attr.string(
-            doc = "The lazily fetched repo holding the profile engine's Flutter_xcframework target.",
+            doc = "The lazily fetched repo holding the profile engine's Flutter_xcframework_profile target.",
             mandatory = True,
         ),
     },

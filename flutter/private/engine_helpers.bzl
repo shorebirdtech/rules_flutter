@@ -7,39 +7,41 @@ flutter_desktop_cross_repo.bzl.
 """
 
 # -- Engine filegroup templates ------------------------------------------------
-# Each template defines a filegroup named "engine_library" for a given OS.
+# One template per OS. `{name}` is the target's name, which says the build
+# mode of the engine it holds (see `engine_filegroup_for_os`); `{dir}` is where
+# that engine was extracted.
 
-MACOS_ENGINE_FILEGROUP = """
+_MACOS_ENGINE_FILEGROUP = """
 filegroup(
-    name = "engine_library",
-    srcs = glob(["engine/FlutterMacOS.framework/**"], allow_empty = True),
+    name = "{name}",
+    srcs = glob(["{dir}/FlutterMacOS.framework/**"], allow_empty = True),
     visibility = ["//visibility:public"],
 )
 """
 
-LINUX_ENGINE_FILEGROUP = """
+_LINUX_ENGINE_FILEGROUP = """
 filegroup(
-    name = "engine_library",
+    name = "{name}",
     srcs = glob(
-        ["engine/libflutter_linux_gtk.so", "engine/flutter_linux/*.h"],
+        ["{dir}/libflutter_linux_gtk.so", "{dir}/flutter_linux/*.h"],
         allow_empty = True,
     ),
     visibility = ["//visibility:public"],
 )
 """
 
-WINDOWS_ENGINE_FILEGROUP = """
+_WINDOWS_ENGINE_FILEGROUP = """
 filegroup(
-    name = "engine_library",
+    name = "{name}",
     srcs = glob(
         [
-            "engine/flutter_windows.dll",
-            "engine/flutter_windows.dll.lib",
-            "engine/flutter_windows.h",
-            "engine/flutter_export.h",
-            "engine/flutter_messenger.h",
-            "engine/flutter_plugin_registrar.h",
-            "engine/flutter_texture_registrar.h",
+            "{dir}/flutter_windows.dll",
+            "{dir}/flutter_windows.dll.lib",
+            "{dir}/flutter_windows.h",
+            "{dir}/flutter_export.h",
+            "{dir}/flutter_messenger.h",
+            "{dir}/flutter_plugin_registrar.h",
+            "{dir}/flutter_texture_registrar.h",
             "cpp-client-wrapper/cpp_client_wrapper/include/flutter/*.h",
             "cpp-client-wrapper/cpp_client_wrapper/*.h",
             "cpp-client-wrapper/cpp_client_wrapper/*.cc",
@@ -50,81 +52,88 @@ filegroup(
 )
 """
 
-LINUX_ENGINE_DEBUG_FILEGROUP = """
-filegroup(
-    name = "engine_debug_library",
-    srcs = glob(
-        ["engine-debug/libflutter_linux_gtk.so", "engine-debug/flutter_linux/*.h"],
-        allow_empty = True,
-    ),
-    visibility = ["//visibility:public"],
-)
-"""
+_ENGINE_FILEGROUPS = {
+    "macos": _MACOS_ENGINE_FILEGROUP,
+    "linux": _LINUX_ENGINE_FILEGROUP,
+    "windows": _WINDOWS_ENGINE_FILEGROUP,
+}
 
-WINDOWS_ENGINE_DEBUG_FILEGROUP = """
-filegroup(
-    name = "engine_debug_library",
-    srcs = glob(
-        [
-            "engine-debug/flutter_windows.dll",
-            "engine-debug/flutter_windows.dll.lib",
-            "engine-debug/flutter_windows.h",
-            "engine-debug/flutter_export.h",
-            "engine-debug/flutter_messenger.h",
-            "engine-debug/flutter_plugin_registrar.h",
-            "engine-debug/flutter_texture_registrar.h",
-            "cpp-client-wrapper/cpp_client_wrapper/include/flutter/*.h",
-            "cpp-client-wrapper/cpp_client_wrapper/*.h",
-            "cpp-client-wrapper/cpp_client_wrapper/*.cc",
-        ],
-        allow_empty = True,
-    ),
-    visibility = ["//visibility:public"],
-)
-"""
+ENGINE_MODES = ["release", "debug", "profile"]
 
-MACOS_ENGINE_DEBUG_FILEGROUP = """
-filegroup(
-    name = "engine_debug_library",
-    srcs = glob(["engine-debug/FlutterMacOS.framework/**"], allow_empty = True),
-    visibility = ["//visibility:public"],
-)
-"""
+def engine_target_name(mode):
+    """The name of the target that holds the engine of one build mode.
 
-def engine_debug_filegroup_for_os(target_os):
-    """Return the debug engine filegroup template string for the given OS.
+    A repo that holds engines names each for its mode, so a plain name never
+    stands for one mode. The plain `engine_library` is only ever the engine of
+    the build mode, chosen by a `select()`.
+
+    Args:
+        mode: One of "release", "debug" or "profile".
+
+    Returns:
+        "engine_release_library", "engine_debug_library" or "engine_profile_library".
+    """
+    if mode not in ENGINE_MODES:
+        fail("Unsupported engine mode: {}".format(mode))
+    return "engine_{}_library".format(mode)
+
+def engine_filegroup_for_os(target_os, mode, dir = "engine"):
+    """Return the filegroup of the engine of one build mode for the given OS.
 
     Args:
         target_os: One of "macos", "linux", or "windows".
+        mode: One of "release", "debug" or "profile"; names the target
+            (`engine_target_name`).
+        dir: The directory the engine archive was extracted into.
 
     Returns:
-        A BUILD file snippet defining the engine_debug_library filegroup, or empty string.
+        A BUILD file snippet defining the `engine_<mode>_library` filegroup.
     """
-    if target_os == "macos":
-        return MACOS_ENGINE_DEBUG_FILEGROUP
-    elif target_os == "linux":
-        return LINUX_ENGINE_DEBUG_FILEGROUP
-    elif target_os == "windows":
-        return WINDOWS_ENGINE_DEBUG_FILEGROUP
-    return ""
-
-def engine_filegroup_for_os(target_os):
-    """Return the engine filegroup template string for the given OS.
-
-    Args:
-        target_os: One of "macos", "linux", or "windows".
-
-    Returns:
-        A BUILD file snippet defining the engine_library filegroup.
-    """
-    if target_os == "macos":
-        return MACOS_ENGINE_FILEGROUP
-    elif target_os == "linux":
-        return LINUX_ENGINE_FILEGROUP
-    elif target_os == "windows":
-        return WINDOWS_ENGINE_FILEGROUP
-    else:
+    template = _ENGINE_FILEGROUPS.get(target_os)
+    if not template:
         fail("Unsupported target OS for engine filegroup: {}".format(target_os))
+    return template.format(name = engine_target_name(mode), dir = dir)
+
+def host_engine_targets(os_name, has_debug, profile_repo):
+    """The BUILD targets of a host SDK repo's engines.
+
+    One target per mode (`engine_release_library`, `engine_debug_library`,
+    `engine_profile_library`), and `engine_library`, the engine of the build
+    mode (`-c dbg`, `-c opt` with `//flutter:profile`, `-c opt`). The profile
+    engine lives in the host's lazily fetched profile repo.
+
+    Args:
+        os_name: The host's OS: macos, linux or windows.
+        has_debug: Whether the host has a debug engine.
+        profile_repo: Name of the host's profile repo, or "" for none.
+
+    Returns:
+        A BUILD file snippet.
+    """
+    targets = engine_filegroup_for_os(os_name, "release")
+    branches = ""
+    if has_debug:
+        targets += engine_filegroup_for_os(os_name, "debug", dir = "engine-debug")
+        branches += '        "@rules_flutter//flutter/private:dbg": ":engine_debug_library",\n'
+    if profile_repo:
+        targets += """
+alias(
+    name = "engine_profile_library",
+    actual = "@{profile_repo}//:engine_profile_library",
+    visibility = ["//visibility:public"],
+)
+""".format(profile_repo = profile_repo)
+        branches += '        "@rules_flutter//flutter/private:profile": ":engine_profile_library",\n'
+    return targets + """
+# The engine of the build mode.
+alias(
+    name = "engine_library",
+    actual = select({{
+{branches}        "//conditions:default": ":engine_release_library",
+    }}),
+    visibility = ["//visibility:public"],
+)
+""".format(branches = branches)
 
 # -- Binary name helpers -------------------------------------------------------
 

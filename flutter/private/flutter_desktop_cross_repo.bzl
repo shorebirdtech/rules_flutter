@@ -32,14 +32,14 @@ def _flutter_desktop_cross_repo_impl(repository_ctx):
     # engine based on compilation mode. Otherwise, use the release engine always.
     if engine_debug_repo_name:
         engine_library_attr = """    engine_library = select({{
-        "@rules_flutter//flutter/private:dbg": "@{debug_repo}//:engine_library",
-        "//conditions:default": "@{release_repo}//:engine_library",
+        "@rules_flutter//flutter/private:dbg": "@{debug_repo}//:engine_debug_library",
+        "//conditions:default": "@{release_repo}//:engine_release_library",
     }}),""".format(
             debug_repo = engine_debug_repo_name,
             release_repo = engine_repo_name,
         )
     else:
-        engine_library_attr = '    engine_library = "@{}//:engine_library",'.format(engine_repo_name)
+        engine_library_attr = '    engine_library = "@{}//:engine_release_library",'.format(engine_repo_name)
 
     repository_ctx.file("BUILD.bazel", _BUILD_TEMPLATE.format(
         flutter_version = flutter_version,

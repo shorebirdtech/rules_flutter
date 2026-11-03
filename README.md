@@ -67,7 +67,7 @@ Some platforms need one more repository from the same extension. Add it to `use_
 | Android | `flutter_android_engine_arm64`, or `flutter_android_engine_x64` for `android_abi = "x64"` |
 | Web | `flutter_web_sdk` |
 
-The macOS and iOS engine repositories name the engine of the build mode directly, for a rule of your own that links the engine: `@flutter_macos_engine//:engine_library` and `@flutter_ios_engine//:Flutter_xcframework` are the debug engine under `-c dbg`, the profile engine under `-c opt --@rules_flutter//flutter:profile`, and the release engine under any other `-c opt`. To pin one engine whatever the mode, use `engine_debug_library`, `engine_profile_library` or `engine_release_library` on macOS, and `Flutter_xcframework_debug`, `Flutter_xcframework_profile` or `Flutter_xcframework_release` on iOS.
+The macOS and iOS engine repositories name the engine of the build mode directly, for a rule of your own that links the engine: `@flutter_macos_engine//:engine_library` and `@flutter_ios_engine//:Flutter_xcframework` are the debug engine under `-c dbg`, the profile engine under `-c opt --@rules_flutter//flutter:profile`, and the release engine under any other `-c opt`. To pin one engine whatever the mode, use `engine_debug_library`, `engine_profile_library` or `engine_release_library` on macOS (the Linux and Windows engines of the SDK repositories are named the same way), and `Flutter_xcframework_debug`, `Flutter_xcframework_profile` or `Flutter_xcframework_release` on iOS.
 
 Static analysis needs nothing extra. rules_dart's analysis resolves `dart:ui` in a `flutter_library`, `flutter_plugin` or `flutter_test` through the `sky_engine` package, which those rules add to the analyzer's closure themselves. Their compiled output does not change.
 
@@ -1498,7 +1498,7 @@ sdk = ctx.toolchains["@rules_flutter//flutter:toolchain_type"].flutter_sdk_info
 | `patched_sdk` | `Target` | The Flutter-patched Dart SDK root. |
 | `icu_data` | `File` | `icudtl.dat`. |
 | `tool_files` | `depset[File]` | Everything needed to run the build tools, for action inputs. |
-| `engine_library` | `Target` or `None` | The platform engine runtime library. `None` for mobile and web. |
+| `engine_library` | `Target` or `None` | The platform engine runtime library of the build mode (debug under `-c dbg`, profile under `--@rules_flutter//flutter:profile` where the toolchain has one, release otherwise). `None` for mobile and web. |
 | `const_finder` | `File` or `None` | `const_finder.dart.snapshot`, for icon tree shaking. |
 | `font_subset` | `File` or `None` | The `font-subset` binary. |
 | `impellerc` | `File` or `None` | The shader compiler. |

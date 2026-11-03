@@ -6,7 +6,7 @@ See https://docs.bazel.build/versions/main/skylark/deploying.html#dependencies
 
 load("//flutter/private:artifact_urls.bzl", "android_engine_artifact_path", "dart_sdk_artifact_path", "desktop_engine_artifact_path", "engine_artifact_url", "gen_snapshot_cross_artifact_path", "host_artifacts_path", "ios_engine_artifact_path")
 load("//flutter/private:constants.bzl", "ANDROID_ABI_FOR_ARCH")
-load("//flutter/private:engine_helpers.bzl", "PLATFORM_PREFIX_TO_OS", "dart_binary_name", "dartaotruntime_binary_name", "engine_arch_for_os", "engine_debug_filegroup_for_os", "engine_filegroup_for_os", "extract_macos_inner_framework", "gen_snapshot_host_platform")
+load("//flutter/private:engine_helpers.bzl", "PLATFORM_PREFIX_TO_OS", "dart_binary_name", "dartaotruntime_binary_name", "engine_arch_for_os", "engine_filegroup_for_os", "extract_macos_inner_framework", "gen_snapshot_host_platform", "host_engine_targets")
 load("//flutter/private:flutter_android_engine_repo.bzl", "flutter_android_engine_repo")
 load("//flutter/private:flutter_cross_repo.bzl", "flutter_cross_compilation_repo")
 load("//flutter/private:flutter_desktop_cross_repo.bzl", "flutter_desktop_cross_repo")
@@ -163,19 +163,16 @@ def _flutter_engine_artifacts_impl(repository_ctx):
     exe_suffix = ".exe" if os_part == "windows" else ""
 
     # Generate BUILD.bazel with flutter_toolchain target.
+    profile_repo = repository_ctx.attr.profile_repo_name
+    engine_targets = ""
     engine_library_attr = ""
-    engine_filegroup = ""
-    engine_debug_filegroup = ""
     if has_engine_library:
-        engine_filegroup = engine_filegroup_for_os(os_name)
-        if has_engine_debug:
-            engine_debug_filegroup = engine_debug_filegroup_for_os(os_name)
-            engine_library_attr = """    engine_library = select({
-        "@rules_flutter//flutter/private:dbg": ":engine_debug_library",
-        "//conditions:default": ":engine_library",
-    }),"""
-        else:
-            engine_library_attr = '    engine_library = ":engine_library",'
+        engine_targets = host_engine_targets(
+            os_name,
+            has_debug = has_engine_debug,
+            profile_repo = profile_repo,
+        )
+        engine_library_attr = '    engine_library = ":engine_library",'
 
     # Release gen_snapshot path varies by platform:
     # - macOS: separate release host tools archive → host-tools-release/gen_snapshot
@@ -192,7 +189,6 @@ def _flutter_engine_artifacts_impl(repository_ctx):
     # Profile mode compiles with the profile gen_snapshot and runs on the
     # profile engine, both from the lazily fetched profile repo that
     # `_host_profile_repo` declares.
-    profile_repo = repository_ctx.attr.profile_repo_name
     gen_snapshot_attr = '    gen_snapshot = "{}",'.format(gen_snapshot_path)
     if profile_repo:
         gen_snapshot_attr = """    gen_snapshot = select({{
@@ -203,12 +199,6 @@ def _flutter_engine_artifacts_impl(repository_ctx):
             profile_gen_snapshot = _profile_gen_snapshot_path(os_name),
             gen_snapshot = gen_snapshot_path,
         )
-        if has_engine_debug:
-            engine_library_attr = """    engine_library = select({{
-        "@rules_flutter//flutter/private:dbg": ":engine_debug_library",
-        "@rules_flutter//flutter/private:profile": "@{profile_repo}//:engine_library",
-        "//conditions:default": ":engine_library",
-    }}),""".format(profile_repo = profile_repo)
 
     # Linux sysroot: point to the sysroot repo for hermetic GTK3 builds.
     linux_sysroot_attr = ""
@@ -222,8 +212,7 @@ def _flutter_engine_artifacts_impl(repository_ctx):
         dart_bin = dart_bin,
         dartaotruntime_bin = dartaotruntime_bin,
         engine_library_attr = engine_library_attr,
-        engine_filegroup = engine_filegroup,
-        engine_debug_filegroup = engine_debug_filegroup,
+        engine_targets = engine_targets,
         gen_snapshot_attr = gen_snapshot_attr,
         exe_suffix = exe_suffix,
         host_os = os_name,
@@ -270,8 +259,7 @@ filegroup(
     srcs = glob(["host-tools/shader_lib/**"]),
     visibility = ["//visibility:public"],
 )
-{engine_filegroup}
-{engine_debug_filegroup}
+{engine_targets}
 flutter_toolchain(
     name = "flutter_toolchain",
     dart = "dart-sdk/bin/{dart_bin}",
@@ -379,7 +367,7 @@ def _host_profile_repo(name, platform, engine_revision, checksums):
         downloads = downloads,
         sha256s = {path: checksums.get(path, "") for path in downloads},
         macos_framework_dirs = ["engine"] if os_name == "macos" else [],
-        build_file_content = engine_filegroup_for_os(os_name) + """
+        build_file_content = engine_filegroup_for_os(os_name, "profile") + """
 exports_files(["{gen_snapshot}"], visibility = ["//visibility:public"])
 """.format(gen_snapshot = _profile_gen_snapshot_path(os_name)),
     )
@@ -627,7 +615,7 @@ def flutter_register_toolchains(name, **kwargs):
         downloads = {ios_profile_path: ""},
         sha256s = {ios_profile_path: checksums.get(ios_profile_path, "")},
         build_file_content = """filegroup(
-    name = "Flutter_xcframework",
+    name = "Flutter_xcframework_profile",
     srcs = glob(["Flutter.xcframework/**"]),
     visibility = ["//visibility:public"],
 )

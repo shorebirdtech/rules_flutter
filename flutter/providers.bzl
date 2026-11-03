@@ -23,8 +23,10 @@ FlutterSdkInfo = provider(
         "icu_data": "File: `icudtl.dat` — ICU data file required by the engine.",
         "tool_files": "depset[File]: All files needed to run Flutter build tools (for use in action inputs).",
         "engine_library": "Target or None: The platform-specific Flutter engine runtime library " +
-                          "(FlutterMacOS.framework, libflutter_linux_gtk.so, flutter_windows.dll). " +
-                          "None for mobile/web or when engine runtime is not downloaded.",
+                          "(FlutterMacOS.framework, libflutter_linux_gtk.so, flutter_windows.dll) of the " +
+                          "build mode: debug under `-c dbg`, profile under " +
+                          "`--@rules_flutter//flutter:profile` where the toolchain has one, release " +
+                          "otherwise. None for mobile/web or when engine runtime is not downloaded.",
         "const_finder": "File or None: The `const_finder.dart.snapshot` for icon tree shaking.",
         "font_subset": "File or None: The `font-subset` binary for font subsetting.",
         "impellerc": "File or None: The `impellerc` shader compiler binary.",
