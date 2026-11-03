@@ -367,7 +367,7 @@
     "@@rules_dart+//dart/pub:extensions.bzl%pub": {
       "general": {
         "bzlTransitiveDigest": "wqmjv7VQaQrVIC4jdnwxWvOLvrSBZumOdnz7vF08fIc=",
-        "usagesDigest": "bZLDstv3KCwml084rixjj9NzP2RPX9Q96pvBgvd6kmQ=",
+        "usagesDigest": "RBEkZeVXd3bSQ/C271YonO8sKkp2K/r3U5xgJ65Z9M8=",
         "recordedInputs": [
           "REPO_MAPPING:rules_dart+,yaml.bzl yaml.bzl+",
           "FILE:@@rules_dart+//dart/ext/pubspec.lock ae866f3a1d4ebad9a74f9b9efab33c74dfbf904ae0d69dfe94192029d4955188"

@@ -154,7 +154,7 @@ upstream `flutter_tools` exactly.
 
 ### A green sweep does not test the published rules_dart pin
 
-The repo root and all fourteen `e2e/*` workspaces carry a gitignored
+The repo root and all fifteen `e2e/*` workspaces carry a gitignored
 `.bazelrc.user` holding:
 
     common --override_module=rules_dart=/Users/aran/Projects/rules_dart
@@ -189,10 +189,14 @@ merely load:
     bazel build --lockfile_mode=error //path/to:target
     mv .bazelrc.user.aside .bazelrc.user
 
-In an `e2e/*` workspace, replace the file with `common --lockfile_mode=off`
-rather than removing it: those workspaces' committed `MODULE.bazel.lock` files
-are written by an older Bazel, and `--lockfile_mode=error` trips on that
-unrelated staleness before it gets anywhere near your change.
+In an `e2e/*` workspace the committed `.bazelrc` already says
+`common --lockfile_mode=off`, so passing `--lockfile_mode=error` on the command
+line is what turns the lock check on. Their `MODULE.bazel.lock` files resolve
+under `error` (checked at 3.47.9), so a failure there is yours. Run both
+`bazel mod deps` and `bazel build --nobuild //...` to check one: each passed a
+lock the other rejected (`mod deps` caught a stale `rules_dart` `pub` entry in
+`e2e/smoke` and a missing protobuf entry in `e2e/_overlay_tests/native_assets_synthetic`;
+`build --nobuild` passed both).
 
 Two cautions:
 
