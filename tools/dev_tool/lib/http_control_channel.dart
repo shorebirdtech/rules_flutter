@@ -15,6 +15,7 @@ import 'command_failure.dart';
 import 'command_runner.dart';
 import 'device.dart';
 import 'machine_protocol.dart';
+import 'screen.dart';
 import 'session.dart';
 
 /// HTTP server that exposes the dev tool's command dispatch and screenshot
@@ -179,6 +180,9 @@ class HttpControlChannel {
         } else {
           await _handleNativeScreenshot(request, match.appId);
         }
+      } else if (request.method == 'GET' &&
+          _sessionScreensMatch(path) != null) {
+        await _handleScreens(request, _sessionScreensMatch(path)!);
       } else if (request.method == 'GET' && _sessionLogsMatch(path) != null) {
         await _handleLogs(request, _sessionLogsMatch(path)!);
       } else {
@@ -479,7 +483,13 @@ class HttpControlChannel {
     // that support multi-window selection (currently macOS, exact title
     // match). Devices that ignore it composite or capture however they do
     // by default.
+    //
+    // `?screen=<id or name>` is a different axis: which display of a device
+    // with several. A window is something an app opens; a screen is something
+    // a device has, and `/screens` lists them. Without it the screen the app
+    // is on is captured, and a device that cannot say which is an error.
     final window = request.uri.queryParameters['window'];
+    final screen = request.uri.queryParameters['screen'];
 
     final settle = await _settleBeforeCapture(session, request);
 
@@ -496,6 +506,7 @@ class HttpControlChannel {
         session.appInstance,
         tmpFile.path,
         window: window,
+        screen: screen,
       );
       final bytes = await tmpFile.readAsBytes();
       request.response.statusCode = HttpStatus.ok;
@@ -503,9 +514,56 @@ class HttpControlChannel {
       _reportSettle(request, settle);
       request.response.add(bytes);
       await request.response.close();
+    } on ScreenSelectionException catch (e) {
+      await _screenSelectionRefusal(request, e);
     } finally {
       if (tmpFile.existsSync()) tmpFile.deleteSync();
     }
+  }
+
+  /// 422, not 500: the request was well formed and the tool is fine, but the
+  /// device's screens do not say which one is meant. The body carries the
+  /// screens so a caller can name one without a second request.
+  Future<void> _screenSelectionRefusal(
+    HttpRequest request,
+    ScreenSelectionException e,
+  ) async {
+    request.response.statusCode = HttpStatus.unprocessableEntity;
+    request.response.headers.contentType = ContentType.json;
+    request.response.write(
+      json.encode({
+        'error': e.message,
+        'screens': [for (final screen in e.screens) screen.toJson()],
+      }),
+    );
+    await request.response.close();
+  }
+
+  /// `GET /sessions/{appId}/screens` — the screens the device has now.
+  ///
+  /// Each is `{id, name, type, width, height, active, primary}`; `id` or
+  /// `name` is what `screenshot/native?screen=` takes. `active` is `true` for
+  /// the screen the app is on, `false` for one it is not, and `null` where the
+  /// device does not say. Read per request, never cached: a simulator's ids
+  /// change on every boot and its active screen follows its posture.
+  Future<void> _handleScreens(HttpRequest request, String appId) async {
+    final session = _findSession(appId);
+    if (session == null) {
+      request.response.statusCode = HttpStatus.notFound;
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(json.encode({'error': 'Unknown appId: $appId'}));
+      await request.response.close();
+      return;
+    }
+    final screens = await session.device.screens();
+    request.response.statusCode = HttpStatus.ok;
+    request.response.headers.contentType = ContentType.json;
+    request.response.write(
+      json.encode({
+        'screens': [for (final screen in screens) screen.toJson()],
+      }),
+    );
+    await request.response.close();
   }
 
   /// Default page size for `/logs`, and the cap on a caller-supplied `limit`
@@ -619,6 +677,13 @@ class HttpControlChannel {
       appId: Uri.decodeComponent(match.group(1)!),
       type: match.group(2)!,
     );
+  }
+
+  /// Parse `/sessions/{appId}/screens` from a path, returning the appId.
+  String? _sessionScreensMatch(String path) {
+    final match = RegExp(r'^/sessions/([^/]+)/screens$').firstMatch(path);
+    if (match == null) return null;
+    return Uri.decodeComponent(match.group(1)!);
   }
 
   /// Parse `/sessions/{appId}/logs` from a path, returning the appId.

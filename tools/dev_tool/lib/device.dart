@@ -53,6 +53,7 @@ import 'app_log.dart';
 import 'build_mode.dart';
 import 'cdp_console.dart';
 import 'compiler_config.dart';
+import 'devicectl_screens.dart';
 import 'host_tools.dart';
 import 'key_press.dart';
 import 'logging.dart';
@@ -60,6 +61,7 @@ import 'mdns_vm_service_discovery.dart';
 import 'native_patch_delivery.dart';
 import 'reload_strategy.dart';
 import 'runfiles_helper.dart';
+import 'screen.dart';
 import 'temp_dir.dart';
 import 'toolchain_info.dart';
 import 'vm_service_client.dart';
@@ -323,7 +325,83 @@ abstract class Device {
     }
   }
 
+  /// The screens this device draws to.
+  ///
+  /// One, for every device but a few iOS simulators and phones: asked anew each
+  /// time, because what a multi-screen device reports changes as it is folded
+  /// and unfolded and its screens' ids change on every boot. Within [deadline]
+  /// when it is part of a screenshot; on its own, within [screenshotBound].
+  Future<List<Screen>> screens({ScreenshotDeadline? deadline}) async => [
+    Screen.only(name),
+  ];
+
+  /// How long a screenshot gets, from the moment the app can be captured to
+  /// the moment the PNG is written: listing the screens, asking again while a
+  /// device with several built-in screens has not reported which is active, and
+  /// the capture itself, all out of this one budget.
+  ///
+  /// Taken once, as a [ScreenshotDeadline], and handed to each step to spend
+  /// what is left. The capture runs inside an HTTP handler, so what has to be
+  /// bounded is what the caller waits for. A device whose capture is a helper
+  /// bounds the helper by this too.
+  ///
+  /// Settable so a test can drive the expiry in milliseconds.
+  Duration screenshotBound = const Duration(seconds: 30);
+
+  /// The pause between two asks of [screens] while a device has not reported.
+  Duration screenPollInterval = const Duration(milliseconds: 500);
+
+  /// The screen [screenshot] captures for [requested]: the one screen named,
+  /// or, with none named, the one the app is on. Throws
+  /// [ScreenSelectionException] when that cannot be settled — see
+  /// [chooseScreen] — and [ScreenshotTimeout] when [deadline] runs out first.
+  Future<Screen> resolveScreen(
+    String? requested,
+    ScreenshotDeadline deadline,
+  ) => resolveScreenOf(
+    (deadline) => screens(deadline: deadline),
+    requested,
+    deadline: deadline,
+    interval: screenPollInterval,
+  );
+
   /// Capture a screenshot of the running app.
+  ///
+  /// [screen] names a screen of [screens] by id or name; without it, the screen
+  /// the app is on (see [chooseScreen]). [window] selects a window *within* a
+  /// screen on a device that has windows; a window is not a screen.
+  ///
+  /// Waits for the app to be capturable ([prepareScreenshot]), then takes one
+  /// [ScreenshotDeadline] of [screenshotBound], resolves the screen and has
+  /// the device capture it ([captureScreen]). The wait for the first frame is
+  /// the app's, not the device's, and is not part of that budget.
+  Future<void> screenshot(
+    AppInstance instance,
+    String outputPath, {
+    VmServiceClient? vmClient,
+    String? window,
+    String? screen,
+  }) async {
+    await prepareScreenshot(vmClient);
+    final deadline = ScreenshotDeadline(screenshotBound);
+    final target = await resolveScreen(screen, deadline);
+    await captureScreen(
+      instance,
+      outputPath,
+      target,
+      deadline,
+      vmClient: vmClient,
+      window: window,
+    );
+  }
+
+  /// Wait for whatever has to be true before a capture shows the app, ahead of
+  /// choosing the screen: a multi-screen device's active screen follows its
+  /// posture and is read as late as it can be.
+  Future<void> prepareScreenshot(VmServiceClient? vmClient) async {}
+
+  /// Capture [screen], one of [screens], to the PNG at [outputPath], within
+  /// what is left of [deadline].
   ///
   /// For native platforms, uses the VM service `_flutter.screenshot` extension
   /// (pass [vmClient]). For web, subclasses override with CDP.
@@ -332,9 +410,11 @@ abstract class Device {
   /// [window] is an optional, platform-specific selector for which window to
   /// capture (e.g. on macOS, the exact window title). Devices that don't
   /// support window selection ignore it.
-  Future<void> screenshot(
+  Future<void> captureScreen(
     AppInstance instance,
-    String outputPath, {
+    String outputPath,
+    Screen screen,
+    ScreenshotDeadline deadline, {
     VmServiceClient? vmClient,
     String? window,
   }) {
@@ -659,6 +739,7 @@ class MacOSDevice extends Device {
   /// *undecided* Screen Recording permission blocks rather than refuses.
   ///
   /// Settable so a test can drive the expiry in milliseconds.
+  @override
   Duration screenshotBound = const Duration(seconds: 10);
 
   /// Captures the launched app's windows via the bundled Swift helper.
@@ -674,9 +755,11 @@ class MacOSDevice extends Device {
   /// Bounded by [screenshotBound]: see there for why an unbounded capture is
   /// the one failure this path must not have.
   @override
-  Future<void> screenshot(
+  Future<void> captureScreen(
     AppInstance instance,
-    String outputPath, {
+    String outputPath,
+    Screen screen,
+    ScreenshotDeadline deadline, {
     VmServiceClient? vmClient,
     String? window,
   }) async {
@@ -820,9 +903,11 @@ class LinuxDevice extends Device {
   }
 
   @override
-  Future<void> screenshot(
+  Future<void> captureScreen(
     AppInstance instance,
-    String outputPath, {
+    String outputPath,
+    Screen screen,
+    ScreenshotDeadline deadline, {
     VmServiceClient? vmClient,
     String? window,
   }) async {
@@ -976,6 +1061,7 @@ class WindowsDevice extends Device {
   /// Generous rather than tight: what matters here is that the request ends.
   ///
   /// Settable so a test can drive the expiry in milliseconds.
+  @override
   Duration screenshotBound = const Duration(seconds: 30);
 
   /// Captures the screen with the bundled DXGI Desktop Duplication helper.
@@ -983,9 +1069,11 @@ class WindowsDevice extends Device {
   /// Bounded by [screenshotBound]: see there for why an unbounded capture is
   /// the one failure this path must not have.
   @override
-  Future<void> screenshot(
+  Future<void> captureScreen(
     AppInstance instance,
-    String outputPath, {
+    String outputPath,
+    Screen screen,
+    ScreenshotDeadline deadline, {
     VmServiceClient? vmClient,
     String? window,
   }) async {
@@ -1639,6 +1727,7 @@ class AndroidDevice extends Device {
   /// `adb` that has to start its server first.
   ///
   /// Settable so a test can drive the expiry in milliseconds.
+  @override
   Duration screenshotBound = const Duration(seconds: 30);
 
   /// Whether this device is a local emulator rather than a physical one.
@@ -1675,9 +1764,11 @@ class AndroidDevice extends Device {
   /// Bounded by [screenshotBound]: see there for why an unbounded capture is
   /// the one failure this path must not have.
   @override
-  Future<void> screenshot(
+  Future<void> captureScreen(
     AppInstance instance,
-    String outputPath, {
+    String outputPath,
+    Screen screen,
+    ScreenshotDeadline deadline, {
     VmServiceClient? vmClient,
     String? window,
   }) async {
@@ -1686,14 +1777,14 @@ class AndroidDevice extends Device {
     }
     if (_isEmulator) return _consoleScreenshot(outputPath);
     const remotePath = '/sdcard/flutter_screenshot.png';
-    final deadline = DateTime.now().add(screenshotBound);
+    final giveUpAt = DateTime.now().add(screenshotBound);
     Future<ProcessResult> step(List<String> args, String what) =>
         runProcessBounded(
           _startScreenshotProcess,
           adbPath,
           _adbArgs(args),
           environment: const {},
-          bound: deadline.difference(DateTime.now()),
+          bound: giveUpAt.difference(DateTime.now()),
           what: what,
         );
 
@@ -2371,30 +2462,40 @@ class IOSSimulatorDevice extends Device {
     await instance.disposeScratchDirs();
   }
 
-  /// iOS Simulator uses `simctl io screenshot` because `_flutter.screenshot`
-  /// returns "Could not capture image screenshot" on the Simulator rendering
-  /// pipeline. Waits for the first frame via VM service before capturing.
+  late final _devicectl = DevicectlScreens(
+    run: _runProcess,
+    device: () => udid,
+    deviceName: () => name,
+    isSimulator: true,
+  );
+
+  /// The simulator's displays: one, or on an iPhone Duo two built-in ones, of
+  /// which the app is drawing on the one the posture turns on.
   @override
-  Future<void> screenshot(
-    AppInstance instance,
-    String outputPath, {
-    VmServiceClient? vmClient,
-    String? window,
-  }) async {
+  Future<List<Screen>> screens({ScreenshotDeadline? deadline}) =>
+      _devicectl.list(deadline ?? ScreenshotDeadline(screenshotBound));
+
+  /// iOS Simulator is captured with `devicectl device capture screenshot`
+  /// because `_flutter.screenshot` returns "Could not capture image
+  /// screenshot" on the Simulator rendering pipeline, and `simctl io
+  /// screenshot` cannot choose between a multi-screen simulator's displays.
+  /// Waits for the first frame via VM service first.
+  @override
+  Future<void> prepareScreenshot(VmServiceClient? vmClient) async {
     if (vmClient != null) {
       await vmClient.waitForFirstFrame();
     }
-    final result = await _runProcess('xcrun', [
-      'simctl',
-      'io',
-      udid,
-      'screenshot',
-      outputPath,
-    ]);
-    if (result.exitCode != 0) {
-      throw StateError('simctl screenshot failed: ${result.stderr}');
-    }
   }
+
+  @override
+  Future<void> captureScreen(
+    AppInstance instance,
+    String outputPath,
+    Screen screen,
+    ScreenshotDeadline deadline, {
+    VmServiceClient? vmClient,
+    String? window,
+  }) => _devicectl.capture(screen, outputPath, deadline);
 }
 
 /// An [IOSSimulatorDevice] that resolves the UDID on first launch.
@@ -3643,69 +3744,45 @@ if not error.Success():
     }
   }
 
-  /// How long `devicectl device capture screenshot` gets before it gives up.
-  ///
-  /// Passed as devicectl's own `--timeout`, so a device that stops answering
-  /// fails the capture with devicectl's error rather than holding the
-  /// screenshot request open.
-  Duration screenshotBound = const Duration(seconds: 30);
+  late final _devicectl = DevicectlScreens(
+    run: _runProcess,
+    device: () => _addressedUdid,
+    deviceName: () => name,
+  );
 
-  /// Captures the device's screen with `devicectl device capture screenshot`.
+  /// The device's screens as `devicectl device info displays` reports them.
   ///
+  /// An iPhone reports its own screen and may report a wireless display
+  /// beside it. The wireless one is listed and can be named, and is never the
+  /// default.
+  @override
+  Future<List<Screen>> screens({ScreenshotDeadline? deadline}) =>
+      _devicectl.list(deadline ?? ScreenshotDeadline(screenshotBound));
+
   /// `_flutter.screenshot` does not work on iOS: Impeller, always on there,
   /// cannot encode a compressed capture. devicectl captures the whole display,
   /// the way Xcode does.
   ///
-  /// `device capture` first shipped in Xcode 27's devicectl. An older one
-  /// does not know the subcommand, and its answer is what is detected here:
-  /// devicectl's version numbers are not documented against its commands.
-  /// See [_lacksDeviceCapture].
+  /// `device capture` and `device info displays` first shipped in Xcode 27's
+  /// devicectl. An older one does not know the subcommands, and its answer is
+  /// what is detected: devicectl's version numbers are not documented against
+  /// its commands.
   @override
-  Future<void> screenshot(
-    AppInstance instance,
-    String outputPath, {
-    VmServiceClient? vmClient,
-    String? window,
-  }) async {
+  Future<void> prepareScreenshot(VmServiceClient? vmClient) async {
     if (vmClient != null) {
       await vmClient.waitForFirstFrame();
     }
-    final result = await _runProcess('xcrun', [
-      'devicectl',
-      'device',
-      'capture',
-      'screenshot',
-      '--device',
-      _addressedUdid,
-      '--destination',
-      outputPath,
-      '--timeout',
-      '${screenshotBound.inSeconds}',
-      '--quiet',
-    ]);
-    if (result.exitCode == 0) return;
-    final err = '${result.stderr}${result.stdout}';
-    if (_lacksDeviceCapture(result.exitCode, err)) {
-      throw StateError(
-        'iPhone screenshots need Xcode 27 or later (devicectl device '
-        'capture). The selected Xcode\'s devicectl does not have it; select '
-        'a newer one with `xcode-select` or DEVELOPER_DIR.',
-      );
-    }
-    throw StateError('devicectl screenshot of $name failed: $err');
   }
 
-  /// Whether devicectl refused the command line as a usage error (exit 64,
-  /// `EX_USAGE`) without knowing `device capture screenshot`.
-  ///
-  /// The arguments are right for every devicectl that has the command, so a
-  /// usage error means it does not. A devicectl without the subcommand stops
-  /// parsing at `device`, rejects the first option after it ("Unknown option
-  /// '--device'") and prints `devicectl device`'s usage. A capture that runs
-  /// and fails exits 1 with a CoreDevice error instead.
-  static bool _lacksDeviceCapture(int exitCode, String output) =>
-      exitCode == 64 &&
-      !output.contains('Usage: devicectl device capture screenshot');
+  @override
+  Future<void> captureScreen(
+    AppInstance instance,
+    String outputPath,
+    Screen screen,
+    ScreenshotDeadline deadline, {
+    VmServiceClient? vmClient,
+    String? window,
+  }) => _devicectl.capture(screen, outputPath, deadline);
 }
 
 /// NSPredicate selecting an app's own log output on the iOS Simulator.
@@ -4352,9 +4429,11 @@ class WebDevice extends Device {
   }
 
   @override
-  Future<void> screenshot(
+  Future<void> captureScreen(
     AppInstance instance,
-    String outputPath, {
+    String outputPath,
+    Screen screen,
+    ScreenshotDeadline deadline, {
     VmServiceClient? vmClient,
     String? window,
   }) async {

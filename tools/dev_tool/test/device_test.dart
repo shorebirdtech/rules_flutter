@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter_bazel_dev_tool/device.dart';
 import 'package:flutter_bazel_dev_tool/key_press.dart';
 import 'package:flutter_bazel_dev_tool/toolchain_info.dart';
@@ -9,6 +10,7 @@ import 'package:flutter_bazel_dev_tool/web_module_server.dart';
 import 'package:flutter_bazel_dev_tool/web_options.dart';
 import 'package:flutter_bazel_dev_tool/mdns_vm_service_discovery.dart';
 import 'package:flutter_bazel_dev_tool/runfiles_helper.dart';
+import 'package:flutter_bazel_dev_tool/screen.dart';
 import 'package:logging/logging.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
@@ -36,6 +38,56 @@ String devicesJson(String transportType) => json.encode({
     ],
   },
 });
+
+/// A display as `devicectl device info displays --json-output` describes it.
+Map<String, Object?> display(
+  String name, {
+  String? uniqueId,
+  int displayId = 1,
+  bool? active,
+  String type = 'integrated',
+  bool primary = false,
+}) => {
+  'name': name,
+  'displayId': displayId,
+  'uniqueId': ?uniqueId,
+  'active': ?active,
+  'primary': primary,
+  'nativeSize': [100, 200],
+  'backlightState': 'unknown',
+  'type': {type: <String, Object?>{}},
+};
+
+/// What a fake `devicectl` answers to `device info displays`: it writes the
+/// JSON to the `--json-output` path, as the real one does.
+ProcessResult displaysAnswer(
+  List<String> args,
+  List<Map<String, Object?>> displays,
+) {
+  File(args[args.indexOf('--json-output') + 1]).writeAsStringSync(
+    json.encode({
+      'info': {'outcome': 'success', 'jsonVersion': 5},
+      'result': {'displays': displays},
+    }),
+  );
+  return ProcessResult(0, 0, '', '');
+}
+
+/// A fake `devicectl` that reports [displays] and records every command line
+/// it is given.
+({ProcessRunSync run, List<List<String>> calls}) fakeDevicectl(
+  List<Map<String, Object?>> Function() displays,
+) {
+  final calls = <List<String>>[];
+  return (
+    calls: calls,
+    run: (exe, args) async {
+      calls.add([exe, ...args]);
+      if (args.contains('displays')) return displaysAnswer(args, displays());
+      return ProcessResult(0, 0, '', '');
+    },
+  );
+}
 
 /// What a fake `simctl` answers: success, and for `simctl launch` the line
 /// naming the pid it started, which a launch needs to find its own app's VM
@@ -172,6 +224,11 @@ void main() {
               '',
             );
           }
+          if (args.contains('displays')) {
+            return displaysAnswer(args, [
+              display('LCD', uniqueId: 'SCREEN-1', primary: true),
+            ]);
+          }
           return ProcessResult(0, 0, '', '');
         },
         startProcess: (exe, args) async =>
@@ -190,7 +247,18 @@ void main() {
         AppInstance(process: FakeProcess()),
         '/tmp/shot.png',
       );
-      expect(calls, ['simctl io SIM-FIRST screenshot /tmp/shot.png']);
+      expect(calls, hasLength(2));
+      expect(
+        calls.first,
+        startsWith('devicectl device info displays --device SIM-FIRST'),
+      );
+      expect(
+        calls.last,
+        startsWith(
+          'devicectl device capture screenshot --device SIM-FIRST '
+          '--destination /tmp/shot.png',
+        ),
+      );
     });
 
     test('has correct name with udid', () {
@@ -3546,46 +3614,339 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
   });
 
   group('IOSSimulatorDevice.screenshot', () {
-    test('calls simctl io screenshot', () async {
-      final calls = <(String, List<String>)>[];
+    final instance = AppInstance(process: FakeProcess());
 
+    test('captures the one screen with devicectl', () async {
+      final devicectl = fakeDevicectl(
+        () => [display('LCD', uniqueId: 'SCREEN-1', primary: true)],
+      );
       final device = IOSSimulatorDevice(
         udid: 'TEST-UDID',
-        runProcess: (exe, args) async {
-          calls.add((exe, args));
-          return ProcessResult(0, 0, '', '');
-        },
+        runProcess: devicectl.run,
       );
 
-      final instance = AppInstance(process: FakeProcess());
       await device.screenshot(instance, '/tmp/ios.png');
 
-      expect(calls, hasLength(1));
-      expect(calls[0].$1, 'xcrun');
-      expect(calls[0].$2, [
-        'simctl',
-        'io',
-        'TEST-UDID',
+      expect(devicectl.calls, hasLength(2));
+      expect(devicectl.calls[0].take(5), [
+        'xcrun',
+        'devicectl',
+        'device',
+        'info',
+        'displays',
+      ]);
+      expect(devicectl.calls[0], containsAllInOrder(['--device', 'TEST-UDID']));
+      expect(devicectl.calls[1], [
+        'xcrun',
+        'devicectl',
+        'device',
+        'capture',
         'screenshot',
+        '--device',
+        'TEST-UDID',
+        '--destination',
         '/tmp/ios.png',
+        '--display-unique-id',
+        'SCREEN-1',
+        '--timeout',
+        '30',
+        '--quiet',
       ]);
     });
 
-    test('throws on simctl screenshot failure', () async {
+    test('on a two-screen simulator captures the active screen', () async {
+      var open = false;
+      final devicectl = fakeDevicectl(
+        () => [
+          display(
+            'LCD',
+            uniqueId: 'INNER',
+            displayId: 1,
+            active: !open,
+            primary: true,
+          ),
+          display('LCD-1', uniqueId: 'OUTER', displayId: 3, active: open),
+        ],
+      );
+      final device = IOSSimulatorDevice(
+        udid: 'DUO',
+        runProcess: devicectl.run,
+      );
+
+      await device.screenshot(instance, '/tmp/folded.png');
+      open = true;
+      await device.screenshot(instance, '/tmp/open.png');
+
+      // Looked up for each screenshot: the posture changed between them.
+      expect(
+        devicectl.calls
+            .where((c) => c.contains('capture'))
+            .map((c) => c[c.indexOf('--display-unique-id') + 1]),
+        ['INNER', 'OUTER'],
+      );
+    });
+
+    test('--screen names a screen, by unique id, displayId or name', () async {
+      final devicectl = fakeDevicectl(
+        () => [
+          display('LCD', uniqueId: 'INNER', displayId: 1, active: true),
+          display('LCD-1', uniqueId: 'OUTER', displayId: 3, active: false),
+        ],
+      );
+      final device = IOSSimulatorDevice(
+        udid: 'DUO',
+        runProcess: devicectl.run,
+      );
+
+      for (final name in ['OUTER', 'displayId:3', 'LCD-1']) {
+        await device.screenshot(instance, '/tmp/x.png', screen: name);
+      }
+
+      expect(
+        devicectl.calls
+            .where((c) => c.contains('capture'))
+            .map((c) => c[c.indexOf('--display-unique-id') + 1]),
+        ['OUTER', 'OUTER', 'OUTER'],
+      );
+    });
+
+    // Time in the tests below is the test's: `fakeAsync` moves it only when
+    // `elapse` is called, so what has finished by an exact moment, which step
+    // was waiting, how many times the device was asked and how many seconds
+    // devicectl was handed are all plain assertions. The listing's own file
+    // calls are synchronous so it can run here.
+    group('under fake time', () {
+      /// A devicectl that takes [list] to list the screens and [capture] to
+      /// capture, and records the `--timeout` it was handed by each.
+      ({ProcessRunSync run, List<int> listTimeouts, List<int> captureTimeouts})
+      slow({
+        Duration list = Duration.zero,
+        Duration capture = Duration.zero,
+        bool Function(int ask)? reported,
+      }) {
+        final listTimeouts = <int>[];
+        final captureTimeouts = <int>[];
+        return (
+          listTimeouts: listTimeouts,
+          captureTimeouts: captureTimeouts,
+          run: (exe, args) async {
+            final timeout = int.parse(args[args.indexOf('--timeout') + 1]);
+            if (args.contains('displays')) {
+              listTimeouts.add(timeout);
+              await Future<void>.delayed(list);
+              final known = reported?.call(listTimeouts.length) ?? true;
+              return displaysAnswer(args, [
+                display(
+                  'LCD',
+                  uniqueId: 'INNER',
+                  active: known ? true : null,
+                  primary: true,
+                ),
+                display(
+                  'LCD-1',
+                  uniqueId: 'OUTER',
+                  displayId: 3,
+                  active: known ? false : null,
+                ),
+              ]);
+            }
+            captureTimeouts.add(timeout);
+            await Future<void>.delayed(capture);
+            return ProcessResult(0, 0, '', '');
+          },
+        );
+      }
+
+      const ms = Duration(milliseconds: 1);
+
+      test('waits out a posture not yet reported, then captures', () {
+        fakeAsync((async) {
+          final devicectl = slow(reported: (ask) => ask > 2);
+          final device = IOSSimulatorDevice(
+            udid: 'DUO',
+            runProcess: devicectl.run,
+          )..screenPollInterval = ms * 10;
+
+          // Asked at 0, 10 and 20 ms; the third answer has a posture.
+          final outcome = track(device.screenshot(instance, '/tmp/ios.png'));
+          async.elapse(ms * 19);
+          expect(outcome.done, isFalse);
+          expect(devicectl.listTimeouts, hasLength(2));
+          async.elapse(ms);
+
+          expect(outcome.done, isTrue);
+          expect(outcome.error, isNull);
+          expect(devicectl.listTimeouts, hasLength(3));
+          expect(devicectl.captureTimeouts, hasLength(1));
+        });
+      });
+
+      test('a posture never reported ends at the deadline, having asked '
+          'every interval', () {
+        fakeAsync((async) {
+          // Each listing takes 5 ms and the interval is 20: asks start at
+          // 0, 25, 50 … The tenth ends at 230 ms with 20 ms left, which is not
+          // enough for another interval, so that is where it gives up.
+          final devicectl = slow(list: ms * 5, reported: (_) => false);
+          final device =
+              IOSSimulatorDevice(
+                  udid: 'DUO',
+                  runProcess: devicectl.run,
+                )
+                ..screenshotBound = ms * 250
+                ..screenPollInterval = ms * 20;
+
+          final outcome = track(device.screenshot(instance, '/tmp/ios.png'));
+          async.elapse(ms * 229);
+          expect(outcome.done, isFalse);
+          async.elapse(ms);
+
+          expect(outcome.done, isTrue);
+          expect(
+            outcome.error,
+            isA<ScreenSelectionException>().having(
+              (e) => e.message,
+              'message',
+              contains('waiting for the device to report which of its screens'),
+            ),
+          );
+          expect(devicectl.listTimeouts, hasLength(10));
+          expect(devicectl.captureTimeouts, isEmpty);
+        });
+      });
+
+      test('a capture gets what the listing left and runs out in it', () {
+        fakeAsync((async) {
+          final devicectl = slow(list: ms * 150, capture: ms * 500);
+          final device = IOSSimulatorDevice(
+            udid: 'DUO',
+            runProcess: devicectl.run,
+          )..screenshotBound = ms * 300;
+
+          final outcome = track(device.screenshot(instance, '/tmp/ios.png'));
+          async.elapse(ms * 299);
+          expect(outcome.done, isFalse);
+          async.elapse(ms);
+
+          // 300 ms in all: not the 150 for the listing and then 300 more.
+          expect(outcome.done, isTrue);
+          expect(
+            outcome.error,
+            isA<ScreenshotTimeout>().having(
+              (e) => e.step,
+              'step',
+              'capturing LCD of iOS Simulator (DUO)',
+            ),
+          );
+        });
+      });
+
+      test('a listing that outlasts the deadline is the step that ran out', () {
+        fakeAsync((async) {
+          final devicectl = slow(list: const Duration(seconds: 2));
+          final device = IOSSimulatorDevice(
+            udid: 'DUO',
+            runProcess: devicectl.run,
+          )..screenshotBound = ms * 100;
+
+          final outcome = track(device.screenshot(instance, '/tmp/ios.png'));
+          async.elapse(ms * 99);
+          expect(outcome.done, isFalse);
+          async.elapse(ms);
+
+          expect(
+            outcome.error,
+            isA<ScreenshotTimeout>().having(
+              (e) => e.step,
+              'step',
+              'listing the screens of iOS Simulator (DUO)',
+            ),
+          );
+          expect(devicectl.captureTimeouts, isEmpty);
+        });
+      });
+
+      test('devicectl is handed the seconds that are left', () {
+        fakeAsync((async) {
+          final devicectl = slow(list: ms * 1200);
+          final device = IOSSimulatorDevice(
+            udid: 'DUO',
+            runProcess: devicectl.run,
+          )..screenshotBound = const Duration(seconds: 3);
+
+          final outcome = track(device.screenshot(instance, '/tmp/ios.png'));
+          async.elapse(ms * 1200);
+
+          // 3 s for the listing; then 3 s less its 1.2 s, rounded up.
+          expect(outcome.done, isTrue);
+          expect(outcome.error, isNull);
+          expect(devicectl.listTimeouts, [3]);
+          expect(devicectl.captureTimeouts, [2]);
+        });
+      });
+    });
+
+    test('a simulator devicectl does not know names the requirement', () async {
+      final device = IOSSimulatorDevice(
+        udid: 'SIM-1',
+        runProcess: (exe, args) async => ProcessResult(
+          0,
+          1,
+          '',
+          'ERROR: The specified device was not found. (Name: SIM-1)',
+        ),
+      );
+      await expectLater(
+        device.screenshot(instance, '/tmp/ios.png'),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            allOf(
+              contains('devicectl does not know the simulator SIM-1'),
+              contains('Xcode 27 or later'),
+              contains('devicectl list devices'),
+            ),
+          ),
+        ),
+      );
+    });
+
+    test('lists the screens it has', () async {
+      final devicectl = fakeDevicectl(
+        () => [display('LCD', uniqueId: 'SCREEN-1', primary: true)],
+      );
+      final device = IOSSimulatorDevice(
+        udid: 'TEST-UDID',
+        runProcess: devicectl.run,
+      );
+      final screens = await device.screens();
+      expect(screens.single.id, 'SCREEN-1');
+      expect(screens.single.name, 'LCD');
+    });
+
+    test('throws on a devicectl capture failure', () async {
       final device = IOSSimulatorDevice(
         udid: 'TEST-UDID',
         runProcess: (exe, args) async {
-          if ((args as List).contains('screenshot')) {
-            return ProcessResult(0, 1, '', 'SCREENSHOT_FAILED');
+          if (args.contains('displays')) {
+            return displaysAnswer(args, [
+              display('LCD', uniqueId: 'SCREEN-1', primary: true),
+            ]);
           }
-          return ProcessResult(0, 0, '', '');
+          return ProcessResult(0, 1, '', 'SCREENSHOT_FAILED');
         },
       );
 
-      final instance = AppInstance(process: FakeProcess());
       expect(
         () => device.screenshot(instance, '/tmp/shot.png'),
-        throwsStateError,
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            contains('SCREENSHOT_FAILED'),
+          ),
+        ),
       );
     });
   });
@@ -4994,19 +5355,15 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
 
   group('IOSDevice.screenshot', () {
     test('captures with devicectl, addressed by the UDID', () async {
-      final calls = <List<String>>[];
-      final device = IOSDevice(
-        udid: 'TEST-UDID',
-        runProcess: (exe, args) async {
-          calls.add([exe, ...args.cast<String>()]);
-          return ProcessResult(0, 0, '', '');
-        },
+      final devicectl = fakeDevicectl(
+        () => [display('LCD', uniqueId: 'SCREEN-1', primary: true)],
       );
+      final device = IOSDevice(udid: 'TEST-UDID', runProcess: devicectl.run);
       await device.screenshot(
         AppInstance(process: FakeProcess()),
         '/tmp/ios.png',
       );
-      expect(calls.single, [
+      expect(devicectl.calls.last, [
         'xcrun',
         'devicectl',
         'device',
@@ -5016,13 +5373,86 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         'TEST-UDID',
         '--destination',
         '/tmp/ios.png',
+        '--display-unique-id',
+        'SCREEN-1',
         '--timeout',
         '30',
         '--quiet',
       ]);
     });
 
-    test('names Xcode 27 when devicectl lacks device capture', () async {
+    // A wired iPhone reports its own screen, which has no unique id, and a
+    // wireless display beside it. The built-in one is the default, and is
+    // captured by naming no id, which devicectl documents as the primary.
+    test('takes the built-in screen over a wireless display', () async {
+      final devicectl = fakeDevicectl(
+        () => [
+          display('LCD', primary: true),
+          display(
+            'Wireless',
+            uniqueId: 'WIRELESS',
+            displayId: 2,
+            type: 'wireless',
+          ),
+        ],
+      );
+      final device = IOSDevice(udid: 'TEST-UDID', runProcess: devicectl.run);
+      await device.screenshot(
+        AppInstance(process: FakeProcess()),
+        '/tmp/ios.png',
+      );
+      expect(devicectl.calls.last, isNot(contains('--display-unique-id')));
+    });
+
+    test('a wireless display is captured when it is named', () async {
+      final devicectl = fakeDevicectl(
+        () => [
+          display('LCD', primary: true),
+          display(
+            'Wireless',
+            uniqueId: 'WIRELESS',
+            displayId: 2,
+            type: 'wireless',
+          ),
+        ],
+      );
+      final device = IOSDevice(udid: 'TEST-UDID', runProcess: devicectl.run);
+      await device.screenshot(
+        AppInstance(process: FakeProcess()),
+        '/tmp/ios.png',
+        screen: 'Wireless',
+      );
+      expect(
+        devicectl.calls.last,
+        containsAllInOrder(['--display-unique-id', 'WIRELESS']),
+      );
+    });
+
+    test(
+      'a screen with no unique id that is not primary cannot be captured',
+      () {
+        final devicectl = fakeDevicectl(
+          () => [display('LCD', primary: true), display('LCD-1', displayId: 3)],
+        );
+        final device = IOSDevice(udid: 'TEST-UDID', runProcess: devicectl.run);
+        expect(
+          () => device.screenshot(
+            AppInstance(process: FakeProcess()),
+            '/tmp/ios.png',
+            screen: 'displayId:3',
+          ),
+          throwsA(
+            isA<ScreenSelectionException>().having(
+              (e) => e.reason,
+              'reason',
+              contains('LCD-1 cannot be captured'),
+            ),
+          ),
+        );
+      },
+    );
+
+    test('names Xcode 27 when devicectl lacks the subcommands', () async {
       // What a devicectl without the subcommand prints for this command line:
       // its parser stops at `device` and rejects the first option after it.
       final device = IOSDevice(
@@ -5044,7 +5474,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
           isA<StateError>().having(
             (e) => e.message,
             'message',
-            contains('iPhone screenshots need Xcode 27 or later'),
+            contains('iOS screenshots need Xcode 27 or later'),
           ),
         ),
       );
@@ -5053,12 +5483,19 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     test('reports a capture that runs and fails as it is', () async {
       final device = IOSDevice(
         udid: 'TEST-UDID',
-        runProcess: (exe, args) async => ProcessResult(
-          0,
-          1,
-          '',
-          'ERROR: The specified device was not found.',
-        ),
+        runProcess: (exe, args) async {
+          if (args.contains('displays')) {
+            return displaysAnswer(args, [
+              display('LCD', uniqueId: 'SCREEN-1', primary: true),
+            ]);
+          }
+          return ProcessResult(
+            0,
+            1,
+            '',
+            'ERROR: The specified device was not found.',
+          );
+        },
       );
       expect(
         () => device.screenshot(

@@ -479,7 +479,7 @@ When re-running to reproduce, use `--nocache_test_results` and read the
 | `web_e2e_test.dart` | Any (needs Chrome) | WASM + JS `--screenshot` (CDP), `--machine` screenshot — the JS one over `:app_js`, whose `base_href = "/web_example_js/"` the dev server has to serve under, so it asserts the launch URL's path and a rendered page — and what a `--wasm` run tells a client: `app.webLaunchUrl` carries the served address and the browser's DevTools endpoint (`cdpPort`, the page's `webSocketDebuggerUrl`), and the VM-service half of the `app.*` agent surface is absent from `/commands` rather than present and refusing |
 | `web_viewport_e2e_test.dart` | Any (needs Chrome) | `--web-viewport` captures at the size asked for, measured on the PNG from `screenshot/native`: `390x844@3` is 1170x2532 and survives a hot restart and an `app.setViewport` to 900x1500, and `390x844` is 390x844. Chrome 154 drops the CDP override when the connection that set it closes, so a tool that applied it and hung up launched cleanly and captured at the window's own 2400x1713 — a run that only checked the launch, or a fake that models the old browser, passes. `cdp_viewport_test` covers the connection handling against a fake that models the new one |
 | `web_define_e2e_test.dart` | Any (needs Chrome) | A `web_defines` value in a `bootstrap_js` template reaches the running page — read off `window` over CDP, with a rendered `screenshot/native` and no service worker beside it. The dev loop must serve the build's bootstrap rather than generate one of its own, or the define works on `bazel build` and does nothing under `-d chrome` |
-| `ios_simulator_e2e_test.dart` | macOS | `--screenshot` (simctl), `--machine` screenshot |
+| `ios_simulator_e2e_test.dart` | macOS | `--screenshot` (devicectl), `--machine` screenshot |
 | `machine_protocol_e2e_test.dart` | macOS | Protocol lifecycle events, unknown-method error (reload/restart correctness is manual — see "Hot reload / hot restart (manual)") |
 | `attach_e2e_test.dart` | macOS | Launch app externally → attach → VM service connects; a hot reload and a hot restart driven over the machine protocol, the restart asserting a `main()`-level edit took effect (attach shares `run`'s reload pipeline, so it gets the orchestrator, asset tracking and codegen refresh). The reload case builds the app with a `--dart-define` attach is never given: the recompile keeps it only because the pipeline reads the defines off the running app. Two cases kill the app instead of driving it, on either side of the pipeline being assembled — both must end the run the same way (exit 0, naming the app as gone), because which side a death lands on is not something the user can see |
 | `dart_defines_e2e_test.dart` | macOS | `--dart-define` reaches the app (comma-in-value intact) and survives a hot reload (frontend_server -D replay) |
@@ -509,11 +509,11 @@ When re-running to reproduce, use `--nocache_test_results` and read the
 | Windows | bundled `dxcam` DXGI helper (always) | same |
 | Android (physical) | `adb screencap` (always) | `adb screencap` |
 | Android (emulator) | `adb emu screenrecord screenshot` (always) | same |
-| iOS Simulator | `simctl io screenshot` (always) | `simctl io screenshot` (always) |
+| iOS Simulator | `devicectl device capture screenshot` (always; needs Xcode 27) | `devicectl device capture screenshot` (always; needs Xcode 27) |
 | iOS device | `devicectl device capture screenshot` (always; Xcode 27+) | same |
 | Chrome/Web | CDP `Page.captureScreenshot` (always) | N/A (web is always debug) |
 
-Note: `_flutter.screenshot` captures only the Flutter widget tree (no OS chrome); the platform tools capture the full screen or window. The three desktop rows name the helper each `Device.screenshot` actually resolves out of runfiles (`tools/{macos,windows}_screenshot/screenshot`, and plain `scrot` on Linux). Windows must use DXGI, not GDI, which captures a Flutter surface as black (§ 4).
+Note: `_flutter.screenshot` captures only the Flutter widget tree (no OS chrome); the platform tools capture the full screen or window. The three desktop rows name the helper each device's `captureScreen` actually resolves out of runfiles (`tools/{macos,windows}_screenshot/screenshot`, and plain `scrot` on Linux). Windows must use DXGI, not GDI, which captures a Flutter surface as black (§ 4).
 
 Every cell says "always": at the pinned Flutter, **no** device can do `_flutter.screenshot`. Impeller cannot encode a compressed screenshot, and there is no engine screenshot on web at all. They all declare `supportsFlutterScreenshot => false`, so the control channel's `screenshot/flutter` endpoint answers `501` naming `screenshot/native` instead of passing back an engine error that reads as transient.
 
@@ -1310,6 +1310,7 @@ script's own package requires ≥ 3.13.
 | Native hot patching (`native_hot_patcher.dart`, `native_hot_patch_tool.dart`, `native_patch_delivery.dart`, `native_image_identity.dart`, `flutter/native_hot_patch.bzl`, `flutter_native_library.hot_patch`, `agent_extensions/native_patch.dart`) | dev_tool unit **and** `native_hot_patch_e2e_test.dart` (macOS) **and** `relaunch_e2e_test.dart` **and** the manual device check — a native edit patched into the app on the iOS simulator, an iOS device and Android, see "Native hot patch on devices (manual)" |
 | Keys (`key_press.dart`, `app.pressKey` in `agent_command.dart`, `pressKeyOverCdp` in `device.dart`, `ext.rules_flutter.pressKey` in `agent_extensions/agent.dart`) | dev_tool unit **and** `press_key_e2e_test.dart` (macOS, Chrome DDC, Chrome `--wasm`). The framework route on iOS, Android, Linux and Windows has no e2e: check it by hand on the device you changed it for |
 | dev_tool app-output forwarding (`app_log.dart`, `app_log_sink.dart`, `cdp_console.dart`, `vm_service_logs.dart`, `device.dart` launch paths) | dev_tool unit + e2e **and** the manual per-platform checks below |
+| dev_tool screens and screenshots (`screen.dart`, `devicectl_screens.dart`, `Device.screenshot`, the `screenshot/native` and `screens` endpoints) | dev_tool unit **and** `ios_simulator_e2e_test.dart` and `plugin_example_e2e_test.dart`'s iOS case on the iPhone Duo simulator **and** the manual posture check in "Multi-screen screenshots (manual)" |
 | dev_tool iOS device paths (`mdns_vm_service_discovery.dart`, `IOSDevice` in `device.dart`) | dev_tool unit **and** manual hot reload + hot restart on hardware, **wired and wireless** — see "iOS hardware (manual)" |
 | New or changed analysis coverage (a target's `srcs` glob or `main`, a new `manual` tag, a new `analysis_options.yaml`) | Root `//...` **and** the probe — see § 1 |
 | Golden comparator (`flutter/private/goldens/`, `flutter_test.bzl` bootstrap) | Root `//...` + codegen `//...` **and** the manual regeneration round trip below |
@@ -1481,6 +1482,31 @@ On an iPhone the patch is signed with the certificate that signed the app, read
 out of the installed `.app`. A signing failure answers `nativePatchFailed` with
 `codesign`'s own message; an unsigned or ad-hoc signed patch is what the device
 refuses with "missing code signature".
+
+### Multi-screen screenshots (manual)
+
+The iPhone Duo simulator has two built-in screens, and the app draws on the one
+its posture turns on: LCD when folded, LCD-1 half open or open. Nothing but
+DeviceHub's posture buttons changes the posture, so a unit test cannot, and the
+recorded `devicectl` output in `test/fixtures/devicectl_displays/` only proves
+the rules, not that the real simulator behaves as recorded.
+
+1. Boot the Duo (`xcrun simctl boot <udid>`) and run an example app on it with
+   `flutter_bazel run -d ios-simulator` (or the `ios_simulator_e2e_test.dart`
+   case, which leaves it folded).
+2. Folded: `curl` `/sessions/<appId>/screens` and `screenshot/native`. The list
+   has one `active: true` (LCD) and the PNG is the app, 1398x2034.
+3. Open DeviceHub (`open -a /Applications/Xcode.app/Contents/Applications/DeviceHub.app`)
+   and click the open-posture button. Repeat: `active` has moved to LCD-1 and the
+   PNG is the app on LCD-1, 2007x2853. Look at the PNG: a black one means the
+   wrong screen.
+4. `screenshot/native?screen=LCD` in that posture returns the black, powered-off
+   screen: naming a screen is taken at its word.
+5. The same on a one-screen simulator (iPhone 17), where `active` is `null` and
+   a bare request still captures the app. Quitting DeviceHub shuts the simulator
+   down.
+6. On an attached iPhone: `screens` lists its own screen and, when the phone
+   reports one, a `wireless` display; a bare screenshot is the phone's own screen.
 
 ### iOS hardware (manual)
 

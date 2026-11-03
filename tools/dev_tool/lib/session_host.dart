@@ -302,7 +302,14 @@ class SessionHost {
         'path': '/sessions/{appId}/screenshot/native',
         'description':
             'native OS screenshot (PNG; waits for the app to go idle first — '
-            '&settle=false to capture this instant)',
+            '&settle=false to capture this instant; &screen=<id or name> on a '
+            'device with several screens)',
+      },
+      {
+        'method': 'GET',
+        'path': '/sessions/{appId}/screens',
+        'description':
+            'the device\'s screens, and which one the app is on (JSON)',
       },
       {
         'method': 'GET',

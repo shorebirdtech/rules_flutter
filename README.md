@@ -34,7 +34,7 @@ If `flutter build` works for you, here is what Bazel adds:
 |---|---|
 | All | Bazel 9 or newer. The rules download Flutter 3.47.9 themselves. |
 | macOS | Xcode, for `rules_apple` and `rules_swift`. |
-| iOS | Xcode. The simulator needs no signing identity. A physical device does; see [Running on an iOS device](#running-on-an-ios-device). |
+| iOS | Xcode. The simulator needs no signing identity. A physical device does; see [Running on an iOS device](#running-on-an-ios-device). `flutter_bazel` screenshots, of a simulator or a device, need Xcode 27 or later, whose `devicectl` lists and captures screens and knows simulators (measured with Xcode 27.2, `devicectl` 651.32; earlier Xcodes were not tried). |
 | Android | The Android SDK and NDK, with `ANDROID_HOME` and `ANDROID_NDK_HOME` set. See [Android](#android). |
 | Linux | A C++ toolchain. From macOS, an LLVM cross-toolchain. |
 | Windows | MSVC for native builds. From macOS or Linux, a C++ cross-toolchain, debug builds only. |
@@ -1697,7 +1697,8 @@ On stdout, the protocol stream starts with `daemon.connected` and then reports `
 | `/command?token=…` | `POST` | Run a protocol method against the session. Body: `{"method":"app.<X>", "params":{"appId":"…", …}}`. |
 | `/commands?token=…` | `GET` | What this run can do right now: `{"protocolVersion", "commands":[{"name","longRunning"}]}`. |
 | `/sessions/{appId}/logs?token=…` | `GET` | The app's console output, from a bounded ring buffer. |
-| `/sessions/{appId}/screenshot/native?token=…` | `GET` | A PNG of the app as the platform sees it. Works on every device. |
+| `/sessions/{appId}/screenshot/native?token=…` | `GET` | A PNG of the app as the platform sees it. Works on every device. `&screen=<id or name>` picks a screen of a device that has several; see [Screens](#screens). |
+| `/sessions/{appId}/screens?token=…` | `GET` | The device's screens, and which one the app is on. |
 | `/sessions/{appId}/screenshot/flutter?token=…` | `GET` | A PNG of the widget tree from the engine. Not available at the pinned Flutter; see below. |
 
 The endpoints speak plain HTTP/1.1, so `curl -s "$URI/..."` works. If your `curl` tries HTTP/2 by default, add `--http1.1`.
@@ -1789,9 +1790,36 @@ The fields in the response:
 
 #### Screenshots
 
-`screenshot/native` captures the app the way the platform sees it (`screencapture`, `scrot`, `simctl io screenshot`, `adb screencap`, or the browser's own capture) and works on every device. `screenshot/flutter` asks the engine for the widget tree alone, with no window chrome, but the engine cannot produce it under Impeller and there is no engine screenshot on the web at all. Since Flutter 3.47 every platform renders with Impeller by default, so every device answers `501` naming `screenshot/native`. The tool does not try to detect an app that has turned Impeller off, because `screenshot/native` captures either way.
+`screenshot/native` captures the app the way the platform sees it (`screencapture`, `scrot`, `devicectl device capture screenshot` on the iOS simulator and iPhones, `adb screencap`, or the browser's own capture) and works on every device. `screenshot/flutter` asks the engine for the widget tree alone, with no window chrome, but the engine cannot produce it under Impeller and there is no engine screenshot on the web at all. Since Flutter 3.47 every platform renders with Impeller by default, so every device answers `501` naming `screenshot/native`. The tool does not try to detect an app that has turned Impeller off, because `screenshot/native` captures either way.
 
 Both endpoints wait for the app to go idle before capturing, so a screenshot taken right after `app.tap` shows what the tap did. Without that wait you would get the frame from before the action painted, and a stale picture is indistinguishable from a feature that did not work. The response says what you got: `X-Settled: yes` means the app was idle first, `no` means the wait ran out or the app is backgrounded, and `skipped` means you passed `settle=false` or the run has no VM service to ask (`--wasm`, `--profile`). `X-Settle-Detail` carries the reason for anything but `yes`, percent-encoded so it can hold characters a header cannot; any URI-component decoder gives back the text. The wait is never fatal, since an app that cannot settle is the one whose picture you most want. `app.settle` is the same wait as a command, for use between two of your own.
+
+##### Screens
+
+A device draws to a *screen*, and most have one. An iPhone Duo simulator has two built-in screens and the app draws on the one its posture (folded, half open, open) turns on; an iPhone that is mirrored to a wireless display has a second, external one. `GET /sessions/{appId}/screens` lists them:
+
+```json
+{"screens": [
+  {"id": "9552AE4F-…", "name": "LCD",   "type": "integrated", "width": 1398, "height": 2034, "active": true,  "primary": true},
+  {"id": "40096A2C-…", "name": "LCD-1", "type": "integrated", "width": 2007, "height": 2853, "active": false, "primary": false}
+]}
+```
+
+`active` says whether the app is on that screen now. It is `null` where the device does not say, which is every device with one screen. `type` is what the platform calls the screen: on iOS, Apple's display type (`integrated` for the device's own, `wireless`, `tvOut`, `carPlay`, …). An iOS screen with no unique id has the id `displayId:<n>`. A simulator's ids change on every boot, so read the list again rather than keeping one.
+
+`screenshot/native` with no `screen` captures the screen the app is on:
+
+- One built-in screen: that one. An external screen (`wireless` and the like) is never chosen without being named.
+- Several built-in screens: the one with `active: true`. A simulator has not reported its posture for the first seconds after it boots; the request asks again until it has.
+- Several active, none active, or no report within the bound: `422` with the screens listed in `error` and, as `screens`, in the body. The tool does not pick one.
+
+`&screen=<id or name>` names a screen instead: its `id`, its `displayId:<n>`, or its `name`. An unknown name, or one that matches two screens, is the same `422`. An external screen is captured this way. An iOS screen with no unique id can only be captured as the primary one, and naming any other answers that it cannot be captured.
+
+`screen` and `window` are different things. `screen` is a display the device has; `window` (macOS only) is one window an app has, matched by exact title, on that Mac's one screen. Giving `screen` to a device with one screen is allowed when it names that screen (`main` or the device's name).
+
+A screenshot has one 30-second budget, once the app has drawn its first frame: listing the screens, waiting for a posture and the capture all spend from it, and the error for running out says which step was waiting.
+
+On iOS this needs Xcode 27 or later (see [Requirements](#requirements)): the simulator and hardware both go through `devicectl device info displays` and `devicectl device capture screenshot`.
 
 #### Driving widgets
 

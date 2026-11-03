@@ -632,6 +632,24 @@ class DevToolProcess {
     return json.decode(reply.body) as Map<String, dynamic>;
   }
 
+  /// The device's screens from the control channel's `/screens` endpoint:
+  /// `{id, name, type, width, height, active, primary}` each.
+  Future<List<Map<String, dynamic>>> httpScreens(
+    String appId, {
+    Duration timeout = _controlChannelTimeout,
+  }) async {
+    final reply = await _controlRequest(
+      _controlUrl('/sessions/$appId/screens'),
+      what: 'the screens of $appId',
+      timeout: timeout,
+    );
+    if (reply.statusCode != HttpStatus.ok) {
+      throw StateError('screens failed (${reply.statusCode}): ${reply.body}');
+    }
+    final body = json.decode(reply.body) as Map<String, dynamic>;
+    return [for (final s in body['screens'] as List) s as Map<String, dynamic>];
+  }
+
   /// Extract the HTTP control channel info from structured JSON stderr lines.
   ///
   /// Parses the `http_control_channel` structured log entry emitted by the
@@ -1626,7 +1644,7 @@ final class AndroidProbeFailed extends AndroidDeviceProbe {
 ///
 /// Only the envelope every capture path here emits is supported — 8-bit,
 /// non-interlaced, colour type 2 (RGB) or 6 (RGBA), which covers `adb
-/// screencap`, the emulator console, `simctl io screenshot`, CDP and the
+/// screencap`, the emulator console, `devicectl device capture screenshot`, CDP and the
 /// desktop helpers. Anything else throws naming what it found rather than being
 /// waved through: a decoder that quietly handles half of what it is given is
 /// the byte threshold again in a new costume.

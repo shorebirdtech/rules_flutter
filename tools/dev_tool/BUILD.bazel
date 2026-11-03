@@ -5,6 +5,7 @@ exports_files(["pubspec.lock"])
 
 _LIB_DEPS = [
     "@dev_tool_deps//:args",
+    "@dev_tool_deps//:clock",
     "@dev_tool_deps//:dds",
     "@dev_tool_deps//:dwds",
     "@dev_tool_deps//:http_multi_server",
@@ -140,7 +141,10 @@ _UNIT_TESTS = {
     "device_id_test": {},
     "device_test": {
         "fakes": True,
-        "deps": ["@dev_tool_deps//:logging"] + _PATH_DEP,
+        "deps": [
+            "@dev_tool_deps//:fake_async",
+            "@dev_tool_deps//:logging",
+        ] + _PATH_DEP,
     },
     "file_clock_test": {"deps": _PATH_DEP},
     "flutter_error_report_test": {"deps": _PATH_DEP},
@@ -233,6 +237,11 @@ _UNIT_TESTS = {
     "process_group_exec_test": {"data": [":process_group_exec"]},
     "shutdown_signals_test": {},
     "semantics_dump_test": {},
+    "screen_test": {
+        "fakes": True,
+        "data": glob(["test/fixtures/devicectl_displays/*.json"]),
+        "deps": ["@dev_tool_deps//:fake_async"],
+    },
     "screenshot_blankness_test": {
         "harness": True,
         "lifetime": True,

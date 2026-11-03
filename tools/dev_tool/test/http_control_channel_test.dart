@@ -6,6 +6,7 @@ import 'package:flutter_bazel_dev_tool/command_failure.dart';
 import 'package:flutter_bazel_dev_tool/command_runner.dart';
 import 'package:flutter_bazel_dev_tool/device.dart';
 import 'package:flutter_bazel_dev_tool/http_control_channel.dart';
+import 'package:flutter_bazel_dev_tool/screen.dart';
 import 'package:flutter_bazel_dev_tool/session.dart';
 import 'package:flutter_bazel_dev_tool/vm_service_client.dart';
 import 'package:test/test.dart';
@@ -57,17 +58,20 @@ void main() {
       await channel.stop();
     });
 
-    Uri _uri(String path, {bool withToken = true}) {
+    Uri _uri(String path, {bool withToken = true, String? query}) {
       final base = channel.uri;
-      final query = withToken ? 'token=test-token-abc' : '';
-      return base.replace(path: path, query: query);
+      final parts = [if (withToken) 'token=test-token-abc', ?query];
+      return base.replace(path: path, query: parts.join('&'));
     }
 
     Future<HttpClientResponse> _get(
       String path, {
       bool withToken = true,
+      String? query,
     }) async {
-      final request = await client.getUrl(_uri(path, withToken: withToken));
+      final request = await client.getUrl(
+        _uri(path, withToken: withToken, query: query),
+      );
       return request.close();
     }
 
@@ -439,6 +443,145 @@ void main() {
             reason,
           );
         });
+      });
+    });
+
+    // A device with several screens: `screen` names one, a bare request takes
+    // the one the app is on, and a request that cannot be settled says which
+    // screens there are rather than guessing.
+    group('screens', () {
+      const png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+      const folded = [
+        Screen(
+          id: 'ID-A',
+          name: 'LCD',
+          type: 'integrated',
+          width: 1398,
+          height: 2034,
+          active: true,
+          primary: true,
+          captureId: 'ID-A',
+        ),
+        Screen(
+          id: 'ID-B',
+          name: 'LCD-1',
+          type: 'integrated',
+          width: 2007,
+          height: 2853,
+          active: false,
+          captureId: 'ID-B',
+        ),
+      ];
+
+      _CapturingDevice seedDevice(List<Screen> screens) {
+        final device = _CapturingDevice(png, deviceScreens: screens);
+        commandRunner.register(
+          'app.settle',
+          (_) async => {'settled': 'yes'},
+        );
+        sessions['app1'] = DeviceSession(
+          device: device,
+          appInstance: AppInstance(process: _StubProcess()),
+          vmClient: VmServiceClient(),
+          appId: 'app1',
+        );
+        return device;
+      }
+
+      test(
+        'GET /screens lists each screen with whether the app is on it',
+        () async {
+          seedDevice(folded);
+          final response = await _get('/sessions/app1/screens');
+          expect(response.statusCode, HttpStatus.ok);
+          final body = json.decode(
+            await utf8.decoder.bind(response).join(),
+          ) as Map<String, dynamic>;
+          expect(body['screens'], [
+            {
+              'id': 'ID-A',
+              'name': 'LCD',
+              'type': 'integrated',
+              'width': 1398,
+              'height': 2034,
+              'active': true,
+              'primary': true,
+            },
+            {
+              'id': 'ID-B',
+              'name': 'LCD-1',
+              'type': 'integrated',
+              'width': 2007,
+              'height': 2853,
+              'active': false,
+              'primary': false,
+            },
+          ]);
+        },
+      );
+
+      test('GET /screens 404s an unknown appId', () async {
+        final response = await _get('/sessions/nope/screens');
+        expect(response.statusCode, HttpStatus.notFound);
+        await response.drain<void>();
+      });
+
+      test('a screenshot with no screen takes the active one', () async {
+        final device = seedDevice(folded);
+        final response = await _get('/sessions/app1/screenshot/native');
+        await response.drain<void>();
+        expect(response.statusCode, HttpStatus.ok);
+        expect(device.captured.single.name, 'LCD');
+      });
+
+      test('?screen= takes the screen it names, by id or by name', () async {
+        final device = seedDevice(folded);
+        for (final name in ['ID-B', 'LCD-1']) {
+          final response = await _get(
+            '/sessions/app1/screenshot/native',
+            query: 'screen=$name',
+          );
+          await response.drain<void>();
+          expect(response.statusCode, HttpStatus.ok);
+        }
+        expect(device.captured.map((s) => s.id), ['ID-B', 'ID-B']);
+      });
+
+      test('a screen that is not there is a 422 listing the screens', () async {
+        final device = seedDevice(folded);
+        final response = await _get(
+          '/sessions/app1/screenshot/native',
+          query: 'screen=nope',
+        );
+        final body = json.decode(
+          await utf8.decoder.bind(response).join(),
+        ) as Map<String, dynamic>;
+        expect(response.statusCode, HttpStatus.unprocessableEntity);
+        expect(body['error'], contains('No screen is named "nope"'));
+        expect(body['error'], contains('LCD-1 (id ID-B'));
+        expect((body['screens'] as List).map((s) => (s as Map)['name']), [
+          'LCD',
+          'LCD-1',
+        ]);
+        expect(device.captured, isEmpty);
+      });
+
+      test('two active screens are a 422, not a guess', () async {
+        final device = seedDevice([
+          folded[0],
+          Screen(
+            id: 'ID-B',
+            name: 'LCD-1',
+            type: 'integrated',
+            active: true,
+            captureId: 'ID-B',
+          ),
+        ]);
+        final response = await _get('/sessions/app1/screenshot/native');
+        final body = await utf8.decoder.bind(response).join();
+        expect(response.statusCode, HttpStatus.unprocessableEntity);
+        expect(body, contains('2 of the device'));
+        expect(device.captured, isEmpty);
       });
     });
 
@@ -825,17 +968,30 @@ class _StubDevice extends Device {
 
 /// A device whose platform capture writes [png].
 class _CapturingDevice extends _StubDevice {
-  _CapturingDevice(this.png);
+  _CapturingDevice(this.png, {this.deviceScreens});
 
   final List<int> png;
+  final List<Screen>? deviceScreens;
 
   @override
-  Future<void> screenshot(
+  Future<List<Screen>> screens({ScreenshotDeadline? deadline}) async =>
+      deviceScreens ?? await super.screens();
+
+  /// The screens [captureScreen] was asked for, in order.
+  final captured = <Screen>[];
+
+  @override
+  Future<void> captureScreen(
     AppInstance instance,
-    String outputPath, {
+    String outputPath,
+    Screen screen,
+    ScreenshotDeadline deadline, {
     VmServiceClient? vmClient,
     String? window,
-  }) => File(outputPath).writeAsBytes(png);
+  }) {
+    captured.add(screen);
+    return File(outputPath).writeAsBytes(png);
+  }
 }
 
 /// A device that declares `_flutter.screenshot` unavailable — what iOS and

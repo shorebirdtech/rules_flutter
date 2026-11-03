@@ -1525,3 +1525,30 @@ Map<(int, String), List<ResourceRecord>> dartVmServiceRecords({
       ],
   };
 }
+
+/// How a future ended, for a test that runs under `fakeAsync`, where nothing
+/// can `await` and time moves only when the test says.
+///
+/// Watch a future with [track], move time with `elapse`, then read [done],
+/// [value] and [error]: what had happened by that exact moment.
+class Outcome<T> {
+  bool done = false;
+  T? value;
+  Object? error;
+}
+
+/// Starts watching [future]; see [Outcome].
+Outcome<T> track<T>(Future<T> future) {
+  final outcome = Outcome<T>();
+  future.then<void>(
+    (v) {
+      outcome.done = true;
+      outcome.value = v;
+    },
+    onError: (Object e) {
+      outcome.done = true;
+      outcome.error = e;
+    },
+  );
+  return outcome;
+}

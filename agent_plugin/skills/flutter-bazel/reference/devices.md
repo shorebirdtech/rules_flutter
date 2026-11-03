@@ -31,9 +31,12 @@ may be using the others.
   lock screen still runs the app, but every screenshot shows the lock screen and
   the app draws nothing (`notRendering` on replies). Prefer an emulator for
   anything visual, and do not try to unlock someone's phone.
-- **iPhone.** Screenshots need Xcode 27 or later, whose `devicectl` can
-  capture the screen. With an older Xcode selected, the screenshot fails and
-  says so.
+- **iOS simulator and iPhone.** Screenshots need Xcode 27 or later (measured
+  with 27.2): its `devicectl` lists and captures screens, and knows simulators.
+  With an older Xcode selected the screenshot fails and says so: for a
+  simulator, "devicectl does not know the simulator <udid>"; for a command it
+  lacks, that screenshots need Xcode 27 or later. Select a newer Xcode with
+  `xcode-select` or `DEVELOPER_DIR`.
 - **Chrome.** Pass `--web-run-headless` so the page stays visible to itself: a
   hidden or covered browser window draws no frames.
 - **Linux.** Screenshots use `scrot` and need a display (`DISPLAY` set, or
@@ -63,9 +66,16 @@ may be using the others.
 | Windows | DXGI desktop duplication |
 | Android phone | `adb screencap` |
 | Android emulator | the emulator's own framebuffer capture |
-| iOS simulator | `simctl io screenshot` |
+| iOS simulator | `devicectl device capture screenshot` (Xcode 27 or later) |
 | iPhone | `devicectl device capture screenshot` (Xcode 27 or later) |
 | Chrome | the DevTools protocol's page capture |
+
+A device with more than one screen (the iPhone Duo simulator, an iPhone
+mirrored to a wireless display) captures the screen the app is on. When the tool
+cannot tell which that is, it answers `422` and lists the screens; name one with
+`&screen=<id or name>`. `GET /sessions/<appId>/screens?token=…` lists them, with
+`active` for the one the app is on. See `commands.md`. `window` (macOS) is
+something else: one window of the app, not a screen.
 
 On macOS the window must be on screen. The tool brings it to the front at
 launch; if something covers it later, raise it again (`open <path to .app>`, or
