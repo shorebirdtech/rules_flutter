@@ -1,0 +1,27 @@
+load("@rules_flutter//flutter:linux.bzl", "flutter_linux_engine", "flutter_linux_runner_lib_gen")
+
+# What Flutter's own build (CMake) gives the Linux runner that `flutter create`
+# writes, which the runner relies on without saying so: the engine's headers and
+# library, GTK, and the project's `linux/` directory on the include path (for
+# `flutter/generated_plugin_registrant.h`). The targets here compile and link
+# small programs that use the runner's includes and calls, so each one names the
+# part of that contract it observes. Nothing runs: build with `bazel build //...`
+# (see docs/TESTING.md, "cross_compile_example").
+
+flutter_linux_engine(name = "engine")
+
+# The registrant `flutter create` leaves in `linux/flutter/`, as for an app with
+# no native plugins; `flutter_linux_app` uses such files when the package has them.
+filegroup(
+    name = "committed_registrant",
+    srcs = glob(["linux/flutter/generated_plugin_registrant.*"]),
+)
+
+# The engine calls and includes of the runner, against the committed registrant.
+flutter_linux_runner_lib_gen(
+    name = "probe_engine_api",
+    srcs = ["probes/engine_api.cc"],
+    application = "//:cross_app",
+    engine = ":engine",
+    registrant = ":committed_registrant",
+)
