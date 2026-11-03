@@ -763,6 +763,25 @@ ERROR: An error occurred during the fetch of repository
   path attribute of android_ndk_repository must be set.
 ```
 
+**Maven dependencies.** The androidx and Kotlin jars the runner and plugins compile against come from `@rules_android_maven`, which rules_flutter declares with rules_jvm_external and pins with a lock file (`rules_android_maven_install.json`). Each jar is then fetched by checksum and kept in Bazel's repository cache, so a fresh output base or CI runner does not download them again. If your `MODULE.bazel` declares no `maven.install` of that name, you get this as is.
+
+If you add artifacts to it, say another androidx library that a plugin's `build.gradle` needs, your declaration takes over from rules_flutter's lock file, and without a `lock_file` of your own Bazel resolves every jar at build time and downloads it again for each output base. Name one, create it empty, and let rules_jvm_external fill it; it merges rules_flutter's and rules_android's artifacts into the list it pins:
+
+```starlark
+maven.install(
+    name = "rules_android_maven",
+    artifacts = ["androidx.browser:browser:1.9.0"],
+    lock_file = "//:rules_android_maven_install.json",
+)
+```
+
+```sh
+touch rules_android_maven_install.json
+bazel run @rules_android_maven//:pin
+```
+
+Run `REPIN=1 bazel run @rules_android_maven//:pin` again after changing the artifacts, or bumping rules_flutter or rules_android: Bazel fails the build until you do. [`e2e/plugin_example/MODULE.bazel`](e2e/plugin_example/MODULE.bazel) is a worked example.
+
 No platform flags are needed to build. `flutter_android_app` transitions the application, including its AOT compile and FFI deps, to the Android platform for its `android_abi`:
 
 ```sh

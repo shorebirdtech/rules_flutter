@@ -88,6 +88,13 @@ register_toolchains("@flutter_toolchains//:all")
 # so rules_jvm_external merges these artifacts with rules_android's own maven
 # deps in downstream workspaces — user modules inherit them and only declare
 # artifacts their own code uses.
+#
+# The lock file pins the merged artifacts (these, rules_android's, and nobody
+# else's) so jars are fetched by checksum and cached by Bazel instead of being
+# resolved through Coursier on every fresh output base. A user module that
+# declares its own install of this name replaces it and needs a lock of its
+# own. Regenerate with `REPIN=1 bazel run @rules_android_maven//:pin`; see
+# docs/TESTING.md, "Maven lock files".
 maven = use_extension("@rules_jvm_external//:extensions.bzl", "maven")
 maven.install(
     name = "rules_android_maven",
@@ -118,6 +125,7 @@ maven.install(
         "org.jetbrains.kotlin:kotlin-stdlib:2.1.20",
         "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0",
     ],
+    lock_file = "//:rules_android_maven_install.json",
     repositories = [
         "https://maven.google.com",
         "https://repo1.maven.org/maven2",
