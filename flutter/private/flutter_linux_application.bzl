@@ -112,7 +112,19 @@ def gtk3_sysroot_link_inputs(sysroot_files, lib_dir):
         # DT_NEEDED entries (libX11, libfreetype, ...) inside the sysroot.
         # Unlike `-L` it is consulted *only* for dependencies of shared
         # libraries, never for `-l`, so it cannot shadow the C runtime.
-        link_flags = ["-Wl,-rpath-link," + lib_dir],
+        #
+        # `--allow-shlib-undefined` stops the linker from requiring that the
+        # GTK libraries' own undefined symbols resolve at link time. The
+        # sysroot's libraries are link stubs: some of their dependencies
+        # (libpcre, libexpat, libdbus) sit in its `lib/<triple>/`, next to a
+        # glibc 2.31 that must not meet the host's, and GNU ld 2.46 rejects the
+        # stubs' data symbols (libffi's `ffi_type_*`). The runner's own
+        # undefined symbols are still checked; GTK's are the runtime loader's
+        # job, against the GTK installed on the machine that runs the app.
+        link_flags = [
+            "-Wl,-rpath-link," + lib_dir,
+            "-Wl,--allow-shlib-undefined",
+        ],
     )
 
 # =============================================================================
