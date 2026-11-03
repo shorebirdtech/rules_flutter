@@ -30,7 +30,7 @@ grep '^{' /tmp/flutter_bazel.Ab12Cd/err | jq -r '.text // .line // empty' | tail
 |---|---|
 | `401` `Invalid or missing token` | The token goes in `?token=`, not in a header. Copy it again from the channel's record in `err`. |
 | `404` `unknown appId: null` | `params` has no `appId`. Every `app.*` command needs it. |
-| `404` `Unknown command: app.X. This run offers […]` | Not available on this run, or a typo. The message lists what is. Widget commands are missing on `--wasm` and `--profile` web runs. |
+| `404` `Unknown command: app.X. This run offers […]` | Not available on this run, or a typo. The message lists what is. Widget commands are missing on `--profile` and other non-debug web bundles; `--wasm` and debug `--no-hot -c dbg` runs have them. |
 | `426` `HTTP upgrade (h2c) is not supported` | Your `curl` tried HTTP/2. Add `--http1.1`. |
 | `422` `no widget matching … found` | Nothing in the tree matches. Selectors are exact. Dump the semantics or widget tree and copy the string. If the reply also says the app is not rendering, the tree is stale; see below. |
 | `422` `missing selector` / `ambiguous selector` | Give exactly one of `key`, `text`, `tooltip`, `type`, `semanticsLabel`. |

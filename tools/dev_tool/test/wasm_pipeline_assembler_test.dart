@@ -66,7 +66,7 @@ void main() {
       // `runningCode` is provable here rather than asserted, because the
       // refusal stops before a compiler or a browser is touched.
       expect(reply['succeeded'], isFalse);
-      expect(reply['error'], contains('not supported in WASM'));
+      expect(reply['error'], contains('not available in WASM'));
       expect(reply['runningCode'], 'unchanged');
     });
 
@@ -85,7 +85,7 @@ void main() {
           isNot(contains(_pipelineSentinel)),
           reason: 'the WASM refusal must be the registration that answers',
         );
-        expect(reply['error'], contains('use restart'));
+        expect(reply['error'], contains('Restart with R'));
       },
     );
   });

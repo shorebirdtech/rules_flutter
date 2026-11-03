@@ -259,7 +259,7 @@ void main() {
     );
 
     test(
-      'on --wasm, with no VM service: advertised, and read off a screenshot',
+      'on --wasm, through the page bridge: settles, and reads off a screenshot',
       () async {
         final dt = await startDevTool(
           workspace: e2eWorkspace('web_example'),
@@ -274,9 +274,10 @@ void main() {
         final appId = dt.appId!;
         await dt.waitForHttpControl();
 
-        // The one app.* command such a run has: the rest need a VM service.
+        // The whole agent surface is offered on a debug --wasm run, so a key
+        // press can ask the app whether it went idle.
         expect(dt.commands, contains('app.pressKey'));
-        expect(dt.commands, isNot(contains('app.getText')));
+        expect(dt.commands, contains('app.getText'));
 
         // Drawn before the first key, so Tab lands in the app rather than in
         // a page still loading. Polled for pixels, not for an answer: the
@@ -316,8 +317,7 @@ void main() {
           'Enter',
         ]) {
           final result = await press(dt, appId, key, route: 'browser');
-          expect(result['settled'], 'skipped', reason: '$result');
-          expect(result['settleDetail'], contains('no VM service'));
+          expect(result['settled'], 'yes', reason: '$result');
         }
 
         // One marker square per submitted character: "ab" is two. A missed

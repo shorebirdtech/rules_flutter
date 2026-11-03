@@ -239,23 +239,23 @@ class SessionHost {
   /// `ext.rules_flutter.*` extensions it proxies to.
   ///
   /// Conditional for the same reason `app.buildInfo` and `app.setViewport`
-  /// are: the command list is a statement about this run. Those extensions
-  /// need a VM service to be registered against, and on a browser only the DDC
-  /// dev loop has one — a `--wasm` or `--profile` web run serves a bundle
-  /// built by dart2wasm or dart2js, where `dart:developer`'s `registerExtension`
-  /// is a no-op stub and there is no service to reach it through anyway. Such
-  /// a run would advertise the whole surface and answer every call with
-  /// `no VM service for <appId>` a minute later, which reads as a connection
-  /// that failed rather than one that was never going to exist.
+  /// are: the command list is a statement about this run. Native and the DDC
+  /// dev loop reach the extensions over a VM service, and a debug web bundle
+  /// (`--wasm`, a debug `--no-hot`) over a bridge the page installs, driven
+  /// through the DevTools protocol. A profile or release bundle compiles the
+  /// extensions out, and would otherwise advertise the whole surface and
+  /// answer every call with a failure that reads as a connection problem
+  /// rather than as a build that never had them.
   void registerAgentCommands() =>
       setUpAgentCommands(commandRunner, findSession);
 
-  /// Offer `app.pressKey` on its own, for a web run with no agent surface.
+  /// Offer `app.pressKey` on its own, for a web run with no agent surface (a
+  /// non-debug bundle).
   ///
   /// The one `app.*` command such a run can answer: its keys go to the
-  /// browser over the DevTools protocol, which needs no VM service. With no
-  /// VM service there is nothing to ask whether the app has gone idle
-  /// afterwards, so it answers without waiting and says so.
+  /// browser over the DevTools protocol, which needs nothing from the app.
+  /// With no agent extensions in the app there is nothing to ask whether it
+  /// has gone idle afterwards, so it answers without waiting and says so.
   void registerPressKey() =>
       registerPressKeyCommand(commandRunner, findSession, canSettle: false);
 

@@ -10,6 +10,7 @@ import 'dart:io';
 
 import 'package:dds/dds.dart';
 
+import 'app_extension_channel.dart';
 import 'command_report.dart';
 import 'command_runner.dart';
 import 'device.dart';
@@ -38,6 +39,24 @@ class DeviceSession {
   AppInstance _appInstance;
 
   VmServiceClient? vmClient;
+
+  /// How the `app.*` agent commands reach this app's service extensions: its
+  /// VM service where there is one, otherwise — a bundled debug web build —
+  /// the browser's bridge over the DevTools protocol. Null where neither
+  /// exists yet (the DDC dev loop before DWDS hands its connection over) or at
+  /// all (`--allow-no-vm-service`).
+  AppExtensionChannel? get extensionChannel {
+    final client = vmClient;
+    if (client != null) {
+      if (_vmChannel?.client != client) _vmChannel = VmExtensionChannel(client);
+      return _vmChannel;
+    }
+    final d = device;
+    return d is WebDevice ? d.browserChannel : null;
+  }
+
+  VmExtensionChannel? _vmChannel;
+
   final String appId;
   String? devToolsUrl;
   Process? devToolsProcess;
@@ -129,7 +148,7 @@ class DeviceSession {
   /// the work being waited on here, and the platform note on the iOS override
   /// is what both are sized against.
   Future<void> waitUntilDrivable(MachineProtocol protocol) async {
-    final client = vmClient;
+    final client = extensionChannel;
     if (client == null) {
       // Left unsettled rather than refused, because "no client yet" is the
       // normal web case, not a failure: a browser's VM service is handed over

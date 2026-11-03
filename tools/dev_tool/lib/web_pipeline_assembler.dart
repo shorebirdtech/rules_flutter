@@ -805,9 +805,10 @@ class WebPipelineAssembler {
   }
 }
 
-/// The WASM dev loop, which is not a dev loop: `dart2wasm` has no incremental
-/// compiler and no VM service, so "hot restart" is a bazel rebuild plus a CDP
-/// page reload, and hot reload does not exist at all.
+/// The WASM run: `dart2wasm` in this Dart SDK has no incremental compiler and
+/// no way to swap code into a running module, so "hot restart" is a bazel
+/// rebuild plus a CDP page reload, and hot reload does not exist at all. (The
+/// `app.*` agent commands still work, through the page's agent bridge.)
 ///
 /// Its handlers deliberately shadow the pipeline-backed ones, so this must be
 /// assembled *after* [SessionHost.registerReloadCommands] — `CommandRunner`
@@ -923,16 +924,22 @@ class WasmPipelineAssembler {
       params,
     ) async {
       // The one refusal in this file, and the strongest case for `unavailable`
-      // there is: dart2wasm has no incremental path at all, so this run can
-      // never hot reload — which is precisely what a client is entitled to
-      // conclude from the field. It also stops before a compiler or a browser
+      // there is: dart2wasm in this Dart SDK has no incremental compiler and
+      // no way to swap code into a running module, so this run can never hot
+      // reload — which is precisely what a client is entitled to conclude from
+      // the field. Upstream `flutter run --wasm` turns a reload into a restart;
+      // this tool refuses instead of silently restarting. It also stops before a compiler or a browser
       // is touched, so `runningCode: unchanged` is provable rather than
       // asserted.
       return toWire(
         CommandReport(
           verb: 'Hot reload',
           unavailable:
-              'Hot reload is not supported in WASM mode — use restart (R).',
+              'Hot reload is not available in WASM mode: dart2wasm in this '
+              'Dart SDK has no incremental compiler and no way to swap code '
+              'into a running module. Upstream `flutter run --wasm` restarts '
+              'on reload; this tool refuses rather than silently restarting. '
+              'Restart with R (or app.restart) to rebuild and reload the page.',
         ),
       );
     });

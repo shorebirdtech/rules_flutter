@@ -51,6 +51,7 @@ import 'package:clock/clock.dart';
 import 'package:path/path.dart' as p;
 
 import 'app_log.dart';
+import 'browser_extension_channel.dart';
 import 'build_mode.dart';
 import 'cdp_console.dart';
 import 'compiler_config.dart';
@@ -4240,6 +4241,13 @@ class WebDevice extends Device {
   /// library docs.
   CdpConsoleClient? _consoleClient;
 
+  /// How the `app.*` agent commands reach the page's extensions when there is
+  /// no VM service to reach them through: a bundled debug build (`--wasm`, or
+  /// a debug `--no-hot` run), whose generated main installs a JavaScript
+  /// bridge. Null for the DDC dev loop, which has a VM service, and for a
+  /// bundle that is not a debug build, which compiles the extensions out.
+  BrowserExtensionChannel? browserChannel;
+
   WebDevice({ProcessStarter? startProcess})
     : _startProcess = startProcess ?? Process.start;
 
@@ -4429,6 +4437,13 @@ class WebDevice extends Device {
     _pageWebSocketDebuggerUrl = session.pageWebSocketDebuggerUrl;
     final logs = _newAppLogs(onLog);
 
+    if (buildMode == BuildMode.debug) {
+      browserChannel = BrowserExtensionChannel.forPage(
+        cdpPort: _cdpPort!,
+        appUrl: url,
+      );
+    }
+
     // No DWDS on this path (WASM / production JS), so CDP is the only source
     // of the app's console output.
     _consoleClient = CdpConsoleClient(
@@ -4479,6 +4494,8 @@ class WebDevice extends Device {
     // expires if the client ever grows chatty outbound traffic.
     await _consoleClient?.close();
     _consoleClient = null;
+    await browserChannel?.close();
+    browserChannel = null;
     // Taken off first, so closing it is not reported as the viewport lost.
     final viewportHold = _viewportHold;
     _viewportHold = null;
@@ -4845,14 +4862,19 @@ Future<Map<String, dynamic>> _sendCdpToPage(
 ///
 /// The target is resolved when the connection opens and not after, so hold
 /// one only for a single operation: see [pickCdpPageTarget].
-class CdpPageConnection {
+class CdpPageConnection implements CdpSender {
   final WebSocket _ws;
   final _pending = <int, Completer<Map<String, dynamic>>>{};
   var _nextId = 1;
   Object? _closedBy;
   final _done = Completer<void>();
+  final _events = StreamController<Map<String, dynamic>>.broadcast();
+
+  @override
+  Stream<Map<String, dynamic>> get events => _events.stream;
 
   /// Whether the socket has closed, from either end.
+  @override
   bool get isClosed => _closedBy != null;
 
   /// Completes when the socket closes, from either end — what a holder of a
@@ -4864,7 +4886,11 @@ class CdpPageConnection {
       (data) {
         final msg = json.decode(data as String) as Map<String, dynamic>;
         final id = msg['id'];
-        if (id is int) _pending.remove(id)?.complete(msg);
+        if (id is int) {
+          _pending.remove(id)?.complete(msg);
+        } else if (msg['method'] is String) {
+          _events.add(msg);
+        }
       },
       // A page that navigates away or a browser that exits closes the socket;
       // every command still waiting would otherwise spend its whole timeout
@@ -4880,7 +4906,10 @@ class CdpPageConnection {
       c.completeError(error);
     }
     _pending.clear();
-    if (!_done.isCompleted) _done.complete();
+    if (!_done.isCompleted) {
+      _done.complete();
+      unawaited(_events.close());
+    }
   }
 
   /// Connect to the page serving [appUrl] on [cdpPort].
@@ -4898,6 +4927,7 @@ class CdpPageConnection {
   ///
   /// Bounded: a browser that stops answering would otherwise hold the
   /// command pool's only slot for the rest of the run.
+  @override
   Future<Map<String, dynamic>> send(
     String method,
     Map<String, dynamic> params, {
@@ -4921,6 +4951,7 @@ class CdpPageConnection {
     return response;
   }
 
+  @override
   Future<void> close() {
     _fail(StateError('the page\'s CDP connection was closed here'));
     return _ws.close();

@@ -121,6 +121,13 @@ _UNIT_TESTS = {
         "deps": ["@dev_tool_deps//:logging"],
     },
     "build_command_test": {},
+    "browser_extension_channel_test": {
+        "fakes": True,
+        "deps": [
+            "@dev_tool_deps//:fake_async",
+            "@dev_tool_deps//:vm_service",
+        ],
+    },
     "build_info_test": {"fakes": True},
     "bundle_rebuild_test": {},
     "fake_process_stdin_test": {"fakes": True},

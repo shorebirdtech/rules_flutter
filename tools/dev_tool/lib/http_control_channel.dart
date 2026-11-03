@@ -368,7 +368,7 @@ class HttpControlChannel {
   /// worth having, so the capture goes ahead and the answer says so:
   /// `X-Settled: yes` when it went idle first, `no` when the wait ran out or
   /// the app is backgrounded, `skipped` when `?settle=false` was asked for or
-  /// this run has no VM service to ask through (`--wasm`, `--profile`).
+  /// this run's app cannot be asked (a profile or release web bundle).
   /// `X-Settle-Detail` carries the reason for anything but `yes`, encoded by
   /// [_headerValue].
   Future<({String state, String? detail})> _settleBeforeCapture(
@@ -386,10 +386,11 @@ class HttpControlChannel {
       return (state: 'skipped', detail: 'the caller asked not to wait');
     }
     // Whether this app can be asked anything at all. Two ways it cannot: the
-    // run offers no `app.*` surface (a wasm or static web bundle has no VM
-    // service behind it, and no flag changes that), or a native session has no
-    // client — native owns one from the moment the session exists, so null
-    // there is permanent.
+    // run offers no `app.*` surface (a profile or release web bundle compiles
+    // the agent extensions out, and no flag changes that), or a native session
+    // has no channel — native owns a VM client from the moment the session
+    // exists, so null there is permanent. A debug wasm or static bundle is
+    // askable over its browser channel, like any web run.
     //
     // Deliberately not `vmClient == null` on its own, which is what this read.
     // On web that field is null for the first seconds of *every* run: DWDS
@@ -402,13 +403,11 @@ class HttpControlChannel {
     // command does, so asking it is what tells "not yet" from "never".
     final askable =
         _commandRunner.knows('app.settle') &&
-        (session.device is WebDevice || session.vmClient != null);
+        (session.device is WebDevice || session.extensionChannel != null);
     if (!askable) {
       return (
         state: 'skipped',
-        detail:
-            'this run has no VM service, so the app cannot be asked whether '
-            'it is idle',
+        detail: 'this run offers no way to ask the app whether it is idle',
       );
     }
     try {

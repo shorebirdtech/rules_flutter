@@ -169,15 +169,17 @@ class RunPlan {
   /// Whether this run's app carries the `ext.rules_flutter.*` extensions the
   /// `app.*` agent surface proxies to.
   ///
-  /// They are registered with `dart:developer` and reached over a VM service,
-  /// so a native run has them and, on a browser, only the DDC dev loop does —
-  /// see [DdcWebMode], which is where that fact is written down. A `--wasm` or
-  /// `--profile` web run serves a bundle compiled by dart2wasm or dart2js,
-  /// where `registerExtension` is a no-op stub, to a page with no VM service
-  /// behind it. Decided here so such a run stops advertising commands it can
-  /// only refuse.
-  bool get hasAgentSurface =>
-      hasAgentSurfaceFor(isWebDevice: isWebDevice, isDdcWeb: isDdcWeb);
+  /// A native run and the DDC dev loop reach them over a VM service. A bundled
+  /// web run (`--wasm`, `--profile`, `--no-hot`) has none, but a debug bundle
+  /// has the extensions compiled in with a JavaScript bridge the dev tool
+  /// drives over the DevTools protocol (see `BrowserExtensionChannel`); a
+  /// non-debug bundle compiles them out. Decided here so a run stops
+  /// advertising commands it can only refuse.
+  bool get hasAgentSurface => hasAgentSurfaceFor(
+    isWebDevice: isWebDevice,
+    isDdcWeb: isDdcWeb,
+    buildMode: buildMode,
+  );
 
   /// The same run, in the vocabulary upstream's daemon protocol uses for
   /// `app.start`'s `mode` field.
@@ -558,8 +560,13 @@ bool carriesBuildInfoFor({
 
 /// Whether a run with these properties can answer the `app.*` agent surface.
 ///
+/// Native and the DDC dev loop always can. A bundled web run can exactly when
+/// it is a debug build: the extensions and their page bridge are compiled into
+/// debug bundles only.
+///
 /// Pulled out of [RunPlan] for the same reason [carriesBuildInfoFor] is.
 bool hasAgentSurfaceFor({
   required bool isWebDevice,
   required bool isDdcWeb,
-}) => !isWebDevice || isDdcWeb;
+  required BuildMode buildMode,
+}) => !isWebDevice || isDdcWeb || buildMode == BuildMode.debug;

@@ -105,15 +105,13 @@ void main() {
   });
 
   group('Web/Chrome e2e', () {
-    // Two facts a `--wasm` run has to state rather than leave a caller to
-    // discover. dart2wasm produces a bundle with no VM service behind it, so
-    // the `app.*` agent surface cannot exist; advertised anyway it answers `no
-    // VM service for <appId>` a minute later, which reads as a connection that
-    // failed rather than one that was never going to exist. And the address has
-    // to be announced: this tool launches Chrome with its own scratch profile,
-    // `--web-run-headless` gives it no window, and the address is otherwise
-    // recoverable only from that process's argv.
-    test('a WASM run says where the app is, and what it cannot do', () async {
+    // Two facts a `--wasm` run has to state. It has the `app.*` agent surface
+    // even though dart2wasm leaves no VM service: the debug bundle's page
+    // bridge is driven over the DevTools protocol, so the command list must
+    // offer it. And the address has to be announced: this tool launches Chrome
+    // with its own scratch profile, `--web-run-headless` gives it no window,
+    // and the address is otherwise recoverable only from that process's argv.
+    test('a WASM run says where the app is, and offers the agent surface', () async {
       final dt = await startDevTool(
         workspace: workspace,
         target: ':app_wasm',
@@ -140,41 +138,116 @@ void main() {
 
       await dt.waitForEvent('app.started', timeout: const Duration(minutes: 4));
 
-      // Said once, up front, rather than one refused command at a time.
-      final absent = json.decode(
-        await dt.waitForStderr(
-          'agent_surface_unavailable',
-          timeout: const Duration(seconds: 30),
-        ),
-      ) as Map<String, dynamic>;
-      expect(absent['reason'], 'wasm');
-
-      // And the surface really is absent, not present-and-refusing.
-      final refusal = await dt.sendCommand(
-        1,
-        'app.getText',
-        params: {'appId': params['appId'], 'text': 'anything'},
-      );
-      expect(refusal['error'], contains('Unknown command: app.getText'));
-
-      // What a WASM run *can* still do is unaffected: its console arrives
-      // over CDP rather than a VM service.
-      expect(dt.commands, isNot(contains('app.getText')));
+      // The surface is offered, not refused one command at a time.
+      expect(dt.commands, contains('app.getText'));
+      expect(dt.commands, contains('app.dumpWidgetTree'));
       expect(dt.commands, contains('app.restart'));
+      // Hot reload stays refused, with the reason, rather than restarting.
+      expect(dt.commands, contains('app.hotReload'));
 
-      // A screenshot waits for the app to go idle first — except here, where
-      // there is no VM service to ask. Said rather than silently skipped: the
-      // header is how a caller learns the picture carries no such promise,
-      // and on this run it is why waiting for a capturable page is the
-      // caller's job rather than the endpoint's.
+      // A screenshot waits for the app to go idle first, through the page
+      // bridge, so the header says it did.
       final appId = params['appId']! as String;
       await dt.nativeScreenshotWhenOnScreen(appId);
       final shot = await dt.httpNativeScreenshotReply(appId);
-      expect(shot.settled, 'skipped');
-      expect(shot.detail, contains('no VM service'));
+      expect(shot.settled, 'yes', reason: shot.detail);
 
       await dt.sendCommand(2, 'daemon.shutdown');
     }, timeout: const Timeout(Duration(minutes: 6)));
+
+    // The agent surface on a dart2wasm bundle, which has no VM service: every
+    // call travels over the DevTools protocol to the bridge the debug build's
+    // generated main installs. Restart is a rebuild plus a page reload, so the
+    // last step proves the channel finds the bridge again on the new document.
+    test('a WASM run is driven through the agent commands', () async {
+      final dt = await startDevTool(
+        workspace: workspace,
+        target: ':app_wasm',
+        device: 'chrome',
+        extraArgs: const ['--wasm', '--web-run-headless'],
+      );
+      await dt.waitForEvent('app.started', timeout: const Duration(minutes: 4));
+      final appId = dt.appId!;
+      await dt.waitForHttpControl();
+
+      final ready = await dt.httpCommand('app.waitFor', {
+        'appId': appId,
+        'key': 'keys_field',
+        'timeoutMs': '60000',
+      });
+      expect(ready['error'], isNull, reason: 'keys_field: ${ready['error']}');
+
+      final tree = await dt.httpCommand('app.dumpWidgetTree', {'appId': appId});
+      expect(tree['error'], isNull, reason: '${tree['error']}');
+      expect(tree['result'].toString(), contains('keys_field'));
+
+      final semantics = await dt.httpCommand('app.dumpSemanticsTree', {
+        'appId': appId,
+      });
+      expect(semantics['error'], isNull, reason: '${semantics['error']}');
+      expect(semantics['result']?['text'], contains('Increment'));
+
+      var submitted = await dt.httpCommand('app.getText', {
+        'appId': appId,
+        'key': 'keys_submitted',
+      });
+      expect(submitted['error'], isNull, reason: '${submitted['error']}');
+      expect(submitted['result']?['text'], 'submitted: ');
+
+      // A tap whose effect reads back: the counter shows 1 afterwards.
+      final tap = await dt.httpCommand('app.tap', {
+        'appId': appId,
+        'tooltip': 'Increment',
+      });
+      expect(tap['error'], isNull, reason: 'app.tap: ${tap['error']}');
+      final counted = await dt.httpCommand('app.waitFor', {
+        'appId': appId,
+        'text': '1',
+        'timeoutMs': '10000',
+      });
+      expect(counted['error'], isNull, reason: 'counter: ${counted['error']}');
+
+      // Typed text, read back after the field submits it.
+      await dt.httpCommand('app.tap', {'appId': appId, 'key': 'keys_field'});
+      final typed = await dt.httpCommand('app.enterText', {
+        'appId': appId,
+        'key': 'keys_field',
+        'text': 'wasm',
+      });
+      expect(typed['error'], isNull, reason: 'enterText: ${typed['error']}');
+      final enter = await dt.httpCommand('app.pressKey', {
+        'appId': appId,
+        'key': 'Enter',
+      });
+      expect(enter['error'], isNull, reason: 'pressKey: ${enter['error']}');
+      expect(enter['result']?['settled'], 'yes', reason: '${enter['result']}');
+      submitted = await dt.httpCommand('app.getText', {
+        'appId': appId,
+        'key': 'keys_submitted',
+      });
+      expect(submitted['result']?['text'], 'submitted: wasm');
+
+      final shot = await dt.httpNativeScreenshotReply(appId);
+      expect(shot.settled, 'yes', reason: shot.detail);
+      expectRendered(shot.bytes, what: 'the driven WASM app');
+
+      // A restart reloads the page: state is gone and the bridge is installed
+      // afresh, which the next command has to wait for and find.
+      final restart = await dt.httpCommand('app.restart', {'appId': appId});
+      expect(
+        restart['error'],
+        isNull,
+        reason: 'app.restart: ${restart['error']}',
+      );
+      final after = await dt.httpCommand('app.getText', {
+        'appId': appId,
+        'key': 'keys_submitted',
+      });
+      expect(after['error'], isNull, reason: '${after['error']}');
+      expect(after['result']?['text'], 'submitted: ');
+
+      await dt.sendCommand(1, 'daemon.shutdown');
+    }, timeout: const Timeout(Duration(minutes: 8)));
 
     test('WASM screenshot via HTTP control channel', () async {
       final dt = await startDevTool(

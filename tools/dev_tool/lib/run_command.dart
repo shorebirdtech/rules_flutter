@@ -130,7 +130,10 @@ class RunCommand {
     ..addFlag(
       'wasm',
       defaultsTo: false,
-      help: 'Run web app in WASM mode (no hot reload, uses bazel rebuild + page reload).',
+      help:
+          'Run web app compiled with dart2wasm. The app.* agent commands '
+          'work (over the DevTools protocol, in a debug build); there is no '
+          'hot reload, and a restart is a bazel rebuild plus a page reload.',
     )
     ..addOption(
       'web-port',
@@ -373,8 +376,8 @@ class RunCommand {
       if (plan.hasAgentSurface) {
         host.registerAgentCommands();
       } else {
-        // Keys go to the browser over CDP, which needs no VM service, so a
-        // run without the agent surface still has a keyboard.
+        // Keys go to the browser over CDP, so a run without the agent surface
+        // still has a keyboard.
         host.registerPressKey();
         // Said once, at the top of the run, rather than left to be discovered
         // one refused command at a time. The absence is structural and known
@@ -385,14 +388,14 @@ class RunCommand {
         logger.info({
           'message': 'agent_surface_unavailable',
           'text':
-              'This run has no VM service, so the app.* agent commands (tap, '
-              'enterText, getText, waitFor, dumpWidgetTree, …) are not offered: '
-              '${absent.because} What still works: app.pressKey (real key '
-              'events in the browser), the app console '
+              'This run is a ${plan.buildMode.name} build, so the app.* agent '
+              'commands (tap, enterText, getText, waitFor, dumpWidgetTree, …) '
+              'are not offered: ${absent.because} What still works: '
+              'app.pressKey (real key events in the browser), the app console '
               '(GET /sessions/{appId}/logs), a browser screenshot '
               '(GET /sessions/{appId}/screenshot/native) and app.restart. To '
-              'drive the widget tree, run the DDC dev loop instead — the same '
-              'target with neither --wasm nor --profile.',
+              'drive the widget tree, run a debug build: the same target '
+              'without --profile, and with -c dbg when --no-hot is given.',
           'reason': absent.reason,
         });
       }
@@ -678,22 +681,24 @@ class RunCommand {
 /// One switch for both, so the tag a client matches on and the sentence a
 /// person reads cannot come to describe different runs.
 ///
-/// Only ever asked of a web run — [RunPlan.hasAgentSurface] is true for every
-/// native one — and the switch is exhaustive over [WebMode] so a fourth shape
-/// cannot be added without answering here.
+/// Only ever asked of a bundled web run in a non-debug mode —
+/// [RunPlan.hasAgentSurface] is true for every other run — and the switch is
+/// exhaustive over [WebMode] so a fourth shape cannot be added without
+/// answering here.
 ({String reason, String because}) _noAgentSurface(RunPlan plan) =>
     switch (plan.webMode) {
       WasmWebMode() => (
-        reason: 'wasm',
+        reason: 'wasm_${plan.buildMode.name}',
         because:
-            'dart2wasm compiles the app to a bundle with no VM service '
-            'behind it, and no flag changes that.',
+            'the agent extensions are compiled into debug builds only, and '
+            'this --wasm run is a ${plan.buildMode.name} build (--profile).',
       ),
       StaticWebMode() => (
-        reason: 'static_bundle',
+        reason: 'static_bundle_${plan.buildMode.name}',
         because:
-            'this run serves a built bundle (--profile or --no-hot), which '
-            'has no VM service.',
+            'the agent extensions are compiled into debug builds only, and '
+            'this run serves a ${plan.buildMode.name} bundle (--profile or '
+            '--no-hot without -c dbg).',
       ),
       DdcWebMode() || null => throw StateError(
         'A DDC or native run has the agent surface; nothing should be asking '

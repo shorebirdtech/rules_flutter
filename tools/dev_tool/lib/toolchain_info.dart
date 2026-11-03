@@ -378,11 +378,11 @@ class DevConfig {
   /// (`registerRulesFlutterAgentExtensions()`), or `''` for a config that
   /// predates them.
   ///
-  /// Web only, and dev-loop only. The native rules compile the same source into
-  /// the app's kernel and let the engine's pre-main registrant hook call it;
-  /// the web bundle cannot, because dart2wasm/dart2js stub out
-  /// `registerExtension`. So the DDC dev loop is the one place it can run, and
-  /// the dev tool imports it from the synthetic entrypoint it generates.
+  /// Web only, and for the DDC dev loop: the dev tool imports it from the
+  /// synthetic entrypoint it generates and reaches it through DWDS. The native
+  /// rules compile the same source into the app's kernel; a debug web bundle
+  /// compiles it in too, behind the bridge that serves it without a VM service
+  /// (`agent_extensions/web_bridge.dart`), and needs nothing from this field.
   final String agentExtensions;
 
   /// Absolute path to the bootstrap the dev server answers

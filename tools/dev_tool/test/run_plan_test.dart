@@ -323,21 +323,33 @@ void main() {
     });
   });
 
-  // The `app.*` commands proxy to `ext.rules_flutter.*` over a VM service.
-  // Every native run has one; on a browser only the DDC dev loop does, so a
-  // `--wasm` or `--profile` run advertising the whole surface could answer
-  // every call only with `no VM service for <appId>`.
+  // The `app.*` commands proxy to `ext.rules_flutter.*`: over a VM service on
+  // native and DDC, over a page bridge in a debug web bundle. Only a non-debug
+  // bundle compiles the extensions out.
   group('hasAgentSurfaceFor', () {
-    test('a native run has it, DDC or not', () {
-      expect(hasAgentSurfaceFor(isWebDevice: false, isDdcWeb: false), isTrue);
+    bool surface({
+      required bool web,
+      required bool ddc,
+      required BuildMode mode,
+    }) => hasAgentSurfaceFor(isWebDevice: web, isDdcWeb: ddc, buildMode: mode);
+
+    test('a native run has it', () {
+      for (final mode in BuildMode.values) {
+        expect(surface(web: false, ddc: false, mode: mode), isTrue);
+      }
     });
 
     test('the DDC dev loop has it', () {
-      expect(hasAgentSurfaceFor(isWebDevice: true, isDdcWeb: true), isTrue);
+      expect(surface(web: true, ddc: true, mode: BuildMode.debug), isTrue);
     });
 
-    test('a web run serving a built bundle does not', () {
-      expect(hasAgentSurfaceFor(isWebDevice: true, isDdcWeb: false), isFalse);
+    test('a debug bundle (--wasm, --no-hot -c dbg) has it', () {
+      expect(surface(web: true, ddc: false, mode: BuildMode.debug), isTrue);
+    });
+
+    test('a profile or release bundle does not', () {
+      expect(surface(web: true, ddc: false, mode: BuildMode.profile), isFalse);
+      expect(surface(web: true, ddc: false, mode: BuildMode.release), isFalse);
     });
   });
 }

@@ -24,23 +24,29 @@ sealed class WebMode {
 
 /// The DDC dev loop: the module server fronts the browser, DWDS provides the
 /// VM service, and an edit becomes a state-preserving hot reload. The only
-/// web shape with a VM service, and therefore the only one with DevTools,
-/// agent control, and an app console sourced from the VM.
+/// web shape with a VM service, and therefore the only one with DevTools and
+/// an app console sourced from the VM. (The agent surface is not exclusive to
+/// it: a debug bundle has it too, over a page bridge.)
 final class DdcWebMode extends WebMode {
   const DdcWebMode();
 }
 
-/// The WASM dev loop, which is not a dev loop: `dart2wasm` has no incremental
-/// compiler and no VM service, so "hot restart" is a bazel rebuild plus a CDP
-/// page reload, and hot reload does not exist at all. The bundle is served
-/// statically; the app console arrives over CDP.
+/// A `dart2wasm` bundle served statically. It has the `app.*` agent surface in
+/// a debug build, reached over the Chrome DevTools Protocol through a bridge
+/// the generated main installs on the page (there is no VM service). Hot
+/// restart is a bazel rebuild (dart2wasm, debug) plus a page reload; hot reload
+/// does not exist, because dart2wasm in this Dart SDK has no incremental
+/// compiler and no way to swap code into a running module. The app console
+/// arrives over CDP.
 final class WasmWebMode extends WebMode {
   const WasmWebMode();
 }
 
 /// A built bundle served statically: no VM service, no reload of any kind.
 /// What `--profile` and `--no-hot` resolve to on a browser. The app console
-/// arrives over CDP; a screenshot is CDP's `Page.captureScreenshot`.
+/// arrives over CDP; a screenshot is CDP's `Page.captureScreenshot`. A debug
+/// bundle (`--no-hot -c dbg`) has the agent surface over the page bridge; a
+/// profile or release one compiles it out.
 final class StaticWebMode extends WebMode {
   const StaticWebMode();
 }
@@ -82,10 +88,12 @@ WebMode? resolveWebMode({
   if (wasmMode) {
     if (hotExplicit && hotReloadEnabled) {
       throw DevToolException(
-        '--hot cannot be honored with --wasm: dart2wasm has no incremental '
-        'compiler, so a WASM run has no hot reload — only restart '
-        '(a bazel rebuild plus a page reload). Drop --hot, or drop --wasm '
-        'to get the DDC dev loop with hot reload.',
+        '--hot cannot be honored with --wasm: dart2wasm in this Dart SDK has '
+        'no incremental compiler and no way to swap code into a running '
+        'module, so a WASM run has no hot reload — only restart (a bazel '
+        'rebuild plus a page reload). Upstream `flutter run --wasm` restarts '
+        'on reload too; this tool refuses rather than silently restarting. '
+        'Drop --hot, or drop --wasm to get the DDC dev loop with hot reload.',
       );
     }
     return const WasmWebMode();
