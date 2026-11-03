@@ -598,14 +598,16 @@ def flutter_register_toolchains(name, **kwargs):
 
     # iOS engine repo (lazy — only downloaded when iOS targets are built).
     # One repo carries both the release engine (device, AOT) and the debug
-    # engine (simulator, JIT); the iOS macros select() between its two targets,
-    # so consumers only need a single `flutter_ios_engine` use_repo entry —
-    # matching the macOS engine alias repo.
+    # engine (simulator, JIT), and aliases the profile engine below; its
+    # `Flutter_xcframework` follows the build mode, so consumers only need a
+    # single `flutter_ios_engine` use_repo entry — matching the macOS engine
+    # alias repo.
     flutter_ios_engine_repo(
         name = name + "_ios_engine",
         engine_revision = meta.engine_revision,
         release_sha256 = checksums.get(ios_engine_artifact_path("release"), ""),
         debug_sha256 = checksums.get(ios_engine_artifact_path("debug"), ""),
+        profile_repo_name = name + "_ios_engine_profile",
     )
 
     # The iOS profile engine and its gen_snapshot, apart so only a profile
@@ -628,7 +630,8 @@ exports_files(["gen_snapshot_arm64"], visibility = ["//visibility:public"])
     )
 
     # macOS engine alias repo — stable name that delegates to the host
-    # platform's engine_library (FlutterMacOS.framework).
+    # platform's FlutterMacOS.framework; its `engine_library` follows the
+    # build mode.
     flutter_macos_engine_repo(
         name = name + "_macos_engine",
         user_repository_name = name,

@@ -62,7 +62,7 @@ load("@rules_apple//apple:apple.bzl", "apple_dynamic_framework_import", "apple_d
 load("@rules_apple//apple:ios.bzl", "ios_application")
 load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
 load("@rules_swift//swift:swift.bzl", "swift_library")
-load("//flutter/private:apple_engine.bzl", _ios_engine_xcframework = "ios_engine_xcframework")
+load("//flutter/private:apple_engine.bzl", _IOS_ENGINE_XCFRAMEWORK = "IOS_ENGINE_XCFRAMEWORK")
 load("//flutter/private:constants.bzl", _IOS_MINIMUM_OS_VERSION = "IOS_MINIMUM_OS_VERSION")
 load("//flutter/private:debug_build.bzl", _debug_build = "debug_build")
 load("//flutter/private:flutter_apple_plugin_library.bzl", _flutter_apple_plugin_library_macro = "flutter_apple_plugin_library")
@@ -185,9 +185,11 @@ def flutter_ios_framework_gen(name, application, minimum_os_version = IOS_MINIMU
     )
 
 def flutter_ios_engine(name, **kwargs):
-    """Imports the Flutter.xcframework engine, auto-selecting debug or release.
+    """Imports the Flutter.xcframework engine for the build mode.
 
     Debug mode (-c dbg): JIT engine for simulator.
+    Profile mode (-c opt with `//flutter:profile`): AOT engine with the VM
+    service, for device.
     Release mode (-c opt / default): AOT engine for device.
 
     Args:
@@ -198,7 +200,7 @@ def flutter_ios_engine(name, **kwargs):
 
     apple_dynamic_xcframework_import(
         name = name,
-        xcframework_imports = _ios_engine_xcframework(),
+        xcframework_imports = _IOS_ENGINE_XCFRAMEWORK,
         tags = tags,
         **kwargs
     )
@@ -517,10 +519,10 @@ def flutter_ios_app(
         tags = tags,
     )
 
-    # 5. Import Flutter.xcframework engine — auto-selects debug/release.
+    # 5. Import Flutter.xcframework engine — follows the build mode.
     apple_dynamic_xcframework_import(
         name = "__%s_engine" % name,
-        xcframework_imports = _ios_engine_xcframework(),
+        xcframework_imports = _IOS_ENGINE_XCFRAMEWORK,
         tags = tags,
     )
 

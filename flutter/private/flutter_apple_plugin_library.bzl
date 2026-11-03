@@ -23,7 +23,7 @@ load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@rules_apple//apple:apple.bzl", "apple_dynamic_framework_import", "apple_dynamic_xcframework_import")
 load("@rules_cc//cc:objc_library.bzl", "objc_library")
 load("@rules_swift//swift:swift.bzl", "swift_library")
-load(":apple_engine.bzl", "ios_engine_xcframework", "macos_engine_framework")
+load(":apple_engine.bzl", "IOS_ENGINE_XCFRAMEWORK", "MACOS_ENGINE_FRAMEWORK")
 
 def _split_srcs(srcs):
     """Split srcs into (swift_files, objc_files, headers).
@@ -129,7 +129,7 @@ def flutter_apple_plugin_library(
     if platform == "macos":
         apple_dynamic_framework_import(
             name = framework_target,
-            framework_imports = macos_engine_framework(),
+            framework_imports = MACOS_ENGINE_FRAMEWORK,
             tags = tags,
             target_compatible_with = target_compatible_with,
             visibility = ["//visibility:private"],
@@ -137,7 +137,7 @@ def flutter_apple_plugin_library(
     else:
         apple_dynamic_xcframework_import(
             name = framework_target,
-            xcframework_imports = ios_engine_xcframework(),
+            xcframework_imports = IOS_ENGINE_XCFRAMEWORK,
             tags = tags,
             target_compatible_with = target_compatible_with,
             visibility = ["//visibility:private"],

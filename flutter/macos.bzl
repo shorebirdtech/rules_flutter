@@ -62,7 +62,7 @@ load("@rules_apple//apple:apple.bzl", "apple_dynamic_framework_import")
 load("@rules_apple//apple:macos.bzl", "macos_application")
 load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
 load("@rules_swift//swift:swift.bzl", "swift_library")
-load("//flutter/private:apple_engine.bzl", _macos_engine_framework = "macos_engine_framework")
+load("//flutter/private:apple_engine.bzl", _MACOS_ENGINE_FRAMEWORK = "MACOS_ENGINE_FRAMEWORK")
 load("//flutter/private:constants.bzl", _MACOS_MINIMUM_OS_VERSION = "MACOS_MINIMUM_OS_VERSION")
 load("//flutter/private:flutter_apple_plugin_library.bzl", _flutter_apple_plugin_library_macro = "flutter_apple_plugin_library")
 load("//flutter/private:flutter_apple_plugins_aggregator.bzl", _flutter_apple_plugins_aggregator = "flutter_apple_plugins_aggregator")
@@ -160,7 +160,7 @@ def flutter_macos_engine(name, **kwargs):
 
     apple_dynamic_framework_import(
         name = name,
-        framework_imports = _macos_engine_framework(),
+        framework_imports = _MACOS_ENGINE_FRAMEWORK,
         tags = tags,
         **kwargs
     )
@@ -450,10 +450,10 @@ def flutter_macos_app(
         tags = tags,
     )
 
-    # 4. Import FlutterMacOS.framework engine — auto-select debug/release.
+    # 4. Import FlutterMacOS.framework engine — follows the build mode.
     apple_dynamic_framework_import(
         name = "__%s_engine" % name,
-        framework_imports = _macos_engine_framework(),
+        framework_imports = _MACOS_ENGINE_FRAMEWORK,
         tags = tags,
     )
 
