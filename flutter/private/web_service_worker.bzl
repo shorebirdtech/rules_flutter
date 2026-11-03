@@ -102,14 +102,17 @@ self.addEventListener('activate', (event) => {
 
 SERVICE_WORKER_VERSION = service_worker_version_for(SERVICE_WORKER_JS)
 
-def service_worker_load_args(pwa):
+def service_worker_load_args(pwa, extra_properties = []):
     """The argument `flutter_bootstrap.js` passes to `_flutter.loader.load`.
 
     Args:
         pwa: Whether the bundle ships a service worker.
+        extra_properties: Further object properties for the same argument,
+            each already written as JS (`config: {...}`), after the worker's.
 
     Returns:
-        A JS object literal, or the empty string when no worker is shipped.
+        A JS object literal, or the empty string when there is neither a
+        worker nor a further property.
 
         The version is left as the `{{flutter_service_worker_version}}`
         placeholder for the templating pass to fill — the same built-in a
@@ -122,10 +125,12 @@ def service_worker_load_args(pwa):
         existing-registration gate — and logs a deprecation warning to every
         visitor's console.
     """
-    if not pwa:
-        return ""
-    return """{
-      serviceWorkerSettings: {
+    properties = []
+    if pwa:
+        properties.append("""serviceWorkerSettings: {
         serviceWorkerVersion: {{flutter_service_worker_version}}
-      }
-    }"""
+      }""")
+    properties += [p for p in extra_properties if p]
+    if not properties:
+        return ""
+    return "{\n      " + ",\n      ".join(properties) + "\n    }"

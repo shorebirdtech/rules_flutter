@@ -167,7 +167,7 @@ def flutter_web_app(
             (e.g. assets, shaders, defines, pwa, web_defines,
             keep_placeholders, tags, visibility).
             The compiler settings live there too and are forwarded the same
-            way: `profile`, `js_fallback`, `optimization_level_js`,
+            way: `profile`, `js_fallback`, `wasm_browsers`, `optimization_level_js`,
             `optimization_level_wasm`, `minify_js`, `minify_wasm`,
             `strip_wasm`, `native_null_assertions`,
             `frequency_based_minification`, `enable_experiments`, `dump_info`
@@ -178,7 +178,10 @@ def flutter_web_app(
             (`optimization_level_js`, `minify_js`,
             `frequency_based_minification`, `dump_info`) are refused unless
             `js_fallback = True` also ships a JavaScript build for browsers
-            without WasmGC.
+            without WasmGC. Flutter's loader allows skwasm on Chromium only by
+            default, so Firefox and Safari get the page's "can't run in this
+            browser" message from a WASM-only bundle: `wasm_browsers = ["blink",
+            "gecko", "webkit"]` allows them to run the WebAssembly instead.
             `extra_web_assets` is accepted here: additional web asset
             targets — typically generated files, which the `web/` glob
             cannot see — copied into the bundle root alongside the

@@ -273,6 +273,51 @@ flutter_web_app(
     ],
 )
 
+# WebAssembly for every browser engine flutter.js knows, instead of Flutter's
+# default of Chromium only. A browser without WasmGC still gets the message the
+# generated bootstrap shows, because there is no JavaScript build to run.
+flutter_web_app(
+    name = "app_all_browsers",
+    package_name = "web_example",
+    app_name = "Web Example (all browsers)",
+    assets = glob(["assets/**"]),
+    wasm_browsers = [
+        "blink",
+        "gecko",
+        "webkit",
+    ],
+    deps = [
+        "@deps//:flutter",
+        "@rules_flutter//flutter:material_icons",
+    ],
+)
+
+# The opposite: Chromium is left out of the allow-list, so Chrome finds no build
+# it may run and the page shows the generated bootstrap's message. Stands in for
+# a browser the loader refuses.
+flutter_web_app(
+    name = "app_no_blink",
+    package_name = "web_example",
+    app_name = "Web Example (no blink)",
+    assets = glob(["assets/**"]),
+    wasm_browsers = [
+        "gecko",
+        "webkit",
+    ],
+    deps = [
+        "@deps//:flutter",
+        "@rules_flutter//flutter:material_icons",
+    ],
+)
+
+build_test(
+    name = "wasm_browsers_build_test",
+    targets = [
+        ":app_all_browsers",
+        ":app_no_blink",
+    ],
+)
+
 build_test(
     name = "fallback_build_test",
     targets = [":app_fallback"],
@@ -307,8 +352,10 @@ dart_test(
         # The negative half of the `useLocalCanvasKit` check: a build that
         # never asked for it must not carry it, or the positive assertion
         # would hold for every bundle and mean nothing.
+        ":app_all_browsers",
         ":app_fallback",
         ":app_js",
+        ":app_no_blink",
         ":app_tuned",
         ":app_wasm",
     ],

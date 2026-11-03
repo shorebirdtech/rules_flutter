@@ -71,12 +71,15 @@ load("//flutter/private:plugin_registrant.bzl", "generate_dart_plugin_registrant
 load(
     "//flutter/private:validation.bzl",
     "escape_html",
+    "renderer_file_needed",
     "validate_base_href",
     "validate_static_assets_url",
+    "validate_wasm_browsers",
     "validate_web_compiler_renderer",
     "validate_web_js_fallback",
     "validate_web_js_only_attrs",
     "validate_web_wasm_only_attrs",
+    "wasm_allow_list_property",
     "web_renderer",
 )
 load(
@@ -116,18 +119,40 @@ _INDEX_HTML_TEMPLATE = """<!DOCTYPE html>
 # `{{flutter_build_config}}` and `{{flutter_service_worker_version}}` are the
 # same built-ins a user-supplied `web/flutter_bootstrap.js` may reference, so
 # the default template goes through the templating action too rather than
-# around it. `%s` is the load argument, which is empty when no worker ships.
+# around it. The first `%s` is the load argument, which is empty when neither
+# a worker nor an allow-list is set; the second is the JS string literal shown
+# when the loader cannot start the app.
+#
+# `load` returns a promise that rejects when it cannot start the app, notably
+# when none of the builds is one the browser can run ("no compatible build
+# found"). Without the `catch` the visitor gets the page `index.html` left: no
+# app and no word why. The loader's own error stays in the console.
 _BOOTSTRAP_JS_TEMPLATE = """\
 {{flutter_build_config}}
 {
   let script = document.createElement("script");
   script.src = "flutter.js";
   script.addEventListener("load", function() {
-    _flutter.loader.load(%s);
+    _flutter.loader.load(%s).catch(function(error) {
+      console.error(error);
+      let message = document.createElement("p");
+      message.setAttribute("role", "alert");
+      message.textContent = %s;
+      message.style.cssText = "font: 16px/1.5 system-ui, sans-serif; max-width: 32em; margin: 4em auto; padding: 0 1em;";
+      document.body.appendChild(message);
+    });
   });
   document.head.appendChild(script);
 }
 """
+
+_NO_APP_MESSAGE = "This app could not start. Reload the page, or try a different browser."
+
+# A bundle with no JavaScript build runs only where the browser can run WASM.
+_WASM_ONLY_NO_APP_MESSAGE = (
+    "This app can't run in this browser. It is built for WebAssembly only and " +
+    "needs a browser that can run it."
+)
 
 def _build_config_js(engine_revision, builds, use_local_canvaskit):
     """The `{{flutter_build_config}}` built-in, in upstream's exact shape.
@@ -310,6 +335,13 @@ def _flutter_web_bundle_impl(ctx):
         ],
         ctx.label,
     )
+    validate_wasm_browsers(
+        ctx.attr.wasm_browsers,
+        ctx.attr.compiler,
+        renderer,
+        ctx.file.bootstrap_js != None,
+        ctx.label,
+    )
     validate_web_js_fallback(ctx.attr.compiler, ctx.attr.js_fallback, ctx.label)
     validate_web_js_only_attrs(
         ctx.attr.compiler,
@@ -460,7 +492,10 @@ def _flutter_web_bundle_impl(ctx):
     # flutter.js does the registering: it waits for the new worker to activate
     # (with a timeout) before booting the app, and — given only a version — it
     # registers nothing unless the visitor already has a worker to replace.
-    load_args = service_worker_load_args(ctx.attr.pwa)
+    load_args = service_worker_load_args(
+        ctx.attr.pwa,
+        extra_properties = [wasm_allow_list_property(ctx.attr.wasm_browsers)],
+    )
     if ctx.attr.compiler == "dart2wasm":
         # Primary: dart2wasm. Outputs are declared under a subdirectory with
         # their canonical bundle names: dart2wasm embeds a sourceMappingURL
@@ -626,7 +661,12 @@ def _flutter_web_bundle_impl(ctx):
         bootstrap_template = ctx.file.bootstrap_js
     else:
         bootstrap_template = ctx.actions.declare_file(ctx.label.name + "_bootstrap_template.js")
-        ctx.actions.write(bootstrap_template, _BOOTSTRAP_JS_TEMPLATE % load_args)
+        wasm_only = [b for b in builds if b["compileTarget"] == "dart2wasm"] == builds
+        no_app_message = _WASM_ONLY_NO_APP_MESSAGE if wasm_only else _NO_APP_MESSAGE
+        ctx.actions.write(
+            bootstrap_template,
+            _BOOTSTRAP_JS_TEMPLATE % (load_args, json.encode(no_app_message)),
+        )
 
     # Use user-provided manifest.json or generate from template.
     if ctx.file.manifest_json:
@@ -859,11 +899,21 @@ def _flutter_web_bundle_impl(ctx):
         _reserve(reserved, copies, refs, flutter_js_file, "flutter.js")
         engine_inputs.append(flutter_js_file)
 
-    # Copy renderer engine files (canvaskit/*.wasm, *.js, etc.).
+    # Copy the renderer engine files (canvaskit/*.wasm, *.js, etc.) the bundle
+    # can load. The loader never falls from skwasm to CanvasKit or back, so a
+    # renderer no build uses has no file here that anything asks for. The DDC
+    # dev loop renders with CanvasKit and serves it from this directory, so a
+    # debug build keeps those files whatever its release builds use.
+    renderers = [b["renderer"] for b in builds]
+    if is_debug:
+        renderers.append("canvaskit")
     for f in renderer_files:
         idx = f.path.find("/web-sdk/canvaskit/")
         if idx >= 0:
-            rel = "canvaskit/" + f.path[idx + len("/web-sdk/canvaskit/"):]
+            sdk_rel = f.path[idx + len("/web-sdk/canvaskit/"):]
+            if not renderer_file_needed(sdk_rel, renderers):
+                continue
+            rel = "canvaskit/" + sdk_rel
             _reserve(reserved, copies, refs, f, rel)
             engine_inputs.append(f)
 
@@ -1257,6 +1307,27 @@ flutter_web_bundle = rule(
             default = "",
             values = ["", "skwasm", "canvaskit"],
         ),
+        "wasm_browsers": attr.string_list(
+            doc = "The browser engines allowed to run the WASM build with the skwasm " +
+                  "renderer, set as flutter.js's `wasmAllowList` in the generated " +
+                  "`flutter_bootstrap.js`. Engines are `blink` (Chrome, Edge), `gecko` " +
+                  "(Firefox), `webkit` (Safari) and `unknown`; exactly those named are " +
+                  "allowed and the rest are refused. Unset (default) is Flutter's own " +
+                  "default, which today allows `blink` only. The browser must also " +
+                  "support WasmGC. CONSEQUENCE: an engine the loader refuses, or a " +
+                  "browser without WasmGC, runs the `js_fallback` build when there is " +
+                  "one; with `compiler = \"dart2wasm\"` alone there is nothing else to " +
+                  "run, and the generated bootstrap shows a message instead of the app " +
+                  "(the loader also logs `no compatible build found` and throws). So " +
+                  "naming `gecko` and `webkit` serves Firefox and Safari WebAssembly " +
+                  "instead of a message, on your judgement of their skwasm support; " +
+                  "leaving them out serves them the message or the JS fallback. It " +
+                  "applies only to a skwasm build, so it is refused with `compiler = " +
+                  "\"dart2js\"` or `renderer = \"canvaskit\"`, and with a `bootstrap_js` " +
+                  "of your own: that file calls `_flutter.loader.load` itself, so pass " +
+                  "`config: {wasmAllowList: {...}}` there.",
+            default = [],
+        ),
         "title": attr.string(
             doc = "HTML page title. Only used when index_html is not provided.",
         ),
@@ -1531,7 +1602,13 @@ build knows which served file is a native module.
                   "environments that cannot reach external CDNs. The CDN already sends " +
                   "Cross-Origin-Resource-Policy: cross-origin, so COEP does not require " +
                   "this. The canvaskit/ directory is always included in the build output " +
-                  "regardless of this setting.\n\n" +
+                  "regardless of this setting (so a bootstrap of your own can point " +
+                  "`canvasKitBaseUrl` at it), holding only the files this bundle's " +
+                  "renderers load: `skwasm*` and `wimp*` for skwasm, `canvaskit.*`, " +
+                  "`chromium/` and `webparagraph/` for CanvasKit. A WASM-only skwasm " +
+                  "bundle therefore carries no CanvasKit, since flutter.js never falls " +
+                  "back from one renderer to the other; a debug build keeps CanvasKit " +
+                  "for the dev loop, which renders with it.\n\n" +
                   "Required to serve under a Content Security Policy: the renderer is a " +
                   "script, so `script-src 'self'` blocks it from the CDN and the app never " +
                   "boots. Note the guarantee stops at `script-src` — the framework still " +

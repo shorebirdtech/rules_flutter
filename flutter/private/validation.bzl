@@ -234,6 +234,92 @@ def validate_web_js_fallback(compiler, js_fallback, what):
             "or switch to `compiler = \"dart2wasm\"`.",
         )
 
+# The browser engines flutter.js knows, as its `BrowserEngine` type names them
+# (`flutter_js/src/types.d.ts`) and as its `wasmAllowList` is keyed. `blink` is
+# Chromium (Chrome, Edge), `gecko` Firefox, `webkit` Safari; `unknown` is what
+# an engine flutter.js cannot classify reports.
+WASM_BROWSER_ENGINES = ["blink", "gecko", "webkit", "unknown"]
+
+def validate_wasm_browsers(wasm_browsers, compiler, renderer, has_own_bootstrap, what):
+    """Validate the `wasm_browsers` allow-list against the target it is set on.
+
+    Args:
+        wasm_browsers: The target's `wasm_browsers` attr value.
+        compiler: The target's compiler ("dart2wasm" or "dart2js").
+        renderer: The renderer the target resolves to ("skwasm" or "canvaskit").
+        has_own_bootstrap: Whether the target supplies its own `bootstrap_js`.
+        what: Label named in the failure message.
+    """
+    if not wasm_browsers:
+        return
+    unknown = [b for b in wasm_browsers if b not in WASM_BROWSER_ENGINES]
+    if unknown:
+        fail("%s: wasm_browsers names %s, which flutter.js does not know. Its engines are %s." % (
+            what,
+            ", ".join([repr(b) for b in unknown]),
+            ", ".join(WASM_BROWSER_ENGINES),
+        ))
+    if compiler != "dart2wasm" or renderer != "skwasm":
+        fail(
+            "%s: wasm_browsers decides which browser engines may run the skwasm " % what +
+            "renderer, and this target (compiler = %r, renderer = %r) has none, " % (compiler, renderer) +
+            "so the setting would reach nothing. Drop it.",
+        )
+    if has_own_bootstrap:
+        fail(
+            "%s: wasm_browsers is written into the generated flutter_bootstrap.js, and this " % what +
+            "target supplies its own `bootstrap_js`, which calls `_flutter.loader.load` itself. " +
+            "Drop the attr and pass `config: {wasmAllowList: {...}}` there.",
+        )
+
+def wasm_allow_list_property(wasm_browsers):
+    """The `config` property of the `_flutter.loader.load` argument.
+
+    Every engine flutter.js knows is stated, so the allow-list is exactly the
+    engines named: one left out is refused, even where Flutter's own default
+    would have allowed it.
+
+    Args:
+        wasm_browsers: Engines allowed to run skwasm; empty for Flutter's default.
+
+    Returns:
+        A JS object property, or the empty string when nothing is set.
+    """
+    if not wasm_browsers:
+        return ""
+    allow_list = {engine: engine in wasm_browsers for engine in WASM_BROWSER_ENGINES}
+    return "config: {\n        wasmAllowList: %s\n      }" % json.encode(allow_list)
+
+# The renderer files flutter.js loads for each renderer, by path under the web
+# SDK's `canvaskit/`. A skwasm build loads `skwasm.*`, `skwasm_heavy.*` (a
+# browser without image codecs or Chromium's break iterators) and `wimp.*`
+# (`enableWimp`), single-threaded or not: there is no skwasm-to-CanvasKit
+# fallback in the loader. A CanvasKit build loads `canvaskit.*` and the
+# `chromium/` and `webparagraph/` variants beside it.
+_SKWASM_FILE_PREFIXES = ["skwasm", "wimp."]
+_CANVASKIT_FILE_PREFIXES = ["canvaskit.", "chromium/", "webparagraph/"]
+
+def renderer_file_needed(rel, renderers):
+    """Whether a file under the web SDK's `canvaskit/` serves any of `renderers`.
+
+    A file this does not recognise is kept: shipping an extra one costs bytes,
+    dropping a needed one is a blank page.
+
+    Args:
+        rel: Path relative to the `canvaskit/` directory.
+        renderers: Renderers the bundle's builds (and dev loop) render with.
+
+    Returns:
+        True when the file should be bundled.
+    """
+    for prefix in _SKWASM_FILE_PREFIXES:
+        if rel.startswith(prefix):
+            return "skwasm" in renderers
+    for prefix in _CANVASKIT_FILE_PREFIXES:
+        if rel.startswith(prefix):
+            return "canvaskit" in renderers
+    return True
+
 def validate_base_href(base_href, what):
     """Validate a web `<base href>` value.
 

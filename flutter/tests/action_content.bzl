@@ -31,6 +31,29 @@ def written_json(env, suffix):
         return None
     return json.decode(writes[0].content)
 
+def written_text(env, suffix):
+    """The content of the single `ctx.actions.write` output ending in `suffix`.
+
+    Args:
+      env: The `analysistest` env.
+      suffix: Basename suffix identifying the write, e.g.
+        `"_bootstrap_template.js"`.
+
+    Returns:
+      The text, or None when the write was not found (the exactly-one
+      assertion has already failed by then).
+    """
+    writes = [
+        a
+        for a in analysistest.target_actions(env)
+        if a.mnemonic == "FileWrite" and
+           a.outputs.to_list()[0].basename.endswith(suffix)
+    ]
+    asserts.equals(env, 1, len(writes), "expected exactly one %s write" % suffix)
+    if not writes:
+        return None
+    return writes[0].content
+
 def package_entry(config, package_name):
     """The `package_config.json` entry naming `package_name`, or None.
 

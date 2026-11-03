@@ -58,7 +58,7 @@ void main() {
 
   // The default WASM bundle is WebAssembly alone: no JavaScript build, and no
   // mention of one for the loader to go looking for.
-  final wasmOnlyDir = Directory('$root/app_wasm_web');
+  final wasmOnlyDir = Directory(bundle('app_wasm_web'));
   final wasmOnlyJs = wasmOnlyDir
       .listSync(recursive: true)
       .whereType<File>()
@@ -81,10 +81,78 @@ void main() {
     detail: 'no dart2js build and no main.dart.js in the build config',
   );
 
+  // Which renderer files ship. flutter.js never falls from skwasm to CanvasKit
+  // or back, so a bundle carries the files of the renderers its builds use:
+  // skwasm alone for `app_wasm`, both for `app_fallback` (WASM plus JS), and
+  // CanvasKit alone for `app_js`.
+  bool ships(String target, String file) =>
+      File('${bundle('${target}_web')}/canvaskit/$file').existsSync();
+  check(
+    'app_wasm ships skwasm and no CanvasKit',
+    ok:
+        ships('app_wasm', 'skwasm.wasm') &&
+        ships('app_wasm', 'skwasm_heavy.wasm') &&
+        !ships('app_wasm', 'canvaskit.wasm') &&
+        !ships('app_wasm', 'chromium/canvaskit.wasm'),
+    detail: 'skwasm.wasm and skwasm_heavy.wasm present, canvaskit.wasm absent',
+  );
+  check(
+    'app_fallback ships both renderers',
+    ok:
+        ships('app_fallback', 'skwasm.wasm') &&
+        ships('app_fallback', 'chromium/canvaskit.wasm'),
+    detail: 'its JS build renders with CanvasKit, its WASM build with skwasm',
+  );
+  check(
+    'app_js ships CanvasKit and no skwasm',
+    ok: ships('app_js', 'canvaskit.wasm') && !ships('app_js', 'skwasm.wasm'),
+    detail: 'canvaskit.wasm present, skwasm.wasm absent',
+  );
+
+  // `wasm_browsers` reaches the page's loader call as an exact allow-list, and
+  // a bundle that does not set it carries none (Flutter's default applies).
+  final allBrowsers = File(
+    '${bundle('app_all_browsers_web')}/flutter_bootstrap.js',
+  ).readAsStringSync();
+  check(
+    'wasm_browsers allows every engine named',
+    ok: allBrowsers.contains(
+      'wasmAllowList: '
+      '{"blink":true,"gecko":true,"unknown":false,"webkit":true}',
+    ),
+    detail: 'allow-list in the loader call',
+  );
+  final noBlink = File(
+    '${bundle('app_no_blink_web')}/flutter_bootstrap.js',
+  ).readAsStringSync();
+  check(
+    'wasm_browsers leaves out the engine it does not name',
+    ok: noBlink.contains(
+      'wasmAllowList: '
+      '{"blink":false,"gecko":true,"unknown":false,"webkit":true}',
+    ),
+    detail: 'blink refused',
+  );
+  check(
+    'the default bootstrap sets no allow-list',
+    ok: !wasmOnlyBootstrap.contains('wasmAllowList'),
+    detail: 'Flutter default',
+  );
+
+  // The page shows a message, not a blank page, when the loader cannot start
+  // the app.
+  check(
+    'the default bootstrap shows a message when no build can run',
+    ok:
+        wasmOnlyBootstrap.contains('.catch(function(error)') &&
+        wasmOnlyBootstrap.contains('WebAssembly only'),
+    detail: 'catch on `load` appends an alert to the page',
+  );
+
   // `js_fallback` adds the JavaScript build, listed after the WASM one so the
   // loader prefers WASM.
   final fallbackBootstrap = File(
-    '$root/app_fallback_web/flutter_bootstrap.js',
+    '${bundle('app_fallback_web')}/flutter_bootstrap.js',
   ).readAsStringSync();
   final wasmAt = fallbackBootstrap.indexOf('"compileTarget":"dart2wasm"');
   final jsAt = fallbackBootstrap.indexOf('"compileTarget":"dart2js"');

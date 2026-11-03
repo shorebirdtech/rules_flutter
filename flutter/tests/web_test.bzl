@@ -4,7 +4,14 @@ load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("//flutter/private:flutter_native_library.bzl", "flutter_native_library")
 load("//flutter/private:flutter_web_application.bzl", "flutter_web_bundle")
-load("//flutter/private:validation.bzl", "escape_html", "is_valid_web_compiler_renderer", "web_renderer")
+load(
+    "//flutter/private:validation.bzl",
+    "escape_html",
+    "is_valid_web_compiler_renderer",
+    "renderer_file_needed",
+    "wasm_allow_list_property",
+    "web_renderer",
+)
 load(
     "//flutter/private:web_service_worker.bzl",
     "SERVICE_WORKER_JS",
@@ -12,7 +19,7 @@ load(
     "service_worker_load_args",
     "service_worker_version_for",
 )
-load(":action_content.bzl", "action_config", "action_config_text", "written_json")
+load(":action_content.bzl", "action_config", "action_config_text", "written_json", "written_text")
 
 def _html_title_escaping_test_impl(ctx):
     """Test that HTML special characters in titles are properly escaped."""
@@ -128,6 +135,53 @@ def _service_worker_load_args_test_impl(ctx):
     )
 
     return unittest.end(env)
+
+def _wasm_allow_list_test_impl(ctx):
+    """`wasm_browsers` becomes an exact `wasmAllowList`, and only when set."""
+    env = unittest.begin(ctx)
+    asserts.equals(env, "", wasm_allow_list_property([]), "unset is Flutter's own default")
+
+    # Every engine is stated, so one left out is refused rather than left to
+    # Flutter's default (which allows `blink`).
+    asserts.equals(
+        env,
+        "config: {\n        wasmAllowList: " +
+        "{\"blink\":false,\"gecko\":true,\"unknown\":false,\"webkit\":true}\n      }",
+        wasm_allow_list_property(["gecko", "webkit"]),
+    )
+
+    # The property joins the worker's in one argument, and stands alone when
+    # there is no worker.
+    both = service_worker_load_args(True, extra_properties = [wasm_allow_list_property(["blink"])])
+    asserts.true(env, "serviceWorkerSettings" in both and "wasmAllowList" in both, both)
+    asserts.true(env, both.index("serviceWorkerSettings") < both.index("config:"), both)
+    alone = service_worker_load_args(False, extra_properties = [wasm_allow_list_property(["blink"])])
+    asserts.true(env, "wasmAllowList" in alone and "serviceWorker" not in alone, alone)
+    asserts.equals(env, "", service_worker_load_args(False, extra_properties = [""]))
+    return unittest.end(env)
+
+_t6_test = unittest.make(_wasm_allow_list_test_impl)
+
+def _renderer_file_filter_test_impl(ctx):
+    """Each renderer's files are kept for it, and only for it."""
+    env = unittest.begin(ctx)
+    skwasm_files = ["skwasm.js", "skwasm.wasm", "skwasm.js.symbols", "skwasm_heavy.wasm", "wimp.js", "wimp.wasm"]
+    canvaskit_files = ["canvaskit.js", "canvaskit.wasm", "chromium/canvaskit.wasm", "webparagraph/canvaskit.js"]
+    for f in skwasm_files:
+        asserts.true(env, renderer_file_needed(f, ["skwasm"]), f)
+        asserts.false(env, renderer_file_needed(f, ["canvaskit"]), f)
+    for f in canvaskit_files:
+        asserts.true(env, renderer_file_needed(f, ["canvaskit"]), f)
+        asserts.false(env, renderer_file_needed(f, ["skwasm"]), f)
+    for f in skwasm_files + canvaskit_files:
+        asserts.true(env, renderer_file_needed(f, ["skwasm", "canvaskit"]), f)
+
+    # A file this does not know is kept: an extra one costs bytes, a missing one a blank page.
+    asserts.true(env, renderer_file_needed("something_new.wasm", ["skwasm"]))
+    asserts.true(env, renderer_file_needed("something_new.wasm", ["canvaskit"]))
+    return unittest.end(env)
+
+_t7_test = unittest.make(_renderer_file_filter_test_impl)
 
 def _service_worker_version_test_impl(ctx):
     """The version has to survive flutter.js's `endsWith` comparison."""
@@ -1109,6 +1163,14 @@ def _wasm_only_bundle_test_impl(ctx):
                 "main.dart.js" in entry["builtins"]["flutter_build_config"]["value"],
                 "%s refers to main.dart.js" % entry["label"],
             )
+
+    # The page says so when the loader finds nothing to run, instead of being
+    # left blank, and says why: this bundle has no other build to offer.
+    template = written_text(env, "_bootstrap_template.js")
+    if template != None:
+        asserts.true(env, ".catch(function(error)" in template, template)
+        asserts.true(env, "WebAssembly only" in template, template)
+        asserts.false(env, "wasmAllowList" in template, "Flutter's default allow-list is unset: " + template)
     return analysistest.end(env)
 
 _wasm_only_bundle_test = analysistest.make(
@@ -1153,11 +1215,80 @@ def _js_fallback_bundle_test_impl(ctx):
             len([e for e in bundle["copy_dirs"] if e["dst"] == "."]),
             "the dart2js tree is copied to the bundle root",
         )
+
+    # A build with a JavaScript fallback can fail to start for reasons other
+    # than the browser, so its message does not claim that one.
+    template = written_text(env, "_bootstrap_template.js")
+    if template != None:
+        asserts.true(env, ".catch(function(error)" in template, template)
+        asserts.false(env, "WebAssembly only" in template, template)
     return analysistest.end(env)
 
 _js_fallback_bundle_test = analysistest.make(
     _js_fallback_bundle_test_impl,
     config_settings = {"//command_line_option:compilation_mode": "opt"},
+)
+
+def _wasm_browsers_bootstrap_test_impl(ctx):
+    """`wasm_browsers` reaches the generated bootstrap as an exact `wasmAllowList`."""
+    env = analysistest.begin(ctx)
+    template = written_text(env, "_bootstrap_template.js")
+    if template != None:
+        asserts.true(
+            env,
+            "wasmAllowList: {\"blink\":true,\"gecko\":true,\"unknown\":false,\"webkit\":true}" in template,
+            "the allow-list must name every engine: " + template,
+        )
+
+        # In the argument the loader reads it from, beside the worker settings.
+        asserts.true(env, template.index("serviceWorkerSettings") < template.index("config: {"), template)
+        asserts.true(env, ".catch(function(error)" in template, template)
+    return analysistest.end(env)
+
+_wasm_browsers_bootstrap_test = analysistest.make(_wasm_browsers_bootstrap_test_impl)
+
+def _wasm_browsers_refused_test_impl(ctx):
+    """An allow-list that would reach nothing, or name no engine, is refused."""
+    env = analysistest.begin(ctx)
+    asserts.expect_failure(env, ctx.attr.expect_message)
+    return analysistest.end(env)
+
+_wasm_browsers_refused_test = analysistest.make(
+    _wasm_browsers_refused_test_impl,
+    attrs = {"expect_message": attr.string(mandatory = True)},
+    expect_failure = True,
+)
+
+def _renderer_files_test_impl(ctx):
+    """The bundle ships the renderer files its builds load, and no others."""
+    env = analysistest.begin(ctx)
+    bundle = action_config(env, "FlutterWebBundle")
+    if bundle == None:
+        return analysistest.end(env)
+    dsts = [c["dst"] for c in bundle["copies"] if c["dst"].startswith("canvaskit/")]
+    asserts.true(env, len(dsts) > 0, "the bundle ships no renderer files at all")
+    for expected in ctx.attr.expect_present:
+        asserts.true(env, expected in dsts, "%s missing from %s" % (expected, dsts))
+    for unexpected in ctx.attr.expect_absent:
+        asserts.false(env, unexpected in dsts, "%s must not ship: %s" % (unexpected, dsts))
+    return analysistest.end(env)
+
+_renderer_files_attrs = {
+    "expect_absent": attr.string_list(),
+    "expect_present": attr.string_list(),
+}
+
+_renderer_files_test = analysistest.make(
+    _renderer_files_test_impl,
+    attrs = _renderer_files_attrs,
+    config_settings = {"//command_line_option:compilation_mode": "opt"},
+)
+
+# A debug build carries the dev loop, which renders with CanvasKit.
+_renderer_files_dbg_test = analysistest.make(
+    _renderer_files_test_impl,
+    attrs = _renderer_files_attrs,
+    config_settings = {"//command_line_option:compilation_mode": "dbg"},
 )
 
 def _js_setting_without_fallback_refused_test_impl(ctx):
@@ -1531,6 +1662,64 @@ def _setup_web_fixtures():
         tags = ["manual"],
     )
 
+    # The allow-list, and each way it is refused.
+    flutter_web_bundle(
+        name = "_web_wasm_browsers_fixture",
+        package_name = "web_fixture",
+        main = "lib/web_fixture_main.dart",
+        tags = ["manual"],
+        wasm_browsers = ["blink", "gecko", "webkit"],
+    )
+    flutter_web_bundle(
+        name = "_web_wasm_browsers_unknown",
+        package_name = "web_fixture",
+        main = "lib/web_fixture_main.dart",
+        tags = ["manual"],
+        wasm_browsers = ["blink", "trident"],
+    )
+    flutter_web_bundle(
+        name = "_web_wasm_browsers_on_js",
+        package_name = "web_fixture",
+        main = "lib/web_fixture_main.dart",
+        compiler = "dart2js",
+        renderer = "canvaskit",
+        tags = ["manual"],
+        wasm_browsers = ["blink"],
+    )
+    flutter_web_bundle(
+        name = "_web_wasm_browsers_on_canvaskit",
+        package_name = "web_fixture",
+        main = "lib/web_fixture_main.dart",
+        renderer = "canvaskit",
+        tags = ["manual"],
+        wasm_browsers = ["blink"],
+    )
+    flutter_web_bundle(
+        name = "_web_wasm_browsers_own_bootstrap",
+        package_name = "web_fixture",
+        bootstrap_js = "web_fixture_bootstrap.js",
+        main = "lib/web_fixture_main.dart",
+        tags = ["manual"],
+        wasm_browsers = ["blink"],
+    )
+
+    # CanvasKit-rendered builds: dart2js alone, and WASM that renders with it.
+    flutter_web_bundle(
+        name = "_web_js_fixture",
+        package_name = "web_fixture",
+        main = "lib/web_fixture_main.dart",
+        compiler = "dart2js",
+        renderer = "canvaskit",
+        tags = ["manual"],
+    )
+    flutter_web_bundle(
+        name = "_web_wasm_canvaskit_fixture",
+        package_name = "web_fixture",
+        main = "lib/web_fixture_main.dart",
+        renderer = "canvaskit",
+        tags = ["manual"],
+    )
+
     # `js_fallback` where the whole bundle is JavaScript already.
     flutter_web_bundle(
         name = "_web_fallback_on_js",
@@ -1791,6 +1980,54 @@ def web_test_suite(name):
         name = name + "_js_fallback_bundle",
         target_under_test = ":_web_fallback_fixture",
     )
+    _wasm_browsers_bootstrap_test(
+        name = name + "_wasm_browsers_bootstrap",
+        target_under_test = ":_web_wasm_browsers_fixture",
+    )
+    for fixture, message in [
+        ("_web_wasm_browsers_unknown", "\"trident\""),
+        ("_web_wasm_browsers_on_js", "would reach nothing"),
+        ("_web_wasm_browsers_on_canvaskit", "would reach nothing"),
+        ("_web_wasm_browsers_own_bootstrap", "`bootstrap_js`"),
+    ]:
+        _wasm_browsers_refused_test(
+            name = name + fixture + "_refused",
+            expect_message = message,
+            target_under_test = ":" + fixture,
+        )
+
+    # The loader never falls from one renderer to the other, so each bundle
+    # ships its builds' files and no others.
+    _skwasm_files = ["canvaskit/skwasm.js", "canvaskit/skwasm.wasm", "canvaskit/skwasm_heavy.wasm"]
+    _canvaskit_files = ["canvaskit/canvaskit.js", "canvaskit/canvaskit.wasm", "canvaskit/chromium/canvaskit.wasm"]
+    _renderer_files_test(
+        name = name + "_renderer_files_wasm_only",
+        expect_absent = _canvaskit_files,
+        expect_present = _skwasm_files,
+        target_under_test = ":_web_fixture",
+    )
+    _renderer_files_test(
+        name = name + "_renderer_files_fallback",
+        expect_present = _skwasm_files + _canvaskit_files,
+        target_under_test = ":_web_fallback_fixture",
+    )
+    _renderer_files_test(
+        name = name + "_renderer_files_js",
+        expect_absent = _skwasm_files,
+        expect_present = _canvaskit_files,
+        target_under_test = ":_web_js_fixture",
+    )
+    _renderer_files_test(
+        name = name + "_renderer_files_wasm_canvaskit",
+        expect_absent = _skwasm_files,
+        expect_present = _canvaskit_files,
+        target_under_test = ":_web_wasm_canvaskit_fixture",
+    )
+    _renderer_files_dbg_test(
+        name = name + "_renderer_files_dbg",
+        expect_present = _skwasm_files + _canvaskit_files,
+        target_under_test = ":_web_fixture",
+    )
     _js_setting_without_fallback_refused_test(
         name = name + "_minify_js_without_fallback_refused",
         attr_name = "minify_js",
@@ -1941,4 +2178,4 @@ def web_test_suite(name):
         targets = [":_web_profile_fixture"],
     )
 
-    unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test)
+    unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test, _t6_test, _t7_test)
