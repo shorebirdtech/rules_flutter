@@ -2,6 +2,7 @@
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
+load("//flutter/private:flutter_native_library.bzl", "flutter_native_library")
 load("//flutter/private:flutter_web_application.bzl", "flutter_web_bundle")
 load("//flutter/private:validation.bzl", "escape_html", "is_valid_web_compiler_renderer", "web_renderer")
 load(
@@ -11,7 +12,7 @@ load(
     "service_worker_load_args",
     "service_worker_version_for",
 )
-load(":action_content.bzl", "written_json")
+load(":action_content.bzl", "action_config", "action_config_text", "written_json")
 
 def _html_title_escaping_test_impl(ctx):
     """Test that HTML special characters in titles are properly escaped."""
@@ -520,6 +521,86 @@ _dev_config_test = analysistest.make(
     attrs = {"expect_entrypoint": attr.string(mandatory = True)},
 )
 
+def _build_package_roots_declared_test_impl(ctx):
+    """Every generated root the build package config names is a declared output.
+
+    The dev tool hands this config to DWDS, which reads each first-party
+    library's source through it to show it in the debugger. A source-assembled
+    package's `rootUri` is the `.pkgsrcs` tree the bundle compiled from, which
+    is otherwise only an action input: with a disk or remote cache and Build
+    without the Bytes, a cache hit leaves it an empty directory, and the
+    debugger shows a blank pane for every library in it.
+    """
+    env = analysistest.begin(ctx)
+    config = written_json(env, ".package_config.json")
+    if config == None:
+        return analysistest.end(env)
+    config_dir = [
+        a.outputs.to_list()[0].dirname
+        for a in analysistest.target_actions(env)
+        if a.mnemonic == "FileWrite" and
+           a.outputs.to_list()[0].basename.endswith(".package_config.json")
+    ][0]
+    declared = [
+        f.path
+        for f in analysistest.target_under_test(env)[DefaultInfo].files.to_list()
+    ]
+
+    # Roots climbing out of the config's directory are the source tree or a
+    # repository, which Bazel never has to write. The rest sit beside the
+    # config, among this target's own outputs.
+    generated = [
+        config_dir + "/" + e["rootUri"]
+        for e in config["packages"]
+        if not e["rootUri"].startswith("../")
+    ]
+    asserts.true(
+        env,
+        len(generated) > 0,
+        "the fixture must source-assemble a package, or this test proves nothing",
+    )
+    for root in generated:
+        asserts.true(
+            env,
+            root in declared,
+            "%s is a package root DWDS reads sources from, and the target does not declare it" % root,
+        )
+    return analysistest.end(env)
+
+_build_package_roots_declared_test = analysistest.make(
+    _build_package_roots_declared_test_impl,
+    config_settings = {"//command_line_option:compilation_mode": "dbg"},
+)
+
+def _native_modules_declared_test_impl(ctx):
+    """Every native module the dev config names is a declared output.
+
+    The dev tool fingerprints these files on every reload, and refuses to start
+    when one is missing. A generated module is otherwise only an input to the
+    copy into the bundle, so a cache hit never writes it to this machine.
+    """
+    env = analysistest.begin(ctx)
+    config = written_json(env, "_dev_config.json")
+    if config == None:
+        return analysistest.end(env)
+    declared = [
+        f.path
+        for f in analysistest.target_under_test(env)[DefaultInfo].files.to_list()
+    ]
+    asserts.equals(env, 1, len(config["nativeLibs"]))
+    for path in config["nativeLibs"]:
+        asserts.true(
+            env,
+            path in declared,
+            "%s is named in the dev config and the target does not declare it" % path,
+        )
+    return analysistest.end(env)
+
+_native_modules_declared_test = analysistest.make(
+    _native_modules_declared_test_impl,
+    config_settings = {"//command_line_option:compilation_mode": "dbg"},
+)
+
 def _main_outside_lib_test_impl(ctx):
     """A `main` outside the package's `lib/` reaches the dev loop by its path.
 
@@ -601,18 +682,12 @@ def _wasm_source_map_test_impl(ctx):
 
     # The bundler must be told to place it at the bundle root under the same
     # name the compiled wasm references.
-    configs = [
-        a
-        for a in analysistest.target_actions(env)
-        if a.mnemonic == "FileWrite" and
-           a.outputs.to_list()[0].basename.endswith("_web_bundle_config.json")
-    ]
-    asserts.equals(env, 1, len(configs), "expected exactly one bundle config write")
+    configs = [c for c in [action_config_text(env, "FlutterWebBundle")] if c != None]
     if configs:
         asserts.true(
             env,
-            "main.dart.wasm.map" in configs[0].content,
-            "main.dart.wasm.map missing from bundle config: %s" % configs[0].content,
+            "main.dart.wasm.map" in configs[0],
+            "main.dart.wasm.map missing from bundle config: %s" % configs[0],
         )
     return analysistest.end(env)
 
@@ -819,7 +894,7 @@ def _dump_info_test_impl(ctx):
         present = ["--stage=dump-info-all"],
     )
 
-    bundle = written_json(env, "_web_bundle_config.json")
+    bundle = action_config(env, "FlutterWebBundle")
     if bundle == None:
         return analysistest.end(env)
 
@@ -864,7 +939,7 @@ def _no_dump_info_test_impl(ctx):
         _action(env, "FlutterDart2JS"),
         absent_substrings = ["dump-info"],
     )
-    bundle = written_json(env, "_web_bundle_config.json")
+    bundle = action_config(env, "FlutterWebBundle")
     if bundle != None:
         asserts.equals(env, [], bundle["extracts"])
     asserts.equals(
@@ -925,7 +1000,7 @@ _wasm_only_attr_refused_test = analysistest.make(
 
 def _template_config(env):
     """The config the templating action is driven by, decoded."""
-    return written_json(env, "_web_template_config.json")
+    return action_config(env, "FlutterWebTemplate")
 
 def _template_action_outputs(env):
     """Basenames the single FlutterWebTemplate action declares."""
@@ -1040,7 +1115,7 @@ def _assert_template_wiring(env, expect_dev_loop_guard):
     )
 
     # And the bundler is told to ship them under the names the page asks for.
-    bundle = written_json(env, "_web_bundle_config.json")
+    bundle = action_config(env, "FlutterWebBundle")
     if bundle != None:
         dsts = [c["dst"] for c in bundle["copies"]]
         for expected in ["index.html", "flutter_bootstrap.js"]:
@@ -1093,18 +1168,12 @@ def _reserved_allows_ordinary_asset_test_impl(ctx):
     above.
     """
     env = analysistest.begin(ctx)
-    configs = [
-        a
-        for a in analysistest.target_actions(env)
-        if a.mnemonic == "FileWrite" and
-           a.outputs.to_list()[0].basename.endswith("_web_bundle_config.json")
-    ]
-    asserts.equals(env, 1, len(configs), "expected exactly one bundle config write")
+    configs = [c for c in [action_config_text(env, "FlutterWebBundle")] if c != None]
     if configs:
         asserts.true(
             env,
-            "\"favicon.png\"" in configs[0].content,
-            "the favicon must still reach the bundle: %s" % configs[0].content,
+            "\"favicon.png\"" in configs[0],
+            "the favicon must still reach the bundle: %s" % configs[0],
         )
     return analysistest.end(env)
 
@@ -1129,14 +1198,9 @@ def _own_service_worker_test_impl(ctx):
     ]
     asserts.equals(env, [], writes, "pwa = False must generate no worker")
 
-    configs = [
-        a
-        for a in analysistest.target_actions(env)
-        if a.mnemonic == "FileWrite" and
-           a.outputs.to_list()[0].basename.endswith("_web_bundle_config.json")
-    ]
+    configs = [c for c in [action_config_text(env, "FlutterWebBundle")] if c != None]
     if configs:
-        copies = json.decode(configs[0].content)["copies"]
+        copies = json.decode(configs[0])["copies"]
         srcs = [c["src"] for c in copies if c["dst"] == "flutter_service_worker.js"]
         asserts.equals(env, 1, len(srcs), "exactly one file may claim the worker's name")
         if srcs:
@@ -1250,6 +1314,50 @@ def _setup_web_fixtures():
         package_name = "web_fixture",
         main = "lib/web_fixture_main.dart",
         defines = ["from.attr=1"],
+        tags = ["manual"],
+    )
+
+    # A generated library in the app's own `lib/`, which makes its package
+    # source-assembled: the shape of every codegen app.
+    native.genrule(
+        name = "_web_fixture_generated",
+        outs = ["lib/web_fixture_generated.dart"],
+        cmd = "echo 'const generated = 1;' > $@",
+        tags = ["manual"],
+    )
+    flutter_web_bundle(
+        name = "_web_codegen_fixture",
+        package_name = "web_fixture",
+        srcs = [":_web_fixture_generated"],
+        main = "lib/web_fixture_main.dart",
+        tags = ["manual"],
+    )
+
+    # A native module that a build step produces, as a real one compiled from
+    # Rust or C would be.
+    native.genrule(
+        name = "_web_fixture_module_wasm",
+        outs = ["web/fixture_module.wasm"],
+        cmd = "touch $@",
+        tags = ["manual"],
+    )
+    native.genrule(
+        name = "_web_fixture_module_api",
+        outs = ["web/fixture_module.api"],
+        cmd = "touch $@",
+        tags = ["manual"],
+    )
+    flutter_native_library(
+        name = "_web_fixture_module",
+        binding_contract = [":_web_fixture_module_api"],
+        library = ":_web_fixture_module_wasm",
+        tags = ["manual"],
+    )
+    flutter_web_bundle(
+        name = "_web_native_module_fixture",
+        package_name = "web_fixture",
+        main = "lib/web_fixture_main.dart",
+        native_modules = [":_web_fixture_module"],
         tags = ["manual"],
     )
 
@@ -1446,6 +1554,14 @@ def web_test_suite(name):
         name = name + "_dev_config",
         target_under_test = ":_web_fixture",
         expect_entrypoint = "package:web_fixture/web_fixture_main.dart",
+    )
+    _build_package_roots_declared_test(
+        name = name + "_build_package_roots_declared",
+        target_under_test = ":_web_codegen_fixture",
+    )
+    _native_modules_declared_test(
+        name = name + "_native_modules_declared",
+        target_under_test = ":_web_native_module_fixture",
     )
     _main_outside_lib_test(
         name = name + "_main_outside_lib",

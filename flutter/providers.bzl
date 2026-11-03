@@ -38,6 +38,40 @@ FlutterSdkInfo = provider(
     },
 )
 
+FlutterExecToolsInfo = provider(
+    doc = "The Flutter SDK tools that run on one host and produce the same output " +
+          "whatever the target platform: kernel compiles, shader and asset " +
+          "bundling, web compiles, and `flutter_tester`. Provided by the " +
+          "`@rules_flutter//flutter:exec_tools_toolchain_type` toolchain, which " +
+          "constrains only the execution platform.",
+    fields = {
+        "version": "str: The Flutter SDK version string (e.g. `3.41.2`).",
+        "engine_revision": "str: The engine commit hash.",
+        "host_os": "str: The OS these tools run on (`macos`, `linux`, `windows`).",
+        "host_arch": "str: The CPU these tools run on (`arm64`, `x64`).",
+        "dart": "File: The `dart` executable from the Flutter-bundled Dart SDK.",
+        "dartaotruntime": "File: The `dartaotruntime` executable for running AOT snapshots.",
+        "frontend_server": "File: The `frontend_server_aot.dart.snapshot` for kernel compilation.",
+        "kernel_worker": "File: `kernel_worker_aot.dart.snapshot`, which compiles one library target to a kernel module.",
+        "libraries_spec": "File: A `libraries.json` whose `flutter` target names the dart: libraries a Flutter program can import.",
+        "platform_kernel_dill": "File: `platform_strong.dill` — the debug platform kernel.",
+        "platform_kernel_dill_product": "File: `platform_strong_product.dill` — the release platform kernel.",
+        "patched_sdk": "Target: The Flutter patched Dart SDK root directory.",
+        "flutter_tester": "File: The `flutter_tester` headless engine that runs widget tests.",
+        "icu_data": "File: `icudtl.dat`, the ICU data `flutter_tester` loads.",
+        "vm_isolate_snapshot": "File: `vm_isolate_snapshot.bin`, the VM bootstrap snapshot a debug app ships.",
+        "isolate_snapshot": "File: `isolate_snapshot.bin`, the isolate bootstrap snapshot a debug app ships.",
+        "const_finder": "File: The `const_finder.dart.snapshot` for icon tree shaking.",
+        "font_subset": "File: The `font-subset` binary for font subsetting.",
+        "impellerc": "File: The `impellerc` shader compiler binary.",
+        "shader_lib": "list[File]: Shader include files for impellerc (shader_lib/ directory contents).",
+        "shader_include_dir": "str: The execution path of the directory holding `shader_lib`, which " +
+                              "impellerc takes as `--include`. A source directory, so path mapping " +
+                              "leaves it as it is.",
+        "tool_files": "depset[File]: All files needed to run the Dart tools above (for use in action inputs).",
+    },
+)
+
 FlutterInfo = provider(
     doc = """The channels a Flutter library contributes to its consumers.
 
@@ -79,9 +113,11 @@ FlutterNativeAssetInfo = provider(
 )
 
 FlutterNativeLibraryInfo = provider(
-    doc = """A native library in `native_deps` together with the contract its bindings were built against.
+    doc = """A native library in `native_deps`, or a code asset, together with the contract its bindings were built against.
 
-Produced by `flutter_native_library` and read where the dev config is written. A
+Produced by `flutter_native_library` and read where the dev config is written —
+off `native_deps` directly, and for a code asset by `code_asset_libraries.bzl`,
+which finds the wrapper in its owning package's `code_assets`. A
 `native_deps` entry without one is an ordinary shared library: the app bundles it
 and nothing says what calling into it is supposed to look like, which is what
 makes a rebuilt copy of it stop a hot reload rather than merely be reported.

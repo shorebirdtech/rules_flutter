@@ -16,6 +16,12 @@ does. Bazel's merger drops a library's permissions unless
 flag shipped without them: a plugin's POST_NOTIFICATIONS, say, so Android 13
 could never ask to show its notifications.
 
+Given a `namespace`, the same action writes the manifest's relative component
+class names (`.MainActivity`, `.sub.Receiver`, a bare `MainActivity`) in full
+against it, as AGP's manifest merger does, so they do not resolve against the
+application id instead: one `flutter create` runner can then ship under any
+application id.
+
 Each runs the rules_flutter merger tool
 (`merge_android_manifests.dart`) over a base manifest and an overlay.
 
@@ -25,6 +31,8 @@ silently mis-merge a variant manifest it does not fully understand.
 """
 
 load("@rules_android//providers:providers.bzl", "StarlarkAndroidResourcesInfo")
+load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
+load("//flutter/private:exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
 
 _TOOL = Label("//flutter/private/tools:merge_android_manifests.dart")
 
@@ -46,8 +54,7 @@ def _exported_library_manifests(libraries):
     return [node.manifest for node in nodes.to_list() if node.exports_manifest]
 
 def _flutter_android_manifest_merge_impl(ctx):
-    flutter_toolchain = ctx.toolchains["@rules_flutter//flutter:toolchain_type"]
-    flutter_sdk_info = flutter_toolchain.flutter_sdk_info
+    tools = portable_tools(ctx)
 
     tool = ctx.file._merge_tool
     output = ctx.actions.declare_file(ctx.label.name + "/AndroidManifest.xml")
@@ -60,17 +67,21 @@ def _flutter_android_manifest_merge_impl(ctx):
         args.add("--overlay", ctx.file.overlay)
     args.add_all(libraries, before_each = "--library")
     args.add_all(ctx.attr.placeholders, before_each = "--placeholder")
+    if ctx.attr.namespace:
+        args.add("--namespace", ctx.attr.namespace)
     args.add("--output", output)
 
     ctx.actions.run(
-        executable = flutter_sdk_info.dart,
+        executable = tools.dart,
         arguments = [args],
         inputs = depset(
             direct = [tool, ctx.file.base] + ([ctx.file.overlay] if ctx.file.overlay else []) + libraries,
-            transitive = [flutter_sdk_info.tool_files],
+            transitive = [tools.tool_files],
         ),
         outputs = [output],
         mnemonic = "FlutterManifestMerge",
+        exec_group = PORTABLE,
+        execution_requirements = PATH_MAPPING,
         progress_message = "Merging Android variant manifest %s" % ctx.label,
     )
 
@@ -101,13 +112,18 @@ flutter_android_manifest_merge = rule(
                   "(its `manifest_values`): a library permission using one " +
                   "passes through verbatim; any other is an error.",
         ),
+        "namespace": attr.string(
+            doc = "The package the app's code lives in (Gradle's " +
+                  "`namespace`). Relative class names in the base " +
+                  "(`.MainActivity`, `.a.B`, `C`) are written out in full " +
+                  "against it, rather than left to resolve against the " +
+                  "application id. Empty leaves them as they are.",
+        ),
         "_merge_tool": attr.label(
             default = _TOOL,
             allow_single_file = True,
         ),
     },
-    toolchains = [
-        "@rules_flutter//flutter:toolchain_type",
-    ],
-    doc = "Merges an overlay manifest's permissions, and those of the app's Android libraries, into a base manifest.",
+    exec_groups = PORTABLE_EXEC_GROUPS,
+    doc = "Merges an overlay manifest's permissions, and those of the app's Android libraries, into a base manifest, and qualifies its relative class names against a namespace.",
 )

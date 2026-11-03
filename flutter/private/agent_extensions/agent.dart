@@ -23,8 +23,8 @@ import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart' show Tooltip;
+import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
-import 'package:flutter/semantics.dart' show SemanticsBinding, SemanticsHandle;
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
@@ -61,6 +61,10 @@ void registerRulesFlutterAgentExtensions() {
   );
   registerExtension('ext.rules_flutter.pageBack', _guard(_handlePageBack));
   registerExtension('ext.rules_flutter.pressKey', _guard(_handlePressKey));
+  registerExtension(
+    'ext.rules_flutter.dumpSemanticsTree',
+    _guard(_handleDumpSemanticsTree),
+  );
 
   // Deliberately NOT wrapped in `_guard`: this one answers from a compile-time
   // constant and touches no binding, so it must stay answerable pre-main —
@@ -758,7 +762,7 @@ Future<ServiceExtensionResponse> _handleSetWindowActive(
     return _err('setWindowActive requires "active": "true" or "false"');
   }
   final binding = WidgetsBinding.instance;
-  binding.handleAppLifecycleStateChanged(
+  _moveLifecycleTo(
     active == 'true' ? AppLifecycleState.resumed : AppLifecycleState.inactive,
   );
   return _ok({
@@ -982,6 +986,131 @@ Future<ServiceExtensionResponse> _handleGetRect(
   Map<String, String> params,
 ) => _withRect(params, (rect) async => _readBody(_rectAsMap(rect)));
 
+/// The semantics tree of every view this isolate renders, as data the dev
+/// tool renders into `app.dumpSemanticsTree`'s text.
+///
+/// Built here rather than by asking Flutter's own
+/// `ext.flutter.debugDumpSemanticsTreeInTraversalOrder`, for two reasons. That
+/// text gives each rect in its parent's coordinates, some behind a transform
+/// matrix, so the point a pointer command needs is not in it. And on an app
+/// with semantics off it answers "Semantics not generated", where [_guard] has
+/// already enabled semantics and waited out the frame that builds the tree.
+///
+/// Children come in traversal order, the order a screen reader walks.
+Future<ServiceExtensionResponse> _handleDumpSemanticsTree(
+  String method,
+  Map<String, String> params,
+) async {
+  // A frame already scheduled may change the tree: answer with what it builds
+  // rather than the one before it. Bounded for the reason [_guard]'s own wait
+  // is, and only waited on when frames can happen at all. A wait that runs out
+  // is said in the answer, because the tree then is the one from before that
+  // frame; when frames stopped meanwhile, `notRendering` says that instead.
+  final scheduler = SchedulerBinding.instance;
+  var frameMissed = false;
+  if (scheduler.framesEnabled && scheduler.hasScheduledFrame) {
+    await scheduler.endOfFrame.timeout(
+      _semanticsFrameBound,
+      onTimeout: () => frameMissed = true,
+    );
+  }
+  final views = <Map<String, Object?>>[];
+  for (final view in RendererBinding.instance.renderViews) {
+    final root = view.debugSemantics;
+    final dpr = view.configuration.devicePixelRatio;
+    views.add({
+      'viewId': view.flutterView.viewId,
+      'size': [_round1(view.size.width), _round1(view.size.height)],
+      'devicePixelRatio': dpr,
+      if (root == null)
+        'missing': _semanticsMissing()
+      else
+        'root': _semanticsNodeJson(root, Matrix4.identity(), dpr),
+    });
+  }
+  return _readOk({
+    'views': views,
+    if (frameMissed && _notRendering() == null)
+      'frameMissed':
+          'a frame was pending and did not finish within '
+          '${_semanticsFrameBound.inSeconds}s, so this tree is from before it; '
+          'ask again for the tree that frame builds',
+  });
+}
+
+/// Why a view has no semantics tree when this file enabled semantics itself.
+String _semanticsMissing() => SchedulerBinding.instance.framesEnabled
+    ? 'no semantics tree was built for this view within '
+          '${_semanticsFrameBound.inSeconds}s of enabling semantics'
+    : 'the app is not drawing frames (it is backgrounded or hidden), so the '
+          'semantics tree, which is built during a frame, does not exist yet';
+
+/// [node] and its subtree as data, with defaults left out.
+///
+/// `rect` is `[left, top, right, bottom]` in the view's logical pixels — the
+/// space `app.tap`'s `x` and `y` are in — which a node's own rect is not: each
+/// is in its parent's coordinates, and the root's is in physical pixels, so
+/// [toRoot] accumulates the transforms down from the root and the result is
+/// divided by the view's device pixel ratio.
+///
+/// Label, value, flags and actions come from `getSemanticsData`, which is what
+/// the platform's accessibility services are sent: a node that merges its
+/// descendants carries their labels and actions, and a node merged into its
+/// parent is marked `merged` rather than dropped.
+Map<String, Object?> _semanticsNodeJson(
+  SemanticsNode node,
+  Matrix4 toRoot,
+  double dpr,
+) {
+  final transform = node.transform;
+  final nodeToRoot = transform == null
+      ? toRoot
+      : (toRoot.clone()..multiply(transform));
+  final r = MatrixUtils.transformRect(nodeToRoot, node.rect);
+  final data = node.getSemanticsData();
+  final actions = [
+    for (final action in SemanticsAction.values)
+      if (action != SemanticsAction.customAction && data.hasAction(action))
+        action.name,
+  ];
+  final customActions = [
+    for (final id in data.customSemanticsActionIds ?? const <int>[])
+      if (CustomSemanticsAction.getAction(id)?.label case final label?) label,
+  ];
+  final flags = data.flagsCollection.toStrings();
+  final children = node.debugListChildrenInOrder(
+    DebugSemanticsDumpOrder.traversalOrder,
+  );
+  return {
+    'id': node.id,
+    'rect': [
+      _round1(r.left / dpr),
+      _round1(r.top / dpr),
+      _round1(r.right / dpr),
+      _round1(r.bottom / dpr),
+    ],
+    if (data.label.isNotEmpty) 'label': data.label,
+    if (data.value.isNotEmpty) 'value': data.value,
+    if (data.hint.isNotEmpty) 'hint': data.hint,
+    if (data.tooltip.isNotEmpty) 'tooltip': data.tooltip,
+    if (data.identifier.isNotEmpty) 'identifier': data.identifier,
+    if (data.role != SemanticsRole.none) 'role': data.role.name,
+    if (data.headingLevel != 0) 'headingLevel': data.headingLevel,
+    if (flags.isNotEmpty) 'flags': flags,
+    if (actions.isNotEmpty) 'actions': actions,
+    if (customActions.isNotEmpty) 'customActions': customActions,
+    if (node.isMergedIntoParent) 'merged': true,
+    if (node.isInvisible) 'invisible': true,
+    if (children.isNotEmpty)
+      'children': [
+        for (final child in children)
+          _semanticsNodeJson(child, nodeToRoot, dpr),
+      ],
+  };
+}
+
+double _round1(double v) => (v * 10).roundToDouble() / 10;
+
 /// Wait for the app to go idle, and say whether it did.
 ///
 /// The step every other command already takes, on its own — because the one
@@ -1201,24 +1330,28 @@ Future<ServiceExtensionResponse> _handlePressKey(
 }
 
 /// Make the app active, as a key press finds it, when its desktop window is
-/// open but not focused; say so, or return null when it already was.
+/// open but not focused or not shown; say so, or return null when it already
+/// was.
 ///
 /// A hardware key only reaches the window that has keyboard focus, so a key
 /// the engine delivers implies an active app. On desktop the framework acts on
-/// the difference: when its window stops being the focused one (lifecycle
-/// `inactive`), [FocusManager] parks the focused node and focuses nothing until
-/// the window is active again. A key simulated into that state reaches no
-/// field — typed text goes nowhere and a shortcut finds no handler — whenever
-/// another app has come to the front. Resuming gives the parked node its focus
-/// back, as the window becoming the key window would, and applying the focus
-/// change now means the key sees it.
+/// the difference: whenever its lifecycle leaves `resumed` — `inactive` when
+/// another app comes to the front, `hidden` when the window is hidden or
+/// covered after it was in front — [FocusManager] parks the focused node and
+/// focuses nothing until the app is resumed. A key simulated into that state
+/// reaches no field: typed text goes nowhere and a shortcut finds no handler.
+/// Resuming gives the parked node its focus back, as the window becoming the
+/// key window would, and applying the focus change now means the key sees it.
 ///
-/// Only `inactive`: a hidden or minimised window draws nothing, and a key
-/// cannot reach one, so that state is left to [_notRendering] to report. Only
-/// desktop, because only there does the framework move focus with the
-/// lifecycle; on a phone `inactive` is a passing system overlay that a key
-/// press does not end. The native window is untouched, as with
-/// `app.setWindowActive`, and the engine's next real change overrides this.
+/// `hidden` too, because on a desktop shared with other work the window is
+/// covered as often as it is merely behind: any window that ends up over all
+/// of it sends `hidden`. Resuming also turns frames back on, so the key's
+/// effect is built rather than waiting in a tree no read could see change.
+/// Only desktop, because only there does the framework move focus with the
+/// lifecycle; on a phone `inactive` is a passing system overlay and `hidden`
+/// another app in front, neither of which a key press ends. The native window
+/// is untouched, as with `app.setWindowActive`, and the engine's next real
+/// change overrides this.
 String? _activateForKeys() {
   final binding = WidgetsBinding.instance;
   final desktop = switch (defaultTargetPlatform) {
@@ -1227,16 +1360,45 @@ String? _activateForKeys() {
     TargetPlatform.linux => true,
     _ => false,
   };
-  if (!desktop || binding.lifecycleState != AppLifecycleState.inactive) {
+  final state = binding.lifecycleState;
+  if (!desktop ||
+      (state != AppLifecycleState.inactive &&
+          state != AppLifecycleState.hidden)) {
     return null;
   }
-  binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+  _moveLifecycleTo(AppLifecycleState.resumed);
   FocusManager.instance.applyFocusChangesIfNeeded();
-  return 'the window was not the focused one (lifecycle state "inactive"), '
-      'so the framework had parked its focus and a key would have reached no '
-      'field. The app now counts as active, as a key press finds it: '
-      'lifecycle state "resumed", focus back where it was. The real window is '
-      'untouched and still behind whatever is in front of it.';
+  final why = state == AppLifecycleState.inactive
+      ? 'the window was not the focused one'
+      : 'the window was hidden or covered by another window';
+  return '$why (lifecycle state "${state!.name}"), so the framework had '
+      'parked its focus and a key would have reached no field. The app now '
+      'counts as active, as a key press finds it: lifecycle state "resumed", '
+      'focus back where it was, frames on. The real window is untouched '
+      'and still behind whatever is in front of it.';
+}
+
+/// Tell the framework the app's lifecycle is now [target], through each state
+/// between, as the engine's own lifecycle messages arrive.
+///
+/// Lifecycle listeners accept only neighbouring moves: `hidden` straight to
+/// `resumed` fails an assertion in [AppLifecycleListener], which every
+/// [EditableText] registers to tell a focus restored on resume from a fresh
+/// one. [ServicesBinding] walks an engine message through the states between,
+/// and this does the same.
+void _moveLifecycleTo(AppLifecycleState target) {
+  final binding = WidgetsBinding.instance;
+  final from = binding.lifecycleState;
+  if (from == null || from == AppLifecycleState.detached) {
+    binding.handleAppLifecycleStateChanged(target);
+    return;
+  }
+  const order = AppLifecycleState.values;
+  final step = order.indexOf(target) > order.indexOf(from) ? 1 : -1;
+  for (var i = order.indexOf(from); i != order.indexOf(target);) {
+    i += step;
+    binding.handleAppLifecycleStateChanged(order[i]);
+  }
 }
 
 /// Whether [text] is something a key types, as opposed to a control

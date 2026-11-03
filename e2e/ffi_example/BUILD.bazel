@@ -4,7 +4,7 @@ load("@rules_apple//apple:macos.bzl", "macos_application")
 load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
-load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_analysis_test", "dart_binary", "dart_test")
+load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_analysis_test", "dart_binary", "dart_code_asset", "dart_test")
 load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_library", "flutter_native_library")
 load(
     "@rules_flutter//flutter:ios.bzl",
@@ -32,6 +32,7 @@ load(
 )
 load("@rules_flutter//flutter:windows.bzl", "flutter_windows_app")
 load(":c_hot_patch.bzl", "c_hot_patch")
+load(":code_asset.bzl", "stand_in_code_asset")
 load(":ios_sim_debug.bzl", "ios_sim_debug_app")
 
 exports_files(["pubspec.lock"])
@@ -70,6 +71,7 @@ cc_library(
         "@platforms//os:linux": ["-ldl"],
         "//conditions:default": [],
     }),
+    textual_hdrs = ["native/hot_patch_router.h"],
     deps = [":mul_body_cc"],
 )
 
@@ -91,7 +93,9 @@ dart_binary(
 
 c_hot_patch(
     name = "mul_hot_patch",
+    body = "native/mul.c",
     contract = "native/mul.h",
+    function = "mul_body",
     library = ":mul",
     patch_library = ":mul_patch",
     sources = [
@@ -110,13 +114,188 @@ flutter_native_library(
     visibility = ["//mul_plugin:__pkg__"],
 )
 
+# `sub` is patchable the same way, and reaches the app the way a bridge
+# generator's library does: as a Dart code asset, from a rule that is not
+# rules_dart's (`code_asset.bzl`), on a `dart_library` that owns its asset id
+# (`//sub_asset`), and called through `@Native`. The wrapper goes in that
+# package's `code_assets`, where the bare asset would have gone, and an edit to
+# `native/sub.c` reaches a running app on a hot reload exactly as one to
+# `native/mul.c` does.
+cc_library(
+    name = "sub_body_cc",
+    srcs = ["native/sub.c"],
+    hdrs = [
+        "native/sub.h",
+        "native/sub_body.h",
+    ],
+)
+
+cc_library(
+    name = "sub_cc",
+    srcs = ["native/sub_hot_patch.c"],
+    linkopts = select({
+        "@platforms//os:linux": ["-ldl"],
+        "//conditions:default": [],
+    }),
+    textual_hdrs = ["native/hot_patch_router.h"],
+    deps = [":sub_body_cc"],
+)
+
+cc_shared_library(
+    name = "sub",
+    deps = [":sub_cc"],
+)
+
+cc_shared_library(
+    name = "sub_patch",
+    deps = [":sub_body_cc"],
+)
+
+stand_in_code_asset(
+    name = "sub_code_asset",
+    asset_id = "package:sub_asset/sub",
+    library = ":sub",
+)
+
+c_hot_patch(
+    name = "sub_hot_patch",
+    body = "native/sub.c",
+    contract = "native/sub.h",
+    function = "sub_body",
+    library = ":sub",
+    patch_library = ":sub_patch",
+    sources = [
+        "native/sub.c",
+        "native/sub.h",
+        "native/sub_body.h",
+    ],
+    tool = ":c_patch_tool",
+)
+
+flutter_native_library(
+    name = "sub_native",
+    binding_contract = ["native/sub.h"],
+    hot_patch = ":sub_hot_patch",
+    library = ":sub_code_asset",
+    visibility = ["//sub_asset:__pkg__"],
+)
+
+# One counter, bound by two packages under two asset ids. Each package declares
+# a standalone library of its own (`counter_a`, `counter_b`); the app serves
+# both ids from the combined `counter` instead, which it bundles once, so the
+# process loads one image and a bump through either id moves one count.
+#
+# The combined `counter` is patchable too, as one library: `:counter_hot_patch`
+# builds patches of `native/counter.c`, and each id's wrapper (`count_a_native`,
+# `count_b_native`) names that one builder, so an edit reaches both ids on one
+# patch. The count lives in the launched image (`native/counter_hot_patch.c`),
+# which hands it to the body on every call, so a patch carries on from the
+# count the launched code left; `state_layout` names the header that shapes it.
+cc_library(
+    name = "counter_body_cc",
+    srcs = ["native/counter.c"],
+    hdrs = [
+        "native/counter.h",
+        "native/counter_body.h",
+        "native/counter_state.h",
+    ],
+)
+
+cc_library(
+    name = "counter_cc",
+    srcs = ["native/counter_hot_patch.c"],
+    linkopts = select({
+        "@platforms//os:linux": ["-ldl"],
+        "//conditions:default": [],
+    }),
+    textual_hdrs = ["native/hot_patch_router.h"],
+    deps = [":counter_body_cc"],
+)
+
+[
+    cc_shared_library(
+        name = name,
+        deps = [":counter_cc"],
+    )
+    for name in [
+        "counter",
+        "counter_a",
+        "counter_b",
+    ]
+]
+
+cc_shared_library(
+    name = "counter_patch",
+    deps = [":counter_body_cc"],
+)
+
+c_hot_patch(
+    name = "counter_hot_patch",
+    body = "native/counter.c",
+    contract = "native/counter.h",
+    function = "counter_bump_body",
+    library = ":counter",
+    patch_library = ":counter_patch",
+    sources = [
+        "native/counter.c",
+        "native/counter.h",
+        "native/counter_body.h",
+        "native/counter_state.h",
+    ],
+    state_layout = "native/counter_state.h",
+    tool = ":c_patch_tool",
+)
+
+[
+    dart_code_asset(
+        name = "count_%s_%s" % (package, which),
+        asset_id = "package:count_%s/count_%s" % (package, package),
+        shared_library = library,
+        visibility = ["//count_%s:__pkg__" % package],
+    )
+    for package in [
+        "a",
+        "b",
+    ]
+    for which, library in [
+        (
+            "own",
+            ":counter_" + package,
+        ),
+        ("combined", ":counter"),
+    ]
+]
+
+# One wrapper per asset id over the combined library, each with that id's
+# contract and all naming the one builder: the app loads one image, so one patch
+# serves both ids.
+[
+    flutter_native_library(
+        name = "count_%s_native" % package,
+        binding_contract = ["native/counter.h"],
+        hot_patch = ":counter_hot_patch",
+        library = ":count_%s_combined" % package,
+    )
+    for package in [
+        "a",
+        "b",
+    ]
+]
+
 flutter_application(
     name = "ffi_app",
     package_name = "ffi_example",
+    code_assets = [
+        ":count_a_native",
+        ":count_b_native",
+    ],
     main = "lib/main.dart",
     deps = [
         "//add_plugin",
+        "//count_a",
+        "//count_b",
         "//mul_plugin",
+        "//sub_asset",
         # No code asset is named anywhere in this workspace. drift pulls
         # package:sqlite3, and the curated registry attaches sqlite3's
         # Bazel-built library to that package, so it arrives here the way pub's
@@ -430,7 +609,10 @@ flutter_library(
     srcs = glob(["lib/**/*.dart"]),
     deps = [
         "//add_plugin",
+        "//count_a",
+        "//count_b",
         "//mul_plugin",
+        "//sub_asset",
         "@deps//:drift",
         "@deps//:flutter",
         "@rules_flutter//flutter:material_icons",

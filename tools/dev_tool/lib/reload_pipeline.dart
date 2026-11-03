@@ -89,6 +89,19 @@ class ReloadPipeline {
   /// the bazel path entirely.
   Future<bool> Function()? refreshGenerated;
 
+  /// Rebuilds the native libraries [nativeLibsVerdict] reads, for a restart
+  /// with no relauncher to rebuild them — an `attach` run. Null where the
+  /// relauncher answers the restart, and for an app with no loose native
+  /// libraries.
+  ///
+  /// The built bytes are the authority on whether native code changed; the
+  /// declared sources the gate also reads are the cheaper, earlier signal, and
+  /// they miss any library whose sources the build cannot name. A reload
+  /// leaves the build out to stay instant. A restart is not that path, and
+  /// judging one from stats alone let it answer "successful" over a library
+  /// that a build would have moved.
+  Future<bool> Function()? rebuildNativeLibs;
+
   /// Tracks the built `flutter_assets` tree so an edit to a PNG or a font
   /// reaches the running app the way an edit to a `.dart` file does.
   AssetTracker? assetTracker;
@@ -438,6 +451,15 @@ class ReloadPipeline {
     );
   }
 
+  /// What can deliver new native code in this run, read off what is wired:
+  /// only a run that launched the app has a relauncher, and only a web run
+  /// re-baselines on a restart. Anything else is an `attach`.
+  NativeRemedy get _nativeRemedy => relaunchIfNativeLibsChanged != null
+      ? NativeRemedy.restart
+      : markNativeLibsLive != null
+      ? NativeRemedy.pageRestart
+      : NativeRemedy.relaunchByHand;
+
   /// What the native libraries allow, and the reply when the answer is "nothing".
   ///
   /// [refusal] is non-null when the command must stop — the increment would be
@@ -505,6 +527,7 @@ class ReloadPipeline {
             verb: verb,
             appIds: addressed,
             nativeLibs: verdict,
+            nativeRemedy: _nativeRemedy,
             assets: assets,
           ),
         ),
@@ -527,6 +550,7 @@ class ReloadPipeline {
       verb: verb,
       appIds: addressed,
       nativeLibs: verdict,
+      nativeRemedy: _nativeRemedy,
       nativePatch: outcome,
       assets: assets,
     );
@@ -564,6 +588,7 @@ class ReloadPipeline {
             verb: verb,
             appIds: addressed,
             nativeLibs: verdict,
+            nativeRemedy: _nativeRemedy,
             nativePatch: outcome,
             assets: assets,
           ),
@@ -714,26 +739,53 @@ class ReloadPipeline {
                 relaunchFailed: failed,
               ),
             );
-          // The libraries are unchanged; fall through to the isolate restart,
-          // the fast path this whole check exists to protect.
+          // The launched bundle's libraries are the ones the tree builds, so
+          // the process already holds every native edit there is: the isolate
+          // restart is all that is left, the fast path this whole check exists
+          // to protect. Not the gate below — the relauncher has just answered
+          // the restart's question from the bundle itself, and re-baselined the
+          // cheaper views the gate reads. Asking them as well would be a second
+          // answer from weaker evidence, and where they disagree (a source
+          // moved, no bundled byte did) it refuses the one command that works.
           case RelaunchNotNeeded():
             break;
         }
       }
-      // Nothing replaced the process, so a library that moved is still beyond
-      // reach — an `attach` run, which never launched the app and so has no
-      // relauncher. A restart re-runs `main()` in the same process over the same
-      // mapped images, so it can no more deliver the new library than a reload
-      // can, and saying so is all this run can do about it.
-      final native = await _checkNativeLibs('Restart', addressed, assets);
-      if (native.refusal case final refusal?) return refusal;
+      // Nothing can replace the process, so a library that moved is still
+      // beyond reach — an `attach` run, which never launched the app and so has
+      // no relauncher. A restart re-runs `main()` in the same process over the
+      // same mapped images, so it can no more deliver the new library than a
+      // reload can, and saying so is all this run can do about it.
+      // Built first, so the gate compares the library a build makes of this
+      // tree — unless the codegen rebuild above already built the same target.
+      final rebuildLibs = rebuildNativeLibs;
+      if (relaunch == null &&
+          refreshGenerated == null &&
+          rebuildLibs != null &&
+          !await rebuildLibs()) {
+        return toWire(
+          CommandReport(
+            verb: 'Restart',
+            appIds: addressed,
+            assets: assets,
+            sourceRebuildFailed:
+                'Rebuilding the native libraries (bazel) failed; see build '
+                'output.',
+          ),
+        );
+      }
+      final native = relaunch == null
+          ? await _checkNativeLibs('Restart', addressed, assets)
+          : null;
+      if (native?.refusal case final refusal?) return refusal;
       return toWire(
         CommandReport(
           verb: 'Restart',
           appIds: addressed,
           outcome: await orch.restart(targets: targets),
           assets: assets,
-          nativeLibs: native.verdict,
+          nativeLibs: native?.verdict,
+          nativeRemedy: _nativeRemedy,
         ),
       );
     }
@@ -902,6 +954,7 @@ class ReloadPipeline {
           outcome: outcome,
           assets: assets,
           nativeLibs: native.verdict,
+          nativeRemedy: _nativeRemedy,
           nativePatch: native.patch,
           elapsed: elapsed.elapsed,
         ),
@@ -996,6 +1049,7 @@ class ReloadPipeline {
           outcome: const ReloadNoChange(),
           assets: assets,
           nativeLibs: native.verdict,
+          nativeRemedy: _nativeRemedy,
         ),
       );
     }
@@ -1020,6 +1074,7 @@ class ReloadPipeline {
         strategy: result.outcome,
         assets: assets,
         nativeLibs: native.verdict,
+        nativeRemedy: _nativeRemedy,
         elapsed: Duration(milliseconds: result.elapsedMs),
       ),
     );

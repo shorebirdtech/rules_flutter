@@ -55,7 +55,7 @@ cannot write there.
 """
 
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
-load("@rules_dart//dart:providers.bzl", "DartInfo", "DartKernelSdkInfo")
+load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo", "DartKernelSdkInfo")
 load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "KERNEL_TOOL_ATTR", "collect_modules", "collect_packages", "collect_transitive_srcs", "dart_analyzable_info_with_package", "dart_entry_kernel_action", "dart_import_check_aspect", "dart_link_kernel_action", "derive_lib_root", "import_check_validation", "module_defines_transition", "runfiles_path")
 load("//flutter:providers.bzl", "FlutterInfo")
 load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "compile_package_config", "synthesize_app_package")
@@ -68,14 +68,17 @@ load(
     "detect_target_platform",
     "flutter_build_assets",
     "flutter_compile_shaders",
-    "host_target_arch",
     "merge_dart_defines",
 )
+load("//flutter/private:exec_groups.bzl", "FLUTTER_EXEC_TOOLS", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
 load("//flutter/private:flutter_compile.bzl", "flutter_kernel_compile_action")
 load("//flutter/private:flutter_module.bzl", "flutter_module_aspect")
-load("//flutter/private:flutter_native_assets.bzl", "bridge_dart_code_assets", "collect_bundled_code_asset_files", "write_native_assets_manifest")
+load("//flutter/private:flutter_native_assets.bzl", "CODE_ASSETS_DOC", "collect_bundled_code_asset_files", "resolve_native_assets", "write_native_assets_manifest")
 
-def make_bootstrap_content(test_relative_import, golden_comparator_import = None):
+# The target's Flutter SDK, whose `flutter_tester` runs the test.
+_FLUTTER_TOOLCHAIN = "@rules_flutter//flutter:toolchain_type"
+
+def make_bootstrap_content(test_relative_import, golden_comparator_import = None, test_config_import = None):
     """Generate the per-test bootstrap Dart source.
 
     The bootstrap is the kernel entry point flutter_tester loads. It calls
@@ -99,10 +102,21 @@ def make_bootstrap_content(test_relative_import, golden_comparator_import = None
             to the user's test source (e.g. `../../e2e/foo/test/widget_test.dart`).
         golden_comparator_import: Import URI for the staged golden comparator,
             or None to emit no golden block (a `test_api`-only suite).
+        test_config_import: Import URI for the suite's `flutter_test_config.dart`,
+            or None. Its `testExecutable` is handed the suite's main and runs
+            it, as `flutter test` runs it, after the golden comparator is
+            installed so the config can replace it.
 
     Returns:
         Dart source string.
     """
+    if test_config_import:
+        config_import = "import '{}' as test_config;\n".format(test_config_import)
+        returned_main = "() => test_config.testExecutable(_runTestMain)"
+    else:
+        config_import = ""
+        returned_main = "_runTestMain"
+
     if golden_comparator_import:
         golden_import = "import '{}' as goldens;\n".format(golden_comparator_import)
         golden_install = "    goldens.installBazelGoldenFileComparator();\n"
@@ -124,7 +138,7 @@ import 'dart:isolate';
 import 'package:test_api/backend.dart';
 
 import '{test_import}' as test;
-{golden_import}
+{golden_import}{config_import}
 void _catchIsolateErrors() {{
   final errorPort = ReceivePort();
   Isolate.current.setErrorsFatal(false);
@@ -153,7 +167,7 @@ Future<void> main() async {{
 
   final testChannel = RemoteListener.start(() {{
     _catchIsolateErrors();
-{golden_install}    return _runTestMain;
+{golden_install}    return {returned_main};
   }});
 
   // 127.0.0.1 and not `localhost`: deliberately the same address family the
@@ -179,6 +193,8 @@ Future<void> main() async {{
         test_import = test_relative_import,
         golden_import = golden_import,
         golden_install = golden_install,
+        config_import = config_import,
+        returned_main = returned_main,
     )
 
 def _kernel_root_path(short_path):
@@ -188,14 +204,13 @@ def _kernel_root_path(short_path):
 
 # The schemes each compile mode names a test's own non-`package:` sources by:
 # the per-library link reads them through rules_dart's kernel roots, and the
-# whole-program compile mounts the exec root under the app scheme. Both are the
-# same wherever the kernel is built.
+# whole-program compile mounts the exec root and the output root under the app
+# scheme. Both are the same wherever, and in whichever configuration, the
+# kernel is built.
 _MODULAR_SCHEME = "org-dartlang-root"
 
 def _own_source_uri(file, modular):
-    if modular:
-        return "%s:///%s" % (_MODULAR_SCHEME, _kernel_root_path(file.short_path))
-    return "%s:///%s" % (APP_SCHEME, file.path)
+    return "%s:///%s" % (_MODULAR_SCHEME if modular else APP_SCHEME, _kernel_root_path(file.short_path))
 
 def _exposes_package(deps, names):
     """True if any dep transitively exposes one of `names`."""
@@ -225,35 +240,10 @@ def _has_flutter_test(deps):
     return _exposes_package(deps, ["flutter_test"])
 
 def _flutter_test_impl(ctx):
-    flutter_toolchain = ctx.toolchains["@rules_flutter//flutter:toolchain_type"]
-    flutter_sdk_info = flutter_toolchain.flutter_sdk_info
+    # The flutter_tester that runs the test: the target's, as everything the
+    # test runs is. The compiles are `portable`.
+    runner_tools = ctx.toolchains[_FLUTTER_TOOLCHAIN].flutter_sdk_info
 
-    if not flutter_sdk_info.flutter_tester:
-        fail(
-            "flutter_test requires the active Flutter toolchain to provide a " +
-            "flutter_tester binary; the resolved toolchain has none. This is " +
-            "typically the case for cross-compile-only configurations — " +
-            "build the test target with the host platform.",
-        )
-
-    if not _can_bootstrap(ctx.attr.deps):
-        fail((
-            "flutter_test target {name} must depend on package:flutter_test " +
-            "(or at minimum package:test_api). Add `@<hub>//:flutter_test` " +
-            "to deps so the generated bootstrap can import RemoteListener."
-        ).format(name = ctx.label.name))
-
-    # Same contract as `flutter_application`: a pub package that builds its
-    # native code with a hook Bazel cannot run contributes no library, and the
-    # manifest below would be quietly one entry short. A test is where that
-    # matters most — it is where an unresolved `@Native` symbol gets debugged.
-    hook_err = check_unreplaced_hooks(ctx.label, ctx.attr.deps)
-    if hook_err != None:
-        fail(hook_err)
-
-    # Tests always run on the host, but the platform still has to be resolved
-    # before the kernel compile: the frontend_server reads the native-assets
-    # manifest at compile time, and the manifest is keyed by `<os>_<arch>`.
     is_macos = ctx.target_platform_has_constraint(
         ctx.attr._macos_constraint[platform_common.ConstraintValueInfo],
     )
@@ -270,34 +260,159 @@ def _flutter_test_impl(ctx):
         ctx.attr._android_constraint[platform_common.ConstraintValueInfo],
     )
     target_platform = detect_target_platform(is_ios, is_macos, is_linux, is_windows, is_android)
+    target_arch = _target_arch(ctx)
+    if runner_tools.flutter_tester == None:
+        fail((
+            "flutter_test {label}: Flutter ships no flutter_tester for " +
+            "{os}, the target platform; build the test for a desktop " +
+            "platform with `--platforms` or a platform transition."
+        ).format(label = ctx.label, os = target_platform))
 
-    # Native Assets reach a test the same two ways they reach an application:
-    # declared with `flutter_native_asset` and propagated on `FlutterInfo`, or
-    # owned by a pub package and lifted off the Dart package graph. Deliberate
-    # declarations win on a shared id, as in `flutter_application`.
-    native_assets_list = depset(transitive = [
-        dep[FlutterInfo].native_assets
-        for dep in ctx.attr.deps
-        if FlutterInfo in dep
-    ]).to_list()
-    declared_ids = {asset.asset_id: True for asset in native_assets_list}
-    native_assets_list = native_assets_list + [
-        asset
-        for asset in bridge_dart_code_assets(ctx, ctx.attr.deps)
-        if asset.asset_id not in declared_ids
-    ]
+    # Bazel runs a test with its working directory at the runfiles root, which
+    # is what the `runfiles` layout's relative library paths resolve against.
+    program = _program(ctx, "flutter_test", runner_tools, target_platform, target_arch, "runfiles")
+
+    # Symlink the prebuilt runner as the test executable.
+    tool = ctx.attr._tool
+    ext = ".exe" if target_platform == "windows" else ""
+    executable = ctx.actions.declare_file(ctx.label.name + ext)
+    ctx.actions.symlink(
+        output = executable,
+        target_file = tool[DefaultInfo].files_to_run.executable,
+        is_executable = True,
+    )
+
+    env = program.env | {
+        # What a coverage run reports, one URI prefix a line: the test's own
+        # package and its own sources, as `flutter test --coverage` reports its
+        # package by default. The rule's generated bootstrap and comparator
+        # are not the user's code.
+        "FLUTTER_TEST_COVERAGE_LIBRARIES": "\n".join(
+            ["package:%s/" % ctx.attr.package_name] +
+            [_own_source_uri(f, program.modular) for f in [ctx.file.main] + ctx.files.srcs],
+        ),
+    }
+    _add_user_env(ctx, "flutter_test", env)
+
+    instrumented_files_info = coverage_common.instrumented_files_info(
+        ctx,
+        source_attributes = ["srcs", "main"],
+        dependency_attributes = ["deps"],
+    )
+
+    return [
+        DefaultInfo(
+            executable = executable,
+            runfiles = program.runfiles.merge(tool[DefaultInfo].default_runfiles),
+        ),
+        testing.TestEnvironment(env),
+        instrumented_files_info,
+    ] + program.providers
+
+def _add_user_env(ctx, kind, env):
+    """Merges the target's `env` into `env`, never over the rule's own keys.
+
+    Those are the runner's start-up contract, and a target that quietly
+    replaced one would fail far from the cause.
+    """
+    for key, value in ctx.attr.env.items():
+        if key in env:
+            fail((
+                "{kind} {name}: env key {key} is set by the rule itself " +
+                "and cannot be overridden."
+            ).format(kind = kind, name = ctx.label.name, key = key))
+        env[key] = value
+
+def _target_arch(ctx):
+    """The target platform's CPU in Native Assets' naming, or "" if neither."""
+    if ctx.target_platform_has_constraint(ctx.attr._arm64_constraint[platform_common.ConstraintValueInfo]):
+        return "arm64"
+    if ctx.target_platform_has_constraint(ctx.attr._x86_64_constraint[platform_common.ConstraintValueInfo]):
+        return "x64"
+    return ""
+
+def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
+    """Compiles the target's suite into what flutter_tester runs, with its runfiles.
+
+    Shared by `flutter_test` and `flutter_tester_binary`, which differ only in
+    how the runner is started and where it runs.
+
+    Args:
+      ctx: The rule context.
+      kind: The rule's name, for messages.
+      runner_tools: The `FlutterSdkInfo` or `FlutterExecToolsInfo` whose
+        `flutter_tester` runs the program.
+      target_os: The target's OS, which `deps` and `code_assets` are built
+        for; with `target_arch`, the ABI the native-assets manifest names.
+      target_arch: The target's CPU.
+      layout: The native-assets manifest layout (`write_native_assets_manifest`).
+
+    Returns:
+      `struct(env, runfiles, modular, providers)`: the runner's
+      runfiles-relative start-up variables; the runfiles, less the runner's
+      own; whether the kernel was linked from modules; and the providers both
+      rules return.
+    """
+    if not _can_bootstrap(ctx.attr.deps):
+        fail((
+            "{kind} target {name} must depend on package:flutter_test " +
+            "(or at minimum package:test_api). Add `@<hub>//:flutter_test` " +
+            "to deps so the generated bootstrap can import RemoteListener."
+        ).format(kind = kind, name = ctx.label.name))
+
+    # Same contract as `flutter_application`: a pub package that builds its
+    # native code with a hook Bazel cannot run contributes no library, and the
+    # manifest below would be quietly one entry short. A test is where that
+    # matters most — it is where an unresolved `@Native` symbol gets debugged.
+    hook_err = check_unreplaced_hooks(ctx.label, ctx.attr.deps)
+    if hook_err != None:
+        fail(hook_err)
+
+    # Native Assets reach a test the same ways they reach an application:
+    # named in `code_assets`, declared with `flutter_native_asset` and
+    # propagated on `FlutterInfo`, or owned by a pub package and lifted off the
+    # Dart package graph. See `resolve_native_assets`.
+    native_assets_list = resolve_native_assets(
+        ctx,
+        declared = depset(transitive = [
+            dep[FlutterInfo].native_assets
+            for dep in ctx.attr.deps
+            if FlutterInfo in dep
+        ]).to_list(),
+        deps = ctx.attr.deps,
+        code_assets = [target[DartCodeAssetInfo] for target in ctx.attr.code_assets],
+    ).assets
 
     native_assets_manifest = ctx.actions.declare_file(ctx.label.name + ".native_assets.json")
     write_native_assets_manifest(
         ctx = ctx,
         output_file = native_assets_manifest,
         native_assets = native_assets_list,
-        target_os = target_platform,
-        target_arch = host_target_arch(ctx, flutter_sdk_info),
-        # No bundle to resolve against — the libraries ship in runfiles.
-        layout = "runfiles",
+        target_os = target_os,
+        target_arch = target_arch,
+        # No bundle to resolve against: the libraries ship in runfiles, named
+        # by their runfiles paths or found on the runner's library path.
+        layout = layout,
     )
-    bundled_code_assets = collect_bundled_code_asset_files(native_assets_list)
+    bundled_code_assets = collect_bundled_code_asset_files(native_assets_list).to_list()
+
+    # Under `library_path` the manifest names each library by its bundle
+    # filename alone, and the runner puts one directory holding all of them on
+    # the loader's search path. Bundle filenames are unique, as in an
+    # application's bundle. `native_file` is one of them, by its runfiles
+    # path: a manifest-only runfiles lists files, so the runner finds the
+    # directory through it.
+    native_file = None
+    if layout == "library_path":
+        staged = []
+        for asset in native_assets_list:
+            if asset.link_mode != "dynamic_loading_bundle" or asset.file == None:
+                continue
+            link = ctx.actions.declare_file("%s.native/%s" % (ctx.label.name, asset.bundle_filename))
+            ctx.actions.symlink(output = link, target_file = asset.file)
+            staged.append(link)
+            native_file = runfiles_path(link, ctx.workspace_name)
+        bundled_code_assets = staged
 
     # The golden comparator, staged next to the generated bootstrap so the
     # bootstrap can import it by basename — the same arrangement
@@ -326,17 +441,20 @@ def _flutter_test_impl(ctx):
     modular = ctx.attr._modular_kernel[BuildSettingInfo].value
 
     # Per-target bootstrap. Imports the user's test by a path relative to the
-    # bootstrap: under the kernel filesystem roots when modular, through the
-    # exec root otherwise.
+    # bootstrap under the filesystem roots both compile modes mount, so the
+    # import names no configuration.
     bootstrap = ctx.actions.declare_file(ctx.label.name + "_bootstrap.dart")
-    if modular:
-        test_import = "../" * _kernel_root_path(bootstrap.short_path).count("/") + _kernel_root_path(ctx.file.main.short_path)
-    else:
-        test_import = "../" * len(bootstrap.dirname.split("/")) + ctx.file.main.path
+    to_root = "../" * _kernel_root_path(bootstrap.short_path).count("/")
+    config = ctx.file.test_config
     ctx.actions.write(bootstrap, make_bootstrap_content(
-        test_import,
+        to_root + _kernel_root_path(ctx.file.main.short_path),
         golden_comparator_import = staged_comparator.basename if staged_comparator else None,
+        test_config_import = to_root + _kernel_root_path(config.short_path) if config else None,
     ))
+
+    # The files that are the user's own and in no package: the main, and the
+    # `flutter_test_config.dart` that wraps it.
+    entry_files = [ctx.file.main] + ([config] if config else [])
 
     # Register the test's own package so `package:<self>/foo` imports inside
     # test sources resolve.
@@ -348,14 +466,14 @@ def _flutter_test_impl(ctx):
         ctx.attr.language_version,
     )
 
-    own_srcs = list(ctx.files.srcs) + [ctx.file.main]
+    own_srcs = list(ctx.files.srcs) + entry_files
     if staged_comparator:
         own_srcs.append(staged_comparator)
     kernel_dill = ctx.actions.declare_file(ctx.label.name + ".dill")
     if modular:
         _link_modules(ctx, bootstrap, own_srcs, packages, native_assets_manifest, kernel_dill)
     else:
-        _compile_whole_program(ctx, flutter_sdk_info, bootstrap, own_srcs, packages, native_assets_manifest, kernel_dill)
+        _compile_whole_program(ctx, portable_tools(ctx), bootstrap, own_srcs, packages, native_assets_manifest, kernel_dill)
 
     # Build a `flutter_assets/` tree for the test. Material widgets pull
     # `shaders/ink_sparkle.frag` at first paint, and pub-package fonts/assets
@@ -365,81 +483,46 @@ def _flutter_test_impl(ctx):
     # The test runs on flutter_tester, not the host's embedder: its shaders
     # are compiled for it, as `flutter test` compiles them (SkSL for Skia,
     # Vulkan for Impeller).
-    compiled_shaders = flutter_compile_shaders(ctx, flutter_sdk_info, "tester")
+    compiled_shaders = flutter_compile_shaders(ctx, portable_tools(ctx), "tester")
     flutter_assets = declare_flutter_assets_dir(ctx)
     flutter_build_assets(
         ctx,
-        flutter_sdk_info,
+        portable_tools(ctx),
         flutter_assets,
         compiled_shaders,
         kernel_dill = kernel_dill,
         is_debug = True,
     )
 
-    # Symlink the prebuilt runner as the test executable.
-    tool = ctx.attr._tool
-    is_windows = ctx.target_platform_has_constraint(
-        ctx.attr._windows_constraint[platform_common.ConstraintValueInfo],
-    )
-    ext = ".exe" if is_windows else ""
-    executable = ctx.actions.declare_file(ctx.label.name + ext)
-    ctx.actions.symlink(
-        output = executable,
-        target_file = tool[DefaultInfo].files_to_run.executable,
-        is_executable = True,
-    )
-
     # Runfiles-relative paths the runner reads from env at start-up.
     workspace_name = ctx.workspace_name
     env = {
-        "FLUTTER_TEST_TESTER": runfiles_path(flutter_sdk_info.flutter_tester, workspace_name),
-        "FLUTTER_TEST_ICU": runfiles_path(flutter_sdk_info.icu_data, workspace_name),
+        "FLUTTER_TEST_TESTER": runfiles_path(runner_tools.flutter_tester, workspace_name),
+        "FLUTTER_TEST_ICU": runfiles_path(runner_tools.icu_data, workspace_name),
         "FLUTTER_TEST_DILL": runfiles_path(kernel_dill, workspace_name),
         "FLUTTER_TEST_ASSETS": runfiles_path(flutter_assets, workspace_name),
         # Display path for the suite. Used in package:test report output.
         "FLUTTER_TEST_PATH": ctx.file.main.short_path,
         "FLUTTER_TEST_IMPELLER": "1" if ctx.attr.enable_impeller else "",
-        # What a coverage run reports, one URI prefix a line: the test's own
-        # package and its own sources, as `flutter test --coverage` reports its
-        # package by default. The rule's generated bootstrap and comparator
-        # are not the user's code.
-        "FLUTTER_TEST_COVERAGE_LIBRARIES": "\n".join(
-            ["package:%s/" % ctx.attr.package_name] +
-            [_own_source_uri(f, modular) for f in [ctx.file.main] + ctx.files.srcs],
-        ),
     }
+    if native_file:
+        env["FLUTTER_TEST_NATIVE_FILE"] = native_file
 
-    # User-supplied variables, merged last but never over the rule's own keys:
-    # those are the runner's start-up contract, and a test that quietly
-    # replaced one would fail far from the cause.
-    for key, value in ctx.attr.env.items():
-        if key in env:
-            fail((
-                "flutter_test {name}: env key {key} is set by the rule itself " +
-                "and cannot be overridden."
-            ).format(name = ctx.label.name, key = key))
-        env[key] = value
-
-    env_info = testing.TestEnvironment(env)
-
-    runtime_files = [
-        kernel_dill,
-        flutter_sdk_info.flutter_tester,
-        flutter_sdk_info.icu_data,
-        flutter_assets,
-    ]
-    tool_runfiles = tool[DefaultInfo].default_runfiles
     runfiles = ctx.runfiles(
         # The bundled native-asset libraries ship here, at the runfiles-relative
         # paths the manifest names. Both arms re-declare the library into an
         # output namespace of their own first — `flutter_native_asset` under
-        # its `bundle_filename`, `bridge_dart_code_assets` under this rule's —
+        # its `bundle_filename`, `resolve_native_assets` under this rule's —
         # so what lands in runfiles is the File the manifest points at rather
         # than the `_solib_<arch>/` original.
-        files = runtime_files + ctx.files.data + bundled_code_assets.to_list(),
-        transitive_files = flutter_sdk_info.tool_files,
+        files = [
+            kernel_dill,
+            runner_tools.flutter_tester,
+            runner_tools.icu_data,
+            flutter_assets,
+        ] + ctx.files.data + bundled_code_assets,
+        transitive_files = runner_tools.tool_files,
     )
-    runfiles = runfiles.merge(tool_runfiles)
 
     # Merge the runfiles of any `data` targets so cc_library / cc_binary
     # producers (e.g. shared dylibs that the test loads via dart:ffi) and
@@ -449,19 +532,7 @@ def _flutter_test_impl(ctx):
     for data_target in ctx.attr.data:
         runfiles = runfiles.merge(data_target[DefaultInfo].default_runfiles)
 
-    instrumented_files_info = coverage_common.instrumented_files_info(
-        ctx,
-        source_attributes = ["srcs", "main"],
-        dependency_attributes = ["deps"],
-    )
-
-    return [
-        DefaultInfo(
-            executable = executable,
-            runfiles = runfiles,
-        ),
-        env_info,
-        instrumented_files_info,
+    return struct(env = env, runfiles = runfiles, modular = modular, providers = [
         # The test's own files and every library it reaches import only what
         # their `deps` provide, in either compile mode. The generated bootstrap
         # and golden comparator are the rule's, not the user's, and are not
@@ -469,7 +540,7 @@ def _flutter_test_impl(ctx):
         OutputGroupInfo(_validation = import_check_validation(
             ctx,
             ctx.executable._kernel_tool,
-            [ctx.file.main] + ctx.files.srcs,
+            entry_files + ctx.files.srcs,
             # `synthesize_app_package` appends the test's own package last.
             packages[-1],
             ctx.attr.deps,
@@ -508,14 +579,14 @@ def _flutter_test_impl(ctx):
             package_name = ctx.attr.package_name,
             lib_root = derive_lib_root(ctx.label.workspace_root, ctx.label.package),
             deps = ctx.attr.deps + [ctx.attr._sky_engine],
-            srcs = [ctx.file.main],
+            srcs = entry_files,
             package_srcs = ctx.files.srcs,
             # The same version the compile path above states. Analysis reading
             # a different one than the compiler is the divergence this attr
             # exists to close, reappearing one layer down.
             language_version = ctx.attr.language_version,
         ),
-    ]
+    ])
 
 def _link_modules(ctx, bootstrap, own_srcs, packages, native_assets_manifest, kernel_dill):
     """Compiles the test's own files against its deps' modules, and links them.
@@ -541,7 +612,7 @@ def _link_modules(ctx, bootstrap, own_srcs, packages, native_assets_manifest, ke
     )
     dart_link_kernel_action(ctx, ctx.executable._kernel_tool, entry_dill, linked, kernel_dill)
 
-def _compile_whole_program(ctx, flutter_sdk_info, bootstrap, own_srcs, packages, native_assets_manifest, kernel_dill):
+def _compile_whole_program(ctx, tools, bootstrap, own_srcs, packages, native_assets_manifest, kernel_dill):
     """Compiles the bootstrap and everything it reaches from source, as `flutter_application` does.
 
     Packages whose hand-written and generated sources straddle the source tree
@@ -552,20 +623,21 @@ def _compile_whole_program(ctx, flutter_sdk_info, bootstrap, own_srcs, packages,
     pc = compile_package_config(ctx, packages, all_srcs)
     flutter_kernel_compile_action(
         ctx = ctx,
-        dartaotruntime = flutter_sdk_info.dartaotruntime,
-        dart = flutter_sdk_info.dart,
+        dartaotruntime = tools.dartaotruntime,
+        dart = tools.dart,
         kernel_filter_tool = ctx.file._kernel_filter_tool,
-        flutter_sdk_files = flutter_sdk_info.tool_files,
-        frontend_server = flutter_sdk_info.frontend_server,
+        flutter_sdk_files = tools.tool_files,
+        frontend_server = tools.frontend_server,
         # The debug platform: asserts on, as `flutter test` compiles.
-        platform_dill = flutter_sdk_info.platform_kernel_dill,
+        platform_dill = tools.platform_kernel_dill,
         main = bootstrap,
         # Under the app scheme, not the bootstrap's exec path: frontend_server
         # names a root given as a path by the sandbox it ran in, so the kernel
         # and every coverage report would carry a sandbox-specific `file://`
         # path to the test.
         entrypoint_uri = _own_source_uri(bootstrap, modular = False),
-        filesystem_roots = [""],
+        # The bootstrap's output root and the test's source root.
+        filesystem_root_files = [bootstrap, ctx.file.main] + ([ctx.file.test_config] if ctx.file.test_config else []),
         srcs = pc.srcs,
         package_config = pc.config_file,
         output = kernel_dill,
@@ -639,11 +711,25 @@ _TEST_ATTRS["data"] = attr.label_list(
 # The five `FLUTTER_TEST_*` keys the rule sets are the runner's start-up
 # contract; supplying one is rejected in the implementation rather than
 # silently honoured or silently dropped.
+_TEST_ATTRS["test_config"] = attr.label(
+    doc = "The suite's `flutter_test_config.dart`: its " +
+          "`testExecutable(FutureOr<void> Function() testMain)` runs the " +
+          "suite, as under `flutter test`. `flutter_test` finds it itself, " +
+          "the way `flutter test` does; name one here only when it is above " +
+          "the BUILD file's package, where that search cannot see.",
+    allow_single_file = [".dart"],
+)
+
 _TEST_ATTRS["enable_impeller"] = attr.bool(
     doc = "Render with Impeller in flutter_tester, as `flutter test " +
           "--enable-impeller` does, instead of software Skia. A test that " +
           "draws an Impeller-only shader, or a golden meant to match an " +
-          "Impeller device, needs it.",
+          "Impeller device, needs it. Impeller needs a GPU where the test " +
+          "runs (Metal on macOS, Vulkan on Linux); a host without one, such " +
+          "as a typical remote worker, fails to start flutter_tester. A " +
+          "test runs on a host matching its target; where that may be a " +
+          "machine without a GPU, keep this one on one with " +
+          "`exec_group_compatible_with = {\"test\": [...]}`.",
     default = False,
 )
 
@@ -666,17 +752,30 @@ _TEST_ATTRS["deps"] = attr.label_list(
     aspects = [flutter_module_aspect, dart_import_check_aspect],
     cfg = module_defines_transition,
 )
+
+_TEST_ATTRS["code_assets"] = attr.label_list(
+    doc = CODE_ASSETS_DOC,
+    providers = [DartCodeAssetInfo],
+    cfg = module_defines_transition,
+)
+
 _TEST_ATTRS["_modular_kernel"] = attr.label(
     default = Label("@rules_dart//dart:modular_kernel"),
     providers = [BuildSettingInfo],
 )
+
+# Built for the host the test's entry kernel compiles on: rules_dart compiles
+# and links it in `portable`.
 _TEST_ATTRS["_kernel_sdk"] = attr.label(
     default = Label("//flutter/private:flutter_kernel_sdk"),
     providers = [DartKernelSdkInfo],
+    cfg = config.exec(PORTABLE),
 )
+
+# Built for the target, where the test runs.
 _TEST_ATTRS["_tool"] = attr.label(
     default = Label("//flutter/private/tools:flutter_test_runner"),
-    cfg = "exec",
+    cfg = "target",
 )
 
 # The golden-file comparator the generated bootstrap installs. Implicit rather
@@ -706,9 +805,124 @@ flutter_test = rule(
     implementation = _flutter_test_impl,
     attrs = _TEST_ATTRS,
     test = True,
-    toolchains = [
-        "@rules_flutter//flutter:toolchain_type",
-    ] + COPY_TO_DIRECTORY_TOOLCHAINS,
-    doc = "Compiles a Flutter widget test, then runs it under flutter_tester " +
-          "via the package:test_api RemoteListener protocol.",
+    # The compiles are `portable`. The run is placed by Bazel's default `test`
+    # group, as any test rule's is: on a host matching the target, which
+    # everything the test runs is built for.
+    toolchains = [_FLUTTER_TOOLCHAIN] + COPY_TO_DIRECTORY_TOOLCHAINS,
+    exec_groups = PORTABLE_EXEC_GROUPS,
+    doc = """Compiles a Flutter widget test, then runs it under flutter_tester \
+via the package:test_api RemoteListener protocol.
+
+Its `deps`, native code assets included, the runner and flutter_tester are \
+built for the target platform, and like any Bazel test it runs where Bazel's \
+default test toolchain places it: on an execution platform matching that \
+platform. Run it elsewhere by building it for another platform: \
+`--platforms`, or a platform transition around the one test. A test whose \
+result depends on the host (a golden image, anything that measures rendered \
+text) can be pinned with the common `exec_group_compatible_with` attribute, \
+e.g. `exec_group_compatible_with = {"test": ["@platforms//os:macos"]}`. \
+`exec_compatible_with` does not pin the test: it constrains only the rule's \
+default group. The compiles run in the `portable` group.""",
+)
+
+# A `flutter_tester_binary` runs where it is started: under `bazel run`, here;
+# as another action's tool, on that action's host, which builds it in its exec
+# configuration. Either way its target platform is that host, so the `run`
+# group asks for a host of the target's OS and CPU and takes flutter_tester
+# from it.
+_RUN = "run"
+_RUN_HOST_TOOLCHAIN = "//flutter:run_host_toolchain_type"
+
+def _flutter_tester_binary_impl(ctx):
+    runner_tools = ctx.exec_groups[_RUN].toolchains[FLUTTER_EXEC_TOOLS].flutter_exec_tools_info
+
+    # The program may be started from any working directory, as a build
+    # action starts its tools from the exec root, so its libraries are found
+    # on the loader's path rather than relative to the runfiles root.
+    #
+    # The `run` group's host has the target's OS and CPU, so the native
+    # libraries built for the target are the ones it loads.
+    target_os = detect_target_platform(
+        ctx.target_platform_has_constraint(ctx.attr._ios_constraint[platform_common.ConstraintValueInfo]),
+        ctx.target_platform_has_constraint(ctx.attr._macos_constraint[platform_common.ConstraintValueInfo]),
+        ctx.target_platform_has_constraint(ctx.attr._linux_constraint[platform_common.ConstraintValueInfo]),
+        ctx.target_platform_has_constraint(ctx.attr._windows_constraint[platform_common.ConstraintValueInfo]),
+        ctx.target_platform_has_constraint(ctx.attr._android_constraint[platform_common.ConstraintValueInfo]),
+    )
+    program = _program(ctx, "flutter_tester_binary", runner_tools, target_os, _target_arch(ctx), "library_path")
+    env = dict(program.env)
+    _add_user_env(ctx, "flutter_tester_binary", env)
+
+    # The executable is the prebuilt runner under the binary's name, as for
+    # `flutter_test`, so it runs on every host and starts no shell. A build
+    # action that runs it as a tool never applies a run environment, so the
+    # settings a test gets from `RunEnvironmentInfo` travel in runfiles
+    # instead, as `<name>.launch.json` at the root of the binary's own tree.
+    # The runner finds that tree beside its own path: a RUNFILES_DIR inherited
+    # from a caller names the caller's.
+    tool = ctx.attr._tool
+    ext = ".exe" if runner_tools.host_os == "windows" else ""
+    executable = ctx.actions.declare_file(ctx.label.name + ext)
+    ctx.actions.symlink(
+        output = executable,
+        target_file = tool[DefaultInfo].files_to_run.executable,
+        is_executable = True,
+    )
+    launch = ctx.actions.declare_file(ctx.label.name + ".launch.json")
+    ctx.actions.write(launch, json.encode(env))
+    return [
+        DefaultInfo(
+            executable = executable,
+            runfiles = program.runfiles.merge_all([
+                ctx.runfiles(root_symlinks = {ctx.label.name + ".launch.json": launch}),
+                tool[DefaultInfo].default_runfiles,
+            ]),
+        ),
+    ] + program.providers
+
+_BINARY_ATTRS = {
+    k: v
+    for k, v in _TEST_ATTRS.items()
+    if k != "_tool"
+}
+
+_BINARY_ATTRS["test_config"] = attr.label(
+    doc = "A `flutter_test_config.dart` whose " +
+          "`testExecutable(FutureOr<void> Function() testMain)` runs the " +
+          "program, as it runs a suite under `flutter test`. Unlike " +
+          "`flutter_test`'s, it is not searched for: a binary runs through " +
+          "one only when it names it.",
+    allow_single_file = [".dart"],
+)
+
+_BINARY_ATTRS["_tool"] = attr.label(
+    default = Label("//flutter/private/tools:flutter_test_runner"),
+    cfg = config.exec(_RUN),
+)
+
+flutter_tester_binary = rule(
+    implementation = _flutter_tester_binary_impl,
+    attrs = _BINARY_ATTRS,
+    executable = True,
+    toolchains = COPY_TO_DIRECTORY_TOOLCHAINS,
+    exec_groups = PORTABLE_EXEC_GROUPS | {
+        _RUN: exec_group(toolchains = [FLUTTER_EXEC_TOOLS, _RUN_HOST_TOOLCHAIN]),
+    },
+    doc = """Compiles a program as `flutter_test` compiles a test, and runs it \
+under flutter_tester, the headless Flutter engine, as an ordinary executable: \
+with `bazel run`, or as the tool of a build action, so outputs made with it \
+need not be `testonly`.
+
+The program is written as a test suite, because flutter_tester draws frames \
+through `package:flutter_test`'s binding: its work is the bodies of its \
+`testWidgets` and `test` calls. It exits 0 when every one passes and non-zero \
+when one fails, as `flutter_test` reports a suite. Arguments are not passed to \
+the program; the environment is, and the program runs in the working directory \
+it was started in, Native Assets included, so a build action can hand it paths \
+under the exec root. `enable_impeller` renders with Impeller, which needs the \
+host's GPU: an action running one should not be sent to a remote executor.
+
+Build it for the host it runs on: `bazel run` does, and a rule that runs it in \
+an action takes it as an executable attribute with `cfg = "exec"`, as a \
+`genrule` takes its `tools`.""",
 )
