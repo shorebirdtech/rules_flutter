@@ -276,6 +276,12 @@ rules_jvm_external decides which version of an artifact several of them name
 workspaces say 8.9.35 and warn). So a bump of rules_android, a change to the root `maven.install`, or a
 change to a workspace's list makes the e2e locks stale.
 
+The root `maven.install` also passes Coursier `--reconciliation *:*:relaxed`
+(`additional_coursier_options`), so an exact POM range such as `fragment [1.3.6]`
+no longer fails the pin when another artifact wants a higher version. Options are
+concatenated across modules, so the e2e workspaces get it without repeating it.
+Changing it changes how every lock resolves; re-pin all of them.
+
 The root's lock is the one consumers get. When rules_flutter is a dependency
 and the consuming module declares no `maven.install` of that name, the root's
 lock pins `@rules_android_maven` for them. A consumer that declares its own

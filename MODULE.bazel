@@ -98,6 +98,15 @@ register_toolchains("@flutter_toolchains//:all")
 maven = use_extension("@rules_jvm_external//:extensions.bzl", "maven")
 maven.install(
     name = "rules_android_maven",
+    # Coursier refuses an exact version range in a POM (`[1.3.6]`) when
+    # anything asks for a higher version; Gradle, which plugins are written
+    # against, lets the higher one win. Relaxed reconciliation does the same.
+    # The option reaches every module that declares an install of this name,
+    # because rules_jvm_external concatenates each module's options.
+    additional_coursier_options = [
+        "--reconciliation",
+        "*:*:relaxed",
+    ],
     artifacts = [
         "androidx.annotation:annotation:1.9.1",
         "androidx.core:core:1.17.0",

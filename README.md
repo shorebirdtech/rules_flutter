@@ -219,19 +219,7 @@ REPIN=1 bazel run @rules_android_maven//:pin
 
 `bazel run @deps//android:maven_artifacts` (with your hub's name for `deps`) prints the complete block for every plugin, marking the entries that are missing or too low. Only Android builds read any of this; a web or desktop build never fetches it.
 
-Coursier, which resolves the install, is stricter than Gradle about exact version ranges. For example, `androidx.preference:preference:1.2.1`, which `shared_preferences_android` needs, depends on `androidx.fragment:fragment` as `[1.3.6]`, an exact version, while other artifacts want a higher one. Gradle lets the higher version win; Coursier reports a conflict. The fix is to name the version you want for each artifact in the error and force it:
-
-```starlark
-maven.artifact(
-    name = "rules_android_maven",
-    artifact = "fragment",
-    force_version = True,
-    group = "androidx.fragment",
-    version = "1.8.9",
-)
-```
-
-`e2e/plugin_example/MODULE.bazel` does this for `activity`, `fragment`, `lifecycle-runtime`, `lifecycle-viewmodel` and `savedstate`.
+Coursier, which resolves the install, is stricter than Gradle about exact version ranges. For example, `androidx.preference:preference:1.2.1`, which `shared_preferences_android` needs, depends on `androidx.fragment:fragment` as `[1.3.6]`, an exact version, while other artifacts want a higher one. Gradle lets the higher version win; Coursier alone reports a conflict. rules_flutter's own `maven.install` passes Coursier `--reconciliation *:*:relaxed` through `additional_coursier_options`, which makes it pick the highest version too. rules_jvm_external concatenates those options across every module that declares an install of the name, so your `maven.install(name = "rules_android_maven")` inherits them and needs no `force_version` entries for such ranges. Do not set `resolver = "gradle"` or `"maven"` to get this: the Gradle resolver selects the JVM or desktop variant of Kotlin Multiplatform libraries (for example `androidx.lifecycle:lifecycle-runtime-desktop`) in place of the Android one, and the Maven resolver reports the same hard-range conflict.
 
 A dependency written any other way (a version catalog entry such as `libs.foo`, `project(...)`, `platform(...)`, `files(...)`, Groovy map notation, a trailing `{ exclude ... }` block, `kapt`, `ksp`, `annotationProcessor`, `coreLibraryDesugaring`, or a `debugImplementation`-style variant configuration) is listed in the same message as a line rules_flutter cannot translate. For such a package, supply a plugin overlay with `flutter.plugin_overlays`: a `BUILD.bazel.tpl` for the package and an `android/BUILD.bazel.tpl` that declares its Android library and the `@rules_android_maven` labels it needs. The `android/` template is used only beside the top-level one.
 
