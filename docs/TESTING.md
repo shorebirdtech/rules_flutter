@@ -1285,6 +1285,34 @@ gcloud compute instances delete flutter-windows-test --quiet
 
 **When to run:** After any change to Windows runner code, engine selection, or bundle assembly.
 
+### Profile mode on Linux and Windows (GCP VM)
+
+`gen_snapshot` cannot cross-compile AOT between desktop OSes, so a profile (or
+release) desktop bundle is built on the VM itself, in the same workspaces as
+above (`e2e/linux_example`, `e2e/windows_example`), not on the Mac. Ship the
+committed tree the way `tools/vm/run_e2e.dart` does (`git ls-files`, not
+`git archive`), then on the VM:
+
+```sh
+bazel build -c opt --@rules_flutter//flutter:profile //:app
+```
+
+On Windows add `--output_user_root=C:/b` (MAX_PATH) and run bazel from a
+scheduled task or another process that outlives the SSH session; the first
+build takes about ten minutes. Run the bundle as the visual check does (Xvfb and
+`scrot` on Linux, `dxgi_screenshot.py` through PsExec on Windows), and confirm
+it is a profile build and not a release one:
+
+- The Dart VM service answers. Linux prints `The Dart VM service is listening on
+  ...`. The Windows runner has no console, so start the app with
+  `FLUTTER_ENGINE_SWITCHES=2`, `FLUTTER_ENGINE_SWITCH_1=vm-service-port=8181` and
+  `FLUTTER_ENGINE_SWITCH_2=disable-service-auth-codes`, then connect to
+  `ws://127.0.0.1:8181/ws`.
+- The main isolate lists the `ext.flutter.profile*` service extensions. A
+  release engine serves no VM service at all.
+- `libapp.so` / `app.so` and the engine library differ in size from a
+  `-c opt` build without the flag.
+
 ## 5. Web rendering verification
 
 Web rendering is verified from Dart, through the dev tool, as part of the e2e
@@ -1335,6 +1363,7 @@ script's own package requires ≥ 3.13.
 | Linux runner / bundle (`flutter/private/*linux*`) | linux_example, cross_compile_example, GCP VM visual test |
 | Windows runner / bundle (`flutter/private/*windows*`) | windows_example (on Windows), GCP VM visual test |
 | Desktop engine selection (debug/release) | cross_compile_example `bazel build :cross_linux` + verify on VM |
+| Profile mode (`flutter:profile` selects, profile engine repos) | Root `//...`, macOS and a device by hand, and a profile build on the Linux and Windows VMs (§ Profile mode on Linux and Windows) |
 | Dart compilation / AOT | hello_world, ffi_example, macos_example |
 | Asset bundling | hello_world, plugin_example |
 | Shader compilation, bundling or hot reload, or how a workspace plugin is wired | `glass_plugin_e2e_test.dart` on every platform it covers, and by hand: `bazel build //impeller_shader:app_flutter_sksl_required` in plugin_example must **fail**, saying the shader does not compile for Skia |
