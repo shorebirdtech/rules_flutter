@@ -354,6 +354,7 @@ dart_test(
         "android",
         "no-windows-ci",
     ],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 # Runtime verifier for the Android APK. Installs on a connected emulator or
@@ -371,6 +372,7 @@ dart_test(
         "exclusive",
         "manual",
     ],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 # `manual`, so `bazel test //...` never gives it to the analysis aspect; this
@@ -398,6 +400,7 @@ dart_test(
         "manual",
     ],
     target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 # `manual`, so `bazel test //...` never gives it to the analysis aspect; this

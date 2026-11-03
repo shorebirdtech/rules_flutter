@@ -1,0 +1,139 @@
+/// Reading the headers of the ELF shared objects an Android APK ships.
+library;
+
+import 'dart:io';
+import 'dart:typed_data';
+
+/// The ELF `e_machine` values of Android ABI directories under `lib/`.
+const elfMachineForAbi = <String, int>{
+  'arm64-v8a': 0xb7, // EM_AARCH64
+  'x86_64': 0x3e, // EM_X86_64
+};
+
+/// The bytes of an ELF file, and what its headers say.
+///
+/// A malformed file is reported as a return value (a message, or no value) and
+/// not as a `RangeError`: a header pointing outside the file is a fact about
+/// the input.
+class ElfImage {
+  /// Reads the file at [path].
+  ElfImage.fromFile(File file) : this(file.readAsBytesSync());
+
+  /// Wraps [bytes].
+  ElfImage(this.bytes) : _data = ByteData.sublistView(bytes);
+
+  /// The file's contents.
+  final Uint8List bytes;
+
+  final ByteData _data;
+
+  /// An error message if this is not an ELF file whose `e_machine` is
+  /// [expectedMachine], or null if it is.
+  ///
+  /// A Mach-O file is named as such: it is what a library built for the host
+  /// and not for Android looks like.
+  String? validate(int expectedMachine) {
+    if (bytes.length < 20) {
+      return 'file too small to be an ELF binary (${bytes.length} bytes)';
+    }
+    final isElf =
+        bytes[0] == 0x7f &&
+        bytes[1] == 0x45 &&
+        bytes[2] == 0x4c &&
+        bytes[3] == 0x46;
+    if (!isElf) {
+      final isMachO =
+          bytes[0] == 0xcf &&
+          bytes[1] == 0xfa &&
+          bytes[2] == 0xed &&
+          bytes[3] == 0xfe;
+      if (isMachO) {
+        return 'Mach-O binary (host format) — the build was not transitioned '
+            'to an Android platform';
+      }
+      return 'not an ELF binary (magic: ${bytes.sublist(0, 4)})';
+    }
+    // e_machine: 2 bytes little-endian at offset 18.
+    final machine = bytes[18] | (bytes[19] << 8);
+    if (machine != expectedMachine) {
+      return 'ELF machine 0x${machine.toRadixString(16)} does not match '
+          'expected 0x${expectedMachine.toRadixString(16)}';
+    }
+    return null;
+  }
+
+  /// The smallest `p_align` across the `PT_LOAD` segments, or an error
+  /// message if the program headers cannot be read.
+  ///
+  /// This is what a 16KB-page device checks when it maps a library. A `.so`
+  /// linked with `-Wl,-z,max-page-size=4096` loads on a 4KB device and is
+  /// refused on a 16KB one, and nothing says so at build time: the APK builds,
+  /// installs, and the app dies on launch.
+  (int?, String?) minLoadAlignment() {
+    // e_ident[EI_CLASS]: 1 = ELF32, 2 = ELF64. Android ships both —
+    // armeabi-v7a and x86 are 32-bit.
+    final is64 = bytes.length > 4 && bytes[4] == 2;
+    const ptLoad = 1;
+    final headerSize = is64 ? 64 : 52;
+    if (bytes.length < headerSize) {
+      return (
+        null,
+        'file is shorter than an ELF header (${bytes.length} bytes)',
+      );
+    }
+    final phoff = is64
+        ? _data.getUint64(0x20, Endian.little)
+        : _data.getUint32(0x1c, Endian.little);
+    final phentsize = _data.getUint16(is64 ? 0x36 : 0x2a, Endian.little);
+    final phnum = _data.getUint16(is64 ? 0x38 : 0x2c, Endian.little);
+    final entrySize = is64 ? 0x38 : 0x20;
+    if (phentsize < entrySize) {
+      return (
+        null,
+        'ELF program header entries are $phentsize bytes, too '
+            'small to hold a p_align',
+      );
+    }
+    if (phoff + phnum * phentsize > bytes.length) {
+      return (null, 'ELF program headers run past the end of the file');
+    }
+    var min = -1;
+    for (var i = 0; i < phnum; i++) {
+      final off = phoff + i * phentsize;
+      if (_data.getUint32(off, Endian.little) != ptLoad) continue;
+      final align = is64
+          ? _data.getUint64(off + 0x30, Endian.little)
+          : _data.getUint32(off + 0x1c, Endian.little);
+      if (min < 0 || align < min) min = align;
+    }
+    if (min < 0) return (null, 'no PT_LOAD segments to check alignment on');
+    return (min, null);
+  }
+
+  /// The section names of a little-endian ELF64 file, or none if it has no
+  /// section headers.
+  List<String> sectionNames() {
+    if (bytes.length < 0x40) return const [];
+    final shoff = _data.getUint64(0x28, Endian.little);
+    final shentsize = _data.getUint16(0x3a, Endian.little);
+    final shnum = _data.getUint16(0x3c, Endian.little);
+    final shstrndx = _data.getUint16(0x3e, Endian.little);
+    if (shoff == 0 || shnum == 0) return const [];
+    final names = _data.getUint64(
+      shoff + shstrndx * shentsize + 0x18,
+      Endian.little,
+    );
+    String nameAt(int start) {
+      var end = start;
+      while (bytes[end] != 0) {
+        end++;
+      }
+      return String.fromCharCodes(bytes, start, end);
+    }
+
+    return [
+      for (var i = 0; i < shnum; i++)
+        nameAt(names + _data.getUint32(shoff + i * shentsize, Endian.little)),
+    ];
+  }
+}

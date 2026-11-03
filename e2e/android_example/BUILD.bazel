@@ -276,16 +276,16 @@ build_test(
 
 dart_test(
     name = "verify_android_apk_test",
-    srcs = ["test/apk_contents.dart"],
     data = [":app"],
     main = "test/verify_android_apk_test.dart",
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 dart_test(
     name = "verify_android_second_app_test",
-    srcs = ["test/apk_contents.dart"],
     data = [":second_app"],
     main = "test/verify_android_second_app_test.dart",
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 # Reads the permissions out of the compiled binary AndroidManifest.xml inside
@@ -295,9 +295,9 @@ dart_test(
 # debug variant overlay.
 dart_test(
     name = "verify_android_permissions_test",
-    srcs = ["test/apk_contents.dart"],
     data = [":app"],
     main = "test/verify_android_permissions_test.dart",
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 dart_test(
@@ -308,6 +308,7 @@ dart_test(
         "exclusive",
         "manual",
     ],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 # `manual`, so `bazel test //...` never gives it to the analysis aspect; this

@@ -6,6 +6,17 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'bytes.dart';
+
+/// Whether [bytes] contain [needle] encoded as UTF-8 or as UTF-16LE.
+///
+/// Binary Android artifacts mix both: aapt2 emits UTF-8 string pools in
+/// `resources.arsc` but UTF-16 in binary XML. This finds a string anywhere,
+/// without parsing; use [manifestElements] to know where in a manifest it is.
+bool containsText(List<int> bytes, String needle) =>
+    containsBytes(bytes, needle.codeUnits) ||
+    containsBytes(bytes, utf16leBytes(needle));
+
 /// Parses a dex file and returns the descriptors of all classes it defines
 /// (class_defs entries — not merely referenced types).
 ///
@@ -16,12 +27,23 @@ import 'dart:typed_data';
 /// data (uleb128 UTF-16 length followed by MUTF-8 bytes). Class descriptors
 /// are ASCII, so MUTF-8 decoding reduces to reading until the NUL terminator.
 Set<String> definedClassDescriptors(File dexFile) {
-  final bytes = dexFile.readAsBytesSync();
+  try {
+    return dexClassDescriptors(dexFile.readAsBytesSync());
+  } on FormatException catch (e) {
+    throw FormatException('${dexFile.path}: ${e.message}');
+  }
+}
+
+/// [definedClassDescriptors] for the bytes of a dex file.
+Set<String> dexClassDescriptors(Uint8List bytes) {
   final data = ByteData.sublistView(bytes);
   const dexMagic = [0x64, 0x65, 0x78, 0x0a]; // "dex\n"
+  if (bytes.length < 0x70) {
+    throw const FormatException('too short to be a dex file');
+  }
   for (var i = 0; i < dexMagic.length; i++) {
     if (bytes[i] != dexMagic[i]) {
-      throw FormatException('${dexFile.path} is not a dex file');
+      throw const FormatException('not a dex file');
     }
   }
   final stringIdsOff = data.getUint32(0x3c, Endian.little);

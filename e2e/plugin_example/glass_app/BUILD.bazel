@@ -97,4 +97,5 @@ dart_test(
         "android",
         "no-windows-ci",
     ],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
