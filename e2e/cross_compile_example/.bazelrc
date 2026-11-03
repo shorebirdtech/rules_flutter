@@ -1,4 +1,8 @@
-common --lockfile_mode=off
+# Fail rather than rewrite or ignore a lock file that is stale or incomplete.
+# `bazel run //tools/lockfile_check` checks every e2e workspace's (see
+# docs/TESTING.md, "Lock files"). A gitignored .bazelrc.user that overrides a
+# module must switch this off, since the override no longer matches the lock.
+common --lockfile_mode=error
 
 # This workspace always cross-compiles for Linux in debug mode.
 # gen_snapshot can't cross-compile AOT between desktop OSes, so debug only.

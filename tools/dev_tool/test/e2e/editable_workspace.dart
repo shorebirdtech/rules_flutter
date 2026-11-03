@@ -301,6 +301,11 @@ void _writeLocalConfig({required String source, required String root}) {
     'common --experimental_disk_cache_gc_max_size=$_diskCacheMaxSize',
     'common --experimental_disk_cache_gc_max_age=$_diskCacheMaxAge',
     '',
+    // The overrides below change what resolves, so the committed lock no
+    // longer describes it; under the workspaces' `--lockfile_mode=error` the
+    // build would refuse it.
+    'common --lockfile_mode=off',
+    '',
     '# Invariant 2: the source resolves these by a path relative to itself.',
   ];
   final overrides = _localPathOverrides(source);

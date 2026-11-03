@@ -1,5 +1,8 @@
-# Disable lockfile for e2e tests (they use local_path_override which changes frequently)
-common --lockfile_mode=off
+# Fail rather than rewrite or ignore a lock file that is stale or incomplete.
+# `bazel run //tools/lockfile_check` checks every e2e workspace's (see
+# docs/TESTING.md, "Lock files"). A gitignored .bazelrc.user that overrides a
+# module must switch this off, since the override no longer matches the lock.
+common --lockfile_mode=error
 
 # Use a remote JDK so the build works without a local Java installation.
 common --java_runtime_version=remotejdk_25

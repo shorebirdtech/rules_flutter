@@ -1,5 +1,8 @@
-# Disable lockfile for e2e tests (they use local_path_override which changes frequently)
-common --lockfile_mode=off
+# Fail rather than rewrite or ignore a lock file that is stale or incomplete.
+# `bazel run //tools/lockfile_check` checks every e2e workspace's (see
+# docs/TESTING.md, "Lock files"). A gitignored .bazelrc.user that overrides a
+# module must switch this off, since the override no longer matches the lock.
+common --lockfile_mode=error
 
 # Share the results of identical actions between configurations (one
 # Android ABI and the next, -c dbg and -c fastbuild, platform transitions).
