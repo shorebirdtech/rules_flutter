@@ -7,8 +7,10 @@ import 'package:args/args.dart';
 import 'package:flutter_bazel_dev_tool/bazel.dart' show bazelBuildArgs;
 import 'package:flutter_bazel_dev_tool/dev_tool_exception.dart';
 import 'package:flutter_bazel_dev_tool/device.dart';
+import 'package:flutter_bazel_dev_tool/logging.dart';
 import 'package:flutter_bazel_dev_tool/run_command.dart' show RunCommand;
 import 'package:flutter_bazel_dev_tool/run_plan.dart';
+import 'package:flutter_bazel_dev_tool/web_mode.dart';
 import 'package:test/test.dart';
 
 /// The parsed flags a plan is resolved from. Goes through the real parser, so a
@@ -350,6 +352,42 @@ void main() {
     test('a profile or release bundle does not', () {
       expect(surface(web: true, ddc: false, mode: BuildMode.profile), isFalse);
       expect(surface(web: true, ddc: false, mode: BuildMode.release), isFalse);
+    });
+  });
+
+  // A run that is not the loop its flags suggest says so before it builds.
+  group('announceWasmSelection', () {
+    List<LogRecord> announce(WasmSelection wasm) {
+      final logger = Logger.detached('announce_test')..level = Level.ALL;
+      final records = <LogRecord>[];
+      final sub = logger.onRecord.listen(records.add);
+      announceWasmSelection(wasm, '//app:web', logger);
+      sub.cancel();
+      return records;
+    }
+
+    test('a WebAssembly-only target running dart2wasm says why, and how to '
+        'get DDC', () {
+      final record = announce(WasmSelection.wasmOnlyTarget).single;
+      expect(record.level, Level.INFO);
+      final text = (record.object as Map)['text'] as String;
+      expect(text, contains('//app:web'));
+      expect(text, contains('js_fallback = False'));
+      expect(text, contains('no hot reload'));
+      expect(text, contains('--no-wasm'));
+    });
+
+    test('--no-wasm on such a target warns that the app ships wasm only', () {
+      final record = announce(WasmSelection.ddcDespiteWasmOnlyTarget).single;
+      expect(record.level, Level.WARNING);
+      final text = (record.object as Map)['text'] as String;
+      expect(text, contains('WebAssembly only'));
+      expect(text, contains('Int64List'));
+    });
+
+    test('a run that is what its flags say stays quiet', () {
+      expect(announce(WasmSelection.notWasm), isEmpty);
+      expect(announce(WasmSelection.requested), isEmpty);
     });
   });
 }

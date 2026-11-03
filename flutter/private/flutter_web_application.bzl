@@ -1307,7 +1307,8 @@ flutter_web_bundle = rule(
                   "builds WebAssembly, and by default a dart2js build beside it " +
                   "(`js_fallback`) for browsers that cannot run it. JavaScript is " +
                   "otherwise for the dev loop only, which compiles with DDC whatever " +
-                  "this says.",
+                  "this says, unless `js_fallback = False` ships no JavaScript: " +
+                  "`flutter_bazel run` then develops the app under dart2wasm.",
             default = "dart2wasm",
             values = ["dart2wasm", "dart2js"],
         ),
@@ -1326,7 +1327,9 @@ flutter_web_bundle = rule(
                   "throws). With True the app must compile under dart2js too. False " +
                   "is what makes `optimization_level_js`, `minify_js`, " +
                   "`frequency_based_minification` and `dump_info` refused, since " +
-                  "nothing would run them. Setting it False with `compiler = " +
+                  "nothing would run them. `flutter_bazel run -d chrome` runs such a " +
+                  "bundle under dart2wasm, with no hot reload, rather than under DDC " +
+                  "(JavaScript), unless told `--no-wasm`. Setting it False with `compiler = " +
                   "\"dart2js\"` is refused: that is JavaScript alone already.",
             default = True,
         ),

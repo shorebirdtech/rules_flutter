@@ -82,7 +82,6 @@ class RunPlan {
   final bool startPaused;
   final bool isMachine;
   final bool watchEnabled;
-  final bool wasmMode;
   final bool devToolsEnabled;
   final bool httpChannelEnabled;
   final bool allowNoVmService;
@@ -117,7 +116,6 @@ class RunPlan {
     required this.startPaused,
     required this.isMachine,
     required this.watchEnabled,
-    required this.wasmMode,
     required this.devToolsEnabled,
     required this.httpChannelEnabled,
     required this.allowNoVmService,
@@ -358,15 +356,44 @@ class RunPlan {
     // What shape of web run this is, and what the web flags mean for it —
     // both before the host is probed, because a `--web-port` that is not a
     // number is a typo to report at once rather than after a preflight.
-    // `resolveWebMode` refuses `--wasm` and `--hot` combinations that cannot
-    // hold; `WebOptions.resolve` refuses every web flag on a native run.
+    // `selectWasm` and `resolveWebMode` refuse `--wasm` and `--hot`
+    // combinations that cannot hold; `WebOptions.resolve` refuses every web
+    // flag on a native run.
+    final isWebDevice = devices.first is WebDevice;
+    final wasmFlag = results['wasm'] as bool?;
+
+    // Whether the app ships WebAssembly only decides the dev loop of a run
+    // that would otherwise be DDC, so only that run asks, and before any build
+    // is spent on the wrong loop. The question is a bazel query because the
+    // build's own description of the bundle (`<bundle>.serving.json`,
+    // `_dev_config.json`) does not exist until the build has run.
+    final targetWasmOnly =
+        needsWasmOnlyFact(
+          isWebDevice: isWebDevice,
+          wasmFlag: wasmFlag,
+          profileMode: profileMode,
+          hotReloadEnabled: hotReloadEnabled,
+        )
+        ? (await bazel.cqueryWebBundleFacts(
+            target,
+            workspace: workspace,
+            compilationMode: compilationMode,
+            extraArgs: extraArgs,
+          ))?.wasmOnly
+        : null;
+    final wasm = selectWasm(
+      isWebDevice: isWebDevice,
+      wasmFlag: wasmFlag,
+      targetWasmOnly: targetWasmOnly,
+    );
     final webMode = resolveWebMode(
-      isWebDevice: devices.first is WebDevice,
-      wasmMode: results['wasm'] as bool,
+      isWebDevice: isWebDevice,
+      wasm: wasm,
       profileMode: profileMode,
       hotReloadEnabled: hotReloadEnabled,
       hotExplicit: results.wasParsed('hot'),
     );
+    announceWasmSelection(wasm, target, logger);
     final webOptions = WebOptions.resolve(results, webMode);
 
     logger.fine({
@@ -467,7 +494,6 @@ class RunPlan {
       // Terminal: watch by default. Machine: don't — a client that drives
       // reloads itself does not want the filesystem doing it too.
       watchEnabled: watchEnabledFor(results, isMachine: isMachine),
-      wasmMode: results['wasm'] as bool,
       devToolsEnabled: results['devtools'] as bool,
       httpChannelEnabled: results['http-control-channel'] as bool,
       allowNoVmService: allowNoVmService,
@@ -517,6 +543,41 @@ class RunPlan {
       'outputs': result.outputFiles,
     });
     return (appFile: appFile, outputFiles: result.outputFiles);
+  }
+}
+
+/// Says, at the start of the run, when the dev loop is not the one the user
+/// would have guessed from the flags they typed.
+///
+/// A WebAssembly-only app gets the dart2wasm loop without asking, which has no
+/// hot reload: a run that quietly lacked it would read as a broken one. And
+/// `--no-wasm` on such an app is honoured, but the DDC loop compiles for
+/// JavaScript, which the app never ships.
+void announceWasmSelection(WasmSelection wasm, String target, Logger logger) {
+  switch (wasm) {
+    case WasmSelection.wasmOnlyTarget:
+      logger.info({
+        'message': 'wasm_only_target_runs_wasm',
+        'text':
+            '$target ships WebAssembly only (js_fallback = False), so this '
+            'run uses the dart2wasm dev loop, not DDC (JavaScript): there is '
+            'no hot reload, and a restart is a bazel rebuild plus a page '
+            'reload. Pass --no-wasm for the DDC loop.',
+        'target': target,
+      });
+    case WasmSelection.ddcDespiteWasmOnlyTarget:
+      logger.warning({
+        'message': 'ddc_for_wasm_only_target',
+        'text':
+            '$target ships WebAssembly only (js_fallback = False), but --no-wasm '
+            'runs it under DDC, which compiles JavaScript. Code that only '
+            'works under dart2wasm (an Int64List, say) will fail here and not '
+            'in the app you ship.',
+        'target': target,
+      });
+    case WasmSelection.notWasm:
+    case WasmSelection.requested:
+      break;
   }
 }
 

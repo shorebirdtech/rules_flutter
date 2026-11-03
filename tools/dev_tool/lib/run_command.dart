@@ -127,13 +127,22 @@ class RunCommand {
       defaultsTo: true,
       help: 'Launch DevTools for each connected device.',
     )
+    // No `defaultsTo`, for the reason `cross-origin-isolation` has none: the
+    // default depends on the target. A web app that ships WebAssembly only
+    // (`js_fallback = False`) runs the dart2wasm loop unless told otherwise;
+    // any other runs the DDC loop. Null is "not asked for", and `--no-wasm`
+    // asks for DDC.
     ..addFlag(
       'wasm',
-      defaultsTo: false,
+      defaultsTo: null,
       help:
           'Run web app compiled with dart2wasm. The app.* agent commands '
           'work (over the DevTools protocol, in a debug build); there is no '
-          'hot reload, and a restart is a bazel rebuild plus a page reload.',
+          'hot reload, and a restart is a bazel rebuild plus a page reload. '
+          'On by default for an app that ships WebAssembly only '
+          '(js_fallback = False), which never ships the JavaScript the DDC '
+          'loop runs; --no-wasm runs the DDC loop for it anyway, with a '
+          'warning. Off by default for any other app.',
     )
     ..addOption(
       'web-port',
@@ -168,7 +177,7 @@ class RunCommand {
           'Repeat for multiple headers. A header the response itself sets '
           '(content-type, say) wins over this.',
     )
-    // No `defaultsTo`: the default really is mode-dependent (on with --wasm,
+    // No `defaultsTo`: the default really is mode-dependent (on in the wasm loop,
     // off elsewhere), and declaring one here would make `--help` print
     // "(defaults to on)" for every run while the code did something else.
     // Null is the honest "not asked for".
@@ -178,7 +187,7 @@ class RunCommand {
       help:
           'Add the Cross-Origin-Opener-Policy and '
           'Cross-Origin-Embedder-Policy headers, which make '
-          'SharedArrayBuffer available. On by default only with --wasm, '
+          'SharedArrayBuffer available. On by default only in the dart2wasm loop, '
           'whose skwasm renderer needs it for multi-threading; turning it '
           'off there costs the app its render threads. Off elsewhere '
           'because an isolated page cannot load a cross-origin subresource '

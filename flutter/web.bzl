@@ -128,7 +128,9 @@ def flutter_web_app(
     This macro always uses dart2wasm + skwasm (modern defaults), and by default
     also builds a dart2js fallback for browsers that cannot run the WebAssembly,
     as `flutter build web --wasm` does. `js_fallback = False` makes the bundle
-    WebAssembly only. For dart2js or canvaskit, use flutter_web_bundle directly.
+    WebAssembly only, and `flutter_bazel run -d chrome` then develops it under
+    dart2wasm (no hot reload) instead of DDC, which compiles JavaScript the app
+    never ships. For dart2js or canvaskit, use flutter_web_bundle directly.
 
     Service worker:
         By default (pwa=True), the bundle ships `flutter_service_worker.js` and

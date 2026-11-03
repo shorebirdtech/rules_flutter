@@ -90,9 +90,16 @@ click it) before trusting a screenshot.
 | iOS simulator | `simctl spawn log stream` for the app's process. |
 | iPhone | `devicectl --console` plus lldb's output, so expect devicectl banners. |
 | Chrome, dev loop | The VM service's stdout and stderr streams. |
-| Chrome, `--wasm` | Browser console messages. |
+| Chrome, wasm loop (`--wasm`, or a WebAssembly-only app) | Browser console messages. |
 
 ## Web bundles and widget driving
+
+A web app whose `flutter_web_app` or `flutter_web_bundle` has
+`js_fallback = False` ships WebAssembly only, so on Chrome it runs the
+`--wasm` loop with no flag, and the startup output says so. That loop has no
+hot reload, and an explicit `--hot` is refused. `--no-wasm` runs such an app
+under DDC (JavaScript) instead and warns that it ships wasm only: code that
+only works there, an `Int64List` for one, fails in that run.
 
 `--wasm`, `--profile` and `--no-hot` on Chrome run a compiled bundle with no
 VM service. A debug bundle (`--wasm`, or `--no-hot -c dbg`) carries the agent

@@ -6,6 +6,7 @@ import 'dart:io';
 import 'dev_tool_exception.dart';
 import 'logging.dart';
 import 'runfiles_helper.dart';
+import 'web_bundle_facts.dart';
 
 final _logger = Logger('dev_tool.bazel');
 
@@ -720,6 +721,42 @@ class Bazel {
       for (final line in LineSplitter.split(result.stdout as String))
         if (line.trim().isNotEmpty) line.trim(),
     ];
+  }
+
+  /// What the web bundle [target] names says about itself, or null when
+  /// [target] is not, and does not alias, a single `flutter_web_bundle`. See
+  /// [WebBundleFacts].
+  ///
+  /// Asked in the configuration the run builds in ([compilationMode] and
+  /// [extraArgs]), so the answer is the one the build will act on.
+  Future<WebBundleFacts?> cqueryWebBundleFacts(
+    String target, {
+    required String workspace,
+    String? compilationMode,
+    List<String> extraArgs = const [],
+  }) async {
+    final args = [
+      ...webBundleFactsQuery(target),
+      if (compilationMode != null) ...['-c', compilationMode],
+      ...extraArgs,
+    ];
+    final result = await run(args, workingDirectory: workspace);
+    if (result.exitCode != 0) {
+      throw DevToolException(
+        'bazel could not read how $target is configured, which decides the '
+        'web dev loop it runs under:\n'
+        '  bazel ${args.join(' ')}\n'
+        '${(result.stderr as String).trim()}',
+      );
+    }
+    try {
+      return parseWebBundleFacts(result.stdout as String);
+    } on FormatException catch (e) {
+      throw DevToolException(
+        'bazel cquery answered something unreadable about $target: '
+        '${e.message}',
+      );
+    }
   }
 
   /// Locate the Bazel workspace root.

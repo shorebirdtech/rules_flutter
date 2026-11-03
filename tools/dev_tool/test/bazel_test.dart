@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter_bazel_dev_tool/bazel.dart';
 import 'package:flutter_bazel_dev_tool/dev_tool_exception.dart';
+import 'package:flutter_bazel_dev_tool/web_bundle_facts.dart';
 import 'package:logging/logging.dart';
 import 'package:test/test.dart';
 
@@ -547,6 +548,73 @@ void main() {
       await fake.bazel.close();
 
       expect(fake.interrupted, isEmpty);
+    });
+
+    group('cqueryWebBundleFacts', () {
+      Future<WebBundleFacts?> ask(
+        Bazel bazel,
+        List<FakeProcess> processes, {
+        required int exitCode,
+        String stdout = '',
+        String stderr = '',
+      }) async {
+        final facts = bazel.cqueryWebBundleFacts(
+          '//app:web',
+          workspace: '/ws',
+          compilationMode: 'dbg',
+          extraArgs: const ['--define=a=b'],
+        );
+        await pumpEventQueue();
+        final process = processes.single;
+        await process.outputAttached;
+        process.emitStdout(stdout);
+        process.emitStderr(stderr);
+        process.complete(exitCode);
+        return facts;
+      }
+
+      test('asks in the configuration the run builds in and reads the '
+          'answer', () async {
+        final fake = fakeBazel();
+        final facts = await ask(
+          fake.bazel,
+          fake.processes,
+          exitCode: 0,
+          stdout:
+              '{"target":[{"rule":{"name":"//app:web",'
+              '"ruleClass":"flutter_web_bundle","attribute":[{'
+              '"name":"js_fallback","booleanValue":false}]}}]}',
+        );
+
+        expect(facts!.wasmOnly, isTrue);
+        expect(fake.spawned.single.args, [
+          ...webBundleFactsQuery('//app:web'),
+          '-c',
+          'dbg',
+          '--define=a=b',
+        ]);
+        expect(fake.spawned.single.workingDirectory, '/ws');
+      });
+
+      test('a query bazel rejects is a failure that names the target and '
+          'what bazel said', () async {
+        final fake = fakeBazel();
+        await expectLater(
+          ask(
+            fake.bazel,
+            fake.processes,
+            exitCode: 1,
+            stderr: 'ERROR: no such package',
+          ),
+          throwsA(
+            isA<DevToolException>().having(
+              (e) => e.message,
+              'message',
+              allOf(contains('//app:web'), contains('no such package')),
+            ),
+          ),
+        );
+      });
     });
 
     group('build', () {

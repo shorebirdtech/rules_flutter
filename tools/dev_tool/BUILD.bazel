@@ -238,6 +238,7 @@ _UNIT_TESTS = {
     "vm_service_conformance_test": {"fakes": True},
     "vm_service_logs_test": {"fakes": True},
     "web_bootstrap_test": {},
+    "web_bundle_facts_test": {},
     "web_expression_compiler_test": {
         "fakes": True,
         "deps": ["@dev_tool_deps//:dwds"],
