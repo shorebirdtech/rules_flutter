@@ -1,0 +1,17 @@
+load("@rules_flutter//flutter:defs.bzl", "flutter_plugin")
+
+# A web plugin whose Dart code holds an icon and imports `dart:js_interop` and
+# `package:web`, as plugins do. No app's `main` imports it: the generated web
+# plugin registrant is the only way in.
+flutter_plugin(
+    name = "icon_plugin",
+    srcs = ["lib/icon_plugin.dart"],
+    platforms = ["web"],
+    plugin_class = "IconPlugin",
+    visibility = ["//web_interop:__pkg__"],
+    deps = [
+        "@deps//:flutter",
+        "@deps//:flutter_web_plugins",
+        "@deps//:web",
+    ],
+)

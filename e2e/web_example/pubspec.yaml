@@ -5,5 +5,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_web_plugins:
+    sdk: flutter
+  web: ^1.1.1
 dev_dependencies:
   very_good_analysis: ^10.3.0

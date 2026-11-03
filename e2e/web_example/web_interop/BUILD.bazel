@@ -1,0 +1,66 @@
+load("@bazel_skylib//rules:build_test.bzl", "build_test")
+load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
+load(":icon_font_test.bzl", "icon_font_test")
+
+# Web apps that a release build must handle, whatever they import.
+#
+# `flutter build web` compiles a release app for the web and nothing else, so
+# an app may import `dart:js_interop`, `package:web` and `dart:ui_web` freely,
+# may pick an icon behind `if (dart.library.js_interop)`, and may get one from
+# a web plugin that only the plugin registrant reaches. A release build here
+# has to accept the same apps and keep the same icons. These targets build in
+# the default (release) configuration.
+
+_SRCS = glob(["lib/**/*.dart"])
+
+_DEPS = [
+    "@deps//:flutter",
+    "@deps//:web",
+    "@rules_flutter//flutter:material_icons",
+]
+
+# An app whose own code imports `dart:js_interop`, `package:web` and
+# `dart:ui_web`, with icon tree shaking off so nothing but the two compilers
+# stands between the source and a bundle. The defaults: dart2wasm, with dart2js
+# beside it for browsers that cannot run WebAssembly, so one build covers both.
+flutter_web_app(
+    name = "interop_app_no_icon_shaking",
+    package_name = "web_interop",
+    srcs = _SRCS,
+    app_name = "Interop (all icons)",
+    main = "lib/interop_main.dart",
+    tree_shake_icons = False,
+    deps = _DEPS,
+)
+
+build_test(
+    name = "compilers_build_test",
+    targets = [":interop_app_no_icon_shaking"],
+)
+
+# An app that picks an icon behind a web-only conditional import and gets
+# another from a web plugin; see `lib/glyph_main.dart`.
+flutter_web_app(
+    name = "glyph_app",
+    package_name = "web_interop",
+    srcs = _SRCS,
+    app_name = "Glyphs",
+    main = "lib/glyph_main.dart",
+    deps = _DEPS + [
+        "//web_interop/icon_plugin",
+        "@deps//:flutter_web_plugins",
+    ],
+)
+
+# What the shipped icon font holds, by reading its character map. The code
+# points are `Icons.home` (e318), the stub branch's `Icons.computer` (e185),
+# the web branch's `Icons.language` (e366), the plugin's `Icons.bolt` (e0ee),
+# `Icons.ac_unit` (e037, which nothing draws), and the space (20).
+# The icon drawn straight from `main` is kept, and the font is a subset: an
+# unshaken font would keep `Icons.ac_unit` too, and pass every other check.
+icon_font_test(
+    name = "main_icon_kept",
+    bundle = "glyph_app",
+    keeps = ["e318"],
+    lacks = ["e037"],
+)
