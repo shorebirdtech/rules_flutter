@@ -1007,18 +1007,18 @@ Unlike the other platforms, the web macro takes `main` and `deps` directly rathe
 
 The macro always compiles with dart2wasm and renders with skwasm. Compiler settings such as `optimization_level_wasm` and `minify_wasm` pass through to `flutter_web_bundle`. For dart2js or CanvasKit, use `flutter_web_bundle` directly.
 
-The built bundle is WebAssembly only. `main.dart.wasm` and `main.dart.mjs` are the whole app, no dart2js compile runs, and nothing the rule generates refers to `main.dart.js`. JavaScript is for the dev loop, which compiles with DDC. So code that only works under WebAssembly builds: dart2js refuses the largest 64-bit integer literal at compile time and throws on `Int64List` at runtime, and neither stops a WASM-only build. (`e2e/web_example/int64` is an app that uses both.)
+The built bundle has two builds, as `flutter build web --wasm` does: `main.dart.wasm` (with `main.dart.mjs`) rendered by skwasm, and `main.dart.js` rendered by CanvasKit. The bootstrap lists the WASM build first. Flutter's loader (`flutter.js`) picks the first entry the browser can run, so a browser that cannot run WASM gets the JavaScript build. A browser cannot run the WASM build when it lacks WasmGC, or when, because the renderer is skwasm, its engine is not allowed to use it. `flutter.js` allows skwasm on Chromium only by default (its `wasmAllowList` is `blink: true, gecko: false, webkit: false`), so Firefox and Safari run the JavaScript build unless you allow them. Measured: Safari 27 loaded `main.dart.js` from a default bundle and rendered it.
 
-The cost is the browsers that cannot run it. Flutter's loader (`flutter.js`) picks the first entry in the bootstrap's build list that the browser can run, and the list has one entry. It skips the WASM build when the browser lacks WasmGC, and, because the renderer is skwasm, when the browser engine is not allowed to use it. `flutter.js` allows skwasm on Chromium only by default (its `wasmAllowList` is `blink: true, gecko: false, webkit: false`), so by default Firefox and Safari get no app from a WASM-only bundle even though both have WasmGC.
+Two settings change that:
 
-When the loader skips the only build, it logs `Flutter Web: no compatible build found for this browser.` and rejects the promise `_flutter.loader.load` returns. The generated `flutter_bootstrap.js` catches that and shows "This app can't run in this browser. It is built for WebAssembly only and needs a browser that can run it." on the page, where the loader alone would leave it as `index.html` left it, with no app and no word why. (A `bootstrap_js` of your own gets none of this unless it does the same.) Two ways to serve more browsers:
+- `wasm_browsers` names the engines allowed to run the skwasm build: `wasm_browsers = ["blink", "gecko", "webkit"]` serves WebAssembly to Chrome and Edge (`blink`), Firefox (`gecko`) and Safari (`webkit`). Exactly the engines named are allowed. Unset is Flutter's default. It is your judgement of those browsers' skwasm support, not something the rule decides (Safari 27 loaded `main.dart.wasm` and rendered it with `wasm_browsers` naming `webkit`). It sets `wasmAllowList` in the generated bootstrap, so it is refused alongside a `bootstrap_js` of your own (pass `config: {wasmAllowList: {...}}` to `_flutter.loader.load` there) and wherever there is no skwasm build (`compiler = "dart2js"`, `renderer = "canvaskit"`).
+- `js_fallback = False` makes the bundle WebAssembly only: no dart2js compile runs, and nothing the rule generates refers to `main.dart.js`. That is for an app that cannot compile under dart2js, since JavaScript is otherwise for the dev loop, which compiles with DDC. Code that only works under WebAssembly then builds: dart2js refuses the largest 64-bit integer literal at compile time and throws on `Int64List` at runtime, and the default build fails on the first (`e2e/web_example/int64` is an app that uses both, with `js_fallback = False`). It also halves the compile work, and `optimization_level_js`, `minify_js`, `frequency_based_minification` and `dump_info` are refused, since nothing would run them.
 
-- `wasm_browsers` names the engines allowed to run the skwasm build: `wasm_browsers = ["blink", "gecko", "webkit"]` serves WebAssembly to Chrome and Edge (`blink`), Firefox (`gecko`) and Safari (`webkit`). Exactly the engines named are allowed. Unset is Flutter's default. It is your judgement of those browsers' skwasm support, not something the rule decides, and a browser without WasmGC still gets the message. It sets `wasmAllowList` in the generated bootstrap, so it is refused alongside a `bootstrap_js` of your own (pass `config: {wasmAllowList: {...}}` to `_flutter.loader.load` there) and wherever there is no skwasm build (`compiler = "dart2js"`, `renderer = "canvaskit"`).
-- `js_fallback = True` also compiles with dart2js and ships `main.dart.js` (rendered with CanvasKit) beside the WASM build, listed second so a browser that can run WASM takes it. This is what `flutter build web --wasm` always does. The app then has to compile under dart2js, and `optimization_level_js`, `minify_js`, `frequency_based_minification` and `dump_info` apply to that build (they are refused without it, since they would reach nothing). The two combine: an engine `wasm_browsers` leaves out runs the JS build.
+The cost of `js_fallback = False` is the browsers that cannot run WASM, and under the default allow-list that is Firefox and Safari. The loader logs `Flutter Web: no compatible build found for this browser.` and rejects the promise `_flutter.loader.load` returns. The generated `flutter_bootstrap.js` catches that and shows "This app could not start. It is built for WebAssembly only, so it needs a browser that can run it." on the page, where the loader alone would leave the page as `index.html` left it, with no app and no word why. A bundle with the JavaScript build shows a plainer "could not start" message for any load failure. (A `bootstrap_js` of your own gets none of this unless it does the same.) Combining `js_fallback = False` with `wasm_browsers` naming the engines you want is the usual WASM-only deployment.
 
 A bundle has a `canvaskit/` directory of renderer files only when something loads it. By default `flutter.js` fetches the renderer from `www.gstatic.com` and never reads a local copy, so the directory would be dead weight and is not shipped. Two things put it there: `use_local_canvaskit = True`, which also tells the loader to read it, and a debug build, whose dev loop renders with CanvasKit served from it. A `bootstrap_js` of your own that points `canvasKitBaseUrl` at the bundle must set `use_local_canvaskit = True` too, or the directory is not there to load; one attribute states "this bundle serves its own renderer" for both routes, where a second could disagree with the files it ships.
 
-What the directory holds depends on the builds. The loader never falls from skwasm to CanvasKit or back, in or out of cross-origin isolation (skwasm runs single-threaded from the same `skwasm.js` and `skwasm.wasm` when the page is not isolated), so a WASM-only skwasm bundle carries `skwasm*` and `wimp*` and no CanvasKit, a CanvasKit bundle the reverse, and `js_fallback` both. The `.symbols` files beside them are emscripten's function-name maps, and nothing fetches them (the dev loop and release runs, skwasm and CanvasKit, were watched request by request), so they are never shipped. They are an output group instead: `bazel build //my:app --output_groups=symbols` links them under `bazel-bin/my/<name>_symbols/canvaskit/`, for the engine this bundle runs, when you need to symbolize a crash.
+What the directory holds depends on the builds. The loader never falls from skwasm to CanvasKit or back, in or out of cross-origin isolation (skwasm runs single-threaded from the same `skwasm.js` and `skwasm.wasm` when the page is not isolated), so a WASM-only skwasm bundle carries `skwasm*` (Safari and Firefox load `skwasm_heavy*`) and `wimp*` and no CanvasKit, a CanvasKit bundle the reverse, and a bundle with both builds both. The `.symbols` files beside them are emscripten's function-name maps, and nothing fetches them (the dev loop and release runs, skwasm and CanvasKit, were watched request by request), so they are never shipped. They are an output group instead: `bazel build //my:app --output_groups=symbols` links them under `bazel-bin/my/<name>_symbols/canvaskit/`, for the engine this bundle runs, when you need to symbolize a crash.
 
 An optimizing wasm compile (`-O1` and up, the default outside debug) reserves 4 cores, and its optimizer uses no more. `--@rules_flutter//flutter:wasm_opt_cores=N` changes both. Fewer lets several web apps compile at once where Bazel has few cores to hand out; more makes one compile finish sooner. The output is the same either way.
 
@@ -1030,7 +1030,8 @@ The files under `web/` are treated as templates and substituted the way `flutter
 ```starlark
 load("@rules_flutter//flutter:web.bzl", "flutter_web_bundle")
 
-# WASM only, the default:
+# WASM, with a dart2js build beside it for browsers that cannot run WASM
+# (the default):
 flutter_web_bundle(
     name = "my_app_web",
     package_name = "my_app",
@@ -1038,12 +1039,13 @@ flutter_web_bundle(
     deps = ["@deps//:flutter"],
 )
 
-# WASM, with a dart2js build beside it for browsers without WasmGC:
+# WASM only, for an app dart2js cannot compile, served to every engine:
 flutter_web_bundle(
-    name = "my_app_web_with_js",
+    name = "my_app_web_wasm",
     package_name = "my_app",
     main = "lib/main.dart",
-    js_fallback = True,
+    js_fallback = False,
+    wasm_browsers = ["blink", "gecko", "webkit"],
     deps = ["@deps//:flutter"],
 )
 
@@ -1071,13 +1073,17 @@ A `<meta http-equiv="Content-Security-Policy">` in `web/index.html` applies both
 
 The dev loop needs `'unsafe-inline'`. Adding `'unsafe-eval'` instead changes nothing. The failure is silent: DWDS connects, the VM service answers, every module loads, no CSP violation reaches the console, and the app never paints. `connect-src 'self' ws: wss:` is enough for the dev loop's WebSocket.
 
-A bundle served under `default-src 'self'` must also serve its own renderer, with `use_local_canvaskit = True`. Otherwise the engine's fetch of `skwasm.js` from `www.gstatic.com` is blocked and the page stays blank. Flutter's font fallback from `fonts.gstatic.com` is blocked too, which is harmless unless the app needs those glyphs.
+A bundle served under `default-src 'self'` or `script-src 'self'` must also serve its own renderer, with `use_local_canvaskit = True`. Otherwise the engine's import of `skwasm.js` from `www.gstatic.com` is blocked, the loader rejects, and the page shows the bootstrap's "could not start" message instead of the app. Flutter's font fallback from `fonts.gstatic.com` is blocked too, which is harmless unless the app needs those glyphs.
+
+A page that is also cross-origin isolated (see below) needs `worker-src 'self' blob:` beside that policy. Multi-threaded skwasm starts its worker from a `blob:` URL, a policy with `script-src 'self'` and no `worker-src` refuses it, and the page stays blank with nothing in the way of a message (measured in Chrome 156 with a local renderer: blank without the `worker-src`, rendered with it).
 
 So a policy strict enough to be useful cannot live in `web/index.html` today, because the dev loop reads the same file. If you need one, compose `flutter_web_bundle` directly with a generated `index_html` for the production bundle.
 
 #### Cross-origin isolation
 
 skwasm runs its renderer on threads only in a cross-origin-isolated page, which needs two response headers: `Cross-Origin-Opener-Policy: same-origin` and a `Cross-Origin-Embedder-Policy`. `flutter_bazel run --wasm` sends both, and so must whatever serves the deployed bundle. The embedder policy is the app's choice, set once on the target:
+
+The default renderer, fetched from `www.gstatic.com`, works in an isolated page and runs multi-threaded: the CDN answers with `Access-Control-Allow-Origin: *` and `Cross-Origin-Resource-Policy: cross-origin`, and skwasm's worker is a same-origin `blob:` that imports the CDN script as a module. Measured under `require-corp` in Chrome 156 and Safari 27, release builds: the app rendered and a worker started with the CDN renderer and with `use_local_canvaskit`, and without isolation neither starts a worker and the loader warns that skwasm runs single-threaded. So `use_local_canvaskit` is for air-gapped hosts and strict policies, not for threading.
 
 ```starlark
 flutter_web_app(
@@ -2089,7 +2095,7 @@ The `e2e/` directory holds working workspaces, each with its own tests:
 | `e2e/android_example` | An Android APK built three ways, with APK content checks. |
 | `e2e/linux_example` | A Linux app built three ways, with bundle checks. |
 | `e2e/windows_example` | A Windows app built three ways, with bundle checks. |
-| `e2e/web_example` | WASM-only, WASM-with-JavaScript-fallback and JavaScript web builds with `web_assets`, and a WASM-only app dart2js cannot compile. |
+| `e2e/web_example` | WASM-with-JavaScript-fallback, WASM-only and JavaScript web builds with `web_assets`, and a WASM-only app dart2js cannot compile. |
 | `e2e/cross_compile_example` | A Linux bundle cross-compiled from macOS. |
 | `e2e/multi_window_example` | Multi-window macOS and multi-scene iOS with `FlutterEngineGroup`. |
 | `e2e/dual_hub` | Two pub hubs in one workspace that disagree on a package version. |

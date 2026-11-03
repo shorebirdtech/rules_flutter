@@ -174,8 +174,6 @@ def path_mapping_test_suite(name):
         name = name + "_web",
         package_name = _PACKAGE,
         main = _MAIN,
-        # Both web compilers, so the fallback's action is path-mapped too.
-        js_fallback = True,
         tags = ["manual"],
     )
     flutter_web_bundle(

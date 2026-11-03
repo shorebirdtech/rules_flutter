@@ -2,7 +2,7 @@
 
 Produces a deployable web directory containing:
 - main.dart.wasm + main.dart.mjs (compiler="dart2wasm"), plus main.dart.js
-  when `js_fallback` asks for a JavaScript build beside it
+  unless `js_fallback = False` leaves the JavaScript build out
   or main.dart.js alone (compiler="dart2js")
 - flutter.js (Flutter engine bootstrapper from web SDK)
 - canvaskit/ (renderer engine artifacts; only with use_local_canvaskit, or in a
@@ -13,14 +13,14 @@ Produces a deployable web directory containing:
 - flutter_service_worker.js (optional; tears down a previously installed
   caching service worker — see flutter/private/web_service_worker.bzl)
 
-When compiler="dart2wasm", the output is WebAssembly only: no dart2js action
-runs, the bootstrap lists the WASM build alone, and nothing the rule generates
-refers to main.dart.js. A browser without WasmGC gets no app (flutter.js logs that no
-compatible build was found and throws). `js_fallback = True` opts into a dart2js
-build beside the WASM one: the bootstrap then lists both, so the Flutter engine
-tries WASM first and falls back to JS (what `flutter build web --wasm` does).
-JavaScript is otherwise for the dev loop only (DDC), which this rule does not
-build.
+When compiler="dart2wasm", both WASM and JS outputs are produced by default,
+as `flutter build web --wasm` does. The bootstrap lists both builds so the
+Flutter engine tries WASM first and falls back to JS (CanvasKit) on browsers
+that cannot run the WASM build. `js_fallback = False` makes the output
+WebAssembly only: no dart2js action runs, the bootstrap lists the WASM build
+alone, and nothing the rule generates refers to main.dart.js. A browser that
+cannot run it then gets no app (flutter.js logs that no compatible build was
+found and throws; the generated bootstrap shows a message instead).
 
 Both dart2wasm and dart2js take .dart source directly (not kernel .dill),
 so we skip the frontend_server kernel compilation step used by desktop/mobile.
@@ -151,8 +151,8 @@ _NO_APP_MESSAGE = "This app could not start. Reload the page, or try a different
 
 # A bundle with no JavaScript build runs only where the browser can run WASM.
 _WASM_ONLY_NO_APP_MESSAGE = (
-    "This app can't run in this browser. It is built for WebAssembly only and " +
-    "needs a browser that can run it."
+    "This app could not start. It is built for WebAssembly only, so it needs a " +
+    "browser that can run it."
 )
 
 def _build_config_js(engine_revision, builds, use_local_canvaskit):
@@ -500,7 +500,7 @@ def _flutter_web_bundle_impl(ctx):
         extra_wrapper_srcs.extend([staged_agent, staged_agent_bridge])
     all_srcs = all_srcs + extra_wrapper_srcs
 
-    # Step 2: Compile to WASM (with a JS build beside it when `js_fallback`) or JS only.
+    # Step 2: Compile to WASM (with a JS build beside it unless `js_fallback = False`) or JS only.
     # dart2js outputs to a tree artifact (directory) to support deferred loading:
     # dart2js may produce main.dart.js + *.part.js files for deferred imports.
     web_sdk_file_list = ctx.attr._web_sdk.files.to_list() if ctx.attr._web_sdk else []
@@ -1304,30 +1304,31 @@ flutter_web_bundle = rule(
     attrs = dict(_WEB_APPLICATION_ATTRS, **{
         "compiler": attr.string(
             doc = "Web compiler: 'dart2wasm' (default) or 'dart2js'. 'dart2wasm' " +
-                  "ships WebAssembly only: no dart2js compile runs, so code dart2js " +
-                  "cannot compile (an `Int64List`, say) builds, and the bundle has no " +
-                  "`main.dart.js`. A browser without WasmGC cannot run it; see " +
-                  "`js_fallback`. JavaScript is for the dev loop only, which compiles " +
-                  "with DDC whatever this says.",
+                  "builds WebAssembly, and by default a dart2js build beside it " +
+                  "(`js_fallback`) for browsers that cannot run it. JavaScript is " +
+                  "otherwise for the dev loop only, which compiles with DDC whatever " +
+                  "this says.",
             default = "dart2wasm",
             values = ["dart2wasm", "dart2js"],
         ),
         "js_fallback": attr.bool(
-            doc = "Also compile with dart2js and ship `main.dart.js` beside the WASM " +
-                  "build, for `compiler = \"dart2wasm\"`. The bootstrap then lists both " +
-                  "builds and Flutter's loader picks the first the browser can run: " +
-                  "WASM where the browser has WasmGC (and, for skwasm, is allowed to " +
-                  "use it: Chromium by default), the CanvasKit JavaScript build " +
-                  "elsewhere. This is what `flutter build web --wasm` does. Off by " +
-                  "default, because it makes the app compile under dart2js as well, " +
-                  "which refuses code that only works under WASM, and doubles the " +
-                  "compile work. Without it, a browser that cannot run the WASM build " +
-                  "gets a blank page (the loader logs `no compatible build found` and " +
-                  "throws). Setting it with `compiler = \"dart2js\"` is refused: that " +
-                  "is JavaScript alone already. Turning it on is what makes " +
-                  "`optimization_level_js`, `minify_js`, `frequency_based_minification` " +
-                  "and `dump_info` live under dart2wasm.",
-            default = False,
+            doc = "Whether `compiler = \"dart2wasm\"` also compiles with dart2js and " +
+                  "ships `main.dart.js` beside the WASM build. True (default), as " +
+                  "`flutter build web --wasm` does: the bootstrap lists both builds and " +
+                  "Flutter's loader picks the first the browser can run, WASM where the " +
+                  "browser has WasmGC (and, for skwasm, is allowed to use it: Chromium " +
+                  "by default, see `wasm_browsers`), the CanvasKit JavaScript build " +
+                  "elsewhere. False makes the bundle WebAssembly only: no dart2js " +
+                  "compile runs, so code only WebAssembly supports (an `Int64List`, the " +
+                  "largest 64-bit integer literal) builds, and the compile work is " +
+                  "halved, but a browser that cannot run the WASM build gets a message " +
+                  "instead of the app (the loader logs `no compatible build found` and " +
+                  "throws). With True the app must compile under dart2js too. False " +
+                  "is what makes `optimization_level_js`, `minify_js`, " +
+                  "`frequency_based_minification` and `dump_info` refused, since " +
+                  "nothing would run them. Setting it False with `compiler = " +
+                  "\"dart2js\"` is refused: that is JavaScript alone already.",
+            default = True,
         ),
         "renderer": attr.string(
             doc = "Web renderer: 'skwasm' or 'canvaskit'. Unset, it follows " +
@@ -1343,13 +1344,13 @@ flutter_web_bundle = rule(
                   "allowed and the rest are refused. Unset (default) is Flutter's own " +
                   "default, which today allows `blink` only. The browser must also " +
                   "support WasmGC. CONSEQUENCE: an engine the loader refuses, or a " +
-                  "browser without WasmGC, runs the `js_fallback` build when there is " +
-                  "one; with `compiler = \"dart2wasm\"` alone there is nothing else to " +
-                  "run, and the generated bootstrap shows a message instead of the app " +
-                  "(the loader also logs `no compatible build found` and throws). So " +
-                  "naming `gecko` and `webkit` serves Firefox and Safari WebAssembly " +
-                  "instead of a message, on your judgement of their skwasm support; " +
-                  "leaving them out serves them the message or the JS fallback. It " +
+                  "browser without WasmGC, runs the `js_fallback` build (the default); " +
+                  "with `js_fallback = False` there is nothing else to run, and the " +
+                  "generated bootstrap shows a message instead of the app (the loader " +
+                  "also logs `no compatible build found` and throws). So naming `gecko` " +
+                  "and `webkit` serves Firefox and Safari WebAssembly instead of the " +
+                  "JS build or a message, on your judgement of their skwasm support; " +
+                  "leaving them out serves them the JS build, or the message. It " +
                   "applies only to a skwasm build, so it is refused with `compiler = " +
                   "\"dart2js\"` or `renderer = \"canvaskit\"`, and with a `bootstrap_js` " +
                   "of your own: that file calls `_flutter.loader.load` itself, so pass " +
@@ -1410,7 +1411,7 @@ flutter_web_bundle = rule(
                   "because upstream's own defaults disagree: dart2wasm stops at 2 in release " +
                   "while dart2js goes to 4, so a single shared level could not state both. " +
                   "Applies to a `compiler = \"dart2js\"` target, and to a dart2wasm one with " +
-                  "`js_fallback = True`; under dart2wasm alone it is refused rather " +
+                  "`js_fallback` on; with `js_fallback = False` it is refused rather " +
                   "than ignored. Note upstream's single `--optimization-level` sets " +
                   "BOTH compilers, and its per-compiler default only applies when the flag " +
                   "is absent; here each compiler is asked separately, so setting this one " +
@@ -1444,7 +1445,7 @@ flutter_web_bundle = rule(
                   "and not in debug or profile, as upstream does; \"true\" and \"false\" state " +
                   "it outright and hold across every build mode. Applies to a " +
                   "`compiler = \"dart2js\"` target, and to a dart2wasm one with " +
-                  "`js_fallback = True`; under dart2wasm alone it is refused. Always passed " +
+                  "`js_fallback` on; with `js_fallback = False` it is refused. Always passed " +
                   "to the compiler explicitly rather than left to be inferred from the " +
                   "optimization level, so the two stay independent — `-O2` and above minify " +
                   "on their own, which would otherwise minify a debug build.",
@@ -1459,7 +1460,7 @@ flutter_web_bundle = rule(
                   "much later, as a failure in code that did nothing wrong. Set False to drop " +
                   "the checks once an interop surface is trusted. Applies to the dart2js " +
                   "compile of a `compiler = \"dart2js\"` target, or of a dart2wasm one with " +
-                  "`js_fallback = True`; a WASM-only bundle has no such compile, so there it " +
+                  "`js_fallback` on; a WASM-only bundle has no such compile, so there it " +
                   "reaches the dev loop alone. The DDC dev loop applies these checks too, and " +
                   "reads this value from the build's dev config, so the two agree.",
             default = True,
@@ -1477,8 +1478,8 @@ flutter_web_bundle = rule(
                   "program, so shipping it to visitors is not something to do by default. " +
                   "Note which compilation it describes: only dart2js produces a report, so " +
                   "under `compiler = \"dart2wasm\"` it describes the `js_fallback` build — " +
-                  "not the WASM build most visitors run — and without `js_fallback` there " +
-                  "is nothing to describe, so it is refused.",
+                  "not the WASM build most visitors run — and with `js_fallback = False` " +
+                  "there is nothing to describe, so it is refused.",
             default = False,
         ),
         "enable_experiments": attr.string_list(
@@ -1499,8 +1500,8 @@ flutter_web_bundle = rule(
                   "output size. Named for what it enables, so the default reads as the " +
                   "behaviour rather than as a double negative. Only minified output has " +
                   "names to choose, so this does nothing alongside `minify_js = \"false\"`. " +
-                  "Refused under `compiler = \"dart2wasm\"` without `js_fallback`, which " +
-                  "runs no dart2js.",
+                  "Refused under `compiler = \"dart2wasm\"` with `js_fallback = False`, " +
+                  "which runs no dart2js.",
             default = True,
         ),
         "strip_wasm": attr.bool(

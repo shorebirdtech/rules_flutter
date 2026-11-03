@@ -7,8 +7,8 @@ exports_files(["pubspec.lock"])
 
 # =============================================================================
 # Approach 1: Tier 1 — flutter_web_app (auto-discovers web/ runner files)
-# WASM build (dart2wasm + skwasm) — modern, recommended. WebAssembly only: no
-# dart2js compile runs and the bundle has no main.dart.js.
+# WASM build (dart2wasm + skwasm) — modern, recommended, with the dart2js build
+# beside it (`js_fallback`, on by default) for browsers that cannot run WASM.
 # =============================================================================
 
 flutter_web_app(
@@ -58,7 +58,8 @@ flutter_web_app(
 # =============================================================================
 # Approach 2: Tier 2 — flutter_web_bundle (explicit control)
 # JS build (dart2js + canvaskit) — legacy, wider browser support. Also what
-# `js_fallback = True` adds beside a WASM build (see `app_fallback` below).
+# `js_fallback` adds beside a WASM build (every WASM target here, but the
+# `js_fallback = False` ones).
 # =============================================================================
 
 flutter_web_manifest_gen(
@@ -244,7 +245,6 @@ flutter_web_app(
     # The size report, produced as a named output rather than deployed. It
     # describes the dart2js build, so it needs the fallback to exist.
     dump_info = True,
-    js_fallback = True,
     # Kept unminified and unstripped so the bundle can be read.
     minify_js = "false",
     minify_wasm = "false",
@@ -259,14 +259,13 @@ flutter_web_app(
     ],
 )
 
-# The defaults plus the opt-in JavaScript build: the WASM bundle with a dart2js
-# fallback beside it, for browsers without WasmGC.
+# WebAssembly only: no dart2js compile runs and the bundle has no main.dart.js.
 flutter_web_app(
-    name = "app_fallback",
+    name = "app_wasm_only",
     package_name = "web_example",
-    app_name = "Web Example (fallback)",
+    app_name = "Web Example (WASM only)",
     assets = glob(["assets/**"]),
-    js_fallback = True,
+    js_fallback = False,
     deps = [
         "@deps//:flutter",
         "@rules_flutter//flutter:material_icons",
@@ -275,7 +274,7 @@ flutter_web_app(
 
 # WebAssembly for every browser engine flutter.js knows, instead of Flutter's
 # default of Chromium only. A browser without WasmGC still gets the message the
-# generated bootstrap shows, because there is no JavaScript build to run. Also
+# generated bootstrap shows, because it has no JavaScript build to run. Also
 # serves its own skwasm renderer, the one e2e bundle where the local
 # `canvaskit/` directory is there to be checked.
 flutter_web_app(
@@ -283,6 +282,7 @@ flutter_web_app(
     package_name = "web_example",
     app_name = "Web Example (all browsers)",
     assets = glob(["assets/**"]),
+    js_fallback = False,
     use_local_canvaskit = True,
     wasm_browsers = [
         "blink",
@@ -303,6 +303,7 @@ flutter_web_app(
     package_name = "web_example",
     app_name = "Web Example (no blink)",
     assets = glob(["assets/**"]),
+    js_fallback = False,
     wasm_browsers = [
         "gecko",
         "webkit",
@@ -322,8 +323,8 @@ build_test(
 )
 
 build_test(
-    name = "fallback_build_test",
-    targets = [":app_fallback"],
+    name = "wasm_only_build_test",
+    targets = [":app_wasm_only"],
 )
 
 build_test(
@@ -356,11 +357,11 @@ dart_test(
         # never asked for it must not carry it, or the positive assertion
         # would hold for every bundle and mean nothing.
         ":app_all_browsers",
-        ":app_fallback",
         ":app_js",
         ":app_no_blink",
         ":app_tuned",
         ":app_wasm",
+        ":app_wasm_only",
     ],
     main = "test/verify_compiler_flags_test.dart",
     deps = ["@rules_dart//dart/runfiles"],

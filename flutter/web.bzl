@@ -125,10 +125,10 @@ def flutter_web_app(
 
         flutter_web_app(name = "reminders_web", web_dir = "web_apps/reminders", ...)
 
-    This macro always uses dart2wasm + skwasm (modern defaults), and builds
-    WebAssembly only: a browser without WasmGC gets no app, and
-    `js_fallback = True` adds a JavaScript build for it. For dart2js
-    or canvaskit, use flutter_web_bundle directly.
+    This macro always uses dart2wasm + skwasm (modern defaults), and by default
+    also builds a dart2js fallback for browsers that cannot run the WebAssembly,
+    as `flutter build web --wasm` does. `js_fallback = False` makes the bundle
+    WebAssembly only. For dart2js or canvaskit, use flutter_web_bundle directly.
 
     Service worker:
         By default (pwa=True), the bundle ships `flutter_service_worker.js` and
@@ -174,14 +174,14 @@ def flutter_web_app(
             and `source_maps`. Note this macro always compiles with dart2wasm,
             so `minify_wasm`, `optimization_level_wasm` and `strip_wasm` are
             live here while a `compiler = "dart2js"` bundle refuses them. The
-            bundle is WebAssembly only: the dart2js settings
-            (`optimization_level_js`, `minify_js`,
-            `frequency_based_minification`, `dump_info`) are refused unless
-            `js_fallback = True` also ships a JavaScript build for browsers
-            without WasmGC. Flutter's loader allows skwasm on Chromium only by
-            default, so Firefox and Safari get the page's "can't run in this
-            browser" message from a WASM-only bundle: `wasm_browsers = ["blink",
-            "gecko", "webkit"]` allows them to run the WebAssembly instead.
+            dart2js settings (`optimization_level_js`, `minify_js`,
+            `frequency_based_minification`, `dump_info`) are refused with
+            `js_fallback = False`, which leaves the JavaScript build out.
+            Flutter's loader allows skwasm on Chromium only by default, so
+            Firefox and Safari run the JavaScript build, or get the page's
+            "could not start" message from a `js_fallback = False`
+            bundle: `wasm_browsers = ["blink", "gecko", "webkit"]` allows them
+            to run the WebAssembly instead.
             `extra_web_assets` is accepted here: additional web asset
             targets — typically generated files, which the `web/` glob
             cannot see — copied into the bundle root alongside the

@@ -6,11 +6,11 @@
 /// out — a flag can be spelled correctly, accepted by the compiler, and still
 /// change nothing. So this compares builds of the SAME app:
 ///
-///   app_wasm:     the defaults: WebAssembly only, stripped and minified in
-///                 the default (release) configuration.
-///   app_fallback: the defaults plus `js_fallback`, which adds minified JS.
-///   app_tuned:    minify_js/minify_wasm off and strip_wasm off, plus
-///                 dump_info, on top of `js_fallback`.
+///   app_wasm:      the defaults: stripped, minified WASM with minified JS
+///                  beside it, in the default (release) configuration.
+///   app_wasm_only: the same with `js_fallback = False`: WebAssembly alone.
+///   app_tuned:     minify_js/minify_wasm off and strip_wasm off, plus
+///                  dump_info.
 ///
 /// Every assertion below is a difference between those two bundles, so it
 /// fails if the attrs stop being honoured — which asserting on one bundle
@@ -51,21 +51,21 @@ void main() {
   }
 
   final tunedJs = bundleFile('app_tuned', 'main.dart.js');
-  final defaultJs = bundleFile('app_fallback', 'main.dart.js');
+  final defaultJs = bundleFile('app_wasm', 'main.dart.js');
   final tunedWasm = bundleFile('app_tuned', 'main.dart.wasm');
   final defaultWasm = bundleFile('app_wasm', 'main.dart.wasm');
   if (failed) exit(1);
 
-  // The default WASM bundle is WebAssembly alone: no JavaScript build, and no
-  // mention of one for the loader to go looking for.
-  final wasmOnlyDir = Directory(bundle('app_wasm_web'));
+  // `js_fallback = False` makes a bundle WebAssembly alone: no JavaScript
+  // build, and no mention of one for the loader to go looking for.
+  final wasmOnlyDir = Directory(bundle('app_wasm_only_web'));
   final wasmOnlyJs = wasmOnlyDir
       .listSync(recursive: true)
       .whereType<File>()
       .where((f) => f.path.endsWith('main.dart.js'))
       .toList();
   check(
-    'default dart2wasm bundle ships no main.dart.js',
+    'js_fallback = False ships no main.dart.js',
     ok: wasmOnlyJs.isEmpty,
     detail: wasmOnlyJs.isEmpty ? 'WebAssembly only' : 'shipped $wasmOnlyJs',
   );
@@ -73,7 +73,7 @@ void main() {
     '${wasmOnlyDir.path}/flutter_bootstrap.js',
   ).readAsStringSync();
   check(
-    'default dart2wasm bootstrap lists only the WASM build',
+    'js_fallback = False lists only the WASM build',
     ok:
         wasmOnlyBootstrap.contains('"compileTarget":"dart2wasm"') &&
         !wasmOnlyBootstrap.contains('dart2js') &&
@@ -96,9 +96,9 @@ void main() {
     detail: 'nothing would load it: the renderer comes from gstatic.com',
   );
   check(
-    'app_fallback has no canvaskit/ directory either',
-    ok: !Directory('${bundle('app_fallback_web')}/canvaskit').existsSync(),
-    detail: 'a JS build does not change that',
+    'app_wasm_only has no canvaskit/ directory either',
+    ok: !Directory('${bundle('app_wasm_only_web')}/canvaskit').existsSync(),
+    detail: 'leaving the JS build out does not change that',
   );
   check(
     'app_all_browsers ships skwasm and no CanvasKit',
@@ -162,22 +162,29 @@ void main() {
   // The page shows a message, not a blank page, when the loader cannot start
   // the app.
   check(
-    'the default bootstrap shows a message when no build can run',
+    'a WASM-only bootstrap shows a message when no build can run',
     ok:
         wasmOnlyBootstrap.contains('.catch(function(error)') &&
         wasmOnlyBootstrap.contains('WebAssembly only'),
     detail: 'catch on `load` appends an alert to the page',
   );
 
-  // `js_fallback` adds the JavaScript build, listed after the WASM one so the
-  // loader prefers WASM.
+  // By default the JavaScript build is there, listed after the WASM one so the
+  // loader prefers WASM, and the message does not claim the app is WASM-only.
   final fallbackBootstrap = File(
-    '${bundle('app_fallback_web')}/flutter_bootstrap.js',
+    '${bundle('app_wasm_web')}/flutter_bootstrap.js',
   ).readAsStringSync();
+  check(
+    'a bundle with a JS build does not call itself WASM-only',
+    ok:
+        fallbackBootstrap.contains('.catch(function(error)') &&
+        !fallbackBootstrap.contains('WebAssembly only'),
+    detail: 'generic message',
+  );
   final wasmAt = fallbackBootstrap.indexOf('"compileTarget":"dart2wasm"');
   final jsAt = fallbackBootstrap.indexOf('"compileTarget":"dart2js"');
   check(
-    'js_fallback lists the JS build after the WASM one',
+    'the default lists the JS build after the WASM one',
     ok: wasmAt >= 0 && jsAt > wasmAt,
     detail: 'dart2wasm at $wasmAt, dart2js at $jsAt',
   );

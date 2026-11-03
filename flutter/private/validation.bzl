@@ -196,8 +196,8 @@ def validate_web_wasm_only_attrs(compiler, set_attrs, what):
 def validate_web_js_only_attrs(compiler, js_fallback, set_attrs, what):
     """Refuse dart2js-only settings on a target that runs no dart2js compile.
 
-    `compiler = "dart2wasm"` ships WebAssembly alone unless `js_fallback` asks
-    for a dart2js build beside it, so a dart2js-only setting there reaches
+    `compiler = "dart2wasm"` runs dart2js for the fallback build unless
+    `js_fallback = False` turns it off, and then a dart2js-only setting reaches
     nothing: it would be accepted and silently ignored.
 
     Args:
@@ -215,22 +215,26 @@ def validate_web_js_only_attrs(compiler, js_fallback, set_attrs, what):
             ", ".join(sorted(set_attrs)),
             "" if len(set_attrs) > 1 else "s",
         ) +
-        "runs none unless `js_fallback = True` asks for one. Drop the setting, add " +
-        "`js_fallback = True`, or switch to `compiler = \"dart2js\"`.",
+        "with `js_fallback = False` runs none. Drop the setting, drop " +
+        "`js_fallback = False`, or switch to `compiler = \"dart2js\"`.",
     )
 
 def validate_web_js_fallback(compiler, js_fallback, what):
-    """Refuse `js_fallback` where there is no WASM build for it to back up.
+    """Refuse `js_fallback = False` where the whole build is JavaScript.
+
+    `js_fallback` defaults to True, so it can only be told apart from unset
+    when it is False. `compiler = "dart2js"` has no WASM build for a JS one to
+    back up, and asking for no JS build beside it contradicts it.
 
     Args:
         compiler: The target's `compiler` attr value.
         js_fallback: The target's `js_fallback` attr value.
         what: Label named in the failure message.
     """
-    if compiler == "dart2js" and js_fallback:
+    if compiler == "dart2js" and not js_fallback:
         fail(
-            "%s: `js_fallback = True` adds a dart2js build beside a WASM one, and " % what +
-            "`compiler = \"dart2js\"` is already JavaScript alone. Drop `js_fallback`, " +
+            "%s: `js_fallback = False` asks for no JavaScript build beside the WASM " % what +
+            "one, and `compiler = \"dart2js\"` is JavaScript alone. Drop `js_fallback`, " +
             "or switch to `compiler = \"dart2wasm\"`.",
         )
 

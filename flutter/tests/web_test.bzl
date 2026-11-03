@@ -265,8 +265,9 @@ def _assert_argv(env, action, present = [], absent_substrings = []):
 def _assert_dart2js(env, js_fallback, present = [], absent_substrings = [], level = None):
     """Assert the dart2js compile a fixture should (not) run.
 
-    A fixture with `js_fallback` runs exactly one, and its argv is checked; one
-    without runs none at all, which is the point of a WASM-only bundle.
+    A fixture with the fallback runs exactly one, and its argv is checked; one
+    with `js_fallback = False` runs none at all, which is the point of a
+    WASM-only bundle.
 
     Args:
         env: The analysistest env.
@@ -1218,7 +1219,7 @@ _wasm_only_bundle_test = analysistest.make(
 )
 
 def _js_fallback_bundle_test_impl(ctx):
-    """`js_fallback = True` ships the JavaScript build after the WASM one.
+    """The default ships the JavaScript build after the WASM one.
 
     The order is the loader's preference order, so WASM has to come first or
     every browser would take the JavaScript build.
@@ -1363,7 +1364,7 @@ def _js_setting_without_fallback_refused_test_impl(ctx):
     """A dart2js-only setting on a WASM-only target is refused, by attr name."""
     env = analysistest.begin(ctx)
     asserts.expect_failure(env, ctx.attr.attr_name)
-    asserts.expect_failure(env, "js_fallback = True")
+    asserts.expect_failure(env, "js_fallback = False")
     return analysistest.end(env)
 
 _js_setting_without_fallback_refused_test = analysistest.make(
@@ -1373,9 +1374,9 @@ _js_setting_without_fallback_refused_test = analysistest.make(
 )
 
 def _js_fallback_on_js_refused_test_impl(ctx):
-    """`js_fallback` beside `compiler = "dart2js"` is refused, with the way out."""
+    """`js_fallback = False` beside `compiler = "dart2js"` is refused, with the way out."""
     env = analysistest.begin(ctx)
-    asserts.expect_failure(env, "js_fallback = True")
+    asserts.expect_failure(env, "js_fallback = False")
     asserts.expect_failure(env, "compiler = \"dart2wasm\"")
     return analysistest.end(env)
 
@@ -1703,13 +1704,13 @@ def _setup_web_fixtures():
         tags = ["manual"],
     )
 
-    # The same app with the opt-in JavaScript build beside the WASM one.
+    # The same app with no JavaScript build beside the WASM one.
     flutter_web_bundle(
-        name = "_web_fallback_fixture",
+        name = "_web_wasm_only_fixture",
         package_name = "web_fixture",
         main = "lib/web_fixture_main.dart",
         defines = ["from.attr=1"],
-        js_fallback = True,
+        js_fallback = False,
         tags = ["manual"],
     )
 
@@ -1718,6 +1719,7 @@ def _setup_web_fixtures():
     flutter_web_bundle(
         name = "_web_minify_js_without_fallback",
         package_name = "web_fixture",
+        js_fallback = False,
         main = "lib/web_fixture_main.dart",
         minify_js = "false",
         tags = ["manual"],
@@ -1725,6 +1727,7 @@ def _setup_web_fixtures():
     flutter_web_bundle(
         name = "_web_dump_info_without_fallback",
         package_name = "web_fixture",
+        js_fallback = False,
         main = "lib/web_fixture_main.dart",
         dump_info = True,
         tags = ["manual"],
@@ -1794,6 +1797,7 @@ def _setup_web_fixtures():
     flutter_web_bundle(
         name = "_web_local_fixture",
         package_name = "web_fixture",
+        js_fallback = False,
         main = "lib/web_fixture_main.dart",
         tags = ["manual"],
         use_local_canvaskit = True,
@@ -1801,19 +1805,18 @@ def _setup_web_fixtures():
     flutter_web_bundle(
         name = "_web_fallback_local_fixture",
         package_name = "web_fixture",
-        js_fallback = True,
         main = "lib/web_fixture_main.dart",
         tags = ["manual"],
         use_local_canvaskit = True,
     )
 
-    # `js_fallback` where the whole bundle is JavaScript already.
+    # `js_fallback = False` where the whole bundle is JavaScript already.
     flutter_web_bundle(
         name = "_web_fallback_on_js",
         package_name = "web_fixture",
         main = "lib/web_fixture_main.dart",
         compiler = "dart2js",
-        js_fallback = True,
+        js_fallback = False,
         renderer = "canvaskit",
         tags = ["manual"],
     )
@@ -1885,7 +1888,6 @@ def _setup_web_fixtures():
         name = "_web_profile_fixture",
         package_name = "web_fixture",
         main = "lib/web_fixture_main.dart",
-        js_fallback = True,
         profile = True,
         tags = ["manual"],
     )
@@ -1896,7 +1898,6 @@ def _setup_web_fixtures():
         name = "_web_minify_fixture",
         package_name = "web_fixture",
         main = "lib/web_fixture_main.dart",
-        js_fallback = True,
         minify_js = "true",
         minify_wasm = "false",
         tags = ["manual"],
@@ -1908,7 +1909,6 @@ def _setup_web_fixtures():
         package_name = "web_fixture",
         main = "lib/web_fixture_main.dart",
         frequency_based_minification = False,
-        js_fallback = True,
         native_null_assertions = False,
         tags = ["manual"],
     )
@@ -1921,7 +1921,6 @@ def _setup_web_fixtures():
         package_name = "web_fixture",
         main = "lib/web_fixture_main.dart",
         enable_experiments = ["test-experiment"],
-        js_fallback = True,
         tags = ["manual"],
     )
 
@@ -1930,7 +1929,6 @@ def _setup_web_fixtures():
         package_name = "web_fixture",
         main = "lib/web_fixture_main.dart",
         dump_info = True,
-        js_fallback = True,
         tags = ["manual"],
     )
 
@@ -1993,7 +1991,6 @@ def _setup_web_fixtures():
         name = "_web_optimization_fixture",
         package_name = "web_fixture",
         main = "lib/web_fixture_main.dart",
-        js_fallback = True,
         optimization_level_js = "3",
         tags = ["manual"],
     )
@@ -2003,7 +2000,6 @@ def _setup_web_fixtures():
         name = "_web_optimization_zero_fixture",
         package_name = "web_fixture",
         main = "lib/web_fixture_main.dart",
-        js_fallback = True,
         optimization_level_js = "0",
         optimization_level_wasm = "0",
         tags = ["manual"],
@@ -2043,29 +2039,31 @@ def web_test_suite(name):
 
     _dbg_web_defines_test(
         name = name + "_dbg_defines",
+        js_fallback = True,
         target_under_test = ":_web_fixture",
     )
     _dbg_web_defines_test(
-        name = name + "_dbg_defines_fallback",
-        js_fallback = True,
-        target_under_test = ":_web_fallback_fixture",
+        name = name + "_dbg_defines_wasm_only",
+        target_under_test = ":_web_wasm_only_fixture",
     )
     _opt_web_defines_test(
         name = name + "_opt_defines",
+        js_fallback = True,
         target_under_test = ":_web_fixture",
     )
     _opt_web_defines_test(
-        name = name + "_opt_defines_fallback",
-        js_fallback = True,
-        target_under_test = ":_web_fallback_fixture",
+        name = name + "_opt_defines_wasm_only",
+        target_under_test = ":_web_wasm_only_fixture",
     )
     _wasm_only_bundle_test(
         name = name + "_wasm_only_bundle",
-        target_under_test = ":_web_fixture",
+        target_under_test = ":_web_wasm_only_fixture",
     )
+
+    # The default: no attr set, and the JavaScript build is there.
     _js_fallback_bundle_test(
         name = name + "_js_fallback_bundle",
-        target_under_test = ":_web_fallback_fixture",
+        target_under_test = ":_web_fixture",
     )
     _wasm_browsers_bootstrap_test(
         name = name + "_wasm_browsers_bootstrap",
@@ -2096,13 +2094,13 @@ def web_test_suite(name):
         expect_none = True,
         expect_symbols = _skwasm_symbols,
         expect_no_symbols = _canvaskit_symbols,
-        target_under_test = ":_web_fixture",
+        target_under_test = ":_web_wasm_only_fixture",
     )
     _renderer_files_test(
         name = name + "_renderer_files_fallback_default",
         expect_none = True,
         expect_symbols = _skwasm_symbols + _canvaskit_symbols,
-        target_under_test = ":_web_fallback_fixture",
+        target_under_test = ":_web_fixture",
     )
     _renderer_files_test(
         name = name + "_renderer_files_wasm_only_local",
@@ -2269,7 +2267,7 @@ def web_test_suite(name):
     )
     _no_dump_info_test(
         name = name + "_no_dump_info",
-        target_under_test = ":_web_fallback_fixture",
+        target_under_test = ":_web_fixture",
     )
     _no_strip_release_test(
         name = name + "_no_strip_release",

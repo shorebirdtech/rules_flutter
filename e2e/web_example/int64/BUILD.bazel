@@ -4,16 +4,17 @@ load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
 # An app holding 64-bit integers in an `Int64List`, which only WebAssembly
 # supports: dart2js refuses the largest 64-bit literal at compile time and
 # throws on `Int64List` at runtime. It stands for any code that only works under
-# WebAssembly, and `compiler = "dart2wasm"` must build it, because it compiles
-# nothing else.
+# WebAssembly, and `js_fallback = False` makes `compiler = "dart2wasm"` build
+# it, because then nothing else compiles it.
 flutter_web_app(
     name = "int64_app",
     package_name = "int64",
     app_name = "Int64List",
+    js_fallback = False,
     deps = ["@deps//:flutter"],
 )
 
-# The same app asking for the dart2js fallback, which compiles it with dart2js
+# The same app with the default dart2js fallback, which compiles it with dart2js
 # as well. Manual, because it is expected NOT to build: dart2js reports "The
 # integer literal 0x7FFFFFFFFFFFFFFF can't be represented exactly in
 # JavaScript". `bazel build //int64:int64_app_with_fallback` shows it.
@@ -21,7 +22,6 @@ flutter_web_app(
     name = "int64_app_with_fallback",
     package_name = "int64",
     app_name = "Int64List with fallback",
-    js_fallback = True,
     tags = ["manual"],
     deps = ["@deps//:flutter"],
 )
