@@ -188,18 +188,106 @@ void main() {
       expect(device.buildArgs, ['--ios_multi_cpus=sim_arm64']);
     });
 
-    test('AndroidDevice defaults to arm64 platform', () {
-      final device = AndroidDevice();
-      expect(device.buildArgs, [
-        '--platforms=@rules_flutter//flutter/platforms:android_arm64',
+    test('AndroidDevice builds for the ABI it was told', () {
+      expect(AndroidDevice(abi: 'arm64-v8a').buildArgs, [
+        '--@rules_android//flags:android_platforms=@rules_android//:arm64-v8a',
+      ]);
+      expect(AndroidDevice(abi: 'x86_64').buildArgs, [
+        '--@rules_android//flags:android_platforms=@rules_android//:x86_64',
       ]);
     });
 
-    test('AndroidDevice respects custom abi', () {
-      final device = AndroidDevice(abi: 'x64');
-      expect(device.buildArgs, [
-        '--platforms=@rules_flutter//flutter/platforms:android_x64',
-      ]);
+    test('AndroidDevice does not guess an ABI it has not been told', () {
+      expect(() => AndroidDevice().buildArgs, throwsStateError);
+    });
+
+    group('AndroidDevice asks the device its ABI', () {
+      Future<(List<String>, AndroidDevice)> resolved(
+        String abiList, {
+        String? deviceId,
+      }) async {
+        final calls = <String>[];
+        final device = AndroidDevice(
+          deviceId: deviceId,
+          adbPath: 'adb',
+          runProcess: (exe, args) async {
+            calls.add('$exe ${args.join(' ')}');
+            return ProcessResult(0, 0, '$abiList\n', '');
+          },
+        );
+        await device.resolveBuildArgs();
+        return (calls, device);
+      }
+
+      test('a phone builds for its own ABI', () async {
+        final (calls, device) = await resolved(
+          'arm64-v8a,armeabi-v7a,armeabi',
+          deviceId: 'PIXEL',
+        );
+        expect(calls, ['adb -s PIXEL shell getprop ro.product.cpu.abilist']);
+        expect(device.buildArgs, [
+          '--@rules_android//flags:android_platforms=@rules_android//:arm64-v8a',
+        ]);
+      });
+
+      test(
+        'an x86_64 emulator builds for x86_64, not the ABI it translates',
+        () async {
+          final (_, device) = await resolved('x86_64,arm64-v8a,x86');
+          expect(device.buildArgs, [
+            '--@rules_android//flags:android_platforms=@rules_android//:x86_64',
+          ]);
+        },
+      );
+
+      test(
+        'a device that runs no ABI we build for is refused by name',
+        () async {
+          expect(
+            resolved('armeabi-v7a,armeabi'),
+            throwsA(
+              isA<StateError>().having(
+                (e) => e.message,
+                'message',
+                allOf(contains('armeabi-v7a, armeabi'), contains('arm64-v8a')),
+              ),
+            ),
+          );
+        },
+      );
+
+      test('a told ABI is not asked again', () async {
+        final calls = <String>[];
+        final device = AndroidDevice(
+          abi: 'x86_64',
+          adbPath: 'adb',
+          runProcess: (exe, args) async {
+            calls.add(args.join(' '));
+            return ProcessResult(0, 0, '', '');
+          },
+        );
+        await device.resolveBuildArgs();
+        expect(calls, isEmpty);
+      });
+
+      test('an adb failure is reported with the device it asked', () async {
+        final device = AndroidDevice(
+          deviceId: 'PIXEL',
+          adbPath: 'adb',
+          runProcess: (exe, args) async =>
+              ProcessResult(0, 1, '', 'device offline'),
+        );
+        expect(
+          device.resolveBuildArgs(),
+          throwsA(
+            isA<StateError>().having(
+              (e) => e.message,
+              'message',
+              allOf(contains('PIXEL'), contains('device offline')),
+            ),
+          ),
+        );
+      });
     });
 
     test('WebDevice returns empty buildArgs', () {

@@ -3,7 +3,7 @@ load("@rules_apple//apple:ios.bzl", "ios_application")
 load("@rules_apple//apple:macos.bzl", "macos_application")
 load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
 load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_analysis_test", "dart_test")
-load("@rules_flutter//flutter:android.bzl", "flutter_android_app")
+load("@rules_flutter//flutter:android.bzl", "flutter_android_app", "flutter_android_build")
 load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_library")
 load(
     "@rules_flutter//flutter:ios.bzl",
@@ -33,7 +33,7 @@ load(
 )
 load("@rules_flutter//flutter:web.bzl", "flutter_web_bundle")
 load("@rules_flutter//flutter:windows.bzl", "flutter_windows_app")
-load(":debug_apk.bzl", "debug_apk")
+load(":android_apk.bzl", "android_apk")
 
 exports_files(["pubspec.lock"])
 
@@ -269,16 +269,35 @@ flutter_android_app(
     tags = ["no-windows-ci"],
 )
 
-# The same app for x86_64. Its APK must carry the x86_64 engine and no other:
-# a plugin that packaged its own (always arm64) engine would make Android
-# install this APK on an arm64 device and crash at launch.
-flutter_android_app(
-    name = "plugin_android_x64",
-    package_name = "com.example.plugin_example",
-    android_abi = "x64",
-    application = ":plugin_app",
-    proguard_specs = ["app_proguard.pro"],
+# The ABIs of that APK are the platforms of --@rules_android//flags:android_platforms. These build it
+# for given ones whatever the command line says, so one `bazel test //...`
+# checks each: arm64-v8a, x86_64, and both at once, as `flutter build apk`'s
+# default fat APK. The x86_64 APK must carry the x86_64 engine and no other: a
+# plugin that packaged its own (always arm64) engine would make Android install
+# it on an arm64 device and crash at launch. The fat APK carries the engine,
+# `libapp.so` and the plugins' native libraries of both.
+flutter_android_build(
+    name = "plugin_android_arm64_build",
+    android_platforms = ["@rules_android//:arm64-v8a"],
     tags = ["no-windows-ci"],
+    targets = [":plugin_android"],
+)
+
+flutter_android_build(
+    name = "plugin_android_x86_64_build",
+    android_platforms = ["@rules_android//:x86_64"],
+    tags = ["no-windows-ci"],
+    targets = [":plugin_android"],
+)
+
+flutter_android_build(
+    name = "plugin_android_fat_build",
+    android_platforms = [
+        "@rules_android//:arm64-v8a",
+        "@rules_android//:x86_64",
+    ],
+    tags = ["no-windows-ci"],
+    targets = [":plugin_android"],
 )
 
 # =============================================================================
@@ -323,33 +342,45 @@ build_test(
         "android",
         "no-windows-ci",
     ],
-    targets = [":plugin_android"],
+    targets = [":plugin_android_arm64_build"],
 )
 
-# The plugin_android APK rebuilt under -c dbg, so the default-configuration
-# APK verifier can assert debug-only content (the merged debug variant
-# manifest's INTERNET permission) without building the test under -c dbg.
-debug_apk(
-    name = "plugin_android_dbg",
-    apk = ":plugin_android",
-    tags = [
-        "android",
-        "no-windows-ci",
-    ],
-)
+# The plugin_android APKs, each under a name of its own: for one ABI, and the
+# arm64 one rebuilt under -c dbg, so the default-configuration APK verifier can
+# assert debug-only content (the merged debug variant manifest's INTERNET
+# permission) without building the test under -c dbg.
+[
+    android_apk(
+        name = "plugin_android_" + variant,
+        apk = ":plugin_android_%s_build" % build,
+        compilation_mode = mode,
+        tags = [
+            "android",
+            "no-windows-ci",
+        ],
+    )
+    for variant, build, mode in [
+        ("arm64", "arm64", ""),
+        ("dbg", "arm64", "dbg"),
+        ("x86_64", "x86_64", ""),
+        ("fat", "fat", ""),
+    ]
+]
 
 # APK content verifier: asserts every plugin's native pieces are packaged —
 # including package:jni's libdartjni.so (jnigen plugins load it via
 # System.loadLibrary), its shared Java support classes, and that every
-# packaged .so is ELF for the declared ABI. Verifies the ambient APK
-# (release), the -c dbg APK, asserting INTERNET is present iff debug, and the
-# x64 APK, asserting it carries no ABI but x86_64.
+# packaged .so is ELF for the ABI of its directory. Verifies the arm64 APK
+# (release), the -c dbg APK, asserting INTERNET is present iff debug, the
+# x86_64 APK, asserting it carries no ABI but x86_64, and the fat APK,
+# asserting it carries all of both.
 dart_test(
     name = "verify_android_apk_test",
     data = [
-        ":plugin_android",
+        ":plugin_android_arm64",
         ":plugin_android_dbg",
-        ":plugin_android_x64",
+        ":plugin_android_fat",
+        ":plugin_android_x86_64",
     ],
     main = "test/verify_android_apk_test.dart",
     tags = [
@@ -367,7 +398,9 @@ dart_test(
 # docs/TESTING.md § Plugin verification matrix.
 dart_test(
     name = "verify_android_app_test",
-    data = [":plugin_android"],
+    # The fat APK installs on whichever device is attached, the Pixel or an
+    # x86_64 emulator.
+    data = [":plugin_android_fat"],
     main = "test/verify_android_app_test.dart",
     tags = [
         "android",

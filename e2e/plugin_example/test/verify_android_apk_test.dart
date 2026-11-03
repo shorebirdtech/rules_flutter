@@ -45,6 +45,11 @@ const _requiredNativeLibs = <String, String>{
   'Flutter engine': 'libflutter.so',
   'package:jni C support library (System.loadLibrary("dartjni"))':
       'libdartjni.so',
+  // shared_preferences_android depends on androidx.datastore, an AAR with a
+  // library for each ABI. It is not Flutter's, so it reaches the APK by
+  // rules_android's own handling of AARs, which the Flutter libraries must
+  // agree with.
+  "androidx.datastore's AAR library": 'libdatastore_shared_counter.so',
 };
 
 /// The engine's libraries, as flutter.jar ships them: the Vulkan validation
@@ -57,17 +62,21 @@ void main() {
   // transition. Checking both in one default `bazel test //...` run exercises
   // the debug variant-manifest merge in both directions — INTERNET must be
   // absent from the release APK and present in the debug APK — without
-  // building this test itself under `-c dbg`. The x64 APK must carry the
-  // x86_64 engine and no other: the plugins compile against an arm64 one.
+  // building this test itself under `-c dbg`. The x86_64 APK must carry the
+  // x86_64 engine and no other: the plugins compile against an arm64 one. The
+  // fat APK, built for both platforms at once, carries every native library of
+  // each: the engine and libapp.so, package:jni's C library, and the AAR's
+  // (androidx.datastore's, which ships a library per ABI).
   final cases = [
-    ('ambient', 'plugin_android.apk', null, 'arm64-v8a'),
-    ('-c dbg', 'plugin_android_dbg.apk', true, 'arm64-v8a'),
-    ('x64', 'plugin_android_x64.apk', null, 'x86_64'),
+    ('arm64-v8a', 'plugin_android_arm64.apk', null, ['arm64-v8a']),
+    ('-c dbg', 'plugin_android_dbg.apk', true, ['arm64-v8a']),
+    ('x86_64', 'plugin_android_x86_64.apk', null, ['x86_64']),
+    ('fat', 'plugin_android_fat.apk', null, ['arm64-v8a', 'x86_64']),
   ];
 
   // One log across the APKs, so one run names every problem in all of them.
   final check = BundleCheck();
-  for (final (label, apkName, mustBeDebug, abi) in cases) {
+  for (final (label, apkName, mustBeDebug, abis) in cases) {
     print('\n=== Verifying $label APK ($apkName) ===');
     final apk = Apk.fromRunfiles(
       apkName,
@@ -76,7 +85,7 @@ void main() {
     );
     final failuresBefore = check.failures.length;
     try {
-      _verifyApk(apk, mustBeDebug: mustBeDebug, abi: abi);
+      _verifyApk(apk, mustBeDebug: mustBeDebug, abis: abis);
       if (check.failures.length > failuresBefore) apk.listContents();
     } finally {
       apk.dispose();
@@ -86,11 +95,15 @@ void main() {
   check.finish('\nAll plugin_example APK verification checks passed.');
 }
 
-/// Verifies a single APK built for [abi], an ABI directory name. [mustBeDebug]
+/// Verifies a single APK built for [abis], ABI directory names. [mustBeDebug]
 /// asserts the detected compilation mode when non-null (the `-c dbg`
 /// transition must yield a debug build); null accepts whatever the ambient
 /// configuration produced.
-void _verifyApk(Apk apk, {required bool? mustBeDebug, required String abi}) {
+void _verifyApk(
+  Apk apk, {
+  required bool? mustBeDebug,
+  required List<String> abis,
+}) {
   final check = apk.check;
 
   // --- Compilation mode detection ---
@@ -100,7 +113,11 @@ void _verifyApk(Apk apk, {required bool? mustBeDebug, required String abi}) {
   final hasKernelBlob = apk
       .file('assets/flutter_assets/kernel_blob.bin')
       .existsSync();
-  final hasLibApp = apk.file('lib/$abi/libapp.so').existsSync();
+  final abisWithLibApp = [
+    for (final abi in abis)
+      if (apk.file('lib/$abi/libapp.so').existsSync()) abi,
+  ];
+  final hasLibApp = abisWithLibApp.isNotEmpty;
   if (hasKernelBlob == hasLibApp) {
     check.fail(
       'expected exactly one of kernel_blob.bin (debug) '
@@ -110,6 +127,19 @@ void _verifyApk(Apk apk, {required bool? mustBeDebug, required String abi}) {
   }
   final isDebug = hasKernelBlob;
   check.pass('APK is a ${isDebug ? "debug (JIT)" : "release (AOT)"} build');
+
+  // --- AOT code, for every ABI ---
+  // Each ABI needs the Dart code compiled for it; a missing one would install
+  // and then crash at launch on a device of that ABI.
+  if (!isDebug) {
+    for (final abi in abis) {
+      check.expect(
+        'lib/$abi/libapp.so (AOT code for $abi)',
+        condition: abisWithLibApp.contains(abi),
+        detail: 'lib/$abi/libapp.so not found',
+      );
+    }
+  }
 
   if (mustBeDebug != null && isDebug != mustBeDebug) {
     check.fail(
@@ -144,24 +174,28 @@ void _verifyApk(Apk apk, {required bool? mustBeDebug, required String abi}) {
   }
 
   // --- Native library presence ---
-  _requiredNativeLibs.forEach((description, basename) {
-    final path = 'lib/$abi/$basename';
-    if (apk.file(path).existsSync()) {
-      check.pass('$path ($description)');
-    } else {
-      check.fail('$path not found — $description');
-    }
-  });
+  for (final abi in abis) {
+    _requiredNativeLibs.forEach((description, basename) {
+      final path = 'lib/$abi/$basename';
+      if (apk.file(path).existsSync()) {
+        check.pass('$path ($description)');
+      } else {
+        check.fail('$path not found — $description');
+      }
+    });
+  }
 
   // --- Binary format checks ---
   // A library under another ABI's directory makes Android choose that ABI
   // when the device supports it, and then the app's own code (libapp.so) is
   // missing and the engine crashes at launch.
-  final abis = apk.abis;
-  if (abis.length == 1 && abis.single == abi) {
-    check.pass('lib/ holds $abi only');
+  final found = apk.abis;
+  if (found.join(',') == ([...abis]..sort()).join(',')) {
+    check.pass('lib/ holds ${abis.join(', ')} only');
   } else {
-    check.fail('expected lib/$abi only; found lib/{${abis.join(',')}}');
+    check.fail(
+      'expected lib/{${abis.join(',')}} only; found lib/{${found.join(',')}}',
+    );
   }
   apk.checkNativeLibraries();
 
@@ -170,7 +204,10 @@ void _verifyApk(Apk apk, {required bool? mustBeDebug, required String abi}) {
   // build strips them (llvm-strip --strip-unneeded) before packaging, in
   // every build type. Unstripped, the debug APK carries ~600 MB of symbols
   // the device never reads.
-  for (final engineLib in _engineLibs.map((name) => 'lib/$abi/$name')) {
+  for (final engineLib in [
+    for (final abi in abis)
+      for (final name in _engineLibs) 'lib/$abi/$name',
+  ]) {
     final file = apk.file(engineLib);
     if (!file.existsSync()) continue;
     final sections = ElfImage.fromFile(file).sectionNames();

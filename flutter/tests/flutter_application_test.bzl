@@ -105,7 +105,7 @@ def _android_arm64_build_args_test_impl(ctx):
     env = unittest.begin(ctx)
     asserts.equals(
         env,
-        ["--platforms=@rules_flutter//flutter/platforms:android_arm64"],
+        ["--@rules_android//flags:android_platforms=@rules_android//:arm64-v8a"],
         launch_build_args("android", is_simulator = False, is_arm64 = True, is_x86_64 = False),
     )
     return unittest.end(env)
@@ -114,7 +114,7 @@ def _android_x64_build_args_test_impl(ctx):
     env = unittest.begin(ctx)
     asserts.equals(
         env,
-        ["--platforms=@rules_flutter//flutter/platforms:android_x64"],
+        ["--@rules_android//flags:android_platforms=@rules_android//:x86_64"],
         launch_build_args("android", is_simulator = False, is_arm64 = False, is_x86_64 = True),
     )
     return unittest.end(env)

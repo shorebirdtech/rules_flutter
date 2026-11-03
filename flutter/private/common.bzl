@@ -806,11 +806,11 @@ def compute_android_jni_path(target_name, abi, basename):
 # ELF e_machine value native libraries packaged for that ABI must carry.
 ANDROID_ABIS = {
     "arm64-v8a": struct(
-        platform = Label("//flutter/platforms:android_arm64"),
+        platform = Label("@rules_android//:arm64-v8a"),
         elf_machine = 183,  # EM_AARCH64
     ),
     "x86_64": struct(
-        platform = Label("//flutter/platforms:android_x64"),
+        platform = Label("@rules_android//:x86_64"),
         elf_machine = 62,  # EM_X86_64
     ),
 }
@@ -990,17 +990,17 @@ def launch_build_args(target_platform, is_simulator, is_arm64, is_x86_64):
 
     if target_platform == "android":
         if is_arm64:
-            abi = "arm64"
+            abi = "arm64-v8a"
         elif is_x86_64:
-            abi = "x64"
+            abi = "x86_64"
         else:
             fail(
                 "flutter_application: the Android target platform has neither an arm64 nor " +
-                "an x86_64 CPU constraint, so the `--platforms` flag a dev-loop rebuild " +
-                "needs cannot be named. rules_flutter ships android_arm64 and android_x64 " +
-                "under @rules_flutter//flutter/platforms.",
+                "an x86_64 CPU constraint, so the `--@rules_android//flags:android_platforms` flag a dev-loop rebuild " +
+                "needs cannot be named. rules_android ships @rules_android//:arm64-v8a " +
+                "and @rules_android//:x86_64.",
             )
-        return ["--platforms=@rules_flutter//flutter/platforms:android_" + abi]
+        return ["--@rules_android//flags:android_platforms=@rules_android//:" + abi]
 
     # Desktop needs no flag: the app is already built in the top-level
     # configuration. `Device.buildArgs` emits `--platforms=` only when

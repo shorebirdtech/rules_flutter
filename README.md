@@ -64,7 +64,7 @@ Some platforms need one more repository from the same extension. Add it to `use_
 |---|---|
 | macOS | `flutter_macos_engine` |
 | iOS | `flutter_ios_engine` |
-| Android | `flutter_android_engine_arm64`, or `flutter_android_engine_x64` for `android_abi = "x64"` |
+| Android | `flutter_android_engine_arm64` and/or `flutter_android_engine_x64`, for each ABI you build |
 | Web | `flutter_web_sdk` |
 
 The macOS and iOS engine repositories name the engine of the build mode directly, for a rule of your own that links the engine: `@flutter_macos_engine//:engine_library` and `@flutter_ios_engine//:Flutter_xcframework` are the debug engine under `-c dbg`, the profile engine under `-c opt --@rules_flutter//flutter:profile`, and the release engine under any other `-c opt`. To pin one engine whatever the mode, use `engine_debug_library`, `engine_profile_library` or `engine_release_library` on macOS (the Linux and Windows engines of the SDK repositories are named the same way), and `Flutter_xcframework_debug`, `Flutter_xcframework_profile` or `Flutter_xcframework_release` on iOS.
@@ -763,6 +763,7 @@ flutter_android_app(
 Add these to `MODULE.bazel`:
 
 ```starlark
+bazel_dep(name = "rules_android", version = "0.8.0")
 bazel_dep(name = "rules_android_ndk", version = "0.1.5")
 
 use_repo(flutter, "deps", "flutter_toolchains", "flutter_android_engine_arm64")
@@ -826,11 +827,37 @@ bazel run @rules_android_maven//:pin
 
 Run `REPIN=1 bazel run @rules_android_maven//:pin` again after changing the artifacts, or bumping rules_flutter or rules_android: Bazel fails the build until you do. [`e2e/plugin_example/MODULE.bazel`](e2e/plugin_example/MODULE.bazel) is a worked example.
 
-No platform flags are needed to build. `flutter_android_app` transitions the application, including its AOT compile and FFI deps, to the Android platform for its `android_abi`:
+**ABIs.** The ABIs of the APK are the platforms of `--@rules_android//flags:android_platforms`, as for any rules_android `android_binary`. One platform builds an APK for that ABI; several build one APK for all of them, like the fat APK `flutter build apk` makes. The Flutter engine, the app's `libapp.so`, the native libraries of the AARs your plugins bring and any C/C++ deps are each packaged for every ABI, from one mechanism: `android_binary` builds its dependencies once for each platform and packages what each build brings.
 
 ```sh
-bazel build //:my_app_android
+# arm64 phones
+bazel build //:my_app_android \
+    --@rules_android//flags:android_platforms=@rules_android//:arm64-v8a
+
+# x86_64 emulators
+bazel build //:my_app_android \
+    --@rules_android//flags:android_platforms=@rules_android//:x86_64
+
+# one APK for both
+bazel build //:my_app_android \
+    --@rules_android//flags:android_platforms=@rules_android//:arm64-v8a,@rules_android//:x86_64
 ```
+
+The platforms are rules_android's own, `@rules_android//:arm64-v8a` and `@rules_android//:x86_64`, and are named for their ABI because rules_android packages a platform's native libraries into `lib/<platform name>/`. Write them as shown: the flag's value is read by rules_android, which resolves the label from its own repository, so a platform of your own repository, or `@rules_flutter//...`, is not found. Put each ABI's engine repository in `use_repo` (`flutter_android_engine_arm64`, `flutter_android_engine_x64`).
+
+The flag is rules_android's Starlark flag, which rules_android reads first. The short `--android_platforms` also works: rules_android aliases it to that flag (`flag_alias`), and Bazel's native option of the same name is what rules_android falls back to while it exists. The long form names `@rules_android` on the command line, so your root `MODULE.bazel` needs `bazel_dep(name = "rules_android", version = "0.8.0")`.
+
+Put the platforms you usually build for in your `.bazelrc`, with a config for the others:
+
+```bazelrc
+common --@rules_android//flags:android_platforms=@rules_android//:arm64-v8a
+common:android-emulator --@rules_android//flags:android_platforms=@rules_android//:x86_64
+common:android-fat --@rules_android//flags:android_platforms=@rules_android//:arm64-v8a,@rules_android//:x86_64
+```
+
+With no `--@rules_android//flags:android_platforms`, rules_android builds for `--platforms`, your machine's, and the engine and the bundle are incompatible with it: building the app fails with "incompatible", naming the platform that did not satisfy the constraint. `bazel build //...` on such a platform skips them, and whatever depends on them, with nothing to tag. `flutter_bazel run -d <android device>` asks the device its ABI and passes the matching platform itself.
+
+To build an app for fixed ABIs whatever the command line says, wrap it in [`flutter_android_build`](#flutter_android_build), as a test of the APK for one ABI, or for both, does.
 
 | Attribute | Description |
 |---|---|
@@ -838,7 +865,6 @@ bazel build //:my_app_android
 | `package_name` | The Android package name, for example `"com.example.myapp"`. Required. |
 | `namespace` | The package the runner's code declares (Gradle's `namespace`). Relative class names in the manifest (`.MainActivity`, `.sub.Receiver`, `MainActivity`) are written out in full against it, as AGP does. Defaults to `package_name`. |
 | `app_name` | Display name. Defaults to the target name. |
-| `android_abi` | `"arm64"` (default) or `"x64"`. Selects the engine and the Android platform. |
 | `min_sdk_version` | Minimum Android SDK version. |
 | `target_sdk_version` | Target Android SDK version. |
 | `manifest` | A manifest you wrote yourself, used verbatim. Placeholders like `${applicationName}` are not substituted, so do not pass `flutter create`'s own manifest here; let the macro discover that one. |
@@ -862,6 +888,16 @@ load("@rules_android//android:rules.bzl", "android_binary")
 
 flutter_android_bundle(name = "my_bundle", application = ":my_app")
 flutter_android_engine(name = "my_engine")
+
+# The bundle's libraries, as the cc_library android_binary takes the native
+# libraries of each ABI from.
+filegroup(
+    name = "my_native_libs_files",
+    srcs = [":my_bundle"],
+    output_group = "native_libs",
+)
+
+cc_library(name = "my_native_libs", srcs = [":my_native_libs_files"])
 flutter_android_manifest_gen(name = "my_manifest", package_name = "com.example.myapp")
 
 flutter_android_runner_lib_gen(
@@ -874,7 +910,7 @@ android_binary(
     name = "my_apk",
     manifest = ":my_manifest",
     multidex = "native",
-    deps = [":my_bundle_native_libs", ":my_engine", ":my_runner"],
+    deps = [":my_native_libs", ":my_engine", ":my_runner"],
 )
 ```
 
@@ -1398,6 +1434,31 @@ The program is written as a test suite, because `flutter_tester` draws frames th
 The program sees the environment it was started with and runs in the working directory it was started in, which for a build action is the exec root, so it can be handed paths of the action's inputs and outputs. Native Assets load from any working directory. Arguments are not passed to the program.
 
 Build it for the machine it runs on. `bazel run` does that, and a rule that runs it in an action takes it as an executable attribute with `cfg = "exec"`, as `genrule` takes `tools`. With `enable_impeller = True` it needs that machine's GPU, so keep such an action off remote executors (`execution_requirements = {"no-remote-exec": "1"}`).
+
+### flutter_android_build
+
+Builds its `targets` for the Android `android_platforms`, as `--@rules_android//flags:android_platforms=<those platforms>` would, whatever flags the command line has. A plain `bazel test //...` then checks an APK for one ABI, or for several, with no `--@rules_android//flags:android_platforms` in the CI job.
+
+```starlark
+load("@rules_flutter//flutter:android.bzl", "flutter_android_build")
+
+flutter_android_build(
+    name = "my_app_android_fat",
+    android_platforms = [
+        "@rules_android//:arm64-v8a",
+        "@rules_android//:x86_64",
+    ],
+    tags = ["manual"],
+    targets = [":my_app_android"],
+)
+```
+
+The rule forwards the files of `targets`, so a test names them in `data` and finds the APK in its runfiles. Two builds of one APK share its file name; a test that reads more than one needs each under a name of its own, which `e2e/plugin_example/android_apk.bzl` does with a symlink.
+
+| Attribute | Description |
+|---|---|
+| `android_platforms` | The platforms to build `targets` for, such as `@rules_android//:arm64-v8a` and `@rules_android//:x86_64`. Your `MODULE.bazel` needs a `bazel_dep` on `rules_android` to name them in a BUILD file. Required. |
+| `targets` | The targets to build, such as a `flutter_android_app`. Required. |
 
 ### flutter_profile_build
 

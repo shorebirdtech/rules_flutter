@@ -21,7 +21,9 @@ _B = "package:shared_b/b"
 _DBG = {"//command_line_option:compilation_mode": "dbg"}
 
 def _platform(name):
-    return {"//command_line_option:platforms": str(Label("//flutter/platforms:" + name))}
+    # The Android platform is named for its ABI directory.
+    label = "@rules_android//:arm64-v8a" if name == "android_arm64" else "//flutter/platforms:" + name
+    return {"//command_line_option:platforms": str(Label(label))}
 
 # Per platform: the Dart target key, the library's extension there, and the
 # manifest path an entry for `lib<name>` takes.

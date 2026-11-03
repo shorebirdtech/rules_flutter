@@ -13,6 +13,7 @@ load("//flutter:defs.bzl", "flutter_application", "flutter_native_library")
 load("//flutter:ios.bzl", "flutter_ios_native_frameworks_gen")
 load("//flutter:macos.bzl", "flutter_macos_native_libs_gen")
 load("//flutter:native_assets.bzl", "flutter_native_asset")
+load("//flutter/private:flutter_android_application.bzl", _flutter_android_bundle = "flutter_android_bundle")
 load("//flutter/tests/code_asset_fixture:stand_in_code_asset.bzl", "stand_in_code_asset")
 
 package(default_visibility = ["//flutter/tests:__subpackages__"])
@@ -182,6 +183,14 @@ _DEPS = [
         "app_own",
     ]
 ]
+
+# The bundle rule itself, which the macro above makes compatible with Android
+# platforms only: built for any other, it names the flag to pass.
+_flutter_android_bundle(
+    name = "app_android_bundle_any_platform",
+    application = ":app",
+    tags = ["manual"],
+)
 
 # Two packages claim `package:shared_a/a` with different libraries, and a
 # `flutter_native_asset` declares what serves it instead.

@@ -500,6 +500,12 @@ abstract class Device {
   /// correct cross-compilation and output resolution.
   List<String> get buildArgs => const [];
 
+  /// Learn whatever [buildArgs] depends on that only the device can say.
+  ///
+  /// Called once, before anything reads [buildArgs]. Most devices' flags are
+  /// fixed by their kind; an Android device's are its ABI's.
+  Future<void> resolveBuildArgs() async {}
+
   /// Create the compiler config for hot reload on this platform.
   ///
   /// Returns null if this device does not support hot reload.
@@ -1207,12 +1213,36 @@ Future<({String packageName, String? activityName})> extractPackageInfo(
   );
 }
 
+/// The ABIs rules_flutter builds an Android app for, most preferred first.
+const androidBuildableAbis = ['arm64-v8a', 'x86_64'];
+
+/// The ABI to build for, given a device's `ro.product.cpu.abilist` (a
+/// comma-separated list, the device's own ABI first).
+///
+/// Throws a [StateError] naming the list when none of it is an ABI
+/// rules_flutter builds for.
+String androidAbiFromAbiList(String abiList, {required String deviceName}) {
+  final abis = abiList
+      .trim()
+      .split(',')
+      .map((abi) => abi.trim())
+      .where((abi) => abi.isNotEmpty)
+      .toList();
+  for (final abi in abis) {
+    if (androidBuildableAbis.contains(abi)) return abi;
+  }
+  throw StateError(
+    '$deviceName runs ${abis.isEmpty ? 'no ABI it reported' : abis.join(', ')}, '
+    'and rules_flutter builds Android apps for ${androidBuildableAbis.join(' and ')}.',
+  );
+}
+
 /// Android device (via adb).
 class AndroidDevice extends Device {
   final String? deviceId;
   String? _packageName;
   String? _activityName;
-  final String abi;
+  String? _abi;
   final String? _explicitAdbPath;
   final String? _explicitAapt2Path;
   final ProcessRunSync _runProcess;
@@ -1242,7 +1272,7 @@ class AndroidDevice extends Device {
     this.deviceId,
     String? packageName,
     String? activityName,
-    this.abi = 'arm64',
+    String? abi,
     String? adbPath,
     String? aapt2Path,
     ProcessRunSync? runProcess,
@@ -1250,6 +1280,7 @@ class AndroidDevice extends Device {
     ProcessStarter? startScreenshotProcess,
   }) : _packageName = packageName,
        _activityName = activityName,
+       _abi = abi,
        _explicitAdbPath = adbPath,
        _explicitAapt2Path = aapt2Path,
        _runProcess = runProcess ?? Process.run,
@@ -1302,9 +1333,41 @@ class AndroidDevice extends Device {
     return outputs.first;
   }
 
+  /// The Android ABI this device runs apps as: `arm64-v8a` or `x86_64`.
+  ///
+  /// The platform the app is built for, so that its engine, `libapp.so` and
+  /// native libraries are the ones this device loads. Known once
+  /// [resolveBuildArgs] has asked the device, or when the constructor was told.
+  String get abi =>
+      _abi ??
+      (throw StateError(
+        'The ABI of $name is not known yet: resolveBuildArgs() asks the device.',
+      ));
+
+  /// Asks the device its ABI, unless it was told.
+  ///
+  /// The first ABI in the device's preference order (`ro.product.cpu.abilist`)
+  /// that rules_flutter builds for. An emulator on an x86_64 host lists
+  /// `x86_64` first, though it can translate arm64 code, and a phone lists its
+  /// own `arm64-v8a`; the first is the one the device runs natively.
+  @override
+  Future<void> resolveBuildArgs() async {
+    if (_abi != null) return;
+    final result = await _runProcess(
+      adbPath,
+      _adbArgs(['shell', 'getprop', 'ro.product.cpu.abilist']),
+    );
+    if (result.exitCode != 0) {
+      throw StateError(
+        _adbFailure('shell getprop ro.product.cpu.abilist', result.stderr),
+      );
+    }
+    _abi = androidAbiFromAbiList('${result.stdout}', deviceName: name);
+  }
+
   @override
   List<String> get buildArgs => [
-    '--platforms=@rules_flutter//flutter/platforms:android_$abi',
+    '--@rules_android//flags:android_platforms=@rules_android//:$abi',
   ];
 
   /// Build the common adb prefix args (includes -s <deviceId> if set).

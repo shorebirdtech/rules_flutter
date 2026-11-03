@@ -19,6 +19,27 @@ config_setting(
     visibility = ["//visibility:public"],
 )
 
+# The Android platforms an APK can be built for, for select() in macros. An
+# android_binary builds its dependencies once for each of --@rules_android//flags:android_platforms,
+# and a dependency picks what it packages by the platform it is built for.
+config_setting(
+    name = "android_arm64",
+    constraint_values = [
+        "@platforms//os:android",
+        "@platforms//cpu:aarch64",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "android_x64",
+    constraint_values = [
+        "@platforms//os:android",
+        "@platforms//cpu:x86_64",
+    ],
+    visibility = ["//visibility:public"],
+)
+
 bzl_library(
     name = "common",
     srcs = ["common.bzl"],
@@ -162,6 +183,12 @@ bzl_library(
         ":flutter_aot_compile",
         "@rules_dart//dart:utils",
     ],
+)
+
+bzl_library(
+    name = "flutter_android_build",
+    srcs = ["flutter_android_build.bzl"],
+    visibility = ["//flutter:__subpackages__"],
 )
 
 bzl_library(

@@ -25,6 +25,7 @@ Two tiers of API:
         load("@rules_flutter//flutter:android.bzl",
             "ANDROID_MIN_SDK_VERSION",
             "ANDROID_TARGET_SDK_VERSION",
+            "flutter_android_build",
             "flutter_android_bundle",
             "flutter_android_engine",
             "flutter_android_manifest_gen",
@@ -32,6 +33,8 @@ Two tiers of API:
             "flutter_android_runner_lib_gen")
 
         flutter_android_bundle(name = "my_bundle", application = ":my_app")
+        filegroup(name = "my_native_libs_files", srcs = [":my_bundle"], output_group = "native_libs")
+        cc_library(name = "my_native_libs", srcs = [":my_native_libs_files"])
         flutter_android_engine(name = "my_engine")
         flutter_android_manifest_gen(name = "my_manifest", package_name = "com.example.myapp")
 
@@ -44,17 +47,19 @@ Two tiers of API:
         android_binary(
             name = "my_apk",
             manifest = ":my_manifest",
-            deps = [":my_bundle_native_libs", ":my_engine", ":my_runner"],
+            deps = [":my_native_libs", ":my_engine", ":my_runner"],
         )
 """
 
 load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@rules_android//android:rules.bzl", _android_binary = "android_binary", _android_library = "android_library")
+load("@rules_cc//cc:cc_library.bzl", _cc_library = "cc_library")
 load("@rules_java//java:java_import.bzl", _java_import = "java_import")
 load("@rules_kotlin//kotlin:android.bzl", _kt_android_library = "kt_android_library")
-load("//flutter/private:constants.bzl", _ANDROID_ABI_FOR_ARCH = "ANDROID_ABI_FOR_ARCH", _ANDROID_MIN_SDK_VERSION = "ANDROID_MIN_SDK_VERSION", _ANDROID_TARGET_SDK_VERSION = "ANDROID_TARGET_SDK_VERSION")
+load("//flutter/private:constants.bzl", _ANDROID_MIN_SDK_VERSION = "ANDROID_MIN_SDK_VERSION", _ANDROID_TARGET_SDK_VERSION = "ANDROID_TARGET_SDK_VERSION")
 load("//flutter/private:flutter_android_application.bzl", _flutter_android_bundle = "flutter_android_bundle")
+load("//flutter/private:flutter_android_build.bzl", _flutter_android_build = "flutter_android_build")
 load("//flutter/private:flutter_android_manifest_merge.bzl", _flutter_android_manifest_merge = "flutter_android_manifest_merge")
 load("//flutter/private:flutter_android_plugin_library.bzl", _flutter_android_plugin_library = "flutter_android_plugin_library")
 load("//flutter/private:flutter_android_registrant.bzl", _flutter_android_registrant = "flutter_android_registrant")
@@ -95,7 +100,38 @@ _ANDROIDX_EMBEDDING_DEPS = [
 
 # -- Composable rules (Tier 2) ------------------------------------------------
 
-flutter_android_bundle = _flutter_android_bundle
+def _android_only():
+    """`target_compatible_with` for a target built only for Android arm64 or x86_64.
+
+    A target that takes its ABI from the platform it is built for has nothing to
+    build on any other, so a wildcard on a non-Android platform skips it rather
+    than failing on it. Its dependents are skipped with it.
+    """
+    return select({
+        "@rules_flutter//flutter/private:android_arm64": [],
+        "@rules_flutter//flutter/private:android_x64": [],
+        "//conditions:default": [Label("@platforms//:incompatible")],
+    })
+
+def flutter_android_bundle(name, **kwargs):
+    """Bundles Flutter compilation outputs for Android packaging.
+
+    See `flutter/private/flutter_android_application.bzl` for the rule. The
+    bundle is built for the Android platform `android_binary` builds it for, so
+    it is incompatible with any other platform: `bazel build //...` on a host
+    platform skips it, with no `manual` tag.
+
+    Args:
+        name: Target name.
+        **kwargs: Arguments of the rule: `application`, `mobile_install_compatible`,
+            and the common ones (`tags`, `visibility`, ...).
+    """
+    kwargs["target_compatible_with"] = kwargs.pop("target_compatible_with", []) + _android_only()
+    _flutter_android_bundle(name = name, **kwargs)
+
+# Builds targets for given Android platforms, whatever the command line asked
+# for: a test of an APK for one ABI, or several, in a plain `bazel test //...`.
+flutter_android_build = _flutter_android_build
 
 # Merges a variant AndroidManifest.xml overlay (e.g. flutter create's
 # android/app/src/debug/AndroidManifest.xml) into a base manifest — the
@@ -152,8 +188,31 @@ flutter_android_plugin_library = _flutter_android_plugin_library
 # flutter_android_app; expose for Tier-2 control.
 flutter_android_registrant = _flutter_android_registrant
 
-def flutter_android_engine(name, android_abi = "arm64", neverlink = False, **kwargs):
-    """Imports the Flutter engine (flutter.jar) as a java_import target.
+# The engine of each ABI an APK can be built for, by the CPU of the platform
+# `android_binary` builds that copy of its dependencies for. The labels are the
+# caller's, as the macro's other repository labels are, so a workspace that
+# builds an ABI names that engine's repository in its `use_repo`.
+_ENGINE_FOR_CPU = {
+    "@rules_flutter//flutter/private:android_arm64": ["@flutter_android_engine_arm64//:stripped"],
+    "@rules_flutter//flutter/private:android_x64": ["@flutter_android_engine_x64//:stripped"],
+}
+
+_NO_ENGINE_FOR_PLATFORM = (
+    "flutter_android_engine is built for a platform that is not Android arm64 " +
+    "or x86_64. An Android app is built for the platforms of --@rules_android//flags:android_platforms: " +
+    "pass --@rules_android//flags:android_platforms=@rules_android//:arm64-v8a " +
+    "(and :x86_64 for a second ABI), or build it through flutter_android_build."
+)
+
+def flutter_android_engine(name, neverlink = False, **kwargs):
+    """Imports the Flutter engine (flutter.jar) as an android_library target.
+
+    The engine is the one of the platform the target is built for. An
+    `android_binary` builds its dependencies once for each platform of
+    `--@rules_android//flags:android_platforms`, so an APK for several ABIs carries the engine of
+    each, and a target built for neither Android arm64 nor x86_64 fails. The
+    repository of each ABI you build for goes in your `use_repo`
+    (`flutter_android_engine_arm64`, `flutter_android_engine_x64`).
 
     Auto-selects the engine of the build mode:
     - Debug (-c dbg): JIT engine for emulator/iterative development.
@@ -174,7 +233,6 @@ def flutter_android_engine(name, android_abi = "arm64", neverlink = False, **kwa
 
     Args:
         name: Target name. Add to android_binary deps.
-        android_abi: Engine ABI — "arm64" (default) or "x64".
         neverlink: Compile against the engine without packaging it. For
             `flutter_android_plugin_library(flutter_engine = ...)`; the
             engine in the app's `android_binary` deps leaves it False.
@@ -182,28 +240,35 @@ def flutter_android_engine(name, android_abi = "arm64", neverlink = False, **kwa
     """
     tags = kwargs.pop("tags", ["manual"])
 
-    # Map short ABI names to repo names.
-    abi_to_repo = {
-        "arm64": "flutter_android_engine_arm64",
-        "x64": "flutter_android_engine_x64",
-    }
-    repo = abi_to_repo.get(android_abi)
-    if not repo:
-        fail("Unsupported android_abi '%s'. Use arm64 or x64." % android_abi)
+    # The engine of an ABI exists for platforms of that ABI only.
+    compatible_with = kwargs.pop("target_compatible_with", [])
+    if not neverlink:
+        compatible_with = compatible_with + _android_only()
+
+    # A neverlink engine is compiled against, and its classes are the same for
+    # every ABI, so it is the arm64 engine whatever platform the plugin is
+    # built for. That keeps a plugin library buildable on its own, with no
+    # Android platform.
+    if neverlink:
+        engine = ["@flutter_android_engine_arm64//:stripped"]
+    else:
+        engine = select(_ENGINE_FOR_CPU, no_match_error = _NO_ENGINE_FOR_PLATFORM)
 
     # `deps` (not just the wrapper's exports) matters here: flutter.jar's
     # own desugar action takes its classpath from the java_import's
     # direct deps, and desugaring io.flutter.* against an incomplete
     # classpath fails the deploy jar's desugar-dependency check.
+    #
+    # The jar holds the classes. The engine's libraries are not in it, and
+    # reach the APK as the engine target's AndroidNativeLibsInfo (below).
     _java_import(
         name = "_%s_jar" % name,
-        # The engine with its native libraries stripped, as Gradle packages
-        # it (flutter_android_engine_jar.bzl).
         # The engine repo's `stripped` follows the build mode, and fetches
         # the profile engine's repo only in a profile build.
-        jars = ["@%s//:stripped" % repo],
+        jars = engine,
         tags = tags,
         neverlink = neverlink,
+        target_compatible_with = compatible_with,
         deps = _ANDROIDX_EMBEDDING_DEPS,
     )
 
@@ -215,12 +280,16 @@ def flutter_android_engine(name, android_abi = "arm64", neverlink = False, **kwa
     # are additionally exported so consumers compile against the same
     # classpath the embedding POM gives Gradle builds (see
     # _ANDROIDX_EMBEDDING_DEPS).
+    #
+    # The engine's libraries are the exports an APK packages and a plugin's
+    # compile does not need.
     _android_library(
         name = name,
-        exports = ["_%s_jar" % name] + _ANDROIDX_EMBEDDING_DEPS,
+        exports = ["_%s_jar" % name] + _ANDROIDX_EMBEDDING_DEPS + ([] if neverlink else engine),
         proguard_specs = ["@rules_flutter//flutter/private/runners/android:flutter_engine_proguard.pro"],
         neverlink = neverlink,
         tags = tags,
+        target_compatible_with = compatible_with,
         **kwargs
     )
 
@@ -421,7 +490,6 @@ def flutter_android_app(
         application,
         package_name,
         app_name = None,
-        android_abi = "arm64",
         min_sdk_version = ANDROID_MIN_SDK_VERSION,
         target_sdk_version = ANDROID_TARGET_SDK_VERSION,
         manifest = None,
@@ -438,6 +506,20 @@ def flutter_android_app(
     Discovers runner files from the conventional `android/app/src/main/`
     directory (as generated by `flutter create --platforms=android .`) and
     wires up all internal targets automatically.
+
+    The ABIs of the APK are those of `--@rules_android//flags:android_platforms`, as for any
+    `android_binary`: one platform builds an APK for that ABI, several build one
+    APK for all of them (`flutter build apk`'s fat APK). The Flutter engine, the
+    app's `libapp.so`, the AARs' native libraries and any C++ deps are each
+    packaged for every ABI. Name the platforms rules_android ships,
+    `@rules_android//:arm64-v8a` and `@rules_android//:x86_64`:
+
+        bazel build //:my_app_android --@rules_android//flags:android_platforms=@rules_android//:arm64-v8a
+
+    With no `--@rules_android//flags:android_platforms`, rules_android builds for `--platforms`, the
+    host's, and the build fails naming the flag. To fix the ABI of a target
+    regardless of the command line, as a test does, wrap it in
+    `flutter_android_build`.
 
     Three modes, and which one an app is in decides what it can express:
       1. `manifest` provided → uses it directly, with **no** `${...}`
@@ -517,8 +599,6 @@ def flutter_android_app(
             `.sub.Receiver`, a bare `MainActivity`) are written out in
             full against it, as AGP does; qualified names are untouched.
         app_name: User-facing display name. Defaults to name.
-        android_abi: Target ABI — "arm64" (default) or "x64". Selects the
-            engine and the Android platform the application is built for.
         min_sdk_version: Minimum Android SDK version.
         target_sdk_version: Target Android SDK version.
         manifest: Override AndroidManifest.xml. If not set, auto-discovered
@@ -557,34 +637,38 @@ def flutter_android_app(
     tags = kwargs.pop("tags", ["manual"])
 
     # -- Internal targets (all __{name}_ prefixed) --
+    #
+    # The engine and the bundle are built for the Android platforms of the APK
+    # that depends on them, once for each. On any other platform they are
+    # incompatible, and so are the targets that depend on them, so a wildcard
+    # skips them.
 
-    # 1. Bundle Flutter outputs (native_libs.jar + flutter_assets).
-    _flutter_android_bundle(
+    # 1. Bundle Flutter outputs (libapp.so and the other native libraries +
+    # flutter_assets). Built for each platform of --@rules_android//flags:android_platforms, as the
+    # rest of android_binary's deps are.
+    flutter_android_bundle(
         name = "__%s_bundle" % name,
         application = application,
-        android_abi = _short_abi_to_full(android_abi),
         tags = tags,
     )
 
-    # 2. Extract native_libs.jar from the bundle.
+    # 2. The bundle's native libraries, as a cc_library: the dep android_binary
+    # takes the native libraries of each ABI it builds from.
     native.filegroup(
-        name = "__%s_native_libs_jar" % name,
+        name = "__%s_native_libs_files" % name,
         srcs = ["__%s_bundle" % name],
-        output_group = "native_libs_jar",
+        output_group = "native_libs",
         tags = tags,
     )
-
-    # 3. Wrap native_libs.jar as java_import.
-    _java_import(
+    _cc_library(
         name = "__%s_native_libs" % name,
-        jars = ["__%s_native_libs_jar" % name],
+        srcs = ["__%s_native_libs_files" % name],
         tags = tags,
     )
 
     # 4. Import Flutter engine.
     flutter_android_engine(
         name = "__%s_engine" % name,
-        android_abi = android_abi,
         tags = tags,
     )
 
@@ -795,9 +879,3 @@ def flutter_android_app(
         tags = tags,
         **kwargs
     )
-
-def _short_abi_to_full(abi):
-    """Convert short ABI name to full ABI string for flutter_android_bundle."""
-    if abi not in _ANDROID_ABI_FOR_ARCH:
-        fail("Unsupported android_abi '%s'. Use arm64 or x64." % abi)
-    return _ANDROID_ABI_FOR_ARCH[abi]

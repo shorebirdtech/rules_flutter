@@ -29,6 +29,11 @@ common --incompatible_auto_exec_groups
 # direct bazel_dep on rules_python.
 common --@@rules_python+//python/config_settings:bootstrap_impl=script
 
+# The ABIs of an Android APK are the platforms of --@rules_android//flags:android_platforms (README,
+# "Android"). This workspace builds for a 64-bit ARM device unless a command
+# says otherwise, as the dev tool does for the device it launches on.
+common --@rules_android//flags:android_platforms=@rules_android//:arm64-v8a
+
 try-import %workspace%/.bazelrc.user
 
 # `dart analyze` and the `dart format` check run as an aspect over every Dart

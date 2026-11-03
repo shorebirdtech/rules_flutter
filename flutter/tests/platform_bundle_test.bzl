@@ -167,12 +167,12 @@ def _android_abi_platform_test_impl(ctx):
 
     asserts.equals(
         env,
-        Label("//flutter/platforms:android_arm64"),
+        Label("@rules_android//:arm64-v8a"),
         android_platform_for_abi("arm64-v8a"),
     )
     asserts.equals(
         env,
-        Label("//flutter/platforms:android_x64"),
+        Label("@rules_android//:x86_64"),
         android_platform_for_abi("x86_64"),
     )
 

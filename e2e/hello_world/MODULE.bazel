@@ -114,7 +114,7 @@ register_toolchains(
     "@androidsdk//:all",
 )
 
-# Android NDK: provides CC toolchain for Android targets (needed for --platforms=android_arm64).
+# Android NDK: provides CC toolchain for Android targets (needed for --@rules_android//flags:android_platforms).
 android_ndk_repository_extension = use_extension(
     "@rules_android_ndk//:extension.bzl",
     "android_ndk_repository_extension",

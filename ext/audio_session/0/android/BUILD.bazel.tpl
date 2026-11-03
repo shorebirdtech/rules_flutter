@@ -14,7 +14,7 @@ load("@rules_kotlin//kotlin:android.bzl", "kt_android_library")
 # Private engine target — gives the plugin's Java the FlutterPlugin SPI
 # on the compile classpath. Always arm64; Java bytecode is
 # ABI-independent. neverlink, so the APK carries only the app's engine, of
-# the ABI flutter_android_app(android_abi=...) names.
+# each ABI of --@rules_android//flags:android_platforms.
 flutter_android_engine(
     name = "_engine",
     neverlink = True,

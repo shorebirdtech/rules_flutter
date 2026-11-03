@@ -27,7 +27,7 @@ const _stabilityWindow = Duration(seconds: 10);
 
 Future<void> main() async {
   final app =
-      AdbApp.fromRunfiles('plugin_android.apk', packageName: _packageName)
+      AdbApp.fromRunfiles('plugin_android_fat.apk', packageName: _packageName)
         ..requireDevice()
         ..install();
 

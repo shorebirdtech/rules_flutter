@@ -13,7 +13,6 @@ load(
 )
 load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_library")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_bundle")
-load("@rules_java//java:java_import.bzl", "java_import")
 load("@rules_kotlin//kotlin:android.bzl", "kt_android_library")
 
 exports_files(["pubspec.lock"])
@@ -22,8 +21,8 @@ exports_files(["pubspec.lock"])
 # Shared: Flutter application (Dart compilation)
 # =============================================================================
 
-# Native FFI library. flutter_android_bundle's platform transition compiles
-# it with the Android NDK toolchain for the bundle's ABI.
+# Native FFI library. It is built with the Android NDK toolchain for the
+# platform the APK is built for, once for each of --@rules_android//flags:android_platforms.
 cc_library(
     name = "add_cc",
     srcs = ["native/add.c"],
@@ -144,17 +143,18 @@ flutter_android_bundle(
     application = ":app_flutter",
 )
 
-# Extract native_libs.jar for composable wiring.
+# The bundle's native libraries, for composable wiring: libapp.so and the
+# FFI library, offered for each ABI android_binary builds for.
 filegroup(
-    name = "app_native_libs_jar",
+    name = "app_native_libs_files",
     srcs = [":app_android"],
-    output_group = "native_libs_jar",
+    output_group = "native_libs",
     tags = ["manual"],
 )
 
-java_import(
+cc_library(
     name = "app_native_libs",
-    jars = [":app_native_libs_jar"],
+    srcs = [":app_native_libs_files"],
     tags = ["manual"],
 )
 

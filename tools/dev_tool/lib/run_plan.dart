@@ -323,6 +323,12 @@ class RunPlan {
       results['device'] as List<String>,
     );
 
+    // The flags a device builds with can depend on the device itself (an
+    // Android device's ABI), so it is asked before anything reads them.
+    for (final device in devices) {
+      await device.resolveBuildArgs();
+    }
+
     // Resolve the workspace root once rather than per callsite: it avoids
     // redundant `bazel info` spawns and gives every consumer the same answer.
     final workspace = await bazel.findWorkspaceRoot();

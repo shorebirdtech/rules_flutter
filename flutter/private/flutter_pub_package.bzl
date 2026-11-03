@@ -973,8 +973,8 @@ def make_android_subpackage_build_content(
     The `_engine` target gives the plugin's Kotlin/Java source access to
     the FlutterPlugin SPI on the compile classpath. It is `neverlink`, as
     Gradle gives a plugin the embedding with `compileOnly`: the app
-    packages its own engine, of the ABI its
-    `flutter_android_app(android_abi = ...)` names. The plugin's is the
+    packages its own engine, of each ABI of
+    `--@rules_android//flags:android_platforms`. The plugin's is the
     arm64 one whatever the app's ABI, since Java bytecode is
     ABI-independent, and packaged it would put an arm64 engine in an x64
     APK. The engine also exports the embedding's
@@ -1181,7 +1181,7 @@ load("@rules_kotlin//kotlin:android.bzl", "kt_android_library")
 # SPI plus the embedding's androidx dependencies (via the engine's
 # exports) on the compile classpath. Always arm64; Java bytecode is
 # ABI-independent. neverlink, so the APK carries only the app's engine, of
-# the ABI flutter_android_app(android_abi=...) names.
+# each ABI of --@rules_android//flags:android_platforms.
 flutter_android_engine(
     name = "_engine",
     neverlink = True,
