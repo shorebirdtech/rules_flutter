@@ -48,6 +48,7 @@ flutter_application(
         "@deps//:package_info_plus",
         "@deps//:path_provider",
         "@deps//:record_android",
+        "@deps//:shared_preferences",
         "@deps//:url_launcher",
         "@rules_flutter//flutter:material_icons",
     ],
@@ -228,6 +229,7 @@ flutter_web_bundle(
         "@deps//:flutter",
         "@deps//:package_info_plus",
         "@deps//:path_provider",
+        "@deps//:shared_preferences",
         "@deps//:url_launcher",
         "@rules_flutter//flutter:material_icons",
     ],
@@ -443,6 +445,7 @@ flutter_library(
         "@deps//:package_info_plus",
         "@deps//:path_provider",
         "@deps//:record_android",
+        "@deps//:shared_preferences",
         "@deps//:url_launcher",
     ],
 )

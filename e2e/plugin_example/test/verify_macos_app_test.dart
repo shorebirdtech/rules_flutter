@@ -69,6 +69,9 @@ Future<void> main() async {
     if (!summary.contains('launchOk=launch ok')) {
       fails.add('launchOk is not "launch ok"');
     }
+    if (!summary.contains('prefs=roundtrip ok')) {
+      fails.add('prefs is not "roundtrip ok"');
+    }
     if (!summary.contains('greeting=Hello from GreetingPlugin!')) {
       fails.add('greeting (regression case) did not register');
     }

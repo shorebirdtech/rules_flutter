@@ -123,6 +123,13 @@ Future<void> main() async {
     'url_launcher channel responded (package visibility denies)',
     condition: resultsLine.contains('launchOk=launch denied'),
   );
+  // shared_preferences' Kotlin compiled against the androidx.datastore /
+  // androidx.preference artifacts its Gradle build declares, and the
+  // DataStore write read back.
+  expectResult(
+    'shared_preferences round-trips a value',
+    condition: resultsLine.contains('prefs=roundtrip ok'),
+  );
   expectResult(
     'audio_session resolved',
     condition: resultsLine.contains('audioSession=audio ok'),

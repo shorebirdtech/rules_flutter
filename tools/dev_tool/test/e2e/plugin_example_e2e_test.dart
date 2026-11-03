@@ -389,6 +389,9 @@ void main() {
         // url_launcher's web implementation.
         expect(summary, contains('launchOk=launch ok'));
 
+        // shared_preferences' web implementation (localStorage).
+        expect(summary, contains('prefs=roundtrip ok'));
+
         // The curated `ext/` overlay packages: audio_session reaches web
         // through the overlay's own Dart, and record_android is Android-only
         // and must say so rather than throw.
@@ -646,6 +649,7 @@ void main() {
         );
         expect(line, contains('appName=plugin_example'));
         expect(line, contains('launchOk=launch ok'));
+        expect(line, contains('prefs=roundtrip ok'));
       }
 
       // The DDC synthetic entrypoint has to carry both the registrant import
