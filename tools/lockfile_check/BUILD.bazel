@@ -7,7 +7,10 @@ load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_test")
 #   bazel run //tools/lockfile_check -- --refresh e2e/smoke   regenerate one lock
 dart_binary(
     name = "lockfile_check",
-    srcs = ["lockfile_check.dart"],
+    srcs = [
+        "lockfile_check.dart",
+        "//tools/e2e_workspaces:e2e_workspaces.dart",
+    ],
     main = "check_lockfiles.dart",
 )
 

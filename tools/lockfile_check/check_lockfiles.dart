@@ -21,6 +21,7 @@
 // Analysing `//...` needs every platform's toolchain, so run this on macOS.
 import 'dart:io';
 
+import '../e2e_workspaces/e2e_workspaces.dart';
 import 'lockfile_check.dart';
 
 const _target = '//tools/lockfile_check';
