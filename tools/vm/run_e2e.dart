@@ -4,7 +4,7 @@
 ///   dart run tools/vm/run_e2e.dart <vm-name> [--windows] \
 ///       [--folders=.,e2e/hello_world] [--keep-going]
 ///
-/// Transfers the committed working tree (`git archive HEAD`) to the VM, clones
+/// Transfers the committed working tree (`git ls-files | tar`) to the VM, clones
 /// the `rules_dart` sibling it depends on, extracts, then runs `bazel test
 /// //...` in each folder, mirroring `.github/workflows/ci.yaml`. Exit code 4
 /// ("no test targets") counts as a pass. Prints a per-folder PASS/FAIL summary
@@ -72,13 +72,6 @@ Future<void> main(List<String> args) async {
   _warnIfDirty(repoRoot);
 
   // 1. Package the committed tree.
-  //
-  // Deliberately not `git archive`: it honours `export-ignore`, and
-  // `.gitattributes` marks `e2e/` as one so release tarballs stay small. An
-  // archive built that way arrives on the VM with every workspace this tool
-  // exists to run stripped out, and the run fails on a missing directory.
-  // `git ls-files` names the same committed tree without consulting
-  // export-ignore.
   final tgz = '${Directory.systemTemp.path}/rules_flutter_src.tgz';
   print('Packaging committed HEAD -> $tgz');
   final listing = File('${Directory.systemTemp.path}/rules_flutter_files.txt');

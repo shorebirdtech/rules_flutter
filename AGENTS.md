@@ -3,8 +3,8 @@
 ## Changelog
 
 The changelog is built from `Changelog:` trailers on commits. Nobody edits a
-changelog file by hand. `cliff.toml` renders the trailers between version tags
-into the release notes.
+changelog file by hand. This fork doesn't release, but keeps the trailers to
+match upstream's commit policy.
 
 **When.** Add a trailer when a user of this project would notice the change:
 new or removed API, a changed default or behaviour, a bug they could hit, a
@@ -59,6 +59,5 @@ This is a Dart family of projects. Write repo tooling in Dart, as a
 `dart_binary` run with `bazel run`. Do not add shell scripts or wrapper
 scripts. When a rule can call a tool directly (multitool's `workspace_root`
 with `args`, say), use it rather than a script that only forwards arguments.
-Shell is acceptable only where an outside interface requires it, such as the
-`release_prep.sh` the bazel-contrib release workflow calls; keep it to the
-lines that interface needs.
+Shell is acceptable only where an outside interface requires it; keep it to
+the lines that interface needs.
