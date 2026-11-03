@@ -22,15 +22,16 @@ load("//flutter/private:libraries_spec.bzl", "flutter_libraries_spec")
 load("//flutter/private:toolchains_repo.bzl", "CROSS_COMPILATION_PAIRS", "DESKTOP_CROSS_PAIRS", "HOST_PLATFORMS", "flutter_toolchains_repo")
 load("//flutter/private:versions.bzl", "ARTIFACT_CHECKSUMS", "FLUTTER_VERSIONS", "LINUX_SYSROOT_CHECKSUMS", "flutter_source_sha256")
 
-# The profile engine's repository: its flutter.jar, and the stripped copy
-# flutter_android_engine imports (see flutter_android_engine_repo.bzl).
+# The profile engine's repository: its flutter.jar, and the stripped copy the
+# Android engine repo's `stripped` aliases in a profile build (see
+# flutter_android_engine_repo.bzl).
 _ANDROID_PROFILE_ENGINE_BUILD = """\
 load("@rules_flutter//flutter/private:flutter_android_engine_jar.bzl", "flutter_android_engine_jar")
 
 exports_files(["flutter.jar"], visibility = ["//visibility:public"])
 
 flutter_android_engine_jar(
-    name = "stripped",
+    name = "profile_stripped",
     jar = "flutter.jar",
     android_abi = "{abi}",
     visibility = ["//visibility:public"],
@@ -562,11 +563,12 @@ def flutter_register_toolchains(name, **kwargs):
                 android_arch = android_arch,
                 release_sha256 = checksums.get(android_engine_artifact_path(android_arch, "release"), ""),
                 debug_sha256 = checksums.get(android_engine_artifact_path(android_arch, "debug"), ""),
+                profile_repo_name = name + "_android_engine_" + android_arch + "_profile",
             )
 
             # The profile engine, apart so only a profile build fetches it.
-            # flutter_android_engine names it through rules_flutter's own
-            # repo mapping, so consumers need no use_repo entry for it.
+            # The engine repo aliases it, so consumers need no use_repo entry
+            # for it.
             profile_engine_path = android_engine_artifact_path(android_arch, "profile")
             flutter_profile_repo(
                 name = name + "_android_engine_" + android_arch + "_profile",

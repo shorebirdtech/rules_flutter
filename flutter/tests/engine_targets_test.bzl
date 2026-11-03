@@ -1,4 +1,4 @@
-"""The engine targets of the SDK repos follow the build mode, or say their mode.
+"""The engine targets of the engine repos follow the build mode, or say their mode.
 
 A target named plainly `engine_library` is the engine of the build mode; a
 target for one mode says which in its name. No release-only target may carry
@@ -12,6 +12,7 @@ engines come from repos of their own per mode.
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("//flutter/private:engine_helpers.bzl", "desktop_cross_engine_attr", "engine_filegroup_for_os", "engine_target_name", "host_engine_targets")
+load("//flutter/private:flutter_android_engine_repo.bzl", "android_engine_build_file")
 load(":engine_mode.bzl", "engine_modes")
 
 _TOOLCHAIN_TYPE = "@rules_flutter//flutter:toolchain_type"
@@ -97,12 +98,32 @@ def _cross_engine_attr_test_impl(ctx):
     asserts.true(env, "\"//conditions:default\": \"@sdk_engine_linux-x64_release//:engine_release_library\"" in text)
     return unittest.end(env)
 
+def _android_engine_targets_test_impl(ctx):
+    env = unittest.begin(ctx)
+    text = android_engine_build_file("arm64-v8a", "sdk_android_profile")
+    asserts.equals(
+        env,
+        ["debug_stripped", "profile_stripped", "release_stripped", "stripped"],
+        _names(text),
+    )
+
+    # `stripped` is the select over the three jars, never one mode's jar.
+    asserts.true(env, "alias(\n    name = \"stripped\"" in text)
+    asserts.true(env, "\"@rules_flutter//flutter/private:dbg\": \":debug_stripped\"" in text)
+    asserts.true(env, "\"@rules_flutter//flutter/private:profile\": \":profile_stripped\"" in text)
+    asserts.true(env, "\"//conditions:default\": \":release_stripped\"" in text)
+    asserts.true(env, "actual = \"@sdk_android_profile//:profile_stripped\"" in text)
+    asserts.true(env, "name = \"release_stripped\",\n    jar = \"flutter.jar\"" in text)
+    asserts.true(env, "name = \"debug_stripped\",\n    jar = \"debug/flutter.jar\"" in text)
+    return unittest.end(env)
+
 _filegroup_names_test = unittest.make(_filegroup_names_test_impl)
 _filegroup_dirs_test = unittest.make(_filegroup_dirs_test_impl)
 _host_targets_test = unittest.make(_host_targets_test_impl)
 _host_targets_without_optional_modes_test = unittest.make(_host_targets_without_optional_modes_test_impl)
 _target_name_test = unittest.make(_target_name_test_impl)
 _cross_engine_attr_test = unittest.make(_cross_engine_attr_test_impl)
+_android_engine_targets_test = unittest.make(_android_engine_targets_test_impl)
 
 def _mode_transition_impl(settings, attr):
     out = {
@@ -173,6 +194,7 @@ def engine_targets_test_suite(name):
         "host_targets_without_optional_modes": _host_targets_without_optional_modes_test,
         "target_name": _target_name_test,
         "cross_engine_attr": _cross_engine_attr_test,
+        "android_engine_targets": _android_engine_targets_test,
     }.items():
         test(name = "%s_%s" % (name, case))
         tests.append("%s_%s" % (name, case))

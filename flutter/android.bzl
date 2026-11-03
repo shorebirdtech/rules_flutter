@@ -155,8 +155,10 @@ flutter_android_registrant = _flutter_android_registrant
 def flutter_android_engine(name, android_abi = "arm64", neverlink = False, **kwargs):
     """Imports the Flutter engine (flutter.jar) as a java_import target.
 
-    Auto-selects debug or release engine based on Bazel compilation mode:
+    Auto-selects the engine of the build mode:
     - Debug (-c dbg): JIT engine for emulator/iterative development.
+    - Profile (-c opt with --@rules_flutter//flutter:profile): AOT engine
+      with the Dart VM service.
     - Release (-c opt / default): AOT engine for production.
 
     The engine's native libraries are stripped with the NDK's `llvm-strip
@@ -197,13 +199,9 @@ def flutter_android_engine(name, android_abi = "arm64", neverlink = False, **kwa
         name = "_%s_jar" % name,
         # The engine with its native libraries stripped, as Gradle packages
         # it (flutter_android_engine_jar.bzl).
-        jars = select({
-            "@rules_flutter//flutter/private:dbg": ["@%s//:debug_stripped" % repo],
-            # Named through rules_flutter's own repo mapping, so a consumer
-            # needs no use_repo entry for a repo only profile builds fetch.
-            "@rules_flutter//flutter/private:profile": [Label("@%s_profile//:stripped" % repo)],
-            "//conditions:default": ["@%s//:stripped" % repo],
-        }),
+        # The engine repo's `stripped` follows the build mode, and fetches
+        # the profile engine's repo only in a profile build.
+        jars = ["@%s//:stripped" % repo],
         tags = tags,
         neverlink = neverlink,
         deps = _ANDROIDX_EMBEDDING_DEPS,
