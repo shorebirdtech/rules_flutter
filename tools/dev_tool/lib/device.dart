@@ -4011,12 +4011,18 @@ class ChromeSession {
   /// Launch Chrome on [url] and wait until it is observably up: debugging
   /// port announced *and* the tab navigated to the app. A failed launch
   /// leaves nothing behind — no browser, no profile directory.
+  ///
+  /// [abandoned] completing means the run is ending: the launch stops
+  /// waiting, and fails after releasing what it started. It is the only way
+  /// the wait for the port ends other than Chrome answering or exiting — see
+  /// [_discoverCdpPort].
   static Future<ChromeSession> launch({
     required String url,
     required ProcessStarter startProcess,
     BrowserLaunchOptions options = const BrowserLaunchOptions(),
     String? chromePath,
-    Duration portTimeout = const Duration(seconds: 15),
+    Future<void>? abandoned,
+    Duration slowStartNotice = const Duration(seconds: 10),
     Duration pageTimeout = const Duration(seconds: 15),
     Duration pollInterval = const Duration(milliseconds: 50),
   }) async {
@@ -4026,7 +4032,27 @@ class ChromeSession {
         'Chrome not found. Install Chrome or use -d macos for desktop.',
       );
     }
+    // A rejection to race every wait against, so that an abandoned launch
+    // fails where it stands rather than when that wait would have ended.
+    const abandonedMessage =
+        'The Chrome launch was abandoned because the run is ending.';
+    var isAbandoned = false;
+    final Future<Never>? abandonment = abandoned?.then<Never>((_) {
+      isAbandoned = true;
+      throw StateError(abandonedMessage);
+    });
+    // Raced, so it may lose; its rejection is then nobody's to report.
+    abandonment?.ignore();
+    Future<T> unlessAbandoned<T>(Future<T> wait) =>
+        abandonment == null ? wait : Future.any([wait, abandonment]);
+
     final userDataDir = await createTempDir('flutter_chrome_');
+    // Checked once more before starting anything: a browser window that
+    // flashes up only to be killed is the one thing worse than not launching.
+    if (isAbandoned) {
+      await deleteTempDir(userDataDir);
+      throw StateError(abandonedMessage);
+    }
     final Process chrome;
     try {
       chrome = await startProcess(
@@ -4048,19 +4074,18 @@ class ChromeSession {
     diagnostics.closeWhen([pumpProcessLines(chrome, diagnostics).done]);
 
     try {
-      final cdpPort = await _discoverCdpPort(
-        diagnostics,
-        timeout: portTimeout,
-        requestedPort: options.debugPort,
+      final cdpPort = await unlessAbandoned(
+        _discoverCdpPort(
+          diagnostics,
+          slowStartNotice: slowStartNotice,
+          requestedPort: options.debugPort,
+        ),
       );
       // The announcement is the readiness signal, not merely the number, so
       // it is awaited even when the port was dictated. A browser that takes a
       // different one than it was given is a state nothing here can drive:
       // every CDP consumer would dial the port that was asked for.
       if (options.debugPort != null && cdpPort != options.debugPort) {
-        chrome.kill();
-        await chrome.exitCode;
-        await deleteTempDir(userDataDir);
         throw StateError(
           'Chrome was asked for --web-browser-debug-port '
           '${options.debugPort} and announced $cdpPort instead.',
@@ -4068,11 +4093,13 @@ class ChromeSession {
       }
       // The same wait [resolveAppPage] does, done before the session exists
       // so the page it found can be part of it.
-      final page = await resolveCdpPageTarget(
-        cdpPort,
-        appUrl: url,
-        timeout: pageTimeout,
-        pollInterval: pollInterval,
+      final page = await unlessAbandoned(
+        resolveCdpPageTarget(
+          cdpPort,
+          appUrl: url,
+          timeout: pageTimeout,
+          pollInterval: pollInterval,
+        ),
       );
       final session = ChromeSession._(
         process: chrome,
@@ -4284,12 +4311,40 @@ class WebDevice extends Device {
     );
   }
 
+  /// Completed by [abandonLaunch]: the run is ending, so a browser launch in
+  /// flight stops waiting and releases what it started.
+  final _abandoned = Completer<void>();
+
+  /// A launch in flight, until it has returned or finished failing — by
+  /// which point it has released everything it did not hand over.
+  Future<void>? _launching;
+
   @override
   Future<AppInstance> launch(String appPath, {AppLogListener? onLog}) async {
-    if (_moduleServer != null) {
-      return _launchWithModuleServer(onLog);
+    final settled = Completer<void>();
+    _launching = settled.future;
+    try {
+      if (_moduleServer != null) {
+        return await _launchWithModuleServer(onLog);
+      }
+      return await _launchStaticServer(appPath, onLog);
+    } finally {
+      settled.complete();
+      _launching = null;
     }
-    return _launchStaticServer(appPath, onLog);
+  }
+
+  /// End a browser launch still in flight and wait until it has let go of
+  /// the browser and its profile.
+  ///
+  /// The wait for Chrome's debugging port has no deadline of its own (see
+  /// [_discoverCdpPort]), so this is what ends it when the run is stopped
+  /// first. A launch that already returned handed its browser to the
+  /// session, whose [stop] releases it.
+  @override
+  Future<void> abandonLaunch() async {
+    if (!_abandoned.isCompleted) _abandoned.complete();
+    await _launching;
   }
 
   /// What this run's web flags resolved to, or a failure naming what was
@@ -4323,6 +4378,7 @@ class WebDevice extends Device {
       url: url,
       startProcess: _startProcess,
       options: options.browser,
+      abandoned: _abandoned.future,
     );
     _cdpPort = session.cdpPort;
     _holdViewport(session.viewportHold);
@@ -4360,6 +4416,7 @@ class WebDevice extends Device {
         url: url,
         startProcess: _startProcess,
         options: options.browser,
+        abandoned: _abandoned.future,
       );
     } catch (_) {
       // The session cleans up after its own failures; this path additionally
@@ -4513,10 +4570,14 @@ class WebDevice extends Device {
   }
 }
 
-/// Chrome's announcement of its debugging port, printed to stderr when
-/// launched with `--remote-debugging-port=0`:
-/// `DevTools listening on ws://127.0.0.1:PORT/devtools/browser/...`
-final cdpPortPattern = RegExp(r'DevTools listening on ws://\S+?:(\d+)/');
+/// Chrome's announcement of its debugging server, printed to stderr once it
+/// is listening: `DevTools listening on ws://127.0.0.1:PORT/devtools/browser/...`
+final cdpPortPattern = RegExp(r'DevTools listening on ws://(\S+):(\d+)/');
+
+/// What Chrome prints when it cannot open its debugging server on any
+/// address. It then carries on running without one, so this line is the only
+/// sign that the port will never be announced.
+const cdpServerFailedLine = 'Cannot start http server for devtools';
 
 /// Discover the CDP debugging port from Chrome's own diagnostic output.
 ///
@@ -4525,41 +4586,81 @@ final cdpPortPattern = RegExp(r'DevTools listening on ws://\S+?:(\d+)/');
 /// unread stderr on a browser as chatty as Chrome is the likeliest place for a
 /// full-pipe stall.
 ///
-/// Throws a [StateError] rather than returning null when the port never
-/// arrives. It is not optional equipment: DDC dev mode dials CDP to give DWDS
+/// Ends on something Chrome does, never on a clock: it announces the port, it
+/// says it cannot open the server, or it exits. How long a cold browser takes
+/// to get there is the machine's business — a loaded CI runner has taken
+/// longer than any deadline that is comfortable on a workstation — so a
+/// deadline here would turn a slow start into a failed run. A browser that is
+/// up and never answers is ended by whoever is waiting on the run (Ctrl-C,
+/// `daemon.shutdown`, a client's own patience), which reaches this launch
+/// through [ChromeSession.launch]'s `abandoned`. After [slowStartNotice] the
+/// person waiting is told, with what Chrome has said so far; that changes
+/// nothing about the wait.
+///
+/// Throws a [StateError] rather than returning null when the port cannot
+/// arrive. It is not optional equipment: DDC dev mode dials CDP to give DWDS
 /// its Chrome connection, and every web path uses it for screenshots and page
 /// reloads, so accepting null here would buy a run with none of that and no
-/// message. Upstream tool-exits in the same situation (`chrome.dart`'s "Unable to
-/// connect to Chrome debug port"). The two causes are reported separately
-/// because they call for different fixes.
+/// message. Upstream tool-exits in the same situation (`chrome.dart`'s "Unable
+/// to connect to Chrome debug port").
 Future<int> _discoverCdpPort(
   AppLogStream browserDiagnostics, {
-  Duration timeout = const Duration(seconds: 15),
+  required Duration slowStartNotice,
   int? requestedPort,
 }) async {
   final completer = Completer<int>();
-  final timer = Timer(timeout, () {
-    if (!completer.isCompleted) {
-      completer.completeError(
-        StateError(
-          'Chrome did not announce a DevTools debugging port within '
-          '${timeout.inSeconds}s of launch. Without it there is no debugging '
-          'connection: no DWDS VM service, no hot restart, no screenshots.'
-          // A dictated port is the one thing about this launch that can be
-          // wrong before Chrome even starts, and Chrome says nothing when it
-          // cannot take one.
-          '${requestedPort == null ? '' : ' --web-browser-debug-port '
-                    '$requestedPort may already be in use.'}',
-        ),
-      );
-    }
+  void fail(String message) {
+    if (!completer.isCompleted) completer.completeError(StateError(message));
+  }
+
+  final sinceLaunch = Stopwatch()..start();
+  var noticeGiven = false;
+  final notice = Timer(slowStartNotice, () {
+    noticeGiven = true;
+    _logger.warning({
+      'message': 'browser_slow_to_start',
+      'text':
+          'Chrome has not opened its DevTools debugging port '
+          '${sinceLaunch.elapsed.inSeconds}s after launch; still waiting. '
+          '${_browserLastWords(browserDiagnostics, silence: 'It has printed nothing so far.')}',
+      'elapsedMs': sinceLaunch.elapsedMilliseconds,
+    });
   });
+
+  // A dictated port is the one thing about this launch that can be wrong
+  // before Chrome even starts.
+  final portInUse = requestedPort == null
+      ? ''
+      : ' --web-browser-debug-port $requestedPort may already be in use.';
 
   final sub = browserDiagnostics.lines.listen(
     (line) {
       if (completer.isCompleted) return;
       final match = cdpPortPattern.firstMatch(line.text);
-      if (match != null) completer.complete(int.parse(match.group(1)!));
+      if (match != null) {
+        final host = match.group(1)!;
+        final port = int.parse(match.group(2)!);
+        // Chrome tries 127.0.0.1 first and falls back to [::1] when that is
+        // taken. Every CDP consumer here dials 127.0.0.1, so a server on any
+        // other address is one they would miss — or, on a dictated port, one
+        // where they would reach whatever holds 127.0.0.1 instead.
+        if (host != '127.0.0.1') {
+          fail(
+            'Chrome opened its DevTools debugging port on $host:$port '
+            'rather than 127.0.0.1, where this tool connects to it, which it '
+            'does when 127.0.0.1:$port is taken.$portInUse',
+          );
+          return;
+        }
+        completer.complete(port);
+      } else if (line.text.contains(cdpServerFailedLine)) {
+        fail(
+          'Chrome could not open its DevTools debugging server. Without it '
+          'there is no debugging connection: no DWDS VM service, no hot '
+          'restart, no screenshots.$portInUse '
+          '${_browserLastWords(browserDiagnostics)}',
+        );
+      }
     },
     onDone: () {
       // Chrome's output is this stream's only source, so it ending means the
@@ -4572,43 +4673,56 @@ Future<int> _discoverCdpPort(
       // under, a profile directory it cannot write, a missing shared library —
       // and on a CI runner the alternative to quoting them here is reproducing
       // the failure somewhere the log can be reached.
-      if (!completer.isCompleted) {
-        completer.completeError(
-          StateError(
-            'Chrome exited before announcing a DevTools debugging port. '
-            '${_browserLastWords(browserDiagnostics)}',
-          ),
-        );
-      }
+      fail(
+        'Chrome exited before announcing a DevTools debugging port. '
+        '${_browserLastWords(browserDiagnostics)}',
+      );
     },
   );
 
   try {
-    return await completer.future;
+    final port = await completer.future;
+    // How long the browser took is what says whether a slow machine is
+    // getting slower; worth a line at the default level only when the person
+    // waiting was already told it was slow.
+    final started = {
+      'message': 'browser_debug_port_open',
+      'text':
+          'Chrome opened its DevTools debugging port $port after '
+          '${sinceLaunch.elapsedMilliseconds}ms.',
+      'cdpPort': port,
+      'elapsedMs': sinceLaunch.elapsedMilliseconds,
+    };
+    noticeGiven ? _logger.info(started) : _logger.fine(started);
+    return port;
   } finally {
-    timer.cancel();
+    notice.cancel();
     await sub.cancel();
   }
 }
 
-/// The tail of what the browser printed, phrased for the end of an error.
+/// The tail of what the browser printed, phrased for the end of a message.
 ///
 /// Read back off [AppLogStream] rather than accumulated by the listener above:
 /// the buffer survives the stream closing, so the lines are still there at the
 /// moment the launch is known to have failed, and there is no second copy of
 /// the same output to keep in step with the first.
 ///
-/// Says so explicitly when there is nothing to quote. "Chrome exited and
-/// printed nothing" is a real and different diagnosis from "Chrome exited" —
-/// it rules out every cause that announces itself, and says the search belongs
-/// somewhere other than the browser's output. An empty tail rendered as
-/// nothing at all would instead read as if the quoting had been forgotten.
-String _browserLastWords(AppLogStream browserDiagnostics, {int lines = 20}) {
+/// Says so explicitly when there is nothing to quote ([silence]). "Chrome
+/// exited and printed nothing" is a real and different diagnosis from "Chrome
+/// exited" — it rules out every cause that announces itself, and says the
+/// search belongs somewhere other than the browser's output. An empty tail
+/// rendered as nothing at all would instead read as if the quoting had been
+/// forgotten.
+String _browserLastWords(
+  AppLogStream browserDiagnostics, {
+  int lines = 20,
+  String silence =
+      'It printed nothing at all on the way out, so its own output does not '
+      'hold the reason.',
+}) {
   final tail = browserDiagnostics.read(-lines).lines;
-  if (tail.isEmpty) {
-    return 'It printed nothing at all on the way out, so its own output does '
-        'not hold the reason.';
-  }
+  if (tail.isEmpty) return silence;
   return 'It last said:\n${tail.map((l) => '  ${l.text}').join('\n')}';
 }
 

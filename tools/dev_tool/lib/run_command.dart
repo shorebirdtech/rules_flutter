@@ -638,6 +638,10 @@ class RunCommand {
           await sessions.first.terminated;
         }
       }
+    } on LaunchAbandoned {
+      // The launch counterpart of the case below: the teardown that abandoned
+      // it signals once everything is released.
+      await host.shutdownRequested.future;
     } on BazelCancelled {
       // Only a shutdown stops a bazel command (see [Bazel.close]), and before
       // the session loop the shutdown that does is `performCleanup` — which

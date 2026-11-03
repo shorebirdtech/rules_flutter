@@ -961,22 +961,128 @@ void main() {
       expect(await profileDirOf(args).exists(), isFalse);
     });
 
+    test('waits out a slow Chrome rather than failing it', () async {
+      // The CI failure this shape stands for: a cold browser on a loaded
+      // runner announcing its port long after a workstation's would. Only
+      // the browser answering, exiting or the run ending may end the wait;
+      // the notice that it is slow must not.
+      late final HttpServer cdp;
+      cdp = await serveCdpJson((_) => [appPage(cdp)]);
+      final proc = FakeProcess();
+      late List<String> args;
+      final launch = ChromeSession.launch(
+        url: appUrl,
+        chromePath: '/fake/chrome',
+        slowStartNotice: const Duration(milliseconds: 10),
+        startProcess: (exe, a) async {
+          args = a;
+          return proc;
+        },
+      );
+      await proc.outputAttached;
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      proc.emitStderr(devToolsLine(cdp));
+
+      final session = await launch;
+      addTearDown(() async {
+        session.process.kill();
+        await profileDirOf(args).delete(recursive: true);
+      });
+      expect(session.cdpPort, cdp.port);
+    });
+
+    test('fails at once when Chrome cannot open its debugging server, '
+        'quoting it, and cleans up', () async {
+      final proc = FakeProcess();
+      late List<String> args;
+      final launch = ChromeSession.launch(
+        url: appUrl,
+        chromePath: '/fake/chrome',
+        options: const BrowserLaunchOptions(debugPort: 9222),
+        startProcess: (exe, a) async {
+          args = a;
+          return proc;
+        },
+      );
+      await proc.outputAttached;
+      // What Chrome prints with the port taken on both loopback addresses —
+      // and then it keeps running, so nothing else would end the wait.
+      proc.emitStderr(
+        '[1:2:ERROR:net/socket/socket_posix.cc:175] bind() failed: '
+        'Address already in use (48)\n'
+        '[1:2:ERROR:content/browser/devtools/devtools_http_handler.cc:322] '
+        'Cannot start http server for devtools.\n',
+      );
+
+      await expectLater(
+        launch,
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            allOf(
+              contains('could not open its DevTools debugging server'),
+              contains('--web-browser-debug-port 9222'),
+              contains('Address already in use'),
+            ),
+          ),
+        ),
+      );
+      expect(await proc.exitCode, isNotNull);
+      expect(await profileDirOf(args).exists(), isFalse);
+    });
+
+    test('refuses a debugging server that is not on 127.0.0.1', () async {
+      // Chrome falls back to [::1] when 127.0.0.1:port is taken; every CDP
+      // consumer here would then dial whatever holds 127.0.0.1:port.
+      final proc = FakeProcess();
+      late List<String> args;
+      final launch = ChromeSession.launch(
+        url: appUrl,
+        chromePath: '/fake/chrome',
+        options: const BrowserLaunchOptions(debugPort: 9222),
+        startProcess: (exe, a) async {
+          args = a;
+          return proc;
+        },
+      );
+      await proc.outputAttached;
+      proc.emitStderr(
+        'DevTools listening on ws://[::1]:9222/devtools/browser/x\n',
+      );
+
+      await expectLater(
+        launch,
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            allOf(contains('[::1]:9222'), contains('127.0.0.1')),
+          ),
+        ),
+      );
+      expect(await proc.exitCode, isNotNull);
+      expect(await profileDirOf(args).exists(), isFalse);
+    });
+
     test(
-      'fails the launch when Chrome never announces a port, and cleans up',
+      'an abandoned launch stops waiting on a silent Chrome and cleans up',
       () async {
         final proc = FakeProcess();
+        final abandoned = Completer<void>();
         late List<String> args;
         final launch = ChromeSession.launch(
           url: appUrl,
           chromePath: '/fake/chrome',
-          portTimeout: const Duration(milliseconds: 100),
+          abandoned: abandoned.future,
           startProcess: (exe, a) async {
             args = a;
             return proc;
           },
         );
         await proc.outputAttached;
-        // The browser stays up but says nothing.
+        // The browser stays up and says nothing; the run ends.
+        abandoned.complete();
 
         await expectLater(
           launch,
@@ -984,7 +1090,7 @@ void main() {
             isA<StateError>().having(
               (e) => e.message,
               'message',
-              contains('did not announce'),
+              contains('abandoned'),
             ),
           ),
         );
@@ -992,6 +1098,24 @@ void main() {
         expect(await profileDirOf(args).exists(), isFalse);
       },
     );
+
+    test('a launch abandoned before it starts starts nothing', () async {
+      final abandoned = Completer<void>()..complete();
+      var started = false;
+      await expectLater(
+        ChromeSession.launch(
+          url: appUrl,
+          chromePath: '/fake/chrome',
+          abandoned: abandoned.future,
+          startProcess: (exe, a) async {
+            started = true;
+            return FakeProcess();
+          },
+        ),
+        throwsA(isA<StateError>()),
+      );
+      expect(started, isFalse);
+    });
 
     group('browser launch options', () {
       // Asserted on the argv rather than by launching a real browser: what a

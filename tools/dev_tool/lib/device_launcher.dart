@@ -22,6 +22,23 @@ import 'session.dart';
 import 'session_host.dart';
 import 'vm_service_client.dart';
 
+/// A launch ended by the run's teardown while it was in flight.
+///
+/// Not a failure, for the reason `BazelCancelled` is not one: the run is
+/// already on its way out by a route that decides its own exit status — a
+/// signal's `130`/`143`, or the `0` a `daemon.shutdown` ends with. Reported
+/// as a failed launch, a Ctrl-C during a slow browser start would print
+/// "Launch failed" and exit 1.
+class LaunchAbandoned implements Exception {
+  final String deviceName;
+
+  const LaunchAbandoned(this.deviceName);
+
+  @override
+  String toString() =>
+      'The launch on $deviceName was stopped: the run is shutting down.';
+}
+
 class DeviceLauncher {
   final RunPlan plan;
   final SessionHost host;
@@ -81,6 +98,10 @@ class DeviceLauncher {
     try {
       appInstance = await device.launch(appFile, onLog: logSink);
     } on StateError catch (e) {
+      // A launch the teardown abandoned did not fail: the run was stopped
+      // while it was in flight, and the route that stopped it decides the
+      // exit status.
+      if (host.teardown.hasRun) throw LaunchAbandoned(device.name);
       throw DevToolException('Launch failed on ${device.name}: ${e.message}');
     }
 
