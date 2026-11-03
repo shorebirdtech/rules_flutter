@@ -1299,22 +1299,51 @@ _wasm_browsers_refused_test = analysistest.make(
 )
 
 def _renderer_files_test_impl(ctx):
-    """The bundle ships the renderer files its builds load, and no others."""
+    """The bundle ships the renderer files something loads, and no others.
+
+    Nothing loads the local `canvaskit/` unless the bundle asks for it
+    (`use_local_canvaskit`) or is a debug build, so otherwise there is no
+    directory at all. The `.symbols` maps are never fetched, so they never ship;
+    they are offered by the `symbols` output group instead.
+    """
     env = analysistest.begin(ctx)
     bundle = action_config(env, "FlutterWebBundle")
     if bundle == None:
         return analysistest.end(env)
     dsts = [c["dst"] for c in bundle["copies"] if c["dst"].startswith("canvaskit/")]
-    asserts.true(env, len(dsts) > 0, "the bundle ships no renderer files at all")
+    if ctx.attr.expect_none:
+        asserts.equals(env, [], dsts, "no renderer files should ship")
+    else:
+        asserts.true(env, len(dsts) > 0, "the bundle ships no renderer files at all")
     for expected in ctx.attr.expect_present:
         asserts.true(env, expected in dsts, "%s missing from %s" % (expected, dsts))
     for unexpected in ctx.attr.expect_absent:
         asserts.false(env, unexpected in dsts, "%s must not ship: %s" % (unexpected, dsts))
+    asserts.equals(
+        env,
+        [],
+        [d for d in dsts if d.endswith(".symbols")],
+        "symbol maps are never fetched, so they must not ship",
+    )
+    asserts.equals(env, [], [e for e in bundle["copy_dirs"] if "symbols" in e["src"]])
+
+    # The maps are still reachable, as files of the target's own output tree.
+    symbols = [
+        f.short_path.split("_symbols/")[1]
+        for f in analysistest.target_under_test(env)[OutputGroupInfo].symbols.to_list()
+    ]
+    for expected in ctx.attr.expect_symbols:
+        asserts.true(env, expected in symbols, "%s missing from the symbols group: %s" % (expected, symbols))
+    for unexpected in ctx.attr.expect_no_symbols:
+        asserts.false(env, unexpected in symbols, "%s must not be in the symbols group: %s" % (unexpected, symbols))
     return analysistest.end(env)
 
 _renderer_files_attrs = {
     "expect_absent": attr.string_list(),
+    "expect_none": attr.bool(default = False),
+    "expect_no_symbols": attr.string_list(),
     "expect_present": attr.string_list(),
+    "expect_symbols": attr.string_list(),
 }
 
 _renderer_files_test = analysistest.make(
@@ -1750,6 +1779,7 @@ def _setup_web_fixtures():
         compiler = "dart2js",
         renderer = "canvaskit",
         tags = ["manual"],
+        use_local_canvaskit = True,
     )
     flutter_web_bundle(
         name = "_web_wasm_canvaskit_fixture",
@@ -1757,6 +1787,24 @@ def _setup_web_fixtures():
         main = "lib/web_fixture_main.dart",
         renderer = "canvaskit",
         tags = ["manual"],
+        use_local_canvaskit = True,
+    )
+
+    # The renderer served from the bundle: WASM only, and with the JS build.
+    flutter_web_bundle(
+        name = "_web_local_fixture",
+        package_name = "web_fixture",
+        main = "lib/web_fixture_main.dart",
+        tags = ["manual"],
+        use_local_canvaskit = True,
+    )
+    flutter_web_bundle(
+        name = "_web_fallback_local_fixture",
+        package_name = "web_fixture",
+        js_fallback = True,
+        main = "lib/web_fixture_main.dart",
+        tags = ["manual"],
+        use_local_canvaskit = True,
     )
 
     # `js_fallback` where the whole bundle is JavaScript already.
@@ -2035,36 +2083,64 @@ def web_test_suite(name):
             target_under_test = ":" + fixture,
         )
 
-    # The loader never falls from one renderer to the other, so each bundle
-    # ships its builds' files and no others.
+    # Nothing reads the bundle's `canvaskit/` unless it serves its own renderer
+    # (`use_local_canvaskit`) or is a debug build, and the loader never falls
+    # from one renderer to the other, so a bundle ships its builds' files only
+    # when asked, and never the `.symbols` maps.
     _skwasm_files = ["canvaskit/skwasm.js", "canvaskit/skwasm.wasm", "canvaskit/skwasm_heavy.wasm"]
     _canvaskit_files = ["canvaskit/canvaskit.js", "canvaskit/canvaskit.wasm", "canvaskit/chromium/canvaskit.wasm"]
+    _skwasm_symbols = ["canvaskit/skwasm.js.symbols", "canvaskit/skwasm_heavy.js.symbols", "canvaskit/wimp.js.symbols"]
+    _canvaskit_symbols = ["canvaskit/canvaskit.js.symbols", "canvaskit/chromium/canvaskit.js.symbols"]
     _renderer_files_test(
-        name = name + "_renderer_files_wasm_only",
-        expect_absent = _canvaskit_files,
-        expect_present = _skwasm_files,
+        name = name + "_renderer_files_default",
+        expect_none = True,
+        expect_symbols = _skwasm_symbols,
+        expect_no_symbols = _canvaskit_symbols,
         target_under_test = ":_web_fixture",
     )
     _renderer_files_test(
-        name = name + "_renderer_files_fallback",
-        expect_present = _skwasm_files + _canvaskit_files,
+        name = name + "_renderer_files_fallback_default",
+        expect_none = True,
+        expect_symbols = _skwasm_symbols + _canvaskit_symbols,
         target_under_test = ":_web_fallback_fixture",
     )
     _renderer_files_test(
-        name = name + "_renderer_files_js",
+        name = name + "_renderer_files_wasm_only_local",
+        expect_absent = _canvaskit_files,
+        expect_present = _skwasm_files,
+        expect_symbols = _skwasm_symbols,
+        expect_no_symbols = _canvaskit_symbols,
+        target_under_test = ":_web_local_fixture",
+    )
+    _renderer_files_test(
+        name = name + "_renderer_files_fallback_local",
+        expect_present = _skwasm_files + _canvaskit_files,
+        expect_symbols = _skwasm_symbols + _canvaskit_symbols,
+        target_under_test = ":_web_fallback_local_fixture",
+    )
+    _renderer_files_test(
+        name = name + "_renderer_files_js_local",
         expect_absent = _skwasm_files,
         expect_present = _canvaskit_files,
+        expect_symbols = _canvaskit_symbols,
+        expect_no_symbols = _skwasm_symbols,
         target_under_test = ":_web_js_fixture",
     )
     _renderer_files_test(
-        name = name + "_renderer_files_wasm_canvaskit",
+        name = name + "_renderer_files_wasm_canvaskit_local",
         expect_absent = _skwasm_files,
         expect_present = _canvaskit_files,
+        expect_symbols = _canvaskit_symbols,
+        expect_no_symbols = _skwasm_symbols,
         target_under_test = ":_web_wasm_canvaskit_fixture",
     )
+
+    # No `use_local_canvaskit`, but a debug build: the dev loop renders with
+    # CanvasKit served from the bundle.
     _renderer_files_dbg_test(
         name = name + "_renderer_files_dbg",
         expect_present = _skwasm_files + _canvaskit_files,
+        expect_symbols = _skwasm_symbols + _canvaskit_symbols,
         target_under_test = ":_web_fixture",
     )
     _js_setting_without_fallback_refused_test(

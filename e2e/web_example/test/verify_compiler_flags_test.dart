@@ -81,32 +81,52 @@ void main() {
     detail: 'no dart2js build and no main.dart.js in the build config',
   );
 
-  // Which renderer files ship. flutter.js never falls from skwasm to CanvasKit
-  // or back, so a bundle carries the files of the renderers its builds use:
-  // skwasm alone for `app_wasm`, both for `app_fallback` (WASM plus JS), and
-  // CanvasKit alone for `app_js`.
+  // Which renderer files ship. The default loader fetches the renderer from
+  // gstatic.com and never reads the bundle's own `canvaskit/`, so a bundle has
+  // one only when it serves its own renderer (`use_local_canvaskit`).
+  // flutter.js never falls from skwasm to CanvasKit or back, so that
+  // directory holds the files of the renderers its builds use: skwasm alone
+  // for `app_all_browsers`, both for `app_tuned` (WASM plus JS). The
+  // `.symbols` maps are never fetched, so they ship nowhere.
   bool ships(String target, String file) =>
       File('${bundle('${target}_web')}/canvaskit/$file').existsSync();
   check(
-    'app_wasm ships skwasm and no CanvasKit',
+    'app_wasm has no canvaskit/ directory',
+    ok: !Directory('${bundle('app_wasm_web')}/canvaskit').existsSync(),
+    detail: 'nothing would load it: the renderer comes from gstatic.com',
+  );
+  check(
+    'app_fallback has no canvaskit/ directory either',
+    ok: !Directory('${bundle('app_fallback_web')}/canvaskit').existsSync(),
+    detail: 'a JS build does not change that',
+  );
+  check(
+    'app_all_browsers ships skwasm and no CanvasKit',
     ok:
-        ships('app_wasm', 'skwasm.wasm') &&
-        ships('app_wasm', 'skwasm_heavy.wasm') &&
-        !ships('app_wasm', 'canvaskit.wasm') &&
-        !ships('app_wasm', 'chromium/canvaskit.wasm'),
+        ships('app_all_browsers', 'skwasm.wasm') &&
+        ships('app_all_browsers', 'skwasm_heavy.wasm') &&
+        !ships('app_all_browsers', 'canvaskit.wasm') &&
+        !ships('app_all_browsers', 'chromium/canvaskit.wasm'),
     detail: 'skwasm.wasm and skwasm_heavy.wasm present, canvaskit.wasm absent',
   );
   check(
-    'app_fallback ships both renderers',
+    'app_tuned ships both renderers',
     ok:
-        ships('app_fallback', 'skwasm.wasm') &&
-        ships('app_fallback', 'chromium/canvaskit.wasm'),
+        ships('app_tuned', 'skwasm.wasm') &&
+        ships('app_tuned', 'chromium/canvaskit.wasm'),
     detail: 'its JS build renders with CanvasKit, its WASM build with skwasm',
   );
+  final symbolMaps = [
+    for (final target in ['app_all_browsers', 'app_tuned'])
+      ...Directory('${bundle('${target}_web')}/canvaskit')
+          .listSync(recursive: true)
+          .whereType<File>()
+          .where((f) => f.path.endsWith('.symbols')),
+  ];
   check(
-    'app_js ships CanvasKit and no skwasm',
-    ok: ships('app_js', 'canvaskit.wasm') && !ships('app_js', 'skwasm.wasm'),
-    detail: 'canvaskit.wasm present, skwasm.wasm absent',
+    'no .symbols map ships in a bundle',
+    ok: symbolMaps.isEmpty,
+    detail: symbolMaps.isEmpty ? 'none shipped' : 'shipped $symbolMaps',
   );
 
   // `wasm_browsers` reaches the page's loader call as an exact allow-list, and

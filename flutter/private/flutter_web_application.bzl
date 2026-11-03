@@ -5,7 +5,8 @@ Produces a deployable web directory containing:
   when `js_fallback` asks for a JavaScript build beside it
   or main.dart.js alone (compiler="dart2js")
 - flutter.js (Flutter engine bootstrapper from web SDK)
-- canvaskit/ or skwasm/ (renderer engine artifacts)
+- canvaskit/ (renderer engine artifacts; only with use_local_canvaskit, or in a
+  debug build for the dev loop)
 - flutter_assets/ (AssetManifest.bin.json for web)
 - index.html
 - flutter_bootstrap.js
@@ -917,19 +918,38 @@ def _flutter_web_bundle_impl(ctx):
         _reserve(reserved, copies, refs, flutter_js_file, "flutter.js")
         engine_inputs.append(flutter_js_file)
 
-    # Copy the renderer engine files (canvaskit/*.wasm, *.js, etc.) the bundle
-    # can load. The loader never falls from skwasm to CanvasKit or back, so a
-    # renderer no build uses has no file here that anything asks for. The DDC
-    # dev loop renders with CanvasKit and serves it from this directory, so a
-    # debug build keeps those files whatever its release builds use.
+    # Copy the renderer engine files (canvaskit/*.wasm, *.js, etc.) something
+    # loads. Two things can: the default loader fetches the renderer from
+    # gstatic.com and never touches this directory, so a bundle carries its own
+    # copy only when it is told to load it (`use_local_canvaskit`, which also
+    # sets `useLocalCanvasKit` in the build config), and in a debug build,
+    # whose dev loop renders with CanvasKit served from this directory.
+    #
+    # And only the renderers a build uses: the loader never falls from skwasm
+    # to CanvasKit or back, so the other renderer's files are asked for by
+    # nothing.
+    #
+    # The `.symbols` files are emscripten's function-name maps. flutter.js and
+    # the renderers never fetch them, so they stay out of the deployable and
+    # ride the `symbols` output group, linked into this target's own output
+    # tree where a crash symbolizer can find them.
+    ships_renderer = ctx.attr.use_local_canvaskit or is_debug
     renderers = [b["renderer"] for b in builds]
     if is_debug:
         renderers.append("canvaskit")
+    symbol_files = []
     for f in renderer_files:
         idx = f.path.find("/web-sdk/canvaskit/")
         if idx >= 0:
             sdk_rel = f.path[idx + len("/web-sdk/canvaskit/"):]
             if not renderer_file_needed(sdk_rel, renderers):
+                continue
+            if sdk_rel.endswith(".symbols"):
+                symbol_file = ctx.actions.declare_file("%s_symbols/canvaskit/%s" % (ctx.label.name, sdk_rel))
+                ctx.actions.symlink(output = symbol_file, target_file = f)
+                symbol_files.append(symbol_file)
+                continue
+            if not ships_renderer:
                 continue
             rel = "canvaskit/" + sdk_rel
             _reserve(reserved, copies, refs, f, rel)
@@ -1045,6 +1065,8 @@ def _flutter_web_bundle_impl(ctx):
     # is off, so the group always exists and always says the truth.
     output_groups = OutputGroupInfo(
         dump_info = depset([dump_info_file] if dump_info_file else []),
+        # The renderers' symbol maps, for the engine this bundle runs.
+        symbols = depset(symbol_files),
         _validation = import_checks,
     )
 
@@ -1607,14 +1629,25 @@ build knows which served file is a native module.
                   "Google's CDN (gstatic.com). Use this for air-gapped deployments or " +
                   "environments that cannot reach external CDNs. The CDN already sends " +
                   "Cross-Origin-Resource-Policy: cross-origin, so COEP does not require " +
-                  "this. The canvaskit/ directory is always included in the build output " +
-                  "regardless of this setting (so a bootstrap of your own can point " +
-                  "`canvasKitBaseUrl` at it), holding only the files this bundle's " +
-                  "renderers load: `skwasm*` and `wimp*` for skwasm, `canvaskit.*`, " +
-                  "`chromium/` and `webparagraph/` for CanvasKit. A WASM-only skwasm " +
-                  "bundle therefore carries no CanvasKit, since flutter.js never falls " +
-                  "back from one renderer to the other; a debug build keeps CanvasKit " +
-                  "for the dev loop, which renders with it.\n\n" +
+                  "this.\n\n" +
+                  "This is what puts the renderer in the bundle: the default loader " +
+                  "fetches it from gstatic.com and nothing reads the local copy, so " +
+                  "without this the bundle has no `canvaskit/` directory (a debug " +
+                  "build excepted: the dev loop renders with CanvasKit served from " +
+                  "it). With it, `canvaskit/` holds only the files this bundle's " +
+                  "renderers load, `skwasm*` and `wimp*` for skwasm and `canvaskit.*`, " +
+                  "`chromium/` and `webparagraph/` for CanvasKit, because flutter.js " +
+                  "never falls back from one renderer to the other. The `.symbols` " +
+                  "files beside them are never fetched, so they are not shipped; " +
+                  "`bazel build //your:app --output_groups=symbols` links them under " +
+                  "`<name>_symbols/canvaskit/` for crash symbolization.\n\n" +
+                  "It is also how a `bootstrap_js` of your own asks for the local " +
+                  "renderer. A bootstrap that sets `canvasKitBaseUrl` to the bundle's " +
+                  "`canvaskit/` must set this too, or the directory is not there to " +
+                  "load. One attribute rather than two: \"this bundle serves its own " +
+                  "renderer\" is a single fact, it already puts `useLocalCanvasKit` in " +
+                  "the build config the bootstrap reads, and a second attribute could " +
+                  "disagree with the files it is meant to ship.\n\n" +
                   "Required to serve under a Content Security Policy: the renderer is a " +
                   "script, so `script-src 'self'` blocks it from the CDN and the app never " +
                   "boots. Note the guarantee stops at `script-src` — the framework still " +
