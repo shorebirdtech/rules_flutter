@@ -3,7 +3,7 @@ load("@rules_apple//apple:ios.bzl", "ios_application")
 load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
 load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_test")
 load("@rules_flutter//flutter:android.bzl", "flutter_android_app")
-load("@rules_flutter//flutter:defs.bzl", "flutter_aot_target", "flutter_application", "flutter_asset_bundle", "flutter_kernel_target", "flutter_library", "flutter_test", "flutter_tester_binary")
+load("@rules_flutter//flutter:defs.bzl", "flutter_aot_target", "flutter_application", "flutter_asset_bundle", "flutter_kernel_target", "flutter_library", "flutter_profile_build", "flutter_test", "flutter_tester_binary")
 load(
     "@rules_flutter//flutter:ios.bzl",
     "IOS_DEFAULT_LAUNCH_STORYBOARD",
@@ -21,7 +21,6 @@ load("@rules_flutter//flutter:linux.bzl", "flutter_linux_app")
 load("@rules_flutter//flutter:macos.bzl", "flutter_macos_app")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
 load("@rules_flutter//flutter:windows.bzl", "flutter_windows_app")
-load(":profile_build.bzl", "profile_build")
 
 exports_files(["pubspec.lock"])
 
@@ -451,14 +450,14 @@ build_test(
 # those hosts build profile mode too. A profile AOT snapshot cannot be built
 # for another desktop OS, so each runs on its own host only.
 
-profile_build(
+flutter_profile_build(
     name = "hello_world_linux_profile",
     tags = ["manual"],
     target_compatible_with = ["@platforms//os:linux"],
     targets = [":hello_world_linux"],
 )
 
-profile_build(
+flutter_profile_build(
     name = "hello_world_windows_profile",
     tags = ["manual"],
     target_compatible_with = ["@platforms//os:windows"],

@@ -5,7 +5,7 @@ load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
 load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_analysis_test", "dart_test")
-load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_library")
+load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_library", "flutter_profile_build")
 load(
     "@rules_flutter//flutter:macos.bzl",
     "MACOS_MINIMUM_OS_VERSION",
@@ -19,7 +19,6 @@ load(
     "flutter_macos_runner_lib_gen",
 )
 load("@rules_swift//swift:swift.bzl", "swift_library")
-load(":profile_build.bzl", "profile_build")
 
 exports_files(["pubspec.lock"])
 
@@ -451,7 +450,7 @@ dart_analysis_test(
 
 # :app built in Flutter profile mode regardless of the command line, so the
 # profile test below does not depend on how it is invoked.
-profile_build(
+flutter_profile_build(
     name = "app_profile",
     tags = ["manual"],
     targets = [":app"],

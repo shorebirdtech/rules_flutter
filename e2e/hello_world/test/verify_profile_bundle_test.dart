@@ -1,7 +1,7 @@
 /// Verifies that a desktop bundle built in Flutter profile mode carries a
 /// profile AOT snapshot, not a release one.
 ///
-/// The bundle comes from `profile_build`, which builds the app with
+/// The bundle comes from `flutter_profile_build`, which builds the app with
 /// `-c opt --@rules_flutter//flutter:profile` whatever the command line says.
 /// Run as `dart_test(args = ["<bundle target name>", "<AOT snapshot path>"])`;
 /// the AOT snapshot is `lib/libapp.so` on Linux and `data/app.so` on Windows.

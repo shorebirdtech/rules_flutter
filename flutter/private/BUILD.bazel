@@ -506,6 +506,12 @@ bzl_library(
 )
 
 bzl_library(
+    name = "flutter_profile_build",
+    srcs = ["flutter_profile_build.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+)
+
+bzl_library(
     name = "flutter_test",
     srcs = ["flutter_test.bzl"],
     visibility = ["//flutter:__subpackages__"],

@@ -169,6 +169,8 @@ Profile mode is `flutter run --profile`: release-speed code that still serves th
 build:profile -c opt --@rules_flutter//flutter:profile
 ```
 
+To check a profile build from a test without those flags on the command line, wrap the app in [`flutter_profile_build`](#flutter_profile_build).
+
 ## Dependencies
 
 ### Pub packages
@@ -1326,6 +1328,32 @@ The program is written as a test suite, because `flutter_tester` draws frames th
 The program sees the environment it was started with and runs in the working directory it was started in, which for a build action is the exec root, so it can be handed paths of the action's inputs and outputs. Native Assets load from any working directory. Arguments are not passed to the program.
 
 Build it for the machine it runs on. `bazel run` does that, and a rule that runs it in an action takes it as an executable attribute with `cfg = "exec"`, as `genrule` takes `tools`. With `enable_impeller = True` it needs that machine's GPU, so keep such an action off remote executors (`execution_requirements = {"no-remote-exec": "1"}`).
+
+### flutter_profile_build
+
+Builds its `targets` in profile mode, as `-c opt --@rules_flutter//flutter:profile` would, whatever flags the command line has. A plain `bazel test //...` then checks a profile build, with no `--config=profile` in the CI job.
+
+```starlark
+load("@rules_flutter//flutter:defs.bzl", "flutter_profile_build")
+
+flutter_profile_build(
+    name = "my_app_profile",
+    tags = ["manual"],
+    targets = [":my_app"],
+)
+
+dart_test(
+    name = "profile_bundle_test",
+    data = [":my_app_profile"],
+    main = "test/profile_bundle_test.dart",
+)
+```
+
+The rule forwards the files of `targets`, so a test names them in `data` and finds them in its runfiles. `tags = ["manual"]` keeps `bazel build //...` from building the profile app on every run; the test that depends on it builds it. Profile mode needs the profile engine and `gen_snapshot` of the target platform, which are downloaded the first time, and the AOT snapshot cannot be built for another desktop OS, so put `target_compatible_with` on the target and its test as you would on the app. There is no profile mode for the iOS simulator.
+
+| Attribute | Description |
+|---|---|
+| `targets` | The targets to build in profile mode, such as a `flutter_macos_app`. Required. |
 
 ### flutter_plugin
 

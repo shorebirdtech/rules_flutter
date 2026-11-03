@@ -11,6 +11,7 @@ actions the rule declares.
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("//flutter/private:flutter_aot_target.bzl", "flutter_aot_target")
 load("//flutter/private:flutter_application.bzl", "flutter_application")
+load("//flutter/private:flutter_profile_build.bzl", "flutter_profile_build")
 
 _PACKAGE = "profile_fixture"
 _MAIN = "lib/language_version_main.dart"
@@ -86,6 +87,29 @@ _refused_fastbuild_test = analysistest.make(
     },
 )
 
+def _wrapper_test_impl(ctx):
+    env = analysistest.begin(ctx)
+
+    # Under -c dbg the wrapped application would be refused with the profile
+    # flag; it analyses only because the transition also sets -c opt, and its
+    # files land in the opt configuration's output tree.
+    files = analysistest.target_under_test(env)[DefaultInfo].files.to_list()
+    asserts.true(env, len(files) > 0, "the wrapper forwards the application's files")
+    for f in files:
+        asserts.true(env, "-opt" in f.path, "%s is built in the opt configuration" % f.path)
+    return analysistest.end(env)
+
+# One test per command line the wrapper must override: it builds in profile mode
+# whatever the invocation asked for.
+_wrapper_dbg_test = analysistest.make(
+    _wrapper_test_impl,
+    config_settings = {"//command_line_option:compilation_mode": "dbg"},
+)
+_wrapper_fastbuild_test = analysistest.make(
+    _wrapper_test_impl,
+    config_settings = {"//command_line_option:compilation_mode": "fastbuild"},
+)
+
 def profile_mode_test_suite(name):
     """Instantiate the fixtures and the analysis tests over them.
 
@@ -120,5 +144,15 @@ def profile_mode_test_suite(name):
             test_name = "%s%s_%s_test" % (name, fixture, suffix)
             rule(name = test_name, target_under_test = ":" + fixture)
             tests.append(":" + test_name)
+
+    flutter_profile_build(
+        name = "_profile_wrapper",
+        targets = [":_profile_application"],
+        tags = ["manual"],
+    )
+    for suffix, rule in [("dbg", _wrapper_dbg_test), ("fastbuild", _wrapper_fastbuild_test)]:
+        test_name = "%s_profile_build_%s_test" % (name, suffix)
+        rule(name = test_name, target_under_test = ":_profile_wrapper")
+        tests.append(":" + test_name)
 
     native.test_suite(name = name, tests = tests)

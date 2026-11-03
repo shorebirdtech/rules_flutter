@@ -1442,7 +1442,7 @@ build or ships a release snapshot in it fails a push, not a VM session. The
 `E2E (hello_world, ubuntu-latest)` and `E2E (hello_world, windows-latest)` jobs
 run `bazel test //...` in `e2e/hello_world`, which includes
 `verify_linux_profile_bundle_test` and `verify_windows_profile_bundle_test`.
-Each builds `hello_world_linux` or `hello_world_windows` through `profile_build`
+Each builds `hello_world_linux` or `hello_world_windows` through `flutter_profile_build`
 (`-c opt --@rules_flutter//flutter:profile`, whatever the command line says),
 downloading the profile engine and building the profile AOT snapshot, then
 checks the snapshot. The Dart VM records the mode it was built for at the start
