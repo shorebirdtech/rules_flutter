@@ -4,11 +4,14 @@ Generates a flutter_toolchain that wires host tools (dart, frontend_server,
 gen_snapshot, patched SDK) from the host repo with a desktop engine library
 from a separate engine repo. Downloads nothing itself.
 
-Desktop cross-toolchains only support debug/JIT mode — gen_snapshot cannot
-cross-compile between desktop OSes for AOT.
+The toolchain's engine follows the build mode, from a repo per mode. Only debug
+(JIT) bundles can be built across desktop OSes, since gen_snapshot cannot
+cross-compile between them for AOT (`flutter_application` refuses the other
+modes); the release and profile engines are there for a rule of your own that
+links the engine, so that it links the engine of the mode being built.
 """
 
-load(":engine_helpers.bzl", "dart_binary_name", "dartaotruntime_binary_name", "platform_to_arch", "platform_to_os")
+load(":engine_helpers.bzl", "dart_binary_name", "dartaotruntime_binary_name", "desktop_cross_engine_attr", "platform_to_arch", "platform_to_os")
 
 def _flutter_desktop_cross_repo_impl(repository_ctx):
     host_platform = repository_ctx.attr.host_platform
@@ -16,8 +19,6 @@ def _flutter_desktop_cross_repo_impl(repository_ctx):
     flutter_version = repository_ctx.attr.flutter_version
     engine_revision = repository_ctx.attr.engine_revision
     host_repo_name = repository_ctx.attr.host_repo_name
-    engine_repo_name = repository_ctx.attr.engine_repo_name
-    engine_debug_repo_name = repository_ctx.attr.engine_debug_repo_name
 
     target_os = platform_to_os(target_platform)
     target_arch = platform_to_arch(target_platform)
@@ -28,24 +29,11 @@ def _flutter_desktop_cross_repo_impl(repository_ctx):
     if sysroot_repo_name:
         linux_sysroot_attr = '    linux_sysroot = "@{}//:sysroot_files",'.format(sysroot_repo_name)
 
-    # If a debug engine repo is provided, use select() to pick debug vs release
-    # engine based on compilation mode. Otherwise, use the release engine always.
-    if engine_debug_repo_name:
-        engine_library_attr = """    engine_library = select({{
-        "@rules_flutter//flutter/private:dbg": "@{debug_repo}//:engine_debug_library",
-        "//conditions:default": "@{release_repo}//:engine_release_library",
-    }}),""".format(
-            debug_repo = engine_debug_repo_name,
-            release_repo = engine_repo_name,
-        )
-    else:
-        engine_library_attr = '    engine_library = "@{}//:engine_release_library",'.format(engine_repo_name)
-
     repository_ctx.file("BUILD.bazel", _BUILD_TEMPLATE.format(
         flutter_version = flutter_version,
         engine_revision = engine_revision,
         host_repo_name = host_repo_name,
-        engine_library_attr = engine_library_attr,
+        engine_library_attr = desktop_cross_engine_attr(repository_ctx.attr.engine_repo_names),
         dart_bin = dart_binary_name(host_platform),
         dartaotruntime_bin = dartaotruntime_binary_name(host_platform),
         target_os = target_os,
@@ -93,8 +81,10 @@ flutter_desktop_cross_repo = repository_rule(
         "host_platform": attr.string(mandatory = True),
         "target_platform": attr.string(mandatory = True),
         "host_repo_name": attr.string(mandatory = True, doc = "Name of the host platform's engine artifacts repo."),
-        "engine_repo_name": attr.string(mandatory = True, doc = "Name of the desktop engine repo (release) for the target platform."),
-        "engine_debug_repo_name": attr.string(doc = "Name of the debug desktop engine repo. When set, select() chooses debug vs release based on compilation mode."),
+        "engine_repo_names": attr.string_dict(
+            mandatory = True,
+            doc = "Name of the target platform's desktop engine repo for each build mode (debug, profile, release); select() chooses by the build's mode.",
+        ),
         "sysroot_repo_name": attr.string(doc = "Name of the Linux sysroot repo (for Linux targets only)."),
     },
 )

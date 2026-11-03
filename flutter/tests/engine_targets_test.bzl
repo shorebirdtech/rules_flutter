@@ -11,7 +11,7 @@ engines come from repos of their own per mode.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
-load("//flutter/private:engine_helpers.bzl", "engine_filegroup_for_os", "engine_target_name", "host_engine_targets")
+load("//flutter/private:engine_helpers.bzl", "desktop_cross_engine_attr", "engine_filegroup_for_os", "engine_target_name", "host_engine_targets")
 load(":engine_mode.bzl", "engine_modes")
 
 _TOOLCHAIN_TYPE = "@rules_flutter//flutter:toolchain_type"
@@ -85,11 +85,24 @@ def _target_name_test_impl(ctx):
     asserts.equals(env, "engine_release_library", engine_target_name("release"))
     return unittest.end(env)
 
+def _cross_engine_attr_test_impl(ctx):
+    env = unittest.begin(ctx)
+    text = desktop_cross_engine_attr({
+        "debug": "sdk_engine_linux-x64_debug",
+        "profile": "sdk_engine_linux-x64_profile",
+        "release": "sdk_engine_linux-x64_release",
+    })
+    asserts.true(env, "\"@rules_flutter//flutter/private:dbg\": \"@sdk_engine_linux-x64_debug//:engine_debug_library\"" in text)
+    asserts.true(env, "\"@rules_flutter//flutter/private:profile\": \"@sdk_engine_linux-x64_profile//:engine_profile_library\"" in text)
+    asserts.true(env, "\"//conditions:default\": \"@sdk_engine_linux-x64_release//:engine_release_library\"" in text)
+    return unittest.end(env)
+
 _filegroup_names_test = unittest.make(_filegroup_names_test_impl)
 _filegroup_dirs_test = unittest.make(_filegroup_dirs_test_impl)
 _host_targets_test = unittest.make(_host_targets_test_impl)
 _host_targets_without_optional_modes_test = unittest.make(_host_targets_without_optional_modes_test_impl)
 _target_name_test = unittest.make(_target_name_test_impl)
+_cross_engine_attr_test = unittest.make(_cross_engine_attr_test_impl)
 
 def _mode_transition_impl(settings, attr):
     out = {
@@ -159,6 +172,7 @@ def engine_targets_test_suite(name):
         "host_targets": _host_targets_test,
         "host_targets_without_optional_modes": _host_targets_without_optional_modes_test,
         "target_name": _target_name_test,
+        "cross_engine_attr": _cross_engine_attr_test,
     }.items():
         test(name = "%s_%s" % (name, case))
         tests.append("%s_%s" % (name, case))
@@ -180,10 +194,9 @@ def engine_targets_test_suite(name):
         )
         tests.append("%s_host_%s" % (name, mode))
 
-    # The cross toolchains have no profile engine (they build debug and
-    # release); their engines come from a repo per mode.
+    # The cross toolchains' engines come from a repo per mode.
     for target in ["linux", "windows"]:
-        for mode in ["debug", "release"]:
+        for mode in ["debug", "profile", "release"]:
             engine = "%s_cross_%s_%s_engine" % (name, target, mode)
             _toolchain_engine(
                 name = engine,

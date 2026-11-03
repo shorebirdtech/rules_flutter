@@ -135,6 +135,29 @@ alias(
 )
 """.format(branches = branches)
 
+def desktop_cross_engine_attr(engine_repos):
+    """The `engine_library` attribute of a desktop cross toolchain.
+
+    The engine follows the build mode as the host's does (`host_engine_targets`):
+    debug under `-c dbg`, profile under `-c opt` with `//flutter:profile`,
+    release otherwise. Each mode's engine is a repo of its own, so a build
+    fetches only the one it uses.
+
+    Args:
+        engine_repos: Repo name of the engine of every mode, by mode.
+
+    Returns:
+        The BUILD file line for the toolchain's `engine_library`.
+    """
+    if sorted(engine_repos.keys()) != sorted(ENGINE_MODES):
+        fail("A desktop cross toolchain needs an engine repo for each of {}, got {}".format(ENGINE_MODES, engine_repos.keys()))
+    labels = {mode: "@{}//:{}".format(repo, engine_target_name(mode)) for mode, repo in engine_repos.items()}
+    return """    engine_library = select({{
+        "@rules_flutter//flutter/private:dbg": "{debug}",
+        "@rules_flutter//flutter/private:profile": "{profile}",
+        "//conditions:default": "{release}",
+    }}),""".format(**labels)
+
 # -- Binary name helpers -------------------------------------------------------
 
 def dart_binary_name(platform):

@@ -1505,7 +1505,7 @@ script's own package requires ≥ 3.13.
 | macOS runner (`flutter/private/runners/macos/`) | macos_example `//...` + manual runtime test |
 | Linux runner / bundle (`flutter/private/*linux*`) | linux_example, cross_compile_example, GCP VM visual test |
 | Windows runner / bundle (`flutter/private/*windows*`) | windows_example (on Windows), GCP VM visual test |
-| Desktop engine selection (debug/release) | cross_compile_example `bazel build :cross_linux` + verify on VM |
+| Desktop engine selection (debug/profile/release) | cross_compile_example `bazel build :cross_linux` + verify on VM |
 | Profile mode (`flutter:profile` selects, profile engine repos) | Root `//...`, macOS and a device by hand, hello_world `//...` on Linux and Windows (CI does this), and the profile run on the Linux and Windows VMs (§ Profile mode on Linux and Windows) |
 | Dart compilation / AOT | hello_world, ffi_example, macos_example |
 | Asset bundling | hello_world, plugin_example |

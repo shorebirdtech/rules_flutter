@@ -6,7 +6,7 @@ See https://docs.bazel.build/versions/main/skylark/deploying.html#dependencies
 
 load("//flutter/private:artifact_urls.bzl", "android_engine_artifact_path", "dart_sdk_artifact_path", "desktop_engine_artifact_path", "engine_artifact_url", "gen_snapshot_cross_artifact_path", "host_artifacts_path", "ios_engine_artifact_path")
 load("//flutter/private:constants.bzl", "ANDROID_ABI_FOR_ARCH")
-load("//flutter/private:engine_helpers.bzl", "PLATFORM_PREFIX_TO_OS", "dart_binary_name", "dartaotruntime_binary_name", "engine_arch_for_os", "engine_filegroup_for_os", "extract_macos_inner_framework", "gen_snapshot_host_platform", "host_engine_targets")
+load("//flutter/private:engine_helpers.bzl", "ENGINE_MODES", "PLATFORM_PREFIX_TO_OS", "dart_binary_name", "dartaotruntime_binary_name", "engine_arch_for_os", "engine_filegroup_for_os", "extract_macos_inner_framework", "gen_snapshot_host_platform", "host_engine_targets")
 load("//flutter/private:flutter_android_engine_repo.bzl", "flutter_android_engine_repo")
 load("//flutter/private:flutter_cross_repo.bzl", "flutter_cross_compilation_repo")
 load("//flutter/private:flutter_desktop_cross_repo.bzl", "flutter_desktop_cross_repo")
@@ -372,6 +372,10 @@ exports_files(["{gen_snapshot}"], visibility = ["//visibility:public"])
 """.format(gen_snapshot = _profile_gen_snapshot_path(os_name)),
     )
 
+def _desktop_engine_repo_name(name, target_platform, mode):
+    """The repo holding the desktop engine of one build mode for a target platform."""
+    return "{}_desktop_engine_{}_{}".format(name, target_platform, mode)
+
 def flutter_register_toolchains(name, **kwargs):
     """Convenience macro for setting up Flutter SDK repositories.
 
@@ -475,10 +479,10 @@ def flutter_register_toolchains(name, **kwargs):
             sha256 = LINUX_SYSROOT_CHECKSUMS[deb_arch],
         )
 
-    # Desktop engine repos (one per unique target platform, shared across hosts).
-    # These are lazy — only downloaded when a cross-platform desktop build is used.
-    # Both release (AOT) and debug (JIT) engines are downloaded, matching the
-    # iOS/Android pattern. The toolchain uses select() to pick the right one.
+    # Desktop engine repos (one per unique target platform and build mode,
+    # shared across hosts). These are lazy: only the repo of the mode being
+    # built is downloaded, when a cross-platform desktop build uses it. The
+    # toolchain uses select() to pick the engine of the build mode.
     desktop_engine_repos_created = {}
     for _host_platform, desktop_targets in DESKTOP_CROSS_PAIRS.items():
         for target_platform in desktop_targets:
@@ -488,42 +492,23 @@ def flutter_register_toolchains(name, **kwargs):
 
             target_os = PLATFORM_PREFIX_TO_OS[target_platform.split("-")[0]]
             engine_arch = engine_arch_for_os(target_os, target_platform.split("-")[1])
-
-            # Release engine (AOT — used with -c opt).
-            engine_path = desktop_engine_artifact_path(target_os, engine_arch, "release")
-            flutter_desktop_engine_repo(
-                name = name + "_desktop_engine_" + target_platform,
-                engine_revision = meta.engine_revision,
-                target_os = target_os,
-                target_arch = engine_arch,
-                sha256 = checksums.get(engine_path, ""),
-            )
-
-            # Debug engine (JIT — used with -c dbg).
-            # macOS debug engine is in the host artifacts repo, not a separate download.
-            if target_os != "macos":
-                engine_debug_path = desktop_engine_artifact_path(target_os, engine_arch, "debug")
+            for mode in ENGINE_MODES:
+                engine_path = desktop_engine_artifact_path(target_os, engine_arch, mode)
                 flutter_desktop_engine_repo(
-                    name = name + "_desktop_engine_" + target_platform + "_debug",
+                    name = _desktop_engine_repo_name(name, target_platform, mode),
                     engine_revision = meta.engine_revision,
                     target_os = target_os,
                     target_arch = engine_arch,
-                    mode = "debug",
-                    sha256 = checksums.get(engine_debug_path, ""),
+                    mode = mode,
+                    sha256 = checksums.get(engine_path, ""),
                 )
 
     # Desktop cross-platform toolchain repos.
     for host_platform, desktop_targets in DESKTOP_CROSS_PAIRS.items():
         for target_platform in desktop_targets:
-            target_os = PLATFORM_PREFIX_TO_OS[target_platform.split("-")[0]]
             sysroot_repo_name = ""
             if target_platform.startswith("linux-"):
                 sysroot_repo_name = name + "_linux_sysroot_" + target_platform.split("-")[1]
-
-            # Debug engine repo for select() — macOS doesn't have a separate debug repo.
-            engine_debug_repo_name = ""
-            if target_os != "macos":
-                engine_debug_repo_name = name + "_desktop_engine_" + target_platform + "_debug"
 
             flutter_desktop_cross_repo(
                 name = name + "_desktop_cross_" + host_platform + "_" + target_platform,
@@ -532,8 +517,10 @@ def flutter_register_toolchains(name, **kwargs):
                 host_platform = host_platform,
                 target_platform = target_platform,
                 host_repo_name = name + "_" + host_platform,
-                engine_repo_name = name + "_desktop_engine_" + target_platform,
-                engine_debug_repo_name = engine_debug_repo_name,
+                engine_repo_names = {
+                    mode: _desktop_engine_repo_name(name, target_platform, mode)
+                    for mode in ENGINE_MODES
+                },
                 sysroot_repo_name = sysroot_repo_name,
             )
 

@@ -194,7 +194,7 @@ toolchain(
                 target_compatible_with = target_meta.compatible_with,
             )
 
-    # Desktop cross-platform toolchains (debug only).
+    # Desktop cross-platform toolchains (debug bundles only: no desktop gen_snapshot cross-compiles AOT).
     for [host_platform, targets] in DESKTOP_CROSS_PAIRS.items():
         host_meta = HOST_PLATFORMS[host_platform]
         for target_platform in targets:
