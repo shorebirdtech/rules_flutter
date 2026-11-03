@@ -89,6 +89,22 @@ _APP_FRAMEWORK_INFO_PLIST = """\
 </plist>
 """
 
+def _xcrun_shell(ctx, **kwargs):
+    """Registers a shell action that runs `xcrun` against the build's Xcode.
+
+    `apple_support.run_shell` sets `DEVELOPER_DIR` and `SDKROOT` from the
+    configured Xcode and marks the action as needing macOS, as rules_apple's
+    own actions do. A bare `ctx.actions.run_shell` leaves `xcrun` to follow
+    `xcode-select`, which fails with "SDK iphoneos cannot be located" on a Mac
+    where it points at the Command Line Tools.
+    """
+    apple_support.run_shell(
+        actions = ctx.actions,
+        xcode_config = ctx.attr._xcode_config[apple_common.XcodeVersionConfig],
+        apple_platform_info = apple_support.platform_info_from_rule_ctx(ctx),
+        **kwargs
+    )
+
 def _flutter_ios_framework_impl(ctx):
     """Assembles Flutter artifacts into App.framework individual files.
 
@@ -152,7 +168,8 @@ def _flutter_ios_framework_impl(ctx):
         dylib = app_info.aot_output
 
         # Copy the dylib and rewrite its LC_BUILD_VERSION with vtool.
-        ctx.actions.run_shell(
+        _xcrun_shell(
+            ctx,
             command = 'cp "$1" "$2" && xcrun vtool -set-build-version "$3" "$4" "$4" -replace -output "$2" "$2"',
             arguments = [dylib.path, framework_binary.path, vtool_platform, minimum_os_version],
             inputs = [dylib],
@@ -180,7 +197,8 @@ def _flutter_ios_framework_impl(ctx):
 
         # Create a stub dylib — rules_apple's framework processor requires a
         # binary file. bundle_only=True prevents linking so it's never loaded.
-        ctx.actions.run_shell(
+        _xcrun_shell(
+            ctx,
             command = 'echo "" | xcrun -sdk "$1" clang -shared -o "$2" -x c - && xcrun vtool -set-build-version "$3" "$4" "$4" -replace -output "$2" "$2"',
             arguments = [sdk, framework_binary.path, vtool_platform, minimum_os_version],
             outputs = [framework_binary],
@@ -222,6 +240,7 @@ def _flutter_ios_framework_impl(ctx):
 flutter_ios_framework = rule(
     implementation = _flutter_ios_framework_impl,
     attrs = dicts.add(
+        apple_support.action_required_attrs(),
         apple_support.platform_constraint_attrs(),
         {
             "application": attr.label(
@@ -302,7 +321,8 @@ def _flutter_ios_native_frameworks_impl(ctx):
 
         # Copy the dylib into the framework and rewrite its install name so the
         # dynamic linker resolves it from the embedded framework via @rpath.
-        ctx.actions.run_shell(
+        _xcrun_shell(
+            ctx,
             command = 'cp "$1" "$2" && xcrun install_name_tool -id "$3" "$2"',
             arguments = [
                 dylib.path,
@@ -336,6 +356,7 @@ def _flutter_ios_native_frameworks_impl(ctx):
 flutter_ios_native_frameworks = rule(
     implementation = _flutter_ios_native_frameworks_impl,
     attrs = dicts.add(
+        apple_support.action_required_attrs(),
         apple_support.platform_constraint_attrs(),
         {
             "application": attr.label(
