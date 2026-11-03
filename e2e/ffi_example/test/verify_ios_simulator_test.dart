@@ -62,7 +62,7 @@ void main() {
       'xcrun simctl not available: ${findSimctl.stderr}'
       'Point DEVELOPER_DIR at Xcode (export '
       'DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer) or run '
-      '`sudo xcode-select -s` on it.',
+      '`sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`.',
     );
     exit(1);
   }

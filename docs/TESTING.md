@@ -835,7 +835,10 @@ Behavioral verification that both native-library mechanisms work at runtime:
 `--native-assets` kernel manifest), `mul()` raw-opens its conventional path
 (`native_deps`). The app writes
 `ffi_example_result add(3,4)=7 mul(3,4)=12` to its temp dir; the tests read
-it back (via `simctl get_app_container` on iOS).
+it back (via `simctl get_app_container` on iOS). The iOS test passes your
+shell's `DEVELOPER_DIR` to `xcrun`, so if `xcode-select -p` names the Command
+Line Tools, export `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`
+first.
 
 ```sh
 cd e2e/ffi_example
