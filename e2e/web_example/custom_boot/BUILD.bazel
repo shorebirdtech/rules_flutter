@@ -62,4 +62,5 @@ dart_test(
         ":inline_boot",
     ],
     main = "test/verify_templating_test.dart",
+    deps = ["@rules_dart//dart/runfiles"],
 )

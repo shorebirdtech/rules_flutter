@@ -65,6 +65,7 @@ flutter_web_bundle(
 
 build_test(
     name = "glass_build_test",
+    tags = ["no-windows-ci"],
     targets = [
         # Compiling the registrant is what proves the workspace plugin's
         # Kotlin is on its classpath.
@@ -92,5 +93,8 @@ dart_test(
     name = "verify_glass_apk_test",
     data = [":glass_android"],
     main = "test/verify_glass_apk_test.dart",
-    tags = ["android"],
+    tags = [
+        "android",
+        "no-windows-ci",
+    ],
 )

@@ -17,13 +17,13 @@ library;
 
 import 'dart:io';
 
+import 'package:runfiles/runfiles.dart';
+
 void main() {
-  final testSrcDir = Platform.environment['TEST_SRCDIR'];
-  final testWorkspace = Platform.environment['TEST_WORKSPACE'];
-  if (testSrcDir == null || testWorkspace == null) {
-    stderr.writeln('Missing TEST_SRCDIR or TEST_WORKSPACE env vars');
-    exit(1);
-  }
+  // Through the runfiles library, not `$TEST_SRCDIR` paths: `windows-latest`
+  // runs with `--noenable_runfiles`, so there is no tree to walk there.
+  final runfiles = Runfiles.create();
+  String bundle(String path) => runfiles.rlocation('_main/$path');
 
   var failed = false;
 
@@ -61,20 +61,18 @@ void main() {
     }
   }
 
-  final root = '$testSrcDir/$testWorkspace';
-
   // Tier 1 (flutter_web_app) with user-provided web/index.html and the
   // default base_href = "/".
   check(
     label: 'app_wasm (default base_href)',
-    bundlePath: '$root/app_wasm_web',
+    bundlePath: bundle('app_wasm_web'),
     expectedBase: '<base href="/">',
   );
 
   // Same Tier 1 path with a non-default base_href.
   check(
     label: 'app_wasm_subpath',
-    bundlePath: '$root/app_wasm_subpath_web',
+    bundlePath: bundle('app_wasm_subpath_web'),
     expectedBase: '<base href="/web_example/">',
   );
 
@@ -82,7 +80,7 @@ void main() {
   // template, with a non-default base_href.
   check(
     label: 'app_js',
-    bundlePath: '$root/app_js_web',
+    bundlePath: bundle('app_js_web'),
     expectedBase: '<base href="/web_example_js/">',
   );
 

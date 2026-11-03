@@ -16,13 +16,14 @@ library;
 
 import 'dart:io';
 
+import 'package:runfiles/runfiles.dart';
+
 void main() {
-  final testSrcDir = Platform.environment['TEST_SRCDIR'];
-  final testWorkspace = Platform.environment['TEST_WORKSPACE'];
-  if (testSrcDir == null || testWorkspace == null) {
-    stderr.writeln('Missing TEST_SRCDIR or TEST_WORKSPACE env vars');
-    exit(1);
-  }
+  // Through the runfiles library, not `$TEST_SRCDIR` paths: `windows-latest`
+  // runs with `--noenable_runfiles`, so there is no tree to walk there.
+  final runfiles = Runfiles.create();
+  final customBoot = runfiles.rlocation('_main/custom_boot/custom_boot_web');
+  final inlineBoot = runfiles.rlocation('_main/custom_boot/inline_boot_web');
 
   var failed = false;
   void fail(String message) {
@@ -39,10 +40,8 @@ void main() {
     return file.readAsStringSync();
   }
 
-  final root = '$testSrcDir/$testWorkspace/custom_boot';
-
   // -- Tier 1, both templates supplied ------------------------------------
-  final index = read('$root/custom_boot_web/index.html');
+  final index = read('$customBoot/index.html');
 
   if (!index.contains('content="https://api.example.com"')) {
     fail('web_defines did not reach index.html:\n$index');
@@ -60,7 +59,7 @@ void main() {
     fail(r'$FLUTTER_BASE_HREF was not substituted in index.html');
   }
 
-  final bootstrap = read('$root/custom_boot_web/flutter_bootstrap.js');
+  final bootstrap = read('$customBoot/flutter_bootstrap.js');
 
   // The override: the user's file is what ships.
   if (!bootstrap.contains('rules_flutter_custom_bootstrap_marker')) {
@@ -84,8 +83,8 @@ void main() {
   }
 
   // -- Tier 2, bootstrap inlined into the page -----------------------------
-  final inlineIndex = read('$root/inline_boot_web/index.html');
-  final inlineBootstrap = read('$root/inline_boot_web/flutter_bootstrap.js');
+  final inlineIndex = read('$inlineBoot/index.html');
+  final inlineBootstrap = read('$inlineBoot/flutter_bootstrap.js');
 
   if (inlineIndex.contains('{{flutter_bootstrap_js}}')) {
     fail('inline_boot/index.html still carries {{flutter_bootstrap_js}}');

@@ -17,13 +17,13 @@ library;
 
 import 'dart:io';
 
+import 'package:runfiles/runfiles.dart';
+
 void main() {
-  final testSrcDir = Platform.environment['TEST_SRCDIR'];
-  final testWorkspace = Platform.environment['TEST_WORKSPACE'];
-  if (testSrcDir == null || testWorkspace == null) {
-    stderr.writeln('Missing TEST_SRCDIR or TEST_WORKSPACE env vars');
-    exit(1);
-  }
+  // Through the runfiles library, not `$TEST_SRCDIR` paths: `windows-latest`
+  // runs with `--noenable_runfiles`, so there is no tree to walk there.
+  final runfiles = Runfiles.create();
+  String bundle(String path) => runfiles.rlocation('_main/$path');
 
   var failed = false;
 
@@ -110,16 +110,14 @@ void main() {
     if (!failed) print('$label: OK (no worker, no registration).');
   }
 
-  final root = '$testSrcDir/$testWorkspace';
-
   // Tier 1 (flutter_web_app), user-provided web/index.html.
-  checkPwaBundle(label: 'app_wasm', bundlePath: '$root/app_wasm_web');
+  checkPwaBundle(label: 'app_wasm', bundlePath: bundle('app_wasm_web'));
 
   // Tier 2 (flutter_web_bundle) with a generated index.html — the other path
   // through index.html generation, and a dart2js-only bundle.
-  checkPwaBundle(label: 'app_js', bundlePath: '$root/app_js_web');
+  checkPwaBundle(label: 'app_js', bundlePath: bundle('app_js_web'));
 
-  checkNoPwaBundle(label: 'app_no_pwa', bundlePath: '$root/app_no_pwa_web');
+  checkNoPwaBundle(label: 'app_no_pwa', bundlePath: bundle('app_no_pwa_web'));
 
   if (failed) {
     exit(1);

@@ -11,22 +11,16 @@ library;
 
 import 'dart:io';
 
-void main() {
-  final testSrcDir = Platform.environment['TEST_SRCDIR'];
-  final testWorkspace = Platform.environment['TEST_WORKSPACE'];
-  if (testSrcDir == null || testWorkspace == null) {
-    stderr.writeln('Missing TEST_SRCDIR or TEST_WORKSPACE env vars');
-    exit(1);
-  }
+import 'package:runfiles/runfiles.dart';
 
-  final bundlePath = '$testSrcDir/$testWorkspace/app';
+void main() {
+  // Through `package:runfiles`, not `$TEST_SRCDIR` paths: `windows-latest`
+  // runs with `--noenable_runfiles`, so there is no tree to walk there.
+  final bundlePath = Runfiles.create().rlocation('_main/app');
   final bundle = Directory(bundlePath);
 
   if (!bundle.existsSync()) {
-    stderr
-      ..writeln('Bundle directory not found at $bundlePath')
-      ..writeln('Looking for bundle...');
-    _listTree(Directory('$testSrcDir/$testWorkspace'), '');
+    stderr.writeln('Bundle directory not found at $bundlePath');
     exit(1);
   }
 
@@ -60,9 +54,8 @@ void main() {
 
   // In release mode data/app.so exists; in debug mode data/flutter_assets/kernel_blob.bin exists.
   final hasAotLib = File('$bundlePath/data/app.so').existsSync();
-  final hasKernelBlob = File(
-    '$bundlePath/data/flutter_assets/kernel_blob.bin',
-  ).existsSync();
+  final hasKernelBlob = File('$bundlePath/data/flutter_assets/kernel_blob.bin')
+      .existsSync();
   if (hasAotLib) {
     check('AOT snapshot (release)', '$bundlePath/data/app.so', nonEmpty: true);
   } else if (hasKernelBlob) {
@@ -109,7 +102,7 @@ void _listTree(Directory dir, String indent) {
   if (!dir.existsSync()) return;
   final entries = dir.listSync()..sort((a, b) => a.path.compareTo(b.path));
   for (final entry in entries) {
-    final name = entry.path.split('/').last;
+    final name = entry.path.split(RegExp(r'[\\/]')).last;
     if (entry is Directory) {
       stderr.writeln('$indent$name/');
       _listTree(entry, '$indent  ');

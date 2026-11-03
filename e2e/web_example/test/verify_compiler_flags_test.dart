@@ -22,15 +22,13 @@ library;
 
 import 'dart:io';
 
-void main() {
-  final testSrcDir = Platform.environment['TEST_SRCDIR'];
-  final testWorkspace = Platform.environment['TEST_WORKSPACE'];
-  if (testSrcDir == null || testWorkspace == null) {
-    stderr.writeln('Missing TEST_SRCDIR or TEST_WORKSPACE env vars');
-    exit(1);
-  }
-  final root = '$testSrcDir/$testWorkspace';
+import 'package:runfiles/runfiles.dart';
 
+void main() {
+  // Through the runfiles library, not `$TEST_SRCDIR` paths: `windows-latest`
+  // runs with `--noenable_runfiles`, so there is no tree to walk there.
+  final runfiles = Runfiles.create();
+  String bundle(String path) => runfiles.rlocation('_main/$path');
   var failed = false;
   void check(String label, {required bool ok, required String detail}) {
     if (ok) {
@@ -42,7 +40,7 @@ void main() {
   }
 
   File bundleFile(String target, String name) {
-    final f = File('$root/${target}_web/$name');
+    final f = File('${bundle('${target}_web')}/$name');
     if (!f.existsSync()) {
       stderr.writeln('missing $name in $target bundle at ${f.path}');
       failed = true;
@@ -89,7 +87,7 @@ void main() {
   // every visitor downloads. `flutter build web` writes it into the deployed
   // directory; this rule deliberately does not, and the file runs to tens of
   // megabytes for this app, so the difference is not academic.
-  final strays = Directory('$root/app_tuned_web')
+  final strays = Directory(bundle('app_tuned_web'))
       .listSync(recursive: true)
       .whereType<File>()
       .where((f) => f.path.endsWith('.info.json'))
@@ -103,7 +101,7 @@ void main() {
   );
 
   // The compile debris dart2js writes beside its output must not ship either.
-  final deps = Directory('$root/app_tuned_web')
+  final deps = Directory(bundle('app_tuned_web'))
       .listSync(recursive: true)
       .whereType<File>()
       .where((f) => f.path.endsWith('.deps'))
@@ -120,9 +118,8 @@ void main() {
   // ship a local `canvaskit/` either way, so file presence proves nothing —
   // `useLocalCanvasKit` in the build config is the flag the loader actually
   // reads, which makes it the thing worth asserting.
-  final tunedConfig = File(
-    '$root/app_tuned_web/flutter_bootstrap.js',
-  ).readAsStringSync();
+  final tunedConfig = File('${bundle('app_tuned_web')}/flutter_bootstrap.js')
+      .readAsStringSync();
   check(
     'app_tuned declares useLocalCanvasKit',
     ok: tunedConfig.contains('"useLocalCanvasKit":true'),
@@ -134,9 +131,8 @@ void main() {
 
   // The negative half: a target that does not ask for it must not get it, or
   // the assertion above would pass for every build and prove nothing.
-  final jsConfig = File(
-    '$root/app_js_web/flutter_bootstrap.js',
-  ).readAsStringSync();
+  final jsConfig = File('${bundle('app_js_web')}/flutter_bootstrap.js')
+      .readAsStringSync();
   check(
     'app_js leaves useLocalCanvasKit unset',
     ok: !jsConfig.contains('useLocalCanvasKit'),
