@@ -3,4 +3,4 @@
 Mirrors `//tools/dev_tool:source_repo.bzl`.
 """
 
-SOURCE_REPO = Label("//tools/e2e_patch_guard:patches_identical_test").workspace_name
+SOURCE_REPO = Label("//tools/e2e_copy_guard:copies_identical_test").workspace_name

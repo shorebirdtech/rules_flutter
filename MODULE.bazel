@@ -68,10 +68,10 @@ register_toolchains(
     dev_dependency = True,
 )
 
-e2e_patches = use_repo_rule("//tools/e2e_patch_guard:e2e_patches.bzl", "e2e_patches")
+e2e_copies = use_repo_rule("//tools/e2e_copy_guard:e2e_copies.bzl", "e2e_copies")
 
-e2e_patches(
-    name = "e2e_patches",
+e2e_copies(
+    name = "e2e_copies",
     dev_dependency = True,
 )
 

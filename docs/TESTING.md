@@ -812,6 +812,36 @@ cd e2e/_overlay_tests/native_assets_synthetic && bazel test //...   # macOS-only
   `bazel test //...` there exits 4 ("No test targets were found") however clean
   the checks are.
 
+### Test code the e2e workspaces share
+
+Each workspace is its own Bazel project, so a test in one cannot import a file
+from another by relative path. There are three ways to avoid a copy, and a
+fourth thing to do when none applies.
+
+- **Checks and parsers that tests run on a built artifact** live in
+  `//tools/e2e_testing`, a `dart_library` in the root module
+  (`package:rules_flutter_e2e_testing`): the OK/FAIL log, finding a bundle in
+  the runfiles, unpacking an `.app`/`.ipa`/`.apk`, the Linux and Windows bundle
+  layouts, launching an app and waiting for its marker file. A workspace reaches
+  it through the `local_path_override` for `rules_flutter` it already has: its
+  `dart_test` lists `deps = ["@rules_flutter//tools/e2e_testing"]` and imports
+  the package. Its own unit tests run in the root `bazel test //...`. It is
+  excluded from the release archive. Put new shared test code there, not into a
+  second copy.
+- **Starlark** the workspaces share is a `.bzl` in the same package
+  (`@rules_flutter//tools/e2e_testing:signing_twin.bzl`, which the iOS and macOS
+  examples use to declare an extension signed two ways).
+- **Standalone scripts** run by hand on a bare machine are under `e2e/_*_test/`
+  (§ 6). They stay self-contained: `tools/vm` copies only that directory to a VM.
+- **A file a workspace must hold itself**, because a test reads or edits it as
+  the workspace's own (the `test_driver/` entrypoint the dev tool reloads in a
+  copy of the workspace, native sources the dev loop watches by workspace path,
+  patches Bazel applies to a module): each workspace keeps its copy, and
+  `//tools/e2e_copy_guard:copies_identical_test` fails when copies differ. A new
+  patch is covered by its name; any other file goes into
+  `tools/e2e_copy_guard/mirrored.bzl`. `.bazelversion` is checked against the
+  root's automatically, for every workspace.
+
 ### What CI covers
 
 `.github/workflows/ci.yaml` runs, on every push and pull request:
