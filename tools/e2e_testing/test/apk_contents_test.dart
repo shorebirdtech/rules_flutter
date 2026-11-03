@@ -43,6 +43,75 @@ Uint8List dex(List<String> descriptors, {required int defined}) {
   return bytes;
 }
 
+/// A dex file defining one class, `LFoo;`, with the static fields
+/// `DEBUG = true`, `BUILD_TYPE = "release"` and `COUNT = -2`, as the dex
+/// format lays them out: a class_data_item names the static fields and the
+/// class_def's static_values_off points to their initial values.
+Uint8List dexWithStaticConstants() {
+  const strings = ['LFoo;', 'DEBUG', 'BUILD_TYPE', 'release', 'COUNT'];
+  const header = 0x70;
+  final stringIds = header;
+  final typeIds = stringIds + 4 * strings.length;
+  final fieldIds = typeIds + 4;
+  final classDefs = fieldIds + 8 * 3;
+  final tail = classDefs + 32;
+
+  final data = <int>[];
+  final stringOffsets = <int>[];
+  for (final string in strings) {
+    stringOffsets.add(tail + data.length);
+    data
+      ..add(string.length)
+      ..addAll(string.codeUnits)
+      ..add(0);
+  }
+  final classData = tail + data.length;
+  data.addAll([
+    3, // static fields
+    0, 0, 0, // instance fields, direct methods, virtual methods
+    0, 0x19, // DEBUG: field id 0 (a difference of 0), public static final
+    1, 0x19, // BUILD_TYPE: field id 1
+    1, 0x19, // COUNT: field id 2
+  ]);
+  final staticValues = tail + data.length;
+  data.addAll([
+    3, // values
+    0x3f, // boolean true: the value is the header's argument
+    0x17, 3, // string, index 3 ("release")
+    0x24, 0xfe, 0xff, // int, 2 bytes, little-endian -2
+  ]);
+
+  final bytes = Uint8List(tail + data.length);
+  final view = ByteData.sublistView(bytes)
+    ..setUint32(0x38, strings.length, Endian.little)
+    ..setUint32(0x3c, stringIds, Endian.little)
+    ..setUint32(0x44, typeIds, Endian.little)
+    ..setUint32(0x50, 3, Endian.little)
+    ..setUint32(0x54, fieldIds, Endian.little)
+    ..setUint32(0x60, 1, Endian.little)
+    ..setUint32(0x64, classDefs, Endian.little)
+    ..setUint32(typeIds, 0, Endian.little) // type 0 is described by string 0
+    ..setUint32(classDefs, 0, Endian.little)
+    ..setUint32(classDefs + 24, classData, Endian.little)
+    ..setUint32(classDefs + 28, staticValues, Endian.little);
+  bytes.setRange(0, 4, [0x64, 0x65, 0x78, 0x0a]);
+  for (var i = 0; i < strings.length; i++) {
+    view.setUint32(stringIds + 4 * i, stringOffsets[i], Endian.little);
+  }
+  // field_id_item: class_idx u2, type_idx u2, name_idx u4.
+  for (var i = 0; i < 3; i++) {
+    view
+      ..setUint16(fieldIds + 8 * i, 0, Endian.little)
+      ..setUint32(
+        fieldIds + 8 * i + 4,
+        const [1, 2, 4][i],
+        Endian.little,
+      );
+  }
+  bytes.setRange(tail, tail + data.length, data);
+  return bytes;
+}
+
 /// A compiled manifest holding an element per entry of [elements]: its name,
 /// then its attributes, each a local name and a string value.
 Uint8List axml(
@@ -166,6 +235,22 @@ void main() {
     test('rejects bytes that are not a dex file', () {
       expect(() => dexClassDescriptors(Uint8List(0x80)), throwsFormatException);
       expect(() => dexClassDescriptors(Uint8List(4)), throwsFormatException);
+    });
+  });
+
+  group('dexStaticConstants', () {
+    test('reads the initial values of static fields, by class and name', () {
+      expect(dexStaticConstants(dexWithStaticConstants()), {
+        'LFoo;': {'DEBUG': true, 'BUILD_TYPE': 'release', 'COUNT': -2},
+      });
+    });
+
+    test('skips a class with no static values', () {
+      expect(dexStaticConstants(dex(['LFoo;'], defined: 1)), isEmpty);
+    });
+
+    test('rejects what is not a dex file', () {
+      expect(() => dexStaticConstants(Uint8List(0x80)), throwsFormatException);
     });
   });
 

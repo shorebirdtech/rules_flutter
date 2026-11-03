@@ -75,6 +75,137 @@ Set<String> dexClassDescriptors(Uint8List bytes) {
   return descriptors;
 }
 
+/// The compile-time constants of every class the dex file defines: its static
+/// fields that carry an initial value, keyed by class descriptor and then
+/// field name. A value is a [bool], an [int], a [double], a [String] or null.
+///
+/// This is where `static final` constants of a primitive or string type live
+/// (`BuildConfig.DEBUG`, `BuildConfig.BUILD_TYPE`): a class_def_item's
+/// `static_values_off` points to an encoded_array of the initial values of its
+/// static fields, in the order the class_data_item lists those fields.
+/// A static field the array does not reach has the default value and is not
+/// listed.
+Map<String, Map<String, Object?>> dexStaticConstants(Uint8List bytes) {
+  final data = ByteData.sublistView(bytes);
+  if (bytes.length < 0x70 ||
+      String.fromCharCodes(bytes.sublist(0, 4)) != 'dex\n') {
+    throw const FormatException('not a dex file');
+  }
+  final stringIdsOff = data.getUint32(0x3c, Endian.little);
+  final typeIdsOff = data.getUint32(0x44, Endian.little);
+  final fieldIdsOff = data.getUint32(0x54, Endian.little);
+  final classDefsSize = data.getUint32(0x60, Endian.little);
+  final classDefsOff = data.getUint32(0x64, Endian.little);
+
+  var at = 0;
+  int uleb() {
+    var result = 0;
+    var shift = 0;
+    while (true) {
+      final b = bytes[at++];
+      result |= (b & 0x7f) << shift;
+      if (b & 0x80 == 0) return result;
+      shift += 7;
+    }
+  }
+
+  // Reads a string without moving the cursor.
+  String stringAt(int stringIdx) {
+    final resume = at;
+    at = data.getUint32(stringIdsOff + 4 * stringIdx, Endian.little);
+    uleb(); // UTF-16 length
+    final end = bytes.indexOf(0, at);
+    final value = utf8.decode(bytes.sublist(at, end), allowMalformed: true);
+    at = resume;
+    return value;
+  }
+
+  String typeAt(int typeIdx) => stringAt(
+    data.getUint32(typeIdsOff + 4 * typeIdx, Endian.little),
+  );
+
+  String fieldNameAt(int fieldIdx) =>
+      stringAt(data.getUint32(fieldIdsOff + 8 * fieldIdx + 4, Endian.little));
+
+  // The size-prefixed little-endian integer an encoded_value carries.
+  int sized(int size, {required bool signed}) {
+    var v = 0;
+    for (var i = 0; i < size; i++) {
+      v |= bytes[at + i] << (8 * i);
+    }
+    at += size;
+    if (signed && size < 8 && size > 0 && (v >> (8 * size - 1)) & 1 == 1) {
+      v -= 1 << (8 * size);
+    }
+    return v;
+  }
+
+  Object? encodedValue() {
+    final header = bytes[at++];
+    final type = header & 0x1f;
+    final size = (header >> 5) + 1;
+    switch (type) {
+      case 0x00: // byte
+      case 0x02: // short
+      case 0x04: // int
+      case 0x06: // long
+        return sized(size, signed: true);
+      case 0x03: // char
+        return sized(size, signed: false);
+      case 0x10: // float: the high bytes are stored, the low ones are zero
+        final raw = sized(size, signed: false) << (8 * (4 - size));
+        return (ByteData(4)..setUint32(0, raw, Endian.little)).getFloat32(
+          0,
+          Endian.little,
+        );
+      case 0x11: // double
+        final raw = sized(size, signed: false) << (8 * (8 - size));
+        return (ByteData(8)..setUint64(0, raw, Endian.little)).getFloat64(
+          0,
+          Endian.little,
+        );
+      case 0x17: // string
+        return stringAt(sized(size, signed: false));
+      case 0x1e: // null
+        return null;
+      case 0x1f: // boolean: the value is the header's argument
+        return (header >> 5) == 1;
+    }
+    throw FormatException('unsupported dex encoded_value type 0x$type');
+  }
+
+  final constants = <String, Map<String, Object?>>{};
+  for (var i = 0; i < classDefsSize; i++) {
+    final def = classDefsOff + 32 * i;
+    final classDataOff = data.getUint32(def + 24, Endian.little);
+    final staticValuesOff = data.getUint32(def + 28, Endian.little);
+    if (classDataOff == 0 || staticValuesOff == 0) continue;
+    final descriptor = typeAt(data.getUint32(def, Endian.little));
+
+    at = classDataOff;
+    final staticFields = uleb();
+    uleb(); // instance fields
+    uleb(); // direct methods
+    uleb(); // virtual methods
+    final names = <String>[];
+    var fieldIdx = 0;
+    for (var f = 0; f < staticFields; f++) {
+      fieldIdx += uleb();
+      uleb(); // access flags
+      names.add(fieldNameAt(fieldIdx));
+    }
+
+    at = staticValuesOff;
+    final count = uleb();
+    final values = <String, Object?>{};
+    for (var v = 0; v < count && v < names.length; v++) {
+      values[names[v]] = encodedValue();
+    }
+    constants[descriptor] = values;
+  }
+  return constants;
+}
+
 // -- Binary XML (AXML) reader -------------------------------------------------
 //
 // Android compiles AndroidManifest.xml into the resource-chunk format

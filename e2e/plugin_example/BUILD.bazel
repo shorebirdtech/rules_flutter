@@ -346,24 +346,53 @@ build_test(
 )
 
 # The plugin_android APKs, each under a name of its own: for one ABI, and the
-# arm64 one rebuilt under -c dbg, so the default-configuration APK verifier can
-# assert debug-only content (the merged debug variant manifest's INTERNET
-# permission) without building the test under -c dbg.
+# arm64 one rebuilt under -c dbg, -c opt and in profile mode, so the
+# default-configuration APK verifiers can assert content that depends on the
+# mode (the merged debug variant manifest's INTERNET permission, the plugins'
+# BuildConfig) without building the test under that mode.
 [
     android_apk(
         name = "plugin_android_" + variant,
         apk = ":plugin_android_%s_build" % build,
         compilation_mode = mode,
+        profile = profile,
         tags = [
             "android",
             "no-windows-ci",
         ],
     )
-    for variant, build, mode in [
-        ("arm64", "arm64", ""),
-        ("dbg", "arm64", "dbg"),
-        ("x86_64", "x86_64", ""),
-        ("fat", "fat", ""),
+    for variant, build, mode, profile in [
+        ("arm64", "arm64", "", False),
+        ("dbg", "arm64", "dbg", False),
+        ("opt", "arm64", "opt", False),
+        ("profile", "arm64", "", True),
+        ("x86_64", "x86_64", "", False),
+        ("fat", "fat", "", False),
+    ]
+]
+
+# What the plugins' generated BuildConfig classes say, read from the dex of an
+# APK of each mode: debug, profile and release (the default configuration and
+# `-c opt`). `identity` checks the classes are there and name their package.
+[
+    dart_test(
+        name = "verify_android_build_config_%s_test" % check,
+        srcs = ["test/android_build_config.dart"],
+        data = [
+            ":plugin_android_arm64",
+            ":plugin_android_dbg",
+            ":plugin_android_opt",
+            ":plugin_android_profile",
+        ],
+        main = "test/verify_android_build_config_%s_test.dart" % check,
+        tags = [
+            "android",
+            "no-windows-ci",
+        ],
+        deps = ["@rules_flutter//tools/e2e_testing"],
+    )
+    for check in [
+        "identity",
     ]
 ]
 

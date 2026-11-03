@@ -66,6 +66,14 @@ class Apk {
         ...definedClassDescriptors(dex),
   };
 
+  /// The compile-time constants of every class the APK's dex files define,
+  /// by class descriptor and field name: see [dexStaticConstants].
+  Map<String, Map<String, Object?>> staticConstants() => {
+    for (final dex in Directory(path).listSync().whereType<File>())
+      if (RegExp(r'classes\d*\.dex$').hasMatch(dex.path))
+        ...dexStaticConstants(dex.readAsBytesSync()),
+  };
+
   /// Checks that every native library under `lib/<abi>/` is an ELF shared
   /// object for its ABI directory's machine, and that there is at least one.
   ///

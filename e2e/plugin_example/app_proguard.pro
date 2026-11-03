@@ -16,3 +16,8 @@
 # emits).
 -dontwarn androidx.window.**
 -dontwarn com.google.common.util.concurrent.ListenableFuture
+
+# Keep every plugin's generated BuildConfig, so that R8 does not inline its
+# constants and drop the class: verify_android_build_config_test reads them
+# from the APK's dex.
+-keep class **.BuildConfig { *; }
