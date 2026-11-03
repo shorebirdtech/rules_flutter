@@ -4,7 +4,7 @@
 ///   dart run tools/vm/run_e2e.dart <vm-name> [--windows] \
 ///       [--folders=.,e2e/hello_world] [--keep-going]
 ///
-/// Transfers the committed working tree (`git archive HEAD`) to the VM, clones
+/// Transfers the committed working tree (`git ls-files | tar`) to the VM, clones
 /// the `rules_dart` sibling it depends on, extracts, then runs `bazel test
 /// //...` in each folder, mirroring `.github/workflows/ci.yaml`. Exit code 4
 /// ("no test targets") counts as a pass. Prints a per-folder PASS/FAIL summary

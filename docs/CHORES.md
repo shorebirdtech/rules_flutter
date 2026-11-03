@@ -206,6 +206,5 @@ Reconcile the revs that track something else in this repo:
 
 1. For each `uses:` reference, check the repo's tags/releases for newer versions
 2. Update the version ref
-3. For reusable workflows, review changelogs for new inputs or breaking changes
 
 **Verification**: CI workflow runs successfully.

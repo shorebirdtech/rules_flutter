@@ -3,8 +3,8 @@
 ## Changelog
 
 The changelog is built from `Changelog:` trailers on commits. Nobody edits a
-changelog file by hand. `cliff.toml` renders the trailers between version tags
-into the release notes.
+changelog file by hand. This fork doesn't release, but keeps the trailers to
+match upstream's commit policy.
 
 **When.** Add a trailer when a user of this project would notice the change:
 new or removed API, a changed default or behaviour, a bug they could hit, a

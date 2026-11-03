@@ -36,16 +36,15 @@ and user-visible commits carry a `Changelog:` trailer; see
 bazel run //tools/changelog:check -- <message-file>
 ```
 
-`bazel run //tools/changelog` prints the release notes the unreleased commits
-would produce.
+`bazel run //tools/changelog` prints the notes the trailers would produce.
 
 ## Using this as a development dependency of other rules
 
 You'll commonly find that you develop in another repository that
 depends on rules_flutter.
 
-To always tell Bazel to use this local checkout rather than a release
-artifact or a version fetched from the registry, run this from this
+To always tell Bazel to use this local checkout rather than the pinned
+commit, run this from this
 directory:
 
 ```sh
