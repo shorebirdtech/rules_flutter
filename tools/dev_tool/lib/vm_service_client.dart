@@ -121,6 +121,12 @@ class ServiceExtensionUnavailable implements Exception {
 /// `package:vm_service` exposes the wire codes only as literals.
 const int _rpcMethodNotFound = -32601;
 
+/// The extension event the rules_flutter agent posts for an error nothing in
+/// the app caught (`_reportUncaughtErrors` in
+/// `flutter/private/agent_extensions/agent.dart`), shaped like a
+/// `Flutter.Error` payload.
+const String _uncaughtErrorEvent = 'rules_flutter.UncaughtError';
+
 /// How often [VmServiceClient.waitForFirstFrame] re-asks
 /// `ext.flutter.didSendFirstFrameEvent`.
 ///
@@ -880,6 +886,11 @@ class VmServiceClient {
   /// The verdict comes from awaiting the stream directly, so it never
   /// depends on cross-future microtask ordering.
   ///
+  /// An error nothing in the app caught ends it the same way as
+  /// `Flutter.Error`: the agent posts it as [_uncaughtErrorEvent]. That is the
+  /// only word a restart whose `main()` throws before `runApp` sends — the
+  /// framework that posts `Flutter.Error` is not up yet, and no frame follows.
+  ///
   /// A third ending covers an app that will draw no frame at all. A
   /// backgrounded app — on macOS, a window hidden or covered after it was on
   /// screen — stops rendering, and a restarted one inherits that; waiting
@@ -938,7 +949,8 @@ class VmServiceClient {
         // Subscribe before deliver() so no event between reloadSources and the
         // rebuilt frame can be missed.
         final sub = _service!.onExtensionEvent.listen((e) {
-          if (e.extensionKind == 'Flutter.Error') {
+          if (e.extensionKind == 'Flutter.Error' ||
+              e.extensionKind == _uncaughtErrorEvent) {
             capturedError ??= _flutterError(e);
             if (applied) settle();
           } else if (e.extensionKind == 'Flutter.Frame' && applied) {

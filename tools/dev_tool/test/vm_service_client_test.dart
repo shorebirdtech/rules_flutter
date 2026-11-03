@@ -901,6 +901,32 @@ void main() {
       },
     );
 
+    test(
+      'hotRestart reports a main() that threw before runApp, without waiting',
+      () async {
+        // No framework yet, so no Flutter.Error, and no frame ever. Before the
+        // agent posted the error, this was a ten-second wait and then a
+        // success "the app gave no reason" for.
+        final fake = FakeVmService(
+          isolates: [IsolateRef(id: 'iso-1', name: 'main', number: '1')],
+          uncaughtErrorOnRestart:
+              "Invalid argument(s): Couldn't resolve native function "
+              "'counter_bump'",
+        );
+        final client = await connected(fake);
+        // Long enough that a verdict reached by waiting it out is unmistakable:
+        // the regression answers VerdictApplied after it, not an error.
+        client.frameTimeout = const Duration(seconds: 30);
+
+        final verdict = await client.hotRestart(dillPath);
+        expect(verdict, isA<VerdictAppErrored>());
+        expect(
+          (verdict as VerdictAppErrored).error.description,
+          contains("Couldn't resolve native function 'counter_bump'"),
+        );
+      },
+    );
+
     test('hotReload still succeeds when no Flutter.Error is posted', () async {
       final fake = FakeVmService(
         isolates: [IsolateRef(id: 'iso-1', name: 'main', number: '1')],

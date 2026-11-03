@@ -94,7 +94,38 @@ Map<String, ServiceExtensionHandler> registerRulesFlutterAgentExtensions() {
   // for a frame.
   register('ext.rules_flutter.renderState', _handleRenderState);
 
+  _reportUncaughtErrors();
+
   return handlers;
+}
+
+/// The extension event an uncaught error is posted as. The dev tool's
+/// `_applyAndVerify` (`vm_service_client.dart`) listens for this name.
+const String _uncaughtErrorEvent = 'rules_flutter.UncaughtError';
+
+/// Post every error nothing caught as [_uncaughtErrorEvent], then let the
+/// engine report it as it would have.
+///
+/// A `main()` that throws before `runApp` draws nothing and posts no
+/// `Flutter.Error` — that event comes from the framework, which is not up yet.
+/// After a hot restart that left the dev tool waiting out its bound for a
+/// frame, then calling the restart a success the app "gave no reason" for,
+/// while the reason sat in the device log. Installed here, before `main`, so
+/// it is in place for exactly that window, and on every restart.
+///
+/// Returns false, so the engine still logs the error: the app's behaviour is
+/// what it was without this. An app that sets its own `onError` replaces this
+/// one, and then decides for itself.
+void _reportUncaughtErrors() {
+  final dispatcher = ui.PlatformDispatcher.instance;
+  if (dispatcher.onError != null) return;
+  dispatcher.onError = (error, stack) {
+    postEvent(_uncaughtErrorEvent, {
+      'description': 'Uncaught exception: $error',
+      'renderedErrorText': 'Uncaught exception: $error\n$stack',
+    });
+    return false;
+  };
 }
 
 /// Whether this app is drawing frames: what the dev tool asks when a reload or

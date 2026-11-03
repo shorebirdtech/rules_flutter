@@ -450,6 +450,11 @@ class FakeVmService implements VmService {
   /// The `renderedErrorText` carried by the simulated `Flutter.Error`.
   String flutterErrorText;
 
+  /// When non-null, `_flutter.runInView` stands for a restarted `main()` that
+  /// throws this before `runApp`: the agent posts `rules_flutter.UncaughtError`
+  /// and no frame follows.
+  String? uncaughtErrorOnRestart;
+
   /// The name a `hotRestart` [callMethod] was issued under — bare, or the
   /// DDS-namespaced alias. Null until one is called. What proves the alias
   /// resolved off the `ServiceRegistered` event rather than being hardcoded.
@@ -492,6 +497,7 @@ class FakeVmService implements VmService {
     this.callServiceExtensionGate,
     this.emitFlutterErrorOnReload = false,
     this.flutterErrorText = 'fake _CompileTimeError building MyApp',
+    this.uncaughtErrorOnRestart,
   });
 
   @override
@@ -1009,6 +1015,22 @@ class FakeVmService implements VmService {
             timestamp: 0,
           ),
         );
+      }
+      // A restarted `main()` that throws before `runApp`: the agent posts the
+      // error, and nothing draws.
+      if (uncaughtErrorOnRestart case final text?) {
+        _extController.add(
+          Event(
+            kind: EventKind.kExtension,
+            extensionKind: 'rules_flutter.UncaughtError',
+            extensionData: ExtensionData.parse({
+              'description': 'Uncaught exception: $text',
+              'renderedErrorText': 'Uncaught exception: $text\n#0 main',
+            }),
+            timestamp: 0,
+          ),
+        );
+        return Response()..json = {};
       }
       // The restarted isolate renders a frame after runInView returns.
       if (drawsFrames) {
