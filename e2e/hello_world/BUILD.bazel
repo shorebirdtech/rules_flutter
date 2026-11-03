@@ -21,6 +21,7 @@ load("@rules_flutter//flutter:linux.bzl", "flutter_linux_app")
 load("@rules_flutter//flutter:macos.bzl", "flutter_macos_app")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
 load("@rules_flutter//flutter:windows.bzl", "flutter_windows_app")
+load(":build_in_mode.bzl", "build_in_mode")
 load(":build_variant_test.bzl", "build_variant_tests")
 
 exports_files(["pubspec.lock"])
@@ -622,3 +623,68 @@ flutter_library(
         "@rules_flutter//flutter:material_icons",
     ],
 )
+
+# -- Reproducibility -----------------------------------------------------------
+#
+# Property: every output is a function of its declared inputs only, so none
+# holds a path of the machine or sandbox that built it, or a byte that depends
+# on the host OS. The tests (see their headers for why this is the property to
+# defend) look through the files of a build made in each Flutter mode, which
+# `build_in_mode` makes in one plain `bazel test`.
+#
+# The parts of an app are built separately, so a failure names the one that
+# leaks: the kernel (`:hello_world`, which a debug app ships as its code), the
+# AOT snapshot (`:hello_world_aot`, and the app, which ships one in every mode
+# but debug), the asset bundle, and the web bundle with both compilers.
+
+_REPRO_PARTS = {
+    "kernel": [":hello_world"],
+    "aot": [
+        ":hello_world_aot",
+        ":hello_world_app",
+    ],
+    "assets": [":hello_world_assets"],
+    "web": [":hello_world_web"],
+}
+
+# A debug app is a kernel, not an AOT snapshot, so it has no `aot` build.
+_REPRO_BUILDS = [
+    ("aot", "fastbuild"),
+    ("aot", "release"),
+    ("web", "fastbuild"),
+    ("web", "release"),
+]
+
+[build_in_mode(
+    name = "repro_%s_%s" % (part, mode),
+    mode = mode,
+    targets = _REPRO_PARTS[part] + (
+        # What a debug app ships as its code: the app's own kernel.
+        [":hello_world_app"] if (part, mode) == ("kernel", "debug") else []
+    ),
+) for part, mode in _REPRO_BUILDS]
+
+# Windows is left out: its paths are not the forward-slash ones the markers
+# look for, and it has no sandbox slot to leak.
+_NOT_WINDOWS = select({
+    "@platforms//os:windows": ["@platforms//:incompatible"],
+    "//conditions:default": [],
+})
+
+# The paths to scan are the files of the build itself, expanded from its label.
+[dart_test(
+    name = "reproducible_%s_%s_test" % (part, mode),
+    size = "medium",
+    args = ["$(rootpaths :repro_%s_%s)" % (part, mode)],
+    data = [":repro_%s_%s" % (part, mode)],
+    env_inherit = [
+        "HOME",
+        "USER",
+    ],
+    main = "test/verify_reproducible_outputs_test.dart",
+    target_compatible_with = _NOT_WINDOWS,
+    deps = [
+        "@deps//:test",
+        "@rules_flutter//tools/e2e_testing",
+    ],
+) for part, mode in _REPRO_BUILDS]
