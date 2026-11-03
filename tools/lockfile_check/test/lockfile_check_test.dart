@@ -104,4 +104,115 @@ common --foo
       );
     });
   });
+
+  group('unpinnedMavenInstalls', () {
+    const header = '''
+maven = use_extension("@rules_jvm_external//:extensions.bzl", "maven")
+''';
+
+    test('names an install with no lock_file', () {
+      expect(
+        unpinnedMavenInstalls('''
+${header}maven.install(
+    name = "a",
+    artifacts = ["g:a:1"],
+)
+'''),
+        ['a'],
+      );
+    });
+
+    test('accepts one with a lock_file, in any attribute order', () {
+      expect(
+        unpinnedMavenInstalls('''
+${header}maven.install(
+    lock_file = "//:a_install.json",
+    name = "a",
+)
+maven.install(name = "b", artifacts = ["g:a:1"], lock_file = "//:b.json")
+'''),
+        isEmpty,
+      );
+    });
+
+    test('judges each install on its own', () {
+      expect(
+        unpinnedMavenInstalls('''
+${header}maven.install(name = "a", lock_file = "//:a.json")
+maven.install(name = "b")
+maven.install(name = "c", lock_file = "//:c.json")
+'''),
+        ['b'],
+      );
+    });
+
+    test('ignores parentheses and lock_file in comments and strings', () {
+      expect(
+        unpinnedMavenInstalls('''
+${header}maven.install(
+    name = "a",  # lock_file = "//:no.json" (not this one)
+    artifacts = ["g:a:1", "x(y"],  # (
+)
+'''),
+        ['a'],
+      );
+    });
+
+    test('follows the name the extension is bound to', () {
+      expect(
+        unpinnedMavenInstalls('''
+jvm = use_extension("@rules_jvm_external//:extensions.bzl", "maven")
+jvm.install(name = "a")
+'''),
+        ['a'],
+      );
+    });
+
+    test('ignores other extensions and artifact tags', () {
+      expect(
+        unpinnedMavenInstalls('''
+${header}maven.artifact(name = "a", group = "g", artifact = "a", version = "1")
+other = use_extension("@other//:x.bzl", "other")
+other.install(name = "b")
+'''),
+        isEmpty,
+      );
+    });
+  });
+
+  group('pinnedMavenInstalls', () {
+    test('names the installs that have a lock_file', () {
+      expect(
+        pinnedMavenInstalls('''
+maven = use_extension("@rules_jvm_external//:extensions.bzl", "maven")
+maven.install(name = "a", lock_file = "//:a.json")
+maven.install(name = "b")
+'''),
+        ['a'],
+      );
+    });
+  });
+
+  group('repinTargets', () {
+    test('finds the pin target Bazel asks for', () {
+      const output = '''
+Error in fail: rules_android_maven_install.json contains an invalid input signature (changes: a:b: 1 vs 2) and must be regenerated. PLEASE DO NOT MODIFY THIS FILE DIRECTLY! To generate a new rules_android_maven_install.json and re-pin the artifacts, please run:
+ REPIN=1 bazel run @rules_android_maven//:pin
+''';
+      expect(repinTargets(output), ['@rules_android_maven//:pin']);
+    });
+
+    test('lists each once, sorted', () {
+      const output = '''
+ REPIN=1 bazel run @b//:pin
+ REPIN=1 bazel run @a//:pin
+ REPIN=1 bazel run @b//:pin
+''';
+      expect(repinTargets(output), ['@a//:pin', '@b//:pin']);
+    });
+
+    test('finds nothing in unrelated output', () {
+      expect(repinTargets('ERROR: no such package'), isEmpty);
+    });
+  });
 }
