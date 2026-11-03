@@ -2686,6 +2686,7 @@ class IOSDevice extends Device {
   final ProcessRunSync _runProcess;
   final ProcessStarter _startProcess;
   final MdnsVmServiceDiscovery _mdns;
+  final TcpProbe _forwardProbe;
 
   /// Filled in by the first [_resolveInfo].
   IOSDeviceInfo? _info;
@@ -2717,11 +2718,16 @@ class IOSDevice extends Device {
     ProcessRunSync? runProcess,
     ProcessStarter? startProcess,
     MdnsVmServiceDiscovery? mdns,
+
+    /// How a wired launch checks that the iproxy forward accepts connections;
+    /// a real connect by default.
+    TcpProbe? forwardProbe,
   }) : requestedUdid = udid,
        _bundleId = bundleId,
        _runProcess = runProcess ?? Process.run,
        _startProcess = startProcess ?? Process.start,
-       _mdns = mdns ?? MdnsVmServiceDiscovery();
+       _mdns = mdns ?? MdnsVmServiceDiscovery(),
+       _forwardProbe = forwardProbe ?? _connectToLocalPort;
 
   /// The UDID in play.
   ///
@@ -3291,6 +3297,7 @@ class IOSDevice extends Device {
           await waitForLocalTcpPort(
             record.port,
             what: 'iproxy forward for the iOS VM service',
+            probe: _forwardProbe,
           );
         } on StateError catch (e) {
           final said = iproxyOutput

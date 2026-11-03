@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:clock/clock.dart';
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter_bazel_dev_tool/device.dart';
 import 'package:flutter_bazel_dev_tool/key_press.dart';
@@ -4032,7 +4033,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       bool consoleExitsAtLaunch = false,
       String? installJson = installedJson,
       List<Map<String, Object?>>? runningProcesses,
-      bool forwardBinds = true,
+      TcpProbe? forwardProbe,
       FakeProcess? devicectlProcess,
       FakeProcess? lldbProcess,
       FakeProcess? iproxyProcess,
@@ -4062,16 +4063,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       // would stall `close()` in tearDown.
       forward.listen((socket) => socket.destroy());
       final forwardPort = forward.port;
-      if (forwardBinds) {
-        sockets.add(forward);
-      } else {
-        // A forward that never binds — what a launch sees when iproxy cannot
-        // take the port. Closing the listener the OS just handed out is the
-        // way to name a port with nothing behind it; if something else claims
-        // it in the gap the launch succeeds and the test fails loudly, rather
-        // than passing on a wait that never happened.
-        await forward.close();
-      }
+      sockets.add(forward);
 
       final mdns = MdnsVmServiceDiscovery(
         clientFactory: FakeMDnsClientFactory(
@@ -4090,6 +4082,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         udid: 'TEST-UDID',
         bundleId: 'com.example.test',
         mdns: mdns,
+        forwardProbe: forwardProbe,
         runProcess: (exe, args) async {
           runs.add([exe, ...args.cast<String>()]);
           onRun?.call(exe, args.cast<String>());
@@ -4343,42 +4336,56 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     // A forward that never binds is the likeliest way for a wired launch to
     // fail this late, and it is the one failure that happens *after* all three
     // helpers are up — so every one of them has to be reaped.
-    test('a wired launch whose forward never binds kills every helper', () async {
-      final devicectl = FakeProcess();
-      final lldb = FakeProcess();
-      final iproxy = FakeProcess();
+    test(
+      'a wired launch whose forward never binds kills every helper',
+      () async {
+        final devicectl = FakeProcess();
+        final lldb = FakeProcess();
+        final iproxy = FakeProcess();
 
-      // Real elapsed time: `waitForLocalTcpPort` polls its 10s budget out, the
-      // same wait a user sits through. There is no shorter failure past iproxy
-      // — the lldb commands ahead of it wait 30s each.
-      await expectLater(
-        launchFaked(
-          forwardBinds: false,
-          devicectlProcess: devicectl,
-          lldbProcess: lldb,
-          iproxyProcess: iproxy,
-        ),
-        throwsA(
-          isA<StateError>().having(
-            (e) => e.message,
-            'message',
-            contains('iproxy forward for the iOS VM service'),
+        // The wait's 10s budget runs on a clock the refused probe moves, so the
+        // budget runs out on the first refusal and the test spends no time on
+        // it. There is no shorter failure past iproxy — the lldb commands ahead
+        // of it wait 30s each.
+        var now = DateTime(2026);
+        final probed = <int>[];
+        await expectLater(
+          withClock(
+            Clock(() => now),
+            () => launchFaked(
+              forwardProbe: (port) async {
+                probed.add(port);
+                now = now.add(const Duration(seconds: 11));
+                throw const SocketException('Connection refused');
+              },
+              devicectlProcess: devicectl,
+              lldbProcess: lldb,
+              iproxyProcess: iproxy,
+            ),
           ),
-        ),
-      );
+          throwsA(
+            isA<StateError>().having(
+              (e) => e.message,
+              'message',
+              contains('iproxy forward for the iOS VM service'),
+            ),
+          ),
+        );
 
-      expect(
-        iproxy.killed,
-        isTrue,
-        reason: 'a surviving iproxy holds its host port indefinitely',
-      );
-      expect(
-        lldb.killed,
-        isTrue,
-        reason: 'lldb holds the app itself, stopped, on the device',
-      );
-      expect(devicectl.killed, isTrue);
-    });
+        expect(probed, hasLength(1));
+        expect(
+          iproxy.killed,
+          isTrue,
+          reason: 'a surviving iproxy holds its host port indefinitely',
+        );
+        expect(
+          lldb.killed,
+          isTrue,
+          reason: 'lldb holds the app itself, stopped, on the device',
+        );
+        expect(devicectl.killed, isTrue);
+      },
+    );
 
     test('a launch that fails after resuming the app terminates it', () async {
       // Discovery comes after the resume, so the app is up and running on the
