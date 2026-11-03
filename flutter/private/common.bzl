@@ -19,7 +19,7 @@ load("//flutter/private:native_sources.bzl", "native_sources_aspect")
 load("//flutter/private:plugin_registrant.bzl", "generate_dart_plugin_registrant", "generate_dev_plugin_registrants")
 load("//flutter/private:validation.bzl", "validate_dart_defines")
 
-def make_web_wrapper_main_content(original_import, registrant_import = None):
+def make_web_wrapper_main_content(original_import, registrant_import = None, agent_imports = None):
     """Generate a web wrapper main.dart that uses ui_web.bootstrapEngine().
 
     Flutter web requires ui_web.bootstrapEngine() to properly initialize the
@@ -33,6 +33,10 @@ def make_web_wrapper_main_content(original_import, registrant_import = None):
         original_import: Import URI for the original main.
         registrant_import: Optional relative import path for the generated
             registrant file. If None, plugin registration is a no-op.
+        agent_imports: Optional pair of relative import paths, the agent
+            extensions and their web bridge, for a debug build. The wrapper
+            registers the extensions and installs the bridge before anything
+            else runs, so they cover the app's whole start.
 
     Returns:
         String of Dart source code.
@@ -49,12 +53,21 @@ def make_web_wrapper_main_content(original_import, registrant_import = None):
     ]
     if registrant_import:
         lines.append("import '%s' as pluginRegistrant;" % registrant_import)
+    if agent_imports:
+        lines.append("import '%s' as agentExtensions;" % agent_imports[0])
+        lines.append("import '%s' as agentBridge;" % agent_imports[1])
     lines.extend([
         "",
         "typedef _UnaryFunction = dynamic Function(List<String> args);",
         "typedef _NullaryFunction = dynamic Function();",
         "",
         "Future<void> main() async {",
+    ])
+    if agent_imports:
+        lines.append("  agentBridge.installRulesFlutterAgentBridge(")
+        lines.append("    agentExtensions.registerRulesFlutterAgentExtensions(),")
+        lines.append("  );")
+    lines.extend([
         "  await ui_web.bootstrapEngine(",
         "    runApp: () {",
         "      if (entrypoint.main is _UnaryFunction) {",

@@ -5,12 +5,13 @@
 // Exposes the `ext.rules_flutter.*` API the dev_tool's HTTP control channel
 // proxies to.
 //
-// Two routes in, both of them pre-main. Native: the generated plugin
+// Three routes in, all of them pre-main. Native: the generated plugin
 // registrant, which the engine invokes on every root-isolate launch, hot
-// restart included. Web: the dev tool's synthetic entrypoint calls the
-// registrar as its first statement, because the engine hook has no web
-// equivalent — and because a web bundle cannot carry these at all, dart2wasm
-// and dart2js having stubbed out `registerExtension`.
+// restart included. The DDC dev loop: the dev tool's synthetic entrypoint
+// calls the registrar as its first statement, because the engine hook has no
+// web equivalent. A debug dart2wasm or dart2js bundle: the generated wrapper
+// main calls it and hands the handlers to `web_bridge.dart`, because such a
+// bundle has no VM service to reach them through.
 //
 // Imports only `package:flutter` and `dart:*` — no flutter_driver, no
 // flutter_test, no transitive pub deps.
@@ -35,33 +36,47 @@ import 'package:flutter/widgets.dart';
 // ignore: unused_field
 SemanticsHandle? _semanticsHandle;
 
-void registerRulesFlutterAgentExtensions() {
-  registerExtension('ext.rules_flutter.tap', _guard(_handleTap));
-  registerExtension('ext.rules_flutter.longPress', _guard(_handleLongPress));
-  registerExtension('ext.rules_flutter.doubleTap', _guard(_handleDoubleTap));
-  registerExtension('ext.rules_flutter.drag', _guard(_handleDrag));
-  registerExtension('ext.rules_flutter.hover', _guard(_handleHover));
-  registerExtension('ext.rules_flutter.hoverExit', _guard(_handleHoverExit));
-  registerExtension(
+/// Register the agent's extensions with `dart:developer`, and return them by
+/// name.
+///
+/// On native and in the DDC dev loop the registration is what the dev tool
+/// reaches, over the VM service. A dart2wasm or dart2js bundle has no VM
+/// service, and its `registerExtension` only files the handler where nothing
+/// outside `dart:developer` can look it up; the returned map is what
+/// `web_bridge.dart` serves to the dev tool there instead.
+Map<String, ServiceExtensionHandler> registerRulesFlutterAgentExtensions() {
+  final handlers = <String, ServiceExtensionHandler>{};
+  void register(String method, ServiceExtensionHandler handler) {
+    handlers[method] = handler;
+    registerExtension(method, handler);
+  }
+
+  register('ext.rules_flutter.tap', _guard(_handleTap));
+  register('ext.rules_flutter.longPress', _guard(_handleLongPress));
+  register('ext.rules_flutter.doubleTap', _guard(_handleDoubleTap));
+  register('ext.rules_flutter.drag', _guard(_handleDrag));
+  register('ext.rules_flutter.hover', _guard(_handleHover));
+  register('ext.rules_flutter.hoverExit', _guard(_handleHoverExit));
+  register(
     'ext.rules_flutter.setWindowActive',
     _guard(_handleSetWindowActive),
   );
-  registerExtension(
+  register(
     'ext.rules_flutter.scrollIntoView',
     _guard(_handleScrollIntoView),
   );
-  registerExtension('ext.rules_flutter.enterText', _guard(_handleEnterText));
-  registerExtension('ext.rules_flutter.getText', _guard(_handleGetText));
-  registerExtension('ext.rules_flutter.getRect', _guard(_handleGetRect));
-  registerExtension('ext.rules_flutter.settle', _guard(_handleSettle));
-  registerExtension('ext.rules_flutter.waitFor', _guard(_handleWaitFor));
-  registerExtension(
+  register('ext.rules_flutter.enterText', _guard(_handleEnterText));
+  register('ext.rules_flutter.getText', _guard(_handleGetText));
+  register('ext.rules_flutter.getRect', _guard(_handleGetRect));
+  register('ext.rules_flutter.settle', _guard(_handleSettle));
+  register('ext.rules_flutter.waitFor', _guard(_handleWaitFor));
+  register(
     'ext.rules_flutter.waitForAbsent',
     _guard(_handleWaitForAbsent),
   );
-  registerExtension('ext.rules_flutter.pageBack', _guard(_handlePageBack));
-  registerExtension('ext.rules_flutter.pressKey', _guard(_handlePressKey));
-  registerExtension(
+  register('ext.rules_flutter.pageBack', _guard(_handlePageBack));
+  register('ext.rules_flutter.pressKey', _guard(_handlePressKey));
+  register(
     'ext.rules_flutter.dumpSemanticsTree',
     _guard(_handleDumpSemanticsTree),
   );
@@ -71,13 +86,15 @@ void registerRulesFlutterAgentExtensions() {
   // `_guard` would call `SemanticsBinding.instance` and wait for a frame, which
   // an app paused at its entrypoint never produces. `flutter_bazel attach`
   // reads this before the app is settled, sometimes before it has run at all.
-  registerExtension('ext.rules_flutter.buildInfo', _handleBuildInfo);
+  register('ext.rules_flutter.buildInfo', _handleBuildInfo);
 
   // Not wrapped either, and for a reason of the same kind: the dev tool asks
   // this straight after a reload or a restart, the restart's before `runApp`
   // may even have run, and it is the one question whose answer must not wait
   // for a frame.
-  registerExtension('ext.rules_flutter.renderState', _handleRenderState);
+  register('ext.rules_flutter.renderState', _handleRenderState);
+
+  return handlers;
 }
 
 /// Whether this app is drawing frames: what the dev tool asks when a reload or

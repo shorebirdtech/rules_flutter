@@ -315,6 +315,42 @@ def _default_basenames(env):
     target = analysistest.target_under_test(env)
     return [f.basename for f in target[DefaultInfo].files.to_list()]
 
+def _assert_bundle_agent(env, expected):
+    """Assert whether the bundle compiles in the agent extensions and bridge.
+
+    A debug bundle carries them, because dart2wasm and dart2js leave no VM
+    service to reach the extensions through and the dev tool calls them over
+    the browser's DevTools protocol instead. Every other mode leaves them out:
+    they are debug-only, as on native.
+
+    Args:
+        env: The analysistest env.
+        expected: Whether this mode's bundle should carry them.
+    """
+    wrappers = [
+        a
+        for a in analysistest.target_actions(env)
+        if a.mnemonic == "FileWrite" and a.outputs.to_list()[0].basename.endswith("_wrapper_main.dart")
+    ]
+    asserts.equals(env, 1, len(wrappers), "expected exactly one wrapper main write")
+    if wrappers:
+        installs = "installRulesFlutterAgentBridge(" in wrappers[0].content
+        asserts.equals(env, expected, installs, "wrapper main installing the agent bridge")
+    compiles = [
+        a
+        for a in analysistest.target_actions(env)
+        if a.mnemonic in ("FlutterDart2Wasm", "FlutterDart2JS")
+    ]
+    asserts.true(env, len(compiles) > 0, "expected a web compile action")
+    for action in compiles:
+        mnemonic = action.mnemonic
+        staged = [
+            f.basename
+            for f in action.inputs.to_list()
+            if f.basename.endswith(".agent_extensions.dart") or f.basename.endswith(".agent_web_bridge.dart")
+        ]
+        asserts.equals(env, 2 if expected else 0, len(staged), "%s agent inputs: %s" % (mnemonic, staged))
+
 def _dbg_web_defines_test_impl(ctx):
     """A `-c dbg` web build is a debug build: no product define, asserts on.
 
@@ -356,6 +392,7 @@ def _dbg_web_defines_test_impl(ctx):
     # was corrected, which is what minified debug JS before `--no-minify` was
     # stated outright.
     _assert_optimization_level(env, _action(env, "FlutterDart2Wasm"), 0)
+    _assert_bundle_agent(env, expected = True)
 
     # The dbg dev-loop contract: the target's outputs still carry the dev
     # config and the DDC side-files the dev tool's DWDS loop stages.
@@ -436,6 +473,7 @@ def _profile_web_defines_test_impl(ctx):
     # release, so a lower level here would measure something nobody ships.
     _assert_optimization_level(env, _action(env, "FlutterDart2Wasm"), 2)
     _assert_optimization_level(env, _action(env, "FlutterDart2JS"), 4)
+    _assert_bundle_agent(env, expected = False)
 
     # A profile build is not a dev-loop build: nothing may serve it as one.
     for basename in _default_basenames(env):
@@ -485,6 +523,7 @@ def _opt_web_defines_test_impl(ctx):
     # single shared level cannot state both, which is why there is no single
     # shared attr.
     _assert_optimization_level(env, _action(env, "FlutterDart2Wasm"), 2)
+    _assert_bundle_agent(env, expected = False)
 
     # Release output is the bundle directory alone — none of the dev-loop
     # side-files may leak into it.

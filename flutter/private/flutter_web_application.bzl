@@ -460,6 +460,21 @@ def _flutter_web_bundle_impl(ctx):
     wrapper = ctx.actions.declare_file(ctx.label.name + "_wrapper_main.dart")
     wrapper_depth = len(wrapper.dirname.split("/"))
 
+    # AI-agent service extensions. In debug they are compiled into the bundle,
+    # as the native rules compile them into their kernel, and served by the
+    # bridge: dart2wasm and dart2js leave `registerExtension` with no VM
+    # service behind it, so the bridge publishes the handlers on the page for
+    # the dev tool to call over the browser's DevTools protocol. The DDC dev
+    # loop imports the same staged file from its own synthetic entrypoint (see
+    # the `agentExtensions` dev-config key) and reaches it through DWDS.
+    staged_agent = None
+    staged_agent_bridge = None
+    if is_debug:
+        staged_agent = ctx.actions.declare_file(ctx.label.name + ".agent_extensions.dart")
+        ctx.actions.symlink(output = staged_agent, target_file = ctx.file._agent_extensions_src)
+        staged_agent_bridge = ctx.actions.declare_file(ctx.label.name + ".agent_web_bridge.dart")
+        ctx.actions.symlink(output = staged_agent_bridge, target_file = ctx.file._agent_web_bridge_src)
+
     # Import the user's main via its `package:` URI when available. That URI
     # resolves through `package_config.json` to the colocated package's
     # `rootUri`, so the user's `main.dart` is read from the assembled
@@ -473,12 +488,15 @@ def _flutter_web_bundle_impl(ctx):
             wrapper_depth,
         ),
         registrant.basename if registrant else None,
+        agent_imports = (staged_agent.basename, staged_agent_bridge.basename) if is_debug else None,
     )
     ctx.actions.write(wrapper, wrapper_content)
     entrypoint = wrapper
     extra_wrapper_srcs = [ctx.file.main, wrapper]
     if registrant:
         extra_wrapper_srcs.append(registrant)
+    if is_debug:
+        extra_wrapper_srcs.extend([staged_agent, staged_agent_bridge])
     all_srcs = all_srcs + extra_wrapper_srcs
 
     # Step 2: Compile to WASM (with a JS build beside it when `js_fallback`) or JS only.
@@ -1099,18 +1117,6 @@ def _flutter_web_bundle_impl(ctx):
         ctx.actions.symlink(output = ddc_stack_trace_mapper_js, target_file = ctx.file._ddc_stack_trace_mapper_js)
         ddc_files.append(ddc_stack_trace_mapper_js)
 
-        # AI-agent service extensions, staged for the dev tool to import from
-        # its synthetic entrypoint (see the `agentExtensions` dev-config key).
-        #
-        # Staged only here, in the DDC branch, rather than compiled into the
-        # bundle the way the native rules compile it into their kernel. The
-        # bundle is built by dart2wasm/dart2js, where `dart:developer`'s
-        # `registerExtension` is a no-op stub — and the runs that serve the
-        # bundle (`--wasm`, release) have no VM service to register against
-        # either. Only the DDC dev loop can carry these.
-        staged_agent = ctx.actions.declare_file(ctx.label.name + ".agent_extensions.dart")
-        ctx.actions.symlink(output = staged_agent, target_file = ctx.file._agent_extensions_src)
-
         # Dev config JSON with engine revision, version, and host tool paths.
         # The dart-sdk root is derived from the module loader path:
         # .../dart-sdk/lib/dev_compiler/ddc/ddc_module_loader.js → .../dart-sdk
@@ -1654,6 +1660,11 @@ build knows which served file is a native module.
         ),
         "_web_template_tool": attr.label(
             default = Label("//flutter/private/tools:web_template.dart"),
+            allow_single_file = [".dart"],
+        ),
+        "_agent_web_bridge_src": attr.label(
+            doc = "Serves the agent extensions from a debug bundle, which has no VM service: the wrapper main publishes them for the dev tool to call over the browser's DevTools protocol.",
+            default = Label("//flutter/private/agent_extensions:web_bridge.dart"),
             allow_single_file = [".dart"],
         ),
     }) | AGENT_EXTENSIONS_ATTR,
