@@ -105,6 +105,10 @@ Future<void> main(List<String> args) async {
       '--instance-termination-action=DELETE',
       '--metadata-from-file=startup-script=${tmpStartup.path}',
       '--scopes=default',
+      // The image starts with 4 GB of its default 10 GB used, and one example's
+      // profile and release builds add 3 GB; every e2e workspace adds its own
+      // output base.
+      '--boot-disk-size=60GB',
     ]);
   } finally {
     tmpDir.deleteSync(recursive: true);
