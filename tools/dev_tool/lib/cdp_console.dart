@@ -40,9 +40,9 @@ final _logger = Logger('dev_tool.cdp_console');
 /// string prefix of `http://localhost:52341`, so a stale browser on a
 /// neighbouring port could be picked.
 ///
-/// Returns null when the page is not listed (yet) — at launch that means the
-/// tab has not navigated and the caller should poll, see
-/// [ChromeSession.resolveAppPage].
+/// Returns null when the page is not listed (yet). At launch that means the
+/// tab has not navigated, which [waitForAppPage] waits out; a consumer of a
+/// running session polls for it, see [resolveCdpPageTarget].
 String? pickCdpPageTarget(List<dynamic> targets, {required String appUrl}) {
   final wanted = originOf(appUrl);
   if (wanted == null) return null;
@@ -91,10 +91,13 @@ const maxCdpPollInterval = Duration(milliseconds: 500);
 /// Resolve the app page's CDP WebSocket URL, or throw with a usable message.
 ///
 /// Polled rather than sampled once, and this is the only place that poll
-/// exists — every CDP consumer here (the console forwarder, the WASM page
-/// reload, screenshots, and the launch's own readiness check via
-/// [ChromeSession.resolveAppPage]) asks the same question and needs the same
-/// patience for it.
+/// exists — every CDP consumer of a running session (the console forwarder,
+/// the WASM page reload, screenshots, key presses) asks the same question and
+/// needs the same patience for it. A page that is not there within [timeout]
+/// is an error here because these callers act on a session that was launched
+/// with its page up; the launch itself, which has no such page yet and no
+/// business failing on a slow machine, waits on the browser's own events
+/// instead ([waitForAppPage]).
 ///
 /// The listing is not a settled fact at any instant. A page target exists from
 /// launch, but its URL is not continuously the app's: cross-origin isolation

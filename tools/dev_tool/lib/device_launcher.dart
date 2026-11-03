@@ -121,6 +121,9 @@ class DeviceLauncher {
       // without serving anything.
       final url = device.appUrl;
       if (url == null) {
+        // Nothing owns the launched browser yet: the session that would stop
+        // it at teardown is built below.
+        await device.stop(appInstance);
         throw DevToolException(
           'The browser launched on ${device.name} but the run does not know '
           'what URL it was pointed at, so nothing can say where the app is '

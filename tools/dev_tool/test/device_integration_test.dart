@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter_bazel_dev_tool/chrome_profile.dart';
 import 'package:flutter_bazel_dev_tool/device.dart';
 import 'package:flutter_bazel_dev_tool/web_options.dart';
 import 'package:test/test.dart';
@@ -30,35 +31,22 @@ void main() {
           return;
         }
 
-        // A fake browser debugging endpoint: `/json` lists the tab the fake
-        // Chrome was launched on, anything else is the page's WebSocket. A
-        // fixed well-known port such as 9222 is a landmine here — a real
-        // developer Chrome with debugging enabled commonly sits on it.
-        final cdp = await HttpServer.bind('127.0.0.1', 0);
-        addTearDown(() => cdp.close(force: true));
+        // A fake browser debugging endpoint: the browser-level socket reports
+        // the tab the fake Chrome was launched on, and a page's own socket is
+        // where the console forwarder attaches. A fixed well-known port such
+        // as 9222 is a landmine here — a real developer Chrome with debugging
+        // enabled commonly sits on it.
+        final cdp = await FakeBrowserCdp.start();
+        addTearDown(cdp.close);
+        final profileRoot = await Directory.systemTemp.createTemp(
+          'web_profiles_',
+        );
+        addTearDown(() => profileRoot.delete(recursive: true));
         List<String>? chromeArgs;
         final enableReceived = Completer<String>();
-        cdp.listen((request) async {
-          if (request.uri.path == '/json') {
-            request.response.headers.contentType = ContentType.json;
-            request.response.write(
-              json.encode([
-                {
-                  'type': 'page',
-                  // The URL the fake Chrome was told to open — the app tab.
-                  'url': chromeArgs!.last,
-                  'webSocketDebuggerUrl': 'ws://127.0.0.1:${cdp.port}/page',
-                },
-              ]),
-            );
-            await request.response.close();
-          } else {
-            final socket = await WebSocketTransformer.upgrade(request);
-            socket.listen((data) {
-              if (!enableReceived.isCompleted) {
-                enableReceived.complete(data as String);
-              }
-            });
+        cdp.onPageConnection = (socket) => socket.listen((data) {
+          if (!enableReceived.isCompleted) {
+            enableReceived.complete(data as String);
           }
         });
 
@@ -69,6 +57,7 @@ void main() {
                   chromeArgs = args;
                   return fakeChrome;
                 },
+                profiles: ChromeProfiles(parent: profileRoot),
               )
               ..webOptions = const WebOptions(
                 server: WebServerOptions(crossOriginIsolation: false),
@@ -82,10 +71,10 @@ void main() {
         // one the way Chrome does — the fake endpoint's real port, never a
         // constant.
         await fakeChrome.outputAttached;
-        fakeChrome.emitStderr(
-          'DevTools listening on '
-          'ws://127.0.0.1:${cdp.port}/devtools/browser/abc123\n',
-        );
+        // The tab the browser was told to open, which it shows once it has
+        // navigated there.
+        cdp.target('tab', type: 'page', url: chromeArgs!.last);
+        fakeChrome.emitStderr(cdp.announcement);
 
         final instance = await launch;
         expect(instance.server, isNotNull);
@@ -118,6 +107,63 @@ void main() {
       },
     );
 
+    test('stop still ends the browser and clears its profile when a step '
+        'before it throws', () async {
+      if (findChrome() == null) {
+        markTestSkipped('Chrome is not installed on this host');
+        return;
+      }
+      final cdp = await FakeBrowserCdp.start();
+      addTearDown(cdp.close);
+      final profileRoot = await Directory.systemTemp.createTemp(
+        'web_profiles_',
+      );
+      addTearDown(() => profileRoot.delete(recursive: true));
+      final fakeChrome = FakeProcess();
+      late List<String> chromeArgs;
+      final device =
+          WebDevice(
+              startProcess: (exe, args) async {
+                chromeArgs = args;
+                return fakeChrome;
+              },
+              profiles: ChromeProfiles(parent: profileRoot),
+            )
+            ..webOptions = const WebOptions(
+              server: WebServerOptions(crossOriginIsolation: false),
+              browser: BrowserLaunchOptions(),
+              enableExpressionEvaluation: false,
+            );
+      final tmpDir = await appDir();
+      final launch = device.launch(tmpDir.path);
+      await fakeChrome.outputAttached;
+      cdp.target('tab', type: 'page', url: chromeArgs.last);
+      fakeChrome.emitStderr(cdp.announcement);
+      final instance = await launch;
+      addTearDown(() => instance.server!.close(force: true));
+      final profileDir = Directory(
+        chromeArgs
+            .firstWhere((a) => a.startsWith('--user-data-dir='))
+            .substring('--user-data-dir='.length),
+      );
+
+      // The browser and its profile are what outlive the process if a stop
+      // that fails along the way skips them.
+      await expectLater(
+        device.stop(
+          AppInstance(
+            process: instance.process,
+            server: _ThrowingServer(),
+            logs: instance.logs,
+          ),
+        ),
+        throwsStateError,
+      );
+
+      expect(fakeChrome.killed, isTrue);
+      expect(await profileDir.exists(), isFalse);
+    });
+
     test(
       'stop lets go of the browser\'s output pipes, even when a helper of '
       'the browser still holds the other end',
@@ -126,27 +172,14 @@ void main() {
           markTestSkipped('Chrome is not installed on this host');
           return;
         }
-        final cdp = await HttpServer.bind('127.0.0.1', 0);
-        addTearDown(() => cdp.close(force: true));
+        final cdp = await FakeBrowserCdp.start();
+        addTearDown(cdp.close);
+        cdp.onPageConnection = (socket) => socket.listen((_) {});
+        final profileRoot = await Directory.systemTemp.createTemp(
+          'web_profiles_',
+        );
+        addTearDown(() => profileRoot.delete(recursive: true));
         List<String>? chromeArgs;
-        cdp.listen((request) async {
-          if (request.uri.path == '/json') {
-            request.response.headers.contentType = ContentType.json;
-            request.response.write(
-              json.encode([
-                {
-                  'type': 'page',
-                  'url': chromeArgs!.last,
-                  'webSocketDebuggerUrl': 'ws://127.0.0.1:${cdp.port}/page',
-                },
-              ]),
-            );
-            await request.response.close();
-          } else {
-            final socket = await WebSocketTransformer.upgrade(request);
-            socket.listen((_) {});
-          }
-        });
         final fakeChrome = FakeProcess();
         final device =
             WebDevice(
@@ -154,6 +187,7 @@ void main() {
                   chromeArgs = args;
                   return fakeChrome;
                 },
+                profiles: ChromeProfiles(parent: profileRoot),
               )
               ..webOptions = const WebOptions(
                 server: WebServerOptions(crossOriginIsolation: false),
@@ -163,10 +197,8 @@ void main() {
 
         final launch = device.launch((await appDir()).path);
         await fakeChrome.outputAttached;
-        fakeChrome.emitStderr(
-          'DevTools listening on '
-          'ws://127.0.0.1:${cdp.port}/devtools/browser/abc123\n',
-        );
+        cdp.target('tab', type: 'page', url: chromeArgs!.last);
+        fakeChrome.emitStderr(cdp.announcement);
         final instance = await launch;
         expect(
           fakeChrome.stderrHasListener,
@@ -198,10 +230,15 @@ void main() {
           markTestSkipped('Chrome is not installed on this host');
           return;
         }
+        final profileRoot = await Directory.systemTemp.createTemp(
+          'web_profiles_',
+        );
+        addTearDown(() => profileRoot.delete(recursive: true));
         final fakeChrome = FakeProcess();
         final device =
             WebDevice(
                 startProcess: (exe, args) async => fakeChrome,
+                profiles: ChromeProfiles(parent: profileRoot),
               )
               ..webOptions = const WebOptions(
                 server: WebServerOptions(crossOriginIsolation: false),
@@ -377,4 +414,14 @@ class _NullSink implements IOSink {
   void writeCharCode(int charCode) {}
   @override
   void writeln([Object? object = '']) {}
+}
+
+/// A server whose `close` fails, standing for any step of a stop that throws.
+class _ThrowingServer implements HttpServer {
+  @override
+  Future<HttpServer> close({bool force = false}) =>
+      throw StateError('the server would not close');
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

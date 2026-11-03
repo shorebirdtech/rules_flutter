@@ -654,6 +654,24 @@ A leaked profile is not merely wasted bytes — see the `ChromeSession` docs on
 why an orphaned browser can serve a screenshot that makes a broken run look
 fine.
 
+**A profile survives only a run that could not clean up.** Every ending the
+tool sees deletes the browser's `flutter_chrome_*` profile in the system temp
+folder, and Chrome's own `com.google.Chrome.*` socket directory beside it: a
+normal stop, `daemon.shutdown`, a signal, a failed or stopped launch, Chrome
+exiting or crashing, an uncaught error (the browser is killed and the profile
+removed on the way out). A second signal exits at once, and kills the browser
+first. A `SIGKILL` of the tool (a harness that gave up waiting, the
+out-of-memory killer) cannot be intercepted, so the **next** web launch removes
+what it left: a profile holds an exclusive lock on its `.dev_tool_owner` file
+while its run lives, the operating system drops that lock however the run
+ends, and a profile whose lock can be taken and whose browser (the pid in
+Chrome's `SingletonLock`) is not running is deleted. A profile whose browser
+is still running is kept and reported, since deleting it would pull the
+profile from under a live browser; quit that browser and the next launch
+removes the profile. A profile with no `.dev_tool_owner` file — made by an
+older tool, or not the tool's — is never touched, and nothing is reaped on
+Windows, where Chrome records no pid.
+
 **A run also has to be able to end without a signal.** An uncancelled
 `ProcessSignal.watch()` keeps the Dart VM alive after `main` returns, so
 `daemon.shutdown` can answer, release everything, and leave the process sitting

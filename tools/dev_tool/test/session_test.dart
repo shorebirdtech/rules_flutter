@@ -1045,6 +1045,27 @@ void main() {
         reason: 'the app must be stopped even when the DDS will not go',
       );
     });
+
+    test('a step that fails still lets the app be stopped, and the failure '
+        'is still reported', () async {
+      // What outlives the tool when the app is skipped is a browser and its
+      // profile directory, or an app on a device.
+      final process = FakeProcess();
+      final session = DeviceSession(
+        device: MacOSDevice(),
+        appInstance: AppInstance(process: process),
+        vmClient: null,
+        appId: 'app-1',
+        dds: _FailingDds(),
+      );
+
+      await expectLater(
+        session.shutdown(MachineProtocol(enabled: false, output: BufferSink())),
+        throwsStateError,
+      );
+
+      expect(process.signals, contains(ProcessSignal.sigterm));
+    });
   });
 
   /// What the watcher does with an edit it cannot map.
@@ -1348,6 +1369,14 @@ class _FakeDirectoryWatcher implements DirectoryWatcher {
 ///
 /// It closes its socket to the app's VM service on the way out
 /// (`dds_impl.dart:311`), and that peer is not ours to trust.
+class _FailingDds implements DartDevelopmentService {
+  @override
+  Future<void> shutdown() => throw StateError('the DDS would not shut down');
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
 class _HangingDds implements DartDevelopmentService {
   @override
   Future<void> shutdown() => Completer<void>().future;

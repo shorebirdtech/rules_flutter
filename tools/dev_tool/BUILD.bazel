@@ -145,11 +145,17 @@ _UNIT_TESTS = {
     "build_info_test": {"fakes": True},
     "bundle_rebuild_test": {},
     "fake_process_stdin_test": {"fakes": True},
+    "cdp_app_page_test": {
+        "fakes": True,
+        "deps": ["@dev_tool_deps//:logging"],
+    },
     "cdp_console_test": {
         "fakes": True,
         "deps": ["@dev_tool_deps//:fake_async"],
     },
     "cdp_viewport_test": {},
+    "chrome_profile_test": {"deps": _PATH_DEP + ["@dev_tool_deps//:logging"]},
+    "chrome_session_test": {"fakes": True},
     "cli_args_test": {"deps": ["@dev_tool_deps//:args"]},
     "command_runner_test": {},
     "compiler_config_test": {},

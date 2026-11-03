@@ -1032,7 +1032,7 @@ class DevToolProcess {
   /// Asks for `daemon.shutdown` first and waits for the run to end on its own,
   /// because
   /// the tool's own teardown is the only thing that stops what it launched: a
-  /// SIGTERM'd dev tool leaves its Chrome (and the `flutter_chrome_*` profile
+  /// SIGKILL'd dev tool leaves its Chrome (and the `flutter_chrome_*` profile
   /// behind it) running. That matters beyond tidiness — an orphaned browser
   /// from a test that failed mid-run is a live window a *later* run can be
   /// screenshotted against, which is how a stale app produces a false pass.

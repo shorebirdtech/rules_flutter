@@ -53,7 +53,9 @@ import 'package:path/path.dart' as p;
 import 'app_log.dart';
 import 'browser_extension_channel.dart';
 import 'build_mode.dart';
+import 'cdp_app_page.dart';
 import 'cdp_console.dart';
+import 'chrome_profile.dart';
 import 'compiler_config.dart';
 import 'devicectl_screens.dart';
 import 'host_tools.dart';
@@ -4121,13 +4123,15 @@ class ChromeSession {
   ///
   /// A throwaway profile is what makes a run reproducible — no extensions, no
   /// restored tabs, no saved sign-ins. The cost is a real directory Chrome
-  /// fills with caches, so on success it goes into the instance's
-  /// [AppInstance.scratchDirs] and dies with the launch, and a failed launch
-  /// deletes it before rethrowing. Left behind they are not inert: a stale
-  /// profile belongs to a browser a `--user-data-dir` scan can still find, and
-  /// an orphaned window can serve a screenshot that makes a broken run look
-  /// fine.
-  final Directory userDataDir;
+  /// fills with caches, so a failed launch releases it before rethrowing and
+  /// [WebDevice.stop] releases it with the browser. Left behind they are not
+  /// inert: a stale profile belongs to a browser a `--user-data-dir` scan can
+  /// still find, and an orphaned window can serve a screenshot that makes a
+  /// broken run look fine. A run killed too hard to release its profile
+  /// leaves it for [ChromeProfiles.reapAbandoned].
+  final ChromeProfile profile;
+
+  Directory get userDataDir => profile.directory;
 
   /// The CDP debugging port announced on Chrome's stderr.
   final int cdpPort;
@@ -4156,7 +4160,7 @@ class ChromeSession {
   ChromeSession._({
     required this.process,
     required this.outputPump,
-    required this.userDataDir,
+    required this.profile,
     required this.cdpPort,
     required this.appUrl,
     required this.pageWebSocketDebuggerUrl,
@@ -4189,19 +4193,27 @@ class ChromeSession {
   /// port announced *and* the tab navigated to the app. A failed launch
   /// leaves nothing behind — no browser, no profile directory.
   ///
-  /// [abandoned] completing means the run is ending: the launch stops
-  /// waiting, and fails after releasing what it started. It is the only way
-  /// the wait for the port ends other than Chrome answering or exiting — see
-  /// [_discoverCdpPort].
+  /// Neither wait has a deadline: each ends on something Chrome does (it says
+  /// the port is open, shows the page, exits, or closes its debugging
+  /// connection) or on [abandoned]. [abandoned] completing means the run is
+  /// ending: the launch stops waiting, and fails after releasing what it
+  /// started. It is the only way the waits end other than Chrome acting — see
+  /// [_discoverCdpPort] and [waitForAppPage]. After [slowStartNotice] in
+  /// either wait a warning says Chrome is slow; it changes nothing about the
+  /// wait.
+  ///
+  /// [stopBound] is how long a browser being ended gets to exit on SIGTERM
+  /// before it is sent SIGKILL.
   static Future<ChromeSession> launch({
     required String url,
     required ProcessStarter startProcess,
     BrowserLaunchOptions options = const BrowserLaunchOptions(),
     String? chromePath,
+    ChromeProfiles? profiles,
     Future<void>? abandoned,
     Duration slowStartNotice = const Duration(seconds: 10),
-    Duration pageTimeout = const Duration(seconds: 15),
-    Duration pollInterval = const Duration(milliseconds: 50),
+    NoticeTimer startNotice = Timer.new,
+    Duration stopBound = const Duration(seconds: 5),
   }) async {
     final exe = chromePath ?? findChrome();
     if (exe == null) {
@@ -4223,23 +4235,24 @@ class ChromeSession {
     Future<T> unlessAbandoned<T>(Future<T> wait) =>
         abandonment == null ? wait : Future.any([wait, abandonment]);
 
-    final userDataDir = await createTempDir('flutter_chrome_');
+    final profile = await (profiles ?? ChromeProfiles()).create();
     // Checked once more before starting anything: a browser window that
     // flashes up only to be killed is the one thing worse than not launching.
     if (isAbandoned) {
-      await deleteTempDir(userDataDir);
+      await profile.release();
       throw StateError(abandonedMessage);
     }
     final Process chrome;
     try {
       chrome = await startProcess(
         exe,
-        launchArgs(url, options, userDataDir: userDataDir.path),
+        launchArgs(url, options, userDataDir: profile.directory.path),
       );
     } catch (_) {
-      await deleteTempDir(userDataDir);
+      await profile.release();
       rethrow;
     }
+    profile.browserStarted(chrome.pid);
 
     // Chrome's own process output — browser diagnostics, not app output.
     // Kept drained for the browser's lifetime so its pipes can never fill
@@ -4252,13 +4265,15 @@ class ChromeSession {
     diagnostics.closeWhen([outputPump.done]);
 
     try {
-      final cdpPort = await unlessAbandoned(
+      final announced = await unlessAbandoned(
         _discoverCdpPort(
           diagnostics,
           slowStartNotice: slowStartNotice,
+          startNotice: startNotice,
           requestedPort: options.debugPort,
         ),
       );
+      final cdpPort = announced.port;
       // The announcement is the readiness signal, not merely the number, so
       // it is awaited even when the port was dictated. A browser that takes a
       // different one than it was given is a state nothing here can drive:
@@ -4269,20 +4284,24 @@ class ChromeSession {
           '${options.debugPort} and announced $cdpPort instead.',
         );
       }
-      // The same wait [resolveAppPage] does, done before the session exists
-      // so the page it found can be part of it.
+      // Done before the session exists so the page it found can be part of
+      // it. A session whose app page never appeared is a failed launch, not a
+      // running one that every CDP consumer — screenshots, page reloads, the
+      // console — then mis-drives.
       final page = await unlessAbandoned(
-        resolveCdpPageTarget(
-          cdpPort,
+        waitForAppPage(
+          browserEndpoint: announced.browserEndpoint,
           appUrl: url,
-          timeout: pageTimeout,
-          pollInterval: pollInterval,
+          browserExit: chrome.exitCode,
+          lastWords: () => _browserLastWords(diagnostics),
+          slowNotice: slowStartNotice,
+          startNotice: startNotice,
         ),
       );
       final session = ChromeSession._(
         process: chrome,
         outputPump: outputPump,
-        userDataDir: userDataDir,
+        profile: profile,
         cdpPort: cdpPort,
         appUrl: url,
         pageWebSocketDebuggerUrl: page,
@@ -4294,37 +4313,16 @@ class ChromeSession {
       // A launch with no debugging port or no app page produced nothing
       // usable; don't leave the browser and its throwaway profile running
       // behind the error.
-      chrome.kill();
-      await chrome.exitCode;
+      // Bounded and escalated like every other stop: a browser that is wedged
+      // is the one most likely to be why the launch failed, and one that
+      // ignores SIGTERM would otherwise hold the failure — and with it the
+      // teardown waiting on this launch — for good.
+      await _stopProcess('browser', chrome, stopBound);
       await outputPump.dispose();
-      await deleteTempDir(userDataDir);
+      await profile.release();
       rethrow;
     }
   }
-
-  /// Wait until the launched tab is serving [appUrl] and return its CDP
-  /// WebSocket debugger URL.
-  ///
-  /// Right after launch the tab is still an `about:blank` that has not
-  /// navigated, and `/json` can list nothing at all, so this waits rather than
-  /// failing on the first look — see [pickCdpPageTarget] for why nothing less
-  /// than the app's own page will do. [launch] awaits it before declaring the
-  /// browser up: a session whose app page never appeared is a failed launch,
-  /// not a running one that every CDP consumer — screenshots, page reloads,
-  /// the console — then mis-drives.
-  ///
-  /// The waiting itself is [resolveCdpPageTarget]'s, not a second copy of it:
-  /// the states this rides out at launch are the same ones those consumers hit
-  /// mid-session.
-  Future<String> resolveAppPage({
-    Duration timeout = const Duration(seconds: 15),
-    Duration pollInterval = const Duration(milliseconds: 50),
-  }) => resolveCdpPageTarget(
-    cdpPort,
-    appUrl: appUrl,
-    timeout: timeout,
-    pollInterval: pollInterval,
-  );
 
   /// Lay the app out at [viewport], and prove that it did.
   ///
@@ -4363,6 +4361,13 @@ class ChromeSession {
 /// Web device — serves build output via HTTP and launches Chrome.
 class WebDevice extends Device {
   final ProcessStarter _startProcess;
+
+  /// Where this device's browser profiles live.
+  final ChromeProfiles _profiles;
+
+  /// The profile of the browser this device launched, until [stop] releases
+  /// it.
+  ChromeProfile? _profile;
 
   /// CDP debugging port discovered from Chrome stderr.
   int? _cdpPort;
@@ -4427,8 +4432,9 @@ class WebDevice extends Device {
   /// bundle that is not a debug build, which compiles the extensions out.
   BrowserExtensionChannel? browserChannel;
 
-  WebDevice({ProcessStarter? startProcess})
-    : _startProcess = startProcess ?? Process.start;
+  WebDevice({ProcessStarter? startProcess, ChromeProfiles? profiles})
+    : _startProcess = startProcess ?? Process.start,
+      _profiles = profiles ?? ChromeProfiles();
 
   @override
   String get name => 'Chrome';
@@ -4513,6 +4519,7 @@ class WebDevice extends Device {
     final settled = Completer<void>();
     _launching = settled.future;
     try {
+      await _reapAbandonedProfiles();
       if (_moduleServer != null) {
         return await _launchWithModuleServer(onLog);
       }
@@ -4520,6 +4527,31 @@ class WebDevice extends Device {
     } finally {
       settled.complete();
       _launching = null;
+    }
+  }
+
+  /// Clear away the profiles of browsers that earlier runs, killed too hard
+  /// to clean up after themselves, left behind. Housekeeping: a failure to do
+  /// it is reported and does not fail the launch.
+  Future<void> _reapAbandonedProfiles() async {
+    try {
+      await _profiles.reapAbandoned();
+    } on FileSystemException catch (e) {
+      _logger.warning({
+        'message': 'chrome_profile_reap_failed',
+        'text':
+            'Could not look for Chrome profiles left by earlier runs in '
+            '${_profiles.parent.path}: ${e.osError?.message ?? e.message}.',
+        'error': '$e',
+      });
+    } on ProcessException catch (e) {
+      _logger.warning({
+        'message': 'chrome_profile_reap_failed',
+        'text':
+            'Could not tell whether the browsers of earlier runs are still '
+            'running, so their Chrome profiles were not cleared: $e.',
+        'error': '$e',
+      });
     }
   }
 
@@ -4567,8 +4599,11 @@ class WebDevice extends Device {
       url: url,
       startProcess: _startProcess,
       options: options.browser,
+      profiles: _profiles,
       abandoned: _abandoned.future,
+      stopBound: teardownBound,
     );
+    _profile = session.profile;
     _cdpPort = session.cdpPort;
     _holdViewport(session.viewportHold);
     _pageWebSocketDebuggerUrl = session.pageWebSocketDebuggerUrl;
@@ -4581,7 +4616,6 @@ class WebDevice extends Device {
       // The app's own output has its own source — DWDS, wired by the caller —
       // so it does not close with the browser process.
       logs: _newAppLogs(onLog),
-      scratchDirs: [session.userDataDir],
       outputPumps: [session.outputPump],
     );
   }
@@ -4606,7 +4640,9 @@ class WebDevice extends Device {
         url: url,
         startProcess: _startProcess,
         options: options.browser,
+        profiles: _profiles,
         abandoned: _abandoned.future,
+        stopBound: teardownBound,
       );
     } catch (_) {
       // The session cleans up after its own failures; this path additionally
@@ -4614,6 +4650,7 @@ class WebDevice extends Device {
       await staticServer.stop();
       rethrow;
     }
+    _profile = session.profile;
     _cdpPort = session.cdpPort;
     _holdViewport(session.viewportHold);
     _pageWebSocketDebuggerUrl = session.pageWebSocketDebuggerUrl;
@@ -4660,55 +4697,65 @@ class WebDevice extends Device {
       vmServiceUri: null,
       server: staticServer.server,
       logs: logs,
-      scratchDirs: [session.userDataDir],
       outputPumps: [session.outputPump],
     );
   }
 
   @override
   Future<void> stop(AppInstance instance) async {
-    // Unbounded on purpose. A client-side `WebSocket.close()` returns the
-    // *outbound* sink's future and never waits for the peer's answering close
-    // frame, so neither a peer that never answers nor one wedged so hard it
-    // reads nothing can hold it. The one shape that does hang is a wedged peer
-    // with a full send buffer, and this client writes a single small
-    // `Runtime.enable` per connection, so it cannot build that backlog. The
-    // SDK's own 5s close timer does NOT rescue that shape, so this decision
-    // expires if the client ever grows chatty outbound traffic.
-    await _consoleClient?.close();
-    _consoleClient = null;
-    await browserChannel?.close();
-    browserChannel = null;
-    // Taken off first, so closing it is not reported as the viewport lost.
-    final viewportHold = _viewportHold;
-    _viewportHold = null;
-    await viewportHold?.close();
-    final moduleServer = _moduleServer;
-    if (moduleServer != null) {
-      // dwds is third-party and its `stop()` reaches peer-dependent awaits —
-      // `DebugService.close()` waits on a DDS shutdown, `DwdsVmClient.close()`
-      // on a VM-service client dispose. This sits *before* the kill, so an
-      // unbounded wait here means the browser is never even asked to exit.
-      await boundedTeardownStep(
-        'the web module server to shut down',
-        moduleServer.stop(),
-        teardownBound,
-      );
+    try {
+      // Unbounded on purpose. A client-side `WebSocket.close()` returns the
+      // *outbound* sink's future and never waits for the peer's answering
+      // close frame, so neither a peer that never answers nor one wedged so
+      // hard it reads nothing can hold it. The one shape that does hang is a
+      // wedged peer with a full send buffer, and this client writes a single
+      // small `Runtime.enable` per connection, so it cannot build that
+      // backlog. The SDK's own 5s close timer does NOT rescue that shape, so
+      // this decision expires if the client ever grows chatty outbound
+      // traffic.
+      await _consoleClient?.close();
+      _consoleClient = null;
+      await browserChannel?.close();
+      browserChannel = null;
+      // Taken off first, so closing it is not reported as the viewport lost.
+      final viewportHold = _viewportHold;
+      _viewportHold = null;
+      await viewportHold?.close();
+      final moduleServer = _moduleServer;
+      if (moduleServer != null) {
+        // dwds is third-party and its `stop()` reaches peer-dependent awaits —
+        // `DebugService.close()` waits on a DDS shutdown, `DwdsVmClient.close()`
+        // on a VM-service client dispose. The browser is released in the
+        // `finally` below, so a step here that throws still ends it.
+        await boundedTeardownStep(
+          'the web module server to shut down',
+          moduleServer.stop(),
+          teardownBound,
+        );
+      }
+      // Unbounded: `HttpServer.close(force: false)` returns promptly against an
+      // idle keep-alive connection, a held streaming response and an open
+      // WebSocket upgrade alike.
+      await instance.server?.close();
+    } finally {
+      // However the steps above ended, the browser and its profile go: they
+      // are the part of this run that outlives the process if it is missed, so
+      // nothing that can throw stands in front of them.
+      //
+      // The browser first, and the profile once it has exited: a browser that
+      // is still shutting down is still writing its caches, and deleting the
+      // tree under it leaves a half-removed directory and an error naming a
+      // file nobody asked about.
+      await _stopProcess('browser', instance.process, teardownBound);
+      // The browser has been asked to die; whatever a helper of it still
+      // writes is nobody's. Not waiting for its end-of-file is what lets this
+      // process exit when that helper is still alive.
+      await instance.disposeOutputPumps();
+      await instance.logs.close();
+      final profile = _profile;
+      _profile = null;
+      await profile?.release();
     }
-    // Unbounded: `HttpServer.close(force: false)` returns promptly against an
-    // idle keep-alive connection, a held streaming response and an open
-    // WebSocket upgrade alike.
-    await instance.server?.close();
-    // Before the profile goes: a browser that is still shutting down is still
-    // writing its caches, and deleting the tree under it leaves a half-removed
-    // directory and an error naming a file nobody asked about.
-    await _stopProcess('browser', instance.process, teardownBound);
-    // The browser has been asked to die; whatever a helper of it still writes
-    // is nobody's. Not waiting for its end-of-file is what lets this process
-    // exit when that helper is still alive.
-    await instance.disposeOutputPumps();
-    await instance.logs.close();
-    await instance.disposeScratchDirs();
   }
 
   @override
@@ -4775,8 +4822,11 @@ class WebDevice extends Device {
 }
 
 /// Chrome's announcement of its debugging server, printed to stderr once it
-/// is listening: `DevTools listening on ws://127.0.0.1:PORT/devtools/browser/...`
-final cdpPortPattern = RegExp(r'DevTools listening on ws://(\S+):(\d+)/');
+/// is listening: `DevTools listening on ws://127.0.0.1:PORT/devtools/browser/ID`.
+/// Groups: the whole endpoint, its host, its port.
+final cdpPortPattern = RegExp(
+  r'DevTools listening on (ws://(\S+):(\d+)/\S*)',
+);
 
 /// What Chrome prints when it cannot open its debugging server on any
 /// address. It then carries on running without one, so this line is the only
@@ -4807,19 +4857,20 @@ const cdpServerFailedLine = 'Cannot start http server for devtools';
 /// reloads, so accepting null here would buy a run with none of that and no
 /// message. Upstream tool-exits in the same situation (`chrome.dart`'s "Unable
 /// to connect to Chrome debug port").
-Future<int> _discoverCdpPort(
+Future<({int port, Uri browserEndpoint})> _discoverCdpPort(
   AppLogStream browserDiagnostics, {
   required Duration slowStartNotice,
+  required NoticeTimer startNotice,
   int? requestedPort,
 }) async {
-  final completer = Completer<int>();
+  final completer = Completer<({int port, Uri browserEndpoint})>();
   void fail(String message) {
     if (!completer.isCompleted) completer.completeError(StateError(message));
   }
 
   final sinceLaunch = Stopwatch()..start();
   var noticeGiven = false;
-  final notice = Timer(slowStartNotice, () {
+  final notice = startNotice(slowStartNotice, () {
     noticeGiven = true;
     _logger.warning({
       'message': 'browser_slow_to_start',
@@ -4842,8 +4893,8 @@ Future<int> _discoverCdpPort(
       if (completer.isCompleted) return;
       final match = cdpPortPattern.firstMatch(line.text);
       if (match != null) {
-        final host = match.group(1)!;
-        final port = int.parse(match.group(2)!);
+        final host = match.group(2)!;
+        final port = int.parse(match.group(3)!);
         // Chrome tries 127.0.0.1 first and falls back to [::1] when that is
         // taken. Every CDP consumer here dials 127.0.0.1, so a server on any
         // other address is one they would miss — or, on a dictated port, one
@@ -4856,7 +4907,10 @@ Future<int> _discoverCdpPort(
           );
           return;
         }
-        completer.complete(port);
+        completer.complete((
+          port: port,
+          browserEndpoint: Uri.parse(match.group(1)!),
+        ));
       } else if (line.text.contains(cdpServerFailedLine)) {
         fail(
           'Chrome could not open its DevTools debugging server. Without it '
@@ -4885,7 +4939,8 @@ Future<int> _discoverCdpPort(
   );
 
   try {
-    final port = await completer.future;
+    final announced = await completer.future;
+    final port = announced.port;
     // How long the browser took is what says whether a slow machine is
     // getting slower; worth a line at the default level only when the person
     // waiting was already told it was slow.
@@ -4898,7 +4953,7 @@ Future<int> _discoverCdpPort(
       'elapsedMs': sinceLaunch.elapsedMilliseconds,
     };
     noticeGiven ? _logger.info(started) : _logger.fine(started);
-    return port;
+    return announced;
   } finally {
     notice.cancel();
     await sub.cancel();

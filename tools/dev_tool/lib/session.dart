@@ -296,23 +296,31 @@ class DeviceSession {
   Future<void> shutdown(MachineProtocol protocol) async {
     if (_shutDown) return;
     _shutDown = true;
-    stopWaitingForFirstFrame();
-    devToolsProcess?.kill();
-    protocol.appStop(appId);
-    // Retired, not merely disconnected: this session is over, and a client
-    // that could still be dialled would be — an RPC in flight when this lands
-    // re-dials on its way back and publishes a socket nothing owns. See
-    // [VmServiceClient.retire].
-    await vmClient?.retire();
-    await boundedTeardownStep(
-      'the DDS to shut down',
-      dds?.shutdown() ?? Future.value(),
-      device.teardownBound,
-    );
-    // Read through the session, not a local: a restart that relaunches the app
-    // replaces the instance, and stopping the one a caller saw earlier would
-    // leave the live one running.
-    await device.stop(appInstance);
+    try {
+      stopWaitingForFirstFrame();
+      devToolsProcess?.kill();
+      protocol.appStop(appId);
+      // Retired, not merely disconnected: this session is over, and a client
+      // that could still be dialled would be — an RPC in flight when this lands
+      // re-dials on its way back and publishes a socket nothing owns. See
+      // [VmServiceClient.retire].
+      await vmClient?.retire();
+      await boundedTeardownStep(
+        'the DDS to shut down',
+        dds?.shutdown() ?? Future.value(),
+        device.teardownBound,
+      );
+    } finally {
+      // Whatever the steps above did, the app itself is stopped: it is what
+      // outlives the tool if this is skipped — a browser and its profile
+      // directory, an app on a device. And once only: the session is marked
+      // shut down above, so a second caller returns without it.
+      //
+      // Read through the session, not a local: a restart that relaunches the
+      // app replaces the instance, and stopping the one a caller saw earlier
+      // would leave the live one running.
+      await device.stop(appInstance);
+    }
   }
 
   void _watchForExit(AppInstance instance) {

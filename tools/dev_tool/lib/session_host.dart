@@ -17,6 +17,7 @@ import 'dart:io';
 
 import 'agent_command.dart';
 import 'bazel.dart';
+import 'chrome_profile.dart';
 import 'command_failure.dart';
 import 'command_runner.dart';
 import 'dev_tool_exception.dart';
@@ -458,13 +459,23 @@ class SessionHost {
         await performCleanup();
         await closeTransports();
       },
-      exitProcess: exitProcess ?? exit,
+      exitProcess: exitProcess ?? exitReleasingBrowsers,
       logger: _logger,
     );
     for (final stream in signals ?? _processShutdownSignals()) {
       _signalSubscriptions.add(handler.listen(stream));
     }
   }
+}
+
+/// Exit now, ending any browser this process started first.
+///
+/// The exit a second signal asks for does not wait for the orderly shutdown,
+/// and a browser left running by a tool that has gone is an orphan: nothing
+/// is left to stop it or to delete its profile.
+Never exitReleasingBrowsers(int code) {
+  ChromeProfile.releaseAllNow();
+  exit(code);
 }
 
 /// Every signal this platform lets a run be stopped with.

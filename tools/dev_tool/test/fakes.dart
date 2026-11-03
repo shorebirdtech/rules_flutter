@@ -1597,3 +1597,128 @@ Outcome<T> track<T>(Future<T> future) {
   );
   return outcome;
 }
+
+/// A stand-in for Chrome's DevTools endpoint: the browser-level WebSocket
+/// that answers `Target.setDiscoverTargets` and reports target events, and
+/// the `/json` listing, both driven from one table of targets so they cannot
+/// disagree.
+///
+/// Held to the rule at the top of this file: the events are the ones Chrome
+/// sends, in the order it sends them — on `setDiscoverTargets` the targets
+/// that already exist arrive as `Target.targetCreated`, then the reply — and
+/// a page's WebSocket URL is the `/devtools/page/<targetId>` Chrome lists.
+class FakeBrowserCdp {
+  final HttpServer _server;
+  final _targets = <String, Map<String, Object?>>{};
+  final _discoverers = <WebSocket>[];
+  final _browserSockets = <WebSocket>[];
+  final _discovering = Completer<void>();
+
+  /// Called with each connection opened on a page's endpoint.
+  void Function(WebSocket page)? onPageConnection;
+
+  FakeBrowserCdp._(this._server) {
+    _server.listen(_handle);
+  }
+
+  static Future<FakeBrowserCdp> start() async =>
+      FakeBrowserCdp._(await HttpServer.bind('127.0.0.1', 0));
+
+  int get port => _server.port;
+
+  Uri get browserEndpoint =>
+      Uri.parse('ws://127.0.0.1:$port/devtools/browser/x');
+
+  /// What Chrome prints on stderr once it is listening.
+  String get announcement => 'DevTools listening on $browserEndpoint\n';
+
+  /// Completes when a client has switched target discovery on.
+  Future<void> get discovering => _discovering.future;
+
+  /// The page endpoint [target] is listed under.
+  String pageEndpoint(String targetId) =>
+      'ws://127.0.0.1:$port/devtools/page/$targetId';
+
+  /// Add [targetId], or change its URL, and tell whoever is discovering.
+  void target(String targetId, {required String type, required String url}) {
+    final isNew = !_targets.containsKey(targetId);
+    final info = _targets[targetId] = {
+      'targetId': targetId,
+      'type': type,
+      'url': url,
+    };
+    _emit(isNew ? 'Target.targetCreated' : 'Target.targetInfoChanged', {
+      'targetInfo': info,
+    });
+  }
+
+  void destroy(String targetId) {
+    _targets.remove(targetId);
+    _emit('Target.targetDestroyed', {'targetId': targetId});
+  }
+
+  /// Drop every browser-level connection, as a browser that is going away does.
+  Future<void> dropBrowserConnections() async {
+    for (final socket in _browserSockets.toList()) {
+      await socket.close();
+    }
+  }
+
+  void _emit(String method, Map<String, Object?> params) {
+    for (final socket in _discoverers) {
+      socket.add(json.encode({'method': method, 'params': params}));
+    }
+  }
+
+  Future<void> _handle(HttpRequest request) async {
+    final path = request.uri.path;
+    if (path == '/json') {
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(
+        json.encode([
+          for (final t in _targets.values)
+            {
+              'id': t['targetId'],
+              'type': t['type'],
+              'url': t['url'],
+              'webSocketDebuggerUrl': pageEndpoint(t['targetId'] as String),
+            },
+        ]),
+      );
+      await request.response.close();
+    } else if (path.startsWith('/devtools/browser/')) {
+      final socket = await WebSocketTransformer.upgrade(request);
+      _browserSockets.add(socket);
+      socket.listen(
+        (data) {
+          final message = json.decode(data as String) as Map<String, dynamic>;
+          if (message['method'] == 'Target.setDiscoverTargets') {
+            for (final t in _targets.values) {
+              socket.add(
+                json.encode({
+                  'method': 'Target.targetCreated',
+                  'params': {'targetInfo': t},
+                }),
+              );
+            }
+            _discoverers.add(socket);
+            socket.add(json.encode({'id': message['id'], 'result': {}}));
+            if (!_discovering.isCompleted) _discovering.complete();
+          }
+        },
+        onDone: () {
+          _discoverers.remove(socket);
+          _browserSockets.remove(socket);
+        },
+      );
+    } else if (path.startsWith('/devtools/page/')) {
+      final socket = await WebSocketTransformer.upgrade(request);
+      onPageConnection?.call(socket);
+    } else {
+      request.response.statusCode = HttpStatus.notFound;
+      await request.response.close();
+    }
+  }
+
+  Future<void> close() => _server.close(force: true);
+}
