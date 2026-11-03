@@ -29,6 +29,7 @@ surface small).
 
 load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version", "make_dart_library_build_content")
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_deps", "parse_pubspec_sdk_constraint")
+load("//flutter/private:android_plugin_maven.bzl", "parse_gradle_maven_dependencies")
 load("//flutter/private:flutter_pubspec.bzl", "parse_flutter_assets_block", "parse_flutter_plugin_block")
 
 # Apple source extensions we sweep into the per-platform plugin library.
@@ -381,129 +382,63 @@ def _detect_consumer_proguard_specs(ctx):
                     paths.append(relpath)
     return paths
 
-# Map well-known maven coordinates the plugin's `build.gradle` may pull
-# in to labels under `@rules_android_maven`. We translate
-# `implementation("group:artifact:version")` declarations into Bazel
-# dep labels by looking up the `group:artifact` here. The user's
-# workspace `maven.install` must include matching artifacts; the bundle
-# of androidx + jetbrains coordinates Flutter plugins typically use is
-# documented in `docs/TESTING.md` § Plugin verification matrix.
-_MAVEN_COORD_TO_LABEL = {
-    "androidx.annotation:annotation": "@rules_android_maven//:androidx_annotation_annotation",
-    "androidx.lifecycle:lifecycle-common": "@rules_android_maven//:androidx_lifecycle_lifecycle_common",
-    "androidx.lifecycle:lifecycle-runtime": "@rules_android_maven//:androidx_lifecycle_lifecycle_runtime",
-    "androidx.media:media": "@rules_android_maven//:androidx_media_media",
-    "androidx.window:window": "@rules_android_maven//:androidx_window_window",
-    "androidx.core:core": "@rules_android_maven//:androidx_core_core",
-    "androidx.browser:browser": "@rules_android_maven//:androidx_browser_browser",
-    "androidx.fragment:fragment": "@rules_android_maven//:androidx_fragment_fragment",
-    "androidx.activity:activity": "@rules_android_maven//:androidx_activity_activity",
-    "com.google.android.material:material": "@rules_android_maven//:com_google_android_material_material",
-    "com.getkeepsafe.relinker:relinker": "@rules_android_maven//:com_getkeepsafe_relinker_relinker",
-}
+def _read_plugin_maven_deps(ctx):
+    """Parse the spoke's `android/build.gradle*` Maven dependencies.
 
-# Coordinates we deliberately ignore — provided by the kt_android_library
-# rule itself or out-of-band. Listing them avoids the parser falling back
-# to "drop unknown" silently for things we do recognize.
-_MAVEN_COORDS_PROVIDED = {
-    "org.jetbrains.kotlin:kotlin-stdlib": True,
-    "org.jetbrains.kotlin:kotlin-stdlib-jdk7": True,
-    "org.jetbrains.kotlin:kotlin-stdlib-jdk8": True,
-}
-
-def _parse_gradle_deps(content):
-    """Extract `implementation("group:artifact:...")` coordinates from Gradle content.
-
-    Handles both Groovy DSL (single quotes) and Kotlin DSL (double
-    quotes / parens). Returns a list of `group:artifact` strings.
-    `api(...)` declarations are treated the same way.
+    Reads the package's Gradle build file (`.gradle.kts` first, then
+    `.gradle`). Returns the parse result of `parse_gradle_maven_dependencies`:
+    the declared dependencies and the lines it could not read. Both are empty
+    when the package has no Gradle script.
     """
-    coords = []
-    for raw_line in content.split("\n"):
-        line = raw_line.strip()
-        if not line:
-            continue
-
-        # Skip comments and gradle plugin classpaths.
-        if line.startswith("//") or line.startswith("#"):
-            continue
-
-        # Match `implementation(...)` or `api(...)` or
-        # `implementation "..."` (Groovy without parens).
-        for prefix in ("implementation", "api", "compile"):
-            if not line.startswith(prefix):
-                continue
-            rest = line[len(prefix):].strip()
-            if not rest:
-                continue
-            if rest[0] not in ("(", '"', "'"):
-                # Not a dep call — could be `implementations.add(...)` etc.
-                continue
-
-            # Pull out the first quoted string after the opening paren/quote.
-            quote_idx = -1
-            quote_char = ""
-            for q in ('"', "'"):
-                idx = rest.find(q)
-                if idx >= 0 and (quote_idx < 0 or idx < quote_idx):
-                    quote_idx = idx
-                    quote_char = q
-            if quote_idx < 0:
-                break
-            end = rest.find(quote_char, quote_idx + 1)
-            if end < 0:
-                break
-            inner = rest[quote_idx + 1:end]
-
-            # Strip Gradle template variables (`$kotlin_version`,
-            # `${kotlin_version}`). Versions only — group:artifact stays
-            # parseable. For our purposes the `group:artifact` is what we
-            # key off, so we just split on the first two colons.
-            parts = inner.split(":")
-            if len(parts) < 2:
-                break
-            coord = "%s:%s" % (parts[0], parts[1])
-            coords.append(coord)
-            break
-    return coords
-
-def _resolve_plugin_maven_deps(ctx):
-    """Translate the spoke's `android/build.gradle*` deps to Bazel labels.
-
-    Reads the package's Gradle build file (Groovy `.gradle` or Kotlin
-    `.gradle.kts`), extracts `implementation("group:artifact:...")`
-    coordinates, and maps them via `_MAVEN_COORD_TO_LABEL` to
-    `@rules_android_maven//:...` labels. Coordinates we don't recognize
-    are silently dropped — the plugin's compile may still fail in that
-    case, but the path forward is to add the artifact to the user's
-    `maven.install` and update the table here. Coordinates we
-    deliberately provide elsewhere (`kotlin-stdlib`) are skipped.
-
-    Returns a sorted list of distinct labels.
-    """
-    candidates = (
-        "android/build.gradle.kts",
-        "android/build.gradle",
-    )
     content = ""
-    for cand in candidates:
+    for cand in ("android/build.gradle.kts", "android/build.gradle"):
         p = ctx.path(cand)
         if p.exists:
             content = ctx.read(p)
             break
-    if not content:
-        return []
-    coords = _parse_gradle_deps(content)
-    seen = {}
-    labels = []
-    for coord in coords:
-        if coord in _MAVEN_COORDS_PROVIDED:
-            continue
-        label = _MAVEN_COORD_TO_LABEL.get(coord)
-        if label and label not in seen:
-            seen[label] = True
-            labels.append(label)
-    return sorted(labels)
+    return parse_gradle_maven_dependencies(content)
+
+def _maven_dep_dicts(parsed):
+    """The parsed dependencies as the dicts `maven_deps.json` records."""
+    return [
+        {
+            "kind": d.kind,
+            "coordinate": d.group + ":" + d.artifact,
+            "version": d.version,
+            "line": d.line,
+        }
+        for d in parsed.deps
+    ]
+
+def _write_maven_deps(ctx, deps, errors):
+    """Record the Maven dependencies the Android check of the hub reads.
+
+    Written for every spoke, so the hub's `@<hub>-android_maven` repo can read
+    all of them: empty for a package that is not an Android plugin with
+    sources. For a plugin whose `android/BUILD.bazel` an overlay supplies,
+    the dependencies its Gradle build declares and no errors.
+    """
+    ctx.file("android/maven_deps.json", json.encode({
+        "package": ctx.attr.package_name,
+        "version": ctx.attr.version,
+        "deps": deps,
+        "errors": errors,
+    }) + "\n")
+
+def _make_android_maven_check_only_content(hub_name):
+    """Generate an `android/BUILD.bazel` that only runs the hub's Maven check.
+
+    Emitted when the plugin's Gradle build declares Maven dependencies in a
+    form rules_flutter cannot read. The hub's check fails, listing that line
+    with every other shortfall of the hub's plugins, so this BUILD never needs
+    to define `:lib`. Android builds load this file through the hub's
+    `android/all_android_plugin_libs` aggregator; other platforms never load
+    it.
+    """
+    return (
+        'load("@{hub}-android_maven//:check.bzl", "check")\n\n' +
+        "check()\n"
+    ).format(hub = hub_name)
 
 def _glob_block(srcs_dirs, extensions):
     """Format a `glob([...])` expression covering the given extensions.
@@ -1019,7 +954,8 @@ flutter_plugin(
 def make_android_subpackage_build_content(
         android_src_dir,
         java_package,
-        extra_maven_labels,
+        hub_name = "",
+        maven_deps = [],
         android_manifest = "",
         consumer_proguard_specs = [],
         has_resources = False):
@@ -1067,9 +1003,15 @@ def make_android_subpackage_build_content(
             pubspec.yaml. Used as `custom_package` on the
             `kt_android_library` so the generated `R` and `BuildConfig`
             classes land in the package the plugin's sources expect.
-        extra_maven_labels: Additional `@rules_android_maven//:...`
-            labels parsed from the plugin's `build.gradle*` and translated
-            via `_MAVEN_COORD_TO_LABEL`.
+        hub_name: The pub hub the spoke belongs to; its
+            `@<hub>-android_maven` repo holds the Maven check.
+        maven_deps: The plugin's Maven dependencies as declared in its
+            `build.gradle*`: dicts with `kind` (`"deps"`, `"compile_only"`,
+            `"runtime"`), `coordinate` (`group:artifact`), `version` (string
+            or None) and `line`. When non-empty the generated BUILD runs the
+            hub's check, which compares every plugin's dependencies with
+            `@rules_android_maven` when an Android build loads it, and
+            depends on the artifacts there.
         android_manifest: Path to the plugin's
             `android/src/main/AndroidManifest.xml` if it ships one, or
             empty. When set, the generated `kt_android_library` declares
@@ -1189,29 +1131,52 @@ genrule(
 
     # Base deps every plugin spoke gets: the engine (which carries the
     # FlutterPlugin SPI plus the embedding's androidx compile classpath
-    # via its exports) and the BuildConfig stub. Plugin-specific maven
-    # deps from `extra_maven_labels` are appended, de-duped.
-    base_labels = [
-        ":_engine",
-        ":_build_config",
-    ]
-    seen = {label: True for label in base_labels}
-    all_labels = list(base_labels)
-    for lbl in extra_maven_labels:
-        if lbl not in seen:
-            seen[lbl] = True
-            all_labels.append(lbl)
-    deps_block = "\n        ".join(['"%s",' % label for label in all_labels])
+    # via its exports) and the BuildConfig stub. The plugin's own Maven
+    # artifacts come from `@rules_android_maven`, checked when this file
+    # is loaded (see `plugin_maven_deps`).
+    deps_expr = '[":_engine", ":_build_config"]'
+    maven_loads = ""
+    maven_call = ""
+    compile_only_target = ""
+    runtime_deps_arg = ""
+    if maven_deps:
+        maven_loads = (
+            'load("@{hub}-android_maven//:check.bzl", "check")\n' +
+            'load("@rules_android//android:rules.bzl", "android_library")\n' +
+            'load("@rules_flutter//flutter/private:android_plugin_maven.bzl", "maven_labels")\n'
+        ).format(hub = hub_name)
+        maven_call = """
+# The hub's Maven check: fails, listing everything @rules_android_maven lacks
+# for the hub's Android plugins, if anything is missing or too low.
+check()
+
+_maven = maven_labels({declared})
+""".format(declared = repr(maven_deps))
+        deps_expr += " + _maven.deps"
+        if [d for d in maven_deps if d["kind"] == "compile_only"]:
+            deps_expr += ' + [":_compile_only"]'
+            compile_only_target = """
+# The plugin's compileOnly / provided dependencies: on its compile classpath,
+# not in the APK.
+android_library(
+    name = "_compile_only",
+    neverlink = True,
+    exports = _maven.compile_only,
+    visibility = ["//visibility:private"],
+)
+"""
+        if [d for d in maven_deps if d["kind"] == "runtime"]:
+            runtime_deps_arg = "    runtime_deps = _maven.runtime_deps,\n"
 
     # BuildConfig.java stub — Gradle generates this implicitly per
     # plugin's namespace. rules_android does not, so we hand-emit one.
     bc_package = java_package if java_package else "_unknown"
 
     return """\
-load("@rules_flutter//flutter:android.bzl", "flutter_android_engine")
+{maven_loads}load("@rules_flutter//flutter:android.bzl", "flutter_android_engine")
 load("@rules_java//java:java_library.bzl", "java_library")
 load("@rules_kotlin//kotlin:android.bzl", "kt_android_library")
-
+{maven_call}
 # Private engine target — gives the plugin's Kotlin/Java the FlutterPlugin
 # SPI plus the embedding's androidx dependencies (via the engine's
 # exports) on the compile classpath. Always arm64; Java bytecode is
@@ -1238,14 +1203,12 @@ java_library(
     srcs = [":_build_config_src"],
     visibility = ["//visibility:private"],
 )
-{synthesized_manifest}
+{synthesized_manifest}{compile_only_target}
 kt_android_library(
     name = "lib",
     srcs = {srcs},
-{custom_package}{manifest}{resource_files}{proguard_specs}    visibility = ["//visibility:public"],
-    deps = [
-        {deps}
-    ],
+{custom_package}{manifest}{resource_files}{proguard_specs}{runtime_deps}    visibility = ["//visibility:public"],
+    deps = {deps},
 )
 """.format(
         srcs = srcs_attr,
@@ -1253,7 +1216,11 @@ kt_android_library(
         manifest = manifest_arg,
         resource_files = resource_files_arg,
         proguard_specs = proguard_specs_arg,
-        deps = deps_block,
+        deps = deps_expr,
+        maven_loads = maven_loads,
+        maven_call = maven_call,
+        compile_only_target = compile_only_target,
+        runtime_deps = runtime_deps_arg,
         bc_package = bc_package,
         bc_package_path = bc_package.replace(".", "/"),
         synthesized_manifest = synthesized_manifest,
@@ -1421,9 +1388,9 @@ def _resolve_overlay_template(ctx, overlay_root_label, package_name, version, la
       replacing the empty-stub `kt_android_library(srcs=[])` that
       otherwise fires when a top-level overlay short-circuits the
       regular auto-gen path. Plugins whose Android side needs real
-      sources / extra maven labels (e.g. ones whose Java references
-      transitive deps not in the curated `_MAVEN_COORD_TO_LABEL`)
-      ship this alongside the top-level overlay.
+      sources, or Maven deps the Gradle script declares in a form
+      rules_flutter cannot read, ship this alongside the top-level
+      overlay.
     """
     root = ctx.path(overlay_root_label).dirname
     pkg_dir = root.get_child(package_name)
@@ -1630,6 +1597,15 @@ def _flutter_pub_package_impl(ctx):
         # `@<spoke>//android:lib` uniformly across overlay-and-no-Android
         # plugins (audio_session declares Android sources and ships the
         # full sub-package; objective_c is pure Apple and gets the stub).
+        #
+        # An overlay's Android library still depends on the artifacts the
+        # plugin's Gradle build declares, so they join the hub's check and
+        # its `maven_artifacts` block. Lines the parser cannot read are what
+        # the overlay replaces, so they are not reported.
+        overlay_maven_deps = []
+        if overlay_android_content:
+            overlay_maven_deps = _maven_dep_dicts(_read_plugin_maven_deps(ctx))
+        _write_maven_deps(ctx, overlay_maven_deps, [])
         if overlay_android_content:
             ctx.file("android/BUILD.bazel", overlay_android_content)
         else:
@@ -1638,7 +1614,6 @@ def _flutter_pub_package_impl(ctx):
                 make_android_subpackage_build_content(
                     android_src_dir = "",
                     java_package = "",
-                    extra_maven_labels = [],
                 ),
             )
         return
@@ -1709,7 +1684,7 @@ def _flutter_pub_package_impl(ctx):
         android_info = plugin_block.platforms.get("android", {})
         android_src_dir = ""
         android_java_package = ""
-        android_extra_maven_labels = []
+        android_gradle_maven = None
         android_manifest = ""
         android_consumer_proguard_specs = []
         android_has_resources = False
@@ -1731,7 +1706,7 @@ def _flutter_pub_package_impl(ctx):
                 ""
             )
             if android_src_dir or android_has_resources:
-                android_extra_maven_labels = _resolve_plugin_maven_deps(ctx)
+                android_gradle_maven = _read_plugin_maven_deps(ctx)
                 android_manifest = _detect_android_manifest(ctx)
                 android_consumer_proguard_specs = _detect_consumer_proguard_specs(ctx)
 
@@ -1776,7 +1751,7 @@ def _flutter_pub_package_impl(ctx):
         )
         android_src_dir = ""
         android_java_package = ""
-        android_extra_maven_labels = []
+        android_gradle_maven = None
         android_manifest = ""
         android_consumer_proguard_specs = []
         android_has_resources = False
@@ -1792,7 +1767,7 @@ def _flutter_pub_package_impl(ctx):
         )
         android_src_dir = ""
         android_java_package = ""
-        android_extra_maven_labels = []
+        android_gradle_maven = None
         android_manifest = ""
         android_consumer_proguard_specs = []
         android_has_resources = False
@@ -1806,20 +1781,29 @@ def _flutter_pub_package_impl(ctx):
     # compiles native Android code that autogen cannot translate get a
     # load-time fail() here instead — Android builds break loudly rather
     # than shipping an APK missing the library.
+    maven_deps = []
+    maven_errors = []
+    if android_gradle_maven and not android_native_build:
+        maven_deps = _maven_dep_dicts(android_gradle_maven)
+        maven_errors = android_gradle_maven.errors
     if android_native_build:
         android_build_content = _make_android_native_build_unsupported_content(
             ctx.attr.package_name,
             ctx.attr.version,
         )
+    elif maven_errors:
+        android_build_content = _make_android_maven_check_only_content(ctx.attr.hub_name)
     else:
         android_build_content = make_android_subpackage_build_content(
             android_src_dir = android_src_dir,
             java_package = android_java_package,
-            extra_maven_labels = android_extra_maven_labels,
+            hub_name = ctx.attr.hub_name,
+            maven_deps = maven_deps,
             android_manifest = android_manifest,
             consumer_proguard_specs = android_consumer_proguard_specs,
             has_resources = android_has_resources,
         )
+    _write_maven_deps(ctx, maven_deps, maven_errors)
     ctx.file("android/BUILD.bazel", android_build_content)
 
 flutter_pub_package = repository_rule(

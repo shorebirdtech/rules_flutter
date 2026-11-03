@@ -120,7 +120,6 @@ def _record_android_subpackage_test_impl(ctx):
     content = make_android_subpackage_build_content(
         android_src_dir = "android/src/main",
         java_package = "com.llfbandit.record",
-        extra_maven_labels = [],
         android_manifest = "android/src/main/AndroidManifest.xml",
         has_resources = True,
     )
@@ -176,7 +175,6 @@ def _resources_without_manifest_test_impl(ctx):
     content = make_android_subpackage_build_content(
         android_src_dir = "android/src/main",
         java_package = "dev.example.res_only_manifestless",
-        extra_maven_labels = [],
         android_manifest = "",
         has_resources = True,
     )
@@ -209,17 +207,28 @@ def _no_resources_subpackage_test_impl(ctx):
     content = make_android_subpackage_build_content(
         android_src_dir = "android/src/main",
         java_package = "io.flutter.plugins.urllauncher",
-        extra_maven_labels = ["@rules_android_maven//:androidx_browser_browser"],
+        hub_name = "deps",
+        maven_deps = [
+            {"kind": "deps", "coordinate": "androidx.browser:browser", "version": "1.8.0", "line": ""},
+            {"kind": "compile_only", "coordinate": "androidx.annotation:annotation", "version": None, "line": ""},
+            {"kind": "runtime", "coordinate": "androidx.core:core", "version": None, "line": ""},
+        ],
         android_manifest = "android/src/main/AndroidManifest.xml",
         has_resources = False,
     )
 
     asserts.false(env, "resource_files" in content, content)
-    asserts.true(
-        env,
-        '"@rules_android_maven//:androidx_browser_browser",' in content,
-        "gradle-declared deps must still be wired:\n" + content,
-    )
+    for needle in [
+        'load("@deps-android_maven//:check.bzl", "check")',
+        'load("@rules_flutter//flutter/private:android_plugin_maven.bzl", "maven_labels")',
+        "check()",
+        "_maven = maven_labels(",
+        "deps = [\":_engine\", \":_build_config\"] + _maven.deps + [\":_compile_only\"],",
+        "runtime_deps = _maven.runtime_deps,",
+        "exports = _maven.compile_only,",
+        "neverlink = True,",
+    ]:
+        asserts.true(env, needle in content, needle + " missing:\n" + content)
 
     return unittest.end(env)
 
@@ -232,7 +241,6 @@ def _empty_subpackage_test_impl(ctx):
     content = make_android_subpackage_build_content(
         android_src_dir = "",
         java_package = "",
-        extra_maven_labels = [],
     )
 
     asserts.true(env, "srcs = []" in content, content)

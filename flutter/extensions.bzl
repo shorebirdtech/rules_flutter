@@ -14,6 +14,7 @@ effectively overriding the default named toolchain due to toolchain resolution p
 
 load("@rules_dart//dart/ext:registry.bzl", "curated_code_assets")
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_lock")
+load("//flutter/private:android_plugin_maven.bzl", "flutter_android_maven")
 load("//flutter/private:flutter_gen_l10n_repo.bzl", "flutter_gen_l10n_repo")
 load("//flutter/private:flutter_pub_lock_hub.bzl", "flutter_pub_lock_hub")
 load("//flutter/private:flutter_pub_package.bzl", "flutter_pub_package")
@@ -239,6 +240,19 @@ def _toolchain_extension(module_ctx):
                     hub_name = hub_name,
                     lock_packages = all_package_names,
                 )
+
+            # The hub's Android Maven check: what every hosted spoke's Gradle
+            # build declares against what `@rules_android_maven` resolved. A
+            # spoke's `android/` package loads it, so only Android builds
+            # fetch it. The dash keeps its name from any `<hub>__<pkg>` spoke.
+            flutter_android_maven(
+                name = hub_name + "-android_maven",
+                hub_name = hub_name,
+                spokes = [
+                    "@{}__{}//android:maven_deps.json".format(hub_name, name)
+                    for name in sorted(hosted.keys())
+                ],
+            )
 
             # Create hub repo with aliases for all packages plus the
             # Android plugin-libs aggregator. flutter.pub() always uses

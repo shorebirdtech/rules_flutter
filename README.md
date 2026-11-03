@@ -193,6 +193,48 @@ flutter_application(
 
 Plugins need no special treatment. A pub package that is a Flutter plugin arrives as a plugin target, and the platform macros register it and build its native code. On Android the hub also exposes `@deps//android:all_android_plugin_libs`, the Kotlin and Java of every plugin, and `flutter_android_app` adds it to the APK for you.
 
+#### Plugins' Maven dependencies
+
+A plugin's `android/build.gradle(.kts)` declares the Maven artifacts its Kotlin or Java compiles against, such as `androidx.datastore:datastore` for `shared_preferences_android`. Those come from the same place as the embedding's androidx libraries: the `maven.install(name = "rules_android_maven")` in your root `MODULE.bazel`. That is one resolution for the whole app, so there is one version of each artifact, and when two plugins want different versions the highest wins, as it does under Gradle.
+
+rules_flutter reads these Gradle forms:
+
+- `implementation`, `api` and `compile` (on the compile and runtime classpath), `compileOnly` and `provided` (compile only), and `runtimeOnly`. Test, `androidTest`, lint and `classpath` lines are ignored.
+- A single string literal `"group:artifact:version"`, in single or double quotes, with or without parentheses. A `:classifier` or `@packaging` suffix is dropped.
+- A version written `$x` or `${x}` takes its value from a string defined in the same file with `def x = "..."`, `val x = "..."`, `var x = "..."`, `ext.x = "..."` or `ext["x"] = "..."`. A variable it cannot find, or a dynamic version (`1.+`, `[1.0,2.0)`, `latest.release`), only checks that the artifact is present, whatever its version.
+- `org.jetbrains.kotlin:kotlin-stdlib*` and `io.flutter:*` are skipped: the Kotlin rules and the engine provide them.
+
+When an artifact is missing from the install, or resolves lower than a plugin declares, the Android build fails when it loads the plugin, and one message lists every such artifact for every plugin of the hub, with the packages that declare it:
+
+```
+"androidx.datastore:datastore:1.1.7",  # declared by package:shared_preferences_android 2.4.28; missing
+"androidx.core:core:1.17.0",  # declared by package:url_launcher_android 6.3.29; resolves 1.0.0
+```
+
+Add those lines to `artifacts = [...]` and re-pin the install's lock file:
+
+```sh
+REPIN=1 bazel run @rules_android_maven//:pin
+```
+
+`bazel run @deps//android:maven_artifacts` (with your hub's name for `deps`) prints the complete block for every plugin, marking the entries that are missing or too low. Only Android builds read any of this; a web or desktop build never fetches it.
+
+Coursier, which resolves the install, is stricter than Gradle about exact version ranges. For example, `androidx.preference:preference:1.2.1`, which `shared_preferences_android` needs, depends on `androidx.fragment:fragment` as `[1.3.6]`, an exact version, while other artifacts want a higher one. Gradle lets the higher version win; Coursier reports a conflict. The fix is to name the version you want for each artifact in the error and force it:
+
+```starlark
+maven.artifact(
+    name = "rules_android_maven",
+    artifact = "fragment",
+    force_version = True,
+    group = "androidx.fragment",
+    version = "1.8.9",
+)
+```
+
+`e2e/plugin_example/MODULE.bazel` does this for `activity`, `fragment`, `lifecycle-runtime`, `lifecycle-viewmodel` and `savedstate`.
+
+A dependency written any other way (a version catalog entry such as `libs.foo`, `project(...)`, `platform(...)`, `files(...)`, Groovy map notation, a trailing `{ exclude ... }` block, `kapt`, `ksp`, `annotationProcessor`, `coreLibraryDesugaring`, or a `debugImplementation`-style variant configuration) is listed in the same message as a line rules_flutter cannot translate. For such a package, supply a plugin overlay with `flutter.plugin_overlays`: a `BUILD.bazel.tpl` for the package and an `android/BUILD.bazel.tpl` that declares its Android library and the `@rules_android_maven` labels it needs. The `android/` template is used only beside the top-level one.
+
 Permissions a plugin declares in its own manifest, such as `record_android`'s `RECORD_AUDIO`, reach the app's manifest as they do under Gradle. You don't need `--merge_android_manifest_permissions`.
 
 ### Regenerating pubspec.lock

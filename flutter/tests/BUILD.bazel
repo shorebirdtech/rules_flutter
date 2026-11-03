@@ -1,4 +1,5 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
+load(":android_plugin_maven_test.bzl", "android_plugin_maven_test_suite")
 load(":app_defines_test.bzl", "app_defines_test_suite")
 load(":app_entrypoint_test.bzl", "app_entrypoint_test_suite")
 load(":apple_engine_test.bzl", "apple_engine_test_suite")
@@ -68,6 +69,8 @@ flutter_info_test_suite(name = "flutter_info_test")
 flutter_library_test_suite(name = "flutter_library_test")
 
 flutter_plugin_test_suite(name = "flutter_plugin_test")
+
+android_plugin_maven_test_suite(name = "android_plugin_maven_test")
 
 flutter_pub_package_test_suite(name = "flutter_pub_package_test")
 

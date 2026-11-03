@@ -25,6 +25,7 @@ exports_files(
         # reach it through that target rather than by file label.
         "flutter_test_runner.dart",
         "bazel_test_protocol.dart",
+        "print_report.dart",
     ],
     visibility = ["//flutter:__subpackages__"],
 )

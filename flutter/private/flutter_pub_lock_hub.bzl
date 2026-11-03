@@ -58,6 +58,20 @@ alias(
         "android/BUILD.bazel",
         """\
 load("@rules_kotlin//kotlin:android.bzl", "kt_android_library")
+load("@{hub}-android_maven//:check.bzl", "check")
+
+# Fails, listing every Maven artifact the hub's Android plugins declare that
+# @rules_android_maven lacks or resolves too low. The spokes run it too; here
+# it also covers plugins whose Android library an overlay supplies.
+check()
+
+# Prints every Maven artifact the hub's Android plugins declare, ready to
+# paste into the root module's maven.install(name = "rules_android_maven").
+alias(
+    name = "maven_artifacts",
+    actual = "@{hub}-android_maven//:maven_artifacts",
+    visibility = ["//visibility:public"],
+)
 
 # Aggregator — re-exports every spoke's `android:lib`. Spokes without
 # Android sources contribute empty libraries (a no-op at link time).
@@ -75,7 +89,7 @@ kt_android_library(
     visibility = ["//visibility:public"],
     exports = [{deps}],
 )
-""".format(deps = deps_block),
+""".format(deps = deps_block, hub = ctx.attr.hub_name),
     )
 
 flutter_pub_lock_hub = repository_rule(
