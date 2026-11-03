@@ -3,7 +3,18 @@ library;
 
 import 'dart:io';
 
+import 'package:runfiles/runfiles.dart';
+
 import 'runfiles_paths.dart';
+
+/// The environment variable a test is told its `adb` by: the runfiles path of
+/// the Android SDK's `adb` that Bazel resolved, which a `dart_test` sets as
+///
+/// ```
+/// data = ["@androidsdk//:adb", ...],
+/// env = {"ADB_RUNFILE": "$(rlocationpath @androidsdk//:adb)"},
+/// ```
+const adbRunfileEnv = 'ADB_RUNFILE';
 
 /// An app on a connected emulator or device, driven through `adb`.
 ///
@@ -11,18 +22,25 @@ import 'runfiles_paths.dart';
 /// [watchStability]; what the test then asserts of the app's log is its own.
 /// A step that fails prints `FAIL: ...`, stops the app and exits 1.
 class AdbApp {
-  /// An app with [packageName] whose APK is at [apkPath].
-  AdbApp({required this.packageName, required this.apkPath});
+  /// An app with [packageName] whose APK is at [apkPath], driven through the
+  /// `adb` at [adbPath].
+  AdbApp({
+    required this.packageName,
+    required this.apkPath,
+    required this.adbPath,
+  });
 
-  /// The APK at [workspacePath] in the test's runfiles.
+  /// The APK at [workspacePath] in the test's runfiles, driven through the
+  /// Android SDK's `adb` that the test's [adbRunfileEnv] names.
   ///
-  /// Exits 1 if it is missing.
+  /// Exits 1 if either is missing.
   factory AdbApp.fromRunfiles(
     String workspacePath, {
     required String packageName,
   }) => AdbApp(
     packageName: packageName,
     apkPath: requireRunfile(workspacePath, what: 'APK'),
+    adbPath: _adbFromRunfiles(),
   );
 
   /// The application id.
@@ -31,15 +49,14 @@ class AdbApp {
   /// The APK to install.
   final String apkPath;
 
-  /// Runs `adb` with [args].
-  ProcessResult adb(List<String> args) => Process.runSync('adb', args);
+  /// The `adb` executable.
+  final String adbPath;
 
-  /// Exits 1 unless `adb` is on the `PATH` and a device is connected.
+  /// Runs `adb` with [args].
+  ProcessResult adb(List<String> args) => Process.runSync(adbPath, args);
+
+  /// Exits 1 unless a device is connected.
   void requireDevice() {
-    if (Process.runSync('which', ['adb']).exitCode != 0) {
-      stderr.writeln('adb not found in PATH');
-      exit(1);
-    }
     final devices = adb(['devices']).stdout
         .toString()
         .trim()
@@ -211,4 +228,28 @@ class AdbApp {
     stdout.writeln('Screenshot saved to $local');
     return local;
   }
+}
+
+/// The `adb` at the runfiles path [adbRunfileEnv] holds. Exits 1 if the test
+/// was not given one or nothing is there, naming what to set.
+String _adbFromRunfiles() {
+  final rlocationPath = Platform.environment[adbRunfileEnv];
+  if (rlocationPath == null || rlocationPath.isEmpty) {
+    stderr.writeln(
+      '\$$adbRunfileEnv is not set: the test target needs '
+      '`data = ["@androidsdk//:adb"]` and '
+      '`env = {"$adbRunfileEnv": "\$(rlocationpath @androidsdk//:adb)"}`',
+    );
+    exit(1);
+  }
+  final path = Runfiles.create().rlocation(rlocationPath);
+  if (!File(path).existsSync()) {
+    stderr.writeln(
+      'adb not found at $path (from \$$adbRunfileEnv=$rlocationPath): the '
+      'Android SDK at ANDROID_HOME needs its platform-tools package '
+      '(`sdkmanager platform-tools`)',
+    );
+    exit(1);
+  }
+  return path;
 }

@@ -400,7 +400,13 @@ dart_test(
     name = "verify_android_app_test",
     # The fat APK installs on whichever device is attached, the Pixel or an
     # x86_64 emulator.
-    data = [":plugin_android_fat"],
+    data = [
+        ":plugin_android_fat",
+        "@androidsdk//:adb",
+    ],
+    # The `adb` of the Android SDK Bazel resolved, so the test needs nothing
+    # on `PATH`.
+    env = {"ADB_RUNFILE": "$(rlocationpath @androidsdk//:adb)"},
     main = "test/verify_android_app_test.dart",
     tags = [
         "android",

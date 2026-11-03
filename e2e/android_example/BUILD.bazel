@@ -302,7 +302,13 @@ dart_test(
 
 dart_test(
     name = "verify_android_app_test",
-    data = [":app"],
+    data = [
+        ":app",
+        "@androidsdk//:adb",
+    ],
+    # The `adb` of the Android SDK Bazel resolved, so the test needs nothing
+    # on `PATH`.
+    env = {"ADB_RUNFILE": "$(rlocationpath @androidsdk//:adb)"},
     main = "test/verify_android_app_test.dart",
     tags = [
         "exclusive",
