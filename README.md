@@ -32,7 +32,7 @@ If `flutter build` works for you, here is what Bazel adds:
 
 | Platform | What you need |
 |---|---|
-| All | Bazel 9 or newer. The rules download Flutter 3.47.7 themselves. |
+| All | Bazel 9 or newer. The rules download Flutter 3.47.8 themselves. |
 | macOS | Xcode, for `rules_apple` and `rules_swift`. |
 | iOS | Xcode. The simulator needs no signing identity. A physical device does; see [Running on an iOS device](#running-on-an-ios-device). |
 | Android | The Android SDK and NDK, with `ANDROID_HOME` and `ANDROID_NDK_HOME` set. See [Android](#android). |
@@ -46,7 +46,7 @@ If `flutter build` works for you, here is what Bazel adds:
 bazel_dep(name = "rules_flutter", version = "<latest from registry.bazel.build/modules/rules_flutter>")
 
 flutter = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter")
-flutter.toolchain(flutter_version = "3.47.7")
+flutter.toolchain(flutter_version = "3.47.8")
 flutter.pub(
     name = "deps",
     lock = "//:pubspec.lock",
@@ -84,6 +84,28 @@ startup --windows_enable_symlinks
 ```
 
 Without the Java settings you get `UnsupportedClassVersionError` when an action runs, or `could not locate class file for java.lang.Record` when one compiles.
+
+One more is recommended:
+
+```bazelrc
+# Share identical work between configurations, where Bazel can sandbox.
+common --enable_platform_specific_config
+common:linux --experimental_output_paths=strip
+common:macos --experimental_output_paths=strip
+```
+
+A Flutter build reaches the same work in several configurations: each Android ABI compiles the same release kernel and bundles the same assets, `-c dbg` and `-c fastbuild` run the same codegen, and platform transitions give one target several output directories. Bazel keys an action by its paths, so each configuration's copy normally runs again. With this flag, Bazel rewrites `bazel-out/<config>/bin` to `bazel-out/cfg/bin` in every action that declares it can run that way, and the copies after the first are cache hits. rules_flutter's actions all declare it. The rewrite needs a sandbox or remote execution, so actions with `local` or `no-sandbox` tags run as before. Windows has no sandbox, and there Bazel fails a path-mapped action (`requires sandboxing due to path mapping`) rather than run it unmapped, so leave the flag off on Windows. Outputs still land in their own configuration's directory, so nothing that reads `bazel-out` changes.
+
+A debug build's kernel is the one action that does not share across configurations: it carries the path of its `flutter_assets/`, which is how `flutter_bazel` tells an app's configurations apart.
+
+rules_flutter also works with Bazel's automatic execution groups:
+
+```bazelrc
+# Run each action where the toolchain it uses is registered.
+common --incompatible_auto_exec_groups
+```
+
+With it, Bazel places each action by the toolchain it names rather than by every toolchain its rule uses, which matters once you register execution platforms of more than one kind (a Linux remote worker beside your Mac, say). rules_flutter's actions land the same with the flag on or off: `gen_snapshot` for iOS and macOS, Xcode tools and signing run on a Mac; kernel compiles, asset and shader bundling and web compiles run on any host with the Flutter SDK; stripping the Android engine runs on the machine running Bazel, where its NDK is. An Android app needs fixes to rulesets it builds with, because rules_android 0.8.0, protobuf 34 and rules_go have actions the flag rejects or places on the wrong host: copy the three `single_version_override` patches in [`e2e/android_example/MODULE.bazel`](e2e/android_example/MODULE.bazel) into your own `MODULE.bazel`. Once you register an execution platform other than your machine, also copy its `archive_override` patch for rules_android_ndk, which keeps the local NDK's tools on the machine that has it.
 
 ### Your first app
 
@@ -222,6 +244,29 @@ flutter_application(
 
 If you would rather bind with `@Native(assetId: ...)` and let the Dart VM find the library, declare it as a Native Asset with `flutter_native_asset` from `@rules_flutter//flutter:native_assets.bzl`, and carry it on a `flutter_plugin`. `e2e/ffi_example` shows both styles side by side.
 
+#### Choosing the library that serves an asset id
+
+A package that owns an asset id supplies its library through its `code_assets`. An application or a `flutter_test` can serve the id from a different library by naming one in its own `code_assets`, which replaces whatever its `deps` supply under that id, as on rules_dart's `dart_binary` and `dart_test`. Several ids can name one library. That is how two bridges linked into one shared library run against one copy of it:
+
+```starlark
+cc_shared_library(
+    name = "combined",
+    deps = ["//bridge_a:native", "//bridge_b:native"],
+)
+
+dart_code_asset(name = "a_combined", asset_id = "package:a/a", shared_library = ":combined")
+dart_code_asset(name = "b_combined", asset_id = "package:b/b", shared_library = ":combined")
+
+flutter_application(
+    name = "my_app",
+    code_assets = [":a_combined", ":b_combined"],
+    deps = ["//a", "//b", "@deps//:flutter"],
+    # ...
+)
+```
+
+The library is bundled once (one file, or one `.framework` on iOS) and every id's manifest entry names it, so the process loads one image of it: one runtime and one copy of its static state, whichever id a call goes through. Wrap each entry in a `flutter_native_library` to give each id the contract of its own bindings; the wrappers of one library may name a `hot_patch` between them, and if several do, it must be the same one, since one patch of the shared library serves every id.
+
 #### Hot reload across a native rebuild
 
 A running process cannot pick up a rebuilt native library; it keeps the one it already loaded. So when a native library goes stale under a hot reload, the dev tool has to decide whether the Dart it is about to inject still matches that library. Without more information it withholds the reload, and a pending native change blocks your Dart edits until you restart.
@@ -243,6 +288,25 @@ flutter_application(
     # ...
 )
 ```
+
+A library that reaches Dart as a code asset (a target providing rules_dart's `DartCodeAssetInfo`, loaded through `@Native`) is wrapped the same way. The wrapper is itself that code asset, so it goes where the bare asset would have gone: in the `code_assets` of the package that owns the asset id, whether that package is a `flutter_plugin`, a `flutter_library` or a `dart_library`.
+
+```starlark
+flutter_native_library(
+    name = "bridge",
+    library = "@my_bridge//bridge:bridge_code_asset",
+    binding_contract = ["@my_bridge//bridge:codegen.ir"],
+)
+
+dart_library(
+    name = "my_bridge_bindings",
+    package_name = "my_bridge_bindings",
+    srcs = ["lib/bindings.dart"],
+    code_assets = [":bridge"],
+)
+```
+
+The build finds a code asset's target however the package that owns it is reached. A package rule that makes its asset with no target of its own leaves nothing to find, so hot reload could not tell when that library changes: a debug build of the application fails, naming the library. Declare the asset with a target of its own (a `dart_code_asset`, or a `flutter_native_library` wrapping one) and name it in the application's `code_assets`. Other builds bundle it as usual.
 
 `binding_contract` is whatever file decides what may be called and how: a binding generator's interface description, or the C header a hand-written FFI binding follows. The dev tool compares the bytes of those files and nothing else, so what matters is that every change to the wire format shows up in them, and that changes which do not affect the wire do not.
 
@@ -707,6 +771,7 @@ bazel build //:my_app_android
 |---|---|
 | `application` | A `flutter_application` target. Required. |
 | `package_name` | The Android package name, for example `"com.example.myapp"`. Required. |
+| `namespace` | The package the runner's code declares (Gradle's `namespace`). Relative class names in the manifest (`.MainActivity`, `.sub.Receiver`, `MainActivity`) are written out in full against it, as AGP does. Defaults to `package_name`. |
 | `app_name` | Display name. Defaults to the target name. |
 | `android_abi` | `"arm64"` (default) or `"x64"`. Selects the engine and the Android platform. |
 | `min_sdk_version` | Minimum Android SDK version. |
@@ -919,6 +984,8 @@ Unlike the other platforms, the web macro takes `main` and `deps` directly rathe
 
 The macro always compiles with dart2wasm and renders with skwasm. Compiler settings such as `optimization_level_wasm` and `minify_wasm` pass through to `flutter_web_bundle`. For dart2js or CanvasKit, use `flutter_web_bundle` directly.
 
+An optimizing wasm compile (`-O1` and up, the default outside debug) reserves 4 cores, and its optimizer uses no more. `--@rules_flutter//flutter:wasm_opt_cores=N` changes both. Fewer lets several web apps compile at once where Bazel has few cores to hand out; more makes one compile finish sooner. The output is the same either way.
+
 The files under `web/` are treated as templates and substituted the way `flutter build web` substitutes them, so raw `flutter create` output works unchanged: `web/index.html`, `web/flutter_bootstrap.js`, `web/manifest.json`, and `web/version.json` are each discovered when present, and everything else under `web/` is copied into the bundle root.
 
 <details>
@@ -962,6 +1029,24 @@ The dev loop needs `'unsafe-inline'`. Adding `'unsafe-eval'` instead changes not
 A bundle served under `default-src 'self'` must also serve its own renderer, with `use_local_canvaskit = True`. Otherwise the engine's fetch of `skwasm.js` from `www.gstatic.com` is blocked and the page stays blank. Flutter's font fallback from `fonts.gstatic.com` is blocked too, which is harmless unless the app needs those glyphs.
 
 So a policy strict enough to be useful cannot live in `web/index.html` today, because the dev loop reads the same file. If you need one, compose `flutter_web_bundle` directly with a generated `index_html` for the production bundle.
+
+#### Cross-origin isolation
+
+skwasm runs its renderer on threads only in a cross-origin-isolated page, which needs two response headers: `Cross-Origin-Opener-Policy: same-origin` and a `Cross-Origin-Embedder-Policy`. `flutter_bazel run --wasm` sends both, and so must whatever serves the deployed bundle. The embedder policy is the app's choice, set once on the target:
+
+```starlark
+flutter_web_app(
+    name = "app",
+    package_name = "my_app",
+    deps = [...],
+    cross_origin_embedder_policy = "credentialless",  # default "require-corp"
+)
+```
+
+- **`require-corp`** (the default) isolates the page in every browser. It blocks a cross-origin subresource, such as an image from a CDN, unless that response carries a `Cross-Origin-Resource-Policy` header or is fetched with CORS. Flutter's own load of the skwasm renderer from `www.gstatic.com` passes.
+- **`credentialless`** loads such subresources without cookies instead of blocking them. Chrome and Firefox isolate the page under it; Safari does not, so skwasm runs single-threaded there. Upstream `flutter run` always sends this one.
+
+The dev tool reads the value from `<bundle>.serving.json`, which the build writes beside the bundle directory rather than inside it, so it is not deployed. `--no-cross-origin-isolation` turns both headers off for a run, and `--web-header` can then set your own.
 
 ### Cross-compiling
 
@@ -1146,7 +1231,16 @@ flutter_test(
 
 It takes the compile attributes of `flutter_application` (`main`, `srcs`, `deps`, `defines`, `package_name`, `language_version`, `assets`, `shaders`) plus the usual `data` and `env`. Values in `env` are literal; there is no `$(location)` expansion.
 
+A test runs where its target runs, as a `cc_test` does: its `deps`, native code included, and the `flutter_tester` that runs it are built for the target platform, and Bazel's default test toolchain runs it on an execution platform matching that platform. On a Mac that is the Mac. To run tests on other machines, a Linux remote worker say:
+
+- **`--platforms`** builds every test for that platform, so Bazel runs them on an execution platform matching it.
+- **A platform transition** does the same for one test: wrap it in `platform_transition_test` from `@bazel_lib//lib:transitions.bzl` with `target_platform` set, and tag the wrapped `flutter_test` `manual`. `e2e/codegen`'s `:transitioned_native_asset_test` is one.
+- **`exec_group_compatible_with = {"test": [...]}`** narrows the execution platforms a test may run on, and execution-requirement tags such as `no-remote-exec` keep it local. A test whose result depends on the machine, such as a golden, and one that loads an FFI library from `data`, are pinned this way.
+- **A toolchain for `@bazel_tools//tools/test:default_test_toolchain_type`** registered in your root module changes where every test rule's tests may run, `flutter_test` included, as it does for `cc_test`. A test sent to a machine other than the one it was built for fails when it starts there, as a `cc_test` does.
+
 `enable_impeller = True` renders with Impeller in `flutter_tester`, as `flutter test --enable-impeller` does, instead of software Skia. A test that draws a shader SkSL cannot compile needs it, and so does a golden meant to match an Impeller device. Shaders are compiled for `flutter_tester` either way, with the SkSL and Vulkan stages `flutter test` gives them.
+
+A `flutter_test_config.dart` wraps the suite as it does under `flutter test`: its `testExecutable(FutureOr<void> Function() testMain)` is handed the suite and runs it, so setup shared by every test in a directory lives in one file. The config used is the nearest one walking up from `main`'s directory, and the walk ends after the directory holding `pubspec.yaml`. Bazel can see only the BUILD file's own package, so the walk also ends there; name a config above it with `test_config = "//path:flutter_test_config.dart"`. The config is compiled into the test like its `main`, and its imports come from the test's `deps`.
 
 Bazel's test protocol applies, as it does to `dart_test`:
 
@@ -1184,6 +1278,33 @@ Two limits come from Flutter rather than from these rules:
 
 - **Goldens are host-specific.** Font rendering and antialiasing differ between operating systems, so a PNG generated on macOS may not match on Linux or Windows. Regenerate on the platform that checks them, or keep per-OS golden directories.
 - **Replacing the comparator disables regeneration.** If a test assigns its own `goldenFileComparator`, `--update-goldens` calls that object's `update()`, which for `LocalFileComparator` writes into runfiles. The run passes, prints nothing, and leaves the source PNG unchanged.
+
+### flutter_tester_binary
+
+Runs a program under `flutter_tester`, the headless engine `flutter_test` uses, as an ordinary executable rather than a test. Use it to make build outputs with Flutter's rendering, such as store screenshots: the outputs do not have to be `testonly`. It is compiled as `flutter_test` compiles a test and takes the same attributes, `enable_impeller` included.
+
+```starlark
+flutter_tester_binary(
+    name = "render",
+    package_name = "my_app",
+    main = "tool/render.dart",
+    enable_impeller = True,
+    deps = ["//:my_app_lib", "@deps//:flutter", "@deps//:flutter_test"],
+)
+
+genrule(
+    name = "screenshot",
+    outs = ["screenshot.png"],
+    cmd = "OUT=$@ $(execpath :render)",
+    tools = [":render"],
+)
+```
+
+The program is written as a test suite, because `flutter_tester` draws frames through `package:flutter_test`'s binding: its work is the bodies of its `testWidgets` and `test` calls, and `tester.pumpWidget`, `tester.view` and `RenderRepaintBoundary.toImage` work as they do in a test. The binary exits 0 when every case passes and 1 when one fails, so a failed render fails the action. A case that runs past five minutes is stopped as wedged.
+
+The program sees the environment it was started with and runs in the working directory it was started in, which for a build action is the exec root, so it can be handed paths of the action's inputs and outputs. Native Assets load from any working directory. Arguments are not passed to the program.
+
+Build it for the machine it runs on. `bazel run` does that, and a rule that runs it in an action takes it as an executable attribute with `cfg = "exec"`, as `genrule` takes `tools`. With `enable_impeller = True` it needs that machine's GPU, so keep such an action off remote executors (`execution_requirements = {"no-remote-exec": "1"}`).
 
 ### flutter_plugin
 
@@ -1345,7 +1466,7 @@ sdk = ctx.toolchains["@rules_flutter//flutter:toolchain_type"].flutter_sdk_info
 
 | Field | Type | Description |
 |---|---|---|
-| `version` | `str` | The Flutter SDK version, for example `"3.47.7"`. |
+| `version` | `str` | The Flutter SDK version, for example `"3.47.8"`. |
 | `engine_revision` | `str` | The engine commit hash. |
 | `dart` | `File` | The `dart` executable from the bundled Dart SDK. |
 | `dartaotruntime` | `File` | The runtime for AOT snapshots. |
@@ -1557,6 +1678,14 @@ On stderr, the tool prints the channel's record. Under `LOG_FORMAT=json` it is o
     "url":"http://localhost:PORT/command?token=...", ...}, ...]}
 ```
 
+The channel's record lists the per-app endpoints as templates, with `{appId}` in the path. Once an app is up, a `session_ready` record names it and carries those endpoints again with the id filled in, next to `uri` and `token`, so a client reading stderr has everything in one line:
+
+```json
+{"message":"session_ready","appId":"___my_app_macos_macOS","uri":"http://localhost:PORT","token":"...",
+ "endpoints":[{"method":"GET","path":"/sessions/___my_app_macos_macOS/logs",
+   "url":"http://localhost:PORT/sessions/___my_app_macos_macOS/logs?token=..."}, ...]}
+```
+
 On stdout, the protocol stream starts with `daemon.connected` and then reports `app.start`, `app.started`, and the rest.
 
 **What counts as protocol on stdout.** A line is a protocol message if and only if it is a `[{…}]` envelope. Anything else is passthrough output that a client should show to the user rather than parse. That is upstream's convention too, and it is what makes `bazel run` safe here: bazel forwards a successful action's stdout, so a run that first has to rebuild the tool prints a line like `Generated: /…/flutter_bazel` before the first envelope.
@@ -1583,6 +1712,7 @@ A `--machine` client does not need the endpoint. It receives the list in `daemon
 
 The commands, once the app is up:
 
+- **Reading the screen:** `app.dumpSemanticsTree`, the whole accessibility tree in one answer. See [Reading the semantics tree](#reading-the-semantics-tree).
 - **Widget driving:** `app.dumpWidgetTree`, `app.tap`, `app.longPress`, `app.doubleTap`, `app.drag`, `app.hover`, `app.hoverExit`, `app.setWindowActive`, `app.scrollIntoView`, `app.enterText`, `app.getText`, `app.getRect`, `app.waitFor`, `app.waitForAbsent`, `app.pageBack`, `app.settle`. These are served by extensions the app registers before `main()` on every launch, so they survive hot restart.
 - **Keys:** `app.pressKey`, on every run, including `--wasm` and `--profile` web runs. See [Pressing keys](#pressing-keys).
 - **Lifecycle:** `app.hotReload`, `app.restart`, `app.stop`, `daemon.shutdown`.
@@ -1595,6 +1725,38 @@ The commands, once the app is up:
 **A web run without a VM service offers no widget driving.** `--wasm`, `--profile`, and `--no-hot` serve a bundle built by dart2wasm or dart2js, where `registerExtension` is a stub and there is no service to dispatch through. The commands are absent from `/commands` rather than present and refusing, and the run says so once at startup as an `agent_surface_unavailable` log record. Such a run can still serve `app.pressKey`, `/logs`, `screenshot/native`, and `app.restart`. To drive the widget tree on the web, run the DDC dev loop: neither `--wasm` nor `--profile`.
 
 **Commands issued early wait.** `app.started` means `main()` has begun, which is what upstream's protocol means by it, and an app that has begun running has not built a widget tree yet. On `-d chrome` the gap is DWDS, which holds `main()` until the browser has connected. On an iPhone the gap is the app's own start, measured at 61 seconds after `app.started` for a debug build. A command sent in that window waits it out rather than failing, so you can fire on `app.started` without a readiness poll. The wait is reported as an `app.progress` pair — "Waiting for the app to render its first frame" opening it, and what the wait found closing it, so a client reading the stream can tell a frame that arrived from one that never did. An app that never paints is refused with a reason rather than a bare timeout. Waiting for a specific widget is still yours to ask for, with `app.waitFor`.
+
+#### Reading the semantics tree
+
+`app.dumpSemanticsTree` returns the app's accessibility tree as text: every node a screen reader would see, with its label, state, actions and where it is. It takes `appId` and nothing else, and answers `{"text": …}`, with `notRendering` when the app is not drawing frames and `frameMissed` when a frame pending at the time did not finish within 5 seconds, so the tree is from before it. It is the cheapest way to read a whole screen, and unlike a picture it says what each control is and where to tap it. Measured on `hello_world`: the dump is 1,135 bytes, which we estimate at 300 to 600 tokens. A screenshot costs, by Anthropic's published rule of width × height / 750 after scaling to fit 1568 pixels and 1.15 megapixels, about 670 tokens for the 800x632 macOS window at 1x and about 1,500 for the 1260x2736 iOS simulator or the 1080x2424 Pixel.
+
+```sh
+curl -s -X POST "$URI/command?token=$T" \
+  -d '{"method":"app.dumpSemanticsTree","params":{"appId":"'$APP'"}}' | jq -r .result.text
+```
+
+```
+view 0 800x600 @1x
+#3 scopesRoute @400,300 800x600
+  #30 header "Hello World" @400,28 120x28
+  #6 "count: 0" @400,254 56x20
+  #7 button "Increment (agent)" [tap] @400,280 171x32
+  #8 textField [tap] @400,320 200x48
+  #27 [scrollUp] @400,444 200x80
+    #13 "item 0" @400,416 200x24
+    #17 hidden "item 4"
+  #31 button tooltip="Increment" [tap] @756,556 56x56
+```
+
+Each view starts with a `view <id> <width>x<height> @<pixel ratio>x` line. Each node line is `#<id>`, then the node's role and flags, then its strings (`"label"`, `value=`, `hint=`, `tooltip=`, and `id=` for a `Semantics.identifier`), then its actions in brackets, then `@x,y`, the centre of the node in logical pixels, and its size. Indentation is nesting, and nodes come in the order a screen reader walks them. Flags are Flutter's names without `is` (`button`, `textField`, `header`, `obscured`, `readOnly`, `focused`), with each state pair folded into one word: `checked`, `unchecked` or `mixed`; `on` or `off`; `selected` on the one that is; `expanded` or `collapsed`; `disabled` for a control that is not enabled. `hidden` marks a node scrolled out of view. It has no `@` point, because its rect lies under whatever is drawn there: scroll it into view, then dump again.
+
+Some nodes are left out. A node that carries nothing but its children is dropped and its children move up a level. A node merged into its parent is dropped too, because its text and actions are already on the parent's line, which is how a screen reader sees it. Actions every focusable node has (`focus`, `showOnScreen`, cursor movement) are not listed.
+
+To act on a node, pass its point to the pointer commands: `app.tap` with `"x"` and `"y"` set to the `@` values. A node with a label can also be named with the `semanticsLabel` selector, for `getRect`, `waitFor` and the rest. To type into a field, tap it and then call `app.enterText` with no selector. Node ids are not selectors: they last only while the widget that produced the node does.
+
+This is not Flutter's own `debugDumpSemanticsTree` text. That text gives each rect in its parent's coordinates, some behind a transform matrix, so it does not say where to tap, and on `hello_world` it is 8,198 bytes, seven times the size. Flutter still serves it through its `ext.flutter.debugDumpSemanticsTreeInTraversalOrder` extension, in DevTools or over the VM service, once semantics are on.
+
+Semantics are off in a Flutter app until something asks for them. The first agent command of any kind turns them on and keeps them on until the app restarts, so the dump needs no setup step. The cost is the framework building the semantics tree for each frame that changes it, and the platform's accessibility layer receiving it, which is what any app pays while a screen reader runs. Every view the app's main isolate renders is listed. A window that runs its own engine, like the second window in `e2e/multi_window_example`, is a separate isolate the tool does not drive. Like the other agent commands, it is refused on a profile or release build, with the reason: the agent extensions are compiled into debug builds only.
 
 #### Reading logs
 
@@ -1643,7 +1805,7 @@ Methods that target a widget (`tap`, `longPress`, `doubleTap`, `drag`, `getRect`
 | `type` | A widget whose runtime type name equals the string, for example `ElevatedButton`. |
 | `semanticsLabel` | A widget whose semantics label equals the string. |
 
-Zero selectors or more than one is an error. Other params: `durationMs` (longPress, drag, scrollIntoView), `dx` and `dy` (drag, scrollIntoView), `scrollableKey` (scrollIntoView, `ValueKey` only), `timeoutMs`, `settle`, `requireHit`.
+Zero selectors or more than one is refused with a `422` (see [How a command says no](#how-a-command-says-no)). Other params: `durationMs` (longPress, drag, scrollIntoView), `dx` and `dy` (drag, scrollIntoView), `scrollableKey` (scrollIntoView, `ValueKey` only), `timeoutMs`, `settle`, `requireHit`.
 
 Put the `Key` on the widget you would point at, such as the `Chip`, the `ListTile`, or the button, rather than on the `Text` it builds. A selector reaches the same distance for every method.
 
@@ -1685,7 +1847,7 @@ A pass on the framework route is not evidence about OS-level input, which is why
 The reply also says what was sent:
 
 - **browser:** `sent` is the CDP events, in order. `focus` is what had the browser's focus, as tag names through shadow roots; a focused Flutter text field reads `flutter-view > input`. When the key types text and the focus is not in a text field, `warning` says the text reached nothing.
-- **framework:** `sent` lists each key event and whether the framework handled it, `handled` is the answer for the main key, and `textInput` is what went to the field: `{"inserted":"a"}`, `{"selectors":["moveDown:"]}`, `{"action":"TextInputAction.done"}`, or `{"skipped":"<why>"}`. On desktop, a key pressed while the app's window is not the focused one, because another app is in front or after `app.setWindowActive` with `"false"`, first makes the app active, as a real key press would find it: the framework had taken focus off the field while the window was inactive, and gets it back. `activated` says this happened. The real window stays where it is.
+- **framework:** `sent` lists each key event and whether the framework handled it, `handled` is the answer for the main key, and `textInput` is what went to the field: `{"inserted":"a"}`, `{"selectors":["moveDown:"]}`, `{"action":"TextInputAction.done"}`, or `{"skipped":"<why>"}`. On desktop, a key pressed while the app's window is not the focused one, because another app is in front or after `app.setWindowActive` with `"false"`, or while the window is hidden or covered by another window, first makes the app active, as a real key press would find it: the framework had taken focus off the field while the window was inactive or hidden, and gets it back. `activated` says this happened. The real window stays where it is.
 
 ```json
 {"route":"framework","key":"ArrowDown","handled":false,
@@ -1724,7 +1886,7 @@ A reload after a native rebuild, with the bindings unchanged, delivers the edit 
 ```json
 {"succeeded":true,"runningCode":"updated",
  "nativeLibsStale":["…/libbridge.dylib"],
- "message":"Hot reload successful. …/libbridge.dylib was rebuilt and its bindings did not change, so the increment is live over the library the app already loaded — the new native code is not running. A restart (R) relaunches the app on it."}
+ "message":"Hot reload successful. …/libbridge.dylib was rebuilt and its bindings did not change, so the increment is live over the library the app already loaded — the new native code is not running. A restart (R, or `app.restart`) delivers it: it relaunches the app when the native code the app runs differs from what the tree builds, and otherwise restarts it in place."}
 ```
 
 With the bindings changed, or nothing declaring them, the edit is withheld:
@@ -1735,7 +1897,7 @@ With the bindings changed, or nothing declaring them, the edit is withheld:
  "message":"Hot reload withheld: …/libbridge.dylib changed, and so did what its bindings are generated from …"}
 ```
 
-Nothing is compiled and nothing is sent, so the app keeps the code and the library it launched with, and `app.restart` picks up the new one. `nativeLibsStale` means the same thing in both replies, and `succeeded` says whether the edit landed. The check costs no Bazel of its own: a `stat` per declared file, and a content hash only for a file the build rewrote.
+Nothing is compiled and nothing is sent, so the app keeps the code and the library it launched with, and `app.restart` picks up the new one. An `attach` run cannot replace a process it did not start, so there the reply says to launch the app again and attach to it instead. `nativeLibsStale` means the same thing in both replies, and `succeeded` says whether the edit landed. The check costs no Bazel of its own: a `stat` per declared file, and a content hash only for a file the build rewrote.
 
 A reload that patched native code into the app says what it patched, and `nativeReverted` lists libraries sent back to their launched code:
 
@@ -1749,13 +1911,24 @@ A patch that cannot be delivered withholds the reload with the patch builder's r
 
 #### How a command says no
 
-Every failure, on either transport, is a top-level `error` carrying the reason. Over HTTP the status says which kind: `404` the command or app does not exist here, `400` the request was malformed (a missing parameter, two selectors), `501` this run cannot serve it (an engine screenshot under Impeller), `422` it was asked properly and could not be done (the app refused, or never answered). A `500` means the tool itself broke, which is the one case worth retrying or reporting. On the stdin protocol the same failure is upstream's `{"id":…, "error":"<reason>"}`.
+Every failure, on either transport, is a top-level `error` carrying the reason. Over HTTP the status says which kind: `404` the command or app does not exist here, `400` the tool could not read the request (not JSON, no `method`, `app.pressKey` without `key`), `501` this run cannot serve it (an engine screenshot under Impeller), `422` it was asked and could not be done (the app refused, or never answered). The app checks a widget command's own parameters, so a missing selector or two selectors is a `422` carrying the app's reason, not a `400`. A `500` means the tool itself broke, which is the one case worth retrying or reporting. On the stdin protocol the same failure is upstream's `{"id":…, "error":"<reason>"}`.
 
 An outcome that carries its own verdict stays inside `result`. A hot reload that ran and failed answers `{"succeeded":false, "error":…}`, because it ran and reported a failure rather than refusing to run.
 
 ### Working with a coding agent
 
-The control channel is what lets a coding agent such as Claude Code check its own work: it can reload the app after an edit, read text back, and look at a screenshot rather than guessing from the code. Three choices make that work well.
+The control channel is what lets a coding agent such as Claude Code check its own work: it can reload the app after an edit, read text back, and look at a screenshot rather than guessing from the code.
+
+**The skill.** This repository ships a skill, `flutter-bazel`, that teaches an agent the whole loop: starting a session, finding the channel, reading the UI, driving it, reloading, and reading failures. For Claude Code it is a plugin in this repository's marketplace:
+
+```sh
+claude plugin marketplace add aran/rules_flutter
+claude plugin install rules-flutter@rules-flutter
+```
+
+Or, inside a session, `/plugin marketplace add aran/rules_flutter` and then `/plugin install rules-flutter@rules-flutter`. The skill itself is in the open Agent Skills format, in [`agent_plugin/skills/flutter-bazel`](agent_plugin/skills/flutter-bazel/SKILL.md), so an agent that reads that format can use the same directory.
+
+With the skill or without it, three choices make the loop work well.
 
 **Start the app in machine mode, in the background.** The run lives for the whole session, so start it once and send its output to files. `--machine` keeps stdout to protocol events, `LOG_FORMAT=json` makes the channel record on stderr one parseable line, and `--no-devtools` avoids opening a browser tab nobody will look at. On the web, add `--web-run-headless`.
 

@@ -61,6 +61,7 @@ void main() {
         'app.waitForAbsent',
         'app.pageBack',
         'app.dumpWidgetTree',
+        'app.dumpSemanticsTree',
       ]) {
         expect(cr.hasCommand(method), isTrue, reason: '$method registered');
       }
@@ -351,6 +352,45 @@ void main() {
 
         expect(error, 'Method not found');
       });
+
+      // The app, not the tool, checks a widget command's selector, so a
+      // missing or doubled one arrives as the app's refusal: a `failed` the
+      // HTTP channel answers 422, not the `badRequest` it answers 400. The
+      // README's status table says so; this pins the code it describes.
+      for (final (params, refusal) in const [
+        (
+          <String, String>{},
+          'missing selector: provide one of '
+              'key, text, tooltip, type, semanticsLabel',
+        ),
+        (
+          {'key': 'k', 'text': 't'},
+          'ambiguous selector: provide exactly one of '
+              'key, text, tooltip, type, semanticsLabel (got key, text)',
+        ),
+      ]) {
+        test('a selector refusal is a failed command: $refusal', () async {
+          final (fake, client) = await readyClient('ext.rules_flutter.tap');
+          fake.extensionErrors['ext.rules_flutter.tap'] = RPCError(
+            'ext.rules_flutter.tap',
+            -32602,
+            'Invalid params',
+            {'details': refusal},
+          );
+
+          final cr = CommandRunner();
+          setUpAgentCommands(cr, (_) => sessionFor(client));
+          CommandFailure? failure;
+          try {
+            await cr.run('app.tap', {'appId': 'app', ...params});
+          } on CommandFailure catch (e) {
+            failure = e;
+          }
+
+          expect(failure?.message, refusal);
+          expect(failure?.kind, CommandFailureKind.failed);
+        });
+      }
     });
 
     // The handler runs on the app's isolate, so anything that stops that
@@ -617,6 +657,7 @@ void main() {
         'app.waitForAbsent',
         'app.pageBack',
         'app.dumpWidgetTree',
+        'app.dumpSemanticsTree',
       ]) {
         await expectLater(
           cr.run(method, {'appId': 'nope'}),
@@ -627,6 +668,132 @@ void main() {
           ),
           reason: '$method on unknown appId',
         );
+      }
+    });
+
+    group('app.dumpSemanticsTree', () {
+      /// A runner whose one app answers the dump with [answer].
+      Future<(FakeVmService, CommandRunner)> runner(
+        Map<String, dynamic> answer, {
+        BuildMode mode = BuildMode.debug,
+      }) async {
+        final fake =
+            FakeVmService(
+                isolates: [IsolateRef(id: 'iso-1', name: 'main', number: '1')],
+              )
+              ..extensionRPCs = [
+                'ext.rules_flutter.dumpSemanticsTree',
+                'ext.flutter.reassemble',
+              ]
+              ..extensionResponses['ext.rules_flutter.dumpSemanticsTree'] =
+                  answer;
+        final client = VmServiceClient(connector: (_) async => fake);
+        await client.connect(Uri.parse('http://127.0.0.1:8181/'));
+        final session = DeviceSession(
+          device: MacOSDevice()..buildMode = mode,
+          appInstance: AppInstance(process: FakeProcess()),
+          vmClient: client,
+          appId: 'app',
+        )..drivable.signalReady();
+        final cr = CommandRunner();
+        setUpAgentCommands(cr, (_) => session);
+        return (fake, cr);
+      }
+
+      final nodes = {
+        'type': '_extensionType',
+        'views': [
+          {
+            'viewId': 0,
+            'size': [800.0, 600.0],
+            'devicePixelRatio': 2.0,
+            'root': {
+              'id': 0,
+              'rect': [0, 0, 800, 600],
+              'children': [
+                {
+                  'id': 4,
+                  'rect': [728, 528, 784, 584],
+                  'label': 'Increment',
+                  'flags': ['isButton'],
+                  'actions': ['tap'],
+                },
+              ],
+            },
+          },
+        ],
+      };
+
+      test(
+        'answers the compact text, asking the app for nothing else',
+        () async {
+          final (fake, cr) = await runner(nodes);
+          final result = await cr.run('app.dumpSemanticsTree', {
+            'appId': 'app',
+          });
+          expect(result, {
+            'text': 'view 0 800x600 @2x\n#4 button "Increment" [tap] @756,556 56x56\n',
+          });
+          expect(fake.lastExtensionArgs, isEmpty);
+        },
+      );
+
+      test('carries the app\'s not-rendering note', () async {
+        final (_, cr) = await runner({...nodes, 'notRendering': 'hidden'});
+        final result = await cr.run('app.dumpSemanticsTree', {'appId': 'app'});
+        expect(result['notRendering'], 'hidden');
+      });
+
+      test(
+        'carries the app\'s note that a pending frame did not finish',
+        () async {
+          final (_, cr) = await runner({...nodes, 'frameMissed': 'stale'});
+          final result = await cr.run('app.dumpSemanticsTree', {
+            'appId': 'app',
+          });
+          expect(result['frameMissed'], 'stale');
+        },
+      );
+
+      test(
+        'refuses a parameter it does not take, before asking the app',
+        () async {
+          final (fake, cr) = await runner(nodes);
+          final failure = await cr
+              .run('app.dumpSemanticsTree', {'appId': 'app', 'format': 'json'})
+              .then<CommandFailure?>(
+                (_) => null,
+                onError: (Object e) => e as CommandFailure,
+              );
+          expect(failure?.kind, CommandFailureKind.badRequest);
+          expect(failure?.message, contains('takes only appId, not format'));
+          expect(
+            fake.extensionCalls.map((c) => c.method),
+            isNot(contains('ext.rules_flutter.dumpSemanticsTree')),
+          );
+        },
+      );
+      for (final mode in [BuildMode.profile, BuildMode.release]) {
+        test('a ${mode.name} build is refused, naming why', () async {
+          final (fake, cr) = await runner(nodes, mode: mode);
+          final failure = await cr
+              .run('app.dumpSemanticsTree', {'appId': 'app'})
+              .then<CommandFailure?>(
+                (_) => null,
+                onError: (Object e) => e as CommandFailure,
+              );
+          expect(failure?.kind, CommandFailureKind.unavailable);
+          expect(failure?.message, contains('${mode.name} build'));
+          expect(failure?.message, contains('debug builds only'));
+          expect(
+            fake.extensionCalls.map((c) => c.method),
+            isNot(
+              contains(
+                'ext.rules_flutter.dumpSemanticsTree',
+              ),
+            ),
+          );
+        });
       }
     });
 

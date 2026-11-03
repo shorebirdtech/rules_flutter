@@ -3,7 +3,9 @@ load(":app_defines_test.bzl", "app_defines_test_suite")
 load(":app_entrypoint_test.bzl", "app_entrypoint_test_suite")
 load(":artifact_urls_test.bzl", "artifact_urls_test_suite")
 load(":asset_bundle_test.bzl", "asset_bundle_test_suite")
+load(":code_asset_native_library_test.bzl", "code_asset_native_library_test_suite")
 load(":common_test.bzl", "common_test_suite")
+load(":dev_config_test.bzl", "dev_config_test_suite")
 load(":flutter_application_test.bzl", "flutter_application_test_suite")
 load(":flutter_info_test.bzl", "flutter_info_test_suite")
 load(":flutter_library_test.bzl", "flutter_library_test_suite")
@@ -22,12 +24,15 @@ load(":manifest_merge_test.bzl", "manifest_merge_test_suite")
 load(":native_assets_test.bzl", "bridge_probe", "native_assets_test_suite")
 load(":native_hot_patch_test.bzl", "native_hot_patch_test_suite")
 load(":native_sources_test.bzl", "native_sources_test_suite")
+load(":path_mapping_test.bzl", "path_mapping_test_suite")
 load(":platform_bundle_test.bzl", "platform_bundle_test_suite")
 load(":plist_merge_test.bzl", "plist_merge_test_suite")
 load(":plugin_registrant_test.bzl", "plugin_registrant_test_suite")
 load(":profile_mode_test.bzl", "profile_mode_test_suite")
 load(":pub_lock_sdks_test.bzl", "pub_lock_sdks_test_suite")
 load(":shader_compile_test.bzl", "shader_compile_test_suite")
+load(":shared_code_asset_test.bzl", "shared_code_asset_test_suite")
+load(":tester_binary_test.bzl", "tester_binary_test_suite")
 load(":toolchain_test.bzl", "toolchain_test_suite")
 load(":toolchains_repo_test.bzl", "toolchains_repo_test_suite")
 load(":validation_test.bzl", "validation_test_suite")
@@ -84,6 +89,8 @@ profile_mode_test_suite(name = "profile_mode_test")
 
 app_entrypoint_test_suite(name = "app_entrypoint_test")
 
+dev_config_test_suite(name = "dev_config_test")
+
 app_defines_test_suite(name = "app_defines_test")
 
 pub_lock_sdks_test_suite(name = "pub_lock_sdks_test")
@@ -100,6 +107,10 @@ native_hot_patch_test_suite(name = "native_hot_patch_test")
 
 native_sources_test_suite(name = "native_sources_test")
 
+code_asset_native_library_test_suite(name = "code_asset_native_library_test")
+
+shared_code_asset_test_suite(name = "shared_code_asset_test")
+
 bridge_probe(
     name = "dart_code_asset_bridge_probe",
     expected_asset_ids = ["package:asset_fixture/src/ffi/asset_fixture.g.dart"],
@@ -112,3 +123,7 @@ build_test(
 )
 
 validation_test_suite(name = "validation_test")
+
+path_mapping_test_suite(name = "path_mapping_test")
+
+tester_binary_test_suite(name = "tester_binary_test")

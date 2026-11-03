@@ -4,7 +4,13 @@ Writes the manifest the dev tool reads and builds everything its command needs:
 the patch library (a second build of the patchable source, in the app's own
 configuration) and the tool that decides what a reload may do with it (built for
 the machine the dev tool runs on).
+
+The tool runs beside the app after the build, not in a build action, so it is
+built for the machine running Bazel (`host_transition`) rather than for an
+execution platform, which may be a remote machine of another OS.
 """
+
+load("@rules_flutter//flutter:native_hot_patch.bzl", "host_transition")
 
 def _c_hot_patch_impl(ctx):
     library = [
@@ -32,9 +38,16 @@ def _c_hot_patch_impl(ctx):
             patch[0].path,
             "--contract",
             ctx.file.contract.path,
-        ],
+            "--function",
+            ctx.attr.function,
+            "--body",
+            ctx.file.body.path,
+        ] + ([
+            "--state-layout",
+            ctx.file.state_layout.path,
+        ] if ctx.file.state_layout else []),
     }))
-    return [DefaultInfo(files = depset([manifest, tool, patch[0], ctx.file.contract]))]
+    return [DefaultInfo(files = depset([manifest, tool, patch[0], ctx.file.contract, ctx.file.body] + ([ctx.file.state_layout] if ctx.file.state_layout else [])))]
 
 c_hot_patch = rule(
     implementation = _c_hot_patch_impl,
@@ -42,7 +55,10 @@ c_hot_patch = rule(
         "library": attr.label(mandatory = True, doc = "The library the app bundles."),
         "patch_library": attr.label(mandatory = True, doc = "A build of the patchable code on its own."),
         "contract": attr.label(mandatory = True, allow_single_file = True, doc = "The header a change to which needs a restart."),
+        "function": attr.string(mandatory = True, doc = "The function a patch replaces, as the reply names it."),
+        "body": attr.label(mandatory = True, allow_single_file = True, doc = "The source a patch is built from, which must define no state of its own."),
+        "state_layout": attr.label(allow_single_file = True, doc = "The header that shapes the state the launched image holds and passes to the body; a change to it needs a restart."),
         "sources": attr.label_list(allow_files = True, doc = "What a reload stats to decide whether to ask."),
-        "tool": attr.label(mandatory = True, executable = True, cfg = "exec"),
+        "tool": attr.label(mandatory = True, executable = True, cfg = host_transition),
     },
 )

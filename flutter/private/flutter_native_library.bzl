@@ -30,6 +30,7 @@ where it lives. A `native_deps` entry that is not wrapped keeps today's
 behaviour exactly.
 """
 
+load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo")
 load("//flutter:providers.bzl", "FlutterNativeLibraryInfo")
 
 # A wasm module belongs here for the same reason a dylib does: the page
@@ -43,13 +44,31 @@ _NATIVE_LIBRARY_EXTENSIONS = ("so", "dylib", "dll", "wasm")
 # else that target builds rides along for the command the manifest names.
 _HOT_PATCH_MANIFEST_SUFFIX = ".hot_patch.json"
 
+def _code_asset_library(ctx, asset):
+    """The one library a code asset loads, which is what the contract describes."""
+    if asset.link_mode != "dynamic_loading_bundle" or asset.dynamic_library == None:
+        fail((
+            "%s names `library = %s`, a code asset (`%s`) with link mode " +
+            "`%s`. The app bundles no library for it, so there is nothing a " +
+            "contract could describe or a patch could reach; only a " +
+            "`dynamic_loading_bundle` asset can be wrapped."
+        ) % (ctx.label, ctx.attr.library.label, asset.asset_id, asset.link_mode))
+    return asset.dynamic_library
+
 def _flutter_native_library_impl(ctx):
     default = ctx.attr.library[DefaultInfo]
-    libraries = [
-        f
-        for f in default.files.to_list()
-        if f.extension in _NATIVE_LIBRARY_EXTENSIONS
-    ]
+
+    # A code asset says which library it loads; anything else is a target whose
+    # native libraries are known by their extension, as in `native_deps`.
+    code_asset = ctx.attr.library[DartCodeAssetInfo] if DartCodeAssetInfo in ctx.attr.library else None
+    if code_asset:
+        libraries = [_code_asset_library(ctx, code_asset)]
+    else:
+        libraries = [
+            f
+            for f in default.files.to_list()
+            if f.extension in _NATIVE_LIBRARY_EXTENSIONS
+        ]
     if not libraries:
         fail((
             "%s names `library = %s`, which produces no native library " +
@@ -91,7 +110,9 @@ def _flutter_native_library_impl(ctx):
             binding_contract = depset(ctx.files.binding_contract),
             hot_patch = hot_patch,
         ),
-    ]
+        # And a code asset forwarded as itself, so the wrapper goes in the
+        # owning package's `code_assets` where the bare asset would have gone.
+    ] + ([code_asset] if code_asset else [])
 
 flutter_native_library = rule(
     implementation = _flutter_native_library_impl,
@@ -110,6 +131,30 @@ flutter_application(
     name = "app",
     native_deps = [":bridge"],
     # ...
+)
+```
+
+A library Dart reaches as a code asset — `library` provides rules_dart's
+`DartCodeAssetInfo`, and the bindings call it through `@Native` — is wrapped
+the same way. The wrapper forwards that `DartCodeAssetInfo`, so it goes where
+the bare asset would have gone: in the `code_assets` of the package that owns
+the asset id, a `flutter_plugin`, a `flutter_library` or a `dart_library`
+alike, or under whatever attribute a package rule forwards it on. The
+application finds it there and puts its contract on the path it bundles the
+library under.
+
+```starlark
+flutter_native_library(
+    name = "bridge",
+    library = "@my_bridge//bridge:bridge_code_asset",
+    binding_contract = ["@my_bridge//bridge:codegen.ir"],
+)
+
+dart_library(
+    name = "bindings",
+    package_name = "my_bridge_bindings",
+    srcs = ["lib/bindings.dart"],
+    code_assets = [":bridge"],
 )
 ```
 
@@ -134,10 +179,15 @@ library. See the attribute for what the named target has to build.
 """,
     attrs = {
         "library": attr.label(
-            doc = """The native library target, as it would appear in `native_deps` (or in a web bundle's `native_modules`).
+            doc = """The native library target, as it would appear in `native_deps` (or in a web bundle's `native_modules`), or a code asset as it would appear in a package's `code_assets`.
 
 A shared library on a native platform; a `.wasm` module on web. Usually a rule's
 output, and a checked-in prebuilt file works too.
+
+A target that provides `DartCodeAssetInfo` is a code asset: the library it
+describes is the asset's `dynamic_library`, which must exist, so only a
+`dynamic_loading_bundle` asset can be wrapped. The wrapper then provides the
+same `DartCodeAssetInfo`.
 """,
             allow_files = True,
             mandatory = True,
@@ -197,6 +247,18 @@ and which returns 0 or writes why it refused. A null `patch_path` sends calls ba
 to the code the library launched with: that is how the dev tool undoes a patched
 edit that was reverted, which `patch` answers as `unchanged`.
 
+A patch is loaded as a second image, and a hot reload keeps the app's state, so
+the patched code must work on the state the running library already holds: the
+same statics, globals and heap, not fresh copies of them. Storage the patch
+image defines for itself starts at its initial value and is invisible to the
+running library, which forks state without an error. A builder therefore either
+makes the patch reach the running library's state (by address, through the
+`--symbol` address, or because the library hands that state to the code it
+calls) or answers `restart` for an edit that would fork it: one that adds state,
+or changes the layout or type of state the running library holds. One library
+serving several code-asset ids is one image with one patch builder, so its state
+is shared by every id before a patch and after it.
+
 The library must carry its linker's identity — `LC_UUID` on Mach-O (ld64 writes
 one by default), a GNU build-id on ELF (`-Wl,--build-id`). A build can produce
 the same library in more than one configuration, and the identity is how the dev
@@ -204,6 +266,18 @@ tool finds the one the app bundled.
 
 Only files are built, not runfiles trees: the command has to run with nothing but
 the files this target builds.
+
+The command runs on the machine the dev tool runs on, after the build and
+outside any build action, so build its program for that machine: not
+`cfg = "exec"`, which builds a tool for whichever execution platform a build
+action resolves to, and not `cfg = "target"`, which is the app's platform (iOS,
+Android). `host_transition` does it:
+
+```starlark
+load("@rules_flutter//flutter:native_hot_patch.bzl", "host_transition")
+
+    attrs = {"tool": attr.label(executable = True, cfg = host_transition)},
+```
 """,
         ),
     },

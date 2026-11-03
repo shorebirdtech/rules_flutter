@@ -601,6 +601,17 @@ class NativePipelineAssembler {
     pipeline.nativeLibsVerdict = nativeLibs?.verdict;
 
     await _wireRelauncher(orchestrator, assetsDir, nativeLibs);
+    // No relauncher means nothing rebuilds the libraries on a restart, and the
+    // watch would judge from source stats alone — see
+    // `ReloadPipeline.rebuildNativeLibs`.
+    if (nativeLibs != null && pipeline.relaunchIfNativeLibsChanged == null) {
+      pipeline.rebuildNativeLibs = () async => (await host.bazel.build(
+        devAppLabel,
+        workspace: workspace,
+        compilationMode: 'dbg',
+        extraArgs: _devArgs,
+      )).success;
+    }
 
     pipeline.strategy = configDevice.createReloadStrategy();
     // What is true, not what was hoped for. A unit whose first compile failed
@@ -817,9 +828,13 @@ class NativePipelineAssembler {
       patchedLibs: hotPatcher == null
           ? null
           : () => hotPatcher.livePatchedLibraries,
-      afterRelaunch: hotPatcher == null
+      catchUpPatcher: hotPatcher == null
           ? null
-          : () => _rebaselineHotPatcher(hotPatcher),
+          : ({required newProcess}) async {
+              if (newProcess || await hotPatcher.sourcesMoved()) {
+                await _rebaselineHotPatcher(hotPatcher);
+              }
+            },
     );
     pipeline.relaunchIfNativeLibsChanged = relauncher.relaunchIfNeeded;
   }
@@ -870,8 +885,9 @@ class NativePipelineAssembler {
     return patcher;
   }
 
-  /// Re-snapshot after a relaunch. A failure leaves the run patching nothing —
-  /// said, not swallowed: a restart still delivers native edits.
+  /// Re-snapshot for the process a restart left running. A failure leaves the
+  /// run patching nothing — said, not swallowed: a restart still delivers
+  /// native edits.
   Future<void> _rebaselineHotPatcher(NativeHotPatcher patcher) async {
     try {
       await patcher.rebaseline();

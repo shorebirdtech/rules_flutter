@@ -106,7 +106,7 @@ def check_unreplaced_hooks(label, deps):
         transitive = [dep[DartInfo].transitive_packages for dep in deps],
     ).to_list()
 
-    # Guarded for the same reason `bridge_dart_code_assets` guards
+    # Guarded for the same reason rules_dart's `package_code_assets` guards
     # `code_assets`: `DartPackageInfo` is rules_dart's, and it deliberately
     # tolerates a record built against a rules_dart predating a field. Absent
     # is not "unknown" here — a producer with no such field could not have
@@ -157,11 +157,8 @@ def collect_native_libs(native_deps):
 def resolve_dev_generated_sources(paths, candidates):
     """The Files behind `_dev_config.json`'s `generatedSourcePaths`.
 
-    `_dev_config.json` sends the frontend_server to read these paths. Nothing
-    asks for them by label, and being an action's *input* is not what makes bazel
-    write a file to this machine — a cache hit (disk or remote) runs no action, so
-    an input-only file is never materialized and the dev tool reports "the build
-    declared files it did not write". Declaring them is what makes the paths true.
+    rules_dart reports the generated sources as paths; the dev config takes
+    Files (see `dev_config.bzl`), and these are those Files.
 
     Args:
         paths: The `generatedSourcePaths` going into the dev config.
@@ -229,7 +226,7 @@ def collect_assets(deps, direct_assets):
         return list(direct_assets) + depset(transitive = transitive_depsets).to_list()
     return list(direct_assets)
 
-def flutter_compile_kernel(ctx, flutter_sdk_info, aot = None, platform_dill = None, target_platform = None, frontend_server_target = "flutter", native_assets_manifest = None, track_widget_creation = False, assets_dir = None, platform_build_args = [], recorded_uses = None):
+def flutter_compile_kernel(ctx, tools, aot = None, platform_dill = None, target_platform = None, frontend_server_target = "flutter", native_assets_manifest = None, track_widget_creation = False, assets_dir = None, platform_build_args = [], recorded_uses = None):
     """Run the shared kernel compilation step.
 
     Collects sources, generates package_config.json, and invokes
@@ -244,7 +241,7 @@ def flutter_compile_kernel(ctx, flutter_sdk_info, aot = None, platform_dill = No
 
     Args:
         ctx: Rule context (must have main, srcs, deps, defines attrs).
-        flutter_sdk_info: FlutterSdkInfo from the toolchain.
+        tools: `FlutterExecToolsInfo` of the `PORTABLE` group (`portable_tools`).
         aot: If set, override AOT mode. Otherwise determined by compilation mode.
         platform_dill: If set, override platform dill. Otherwise determined by compilation mode.
         target_platform: Optional platform string (e.g. "web", "linux", "android").
@@ -321,9 +318,9 @@ def flutter_compile_kernel(ctx, flutter_sdk_info, aot = None, platform_dill = No
     dev_package_config = None
     dev_filesystem_roots = []
     dev_filesystem_scheme = ""
-    dev_generated_source_paths = []
+    dev_package_config_names = []
+    dev_generated_sources = []
     dev_generated_source_uris = []
-    dev_generated_source_files = []
     dev_source_packages = []
     dev_app_sources = []
     main_location = app_main_location(app_pkg_name, app_lib_root, ctx.file.main) if ctx.file.main else None
@@ -339,17 +336,16 @@ def flutter_compile_kernel(ctx, flutter_sdk_info, aot = None, platform_dill = No
         dev_filesystem_roots = with_root(dev_pc.filesystem_roots, main_location.root if main_location else None)
         dev_filesystem_scheme = dev_pc.scheme
         dev_app_sources = app_scheme_sources(app_pkg_name, app_lib_root, ctx.file.main, ctx.files.srcs) if ctx.file.main else []
-        dev_generated_source_paths = dev_pc.generated_source_paths
         dev_generated_source_uris = dev_pc.generated_source_uris
         dev_source_packages = dev_pc.source_packages
-
-        # Resolved from the same list the paths came from, so the two cannot
-        # drift — see [resolve_dev_generated_sources] for why declaring them is
-        # what makes the config's paths true.
-        dev_generated_source_files = resolve_dev_generated_sources(
-            dev_generated_source_paths,
+        dev_generated_sources = resolve_dev_generated_sources(
+            dev_pc.generated_source_paths,
             colocate_inputs,
         )
+
+        # The dev package_config's roots and the filesystem roots reach every
+        # file the dev compiler may read.
+        dev_package_config_names = colocate_inputs
 
     pc = compile_package_config(ctx, packages, colocate_inputs)
     config_file = pc.config_file
@@ -360,9 +356,9 @@ def flutter_compile_kernel(ctx, flutter_sdk_info, aot = None, platform_dill = No
     # product one has the VM service and the profiling hooks compiled out.
     if platform_dill == None:
         if mode == "release":
-            platform_dill = flutter_sdk_info.platform_kernel_dill_product
+            platform_dill = tools.platform_kernel_dill_product
         else:
-            platform_dill = flutter_sdk_info.platform_kernel_dill
+            platform_dill = tools.platform_kernel_dill
     if aot == None:
         aot = mode != "debug"
 
@@ -469,11 +465,11 @@ def flutter_compile_kernel(ctx, flutter_sdk_info, aot = None, platform_dill = No
     kernel_dill = ctx.actions.declare_file(ctx.label.name + ".dill")
     flutter_kernel_compile_action(
         ctx = ctx,
-        dartaotruntime = flutter_sdk_info.dartaotruntime,
-        dart = flutter_sdk_info.dart,
+        dartaotruntime = tools.dartaotruntime,
+        dart = tools.dart,
         kernel_filter_tool = ctx.file._kernel_filter_tool,
-        flutter_sdk_files = flutter_sdk_info.tool_files,
-        frontend_server = flutter_sdk_info.frontend_server,
+        flutter_sdk_files = tools.tool_files,
+        frontend_server = tools.frontend_server,
         platform_dill = platform_dill,
         main = entrypoint_info.file,
         entrypoint_uri = entrypoint_info.uri,
@@ -486,10 +482,8 @@ def flutter_compile_kernel(ctx, flutter_sdk_info, aot = None, platform_dill = No
         extra_flags = extra_frontend_flags,
         native_assets_manifest = native_assets_manifest,
         dart_plugin_registrant_uri = registrant_location.uri if registrant_location else None,
-        filesystem_roots = with_root(
-            with_root([], registrant_location.root if registrant_location else None),
-            entrypoint_info.root,
-        ),
+        filesystem_root_files = ([registrant] if registrant_location else []) +
+                                ([entrypoint_info.file] if entrypoint_info.root != None else []),
         recorded_uses = recorded_uses,
     )
     return struct(
@@ -510,9 +504,9 @@ def flutter_compile_kernel(ctx, flutter_sdk_info, aot = None, platform_dill = No
         dev_package_config = dev_package_config,
         dev_filesystem_roots = dev_filesystem_roots,
         dev_filesystem_scheme = dev_filesystem_scheme,
-        dev_generated_source_paths = dev_generated_source_paths,
+        dev_package_config_names = dev_package_config_names,
+        dev_generated_sources = dev_generated_sources,
         dev_generated_source_uris = dev_generated_source_uris,
-        dev_generated_source_files = dev_generated_source_files,
         dev_source_packages = dev_source_packages,
         dev_app_sources = dev_app_sources,
     )
@@ -596,7 +590,7 @@ def shader_sources(ctx):
         for job in _shader_jobs(ctx)
     }
 
-def flutter_compile_shaders(ctx, flutter_sdk_info, target_platform):
+def flutter_compile_shaders(ctx, tools, target_platform):
     """Compile every shader this target bundles for the target platform.
 
     The shaders are the target's own (`shaders`), the SDK's (collected from
@@ -605,7 +599,7 @@ def flutter_compile_shaders(ctx, flutter_sdk_info, target_platform):
 
     Args:
         ctx: Rule context (must have shaders attr and deps attr).
-        flutter_sdk_info: FlutterSdkInfo from the toolchain.
+        tools: `FlutterExecToolsInfo` of the `PORTABLE` group (`portable_tools`).
         target_platform: Target platform string ("ios", "macos", "android", "linux", "windows", "web").
 
     Returns:
@@ -613,7 +607,7 @@ def flutter_compile_shaders(ctx, flutter_sdk_info, target_platform):
         extra_asset_copies in flutter_asset_bundle_action.
     """
     jobs = _shader_jobs(ctx)
-    if not jobs or not flutter_sdk_info.impellerc:
+    if not jobs or not tools.impellerc:
         return {}
 
     compiled = {}
@@ -623,16 +617,17 @@ def flutter_compile_shaders(ctx, flutter_sdk_info, target_platform):
         output = ctx.actions.declare_file(ctx.label.name + "_shaders/" + out_path + ".iplr")
         flutter_shader_compile_action(
             ctx = ctx,
-            impellerc = flutter_sdk_info.impellerc,
-            shader_lib = flutter_sdk_info.shader_lib,
+            impellerc = tools.impellerc,
+            shader_lib = tools.shader_lib,
+            shader_include_dir = tools.shader_include_dir,
             shader = job.file,
             output = output,
             target_platform = target_platform,
             is_web = target_platform == "web",
             includes = job.includes,
             # What compiles a shader whose SkSL stage fails without it.
-            dart = flutter_sdk_info.dart,
-            dart_files = flutter_sdk_info.tool_files,
+            dart = tools.dart,
+            dart_files = tools.tool_files,
             compile_tool = ctx.file._shader_compile_tool,
             require_sksl = getattr(ctx.attr, "require_sksl_shaders", False),
         )
@@ -657,7 +652,7 @@ def declare_flutter_assets_dir(ctx):
     """
     return ctx.actions.declare_directory(ctx.label.name + "_flutter_assets")
 
-def flutter_build_assets(ctx, flutter_sdk_info, output_dir, compiled_shaders = {}, kernel_dill = None, is_debug = False, data_assets = None):
+def flutter_build_assets(ctx, tools, output_dir, compiled_shaders = {}, kernel_dill = None, is_debug = False, data_assets = None):
     """Run the shared asset bundling step.
 
     Walks `FlutterInfo.pub_fonts` / `pub_assets` from deps to bundle
@@ -666,7 +661,7 @@ def flutter_build_assets(ctx, flutter_sdk_info, output_dir, compiled_shaders = {
 
     Args:
         ctx: Rule context (must have assets, deps, license_files, tree_shake_icons attrs and _asset_bundle_tool).
-        flutter_sdk_info: FlutterSdkInfo from the toolchain.
+        tools: `FlutterExecToolsInfo` of the `PORTABLE` group (`portable_tools`).
         output_dir: The tree artifact to bundle into, from
             `declare_flutter_assets_dir`. Passed in rather than declared here
             so an application can bake the path into its `build_info` before
@@ -709,20 +704,20 @@ def flutter_build_assets(ctx, flutter_sdk_info, output_dir, compiled_shaders = {
         ctx.attr.tree_shake_icons and
         not is_debug and
         kernel_dill != None and
-        flutter_sdk_info.const_finder != None and
-        flutter_sdk_info.font_subset != None
+        tools.const_finder != None and
+        tools.font_subset != None
     )
 
     return flutter_asset_bundle_action(
         ctx = ctx,
-        dart = flutter_sdk_info.dart,
-        flutter_sdk_files = flutter_sdk_info.tool_files,
+        dart = tools.dart,
+        flutter_sdk_files = tools.tool_files,
         assets = all_assets,
         fonts = fonts,
         license_files = license_files,
         output_dir = output_dir,
-        const_finder = flutter_sdk_info.const_finder if tree_shake_icons else None,
-        font_subset = flutter_sdk_info.font_subset if tree_shake_icons else None,
+        const_finder = tools.const_finder if tree_shake_icons else None,
+        font_subset = tools.font_subset if tree_shake_icons else None,
         kernel_dill = kernel_dill if tree_shake_icons else None,
         extra_asset_copies = extra_asset_copies,
     )
@@ -1070,6 +1065,28 @@ def merge_dart_defines(ctx):
     validate_dart_defines(ctx.attr.defines, "defines attribute of %s" % ctx.label)
     return list(ctx.attr.defines) + ctx.attr._extra_dart_defines[BuildSettingInfo].value
 
+def flutter_deps_attr(aspects = []):
+    """The `deps` attribute of every rule that compiles a Flutter program.
+
+    Args:
+        aspects: Aspects a rule applies over its `deps` on top of the import
+            check every such rule runs.
+
+    Returns:
+        The `attr.label_list`.
+    """
+    return attr.label_list(
+        doc = "`dart_library` or `flutter_library` dependencies. A rule that " +
+              "builds an asset bundle needs `@rules_flutter//flutter:material_icons` " +
+              "listed here to bundle `MaterialIcons-Regular.otf` into " +
+              "`flutter_assets/` for Material widgets; the rules that emit only " +
+              "a kernel or an AOT artifact have no bundle for it to reach.",
+        providers = [DartInfo],
+        # Each library's imports are checked against its own `deps`, in the
+        # `_validation` output group.
+        aspects = [dart_import_check_aspect] + aspects,
+    )
+
 # The attrs `flutter_compile_kernel` reads off its caller's `ctx`. Every rule
 # that calls it spreads this bundle wholesale rather than naming the members,
 # because naming them is what let the contract break: `flutter_compile_kernel`
@@ -1133,17 +1150,7 @@ KERNEL_COMPILE_ATTRS = {
         doc = "Additional Dart source files.",
         allow_files = [".dart"],
     ),
-    "deps": attr.label_list(
-        doc = "`dart_library` or `flutter_library` dependencies. A rule that " +
-              "builds an asset bundle needs `@rules_flutter//flutter:material_icons` " +
-              "listed here to bundle `MaterialIcons-Regular.otf` into " +
-              "`flutter_assets/` for Material widgets; the rules that emit only " +
-              "a kernel or an AOT artifact have no bundle for it to reach.",
-        providers = [DartInfo],
-        # Each library's imports are checked against its own `deps`, in the
-        # `_validation` output group.
-        aspects = [dart_import_check_aspect],
-    ),
+    "deps": flutter_deps_attr(),
     "defines": attr.string_list(
         doc = "Dart environment defines (-D flags).",
     ),
