@@ -5,14 +5,7 @@ exports_files(
 
 filegroup(
     name = "windows_runner_srcs",
-    srcs = glob(
-        [
-            "windows/*.cpp",
-            "windows/*.cc",
-            "windows/*.c",
-        ],
-        allow_empty = True,
-    ),
+    srcs = glob(["windows/*.cpp"]),
     visibility = ["//flutter:__subpackages__"],
 )
 

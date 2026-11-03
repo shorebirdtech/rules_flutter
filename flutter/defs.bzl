@@ -100,6 +100,8 @@ def flutter_test(name, main, test_config = None, **kwargs):
         label = native.package_relative_label(main)
         here = native.package_relative_label(":" + name)
         if (label.repo_name, label.package) == (here.repo_name, here.package):
+            # `allow_empty`: the lookup asks whether each candidate config
+            # exists, and most tests have none.
             test_config = find_test_config(
                 label.name,
                 lambda path: bool(native.glob([path], allow_empty = True)),

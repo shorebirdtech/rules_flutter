@@ -47,6 +47,9 @@ def make_flutter_sdk_build_content(name, deps, language_version):
         dep_lines = ['        "{}",'.format(dep) for dep in deps]
         deps_block = "    deps = [\n{}\n    ],\n".format("\n".join(dep_lines))
 
+    # `resources` is `allow_empty`: an SDK package whose `lib/` is all Dart
+    # (flutter_test, say) has none. The Dart glob is strict: a package
+    # without Dart sources was not extracted.
     if name == "flutter":
         return """\
 load("@rules_flutter//flutter:defs.bzl", "flutter_library")

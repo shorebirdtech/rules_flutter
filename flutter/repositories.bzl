@@ -4,7 +4,7 @@ These are needed for local dev, and users must install them as well.
 See https://docs.bazel.build/versions/main/skylark/deploying.html#dependencies
 """
 
-load("//flutter/private:artifact_urls.bzl", "android_engine_artifact_path", "dart_sdk_artifact_path", "desktop_engine_artifact_path", "engine_artifact_url", "gen_snapshot_cross_artifact_path", "host_artifacts_path", "ios_engine_artifact_path")
+load("//flutter/private:artifact_urls.bzl", "android_engine_artifact_path", "cpp_client_wrapper_artifact_path", "dart_sdk_artifact_path", "desktop_engine_artifact_path", "engine_artifact_url", "gen_snapshot_cross_artifact_path", "host_artifacts_path", "ios_engine_artifact_path")
 load("//flutter/private:constants.bzl", "ANDROID_ABI_FOR_ARCH")
 load("//flutter/private:engine_helpers.bzl", "ENGINE_MODES", "PLATFORM_PREFIX_TO_OS", "dart_binary_name", "dartaotruntime_binary_name", "engine_arch_for_os", "engine_filegroup_for_os", "extract_macos_inner_framework", "gen_snapshot_host_platform", "host_engine_targets")
 load("//flutter/private:flutter_android_engine_repo.bzl", "flutter_android_engine_repo")
@@ -136,7 +136,7 @@ def _flutter_engine_artifacts_impl(repository_ctx):
     # The wrapper provides flutter/plugin_registry.h and its implementation
     # sources, needed to compile native plugin registrants on Windows.
     if os_name == "windows" and has_engine_library:
-        cpp_wrapper_path = "{platform}/flutter-cpp-client-wrapper.zip".format(platform = platform)
+        cpp_wrapper_path = cpp_client_wrapper_artifact_path(platform)
         repository_ctx.download_and_extract(
             url = engine_artifact_url(engine_revision, cpp_wrapper_path),
             sha256 = checksums.get(cpp_wrapper_path, ""),
@@ -358,10 +358,8 @@ def _host_profile_repo(name, platform, engine_revision, checksums):
     if os_name == "windows":
         # The engine filegroup lists the C++ client wrapper's headers, and the
         # Windows runner finds its include directories from those files. The
-        # wrapper is the same in every mode, but the glob is `allow_empty`: a
-        # profile repo without it builds a runner that cannot find
-        # `flutter/plugin_registry.h`.
-        downloads[platform + "/flutter-cpp-client-wrapper.zip"] = "cpp-client-wrapper"
+        # wrapper is the same in every mode.
+        downloads[cpp_client_wrapper_artifact_path(platform)] = "cpp-client-wrapper"
     flutter_profile_repo(
         name = name,
         engine_revision = engine_revision,
@@ -502,6 +500,7 @@ def flutter_register_toolchains(name, **kwargs):
                     target_arch = engine_arch,
                     mode = mode,
                     sha256 = checksums.get(engine_path, ""),
+                    cpp_wrapper_sha256 = checksums.get(cpp_client_wrapper_artifact_path(target_platform), ""),
                 )
 
     # Desktop cross-platform toolchain repos.

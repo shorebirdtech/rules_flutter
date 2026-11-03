@@ -373,6 +373,7 @@ def flutter_macos_app(
     # instead of ~/Library/Containers/<bundle-id>/Data/Documents,
     # diverging from `flutter build macos`.
     if entitlements == None:
+        # `allow_empty`: an absent file is reported below, naming it.
         debug_present = native.glob(
             ["macos/Runner/DebugProfile.entitlements"],
             allow_empty = True,
@@ -530,6 +531,7 @@ def flutter_macos_app(
     #     and an app with no catalog at all is the second without having to
     #     write it.
     if app_icons == None:
+        # `allow_empty`: an app with no catalog ships the generic icon.
         app_icons = native.glob(
             ["macos/Runner/Assets.xcassets/AppIcon.appiconset/**"],
             allow_empty = True,

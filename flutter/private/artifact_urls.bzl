@@ -147,6 +147,22 @@ def host_artifacts_path(host_platform, mode = "debug"):
         platform_dir = "{dir}-{mode}".format(dir = platform_dir, mode = mode)
     return "{platform}/artifacts.zip".format(platform = platform_dir)
 
+def cpp_client_wrapper_artifact_path(platform):
+    """Returns the artifact path for the Windows C++ client wrapper.
+
+    The wrapper provides `flutter/plugin_registry.h` and the sources behind it,
+    which a Windows runner and its plugin registrant compile. It is the same
+    for every build mode, so a repo holding a Windows engine of any mode
+    downloads this one.
+
+    Args:
+        platform: Windows platform string (e.g. "windows-x64").
+
+    Returns:
+        Artifact path like "windows-x64/flutter-cpp-client-wrapper.zip".
+    """
+    return "{platform}/flutter-cpp-client-wrapper.zip".format(platform = platform)
+
 def desktop_engine_artifact_path(os, arch, mode):
     """Returns the artifact path for a desktop Flutter engine runtime library.
 

@@ -10,11 +10,15 @@ flutter_desktop_cross_repo.bzl.
 # One template per OS. `{name}` is the target's name, which says the build
 # mode of the engine it holds (see `engine_filegroup_for_os`); `{dir}` is where
 # that engine was extracted.
+#
+# Each glob is strict: every pattern must match a file, so a repo that lacks a
+# download fails when its package loads, naming the pattern, instead of
+# building and failing later in a rule that finds no header or library.
 
 _MACOS_ENGINE_FILEGROUP = """
 filegroup(
     name = "{name}",
-    srcs = glob(["{dir}/FlutterMacOS.framework/**"], allow_empty = True),
+    srcs = glob(["{dir}/FlutterMacOS.framework/**"]),
     visibility = ["//visibility:public"],
 )
 """
@@ -22,10 +26,7 @@ filegroup(
 _LINUX_ENGINE_FILEGROUP = """
 filegroup(
     name = "{name}",
-    srcs = glob(
-        ["{dir}/libflutter_linux_gtk.so", "{dir}/flutter_linux/*.h"],
-        allow_empty = True,
-    ),
+    srcs = glob(["{dir}/libflutter_linux_gtk.so", "{dir}/flutter_linux/*.h"]),
     visibility = ["//visibility:public"],
 )
 """
@@ -46,7 +47,6 @@ filegroup(
             "cpp-client-wrapper/cpp_client_wrapper/*.h",
             "cpp-client-wrapper/cpp_client_wrapper/*.cc",
         ],
-        allow_empty = True,
     ),
     visibility = ["//visibility:public"],
 )

@@ -513,6 +513,9 @@ def _glob_block(srcs_dirs, extensions):
     excluded — pub plugins routinely ship integration tests next to
     their plugin source, but those should never be linked into the
     runner.
+
+    The glob is `allow_empty`: a plugin ships sources in only some of the
+    extensions, and a package may ship a platform directory with none.
     """
     patterns = []
     excludes = []
@@ -629,6 +632,7 @@ def _format_label_dict_literal(d, indent = "        "):
     lines = ['{indent}"{k}": "{v}",'.format(indent = indent, k = k, v = d[k]) for k in keys]
     return "{\n" + "\n".join(lines) + "\n" + indent[:-4] + "}"
 
+# `allow_empty`: most packages ship no shader includes.
 _SHADER_INCLUDES_GLOB = """    shader_includes = glob(
         ["**/*.glsl", "**/*.frag", "**/*.vert"],
         allow_empty = True,
@@ -676,6 +680,8 @@ def _format_code_asset_attrs(code_assets, has_unreplaced_hook):
 # `pkg_shaders` / `font_files`): those name what is transformed and bundled
 # into flutter_assets, while `resources` names membership in the staged
 # package tree. A shader under `lib/` is legitimately both.
+#
+# `allow_empty`: most packages ship nothing but Dart under `lib/`.
 _RESOURCES_GLOB_BLOCK = """    resources = glob(
         ["lib/**"],
         exclude = ["lib/**/*.dart"],
@@ -745,6 +751,8 @@ def make_flutter_library_build_content(
 
     pub_attrs = _format_pub_asset_attrs(fonts_json_str, font_files, pkg_assets, pkg_shaders)
 
+    # The `lib/` glob is `allow_empty`: a pub package can be only assets or native
+    # code, with no Dart.
     return """\
 load("@rules_flutter//flutter:defs.bzl", "flutter_library")
 
@@ -977,6 +985,8 @@ flutter_windows_plugin_library(
 
     pub_attrs = _format_pub_asset_attrs(fonts_json_str, font_files, pkg_assets, pkg_shaders)
 
+    # The `lib/` glob is `allow_empty`: a pub package can be only assets or native
+    # code, with no Dart.
     return """\
 load("@rules_flutter//flutter:defs.bzl", "flutter_plugin")
 {extra_loads}
@@ -1114,6 +1124,9 @@ kt_android_library(
             sub_src = android_src_dir[len("android/"):]
         else:
             sub_src = android_src_dir
+
+        # `allow_empty`: a plugin's Android directory can hold resources and
+        # no code.
         srcs_attr = 'glob(["{d}/**/*.kt", "{d}/**/*.java"], allow_empty = True)'.format(d = sub_src)
     else:
         srcs_attr = "[]"

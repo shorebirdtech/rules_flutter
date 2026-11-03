@@ -396,6 +396,7 @@ def _variant_overlay(name, variant, manifest, base_manifest):
     if manifest == False:
         return None
     if manifest == None:
+        # `allow_empty`: a variant overlay is optional; most apps have none.
         discovered = native.glob(
             ["android/app/src/%s/AndroidManifest.xml" % variant],
             allow_empty = True,
@@ -645,7 +646,9 @@ def flutter_android_app(
         binary_deps.append("@%s//android:all_android_plugin_libs" % pub_hub_name)
 
     if not base_manifest:
-        # Try to discover flutter create output.
+        # Try to discover flutter create output. `allow_empty`: an app
+        # assembled without `flutter create`'s `android/` directory is a
+        # supported case; the macro then needs the `base_manifest` argument.
         discovered_manifests = native.glob(
             ["android/app/src/main/AndroidManifest.xml"],
             allow_empty = True,
@@ -665,7 +668,8 @@ def flutter_android_app(
             )
             base_manifest = "__%s_manifest" % name
 
-            # Discover resources from flutter create output.
+            # Discover resources from flutter create output. `allow_empty`:
+            # an app may ship none.
             discovered_resources = native.glob(
                 ["android/app/src/main/res/**"],
                 allow_empty = True,
@@ -675,7 +679,8 @@ def flutter_android_app(
             # Discover and compile the runner from flutter create output:
             # Gradle's main source directories for Kotlin and Java. Not the
             # plugin registrant `flutter run` writes there: the
-            # `__{name}_registrant` above is this app's.
+            # `__{name}_registrant` above is this app's. `allow_empty`: an app
+            # may keep all of its code in Dart.
             runner_sources = native.glob(
                 [
                     "android/app/src/main/kotlin/**/*.kt",

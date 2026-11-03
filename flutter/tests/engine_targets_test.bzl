@@ -37,6 +37,28 @@ def _filegroup_names_test_impl(ctx):
         asserts.false(env, "engine_library" in _names(engine_filegroup_for_os(os_name, "release")))
     return unittest.end(env)
 
+def _strict_globs_test_impl(ctx):
+    # A glob that may match nothing builds a repo that lacks a download, and
+    # the rules using it fail later with no word of what is missing. Each
+    # pattern of a strict glob has to match, so Bazel stops the package load
+    # naming the pattern.
+    env = unittest.begin(ctx)
+    for os_name in ["macos", "linux", "windows"]:
+        for mode in ["release", "debug", "profile"]:
+            asserts.false(env, "allow_empty" in engine_filegroup_for_os(os_name, mode), "%s %s" % (os_name, mode))
+        asserts.false(
+            env,
+            "allow_empty" in host_engine_targets(os_name, has_debug = True, profile_repo = "sdk_profile"),
+            os_name,
+        )
+
+    # The Windows engine's files are named one by one, the wrapper's by
+    # directory, and the wrapper is not in the engine archive.
+    text = engine_filegroup_for_os("windows", "release")
+    asserts.true(env, "\"engine/flutter_windows.dll\"" in text)
+    asserts.true(env, "cpp-client-wrapper/cpp_client_wrapper/include/flutter/*.h" in text)
+    return unittest.end(env)
+
 def _filegroup_dirs_test_impl(ctx):
     env = unittest.begin(ctx)
     for os_name in ["macos", "linux", "windows"]:
@@ -118,6 +140,7 @@ def _android_engine_targets_test_impl(ctx):
     return unittest.end(env)
 
 _filegroup_names_test = unittest.make(_filegroup_names_test_impl)
+_strict_globs_test = unittest.make(_strict_globs_test_impl)
 _filegroup_dirs_test = unittest.make(_filegroup_dirs_test_impl)
 _host_targets_test = unittest.make(_host_targets_test_impl)
 _host_targets_without_optional_modes_test = unittest.make(_host_targets_without_optional_modes_test_impl)
@@ -190,6 +213,7 @@ def engine_targets_test_suite(name):
     for case, test in {
         "filegroup_names": _filegroup_names_test,
         "filegroup_dirs": _filegroup_dirs_test,
+        "strict_globs": _strict_globs_test,
         "host_targets": _host_targets_test,
         "host_targets_without_optional_modes": _host_targets_without_optional_modes_test,
         "target_name": _target_name_test,

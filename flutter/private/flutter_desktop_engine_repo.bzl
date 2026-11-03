@@ -9,7 +9,7 @@ filegroup is named for the mode (`engine_release_library`,
 `engine_debug_library` or `engine_profile_library`).
 """
 
-load(":artifact_urls.bzl", "desktop_engine_artifact_path", "engine_artifact_url")
+load(":artifact_urls.bzl", "cpp_client_wrapper_artifact_path", "desktop_engine_artifact_path", "engine_artifact_url")
 load(":engine_helpers.bzl", "engine_filegroup_for_os", "extract_macos_inner_framework")
 
 def _flutter_desktop_engine_repo_impl(repository_ctx):
@@ -31,6 +31,15 @@ def _flutter_desktop_engine_repo_impl(repository_ctx):
     if target_os == "macos":
         extract_macos_inner_framework(repository_ctx)
 
+    # The Windows engine filegroup lists the C++ client wrapper, which is not
+    # in the engine archive.
+    if target_os == "windows":
+        repository_ctx.download_and_extract(
+            url = engine_artifact_url(engine_revision, cpp_client_wrapper_artifact_path("windows-" + target_arch)),
+            sha256 = repository_ctx.attr.cpp_wrapper_sha256,
+            output = "cpp-client-wrapper",
+        )
+
     repository_ctx.file("BUILD.bazel", _BUILD_TEMPLATE.format(
         engine_filegroup = engine_filegroup_for_os(target_os, mode),
     ))
@@ -48,5 +57,6 @@ flutter_desktop_engine_repo = repository_rule(
         "target_arch": attr.string(mandatory = True, doc = "Target architecture: x64 or arm64."),
         "mode": attr.string(default = "release", doc = "Build mode: debug, profile, or release."),
         "sha256": attr.string(doc = "Expected SHA-256 of the engine archive."),
+        "cpp_wrapper_sha256": attr.string(doc = "Expected SHA-256 of the C++ client wrapper archive (Windows only)."),
     },
 )

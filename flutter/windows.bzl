@@ -164,6 +164,8 @@ def flutter_windows_app(
     #    If flutter create registrant files exist, use them directly (they match
     #    the #include "flutter/generated_plugin_registrant.h" path expected by
     #    flutter create runner code). Otherwise, generate from FlutterInfo.
+    # `allow_empty`: the files exist only where `flutter create` or
+    # `flutter pub get` wrote them; the fallback generates the registrant.
     flutter_create_registrant = native.glob(
         [
             "windows/flutter/generated_plugin_registrant.cc",
@@ -185,6 +187,7 @@ def flutter_windows_app(
         )
 
     # 3. Runner target — discover flutter create output or use template.
+    # `allow_empty`: an app without a runner directory gets the template's.
     runner_srcs = native.glob(["windows/runner/*.cc", "windows/runner/*.cpp"], allow_empty = True)
     runner_hdrs = native.glob(["windows/runner/*.h"], allow_empty = True)
 

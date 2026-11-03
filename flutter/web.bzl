@@ -198,6 +198,8 @@ def flutter_web_app(
     }
     for attr, basename in templates.items():
         path = "%s/%s" % (web_dir, basename)
+
+        # `allow_empty`: each file is optional; absent ones are generated.
         if attr not in kwargs and native.glob([path], allow_empty = True):
             kwargs[attr] = path
 
@@ -213,6 +215,7 @@ def flutter_web_app(
     # Discover web assets. The files the bundle generates for itself are
     # excluded — they reach it through their own attrs, and bundling them here
     # as well is refused rather than silently resolved.
+    # `allow_empty`: an app may have no web directory contents.
     web_assets = native.glob(
         [web_dir + "/**"],
         exclude = ["%s/%s" % (web_dir, b) for b in templates.values()],

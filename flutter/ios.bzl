@@ -448,6 +448,7 @@ def flutter_ios_app(
     # pipeline still injects `get-task-allow=true` for debug builds.
     # `False` ships none although the file exists — see
     # `resolve_ios_entitlements` for the device build that needs it.
+    # `allow_empty` is the supported no-capabilities case.
     entitlements = resolve_ios_entitlements(
         entitlements,
         discovered = "ios/Runner/Runner.entitlements" if native.glob(
@@ -478,6 +479,7 @@ def flutter_ios_app(
     # `None` means discover, `[]` means ship none: both states are sayable, and
     # an app with no catalog at all is the second without having to write it.
     if app_icons == None:
+        # `allow_empty`: an app with no catalog ships the generic icon.
         app_icons = native.glob(
             ["ios/Runner/Assets.xcassets/AppIcon.appiconset/**"],
             allow_empty = True,
