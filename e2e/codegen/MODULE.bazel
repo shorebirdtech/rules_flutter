@@ -31,9 +31,10 @@ register_toolchains("@flutter_toolchains//:all")
 # built for the exec platform (zipper, xmllint) can be compiled when Bazel runs
 # actions on a Linux arm64 worker. Only the Linux-exec, Linux-target toolchain
 # exists: Mac and iOS builds keep apple_support's toolchain. It is registered
-# only for cloud builds, by `--extra_toolchains` in .bazelrc: registering it
-# here would make every build fetch llvm-project's sources, which toolchain
-# resolution loads the generated package from.
+# only on request, with `--extra_toolchains=@llvm_toolchains//:all` (for
+# example in .bazelrc.user, for builds that run on a Linux arm64 worker):
+# registering it here would make every build fetch llvm-project's sources,
+# which toolchain resolution loads the generated package from.
 bazel_dep(name = "llvm", version = "0.8.26", dev_dependency = True)
 
 llvm_tc = use_extension("@llvm//extensions:toolchain.bzl", "toolchain", dev_dependency = True)
