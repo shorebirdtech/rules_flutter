@@ -386,6 +386,7 @@ dart_test(
     data = [":app"],
     main = "test/verify_macos_bundle_test.dart",
     target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 # Reads the entitlements blob codesign embedded in the built bundle. Bazel's

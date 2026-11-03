@@ -2,130 +2,35 @@
 /// including the native shared library with the correct filename.
 library;
 
-// This script's diagnostics are its product: it reports what it found in
-// the built artifact to the bazel test log, so `print` is its output
-// channel rather than a stray debugging statement.
-// ignore_for_file: avoid_print
-
-import 'dart:io';
+import 'package:rules_flutter_e2e_testing/desktop_bundle.dart';
 
 void main() {
-  final testSrcDir = Platform.environment['TEST_SRCDIR'];
-  final testWorkspace = Platform.environment['TEST_WORKSPACE'];
-  if (testSrcDir == null || testWorkspace == null) {
-    stderr.writeln('Missing TEST_SRCDIR or TEST_WORKSPACE env vars');
-    exit(1);
-  }
-
-  final bundlePath = '$testSrcDir/$testWorkspace/ffi_linux';
-  final bundle = Directory(bundlePath);
-  if (!bundle.existsSync()) {
-    stderr.writeln('Bundle not found at $bundlePath');
-    exit(1);
-  }
-
-  var failed = false;
-
-  void check(String description, String path, {bool nonEmpty = false}) {
-    final file = File(path);
-    final isDir = FileSystemEntity.isDirectorySync(path);
-    final exists = isDir || file.existsSync();
-    if (!exists) {
-      stderr.writeln('FAIL: $description — not found: $path');
-      failed = true;
-    } else if (nonEmpty && !isDir && file.lengthSync() == 0) {
-      stderr.writeln('FAIL: $description — file is empty: $path');
-      failed = true;
-    } else {
-      print('OK: $description');
-    }
-  }
-
-  check('Runner binary', '$bundlePath/ffi_linux', nonEmpty: true);
-  check(
-    'libflutter_linux_gtk.so',
-    '$bundlePath/lib/libflutter_linux_gtk.so',
-    nonEmpty: true,
-  );
-  check('flutter_assets', '$bundlePath/data/flutter_assets');
-  check(
-    'AssetManifest.bin',
-    '$bundlePath/data/flutter_assets/AssetManifest.bin',
-  );
-  check(
-    'FontManifest.json',
-    '$bundlePath/data/flutter_assets/FontManifest.json',
-  );
-  check('NOTICES.Z', '$bundlePath/data/flutter_assets/NOTICES.Z');
-  check('icudtl.dat', '$bundlePath/data/icudtl.dat', nonEmpty: true);
-  check(
-    'Native-asset lib libadd.so',
-    '$bundlePath/lib/libadd.so',
-    nonEmpty: true,
-  );
-  check(
-    'native_deps lib libmul.so',
-    '$bundlePath/lib/libmul.so',
-    nonEmpty: true,
-  );
-  check(
-    'curated code-asset lib libsqlite3.so',
-    '$bundlePath/lib/libsqlite3.so',
-    nonEmpty: true,
-  );
-  check(
-    'combined code-asset lib libcounter.so',
-    '$bundlePath/lib/libcounter.so',
-    nonEmpty: true,
-  );
+  final bundle = LinuxBundle.fromRunfiles('ffi_linux')..checkStandardLayout();
+  final check = bundle.check
+    ..exists(
+      'Native-asset lib libadd.so',
+      bundle.lib('libadd.so'),
+      nonEmpty: true,
+    )
+    ..exists(
+      'native_deps lib libmul.so',
+      bundle.lib('libmul.so'),
+      nonEmpty: true,
+    )
+    ..exists(
+      'curated code-asset lib libsqlite3.so',
+      bundle.lib('libsqlite3.so'),
+      nonEmpty: true,
+    )
+    ..exists(
+      'combined code-asset lib libcounter.so',
+      bundle.lib('libcounter.so'),
+      nonEmpty: true,
+    );
   // The app serves both packages' ids from `libcounter.so`, so the standalone
   // libraries the packages declare for themselves stay out.
   for (final name in ['libcounter_a.so', 'libcounter_b.so']) {
-    if (File('$bundlePath/lib/$name').existsSync()) {
-      stderr.writeln('FAIL: replaced code asset $name was bundled');
-      failed = true;
-    } else {
-      print('OK: replaced code asset $name not bundled');
-    }
+    check.absent('replaced code asset $name', bundle.lib(name));
   }
-
-  // Check for either AOT or debug artifact.
-  final hasAot = File('$bundlePath/lib/libapp.so').existsSync();
-  final hasKernelBlob = File(
-    '$bundlePath/data/flutter_assets/kernel_blob.bin',
-  ).existsSync();
-  if (hasAot) {
-    check('AOT snapshot', '$bundlePath/lib/libapp.so', nonEmpty: true);
-  } else if (hasKernelBlob) {
-    check(
-      'Kernel blob (debug)',
-      '$bundlePath/data/flutter_assets/kernel_blob.bin',
-      nonEmpty: true,
-    );
-  } else {
-    stderr.writeln(
-      'FAIL: Neither lib/libapp.so nor data/flutter_assets/kernel_blob.bin found',
-    );
-    failed = true;
-  }
-
-  if (failed) {
-    _listDir(Directory(bundlePath), '');
-    exit(1);
-  }
-
-  print('All Linux bundle verification checks passed.');
-}
-
-void _listDir(Directory dir, String indent) {
-  final entities = dir.listSync()..sort((a, b) => a.path.compareTo(b.path));
-  for (final entity in entities) {
-    final name = entity.path.split('/').last;
-    if (entity is Directory) {
-      stderr.writeln('$indent$name/');
-      _listDir(entity, '$indent  ');
-    } else {
-      stderr.writeln('$indent$name');
-    }
-  }
+  bundle.finish();
 }

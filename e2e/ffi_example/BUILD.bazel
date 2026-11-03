@@ -432,6 +432,7 @@ dart_test(
     data = [":ffi_macos"],
     main = "test/verify_macos_bundle_test.dart",
     target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 # Behavioral runtime test: launches the macOS app binary and asserts both the
@@ -448,6 +449,7 @@ dart_test(
         "manual",
     ],
     target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 # `manual`, so `bazel test //...` never gives it to the analysis aspect; this
@@ -463,6 +465,7 @@ dart_test(
     data = [":ffi_linux"],
     main = "test/verify_linux_bundle_test.dart",
     target_compatible_with = ["@platforms//os:linux"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 # Behavioral runtime test: launches the Linux runner and asserts both the
@@ -478,6 +481,7 @@ dart_test(
         "manual",
     ],
     target_compatible_with = ["@platforms//os:linux"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 # `manual`, so `bazel test //...` never gives it to the analysis aspect; this
@@ -493,7 +497,7 @@ dart_test(
     data = [":ffi_windows"],
     main = "test/verify_windows_bundle_test.dart",
     target_compatible_with = ["@platforms//os:windows"],
-    deps = ["@rules_dart//dart/runfiles"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 # Behavioral runtime test: launches the Windows runner and asserts both the
@@ -508,7 +512,7 @@ dart_test(
         "manual",
     ],
     target_compatible_with = ["@platforms//os:windows"],
-    deps = ["@rules_dart//dart/runfiles"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 # `manual`, so `bazel test //...` never gives it to the analysis aspect; this

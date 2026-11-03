@@ -229,6 +229,7 @@ dart_test(
     data = [":ffi_plugin_macos"],
     main = "test/verify_macos_bundle_test.dart",
     target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 dart_test(
@@ -236,6 +237,7 @@ dart_test(
     data = [":ffi_plugin_linux"],
     main = "test/verify_linux_bundle_test.dart",
     target_compatible_with = ["@platforms//os:linux"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 build_test(

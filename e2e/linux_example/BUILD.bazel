@@ -98,6 +98,7 @@ dart_test(
     data = [":app"],
     main = "test/verify_linux_bundle_test.dart",
     target_compatible_with = ["@platforms//os:linux"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 dart_test(

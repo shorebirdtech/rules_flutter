@@ -1,82 +1,30 @@
 /// Verifies the Windows bundle has the expected structure, including both
 /// native shared libraries next to the runner exe (that is where the loader —
 /// and the native-assets manifest's bare-basename entries — expect them).
-///
-/// The bundle is resolved through `package:runfiles`, not `$TEST_SRCDIR`
-/// paths: Windows uses manifest-based runfiles (no symlink tree), so raw
-/// path construction finds nothing there.
 library;
 
-// This script's diagnostics are its product: it reports what it found in
-// the built artifact to the bazel test log, so `print` is its output
-// channel rather than a stray debugging statement.
-// ignore_for_file: avoid_print
-
-import 'dart:io';
-
-import 'package:runfiles/runfiles.dart';
+import 'package:rules_flutter_e2e_testing/desktop_bundle.dart';
 
 void main() {
-  final bundlePath = Runfiles.create().rlocation('_main/ffi_windows');
-  if (!Directory(bundlePath).existsSync()) {
-    stderr.writeln('Bundle directory not found at $bundlePath');
-    exit(1);
-  }
-
-  var failed = false;
-
-  void check(String description, String path, {bool nonEmpty = false}) {
-    final file = File(path);
-    final isDir = FileSystemEntity.isDirectorySync(path);
-    final exists = isDir || file.existsSync();
-    if (!exists) {
-      stderr.writeln('FAIL: $description — not found: $path');
-      failed = true;
-    } else if (nonEmpty && !isDir && file.lengthSync() == 0) {
-      stderr.writeln('FAIL: $description — file is empty: $path');
-      failed = true;
-    } else {
-      print('OK: $description');
-    }
-  }
-
-  check('Runner binary', '$bundlePath/ffi_windows.exe', nonEmpty: true);
-  check(
-    'flutter_windows.dll',
-    '$bundlePath/flutter_windows.dll',
-    nonEmpty: true,
-  );
-  check('Native-asset lib add.dll', '$bundlePath/add.dll', nonEmpty: true);
-  check('native_deps lib mul.dll', '$bundlePath/mul.dll', nonEmpty: true);
-  check(
-    'curated code-asset lib sqlite3.dll',
-    '$bundlePath/sqlite3.dll',
-    nonEmpty: true,
-  );
-  check(
-    'combined code-asset lib counter.dll',
-    '$bundlePath/counter.dll',
-    nonEmpty: true,
-  );
+  final bundle = WindowsBundle.fromRunfiles('ffi_windows')
+    ..checkStandardLayout();
+  final check = bundle.check
+    ..exists('Native-asset lib add.dll', bundle.file('add.dll'), nonEmpty: true)
+    ..exists('native_deps lib mul.dll', bundle.file('mul.dll'), nonEmpty: true)
+    ..exists(
+      'curated code-asset lib sqlite3.dll',
+      bundle.file('sqlite3.dll'),
+      nonEmpty: true,
+    )
+    ..exists(
+      'combined code-asset lib counter.dll',
+      bundle.file('counter.dll'),
+      nonEmpty: true,
+    );
   // The app serves both packages' ids from `counter.dll`, so the standalone
   // libraries the packages declare for themselves stay out.
   for (final name in ['counter_a.dll', 'counter_b.dll']) {
-    if (File('$bundlePath/$name').existsSync()) {
-      stderr.writeln('FAIL: replaced code asset $name was bundled');
-      failed = true;
-    } else {
-      print('OK: replaced code asset $name not bundled');
-    }
+    check.absent('replaced code asset $name', bundle.file(name));
   }
-  check('flutter_assets', '$bundlePath/data/flutter_assets');
-  check('icudtl.dat', '$bundlePath/data/icudtl.dat', nonEmpty: true);
-
-  if (failed) {
-    stderr.writeln('Bundle contains:');
-    for (final entity in Directory(bundlePath).listSync(recursive: true)) {
-      stderr.writeln('  ${entity.path.substring(bundlePath.length + 1)}');
-    }
-    exit(1);
-  }
-  print('All Windows bundle verification checks passed.');
+  bundle.finish();
 }

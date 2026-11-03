@@ -1,0 +1,31 @@
+load("@rules_dart//dart:defs.bzl", "dart_library", "dart_test")
+
+# The checks the e2e workspaces' `verify_*_test`s share, as a library:
+# checking that a built bundle holds the files and symbols it should, unpacking
+# an archive, launching an app and waiting for it to report. Each workspace is
+# its own Bazel project and cannot share files by relative path, so a test
+# there lists `@rules_flutter//tools/e2e_testing` in `deps` and imports
+# `package:rules_flutter_e2e_testing/...`.
+#
+# It is for this repository's tests. `.gitattributes` leaves it out of the
+# release archive, and it is public only so the e2e workspaces can name it.
+dart_library(
+    name = "e2e_testing",
+    package_name = "rules_flutter_e2e_testing",
+    srcs = glob(["lib/**/*.dart"]),
+    visibility = ["//visibility:public"],
+    deps = ["@rules_dart//dart/runfiles"],
+)
+
+[
+    dart_test(
+        name = test[len("test/"):-len(".dart")],
+        size = "small",
+        main = test,
+        deps = [
+            ":e2e_testing",
+            "@dev_tool_deps//:test",
+        ],
+    )
+    for test in glob(["test/*_test.dart"])
+]

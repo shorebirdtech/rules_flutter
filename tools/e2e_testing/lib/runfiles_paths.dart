@@ -1,0 +1,20 @@
+/// Where a test finds the artifact it inspects.
+library;
+
+import 'dart:io';
+
+import 'package:runfiles/runfiles.dart';
+
+/// The path of [workspacePath] (as `//:app` would put it, `app`) in the test's
+/// runfiles, resolved through `package:runfiles` so it also works where
+/// runfiles are a manifest and not a tree (Windows CI).
+///
+/// Exits 1 if nothing is there.
+String requireRunfile(String workspacePath, {String what = 'File'}) {
+  final path = Runfiles.create().rlocation('_main/$workspacePath');
+  if (!FileSystemEntity.isDirectorySync(path) && !File(path).existsSync()) {
+    stderr.writeln('$what not found at $path');
+    exit(1);
+  }
+  return path;
+}

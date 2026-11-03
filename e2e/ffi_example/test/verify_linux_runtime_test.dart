@@ -27,12 +27,10 @@
 /// `ffi_example_result add(3,4)=7 mul(3,4)=12 sqlite=HELLO shared=2` to `$TMPDIR/ffi_result.txt`.
 library;
 
-// This script's diagnostics are its product: it reports what it found in
-// the built artifact to the bazel test log, so `print` is its output
-// channel rather than a stray debugging statement.
-// ignore_for_file: avoid_print
-
 import 'dart:io';
+
+import 'package:rules_flutter_e2e_testing/marker_run.dart';
+import 'package:rules_flutter_e2e_testing/runfiles_paths.dart';
 
 const _marker =
     'ffi_example_result add(3,4)=7 mul(3,4)=12 sqlite=HELLO shared=2';
@@ -41,62 +39,24 @@ const _marker =
 const _timeout = Duration(seconds: 60);
 
 Future<void> main() async {
-  final testSrcDir = Platform.environment['TEST_SRCDIR'];
-  final testWorkspace = Platform.environment['TEST_WORKSPACE'];
-  if (testSrcDir == null || testWorkspace == null) {
-    stderr.writeln('Missing TEST_SRCDIR or TEST_WORKSPACE env vars');
-    exit(1);
-  }
-
-  final binary = '$testSrcDir/$testWorkspace/ffi_linux/ffi_linux';
-  if (!File(binary).existsSync()) {
-    stderr.writeln('Runner binary not found at $binary');
-    exit(1);
-  }
+  final binary = requireRunfile('ffi_linux/ffi_linux', what: 'Runner binary');
 
   final markerDir = Directory.systemTemp.createTempSync('ffi_linux_runtime');
-  final markerFile = File('${markerDir.path}/ffi_result.txt');
-  Process? app;
   try {
-    print('Launching $binary ...');
-    app = await Process.start(
-      binary,
-      const [],
-      environment: {...Platform.environment, 'TMPDIR': markerDir.path},
+    await runUntilMarker(
+      binary: binary,
+      markerFile: File('${markerDir.path}/ffi_result.txt'),
+      expected: _marker,
+      timeout: _timeout,
+      environment: {'TMPDIR': markerDir.path},
+      // Surface engine/loader errors in the test log.
+      forwardOutput: true,
     );
-    // Surface engine/loader errors in the test log.
-    app.stdout.listen(stdout.add);
-    app.stderr.listen(stderr.add);
-
-    print('Waiting up to ${_timeout.inSeconds}s for ${markerFile.path} ...');
-    final deadline = DateTime.now().add(_timeout);
-    String? contents;
-    while (DateTime.now().isBefore(deadline)) {
-      if (markerFile.existsSync()) {
-        contents = markerFile.readAsStringSync().trim();
-        break;
-      }
-      await Future<void>.delayed(const Duration(milliseconds: 250));
-    }
-
-    if (contents == null) {
-      stderr.writeln(
-        'FAIL: app never wrote ${markerFile.path} — it likely '
-        'crashed before main() completed (native library failed to load?).',
-      );
-      exit(1);
-    }
-    print('App recorded: "$contents"');
-    if (contents != _marker) {
-      stderr.writeln('FAIL: expected "$_marker" but got "$contents".');
-      exit(1);
-    }
-    print(
+    stdout.writeln(
       'PASS: @Native asset bind (add), raw filename open (mul) and '
       'the curated sqlite3 code asset all worked at runtime.',
     );
   } finally {
-    app?.kill();
     markerDir.deleteSync(recursive: true);
   }
 }
