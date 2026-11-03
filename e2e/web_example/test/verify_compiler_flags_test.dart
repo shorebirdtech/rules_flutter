@@ -4,11 +4,13 @@
 /// The analysis tests in `flutter/tests/web_test.bzl` pin the flags onto the
 /// dart2js and dart2wasm argv. That proves what was asked for, not what came
 /// out — a flag can be spelled correctly, accepted by the compiler, and still
-/// change nothing. So this compares two builds of the SAME app:
+/// change nothing. So this compares builds of the SAME app:
 ///
-///   app_wasm:  the defaults, which in the default (release) configuration
-///              means minified JS and a stripped, minified WASM.
-///   app_tuned: minify_js/minify_wasm off and strip_wasm off, plus dump_info.
+///   app_wasm:     the defaults: WebAssembly only, stripped and minified in
+///                 the default (release) configuration.
+///   app_fallback: the defaults plus `js_fallback`, which adds minified JS.
+///   app_tuned:    minify_js/minify_wasm off and strip_wasm off, plus
+///                 dump_info, on top of `js_fallback`.
 ///
 /// Every assertion below is a difference between those two bundles, so it
 /// fails if the attrs stop being honoured — which asserting on one bundle
@@ -49,10 +51,48 @@ void main() {
   }
 
   final tunedJs = bundleFile('app_tuned', 'main.dart.js');
-  final defaultJs = bundleFile('app_wasm', 'main.dart.js');
+  final defaultJs = bundleFile('app_fallback', 'main.dart.js');
   final tunedWasm = bundleFile('app_tuned', 'main.dart.wasm');
   final defaultWasm = bundleFile('app_wasm', 'main.dart.wasm');
   if (failed) exit(1);
+
+  // The default WASM bundle is WebAssembly alone: no JavaScript build, and no
+  // mention of one for the loader to go looking for.
+  final wasmOnlyDir = Directory('$root/app_wasm_web');
+  final wasmOnlyJs = wasmOnlyDir
+      .listSync(recursive: true)
+      .whereType<File>()
+      .where((f) => f.path.endsWith('main.dart.js'))
+      .toList();
+  check(
+    'default dart2wasm bundle ships no main.dart.js',
+    ok: wasmOnlyJs.isEmpty,
+    detail: wasmOnlyJs.isEmpty ? 'WebAssembly only' : 'shipped $wasmOnlyJs',
+  );
+  final wasmOnlyBootstrap = File(
+    '${wasmOnlyDir.path}/flutter_bootstrap.js',
+  ).readAsStringSync();
+  check(
+    'default dart2wasm bootstrap lists only the WASM build',
+    ok:
+        wasmOnlyBootstrap.contains('"compileTarget":"dart2wasm"') &&
+        !wasmOnlyBootstrap.contains('dart2js') &&
+        !wasmOnlyBootstrap.contains('main.dart.js'),
+    detail: 'no dart2js build and no main.dart.js in the build config',
+  );
+
+  // `js_fallback` adds the JavaScript build, listed after the WASM one so the
+  // loader prefers WASM.
+  final fallbackBootstrap = File(
+    '$root/app_fallback_web/flutter_bootstrap.js',
+  ).readAsStringSync();
+  final wasmAt = fallbackBootstrap.indexOf('"compileTarget":"dart2wasm"');
+  final jsAt = fallbackBootstrap.indexOf('"compileTarget":"dart2js"');
+  check(
+    'js_fallback lists the JS build after the WASM one',
+    ok: wasmAt >= 0 && jsAt > wasmAt,
+    detail: 'dart2wasm at $wasmAt, dart2js at $jsAt',
+  );
 
   // minify_js = "false" — the Dart names survive into the JavaScript. Checked
   // by name rather than by size alone: a size difference could come from any
@@ -67,9 +107,9 @@ void main() {
       detail: 'present in the unminified build',
     );
     check(
-      'default build minifies `$identifier` away',
+      'the default fallback build minifies `$identifier` away',
       ok: !defaultJsText.contains(identifier),
-      detail: 'absent from the default release build, as it should be',
+      detail: 'absent from the minified fallback build, as it should be',
     );
   }
 

@@ -1007,6 +1007,13 @@ Unlike the other platforms, the web macro takes `main` and `deps` directly rathe
 
 The macro always compiles with dart2wasm and renders with skwasm. Compiler settings such as `optimization_level_wasm` and `minify_wasm` pass through to `flutter_web_bundle`. For dart2js or CanvasKit, use `flutter_web_bundle` directly.
 
+The built bundle is WebAssembly only. `main.dart.wasm` and `main.dart.mjs` are the whole app, no dart2js compile runs, and nothing the rule generates refers to `main.dart.js`. JavaScript is for the dev loop, which compiles with DDC. So code that only works under WebAssembly builds: dart2js refuses the largest 64-bit integer literal at compile time and throws on `Int64List` at runtime, and neither stops a WASM-only build. (`e2e/web_example/int64` is an app that uses both.)
+
+The cost is the browsers that cannot run it. Flutter's loader (`flutter.js`) picks the first entry in the bootstrap's build list that the browser can run, and the list has one entry. It skips the WASM build when the browser lacks WasmGC, and, because the renderer is skwasm, when the browser engine is not allowed to use it. Today's `flutter.js` allows skwasm on Chromium only (`wasmAllowList` defaults to `blink: true, gecko: false, webkit: false`). Where it skips the only build, the loader logs `Flutter Web: no compatible build found for this browser.` to the console, throws `FlutterLoader could not find a build compatible with configuration and environment.`, and the page stays as `index.html` left it, with no app and no error shown to the visitor. Two ways to serve more browsers:
+
+- `js_fallback = True` also compiles with dart2js and ships `main.dart.js` (rendered with CanvasKit) beside the WASM build, listed second so a browser that can run WASM takes it. This is what `flutter build web --wasm` always does. The app then has to compile under dart2js, and `optimization_level_js`, `minify_js`, `frequency_based_minification` and `dump_info` apply to that build (they are refused without it, since they would reach nothing).
+- Allow skwasm in more engines with a `web/flutter_bootstrap.js` of your own that passes `config: { wasmAllowList: { gecko: true, webkit: true } }` to `_flutter.loader.load`. That is the app's judgement of those browsers' skwasm support, not something the rule decides.
+
 An optimizing wasm compile (`-O1` and up, the default outside debug) reserves 4 cores, and its optimizer uses no more. `--@rules_flutter//flutter:wasm_opt_cores=N` changes both. Fewer lets several web apps compile at once where Bazel has few cores to hand out; more makes one compile finish sooner. The output is the same either way.
 
 The files under `web/` are treated as templates and substituted the way `flutter build web` substitutes them, so raw `flutter create` output works unchanged: `web/index.html`, `web/flutter_bootstrap.js`, `web/manifest.json`, and `web/version.json` are each discovered when present, and everything else under `web/` is copied into the bundle root.
@@ -1017,7 +1024,7 @@ The files under `web/` are treated as templates and substituted the way `flutter
 ```starlark
 load("@rules_flutter//flutter:web.bzl", "flutter_web_bundle")
 
-# WASM, the default:
+# WASM only, the default:
 flutter_web_bundle(
     name = "my_app_web",
     package_name = "my_app",
@@ -1025,7 +1032,16 @@ flutter_web_bundle(
     deps = ["@deps//:flutter"],
 )
 
-# JavaScript, for wider browser support:
+# WASM, with a dart2js build beside it for browsers without WasmGC:
+flutter_web_bundle(
+    name = "my_app_web_with_js",
+    package_name = "my_app",
+    main = "lib/main.dart",
+    js_fallback = True,
+    deps = ["@deps//:flutter"],
+)
+
+# JavaScript alone, for wider browser support:
 flutter_web_bundle(
     name = "my_app_web_js",
     package_name = "my_app",
@@ -2067,7 +2083,7 @@ The `e2e/` directory holds working workspaces, each with its own tests:
 | `e2e/android_example` | An Android APK built three ways, with APK content checks. |
 | `e2e/linux_example` | A Linux app built three ways, with bundle checks. |
 | `e2e/windows_example` | A Windows app built three ways, with bundle checks. |
-| `e2e/web_example` | WASM and JavaScript web builds with `web_assets`. |
+| `e2e/web_example` | WASM-only, WASM-with-JavaScript-fallback and JavaScript web builds with `web_assets`, and a WASM-only app dart2js cannot compile. |
 | `e2e/cross_compile_example` | A Linux bundle cross-compiled from macOS. |
 | `e2e/multi_window_example` | Multi-window macOS and multi-scene iOS with `FlutterEngineGroup`. |
 | `e2e/dual_hub` | Two pub hubs in one workspace that disagree on a package version. |

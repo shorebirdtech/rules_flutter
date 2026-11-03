@@ -887,7 +887,7 @@ with.
 | plugin_example | Real pub.dev plugins (`path_provider`, `url_launcher`, `package_info_plus`) plus the hand-written `:greeting_plugin` regression case; per-platform bundle builds; web plugin assertions via the e2e suite; macOS runtime verifier asserting the four plugin-result strings. See **Plugin verification matrix** below. |
 | macos_example | Full macOS app build + bundle structure verification (Info.plist, ObjC symbols, framework linkage, AOT dylib, flutter_assets, and a native library built in a subdirectory of its package landing flat at `Contents/Frameworks/libsub.dylib`) |
 | ios_example | iOS app build (requires Xcode) |
-| web_example | Web app builds (dart2wasm + dart2js) with web_assets |
+| web_example | Web app builds with web_assets: WASM only (`:app_wasm`, no `main.dart.js`), WASM with the opt-in dart2js fallback (`js_fallback`), and dart2js alone; `//int64:int64_app`, a WASM-only app dart2js cannot compile (`:int64_app_with_fallback`, manual, is the proof it fails) |
 | multi_window_example | Multi-window macOS + multi-scene iOS builds with FlutterEngineGroup; macOS bundle verification |
 | android_example | Android APK build (3 approaches: flutter_android_app, Bazel-generated manifest, custom manifest) + APK content verification + web build |
 | linux_example | Linux desktop app (2 approaches: flutter_linux_app, Bazel-generated runner) + bundle structure verification |
@@ -1466,6 +1466,7 @@ suite. There is no browser-test toolchain in this repo and no `npx` step.
 | Render | `web_smoke_e2e_test.dart` | Reads text back out of a keyed widget over the agent surface. Answering proves the framework built the tree *and* resolved the asset bundle behind it — a bundle that boots, answers the VM service and paints nothing fails here. |
 | Plugins on web | `plugin_example_e2e_test.dart` (`Web e2e`) | The four `plugin_example_results` strings on web, where each plugin takes a different path than on desktop (`package_info_plus` reads a generated JS manifest, `path_provider` has no web implementation, `url_launcher` goes through `window.open`). |
 | Templating / defines | `custom_boot/test/verify_templating_test.dart` | Substitution outcomes in the built bytes: web defines resolved, kept placeholders survived, `buildConfig` emitted, no `{{` left. |
+| WASM-only layout | `web_example/test/verify_compiler_flags_test.dart` | A default `dart2wasm` bundle ships no `main.dart.js` and its build config lists the WASM build alone; `js_fallback = True` lists the JS build second. Analysis tests in `flutter/tests/web_test.bzl` (`_wasm_only_bundle`, `_js_fallback_bundle`) pin the same on the actions: no dart2js action runs without `js_fallback`. |
 | Local CanvasKit | `web_example/test/verify_compiler_flags_test.dart` | `useLocalCanvasKit` is declared, so the renderer loads from the app origin rather than gstatic.com — the regression a strict `script-src 'self'` exposes. |
 
 Running the web checks needs a `dart` of 3.13+ on `PATH` (see § 2) and, for
@@ -1510,7 +1511,7 @@ script's own package requires ≥ 3.13.
 | Dart compilation / AOT | hello_world, ffi_example, macos_example |
 | Asset bundling | hello_world, plugin_example |
 | Shader compilation, bundling or hot reload, or how a workspace plugin is wired | `glass_plugin_e2e_test.dart` on every platform it covers, and by hand: `bazel build //impeller_shader:app_flutter_sksl_required` in plugin_example must **fail**, saying the shader does not compile for Skia |
-| Web support | `web_smoke_e2e_test.dart` (render) + `plugin_example_e2e_test.dart` (plugins on web) + `native_libs_reload_e2e_test.dart`'s web group if the change touches `native_modules` or the web reload arms |
+| Web support | web_example `//...` (a WASM-only bundle and an `Int64List` app dart2js cannot build) + `web_smoke_e2e_test.dart` (render) + `plugin_example_e2e_test.dart` (plugins on web) + `native_libs_reload_e2e_test.dart`'s web group if the change touches `native_modules` or the web reload arms |
 | FFI / native deps / native assets | ffi_example (incl. manual iOS-sim + macOS runtime tests), ffi_plugin_example |
 | Plugins | plugin_example, ffi_plugin_example |
 | Toolchain / SDK | smoke, hello_world |

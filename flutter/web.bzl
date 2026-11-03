@@ -125,7 +125,9 @@ def flutter_web_app(
 
         flutter_web_app(name = "reminders_web", web_dir = "web_apps/reminders", ...)
 
-    This macro always uses dart2wasm + skwasm (modern defaults). For dart2js
+    This macro always uses dart2wasm + skwasm (modern defaults), and builds
+    WebAssembly only: a browser without WasmGC gets no app, and
+    `js_fallback = True` adds a JavaScript build for it. For dart2js
     or canvaskit, use flutter_web_bundle directly.
 
     Service worker:
@@ -165,13 +167,18 @@ def flutter_web_app(
             (e.g. assets, shaders, defines, pwa, web_defines,
             keep_placeholders, tags, visibility).
             The compiler settings live there too and are forwarded the same
-            way: `profile`, `optimization_level_js`, `optimization_level_wasm`,
-            `minify_js`, `minify_wasm`,
+            way: `profile`, `js_fallback`, `optimization_level_js`,
+            `optimization_level_wasm`, `minify_js`, `minify_wasm`,
             `strip_wasm`, `native_null_assertions`,
             `frequency_based_minification`, `enable_experiments`, `dump_info`
             and `source_maps`. Note this macro always compiles with dart2wasm,
             so `minify_wasm`, `optimization_level_wasm` and `strip_wasm` are
-            live here while a `compiler = "dart2js"` bundle refuses them.
+            live here while a `compiler = "dart2js"` bundle refuses them. The
+            bundle is WebAssembly only: the dart2js settings
+            (`optimization_level_js`, `minify_js`,
+            `frequency_based_minification`, `dump_info`) are refused unless
+            `js_fallback = True` also ships a JavaScript build for browsers
+            without WasmGC.
             `extra_web_assets` is accepted here: additional web asset
             targets — typically generated files, which the `web/` glob
             cannot see — copied into the bundle root alongside the

@@ -208,6 +208,32 @@ def _assert_argv(env, action, present = [], absent_substrings = []):
         matches = [a for a in argv if sub in a]
         asserts.equals(env, [], matches, "%r must not appear in %s argv" % (sub, action.mnemonic))
 
+def _assert_dart2js(env, js_fallback, present = [], absent_substrings = [], level = None):
+    """Assert the dart2js compile a fixture should (not) run.
+
+    A fixture with `js_fallback` runs exactly one, and its argv is checked; one
+    without runs none at all, which is the point of a WASM-only bundle.
+
+    Args:
+        env: The analysistest env.
+        js_fallback: Whether the fixture asked for the fallback.
+        present: Args that must be on the dart2js argv.
+        absent_substrings: Substrings that must not be.
+        level: The expected `-O` level, or None to leave it unchecked.
+    """
+    if not js_fallback:
+        asserts.equals(
+            env,
+            [],
+            [a.mnemonic for a in analysistest.target_actions(env) if a.mnemonic == "FlutterDart2JS"],
+            "a WASM-only bundle must run no dart2js compile",
+        )
+        return
+    action = _action(env, "FlutterDart2JS")
+    _assert_argv(env, action, present = present, absent_substrings = absent_substrings)
+    if level != None:
+        _assert_optimization_level(env, action, level)
+
 def _assert_optimization_level(env, action, expected):
     """Assert the action states exactly one `-O`, and that it is `expected`.
 
@@ -238,11 +264,13 @@ def _default_basenames(env):
 def _dbg_web_defines_test_impl(ctx):
     """A `-c dbg` web build is a debug build: no product define, asserts on.
 
-    Both compilers are checked — the dart2js fallback ships in the same
-    bundle, and a fallback silently compiled as release would be the same bug
-    reappearing on WASM-less browsers.
+    Both compilers are checked where the fixture asks for the fallback — it
+    ships in the same bundle, and a fallback silently compiled as release would
+    be the same bug reappearing on WASM-less browsers. A fixture without one is
+    checked for running no dart2js at all.
     """
     env = analysistest.begin(ctx)
+    js_fallback = ctx.attr.js_fallback
     _assert_argv(
         env,
         _action(env, "FlutterDart2Wasm"),
@@ -258,11 +286,13 @@ def _dbg_web_defines_test_impl(ctx):
         # output is read.
         absent_substrings = ["dart.vm.product", "dart.vm.profile", "delete-tostring"],
     )
-    _assert_argv(
+    _assert_dart2js(
         env,
-        _action(env, "FlutterDart2JS"),
+        js_fallback,
         present = ["--enable-asserts", "--no-minify", "--native-null-assertions"],
         absent_substrings = ["dart.vm.product", "dart.vm.profile", "frequency-based"],
+        # Dart2js stops at 1 in debug; see the levels note below.
+        level = 1,
     )
 
     # Upstream's debug levels, which the two compilers disagree about: dart2js
@@ -272,21 +302,21 @@ def _dbg_web_defines_test_impl(ctx):
     # was corrected, which is what minified debug JS before `--no-minify` was
     # stated outright.
     _assert_optimization_level(env, _action(env, "FlutterDart2Wasm"), 0)
-    _assert_optimization_level(env, _action(env, "FlutterDart2JS"), 1)
 
     # The dbg dev-loop contract: the target's outputs still carry the dev
     # config and the DDC side-files the dev tool's DWDS loop stages.
     basenames = _default_basenames(env)
+    prefix = analysistest.target_under_test(env).label.name
     for expected in [
-        "_web_fixture_dev_config.json",
-        "_web_fixture.dev_package_config.json",
-        "_web_fixture_ddc_outline.dill",
-        "_web_fixture_ddc_libraries.json",
-        "_web_fixture_ddc_dart_sdk.js",
-        "_web_fixture_ddc_module_loader.js",
-        "_web_fixture_ddc_stack_trace_mapper.js",
-        "_web_fixture.agent_extensions.dart",
-        "_web_fixture_dev_flutter_bootstrap.js",
+        prefix + "_dev_config.json",
+        prefix + ".dev_package_config.json",
+        prefix + "_ddc_outline.dill",
+        prefix + "_ddc_libraries.json",
+        prefix + "_ddc_dart_sdk.js",
+        prefix + "_ddc_module_loader.js",
+        prefix + "_ddc_stack_trace_mapper.js",
+        prefix + ".agent_extensions.dart",
+        prefix + "_dev_flutter_bootstrap.js",
     ]:
         asserts.true(env, expected in basenames, "%s missing from dbg outputs: %s" % (expected, basenames))
 
@@ -297,7 +327,7 @@ def _dbg_web_defines_test_impl(ctx):
     if dev_config != None:
         asserts.true(
             env,
-            dev_config["flutterBootstrapJs"].endswith("_web_fixture_dev_flutter_bootstrap.js"),
+            dev_config["flutterBootstrapJs"].endswith(prefix + "_dev_flutter_bootstrap.js"),
             "the dev config must name the dev loop's bootstrap: %s" % dev_config.get("flutterBootstrapJs"),
         )
 
@@ -308,6 +338,7 @@ def _dbg_web_defines_test_impl(ctx):
 
 _dbg_web_defines_test = analysistest.make(
     _dbg_web_defines_test_impl,
+    attrs = {"js_fallback": attr.bool(default = False)},
     config_settings = {"//command_line_option:compilation_mode": "dbg"},
 )
 
@@ -340,9 +371,9 @@ def _profile_web_defines_test_impl(ctx):
 
     # dart2js gets the define but not the tostring options — upstream's
     # `Dart2JSTarget` has no equivalent, and dart2js would reject them.
-    _assert_argv(
+    _assert_dart2js(
         env,
-        _action(env, "FlutterDart2JS"),
+        True,
         present = ["-Ddart.vm.profile=true", "--no-minify", "--native-null-assertions"],
         absent_substrings = ["enable-asserts", "dart.vm.product", "delete-tostring"],
     )
@@ -370,6 +401,7 @@ _profile_web_defines_test = analysistest.make(
 def _opt_web_defines_test_impl(ctx):
     """A `-c opt` web build is a release build: product define, no asserts."""
     env = analysistest.begin(ctx)
+    js_fallback = ctx.attr.js_fallback
     _assert_argv(
         env,
         _action(env, "FlutterDart2Wasm"),
@@ -385,11 +417,12 @@ def _opt_web_defines_test_impl(ctx):
         ],
         absent_substrings = ["enable-asserts", "dart.vm.profile"],
     )
-    _assert_argv(
+    _assert_dart2js(
         env,
-        _action(env, "FlutterDart2JS"),
+        js_fallback,
         present = ["-Ddart.vm.product=true", "--minify", "--native-null-assertions"],
         absent_substrings = ["enable-asserts", "dart.vm.profile"],
+        level = 4,
     )
 
     # The release levels, and the reason they differ: dart2js goes to 4, while
@@ -398,7 +431,6 @@ def _opt_web_defines_test_impl(ctx):
     # single shared level cannot state both, which is why there is no single
     # shared attr.
     _assert_optimization_level(env, _action(env, "FlutterDart2Wasm"), 2)
-    _assert_optimization_level(env, _action(env, "FlutterDart2JS"), 4)
 
     # Release output is the bundle directory alone — none of the dev-loop
     # side-files may leak into it.
@@ -416,6 +448,7 @@ def _opt_web_defines_test_impl(ctx):
 
 _opt_web_defines_test = analysistest.make(
     _opt_web_defines_test_impl,
+    attrs = {"js_fallback": attr.bool(default = False)},
     config_settings = {"//command_line_option:compilation_mode": "opt"},
 )
 
@@ -998,6 +1031,160 @@ _wasm_only_attr_refused_test = analysistest.make(
     expect_failure = True,
 )
 
+def _build_config_builds(env):
+    """The `builds` list the bootstrap and index.html receive, decoded."""
+    config = _template_config(env)
+    if config == None:
+        return None
+    values = {}
+    for entry in config["files"]:
+        text = entry["builtins"]["flutter_build_config"]["value"]
+        values[entry["label"]] = text
+
+        # `_flutter.buildConfig = {...};` — the JSON between the `=` and `;`.
+        start = text.index("_flutter.buildConfig = ") + len("_flutter.buildConfig = ")
+        end = text.index(";\n", start)
+        values[entry["label"]] = json.decode(text[start:end])["builds"]
+    return values
+
+def _wasm_only_bundle_test_impl(ctx):
+    """`compiler = "dart2wasm"` ships WebAssembly and nothing else.
+
+    Read from `-c opt`, the release configuration a deployable is built in.
+    Every place the JavaScript build could still leak is checked: the compile
+    action, the tree artifact the bundler copies in, the bootstrap's build
+    list, and the name `main.dart.js` itself.
+    """
+    env = analysistest.begin(ctx)
+
+    # The compile that would fail on code only WASM can run.
+    asserts.equals(
+        env,
+        [],
+        [a.mnemonic for a in analysistest.target_actions(env) if a.mnemonic == "FlutterDart2JS"],
+        "a WASM-only bundle must run no dart2js compile",
+    )
+    asserts.equals(
+        env,
+        1,
+        len([a for a in analysistest.target_actions(env) if a.mnemonic == "FlutterDart2Wasm"]),
+    )
+
+    # Nothing from a dart2js tree reaches the bundle root.
+    bundle = action_config(env, "FlutterWebBundle")
+    if bundle != None:
+        asserts.equals(
+            env,
+            [{"src": bundle["copy_dirs"][0]["src"], "dst": "assets"}],
+            bundle["copy_dirs"],
+            "only the asset bundle is a copied directory in a WASM-only bundle",
+        )
+        asserts.equals(env, [], bundle["extracts"])
+        dsts = [c["dst"] for c in bundle["copies"]]
+        for expected in ["main.dart.wasm", "main.dart.mjs"]:
+            asserts.true(env, expected in dsts, "%s missing from bundle: %s" % (expected, dsts))
+    for f in analysistest.target_under_test(env)[DefaultInfo].files.to_list():
+        asserts.false(env, "dart2js" in f.basename, "dart2js output %s in a WASM-only bundle" % f.path)
+
+    # The loader is told about one build, and it is the WASM one: its list is
+    # the only thing the browser consults, so a leftover entry is a request for
+    # a file the bundle does not have.
+    per_file = _build_config_builds(env)
+    if per_file != None:
+        for label, builds in per_file.items():
+            asserts.equals(
+                env,
+                [{
+                    "compileTarget": "dart2wasm",
+                    "renderer": "skwasm",
+                    "mainWasmPath": "main.dart.wasm",
+                    "jsSupportRuntimePath": "main.dart.mjs",
+                }],
+                builds,
+                "%s must list the WASM build alone" % label,
+            )
+        for entry in _template_config(env)["files"]:
+            asserts.false(
+                env,
+                "main.dart.js" in entry["builtins"]["flutter_build_config"]["value"],
+                "%s refers to main.dart.js" % entry["label"],
+            )
+    return analysistest.end(env)
+
+_wasm_only_bundle_test = analysistest.make(
+    _wasm_only_bundle_test_impl,
+    config_settings = {"//command_line_option:compilation_mode": "opt"},
+)
+
+def _js_fallback_bundle_test_impl(ctx):
+    """`js_fallback = True` ships the JavaScript build after the WASM one.
+
+    The order is the loader's preference order, so WASM has to come first or
+    every browser would take the JavaScript build.
+    """
+    env = analysistest.begin(ctx)
+    asserts.equals(
+        env,
+        1,
+        len([a for a in analysistest.target_actions(env) if a.mnemonic == "FlutterDart2JS"]),
+        "js_fallback must run the dart2js compile",
+    )
+    asserts.equals(
+        env,
+        1,
+        len([a for a in analysistest.target_actions(env) if a.mnemonic == "FlutterDart2Wasm"]),
+    )
+    per_file = _build_config_builds(env)
+    if per_file != None:
+        for label, builds in per_file.items():
+            asserts.equals(
+                env,
+                ["dart2wasm", "dart2js"],
+                [b["compileTarget"] for b in builds],
+                "%s must list WASM first, then the JavaScript fallback" % label,
+            )
+            asserts.equals(env, "main.dart.js", builds[1]["mainJsPath"])
+            asserts.equals(env, "canvaskit", builds[1]["renderer"])
+    bundle = action_config(env, "FlutterWebBundle")
+    if bundle != None:
+        asserts.equals(
+            env,
+            1,
+            len([e for e in bundle["copy_dirs"] if e["dst"] == "."]),
+            "the dart2js tree is copied to the bundle root",
+        )
+    return analysistest.end(env)
+
+_js_fallback_bundle_test = analysistest.make(
+    _js_fallback_bundle_test_impl,
+    config_settings = {"//command_line_option:compilation_mode": "opt"},
+)
+
+def _js_setting_without_fallback_refused_test_impl(ctx):
+    """A dart2js-only setting on a WASM-only target is refused, by attr name."""
+    env = analysistest.begin(ctx)
+    asserts.expect_failure(env, ctx.attr.attr_name)
+    asserts.expect_failure(env, "js_fallback = True")
+    return analysistest.end(env)
+
+_js_setting_without_fallback_refused_test = analysistest.make(
+    _js_setting_without_fallback_refused_test_impl,
+    attrs = {"attr_name": attr.string(mandatory = True)},
+    expect_failure = True,
+)
+
+def _js_fallback_on_js_refused_test_impl(ctx):
+    """`js_fallback` beside `compiler = "dart2js"` is refused, with the way out."""
+    env = analysistest.begin(ctx)
+    asserts.expect_failure(env, "js_fallback = True")
+    asserts.expect_failure(env, "compiler = \"dart2wasm\"")
+    return analysistest.end(env)
+
+_js_fallback_on_js_refused_test = analysistest.make(
+    _js_fallback_on_js_refused_test_impl,
+    expect_failure = True,
+)
+
 def _template_config(env):
     """The config the templating action is driven by, decoded."""
     return action_config(env, "FlutterWebTemplate")
@@ -1317,6 +1504,44 @@ def _setup_web_fixtures():
         tags = ["manual"],
     )
 
+    # The same app with the opt-in JavaScript build beside the WASM one.
+    flutter_web_bundle(
+        name = "_web_fallback_fixture",
+        package_name = "web_fixture",
+        main = "lib/web_fixture_main.dart",
+        defines = ["from.attr=1"],
+        js_fallback = True,
+        tags = ["manual"],
+    )
+
+    # dart2js settings on a target that runs no dart2js, one fixture each so
+    # the refusal is shown to name the attr that was set.
+    flutter_web_bundle(
+        name = "_web_minify_js_without_fallback",
+        package_name = "web_fixture",
+        main = "lib/web_fixture_main.dart",
+        minify_js = "false",
+        tags = ["manual"],
+    )
+    flutter_web_bundle(
+        name = "_web_dump_info_without_fallback",
+        package_name = "web_fixture",
+        main = "lib/web_fixture_main.dart",
+        dump_info = True,
+        tags = ["manual"],
+    )
+
+    # `js_fallback` where the whole bundle is JavaScript already.
+    flutter_web_bundle(
+        name = "_web_fallback_on_js",
+        package_name = "web_fixture",
+        main = "lib/web_fixture_main.dart",
+        compiler = "dart2js",
+        js_fallback = True,
+        renderer = "canvaskit",
+        tags = ["manual"],
+    )
+
     # A generated library in the app's own `lib/`, which makes its package
     # source-assembled: the shape of every codegen app.
     native.genrule(
@@ -1384,6 +1609,7 @@ def _setup_web_fixtures():
         name = "_web_profile_fixture",
         package_name = "web_fixture",
         main = "lib/web_fixture_main.dart",
+        js_fallback = True,
         profile = True,
         tags = ["manual"],
     )
@@ -1394,6 +1620,7 @@ def _setup_web_fixtures():
         name = "_web_minify_fixture",
         package_name = "web_fixture",
         main = "lib/web_fixture_main.dart",
+        js_fallback = True,
         minify_js = "true",
         minify_wasm = "false",
         tags = ["manual"],
@@ -1405,6 +1632,7 @@ def _setup_web_fixtures():
         package_name = "web_fixture",
         main = "lib/web_fixture_main.dart",
         frequency_based_minification = False,
+        js_fallback = True,
         native_null_assertions = False,
         tags = ["manual"],
     )
@@ -1417,6 +1645,7 @@ def _setup_web_fixtures():
         package_name = "web_fixture",
         main = "lib/web_fixture_main.dart",
         enable_experiments = ["test-experiment"],
+        js_fallback = True,
         tags = ["manual"],
     )
 
@@ -1425,6 +1654,7 @@ def _setup_web_fixtures():
         package_name = "web_fixture",
         main = "lib/web_fixture_main.dart",
         dump_info = True,
+        js_fallback = True,
         tags = ["manual"],
     )
 
@@ -1487,6 +1717,7 @@ def _setup_web_fixtures():
         name = "_web_optimization_fixture",
         package_name = "web_fixture",
         main = "lib/web_fixture_main.dart",
+        js_fallback = True,
         optimization_level_js = "3",
         tags = ["manual"],
     )
@@ -1496,6 +1727,7 @@ def _setup_web_fixtures():
         name = "_web_optimization_zero_fixture",
         package_name = "web_fixture",
         main = "lib/web_fixture_main.dart",
+        js_fallback = True,
         optimization_level_js = "0",
         optimization_level_wasm = "0",
         tags = ["manual"],
@@ -1537,9 +1769,41 @@ def web_test_suite(name):
         name = name + "_dbg_defines",
         target_under_test = ":_web_fixture",
     )
+    _dbg_web_defines_test(
+        name = name + "_dbg_defines_fallback",
+        js_fallback = True,
+        target_under_test = ":_web_fallback_fixture",
+    )
     _opt_web_defines_test(
         name = name + "_opt_defines",
         target_under_test = ":_web_fixture",
+    )
+    _opt_web_defines_test(
+        name = name + "_opt_defines_fallback",
+        js_fallback = True,
+        target_under_test = ":_web_fallback_fixture",
+    )
+    _wasm_only_bundle_test(
+        name = name + "_wasm_only_bundle",
+        target_under_test = ":_web_fixture",
+    )
+    _js_fallback_bundle_test(
+        name = name + "_js_fallback_bundle",
+        target_under_test = ":_web_fallback_fixture",
+    )
+    _js_setting_without_fallback_refused_test(
+        name = name + "_minify_js_without_fallback_refused",
+        attr_name = "minify_js",
+        target_under_test = ":_web_minify_js_without_fallback",
+    )
+    _js_setting_without_fallback_refused_test(
+        name = name + "_dump_info_without_fallback_refused",
+        attr_name = "dump_info",
+        target_under_test = ":_web_dump_info_without_fallback",
+    )
+    _js_fallback_on_js_refused_test(
+        name = name + "_js_fallback_on_js_refused",
+        target_under_test = ":_web_fallback_on_js",
     )
     _profile_web_defines_test(
         name = name + "_profile_defines",
@@ -1653,7 +1917,7 @@ def web_test_suite(name):
     )
     _no_dump_info_test(
         name = name + "_no_dump_info",
-        target_under_test = ":_web_fixture",
+        target_under_test = ":_web_fallback_fixture",
     )
     _no_strip_release_test(
         name = name + "_no_strip_release",

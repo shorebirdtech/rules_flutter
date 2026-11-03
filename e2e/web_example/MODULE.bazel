@@ -1,4 +1,4 @@
-"E2e test: Flutter web application (dart2wasm + dart2js)"
+"E2e test: Flutter web applications (WASM only, WASM with a JS fallback, and JS)"
 
 module(name = "rules_flutter_web_example")
 

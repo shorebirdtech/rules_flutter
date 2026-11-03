@@ -173,11 +173,8 @@ def validate_web_compiler_renderer(compiler, renderer):
 def validate_web_wasm_only_attrs(compiler, set_attrs, what):
     """Refuse wasm-only settings on a target that runs no wasm compile.
 
-    `compiler = "dart2wasm"` runs both compilers — dart2wasm for the app and
-    dart2js for the browsers without WASM — so a dart2js-only setting is live
-    in both compiler modes. The reverse is not true: `compiler = "dart2js"`
-    runs no wasm compile at all, and a wasm-only setting there would be
-    accepted and reach nothing.
+    `compiler = "dart2js"` runs no wasm compile at all, so a wasm-only setting
+    there would be accepted and reach nothing.
 
     Args:
         compiler: The target's `compiler` attr value.
@@ -193,9 +190,49 @@ def validate_web_wasm_only_attrs(compiler, set_attrs, what):
             ", ".join(sorted(set_attrs)),
             "" if len(set_attrs) > 1 else "s",
         ) +
-        "runs none. Drop the setting, or switch to `compiler = \"dart2wasm\"` " +
-        "— which also builds a dart2js fallback, so the JS settings still apply.",
+        "runs none. Drop the setting, or switch to `compiler = \"dart2wasm\"`.",
     )
+
+def validate_web_js_only_attrs(compiler, js_fallback, set_attrs, what):
+    """Refuse dart2js-only settings on a target that runs no dart2js compile.
+
+    `compiler = "dart2wasm"` ships WebAssembly alone unless `js_fallback` asks
+    for a dart2js build beside it, so a dart2js-only setting there reaches
+    nothing: it would be accepted and silently ignored.
+
+    Args:
+        compiler: The target's `compiler` attr value.
+        js_fallback: The target's `js_fallback` attr value.
+        set_attrs: Names of dart2js-only attrs the target set away from their
+            defaults. Determined by the caller, which is where the values are.
+        what: Label named in the failure message.
+    """
+    if compiler == "dart2js" or js_fallback or not set_attrs:
+        return
+    fail(
+        "%s: %s only affect%s the dart2js compile, and `compiler = \"dart2wasm\"` " % (
+            what,
+            ", ".join(sorted(set_attrs)),
+            "" if len(set_attrs) > 1 else "s",
+        ) +
+        "runs none unless `js_fallback = True` asks for one. Drop the setting, add " +
+        "`js_fallback = True`, or switch to `compiler = \"dart2js\"`.",
+    )
+
+def validate_web_js_fallback(compiler, js_fallback, what):
+    """Refuse `js_fallback` where there is no WASM build for it to back up.
+
+    Args:
+        compiler: The target's `compiler` attr value.
+        js_fallback: The target's `js_fallback` attr value.
+        what: Label named in the failure message.
+    """
+    if compiler == "dart2js" and js_fallback:
+        fail(
+            "%s: `js_fallback = True` adds a dart2js build beside a WASM one, and " % what +
+            "`compiler = \"dart2js\"` is already JavaScript alone. Drop `js_fallback`, " +
+            "or switch to `compiler = \"dart2wasm\"`.",
+        )
 
 def validate_base_href(base_href, what):
     """Validate a web `<base href>` value.

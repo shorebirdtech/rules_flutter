@@ -7,7 +7,8 @@ exports_files(["pubspec.lock"])
 
 # =============================================================================
 # Approach 1: Tier 1 — flutter_web_app (auto-discovers web/ runner files)
-# WASM build (dart2wasm + skwasm) — modern, recommended
+# WASM build (dart2wasm + skwasm) — modern, recommended. WebAssembly only: no
+# dart2js compile runs and the bundle has no main.dart.js.
 # =============================================================================
 
 flutter_web_app(
@@ -56,7 +57,8 @@ flutter_web_app(
 
 # =============================================================================
 # Approach 2: Tier 2 — flutter_web_bundle (explicit control)
-# JS build (dart2js + canvaskit) — legacy, wider browser support
+# JS build (dart2js + canvaskit) — legacy, wider browser support. Also what
+# `js_fallback = True` adds beside a WASM build (see `app_fallback` below).
 # =============================================================================
 
 flutter_web_manifest_gen(
@@ -239,8 +241,10 @@ flutter_web_app(
     package_name = "web_example",
     app_name = "Web Example (tuned)",
     assets = glob(["assets/**"]),
-    # The size report, produced as a named output rather than deployed.
+    # The size report, produced as a named output rather than deployed. It
+    # describes the dart2js build, so it needs the fallback to exist.
     dump_info = True,
+    js_fallback = True,
     # Kept unminified and unstripped so the bundle can be read.
     minify_js = "false",
     minify_wasm = "false",
@@ -253,6 +257,25 @@ flutter_web_app(
         "@deps//:flutter",
         "@rules_flutter//flutter:material_icons",
     ],
+)
+
+# The defaults plus the opt-in JavaScript build: the WASM bundle with a dart2js
+# fallback beside it, for browsers without WasmGC.
+flutter_web_app(
+    name = "app_fallback",
+    package_name = "web_example",
+    app_name = "Web Example (fallback)",
+    assets = glob(["assets/**"]),
+    js_fallback = True,
+    deps = [
+        "@deps//:flutter",
+        "@rules_flutter//flutter:material_icons",
+    ],
+)
+
+build_test(
+    name = "fallback_build_test",
+    targets = [":app_fallback"],
 )
 
 build_test(
@@ -284,6 +307,7 @@ dart_test(
         # The negative half of the `useLocalCanvasKit` check: a build that
         # never asked for it must not carry it, or the positive assertion
         # would hold for every bundle and mean nothing.
+        ":app_fallback",
         ":app_js",
         ":app_tuned",
         ":app_wasm",
