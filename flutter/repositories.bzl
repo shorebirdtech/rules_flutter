@@ -366,6 +366,13 @@ def _host_profile_repo(name, platform, engine_revision, checksums):
     downloads = {engine_path: "engine"}
     if os_name == "macos":
         downloads[host_artifacts_path(platform, mode = "profile")] = "host-tools"
+    if os_name == "windows":
+        # The engine filegroup lists the C++ client wrapper's headers, and the
+        # Windows runner finds its include directories from those files. The
+        # wrapper is the same in every mode, but the glob is `allow_empty`: a
+        # profile repo without it builds a runner that cannot find
+        # `flutter/plugin_registry.h`.
+        downloads[platform + "/flutter-cpp-client-wrapper.zip"] = "cpp-client-wrapper"
     flutter_profile_repo(
         name = name,
         engine_revision = engine_revision,
