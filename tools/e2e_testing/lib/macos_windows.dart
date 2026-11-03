@@ -5,12 +5,15 @@ import 'dart:async';
 import 'dart:io';
 
 import 'app_process.dart';
+import 'macos_gui_session.dart';
 
 /// The windows of an [AppProcess], through System Events.
 ///
-/// It needs a GUI session and an accessibility grant for the test runner.
-/// When System Events cannot answer, that is the harness failing and not the
-/// app, so these methods say so and exit 1 rather than report no windows.
+/// It needs a live GUI session (unlocked screen, awake display, which
+/// [GuiSession.hold] provides for the latter) and an accessibility grant for
+/// the test runner. When System Events cannot answer, that is the harness
+/// failing and not the app, so these methods say so, name which of those
+/// is missing, and exit 1 rather than report no windows.
 class AppWindows {
   /// The windows of [app], found by its pid.
   AppWindows(this.app);
@@ -54,9 +57,8 @@ class AppWindows {
       stderr.writeln('osascript: ${result.stderr.toString().trim()}');
     }
     stderr.writeln(
-      'This is a harness failure, not an app failure. Grant '
-      'accessibility access to the test runner in System Settings > Privacy & '
-      'Security > Accessibility, then `killall "System Events"` and re-run.',
+      'This is a harness failure, not an app failure. '
+      '${await GuiSession.diagnosis()}',
     );
     exit(1);
   }
@@ -81,9 +83,8 @@ class AppWindows {
       stderr
         ..writeln('FAIL: cannot query windows via System Events: $message')
         ..writeln(
-          'Grant accessibility access to the test runner, or restart '
-          'System Events, and re-run. This is a harness failure, not an app '
-          'failure.',
+          'This is a harness failure, not an app failure. '
+          '${await GuiSession.diagnosis()}',
         );
       exit(1);
     }
@@ -91,7 +92,9 @@ class AppWindows {
   }
 
   /// Waits up to [timeout] for the app to show a window. False if none
-  /// appears.
+  /// appears, after printing what the session looked like when it gave up:
+  /// the session going dark during the wait (the screen locking, the display
+  /// idling out) looks the same as an app that never drew.
   ///
   /// Exits 1 if the app exits first: a crash ends before any window can
   /// appear, and that is reported at once instead of after the wait.
@@ -108,6 +111,15 @@ class AppWindows {
       if (await count() > 0) return true;
       await Future<void>.delayed(const Duration(seconds: 1));
     }
+    final state = await GuiSession.probe();
+    final blocker = GuiSession.diagnose(state);
+    stderr.writeln(
+      blocker == GuiBlocker.unknown
+          ? 'The desktop session was live ($state), so the app itself drew '
+                'no window.'
+          : 'The window may be missing because of the session, not the app. '
+                '${GuiSession.explain(blocker)} (Read: $state.)',
+    );
     return false;
   }
 

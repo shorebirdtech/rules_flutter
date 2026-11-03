@@ -471,7 +471,7 @@ System Settings → Privacy & Security:
 | Permission | Needed by | Symptom when missing |
 |---|---|---|
 | **Screen Recording** | `macos_e2e_test.dart` and `multi_window_e2e_test.dart` native-screenshot tests (ScreenCaptureKit) | Test **fails**: `No window titled … Available titles: []` — with the permission missing, `SCShareableContent` still returns windows but their titles come back empty. Not every native-screenshot failure is this one; see "The display must be awake for the native-screenshot tests" below, and read the helper's own message, which names the windows it found |
-| **Accessibility** | `agent_e2e_test.dart` occlusion test, which minimizes the app window via `AXMinimized` | Test **skips**, after `osascript` refuses in well under a second: `agent_e2e: could not set AXMinimized=true — exit 1: … not allowed assistive access`. On macOS 27 (Darwin 27.0) the same refusal reads `Can’t get window 1 of process "Hello World". Invalid index. (-1719)`: System Events answers an untrusted client with no windows for any app, so the app's window looks missing rather than forbidden — `count of windows of process "<your terminal>"` coming back `0` is the tell |
+| **Accessibility** | `agent_e2e_test.dart` occlusion test, which minimizes the app window via `AXMinimized` | (A locked screen or sleeping display produces the same symptoms with the grant intact; see "macOS runtime smoke test" for telling them apart.) Test **skips**, after `osascript` refuses in well under a second: `agent_e2e: could not set AXMinimized=true — exit 1: … not allowed assistive access`. On macOS 27 (Darwin 27.0) the same refusal reads `Can’t get window 1 of process "Hello World". Invalid index. (-1719)`: System Events answers an untrusted client with no windows for any app, so the app's window looks missing rather than forbidden — `count of windows of process "<your terminal>"` coming back `0` is the tell |
 | **Automation** (System Events) | the same test, same `osascript` call | Test **skips**, after the bound expires: `agent_e2e: could not set AXMinimized=true — timed out`. Unlike a refusal this one has no error to return — with the permission undecided, the AppleEvent send simply blocks — so the call is given ten seconds and then killed |
 
 These dependencies are essential rather than incidental: there is no way to
@@ -1010,7 +1010,7 @@ These require a GUI environment and are skipped by `bazel test //...`.
 
 ### macOS runtime smoke test
 
-Launches the app, polls for a window, and verifies dimensions > 100x100. Catches window sizing bugs (e.g. the 1x32 collapsed-window bug).
+Launches the app, polls for a window, and verifies dimensions > 100x100. Catches window sizing bugs (e.g. the 1x32 collapsed-window bug). It needs an unlocked screen; it wakes a sleeping display itself.
 
 It also reads the app's stdout for `macos_example_native sum=7 difference=3`, which `main()` prints only after calling into both bundled native libraries: `libadd.dylib` (built at its package root) and `libsub.dylib` (built at `vendor/lib/` in its package). The window check cannot see this on its own — a library that fails to load throws in `main()` before `runApp`, and the runner still opens its 800x632 window (measured with the library renamed out of reach).
 
@@ -1021,7 +1021,18 @@ bazel test :verify_macos_app_test --test_tag_filters= --strategy=TestRunner=stan
 
 **When to run:** After any change to macOS runner code (`flutter/private/runners/macos/`) or to what the macOS bundle carries (`flutter_macos_application.bzl`).
 
-**`System Events reports no windows for any process` can be the Bazel server, not your grant.** The test reads windows through System Events, which answers only a client macOS trusts with Accessibility. Measured 2026-09-18: in a workspace whose Bazel server had first been started by `flutter_bazel run`, the test failed this way while `osascript -e 'tell application "System Events" to count processes'` answered from the same terminal. After `bazel shutdown` and a rerun from the terminal it passed. So check the `osascript` line first: if it answers, restart the server; if it does not, grant the terminal Accessibility.
+**`System Events reports no windows for any process` is usually the session, not your grant.** The test reads windows through System Events, which answers "no windows" (`-1719`) for every process, while reporting accessibility as enabled, in three different situations that look identical from the error alone. The failure therefore reads the session (`tools/e2e_testing/lib/macos_gui_session.dart`) and says which one it is:
+
+| It prints | Meaning | Remedy |
+|---|---|---|
+| `The screen is locked` | The login window is up. Measured 2026-11-03: `pmset displaysleepnow` locks this Mac at once (`sysadminctl -screenLock status` says "immediate"), and System Events returned `-1719` for the enumeration with the display awake and the grant intact. | Unlock the Mac. A harness cannot. |
+| `The display is asleep and stayed asleep` | The panel is off. | The test wakes it itself and holds it awake for its run (`caffeinate -d -u`, tied to the test's pid): `-d` keeps an awake display awake, `-u` wakes a dark one. This message means that did not work; wake the Mac by hand. |
+| `The test runner is not trusted for Accessibility` | `AXIsProcessTrusted` is false for the runner. | Grant the terminal or IDE in System Settings > Privacy & Security > Accessibility, then `killall "System Events"`. |
+| `... yet System Events reports no windows` | Unlocked, awake and trusted, and System Events still cannot answer. | `killall "System Events"` and re-run, then `bazel shutdown` and re-run from the terminal. Measured 2026-09-18: in a workspace whose Bazel server had first been started by `flutter_bazel run`, the test failed this way while `osascript -e 'tell application "System Events" to count processes'` answered from the same terminal; after `bazel shutdown` it passed. The same message once appeared on 2026-11-03 on a fresh server with a live, trusted session and passed on the next run after `bazel shutdown`; cause not found. |
+
+Before the hold existed, a sleeping display produced the old "Grant accessibility access to the test runner" advice on a machine whose grant was fine; `caffeinate -u -t 3` made the same test pass.
+
+`e2e/_macos_test/verify_macos_app.dart` (below) holds the display the same way and prints the same diagnosis when no window appears. It carries its own copy of the probe because `tools/vm` copies that directory alone to bare machines.
 
 ### FFI runtime tests (iOS simulator, macOS, Linux, Windows)
 

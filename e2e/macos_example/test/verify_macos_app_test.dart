@@ -1,7 +1,8 @@
 /// Runtime verification: launches the macOS .app, checks window dimensions, and
 /// checks that both bundled native libraries loaded.
 ///
-/// This test requires a GUI environment and accessibility permissions, so it
+/// This test requires a GUI environment (an unlocked screen; it wakes a
+/// sleeping display itself) and accessibility permissions, so it
 /// uses `tags = ["manual"]` to skip during normal `bazel test //...` runs.
 /// Run explicitly: `bazel test :verify_macos_app_test --test_tag_filters=`
 ///
@@ -34,6 +35,7 @@ import 'dart:io';
 
 import 'package:rules_flutter_e2e_testing/app_process.dart';
 import 'package:rules_flutter_e2e_testing/macos_bundle.dart';
+import 'package:rules_flutter_e2e_testing/macos_gui_session.dart';
 import 'package:rules_flutter_e2e_testing/macos_windows.dart';
 
 const _nativeMarker = 'macos_example_native';
@@ -46,6 +48,10 @@ Future<void> main() async {
     prefix: 'macos_app_test',
   );
   AppProcess? app;
+  // A sleeping display makes System Events report no windows, exactly as a
+  // missing accessibility grant does, so the test declares the user active
+  // (and wakes the display) for its whole run.
+  final gui = await GuiSession.hold();
   try {
     await AppWindows.assertEnumerationWorks();
 
@@ -120,5 +126,6 @@ Future<void> main() async {
   } finally {
     await app?.stop();
     bundle.dispose();
+    await gui.release();
   }
 }
