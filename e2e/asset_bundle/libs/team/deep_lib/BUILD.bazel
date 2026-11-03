@@ -1,0 +1,10 @@
+load("@rules_flutter//flutter:defs.bzl", "flutter_library")
+
+flutter_library(
+    name = "deep_lib",
+    package_name = "deep_lib",
+    srcs = ["lib/deep_lib.dart"],
+    assets = glob(["assets/**"]),
+    visibility = ["//visibility:public"],
+    deps = ["@deps//:flutter"],
+)

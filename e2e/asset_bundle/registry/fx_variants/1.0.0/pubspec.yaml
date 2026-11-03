@@ -1,0 +1,9 @@
+name: fx_variants
+version: 1.0.0
+environment:
+  sdk: ^3.13.0
+flutter:
+  assets:
+    - assets/icon.png
+    - assets/photo.jpg
+    - assets/logo.png

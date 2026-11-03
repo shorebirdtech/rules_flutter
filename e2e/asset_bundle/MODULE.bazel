@@ -1,0 +1,44 @@
+"E2e test: every asset a pubspec declares reaches the bundle under the key, variants and platform set `flutter build` gives it"
+
+module(name = "rules_flutter_asset_bundle")
+
+bazel_dep(name = "rules_flutter", version = "0.0.0")
+bazel_dep(name = "rules_dart", version = "0.8.1")
+bazel_dep(name = "bazel_skylib", version = "1.9.2")
+bazel_dep(name = "platforms", version = "1.1.0")
+
+# A second module, standing in for a repository outside this workspace that
+# ships a library with assets of its own.
+bazel_dep(name = "ext_assets", version = "0.0.0")
+
+local_path_override(
+    module_name = "rules_flutter",
+    path = "../..",
+)
+
+local_path_override(
+    module_name = "ext_assets",
+    path = "external_repo",
+)
+
+flutter = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter")
+flutter.toolchain(flutter_version = "3.47.9")
+flutter.pub(
+    name = "deps",
+    lock = "//:pubspec.lock",
+)
+use_repo(flutter, "deps", "flutter_toolchains", "flutter_web_sdk")
+
+register_toolchains("@flutter_toolchains//:all")
+
+# The packages `//registry` holds, served as a pub registry and fetched by the
+# repository rule that fetches a pub.dev package.
+pub_registry = use_repo_rule("//tools:registry.bzl", "pub_registry")
+
+pub_registry(
+    name = "pub_registry",
+    anchor = "//registry:MARKER",
+)
+
+fixture_pubs = use_extension("//tools:pubs.bzl", "fixture_pubs")
+use_repo(fixture_pubs, "fx_dirs", "fx_flavors", "fx_names", "fx_platforms", "fx_variants")

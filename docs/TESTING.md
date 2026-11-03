@@ -890,6 +890,7 @@ quietly never running. A new workspace needs an entry; `bazel run
 | `cross_compile_example` | macOS (`build`) | the Mac-to-Linux cross toolchain | Linux: a native build is `hello_world`'s; Windows: no such pair |
 | `macos_example`, `ios_example`, `multi_window_example`, `_overlay_tests/native_assets_synthetic` | macOS | Apple-only features | Linux, Windows: Apple-only |
 | `dual_hub`, `ffi_plugin_example`, `web_example`, `android_example`, `_overlay_tests/link_hooks` | Linux | their platform-neutral subject, once, on the cheapest runner | macOS, Windows: the same again (`android_example` also runs out of memory on Windows) |
+| `asset_bundle` | macOS | the `flutter_assets/` tree of every platform against `flutter build`'s, once | Linux, Windows: no other host can analyse its iOS targets |
 | `linux_example` | Linux | Tier-2 Linux rules | macOS, Windows: Linux-only |
 | `windows_example` | Windows | Tier-2 Windows rules | macOS, Linux: Windows-only |
 
@@ -925,6 +926,7 @@ with.
 | plugin_example | Real pub.dev plugins (`path_provider`, `url_launcher`, `package_info_plus`) plus the hand-written `:greeting_plugin` regression case; per-platform bundle builds; web plugin assertions via the e2e suite; macOS runtime verifier asserting the four plugin-result strings. See **Plugin verification matrix** below. |
 | macos_example | Full macOS app build + bundle structure verification (Info.plist, ObjC symbols, framework linkage, AOT dylib, flutter_assets, and a native library built in a subdirectory of its package landing flat at `Contents/Frameworks/libsub.dylib`) |
 | ios_example | iOS app build (requires Xcode) |
+| asset_bundle | Every asset a pubspec declares reaches the `flutter_assets/` tree under the key, variants, stored name and platform set `flutter build` gives it: an application at the root and below it, a library below the root and in an external module, and pub packages served by a fixture registry (variants, directory entries, URI-encoded names, `platforms:` and `flavors:`, on Android, iOS, Linux, macOS, Windows and the web). |
 | web_example | Web app builds with web_assets: WASM with the default dart2js fallback (`:app_wasm`), WASM only (`:app_wasm_only`, `js_fallback = False`, no `main.dart.js`), and dart2js alone; `//int64:int64_app`, a WASM-only app dart2js cannot compile (`:int64_app_with_fallback`, the default, manual, is the proof it fails) |
 | multi_window_example | Multi-window macOS + multi-scene iOS builds with FlutterEngineGroup; macOS bundle verification |
 | android_example | Android APK build (3 approaches: flutter_android_app, Bazel-generated manifest, custom manifest) + APK content verification + web build |

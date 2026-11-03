@@ -1,0 +1,9 @@
+load("@rules_flutter//flutter:defs.bzl", "flutter_library")
+
+flutter_library(
+    name = "ext_assets",
+    package_name = "ext_assets",
+    srcs = ["lib/ext_assets.dart"],
+    assets = glob(["assets/**"]),
+    visibility = ["//visibility:public"],
+)

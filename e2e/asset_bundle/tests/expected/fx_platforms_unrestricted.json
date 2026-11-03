@@ -1,0 +1,11 @@
+{
+  "assets": {
+    "assets/all.txt": {
+      "variants": [
+        {
+          "asset": "assets/all.txt"
+        }
+      ]
+    }
+  }
+}

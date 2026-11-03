@@ -1,0 +1,7 @@
+load("//tools:bundle.bzl", "bundled_app")
+
+bundled_app(
+    name = "app",
+    package_name = "deep_app",
+    assets = glob(["assets/**"]),
+)

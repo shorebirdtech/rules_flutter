@@ -296,6 +296,31 @@ const e2eWorkspaces = <E2eWorkspace>[
           'here and nothing runs',
     },
   ),
+  // The flutter_assets/ tree of every platform (Android, iOS, Linux, macOS,
+  // Windows, web) is built from this one host by platform transition, so what
+  // it checks does not depend on the OS it runs on. Only a Mac can analyse the
+  // iOS targets among them.
+  E2eWorkspace(
+    'asset_bundle',
+    runs: {
+      Os.macos:
+          'every asset a pubspec declares reaching the flutter_assets/ tree '
+          'under the key, variants, stored name and platform set `flutter '
+          'build` gives it, for an app at the root, a library below it, one '
+          'in another module and fixture-registry pub packages: '
+          'platform-neutral, so one run, on the only system that can analyse '
+          'its iOS targets',
+    },
+    skips: {
+      Os.linux:
+          'its platform checks bundle the same application for iOS, which '
+          'no other host can analyse',
+      Os.windows:
+          'its platform checks bundle the same application for iOS, which '
+          'no other host can analyse, and its fixture registry runs `cp` '
+          'and `tar`',
+    },
+  ),
   E2eWorkspace(
     'linux_example',
     runs: {

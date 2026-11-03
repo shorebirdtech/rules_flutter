@@ -1,0 +1,4 @@
+exports_files(
+    ["bundle.bzl"],
+    visibility = ["//visibility:public"],
+)

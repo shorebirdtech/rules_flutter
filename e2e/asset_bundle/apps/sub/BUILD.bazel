@@ -1,0 +1,10 @@
+load("//tools:bundle.bzl", "bundled_app")
+
+bundled_app(
+    name = "app",
+    package_name = "sub_app",
+    assets = glob(
+        ["assets/**"],
+        exclude = ["assets/extra/**"],
+    ) + ["//apps/sub/assets/extra:x.txt"],
+)

@@ -1,0 +1,7 @@
+name: asset_bundle
+publish_to: none
+environment:
+  sdk: ^3.13.0
+dependencies:
+  flutter:
+    sdk: flutter

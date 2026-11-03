@@ -1,0 +1,53 @@
+load("@rules_dart//dart:defs.bzl", "dart_library")
+load("//tools:bundle.bzl", "bundle_test")
+
+dart_library(
+    name = "bundle_check",
+    package_name = "asset_bundle_checks",
+    srcs = ["lib/bundle_check.dart"],
+    visibility = ["//visibility:public"],
+)
+
+exports_files(glob(["expected/*.json"]) + ["bundle_test.dart"])
+
+# The properties below hold today. They are the baseline the ones in `unmet`
+# are read against: the same checker, the same assets, one layout, name or
+# platform apart.
+
+# Property: an application at the root of the workspace ships the files it
+# lists under their paths, each with the resolution variants beside it.
+bundle_test(
+    name = "app_at_workspace_root_ships_assets_with_their_variants_test",
+    bundle = "//:app_root_bundle",
+    expected = ":expected/kit.json",
+)
+
+# Property: nothing a pub package lists goes missing from the bundle of a
+# platform it is listed for, whether listed as a file or as a directory. (That
+# nothing more ships is `unmet`.)
+bundle_test(
+    name = "pub_package_listed_directory_ships_its_files_and_their_variants_test",
+    allow_extra = True,
+    bundle = "//:app_with_fx_dirs_bundle",
+    expected = ":expected/fx_dirs.json",
+    prefix = "packages/fx_dirs/",
+)
+
+[
+    bundle_test(
+        name = "pub_package_unrestricted_asset_ships_on_%s_test" % os,
+        allow_extra = True,
+        bundle = bundle,
+        expected = ":expected/fx_platforms_unrestricted.json",
+        prefix = "packages/fx_platforms/",
+        subdir = "assets" if os == "web" else "",
+    )
+    for os, bundle in {
+        "android": "//:app_with_fx_platforms_android_bundle",
+        "ios": "//:app_with_fx_platforms_ios_bundle",
+        "linux": "//:app_with_fx_platforms_linux_bundle",
+        "macos": "//:app_with_fx_platforms_macos_bundle",
+        "web": "//:web_with_fx_platforms_bundle",
+        "windows": "//:app_with_fx_platforms_windows_bundle",
+    }.items()
+]
