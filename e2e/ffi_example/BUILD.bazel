@@ -534,6 +534,9 @@ ios_sim_debug_app(
 dart_test(
     name = "verify_ios_simulator_test",
     data = [":ffi_ios_sim_debug"],
+    # `xcrun simctl` needs Xcode, and on a Mac whose `xcode-select` points at
+    # the Command Line Tools only DEVELOPER_DIR names it.
+    env_inherit = ["DEVELOPER_DIR"],
     main = "test/verify_ios_simulator_test.dart",
     tags = ["manual"],
     target_compatible_with = ["@platforms//os:macos"],

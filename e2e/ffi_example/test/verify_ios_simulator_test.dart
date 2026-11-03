@@ -56,8 +56,14 @@ void main() {
     exit(1);
   }
 
-  if (Process.runSync('xcrun', ['--find', 'simctl']).exitCode != 0) {
-    stderr.writeln('xcrun simctl not available');
+  final findSimctl = Process.runSync('xcrun', ['--find', 'simctl']);
+  if (findSimctl.exitCode != 0) {
+    stderr.writeln(
+      'xcrun simctl not available: ${findSimctl.stderr}'
+      'Point DEVELOPER_DIR at Xcode (export '
+      'DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer) or run '
+      '`sudo xcode-select -s` on it.',
+    );
     exit(1);
   }
 
