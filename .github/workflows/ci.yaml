@@ -1,13 +1,13 @@
 # CI workflow for rules_flutter
 #
-# Runs repo-root tests (Starlark unit tests, buildifier lint) and
-# e2e tests across all workspaces on every push/PR.
+# Runs repo-root tests (Starlark unit tests, buildifier lint) and the e2e tests
+# on every push/PR. Each e2e workspace runs on the operating systems where it
+# exercises something no other job does; the `plan` job reads which, and why,
+# from tools/ci_matrix/e2e_matrix.dart.
 #
-# No job checks out rules_dart: every workspace below takes it as a registry
+# No job checks out rules_dart: every workspace takes it as a registry
 # `bazel_dep`. Local sibling overrides live in gitignored `.bazelrc.user` files,
-# which never exist on a runner. The one committed sibling override, in
-# e2e/_overlay_tests/native_assets_synthetic, is in no matrix — adding it means
-# adding a checkout step too.
+# which never exist on a runner.
 name: CI
 on:
   push:
@@ -37,6 +37,7 @@ env:
     - MODULE.bazel
     - MODULE.bazel.lock
     - e2e/*/MODULE.bazel
+    - e2e/_overlay_tests/*/MODULE.bazel
     - flutter/private/versions.bzl
 jobs:
   unit-tests:
@@ -89,8 +90,9 @@ jobs:
       - name: Run private tool tests
         working-directory: flutter/private/tools
         run: dart pub get && dart test -x runfiles
-  # The only web coverage CI has — web_example is in no e2e matrix below — and
-  # the only place CI runs the binary users install rather than `dart run`.
+  # The only place CI runs a browser against a web app — web_example's e2e jobs
+  # below only build it and read the bytes — and the only place CI runs the
+  # binary users install rather than `dart run`.
   # One `-c dbg` Chrome run, asserted down to a VM service that answers
   # `getVersion` — `app.started` alone does not prove DWDS came up.
   web-smoke:
@@ -140,38 +142,32 @@ jobs:
       # itself and resolves tools/dev_tool from its own location.
       - name: Web smoke
         run: xvfb-run -a dart run tools/dev_tool/tool/e2e.dart test/e2e/web_smoke_e2e_test.dart
+  # The jobs of `e2e` below: one per workspace and operating system, from the
+  # table in tools/ci_matrix/e2e_matrix.dart. The same run checks that the table
+  # lists every workspace under e2e/ and says, for each system, what the
+  # workspace exercises there that no other job does or why it does not run, so
+  # a workspace added without a decision fails here and not silently never runs,
+  # and a job that repeats another's coverage has no purpose to give.
+  plan:
+    name: Plan E2E jobs
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dart-lang/setup-dart@v1
+      - name: Build the E2E matrix
+        id: matrix
+        run: dart run tools/ci_matrix/ci_matrix.dart >> "$GITHUB_OUTPUT"
   e2e:
     name: E2E (${{ matrix.workspace }}, ${{ matrix.os }})
+    needs: plan
     runs-on: ${{ matrix.os }}
+    # Cold, a workspace fetches its own Flutter SDK, engine and toolchains.
+    timeout-minutes: 120
     strategy:
       fail-fast: false
-      matrix:
-        workspace:
-          - smoke
-          # Two pub hubs over two locks — cheap (no Flutter SDK, no app) and the
-          # only coverage of duplicate package records across hubs.
-          - dual_hub
-          - hello_world
-          - ffi_example
-          - plugin_example
-          - ffi_plugin_example
-          - codegen
-        os:
-          - macos-latest
-        include:
-          # Run hello_world on Linux for native Linux bundle testing. Its
-          # `bazel test //...` also builds the bundle in Flutter's profile mode
-          # (`verify_linux_profile_bundle_test`): a profile AOT snapshot can only
-          # be built on its own OS, so this is the one place CI can.
-          - workspace: hello_world
-            os: ubuntu-latest
-          # Run hello_world on Windows for native Windows bundle testing, and
-          # the same profile-mode build (`verify_windows_profile_bundle_test`).
-          - workspace: hello_world
-            os: windows-latest
-          # Run codegen on Linux (no platform-specific code).
-          - workspace: codegen
-            os: ubuntu-latest
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v7
       # See the note above `env` for why only hello_world saves. The output base
@@ -208,11 +204,12 @@ jobs:
         run: bazel mod deps --lockfile_mode=error
       # --test_output=errors so a failure's assertion reaches this log. Without
       # it the output stays in a test.log on the runner and is discarded with
-      # the machine.
-      - name: bazel test //... (e2e/${{ matrix.workspace }})
+      # the machine. `build` takes no test flags: the workspaces that run it
+      # have no test targets (see tools/ci_matrix/e2e_matrix.dart).
+      - name: bazel ${{ matrix.command }} //... (e2e/${{ matrix.workspace }})
         if: runner.os != 'Windows'
         working-directory: e2e/${{ matrix.workspace }}
-        run: bazel test //... --test_output=errors
+        run: bazel ${{ matrix.command }} //... ${{ matrix.command == 'test' && '--test_output=errors' || '' }}
       # On Windows the same lock check runs under the short output root the test
       # step below explains, so both use one Bazel server.
       - name: bazel mod deps (e2e/${{ matrix.workspace }})
@@ -228,13 +225,14 @@ jobs:
       # (`BAZEL_OUTPUT_BASE` is not read by Bazel; the startup flag is required.)
       # --*_tag_filters=-no-windows-ci skips targets that build fine on
       # macOS/Linux but exceed the windows-latest runner's commit limit
-      # (RAM + its small fixed pagefile). Today that's hello_world's Android
-      # target: rules_android's resource compiler launches its JVM with
-      # -Xms3G, eagerly committing 3 GiB and OOMing. Android is still covered
-      # on the macOS and Linux runners. The build filter (not just the test
-      # filter) is required because `bazel test //...` builds every matched
-      # target, including the non-test app, so a test-only filter wouldn't
-      # stop the OOMing build action.
+      # (RAM + its small fixed pagefile). Today that's the Android targets of
+      # hello_world and plugin_example: rules_android's resource compiler
+      # launches its JVM with -Xms3G, eagerly committing 3 GiB and OOMing.
+      # Android is still covered on the macOS and Linux runners. The build
+      # filter (not just the test filter) is required because `bazel test //...`
+      # builds every matched target, including the non-test app, so a test-only
+      # filter wouldn't stop the OOMing build action. A workspace made only of
+      # such targets does not run here at all (android_example).
       - name: bazel test //... (e2e/${{ matrix.workspace }})
         if: runner.os == 'Windows'
         working-directory: e2e/${{ matrix.workspace }}

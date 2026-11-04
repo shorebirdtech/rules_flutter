@@ -25,7 +25,7 @@ The latest tag is the current stable release.
 - `MODULE.bazel` — `flutter_version` in `flutter.toolchain()` call
 - All `e2e/*/MODULE.bazel` — `flutter_version` in `flutter.toolchain()` calls
 - `e2e/_overlay_tests/*/MODULE.bazel` — same call, one directory deeper, so a
-  `e2e/*/MODULE.bazel` glob misses it, and no CI job runs it to notice
+  `e2e/*/MODULE.bazel` glob misses it
 - `README.md` — the Flutter version in the Requirements table, the
   `MODULE.bazel` snippet under Getting started, and the `FlutterSdkInfo.version`
   example under Providers

@@ -736,6 +736,8 @@ cd e2e/android_example && bazel test //...
 cd e2e/web_example && bazel test //...
 cd e2e/linux_example && bazel test //...    # Linux-only (target_compatible_with)
 cd e2e/windows_example && bazel test //...  # Windows-only (target_compatible_with)
+cd e2e/_overlay_tests/link_hooks && bazel test //...                # macOS-only
+cd e2e/_overlay_tests/native_assets_synthetic && bazel test //...   # macOS-only
 ```
 
 **Platform notes:**
@@ -809,6 +811,69 @@ cd e2e/windows_example && bazel test //...  # Windows-only (target_compatible_wi
   ```
   `bazel test //...` there exits 4 ("No test targets were found") however clean
   the checks are.
+
+### What CI covers
+
+`.github/workflows/ci.yaml` runs, on every push and pull request:
+
+- `bazel test //...` in the repository root (Linux);
+- `bazel mod deps --lockfile_mode=error` in each e2e workspace before its build,
+  which fails on a stale `MODULE.bazel.lock`, see "Lock files" in § 1;
+- the pre-commit hooks, the dev_tool unit tests, and the web smoke test (§ 5);
+- `bazel test //...` in every e2e workspace, on each operating system where it
+  exercises something no other job does.
+
+The last is a matrix of one job per workspace and system, named `E2E
+(<workspace>, <runner>)`. It is generated: the `Plan E2E jobs` job runs
+`tools/ci_matrix/e2e_matrix.dart`, and that table is the one place that says
+where a workspace runs and why. A job costs runner time (a macOS minute costs
+ten Linux ones), so it has to earn it. A workspace runs on a system only where it
+exercises something there that nothing else in CI does, and its entry says what:
+an OS-specific path (a runner, a toolchain, a bundle layout, a plugin's
+implementation for that platform, how the host loads a native library), or, for
+a workspace whose subject does not depend on the OS, its one run, on the cheapest
+system that builds it. Every other system gets a reason: the job that covers it,
+or that the system cannot build it. Building on a system is not a reason to run
+there.
+
+The run fails when the table and `e2e/` disagree, when a run gives no purpose,
+or when one workspace gives two systems the same purpose. So a workspace added
+without a decision (or removed without its entry) turns CI red rather than
+quietly never running. A new workspace needs an entry; `bazel run
+//tools/ci_matrix` finds a gap before a push.
+
+| Workspace | Runs on | What each run adds | Not on |
+|---|---|---|---|
+| `smoke` | macOS, Linux, Windows | the BCR presubmit module, which BCR runs on each | |
+| `hello_world` | macOS, Linux, Windows | the Tier-1 app over each `flutter create` runner; profile bundles on Linux and Windows; Android and web from each host | |
+| `codegen` | macOS, Linux, Windows | Native Assets loaded by each host's `flutter_tester` | |
+| `plugin_example` | macOS, Linux, Windows | each platform's implementations of real pub plugins | |
+| `ffi_example` | macOS, Linux, Windows | native libraries in each platform's bundle | |
+| `cross_compile_example` | macOS (`build`) | the Mac-to-Linux cross toolchain | Linux: a native build is `hello_world`'s; Windows: no such pair |
+| `macos_example`, `ios_example`, `multi_window_example`, `_overlay_tests/native_assets_synthetic` | macOS | Apple-only features | Linux, Windows: Apple-only |
+| `dual_hub`, `ffi_plugin_example`, `web_example`, `android_example`, `_overlay_tests/link_hooks` | Linux | their platform-neutral subject, once, on the cheapest runner | macOS, Windows: the same again (`android_example` also runs out of memory on Windows) |
+| `linux_example` | Linux | Tier-2 Linux rules | macOS, Windows: Linux-only |
+| `windows_example` | Windows | Tier-2 Windows rules | macOS, Linux: Windows-only |
+
+The table in `e2e_matrix.dart` is the source; if this one disagrees, that one is
+right. After the lock check, the macOS and Linux jobs run exactly
+`bazel test //... --test_output=errors`
+(`build` for `cross_compile_example`), so a target the system cannot build must
+carry `target_compatible_with` and is then skipped, not failed. The Windows job
+adds `--output_user_root=C:/b` (MAX_PATH) and `--build_tag_filters=-no-windows-ci
+--test_tag_filters=-no-windows-ci`: tag a target `no-windows-ci` when it builds
+elsewhere but exceeds the runner's memory, as `hello_world`'s and
+`plugin_example`'s Android targets do. Tests on Windows locate their `data`
+through `package:runfiles`, never `$TEST_SRCDIR/...` paths, since the runner has
+no runfiles tree.
+
+Everything tagged `manual` or `exclusive` stays out of `bazel test //...`, so CI
+never runs a test that needs a GUI session, a display adapter, a simulator, an
+emulator or a device (`verify_macos_app_test`, the `*_runtime_test`s,
+`verify_android_app_test`, the team-signing test that needs a provisioning
+profile, and the like). Those are § 4. CI also runs on GitHub's runner images:
+what they ship (Xcode, the Android SDK and NDK, MSVC) is what the jobs build
+with.
 
 ### What the automated e2e tests cover
 
@@ -1370,7 +1435,7 @@ it is a profile build and not a release one:
 - `libapp.so` / `app.so` and the engine library differ in size from a
   `-c opt` build without the flag.
 
-#### What CI covers
+#### What CI covers of profile mode
 
 CI builds profile mode on both hosts, so a regression that stops the profile
 build or ships a release snapshot in it fails a push, not a VM session. The
@@ -1387,8 +1452,9 @@ of every AOT snapshot: `release` from Flutter's profile `gen_snapshot`,
 
 CI does not start the app, so it does not show that the VM service answers or
 that the main isolate lists the `ext.flutter.profile*` extensions; the manual
-checks above still cover those. `e2e/linux_example` and `e2e/windows_example`
-are in no CI matrix, so the profile build is exercised through `hello_world`.
+checks above still cover those. The profile build is exercised through
+`hello_world`; `e2e/linux_example` and `e2e/windows_example` run in CI (see
+"What CI covers" in § 3) but do not build profile mode.
 
 ## 5. Web rendering verification
 
@@ -1448,6 +1514,7 @@ script's own package requires ≥ 3.13.
 | FFI / native deps / native assets | ffi_example (incl. manual iOS-sim + macOS runtime tests), ffi_plugin_example |
 | Plugins | plugin_example, ffi_plugin_example |
 | Toolchain / SDK | smoke, hello_world |
+| A new or removed e2e workspace, or where one runs in CI (`tools/ci_matrix/e2e_matrix.dart`, `.github/workflows/ci.yaml`) | `bazel run //tools/ci_matrix` (fails on a gap) and `bazel test //tools/ci_matrix/...` |
 | Maven artifacts (a `maven.install` in any `MODULE.bazel`, or a bump of `rules_android` or `rules_jvm_external`) | `bazel run //tools/lockfile_check -- --refresh` on hello_world, plugin_example and android_example, and the root's lock by hand — see "Maven lock files" in § 1 |
 | dev_tool (unit) | `bazel test //tools/dev_tool/...` (already covered by root `//...`) |
 | dev_tool (e2e) | `dart run tools/dev_tool/tool/e2e.dart` — needs a Dart ≥3.13 on `PATH`, see § 2 |

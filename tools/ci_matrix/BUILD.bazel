@@ -1,0 +1,23 @@
+load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_test")
+
+# Prints the matrix of the E2E jobs in .github/workflows/ci.yaml and checks
+# that tools/ci_matrix/e2e_matrix.dart accounts for every workspace under e2e/
+# on every operating system. The workflow's `plan` job runs the same file with
+# plain `dart run`.
+#   bazel run //tools/ci_matrix
+dart_binary(
+    name = "ci_matrix",
+    srcs = [
+        "e2e_matrix.dart",
+        "//tools/e2e_workspaces:e2e_workspaces.dart",
+    ],
+    main = "ci_matrix.dart",
+)
+
+dart_test(
+    name = "ci_matrix_test",
+    size = "small",
+    srcs = ["e2e_matrix.dart"],
+    main = "test/ci_matrix_test.dart",
+    deps = ["@dev_tool_deps//:test"],
+)
