@@ -87,6 +87,9 @@ load(
     "service_worker_load_args",
 )
 
+# The glyph the engine measures an icon font's height with.
+_SPACE_CODE_POINT = 32
+
 # The index.html the rule falls back to when the target supplies none.
 #
 # Carries `$FLUTTER_BASE_HREF` rather than a formatted value so it reaches the
@@ -705,7 +708,18 @@ def _flutter_web_bundle_impl(ctx):
         )
 
     flutter_assets = declare_flutter_assets_dir(ctx)
-    flutter_build_assets(ctx, tools, flutter_assets, primary.deps, compiled_shaders, kernel_dill = kernel_dill, is_debug = is_debug)
+    flutter_build_assets(
+        ctx,
+        tools,
+        flutter_assets,
+        primary.deps,
+        compiled_shaders,
+        kernel_dill = kernel_dill,
+        is_debug = is_debug,
+        # The engine measures an icon font's height with the space glyph, so
+        # every subset keeps it, as flutter_tools' web icon shaking does.
+        optional_code_points = [_SPACE_CODE_POINT],
+    )
 
     # Step 4: Pick the index.html and flutter_bootstrap.js *templates*.
     #

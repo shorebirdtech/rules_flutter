@@ -227,10 +227,16 @@ Future<void> main(List<String> args) async {
   Map<String, Set<int>>? usedCodePoints;
   Map<String, String>? fontFamilyToAsset;
 
+  // Code points each subset font keeps if the font has them, used or not.
+  var optionalCodePoints = <int>[];
+
   if (iconTreeShaking != null) {
     final dart = iconTreeShaking['dart'] as String;
     final constFinder = iconTreeShaking['const_finder'] as String;
     final kernelDill = iconTreeShaking['kernel_dill'] as String;
+    final optional =
+        iconTreeShaking['optional_code_points'] as List<dynamic>? ?? [];
+    optionalCodePoints = [for (final cp in optional) cp as int];
 
     // Step 1: Run const_finder to discover used icon code points.
     final constFinderResult = Process.runSync(dart, [
@@ -324,7 +330,10 @@ Future<void> main(List<String> args) async {
           : null;
       if (codePoints != null && codePoints.isNotEmpty) {
         // Run font-subset: code points are piped via stdin.
-        final codePointStr = codePoints.map((cp) => cp.toString()).join(' ');
+        final codePointStr = [
+          ...codePoints.map((cp) => cp.toString()),
+          ...optionalCodePoints.map((cp) => 'optional:$cp'),
+        ].join(' ');
         final success = await _runFontSubset(
           fontSubsetBin,
           dest,

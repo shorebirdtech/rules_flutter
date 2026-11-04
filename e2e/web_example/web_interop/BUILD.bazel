@@ -143,3 +143,11 @@ icon_font_test(
     keeps = ["e318"],
     lacks = ["e037"],
 )
+
+# Flutter adds the space to every icon font subset it makes for the web, because
+# the engine measures the font's height with it (`icon_tree_shaker.dart`).
+icon_font_test(
+    name = "web_space_glyph_kept",
+    bundle = "glyph_app",
+    keeps = ["20"],
+)

@@ -91,6 +91,7 @@ def flutter_asset_bundle_action(
         const_finder = None,
         font_subset = None,
         kernel_dill = None,
+        optional_code_points = [],
         extra_asset_copies = {}):
     """Create an action that generates the flutter_assets/ tree artifact.
 
@@ -114,6 +115,9 @@ def flutter_asset_bundle_action(
         const_finder: File for const_finder.dart.snapshot (enables icon tree shaking).
         font_subset: File for font-subset binary (enables icon tree shaking).
         kernel_dill: File for the compiled kernel .dill (needed for icon tree shaking).
+        optional_code_points: Code points every subset icon font keeps if the
+            font has a glyph for them, used or not (`optional:<n>` to
+            font-subset).
         extra_asset_copies: dict mapping custom dest path → File for assets that
             need a specific destination path (e.g. "fonts/MaterialIcons-Regular.otf").
 
@@ -163,6 +167,7 @@ def flutter_asset_bundle_action(
             "const_finder": file_ref(refs, const_finder),
             "font_subset": file_ref(refs, font_subset),
             "kernel_dill": file_ref(refs, kernel_dill),
+            "optional_code_points": optional_code_points,
         }
         extra_inputs.extend([const_finder, font_subset, kernel_dill])
 

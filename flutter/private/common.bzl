@@ -690,7 +690,7 @@ def declare_flutter_assets_dir(ctx):
     """
     return ctx.actions.declare_directory(ctx.label.name + "_flutter_assets")
 
-def flutter_build_assets(ctx, tools, output_dir, deps, compiled_shaders = {}, kernel_dill = None, is_debug = False, data_assets = None):
+def flutter_build_assets(ctx, tools, output_dir, deps, compiled_shaders = {}, kernel_dill = None, is_debug = False, data_assets = None, optional_code_points = []):
     """Run the shared asset bundling step.
 
     Walks `FlutterInfo.pub_fonts` / `pub_assets` from deps to bundle
@@ -716,6 +716,8 @@ def flutter_build_assets(ctx, tools, output_dir, deps, compiled_shaders = {}, ke
             placed at `flutter_assets/packages/<package>/<name>` and listed in
             the asset manifest under that key, as flutter_tools bundles a
             hook's data asset.
+        optional_code_points: Code points every subset icon font keeps if it
+            has a glyph for them, whether or not the app uses them.
 
     Returns:
         The flutter_assets/ tree artifact File.
@@ -762,6 +764,7 @@ def flutter_build_assets(ctx, tools, output_dir, deps, compiled_shaders = {}, ke
         const_finder = tools.const_finder if tree_shake_icons else None,
         font_subset = tools.font_subset if tree_shake_icons else None,
         kernel_dill = kernel_dill if tree_shake_icons else None,
+        optional_code_points = optional_code_points,
         extra_asset_copies = extra_asset_copies,
     )
 
