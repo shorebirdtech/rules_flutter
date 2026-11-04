@@ -60,6 +60,7 @@ import 'compiler_config.dart';
 import 'devicectl_screens.dart';
 import 'host_tools.dart';
 import 'key_press.dart';
+import 'launch_bundle_parts.dart';
 import 'logging.dart';
 import 'mdns_vm_service_discovery.dart';
 import 'native_patch_delivery.dart';
@@ -519,6 +520,15 @@ abstract class Device {
   /// These are injected into `bazel build` and `bazel cquery` to ensure
   /// correct cross-compilation and output resolution.
   List<String> get buildArgs => const [];
+
+  /// How a restart reads the launch bundle's native libraries and assets
+  /// without building the launch artifact, or null when the artifact is the
+  /// bundle and building it is the way to read it.
+  ///
+  /// For a platform whose artifact is packaged from the bundle at a cost a
+  /// restart should not pay: an APK is dexed, linked, zipped and signed, none
+  /// of it needed to learn that only Dart changed.
+  LaunchBundleParts? get launchBundleParts => null;
 
   /// Learn whatever [buildArgs] depends on that only the device can say.
   ///
@@ -1393,6 +1403,13 @@ class AndroidDevice extends Device {
   List<String> get buildArgs => [
     '--@rules_android//flags:android_platforms=@rules_android//:$abi',
   ];
+
+  @override
+  LaunchBundleParts? get launchBundleParts => LaunchBundleParts(
+    aspect: androidBundlePartsAspect,
+    assetsGroup: androidBundlePartsOutputGroup,
+    nativeLibsGroup: androidNativeLibsOutputGroup,
+  );
 
   /// Build the common adb prefix args (includes -s <deviceId> if set).
   List<String> _adbArgs(List<String> args) {

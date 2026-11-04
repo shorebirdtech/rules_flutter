@@ -1,5 +1,8 @@
 /// The launch bundle's bazel build, run at most once per command.
 ///
+/// [T] is what the build answers: whether it succeeded, or for a build whose
+/// files the caller reads, those too.
+///
 /// One `app.restart` has two steps that need the bundle rebuilt: the asset
 /// refresh, which rebuilds when an asset source has moved, and the native-libs
 /// check, which rebuilds before it can compare the bundle against the running
@@ -15,8 +18,8 @@
 /// why there is a later command.
 library;
 
-class BundleRebuild {
-  final Future<bool> Function() _build;
+class BundleRebuild<T> {
+  final Future<T> Function() _build;
 
   /// The command a build would belong to, read at call time rather than passed
   /// in: both callers are several layers from the handler that knows it.
@@ -27,15 +30,17 @@ class BundleRebuild {
   /// the same way a second time, and the caller that asked first has already
   /// reported it.
   int _builtFor = -1;
-  bool _result = false;
+  T? _result;
 
   BundleRebuild(this._build, this._command);
 
-  Future<bool> run() async {
+  /// What the build answered for the current command: built now if this is the
+  /// first ask in it, else the answer the first one got.
+  Future<T> run() async {
     final command = _command();
-    if (command == _builtFor) return _result;
+    if (command == _builtFor) return _result as T;
     _result = await _build();
     _builtFor = command;
-    return _result;
+    return _result as T;
   }
 }

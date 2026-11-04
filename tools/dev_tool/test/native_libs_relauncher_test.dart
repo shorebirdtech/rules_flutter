@@ -142,10 +142,12 @@ class _Harness {
     List<String> Function()? patchedLibs,
     Future<void> Function({required bool newProcess})? catchUpPatcher,
     NativeLibsWatch? nativeLibs,
+    Future<Map<String, String>?> Function()? probeLibs,
   }) async {
     return Relauncher(
       appFile: appDir,
       rebuild: rebuild,
+      probeLibs: probeLibs,
       sessions: [session],
       protocol: MachineProtocol(enabled: false, commandRunner: CommandRunner()),
       orchestrator: orchestrator,
@@ -414,5 +416,122 @@ void main() {
     // otherwise every subsequent restart would relaunch the process again.
     expect(await r.relaunchIfNeeded(), isA<RelaunchNotNeeded>());
     expect(h.device.launches, 1);
+  });
+
+  // Packaging the launch artifact is most of what an Android restart costs (an
+  // APK is dexed, linked, zipped and signed), and the only thing a restart
+  // needs of it is its native libraries. A platform that can read those without
+  // the artifact says how, and a restart that finds them unchanged builds
+  // nothing of it.
+  group('with a probe of the libraries that does not package the artifact', () {
+    /// The fingerprint the probe reads off the libraries, as the bundle's own
+    /// is keyed: the same file name and a token for its content.
+    Future<Map<String, String>?> Function() probing(
+      _Harness h,
+      List<String> asked,
+    ) => () async {
+      asked.add('probe');
+      return nativeLibsFingerprint(h.appDir);
+    };
+
+    test('unchanged libraries build and relaunch nothing', () async {
+      final h = await _Harness.create();
+      addTearDown(h.dispose);
+      final asked = <String>[];
+      final r = await h.relauncher(
+        rebuild: () async {
+          asked.add('rebuild');
+          return true;
+        },
+        probeLibs: probing(h, asked),
+      );
+
+      expect(await r.relaunchIfNeeded(), isA<RelaunchNotNeeded>());
+      expect(asked, ['probe']);
+      expect(h.device.launches, 0);
+    });
+
+    test('changed libraries build the artifact once, then relaunch from it, '
+        'and the next restart compares against what now runs', () async {
+      final h = await _Harness.create();
+      addTearDown(h.dispose);
+      final asked = <String>[];
+      final r = await h.relauncher(
+        rebuild: () async {
+          asked.add('rebuild');
+          return true;
+        },
+        probeLibs: () async {
+          asked.add('probe');
+          h.changeNativeLib('machine code v2 — longer');
+          return nativeLibsFingerprint(h.appDir);
+        },
+      );
+
+      final outcome = await r.relaunchIfNeeded();
+      expect(
+        outcome,
+        isA<Relaunched>().having((o) => o.changedLibs, 'changedLibs', [
+          'libnative.dylib',
+        ]),
+      );
+      // The relaunch installs the artifact, so it is built before it, and only
+      // once the libraries are known to have moved.
+      expect(asked, ['probe', 'rebuild']);
+      expect(h.device.launches, 1);
+
+      expect(await r.relaunchIfNeeded(), isA<RelaunchNotNeeded>());
+      expect(h.device.launches, 1);
+    });
+
+    test('a probe that cannot read the libraries reports the build and '
+        'relaunches nothing', () async {
+      final h = await _Harness.create();
+      addTearDown(h.dispose);
+      var rebuilt = false;
+      final r = await h.relauncher(
+        rebuild: () async => rebuilt = true,
+        probeLibs: () async => null,
+      );
+
+      expect(await r.relaunchIfNeeded(), isA<RelaunchBuildFailed>());
+      expect(rebuilt, isFalse);
+      expect(h.device.launches, 0);
+    });
+
+    test('a failed build of the artifact after a changed library relaunches '
+        'nothing', () async {
+      final h = await _Harness.create();
+      addTearDown(h.dispose);
+      final r = await h.relauncher(
+        rebuild: () async => false,
+        probeLibs: () async {
+          h.changeNativeLib('machine code v2 — longer');
+          return nativeLibsFingerprint(h.appDir);
+        },
+      );
+
+      expect(await r.relaunchIfNeeded(), isA<RelaunchBuildFailed>());
+      expect(h.device.stops, 0);
+      expect(h.device.launches, 0);
+    });
+
+    test('a live patch still relaunches an unchanged bundle, from a rebuilt '
+        'artifact', () async {
+      final h = await _Harness.create();
+      addTearDown(h.dispose);
+      final asked = <String>[];
+      final r = await h.relauncher(
+        rebuild: () async {
+          asked.add('rebuild');
+          return true;
+        },
+        probeLibs: probing(h, asked),
+        patchedLibs: () => ['libnative.dylib'],
+      );
+
+      expect(await r.relaunchIfNeeded(), isA<Relaunched>());
+      expect(asked, ['probe', 'rebuild']);
+    });
   });
 }

@@ -55,6 +55,26 @@ void main() {
       },
     );
 
+    test('reads each of several groups an aspect filled apart', () {
+      final events = [
+        '{"id":{"workspace":{}},"workspaceInfo":{"localExecRoot":"/x/root"}}',
+        '{"id":{"namedSet":{"id":"0"}},"namedSetOfFiles":{"files":[{"name":"assets/a.bin","uri":"file:///x/root/bazel-out/k/bin/assets/a.bin","pathPrefix":["bazel-out","k","bin"]}]}}',
+        '{"id":{"namedSet":{"id":"1"}},"namedSetOfFiles":{"files":[{"name":"libx.so","uri":"file:///x/root/bazel-out/k/bin/libx.so","pathPrefix":["bazel-out","k","bin"]}]}}',
+        '{"id":{"targetCompleted":{"label":"//:app","aspect":"@@rules_flutter+//flutter:a.bzl%an_aspect"}},"completed":{"outputGroup":[{"name":"assets","fileSets":[{"id":"0"}]},{"name":"libs","fileSets":[{"id":"1"}]}]}}',
+      ];
+      final outputs = aspectOutputsFromBuildEvents(
+        events.join('\n'),
+        aspect: '@rules_flutter//flutter:a.bzl%an_aspect',
+        outputGroup: 'assets',
+        otherGroups: ['libs'],
+      );
+      expect(outputs.filesByGroup, {
+        'assets': ['/x/root/bazel-out/k/bin/assets/a.bin'],
+        'libs': ['/x/root/bazel-out/k/bin/libx.so'],
+      });
+      expect(outputs.files, outputs.filesByGroup['assets']);
+    });
+
     test('ignores another aspect\'s group and follows nested file sets', () {
       final events = [
         '{"id":{"workspace":{}},"workspaceInfo":{"localExecRoot":"/x/root"}}',

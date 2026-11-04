@@ -37,6 +37,21 @@ class Relauncher {
   /// different configuration's outputs and leaves the running bundle untouched.
   final Future<bool> Function() rebuild;
 
+  /// Reads the fingerprint of the native libraries the tree now builds without
+  /// building [rebuild]'s launch artifact, or null when the build it needed
+  /// failed.
+  ///
+  /// For a platform whose launch artifact costs far more than the libraries in
+  /// it: an APK is dexed, linked, zipped and signed, and a restart that finds
+  /// its libraries unchanged needs none of that. Null here means the artifact
+  /// *is* the cheap thing (a macOS bundle is a directory of what the build
+  /// wrote anyway), so [rebuild] runs first and its bundle is read.
+  ///
+  /// The fingerprints it returns must be the form the `liveFingerprint` was
+  /// taken in, since they are compared. [rebuild] still runs before a
+  /// relaunch, because that installs the artifact.
+  final Future<Map<String, String>?> Function()? probeLibs;
+
   /// The run's live session list — the same instance the rest of the run holds,
   /// because [DeviceSession.relaunch] swaps each session's app instance in
   /// place and everything else must see the replacement.
@@ -85,6 +100,7 @@ class Relauncher {
   Relauncher({
     required this.appFile,
     required this.rebuild,
+    this.probeLibs,
     required this.sessions,
     required this.protocol,
     required this.orchestrator,
@@ -102,12 +118,19 @@ class Relauncher {
   /// caller to run the ordinary isolate restart, and the other two are what the
   /// restart's reply is built from. The words are the renderers' job.
   Future<RelaunchOutcome> relaunchIfNeeded() async {
-    if (!await rebuild()) {
-      return const RelaunchBuildFailed(
-        'bazel build failed during restart; see build output.',
-      );
+    const buildFailed = RelaunchBuildFailed(
+      'bazel build failed during restart; see build output.',
+    );
+    final probe = probeLibs;
+    final Map<String, String> fingerprint;
+    if (probe == null) {
+      if (!await rebuild()) return buildFailed;
+      fingerprint = await nativeLibsFingerprint(appFile);
+    } else {
+      final probed = await probe();
+      if (probed == null) return buildFailed;
+      fingerprint = probed;
     }
-    final fingerprint = await nativeLibsFingerprint(appFile);
     final patched = patchedLibs?.call() ?? const [];
     final bundleMoved = !fingerprintsEqual(fingerprint, _live);
     if (!bundleMoved && patched.isEmpty) {
@@ -123,6 +146,12 @@ class Relauncher {
       'text': 'Native libraries changed (${changed.join(', ')}); relaunching.',
       'libs': changed,
     });
+
+    // The relaunch installs the launch artifact, so the one a probe skipped is
+    // built now that a process is certain to be replaced. Where there is no
+    // probe it was built above, and this is the same build, which the caller's
+    // per-command cache answers without running bazel again.
+    if (probe != null && !await rebuild()) return buildFailed;
 
     final relaunched = <DeviceSession>[];
     final failures = <String, String>{};

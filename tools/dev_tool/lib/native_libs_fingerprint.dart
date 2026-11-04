@@ -70,6 +70,49 @@ Future<Map<String, String>> nativeLibsFingerprintOfFiles(
   return out;
 }
 
+/// Per-file content fingerprint of [files], the build outputs an Android
+/// `android_binary` takes its native libraries from, keyed by where each sits
+/// in its configuration's output tree (`libextra.lo`,
+/// `external/aar+/jni/arm64-v8a/libaar.so`).
+///
+/// The companion to [nativeLibsFingerprint] for an Android app whose APK is not
+/// built. A restart asks only whether the native code moved, and the APK is
+/// packaged from files the build makes first: the `.a`/`.lo` archives and
+/// objects of every `cc_library` listed on the binary (which it links into a
+/// library of its own), the shared libraries those bring, the application's
+/// own libraries, and the `jni/` libraries of every AAR. A change to any of
+/// them is a change to what the APK carries, so a changed library cannot
+/// slip past the check by being something other than the application's.
+///
+/// [files] is whatever a build listed: anything that is not a regular file (a
+/// tree artifact) is skipped, and so are `libapp.so` and `libflutter.so`, the
+/// Dart snapshot and the engine, which no edit to the app's native code moves.
+/// The content token is of the bytes, so the same file built in another
+/// configuration has the same one.
+Future<Map<String, String>> nativeLibsFingerprintOfBuiltFiles(
+  Iterable<String> files,
+) async {
+  // A launch target can reach one file in more than one configuration (the
+  // APK's own and the one its dependencies are split into), so a key can have
+  // several files. Their tokens are sorted, so the order the build listed them
+  // in decides nothing, and either one changing changes the key's.
+  final tokens = <String, Set<String>>{};
+  for (final path in files) {
+    final key = _inOutputTree.firstMatch(path)?.group(1) ?? path;
+    if (_flutterLibraries.contains(key.split('/').last)) continue;
+    final file = File(path);
+    if (!file.existsSync()) continue;
+    (tokens[key] ??= {}).add('fnv:${await _fnv1a64(file)}');
+  }
+  return {
+    for (final entry in tokens.entries)
+      entry.key: (entry.value.toList()..sort()).join(','),
+  };
+}
+
+/// A path under a configuration's output tree: what follows `bazel-out/<cfg>/bin/`.
+final _inOutputTree = RegExp(r'bazel-out/[^/]+/bin/(.*)$');
+
 bool fingerprintsEqual(Map<String, String> a, Map<String, String> b) {
   if (a.length != b.length) return false;
   for (final e in a.entries) {

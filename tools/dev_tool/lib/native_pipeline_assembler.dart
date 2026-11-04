@@ -36,6 +36,7 @@ import 'hot_reload/source_uri_resolver.dart';
 import 'hot_reload/reload_orchestrator.dart';
 import 'hot_reload/session_reloader.dart';
 import 'hot_reload/workspace.dart';
+import 'launch_bundle_parts.dart';
 import 'logging.dart';
 import 'native_hot_patcher.dart';
 import 'native_libs_fingerprint.dart';
@@ -803,7 +804,9 @@ class NativePipelineAssembler {
       ),
       builtBefore: builtBefore,
     );
-    pipeline.rebuildAssets = _bundleRebuild.run;
+    // The refreshed assets, built the cheapest way the platform offers: an
+    // APK is not packaged to learn that an asset moved.
+    pipeline.rebuildAssets = _rebuildAssets;
     return assetsDir;
   }
 
@@ -821,10 +824,53 @@ class NativePipelineAssembler {
   /// asset sources moved asks for this build twice — once to refresh the bundle
   /// it diffs, once before the native-libs comparison — and the second is a
   /// bazel invocation that can only confirm the first.
-  late final BundleRebuild _bundleRebuild = BundleRebuild(
+  late final BundleRebuild<bool> _bundleRebuild = BundleRebuild(
     _rebuildBundle,
     () => pipeline.command,
   );
+
+  /// How a restart reads the bundle without building the launch artifact, if
+  /// the device has such a way (an APK is not packaged for it).
+  LaunchBundleParts? get _parts => configDevice.launchBundleParts;
+
+  /// The bundle's assets and native libraries alone, built through
+  /// [LaunchBundleParts]; deduplicated within one command like [_bundleRebuild],
+  /// for the same reason: the asset refresh and the native-libs check ask for
+  /// it in one restart, and the second can only confirm the first.
+  ///
+  /// In the configuration the running app used, which is the reason it goes
+  /// through the launch target and its aspect rather than building the
+  /// flutter_application: see [_rebuildBundle].
+  late final BundleRebuild<BazelAspectOutputs> _partsRebuild = BundleRebuild(
+    _buildParts,
+    () => pipeline.command,
+  );
+
+  Future<BazelAspectOutputs> _buildParts() => host.bazel.buildAspectOutputs(
+    target,
+    workspace: workspace,
+    aspect: _parts!.aspect,
+    outputGroup: _parts!.assetsGroup,
+    otherGroups: [_parts!.nativeLibsGroup],
+    compilationMode: 'dbg',
+    extraArgs: _launchArgs,
+  );
+
+  /// Refresh the assets the app reads: the launch target's bundle, or only its
+  /// parts where the device can read them without the artifact.
+  Future<bool> _rebuildAssets() async => _parts == null
+      ? _bundleRebuild.run()
+      : (await _partsRebuild.run()).success;
+
+  /// The fingerprint of the native libraries the tree now builds, read off the
+  /// bundle's parts. Null when that build failed.
+  Future<Map<String, String>?> _probeLibs() async {
+    final built = await _partsRebuild.run();
+    if (!built.success) return null;
+    return nativeLibsFingerprintOfBuiltFiles(
+      built.filesByGroup[_parts!.nativeLibsGroup]!,
+    );
+  }
 
   Future<bool> _rebuildBundle() async {
     final r = await host.bazel.build(
@@ -851,12 +897,38 @@ class NativePipelineAssembler {
     // launched bundle's fingerprint; app.restart rebuilds and, when it changed,
     // relaunches the process instead of restarting the isolate. Apps with no
     // loose native libraries skip all of this and keep the instant restart path.
-    final fingerprint = await nativeLibsFingerprint(launched.appFile);
+    // Read the way a restart will read it, so the two are compared in one form.
+    // For a device that has a cheaper way to read the libraries than building
+    // its artifact, that is that way, taken now rather than from the artifact:
+    // the same bytes the dev build above has already paid for.
+    final parts = _parts;
+    final Map<String, String> fingerprint;
+    if (parts == null) {
+      fingerprint = await nativeLibsFingerprint(launched.appFile);
+    } else {
+      // Not through [_partsRebuild]: that answers for the command in flight,
+      // and a restart can arrive while this assembly is still running. It would
+      // then be handed this baseline as its own rebuild, and compare the
+      // libraries against themselves.
+      final built = await _buildParts();
+      // A failure like the dev build's, and recoverable the same way: the next
+      // reload assembles again.
+      if (!built.success) {
+        throw BazelInvocationFailure(
+          command: 'build $target (the bundle parts)',
+          diagnostics: built.stderr,
+        );
+      }
+      fingerprint = await nativeLibsFingerprintOfBuiltFiles(
+        built.filesByGroup[parts.nativeLibsGroup]!,
+      );
+    }
     if (fingerprint.isEmpty) return;
     final hotPatcher = await _armHotPatcher(launched, nativeLibs);
     final relauncher = Relauncher(
       appFile: launched.appFile,
       rebuild: _bundleRebuild.run,
+      probeLibs: _parts == null ? null : _probeLibs,
       sessions: host.sessions,
       protocol: host.protocol,
       orchestrator: orchestrator,

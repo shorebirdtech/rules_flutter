@@ -97,6 +97,10 @@ class BazelAspectOutputs {
   /// Every file in the requested group, absolute.
   final List<String> files;
 
+  /// The files of every group asked for, by group name; [files] is the first
+  /// one's. Empty for a result built without groups to name.
+  final Map<String, List<String>> filesByGroup;
+
   /// The directory the build ran actions in, which paths an aspect's manifests
   /// name are relative to. Null when the build failed.
   final String? executionRoot;
@@ -109,6 +113,7 @@ class BazelAspectOutputs {
     required this.files,
     required this.executionRoot,
     required this.stderr,
+    this.filesByGroup = const {},
   });
 
   bool get success => exitCode == 0;
@@ -133,9 +138,11 @@ BazelAspectOutputs aspectOutputsFromBuildEvents(
   String events, {
   required String aspect,
   required String outputGroup,
+  List<String> otherGroups = const [],
 }) {
   final sets = <String, Map<String, Object?>>{};
-  final roots = <String>[];
+  final groupNames = [outputGroup, ...otherGroups];
+  final roots = {for (final name in groupNames) name: <String>[]};
   String? executionRoot;
   for (final line in LineSplitter.split(events)) {
     if (line.trim().isEmpty) continue;
@@ -165,39 +172,57 @@ BazelAspectOutputs aspectOutputsFromBuildEvents(
             as List? ??
         const [];
     for (final group in groups.cast<Map<String, Object?>>()) {
-      if (group['name'] != outputGroup) continue;
+      final into = roots[group['name']];
+      if (into == null) continue;
       for (final set in (group['fileSets'] as List? ?? const [])) {
-        roots.add((set as Map<String, Object?>)['id'] as String);
+        into.add((set as Map<String, Object?>)['id'] as String);
       }
     }
   }
 
-  final relative = <String>{};
-  final seen = <String>{};
-  final pending = [...roots];
-  while (pending.isNotEmpty) {
-    final setId = pending.removeLast();
-    if (!seen.add(setId)) continue;
-    final set = sets[setId] ?? const {};
-    for (final file in (set['files'] as List? ?? const [])) {
-      final entry = file as Map<String, Object?>;
-      final prefix = (entry['pathPrefix'] as List? ?? const []).cast<String>();
-      relative.add([...prefix, entry['name'] as String].join('/'));
+  Set<String> closure(List<String> from) {
+    final relative = <String>{};
+    final seen = <String>{};
+    final pending = [...from];
+    while (pending.isNotEmpty) {
+      final setId = pending.removeLast();
+      if (!seen.add(setId)) continue;
+      final set = sets[setId] ?? const {};
+      for (final file in (set['files'] as List? ?? const [])) {
+        final entry = file as Map<String, Object?>;
+        final prefix = (entry['pathPrefix'] as List? ?? const [])
+            .cast<String>();
+        relative.add([...prefix, entry['name'] as String].join('/'));
+      }
+      for (final nested in (set['fileSets'] as List? ?? const [])) {
+        pending.add((nested as Map<String, Object?>)['id'] as String);
+      }
     }
-    for (final nested in (set['fileSets'] as List? ?? const [])) {
-      pending.add((nested as Map<String, Object?>)['id'] as String);
-    }
+    return relative;
   }
-  if (relative.isNotEmpty && executionRoot == null) {
+
+  final byGroup = {
+    for (final entry in roots.entries) entry.key: closure(entry.value),
+  };
+  if (byGroup.values.any((files) => files.isNotEmpty) &&
+      executionRoot == null) {
     throw DevToolException(
       'The build event stream of the $outputGroup build named '
-      '${relative.length} file(s) and no execution root (its `workspaceInfo` '
-      'event), so none of them can be found.',
+      '${byGroup.values.expand((f) => f).toSet().length} file(s) and no '
+      'execution root (its `workspaceInfo` event), so none of them can be '
+      'found.',
     );
   }
+  List<String> absolute(Set<String> relative) => [
+    for (final path in relative) '$executionRoot/$path',
+  ]..sort();
+  final filesByGroup = {
+    for (final entry in byGroup.entries) entry.key: absolute(entry.value),
+  };
   return BazelAspectOutputs(
     exitCode: 0,
-    files: [for (final path in relative) '$executionRoot/$path']..sort(),
+    files: filesByGroup[outputGroup]!,
+    filesByGroup: filesByGroup,
     executionRoot: executionRoot,
     stderr: '',
   );
@@ -528,7 +553,8 @@ class Bazel {
     );
   }
 
-  /// Build one output group an [aspect] adds to [target], and return its files.
+  /// Build the output group an [aspect] adds to [target], and [otherGroups] it
+  /// fills too, and return their files.
   ///
   /// The files come from the build's own event stream, not from a cquery: a
   /// cquery lists a target's outputs and never an aspect's, and it re-runs
@@ -542,6 +568,7 @@ class Bazel {
     required String workspace,
     required String aspect,
     required String outputGroup,
+    List<String> otherGroups = const [],
     String? compilationMode,
     List<String> extraArgs = const [],
   }) async {
@@ -559,7 +586,7 @@ class Bazel {
         if (compilationMode != null) ...['-c', compilationMode],
         ...extraArgs,
         '--aspects=$aspect',
-        '--output_groups=$outputGroup',
+        '--output_groups=${[outputGroup, ...otherGroups].join(',')}',
         // The caller reads these files from disk, and a build without the
         // bytes keeps whatever it was not asked for in the remote cache. The
         // group is this build's only top-level output, so this downloads it
@@ -587,6 +614,7 @@ class Bazel {
         await File(eventFile).readAsString(),
         aspect: aspect,
         outputGroup: outputGroup,
+        otherGroups: otherGroups,
       );
     } finally {
       await events.delete(recursive: true);

@@ -275,4 +275,96 @@ void main() {
       },
     );
   });
+
+  group('nativeLibsFingerprintOfBuiltFiles', () {
+    // What an Android restart reads in place of the APK: the files the build
+    // gives the packaging to take its native libraries from. They sit in an
+    // output tree, one directory per configuration.
+    File built(String config, String relative, List<int> bytes) =>
+        File('${tmp.path}/bazel-out/$config/bin/$relative')
+          ..createSync(recursive: true)
+          ..writeAsBytesSync(bytes);
+
+    test('keys each file by where it sits in its configuration', () async {
+      final fp = await nativeLibsFingerprintOfBuiltFiles([
+        built('k8', 'libdartjni.so', [1, 2, 3]).path,
+        built('k8', 'external/lib+/libmul.so', [4]).path,
+      ]);
+      expect(fp.keys, ['libdartjni.so', 'external/lib+/libmul.so']);
+    });
+
+    // `android_binary` links every `cc_library` it lists into a library of its
+    // own and packages every AAR's `jni/` libraries, so what can change the
+    // APK's native code is archives, objects and extracted libraries too.
+    test(
+      'takes the archives, objects and libraries the packaging links',
+      () async {
+        final fp = await nativeLibsFingerprintOfBuiltFiles([
+          built('k8', 'libextra_native.lo', [1]).path,
+          built('k8', 'libplain.a', [2]).path,
+          built('k8', '_objs/plain/plain.pic.o', [3]).path,
+          built('k8', 'external/aar+/jni/arm64-v8a/libaar.so', [4]).path,
+        ]);
+        expect(fp.keys, [
+          'libextra_native.lo',
+          'libplain.a',
+          '_objs/plain/plain.pic.o',
+          'external/aar+/jni/arm64-v8a/libaar.so',
+        ]);
+      },
+    );
+
+    test('leaves out the engine and the Dart snapshot', () async {
+      final fp = await nativeLibsFingerprintOfBuiltFiles([
+        built('k8', 'libdartjni.so', [1]).path,
+        built('k8', 'libapp.so', [2]).path,
+        built('k8', 'external/engine/libflutter.so', [3]).path,
+      ]);
+      expect(fp.keys, ['libdartjni.so']);
+    });
+
+    test(
+      'skips what is not a file: a tree artifact the build listed',
+      () async {
+        Directory('${tmp.path}/bazel-out/k8/bin/flutter_assets').createSync(
+          recursive: true,
+        );
+        final fp = await nativeLibsFingerprintOfBuiltFiles([
+          '${tmp.path}/bazel-out/k8/bin/flutter_assets',
+          built('k8', 'libdartjni.so', [1]).path,
+        ]);
+        expect(fp.keys, ['libdartjni.so']);
+      },
+    );
+
+    // A launch target reaches one library in more than one configuration (the
+    // APK's own and the one its dependencies are split into), and which copy
+    // the build lists first is not something to depend on.
+    test('does not depend on the order of a library built twice', () async {
+      final a = built('config_a', 'libdartjni.so', [1, 2, 3]);
+      final b = built('config_b', 'libdartjni.so', [1, 2, 4]);
+      final one = await nativeLibsFingerprintOfBuiltFiles([a.path, b.path]);
+      final other = await nativeLibsFingerprintOfBuiltFiles([b.path, a.path]);
+      expect(one, other);
+
+      b.writeAsBytesSync([1, 2, 5]);
+      expect(
+        await nativeLibsFingerprintOfBuiltFiles([a.path, b.path]),
+        isNot(one),
+        reason: 'either copy changing is a change',
+      );
+    });
+
+    test('moves with a file\'s bytes and not with its configuration', () async {
+      final before = await nativeLibsFingerprintOfBuiltFiles([
+        built('one', 'libextra.a', [1, 2, 3]).path,
+      ]);
+      final elsewhere = built('two', 'libextra.a', [1, 2, 3]);
+      expect(await nativeLibsFingerprintOfBuiltFiles([elsewhere.path]), before);
+
+      elsewhere.writeAsBytesSync([1, 2, 4]);
+      final after = await nativeLibsFingerprintOfBuiltFiles([elsewhere.path]);
+      expect(changedLibs(before, after), ['libextra.a']);
+    });
+  });
 }

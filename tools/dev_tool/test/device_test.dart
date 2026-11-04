@@ -197,6 +197,23 @@ void main() {
       ]);
     });
 
+    // An APK is dexed, linked, zipped and signed; a restart needs only the
+    // libraries and assets that go into it, so Android says where to read them
+    // without the APK, and a platform whose launch artifact is the bundle says
+    // nothing.
+    test('AndroidDevice names the bundle parts a restart reads', () {
+      final parts = AndroidDevice(abi: 'x86_64').launchBundleParts;
+      expect(parts, isNotNull);
+      expect(parts!.aspect, contains('android_bundle_parts.bzl'));
+      expect(parts.assetsGroup, 'flutter_android_bundle_parts');
+      expect(parts.nativeLibsGroup, 'flutter_android_native_libs');
+    });
+
+    test('a device whose launch artifact is the bundle names no parts', () {
+      expect(MacOSDevice().launchBundleParts, isNull);
+      expect(IOSSimulatorDevice(udid: 'TEST').launchBundleParts, isNull);
+    });
+
     test('AndroidDevice does not guess an ABI it has not been told', () {
       expect(() => AndroidDevice().buildArgs, throwsStateError);
     });
