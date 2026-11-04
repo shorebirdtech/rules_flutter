@@ -27,6 +27,12 @@ import 'editable_workspace.dart';
 /// brought up can answer an `app.*` command in the fresh isolate. Weakening
 /// that assertion to something the framework answers on its own would silently
 /// drop the coverage.
+/// A reload of this app runs a bazel build (regenerated sources, then the
+/// bundle's cquery) before it compiles, so under a loaded machine it
+/// legitimately takes longer than the harness's 60s default. A reload that is
+/// really wedged still fails, at three minutes.
+const _reloadTimeout = Duration(minutes: 3);
+
 void main() {
   group('reload after failure e2e', () {
     test(
@@ -73,6 +79,19 @@ void main() {
         );
         final appId = start['params']?['appId'] as String? ?? dt.appId!;
         await dt.waitForHttpControl(timeout: const Duration(seconds: 90));
+        // Edit only once the pipeline has assembled. `app.started` comes first
+        // and the assembler then runs its own `bazel build` and the compiler's
+        // first compile, so an edit made before this is read by that build as
+        // part of the baseline, and a reload sent in that window waits on the
+        // readiness gate for the whole assembly before it even starts its own
+        // rebuild. Measured on a loaded machine (load average ~50): the pipeline
+        // was ready 8s after `app.started` and a reload sent at `app.started`
+        // answered 7s after that. A suite run under heavier load stretches each
+        // part, and the first reload was the one that ran out of its 60s.
+        await dt.waitForStderr(
+          'frontend_server_ready',
+          timeout: const Duration(minutes: 6),
+        );
 
         final ready = await dt.httpCommand('app.waitFor', {
           'appId': appId,
@@ -104,6 +123,7 @@ void main() {
           1,
           'app.hotReload',
           params: {'appId': appId},
+          timeout: _reloadTimeout,
         );
         expect(
           failed['result']?['error'],
@@ -126,6 +146,7 @@ void main() {
           2,
           'app.hotReload',
           params: {'appId': appId},
+          timeout: _reloadTimeout,
         );
         expect(
           afterFailure,
