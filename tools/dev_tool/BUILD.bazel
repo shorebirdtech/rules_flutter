@@ -168,6 +168,10 @@ _UNIT_TESTS = {
         ],
     },
     "flutter_error_report_test": {"deps": _PATH_DEP},
+    "ios_simulator_launch_properties_test": {
+        "fakes": True,
+        "deps": ["@dev_tool_deps//:fake_async"],
+    },
     "key_press_test": {},
     "frontend_server_integration_test": {"fakes": True},
     "frontend_server_test": {

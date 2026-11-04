@@ -1463,6 +1463,7 @@ class AndroidDevice extends Device {
       logs,
       parse: parseLogcatAnnouncement,
       isOwnProcess: (pid) => _isProcessOf(packageName, pid),
+      timeout: _androidVmServiceDiscoveryTimeout,
     );
 
     // Port forwarding — the URI logcat announces is device-local, and a failed
@@ -2117,8 +2118,19 @@ final vmServiceUriPattern = RegExp(
   r'The Dart VM service is listening on ((http|//)[a-zA-Z0-9:/=_\-\.\[\]]+)',
 );
 
-/// How long a launch waits for the VM-service announcement before giving up.
-const _vmServiceDiscoveryTimeout = Duration(seconds: 30);
+/// How long an Android launch waits for the VM-service announcement before
+/// giving up. Android's logcat does not end when the app dies and there is no
+/// liveness signal to wait on instead, so it still has a deadline; the other
+/// platforms wait for the app itself (see [discoverVmServiceUri]).
+const _androidVmServiceDiscoveryTimeout = Duration(seconds: 30);
+
+/// How often a launch that is still waiting for the VM-service announcement
+/// says so.
+const _vmServiceSlowStartNotice = Duration(seconds: 30);
+
+/// How often a launched simulator app's process is checked for being alive
+/// while its VM service is awaited.
+const _simulatorAppLivenessInterval = Duration(seconds: 2);
 
 /// Watch [logs] for the VM-service announcement.
 ///
@@ -2136,15 +2148,17 @@ const _vmServiceDiscoveryTimeout = Duration(seconds: 30);
 /// kill all subsequent output and leave the OS pipes unread — see the library
 /// docs.
 ///
-/// Returns null if nothing announced a VM service within
-/// [_vmServiceDiscoveryTimeout] or the stream ended first.
-Future<Uri?> discoverVmServiceUri(
-  AppLogStream logs, {
-  Duration timeout = _vmServiceDiscoveryTimeout,
-}) => _watchForVmService(logs, timeout, (line) {
-  final match = vmServiceUriPattern.firstMatch(line);
-  return match == null ? null : Uri.parse(match.group(1)!);
-});
+/// There is no deadline: a slow start (a loaded host, a first launch) is not a
+/// failed one. The wait ends on the announcement, when the stream ends (the
+/// app's process exited, closing its stdout and stderr), or when the run is
+/// torn down and closes the stream. After each [_vmServiceSlowStartNotice]
+/// without one it logs that it is still waiting. Returns null if the stream
+/// ended first.
+Future<Uri?> discoverVmServiceUri(AppLogStream logs) =>
+    _watchForVmService(logs, null, null, (line) {
+      final match = vmServiceUriPattern.firstMatch(line);
+      return match == null ? null : Uri.parse(match.group(1)!);
+    });
 
 /// A VM-service announcement read off a log several processes write to, with
 /// the process that made it.
@@ -2163,30 +2177,55 @@ typedef VmServiceAnnouncement = ({int pid, Uri uri});
 /// Lines are checked in the order they arrive, one at a time, so an
 /// announcement is never chosen over an earlier one of this app's.
 ///
-/// Returns null if the app announced no VM service within [timeout] or the
-/// stream ended first.
+/// Waits for the announcement, the stream ending, [appGone] completing (the
+/// app exited; the caller knows how to tell), or [timeout] if one is given.
+/// With no [timeout] there is no deadline, and the wait says every
+/// [_vmServiceSlowStartNotice] that it is still going. Returns null when the
+/// wait ended any other way than an announcement.
 Future<Uri?> discoverOwnVmServiceUri(
   AppLogStream logs, {
   required VmServiceAnnouncement? Function(String line) parse,
   required Future<bool> Function(int pid) isOwnProcess,
-  Duration timeout = _vmServiceDiscoveryTimeout,
-}) => _watchForVmService(logs, timeout, (line) async {
+  Duration? timeout,
+  Future<void>? appGone,
+}) => _watchForVmService(logs, timeout, appGone, (line) async {
   final announcement = parse(line);
   if (announcement == null) return null;
   return await isOwnProcess(announcement.pid) ? announcement.uri : null;
 });
 
 /// The URI [accept] takes from the first line it accepts, read off [logs] in
-/// order; null on [timeout] or when the stream ends first.
+/// order; null on [timeout] (when given), when [appGone] completes, or when the
+/// stream ends first.
 Future<Uri?> _watchForVmService(
   AppLogStream logs,
-  Duration timeout,
+  Duration? timeout,
+  Future<void>? appGone,
   FutureOr<Uri?> Function(String line) accept,
 ) async {
   final completer = Completer<Uri?>();
-  final timer = Timer(timeout, () {
-    if (!completer.isCompleted) completer.complete(null);
-  });
+  final timer = timeout == null
+      ? null
+      : Timer(timeout, () {
+          if (!completer.isCompleted) completer.complete(null);
+        });
+  final sinceLaunch = Stopwatch()..start();
+  final notice = timeout != null
+      ? null
+      : Timer.periodic(_vmServiceSlowStartNotice, (_) {
+          _logger.warning({
+            'message': 'vm_service_slow_to_announce',
+            'text':
+                'The app has not announced its VM service '
+                '${sinceLaunch.elapsed.inSeconds}s after launch; still waiting.',
+            'elapsedMs': sinceLaunch.elapsedMilliseconds,
+          });
+        });
+  unawaited(
+    appGone?.then((_) {
+      if (!completer.isCompleted) completer.complete(null);
+    }),
+  );
 
   // Each line waits for the one before it, so an asynchronous [accept] cannot
   // let a later line win.
@@ -2213,7 +2252,8 @@ Future<Uri?> _watchForVmService(
   try {
     return await completer.future;
   } finally {
-    timer.cancel();
+    timer?.cancel();
+    notice?.cancel();
     await sub.cancel();
   }
 }
@@ -2428,8 +2468,23 @@ class IOSSimulatorDevice extends Device {
       _scratch.hold(extracted.dir);
     }
 
-    // Boot sim (idempotent — no-op if already booted).
-    await _runProcess('xcrun', ['simctl', 'boot', udid]);
+    // Boot it if it is not booted, and wait for the boot to finish: `install`
+    // on a device that is still booting fails, and so does everything after
+    // it. `bootstatus -b` is one command for both, blocks on the boot rather
+    // than a clock, and exits nonzero when the boot fails, which is then the
+    // launch's failure and says so.
+    final boot = await _runProcess('xcrun', [
+      'simctl',
+      'bootstatus',
+      udid,
+      '-b',
+    ]);
+    if (boot.exitCode != 0) {
+      throw StateError(
+        'Booting the iOS Simulator $udid failed (simctl bootstatus -b exited '
+        '${boot.exitCode}): ${'${boot.stderr}'.trim()}${'${boot.stdout}'.trim()}',
+      );
+    }
 
     // Install.
     final installResult = await _runProcess('xcrun', [
@@ -2512,11 +2567,32 @@ class IOSSimulatorDevice extends Device {
       );
     }
 
-    final uri = await discoverVmServiceUriFromProcess(
-      discoveryLog,
-      parse: parseUnifiedLoggingAnnouncement,
-      isOwnProcess: (announcer) async => announcer == pid,
-    );
+    // Waits for the app, not a clock: a first launch after a boot, or a host
+    // busy with a build, is slow, not failed. It ends on the announcement, on
+    // the app's process going away, or on the run's teardown killing the helper.
+    final exited = Completer<void>();
+    final liveness = Timer.periodic(_simulatorAppLivenessInterval, (_) async {
+      if (exited.isCompleted) return;
+      final alive = await _runProcess('kill', ['-0', '$pid']);
+      if (alive.exitCode != 0 && !exited.isCompleted) exited.complete();
+    });
+    final Uri? uri;
+    try {
+      uri = await discoverVmServiceUriFromProcess(
+        discoveryLog,
+        parse: parseUnifiedLoggingAnnouncement,
+        isOwnProcess: (announcer) async => announcer == pid,
+        appGone: exited.future,
+      );
+    } finally {
+      liveness.cancel();
+    }
+    if (uri == null && exited.isCompleted) {
+      throw StateError(
+        '$bundleId (pid $pid) exited before announcing a VM service on '
+        'the iOS Simulator $udid. ${_browserLastWords(logs, silence: 'It printed nothing.')}',
+      );
+    }
 
     _launchHelpers.clear();
     return AppInstance(
@@ -3967,7 +4043,8 @@ Future<Uri?> discoverVmServiceUriFromProcess(
   Process log, {
   required VmServiceAnnouncement? Function(String line) parse,
   required Future<bool> Function(int pid) isOwnProcess,
-  Duration timeout = _vmServiceDiscoveryTimeout,
+  Duration? timeout,
+  Future<void>? appGone,
 }) async {
   final logs = AppLogStream();
   final pump = pumpProcessLines(log, logs);
@@ -3981,6 +4058,7 @@ Future<Uri?> discoverVmServiceUriFromProcess(
       parse: parse,
       isOwnProcess: isOwnProcess,
       timeout: timeout,
+      appGone: appGone,
     );
   } finally {
     await pump.dispose();

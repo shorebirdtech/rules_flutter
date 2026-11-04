@@ -376,12 +376,19 @@ void main() {
 
       await device.launch('/path/to/MyApp.app');
 
-      // Should have: boot, install, log stream spawn, launch.
+      // Should have: boot (waited for), install, log stream spawn, launch.
       final xcrunCalls = calls.where((c) => c.$1 == 'xcrun').toList();
       expect(xcrunCalls.length, greaterThanOrEqualTo(4));
 
-      final bootCall = xcrunCalls.firstWhere((c) => c.$2.contains('boot'));
-      expect(bootCall.$2, contains('TEST-UDID'));
+      final bootCall = xcrunCalls.firstWhere(
+        (c) => c.$2.contains('bootstatus'),
+      );
+      expect(bootCall.$2, containsAllInOrder(['TEST-UDID', '-b']));
+      expect(
+        xcrunCalls.indexOf(bootCall),
+        lessThan(xcrunCalls.indexWhere((c) => c.$2.contains('install'))),
+        reason: 'nothing is installed before the boot has finished',
+      );
 
       final installCall = xcrunCalls.firstWhere(
         (c) => c.$2.contains('install'),
@@ -393,11 +400,9 @@ void main() {
       expect(launchCall.$2, contains('com.example.test'));
     });
 
-    // Measured against `xcrun simctl` (Xcode 27.2): booting a device that is
-    // already booted exits 149, "Unable to boot device in current state:
-    // Booted". That is the ordinary case of every run after the first on a
-    // simulator someone left booted, so a launch has to treat it as the device
-    // being ready, not as a boot that failed.
+    // Measured against `xcrun simctl` (Xcode 27.2): `bootstatus -b` on a device
+    // that is already booted exits 0 at once, which is the ordinary case of
+    // every run after the first on a simulator someone left booted.
     test('a simulator that is already booted is launched on', () async {
       final calls = <String>[];
       final device = IOSSimulatorDevice(
@@ -405,14 +410,6 @@ void main() {
         bundleId: 'com.example.test',
         runProcess: (exe, args) async {
           calls.add(args.join(' '));
-          if (args.take(2).join(' ') == 'simctl boot') {
-            return ProcessResult(
-              0,
-              149,
-              '',
-              'Unable to boot device in current state: Booted',
-            );
-          }
           return simctlOk(args);
         },
         startProcess: (exe, args) async {
