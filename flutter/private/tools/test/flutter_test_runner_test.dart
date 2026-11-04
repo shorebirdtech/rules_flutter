@@ -463,6 +463,24 @@ void main() {
       expect(runner.readLaunchEnvironment(r, exe), {'B': '2'});
     });
 
+    test('in the manifest when the directory beside it holds none of them', () {
+      // Bazel with no runfiles tree, as on Windows by default, still makes the
+      // directory: a MANIFEST and empty directories, none of the files.
+      final exe = '${tmp.path}/tool.exe';
+      File('$exe.runfiles/MANIFEST').createSync(recursive: true);
+      Directory('$exe.runfiles/_main').createSync();
+      final data = File('${tmp.path}/elsewhere/data.json')
+        ..createSync(recursive: true)
+        ..writeAsStringSync('{"C": "3"}');
+      File(
+        '$exe.runfiles_manifest',
+      ).writeAsStringSync('tool.launch.json ${data.path}\n');
+
+      final r = runner.runfilesBeside(exe)!;
+
+      expect(runner.readLaunchEnvironment(r, exe), {'C': '3'});
+    });
+
     test('under a .exe name, as on Windows', () {
       final exe = '${tmp.path}/tool.exe';
       File('$exe.runfiles/tool.launch.json')

@@ -270,7 +270,10 @@ def _flutter_test_impl(ctx):
 
     # Bazel runs a test with its working directory at the runfiles root, which
     # is what the `runfiles` layout's relative library paths resolve against.
-    program = _program(ctx, "flutter_test", runner_tools, target_platform, target_arch, "runfiles")
+    # Windows has no such tree by default, only a manifest, so a test there
+    # finds its libraries by name on PATH, as a `flutter_tester_binary` does.
+    layout = "library_path" if target_platform == "windows" else "runfiles"
+    program = _program(ctx, "flutter_test", runner_tools, target_platform, target_arch, layout)
 
     # Symlink the prebuilt runner as the test executable.
     tool = ctx.attr._tool

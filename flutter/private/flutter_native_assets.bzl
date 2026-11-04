@@ -137,13 +137,10 @@ def _path_list_for(asset, target_os, layout):
     having to rewrite the manifest (it is baked into the kernel at build time
     and cannot be rewritten later).
 
-    That last part is why this is unverified on Windows: without
-    `--enable_runfiles` Bazel there uses a runfiles *manifest* instead of a
-    symlink tree, so no such relative path exists on disk to resolve against.
-    A Windows `flutter_test` reaching a `dynamic_loading_bundle` asset is
-    expected to fail at the first `@Native` call rather than silently — the
-    engine reports the unresolved id — but nothing here has been run on
-    Windows to confirm the shape of that failure.
+    Windows has no such tree by default: without `--enable_runfiles` Bazel
+    there writes a runfiles *manifest* only, so no such relative path exists on
+    disk to resolve against. A Windows `flutter_test` uses `library_path`
+    instead, as a `flutter_tester_binary` does on every host.
     """
     if asset.link_mode == "dynamic_loading_bundle":
         if layout == "library_path":
@@ -219,8 +216,9 @@ def write_native_assets_manifest(
         (the default) writes paths relative to the platform application's
         bundle slot; `"runfiles"` writes each library's runfiles-relative
         path, for a `flutter_test`, which has no bundle; `"library_path"`
-        names each by its bundle filename, for a `flutter_tester_binary`, whose
-        runner puts the directory they are staged in on the loader's path.
+        names each by its bundle filename, for a `flutter_tester_binary` and
+        for a `flutter_test` on Windows, whose runner puts the directory they
+        are staged in on the loader's path.
     """
     target_string = native_assets_target_string(target_os, target_arch)
 

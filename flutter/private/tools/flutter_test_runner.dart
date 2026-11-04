@@ -74,13 +74,15 @@ bool parseUpdateGoldens(List<String> args, String? workspaceDir) {
   return update;
 }
 
-/// The runfiles tree of the program started as [executable], or null.
+/// The runfiles of the program started as [executable], or null.
 ///
 /// Unlike `Runfiles.create`, which trusts `RUNFILES_DIR` first, this looks
 /// only beside [executable]: a `RUNFILES_DIR` inherited from a caller names
-/// the caller's tree, not this program's. A directory or, where Bazel makes
-/// only a manifest, `<executable>.runfiles_manifest` is found; `.exe` is
-/// spelled both ways as on Windows.
+/// the caller's tree, not this program's. `<executable>.runfiles` and
+/// `<executable>.runfiles_manifest` are both read when both exist, with the
+/// manifest answering first: where Bazel makes no symlink tree, as on Windows
+/// by default, the directory is still there, holding only a `MANIFEST` and
+/// empty directories. `.exe` is spelled both ways as on Windows.
 ///
 /// Public, like [testCeiling], because the test reaches it directly.
 Runfiles? runfilesBeside(String executable) {
@@ -90,29 +92,24 @@ Runfiles? runfilesBeside(String executable) {
   final names = {executable, withoutExe, '$withoutExe.exe'};
   for (final name in names) {
     final dir = Directory('$name.runfiles');
-    if (dir.existsSync()) {
-      final root = dir.resolveSymbolicLinksSync();
-      final mapping = File('$root/_repo_mapping');
-      return Runfiles.fromState(
-        directory: root,
-        repoMapping: mapping.existsSync()
-            ? Runfiles.parseRepoMapping(mapping.readAsStringSync())
-            : null,
-      );
-    }
-  }
-  for (final name in names) {
     final file = File('$name.runfiles_manifest');
-    if (file.existsSync()) {
-      final manifest = parseRunfilesManifest(file.readAsLinesSync());
-      final mapping = manifest['_repo_mapping'];
-      return Runfiles.fromState(
-        manifest: manifest,
-        repoMapping: mapping == null
-            ? null
-            : Runfiles.parseRepoMapping(File(mapping).readAsStringSync()),
-      );
-    }
+    final hasDir = dir.existsSync();
+    final hasManifest = file.existsSync();
+    if (!hasDir && !hasManifest) continue;
+    final root = hasDir ? dir.resolveSymbolicLinksSync() : null;
+    final manifest = hasManifest
+        ? parseRunfilesManifest(file.readAsLinesSync())
+        : null;
+    final mappingFile = root != null && File('$root/_repo_mapping').existsSync()
+        ? '$root/_repo_mapping'
+        : manifest?['_repo_mapping'];
+    return Runfiles.fromState(
+      directory: root,
+      manifest: manifest,
+      repoMapping: mappingFile == null
+          ? null
+          : Runfiles.parseRepoMapping(File(mappingFile).readAsStringSync()),
+    );
   }
   return null;
 }
