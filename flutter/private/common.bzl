@@ -102,11 +102,9 @@ def check_unreplaced_hooks(label, deps):
     hook is irrelevant. Only a package an application actually reaches is a
     problem, and only here is the depending target known.
 
-    rules_dart applies the same rule at `dart_binary` with its own copy. The
-    two differ only in the remediation they suggest — a Flutter user fixes this
-    through `flutter.pub()`, not `pub.from_lock()` — so this collapses into one
-    shared helper once rules_dart exports one that takes the hint as an
-    argument.
+    rules_dart applies the same rule at `dart_binary`. The two differ in the
+    remediation they suggest: a Flutter user fixes this through
+    `flutter.pub()`, not `pub.from_lock()`.
 
     Args:
       label: The consuming target's label, for the message.

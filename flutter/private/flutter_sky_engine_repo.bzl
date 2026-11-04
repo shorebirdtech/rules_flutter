@@ -25,12 +25,8 @@ worse to use — that repository downloads the entire flutter/flutter tag
 tarball, and it exists to be fetched only when `@rules_flutter//flutter:pub`
 runs.
 
-The generated package uses `dart_library`'s `resources`, which carries a
-package's non-Dart `lib/` members and is newer than the `rules_dart 0.4.9` this
-module pins. Nothing in rules_flutter references this repository yet, and Bazel
-fetches it only on reference, so the pin is not yet a problem — but the analyze
-targets that consume it cannot land until rules_dart ships that attribute and
-MODULE.bazel moves to it.
+The generated package carries its non-Dart `lib/` members (`_embedder.yaml`
+among them) as `dart_library`'s `resources`.
 """
 
 load("//flutter/private:pinned.bzl", "pinned")
