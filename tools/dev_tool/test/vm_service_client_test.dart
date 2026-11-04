@@ -585,15 +585,13 @@ void main() {
       );
       final client = await connected(fakeService);
 
-      final tmpFile = File('${Directory.systemTemp.path}/test_screenshot.png');
-      try {
-        await client.screenshot(tmpFile.path);
-        expect(tmpFile.existsSync(), isTrue);
-        expect(tmpFile.readAsBytesSync(), pngBytes);
-        expect(fakeService.lastExtensionMethod, '_flutter.screenshot');
-      } finally {
-        if (tmpFile.existsSync()) tmpFile.deleteSync();
-      }
+      final scratch = Directory.systemTemp.createTempSync('vm_screenshot_');
+      addTearDown(() => scratch.deleteSync(recursive: true));
+      final tmpFile = File('${scratch.path}/test_screenshot.png');
+      await client.screenshot(tmpFile.path);
+      expect(tmpFile.existsSync(), isTrue);
+      expect(tmpFile.readAsBytesSync(), pngBytes);
+      expect(fakeService.lastExtensionMethod, '_flutter.screenshot');
     });
 
     test('screenshot throws when _flutter.screenshot returns no data', () async {

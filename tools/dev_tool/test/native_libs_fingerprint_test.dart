@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:flutter_bazel_dev_tool/native_libs_fingerprint.dart';
 import 'package:test/test.dart';
 
+import 'zip_fixture.dart';
+
 void main() {
   late Directory tmp;
 
@@ -32,17 +34,12 @@ void main() {
 
   Future<String> zipBundle(Directory app) async {
     final zipPath = '${app.path}.zip';
-    final r = await Process.run(
-      'zip',
-      [
-        '-q',
-        '-r',
-        zipPath,
-        app.uri.pathSegments.lastWhere((s) => s.isNotEmpty),
-      ],
-      workingDirectory: app.parent.path,
+    zipTree(
+      zipPath: zipPath,
+      base: app.parent.path,
+      include: [app.uri.pathSegments.lastWhere((s) => s.isNotEmpty)],
+      deflate: true,
     );
-    expect(r.exitCode, 0, reason: r.stderr.toString());
     return zipPath;
   }
 
@@ -134,13 +131,12 @@ void main() {
 
     Future<String> zipIpa(Directory root) async {
       final ipa = '${root.path}.ipa';
-      final r = await Process.run('zip', [
-        '-q',
-        '-r',
-        ipa,
-        'Payload',
-      ], workingDirectory: root.path);
-      expect(r.exitCode, 0, reason: r.stderr.toString());
+      zipTree(
+        zipPath: ipa,
+        base: root.path,
+        include: ['Payload'],
+        deflate: true,
+      );
       return ipa;
     }
 
@@ -192,13 +188,7 @@ void main() {
       File('${abi.path}/libapp.so').writeAsBytesSync([3, 4]);
       File('${abi.path}/libflutter.so').writeAsBytesSync([5, 6]);
       final apk = '${tmp.path}/app.apk';
-      final r = await Process.run('zip', [
-        '-q',
-        '-r',
-        apk,
-        'lib',
-      ], workingDirectory: root.path);
-      expect(r.exitCode, 0, reason: r.stderr.toString());
+      zipTree(zipPath: apk, base: root.path, include: ['lib']);
       expect((await nativeLibsFingerprint(apk)).keys, [
         'lib/arm64-v8a/libadd.so',
       ]);
