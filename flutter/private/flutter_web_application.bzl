@@ -24,21 +24,24 @@ found and throws; the generated bootstrap shows a message instead).
 
 Both dart2wasm and dart2js take .dart source directly (not kernel .dill),
 so we skip the frontend_server kernel compilation step used by desktop/mobile.
+
+The program is built once for each compiler the bundle ships, so a dependency
+may differ between dart2wasm and dart2js (see `flutter_web_branch.bzl`). The
+macro in `web.bzl` declares the staging target each compiler's inputs come
+from, and `deps` is split the same way.
 """
 
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_dart//dart:providers.bzl", "DartInfo")
-load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "PATH_MAPPING", "collect_packages", "collect_transitive_srcs", "dart_analyzable_info_with_package", "derive_lib_root", "generate_dev_package_config", "import_check_validation")
+load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "dart_analyzable_info_with_package", "derive_lib_root", "generate_dev_package_config", "import_check_validation")
 load("//flutter:providers.bzl", "FlutterInfo", "FlutterNativeLibraryInfo")
 load(
     "//flutter/private:app_entrypoint.bzl",
     "APP_SCHEME",
     "app_main_location",
     "app_scheme_sources",
-    "compile_package_config",
     "package_lib_prefix",
     "resolve_wrapper_main_import",
-    "synthesize_app_package",
     "with_root",
 )
 load(
@@ -50,6 +53,7 @@ load(
     "declare_flutter_assets_dir",
     "flutter_build_assets",
     "flutter_compile_shaders",
+    "flutter_deps_attr",
     "make_web_wrapper_main_content",
     "merge_dart_defines",
     "resolve_dev_generated_sources",
@@ -58,6 +62,13 @@ load(
 load("//flutter/private:dev_config.bzl", "dev_config_file", "dev_search_roots", "dev_source_dir", "write_dev_config")
 load("//flutter/private:exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
 load("//flutter/private:flutter_info.bzl", "dedup_plugins")
+load(
+    "//flutter/private:flutter_web_branch.bzl",
+    "BRANCH_COMPILER",
+    "FlutterWebBranchInfo",
+    "web_branches",
+    "web_compile_branches",
+)
 load(
     "//flutter/private:flutter_web_compile.bzl",
     "flutter_dart2js_action",
@@ -321,65 +332,6 @@ def _check_web_asset_dst(ctx, reserved, dst, short_path):
             "so this is refused instead: " + remedy,
         )
 
-def web_compile_branches(compiler, js_fallback, debug):
-    """The compilers a bundle's Dart goes through, the primary first.
-
-    Each is a branch of the program: what it compiles is read from its own
-    branch of `deps`, so a dependency may differ by compiler. The primary is
-    `compiler`, the build the bundle describes; dart2js joins a dart2wasm
-    bundle as its fallback; and a debug build adds DDC, which compiles the
-    app for `flutter_bazel run -d chrome` from the files `_dev_config.json`
-    names rather than in this rule.
-
-    Args:
-        compiler: The `compiler` attr: "dart2wasm" or "dart2js".
-        js_fallback: The `js_fallback` attr.
-        debug: Whether this is a debug build.
-
-    Returns:
-        A list of "dart2wasm", "dart2js" and "ddc", the primary first.
-    """
-    branches = [compiler]
-    if compiler == "dart2wasm" and js_fallback:
-        branches.append("dart2js")
-    if debug:
-        branches.append("ddc")
-    return branches
-
-def _branch_inputs(ctx, deps, lib_root):
-    """What one compiler reads from its branch of `deps`.
-
-    The one place a branch's sources, packages and package config are worked
-    out, so no consumer derives its own from a different set of dependencies.
-
-    Args:
-        ctx: Rule context.
-        deps: The branch's dependencies.
-        lib_root: The app's own library root (`derive_lib_root`).
-
-    Returns:
-        `struct(deps, srcs, packages, config_file, compile_srcs)`: `srcs` and
-        `packages` as declared, the app's own package last; `config_file` and
-        `compile_srcs` after `compile_package_config` co-locates them, which
-        is what a compile action takes.
-    """
-    srcs = list(ctx.files.srcs) + collect_transitive_srcs(deps).to_list()
-
-    # Register the app's own package (when declared) so `package:<name>/main.dart`
-    # is a valid URI for the wrapper to import. Include `main` in the colocate
-    # inputs so it ends up inside the same assembled directory as its lib/
-    # siblings — that's what lets `main.dart`'s relative imports resolve to
-    # the assembled (codegen-co-located) copies of its package siblings.
-    packages = synthesize_app_package(ctx.label, collect_packages(deps), ctx.attr.package_name, lib_root, ctx.attr.language_version)
-    pc = compile_package_config(ctx, packages, srcs + [ctx.file.main])
-    return struct(
-        deps = deps,
-        srcs = srcs,
-        packages = packages,
-        config_file = pc.config_file,
-        compile_srcs = pc.srcs,
-    )
-
 def _flutter_web_bundle_impl(ctx):
     renderer = web_renderer(ctx.attr.compiler, ctx.attr.renderer)
     validate_web_compiler_renderer(ctx.attr.compiler, renderer)
@@ -460,11 +412,25 @@ def _flutter_web_bundle_impl(ctx):
     # compiler's; everything the bundle holds once — the plugin registrant
     # every compile imports, the assets, the icon tree-shaker's kernel, the
     # import check and the analysis closure — takes the primary's, the build
-    # the bundle describes. One `deps` edge feeds every compiler, so their
-    # inputs are one computation.
+    # the bundle describes. A branch is the program built with its compiler's
+    # `@rules_dart//dart:web_compiler`: `deps` and the staging target beside
+    # the bundle are split on that setting, and DDC reads dart2js's.
     branches = web_compile_branches(ctx.attr.compiler, ctx.attr.js_fallback, is_debug)
-    shared_inputs = _branch_inputs(ctx, ctx.attr.deps, lib_root)
-    branch_inputs = {branch: shared_inputs for branch in branches}
+    branch_inputs = {}
+    for branch in branches:
+        setting = BRANCH_COMPILER[branch]
+        staged = ctx.split_attr.branches.get(setting)
+        if staged == None:
+            fail("%s: the %s branch builds for web_compiler=%s, which its dependencies were not split for" % (ctx.label, branch, setting))
+        info = staged[FlutterWebBranchInfo]
+        branch_inputs[branch] = struct(
+            # Absent when `deps` is empty: there is nothing to split.
+            deps = ctx.split_attr.deps.get(setting, []),
+            srcs = info.srcs,
+            packages = info.packages,
+            config_file = info.config_file,
+            compile_srcs = info.compile_srcs,
+        )
     primary = branch_inputs[branches[0]]
 
     # `synthesize_app_package` appends the app's own package last.
@@ -687,10 +653,14 @@ def _flutter_web_bundle_impl(ctx):
 
         # The wrapper is the entrypoint the compilers get, so the scan reads
         # the program that ships: the app, its plugin registrant, and the
-        # engine bootstrap. A bundle that ships a dart2js build is scanned
-        # through dart2js's front end, as `flutter build web` does; one that
-        # does not (`js_fallback = False`) through dart2wasm's.
-        front_end = "dart2js" if "dart2js" in branches else "dart2wasm"
+        # engine bootstrap. It reads the primary branch's program through that
+        # branch's own front end, so a program that differs by compiler is
+        # scanned as the build the bundle describes, and a front end is never
+        # handed code written for the other (a WebAssembly-only integer
+        # literal, say, which dart2js's front end refuses). An icon only the
+        # other compiler's variant uses is shaken out of the font;
+        # `tree_shake_icons = False` keeps every glyph.
+        front_end = branches[0]
         flutter_web_icon_kernel_action(
             ctx = ctx,
             dart = tools.dart,
@@ -699,7 +669,7 @@ def _flutter_web_bundle_impl(ctx):
             front_end = front_end,
             platform_dill = ctx.file._dart2js_platform_dill if front_end == "dart2js" else ctx.file._dart2wasm_platform_dill,
             main_dart = entrypoint,
-            srcs = compile_srcs[branches[0]],
+            srcs = compile_srcs[front_end],
             package_config = primary.config_file,
             output = kernel_dill,
             mode = mode,
@@ -1363,6 +1333,19 @@ _WEB_APPLICATION_ATTRS["_sky_engine"] = attr.label(
     providers = [DartInfo],
 )
 
+# The program once per compiler. `deps` is what the bundle reads its plugins,
+# assets and shaders from; `branches` is the staging target the bundle macro
+# declares beside it, which holds each compiler's package config and co-located
+# sources. Both take the same split, so a compiler's branch of each is one
+# configuration of the program.
+_WEB_APPLICATION_ATTRS["deps"] = flutter_deps_attr(cfg = web_branches)
+_WEB_APPLICATION_ATTRS["branches"] = attr.label(
+    doc = "The staging target `flutter_web_bundle` declares beside the bundle. Set by that macro; not for BUILD files.",
+    cfg = web_branches,
+    providers = [FlutterWebBranchInfo],
+    mandatory = True,
+)
+
 flutter_web_bundle = rule(
     implementation = _flutter_web_bundle_impl,
     attrs = dict(_WEB_APPLICATION_ATTRS, **{
@@ -1388,7 +1371,11 @@ flutter_web_bundle = rule(
                   "largest 64-bit integer literal) builds, and the compile work is " +
                   "halved, but a browser that cannot run the WASM build gets a message " +
                   "instead of the app (the loader logs `no compatible build found` and " +
-                  "throws). With True the app must compile under dart2js too. False " +
+                  "throws). With True the app must compile under dart2js too, which " +
+                  "code that differs by compiler can: a library in `deps` picks its " +
+                  "dependency by `@rules_dart//dart:web_compiler` with a `select()`, " +
+                  "so dart2js can take a variant without the 64-bit type and keep the " +
+                  "fallback. False " +
                   "is what makes `optimization_level_js`, `minify_js`, " +
                   "`frequency_based_minification` and `dump_info` refused, since " +
                   "nothing would run them. `flutter_bazel run -d chrome` runs such a " +
@@ -1769,7 +1756,7 @@ build knows which served file is a native module.
             allow_single_file = [".dart"],
         ),
     }) | AGENT_EXTENSIONS_ATTR,
-    toolchains = ["@rules_flutter//flutter:toolchain_type"] + COPY_TO_DIRECTORY_TOOLCHAINS,
+    toolchains = ["@rules_flutter//flutter:toolchain_type"],
     exec_groups = PORTABLE_EXEC_GROUPS,
-    doc = "Builds a Flutter web application (WASM or JS) with all deployment artifacts.",
+    doc = "Builds a Flutter web application (WASM or JS) with all deployment artifacts. Declared through the `flutter_web_bundle` macro in `web.bzl`, which adds the staging target `branches` names.",
 )

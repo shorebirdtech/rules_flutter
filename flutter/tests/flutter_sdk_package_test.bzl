@@ -105,6 +105,9 @@ def _flutter_spoke_declares_its_language_version_test_impl(ctx):
     asserts.true(env, 'shaders = glob(["lib/src/material/shaders/*.frag"])' in content, content)
     asserts.true(env, '"@hub__meta//:meta",' in content, content)
 
+    # An SDK package is the same under every web compiler.
+    asserts.true(env, "\n    web_compiler_independent = True," in content, content)
+
     return unittest.end(env)
 
 def _non_flutter_spoke_declares_its_language_version_test_impl(ctx):
@@ -123,6 +126,7 @@ def _non_flutter_spoke_declares_its_language_version_test_impl(ctx):
 
     # No deps means no `deps` attribute at all, not an empty list.
     asserts.true(env, "deps = [" not in content, content)
+    asserts.true(env, "\n    web_compiler_independent = True," in content, content)
 
     return unittest.end(env)
 

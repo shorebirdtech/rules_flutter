@@ -1,7 +1,7 @@
 """Implementation of the flutter_library rule."""
 
 load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo")
-load("@rules_dart//dart:utils.bzl", "dart_analyzable_info_with_package", "dart_info", "derive_lib_root", "derive_package_name")
+load("@rules_dart//dart:utils.bzl", "WEB_COMPILER_INDEPENDENT_ATTR", "dart_analyzable_info_with_package", "dart_info", "derive_lib_root", "derive_package_name", "web_compiler_reset_when_independent")
 load("//flutter:providers.bzl", "FlutterInfo")
 load("//flutter/private:flutter_info.bzl", "LINK_HOOK_ATTR", "flutter_info")
 
@@ -359,6 +359,10 @@ def _flutter_library_impl(ctx):
 
 flutter_library = rule(
     implementation = _flutter_library_impl,
+    # A library reached under a web bundle's compilers is configured once for
+    # each, unless it says `web_compiler_independent` (every generated pub and
+    # SDK package does), which builds it once with no web compiler.
+    cfg = web_compiler_reset_when_independent,
     attrs = {
         "srcs": attr.label_list(
             doc = "Dart source files for this library.",
@@ -435,6 +439,6 @@ flutter_library = rule(
             doc = "Map of shader File label -> package-relative path (mirrors `flutter.shaders` in pubspec.yaml). Routed through the impellerc compile and bundled at `packages/<package_name>/<path>` (or bare `<path>` when `package_name` is empty).",
             allow_files = True,
         ),
-    },
+    } | WEB_COMPILER_INDEPENDENT_ATTR,
     doc = "Collects Flutter sources and assets, propagates DartInfo and FlutterInfo. Does not compile.",
 )

@@ -172,6 +172,7 @@ bzl_library(
     visibility = ["//visibility:public"],
     deps = [
         "//flutter/private:flutter_web_application",
+        "//flutter/private:flutter_web_branch",
         "@bazel_skylib//rules:expand_template",
     ],
 )

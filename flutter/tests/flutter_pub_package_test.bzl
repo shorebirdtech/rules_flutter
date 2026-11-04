@@ -312,6 +312,11 @@ def _spokes_state_their_resolved_version_test_impl(ctx):
     )
     asserts.true(env, '\n    version = "1.0.8",' in library, library)
 
+    # And that it is built once, whichever web compilers an app reaching it
+    # compiles for: no pub package can `select()` on the web compiler.
+    asserts.true(env, "\n    web_compiler_independent = True," in plugin, plugin)
+    asserts.true(env, "\n    web_compiler_independent = True," in library, library)
+
     return unittest.end(env)
 
 spokes_state_their_resolved_version_test = unittest.make(

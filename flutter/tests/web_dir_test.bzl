@@ -1,8 +1,7 @@
 """Analysis tests for `web_dir`, the directory served at a web bundle's root."""
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
-load("//flutter:web.bzl", "flutter_web_app")
-load("//flutter/private:flutter_web_application.bzl", "flutter_web_bundle")
+load("//flutter:web.bzl", "flutter_web_app", "flutter_web_bundle")
 load(":action_content.bzl", "action_config")
 
 def _sources_by_dst(env):

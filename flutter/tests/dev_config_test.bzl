@@ -9,8 +9,8 @@ sources are all generated.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
+load("//flutter:web.bzl", "flutter_web_bundle")
 load("//flutter/private:flutter_application.bzl", "flutter_application")
-load("//flutter/private:flutter_web_application.bzl", "flutter_web_bundle")
 
 _MAX_NODES = 100000
 

@@ -46,6 +46,7 @@ pipeline is structurally different from AOT platforms.
 
 load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
 load("//flutter/private:flutter_web_application.bzl", _flutter_web_bundle_rule = "flutter_web_bundle")
+load("//flutter/private:flutter_web_branch.bzl", "flutter_web_branch", "web_branches_target")
 
 # -- Gen helpers (Tier 2) -----------------------------------------------------
 
@@ -67,16 +68,36 @@ def flutter_web_manifest_gen(name, app_name, **kwargs):
 
 # -- Low-level assembler (Tier 2) --------------------------------------------
 
-def flutter_web_bundle(name, web_sdk = None, **kwargs):
+def flutter_web_bundle(name, main, package_name, deps = [], srcs = [], language_version = "", web_sdk = None, tags = [], testonly = None, **kwargs):
     """Builds a Flutter web application (WASM or JS) with all deployment artifacts.
 
     This is the low-level assembler rule. For most projects, prefer
     flutter_web_app which auto-discovers runner files.
 
+    The bundle compiles its program once for each compiler it ships, and the
+    program may differ between them. A library in `deps` picks a variant with
+    a `select()` on `@rules_dart//dart:web_compiler_wasm` or
+    `@rules_dart//dart:web_compiler_js` (dart2js, and DDC in a `-c dbg` build)
+    in its own `deps`; a `select()` in the bundle's `deps` would see no
+    compiler. See "Per-compiler code" in `@rules_dart`'s README. Everything the
+    bundle holds once (the plugin registrant, assets and shaders) is read from
+    the build it describes: the dart2wasm one for `compiler = "dart2wasm"`.
+
+    This declares a target beside the bundle, `__<name>_branches`, which stages
+    the program for each compiler: its package config and co-located sources.
+    It is tagged `manual`, since only the bundle can build it for a compiler.
+
     Args:
         name: Target name.
+        main: The entrypoint `.dart` file.
+        package_name: The Dart package name of the app.
+        deps: The program's Dart and Flutter libraries.
+        srcs: The app's own Dart sources beside `main`.
+        language_version: The app package's language version (`<major>.<minor>`).
         web_sdk: Optional web SDK repo name (e.g. "@my_flutter_web_sdk").
             Defaults to "@flutter_web_sdk".
+        tags: Tags of the bundle and of its staging target.
+        testonly: Whether the bundle and its staging target are test-only.
         **kwargs: All other arguments forwarded to the underlying rule.
     """
     if web_sdk:
@@ -85,8 +106,29 @@ def flutter_web_bundle(name, web_sdk = None, **kwargs):
         kwargs["_dart2js_platform_dill"] = Label("@%s//:web-sdk/kernel/dart2js_platform.dill" % repo)
         kwargs["_web_sdk"] = Label("@%s//:web_sdk" % repo)
 
+    branches = web_branches_target(name)
+    flutter_web_branch(
+        name = branches,
+        bundle = str(native.package_relative_label(name)),
+        deps = deps,
+        srcs = srcs,
+        main = main,
+        package_name = package_name,
+        language_version = language_version,
+        tags = tags + ([] if "manual" in tags else ["manual"]),
+        testonly = testonly,
+        visibility = ["//visibility:private"],
+    )
     _flutter_web_bundle_rule(
         name = name,
+        main = main,
+        package_name = package_name,
+        deps = deps,
+        srcs = srcs,
+        language_version = language_version,
+        branches = ":" + branches,
+        tags = tags,
+        testonly = testonly,
         **kwargs
     )
 

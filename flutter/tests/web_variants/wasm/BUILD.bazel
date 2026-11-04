@@ -1,0 +1,8 @@
+load("@rules_dart//dart:defs.bzl", "dart_library")
+
+dart_library(
+    name = "variant",
+    package_name = "web_variant",
+    srcs = ["lib/web_variant.dart"],
+    visibility = ["//flutter/tests/web_variants:__pkg__"],
+)

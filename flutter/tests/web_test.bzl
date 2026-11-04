@@ -2,8 +2,9 @@
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
+load("//flutter:web.bzl", "flutter_web_bundle")
 load("//flutter/private:flutter_native_library.bzl", "flutter_native_library")
-load("//flutter/private:flutter_web_application.bzl", "flutter_web_bundle", "web_compile_branches")
+load("//flutter/private:flutter_web_branch.bzl", "WEB_COMPILER_SETTING", "web_branches_target", "web_compile_branches")
 load(
     "//flutter/private:validation.bzl",
     "escape_html",
@@ -649,7 +650,7 @@ _dev_config_test = analysistest.make(
 )
 
 def _build_package_roots_declared_test_impl(ctx):
-    """Every generated root the build package config names is a declared output.
+    """The bundle declares the build package config and the roots it names.
 
     The dev tool hands this config to DWDS, which reads each first-party
     library's source through it to show it in the debugger. A source-assembled
@@ -657,7 +658,37 @@ def _build_package_roots_declared_test_impl(ctx):
     is otherwise only an action input: with a disk or remote cache and Build
     without the Bytes, a cache hit leaves it an empty directory, and the
     debugger shows a blank pane for every library in it.
+
+    The config is written by a branch target, so the bundle's outputs are
+    checked here for the config its dev config names and for the assembled
+    tree beside it, and the branch's own for every root its config names
+    (`_branch_roots_declared_test`).
     """
+    env = analysistest.begin(ctx)
+    config = written_json(env, "_dev_config.json")
+    if config == None:
+        return analysistest.end(env)
+    declared = [
+        f.path
+        for f in analysistest.target_under_test(env)[DefaultInfo].files.to_list()
+    ]
+    named = config["buildPackageConfig"]
+    asserts.true(env, named in declared, "%s is named in the dev config and the target does not declare it" % named)
+    assembled = [p for p in declared if p.endswith(".pkgsrcs")]
+    asserts.true(
+        env,
+        len(assembled) > 0,
+        "the fixture must source-assemble a package, or this test proves nothing: %s" % declared,
+    )
+    return analysistest.end(env)
+
+_build_package_roots_declared_test = analysistest.make(
+    _build_package_roots_declared_test_impl,
+    config_settings = {"//command_line_option:compilation_mode": "dbg"},
+)
+
+def _branch_roots_declared_test_impl(ctx):
+    """A branch declares every generated root its package config names."""
     env = analysistest.begin(ctx)
     config = written_json(env, ".package_config.json")
     if config == None:
@@ -675,7 +706,7 @@ def _build_package_roots_declared_test_impl(ctx):
 
     # Roots climbing out of the config's directory are the source tree or a
     # repository, which Bazel never has to write. The rest sit beside the
-    # config, among this target's own outputs.
+    # config, among the branch's own outputs.
     generated = [
         config_dir + "/" + e["rootUri"]
         for e in config["packages"]
@@ -690,12 +721,12 @@ def _build_package_roots_declared_test_impl(ctx):
         asserts.true(
             env,
             root in declared,
-            "%s is a package root DWDS reads sources from, and the target does not declare it" % root,
+            "%s is a package root the config names, and the branch does not declare it" % root,
         )
     return analysistest.end(env)
 
-_build_package_roots_declared_test = analysistest.make(
-    _build_package_roots_declared_test_impl,
+_branch_roots_declared_test = analysistest.make(
+    _branch_roots_declared_test_impl,
     config_settings = {"//command_line_option:compilation_mode": "dbg"},
 )
 
@@ -1698,7 +1729,7 @@ def _web_compile_branches_test_impl(ctx):
 _web_compile_branches_test = unittest.make(_web_compile_branches_test_impl)
 
 def _package_config_of(env, action):
-    """The package names in the package config `action` compiles against."""
+    """The one package config `action` compiles against."""
     configs = [
         f
         for f in action.inputs.to_list()
@@ -1706,50 +1737,50 @@ def _package_config_of(env, action):
            not f.basename.endswith(".import_check_package_config.json")
     ]
     asserts.equals(env, 1, len(configs), "%s reads %d package configs" % (action.mnemonic, len(configs)))
-    if len(configs) != 1:
-        return None, []
-    writes = [
-        a
-        for a in analysistest.target_actions(env)
-        if a.mnemonic == "FileWrite" and a.outputs.to_list() == configs
-    ]
-    asserts.equals(env, 1, len(writes), "no write produces " + configs[0].short_path)
-    if len(writes) != 1:
-        return configs[0], []
-    return configs[0], [p["name"] for p in json.decode(writes[0].content)["packages"]]
+    return configs[0] if configs else None
 
 def _branch_inputs_test_impl(ctx):
-    """Each compile reads one package config naming each package once.
+    """Each compile reads its own branch's package config.
 
-    `deps` is the edge the bundle splits per compiler, and a split edge's
-    `ctx.attr.deps` holds every branch's copy of each dependency. A reader
-    left on it names a package once per branch, so this looks for exactly
-    one entry per package in what every compile reads, and in the font list
-    of the asset bundle.
-
-    The icon tree-shaker's kernel is compiled from the primary compiler's
-    branch, so it reads the package config dart2wasm reads.
+    The bundle writes no package config of its own: each branch is a target
+    (`__<name>_branches`) built once for each compiler, and writing two from
+    one target collides. The dart2wasm and dart2js compiles read different
+    files, the dart2wasm one from the dart2wasm configuration and the dart2js
+    one from the dart2js's, and the icon tree-shaker's kernel reads the
+    primary's, dart2wasm's, as the rest of what the bundle holds once does.
     """
     env = analysistest.begin(ctx)
+    own = [
+        a
+        for a in analysistest.target_actions(env)
+        if a.mnemonic == "FileWrite" and a.outputs.to_list()[0].basename.endswith(".package_config.json")
+    ]
+    asserts.equals(env, [], own, "the bundle writes a package config its branches should")
+
     by_mnemonic = {}
     for mnemonic in ["FlutterDart2Wasm", "FlutterDart2JS", "FlutterWebIconKernel"]:
         action = _action(env, mnemonic)
         if action == None:
             continue
-        config, names = _package_config_of(env, action)
+        config = _package_config_of(env, action)
         by_mnemonic[mnemonic] = config
-        for package in ["web_fixture", "web_branches_dep"]:
-            count = len([n for n in names if n == package])
-            asserts.equals(
+        if config != None:
+            asserts.true(
                 env,
-                1,
-                count,
-                "%s's package config names %s %d times: %s" % (mnemonic, package, count, names),
+                config.basename == web_branches_target(ctx.attr.bundle_name) + ".package_config.json",
+                "%s reads %s, not the branch target's package config" % (mnemonic, config.short_path),
             )
-        asserts.equals(env, len(names), len({n: None for n in names}), "%s: a package named twice: %s" % (mnemonic, names))
+    wasm = by_mnemonic.get("FlutterDart2Wasm")
+    js = by_mnemonic.get("FlutterDart2JS")
+    if wasm != None and js != None:
+        asserts.true(
+            env,
+            wasm != js and wasm.root.path != js.root.path,
+            "dart2wasm and dart2js read one package config: %s" % wasm.path,
+        )
     asserts.equals(
         env,
-        by_mnemonic.get("FlutterDart2Wasm"),
+        wasm,
         by_mnemonic.get("FlutterWebIconKernel"),
         "the icon tree-shaker's kernel must compile the primary (dart2wasm) branch",
     )
@@ -1763,7 +1794,118 @@ def _branch_inputs_test_impl(ctx):
 
 _branch_inputs_test = analysistest.make(
     _branch_inputs_test_impl,
+    attrs = {"bundle_name": attr.string(mandatory = True)},
     config_settings = {"//command_line_option:compilation_mode": "opt"},
+)
+
+def _branch_config_test_impl(ctx):
+    """A branch's package config names each package once, and the right variant.
+
+    `deps` is the edge the bundle splits per compiler, and a split edge's
+    `ctx.attr.deps` holds every branch's copy of each dependency. A reader
+    left on it names a package once per branch, so this looks for exactly one
+    entry per package in what each branch writes. Where a dependency differs by
+    compiler, the config's root for it is that compiler's directory and not the
+    other's.
+    """
+    env = analysistest.begin(ctx)
+    config = written_json(env, ".package_config.json")
+    if config == None:
+        return analysistest.end(env)
+    names = [p["name"] for p in config["packages"]]
+    asserts.equals(env, len(names), len({n: None for n in names}), "a package named twice: %s" % names)
+    for package in ctx.attr.packages:
+        asserts.equals(env, 1, len([n for n in names if n == package]), "%s is named %d times: %s" % (package, len([n for n in names if n == package]), names))
+    for package, suffix in ctx.attr.roots.items():
+        entry = [p for p in config["packages"] if p["name"] == package]
+        if entry:
+            asserts.true(
+                env,
+                entry[0]["rootUri"].endswith(suffix),
+                "%s is rooted at %s, not at a path ending %s" % (package, entry[0]["rootUri"], suffix),
+            )
+    return analysistest.end(env)
+
+def _branch_config_test_for(compiler):
+    return analysistest.make(
+        _branch_config_test_impl,
+        attrs = {
+            "packages": attr.string_list(),
+            "roots": attr.string_dict(),
+        },
+        config_settings = {
+            "//command_line_option:compilation_mode": "opt",
+            WEB_COMPILER_SETTING: compiler,
+        },
+    )
+
+_branch_config_wasm_test = _branch_config_test_for("wasm")
+_branch_config_js_test = _branch_config_test_for("js")
+
+def _per_compiler_test_impl(ctx):
+    """Each compile reads its own compiler's variant of a dependency.
+
+    The fixture's library depends on one of two `web_variant` packages by web
+    compiler. The dart2wasm compile must take the first and the dart2js the
+    second; the icon tree-shaker's kernel reads the primary's.
+    """
+    env = analysistest.begin(ctx)
+    for mnemonic, variant, other in [
+        ("FlutterDart2Wasm", "web_variants/wasm/lib", "web_variants/js/lib"),
+        ("FlutterDart2JS", "web_variants/js/lib", "web_variants/wasm/lib"),
+        ("FlutterWebIconKernel", "web_variants/wasm/lib", "web_variants/js/lib"),
+    ]:
+        action = _action(env, mnemonic)
+        if action == None:
+            continue
+        paths = [f.short_path for f in action.inputs.to_list()]
+        asserts.true(
+            env,
+            [p for p in paths if variant in p],
+            "%s does not read the %s variant" % (mnemonic, variant),
+        )
+        asserts.equals(
+            env,
+            [],
+            [p for p in paths if other in p],
+            "%s reads the %s variant" % (mnemonic, other),
+        )
+    return analysistest.end(env)
+
+_per_compiler_test = analysistest.make(
+    _per_compiler_test_impl,
+    config_settings = {"//command_line_option:compilation_mode": "opt"},
+)
+
+def _per_compiler_dev_test_impl(ctx):
+    """The dev loop reads the JavaScript variant, in a debug build of a wasm bundle.
+
+    DDC compiles what dart2js does, so the dev package config the dev tool
+    compiles from names the `js` variant, though the bundle's primary compiler
+    is dart2wasm.
+    """
+    env = analysistest.begin(ctx)
+    dev = written_text(env, ".dev_package_config.json")
+    if dev == None:
+        return analysistest.end(env)
+    asserts.true(env, "web_variants/js" in dev, "the dev package config does not name the js variant: %s" % dev)
+    asserts.false(env, "web_variants/wasm" in dev, "the dev package config names the wasm variant: %s" % dev)
+
+    config = written_json(env, "_dev_config.json")
+    if config != None:
+        build_config = config["buildPackageConfig"]
+        asserts.true(env, "__web_variants_fixture_branches" in build_config, "the dev config's build package config is not the branch's: %s" % build_config)
+    wasm = _action(env, "FlutterDart2Wasm")
+    js = _action(env, "FlutterDart2JS")
+    if wasm != None and js != None:
+        asserts.true(env, _package_config_of(env, wasm).root.path != _package_config_of(env, js).root.path)
+        if config != None:
+            asserts.equals(env, _package_config_of(env, js).path, config["buildPackageConfig"], "DDC's build package config is the one dart2js reads")
+    return analysistest.end(env)
+
+_per_compiler_dev_test = analysistest.make(
+    _per_compiler_dev_test_impl,
+    config_settings = {"//command_line_option:compilation_mode": "dbg"},
 )
 
 def _setup_web_fixtures():
@@ -1922,6 +2064,16 @@ def _setup_web_fixtures():
             "//flutter:material_icons",
             "//flutter/tests/web_branches_dep",
         ],
+        tags = ["manual"],
+    )
+
+    # A library whose dependency differs by compiler, so each compile can be
+    # shown to read its own.
+    flutter_web_bundle(
+        name = "_web_variants_fixture",
+        package_name = "web_fixture",
+        main = "lib/web_fixture_main.dart",
+        deps = ["//flutter/tests/web_variants:select"],
         tags = ["manual"],
     )
     flutter_web_bundle(
@@ -2221,13 +2373,15 @@ _icon_scan_kernel_is_a_web_program_opt_test = analysistest.make(
 )
 
 def _icon_scan_front_end_test_impl(ctx):
-    """The icon scan goes through the front end of a compiler the bundle ships.
+    """The icon scan goes through the front end of the bundle's primary compiler.
 
-    `flutter build web` scans what `dart compile js --cfe-only` makes, and so
-    does a bundle with a dart2js build. A bundle without one
-    (`js_fallback = False`) cannot: the JavaScript front end refuses an integer
-    literal JavaScript cannot hold, which a WASM-only app may contain, so its
-    scan goes through dart2wasm's front end, against dart2wasm's platform.
+    It reads the primary branch's program, and a front end is never handed the
+    other compiler's: JavaScript cannot represent every integer literal a
+    WebAssembly program may contain (`0x7FFFFFFFFFFFFFFF`) and its front end
+    refuses them. So a `compiler = "dart2wasm"` bundle is scanned through
+    dart2wasm's front end, against dart2wasm's platform, whether or not it also
+    ships a dart2js build, and a `compiler = "dart2js"` one through
+    `dart compile js --cfe-only`, as `flutter build web` does.
     """
     env = analysistest.begin(ctx)
     scan = _action(env, "FlutterWebIconKernel")
@@ -2398,10 +2552,45 @@ def web_test_suite(name):
         name = name + "_build_package_roots_declared",
         target_under_test = ":_web_codegen_fixture",
     )
+    _branch_roots_declared_test(
+        name = name + "_branch_roots_declared",
+        target_under_test = ":" + web_branches_target("_web_codegen_fixture"),
+    )
     _web_compile_branches_test(name = name + "_compile_branches")
     _branch_inputs_test(
         name = name + "_branch_inputs",
         target_under_test = ":_web_branches_fixture",
+        bundle_name = "_web_branches_fixture",
+    )
+    _branch_config_wasm_test(
+        name = name + "_branch_config_wasm",
+        target_under_test = ":" + web_branches_target("_web_branches_fixture"),
+        packages = ["web_fixture", "web_branches_dep"],
+    )
+    _branch_config_js_test(
+        name = name + "_branch_config_js",
+        target_under_test = ":" + web_branches_target("_web_branches_fixture"),
+        packages = ["web_fixture", "web_branches_dep"],
+    )
+    _per_compiler_test(
+        name = name + "_per_compiler",
+        target_under_test = ":_web_variants_fixture",
+    )
+    _branch_config_wasm_test(
+        name = name + "_per_compiler_wasm_config",
+        target_under_test = ":" + web_branches_target("_web_variants_fixture"),
+        packages = ["web_variant", "web_variant_select"],
+        roots = {"web_variant": "web_variants/wasm"},
+    )
+    _branch_config_js_test(
+        name = name + "_per_compiler_js_config",
+        target_under_test = ":" + web_branches_target("_web_variants_fixture"),
+        packages = ["web_variant", "web_variant_select"],
+        roots = {"web_variant": "web_variants/js"},
+    )
+    _per_compiler_dev_test(
+        name = name + "_per_compiler_dev",
+        target_under_test = ":_web_variants_fixture",
     )
     _native_modules_declared_test(
         name = name + "_native_modules_declared",
@@ -2544,9 +2733,15 @@ def web_test_suite(name):
 
     _icon_scan_front_end_test(
         name = name + "_icon_scan_front_end_js",
-        target_under_test = ":_web_fixture",
+        target_under_test = ":_web_js_fixture",
         compiler = "js",
         flags = ["--cfe-only"],
+    )
+    _icon_scan_front_end_test(
+        name = name + "_icon_scan_front_end_wasm_with_fallback",
+        target_under_test = ":_web_fixture",
+        compiler = "wasm",
+        flags = ["--phases=cfe"],
     )
     _icon_scan_front_end_test(
         name = name + "_icon_scan_front_end_wasm_only",

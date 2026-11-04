@@ -430,12 +430,23 @@ bzl_library(
         ":flutter_asset_bundle",
         ":flutter_info",
         ":flutter_library",
+        ":flutter_web_branch",
         ":flutter_web_compile",
         ":path_mapping",
         ":plugin_registrant",
         ":validation",
         "//flutter:providers",
         "@bazel_skylib//rules:common_settings",
+        "@rules_dart//dart:utils",
+    ],
+)
+
+bzl_library(
+    name = "flutter_web_branch",
+    srcs = ["flutter_web_branch.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+    deps = [
+        "@rules_dart//dart:providers",
         "@rules_dart//dart:utils",
     ],
 )

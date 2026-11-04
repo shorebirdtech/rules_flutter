@@ -31,6 +31,7 @@ behaviour exactly.
 """
 
 load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo")
+load("@rules_dart//dart:utils.bzl", "web_compiler_reset")
 load("//flutter:providers.bzl", "FlutterNativeLibraryInfo")
 
 # A wasm module belongs here for the same reason a dylib does: the page
@@ -116,6 +117,11 @@ def _flutter_native_library_impl(ctx):
 
 flutter_native_library = rule(
     implementation = _flutter_native_library_impl,
+    # The library and its contract are the same whatever web compiler the app
+    # that bundles them is built for, so every route to them, through a package
+    # the app compiles once per compiler or not, reaches one configured target
+    # and one build.
+    cfg = web_compiler_reset,
     doc = """A `native_deps` entry that declares what its bindings were built against.
 
 Put the wrapper in `native_deps` where the library itself would have gone:

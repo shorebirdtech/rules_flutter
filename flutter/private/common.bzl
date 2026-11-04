@@ -1132,12 +1132,14 @@ def merge_dart_defines(ctx):
     validate_dart_defines(ctx.attr.defines, "defines attribute of %s" % ctx.label)
     return list(ctx.attr.defines) + ctx.attr._extra_dart_defines[BuildSettingInfo].value
 
-def flutter_deps_attr(aspects = []):
+def flutter_deps_attr(aspects = [], **kwargs):
     """The `deps` attribute of every rule that compiles a Flutter program.
 
     Args:
         aspects: Aspects a rule applies over its `deps` on top of the import
             check every such rule runs.
+        **kwargs: Further arguments to `attr.label_list`, such as the `cfg` of
+            a rule that builds its dependencies for several compilers.
 
     Returns:
         The `attr.label_list`.
@@ -1152,6 +1154,7 @@ def flutter_deps_attr(aspects = []):
         # Each library's imports are checked against its own `deps`, in the
         # `_validation` output group.
         aspects = [dart_import_check_aspect] + aspects,
+        **kwargs
     )
 
 # The attrs `flutter_compile_kernel` reads off its caller's `ctx`. Every rule

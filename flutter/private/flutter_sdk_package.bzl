@@ -66,6 +66,7 @@ flutter_library(
     shaders = glob(["lib/src/material/shaders/*.frag"]),
 {deps}    package_name = "{name}",
     language_version = "{language_version}",
+    web_compiler_independent = True,
     visibility = ["//visibility:public"],
 )
 """.format(
@@ -87,6 +88,7 @@ dart_library(
     ),
 {deps}    package_name = "{name}",
     language_version = "{language_version}",
+    web_compiler_independent = True,
     visibility = ["//visibility:public"],
 )
 """.format(

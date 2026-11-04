@@ -838,7 +838,8 @@ flutter_library(
     srcs = glob(["lib/**/*.dart"], allow_empty = True),
 {resources}{deps}    package_name = "{name}",
     language_version = "{language_version}",
-{version}{asset_attrs}{pub_attrs}    visibility = ["//visibility:public"],
+{version}{asset_attrs}{pub_attrs}    web_compiler_independent = True,
+    visibility = ["//visibility:public"],
 )
 """.format(
         name = name,
@@ -1083,7 +1084,8 @@ flutter_plugin(
 {resources}{deps}    package_name = "{name}",
     plugin_platforms_json = {plugin_platforms_json_literal},
     language_version = "{language_version}",
-{version}{apple_libs_arg}{linux_libs_arg}{windows_libs_arg}{apple_privacy_files_arg}{asset_attrs}{pub_attrs}    visibility = ["//visibility:public"],
+{version}{apple_libs_arg}{linux_libs_arg}{windows_libs_arg}{apple_privacy_files_arg}{asset_attrs}{pub_attrs}    web_compiler_independent = True,
+    visibility = ["//visibility:public"],
 )
 {extra_targets}
 """.format(

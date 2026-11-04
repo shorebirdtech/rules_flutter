@@ -23,12 +23,12 @@ configurations.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
+load("//flutter:web.bzl", "flutter_web_bundle")
 load("//flutter/private:flutter_aot_target.bzl", "flutter_aot_target")
 load("//flutter/private:flutter_application.bzl", "flutter_application")
 load("//flutter/private:flutter_ios_application.bzl", "flutter_ios_framework")
 load("//flutter/private:flutter_kernel_target.bzl", "flutter_kernel_target")
 load("//flutter/private:flutter_macos_application.bzl", "flutter_macos_framework", "flutter_macos_native_libs")
-load("//flutter/private:flutter_web_application.bzl", "flutter_web_bundle")
 load(":apple_bundling.bzl", "fake_application")
 
 _STRIP = "//command_line_option:experimental_output_paths"

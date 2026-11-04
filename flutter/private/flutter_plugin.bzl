@@ -19,7 +19,7 @@ Platform-specific native dependencies use select() in BUILD files:
 
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo")
-load("@rules_dart//dart:utils.bzl", "dart_info", "derive_lib_root", "derive_package_name")
+load("@rules_dart//dart:utils.bzl", "WEB_COMPILER_INDEPENDENT_ATTR", "dart_info", "derive_lib_root", "derive_package_name", "web_compiler_reset_when_independent")
 load("@rules_swift//swift:swift.bzl", "SwiftInfo")
 load("//flutter:providers.bzl", "FlutterDataAssetInfo", "FlutterInfo", "FlutterNativeAssetInfo")
 load("//flutter/private:common.bzl", "collect_binding_contracts", "collect_native_libs")
@@ -229,6 +229,9 @@ def _flutter_plugin_impl(ctx):
 
 flutter_plugin = rule(
     implementation = _flutter_plugin_impl,
+    # As `flutter_library`: configured once per web compiler that reaches it,
+    # unless `web_compiler_independent`.
+    cfg = web_compiler_reset_when_independent,
     attrs = {
         "_sky_engine": SKY_ENGINE_ATTR,
         "srcs": attr.label_list(
@@ -348,6 +351,6 @@ flutter_plugin = rule(
             doc = "Map of shader File label -> package-relative path (mirrors `flutter.shaders`). Same shape as `flutter_library.pkg_shaders`.",
             allow_files = True,
         ),
-    },
+    } | WEB_COMPILER_INDEPENDENT_ATTR,
     doc = "Declares a Flutter plugin with platform metadata and optional native dependencies.",
 )

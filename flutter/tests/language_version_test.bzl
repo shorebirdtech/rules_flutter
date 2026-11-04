@@ -33,11 +33,12 @@ compiler.
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("@rules_dart//dart:providers.bzl", "DartAnalyzableInfo")
+load("//flutter:web.bzl", "flutter_web_bundle")
 load("//flutter/private:flutter_aot_target.bzl", "flutter_aot_target")
 load("//flutter/private:flutter_application.bzl", "flutter_application")
 load("//flutter/private:flutter_kernel_target.bzl", "flutter_kernel_target")
 load("//flutter/private:flutter_test.bzl", "flutter_test")
-load("//flutter/private:flutter_web_application.bzl", "flutter_web_bundle")
+load("//flutter/private:flutter_web_branch.bzl", "web_branches_target")
 load(":action_content.bzl", "package_entry", "written_json")
 
 # The version the fixtures state. Deliberately not the SDK's own: a fixture
@@ -96,8 +97,14 @@ def _flutter_test_test_impl(ctx):
 
 def _web_test_impl(ctx):
     env = analysistest.begin(ctx)
-    _assert_config_states_version(env)
     _assert_provider_states_version(env)
+    return analysistest.end(env)
+
+def _web_branch_test_impl(ctx):
+    # The bundle's package config is written by its branch target, one per
+    # compiler, so that is where the version has to arrive.
+    env = analysistest.begin(ctx)
+    _assert_config_states_version(env)
     return analysistest.end(env)
 
 def _kernel_test_impl(ctx):
@@ -113,6 +120,7 @@ def _aot_test_impl(ctx):
 _application_test = analysistest.make(_application_test_impl)
 _flutter_test_test = analysistest.make(_flutter_test_test_impl)
 _web_test = analysistest.make(_web_test_impl)
+_web_branch_test = analysistest.make(_web_branch_test_impl)
 _kernel_test = analysistest.make(_kernel_test_impl)
 _aot_test = analysistest.make(_aot_test_impl)
 
@@ -190,6 +198,10 @@ def language_version_test_suite(name):
         name = name + "_web",
         target_under_test = ":_lv_web",
     )
+    _web_branch_test(
+        name = name + "_web_branch",
+        target_under_test = ":" + web_branches_target("_lv_web"),
+    )
     _kernel_test(
         name = name + "_kernel",
         target_under_test = ":_lv_kernel",
@@ -205,6 +217,7 @@ def language_version_test_suite(name):
             ":" + name + "_application",
             ":" + name + "_flutter_test",
             ":" + name + "_web",
+            ":" + name + "_web_branch",
             ":" + name + "_kernel",
             ":" + name + "_aot",
         ],

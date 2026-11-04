@@ -49,6 +49,7 @@ load(":toolchain_test.bzl", "toolchain_test_suite")
 load(":toolchains_repo_test.bzl", "toolchains_repo_test_suite")
 load(":validation_test.bzl", "validation_test_suite")
 load(":versions_test.bzl", "versions_test_suite")
+load(":web_compiler_test.bzl", "web_compiler_test_suite")
 load(":web_test.bzl", "web_test_suite")
 load(":widget_creation_flag_test.bzl", "widget_creation_flag_test_suite")
 
@@ -77,6 +78,8 @@ manifest_merge_test_suite(name = "manifest_merge_test")
 plist_merge_test_suite(name = "plist_merge_test")
 
 web_test_suite(name = "web_test")
+
+web_compiler_test_suite(name = "web_compiler_test")
 
 flutter_info_test_suite(name = "flutter_info_test")
 
