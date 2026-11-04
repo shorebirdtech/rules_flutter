@@ -651,6 +651,10 @@ _REPRO_PARTS = {
 _REPRO_BUILDS = [
     ("aot", "fastbuild"),
     ("aot", "release"),
+    ("assets", "debug"),
+    ("assets", "fastbuild"),
+    ("assets", "release"),
+    ("assets", "profile"),
     ("web", "fastbuild"),
     ("web", "release"),
 ]
@@ -687,4 +691,16 @@ _NOT_WINDOWS = select({
         "@deps//:test",
         "@rules_flutter//tools/e2e_testing",
     ],
-) for part, mode in _REPRO_BUILDS]
+) for part, mode in _REPRO_BUILDS if part != "assets"]
+
+[dart_test(
+    name = "reproducible_notices_%s_test" % mode,
+    size = "small",
+    args = ["$(rootpaths :repro_assets_%s)" % mode],
+    data = [":repro_assets_%s" % mode],
+    main = "test/verify_reproducible_notices_test.dart",
+    deps = [
+        "@deps//:test",
+        "@rules_flutter//tools/e2e_testing",
+    ],
+) for part, mode in _REPRO_BUILDS if part == "assets"]
