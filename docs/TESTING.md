@@ -985,6 +985,17 @@ names the base and that the arithmetic holds; when `plugin_example` gains a long
 resource, change the constant there and shorten nothing else. On a VM pass
 `--output_base=C:/b` (`tools/vm/run_e2e.dart` does, `C:/b/<n>` per folder).
 
+Separately, three rules_android genrules (`Configuration_proto_file` and two
+more) used to fail the first build of a fresh Windows output base with `replace
+Configuration.proto? [y]es, [n]o, [A]ll, [N]one, [r]ename: NULL`. Each ran
+`unzip` on the aapt2 proto jar with the execution root as its working directory,
+where nothing sandboxes an action on Windows, so the same genrule in a second
+configuration found the file the first had left, and every rerun that found it
+failed again until the file was deleted. It reproduced on all three fresh output
+bases of the VM run above. The e2e workspaces carry
+`patches/rules_android_unzip_to_stdout.patch`, which pipes the entry through
+`sed` instead of extracting it.
+
 ### What the automated e2e tests cover
 
 | Workspace | Key tests |

@@ -52,6 +52,14 @@ single_version_override(
         # exhaust that on a 16 GB machine. The patch keeps every cap and drops
         # the initial sizes. Drop it once a rules_android release does.
         "//patches:rules_android_no_initial_heap.patch",
+        # Three genrules unzip an entry of the aapt2 proto jar into their
+        # working directory, the execution root, which an unsandboxed action
+        # (Windows) shares with the same genrule in another configuration:
+        # the second `unzip` prompts "replace Configuration.proto?" and the
+        # build fails, on a fresh output base every time and on each rerun
+        # that finds the file. The patch reads the entry through a pipe.
+        # Drop it once a rules_android release does.
+        "//patches:rules_android_unzip_to_stdout.patch",
     ],
 )
 
