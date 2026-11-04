@@ -399,10 +399,10 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
     # Under `library_path` the manifest names each library by its bundle
     # filename alone, and the runner puts one directory holding all of them on
     # the loader's search path. Bundle filenames are unique, as in an
-    # application's bundle. `native_file` is one of them, by its runfiles
-    # path: a manifest-only runfiles lists files, so the runner finds the
-    # directory through it.
-    native_file = None
+    # application's bundle. `native_files` names each by its runfiles path:
+    # a manifest-only runfiles lists files, so the runner finds the directory
+    # through them, and can name any it cannot find.
+    native_files = []
     if layout == "library_path":
         staged = []
         for asset in native_assets_list:
@@ -411,7 +411,7 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
             link = ctx.actions.declare_file("%s.native/%s" % (ctx.label.name, asset.bundle_filename))
             ctx.actions.symlink(output = link, target_file = asset.file)
             staged.append(link)
-            native_file = runfiles_path(link, ctx.workspace_name)
+            native_files.append(runfiles_path(link, ctx.workspace_name))
         bundled_code_assets = staged
 
     # The golden comparator, staged next to the generated bootstrap so the
@@ -506,8 +506,8 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
         "FLUTTER_TEST_PATH": ctx.file.main.short_path,
         "FLUTTER_TEST_IMPELLER": "1" if ctx.attr.enable_impeller else "",
     }
-    if native_file:
-        env["FLUTTER_TEST_NATIVE_FILE"] = native_file
+    if native_files:
+        env["FLUTTER_TEST_NATIVE_FILES"] = "\n".join(native_files)
 
     runfiles = ctx.runfiles(
         # The bundled native-asset libraries ship here, at the runfiles-relative

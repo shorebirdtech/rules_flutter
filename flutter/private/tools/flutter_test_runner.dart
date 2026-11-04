@@ -150,12 +150,38 @@ Map<String, String> readLaunchEnvironment(
       .cast<String, String>();
 }
 
-/// The directory holding the runfile [key], whose own entry may be absent.
+/// The directories holding the runfiles [keys], each listed once and in order.
 ///
 /// A manifest lists files, not directories, so a directory is found through
-/// a file known to be under it.
-String _directoryOf(Runfiles runfiles, String key) =>
-    File(runfiles.rlocation(key)).absolute.parent.path;
+/// a file known to be under it. A library that cannot be found is an error
+/// naming it: it is missing from the manifest, or listed but absent on disk.
+///
+/// Public, like [testCeiling], because the test reaches it directly.
+List<String> nativeLibraryDirectories(
+  Runfiles runfiles,
+  Iterable<String> keys,
+) {
+  final directories = <String>{};
+  for (final key in keys) {
+    final String path;
+    try {
+      path = runfiles.rlocation(key);
+    } on StateError {
+      throw StateError(
+        'flutter_test runner: native library $key is not in the runfiles.',
+      );
+    }
+    final file = File(path);
+    if (!file.existsSync()) {
+      throw StateError(
+        'flutter_test runner: native library $key resolves to $path, which '
+        'does not exist.',
+      );
+    }
+    directories.add(file.absolute.parent.path);
+  }
+  return directories.toList();
+}
 
 void main(List<String> args) async {
   // A flutter_test is handed its settings by Bazel's test environment. A
@@ -212,12 +238,20 @@ void main(List<String> args) async {
   final icu = r.rlocation(icuKey);
   final dill = r.rlocation(dillKey);
   final assetsDir = assetsKey == null ? null : r.rlocation(assetsKey);
-  final nativeFile = settings['FLUTTER_TEST_NATIVE_FILE'];
-  final loader = libraryPathEnvironment(
-    nativeFile == null ? null : _directoryOf(r, nativeFile),
-    Platform.environment,
-    Platform.operatingSystem,
-  );
+  final nativeFiles = settings['FLUTTER_TEST_NATIVE_FILES'];
+  final Map<String, String> loader;
+  try {
+    loader = libraryPathEnvironment(
+      nativeFiles == null
+          ? const []
+          : nativeLibraryDirectories(r, nativeFiles.split('\n')),
+      Platform.environment,
+      Platform.operatingSystem,
+    );
+  } on StateError catch (e) {
+    stderr.writeln(e.message);
+    exit(64);
+  }
   final testPath = settings['FLUTTER_TEST_PATH'] ?? 'test.dart';
   final coverageOutput = Platform.environment['COVERAGE_OUTPUT_FILE'];
   final coverageLibraries =
@@ -255,29 +289,47 @@ void main(List<String> args) async {
 /// The loader's search path for a `flutter_tester_binary`'s Native Assets.
 ///
 /// Its kernel names each bundled library by filename alone, so the program
-/// may run from any working directory; this puts [nativeDir], where they are
+/// may run from any working directory; this puts [nativeDirs], where they are
 /// staged, ahead of the search path [environment] already has. Empty when
-/// there is no such directory, as for every `flutter_test`, whose libraries
+/// there are no such directories, as for every `flutter_test`, whose libraries
 /// are named by their paths under the runfiles root it runs in.
+///
+/// Windows has no variable for the purpose: `LoadLibrary` of a bare name
+/// looks in the application's directory, the system directories, the working
+/// directory and then `PATH`, and only `PATH` can be set for a child. Its
+/// directories are joined with `;` and spelled with `\`, and its variable is
+/// found without regard to case, as Windows does, so the child is not given
+/// `Path` and `PATH` both.
 ///
 /// Public, like [testCeiling], because the test reaches it directly.
 Map<String, String> libraryPathEnvironment(
-  String? nativeDir,
+  List<String> nativeDirs,
   Map<String, String> environment,
   String os,
 ) {
-  if (nativeDir == null) return const {};
-  final variable = switch (os) {
-    'macos' => 'DYLD_LIBRARY_PATH',
-    'linux' => 'LD_LIBRARY_PATH',
-    _ => throw UnsupportedError('flutter_tester_binary: no loader path on $os'),
-  };
-  final existing = environment[variable];
-  return {
-    variable: existing == null || existing.isEmpty
-        ? nativeDir
-        : '$nativeDir:$existing',
-  };
+  if (nativeDirs.isEmpty) return const {};
+  final windows = os == 'windows';
+  final String variable;
+  switch (os) {
+    case 'macos':
+      variable = 'DYLD_LIBRARY_PATH';
+    case 'linux':
+      variable = 'LD_LIBRARY_PATH';
+    case 'windows':
+      variable = environment.keys.firstWhere(
+        (k) => k.toUpperCase() == 'PATH',
+        orElse: () => 'PATH',
+      );
+    default:
+      throw UnsupportedError('flutter_tester_binary: no loader path on $os');
+  }
+  final separator = windows ? ';' : ':';
+  final dirs = [
+    for (final dir in nativeDirs) windows ? dir.replaceAll('/', r'\') : dir,
+    if (environment[variable] case final existing? when existing.isNotEmpty)
+      existing,
+  ];
+  return {variable: dirs.join(separator)};
 }
 
 Future<int> _runOnce({

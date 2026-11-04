@@ -298,10 +298,6 @@ flutter_tester_binary(
     package_name = "hello_world",
     enable_impeller = True,
     main = "tool/render_swatch.dart",
-    target_compatible_with = select({
-        "@platforms//os:windows": ["@platforms//:incompatible"],
-        "//conditions:default": [],
-    }),
     deps = [
         "@deps//:flutter",
         "@deps//:flutter_test",
@@ -312,10 +308,6 @@ genrule(
     name = "swatch",
     outs = ["swatch.png"],
     cmd = "RENDER_OUT=$@ $(execpath :render_swatch)",
-    target_compatible_with = select({
-        "@platforms//os:windows": ["@platforms//:incompatible"],
-        "//conditions:default": [],
-    }),
     tools = [":render_swatch"],
 )
 

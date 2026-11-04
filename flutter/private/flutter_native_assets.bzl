@@ -148,8 +148,8 @@ def _path_list_for(asset, target_os, layout):
     if asset.link_mode == "dynamic_loading_bundle":
         if layout == "library_path":
             # Found by name on the loader's search path, which the runner sets
-            # to the one directory the libraries are staged in, so the program
-            # may run from any working directory.
+            # to the one directory the libraries are staged in (PATH on
+            # Windows), so the program may run from any working directory.
             return ["system", asset.bundle_filename]
         if layout == "runfiles":
             # `dlopen` searches its loader paths for a name with no separator

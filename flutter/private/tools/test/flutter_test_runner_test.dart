@@ -10,6 +10,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:runfiles/runfiles.dart';
 import 'package:test/test.dart';
 
 // Imported under a prefix rather than plainly: this script is a `main`, and so
@@ -296,24 +297,138 @@ void main() {
 
   group('libraryPathEnvironment', () {
     test('sets nothing without a staged directory', () {
-      expect(runner.libraryPathEnvironment(null, const {}, 'macos'), isEmpty);
+      expect(
+        runner.libraryPathEnvironment(const [], const {}, 'macos'),
+        isEmpty,
+      );
+      expect(
+        runner.libraryPathEnvironment(const [], const {}, 'windows'),
+        isEmpty,
+      );
     });
 
     test('names the directory on each host loader path', () {
-      expect(runner.libraryPathEnvironment('/r/x.native', const {}, 'macos'), {
-        'DYLD_LIBRARY_PATH': '/r/x.native',
-      });
-      expect(runner.libraryPathEnvironment('/r/x.native', const {}, 'linux'), {
-        'LD_LIBRARY_PATH': '/r/x.native',
-      });
+      expect(
+        runner.libraryPathEnvironment(['/r/x.native'], const {}, 'macos'),
+        {'DYLD_LIBRARY_PATH': '/r/x.native'},
+      );
+      expect(
+        runner.libraryPathEnvironment(['/r/x.native'], const {}, 'linux'),
+        {'LD_LIBRARY_PATH': '/r/x.native'},
+      );
     });
 
     test('goes ahead of the path the caller set', () {
       expect(
-        runner.libraryPathEnvironment('/r/x.native', const {
-          'LD_LIBRARY_PATH': '/usr/local/lib',
-        }, 'linux'),
+        runner.libraryPathEnvironment(
+          ['/r/x.native'],
+          const {
+            'LD_LIBRARY_PATH': '/usr/local/lib',
+          },
+          'linux',
+        ),
         {'LD_LIBRARY_PATH': '/r/x.native:/usr/local/lib'},
+      );
+    });
+
+    test(
+      'puts a Windows directory on PATH, spelled and joined for Windows',
+      () {
+        expect(
+          runner.libraryPathEnvironment(
+            ['C:/b/x.native', 'C:/b/y.native'],
+            const {'PATH': r'C:\Windows;C:\bin'},
+            'windows',
+          ),
+          {'PATH': r'C:\b\x.native;C:\b\y.native;C:\Windows;C:\bin'},
+        );
+      },
+    );
+
+    test('keeps the spelling of the Windows variable the caller has', () {
+      expect(
+        runner.libraryPathEnvironment(
+          ['C:/b/x.native'],
+          const {'Path': r'C:\Windows'},
+          'windows',
+        ),
+        {'Path': r'C:\b\x.native;C:\Windows'},
+      );
+    });
+
+    test('makes a Windows PATH of the directory alone when there is none', () {
+      expect(
+        runner.libraryPathEnvironment(['C:/b/x.native'], const {}, 'windows'),
+        {'PATH': r'C:\b\x.native'},
+      );
+    });
+
+    test('refuses a host it has no loader path for', () {
+      expect(
+        () => runner.libraryPathEnvironment(['/r/x'], const {}, 'fuchsia'),
+        throwsUnsupportedError,
+      );
+    });
+  });
+
+  group('nativeLibraryDirectories', () {
+    late Directory tmp;
+    setUp(() => tmp = Directory.systemTemp.createTempSync('native_dirs'));
+    tearDown(() => tmp.deleteSync(recursive: true));
+
+    Runfiles manifest(Map<String, String> entries) =>
+        Runfiles.fromState(manifest: entries);
+
+    test('finds a library\'s directory through a manifest-only runfiles', () {
+      final dll = File('${tmp.path}/out/x.native/native_add.dll')
+        ..createSync(recursive: true);
+      final other = File('${tmp.path}/out/y.native/other.dll')
+        ..createSync(recursive: true);
+
+      final dirs = runner.nativeLibraryDirectories(
+        manifest({
+          '_main/x.native/native_add.dll': dll.path,
+          '_main/x.native/same.dll': dll.path,
+          '_main/y.native/other.dll': other.path,
+        }),
+        [
+          '_main/x.native/native_add.dll',
+          '_main/x.native/same.dll',
+          '_main/y.native/other.dll',
+        ],
+      );
+
+      expect(dirs, [dll.parent.path, other.parent.path]);
+    });
+
+    test('names a library the manifest does not list', () {
+      expect(
+        () => runner.nativeLibraryDirectories(manifest({}), [
+          '_main/x.native/native_add.dll',
+        ]),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            contains('_main/x.native/native_add.dll'),
+          ),
+        ),
+      );
+    });
+
+    test('names a library the manifest lists but is not on disk', () {
+      expect(
+        () => runner.nativeLibraryDirectories(
+          manifest({'_main/x.native/a.dll': '${tmp.path}/gone/a.dll'}),
+          ['_main/x.native/a.dll'],
+        ),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            allOf(contains('_main/x.native/a.dll'), contains('gone/a.dll')),
+          ),
+        ),
       );
     });
   });

@@ -117,11 +117,6 @@ const e2eWorkspaces = <E2eWorkspace>[
   // The codegen, gen-l10n and golden tests here are platform-neutral and ride
   // along; what each system adds is how its flutter_tester loads a native
   // library, which only this workspace tests.
-  //
-  // Expected to fail on Windows until fixed: `:native_asset_program` is a
-  // flutter_tester_binary, whose runner has no Windows loader path and throws
-  // (`libraryPathEnvironment` in flutter_test_runner.dart). hello_world keeps
-  // its own flutter_tester_binary off Windows for that reason.
   E2eWorkspace(
     'codegen',
     runs: {
@@ -136,7 +131,8 @@ const e2eWorkspaces = <E2eWorkspace>[
           'under a platform transition',
       Os.windows:
           'Native Assets under the Windows flutter_tester: a .dll found through '
-          'manifest-only runfiles',
+          'manifest-only runfiles in flutter_test, and by PATH in '
+          'flutter_tester_binary',
     },
   ),
   // Expected to fail on Linux until fixed: the `flutter create` Linux runner
