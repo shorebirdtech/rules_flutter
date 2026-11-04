@@ -353,6 +353,24 @@ _t11_test = unittest.make(_empty_flutter_block_test_impl)
 _t12_test = unittest.make(_parse_pubspec_basics_test_impl)
 _t13_test = unittest.make(_parse_pubspec_empty_test_impl)
 
+def _asset_transformers_test_impl(ctx):
+    env = unittest.begin(ctx)
+    assets = parse_flutter_assets_block("""\
+name: p
+flutter:
+  assets:
+    - assets/plain.txt
+    - path: assets/map.txt
+    - path: assets/svg.svg
+      transformers:
+        - package: vector_graphics_compiler
+          args: ['--tessellate']
+""").assets
+    asserts.equals(env, [False, False, True], [bool(a.transformers) for a in assets])
+    return unittest.end(env)
+
+_asset_transformers_test = unittest.make(_asset_transformers_test_impl)
+
 def flutter_pubspec_test_suite(name):
     unittest.suite(
         name,
@@ -370,4 +388,5 @@ def flutter_pubspec_test_suite(name):
         _t11_test,
         _t12_test,
         _t13_test,
+        _asset_transformers_test,
     )

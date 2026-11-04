@@ -1605,6 +1605,12 @@ def _flutter_pub_package_impl(ctx):
         )
         plugin_block = parse_flutter_plugin_block(pubspec_content)
         asset_block = parse_flutter_assets_block(pubspec_content)
+        for asset in asset_block.assets:
+            if asset.transformers:
+                fail((
+                    "package {}: its asset {} lists `transformers`, which rules_flutter does not run. " +
+                    "Bundling the file as it is would ship it untransformed under the transformed file's name."
+                ).format(ctx.attr.package_name, repr(asset.path)))
 
     # Build full label strings for sibling spoke repos.
     dep_labels = [

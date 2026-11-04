@@ -192,4 +192,39 @@ void main() {
       });
     }
   });
+
+  group('an asset with transformers', () {
+    late PubInputsWorkspace ws;
+    setUpAll(() async {
+      ws = await PubInputsFixture(
+        hosted: [
+          HostedPackage(
+            'transformed',
+            pubspec: _pubspec(
+              'transformed',
+              'flutter:\n'
+                  '  assets:\n'
+                  '    - path: assets/data.txt\n'
+                  '      transformers:\n'
+                  '        - package: some_transformer\n',
+            ),
+            files: {'assets/data.txt': 'x'},
+          ),
+        ],
+      ).materialize();
+    });
+
+    /// `transformers:` on an asset runs a program over the file before it is
+    /// bundled. rules_flutter does not run it, so building without it ships
+    /// the untransformed file under the transformed file's name.
+    test('is refused naming the package and the key', () async {
+      final result = await ws.loadSpoke('transformed');
+      expectRefused(
+        result,
+        package: 'transformed',
+        what: 'an asset with transformers',
+        mentions: ['transformers'],
+      );
+    });
+  });
 }

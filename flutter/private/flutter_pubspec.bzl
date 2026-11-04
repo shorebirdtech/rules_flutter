@@ -22,6 +22,8 @@ Schema reference (Flutter's pubspec):
         - path: <path>               # map form (modern)
           flavors: [<flavor>, ...]
           platforms: [<platform>, ...]
+          transformers:              # refused: rules_flutter does not run them
+            - package: <name>
       shaders:
         - <path>
       plugin:
@@ -155,7 +157,7 @@ def _parse_assets(raw):
     out = []
     for entry in raw:
         if type(entry) == "string":
-            out.append(struct(path = entry, flavors = [], platforms = []))
+            out.append(struct(path = entry, flavors = [], platforms = [], transformers = []))
             continue
         if type(entry) != "dict":
             continue
@@ -164,10 +166,12 @@ def _parse_assets(raw):
             continue
         flavors_raw = entry.get("flavors", [])
         platforms_raw = entry.get("platforms", [])
+        transformers_raw = entry.get("transformers", [])
         out.append(struct(
             path = path,
             flavors = [str(f) for f in flavors_raw] if type(flavors_raw) == "list" else [],
             platforms = [str(p) for p in platforms_raw] if type(platforms_raw) == "list" else [],
+            transformers = transformers_raw if type(transformers_raw) == "list" else ([transformers_raw] if transformers_raw else []),
         ))
     return out
 
@@ -194,7 +198,7 @@ def parse_flutter_assets_block(content):
     Returns:
         struct(
             fonts:    list[struct(family, fonts=list[struct(asset, weight, style)])],
-            assets:   list[struct(path, flavors, platforms)],
+            assets:   list[struct(path, flavors, platforms, transformers)],
             shaders:  list[struct(path)],
             uses_material_design: bool,
         )
