@@ -525,7 +525,6 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
             runner_tools.icu_data,
             flutter_assets,
         ] + ctx.files.data + bundled_code_assets,
-        transitive_files = runner_tools.tool_files,
     )
 
     # Merge the runfiles of any `data` targets so cc_library / cc_binary

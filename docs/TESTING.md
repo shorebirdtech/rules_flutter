@@ -1651,6 +1651,10 @@ compile (`--@rules_dart//dart:modular_kernel=false`), under `-c fastbuild` or
 - `asserts_fire_test` — an `assert` trips in the test's own file, in a
   dependency's library, in an initializer list and in the framework.
 
+`//flutter/tests:flutter_test_runfiles_test` is the analysis half: a test's
+runfiles hold nothing from the Dart SDK or the patched SDK, which only a compile
+opens.
+
 A constant that breaks a `const` constructor's `assert` must not compile, as
 under `flutter test`; a build cannot be a passing test, so the two targets are
 `manual` and are checked by hand:
