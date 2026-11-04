@@ -66,13 +66,13 @@ def _package_test_carries_the_runner_test_impl(ctx):
         deps = ["@hub_lib__test_api//:test_api"],
         flutter = False,
     )
-    asserts.true(env, '\ndart_test_package(\n    name = "test",' in content, content)
+    asserts.true(env, '\npub_test_runner(\n    name = "test",' in content, content)
     asserts.true(env, '    library = ":test_library",' in content, content)
     asserts.true(env, '\npub_library(\n    name = "test_library",' in content, content)
     asserts.true(env, '    members = ["@hub__test//:test"],' in content, content)
 
     # Any other package is its library alone.
-    asserts.false(env, "dart_test_package" in make_library_build_content("test_api", ["@hub__test_api//:test_api"], [], False))
+    asserts.false(env, "pub_test_runner" in make_library_build_content("test_api", ["@hub__test_api//:test_api"], [], False))
 
     return unittest.end(env)
 

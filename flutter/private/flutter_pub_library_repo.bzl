@@ -78,20 +78,14 @@ def make_library_build_content(name, members, deps, flutter):
     )
 
 # `package:test`'s library also carries the runner `dart_test` runs tests
-# through, built from this same package so the two are one version. rules_dart
-# emits the same block for the `test` of its own hubs; `dart_test` finds the
+# through, built from this same package so the two are one version. rules_dart's
+# `pub_test_runner` declares it, as rules_dart's own hubs do; `dart_test` finds the
 # runner on the direct dependency that provides `package:test`.
 _TEST_PACKAGE = "test"
 
 def _test_package_build_content(members, deps):
     return """\
-load("@rules_dart//dart:defs.bzl", "dart_binary")
-load("@rules_dart//dart/pub:pub_library.bzl", "pub_library")
-load(
-    "@rules_dart//dart/private:dart_test_runner.bzl",
-    "dart_test_package",
-    "dart_test_runner_main",
-)
+load("@rules_dart//dart/pub:pub_library.bzl", "pub_library", "pub_test_runner")
 
 pub_library(
     name = "test_library",
@@ -100,19 +94,9 @@ pub_library(
     visibility = ["//visibility:private"],
 )
 
-dart_test_runner_main(name = "test_runner_main")
-
-dart_binary(
-    name = "test_runner",
-    compile_mode = "kernel",
-    main = ":test_runner_main",
-    deps = [":test_library"],
-)
-
-dart_test_package(
+pub_test_runner(
     name = "test",
     library = ":test_library",
-    runner = ":test_runner",
     visibility = ["//visibility:public"],
 )
 """.format(members = _labels(members), deps = _labels(deps))
