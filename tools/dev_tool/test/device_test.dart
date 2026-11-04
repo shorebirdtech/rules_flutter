@@ -1289,6 +1289,162 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       },
     );
 
+    // The VM service of an app on a handset or emulator comes up when the app
+    // does, and a first launch on a busy host takes minutes. Logcat does not
+    // end when the app does, so what bounds the wait is the app's process:
+    // present, the launch waits (and says so); gone, it fails at once with the
+    // log's last words.
+    group('waiting for the VM service', () {
+      /// Launches on a device whose `pidof` answers [pids] on the n-th ask
+      /// (counting from 0), and whose forward succeeds. The launch's outcome is
+      /// read off [Launch] once the fake clock has moved.
+      ({AndroidDevice device, FakeProcess logcat}) deviceWith(
+        String Function(int ask) pids,
+      ) {
+        final logcat = FakeProcess();
+        var asked = 0;
+        final device = AndroidDevice(
+          packageName: 'com.example.app',
+          adbPath: 'adb',
+          runProcess: (exe, args) async {
+            if (args.contains('pidof')) {
+              return ProcessResult(0, 0, pids(asked++), '');
+            }
+            if (args.contains('forward')) {
+              return ProcessResult(0, 0, '41234\n', '');
+            }
+            return ProcessResult(0, 0, '', '');
+          },
+          startProcess: (exe, args) async => logcat,
+        );
+        return (device: device, logcat: logcat);
+      }
+
+      /// The launch of [device], its settled value or error visible as fake
+      /// time passes.
+      ({bool Function() done, Object? Function() error, Uri? Function() uri})
+      launching(AndroidDevice device) {
+        var done = false;
+        Object? error;
+        Uri? uri;
+        device
+            .launch('/path/to/app.apk')
+            .then(
+              (instance) {
+                uri = instance.vmServiceUri;
+                done = true;
+              },
+              onError: (Object e) {
+                error = e;
+                done = true;
+              },
+            );
+        return (done: () => done, error: () => error, uri: () => uri);
+      }
+
+      /// Moves the fake clock by [by]. The streams a launch cancels hand back
+      /// futures completed in the real zone, which fake time cannot run, so the
+      /// real event loop is given a turn after each step.
+      Future<void> pass(FakeAsync async, Duration by) async {
+        async.elapse(by);
+        for (var i = 0; i < 3; i++) {
+          await Future<void>.delayed(Duration.zero);
+          async.flushMicrotasks();
+        }
+      }
+
+      /// Starts [start] inside [async]'s zone.
+      T inside<T>(FakeAsync async, T Function() start) {
+        late T result;
+        async.run((_) => result = start());
+        async.flushMicrotasks();
+        return result;
+      }
+
+      test('an app that is alive and silent is waited for past 30 s, and '
+          'its announcement is taken whenever it comes', () async {
+        final async = FakeAsync();
+        final w = deviceWith((_) => '777\n');
+        final launch = inside(async, () => launching(w.device));
+
+        await pass(async, const Duration(minutes: 5));
+        expect(
+          launch.done(),
+          isFalse,
+          reason: 'a slow start is not a failed one: the app is running',
+        );
+
+        w.logcat.emitStdout(
+          '01-02 03:04:05.678 I/flutter (  777): The Dart VM service is '
+          'listening on http://127.0.0.1:12345/abc=/',
+        );
+        await pass(async, const Duration(seconds: 1));
+        expect(launch.error(), isNull);
+        expect(launch.uri().toString(), 'http://127.0.0.1:41234/abc=/');
+      });
+
+      test('an app whose process goes away before announcing fails the '
+          'launch at once, quoting the log', () async {
+        final async = FakeAsync();
+        // Running for the first two asks, then gone: it crashed.
+        final w = deviceWith((ask) => ask < 2 ? '777\n' : '\n');
+        final launch = inside(async, () => launching(w.device));
+        w.logcat.emitStdout(
+          '01-02 03:04:05.678 E/AndroidRuntime(  777): FATAL EXCEPTION: main',
+        );
+
+        await pass(async, const Duration(seconds: 20));
+        expect(launch.done(), isTrue);
+        expect(
+          launch.error(),
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            allOf(
+              contains('com.example.app'),
+              contains('exited before announcing a VM service'),
+              contains('FATAL EXCEPTION'),
+            ),
+          ),
+        );
+      });
+
+      test(
+        'an app that never gets a process fails the launch naming that',
+        () async {
+          final async = FakeAsync();
+          final w = deviceWith((_) => '\n');
+          final launch = inside(async, () => launching(w.device));
+
+          await pass(async, const Duration(minutes: 2));
+          expect(launch.done(), isTrue);
+          expect(
+            launch.error(),
+            isA<StateError>().having(
+              (e) => e.message,
+              'message',
+              allOf(
+                contains('com.example.app'),
+                contains('never started a process'),
+              ),
+            ),
+          );
+        },
+      );
+
+      test('a release app has no VM service to wait for', () async {
+        final async = FakeAsync();
+        final w = deviceWith((_) => '777\n');
+        w.device.buildMode = BuildMode.release;
+        final launch = inside(async, () => launching(w.device));
+
+        await pass(async, Duration.zero);
+        expect(launch.done(), isTrue, reason: 'nothing is announced');
+        expect(launch.error(), isNull);
+        expect(launch.uri(), isNull);
+      });
+    });
+
     test('stop calls force-stop when packageName is set', () async {
       final calls = <(String, List<String>)>[];
       final fakeLogcat = FakeProcess();

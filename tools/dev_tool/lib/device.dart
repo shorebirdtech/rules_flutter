@@ -1497,13 +1497,11 @@ class AndroidDevice extends Device {
 
     // Step 4: Discover VM service URI from logcat — the announcement this
     // app's process made. logcat is the whole device's log, so another Flutter
-    // app starting meanwhile announces its own there too.
-    final deviceUri = await discoverOwnVmServiceUri(
-      logs,
-      parse: parseLogcatAnnouncement,
-      isOwnProcess: (pid) => _isProcessOf(packageName, pid),
-      timeout: _androidVmServiceDiscoveryTimeout,
-    );
+    // app starting meanwhile announces its own there too. A release app
+    // announces nothing, so there is nothing to wait for.
+    final deviceUri = buildMode.servesVmService
+        ? await _awaitVmService(logs, packageName)
+        : null;
 
     // Port forwarding — the URI logcat announces is device-local, and a failed
     // forward has no usable second answer. `127.0.0.1:<devicePort>` on the host
@@ -1544,23 +1542,117 @@ class AndroidDevice extends Device {
     return AppInstance(process: logcat, vmServiceUri: vmServiceUri, logs: logs);
   }
 
-  /// Whether [pid] is a running process of [packageName].
+  /// Wait for the VM-service announcement of [packageName]'s process, for as
+  /// long as that process is there to make one.
   ///
-  /// Asked when an announcement arrives, so a process that made one is still
-  /// there to be found; `pidof` names an app's processes by its package name.
-  Future<bool> _isProcessOf(String packageName, int pid) async {
+  /// Logcat does not end when the app does, so what bounds the wait is the app
+  /// itself, asked every [_androidAppLivenessInterval] through `pidof`: a slow
+  /// start (a first launch, a busy host) is not a failed one, and it says so
+  /// every [_vmServiceSlowStartNotice] while it waits. The wait ends on the
+  /// announcement, or with a [StateError] naming what became of the app:
+  ///
+  ///  * its process was there and is gone — it crashed or exited, and the log's
+  ///    last lines are quoted;
+  ///  * it had no process at all for [_androidAppStartGrace] after `am start`
+  ///    returned, which is the activity failing to start before the system made
+  ///    one. A process takes moments to appear, so this is not a limit on how
+  ///    slowly the app may start, only on how long a missing process is waited
+  ///    for.
+  ///
+  /// Null when logcat itself ends first: the device went away, or the run is
+  /// being torn down.
+  Future<Uri?> _awaitVmService(AppLogStream logs, String packageName) async {
+    final gone = Completer<_AppGone>();
+    var seen = false;
+    var missingPolls = 0;
+    var asking = false;
+    var failing = false;
+    final liveness = Timer.periodic(_androidAppLivenessInterval, (_) async {
+      if (gone.isCompleted || asking) return;
+      asking = true;
+      try {
+        final running = (await _pidsOf(packageName)).isNotEmpty;
+        failing = false;
+        if (running) {
+          seen = true;
+          missingPolls = 0;
+        } else if (seen) {
+          gone.complete(_AppGone.exited);
+        } else if (++missingPolls >= _androidAppStartPolls) {
+          gone.complete(_AppGone.neverStarted);
+        }
+      } on StateError catch (e) {
+        // Liveness is unknown while adb will not answer, which is not the app
+        // having died. Said once per spell of failure, not every poll.
+        if (!failing) {
+          _logger.warning({
+            'message': 'android_liveness_check_failed',
+            'text':
+                'Cannot tell whether $packageName is still running on $name, '
+                'so its VM service is waited for regardless: ${e.message}',
+            'device': name,
+          });
+        }
+        failing = true;
+      } finally {
+        asking = false;
+      }
+    });
+    try {
+      final uri = await discoverOwnVmServiceUri(
+        logs,
+        parse: parseLogcatAnnouncement,
+        isOwnProcess: (pid) => _isProcessOf(packageName, pid),
+        appGone: gone.future,
+      );
+      if (uri == null && gone.isCompleted) {
+        final tail = logs.read(-20).lines;
+        final said = tail.isEmpty
+            ? 'The device log had nothing in it.'
+            : 'The end of the device log, which other apps write to as '
+                  'well:\n${tail.map((l) => '  ${l.text}').join('\n')}';
+        throw StateError(switch (await gone.future) {
+          _AppGone.exited =>
+            '$packageName exited before announcing a VM service on $name. '
+                '$said',
+          _AppGone.neverStarted =>
+            '$packageName never started a process on $name: none appeared '
+                '${_androidAppStartGrace.inSeconds}s after `am start` '
+                'succeeded, so its activity did not start. $said',
+        });
+      }
+      return uri;
+    } finally {
+      liveness.cancel();
+    }
+  }
+
+  /// The pids of [packageName]'s main process: none when it is not running.
+  ///
+  /// `pidof` names an app's processes by its package name, and a service
+  /// declared `android:process=":x"` has another name.
+  Future<List<int>> _pidsOf(String packageName) async {
     final result = await _runProcess(
       adbPath,
       _adbArgs(['shell', 'pidof', packageName]),
     );
-    final pids = '${result.stdout}'.trim();
     // `pidof` exits 1, saying nothing, when no process has the name.
     final stderr = '${result.stderr}'.trim();
     if (result.exitCode != 0 && stderr.isNotEmpty) {
       throw StateError(_adbFailure('shell pidof $packageName', stderr));
     }
-    return pids.split(RegExp(r'\s+')).contains('$pid');
+    return [
+      for (final pid in '${result.stdout}'.trim().split(RegExp(r'\s+')))
+        if (int.tryParse(pid) case final parsed?) parsed,
+    ];
   }
+
+  /// Whether [pid] is a running process of [packageName].
+  ///
+  /// Asked when an announcement arrives, so a process that made one is still
+  /// there to be found.
+  Future<bool> _isProcessOf(String packageName, int pid) async =>
+      (await _pidsOf(packageName)).contains(pid);
 
   /// Read the package name (and launchable activity) out of the APK.
   ///
@@ -2159,11 +2251,22 @@ final vmServiceUriPattern = RegExp(
   r'The Dart VM service is listening on ((http|//)[a-zA-Z0-9:/=_\-\.\[\]]+)',
 );
 
-/// How long an Android launch waits for the VM-service announcement before
-/// giving up. Android's logcat does not end when the app dies and there is no
-/// liveness signal to wait on instead, so it still has a deadline; the other
-/// platforms wait for the app itself (see [discoverVmServiceUri]).
-const _androidVmServiceDiscoveryTimeout = Duration(seconds: 30);
+/// How often an Android launch asks, while awaiting the VM service, whether
+/// the app's process is still there.
+const _androidAppLivenessInterval = Duration(seconds: 2);
+
+/// How long an Android app may have no process at all, after `am start`
+/// succeeded, before its launch is called failed. See
+/// [AndroidDevice._awaitVmService].
+const _androidAppStartGrace = Duration(seconds: 30);
+
+/// [_androidAppStartGrace] in liveness polls.
+final _androidAppStartPolls =
+    _androidAppStartGrace.inMilliseconds ~/
+    _androidAppLivenessInterval.inMilliseconds;
+
+/// What became of an Android app whose VM service was being awaited.
+enum _AppGone { exited, neverStarted }
 
 /// How often a launch that is still waiting for the VM-service announcement
 /// says so.
