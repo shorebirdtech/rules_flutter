@@ -60,6 +60,53 @@ void main() {
       );
     });
   });
+  // One run is one build of the launch target, so every device in it gets that
+  // build's native libraries and native-assets table. A device of another ABI
+  // would run the first device's, so the run is refused before it builds.
+  group('assertDevicesShareOneBuild', () {
+    test('devices of different ABIs are refused, naming each and why', () {
+      expect(
+        () => assertDevicesShareOneBuild([
+          AndroidDevice(deviceId: 'PIXEL', abi: 'arm64-v8a'),
+          AndroidDevice(deviceId: 'emulator-5554', abi: 'x86_64'),
+        ]),
+        throwsA(
+          isA<DevToolException>().having(
+            (e) => e.message,
+            'message',
+            allOf(
+              contains('Android (PIXEL)'),
+              contains('arm64-v8a'),
+              contains('Android (emulator-5554)'),
+              contains('x86_64'),
+              contains('one run per'),
+            ),
+          ),
+        ),
+      );
+    });
+
+    test('devices of one ABI share a build', () {
+      expect(
+        () => assertDevicesShareOneBuild([
+          AndroidDevice(deviceId: 'PIXEL', abi: 'arm64-v8a'),
+          AndroidDevice(deviceId: 'emulator-5554', abi: 'arm64-v8a'),
+        ]),
+        returnsNormally,
+      );
+    });
+
+    test('a desktop and a phone are refused', () {
+      expect(
+        () => assertDevicesShareOneBuild([
+          IOSSimulatorDevice(udid: 'SIM'),
+          AndroidDevice(abi: 'arm64-v8a'),
+        ]),
+        throwsA(isA<DevToolException>()),
+      );
+    });
+  });
+
   // The run's own intent, asked once and answered everywhere the flag governs.
   group('hotReloadOffReason', () {
     test('a run that asked for hot reload has no reason to refuse it', () {

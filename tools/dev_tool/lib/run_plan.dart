@@ -23,6 +23,30 @@ import 'toolchain_info.dart';
 import 'web_mode.dart';
 import 'web_options.dart';
 
+/// Refuses [devices] that cannot be built by one `bazel build`.
+///
+/// A run launches every device from a single build of the launch target, and
+/// the build's flags are the first device's. Devices that need different ones
+/// (an x86_64 emulator and an arm64 phone: another ABI means other native
+/// libraries, another native-assets table) would each get the wrong build
+/// facts for all but the first, silently, so they are refused before anything
+/// is built.
+void assertDevicesShareOneBuild(List<Device> devices) {
+  final distinctBuildArgs = devices.map((d) => d.buildArgs.join(' ')).toSet();
+  if (distinctBuildArgs.length > 1) {
+    final details = devices
+        .where((d) => d.buildArgs.isNotEmpty)
+        .map((d) => '  ${d.name}: ${d.buildArgs.join(' ')}')
+        .join('\n');
+    throw DevToolException(
+      'Cannot build for multiple platforms in one invocation.\n$details\n'
+      'A run launches every device from one build, so devices that need '
+      'different flags (another Android ABI, say) cannot share a run: start '
+      'one run per build configuration.',
+    );
+  }
+}
+
 /// Refuses a compilation mode no device in [devices] can actually run.
 ///
 /// Only one combination qualifies, and it is the one that fails quietly: an AOT
@@ -404,16 +428,7 @@ class RunPlan {
 
     // All devices must agree on platform build args: one invocation is one
     // build, and a build cannot be for two platforms at once.
-    final distinctBuildArgs = devices.map((d) => d.buildArgs.join(' ')).toSet();
-    if (distinctBuildArgs.length > 1) {
-      final details = devices
-          .where((d) => d.buildArgs.isNotEmpty)
-          .map((d) => '  ${d.name}: ${d.buildArgs.join(' ')}')
-          .join('\n');
-      throw DevToolException(
-        'Cannot build for multiple platforms in one invocation.\n$details',
-      );
-    }
+    assertDevicesShareOneBuild(devices);
 
     // Before the preflight: the mode decides which host tools a launch needs
     // (an iOS device attaches lldb to a debug app only), as well as how it
