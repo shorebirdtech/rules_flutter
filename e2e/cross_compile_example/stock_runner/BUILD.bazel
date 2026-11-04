@@ -1,4 +1,4 @@
-load("@rules_flutter//flutter:linux.bzl", "flutter_linux_engine", "flutter_linux_runner_lib_gen")
+load("@rules_flutter//flutter:linux.bzl", "flutter_linux_app", "flutter_linux_engine", "flutter_linux_registrant_gen", "flutter_linux_runner_lib_gen")
 
 # What Flutter's own build (CMake) gives the Linux runner that `flutter create`
 # writes, which the runner relies on without saying so: the engine's headers and
@@ -33,4 +33,37 @@ flutter_linux_runner_lib_gen(
     application = "//:cross_app",
     engine = ":engine",
     registrant = ":committed_registrant",
+)
+
+# The registrant rules_flutter generates, for a project that does not check
+# `linux/flutter/generated_plugin_registrant.*` in, reached by the name the
+# runner includes it under.
+flutter_linux_registrant_gen(
+    name = "generated_registrant",
+    application = "//:cross_app",
+)
+
+flutter_linux_runner_lib_gen(
+    name = "probe_generated_registrant",
+    srcs = ["probes/generated_registrant.cc"],
+    application = "//:cross_app",
+    engine = ":engine",
+    registrant = ":generated_registrant",
+)
+
+# `flutter create`'s runner, byte for byte: the 3.47.9 template with only the
+# project name filled in. It also reads `APPLICATION_ID`, which Flutter's
+# CMake defines from the project's GTK application id.
+flutter_linux_app(
+    name = "stock_runner_linux",
+    application = "//:cross_app",
+)
+
+flutter_linux_runner_lib_gen(
+    name = "stock_runner_generated_registrant",
+    srcs = glob(["linux/runner/*.cc"]),
+    hdrs = glob(["linux/runner/*.h"]),
+    application = "//:cross_app",
+    engine = ":engine",
+    registrant = ":generated_registrant",
 )

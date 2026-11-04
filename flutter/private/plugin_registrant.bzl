@@ -445,11 +445,54 @@ void RegisterPlugins(flutter::PluginRegistry* registry);
 #endif
 """
 
+# How runner code includes the native registrant's header: the path `flutter
+# create` gives it (`<platform>/flutter/generated_plugin_registrant.h`) seen
+# from the platform directory on the include path.
+_NATIVE_REGISTRANT_HEADER = "flutter/generated_plugin_registrant.h"
+
+def native_registrant_header_path(label_name):
+    """Where a generated native registrant header is declared.
+
+    Args:
+        label_name: Name of the registrant target.
+
+    Returns:
+        The path relative to the target's package, ending in the name runner
+        code includes it by.
+    """
+    return label_name + "/" + _NATIVE_REGISTRANT_HEADER
+
+def registrant_include_dirs(header_paths):
+    """Include directories that make registrant headers reachable.
+
+    Each header's own directory, and for one in a `flutter/` directory (where
+    `flutter create` puts `generated_plugin_registrant.h`, and where
+    `native_registrant_header_path` declares it) that directory's parent as
+    well, so `#include "flutter/generated_plugin_registrant.h"` resolves.
+
+    Args:
+        header_paths: Paths of the registrant header files.
+
+    Returns:
+        A list of directory paths without duplicates, in first-seen order.
+    """
+    dirs = []
+    for path in header_paths:
+        d = path[:path.rfind("/")]
+        candidates = [d]
+        if d.endswith("/flutter"):
+            candidates.append(d[:d.rfind("/")])
+        for c in candidates:
+            if c and c not in dirs:
+                dirs.append(c)
+    return dirs
+
 def generate_native_plugin_registrant_header(ctx, target_platform):
     """Generate a native plugin registrant header file.
 
     Produces the .h that declares the registration function so runner code
-    can #include "flutter/generated_plugin_registrant.h".
+    can #include "flutter/generated_plugin_registrant.h" (see
+    `registrant_include_dirs` for the include path that makes it so).
 
     Args:
         ctx: Rule context.
@@ -465,7 +508,7 @@ def generate_native_plugin_registrant_header(ctx, target_platform):
     else:
         return None
 
-    header = ctx.actions.declare_file(ctx.label.name + "_native_plugin_registrant.h")
+    header = ctx.actions.declare_file(native_registrant_header_path(ctx.label.name))
     ctx.actions.write(header, content)
     return header
 

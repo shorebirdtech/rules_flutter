@@ -27,6 +27,7 @@ load("//flutter/private:common.bzl", "compute_desktop_bundle_copies")
 load("//flutter/private:engine_helpers.bzl", "find_engine_header_dir", "linux_multiarch_triple")
 load("//flutter/private:exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
 load("//flutter/private:path_mapping.bzl", "file_ref", "json_config_args")
+load("//flutter/private:plugin_registrant.bzl", "registrant_include_dirs")
 
 # GTK3 include subdirectories within the Chromium sysroot.
 _GTK3_INCLUDE_SUBDIRS = [
@@ -312,24 +313,14 @@ def _compile_linux_runner(ctx, runner_srcs, engine_files, defines, linux_sysroot
     # path so runner code can do #include "flutter/generated_plugin_registrant.h".
     all_header_files = header_files + registrant_hdrs + runner_hdrs + plugin_hdrs
     extra_compile = list(sysroot_include_flags)
-    registrant_include_dirs = {}
-    for h in registrant_hdrs:
-        d = h.path[:h.path.rfind("/")]
-        if d not in registrant_include_dirs:
-            registrant_include_dirs[d] = True
-            extra_compile.append("-I" + d)
-
-        # For flutter create registrant files at linux/flutter/generated_plugin_registrant.h,
-        # also add the grandparent dir so #include "flutter/generated_plugin_registrant.h" resolves.
-        if "/flutter/" in h.path:
-            grandparent = d[:d.rfind("/")]
-            if grandparent and grandparent not in registrant_include_dirs:
-                registrant_include_dirs[grandparent] = True
-                extra_compile.append("-I" + grandparent)
+    seen_dirs = {}
+    for d in registrant_include_dirs([h.path for h in registrant_hdrs]):
+        seen_dirs[d] = True
+        extra_compile.append("-I" + d)
     for h in runner_hdrs:
         d = h.path[:h.path.rfind("/")]
-        if d not in registrant_include_dirs:
-            registrant_include_dirs[d] = True
+        if d not in seen_dirs:
+            seen_dirs[d] = True
             extra_compile.append("-I" + d)
 
     # Plugin header parent dirs and plugin-relative include directories.
@@ -338,8 +329,8 @@ def _compile_linux_runner(ctx, runner_srcs, engine_files, defines, linux_sysroot
     plugin_pkg_roots = {}
     for h in plugin_hdrs:
         d = h.path[:h.path.rfind("/")]
-        if d not in registrant_include_dirs:
-            registrant_include_dirs[d] = True
+        if d not in seen_dirs:
+            seen_dirs[d] = True
             extra_compile.append("-I" + d)
     for f in plugin_srcs:
         path = f.path
@@ -354,8 +345,8 @@ def _compile_linux_runner(ctx, runner_srcs, engine_files, defines, linux_sysroot
     for include_dir in plugin_include_dirs:
         for pkg_root in plugin_pkg_roots.keys():
             full = pkg_root + "/" + include_dir
-            if full not in registrant_include_dirs:
-                registrant_include_dirs[full] = True
+            if full not in seen_dirs:
+                seen_dirs[full] = True
                 extra_compile.append("-I" + full)
 
     return compile_and_link_runner(

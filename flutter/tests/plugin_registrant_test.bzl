@@ -1,7 +1,7 @@
 """Unit tests for plugin_registrant.bzl pure functions."""
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
-load("//flutter/private:plugin_registrant.bzl", "make_android_registrant_content", "make_registrant_content")
+load("//flutter/private:plugin_registrant.bzl", "make_android_registrant_content", "make_registrant_content", "native_registrant_header_path", "registrant_include_dirs")
 
 def _no_plugins_returns_empty_test_impl(ctx):
     env = unittest.begin(ctx)
@@ -284,5 +284,38 @@ def _android_registrant_names_the_declared_package_test_impl(ctx):
 
 _t15_test = unittest.make(_android_registrant_names_the_declared_package_test_impl)
 
+def _reaches(header_path, include_dirs, name):
+    """Whether `#include "<name>"` finds `header_path` under one of `include_dirs`."""
+    for d in include_dirs:
+        if header_path == d + "/" + name:
+            return True
+    return False
+
+def _native_registrant_is_included_as_flutter_header_test_impl(ctx):
+    """Runner code includes `flutter/generated_plugin_registrant.h`, as `flutter create`'s does.
+
+    Holds for the header rules_flutter generates (Linux and Windows share the
+    declaration and the include path) and for the one `flutter create` checks in
+    at `<platform>/flutter/`.
+    """
+    env = unittest.begin(ctx)
+    name = "flutter/generated_plugin_registrant.h"
+    generated = "bazel-out/cfg/bin/pkg/" + native_registrant_header_path("app_registrant")
+    committed = "pkg/linux/flutter/generated_plugin_registrant.h"
+    for header in [generated, committed]:
+        asserts.true(env, _reaches(header, registrant_include_dirs([header]), name), header)
+    return unittest.end(env)
+
+def _registrant_include_dirs_stay_narrow_test_impl(ctx):
+    """A header outside a `flutter/` directory adds only its own directory, once."""
+    env = unittest.begin(ctx)
+    asserts.equals(env, ["a/b"], registrant_include_dirs(["a/b/r.h", "a/b/s.h"]))
+    asserts.equals(env, ["a/flutter", "a"], registrant_include_dirs(["a/flutter/r.h"]))
+    asserts.equals(env, ["a/myflutter"], registrant_include_dirs(["a/myflutter/r.h"]))
+    return unittest.end(env)
+
+_t16_test = unittest.make(_native_registrant_is_included_as_flutter_header_test_impl)
+_t17_test = unittest.make(_registrant_include_dirs_stay_narrow_test_impl)
+
 def plugin_registrant_test_suite(name):
-    unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test, _t6_test, _t7_test, _t8_test, _t9_test, _t10_test, _t11_test, _t12_test, _t13_test, _t14_test, _t15_test)
+    unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test, _t6_test, _t7_test, _t8_test, _t9_test, _t10_test, _t11_test, _t12_test, _t13_test, _t14_test, _t15_test, _t16_test, _t17_test)

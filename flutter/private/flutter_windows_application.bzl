@@ -26,6 +26,7 @@ load("//flutter/private:common.bzl", "compute_desktop_bundle_copies")
 load("//flutter/private:engine_helpers.bzl", "find_engine_header_dir")
 load("//flutter/private:exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
 load("//flutter/private:path_mapping.bzl", "file_ref", "json_config_args")
+load("//flutter/private:plugin_registrant.bzl", "registrant_include_dirs")
 
 # =============================================================================
 # Runner compilation rule
@@ -181,21 +182,14 @@ def _compile_windows_runner(ctx, runner_srcs, engine_files, is_debug, registrant
     # Include registrant, runner, and plugin header directories.
     all_header_files = header_files + registrant_hdrs + runner_hdrs + plugin_hdrs
     seen_dirs = {}
-    for h in registrant_hdrs + runner_hdrs + plugin_hdrs:
+    for d in registrant_include_dirs([h.path for h in registrant_hdrs]):
+        seen_dirs[d] = True
+        extra_compile_flags.append("-I" + d)
+    for h in runner_hdrs + plugin_hdrs:
         d = h.path[:h.path.rfind("/")]
         if d not in seen_dirs:
             seen_dirs[d] = True
             extra_compile_flags.append("-I" + d)
-
-    # For flutter create registrant files at windows/flutter/generated_plugin_registrant.h,
-    # also add the grandparent dir so #include "flutter/generated_plugin_registrant.h" resolves.
-    for h in registrant_hdrs:
-        if "/flutter/" in h.path:
-            d = h.path[:h.path.rfind("/")]
-            grandparent = d[:d.rfind("/")]
-            if grandparent and grandparent not in seen_dirs:
-                seen_dirs[grandparent] = True
-                extra_compile_flags.append("-I" + grandparent)
 
     # Plugin-relative include dirs (e.g. "windows/include") resolved
     # against each plugin's package root (deduced from plugin_srcs paths).
