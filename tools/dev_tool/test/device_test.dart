@@ -1455,6 +1455,65 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         );
       });
 
+      // What a Pixel (Android 16) printed for an app whose `onCreate` threw,
+      // read off the device: the activity was launched, so the status is ok,
+      // and the process died before the launch could name how it started, so
+      // the state is UNKNOWN. A crash on start is not a launch that failed to
+      // start; the dead process is what says so.
+      test('a launch whose app crashed on start (Status: ok, LaunchState: '
+          'UNKNOWN) fails when its process is gone', () async {
+        final async = FakeAsync();
+        final w = deviceWith(
+          (_) => '\n',
+          amStart: () async => ProcessResult(
+            0,
+            0,
+            'Starting: Intent { cmp=com.example.app/.MainActivity }\n'
+                'Status: ok\nLaunchState: UNKNOWN (0)\n'
+                'Activity: com.example.app/.MainActivity\n'
+                'WaitTime: 694\nComplete\n',
+            '',
+          ),
+        );
+        final launch = inside(async, () => launching(w.device));
+
+        await pass(async, const Duration(seconds: 3));
+        expect(
+          launch.error(),
+          stateErrorSaying(['com.example.app', 'exited before announcing']),
+        );
+      });
+
+      // An exception after the engine started (`onCreate` throwing once
+      // `super.onCreate` has returned) comes after the VM service is announced,
+      // so the launch succeeds and the connection to the dead service is what
+      // fails. That failure has to say the app exited, not blame the service.
+      test('an app that announced its VM service and died is said to have '
+          'exited, with the log', () async {
+        final w = deviceWith((_) => '\n');
+        final instance = AppInstance(process: w.logcat);
+        instance.logs.add('E/AndroidRuntime( 7960): FATAL EXCEPTION: main');
+
+        final why = await w.device.whyAppExited(instance);
+
+        expect(
+          why,
+          allOf(
+            contains('com.example.app exited'),
+            contains('FATAL EXCEPTION'),
+          ),
+        );
+      });
+
+      test('an app still running is not said to have exited', () async {
+        final w = deviceWith((_) => '777\n');
+
+        expect(
+          await w.device.whyAppExited(AppInstance(process: w.logcat)),
+          isNull,
+        );
+      });
+
       // `am start -W` returns once the first frame is drawn. An app started
       // paused never draws one, so it has not answered, and no process is yet
       // proof of nothing: waiting for it is the only honest thing to do.
@@ -1536,7 +1595,10 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
           amStart: () async => ProcessResult(
             0,
             0,
-            'Status: timeout\nLaunchState: UNKNOWN (0)\n',
+            'Starting: Intent { cmp=com.example.app/.MainActivity }\n'
+                'Status: timeout\nLaunchState: UNKNOWN (-1)\n'
+                'Activity: com.example.app/.MainActivity\n'
+                'WaitTime: 10170\nComplete\n',
             '',
           ),
         );

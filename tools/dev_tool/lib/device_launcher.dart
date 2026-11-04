@@ -268,6 +268,9 @@ class DeviceLauncher {
           'reason': vmFailureReason ?? 'unknown failure',
         });
       } else {
+        // Asked before the app is stopped: a process this run killed is not
+        // one that died.
+        final exited = await device.whyAppExited(appInstance);
         try {
           await device.stop(appInstance);
         } catch (e) {
@@ -280,6 +283,9 @@ class DeviceLauncher {
             'device': device.name,
             'error': '$e',
           });
+        }
+        if (exited != null) {
+          throw DevToolException('Launch failed on ${device.name}: $exited');
         }
         throw DevToolException(
           'No VM service connection on ${device.name}: '

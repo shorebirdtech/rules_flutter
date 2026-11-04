@@ -314,6 +314,10 @@ abstract class Device {
   /// Stop the running app.
   Future<void> stop(AppInstance instance);
 
+  /// Why [instance] is no longer running, once its VM service could not be
+  /// reached: null while it runs, or on a device that cannot tell.
+  Future<String?> whyAppExited(AppInstance instance) async => null;
+
   /// Release what a launch left running when no session took ownership of it.
   ///
   /// The launcher gives this to the run's teardown before it calls [launch],
@@ -1628,17 +1632,47 @@ class AndroidDevice extends Device {
         appGone: gone.future,
       );
       if (uri == null && gone.isCompleted) {
-        final tail = logs.read(-20).lines;
-        final said = tail.isEmpty
-            ? 'The device log had nothing in it.'
-            : 'The end of the device log, which other apps write to as '
-                  'well:\n${tail.map((l) => '  ${l.text}').join('\n')}';
-        throw StateError('${await gone.future} $said');
+        throw StateError('${await gone.future} ${_deviceLogTail(logs)}');
       }
       return uri;
     } finally {
       liveness.cancel();
     }
+  }
+
+  /// The end of the device log, for a failure to quote.
+  String _deviceLogTail(AppLogStream logs) {
+    final tail = logs.read(-20).lines;
+    return tail.isEmpty
+        ? 'The device log had nothing in it.'
+        : 'The end of the device log, which other apps write to as '
+              'well:\n${tail.map((l) => '  ${l.text}').join('\n')}';
+  }
+
+  /// A process that announced its VM service and then died (an exception
+  /// after the engine started, say) leaves a service address nothing answers,
+  /// and the connection to it fails; this says the app is gone instead, with
+  /// the log's last words. Null while the process is there.
+  @override
+  Future<String?> whyAppExited(AppInstance instance) async {
+    final packageName = _packageName;
+    if (packageName == null) return null;
+    final List<int> pids;
+    try {
+      pids = await _pidsOf(packageName);
+    } on StateError catch (e) {
+      _logger.warning({
+        'message': 'android_liveness_check_failed',
+        'text':
+            'Cannot tell whether $packageName is still running on $name: '
+            '${e.message}',
+        'device': name,
+      });
+      return null;
+    }
+    if (pids.isNotEmpty) return null;
+    return '$packageName exited after announcing its VM service on $name. '
+        '${_deviceLogTail(instance.logs)}';
   }
 
   /// The pids of [packageName]'s main process: none when it is not running.
@@ -2293,6 +2327,14 @@ class _AmStart {
 /// timeout` is `am` giving up on the first frame, which a loaded host causes
 /// and which says nothing about whether a process exists, so it is no verdict.
 /// Output with no `Status` line (an `am` older than the flag) is none either.
+///
+/// Read off a Pixel: a healthy cold start prints `Status: ok` and `LaunchState:
+/// COLD`; an app that threw in `onCreate` prints `Status: ok` and `LaunchState:
+/// UNKNOWN (0)` (the activity launched, and the process died before `am` could
+/// say how); an app that held the main thread past `am`'s ten seconds prints
+/// `Status: timeout` and `LaunchState: UNKNOWN (-1)`, its process alive. So an
+/// `ok` status of any state but `WARM` and `HOT` is a process that was
+/// started, alive or not, and the liveness check tells which.
 _AmStart _readAmStart(ProcessResult result) {
   final output = '${result.stdout}${result.stderr}'.trim();
   if (result.exitCode != 0) {
