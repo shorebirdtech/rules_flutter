@@ -359,7 +359,8 @@ build_test(
 
 # What the plugins' generated BuildConfig classes say, read from the dex of an
 # APK of each mode: debug, profile and release (the default configuration and
-# `-c opt`). `identity` checks the classes are there and name their package.
+# `-c opt`). `identity` checks the classes are there and name their package; `mode` checks
+# they say what Gradle's BuildConfig would for the build mode.
 [
     dart_test(
         name = "verify_android_build_config_%s_test" % check,
@@ -378,6 +379,7 @@ build_test(
     )
     for check in [
         "identity",
+        "mode",
     ]
 ]
 

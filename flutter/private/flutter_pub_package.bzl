@@ -1065,11 +1065,10 @@ def make_android_subpackage_build_content(
 
     BuildConfig.java is generated from the plugin's `java_package`. Many
     Flutter plugins reference `BuildConfig.DEBUG`, which Gradle synthesizes
-    automatically; rules_android does not. We emit a minimal stub so the
-    plugin's source compiles. `DEBUG = false` is the safe default —
-    Flutter's Bazel build is release-by-default; debug runtime semantics
-    are governed by `flutter_android_engine`'s engine selection, not by
-    `BuildConfig.DEBUG`.
+    automatically; rules_android does not. `android_build_config` emits it,
+    with `DEBUG` and `BUILD_TYPE` as Gradle's would be in the build's mode
+    (debug: true and `debug`, profile: true and `profile`, release: false
+    and `release`).
 
     Args:
         android_src_dir: Source dir under the package root (e.g.
@@ -1256,7 +1255,7 @@ android_library(
 
     return """\
 {maven_loads}load("@rules_flutter//flutter:android.bzl", "flutter_android_engine")
-load("@rules_java//java:java_library.bzl", "java_library")
+load("@rules_flutter//flutter/private:android_build_config.bzl", "android_build_config")
 load("@rules_kotlin//kotlin:android.bzl", "kt_android_library")
 {maven_call}
 # Private engine target — gives the plugin's Kotlin/Java the FlutterPlugin
@@ -1270,20 +1269,11 @@ flutter_android_engine(
     visibility = ["//visibility:private"],
 )
 
-# BuildConfig.java stub. Gradle synthesizes this per Android module
-# (matching `android.namespace`). rules_android doesn't, so we generate
-# a minimal one — `DEBUG = false`, which is correct for release builds
-# and harmless for debug (the engine ABI / mode is decided elsewhere).
-genrule(
-    name = "_build_config_src",
-    outs = ["_build_config/{bc_package_path}/BuildConfig.java"],
-    cmd = "cat > $@ <<'EOF'\\npackage {bc_package};\\npublic final class BuildConfig {{\\n  public static final boolean DEBUG = false;\\n  public static final String LIBRARY_PACKAGE_NAME = \\"{bc_package}\\";\\n  public static final String BUILD_TYPE = \\"release\\";\\n}}\\nEOF\\n",
-)
-
-java_library(
+# BuildConfig for the plugin's namespace, which Gradle generates and
+# rules_android does not. DEBUG and BUILD_TYPE follow the build mode.
+android_build_config(
     name = "_build_config",
-    srcs = [":_build_config_src"],
-    visibility = ["//visibility:private"],
+    package = "{bc_package}",
 )
 {synthesized_manifest}{compile_only_target}
 kt_android_library(
@@ -1304,7 +1294,6 @@ kt_android_library(
         compile_only_target = compile_only_target,
         runtime_deps = runtime_deps_arg,
         bc_package = bc_package,
-        bc_package_path = bc_package.replace(".", "/"),
         synthesized_manifest = synthesized_manifest,
     )
 

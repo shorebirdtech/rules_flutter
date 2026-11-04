@@ -8,7 +8,7 @@
 # them, because it rewrites comment text too.
 
 load("@rules_flutter//flutter:android.bzl", "flutter_android_engine")
-load("@rules_java//java:java_library.bzl", "java_library")
+load("@rules_flutter//flutter/private:android_build_config.bzl", "android_build_config")
 load("@rules_kotlin//kotlin:android.bzl", "kt_android_library")
 
 # Private engine target — gives the plugin's Java the FlutterPlugin SPI
@@ -21,20 +21,11 @@ flutter_android_engine(
     visibility = ["//visibility:private"],
 )
 
-# BuildConfig.java stub. Gradle synthesizes this per Android module
-# (matching `android.namespace`). rules_android doesn't, so we generate
-# a minimal one — `DEBUG = false`, which is correct for release builds
-# and harmless for debug (the engine ABI / mode is decided elsewhere).
-genrule(
-    name = "_build_config_src",
-    outs = ["_build_config/com/ryanheise/audio_session/BuildConfig.java"],
-    cmd = "cat > $@ <<'EOF'\npackage com.ryanheise.audio_session;\npublic final class BuildConfig {\n  public static final boolean DEBUG = false;\n  public static final String LIBRARY_PACKAGE_NAME = \"com.ryanheise.audio_session\";\n  public static final String BUILD_TYPE = \"release\";\n}\nEOF\n",
-)
-
-java_library(
+# BuildConfig for the plugin's namespace, which Gradle generates and
+# rules_android does not. DEBUG and BUILD_TYPE follow the build mode.
+android_build_config(
     name = "_build_config",
-    srcs = [":_build_config_src"],
-    visibility = ["//visibility:private"],
+    package = "com.ryanheise.audio_session",
 )
 
 kt_android_library(

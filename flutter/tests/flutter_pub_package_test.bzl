@@ -141,7 +141,7 @@ def _record_android_subpackage_test_impl(ctx):
     )
     asserts.true(
         env,
-        "_build_config/com/llfbandit/record/BuildConfig.java" in content,
+        'android_build_config(\n    name = "_build_config",\n    package = "com.llfbandit.record",' in content,
         "expected BuildConfig against the plugin namespace in:\n" + content,
     )
 
