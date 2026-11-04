@@ -241,6 +241,12 @@ bzl_library(
 )
 
 bzl_library(
+    name = "ios_signing_check",
+    srcs = ["ios_signing_check.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+)
+
+bzl_library(
     name = "apple_xcode",
     srcs = ["apple_xcode.bzl"],
     visibility = ["//flutter:__subpackages__"],

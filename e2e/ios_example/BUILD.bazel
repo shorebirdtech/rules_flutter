@@ -20,7 +20,7 @@ load(
 load("@rules_flutter//tools/e2e_testing:apple_analysis_test.bzl", "analyses_test", "command_line_tests", "skipped_test")
 load("@rules_flutter//tools/e2e_testing:apple_release_build.bzl", "apple_release_build")
 load("@rules_swift//swift:swift.bzl", "swift_library")
-load(":simulator_mode_test.bzl", "simulator_fastbuild_refused_test")
+load(":simulator_mode_test.bzl", "device_needs_profile_test", "simulator_fastbuild_refused_test")
 
 exports_files(["pubspec.lock"])
 
@@ -298,6 +298,15 @@ flutter_ios_simulator_build_test(
 
 simulator_fastbuild_refused_test(
     name = "simulator_fastbuild_refused_test",
+    target_compatible_with = ["@platforms//os:macos"],
+    target_under_test = ":app",
+)
+
+# Property: a device build without a provisioning profile fails, and says why.
+# rules_apple wants the profile also for an app it does not sign (the build
+# below is the sign-later one), which its own message does not explain.
+device_needs_profile_test(
+    name = "device_needs_profile_test",
     target_compatible_with = ["@platforms//os:macos"],
     target_under_test = ":app",
 )

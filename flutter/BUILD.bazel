@@ -148,6 +148,7 @@ bzl_library(
         "//flutter/private:flutter_ios_application",
         "//flutter/private:flutter_ios_registrant",
         "//flutter/private:flutter_plist_merge",
+        "//flutter/private:ios_signing_check",
         "//flutter/private:runner_module",
     ],
 )

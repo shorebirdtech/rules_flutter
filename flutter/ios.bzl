@@ -72,6 +72,7 @@ load("//flutter/private:flutter_ios_application.bzl", _flutter_ios_application =
 load("//flutter/private:flutter_ios_registrant.bzl", _flutter_ios_registrant_rule = "flutter_ios_registrant")
 load("//flutter/private:flutter_plist_merge.bzl", _flutter_entitlements_merge = "flutter_entitlements_merge", _flutter_plist_merge = "flutter_plist_merge")
 load("//flutter/private:ios_entitlements.bzl", "resolve_ios_entitlements")
+load("//flutter/private:ios_signing_check.bzl", "flutter_ios_signing_check")
 load("//flutter/private:runner_module.bzl", "runner_module_name")
 load("//flutter/private:validation.bzl", "validate_minimum_os_version")
 
@@ -331,11 +332,20 @@ def flutter_ios_app(
         - `ios/Runner/*.swift` (AppDelegate, SceneDelegate, etc.)
     Generate these with: `flutter create --platforms=ios .`
 
-    Simulator builds need no code signing. Device builds require
-    `provisioning_profile`; without it `ios_application` fails at analysis
-    with "The provisioning_profile attribute must be set for device builds
-    on this platform (ios)". See the README's "Running an iOS example on a
-    physical device" for how to obtain one without an Xcode project.
+    Simulator builds need no code signing. A device build needs
+    `provisioning_profile`, and fails at analysis, saying so, without one. That
+    holds for an app that is not signed in this build as well: rules_apple
+    takes the bundle's `embedded.mobileprovision` and its entitlements from the
+    profile, also when signing is left for later (see below). See the README's
+    "Running on an iOS device" for how to obtain a profile without an Xcode
+    project.
+
+    To leave signing for later, as `flutter build ios --no-codesign` does for a
+    CI that holds no signing identity, build with
+    `--features=disable_legacy_signing`: the `.ipa` is unsigned, and
+    rules_apple's `combined_dossier_zip` output group holds what
+    `dossier_codesigningtool` signs it with elsewhere. Unlike
+    `--no-codesign`, this still wants the profile.
 
     Non-release builds carry two extra `Info.plist` keys —
     `NSBonjourServices` and `NSLocalNetworkUsageDescription` — so the engine
@@ -651,6 +661,16 @@ def flutter_ios_app(
         tags = tags,
     )
 
+    # 10c. Fails a device build that has no provisioning profile with the reason
+    #      rules_apple wants one, which its own error leaves out. Which builds
+    #      are for a device is known to the rule, under the transition.
+    flutter_ios_signing_check(
+        name = "__%s_signing_check" % name,
+        app_label = str(native.package_relative_label(name)),
+        provisioning_profile_set = provisioning_profile != None,
+        tags = tags,
+    )
+
     # 11. Final ios_application, behind the target the user names.
     ios_application(
         name = "__%s_app" % name,
@@ -672,6 +692,7 @@ def flutter_ios_app(
             "__%s_runner" % name,
             "__%s_app_bundle" % name,
             "__%s_native_frameworks" % name,
+            "__%s_signing_check" % name,
         ],
         tags = tags,
         **kwargs

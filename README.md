@@ -590,7 +590,19 @@ for f in ~/Library/Developer/Xcode/UserData/Provisioning\ Profiles/*.mobileprovi
 done
 ```
 
-Without `provisioning_profile`, a device build fails at analysis with "The provisioning_profile attribute must be set for device builds on this platform (ios)".
+Without `provisioning_profile`, a device build fails at analysis, and the message says that rules_apple needs the profile even for an app it does not sign in that build.
+
+**Signing later.** `flutter build ios --no-codesign` builds an app with no signing identity at hand, for a CI that signs elsewhere. The equivalent here is rules_apple's sign-later flow. Build the device app with `--features=disable_legacy_signing`, which leaves the `.ipa` unsigned, and take the `combined_dossier_zip` output group:
+
+```sh
+bazel build //:my_app_ios_device -c opt --ios_multi_cpus=arm64 \
+    --features=disable_legacy_signing --noincompatible_auto_exec_groups \
+    --output_groups=+combined_dossier_zip
+```
+
+`--noincompatible_auto_exec_groups` is needed with rules_apple 5.2.0, whose action that assembles the unsigned archive has no toolchain set and so fails analysis under the `--incompatible_auto_exec_groups` this README recommends. Leave it out once the rules_apple you use sets one.
+
+The dossier holds what rules_apple's `dossier_codesigningtool` needs to sign the bundle on a machine that has the identity. The profile is still required, because it supplies the bundle's `embedded.mobileprovision` and its entitlements. `--no-codesign` differs here: Xcode leaves the profile out as well, and rules_apple's sign-later model has no equivalent.
 
 **Entitlements your profile cannot grant.** A simulator build is ad-hoc signed and validates nothing. A device build is signed against the profile, and an entitlement the profile does not grant fails it:
 
