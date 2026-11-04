@@ -109,10 +109,13 @@ maven.install(
         "androidx.fragment:fragment:1.8.9",
         "androidx.lifecycle:lifecycle-common:2.10.0",
         "androidx.lifecycle:lifecycle-runtime:2.10.0",
-        # androidx.lifecycle is an atomic version group (siblings depend on
-        # exact [version] ranges), so the members fragment pulls in
-        # transitively must be pinned to the same version for coursier to
-        # resolve.
+        # androidx.lifecycle is one version group, and fragment pulls in more
+        # of it than the lines above: pin those members to the same version.
+        # Relaxed reconciliation lets Coursier resolve without them, but takes
+        # the old version another artifact asks for (livedata 2.0.0,
+        # livedata-core and viewmodel-savedstate 2.6.1, savedstate 1.2.1) next
+        # to lifecycle-runtime 2.10.0. //tools/lockfile_check:root_lock_test
+        # fails on that.
         "androidx.lifecycle:lifecycle-livedata:2.10.0",
         "androidx.lifecycle:lifecycle-livedata-core:2.10.0",
         "androidx.lifecycle:lifecycle-viewmodel:2.10.0",

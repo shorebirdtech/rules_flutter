@@ -21,3 +21,20 @@ dart_test(
     main = "test/lockfile_check_test.dart",
     deps = ["@dev_tool_deps//:test"],
 )
+
+# The root Maven lock, which every consumer of rules_flutter gets, keeps
+# androidx.lifecycle at one version. See root_lock_test.dart.
+dart_test(
+    name = "root_lock_test",
+    size = "small",
+    data = ["//:rules_android_maven_install.json"],
+    env = {
+        "ROOT_LOCK": "$(rlocationpath //:rules_android_maven_install.json)",
+        "RUNFILES_SOURCE_REPO": "",
+    },
+    main = "test/root_lock_test.dart",
+    deps = [
+        "@dev_tool_deps//:test",
+        "@rules_dart//dart/runfiles",
+    ],
+)

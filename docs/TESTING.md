@@ -280,7 +280,13 @@ The root `maven.install` also passes Coursier `--reconciliation *:*:relaxed`
 (`additional_coursier_options`), so an exact POM range such as `fragment [1.3.6]`
 no longer fails the pin when another artifact wants a higher version. Options are
 concatenated across modules, so the e2e workspaces get it without repeating it.
-Changing it changes how every lock resolves; re-pin all of them.
+Changing it changes how every lock resolves; re-pin all of them. It does not
+make the root install's `androidx.lifecycle` entries unnecessary: without the
+lines that pin `lifecycle-livedata`, `-livedata-core` and
+`-viewmodel-savedstate` to 2.10.0, Coursier resolves but takes the old versions
+other artifacts ask for (2.0.0, 2.6.1, 2.6.1, and `savedstate` 1.2.1) beside
+`lifecycle-runtime` 2.10.0. `//tools/lockfile_check:root_lock_test` fails on a
+root lock where the group is not at one version.
 
 The root's lock is the one consumers get. When rules_flutter is a dependency
 and the consuming module declares no `maven.install` of that name, the root's

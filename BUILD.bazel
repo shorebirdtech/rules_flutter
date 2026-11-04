@@ -17,6 +17,13 @@ dart_analysis_config(
     options = [":analysis_options"],
 )
 
+# The Maven lock consumers get, read by the test that keeps its androidx
+# versions together.
+exports_files(
+    ["rules_android_maven_install.json"],
+    visibility = ["//tools/lockfile_check:__pkg__"],
+)
+
 package_metadata(
     name = "package_metadata",
     purl = purl.bazel(
