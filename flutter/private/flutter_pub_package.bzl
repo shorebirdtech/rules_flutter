@@ -30,6 +30,7 @@ surface small).
 load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version", "make_dart_library_build_content")
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_deps", "parse_pubspec_sdk_constraint")
 load("//flutter/private:android_plugin_maven.bzl", "gradle_statements", "parse_gradle_maven_dependencies")
+load("//flutter/private:asset_variants.bzl", "variant_scale")
 load("//flutter/private:cmake_link_libraries.bzl", "parse_cmake_link_libraries")
 load("//flutter/private:flutter_pubspec.bzl", "parse_flutter_assets_block", "parse_flutter_plugin_block")
 load("//flutter/private:pinned.bzl", "pinned")
@@ -540,41 +541,21 @@ def _split_glob_block(srcs_dirs, src_exts, hdr_exts):
 _DESKTOP_HDR_EXTS = ("h", "hh", "hpp")
 _DESKTOP_C_EXTS = ("cc", "cpp", "c")
 
-def _readdir_files_recursive(ctx, rel_dir):
-    """Recursively walk `<package>/<rel_dir>` and return file paths.
+def _files_in(ctx, rel_dir):
+    """The files directly in `<package>/<rel_dir>`, as package-relative paths.
 
-    Returns a list of package-relative paths (e.g. `data/locales.json`).
-    Used to expand directory entries from `flutter.assets:` (which Flutter
-    treats as "include every file under this directory").
+    Not the files below it: Flutter does not recurse into a listed
+    directory, which is what keeps `assets/` from shipping `assets/dev/`.
+    A directory that is not there lists nothing.
     """
-    out = []
-    base = ctx.path(rel_dir)
-    if not base.exists:
-        return out
-    queue = [base]
-    for _ in range(10000):  # bounded loop to satisfy Starlark's no-while constraint
-        if not queue:
-            break
-        cur = queue.pop()
-        for child in cur.readdir():
-            if child.is_dir:
-                queue.append(child)
-            else:
-                # Reconstruct package-relative path. ctx.path() basis is the
-                # repository root, so child.basename + walking up gets us
-                # what we want — but readdir paths already include the
-                # trailing component. Use child path's segments past the
-                # spoke root.
-                rel = str(child)
-
-                # Trim the spoke-root prefix; what's left is the relative
-                # path we want.
-                pkg_root = str(ctx.path("."))
-                if rel.startswith(pkg_root + "/"):
-                    out.append(rel[len(pkg_root) + 1:])
-                else:
-                    out.append(rel)
-    return out
+    directory = ctx.path(rel_dir)
+    if not directory.exists:
+        return []
+    return sorted([
+        "{}/{}".format(rel_dir, child.basename)
+        for child in directory.readdir()
+        if not child.is_dir
+    ])
 
 def _file_name_problem(path):
     """Why `path` cannot be the name of a file in a BUILD file, or "".
@@ -636,23 +617,51 @@ def _build_font_files_dict(package, parsed_fonts):
             out[":" + path] = path
     return out
 
-def _build_pkg_assets_dict(ctx, package, parsed_assets):
-    """Build the `pkg_assets` dict, expanding directory entries.
+def _with_variants(ctx, package, path):
+    """`path` if it is a file, and the files of that name in its `<number>x/` siblings.
 
-    Flutter's `flutter.assets:` accepts paths and trailing-slash directory
-    prefixes. Bazel needs an explicit label per file, so we walk each
-    directory at repo-rule time and emit one entry per discovered file.
+    The resolution variants of an image are found beside it, in the
+    directories next to it named for a scale (see `variant_scale`), as
+    flutter_tools finds them. The listed file itself need not exist when a
+    variant does; when neither does, the package lists something it does not
+    ship, which `flutter build` fails on and so does this.
+    """
+    slash = path.rfind("/")
+    prefix = path[:slash + 1]
+    name = path[slash + 1:]
+    found = []
+    if ctx.path(path).exists:
+        found.append(path)
+    beside = ctx.path(prefix.rstrip("/") or ".")
+    if beside.exists:
+        for sibling in beside.readdir():
+            if sibling.is_dir and variant_scale(sibling.basename) != None:
+                variant = sibling.get_child(name)
+                if variant.exists and not variant.is_dir:
+                    found.append("{}{}/{}".format(prefix, sibling.basename, name))
+    if not found:
+        fail("package {}: it lists the asset {}, but neither that file nor a resolution variant of it exists.".format(package, repr(path)))
+    return sorted(found)
+
+def _build_pkg_assets_dict(ctx, package, parsed_assets):
+    """Build the `pkg_assets` dict from the package's `flutter: assets:` entries.
+
+    Bazel needs an explicit label per file, so each entry is expanded at
+    repo-rule time as flutter_tools expands it. A file entry is the file and
+    its resolution variants. A directory entry (a trailing slash) is the files
+    directly in it, each with its variants, and nothing from the directories
+    below it, which need an entry of their own.
     """
     out = {}
     for entry in parsed_assets:
         path = entry.path
         if path.endswith("/"):
-            for f in _readdir_files_recursive(ctx, path.rstrip("/")):
-                _checked_file_name(package, "asset file", f)
-                out[":" + f] = f
+            files = _files_in(ctx, path.rstrip("/"))
         else:
-            _checked_file_name(package, "asset file", path)
-            out[":" + path] = path
+            files = [path]
+        for f in files:
+            for variant in _with_variants(ctx, package, _checked_file_name(package, "asset file", f)):
+                out[":" + variant] = variant
     return out
 
 def _build_pkg_shaders_dict(package, parsed_shaders):

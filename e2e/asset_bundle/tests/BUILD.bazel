@@ -22,17 +22,6 @@ bundle_test(
     expected = ":expected/kit.json",
 )
 
-# Property: nothing a pub package lists goes missing from the bundle of a
-# platform it is listed for, whether listed as a file or as a directory. (That
-# nothing more ships is `unmet`.)
-bundle_test(
-    name = "pub_package_listed_directory_ships_its_files_and_their_variants_test",
-    allow_extra = True,
-    bundle = "//:app_with_fx_dirs_bundle",
-    expected = ":expected/fx_dirs.json",
-    prefix = "packages/fx_dirs/",
-)
-
 [
     bundle_test(
         name = "pub_package_unrestricted_asset_ships_on_%s_test" % os,
@@ -106,3 +95,25 @@ bundle_test(
     bundle = "//:app_scales_bundle",
     expected = "//tests:expected/scales.json",
 )
+
+# -- Pub packages --------------------------------------------------------------
+
+# Property: every variant of an image a pub package lists is bundled and
+# listed with its scale (`flutter build` finds them beside the listed file, in
+# its `<number>x/` directories), so a high-density screen gets the image made
+# for it.
+# Property: a directory a pub package lists ships the files directly in it and
+# the variants of those, and nothing from the directories below it (they need
+# an entry of their own).
+[
+    bundle_test(
+        name = name,
+        bundle = "//:app_with_%s_bundle" % package,
+        expected = "//tests:expected/%s.json" % package,
+        prefix = "packages/%s/" % package,
+    )
+    for name, package in {
+        "pub_package_variants_of_listed_images_ship_test": "fx_variants",
+        "pub_package_listed_directory_ships_only_its_own_files_test": "fx_dirs",
+    }.items()
+]
