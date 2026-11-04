@@ -38,9 +38,20 @@ def _each_define_is_defined_once_test_impl(ctx):
         asserts.equals(env, len(names), len(depset(names).to_list()))
     return unittest.end(env)
 
+def _application_id_is_the_gtk_app_id_test_impl(ctx):
+    # `flutter create`'s runner reads `APPLICATION_ID`, which its CMake defines
+    # as the project's GTK application id: a string literal equal to `gtk_app_id`.
+    env = unittest.begin(ctx)
+    for gtk_app_id in ["com.example.flutter", "org.example.my_app", "com.example.a-b_c", "x"]:
+        defines = linux_runner_defines(gtk_app_id, "Title")
+        asserts.equals(env, "\"" + gtk_app_id + "\"", _define(defines, "APPLICATION_ID"))
+        asserts.equals(env, _define(defines, "GTK_APP_ID"), _define(defines, "APPLICATION_ID"))
+    return unittest.end(env)
+
 _plain_title_test = unittest.make(_plain_title_test_impl)
 _escapes_quotes_and_backslashes_test = unittest.make(_escapes_quotes_and_backslashes_test_impl)
 _each_define_is_defined_once_test = unittest.make(_each_define_is_defined_once_test_impl)
+_application_id_is_the_gtk_app_id_test = unittest.make(_application_id_is_the_gtk_app_id_test_impl)
 
 def linux_runner_defines_test_suite(name):
     unittest.suite(
@@ -48,4 +59,5 @@ def linux_runner_defines_test_suite(name):
         _plain_title_test,
         _escapes_quotes_and_backslashes_test,
         _each_define_is_defined_once_test,
+        _application_id_is_the_gtk_app_id_test,
     )
