@@ -58,6 +58,23 @@ int exported(int x) { return local_helper(x) + 1; }
     });
   });
 
+  group('checkAppBinaryKeepsSymbols', () {
+    test('passes a binary with local symbols', () {
+      final check = recorder();
+      checkAppBinaryKeepsSymbols(check, unstripped);
+      expect(check.failures, isEmpty, reason: '${check.failures}');
+    });
+
+    test('fails the same binary after strip -x -S', () {
+      final stripped = '${tmp.path}/stripped_keeps.dylib';
+      File(unstripped).copySync(stripped);
+      run('strip', ['-x', '-S', stripped]);
+      final check = recorder();
+      checkAppBinaryKeepsSymbols(check, stripped);
+      expect(check.failures, hasLength(1), reason: '${check.failures}');
+    });
+  });
+
   group('checkDsymMatches', () {
     test('passes the dSYM made from the binary, also once it is stripped', () {
       final stripped = '${tmp.path}/stripped_for_dsym.dylib';

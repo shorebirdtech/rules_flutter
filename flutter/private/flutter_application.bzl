@@ -155,10 +155,12 @@ def _flutter_application_impl(ctx):
 
     aot_output = None
     aot_object = None
+    strip_aot = True
     debug_info_output = None
     gen_snapshot_files = []
     if not is_debug:
         options = gen_snapshot_options(ctx)
+        strip_aot = options.strip
         debug_info_output = options.debug_info
         gen_snapshot_files = options.files
 
@@ -186,7 +188,7 @@ def _flutter_application_impl(ctx):
                 flutter_sdk_files = flutter_sdk_info.tool_files,
                 kernel_dill = kernel_dill,
                 output = aot_output,
-                strip = strip,
+                strip = strip and options.strip,
                 extra_flags = options.flags,
                 file_flags = options.file_flags,
                 debug_info = debug_info_output,
@@ -436,6 +438,7 @@ def _flutter_application_impl(ctx):
         FlutterApplicationInfo(
             aot_output = aot_output,
             aot_object = aot_object,
+            strip_aot = strip_aot,
             kernel_dill = kernel_dill if is_debug else None,
             flutter_assets = flutter_assets,
             icu_data = flutter_sdk_info.icu_data,

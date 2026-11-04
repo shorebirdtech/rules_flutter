@@ -73,7 +73,7 @@ def _flutter_aot_target_impl(ctx):
             flutter_sdk_files = flutter_sdk_info.tool_files,
             kernel_dill = kernel_dill,
             output = output,
-            strip = ctx.var["COMPILATION_MODE"] == "opt",
+            strip = ctx.var["COMPILATION_MODE"] == "opt" and options.strip,
             extra_flags = options.flags,
             file_flags = options.file_flags,
             debug_info = options.debug_info,

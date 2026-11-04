@@ -166,6 +166,7 @@ def _flutter_ios_framework_impl(ctx):
             object = app_info.aot_object,
             binary = framework_binary,
             dsym = dsym,
+            strip = app_info.strip_aot,
             retag = [vtool_platform, minimum_os_version],
         )
 
@@ -252,8 +253,9 @@ flutter_ios_framework = rule(
     toolchains = use_cc_toolchain(mandatory = True),
     doc = """Assembles Flutter artifacts into App.framework for iOS (release: AOT binary + assets; debug: assets + kernel).
 
-The release binary is stripped, as `flutter build ios` strips it; the dSYM it
-was stripped of is in the `dsym` output group.""",
+The release binary is stripped, as `flutter build ios` strips it (not with
+`--no-strip` in the application's `extra_gen_snapshot_options`); its dSYM
+is made either way, and is in the `dsym` output group.""",
 )
 
 # -- flutter_ios_native_frameworks (dylib -> framework wrapping) ---------------

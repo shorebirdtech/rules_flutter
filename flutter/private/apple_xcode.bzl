@@ -4,7 +4,8 @@ Shared by the iOS and macOS framework rules: both ship gen_snapshot's Mach-O
 dylib as `App.framework/App`, and both treat it the way `flutter build`
 does (`flutter_tools/lib/src/base/build.dart`): the dSYM is extracted from the
 snapshot with `dsymutil`, and then `strip -x` removes the local symbols the
-shipped binary does not need.
+shipped binary does not need, unless `--no-strip` is among the application's
+`extra_gen_snapshot_options`.
 """
 
 load("@apple_support//lib:apple_support.bzl", "apple_support")
@@ -71,6 +72,7 @@ def split_and_strip_aot_binary(
         object,
         binary,
         dsym,
+        strip = True,
         retag = None):
     """Registers the action that makes the shipped `App` and its dSYM.
 
@@ -88,6 +90,8 @@ def split_and_strip_aot_binary(
       object: The relocatable object gen_snapshot wrote with it.
       binary: The `App` File to write.
       dsym: A `declare_dsym` struct.
+      strip: Whether to `strip -x` the binary. False keeps its local symbols,
+        as `flutter build` does with `--no-strip`; the dSYM is made either way.
       retag: None, or a pair of the `vtool` platform and the minimum OS
         version to tag the binary with, for a dylib gen_snapshot tagged as
         macOS (the host it ran on) that is for another platform.
@@ -112,7 +116,8 @@ def split_and_strip_aot_binary(
     if retag:
         args.add_all(retag)
         commands.append('xcrun vtool -set-build-version "$4" "$5" "$5" -replace -output "$2" "$2"')
-    commands.append('xcrun strip -x "$2" -o "$2"')
+    if strip:
+        commands.append('xcrun strip -x "$2" -o "$2"')
     run_xcode_tool(
         ctx,
         command = "\n".join(commands),
@@ -121,5 +126,5 @@ def split_and_strip_aot_binary(
         outputs = [binary] + dsym.files,
         mnemonic = "FlutterAppleSplitDebugInfo",
         execution_requirements = PATH_MAPPING,
-        progress_message = "Extracting the dSYM of and stripping %s" % binary.short_path,
+        progress_message = "Extracting the dSYM of %s%s" % (binary.short_path, " and stripping it" if strip else ""),
     )

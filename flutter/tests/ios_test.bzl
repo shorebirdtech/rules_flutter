@@ -4,7 +4,7 @@ load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("//flutter/private:flutter_ios_application.bzl", "flutter_ios_framework")
 load("//flutter/private:ios_entitlements.bzl", "resolve_ios_entitlements")
-load(":apple_bundling.bzl", "fake_application", "outputs_under_target_dir_test")
+load(":apple_bundling.bzl", "fake_application", "outputs_under_target_dir_test", "strip_step_test")
 
 _DISCOVERED = "ios/Runner/Runner.entitlements"
 
@@ -106,9 +106,34 @@ def _bundling_tests(name):
         target_compatible_with = ["@platforms//os:macos"],
     )
 
+    # A release framework runs Xcode's tools on its dylib, so these are only
+    # analysed, never built: the fake's dylib is not a Mach-O. Whether the
+    # binary is stripped follows the application, as `flutter build` follows
+    # `--no-strip`.
+    for strip in [True, False]:
+        suffix = "_stripped" if strip else "_unstripped"
+        fake_application(
+            name = name + "_fake_release" + suffix,
+            strip_aot = strip,
+            tags = ["manual"],
+        )
+        flutter_ios_framework(
+            name = name + "_release_framework" + suffix,
+            application = name + "_fake_release" + suffix,
+            tags = ["manual"],
+        )
+        strip_step_test(
+            name = name + "_release_framework" + suffix + "_test",
+            expect_strip = strip,
+            target_under_test = name + "_release_framework" + suffix,
+            target_compatible_with = ["@platforms//os:macos"],
+        )
+
     return [
         name + "_framework_outputs_under_target_dir",
         name + "_two_apps_one_package",
+        name + "_release_framework_stripped_test",
+        name + "_release_framework_unstripped_test",
     ]
 
 def ios_test_suite(name):

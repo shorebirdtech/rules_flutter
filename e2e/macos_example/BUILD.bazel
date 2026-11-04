@@ -513,6 +513,26 @@ flutter_macos_app(
     target_compatible_with = ["@platforms//os:macos"],
 )
 
+# The same app asked not to strip, as `flutter build macos --release
+# --extra-gen-snapshot-options=--no-strip` is.
+flutter_application(
+    name = "app_no_strip_flutter",
+    package_name = "macos_example",
+    assets = glob(["assets/**"]),
+    extra_gen_snapshot_options = ["--no-strip"],
+    main = "lib/main.dart",
+    native_deps = [":sub"],
+    deps = _APP_DEPS,
+)
+
+flutter_macos_app(
+    name = "app_no_strip",
+    app_name = "Flutter App",
+    application = ":app_no_strip_flutter",
+    bundle_id = "com.example.flutterapp.nostrip",
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
 [
     apple_release_build(
         name = "release_%s" % mode,
@@ -520,6 +540,7 @@ flutter_macos_app(
         generate_dsym = True,
         targets = [
             ":app",
+            ":app_no_strip",
             ":app_obfuscated",
         ],
     )
@@ -536,6 +557,7 @@ flutter_macos_app(
     )
     for what in (
         "stripped",
+        "unstripped",
         "dsym",
         "obfuscated",
     )

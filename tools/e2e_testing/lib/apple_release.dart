@@ -39,6 +39,26 @@ void checkAppBinaryStripped(BundleCheck check, String path) {
     );
 }
 
+/// Checks that the `App` binary at [path] keeps its local symbols, as one
+/// built with `--no-strip` in `extra_gen_snapshot_options` does.
+///
+/// The counterpart of [checkAppBinaryStripped]: a build asked not to strip
+/// must not be stripped anyway.
+void checkAppBinaryKeepsSymbols(BundleCheck check, String path) {
+  final SymbolCounts counts;
+  try {
+    counts = MachO(path).symbolCounts();
+  } on StateError catch (e) {
+    check.fail('cannot read the symbol table of $path: $e');
+    return;
+  }
+  check.expect(
+    'App binary keeps its local symbols',
+    condition: counts.local > 0,
+    detail: 'it lists $counts, so something stripped it',
+  );
+}
+
 /// The one `App.framework/App` among the test's runfiles, whatever the target
 /// that produced it.
 ///

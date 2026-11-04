@@ -4,7 +4,7 @@ load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("//flutter/private:flutter_macos_application.bzl", "flutter_macos_framework", "flutter_macos_native_libs")
 load("//flutter/private:validation.bzl", "is_valid_bundle_id", "minimum_os_version_is_below")
-load(":apple_bundling.bzl", "fake_application", "outputs_under_target_dir_test")
+load(":apple_bundling.bzl", "fake_application", "outputs_under_target_dir_test", "strip_step_test")
 
 def _valid_bundle_id_test_impl(ctx):
     env = unittest.begin(ctx)
@@ -294,12 +294,37 @@ def _bundling_tests(name):
         ],
     )
 
+    # A release framework runs Xcode's tools on its dylib, so these are only
+    # analysed, never built: the fake's dylib is not a Mach-O. Whether the
+    # binary is stripped follows the application, as `flutter build` follows
+    # `--no-strip`.
+    for strip in [True, False]:
+        suffix = "_stripped" if strip else "_unstripped"
+        fake_application(
+            name = name + "_fake_release" + suffix,
+            strip_aot = strip,
+            tags = ["manual"],
+        )
+        flutter_macos_framework(
+            name = name + "_release_framework" + suffix,
+            application = name + "_fake_release" + suffix,
+            tags = ["manual"],
+        )
+        strip_step_test(
+            name = name + "_release_framework" + suffix + "_test",
+            expect_strip = strip,
+            target_under_test = name + "_release_framework" + suffix,
+            target_compatible_with = ["@platforms//os:macos"],
+        )
+
     return [
         name + "_framework_outputs_under_target_dir",
         name + "_native_libs_staged",
         name + "_native_libs_nothing_to_bundle",
         name + "_native_libs_duplicate_basename_fails",
         name + "_two_apps_one_package",
+        name + "_release_framework_stripped_test",
+        name + "_release_framework_unstripped_test",
     ]
 
 def macos_test_suite(name):

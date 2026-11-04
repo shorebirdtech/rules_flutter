@@ -9,6 +9,7 @@ attribute, in each `-c` that builds Flutter's release mode.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
+load("//flutter:providers.bzl", "FlutterApplicationInfo")
 load("//flutter/private:flutter_aot_target.bzl", "flutter_aot_target")
 load("//flutter/private:flutter_application.bzl", "flutter_application")
 
@@ -67,6 +68,29 @@ def _impl(ctx):
             _EXTRA_FLAG in argv,
             "extra_gen_snapshot_options should reach gen_snapshot: %s" % argv,
         )
+    elif what == "no_strip":
+        # flutter_tools reads `--no-strip` itself: it decides whether the
+        # snapshot is stripped and does not hand the flag to gen_snapshot.
+        # Here a rule that was told not to strip must not ask gen_snapshot to
+        # (`--strip`, which `opt` otherwise adds for an ELF snapshot), and
+        # says so in its provider so a later strip step can follow.
+        asserts.false(
+            env,
+            "--strip" in argv,
+            "--no-strip should leave gen_snapshot unasked to strip: %s" % argv,
+        )
+        asserts.false(
+            env,
+            "--no-strip" in argv,
+            "--no-strip is the rule's to read, not gen_snapshot's: %s" % argv,
+        )
+        target = analysistest.target_under_test(env)
+        if FlutterApplicationInfo in target:
+            asserts.false(
+                env,
+                target[FlutterApplicationInfo].strip_aot,
+                "FlutterApplicationInfo.strip_aot should be False after --no-strip",
+            )
     elif what == "file_writing_flags":
         # A flag that makes gen_snapshot write a file names a path. The action
         # keeps only its declared outputs, so a path that is not one is a file
@@ -138,6 +162,20 @@ def aot_options_test_suite(name, rules):
         rules,
         {option: {option: value} for option, value in _OPTIONS.items()},
         None,
+    )
+
+def aot_no_strip_test_suite(name, rules):
+    """A fixture per rule with `--no-strip`, and a test per `-c`.
+
+    Args:
+        name: The test_suite name.
+        rules: Which of "application" and "aot_target" to test.
+    """
+    _instantiate(
+        name,
+        rules,
+        {"no_strip": {"extra_gen_snapshot_options": ["--no-strip"]}},
+        "no_strip",
     )
 
 def aot_file_flags_test_suite(name, rules):

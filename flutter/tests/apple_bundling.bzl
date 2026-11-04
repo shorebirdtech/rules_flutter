@@ -53,6 +53,7 @@ def _fake_application_impl(ctx):
     return [FlutterApplicationInfo(
         aot_output = aot_output,
         aot_object = aot_object,
+        strip_aot = ctx.attr.strip_aot,
         kernel_dill = kernel_dill,
         is_debug = ctx.attr.debug,
         flutter_assets = flutter_assets,
@@ -66,6 +67,7 @@ fake_application = rule(
         "code_assets": attr.string_list(),
         "debug": attr.bool(default = False),
         "native_libs": attr.string_list(),
+        "strip_aot": attr.bool(default = True),
         "_assemble": attr.label(
             default = "//flutter/private/tools:assemble_directory",
             executable = True,
@@ -103,4 +105,35 @@ def _outputs_under_target_dir_test_impl(ctx):
 
 outputs_under_target_dir_test = analysistest.make(
     _outputs_under_target_dir_test_impl,
+)
+
+def _strip_step_test_impl(ctx):
+    """The shipped binary is stripped exactly when the application says it is.
+
+    `flutter build` strips an Apple AOT binary after its dSYM is extracted,
+    unless `--no-strip` is among the extra gen_snapshot options. The dSYM is
+    extracted either way.
+    """
+    env = analysistest.begin(ctx)
+    actions = [
+        a
+        for a in analysistest.target_actions(env)
+        if a.mnemonic == "FlutterAppleSplitDebugInfo"
+    ]
+    asserts.equals(env, 1, len(actions), "expected one dSYM-and-strip action")
+    if len(actions) != 1:
+        return analysistest.end(env)
+    script = "\n".join(actions[0].argv)
+    asserts.true(env, "dsymutil" in script, "the dSYM is extracted either way: %s" % script)
+    asserts.equals(
+        env,
+        ctx.attr.expect_strip,
+        "strip -x" in script,
+        "strip -x %s run: %s" % ("should be" if ctx.attr.expect_strip else "should not be", script),
+    )
+    return analysistest.end(env)
+
+strip_step_test = analysistest.make(
+    _strip_step_test_impl,
+    attrs = {"expect_strip": attr.bool(mandatory = True)},
 )

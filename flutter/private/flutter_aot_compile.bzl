@@ -37,12 +37,20 @@ def gen_snapshot_options(ctx):
 
     Returns:
         A struct of `flags` (strings), `file_flags` ((flag, File) pairs),
-        `debug_info` (the split debug info File, or None) and `files` (every
-        output the options declare).
+        `debug_info` (the split debug info File, or None), `files` (every
+        output the options declare) and `strip` (False when the options hold
+        `--no-strip`, which `flutter build` reads as "ship the symbols").
     """
     flags = []
     file_flags = []
+    strip = True
     for option in ctx.attr.extra_gen_snapshot_options:
+        # As flutter_tools does, `--no-strip` is read here and not passed on:
+        # whether the snapshot is stripped is the rule's to decide, and an
+        # Apple rule strips after its dSYM is made, not in gen_snapshot.
+        if option.replace("_", "-") == "--no-strip":
+            strip = False
+            continue
         flag, has_value, value = option.partition("=")
         if not has_value or flag.lstrip("-").replace("_", "-") not in _FILE_WRITING_FLAGS or not flag.startswith("--"):
             flags.append(option)
@@ -64,6 +72,7 @@ def gen_snapshot_options(ctx):
         file_flags = file_flags,
         debug_info = debug_info,
         files = [f for _, f in file_flags],
+        strip = strip,
     )
 
 def _flutter_aot_action(
@@ -157,7 +166,8 @@ def flutter_aot_macho_action(
 
     The dylib keeps its symbols: gen_snapshot's `--strip` leaves no debug
     information to make a dSYM from, so Apple targets strip after extracting
-    one, as `flutter build` does (see `split_and_strip_aot_binary`).
+    one, as `flutter build` does (see `split_and_strip_aot_binary`), unless
+    `--no-strip` asked for the symbols (`gen_snapshot_options(ctx).strip`).
 
     Args:
         ctx: Rule context.

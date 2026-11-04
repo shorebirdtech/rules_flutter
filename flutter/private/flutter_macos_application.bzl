@@ -115,6 +115,7 @@ def _flutter_macos_framework_impl(ctx):
             object = app_info.aot_object,
             binary = binary,
             dsym = dsym,
+            strip = app_info.strip_aot,
         )
         steps.append(("file", "App.framework/App", binary))
 
@@ -177,9 +178,10 @@ flutter_macos_framework = rule(
     toolchains = XCODE_TOOL_TOOLCHAINS,
     doc = """Assembles the Flutter AOT dylib and assets into App.framework for macOS.
 
-The release binary is stripped, as `flutter build macos` strips it; the dSYM it
-was stripped of is in the `dsym` output group, and in the `dsyms` output group
-of the app that bundles this.""",
+The release binary is stripped, as `flutter build macos` strips it (not with
+`--no-strip` in the application's `extra_gen_snapshot_options`); its dSYM
+is made either way. It is in the `dsym` output group, and in the `dsyms` output
+group of the app that bundles this.""",
 )
 
 # -- flutter_macos_native_libs (dylib staging for additional_contents) -------

@@ -145,6 +145,7 @@ FlutterApplicationInfo = provider(
     fields = {
         "aot_output": "File or None: The AOT compiled native code (.so, .dylib, or .S). None in debug mode.",
         "aot_object": "File or None: The relocatable object gen_snapshot wrote beside an Apple `aot_output` (`--macho-object`), which the dylib's debugging map points at and its dSYM is read from. None unless this is an Apple AOT build.",
+        "strip_aot": "bool: Whether the shipped AOT binary is stripped of its local symbols. False when `extra_gen_snapshot_options` holds `--no-strip`, as in `flutter build`. An Apple framework rule strips after extracting the dSYM unless this is False.",
         "kernel_dill": "File or None: The kernel .dill file for JIT mode. None in release mode.",
         "flutter_assets": "File: The flutter_assets/ tree artifact.",
         "icu_data": "File: The icudtl.dat file.",
