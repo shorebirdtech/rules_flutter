@@ -1324,7 +1324,7 @@ flutter_application(
 | `language_version` | The Dart language version, matching `pubspec.yaml`. |
 | `obfuscate` | Obfuscate Dart symbols in the AOT output. Pair with `split_debug_info`. Default `False`. |
 | `split_debug_info` | Write debug info to a separate `.symbols` file. Default `False`. |
-| `extra_gen_snapshot_options` | Extra flags for `gen_snapshot`. |
+| `extra_gen_snapshot_options` | Extra flags for `gen_snapshot`. A flag that makes `gen_snapshot` write a file (`--save-obfuscation-map`, `--write-v8-snapshot-profile-to`, `--print-instructions-sizes-to`) names it relative to the package, as `--save-obfuscation-map=obfuscation.json`. The file is built to `<name>_gen_snapshot/obfuscation.json`, and it is in the target's `gen_snapshot_files` output group. |
 | `track_widget_creation` | Record where each widget was created, for the DevTools inspector, as `flutter run` does. Debug and profile builds; a release build never does. Default `True`. |
 | `shaders` | Fragment shaders to compile with impellerc. |
 | `shader_includes` | Files the `shaders` may `#include`. |

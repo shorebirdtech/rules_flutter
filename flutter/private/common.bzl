@@ -1221,7 +1221,11 @@ FLUTTER_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | {
         default = False,
     ),
     "extra_gen_snapshot_options": attr.string_list(
-        doc = "Additional flags passed directly to gen_snapshot (AOT compiler).",
+        doc = "Additional flags passed directly to gen_snapshot (AOT compiler). " +
+              "A flag that makes gen_snapshot write a file (`--save-obfuscation-map`, " +
+              "`--write-v8-snapshot-profile-to`, `--print-instructions-sizes-to`) names " +
+              "it relative to the package; it is declared as an output of the target " +
+              "(`<name>_gen_snapshot/<path>`) in the `gen_snapshot_files` output group.",
     ),
     "track_widget_creation": attr.bool(
         doc = "If True, a debug or profile build records where each widget was created, for the DevTools widget inspector, as `flutter run` does. A release build never does. Default `True`.",

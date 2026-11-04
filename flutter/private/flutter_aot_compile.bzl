@@ -11,6 +11,61 @@ load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
 
 _FLUTTER_TOOLCHAIN = Label("//flutter:toolchain_type")
 
+# gen_snapshot flags whose value is a file path gen_snapshot writes, by their
+# hyphenated names (gen_snapshot takes `_` for `-` in a flag name).
+_FILE_WRITING_FLAGS = [
+    "print-instructions-sizes-to",
+    "save-obfuscation-map",
+    "write-v8-snapshot-profile-to",
+]
+
+def gen_snapshot_options(ctx):
+    """Reads the gen_snapshot options a rule's attributes ask for.
+
+    `obfuscate`, `split_debug_info` and `extra_gen_snapshot_options` mean the
+    same on every rule that declares them, so they are read in one place.
+
+    An option that makes gen_snapshot write a file (`--save-obfuscation-map`,
+    for one) names the file relative to the package, and the file is declared
+    as an output of the rule under `<name>_gen_snapshot/`: an action keeps its
+    declared outputs and nothing else. The files are in the rule's
+    `gen_snapshot_files` output group.
+
+    Args:
+        ctx: A rule context with `obfuscate`, `split_debug_info` and
+            `extra_gen_snapshot_options` attributes.
+
+    Returns:
+        A struct of `flags` (strings), `file_flags` ((flag, File) pairs),
+        `debug_info` (the split debug info File, or None) and `files` (every
+        output the options declare).
+    """
+    flags = []
+    file_flags = []
+    for option in ctx.attr.extra_gen_snapshot_options:
+        flag, has_value, value = option.partition("=")
+        if not has_value or flag.lstrip("-").replace("_", "-") not in _FILE_WRITING_FLAGS or not flag.startswith("--"):
+            flags.append(option)
+            continue
+        if not value or value.startswith("/") or ".." in value.split("/"):
+            fail(
+                ("%s: extra_gen_snapshot_options `%s` writes a file, so it must name " +
+                 "one relative to the package, without `..`.") % (ctx.label, option),
+            )
+        output = ctx.actions.declare_file("%s_gen_snapshot/%s" % (ctx.label.name, value))
+        file_flags.append((flag, output))
+    if ctx.attr.obfuscate:
+        flags.append("--obfuscate")
+    debug_info = None
+    if ctx.attr.split_debug_info:
+        debug_info = ctx.actions.declare_file(ctx.label.name + ".symbols")
+    return struct(
+        flags = flags,
+        file_flags = file_flags,
+        debug_info = debug_info,
+        files = [f for _, f in file_flags],
+    )
+
 def _flutter_aot_action(
         ctx,
         gen_snapshot,
@@ -21,6 +76,7 @@ def _flutter_aot_action(
         output_flag,
         strip = True,
         extra_flags = [],
+        file_flags = [],
         debug_info = None,
         object = None,
         mnemonic = "FlutterAot"):
@@ -44,6 +100,9 @@ def _flutter_aot_action(
         outputs.append(debug_info)
 
     args.add_all(extra_flags)
+    for flag, file in file_flags:
+        args.add(file, format = flag + "=%s")
+        outputs.append(file)
     args.add(kernel_dill)
 
     ctx.actions.run(
@@ -62,7 +121,7 @@ def _flutter_aot_action(
         progress_message = "AOT compiling Flutter %s %s" % (snapshot_kind, ctx.label),
     )
 
-def flutter_aot_elf_action(ctx, gen_snapshot, flutter_sdk_files, kernel_dill, output, strip = True, extra_flags = [], debug_info = None):
+def flutter_aot_elf_action(ctx, gen_snapshot, flutter_sdk_files, kernel_dill, output, strip = True, extra_flags = [], file_flags = [], debug_info = None):
     """AOT compile to ELF shared library. Used for Android, Linux, Windows.
 
     Args:
@@ -74,10 +133,12 @@ def flutter_aot_elf_action(ctx, gen_snapshot, flutter_sdk_files, kernel_dill, ou
         strip: Whether to strip debug symbols.
         extra_flags: Additional gen_snapshot flags. Not paths: a path
             reaches the action as a File, or path mapping cannot rewrite it.
+        file_flags: (flag, File) pairs for the flags that write a file, such
+            as `--save-obfuscation-map`; the Files are outputs of the action.
         debug_info: Optional File the split debug info is saved to
             (`--save-debugging-info`), with DWARF stack traces turned on.
     """
-    _flutter_aot_action(ctx, gen_snapshot, flutter_sdk_files, kernel_dill, output, "app-aot-elf", "--elf", strip, extra_flags, debug_info, mnemonic = "FlutterAotElf")
+    _flutter_aot_action(ctx, gen_snapshot, flutter_sdk_files, kernel_dill, output, "app-aot-elf", "--elf", strip, extra_flags, file_flags, debug_info, mnemonic = "FlutterAotElf")
 
 def flutter_aot_macho_action(
         ctx,
@@ -86,6 +147,7 @@ def flutter_aot_macho_action(
         kernel_dill,
         output,
         extra_flags = [],
+        file_flags = [],
         debug_info = None,
         object = None,
         install_name = "@rpath/App.framework/App",
@@ -105,6 +167,8 @@ def flutter_aot_macho_action(
         output: Output dylib File.
         extra_flags: Additional gen_snapshot flags. Not paths: a path
             reaches the action as a File, or path mapping cannot rewrite it.
+        file_flags: (flag, File) pairs for the flags that write a file, such
+            as `--save-obfuscation-map`; the Files are outputs of the action.
         debug_info: Optional File the split debug info is saved to
             (`--save-debugging-info`), with DWARF stack traces turned on.
         object: Optional File the relocatable object is written to
@@ -120,4 +184,4 @@ def flutter_aot_macho_action(
         macho_flags.append("--macho-min-os-version=" + min_os_version)
     if rpath:
         macho_flags.append("--macho-rpath=" + rpath)
-    _flutter_aot_action(ctx, gen_snapshot, flutter_sdk_files, kernel_dill, output, "app-aot-macho-dylib", "--macho", False, macho_flags, debug_info, object, mnemonic = "FlutterAotMacho")
+    _flutter_aot_action(ctx, gen_snapshot, flutter_sdk_files, kernel_dill, output, "app-aot-macho-dylib", "--macho", False, macho_flags, file_flags, debug_info, object, mnemonic = "FlutterAotMacho")

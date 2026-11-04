@@ -22,7 +22,7 @@ load("//flutter/private:code_asset_libraries.bzl", "code_asset_libraries", "code
 load("//flutter/private:common.bzl", "FLUTTER_APPLICATION_ATTRS", "PLATFORM_CONSTRAINT_ATTRS", "check_unreplaced_hooks", "collect_binding_contracts", "collect_native_libs", "declare_flutter_assets_dir", "detect_target_platform", "flutter_build_assets", "flutter_build_mode", "flutter_compile_kernel", "flutter_compile_shaders", "flutter_deps_attr", "host_target_arch", "launch_build_args", "shader_sources")
 load("//flutter/private:dev_config.bzl", "dev_config_file", "dev_search_roots", "dev_source_dir", "write_dev_config")
 load("//flutter/private:exec_groups.bzl", "PORTABLE_EXEC_GROUPS", "portable_tools")
-load("//flutter/private:flutter_aot_compile.bzl", "flutter_aot_elf_action", "flutter_aot_macho_action")
+load("//flutter/private:flutter_aot_compile.bzl", "flutter_aot_elf_action", "flutter_aot_macho_action", "gen_snapshot_options")
 load("//flutter/private:flutter_info.bzl", "dedup_plugins")
 load("//flutter/private:flutter_native_assets.bzl", "CODE_ASSETS_DOC", "collect_bundled_code_asset_files", "resolve_native_assets", "write_native_assets_manifest")
 load("//flutter/private:native_sources.bzl", "collect_native_source_pairs")
@@ -156,13 +156,11 @@ def _flutter_application_impl(ctx):
     aot_output = None
     aot_object = None
     debug_info_output = None
+    gen_snapshot_files = []
     if not is_debug:
-        # Collect gen_snapshot extra flags from user attrs.
-        extra_flags = list(ctx.attr.extra_gen_snapshot_options)
-        if ctx.attr.obfuscate:
-            extra_flags.append("--obfuscate")
-        if ctx.attr.split_debug_info:
-            debug_info_output = ctx.actions.declare_file(ctx.label.name + ".symbols")
+        options = gen_snapshot_options(ctx)
+        debug_info_output = options.debug_info
+        gen_snapshot_files = options.files
 
         # Step 2: AOT compile — choose format based on target platform.
         if is_ios or is_macos:
@@ -174,7 +172,8 @@ def _flutter_application_impl(ctx):
                 flutter_sdk_files = flutter_sdk_info.tool_files,
                 kernel_dill = kernel_dill,
                 output = aot_output,
-                extra_flags = extra_flags,
+                extra_flags = options.flags,
+                file_flags = options.file_flags,
                 debug_info = debug_info_output,
                 object = aot_object,
                 min_os_version = ctx.attr.min_os_version if ctx.attr.min_os_version else None,
@@ -188,7 +187,8 @@ def _flutter_application_impl(ctx):
                 kernel_dill = kernel_dill,
                 output = aot_output,
                 strip = strip,
-                extra_flags = extra_flags,
+                extra_flags = options.flags,
+                file_flags = options.file_flags,
                 debug_info = debug_info_output,
             )
 
@@ -419,6 +419,8 @@ def _flutter_application_impl(ctx):
     }
     if debug_info_output:
         output_groups["debug_info"] = depset([debug_info_output])
+    if gen_snapshot_files:
+        output_groups["gen_snapshot_files"] = depset(gen_snapshot_files)
 
     # Every hook runs whenever the app builds, even one that emits no asset,
     # so its verdict on the program is never skipped.

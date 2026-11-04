@@ -15,7 +15,7 @@ platforms (ELF .so).
 load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS")
 load("//flutter/private:common.bzl", "FLUTTER_APPLICATION_ATTRS", "KERNEL_COMPILE_ATTRS", "PLATFORM_CONSTRAINT_ATTRS", "flutter_build_mode", "flutter_compile_kernel")
 load("//flutter/private:exec_groups.bzl", "PORTABLE_EXEC_GROUPS", "portable_tools")
-load("//flutter/private:flutter_aot_compile.bzl", "flutter_aot_elf_action", "flutter_aot_macho_action")
+load("//flutter/private:flutter_aot_compile.bzl", "flutter_aot_elf_action", "flutter_aot_macho_action", "gen_snapshot_options")
 
 def _flutter_aot_target_impl(ctx):
     flutter_toolchain = ctx.toolchains["@rules_flutter//flutter:toolchain_type"]
@@ -44,6 +44,12 @@ def _flutter_aot_target_impl(ctx):
         ctx.attr._macos_constraint[platform_common.ConstraintValueInfo],
     )
 
+    options = gen_snapshot_options(ctx)
+    if options.debug_info:
+        output_groups["debug_info"] = depset([options.debug_info])
+    if options.files:
+        output_groups["gen_snapshot_files"] = depset(options.files)
+
     if is_ios or is_macos:
         output = ctx.actions.declare_file(ctx.label.name + ".dylib")
         object = ctx.actions.declare_file(ctx.label.name + ".o")
@@ -54,6 +60,9 @@ def _flutter_aot_target_impl(ctx):
             flutter_sdk_files = flutter_sdk_info.tool_files,
             kernel_dill = kernel_dill,
             output = output,
+            extra_flags = options.flags,
+            file_flags = options.file_flags,
+            debug_info = options.debug_info,
             object = object,
         )
     else:
@@ -65,6 +74,9 @@ def _flutter_aot_target_impl(ctx):
             kernel_dill = kernel_dill,
             output = output,
             strip = ctx.var["COMPILATION_MODE"] == "opt",
+            extra_flags = options.flags,
+            file_flags = options.file_flags,
+            debug_info = options.debug_info,
         )
 
     return [
