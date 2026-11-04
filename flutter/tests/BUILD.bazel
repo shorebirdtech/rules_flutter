@@ -46,6 +46,7 @@ load(":toolchains_repo_test.bzl", "toolchains_repo_test_suite")
 load(":validation_test.bzl", "validation_test_suite")
 load(":versions_test.bzl", "versions_test_suite")
 load(":web_test.bzl", "web_test_suite")
+load(":widget_creation_flag_test.bzl", "widget_creation_flag_test_suite")
 
 versions_test_suite(name = "versions_test")
 
@@ -113,6 +114,8 @@ app_entrypoint_test_suite(name = "app_entrypoint_test")
 dev_config_test_suite(name = "dev_config_test")
 
 app_defines_test_suite(name = "app_defines_test")
+
+widget_creation_flag_test_suite(name = "widget_creation_flag_test")
 
 pub_lock_sdks_test_suite(name = "pub_lock_sdks_test")
 

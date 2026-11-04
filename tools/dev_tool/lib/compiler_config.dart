@@ -81,6 +81,11 @@ class NativeCompilerConfig implements CompilerConfig {
   /// (macOS, iOS), and an exception in `main()` where it did not (Android).
   final String nativeAssetsManifest;
 
+  /// Whether the app was built with `--track-widget-creation`, which the
+  /// compiler then applies to every library it recompiles (see
+  /// `BuildInfo.trackWidgetCreation`).
+  final bool trackWidgetCreation;
+
   @override
   final List<String> enableExperiments;
 
@@ -91,6 +96,7 @@ class NativeCompilerConfig implements CompilerConfig {
     this.dartDefines = const [],
     this.dartPluginRegistrantUri = '',
     this.nativeAssetsManifest = '',
+    this.trackWidgetCreation = false,
     this.enableExperiments = const [],
   });
 
@@ -103,6 +109,7 @@ class NativeCompilerConfig implements CompilerConfig {
   @override
   List<String> get extraFlags => [
     '--enable-asserts',
+    if (trackWidgetCreation) '--track-widget-creation',
     ...experimentFlags,
     for (final define in dartDefines) '-D$define',
     if (dartPluginRegistrantUri.isNotEmpty) ...[

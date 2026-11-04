@@ -1323,7 +1323,7 @@ flutter_application(
 | `obfuscate` | Obfuscate Dart symbols in the AOT output. Pair with `split_debug_info`. Default `False`. |
 | `split_debug_info` | Write debug info to a separate `.symbols` file. Default `False`. |
 | `extra_gen_snapshot_options` | Extra flags for `gen_snapshot`. |
-| `track_widget_creation` | Record widget creation locations for the DevTools inspector. Default `False`. |
+| `track_widget_creation` | Record where each widget was created, for the DevTools inspector, as `flutter run` does. Debug builds only; profile and release never do. Default `True`. |
 | `shaders` | Fragment shaders to compile with impellerc. |
 | `shader_includes` | Files the `shaders` may `#include`. |
 | `require_sksl_shaders` | Fail the build when a shader cannot be compiled for Skia (SkSL). By default such a shader, say one that indexes a uniform array in a loop, is compiled for Impeller alone with a warning, as `flutter build` does, and fails to load only where the app renders with Skia. Web builds always need SkSL. Default `False`. |

@@ -265,7 +265,9 @@ def flutter_compile_kernel(ctx, tools, aot = None, platform_dill = None, target_
             frontend_server reads via `--native-assets`). Always passed
             through when set; the manifest's contents may be empty.
         track_widget_creation: Whether to pass `--track-widget-creation` to
-            the frontend server. Passed rather than read off `ctx.attr`,
+            the frontend server, and to tell the dev tool the kernel has it
+            (the `trackWidgetCreation` of the debug `rules_flutter.build_info`
+            record). Passed rather than read off `ctx.attr`,
             because the rules calling this do not share one attribute set —
             `flutter_kernel_target` has no such attr — and a rule that has no
             opinion should say `False` rather than be probed for one.
@@ -479,6 +481,12 @@ def flutter_compile_kernel(ctx, tools, aot = None, platform_dill = None, target_
             # manifest names the host's libraries, so only the app can say
             # which one a hot restart's kernel has to carry. "" when none.
             "nativeAssetsManifest": native_assets_manifest.path if native_assets_manifest else "",
+            # Whether this kernel was compiled with `--track-widget-creation`.
+            # The dev tool's frontend_server recompiles libraries on every hot
+            # reload and restart, and must apply the same transform: a library
+            # compiled without it would build its widgets with no location
+            # while the rest of the app records them.
+            "trackWidgetCreation": track_widget_creation,
         }))
 
     kernel_dill = ctx.actions.declare_file(ctx.label.name + ".dill")
@@ -1213,8 +1221,8 @@ FLUTTER_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | {
         doc = "Additional flags passed directly to gen_snapshot (AOT compiler).",
     ),
     "track_widget_creation": attr.bool(
-        doc = "If True, track widget creation locations for the DevTools widget inspector. Adds overhead; typically used only in debug/profile builds.",
-        default = False,
+        doc = "If True, a debug build records where each widget was created, for the DevTools widget inspector, as `flutter run` does. A profile or release build never does. Default `True`.",
+        default = True,
     ),
     "shaders": attr.label_list(
         doc = "Fragment shader files (.frag) to compile with impellerc. Compiled shaders are included in the asset bundle.",

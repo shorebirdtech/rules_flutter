@@ -70,6 +70,30 @@ void main() {
     });
   });
 
+  group('trackWidgetCreation', () {
+    // The build's kernel records where each widget was created only if every
+    // library in it was compiled with the transform; the resident compiler
+    // recompiles the changed ones on each reload and restart, so it has to
+    // apply the same one.
+
+    test('is passed when the app was built with it', () {
+      expect(
+        NativeCompilerConfig(
+          patchedSdkRoot: '/patched',
+          trackWidgetCreation: true,
+        ).extraFlags,
+        contains('--track-widget-creation'),
+      );
+    });
+
+    test('is not passed otherwise', () {
+      expect(
+        NativeCompilerConfig(patchedSdkRoot: '/patched').extraFlags,
+        isNot(contains('--track-widget-creation')),
+      );
+    });
+  });
+
   group('nativeAssetsManifest', () {
     // The manifest is what puts the asset-id map into a hot restart's whole
     // kernel. Without it a restarted Android app's `@Native(assetId:)` calls

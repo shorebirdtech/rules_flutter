@@ -1347,7 +1347,6 @@ _WEB_RELEVANT_KEYS = (
     "_shader_compile_tool",
     "tree_shake_icons",
     "license_files",
-    "track_widget_creation",
     "_asset_bundle_tool",
 )
 _WEB_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | {

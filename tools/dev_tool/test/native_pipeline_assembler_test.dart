@@ -51,6 +51,7 @@ Map<String, dynamic> buildInfoJson({String compilationMode = 'dbg'}) => {
   'assetsDir': 'bazel-out/darwin_arm64-dbg/bin/app_flutter_flutter_assets',
   'targetPlatform': 'macos',
   'nativeAssetsManifest': '',
+  'trackWidgetCreation': false,
 };
 
 void main() {

@@ -469,6 +469,10 @@ class NativePipelineAssembler {
           ? ''
           : Uri.file(registrant).toString(),
       nativeAssetsManifest: await _launchNativeAssetsManifest(),
+      // The app says whether its kernel has widget creation locations, so a
+      // reload's recompiled libraries keep them: the build's `track_widget_creation`
+      // is the app's, not something the host-configured dev build knows.
+      trackWidgetCreation: _info.trackWidgetCreation,
       enableExperiments: devConfig.enableExperiments,
     );
     // A device with no compiler config has no incremental compiler, so there is

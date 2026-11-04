@@ -29,6 +29,7 @@ void main() {
     'assetsDir': assetsDir,
     'targetPlatform': 'ios',
     'nativeAssetsManifest': '',
+    'trackWidgetCreation': false,
   });
 
   group('resolveAssetsDir', () {
@@ -176,6 +177,7 @@ void main() {
           'dartDefines': <String>[],
           'targetPlatform': 'ios',
           'nativeAssetsManifest': '',
+          'trackWidgetCreation': false,
           // assetsDir missing — a rules/dev-tool version skew.
         }),
         throwsA(
@@ -244,10 +246,40 @@ void main() {
         'targetPlatform': 'android',
         'nativeAssetsManifest':
             'bazel-out/x/bin/app_flutter.native_assets.json',
+        'trackWidgetCreation': false,
       });
       expect(
         parsed.nativeAssetsManifest,
         'bazel-out/x/bin/app_flutter.native_assets.json',
+      );
+    });
+
+    test('carries whether the app tracks widget creation through', () {
+      Map<String, dynamic> record(Object? tracked) => {
+        'label': '@@//:app_flutter',
+        'compilationMode': 'dbg',
+        'platformBuildArgs': <String>[],
+        'dartDefines': <String>[],
+        'assetsDir': 'bazel-out/x/bin/app_flutter_flutter_assets',
+        'targetPlatform': 'macos',
+        'nativeAssetsManifest': '',
+        'trackWidgetCreation': ?tracked,
+      };
+      expect(BuildInfo.fromJson(record(true)).trackWidgetCreation, isTrue);
+      expect(BuildInfo.fromJson(record(false)).trackWidgetCreation, isFalse);
+      // The hot-reload compiler must apply the transform the app was built
+      // with. A tool that assumed either answer would drop the creation
+      // locations of every reloaded library, or add them to an app that was
+      // built without.
+      expect(
+        () => BuildInfo.fromJson(record(null)),
+        throwsA(
+          isA<DevToolException>().having(
+            (e) => e.message,
+            'message',
+            contains('trackWidgetCreation'),
+          ),
+        ),
       );
     });
 
@@ -260,6 +292,7 @@ void main() {
         'assetsDir': 'bazel-out/x/bin/app_flutter_flutter_assets',
         'targetPlatform': 'ios',
         'nativeAssetsManifest': '',
+        'trackWidgetCreation': false,
       });
       expect(parsed.targetPlatform, 'ios');
     });
@@ -279,6 +312,7 @@ void main() {
         'assetsDir': 'bazel-out/x/bin/app_flutter_flutter_assets',
         'targetPlatform': 'ios',
         'nativeAssetsManifest': '',
+        'trackWidgetCreation': false,
       };
       final parsed = BuildInfo.fromJson(record);
 
@@ -312,6 +346,7 @@ void main() {
         'assetsDir': 'bazel-out/x/bin/app_flutter_flutter_assets',
         'targetPlatform': 'ios',
         'nativeAssetsManifest': '',
+        'trackWidgetCreation': false,
         'somethingNewerRulesBake': 'keep me',
       });
 
@@ -328,6 +363,7 @@ void main() {
         'assetsDir': 'bazel-out/x/bin/app_flutter_flutter_assets',
         'targetPlatform': 'ios',
         'nativeAssetsManifest': '',
+        'trackWidgetCreation': false,
       });
       expect(parsed.buildArgs(extra: const ['--//custom:flag']), [
         '--ios_multi_cpus=sim_arm64',
@@ -471,6 +507,7 @@ void main() {
           'assetsDir': 'bazel-out/x/bin/app_flutter_flutter_assets',
           'targetPlatform': 'macos',
           'nativeAssetsManifest': '',
+          'trackWidgetCreation': false,
         },
       );
 

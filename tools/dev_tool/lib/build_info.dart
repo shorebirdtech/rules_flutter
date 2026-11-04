@@ -82,6 +82,14 @@ class BuildInfo {
   /// and makes `main()` throw.
   final String nativeAssetsManifest;
 
+  /// Whether the app's kernel was compiled with `--track-widget-creation`.
+  ///
+  /// The resident frontend_server recompiles every changed library on a hot
+  /// reload or restart, so it passes the flag too when this is true: a library
+  /// compiled without it builds its widgets with no creation location, and the
+  /// widget inspector loses them after the first edit.
+  final bool trackWidgetCreation;
+
   /// The record exactly as the running app served it.
   ///
   /// Kept alongside the parsed fields rather than re-derived from them, so a
@@ -97,6 +105,7 @@ class BuildInfo {
     required this.assetsDir,
     required this.targetPlatform,
     required this.nativeAssetsManifest,
+    required this.trackWidgetCreation,
     required this.record,
   });
 
@@ -145,6 +154,7 @@ class BuildInfo {
       assetsDir: need<String>('assetsDir'),
       targetPlatform: need<String>('targetPlatform'),
       nativeAssetsManifest: need<String>('nativeAssetsManifest'),
+      trackWidgetCreation: need<bool>('trackWidgetCreation'),
       record: json,
     );
   }
