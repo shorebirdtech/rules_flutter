@@ -745,6 +745,33 @@ platform_restricted_assets_are_stated_in_the_spoke_test = unittest.make(
     _platform_restricted_assets_are_stated_in_the_spoke_test_impl,
 )
 
+def _platform_restricted_shaders_are_stated_in_the_spoke_test_impl(ctx):
+    """A shader a `platforms:` entry restricts is stated with its platforms."""
+    env = unittest.begin(ctx)
+
+    content = make_flutter_library_build_content(
+        name = "restricted",
+        deps = [],
+        language_version = "3.4",
+        code_assets = [],
+        has_unreplaced_hook = "",
+        fonts_json_str = "",
+        font_files = {},
+        pkg_assets = {},
+        pkg_shaders = {":shaders/a.frag": "shaders/a.frag", ":shaders/b.frag": "shaders/b.frag"},
+        pkg_shader_platforms = {"shaders/a.frag": ["android", "web"]},
+    )
+
+    asserts.true(env, "pkg_shader_platforms" in content, content)
+    asserts.true(env, '"shaders/a.frag": ["android", "web"]' in content, content)
+    asserts.false(env, '"shaders/b.frag": [' in content, content)
+
+    return unittest.end(env)
+
+platform_restricted_shaders_are_stated_in_the_spoke_test = unittest.make(
+    _platform_restricted_shaders_are_stated_in_the_spoke_test_impl,
+)
+
 def flutter_pub_package_test_suite(name):
     unittest.suite(
         name,
@@ -767,4 +794,5 @@ def flutter_pub_package_test_suite(name):
         spoke_with_shaders_declares_their_includes_test,
         desktop_plugin_libraries_carry_their_link_libraries_test,
         platform_restricted_assets_are_stated_in_the_spoke_test,
+        platform_restricted_shaders_are_stated_in_the_spoke_test,
     )

@@ -59,6 +59,7 @@ bundled_app(
         "fx_flavors",
         "fx_names",
         "fx_platforms",
+        "fx_shader_flavors",
         "fx_variants",
     ]
 ]
@@ -101,6 +102,39 @@ flutter_web_app(
 tree_of(
     name = "web_with_fx_platforms_bundle",
     src = ":web_with_fx_platforms",
+    visibility = ["//visibility:public"],
+)
+
+# A package that ships shaders is bundled the same way.
+
+[
+    bundled_app(
+        name = "app_with_fx_shaders_" + os,
+        platform = platform,
+        deps = ["@fx_shaders"],
+    )
+    for os, platform in {
+        "android": ":android_arm64",
+        "ios": "@rules_flutter//flutter/platforms:ios_arm64",
+        "linux": "@rules_flutter//flutter/platforms:linux_x64",
+        "macos": "@rules_flutter//flutter/platforms:macos_arm64",
+        "windows": "@rules_flutter//flutter/platforms:windows_x64",
+    }.items()
+]
+
+flutter_web_app(
+    name = "web_with_fx_shaders",
+    package_name = "asset_bundle",
+    js_fallback = False,
+    deps = [
+        "@deps//:flutter",
+        "@fx_shaders",
+    ],
+)
+
+tree_of(
+    name = "web_with_fx_shaders_bundle",
+    src = ":web_with_fx_shaders",
     visibility = ["//visibility:public"],
 )
 

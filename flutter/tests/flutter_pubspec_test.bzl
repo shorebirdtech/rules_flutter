@@ -159,6 +159,10 @@ flutter:
   uses-material-design: true
   shaders:
     - shaders/ink_sparkle.frag
+    - path: shaders/web_only.frag
+      platforms: [web]
+    - path: shaders/paid.frag
+      flavors: [paid, premium]
 """
 
 # ---------------------------------------------------------------------------
@@ -303,8 +307,15 @@ def _shaders_and_material_test_impl(ctx):
     env = unittest.begin(ctx)
     result = parse_flutter_assets_block(_MATERIAL_AND_SHADERS_PUBSPEC)
     asserts.equals(env, True, result.uses_material_design)
-    asserts.equals(env, 1, len(result.shaders))
+    asserts.equals(env, 3, len(result.shaders))
     asserts.equals(env, "shaders/ink_sparkle.frag", result.shaders[0].path)
+    asserts.equals(env, [], result.shaders[0].platforms)
+    asserts.equals(env, [], result.shaders[0].flavors)
+
+    # The map form carries the restrictions flutter_tools applies to a shader
+    # as it does to an asset.
+    asserts.equals(env, ["web"], result.shaders[1].platforms)
+    asserts.equals(env, ["paid", "premium"], result.shaders[2].flavors)
     return unittest.end(env)
 
 def _empty_flutter_block_test_impl(ctx):

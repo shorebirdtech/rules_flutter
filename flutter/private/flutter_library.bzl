@@ -67,7 +67,7 @@ def own_asset_contributions(ctx, package_name):
         for f in ctx.files.assets
     ]
 
-def build_pub_contributions(package_name, fonts_json, font_files_dict, pkg_assets_dict, pkg_shaders_dict, shader_includes = [], pkg_asset_platforms = {}):
+def build_pub_contributions(package_name, fonts_json, font_files_dict, pkg_assets_dict, pkg_shaders_dict, shader_includes = [], pkg_asset_platforms = {}, pkg_shader_platforms = {}):
     """Build pub_fonts/pub_assets/pub_shaders contribution structs from rule attrs.
 
     Decodes the JSON-encoded font declarations and walks the file dicts,
@@ -94,6 +94,8 @@ def build_pub_contributions(package_name, fonts_json, font_files_dict, pkg_asset
         pkg_asset_platforms: dict[str, list[str]] — `ctx.attr.pkg_asset_platforms`.
             For the assets of `pkg_assets_dict` that ship on some platforms
             only, the path and the platforms. An asset not here ships on all.
+        pkg_shader_platforms: dict[str, list[str]] — `ctx.attr.pkg_shader_platforms`,
+            the same for the shaders of `pkg_shaders_dict`.
 
     Returns:
         Tuple of (extra_pub_fonts, extra_pub_assets, extra_pub_shaders) lists.
@@ -161,9 +163,25 @@ def build_pub_contributions(package_name, fonts_json, font_files_dict, pkg_asset
             shader_path = shader_path,
             file = files[0],
             includes = tuple(shader_includes),
+            platforms = tuple(pkg_shader_platforms.get(shader_path, [])),
         ))
 
     return (extra_pub_fonts, extra_pub_assets, extra_pub_shaders)
+
+def ships_on(platforms, target_platform):
+    """Whether a pub asset or shader restricted to `platforms` is in a bundle for `target_platform`.
+
+    Args:
+        platforms: The platforms its `platforms:` entry names; empty for
+            all of them.
+        target_platform: The platform the bundle is for (`android`, `ios`,
+            `linux`, `macos`, `windows`, `web`, or `tester`). None, and `tester`,
+            which `flutter test` bundles for, leave out nothing.
+
+    Returns:
+        True if the bundle holds it.
+    """
+    return not platforms or target_platform in (None, "tester") or target_platform in platforms
 
 def aggregate_pub_contributions(deps, target_platform = None):
     """Walk transitive `FlutterInfo.pub_fonts` / `pub_assets` from deps.
@@ -223,12 +241,16 @@ def aggregate_pub_contributions(deps, target_platform = None):
         fonts.append({"family": family_str, "fonts": fonts_descriptors})
 
     for entry in pub_assets:
-        if entry.platforms and target_platform not in (None, "tester") and target_platform not in entry.platforms:
+        if not ships_on(entry.platforms, target_platform):
             continue
         prefix = "packages/{}/".format(entry.package_name) if entry.package_name else ""
         copies.append((prefix + entry.asset_path, entry.file))
 
     return (fonts, copies, unlisted_copies)
+
+PKG_SHADER_PLATFORMS_ATTR = attr.string_list_dict(
+    doc = "For a shader of `pkg_shaders` that ships on some platforms only (a `platforms:` entry of `flutter: shaders:`), its package-relative path and the platforms (`android`, `ios`, `linux`, `macos`, `windows`, `web`). A shader not listed here ships on every platform.",
+)
 
 PKG_ASSET_PLATFORMS_ATTR = attr.string_list_dict(
     doc = "For an asset of `pkg_assets` that ships on some platforms only (a `platforms:` entry of `flutter: assets:`), its package-relative path and the platforms (`android`, `ios`, `linux`, `macos`, `windows`, `web`). An asset not listed here ships on every platform.",
@@ -294,6 +316,7 @@ def _flutter_library_impl(ctx):
         ctx.attr.pkg_shaders,
         ctx.files.shader_includes,
         ctx.attr.pkg_asset_platforms,
+        ctx.attr.pkg_shader_platforms,
     )
 
     # `resources` names the non-Dart remainder of `lib/`; a Dart source there
@@ -427,6 +450,7 @@ flutter_library = rule(
             allow_files = True,
         ),
         "pkg_asset_platforms": PKG_ASSET_PLATFORMS_ATTR,
+        "pkg_shader_platforms": PKG_SHADER_PLATFORMS_ATTR,
         "_sky_engine": SKY_ENGINE_ATTR,
         "shader_includes": attr.label_list(
             doc = "Files this package's `pkg_shaders` may `#include` (e.g. " +

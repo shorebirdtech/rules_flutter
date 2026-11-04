@@ -1256,7 +1256,7 @@ def _flutter_web_bundle_impl(ctx):
             "generatedSourcePaths": dev_generated_sources,
             "generatedSourceUris": dev_generated_source_uris,
             # See flutter_application's dev config.
-            "shaders": shader_sources(ctx, primary.deps),
+            "shaders": shader_sources(ctx, primary.deps, "web"),
             "assetRoots": asset_roots(ctx, primary.deps),
             # The native modules the page instantiates, and per module the files
             # its bindings were generated from. A reload cannot replace an

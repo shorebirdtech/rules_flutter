@@ -25,7 +25,10 @@ Schema reference (Flutter's pubspec):
           transformers:              # refused: rules_flutter does not run them
             - package: <name>
       shaders:
-        - <path>
+        - <path>                     # string form
+        - path: <path>               # map form
+          flavors: [<flavor>, ...]
+          platforms: [<platform>, ...]
       plugin:
         implements: <umbrella>
         platforms:
@@ -181,12 +184,18 @@ def _parse_shaders(raw):
     out = []
     for entry in raw:
         if type(entry) == "string":
-            out.append(struct(path = entry))
+            out.append(struct(path = entry, flavors = [], platforms = []))
             continue
         if type(entry) == "dict":
             path = entry.get("path")
             if type(path) == "string":
-                out.append(struct(path = path))
+                flavors_raw = entry.get("flavors", [])
+                platforms_raw = entry.get("platforms", [])
+                out.append(struct(
+                    path = path,
+                    flavors = [str(f) for f in flavors_raw] if type(flavors_raw) == "list" else [],
+                    platforms = [str(p) for p in platforms_raw] if type(platforms_raw) == "list" else [],
+                ))
     return out
 
 def parse_flutter_assets_block(content):
@@ -199,13 +208,13 @@ def parse_flutter_assets_block(content):
         struct(
             fonts:    list[struct(family, fonts=list[struct(asset, weight, style)])],
             assets:   list[struct(path, flavors, platforms, transformers)],
-            shaders:  list[struct(path)],
+            shaders:  list[struct(path, flavors, platforms)],
             uses_material_design: bool,
         )
 
     `weight` and `style` on a font are None when unset. `flavors`/`platforms`
-    are captured from modern-shape asset entries but are not yet acted on by
-    the asset bundler — they are out-of-scope for v1.
+    are captured from modern-shape asset and shader entries; `flutter_pub_package`
+    acts on them.
     """
     flutter = parse_flutter_block(content)
     umd_raw = flutter.get("uses-material-design", False)

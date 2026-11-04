@@ -376,7 +376,7 @@ def _flutter_application_impl(ctx):
                 # Every bundled shader, by bundle path, with the workspace
                 # files it is compiled from. The dev tool watches those and
                 # has the app reload a shader whose compiled bytes changed.
-                "shaders": shader_sources(ctx, ctx.attr.deps),
+                "shaders": shader_sources(ctx, ctx.attr.deps, target_platform),
                 # Where each package's first-party assets are in the workspace,
                 # by bundle path prefix: an asset is bundled under its path in
                 # its package, not in the workspace.

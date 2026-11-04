@@ -41,4 +41,4 @@ pub_registry(
 )
 
 fixture_pubs = use_extension("//tools:pubs.bzl", "fixture_pubs")
-use_repo(fixture_pubs, "fx_dirs", "fx_flavors", "fx_names", "fx_platforms", "fx_variants")
+use_repo(fixture_pubs, "fx_dirs", "fx_flavors", "fx_names", "fx_platforms", "fx_shader_flavors", "fx_shaders", "fx_variants")

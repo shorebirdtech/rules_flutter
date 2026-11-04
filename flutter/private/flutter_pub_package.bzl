@@ -665,8 +665,7 @@ def _build_pkg_assets(ctx, package, parsed_assets):
         ships on some platforms only to those platforms.
     """
     files = {}
-    platforms = {}
-    unrestricted = {}
+    restrictions = _platform_restrictions()
     for entry in parsed_assets:
         if entry.flavors:
             continue
@@ -675,22 +674,54 @@ def _build_pkg_assets(ctx, package, parsed_assets):
         for f in listed:
             for variant in _with_variants(ctx, package, _checked_file_name(package, "asset file", f)):
                 files[":" + variant] = variant
-                if entry.platforms:
-                    platforms[variant] = sorted({p: True for p in platforms.get(variant, []) + entry.platforms}.keys())
-                else:
-                    unrestricted[variant] = True
-    return struct(
-        files = files,
-        platforms = {path: names for path, names in platforms.items() if path not in unrestricted},
-    )
+                restrictions.add(variant, entry.platforms)
+    return struct(files = files, platforms = restrictions.platforms())
 
-def _build_pkg_shaders_dict(package, parsed_shaders):
-    """Build the `pkg_shaders` dict — same shape as pkg_assets, no directories."""
-    out = {}
+def _build_pkg_shaders(package, parsed_shaders):
+    """Expand the package's `flutter: shaders:` entries into files.
+
+    The same rules as for assets (see `_build_pkg_assets`): an entry with
+    `flavors:` ships in no build, one with `platforms:` only in builds for
+    those platforms. There are no directories and no resolution variants.
+
+    Returns:
+        struct(files, platforms): `files` is the `pkg_shaders` dict;
+        `platforms` maps the path of each shader that ships on some platforms
+        only to those platforms.
+    """
+    files = {}
+    restrictions = _platform_restrictions()
     for entry in parsed_shaders:
+        if entry.flavors:
+            continue
         _checked_file_name(package, "shader file", entry.path)
-        out[":" + entry.path] = entry.path
-    return out
+        files[":" + entry.path] = entry.path
+        restrictions.add(entry.path, entry.platforms)
+    return struct(files = files, platforms = restrictions.platforms())
+
+def _platform_restrictions():
+    """The platforms each file of a package ships on, from the entries that list it.
+
+    A file that several entries list ships wherever any of them does, so one
+    entry without `platforms:` makes it unrestricted.
+    """
+    listed = {}
+    unrestricted = {}
+
+    def add(path, platforms):
+        if platforms:
+            listed[path] = listed.get(path, []) + platforms
+        else:
+            unrestricted[path] = True
+
+    def restricted():
+        return {
+            path: sorted({p: True for p in names}.keys())
+            for path, names in listed.items()
+            if path not in unrestricted
+        }
+
+    return struct(add = add, platforms = restricted)
 
 def _format_label_dict_literal(d, indent = "        "):
     """Render `{":foo": "foo", ":bar": "bar"}` as a multi-line BUILD source dict."""
@@ -711,7 +742,7 @@ _SHADER_INCLUDES_GLOB = """    shader_includes = glob(
         allow_empty = True,
     ),"""
 
-def _format_pub_asset_attrs(fonts_json_str, font_files, pkg_assets, pkg_shaders, pkg_asset_platforms = {}):
+def _format_pub_asset_attrs(fonts_json_str, font_files, pkg_assets, pkg_shaders, pkg_asset_platforms = {}, pkg_shader_platforms = {}):
     """Render the four pub-asset attrs as BUILD source, omitting empty ones."""
     parts = []
     if fonts_json_str:
@@ -724,7 +755,9 @@ def _format_pub_asset_attrs(fonts_json_str, font_files, pkg_assets, pkg_shaders,
         parts.append("    pkg_asset_platforms = {},".format(_format_list_dict_literal(pkg_asset_platforms)))
     if pkg_shaders:
         parts.append("    pkg_shaders = {},".format(_format_label_dict_literal(pkg_shaders)))
-
+    if pkg_shader_platforms:
+        parts.append("    pkg_shader_platforms = {},".format(_format_list_dict_literal(pkg_shader_platforms)))
+    if pkg_shaders:
         # What the shaders may `#include`: a package's GLSL anywhere in it,
         # since an include can reach `../`.
         parts.append(_SHADER_INCLUDES_GLOB)
@@ -791,7 +824,8 @@ def make_flutter_library_build_content(
         pkg_assets,
         pkg_shaders,
         version = "",
-        pkg_asset_platforms = {}):
+        pkg_asset_platforms = {},
+        pkg_shader_platforms = {}):
     """Generate BUILD content for a non-plugin Flutter spoke shipping fonts/assets/shaders.
 
     Counterpart to `make_dart_library_build_content` — used when the spoke
@@ -813,6 +847,8 @@ def make_flutter_library_build_content(
         pkg_asset_platforms: Dict of package-relative asset path -> the platforms
             it ships on, for the assets a `platforms:` entry restricts.
         pkg_shaders: Dict of shader file label -> package-relative path.
+        pkg_shader_platforms: Dict of package-relative shader path -> the
+            platforms it ships on, for the shaders a `platforms:` entry restricts.
         version: The resolved package version this spoke was fetched at, or
             empty. Emitted only when known, matching
             `make_dart_library_build_content`: its sole use is agreement
@@ -827,7 +863,7 @@ def make_flutter_library_build_content(
         dep_lines = ['        "{}",'.format(dep) for dep in deps]
         deps_block = "    deps = [\n{}\n    ],\n".format("\n".join(dep_lines))
 
-    pub_attrs = _format_pub_asset_attrs(fonts_json_str, font_files, pkg_assets, pkg_shaders, pkg_asset_platforms)
+    pub_attrs = _format_pub_asset_attrs(fonts_json_str, font_files, pkg_assets, pkg_shaders, pkg_asset_platforms, pkg_shader_platforms)
 
     # The `lib/` glob is `allow_empty`: a pub package can be only assets or native
     # code, with no Dart.
@@ -874,7 +910,8 @@ def make_flutter_plugin_build_content(
         version = "",
         linux_link = None,
         windows_link = None,
-        pkg_asset_platforms = {}):
+        pkg_asset_platforms = {},
+        pkg_shader_platforms = {}):
     """Generate BUILD content for a Flutter plugin spoke.
 
     Emits a `flutter_plugin` plus optional per-platform
@@ -910,6 +947,8 @@ def make_flutter_plugin_build_content(
         pkg_asset_platforms: Dict of package-relative asset path -> the platforms
             it ships on, for the assets a `platforms:` entry restricts.
         pkg_shaders: Dict of shader file label -> package-relative path.
+        pkg_shader_platforms: Dict of package-relative shader path -> the
+            platforms it ships on, for the shaders a `platforms:` entry restricts.
         version: The resolved package version this spoke was fetched at, or
             empty. Emitted only when known, matching
             `make_dart_library_build_content`: its sole use is agreement
@@ -1072,7 +1111,7 @@ flutter_windows_plugin_library(
             ios_lines = ios_lines,
         )
 
-    pub_attrs = _format_pub_asset_attrs(fonts_json_str, font_files, pkg_assets, pkg_shaders, pkg_asset_platforms)
+    pub_attrs = _format_pub_asset_attrs(fonts_json_str, font_files, pkg_assets, pkg_shaders, pkg_asset_platforms, pkg_shader_platforms)
 
     # The `lib/` glob is `allow_empty`: a pub package can be only assets or native
     # code, with no Dart.
@@ -1717,7 +1756,7 @@ def _flutter_pub_package_impl(ctx):
     fonts_json_str = _encode_fonts_json(asset_block.fonts)
     font_files = _build_font_files_dict(ctx.attr.package_name, asset_block.fonts)
     pkg_assets = _build_pkg_assets(ctx, ctx.attr.package_name, asset_block.assets)
-    pkg_shaders_dict = _build_pkg_shaders_dict(ctx.attr.package_name, asset_block.shaders)
+    pkg_shaders = _build_pkg_shaders(ctx.attr.package_name, asset_block.shaders)
     has_asset_contributions = (
         bool(asset_block.fonts) or bool(asset_block.assets) or bool(asset_block.shaders)
     )
@@ -1906,7 +1945,8 @@ def _flutter_pub_package_impl(ctx):
             font_files = font_files,
             pkg_assets = pkg_assets.files,
             pkg_asset_platforms = pkg_assets.platforms,
-            pkg_shaders = pkg_shaders_dict,
+            pkg_shaders = pkg_shaders.files,
+            pkg_shader_platforms = pkg_shaders.platforms,
             linux_link = linux_link,
             windows_link = windows_link,
         )
@@ -1926,7 +1966,8 @@ def _flutter_pub_package_impl(ctx):
             font_files = font_files,
             pkg_assets = pkg_assets.files,
             pkg_asset_platforms = pkg_assets.platforms,
-            pkg_shaders = pkg_shaders_dict,
+            pkg_shaders = pkg_shaders.files,
+            pkg_shader_platforms = pkg_shaders.platforms,
         )
         android_src_dir = ""
         android_java_package = ""

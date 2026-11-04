@@ -179,3 +179,35 @@ two_files_one_key_test(
     name = "two_files_claiming_one_asset_key_fail_the_build_test",
     target_under_test = "//:two_files_one_key",
 )
+
+# Property: a pub package's shader entry with `platforms:` is bundled (and
+# compiled) only for those platforms, as flutter_tools drops it from a build
+# for another; one without ships for all.
+[
+    bundle_test(
+        name = "pub_package_shaders_bundle_only_for_their_platforms_%s_test" % os,
+        bundle = bundle,
+        expected = "//tests:expected/fx_shaders.json",
+        platform = os,
+        prefix = "packages/fx_shaders/",
+        subdir = "assets" if os == "web" else "",
+    )
+    for os, bundle in {
+        "android": "//:app_with_fx_shaders_android_bundle",
+        "ios": "//:app_with_fx_shaders_ios_bundle",
+        "linux": "//:app_with_fx_shaders_linux_bundle",
+        "macos": "//:app_with_fx_shaders_macos_bundle",
+        "web": "//:web_with_fx_shaders_bundle",
+        "windows": "//:app_with_fx_shaders_windows_bundle",
+    }.items()
+]
+
+# Property: a pub package's shader entry with `flavors:` is bundled only for a
+# build of one of those flavors; this workspace builds none, so such shaders
+# ship nowhere, as with `flutter build` without `--flavor`.
+bundle_test(
+    name = "pub_package_flavor_restricted_shaders_are_not_bundled_without_a_flavor_test",
+    bundle = "//:app_with_fx_shader_flavors_bundle",
+    expected = "//tests:expected/fx_shader_flavors.json",
+    prefix = "packages/fx_shader_flavors/",
+)

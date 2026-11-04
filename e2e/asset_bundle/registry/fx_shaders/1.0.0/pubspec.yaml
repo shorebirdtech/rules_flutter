@@ -1,0 +1,15 @@
+name: fx_shaders
+version: 1.0.0
+environment:
+  sdk: ^3.13.0
+flutter:
+  shaders:
+    - shaders/all.frag
+    - path: shaders/android_only.frag
+      platforms: [android]
+    - path: shaders/web_only.frag
+      platforms: [web]
+    - path: shaders/ios_only.frag
+      platforms: [ios]
+    - path: shaders/desktop.frag
+      platforms: [linux, macos, windows]

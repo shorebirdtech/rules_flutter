@@ -13,7 +13,7 @@ load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "app_main_location", 
 load("//flutter/private:flutter_asset_bundle.bzl", "flutter_asset_bundle_action")
 load("//flutter/private:flutter_compile.bzl", "flutter_kernel_compile_action")
 load("//flutter/private:flutter_info.bzl", "dedup_plugins")
-load("//flutter/private:flutter_library.bzl", "aggregate_pub_contributions", "package_relative")
+load("//flutter/private:flutter_library.bzl", "aggregate_pub_contributions", "package_relative", "ships_on")
 load("//flutter/private:flutter_shader_compile.bzl", "flutter_shader_compile_action")
 load("//flutter/private:native_sources.bzl", "native_sources_aspect")
 load("//flutter/private:plugin_registrant.bzl", "generate_dart_plugin_registrant", "generate_dev_plugin_registrants")
@@ -540,7 +540,7 @@ def collect_sdk_shader_srcs(deps):
         return depset(transitive = transitive_depsets).to_list()
     return []
 
-def _shader_jobs(ctx, deps):
+def _shader_jobs(ctx, deps, target_platform):
     """Every shader this target bundles, as struct(bundle_path, file, includes, listed).
 
     `listed` says whether the asset manifest lists the shader. Flutter's own
@@ -554,6 +554,10 @@ def _shader_jobs(ctx, deps):
     package's under "packages/<pkg>/<path>" (bare "<path>" when it has no
     package name). Two shaders claiming one bundle path fail here: one would
     otherwise overwrite the other.
+
+    A package's shader that its `platforms:` entry restricts to other platforms
+    than `target_platform` is no job, as flutter_tools leaves it out of a build
+    for them; `tester` and None leave out nothing.
     """
     jobs = []
     user_includes = getattr(ctx.files, "shader_includes", [])
@@ -564,6 +568,8 @@ def _shader_jobs(ctx, deps):
     for dep in deps:
         if FlutterInfo in dep:
             for entry in dep[FlutterInfo].pub_shaders.to_list():
+                if not ships_on(entry.platforms, target_platform):
+                    continue
                 prefix = "packages/{}/".format(entry.package_name) if entry.package_name else ""
                 jobs.append(struct(
                     bundle_path = prefix + entry.shader_path,
@@ -588,7 +594,7 @@ def _shader_jobs(ctx, deps):
             ))
     return by_path.values()
 
-def shader_sources(ctx, deps):
+def shader_sources(ctx, deps, target_platform):
     """The workspace files behind each bundled shader, for the dev tool.
 
     `{bundle path: [workspace-relative path]}`: the shader and what it may
@@ -600,6 +606,8 @@ def shader_sources(ctx, deps):
         ctx: Rule context (must have the shaders attr).
         deps: The dependencies whose packages' shaders are bundled: the ones
             `flutter_compile_shaders` was given.
+        target_platform: The platform the build is for, as `flutter_compile_shaders`
+            was given it.
 
     Returns:
         The dict above.
@@ -610,7 +618,7 @@ def shader_sources(ctx, deps):
             for f in [job.file] + list(job.includes)
             if f.is_source and not f.short_path.startswith("../")
         ]
-        for job in _shader_jobs(ctx, deps)
+        for job in _shader_jobs(ctx, deps, target_platform)
     }
 
 def asset_roots(ctx, deps):
@@ -666,7 +674,7 @@ def flutter_compile_shaders(ctx, tools, target_platform, deps):
         File), the shaders the asset manifest lists and the ones it does not.
         Pass to `flutter_build_assets`.
     """
-    jobs = _shader_jobs(ctx, deps)
+    jobs = _shader_jobs(ctx, deps, target_platform)
     compiled = struct(listed = [], unlisted = [])
     if not jobs or not tools.impellerc:
         return compiled

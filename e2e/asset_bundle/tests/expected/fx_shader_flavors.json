@@ -1,0 +1,11 @@
+{
+  "assets": {
+    "shaders/all.frag": {
+      "variants": [
+        {
+          "asset": "shaders/all.frag"
+        }
+      ]
+    }
+  }
+}

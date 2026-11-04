@@ -11,6 +11,8 @@ PACKAGES = {
     "fx_flavors": "1.0.0",
     "fx_names": "1.0.0",
     "fx_platforms": "1.0.0",
+    "fx_shader_flavors": "1.0.0",
+    "fx_shaders": "1.0.0",
     "fx_variants": "1.0.0",
 }
 
