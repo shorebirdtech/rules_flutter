@@ -1479,29 +1479,38 @@ class AndroidDevice extends Device {
       transform: androidLogFilter,
     );
 
-    // Step 3: Launch the activity.
+    // Step 3: Launch the activity. `-W` makes `am` wait for the launch to
+    // complete and say how it went (`Status`, `LaunchState`), which is what
+    // tells a process that started from one that never did. It is not awaited
+    // here: it returns once the first frame is drawn, and an app started
+    // paused (or a debug app on a busy host) announces its VM service well
+    // before that, which is all the wait below is for.
     final activity = _activityName ?? '.MainActivity';
-    final startResult = await _runProcess(
+    final launched = _runProcess(
       adbPath,
       _adbArgs([
-        'shell', 'am', 'start',
+        'shell', 'am', 'start', '-W',
         // `--ez <key> <bool>` is an intent extra; the embedder reads
         // `start-paused` off the launch intent.
         if (startPaused) ...['--ez', 'start-paused', 'true'],
         '-n', '$packageName/$activity',
       ]),
-    );
-    if (startResult.exitCode != 0) {
-      throw StateError(_adbFailure('am start', startResult.stderr));
-    }
+    ).then(_readAmStart, onError: (Object e) => _AmStart.failed('$e'));
 
     // Step 4: Discover VM service URI from logcat — the announcement this
     // app's process made. logcat is the whole device's log, so another Flutter
     // app starting meanwhile announces its own there too. A release app
     // announces nothing, so there is nothing to wait for.
-    final deviceUri = buildMode.servesVmService
-        ? await _awaitVmService(logs, packageName)
-        : null;
+    final Uri? deviceUri;
+    if (buildMode.servesVmService) {
+      deviceUri = await _awaitVmService(logs, packageName, launched);
+    } else {
+      final result = await launched;
+      if (result.failure case final failure?) {
+        throw StateError(_adbFailure('am start', failure));
+      }
+      deviceUri = null;
+    }
 
     // Port forwarding — the URI logcat announces is device-local, and a failed
     // forward has no usable second answer. `127.0.0.1:<devicePort>` on the host
@@ -1551,22 +1560,36 @@ class AndroidDevice extends Device {
   /// every [_vmServiceSlowStartNotice] while it waits. The wait ends on the
   /// announcement, or with a [StateError] naming what became of the app:
   ///
-  ///  * its process was there and is gone — it crashed or exited, and the log's
-  ///    last lines are quoted;
-  ///  * it had no process at all for [_androidAppStartGrace] after `am start`
-  ///    returned, which is the activity failing to start before the system made
-  ///    one. A process takes moments to appear, so this is not a limit on how
-  ///    slowly the app may start, only on how long a missing process is waited
-  ///    for.
+  ///  * `am start -W` ([launched]) reported the launch failed, or that the app
+  ///    was already running (so nothing will announce);
+  ///  * the process had been started, which `am` reported or `pidof` saw, and
+  ///    is gone — it crashed or exited, and the log's last lines are quoted.
+  ///
+  /// A process that has not been seen is not judged by a clock: `am` says
+  /// whether the launch completed, and until it does the wait goes on.
   ///
   /// Null when logcat itself ends first: the device went away, or the run is
   /// being torn down.
-  Future<Uri?> _awaitVmService(AppLogStream logs, String packageName) async {
-    final gone = Completer<_AppGone>();
+  Future<Uri?> _awaitVmService(
+    AppLogStream logs,
+    String packageName,
+    Future<_AmStart> launched,
+  ) async {
+    final gone = Completer<String>();
     var seen = false;
-    var missingPolls = 0;
     var asking = false;
     var failing = false;
+    unawaited(
+      launched.then((result) {
+        if (gone.isCompleted) return;
+        final failure = result.failure;
+        if (failure != null) {
+          gone.complete(_adbFailure('am start', failure));
+        } else if (result.newProcess) {
+          seen = true;
+        }
+      }),
+    );
     final liveness = Timer.periodic(_androidAppLivenessInterval, (_) async {
       if (gone.isCompleted || asking) return;
       asking = true;
@@ -1575,11 +1598,10 @@ class AndroidDevice extends Device {
         failing = false;
         if (running) {
           seen = true;
-          missingPolls = 0;
-        } else if (seen) {
-          gone.complete(_AppGone.exited);
-        } else if (++missingPolls >= _androidAppStartPolls) {
-          gone.complete(_AppGone.neverStarted);
+        } else if (seen && !gone.isCompleted) {
+          gone.complete(
+            '$packageName exited before announcing a VM service on $name.',
+          );
         }
       } on StateError catch (e) {
         // Liveness is unknown while adb will not answer, which is not the app
@@ -1611,15 +1633,7 @@ class AndroidDevice extends Device {
             ? 'The device log had nothing in it.'
             : 'The end of the device log, which other apps write to as '
                   'well:\n${tail.map((l) => '  ${l.text}').join('\n')}';
-        throw StateError(switch (await gone.future) {
-          _AppGone.exited =>
-            '$packageName exited before announcing a VM service on $name. '
-                '$said',
-          _AppGone.neverStarted =>
-            '$packageName never started a process on $name: none appeared '
-                '${_androidAppStartGrace.inSeconds}s after `am start` '
-                'succeeded, so its activity did not start. $said',
-        });
+        throw StateError('${await gone.future} $said');
       }
       return uri;
     } finally {
@@ -2255,18 +2269,56 @@ final vmServiceUriPattern = RegExp(
 /// the app's process is still there.
 const _androidAppLivenessInterval = Duration(seconds: 2);
 
-/// How long an Android app may have no process at all, after `am start`
-/// succeeded, before its launch is called failed. See
-/// [AndroidDevice._awaitVmService].
-const _androidAppStartGrace = Duration(seconds: 30);
+/// What `am start -W` reported of a launch.
+class _AmStart {
+  /// Why the launch failed, or null when it did not.
+  final String? failure;
 
-/// [_androidAppStartGrace] in liveness polls.
-final _androidAppStartPolls =
-    _androidAppStartGrace.inMilliseconds ~/
-    _androidAppLivenessInterval.inMilliseconds;
+  /// Whether the launch created the app's process (`LaunchState: COLD`, or an
+  /// `ok` status from an `am` that names no state).
+  final bool newProcess;
 
-/// What became of an Android app whose VM service was being awaited.
-enum _AppGone { exited, neverStarted }
+  const _AmStart({this.newProcess = false}) : failure = null;
+
+  const _AmStart.failed(String this.failure) : newProcess = false;
+}
+
+/// Reads the output of `am start -W`.
+///
+/// `Status: ok` says the activity launched, and `LaunchState` how: `COLD` is a
+/// new process, the only kind whose VM service has not been announced already.
+/// `WARM` and `HOT` found the app running, so no announcement can follow and
+/// waiting for one would never end. Any other `Status` (`canceled`, `error`)
+/// and any `Error:` line is a launch that failed, said in `am`'s words. `Status:
+/// timeout` is `am` giving up on the first frame, which a loaded host causes
+/// and which says nothing about whether a process exists, so it is no verdict.
+/// Output with no `Status` line (an `am` older than the flag) is none either.
+_AmStart _readAmStart(ProcessResult result) {
+  final output = '${result.stdout}${result.stderr}'.trim();
+  if (result.exitCode != 0) {
+    return _AmStart.failed(output.isEmpty ? 'exit ${result.exitCode}' : output);
+  }
+  String? field(String name) => RegExp(
+    '^$name:\\s*(.*)\$',
+    multiLine: true,
+  ).firstMatch(output)?.group(1)?.trim();
+  final errors = [
+    for (final line in output.split('\n'))
+      if (line.startsWith('Error')) line.trim(),
+  ];
+  if (errors.isNotEmpty) return _AmStart.failed(errors.join(' '));
+  final status = field('Status');
+  if (status == null || status == 'timeout') return const _AmStart();
+  if (status != 'ok') return _AmStart.failed('Status: $status\n$output');
+  final state = field('LaunchState');
+  if (state == 'WARM' || state == 'HOT') {
+    return _AmStart.failed(
+      'the app was already running (LaunchState: $state), so its VM service '
+      'was announced before this launch and nothing will announce it again',
+    );
+  }
+  return const _AmStart(newProcess: true);
+}
 
 /// How often a launch that is still waiting for the VM-service announcement
 /// says so.

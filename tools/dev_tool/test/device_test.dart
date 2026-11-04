@@ -1295,29 +1295,45 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     // present, the launch waits (and says so); gone, it fails at once with the
     // log's last words.
     group('waiting for the VM service', () {
+      /// What `am start -W` prints for a launch that completed.
+      const started =
+          'Starting: Intent { cmp=com.example.app/.MainActivity }\n'
+          'Status: ok\nLaunchState: COLD\nActivity: com.example.app/.MainActivity\n'
+          'TotalTime: 765\nWaitTime: 768\nComplete\n';
+
       /// Launches on a device whose `pidof` answers [pids] on the n-th ask
-      /// (counting from 0), and whose forward succeeds. The launch's outcome is
-      /// read off [Launch] once the fake clock has moved.
-      ({AndroidDevice device, FakeProcess logcat}) deviceWith(
-        String Function(int ask) pids,
-      ) {
+      /// (counting from 0), whose `am start -W` answers [amStart], and whose
+      /// forward succeeds. The launch's outcome is read off [launching] once the
+      /// fake clock has moved.
+      ({AndroidDevice device, FakeProcess logcat, List<List<String>> calls})
+      deviceWith(
+        String Function(int ask) pids, {
+        Future<ProcessResult> Function()? amStart,
+      }) {
         final logcat = FakeProcess();
+        final calls = <List<String>>[];
         var asked = 0;
         final device = AndroidDevice(
           packageName: 'com.example.app',
           adbPath: 'adb',
           runProcess: (exe, args) async {
+            calls.add(args);
             if (args.contains('pidof')) {
               return ProcessResult(0, 0, pids(asked++), '');
             }
             if (args.contains('forward')) {
               return ProcessResult(0, 0, '41234\n', '');
             }
+            if (args.contains('am') && args.contains('start')) {
+              return amStart == null
+                  ? ProcessResult(0, 0, started, '')
+                  : amStart();
+            }
             return ProcessResult(0, 0, '', '');
           },
           startProcess: (exe, args) async => logcat,
         );
-        return (device: device, logcat: logcat);
+        return (device: device, logcat: logcat, calls: calls);
       }
 
       /// The launch of [device], its settled value or error visible as fake
@@ -1361,6 +1377,24 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         return result;
       }
 
+      Matcher stateErrorSaying(List<String> parts) => isA<StateError>().having(
+        (e) => e.message,
+        'message',
+        allOf([for (final part in parts) contains(part)]),
+      );
+
+      test('starts the activity with -W, which reports whether the launch '
+          'completed', () async {
+        final async = FakeAsync();
+        final w = deviceWith((_) => '777\n');
+        inside(async, () => launching(w.device));
+        await pass(async, const Duration(seconds: 1));
+        final start = w.calls.firstWhere(
+          (c) => c.contains('am') && c.contains('start'),
+        );
+        expect(start, contains('-W'));
+      });
+
       test('an app that is alive and silent is waited for past 30 s, and '
           'its announcement is taken whenever it comes', () async {
         final async = FakeAsync();
@@ -1397,40 +1431,143 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         expect(launch.done(), isTrue);
         expect(
           launch.error(),
-          isA<StateError>().having(
-            (e) => e.message,
-            'message',
-            allOf(
-              contains('com.example.app'),
-              contains('exited before announcing a VM service'),
-              contains('FATAL EXCEPTION'),
-            ),
-          ),
+          stateErrorSaying([
+            'com.example.app',
+            'exited before announcing a VM service',
+            'FATAL EXCEPTION',
+          ]),
+        );
+      });
+
+      // The launch reported complete, so there was a process; one that is not
+      // there at the next ask has died, and no count of asks is needed to say so.
+      test('a launch that completed and left no process fails at the next '
+          'ask', () async {
+        final async = FakeAsync();
+        final w = deviceWith((_) => '\n');
+        final launch = inside(async, () => launching(w.device));
+
+        await pass(async, const Duration(seconds: 3));
+        expect(launch.done(), isTrue);
+        expect(
+          launch.error(),
+          stateErrorSaying(['com.example.app', 'exited before announcing']),
+        );
+      });
+
+      // `am start -W` returns once the first frame is drawn. An app started
+      // paused never draws one, so it has not answered, and no process is yet
+      // proof of nothing: waiting for it is the only honest thing to do.
+      test('a launch `am` has not answered is not judged by a clock', () async {
+        final async = FakeAsync();
+        final pending = Completer<ProcessResult>();
+        final w = deviceWith((_) => '\n', amStart: () => pending.future);
+        final launch = inside(async, () => launching(w.device));
+
+        await pass(async, const Duration(minutes: 10));
+        expect(launch.done(), isFalse);
+        expect(launch.error(), isNull);
+
+        // When `am` does answer that the launch completed, there was a process,
+        // and its absence at the next ask is a death.
+        pending.complete(ProcessResult(0, 0, started, ''));
+        // Completed from outside the fake zone, so its listeners run on the
+        // real event loop.
+        await Future<void>.delayed(Duration.zero);
+        await pass(async, const Duration(seconds: 3));
+        expect(
+          launch.error(),
+          stateErrorSaying(['com.example.app', 'exited before announcing']),
         );
       });
 
       test(
-        'an app that never gets a process fails the launch naming that',
+        'a launch `am` reports failed is failed, with what it said',
         () async {
           final async = FakeAsync();
-          final w = deviceWith((_) => '\n');
+          final w = deviceWith(
+            (_) => '\n',
+            amStart: () async => ProcessResult(
+              0,
+              0,
+              'Starting: Intent { cmp=com.example.app/.MainActivity }\n'
+                  'Error type 3\n'
+                  'Error: Activity class {com.example.app/com.example.app.MainActivity} does not exist.\n',
+              '',
+            ),
+          );
           final launch = inside(async, () => launching(w.device));
 
-          await pass(async, const Duration(minutes: 2));
+          await pass(async, const Duration(seconds: 1));
           expect(launch.done(), isTrue);
           expect(
             launch.error(),
-            isA<StateError>().having(
-              (e) => e.message,
-              'message',
-              allOf(
-                contains('com.example.app'),
-                contains('never started a process'),
-              ),
-            ),
+            stateErrorSaying(['am start', 'does not exist']),
           );
         },
       );
+
+      test(
+        'a launch with a status other than ok is failed, naming it',
+        () async {
+          final async = FakeAsync();
+          final w = deviceWith(
+            (_) => '777\n',
+            amStart: () async => ProcessResult(
+              0,
+              0,
+              'Status: canceled\nLaunchState: UNKNOWN (0)\n',
+              '',
+            ),
+          );
+          final launch = inside(async, () => launching(w.device));
+
+          await pass(async, const Duration(seconds: 1));
+          expect(launch.error(), stateErrorSaying(['canceled']));
+        },
+      );
+
+      // `am` stops waiting after its own bound. That says the first frame was
+      // not drawn in time, which a loaded host does, not that nothing started.
+      test('a launch `am` gave up waiting for is not failed by that', () async {
+        final async = FakeAsync();
+        final w = deviceWith(
+          (_) => '777\n',
+          amStart: () async => ProcessResult(
+            0,
+            0,
+            'Status: timeout\nLaunchState: UNKNOWN (0)\n',
+            '',
+          ),
+        );
+        final launch = inside(async, () => launching(w.device));
+
+        await pass(async, const Duration(minutes: 3));
+        expect(launch.done(), isFalse);
+      });
+
+      // The VM service of a process that was already running was announced
+      // before this launch, and nothing will announce it again.
+      test('a launch that found the app already running says why no '
+          'announcement can come', () async {
+        final async = FakeAsync();
+        final w = deviceWith(
+          (_) => '777\n',
+          amStart: () async => ProcessResult(
+            0,
+            0,
+            'Status: ok\nLaunchState: WARM\nActivity: com.example.app/.MainActivity\n',
+            '',
+          ),
+        );
+        final launch = inside(async, () => launching(w.device));
+
+        await pass(async, const Duration(seconds: 1));
+        expect(
+          launch.error(),
+          stateErrorSaying(['already running', 'WARM']),
+        );
+      });
 
       test('a release app has no VM service to wait for', () async {
         final async = FakeAsync();
@@ -1443,6 +1580,23 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         expect(launch.error(), isNull);
         expect(launch.uri(), isNull);
       });
+
+      test(
+        'a release app whose launch failed is failed all the same',
+        () async {
+          final async = FakeAsync();
+          final w = deviceWith(
+            (_) => '777\n',
+            amStart: () async =>
+                ProcessResult(0, 0, 'Error: Activity not started\n', ''),
+          );
+          w.device.buildMode = BuildMode.release;
+          final launch = inside(async, () => launching(w.device));
+
+          await pass(async, const Duration(seconds: 1));
+          expect(launch.error(), stateErrorSaying(['not started']));
+        },
+      );
     });
 
     test('stop calls force-stop when packageName is set', () async {

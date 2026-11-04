@@ -17,6 +17,8 @@ library;
 import 'dart:convert';
 
 import 'package:test/test.dart';
+import 'package:vm_service/vm_service.dart';
+import 'package:vm_service/vm_service_io.dart';
 
 import 'dev_tool_e2e_harness.dart';
 import 'editable_workspace.dart';
@@ -292,6 +294,42 @@ void main() {
             '$result',
       );
       expect((result['launch'] as Map)[appId], 2);
+      await dt.sendCommand(1, 'daemon.shutdown');
+    }, timeout: const Timeout(Duration(minutes: 15)));
+
+    // `am start -W` returns once the first frame is drawn, and an app started
+    // paused never draws one. The launch must not wait on it: the VM service is
+    // announced, and held at PauseStart, until a debugger resumes it.
+    test('an app started paused is found and held, not waited on', () async {
+      final probe = android;
+      if (probe is! AndroidDeviceFound) {
+        fail(
+          'Android device detection failed: '
+          '${(probe as AndroidProbeFailed).reason}',
+        );
+      }
+      final ws = await editableWorkspace('android_example');
+      final dt = await startDevTool(
+        workspace: ws.root,
+        target: ':app',
+        device: 'android:${probe.serial}',
+        extraArgs: ['--start-paused'],
+      );
+      final debugPort = await dt.waitForEvent(
+        'app.debugPort',
+        timeout: const Duration(minutes: 8),
+      );
+      final service = await vmServiceConnectUri(
+        debugPort['params']?['wsUri'] as String,
+      );
+      addTearDown(service.dispose);
+      final vm = await service.getVM();
+      final main = vm.isolates!.firstWhere((i) => i.name == 'main');
+      final isolate = await service.getIsolate(main.id!);
+      expect(isolate.pauseEvent?.kind, EventKind.kPauseStart);
+
+      await service.resume(main.id!);
+      await dt.waitForAppLog('android_example shared=');
       await dt.sendCommand(1, 'daemon.shutdown');
     }, timeout: const Timeout(Duration(minutes: 15)));
   }, skip: android.skipReason);
