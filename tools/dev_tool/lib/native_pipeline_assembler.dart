@@ -64,7 +64,12 @@ class NativeLaunch {
   /// The artifact the app was launched from.
   final String appFile;
 
-  const NativeLaunch({required this.appFile});
+  /// When the build [appFile] came from had finished, on the filesystem's
+  /// clock. A build output stamped no later than this is in the launched
+  /// bundle; one stamped after it is code the process never loaded.
+  final DateTime builtAt;
+
+  const NativeLaunch({required this.appFile, required this.builtAt});
 }
 
 class NativePipelineAssembler {
@@ -812,18 +817,36 @@ class NativePipelineAssembler {
     // launched bundle's fingerprint; app.restart rebuilds and, when it changed,
     // relaunches the process instead of restarting the isolate. Apps with no
     // loose native libraries skip all of this and keep the instant restart path.
-    final fingerprint = await nativeLibsFingerprint(launched.appFile);
-    if (fingerprint.isEmpty) return;
+    final bundled = await nativeLibsFingerprint(launched.appFile);
+    if (bundled.isEmpty) return;
+    // Each restart asks whether the libraries moved by building only them —
+    // see `native_libs.bzl`. A bundle with any native code that group does not
+    // hold (a plugin's vendored framework, a checked-in prebuilt library) is
+    // still judged by rebuilding and reading the bundle, as before: the group
+    // would never see that code move. So is a group this build wrote anew: a
+    // native source saved after the launch build is compiled in here, and
+    // taking that as the baseline would hide it from every later restart.
+    final built = await _buildNativeLibs();
+    final byGroup =
+        built != null &&
+        nativeLibsCoverBundle(built.keys, bundled.keys) &&
+        nativeLibsWrittenBy(built.keys, launched.builtAt);
+    final fingerprint = byGroup
+        ? _buildNativeLibs
+        : () async => await _bundleRebuild.run()
+              ? await nativeLibsFingerprint(launched.appFile)
+              : null;
     final hotPatcher = await _armHotPatcher(launched, nativeLibs);
     final relauncher = Relauncher(
       appFile: launched.appFile,
+      fingerprint: fingerprint,
       rebuild: _bundleRebuild.run,
       sessions: host.sessions,
       protocol: host.protocol,
       orchestrator: orchestrator,
       assetsDir: assetsDir,
       logger: logger,
-      liveFingerprint: fingerprint,
+      liveFingerprint: byGroup ? built : bundled,
       nativeLibs: nativeLibs,
       patchedLibs: hotPatcher == null
           ? null
@@ -837,6 +860,22 @@ class NativePipelineAssembler {
             },
     );
     pipeline.relaunchIfNativeLibsChanged = relauncher.relaunchIfNeeded;
+  }
+
+  /// Builds the launch target's `flutter_native_libs` output group, in the
+  /// launch configuration, and fingerprints what it holds. Null when the build
+  /// failed.
+  Future<Map<String, String>?> _buildNativeLibs() async {
+    final r = await host.bazel.buildAspectOutputs(
+      target,
+      workspace: workspace,
+      aspect: nativeLibsAspect,
+      outputGroup: nativeLibsOutputGroup,
+      compilationMode: 'dbg',
+      extraArgs: _launchArgs,
+    );
+    if (!r.success) return null;
+    return nativeLibsFingerprintOfFiles(r.files);
   }
 
   /// Arm native hot reload for the libraries the launched app bundles, if any

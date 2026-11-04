@@ -162,7 +162,8 @@ class ReloadOrchestrator {
     targets: targets,
   );
 
-  /// Full restart of [targets] — full compile, hotRestart, and each target's
+  /// Full restart of [targets] — the whole program, compiled incrementally
+  /// from each target's committed baseline, hotRestart, and each target's
   /// applied record reset to the full disk snapshot. Untargeted apps keep their
   /// records and their compilers, so their next `reload()` still delivers what
   /// they missed, dependent libraries included.
@@ -192,13 +193,14 @@ class ReloadOrchestrator {
     // What each target lacks, judged against its own record. Deliberately not
     // unioned across targets — each compiler is asked only for its own app's
     // gap and derives the dependent libraries itself.
+    //
+    // A restart is told the same gap. Its `reset` makes the compiler answer
+    // with the whole program, but the compiler still reuses every library it
+    // already compiled; invalidating every file on disk instead recompiled the
+    // whole app on each restart. flutter_tools pairs `reset` with the changed
+    // files the same way (`devfs.dart`).
     final work = <SessionReloader, Set<String>>{
-      for (final u in targetUnits)
-        u: isRestart
-            // A restart recompiles from scratch and treats every disk file as
-            // newly applied; the committed kernel is being thrown out anyway.
-            ? snap.fileUris.toSet()
-            : u.pendingAt(snap, declared: declared),
+      for (final u in targetUnits) u: u.pendingAt(snap, declared: declared),
     };
 
     final working = [

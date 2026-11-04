@@ -42,13 +42,11 @@ abstract interface class Compiler {
     required String entrypoint,
   });
 
-  /// Full recompile from scratch — used for hot restart.
+  /// The whole program, for a hot restart.
   ///
-  /// [invalidated] is what the caller knows has changed. A full compile
-  /// re-reads the tree regardless, so this does not decide what is compiled;
-  /// it is passed because the underlying compiler takes it on the same
-  /// request, and because a compiler that keeps per-file state has to be told
-  /// the same thing an incremental compile would tell it.
+  /// [invalidated] is what changed since the committed baseline, as for
+  /// [compileIncrement]: the compiler recompiles those and reuses the rest,
+  /// and only the answer differs, a whole program instead of a delta.
   Future<CompileOutcome> compileFull({
     required String entrypoint,
     required Set<String> invalidated,

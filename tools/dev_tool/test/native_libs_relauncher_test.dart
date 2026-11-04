@@ -137,15 +137,20 @@ class _Harness {
   void changeNativeLib(String contents) =>
       File(p.join(appDir, 'libnative.dylib')).writeAsStringSync(contents);
 
+  /// [rebuild] builds the native libraries the restart fingerprints;
+  /// [rebuildBundle] the launch target, which only a relaunch needs.
   Future<Relauncher> relauncher({
     required Future<bool> Function() rebuild,
+    Future<bool> Function()? rebuildBundle,
     List<String> Function()? patchedLibs,
     Future<void> Function({required bool newProcess})? catchUpPatcher,
     NativeLibsWatch? nativeLibs,
   }) async {
     return Relauncher(
       appFile: appDir,
-      rebuild: rebuild,
+      fingerprint: () async =>
+          await rebuild() ? await nativeLibsFingerprint(appDir) : null,
+      rebuild: rebuildBundle ?? () async => true,
       sessions: [session],
       protocol: MachineProtocol(enabled: false, commandRunner: CommandRunner()),
       orchestrator: orchestrator,
@@ -175,6 +180,61 @@ void main() {
     // restart, which is the fast path this check exists to protect.
     expect(await r.relaunchIfNeeded(), isA<RelaunchNotNeeded>());
     expect(rebuilds, 1);
+    expect(h.device.launches, 0);
+  });
+
+  // The restart's question is answered by building the libraries alone; the
+  // bundle, which on macOS means the kernel, App.framework and a signature,
+  // is built only for the relaunch that needs it.
+  test('an unchanged native library does not rebuild the bundle', () async {
+    final h = await _Harness.create();
+    addTearDown(h.dispose);
+    var bundleBuilds = 0;
+    final r = await h.relauncher(
+      rebuild: () async => true,
+      rebuildBundle: () async {
+        bundleBuilds++;
+        return true;
+      },
+    );
+    expect(await r.relaunchIfNeeded(), isA<RelaunchNotNeeded>());
+    expect(bundleBuilds, 0);
+  });
+
+  test(
+    'a changed native library rebuilds the bundle before relaunching',
+    () async {
+      final h = await _Harness.create();
+      addTearDown(h.dispose);
+      var bundleBuilds = 0;
+      final r = await h.relauncher(
+        rebuild: () async {
+          h.changeNativeLib('machine code v2 — longer');
+          return true;
+        },
+        rebuildBundle: () async {
+          bundleBuilds++;
+          expect(h.device.stops, 0, reason: 'built before the old app stops');
+          return true;
+        },
+      );
+      expect(await r.relaunchIfNeeded(), isA<Relaunched>());
+      expect(bundleBuilds, 1);
+    },
+  );
+
+  test('a bundle that fails to build relaunches nothing', () async {
+    final h = await _Harness.create();
+    addTearDown(h.dispose);
+    final r = await h.relauncher(
+      rebuild: () async {
+        h.changeNativeLib('machine code v2 — longer');
+        return true;
+      },
+      rebuildBundle: () async => false,
+    );
+    expect(await r.relaunchIfNeeded(), isA<RelaunchBuildFailed>());
+    expect(h.device.stops, 0);
     expect(h.device.launches, 0);
   });
 

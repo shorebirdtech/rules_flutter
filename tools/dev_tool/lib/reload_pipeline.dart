@@ -836,12 +836,12 @@ class ReloadPipeline {
     // compile did pick up. Native's orchestrator snapshots before compiling
     // for the same reason.
     final preCompile = workspaceView?.snapshot();
-    // What the restart's `reset` + `recompile` is told changed. It does not
-    // decide what is compiled — the reset re-reads the whole tree — but the
-    // compiler takes both on one request and keeps per-file state, so it is
-    // owed the same list an incremental compile would give it. Derived from the
-    // same snapshot the success path commits, so the two cannot disagree about
-    // which version of a file this restart is about.
+    // What the restart's `reset` + `recompile` is told changed. This decides
+    // what is compiled: the reset does not re-read the tree, it only makes the
+    // answer a whole program, so this is the same list an incremental compile
+    // would give it. Derived from the same snapshot the success path commits,
+    // so the two cannot disagree about which version of a file this restart is
+    // about.
     final invalidated = preCompile == null
         ? const <String>[]
         : appliedVersions.findChangedFrom(preCompile).toList();

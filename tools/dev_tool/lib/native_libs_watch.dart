@@ -118,9 +118,10 @@ class NativeLibsWatch {
   /// bundle build on the instant path.
   ///
   /// It is also self-healing, which is what makes the trade bearable: a restart
-  /// rebuilds the launch target and `Relauncher` compares the launched bundle
-  /// itself, which is exact by construction, so the first `R` after the window
-  /// relaunches the process and re-baselines this watch through [markLive].
+  /// has `Relauncher` compare against what was launched, exact by construction
+  /// (the bundle itself, or the native-libs group when the launch build wrote
+  /// it), so the first `R` after the window relaunches the process and
+  /// re-baselines this watch through [markLive].
   static Future<NativeLibsWatch> of(
     Map<String, List<String>> contracts, {
     Map<String, List<String>> sources = const {},
