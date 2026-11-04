@@ -220,7 +220,7 @@ def path_mapping_test_suite(name):
         "app_dbg": ("app", _path_mapped_dbg_test, ["FlutterKernelCompile", "FlutterAssetBundle", "FlutterShaderCompile"]),
         "kernel": ("kernel", _path_mapped_test, ["FlutterKernelCompile"]),
         "aot": ("aot", _path_mapped_opt_test, ["FlutterKernelCompile"] + aot),
-        "web": ("web", _path_mapped_test, ["FlutterKernelCompile", "FlutterAssetBundle", "FlutterDart2Wasm", "FlutterDart2JS", "FlutterWebTemplate", "FlutterWebBundle"]),
+        "web": ("web", _path_mapped_test, ["FlutterWebIconKernel", "FlutterAssetBundle", "FlutterDart2Wasm", "FlutterDart2JS", "FlutterWebTemplate", "FlutterWebBundle"]),
         "web_dbg": ("web", _path_mapped_dbg_test, ["FlutterAssetBundle", "FlutterDart2Wasm", "FlutterDart2JS", "FlutterWebTemplate", "FlutterWebBundle"]),
         "web_js": ("web_js", _path_mapped_opt_test, ["FlutterDart2JS", "FlutterWebTemplate", "FlutterWebBundle"]),
         "macos_framework_debug": ("macos_framework_debug", _path_mapped_test, ["FlutterMacOSFramework"]),

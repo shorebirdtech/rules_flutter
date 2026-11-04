@@ -34,7 +34,6 @@ load(
     "//flutter/private:app_entrypoint.bzl",
     "APP_SCHEME",
     "app_main_location",
-    "app_main_package_uri",
     "app_scheme_sources",
     "compile_package_config",
     "package_lib_prefix",
@@ -57,15 +56,13 @@ load(
 )
 load("//flutter/private:dev_config.bzl", "dev_config_file", "dev_search_roots", "dev_source_dir", "write_dev_config")
 load("//flutter/private:exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
-load("//flutter/private:flutter_compile.bzl", "flutter_kernel_compile_action")
 load("//flutter/private:flutter_info.bzl", "dedup_plugins")
 load(
     "//flutter/private:flutter_web_compile.bzl",
     "flutter_dart2js_action",
     "flutter_dart2wasm_action",
+    "flutter_web_icon_kernel_action",
     "web_build_mode",
-    "web_experiment_flags",
-    "web_mode_defines",
 )
 load("//flutter/private:path_mapping.bzl", "file_ref", "json_config_args")
 load("//flutter/private:plugin_registrant.bzl", "generate_dart_plugin_registrant")
@@ -684,40 +681,27 @@ def _flutter_web_bundle_impl(ctx):
         tools.const_finder != None and tools.font_subset != None):
         kernel_dill = ctx.actions.declare_file(ctx.label.name + "_icon_tree_shaking.dill")
 
-        # When the app is a Dart package, key the entrypoint by its `package:`
-        # URI so the compile reads `main.dart` from the colocated package and
-        # its relative imports resolve to the assembled siblings (handwritten
-        # + generated). Without this, `main.dart` is read from its source-tree
-        # exec path and reaches the source-tree copies of its siblings, which
-        # miss any `dart_codegen`-produced `.g.dart` in `bazel-out`.
-        flutter_kernel_compile_action(
+        # The wrapper is the entrypoint the compilers get, so the scan reads
+        # the program that ships: the app, its plugin registrant, and the
+        # engine bootstrap. A bundle that ships a dart2js build is scanned
+        # through dart2js's front end, as `flutter build web` does; one that
+        # does not (`js_fallback = False`) through dart2wasm's.
+        front_end = "dart2js" if "dart2js" in branches else "dart2wasm"
+        flutter_web_icon_kernel_action(
             ctx = ctx,
-            dartaotruntime = tools.dartaotruntime,
             dart = tools.dart,
-            kernel_filter_tool = ctx.file._kernel_filter_tool,
             flutter_sdk_files = tools.tool_files,
-            frontend_server = tools.frontend_server,
-            platform_dill = tools.platform_kernel_dill_product,
-            main = ctx.file.main,
-            entrypoint_uri = app_main_package_uri(
-                ctx.attr.package_name,
-                lib_root,
-                ctx.file.main.short_path,
-            ),
+            web_sdk_files = web_sdk_file_list,
+            front_end = front_end,
+            platform_dill = ctx.file._dart2js_platform_dill if front_end == "dart2js" else ctx.file._dart2wasm_platform_dill,
+            main_dart = entrypoint,
             srcs = compile_srcs[branches[0]],
             package_config = primary.config_file,
             output = kernel_dill,
-            aot = True,
-            # Mode-derived rather than hardcoded: this branch is reachable in
-            # both non-debug modes, and a profile build that shook its icons
-            # against `dart.vm.product=true` would be shaking a different
-            # program than the one it goes on to compile.
-            defines = list(user_defines) + web_mode_defines(mode),
-            # The experiments have to reach this compile too: they change how
-            # the source *parses*, so a release build of experiment-using code
-            # would die here — in an icon-shaking step the user never asked
-            # for — while both real compilers accepted it.
-            extra_flags = web_experiment_flags(ctx.attr.enable_experiments),
+            mode = mode,
+            enable_experiments = ctx.attr.enable_experiments,
+            defines = user_defines,
+            renderer = renderer,
         )
 
     flutter_assets = declare_flutter_assets_dir(ctx)

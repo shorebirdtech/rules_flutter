@@ -155,9 +155,9 @@ def resolve_web_optimization_level(level, mode_default):
 def web_experiment_flags(enable_experiments):
     """The `--enable-experiment` flags for a list of experiment names.
 
-    Both `dart compile js` and `dart compile wasm` take these bare, and so
-    does the frontend_server the icon tree-shake kernel goes through — the
-    same shape upstream produces by folding `--enable-experiment=<name>` into
+    `dart compile js` (the real compile and the icon scan's `--cfe-only` one)
+    and `dart compile wasm` all take these bare — the same shape upstream
+    produces by folding `--enable-experiment=<name>` into
     `extraFrontEndOptions`, which every web compile splices in unwrapped.
 
     Args:
@@ -167,6 +167,19 @@ def web_experiment_flags(enable_experiments):
         List of `--enable-experiment=<name>` strings.
     """
     return ["--enable-experiment=" + e for e in enable_experiments]
+
+def web_renderer_defines(renderer):
+    """The `-D` defines (without the `-D`) that select a web renderer.
+
+    Args:
+        renderer: "skwasm" or "canvaskit".
+
+    Returns:
+        A list of `NAME=value` strings.
+    """
+    if renderer == "skwasm":
+        return ["FLUTTER_WEB_USE_SKIA=false", "FLUTTER_WEB_USE_SKWASM=true"]
+    return ["FLUTTER_WEB_USE_SKIA=true", "FLUTTER_WEB_USE_SKWASM=false"]
 
 # The memory reservation covers a small app; a larger program needs more. An
 # optimizing dart2wasm (`-O1` and up) hands the module to Binaryen's
@@ -281,12 +294,8 @@ def flutter_dart2wasm_action(
         # meant to measure.
         for uri in ("dart:ui", "package:flutter"):
             args.add("--extra-compiler-option=--delete-tostring-package-uri=" + uri)
-    if renderer == "skwasm":
-        args.add("-DFLUTTER_WEB_USE_SKIA=false")
-        args.add("-DFLUTTER_WEB_USE_SKWASM=true")
-    else:
-        args.add("-DFLUTTER_WEB_USE_SKIA=true")
-        args.add("-DFLUTTER_WEB_USE_SKWASM=false")
+    for d in web_renderer_defines(renderer):
+        args.add("-D" + d)
     for d in defines:
         args.add("-D" + d)
 
@@ -411,9 +420,8 @@ def flutter_dart2js_action(
         args.add("-D" + d)
     if mode == "debug":
         args.add("--enable-asserts")
-    if renderer == "canvaskit":
-        args.add("-DFLUTTER_WEB_USE_SKIA=true")
-        args.add("-DFLUTTER_WEB_USE_SKWASM=false")
+    for d in web_renderer_defines(renderer):
+        args.add("-D" + d)
     for d in defines:
         args.add("-D" + d)
 
@@ -433,5 +441,87 @@ def flutter_dart2js_action(
         exec_group = PORTABLE,
         resource_set = _web_compiler_resources,
         progress_message = "Compiling Flutter to JavaScript %s" % ctx.label,
+        **sdk_action()
+    )
+
+def flutter_web_icon_kernel_action(
+        ctx,
+        dart,
+        flutter_sdk_files,
+        web_sdk_files,
+        front_end,
+        platform_dill,
+        main_dart,
+        srcs,
+        package_config,
+        output,
+        mode,
+        enable_experiments = [],
+        defines = [],
+        renderer = "canvaskit"):
+    """Compiles the app to a kernel for the icon tree shaker to scan.
+
+    Icon tree shaking finds the icons an app uses by reading a kernel of the
+    program that ships, so this compiles the same entrypoint the web compilers
+    do, with a web front end against the web SDK's platform. A kernel built
+    against the Dart VM's platform cannot import `dart:js_interop`,
+    `package:web` or `dart:ui_web`, and takes the VM side of every
+    `dart.library.js_interop` conditional import, so it would miss the icons
+    only the web build uses.
+
+    With `front_end = "dart2js"` this is `dart compile js --cfe-only`, which is
+    what `flutter build web` scans. A bundle with no dart2js compile cannot use
+    it: JavaScript cannot represent every integer literal a WASM-only app may
+    hold (`0x7FFFFFFFFFFFFFFF`), and the front end refuses them. That bundle's
+    kernel comes from dart2wasm's own front end (`--phases=cfe`).
+
+    Args:
+        ctx: Rule context.
+        dart: The `dart` executable File.
+        flutter_sdk_files: SDK files needed to run dart.
+        web_sdk_files: Flutter web SDK files.
+        front_end: "dart2js" or "dart2wasm".
+        platform_dill: The web SDK platform File of `front_end`
+            (`dart2js_platform.dill` or `dart2wasm_platform.dill`).
+        main_dart: The entrypoint File (the wrapper the compilers get).
+        srcs: All source Files the entrypoint reads.
+        package_config: The package_config.json File.
+        output: The kernel `.dill` File to write.
+        mode: A `web_build_mode` value; selects the mode defines.
+        enable_experiments: Dart language experiments to enable.
+        defines: Dart -D defines.
+        renderer: The primary compiler's web renderer.
+    """
+    args = ctx.actions.args()
+    if front_end == "dart2js":
+        args.add_all(["compile", "js", "--cfe-only"])
+        args.add(platform_dill.dirname, format = "--platform-binaries=%s")
+    elif front_end == "dart2wasm":
+        args.add_all(["compile", "wasm", "--phases=cfe"])
+        args.add(platform_dill, format = "--extra-compiler-option=--platform=%s")
+    else:
+        fail("flutter_web_icon_kernel_action: front_end must be \"dart2js\" or \"dart2wasm\", got %r" % front_end)
+    args.add(package_config, format = "--packages=%s")
+    args.add_all(web_experiment_flags(enable_experiments))
+    for d in web_mode_defines(mode):
+        args.add("-D" + d)
+    for d in web_renderer_defines(renderer):
+        args.add("-D" + d)
+    for d in defines:
+        args.add("-D" + d)
+    args.add_all(["-o", output, main_dart])
+
+    ctx.actions.run(
+        executable = dart,
+        arguments = [args],
+        inputs = depset(
+            direct = [main_dart, package_config, platform_dill] + srcs,
+            transitive = [flutter_sdk_files, depset(web_sdk_files)],
+        ),
+        outputs = [output],
+        mnemonic = "FlutterWebIconKernel",
+        exec_group = PORTABLE,
+        resource_set = _web_compiler_resources,
+        progress_message = "Compiling web kernel for icon scan %s" % ctx.label,
         **sdk_action()
     )

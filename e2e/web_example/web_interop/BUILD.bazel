@@ -1,5 +1,5 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
-load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
+load("@rules_flutter//flutter:web.bzl", "flutter_web_app", "flutter_web_bundle")
 load(":icon_font_test.bzl", "icon_font_test")
 
 # Web apps that a release build must handle, whatever they import.
@@ -61,6 +61,85 @@ flutter_web_app(
 icon_font_test(
     name = "main_icon_kept",
     bundle = "glyph_app",
+    keeps = ["e318"],
+    lacks = ["e037"],
+)
+
+# =============================================================================
+# Properties a release build does not hold today. Each target below fails on
+# the code it was written against; the comment on it says what must be true.
+# =============================================================================
+
+# Any app that `flutter build web` builds in release builds here in release,
+# with either compiler. The same app as `interop_app_no_icon_shaking`, with the
+# icon tree shaking a release build runs by default: the compilers accept it
+# (that target builds), so what fails is the step that finds the app's icons,
+# which compiles `main` for the Dart VM, where `dart:js_interop` does not exist.
+flutter_web_app(
+    name = "interop_app",
+    package_name = "web_interop",
+    srcs = _SRCS,
+    app_name = "Interop",
+    main = "lib/interop_main.dart",
+    deps = _DEPS,
+)
+
+flutter_web_app(
+    name = "interop_app_wasm_only",
+    package_name = "web_interop",
+    srcs = _SRCS,
+    app_name = "Interop (WASM only)",
+    js_fallback = False,
+    main = "lib/interop_main.dart",
+    deps = _DEPS,
+)
+
+flutter_web_bundle(
+    name = "interop_app_dart2js",
+    package_name = "web_interop",
+    srcs = _SRCS,
+    compiler = "dart2js",
+    main = "lib/interop_main.dart",
+    renderer = "canvaskit",
+    title = "Interop (dart2js)",
+    deps = _DEPS,
+)
+
+build_test(
+    name = "release_build_wasm_with_js_fallback_test",
+    targets = [":interop_app"],
+)
+
+build_test(
+    name = "release_build_wasm_only_test",
+    targets = [":interop_app_wasm_only"],
+)
+
+build_test(
+    name = "release_build_dart2js_test",
+    targets = [":interop_app_dart2js"],
+)
+
+# The release bundle's icon font keeps every icon the app can render on web.
+# `glyph_app` draws `Icons.language` only where `dart.library.js_interop` holds
+# (it draws `Icons.computer` elsewhere), and a web plugin's `Icons.bolt` is
+# reached only through the plugin registrant.
+icon_font_test(
+    name = "web_conditional_import_icon_kept",
+    bundle = "glyph_app",
+    keeps = ["e366"],
+)
+
+icon_font_test(
+    name = "web_plugin_icon_kept",
+    bundle = "glyph_app",
+    keeps = ["e0ee"],
+)
+
+# An app that builds in release keeps its icon as well.
+icon_font_test(
+    name = "interop_app_icon_kept",
+    bundle = "interop_app",
     keeps = ["e318"],
     lacks = ["e037"],
 )

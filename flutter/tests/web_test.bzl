@@ -989,14 +989,7 @@ def _experiments_test_impl(ctx):
     for mnemonic in ["FlutterDart2Wasm", "FlutterDart2JS"]:
         _assert_argv(env, _action(env, mnemonic), present = [flag])
 
-    kernels = [
-        a
-        for a in analysistest.target_actions(env)
-        if a.mnemonic == "FlutterKernelCompile"
-    ]
-    asserts.equals(env, 1, len(kernels), "expected the icon tree-shake kernel compile")
-    if kernels:
-        _assert_argv(env, kernels[0], present = [flag])
+    _assert_argv(env, _action(env, "FlutterWebIconKernel"), present = [flag])
     return analysistest.end(env)
 
 _experiments_test = analysistest.make(
@@ -1739,7 +1732,7 @@ def _branch_inputs_test_impl(ctx):
     """
     env = analysistest.begin(ctx)
     by_mnemonic = {}
-    for mnemonic in ["FlutterDart2Wasm", "FlutterDart2JS", "FlutterKernelCompile"]:
+    for mnemonic in ["FlutterDart2Wasm", "FlutterDart2JS", "FlutterWebIconKernel"]:
         action = _action(env, mnemonic)
         if action == None:
             continue
@@ -1757,7 +1750,7 @@ def _branch_inputs_test_impl(ctx):
     asserts.equals(
         env,
         by_mnemonic.get("FlutterDart2Wasm"),
-        by_mnemonic.get("FlutterKernelCompile"),
+        by_mnemonic.get("FlutterWebIconKernel"),
         "the icon tree-shaker's kernel must compile the primary (dart2wasm) branch",
     )
 
@@ -2183,6 +2176,84 @@ _dart2js_reads_precompiled_web_platform_test = analysistest.make(
     _dart2js_reads_precompiled_web_platform_test_impl,
 )
 
+def _icon_scan_kernel_is_a_web_program_test_impl(ctx):
+    """The program the icon scan reads is the one compiled for the web.
+
+    A release build finds the icons an app uses by scanning a kernel of its
+    program. The scan has to see the program that ships: one compiled against
+    the Dart VM's platform cannot import `dart:js_interop`, `package:web` or
+    `dart:ui_web` (it fails the build of an app that does), and takes the VM
+    branch of every `if (dart.library.js_interop)` import, so an icon used only
+    on the web is not found and is cut from the shipped font. So every platform
+    kernel the action producing it reads is a web one, and it reads one.
+    """
+    env = analysistest.begin(ctx)
+    producers = [
+        a
+        for a in analysistest.target_actions(env)
+        if [o for o in a.outputs.to_list() if o.basename.endswith("_icon_tree_shaking.dill")]
+    ]
+    asserts.equals(env, 1, len(producers), "expected one action producing the icon scan's kernel")
+    if producers:
+        # The command line, not the inputs: the toolchain's files are inputs to
+        # every compile and hold every platform kernel there is.
+        argv = " ".join(producers[0].argv)
+        asserts.true(
+            env,
+            "web-sdk/kernel" in argv,
+            "the icon scan's kernel is not compiled against the web SDK's platform: %s" % argv,
+        )
+        for vm in ["flutter_patched_sdk", "platform_strong", "vm_platform"]:
+            asserts.false(
+                env,
+                vm in argv,
+                "the icon scan's kernel is compiled against the Dart VM's platform (%s): %s" % (vm, argv),
+            )
+    return analysistest.end(env)
+
+_icon_scan_kernel_is_a_web_program_test = analysistest.make(
+    _icon_scan_kernel_is_a_web_program_test_impl,
+)
+
+_icon_scan_kernel_is_a_web_program_opt_test = analysistest.make(
+    _icon_scan_kernel_is_a_web_program_test_impl,
+    config_settings = {"//command_line_option:compilation_mode": "opt"},
+)
+
+def _icon_scan_front_end_test_impl(ctx):
+    """The icon scan goes through the front end of a compiler the bundle ships.
+
+    `flutter build web` scans what `dart compile js --cfe-only` makes, and so
+    does a bundle with a dart2js build. A bundle without one
+    (`js_fallback = False`) cannot: the JavaScript front end refuses an integer
+    literal JavaScript cannot hold, which a WASM-only app may contain, so its
+    scan goes through dart2wasm's front end, against dart2wasm's platform.
+    """
+    env = analysistest.begin(ctx)
+    scan = _action(env, "FlutterWebIconKernel")
+    if scan == None:
+        return analysistest.end(env)
+    argv = scan.argv
+    expected = ["compile", ctx.attr.compiler] + ctx.attr.flags
+    asserts.equals(env, expected, argv[1:1 + len(expected)], "the icon scan runs %s" % argv)
+    other = "js" if ctx.attr.compiler == "wasm" else "wasm"
+    asserts.false(env, other in argv, "the icon scan names the %s front end: %s" % (other, argv))
+    platform = "dart2wasm_platform.dill" if ctx.attr.compiler == "wasm" else "dart2js_platform.dill"
+    asserts.true(
+        env,
+        [f for f in scan.inputs.to_list() if f.basename == platform],
+        "the icon scan does not read %s" % platform,
+    )
+    return analysistest.end(env)
+
+_icon_scan_front_end_test = analysistest.make(
+    _icon_scan_front_end_test_impl,
+    attrs = {
+        "compiler": attr.string(mandatory = True),
+        "flags": attr.string_list(mandatory = True),
+    },
+)
+
 def web_test_suite(name):
     """Instantiate the web-bundle fixtures and the analysis tests over them.
 
@@ -2459,6 +2530,29 @@ def web_test_suite(name):
     _dart2js_reads_precompiled_web_platform_test(
         name = name + "_dart2js_reads_precompiled_web_platform_js_only",
         target_under_test = ":_web_js_fixture",
+    )
+
+    # Release is every mode but `dbg`, so fastbuild and opt are both release.
+    _icon_scan_kernel_is_a_web_program_test(
+        name = name + "_icon_scan_kernel_is_a_web_program_fastbuild",
+        target_under_test = ":_web_fixture",
+    )
+    _icon_scan_kernel_is_a_web_program_opt_test(
+        name = name + "_icon_scan_kernel_is_a_web_program_opt",
+        target_under_test = ":_web_js_fixture",
+    )
+
+    _icon_scan_front_end_test(
+        name = name + "_icon_scan_front_end_js",
+        target_under_test = ":_web_fixture",
+        compiler = "js",
+        flags = ["--cfe-only"],
+    )
+    _icon_scan_front_end_test(
+        name = name + "_icon_scan_front_end_wasm_only",
+        target_under_test = ":_web_wasm_only_fixture",
+        compiler = "wasm",
+        flags = ["--phases=cfe"],
     )
 
     unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test, _t6_test, _t7_test)

@@ -273,7 +273,9 @@ Future<void> main(List<String> args) async {
           final m = instance as Map<String, dynamic>;
           final family = m['fontFamily'] as String?;
           final pkg = m['fontPackage'] as String?;
-          final codePoint = m['codePoint'] as int?;
+          // A kernel built for the web (JavaScript) holds an `int` constant as
+          // a `double`, so const_finder reports its code point as a number.
+          final codePoint = (m['codePoint'] as num?)?.round();
           if (family != null && codePoint != null) {
             final key = pkg == null ? family : 'packages/$pkg/$family';
             usedCodePoints.putIfAbsent(key, () => <int>{}).add(codePoint);
