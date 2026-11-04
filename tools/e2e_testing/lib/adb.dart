@@ -28,7 +28,8 @@ class AdbApp {
     required this.packageName,
     required this.apkPath,
     required this.adbPath,
-  });
+    Map<String, String>? environment,
+  }) : _environment = environment ?? Platform.environment;
 
   /// The APK at [workspacePath] in the test's runfiles, driven through the
   /// Android SDK's `adb` that the test's [adbRunfileEnv] names.
@@ -52,22 +53,81 @@ class AdbApp {
   /// The `adb` executable.
   final String adbPath;
 
-  /// Runs `adb` with [args].
-  ProcessResult adb(List<String> args) => Process.runSync(adbPath, args);
+  final Map<String, String> _environment;
 
-  /// Exits 1 unless a device is connected.
+  String? _serial;
+
+  /// The serial of the device this app is driven on, once [chooseDevice] has
+  /// chosen it.
+  String? get serial => _serial;
+
+  /// Runs `adb` with [args] on the chosen device ([chooseDevice] first).
+  ProcessResult adb(List<String> args) {
+    final serial = _serial;
+    if (serial == null) {
+      throw StateError('adb() before chooseDevice(): no device is chosen');
+    }
+    return Process.runSync(adbPath, ['-s', serial, ...args]);
+  }
+
+  /// Chooses the device to drive, and returns its serial.
+  ///
+  /// `$ANDROID_SERIAL` names it, as it does for `adb` itself; with none set,
+  /// the one attached device is it. Several attached with none named is an
+  /// error, because `adb` would refuse each later call with "more than one
+  /// device" in the middle of the test. Throws [AdbDeviceChoiceError] naming the
+  /// attached devices and how to choose.
+  String chooseDevice() {
+    final listing = Process.runSync(adbPath, ['devices']);
+    if (listing.exitCode != 0) {
+      throw AdbDeviceChoiceError(
+        '`adb devices` exited ${listing.exitCode}: '
+        '${listing.stdout}${listing.stderr}',
+      );
+    }
+    final attached = parseAdbDevices(listing.stdout.toString());
+    final ready = attached.where((d) => d.state == 'device').toList();
+    final listed = attached.isEmpty
+        ? 'none attached'
+        : attached.map((d) => '${d.serial} (${d.state})').join(', ');
+    final requested = _environment['ANDROID_SERIAL'];
+    final String chosen;
+    if (requested != null && requested.isNotEmpty) {
+      final match = attached.where((d) => d.serial == requested).toList();
+      if (match.isEmpty || match.single.state != 'device') {
+        throw AdbDeviceChoiceError(
+          '\$ANDROID_SERIAL names $requested, which '
+          '${match.isEmpty ? 'is not attached' : 'is ${match.single.state}'}; '
+          'attached: $listed',
+        );
+      }
+      chosen = requested;
+    } else if (ready.isEmpty) {
+      throw AdbDeviceChoiceError(
+        'No Android device or emulator is ready; attached: $listed',
+      );
+    } else if (ready.length > 1) {
+      throw AdbDeviceChoiceError(
+        '${ready.length} Android devices are attached '
+        '(${ready.map((d) => d.serial).join(', ')}) and \$ANDROID_SERIAL '
+        'does not choose one. Pass it to the test with '
+        '`--test_env=ANDROID_SERIAL=<serial>`.',
+      );
+    } else {
+      chosen = ready.single.serial;
+    }
+    return _serial = chosen;
+  }
+
+  /// Chooses the device ([chooseDevice]); exits 1, saying why, if there is none
+  /// to choose.
   void requireDevice() {
-    final devices = adb(['devices']).stdout
-        .toString()
-        .trim()
-        .split('\n')
-        .where((l) => l.contains('\tdevice'))
-        .toList();
-    if (devices.isEmpty) {
-      stderr.writeln('No Android devices/emulators connected');
+    try {
+      stdout.writeln('Using device ${chooseDevice()}');
+    } on AdbDeviceChoiceError catch (e) {
+      stderr.writeln(e.message);
       exit(1);
     }
-    stdout.writeln('Found ${devices.length} device(s)');
   }
 
   /// Installs [apkPath], replacing any installed copy.
@@ -252,4 +312,38 @@ String _adbFromRunfiles() {
     exit(1);
   }
   return path;
+}
+
+/// Why no device could be chosen.
+class AdbDeviceChoiceError implements Exception {
+  AdbDeviceChoiceError(this.message);
+
+  /// What went wrong and how to fix it.
+  final String message;
+}
+
+/// One line of `adb devices`: a serial and the state adb reports it in.
+class AdbDevice {
+  AdbDevice(this.serial, this.state);
+
+  /// What `-s` and `$ANDROID_SERIAL` name it by.
+  final String serial;
+
+  /// `device` when it can be driven; `offline`, `unauthorized` and the like
+  /// when it cannot.
+  final String state;
+}
+
+/// The devices `adb devices` printed [output] lists, in its order.
+///
+/// Anchored on adb's `List of devices attached` header, because adb prints
+/// daemon start-up notes (`* daemon started successfully`) ahead of it.
+List<AdbDevice> parseAdbDevices(String output) {
+  final lines = output.split('\n').map((l) => l.trimRight()).toList();
+  final header = lines.indexWhere((l) => l.startsWith('List of devices'));
+  return [
+    for (final line in lines.skip(header + 1))
+      if (line.contains('\t'))
+        AdbDevice(line.split('\t').first, line.split('\t')[1].trim()),
+  ];
 }
