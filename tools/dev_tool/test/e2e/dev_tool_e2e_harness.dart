@@ -240,11 +240,45 @@ class DevToolProcess {
       timeout,
       onTimeout: () => throw StateError(
         'Timed out after ${timeout.inSeconds}s waiting for $what.\n'
+        '${_hostLoad()}\n'
         '${seen == null ? '' : '${seen()}\n'}'
         '${_lastLines('stderr', stderrLines)}'
         '${_lastLines('stdout (non-protocol)', nonProtocolStdoutLines)}',
       ),
     );
+  }
+
+  /// The host's load average against its core count, for a timeout message.
+  ///
+  /// A deadline in this suite is sized for a machine that can give the run's
+  /// processes CPU. On one that cannot, a compiler that is working reads like
+  /// one that is stuck: still runnable, a few seconds of CPU a minute, and its
+  /// answer minutes late. The dev tool's `frontend_server_still_working` lines
+  /// say it was working; this says why it was slow, so a timeout on a
+  /// saturated host is not taken for a hang in the change under test.
+  static String _hostLoad() {
+    final cores = Platform.numberOfProcessors;
+    String? averages;
+    try {
+      if (Platform.isMacOS) {
+        // `{ 3.12 2.95 2.80 }`
+        final out = Process.runSync('sysctl', ['-n', 'vm.loadavg']);
+        if (out.exitCode == 0) {
+          averages = (out.stdout as String)
+              .replaceAll(RegExp(r'[{}]'), '')
+              .trim();
+        }
+      } else if (Platform.isLinux) {
+        averages = File(
+          '/proc/loadavg',
+        ).readAsStringSync().split(' ').take(3).join(' ');
+      }
+    } on Object catch (e) {
+      return '  host load: could not be read ($e); $cores cores.';
+    }
+    if (averages == null)
+      return '  host load: not read on this OS; $cores cores.';
+    return '  host load averages (1/5/15 min): $averages, on $cores cores.';
   }
 
   static String _lastLines(String label, List<String> lines) => lines.isEmpty
