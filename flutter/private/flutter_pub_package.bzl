@@ -30,6 +30,7 @@ surface small).
 load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version", "make_dart_library_build_content")
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_deps", "parse_pubspec_sdk_constraint")
 load("//flutter/private:android_plugin_maven.bzl", "gradle_statements", "parse_gradle_maven_dependencies")
+load("//flutter/private:cmake_link_libraries.bzl", "parse_cmake_link_libraries")
 load("//flutter/private:flutter_pubspec.bzl", "parse_flutter_assets_block", "parse_flutter_plugin_block")
 load("//flutter/private:pinned.bzl", "pinned")
 
@@ -171,6 +172,30 @@ def _detect_desktop_source_dir(ctx, platform):
     if _has_files_under(ctx, platform, _DESKTOP_SRC_EXTENSIONS):
         return platform
     return ""
+
+def _read_desktop_link_libraries(ctx, platform):
+    """Parse the system libraries the plugin's `<platform>/CMakeLists.txt` links.
+
+    Returns the result of `parse_cmake_link_libraries`: linker flags and the
+    lines that could not be translated. Both are empty when the plugin ships no
+    CMakeLists.txt. The errors are not raised here: they fail the build of the
+    platform's runner, so a plugin that cannot be linked on Windows still
+    builds everywhere else.
+    """
+    path = platform + "/CMakeLists.txt"
+    p = ctx.path(path)
+    if not p.exists:
+        return parse_cmake_link_libraries("", platform, path)
+    return parse_cmake_link_libraries(ctx.read(p), platform, path)
+
+def _format_link_attrs(link):
+    """The `linkopts` / `link_errors` attributes of a plugin library target."""
+    attrs = ""
+    if link.linkopts:
+        attrs += "    linkopts = %s,\n" % repr(link.linkopts)
+    if link.errors:
+        attrs += "    link_errors = %s,\n" % repr(link.errors)
+    return attrs
 
 def _detect_android_source_dir(ctx):
     """Return the Android source dir if it contains Kotlin/Java files.
@@ -806,7 +831,9 @@ def make_flutter_plugin_build_content(
         font_files = {},
         pkg_assets = {},
         pkg_shaders = {},
-        version = ""):
+        version = "",
+        linux_link = None,
+        windows_link = None):
     """Generate BUILD content for a Flutter plugin spoke.
 
     Emits a `flutter_plugin` plus optional per-platform
@@ -845,6 +872,9 @@ def make_flutter_plugin_build_content(
             `make_dart_library_build_content`: its sole use is agreement
             checking when one package name arrives from two hubs, and an
             unstated version never conflicts with a stated one.
+        linux_link: The result of `parse_cmake_link_libraries` for the plugin's
+            `linux/CMakeLists.txt`, or None.
+        windows_link: Same, for `windows/CMakeLists.txt`.
 
     Returns:
         BUILD.bazel content as a string.
@@ -916,11 +946,12 @@ flutter_linux_plugin_library(
     srcs = {srcs},
     hdrs = {hdrs},
     includes = ["linux/include"],
-    visibility = ["//visibility:public"],
+{link_attrs}    visibility = ["//visibility:public"],
 )""".format(
             name = name,
             srcs = linux_srcs,
             hdrs = linux_hdrs,
+            link_attrs = _format_link_attrs(linux_link) if linux_link else "",
         ))
 
     if windows_src_dir:
@@ -931,11 +962,12 @@ flutter_windows_plugin_library(
     srcs = {srcs},
     hdrs = {hdrs},
     includes = ["windows/include"],
-    visibility = ["//visibility:public"],
+{link_attrs}    visibility = ["//visibility:public"],
 )""".format(
             name = name,
             srcs = win_srcs,
             hdrs = win_hdrs,
+            link_attrs = _format_link_attrs(windows_link) if windows_link else "",
         ))
 
     # NB: Android sources are no longer surfaced via a top-level filegroup.
@@ -1763,6 +1795,8 @@ def _flutter_pub_package_impl(ctx):
             linux_src_dir = _detect_desktop_source_dir(ctx, "linux")
         if windows_info and windows_info.get("pluginClass", ""):
             windows_src_dir = _detect_desktop_source_dir(ctx, "windows")
+        linux_link = _read_desktop_link_libraries(ctx, "linux") if linux_src_dir else None
+        windows_link = _read_desktop_link_libraries(ctx, "windows") if windows_src_dir else None
 
         # Android sources: scan when pluginClass is set on android.
         android_info = plugin_block.platforms.get("android", {})
@@ -1819,6 +1853,8 @@ def _flutter_pub_package_impl(ctx):
             font_files = font_files,
             pkg_assets = pkg_assets_dict,
             pkg_shaders = pkg_shaders_dict,
+            linux_link = linux_link,
+            windows_link = windows_link,
         )
     elif has_asset_contributions:
         # No plugin block, but the pubspec has flutter.fonts/assets/shaders.

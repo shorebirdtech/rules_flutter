@@ -7,8 +7,10 @@ load(":app_entrypoint_test.bzl", "app_entrypoint_test_suite")
 load(":apple_engine_test.bzl", "apple_engine_test_suite")
 load(":artifact_urls_test.bzl", "artifact_urls_test_suite")
 load(":asset_bundle_test.bzl", "asset_bundle_test_suite")
+load(":cmake_link_libraries_test.bzl", "cmake_link_libraries_test_suite")
 load(":code_asset_native_library_test.bzl", "code_asset_native_library_test_suite")
 load(":common_test.bzl", "common_test_suite")
+load(":desktop_plugin_link_test.bzl", "desktop_plugin_link_test_suite")
 load(":dev_config_test.bzl", "dev_config_test_suite")
 load(":download_digests_test.bzl", "download_digests_test_suite")
 load(":engine_targets_test.bzl", "engine_targets_test_suite")
@@ -85,6 +87,10 @@ flutter_plugin_test_suite(name = "flutter_plugin_test")
 android_bundle_test_suite(name = "android_bundle_test")
 
 android_plugin_maven_test_suite(name = "android_plugin_maven_test")
+
+cmake_link_libraries_test_suite(name = "cmake_link_libraries_test")
+
+desktop_plugin_link_test_suite(name = "desktop_plugin_link_test")
 
 gradle_dependency_forms_test_suite(name = "gradle_dependency_forms_test")
 

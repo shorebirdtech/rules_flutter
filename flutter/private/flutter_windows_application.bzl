@@ -25,6 +25,7 @@ load("//flutter/private:cc_runner_compile.bzl", "compile_and_link_runner")
 load("//flutter/private:common.bzl", "compute_desktop_bundle_copies")
 load("//flutter/private:engine_helpers.bzl", "find_engine_header_dir")
 load("//flutter/private:exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
+load("//flutter/private:flutter_desktop_plugin_info.bzl", "plugin_link_flags")
 load("//flutter/private:path_mapping.bzl", "file_ref", "json_config_args")
 load("//flutter/private:plugin_registrant.bzl", "registrant_include_dirs")
 
@@ -66,8 +67,10 @@ def _flutter_windows_runner_lib_impl(ctx):
     plugin_srcs = []
     plugin_hdrs = []
     plugin_include_dirs = []
+    plugin_entries = []
     if ctx.attr.application:
-        for entry in ctx.attr.application[FlutterApplicationInfo].windows_plugin_libraries.to_list():
+        plugin_entries = ctx.attr.application[FlutterApplicationInfo].windows_plugin_libraries.to_list()
+        for entry in plugin_entries:
             plugin_srcs.extend(entry.srcs.to_list())
             plugin_hdrs.extend(entry.hdrs.to_list())
             plugin_include_dirs.extend(entry.include_dirs.to_list())
@@ -83,6 +86,7 @@ def _flutter_windows_runner_lib_impl(ctx):
         plugin_srcs = plugin_srcs,
         plugin_hdrs = plugin_hdrs,
         plugin_include_dirs = plugin_include_dirs,
+        plugin_linkopts = plugin_link_flags(plugin_entries, "Windows"),
     )
 
     return [DefaultInfo(
@@ -90,7 +94,7 @@ def _flutter_windows_runner_lib_impl(ctx):
         executable = runner_binary,
     )]
 
-def _compile_windows_runner(ctx, runner_srcs, engine_files, is_debug, registrant_srcs = [], registrant_hdrs = [], runner_hdrs = [], plugin_srcs = [], plugin_hdrs = [], plugin_include_dirs = []):
+def _compile_windows_runner(ctx, runner_srcs, engine_files, is_debug, registrant_srcs = [], registrant_hdrs = [], runner_hdrs = [], plugin_srcs = [], plugin_hdrs = [], plugin_include_dirs = [], plugin_linkopts = []):
     """Compile the C++ Win32 runner binary.
 
     Uses cc_common.compile() + cc_common.link() with Bazel's hermetic CC
@@ -115,6 +119,8 @@ def _compile_windows_runner(ctx, runner_srcs, engine_files, is_debug, registrant
         plugin_include_dirs: Plugin-relative include directories,
             resolved against each plugin's package root via additional
             `-I` flags.
+        plugin_linkopts: Linker flags for the system libraries the plugins'
+            sources need (e.g. `shlwapi.lib`).
 
     Returns:
         The compiled runner executable File.
@@ -217,7 +223,7 @@ def _compile_windows_runner(ctx, runner_srcs, engine_files, is_debug, registrant
         engine_header_files = all_header_files,
         engine_include_dir = header_dir,
         extra_compile_flags = extra_compile_flags,
-        extra_link_flags = ["/SUBSYSTEM:WINDOWS", "user32.lib", "ole32.lib", "dwmapi.lib", "shell32.lib", "advapi32.lib"],
+        extra_link_flags = ["/SUBSYSTEM:WINDOWS", "user32.lib", "ole32.lib", "dwmapi.lib", "shell32.lib", "advapi32.lib"] + plugin_linkopts,
         extra_defines = defines,
         additional_srcs = additional_srcs + plugin_srcs,
     )

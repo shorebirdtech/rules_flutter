@@ -11,6 +11,7 @@ The fixture shapes mirror real pub.dev plugins:
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
+load("//flutter/private:cmake_link_libraries.bzl", "parse_cmake_link_libraries")
 load(
     "//flutter/private:flutter_pub_package.bzl",
     "apply_overlay_substitutions",
@@ -655,6 +656,58 @@ hardcoded_overlay_dependency_is_rejected_test = unittest.make(
     _hardcoded_overlay_dependency_is_rejected_test_impl,
 )
 
+def _desktop_plugin_libraries_carry_their_link_libraries_test_impl(ctx):
+    """A plugin's CMake link libraries reach its generated library targets."""
+    env = unittest.begin(ctx)
+
+    windows = parse_cmake_link_libraries(
+        "add_library(p SHARED a.cpp)\ntarget_link_libraries(p PRIVATE flutter shlwapi.lib ${vars})\n",
+        "windows",
+        "windows/CMakeLists.txt",
+    )
+    linux = parse_cmake_link_libraries(
+        "add_library(p SHARED a.cc)\ntarget_link_libraries(p PRIVATE flutter PkgConfig::GTK)\n",
+        "linux",
+        "linux/CMakeLists.txt",
+    )
+    content = make_flutter_plugin_build_content(
+        name = "url_launcher_windows",
+        deps = [],
+        language_version = "3.4",
+        code_assets = [],
+        has_unreplaced_hook = "",
+        plugin_platforms_json = '{"windows":{"pluginClass":"UrlLauncherWindows"},"linux":{"pluginClass":"UrlLauncherLinux"}}',
+        apple_macos_srcs_dirs = [],
+        apple_ios_srcs_dirs = [],
+        apple_macos_include_dirs = [],
+        apple_ios_include_dirs = [],
+        apple_macos_privacy_manifests = [],
+        apple_ios_privacy_manifests = [],
+        linux_src_dir = "linux",
+        windows_src_dir = "windows",
+        linux_link = linux,
+        windows_link = windows,
+    )
+    windows_target = content[content.index("flutter_windows_plugin_library("):]
+    asserts.true(env, '    linkopts = ["shlwapi.lib"],\n' in windows_target, content)
+    asserts.true(
+        env,
+        '    link_errors = ["windows/CMakeLists.txt:2: `${vars}` is a CMake variable that this file does not set once, outside any block, to literal values before this call"],\n' in windows_target,
+        content,
+    )
+
+    # The Linux library needs nothing the runner does not link already, so it
+    # states neither attribute.
+    linux_target = content[content.index("flutter_linux_plugin_library("):content.index("flutter_windows_plugin_library(")]
+    asserts.false(env, "linkopts" in linux_target, linux_target)
+    asserts.false(env, "link_errors" in linux_target, linux_target)
+
+    return unittest.end(env)
+
+desktop_plugin_libraries_carry_their_link_libraries_test = unittest.make(
+    _desktop_plugin_libraries_carry_their_link_libraries_test_impl,
+)
+
 def flutter_pub_package_test_suite(name):
     unittest.suite(
         name,
@@ -675,4 +728,5 @@ def flutter_pub_package_test_suite(name):
         library_spoke_carries_resources_test,
         file_names_are_written_as_string_literals_test,
         spoke_with_shaders_declares_their_includes_test,
+        desktop_plugin_libraries_carry_their_link_libraries_test,
     )

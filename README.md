@@ -227,6 +227,17 @@ A dependency written any other way (a version catalog entry such as `libs.foo`, 
 
 Permissions a plugin declares in its own manifest, such as `record_android`'s `RECORD_AUDIO`, reach the app's manifest as they do under Gradle. You don't need `--merge_android_manifest_permissions`.
 
+### System libraries of Linux and Windows plugins
+
+A plugin's C++ sources are compiled into your Linux or Windows app, so the app must be linked with the system libraries they call. rules_flutter reads them from the plugin's own `windows/CMakeLists.txt` or `linux/CMakeLists.txt`: the `target_link_libraries` calls that name the plugin's library. `url_launcher_windows` links `shlwapi.lib` that way, and so its Windows app links `shlwapi.lib`.
+
+- `flutter` and `flutter_wrapper_plugin` (Windows), `flutter` and `PkgConfig::GTK` (Linux) are what the app links already.
+- A plain library name (`shlwapi`, `dwmapi.lib`, `m`) becomes a linker flag.
+- A list variable (`${wmf_libs}`) is read when the file sets it once, outside any block, to literal values before the call: `set(wmf_libs mf.lib mfplat.lib)`. Its values are read as above.
+- Anything else needs CMake to evaluate it: any other variable, a generator expression, an imported target such as `PkgConfig::LIBSECRET`, a target the plugin defines or fetches, a path, or a call inside an `if()` block.
+
+For a plugin with something of the last kind, the Windows or Linux app fails when it is built, listing each line and its package. Other platforms are unaffected. Supply a plugin overlay with `flutter.plugin_overlays`: a `BUILD.bazel.tpl` for the package that declares its `flutter_windows_plugin_library` or `flutter_linux_plugin_library` with the flags its sources need in `linkopts`.
+
 ### Regenerating pubspec.lock
 
 Bazel reads `pubspec.lock` and never writes it. To regenerate it, use the Flutter toolchain the rules pin rather than a Flutter installed on your machine:

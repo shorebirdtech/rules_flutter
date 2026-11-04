@@ -120,6 +120,8 @@ def _flutter_plugin_impl(ctx):
             srcs = info.srcs,
             hdrs = info.hdrs,
             include_dirs = info.include_dirs,
+            linkopts = info.linkopts,
+            link_errors = info.link_errors,
             package = package_name,
         ))
 
@@ -133,6 +135,8 @@ def _flutter_plugin_impl(ctx):
             srcs = info.srcs,
             hdrs = info.hdrs,
             include_dirs = info.include_dirs,
+            linkopts = info.linkopts,
+            link_errors = info.link_errors,
             package = package_name,
         ))
 

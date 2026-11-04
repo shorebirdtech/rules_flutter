@@ -30,6 +30,8 @@ def _flutter_linux_plugin_library_impl(ctx):
             srcs = depset(ctx.files.srcs),
             hdrs = depset(ctx.files.hdrs),
             include_dirs = depset(ctx.attr.includes),
+            linkopts = ctx.attr.linkopts,
+            link_errors = ctx.attr.link_errors,
         ),
         DefaultInfo(files = depset(ctx.files.srcs + ctx.files.hdrs)),
     ]
@@ -49,6 +51,17 @@ flutter_linux_plugin_library = rule(
             doc = "Relative include directories under the plugin package " +
                   "root (e.g. `[\"linux/include\"]`). The runner adds them as " +
                   "`-I` flags when compiling plugin srcs.",
+        ),
+        "linkopts": attr.string_list(
+            doc = "Linker flags for the system libraries the plugin's code needs, " +
+                  "added to the runner's link (`[\"-lm\"]`). Pub plugins get these " +
+                  "from their CMakeLists.txt `target_link_libraries`; a plugin " +
+                  "overlay sets them by hand.",
+        ),
+        "link_errors": attr.string_list(
+            doc = "Link libraries of the plugin's CMakeLists.txt that could not be " +
+                  "translated into `linkopts`. Set by `flutter_pub_package`; the " +
+                  "runner fails on them, naming each line.",
         ),
     },
     doc = "Bundle a Flutter Linux plugin's C++ sources for the runner to compile + link.",

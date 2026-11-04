@@ -34,6 +34,7 @@ load(
 load("@rules_flutter//flutter:web.bzl", "flutter_web_bundle")
 load("@rules_flutter//flutter:windows.bzl", "flutter_windows_app")
 load(":android_apk.bzl", "android_apk")
+load(":desktop_link_libraries_test.bzl", "desktop_link_libraries_test")
 
 exports_files(["pubspec.lock"])
 
@@ -320,6 +321,11 @@ build_test(
     name = "linux_bundle_build_test",
     target_compatible_with = ["@platforms//os:linux"],
     targets = [":plugin_linux"],
+)
+
+desktop_link_libraries_test(
+    name = "desktop_link_libraries_test",
+    target_under_test = ":plugin_app",
 )
 
 build_test(
