@@ -1328,7 +1328,7 @@
       "org.bouncycastle.jcajce.provider.asymmetric.ec",
       "org.bouncycastle.jcajce.provider.asymmetric.ecgost",
       "org.bouncycastle.jcajce.provider.asymmetric.elgamal",
-      "org.bouncycastle.jcajce.provider.asymmetric.ghost",
+      "org.bouncycastle.jcajce.provider.asymmetric.gost",
       "org.bouncycastle.jcajce.provider.asymmetric.ies",
       "org.bouncycastle.jcajce.provider.asymmetric.rsa",
       "org.bouncycastle.jcajce.provider.asymmetric.util",
