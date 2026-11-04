@@ -25,8 +25,9 @@ load("@rules_cc//cc:find_cc_toolchain.bzl", "use_cc_toolchain")
 load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
 load("//flutter:providers.bzl", "FlutterApplicationInfo")
 load("//flutter/private:apple_xcode.bzl", "declare_dsym", "run_xcode_tool", "split_and_strip_aot_binary")
+load("//flutter/private:assemble_directory.bzl", "ASSEMBLE_DIRECTORY_ATTRS", "assemble_directory")
 load("//flutter/private:constants.bzl", "IOS_MINIMUM_OS_VERSION")
-load("//flutter/private:exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
+load("//flutter/private:exec_groups.bzl", "PORTABLE_EXEC_GROUPS", "portable_tools")
 load("//flutter/private:flutter_native_assets.bzl", "native_asset_framework_name")
 
 def _flutter_ios_application_impl(ctx):
@@ -169,14 +170,12 @@ def _flutter_ios_framework_impl(ctx):
         )
 
         # Copy flutter_assets into the framework.
-        ctx.actions.run_shell(
-            command = 'cp -RL "$1"/. "$2"',
-            arguments = [ctx.actions.args().add_all([flutter_assets, framework_assets], expand_directories = False)],
-            inputs = [flutter_assets],
-            outputs = [framework_assets],
+        assemble_directory(
+            ctx,
+            tools,
+            framework_assets,
+            [("tree", ".", flutter_assets)],
             mnemonic = "FlutterIOSCopyAssets",
-            exec_group = PORTABLE,
-            execution_requirements = PATH_MAPPING,
             progress_message = "Copying flutter_assets into App.framework",
         )
 
@@ -209,24 +208,17 @@ def _flutter_ios_framework_impl(ctx):
         vm_snapshot = tools.vm_isolate_snapshot
         iso_snapshot = tools.isolate_snapshot
 
-        copy_cmd = (
-            'cp -RL "$1"/. "$2" && cp "$3" "$2/kernel_blob.bin"' +
-            ' && cp "$4" "$2/vm_snapshot_data" && cp "$5" "$2/isolate_snapshot_data"'
-        )
-        copy_args = ctx.actions.args().add_all(
-            [flutter_assets, framework_assets, kernel_dill, vm_snapshot, iso_snapshot],
-            expand_directories = False,
-        )
-        copy_inputs = [flutter_assets, kernel_dill, vm_snapshot, iso_snapshot]
-
-        ctx.actions.run_shell(
-            command = copy_cmd,
-            arguments = [copy_args],
-            inputs = copy_inputs,
-            outputs = [framework_assets],
+        assemble_directory(
+            ctx,
+            tools,
+            framework_assets,
+            [
+                ("tree", ".", flutter_assets),
+                ("file", "kernel_blob.bin", kernel_dill),
+                ("file", "vm_snapshot_data", vm_snapshot),
+                ("file", "isolate_snapshot_data", iso_snapshot),
+            ],
             mnemonic = "FlutterIOSDebugAssets",
-            exec_group = PORTABLE,
-            execution_requirements = PATH_MAPPING,
             progress_message = "Assembling debug App.framework with kernel and VM snapshots",
         )
 
@@ -240,6 +232,7 @@ flutter_ios_framework = rule(
     attrs = dicts.add(
         apple_support.action_required_attrs(),
         apple_support.platform_constraint_attrs(),
+        ASSEMBLE_DIRECTORY_ATTRS,
         {
             "application": attr.label(
                 doc = "A flutter_ios_application target providing Flutter compilation outputs.",

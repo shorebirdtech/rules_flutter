@@ -128,8 +128,13 @@ def _native_libs_staged_test_impl(ctx):
     if len(actions) != 1:
         return analysistest.end(env)
     argv = [_without_config(arg) for arg in actions[0].argv]
-    pairs = argv[argv.index(_without_config(staged.path)) + 1:]
-    sources = pairs[0::2]
+
+    # `--output <dir>`, then one `--add <basename> <library>` for each library.
+    asserts.equals(env, _without_config(staged.path), argv[argv.index("--output") + 1])
+    additions = argv[argv.index("--output") + 2:]
+    asserts.equals(env, ["--add"] * (len(additions) // 3), additions[0::3])
+    basenames = additions[1::3]
+    sources = additions[2::3]
     fake_prefix = "/%s/" % ctx.attr.fake_application_name
     asserts.equals(
         env,
@@ -137,12 +142,16 @@ def _native_libs_staged_test_impl(ctx):
         [path.split(fake_prefix, 1)[1] for path in sources],
         "each library once, deduplicated by path, in arrival order",
     )
-    asserts.equals(env, ctx.attr.expected_basenames, pairs[1::2])
+    asserts.equals(env, ctx.attr.expected_basenames, basenames)
     asserts.equals(
         env,
         sorted(sources),
-        sorted([_without_config(f.path) for f in actions[0].inputs.to_list()]),
-        "the action's inputs must be exactly the libraries it copies",
+        sorted([
+            _without_config(f.path)
+            for f in actions[0].inputs.to_list()
+            if fake_prefix in "/" + _without_config(f.path)
+        ]),
+        "the libraries the action copies must be among its inputs, and no other file of the application",
     )
     return analysistest.end(env)
 
