@@ -893,7 +893,8 @@ void main() {
     });
 
     test(
-      'fails the launch when Chrome never announces a port, and cleans up',
+      'fails the launch when Chrome never announces a port, quoting what it '
+      'said, and cleans up',
       () async {
         final proc = FakeProcess();
         late List<String> args;
@@ -907,7 +908,11 @@ void main() {
           },
         );
         await proc.outputAttached;
-        // The browser stays up but says nothing.
+        // The browser stays up, says why it is stuck, and never announces.
+        proc.emitStderr(
+          'Failed to connect to the bus: Could not parse server '
+          'address\n',
+        );
 
         await expectLater(
           launch,
@@ -915,7 +920,10 @@ void main() {
             isA<StateError>().having(
               (e) => e.message,
               'message',
-              contains('did not announce'),
+              allOf(
+                contains('did not announce'),
+                contains('Failed to connect to the bus'),
+              ),
             ),
           ),
         );
