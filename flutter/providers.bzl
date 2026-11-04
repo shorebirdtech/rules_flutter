@@ -21,7 +21,13 @@ FlutterSdkInfo = provider(
         "platform_kernel_dill_product": "File: `platform_strong_product.dill` — the release platform kernel.",
         "patched_sdk": "Target: The Flutter patched Dart SDK root directory.",
         "icu_data": "File: `icudtl.dat` — ICU data file required by the engine.",
-        "tool_files": "depset[File]: All files needed to run Flutter build tools (for use in action inputs).",
+        "tool_files": "depset[File]: Every file of the bundled Dart SDK and of the patched SDK, " +
+                      "for running any SDK command (`dart pub`). An action that runs one tool " +
+                      "takes only that tool's files from `sdk_files`: each input is linked into " +
+                      "a sandbox and, remotely, hashed and staged, and the SDK is ~1,050 files.",
+        "sdk_files": "DartSdkFilesInfo: The bundled Dart SDK's files by the use that reads them " +
+                     "(`run`, `aot_run`, `kernel`, `dart2js`, `dart2wasm`, ...), as rules_dart " +
+                     "declares them. `gen_snapshot` needs none of them.",
         "engine_library": "Target or None: The platform-specific Flutter engine runtime library " +
                           "(FlutterMacOS.framework, libflutter_linux_gtk.so, flutter_windows.dll) of the " +
                           "build mode: debug under `-c dbg`, profile under " +
@@ -70,7 +76,10 @@ FlutterExecToolsInfo = provider(
         "shader_include_dir": "str: The execution path of the directory holding `shader_lib`, which " +
                               "impellerc takes as `--include`. A source directory, so path mapping " +
                               "leaves it as it is.",
-        "tool_files": "depset[File]: All files needed to run the Dart tools above (for use in action inputs).",
+        "sdk_files": "DartSdkFilesInfo: The bundled Dart SDK's files by the use that reads them " +
+                     "(`run`, `aot_run`, `kernel`, `dart2js`, `dart2wasm`, ...). An action takes " +
+                     "only its tool's set: `run` for a `dart script.dart` step, and for a front " +
+                     "end the files it names itself.",
     },
 )
 

@@ -113,7 +113,7 @@ def _flutter_android_engine_jar_impl(ctx):
         arguments = [args],
         inputs = depset(
             direct = [ctx.file._tool, ctx.file.jar],
-            transitive = [flutter_tools.tool_files, cc_toolchain.all_files],
+            transitive = [flutter_tools.sdk_files.run, cc_toolchain.all_files],
         ),
         tools = [ctx.executable._zipper],
         outputs = [output, libs],

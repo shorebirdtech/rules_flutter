@@ -76,7 +76,7 @@ def _flutter_android_manifest_merge_impl(ctx):
         arguments = [args],
         inputs = depset(
             direct = [tool, ctx.file.base] + ([ctx.file.overlay] if ctx.file.overlay else []) + libraries,
-            transitive = [tools.tool_files],
+            transitive = [tools.sdk_files.run],
         ),
         outputs = [output],
         mnemonic = "FlutterManifestMerge",

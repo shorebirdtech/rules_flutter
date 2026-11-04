@@ -177,7 +177,7 @@ known:
 
 The second is the nastier one. `dart_binary` compiles with **rules_dart's**
 exec-tools Dart, not the Flutter SDK's Dart, even inside rules_flutter. The
-Flutter Dart is downloaded but only as the `dart_sdk_files` filegroup, not as a
+Flutter Dart is downloaded but only as the `dart_sdk` file sets, not as a
 registered toolchain. So Dart source using an API newer than rules_dart's Dart
 builds clean locally and fails on CI, whenever the sibling checkout carries a
 newer Dart than the published pin.
@@ -1596,7 +1596,7 @@ script's own package requires ≥ 3.13.
 | FFI / native deps / native assets | ffi_example (incl. manual iOS-sim + macOS runtime tests), ffi_plugin_example |
 | Plugins | plugin_example, ffi_plugin_example |
 | Android ABI selection (`flutter_android_engine`, `flutter_android_bundle`, `flutter_android_build`, `AndroidDevice` ABI in `device.dart`) | Root `//...`, android_example, hello_world and plugin_example `//...` (force-run `verify_android_apk_test`), dev_tool unit **and** `flutter_bazel run` on the attached phone (arm64-v8a) and on an x86_64 emulator, which must each launch the app |
-| Toolchain / SDK | smoke, hello_world |
+| Toolchain / SDK, or any action's inputs from the Dart SDK | smoke, hello_world, and `//flutter/tests:sdk_inputs_test` with `//flutter/tests/sdk_sets:sdk_sets_test` (see § "SDK inputs") |
 | Anything that downloads (`download*` in a repository rule, `ARTIFACT_CHECKSUMS` / `source_sha256` in `versions.bzl`, `flutter_pub_package`, `update_flutter_version`) | Root `//flutter/tests:download_digests_test` (every table digest is 64-hex, for every version, host, target and mode the macros iterate) and `//flutter/tests:pinned_test` (what counts as a digest) and `//tools/download_guard/...` (every `download*` call in `//flutter` passes its digest through `pinned()`, which refuses a missing or malformed one before the request; a hosted pub package goes through rules_dart's `fetch_pub_archive`, which the lint accepts only when it is loaded from `@rules_dart//dart/pub:pub_lock_package.bzl` and given a `sha256`), **and** `dart run tools/dev_tool/tool/e2e.dart test/e2e/digest_pinned_e2e_test.dart test/e2e/digest_missing_e2e_test.dart test/e2e/pub_archive_e2e_test.dart` (what a fetch does with a good, a bad and a missing digest; needs no device; the generated workspace resolves its modules from Bazel's registry or repository cache) |
 | A new or removed e2e workspace, or where one runs in CI (`tools/ci_matrix/e2e_matrix.dart`, `.github/workflows/ci.yaml`) | `bazel run //tools/ci_matrix` (fails on a gap) and `bazel test //tools/ci_matrix/...` |
 | Maven artifacts (a `maven.install` in any `MODULE.bazel`, or a bump of `rules_android` or `rules_jvm_external`) | `bazel run //tools/lockfile_check -- --refresh` on hello_world, plugin_example and android_example, and the root's lock by hand — see "Maven lock files" in § 1 |
@@ -1613,6 +1613,26 @@ script's own package requires ≥ 3.13.
 | `flutter_test` compile flags, runfiles or kernel mode (`flutter/private/flutter_test.bzl`) | Root `//...`, hello_world `//...` (the `asserts_fire_test` and `widget_creation_test` variants) **and** the by-hand const-violation builds in § "`flutter_test` build modes" |
 | Golden comparator (`flutter/private/goldens/`, `flutter_test.bzl` bootstrap) | Root `//...` + codegen `//...` **and** the manual regeneration round trip below |
 | Everything | All sections above |
+
+### SDK inputs
+
+An action names the Dart SDK files its tool reads (rules_dart's `SDK_FILE_SETS`,
+through `FlutterSdkInfo.sdk_files`), not the SDK's ~1,050 files and 650 MB.
+Two tests hold that, and neither replaces the other:
+
+- `//flutter/tests:sdk_inputs_test` reads each action's inputs and fails on any
+  SDK file outside the set for its tool. A new action that takes the whole SDK
+  fails it.
+- `//flutter/tests/sdk_sets:sdk_sets_test` runs the kernel compile, the
+  front end, `dart script.dart`, `const_finder`, `dart compile js` and
+  `dart compile wasm` against real *copies* of exactly those files. A sandboxed
+  build cannot show a set that is too small: the sandbox links its inputs, and
+  `dart` finds the VM and its snapshots beside the link's target, which is the
+  whole SDK. Only a copy (or a remote executor) has nothing else. A green
+  sandboxed build is no evidence a set is enough.
+
+A tool that needs another file is a missing entry in the action's set, found
+by the second test, not a reason to take the whole SDK.
 
 ### Dual-hub package skew (manual)
 

@@ -1,0 +1,83 @@
+load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_test")
+load(":sdk_sets.bzl", "sdk_set_copy")
+
+# `//flutter/tests:sdk_inputs_test` checks which SDK files each action names.
+# This checks that those files are enough: the tools run against real copies of
+# exactly them. A local sandbox links its inputs, and the `dart` launcher finds
+# the files beside it through a link, so a sandboxed build passes however short
+# the inputs are; only a remote executor, which has the declared inputs and
+# nothing else, shows the gap.
+
+dart_binary(
+    name = "copy_files",
+    compile_mode = "exe",
+    main = "copy_files.dart",
+)
+
+# Each copy holds what the action it is named for declares.
+COPIES = {
+    # FlutterKernelCompile: `dart kernel_filter.dart` starts the front end.
+    "kernel_compile": dict(
+        fields = [
+            "frontend_server",
+            "platform_kernel_dill",
+        ],
+        sets = [
+            "run",
+            "aot_run",
+        ],
+    ),
+    # DartModule, through `DartKernelSdkInfo`: kernel_worker, its runtime and
+    # the platform, and `tool_files` is empty.
+    "kernel_worker": dict(
+        fields = [
+            "kernel_worker",
+            "platform_kernel_dill",
+        ],
+        sets = ["aot_run"],
+    ),
+    # Every `dart script.dart` step, and the asset bundle's const_finder.
+    "script": dict(
+        fields = ["const_finder"],
+        sets = ["run"],
+    ),
+    "dart2js": dict(
+        extra = ["@flutter_web_sdk//:web-sdk/kernel/dart2js_platform.dill"],
+        sets = ["dart2js"],
+    ),
+    "dart2wasm": dict(
+        extra = ["@flutter_web_sdk//:web-sdk/kernel/dart2wasm_platform.dill"],
+        sets = ["dart2wasm"],
+    ),
+}
+
+[
+    sdk_set_copy(
+        name = "copy_" + name,
+        extra = kwargs.get("extra", []),
+        fields = kwargs.get("fields", []),
+        sets = kwargs["sets"],
+    )
+    for name, kwargs in COPIES.items()
+]
+
+dart_test(
+    name = "sdk_sets_test",
+    size = "medium",
+    args = [
+        "kernel_filter=$(rlocationpath //flutter/private/tools:kernel_filter.dart)",
+        "generate_asset_manifest=$(rlocationpath //flutter/private/tools:generate_asset_manifest.dart)",
+    ] + [
+        "%s=$(rlocationpath :copy_%s)" % (name, name)
+        for name in COPIES
+    ],
+    data = [
+        "//flutter/private/tools:generate_asset_manifest.dart",
+        "//flutter/private/tools:kernel_filter.dart",
+    ] + [":copy_" + name for name in COPIES],
+    main = "sdk_sets_test.dart",
+    deps = [
+        "@dev_tool_deps//:test",
+        "@rules_dart//dart/runfiles",
+    ],
+)

@@ -169,7 +169,7 @@ def _stage_native_libs(ctx, tools, aot_output, native_libs, abi):
         arguments = [args],
         inputs = depset(
             direct = [ctx.file._validate_tool] + libs,
-            transitive = [tools.tool_files],
+            transitive = [tools.sdk_files.run],
         ),
         outputs = [validated],
         mnemonic = "FlutterValidateNativeLibs",

@@ -534,7 +534,6 @@ def _flutter_web_bundle_impl(ctx):
     # Step 2: Compile to WASM (with a JS build beside it unless `js_fallback = False`) or JS only.
     # dart2js outputs to a tree artifact (directory) to support deferred loading:
     # dart2js may produce main.dart.js + *.part.js files for deferred imports.
-    web_sdk_file_list = ctx.attr._web_sdk.files.to_list() if ctx.attr._web_sdk else []
     compile_outputs = []  # Files (wasm, mjs, wasm.map)
     compile_copies = []  # Bundle copy entries for compile_outputs
     dart2js_dirs = []  # Tree artifacts from dart2js
@@ -559,8 +558,7 @@ def _flutter_web_bundle_impl(ctx):
         flutter_dart2wasm_action(
             ctx = ctx,
             dart = tools.dart,
-            flutter_sdk_files = tools.tool_files,
-            web_sdk_files = web_sdk_file_list,
+            sdk_files = tools.sdk_files,
             dart2wasm_platform_dill = ctx.file._dart2wasm_platform_dill,
             main_dart = entrypoint,
             srcs = compile_srcs["dart2wasm"],
@@ -585,8 +583,7 @@ def _flutter_web_bundle_impl(ctx):
             flutter_dart2js_action(
                 ctx = ctx,
                 dart = tools.dart,
-                flutter_sdk_files = tools.tool_files,
-                web_sdk_files = web_sdk_file_list,
+                sdk_files = tools.sdk_files,
                 dart2js_platform_dill = ctx.file._dart2js_platform_dill,
                 main_dart = entrypoint,
                 srcs = compile_srcs["dart2js"],
@@ -619,8 +616,7 @@ def _flutter_web_bundle_impl(ctx):
         flutter_dart2js_action(
             ctx = ctx,
             dart = tools.dart,
-            flutter_sdk_files = tools.tool_files,
-            web_sdk_files = web_sdk_file_list,
+            sdk_files = tools.sdk_files,
             dart2js_platform_dill = ctx.file._dart2js_platform_dill,
             main_dart = entrypoint,
             srcs = compile_srcs["dart2js"],
@@ -664,8 +660,7 @@ def _flutter_web_bundle_impl(ctx):
         flutter_web_icon_kernel_action(
             ctx = ctx,
             dart = tools.dart,
-            flutter_sdk_files = tools.tool_files,
-            web_sdk_files = web_sdk_file_list,
+            sdk_files = tools.sdk_files,
             front_end = front_end,
             platform_dill = ctx.file._dart2js_platform_dill if front_end == "dart2js" else ctx.file._dart2wasm_platform_dill,
             main_dart = entrypoint,
@@ -902,7 +897,7 @@ def _flutter_web_bundle_impl(ctx):
         arguments = [template_args, json_config_args(ctx, template_config, template_refs)],
         inputs = depset(
             direct = template_inputs + [ctx.file._web_template_tool],
-            transitive = [tools.tool_files],
+            transitive = [tools.sdk_files.run],
         ),
         outputs = [index_html, bootstrap_js] + ([dev_bootstrap_js] if dev_bootstrap_js else []),
         mnemonic = "FlutterWebTemplate",
@@ -1084,7 +1079,7 @@ def _flutter_web_bundle_impl(ctx):
         arguments = [bundle_args, json_config_args(ctx, config, refs)],
         inputs = depset(
             direct = all_inputs + [ctx.file._bundle_tool],
-            transitive = [tools.tool_files],
+            transitive = [tools.sdk_files.run],
         ),
         outputs = [output_dir] + ([dump_info_file] if dump_info_file else []),
         mnemonic = "FlutterWebBundle",

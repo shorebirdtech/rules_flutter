@@ -1720,7 +1720,8 @@ sdk = ctx.toolchains["@rules_flutter//flutter:toolchain_type"].flutter_sdk_info
 | `platform_kernel_dill_product` | `File` | `platform_strong_product.dill`, the release platform kernel. |
 | `patched_sdk` | `Target` | The Flutter-patched Dart SDK root. |
 | `icu_data` | `File` | `icudtl.dat`. |
-| `tool_files` | `depset[File]` | Everything needed to run the build tools, for action inputs. |
+| `sdk_files` | `DartSdkFilesInfo` | The bundled Dart SDK's files by the use that reads them (`run`, `aot_run`, `kernel`, `dart2js`, `dart2wasm`, ...), as rules_dart declares them. An action takes the set of the one tool it runs. |
+| `tool_files` | `depset[File]` | Every file of the bundled Dart SDK and the patched SDK (~1,050 files, 650 MB), for running any SDK command such as `dart pub`. An action that runs one tool takes that tool's set from `sdk_files` instead. |
 | `engine_library` | `Target` or `None` | The platform engine runtime library of the build mode (debug under `-c dbg`, profile under `--@rules_flutter//flutter:profile` where the toolchain has one, release otherwise). `None` for mobile and web. |
 | `const_finder` | `File` or `None` | `const_finder.dart.snapshot`, for icon tree shaking. |
 | `font_subset` | `File` or `None` | The `font-subset` binary. |

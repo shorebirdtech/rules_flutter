@@ -196,8 +196,7 @@ def _main_dart_js(output_dir):
 def flutter_dart2wasm_action(
         ctx,
         dart,
-        flutter_sdk_files,
-        web_sdk_files,
+        sdk_files,
         dart2wasm_platform_dill,
         main_dart,
         srcs,
@@ -218,8 +217,10 @@ def flutter_dart2wasm_action(
     Args:
         ctx: Rule context.
         dart: The `dart` executable File.
-        flutter_sdk_files: SDK files needed to run dart.
-        web_sdk_files: Flutter web SDK files.
+        sdk_files: The `DartSdkFilesInfo` of the Flutter-bundled Dart SDK; the
+            action takes the set for its compiler (`dart2wasm`). The platform kernel of
+            the Flutter web SDK is an argument below, and the rest of the web
+            SDK is for the bundle, not the compile.
         dart2wasm_platform_dill: The dart2wasm_platform.dill File.
         main_dart: The main .dart source File.
         srcs: All transitive source Files needed for compilation.
@@ -310,7 +311,7 @@ def flutter_dart2wasm_action(
         arguments = [args],
         inputs = depset(
             direct = [main_dart, package_config, dart2wasm_platform_dill] + srcs,
-            transitive = [flutter_sdk_files, depset(web_sdk_files)],
+            transitive = [sdk_files.dart2wasm],
         ),
         outputs = [output_wasm, output_mjs] + ([output_source_map] if output_source_map != None else []),
         mnemonic = "FlutterDart2Wasm",
@@ -329,8 +330,7 @@ def flutter_dart2wasm_action(
 def flutter_dart2js_action(
         ctx,
         dart,
-        flutter_sdk_files,
-        web_sdk_files,
+        sdk_files,
         dart2js_platform_dill,
         main_dart,
         srcs,
@@ -357,8 +357,10 @@ def flutter_dart2js_action(
     Args:
         ctx: Rule context.
         dart: The `dart` executable File.
-        flutter_sdk_files: SDK files needed to run dart.
-        web_sdk_files: Flutter web SDK files.
+        sdk_files: The `DartSdkFilesInfo` of the Flutter-bundled Dart SDK; the
+            action takes the set for its compiler (`dart2js`). The platform kernel of
+            the Flutter web SDK is an argument below, and the rest of the web
+            SDK is for the bundle, not the compile.
         dart2js_platform_dill: The dart2js_platform.dill File.
         main_dart: The main .dart source File.
         srcs: All transitive source Files needed for compilation.
@@ -434,7 +436,7 @@ def flutter_dart2js_action(
         arguments = [args],
         inputs = depset(
             direct = [main_dart, package_config, dart2js_platform_dill] + srcs,
-            transitive = [flutter_sdk_files, depset(web_sdk_files)],
+            transitive = [sdk_files.dart2js],
         ),
         outputs = [output_dir],
         mnemonic = "FlutterDart2JS",
@@ -447,8 +449,7 @@ def flutter_dart2js_action(
 def flutter_web_icon_kernel_action(
         ctx,
         dart,
-        flutter_sdk_files,
-        web_sdk_files,
+        sdk_files,
         front_end,
         platform_dill,
         main_dart,
@@ -478,8 +479,10 @@ def flutter_web_icon_kernel_action(
     Args:
         ctx: Rule context.
         dart: The `dart` executable File.
-        flutter_sdk_files: SDK files needed to run dart.
-        web_sdk_files: Flutter web SDK files.
+        sdk_files: The `DartSdkFilesInfo` of the Flutter-bundled Dart SDK; the
+            action takes the set for its compiler (`dart2js` for the `dart2js` front end, `dart2wasm` for the other). The platform kernel of
+            the Flutter web SDK is an argument below, and the rest of the web
+            SDK is for the bundle, not the compile.
         front_end: "dart2js" or "dart2wasm".
         platform_dill: The web SDK platform File of `front_end`
             (`dart2js_platform.dill` or `dart2wasm_platform.dill`).
@@ -516,7 +519,7 @@ def flutter_web_icon_kernel_action(
         arguments = [args],
         inputs = depset(
             direct = [main_dart, package_config, platform_dill] + srcs,
-            transitive = [flutter_sdk_files, depset(web_sdk_files)],
+            transitive = [getattr(sdk_files, front_end)],
         ),
         outputs = [output],
         mnemonic = "FlutterWebIconKernel",

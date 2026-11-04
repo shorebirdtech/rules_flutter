@@ -71,7 +71,7 @@ _BUILD_TEMPLATE = """load("@rules_flutter//flutter:toolchain.bzl", "flutter_tool
 flutter_toolchain(
     name = "flutter_toolchain",
     dart = "@{host_repo_name}//:dart-sdk/bin/{dart_bin}",
-    dart_sdk = "@{host_repo_name}//:dart_sdk_files",
+    dart_sdk = "@{host_repo_name}//:dart_sdk",
     dartaotruntime = "@{host_repo_name}//:dart-sdk/bin/{dartaotruntime_bin}",
     engine_revision = "{engine_revision}",
     frontend_server = "@{host_repo_name}//:dart-sdk/bin/snapshots/frontend_server_aot.dart.snapshot",

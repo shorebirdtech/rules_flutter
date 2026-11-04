@@ -19,7 +19,7 @@ def flutter_kernel_compile_action(
         dartaotruntime,
         dart,
         kernel_filter_tool,
-        flutter_sdk_files,
+        sdk_files,
         frontend_server,
         platform_dill,
         main,
@@ -47,7 +47,11 @@ def flutter_kernel_compile_action(
         kernel_filter_tool: `kernel_filter.dart`, which runs the
             frontend_server and drops its batch-protocol lines from the
             output so a successful compile prints nothing.
-        flutter_sdk_files: All Flutter SDK files needed (for action inputs).
+        sdk_files: The `DartSdkFilesInfo` of the Flutter-bundled Dart SDK. The
+            action takes its `run` set (`dart` starts [kernel_filter_tool]
+            from source) and `aot_run` (the runtime the front end runs on);
+            the front end's snapshot and the platform kernel are named
+            arguments, and it reads nothing else.
         frontend_server: The frontend_server_aot.dart.snapshot File.
         platform_dill: The platform_strong.dill File (debug or product).
         main: The entrypoint .dart source File. Always an action input and
@@ -171,7 +175,7 @@ def flutter_kernel_compile_action(
         arguments = [args],
         inputs = depset(
             direct = direct_inputs + [kernel_filter_tool, dartaotruntime],
-            transitive = [flutter_sdk_files],
+            transitive = [sdk_files.run, sdk_files.aot_run],
         ),
         outputs = outputs,
         mnemonic = "FlutterKernelCompile",

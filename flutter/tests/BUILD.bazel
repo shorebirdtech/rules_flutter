@@ -42,6 +42,7 @@ load(":plist_merge_test.bzl", "plist_merge_test_suite")
 load(":plugin_registrant_test.bzl", "plugin_registrant_test_suite")
 load(":profile_mode_test.bzl", "profile_mode_test_suite")
 load(":pub_lock_sdks_test.bzl", "pub_lock_sdks_test_suite")
+load(":sdk_inputs_test.bzl", "sdk_inputs_test_suite")
 load(":shader_compile_test.bzl", "shader_compile_test_suite")
 load(":shared_code_asset_test.bzl", "shared_code_asset_test_suite")
 load(":tester_binary_test.bzl", "tester_binary_test_suite")
@@ -193,3 +194,5 @@ path_mapping_test_suite(name = "path_mapping_test")
 tester_binary_test_suite(name = "tester_binary_test")
 
 flutter_test_runfiles_test_suite(name = "flutter_test_runfiles_test")
+
+sdk_inputs_test_suite(name = "sdk_inputs_test")

@@ -5,10 +5,12 @@
 the SDK whose output does not depend on the target, for one host.
 """
 
+load("@rules_dart//dart:toolchain.bzl", "DartSdkFilesInfo")
 load("//flutter:providers.bzl", "FlutterExecToolsInfo", "FlutterSdkInfo")
 
 def _flutter_toolchain_impl(ctx):
-    tool_files = depset(transitive = [ctx.attr.dart_sdk.files, ctx.attr.patched_sdk.files])
+    sdk_files = ctx.attr.dart_sdk[DartSdkFilesInfo]
+    tool_files = depset(transitive = [sdk_files.all, ctx.attr.patched_sdk.files])
 
     flutter_sdk_info = FlutterSdkInfo(
         version = ctx.attr.version,
@@ -32,6 +34,7 @@ def _flutter_toolchain_impl(ctx):
         vm_isolate_snapshot = ctx.file.vm_isolate_snapshot,
         isolate_snapshot = ctx.file.isolate_snapshot,
         tool_files = tool_files,
+        sdk_files = sdk_files,
         engine_library = ctx.attr.engine_library,
         target_os = ctx.attr.target_os,
         target_arch = ctx.attr.target_arch,
@@ -112,8 +115,9 @@ flutter_toolchain = rule(
             allow_single_file = True,
         ),
         "dart_sdk": attr.label(
-            doc = "A filegroup containing the Flutter-bundled Dart SDK files.",
+            doc = "The Flutter-bundled Dart SDK's files: a `dart_sdk_files` target.",
             mandatory = True,
+            providers = [DartSdkFilesInfo],
         ),
         "patched_sdk": attr.label(
             doc = "A filegroup containing the Flutter patched Dart SDK files.",
@@ -192,7 +196,6 @@ def _shader_include_dir(ctx):
     return include_dir
 
 def _flutter_exec_tools_impl(ctx):
-    tool_files = depset(transitive = [ctx.attr.dart_sdk.files, ctx.attr.patched_sdk.files])
     info = FlutterExecToolsInfo(
         version = ctx.attr.version,
         engine_revision = ctx.attr.engine_revision,
@@ -215,7 +218,7 @@ def _flutter_exec_tools_impl(ctx):
         impellerc = ctx.file.impellerc,
         shader_lib = ctx.files.shader_lib,
         shader_include_dir = _shader_include_dir(ctx),
-        tool_files = tool_files,
+        sdk_files = ctx.attr.dart_sdk[DartSdkFilesInfo],
     )
     return [platform_common.ToolchainInfo(flutter_exec_tools_info = info)]
 
@@ -231,7 +234,11 @@ flutter_exec_tools = rule(
         "host_arch": attr.string(doc = "The CPU the tools run on.", mandatory = True, values = ["arm64", "x64"]),
         "dart": _file("The `dart` executable."),
         "dartaotruntime": _file("The `dartaotruntime` executable."),
-        "dart_sdk": attr.label(doc = "A filegroup of the Flutter-bundled Dart SDK.", mandatory = True),
+        "dart_sdk": attr.label(
+            doc = "The Flutter-bundled Dart SDK's files: a `dart_sdk_files` target.",
+            mandatory = True,
+            providers = [DartSdkFilesInfo],
+        ),
         "frontend_server": _file("`frontend_server_aot.dart.snapshot`."),
         "kernel_worker": _file("`kernel_worker_aot.dart.snapshot`."),
         "libraries_spec": _file("The Flutter `libraries.json`."),

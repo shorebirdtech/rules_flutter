@@ -75,7 +75,7 @@ def build_asset_manifest(assets):
 def flutter_asset_bundle_action(
         ctx,
         dart,
-        flutter_sdk_files,
+        dart_files,
         assets = [],
         fonts = [],
         notices = "",
@@ -92,7 +92,9 @@ def flutter_asset_bundle_action(
     Args:
         ctx: Rule context.
         dart: The `dart` executable File from the Flutter SDK.
-        flutter_sdk_files: SDK files needed to run dart (for action inputs).
+        dart_files: The files `dart` needs to run `generate_asset_manifest.dart`
+            from source, and to start `const_finder`'s snapshot: the `run` set
+            of the SDK (`DartSdkFilesInfo.run`).
         assets: list of File objects of the target's package to include in the
             bundle, each under its path in that package (`assets/a.png`).
         fonts: list of font declaration dicts (FontManifest.json schema).
@@ -185,7 +187,7 @@ def flutter_asset_bundle_action(
         arguments = [args, json_config_args(ctx, config, refs)],
         inputs = depset(
             direct = [tool] + claims.values() + license_files + extra_inputs,
-            transitive = [flutter_sdk_files],
+            transitive = [dart_files],
         ),
         outputs = [output_dir],
         mnemonic = "FlutterAssetBundle",
@@ -207,7 +209,7 @@ def _flutter_asset_bundle_impl(ctx):
     output_dir = flutter_asset_bundle_action(
         ctx = ctx,
         dart = tools.dart,
-        flutter_sdk_files = tools.tool_files,
+        dart_files = tools.sdk_files.run,
         assets = ctx.files.assets,
         fonts = fonts,
         notices = "",

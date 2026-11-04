@@ -57,7 +57,6 @@ def _flutter_aot_target_impl(ctx):
         flutter_aot_macho_action(
             ctx = ctx,
             gen_snapshot = flutter_sdk_info.gen_snapshot,
-            flutter_sdk_files = flutter_sdk_info.tool_files,
             kernel_dill = kernel_dill,
             output = output,
             extra_flags = options.flags,
@@ -70,7 +69,6 @@ def _flutter_aot_target_impl(ctx):
         flutter_aot_elf_action(
             ctx = ctx,
             gen_snapshot = flutter_sdk_info.gen_snapshot,
-            flutter_sdk_files = flutter_sdk_info.tool_files,
             kernel_dill = kernel_dill,
             output = output,
             strip = ctx.var["COMPILATION_MODE"] == "opt" and options.strip,

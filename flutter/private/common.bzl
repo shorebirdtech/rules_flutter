@@ -476,7 +476,7 @@ def flutter_compile_kernel(ctx, tools, aot = None, platform_dill = None, target_
         dartaotruntime = tools.dartaotruntime,
         dart = tools.dart,
         kernel_filter_tool = ctx.file._kernel_filter_tool,
-        flutter_sdk_files = tools.tool_files,
+        sdk_files = tools.sdk_files,
         frontend_server = tools.frontend_server,
         platform_dill = platform_dill,
         main = entrypoint_info.file,
@@ -695,7 +695,7 @@ def flutter_compile_shaders(ctx, tools, target_platform, deps):
             includes = job.includes,
             # What compiles a shader whose SkSL stage fails without it.
             dart = tools.dart,
-            dart_files = tools.tool_files,
+            dart_files = tools.sdk_files.run,
             compile_tool = ctx.file._shader_compile_tool,
             require_sksl = getattr(ctx.attr, "require_sksl_shaders", False),
         )
@@ -784,7 +784,7 @@ def flutter_build_assets(ctx, tools, output_dir, deps, target_platform, compiled
     return flutter_asset_bundle_action(
         ctx = ctx,
         dart = tools.dart,
-        flutter_sdk_files = tools.tool_files,
+        dart_files = tools.sdk_files.run,
         assets = ctx.files.assets,
         fonts = fonts,
         license_files = license_files,

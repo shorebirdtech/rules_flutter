@@ -78,7 +78,6 @@ def gen_snapshot_options(ctx):
 def _flutter_aot_action(
         ctx,
         gen_snapshot,
-        flutter_sdk_files,
         kernel_dill,
         output,
         snapshot_kind,
@@ -117,10 +116,9 @@ def _flutter_aot_action(
     ctx.actions.run(
         executable = gen_snapshot,
         arguments = [args],
-        inputs = depset(
-            direct = [kernel_dill],
-            transitive = [flutter_sdk_files],
-        ),
+        # `gen_snapshot` is a standalone binary: it reads the kernel and no file
+        # of any SDK.
+        inputs = [kernel_dill],
         outputs = outputs,
         mnemonic = mnemonic,
         # `gen_snapshot` is the target toolchain's, which also fixes the hosts
@@ -130,13 +128,12 @@ def _flutter_aot_action(
         progress_message = "AOT compiling Flutter %s %s" % (snapshot_kind, ctx.label),
     )
 
-def flutter_aot_elf_action(ctx, gen_snapshot, flutter_sdk_files, kernel_dill, output, strip = True, extra_flags = [], file_flags = [], debug_info = None):
+def flutter_aot_elf_action(ctx, gen_snapshot, kernel_dill, output, strip = True, extra_flags = [], file_flags = [], debug_info = None):
     """AOT compile to ELF shared library. Used for Android, Linux, Windows.
 
     Args:
         ctx: Rule context.
         gen_snapshot: gen_snapshot executable File.
-        flutter_sdk_files: SDK support files.
         kernel_dill: Kernel .dill input.
         output: Output shared library File.
         strip: Whether to strip debug symbols.
@@ -147,12 +144,11 @@ def flutter_aot_elf_action(ctx, gen_snapshot, flutter_sdk_files, kernel_dill, ou
         debug_info: Optional File the split debug info is saved to
             (`--save-debugging-info`), with DWARF stack traces turned on.
     """
-    _flutter_aot_action(ctx, gen_snapshot, flutter_sdk_files, kernel_dill, output, "app-aot-elf", "--elf", strip, extra_flags, file_flags, debug_info, mnemonic = "FlutterAotElf")
+    _flutter_aot_action(ctx, gen_snapshot, kernel_dill, output, "app-aot-elf", "--elf", strip, extra_flags, file_flags, debug_info, mnemonic = "FlutterAotElf")
 
 def flutter_aot_macho_action(
         ctx,
         gen_snapshot,
-        flutter_sdk_files,
         kernel_dill,
         output,
         extra_flags = [],
@@ -172,7 +168,6 @@ def flutter_aot_macho_action(
     Args:
         ctx: Rule context.
         gen_snapshot: gen_snapshot executable File.
-        flutter_sdk_files: SDK support files.
         kernel_dill: Kernel .dill input.
         output: Output dylib File.
         extra_flags: Additional gen_snapshot flags. Not paths: a path
@@ -194,4 +189,4 @@ def flutter_aot_macho_action(
         macho_flags.append("--macho-min-os-version=" + min_os_version)
     if rpath:
         macho_flags.append("--macho-rpath=" + rpath)
-    _flutter_aot_action(ctx, gen_snapshot, flutter_sdk_files, kernel_dill, output, "app-aot-macho-dylib", "--macho", False, macho_flags, file_flags, debug_info, object, mnemonic = "FlutterAotMacho")
+    _flutter_aot_action(ctx, gen_snapshot, kernel_dill, output, "app-aot-macho-dylib", "--macho", False, macho_flags, file_flags, debug_info, object, mnemonic = "FlutterAotMacho")

@@ -58,7 +58,7 @@ def assemble_directory(ctx, tools, output, steps, mnemonic, progress_message):
         arguments = [args],
         inputs = depset(
             direct = [tool] + sources,
-            transitive = [tools.tool_files],
+            transitive = [tools.sdk_files.run],
         ),
         outputs = [output],
         mnemonic = mnemonic,

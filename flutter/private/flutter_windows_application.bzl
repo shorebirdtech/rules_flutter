@@ -367,7 +367,7 @@ def _flutter_windows_bundle_impl(ctx):
         arguments = [args, json_config_args(ctx, config, refs)],
         inputs = depset(
             direct = inputs,
-            transitive = [portable_tools(ctx).tool_files],
+            transitive = [portable_tools(ctx).sdk_files.run],
         ),
         outputs = [bundle_dir],
         mnemonic = "FlutterWindowsBundle",

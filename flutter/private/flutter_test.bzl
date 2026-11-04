@@ -633,7 +633,7 @@ def _compile_whole_program(ctx, tools, bootstrap, own_srcs, packages, native_ass
         dartaotruntime = tools.dartaotruntime,
         dart = tools.dart,
         kernel_filter_tool = ctx.file._kernel_filter_tool,
-        flutter_sdk_files = tools.tool_files,
+        sdk_files = tools.sdk_files,
         frontend_server = tools.frontend_server,
         # The debug platform: asserts on, as `flutter test` compiles.
         platform_dill = tools.platform_kernel_dill,

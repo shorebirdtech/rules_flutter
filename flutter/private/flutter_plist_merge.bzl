@@ -51,7 +51,7 @@ def _flutter_plist_merge_impl(ctx):
         arguments = [args],
         inputs = depset(
             direct = inputs,
-            transitive = [tools.tool_files],
+            transitive = [tools.sdk_files.run],
         ),
         outputs = [output],
         mnemonic = "FlutterPlistMerge",

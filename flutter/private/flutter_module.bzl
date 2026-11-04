@@ -32,7 +32,8 @@ def _flutter_kernel_sdk_impl(ctx):
         # not be left to the engine: it would take the default the compiler
         # was given.
         defines = ["dart.vm.product=false", "dart.vm.profile=false"],
-        tool_files = sdk.tool_files,
+        # The compilers read the files named above and nothing else of the SDK.
+        tool_files = depset(),
     )]
 
 flutter_kernel_sdk = rule(
