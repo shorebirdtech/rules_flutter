@@ -714,6 +714,7 @@ def _flutter_web_bundle_impl(ctx):
         tools,
         flutter_assets,
         primary.deps,
+        "web",
         compiled_shaders,
         kernel_dill = kernel_dill,
         is_debug = is_debug,

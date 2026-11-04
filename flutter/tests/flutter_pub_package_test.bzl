@@ -708,6 +708,33 @@ desktop_plugin_libraries_carry_their_link_libraries_test = unittest.make(
     _desktop_plugin_libraries_carry_their_link_libraries_test_impl,
 )
 
+def _platform_restricted_assets_are_stated_in_the_spoke_test_impl(ctx):
+    """An asset a `platforms:` entry restricts is stated with its platforms."""
+    env = unittest.begin(ctx)
+
+    content = make_flutter_library_build_content(
+        name = "restricted",
+        deps = [],
+        language_version = "3.4",
+        code_assets = [],
+        has_unreplaced_hook = "",
+        fonts_json_str = "",
+        font_files = {},
+        pkg_assets = {":assets/a.txt": "assets/a.txt", ":assets/b.txt": "assets/b.txt"},
+        pkg_shaders = {},
+        pkg_asset_platforms = {"assets/a.txt": ["android", "web"]},
+    )
+
+    asserts.true(env, "pkg_asset_platforms" in content, content)
+    asserts.true(env, '"assets/a.txt": ["android", "web"]' in content, content)
+    asserts.false(env, '"assets/b.txt": [' in content, content)
+
+    return unittest.end(env)
+
+platform_restricted_assets_are_stated_in_the_spoke_test = unittest.make(
+    _platform_restricted_assets_are_stated_in_the_spoke_test_impl,
+)
+
 def flutter_pub_package_test_suite(name):
     unittest.suite(
         name,
@@ -729,4 +756,5 @@ def flutter_pub_package_test_suite(name):
         file_names_are_written_as_string_literals_test,
         spoke_with_shaders_declares_their_includes_test,
         desktop_plugin_libraries_carry_their_link_libraries_test,
+        platform_restricted_assets_are_stated_in_the_spoke_test,
     )

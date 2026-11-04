@@ -223,5 +223,5 @@ flutter_asset_bundle = rule(
         ),
     },
     exec_groups = PORTABLE_EXEC_GROUPS,
-    doc = "Generates a flutter_assets/ tree artifact with manifests and asset files.",
+    doc = "Generates a flutter_assets/ tree artifact with manifests and asset files. It is for no platform in particular, so it holds the assets of `deps` that a package restricts to some platforms (`platforms:`) too.",
 )

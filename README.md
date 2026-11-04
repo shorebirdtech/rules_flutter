@@ -195,6 +195,10 @@ flutter_application(
 
 Plugins need no special treatment. A pub package that is a Flutter plugin arrives as a plugin target, and the platform macros register it and build its native code. On Android the hub also exposes `@deps//android:all_android_plugin_libs`, the Kotlin and Java of every plugin, and `flutter_android_app` adds it to the APK for you.
 
+#### Pub packages' assets
+
+A package's `flutter: assets:` are bundled at `packages/<package>/<path>`, as `flutter build` bundles them. A listed image ships its resolution variants from the `<number>x/` directories beside it. A listed directory (a trailing slash) ships the files directly in it, and nothing from the directories below it. An entry with `platforms:` ships only in builds for those platforms, and an entry with `flavors:` ships only in a build of one of those flavors, which rules_flutter has none of, so such an entry ships nowhere.
+
 #### Plugins' Maven dependencies
 
 A plugin's `android/build.gradle(.kts)` declares the Maven artifacts its Kotlin or Java compiles against, such as `androidx.datastore:datastore` for `shared_preferences_android`. Those come from the same place as the embedding's androidx libraries: the `maven.install(name = "rules_android_maven")` in your root `MODULE.bazel`. That is one resolution for the whole app, so there is one version of each artifact, and when two plugins want different versions the highest wins, as it does under Gradle.

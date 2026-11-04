@@ -226,6 +226,7 @@ def _flutter_application_impl(ctx):
         portable_tools(ctx),
         flutter_assets,
         ctx.attr.deps,
+        target_platform,
         compiled_shaders,
         kernel_dill = kernel_dill,
         is_debug = is_debug,

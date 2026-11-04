@@ -704,7 +704,7 @@ def declare_flutter_assets_dir(ctx):
     """
     return ctx.actions.declare_directory(ctx.label.name + "_flutter_assets")
 
-def flutter_build_assets(ctx, tools, output_dir, deps, compiled_shaders = {}, kernel_dill = None, is_debug = False, data_assets = None, optional_code_points = []):
+def flutter_build_assets(ctx, tools, output_dir, deps, target_platform, compiled_shaders = {}, kernel_dill = None, is_debug = False, data_assets = None, optional_code_points = []):
     """Run the shared asset bundling step.
 
     Walks `FlutterInfo.pub_fonts` / `pub_assets` from deps to bundle
@@ -723,6 +723,9 @@ def flutter_build_assets(ctx, tools, output_dir, deps, compiled_shaders = {}, ke
             `ctx.attr.deps`: a rule whose `deps` edge is split sees every
             branch's copy there, and would bundle each package once per
             branch.
+        target_platform: The platform the bundle is for ("android", "ios",
+            "linux", "macos", "windows", "web", or "tester" for a test), which
+            leaves out the pub assets restricted to other platforms.
         compiled_shaders: Dict mapping bundle dest path → compiled shader File.
         kernel_dill: The compiled kernel .dill File (needed for icon tree shaking).
         is_debug: Whether this is a debug build (icon tree shaking is skipped in debug).
@@ -740,7 +743,7 @@ def flutter_build_assets(ctx, tools, output_dir, deps, compiled_shaders = {}, ke
     # Walk pub-package font/asset contributions from FlutterInfo.
     # MaterialIcons is no longer special-cased here — apps depend on
     # `@rules_flutter//flutter:material_icons` to get it via this same path.
-    fonts, pub_extra_asset_copies = aggregate_pub_contributions(deps)
+    fonts, pub_extra_asset_copies = aggregate_pub_contributions(deps, target_platform)
     extra_asset_copies = dict(compiled_shaders)
     extra_asset_copies.update(pub_extra_asset_copies)
 

@@ -25,7 +25,7 @@ load("//flutter:providers.bzl", "FlutterDataAssetInfo", "FlutterInfo", "FlutterN
 load("//flutter/private:common.bzl", "collect_binding_contracts", "collect_native_libs")
 load("//flutter/private:flutter_desktop_plugin_info.bzl", "FlutterLinuxPluginInfo", "FlutterWindowsPluginInfo")
 load("//flutter/private:flutter_info.bzl", "LINK_HOOK_ATTR", "flutter_info")
-load("//flutter/private:flutter_library.bzl", "SKY_ENGINE_ATTR", "build_pub_contributions", "flutter_analyzable_info", "own_asset_contributions")
+load("//flutter/private:flutter_library.bzl", "PKG_ASSET_PLATFORMS_ATTR", "SKY_ENGINE_ATTR", "build_pub_contributions", "flutter_analyzable_info", "own_asset_contributions")
 load("//flutter/private:native_sources.bzl", "collect_native_source_pairs", "native_sources_aspect")
 
 def build_plugin_struct(name, plugin_platforms):
@@ -173,6 +173,7 @@ def _flutter_plugin_impl(ctx):
         ctx.attr.pkg_assets,
         ctx.attr.pkg_shaders,
         ctx.files.shader_includes,
+        ctx.attr.pkg_asset_platforms,
     )
     extra_pub_assets.extend(own_asset_contributions(ctx, package_name))
 
@@ -335,6 +336,7 @@ flutter_plugin = rule(
             doc = "Map of asset File label -> package-relative path (mirrors `flutter.assets`). Same shape as `flutter_library.pkg_assets`.",
             allow_files = True,
         ),
+        "pkg_asset_platforms": PKG_ASSET_PLATFORMS_ATTR,
         "shader_includes": attr.label_list(
             doc = "Files this package's `pkg_shaders` may `#include` (e.g. " +
                   "`glob([\"shaders/**/*.glsl\"])`). A shader compiles in a " +

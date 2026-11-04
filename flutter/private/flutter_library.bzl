@@ -63,11 +63,11 @@ def own_asset_contributions(ctx, package_name):
         List of `pub_assets` structs.
     """
     return [
-        struct(package_name = package_name, asset_path = package_relative(ctx, f), file = f)
+        struct(package_name = package_name, asset_path = package_relative(ctx, f), file = f, platforms = ())
         for f in ctx.files.assets
     ]
 
-def build_pub_contributions(package_name, fonts_json, font_files_dict, pkg_assets_dict, pkg_shaders_dict, shader_includes = []):
+def build_pub_contributions(package_name, fonts_json, font_files_dict, pkg_assets_dict, pkg_shaders_dict, shader_includes = [], pkg_asset_platforms = {}):
     """Build pub_fonts/pub_assets/pub_shaders contribution structs from rule attrs.
 
     Decodes the JSON-encoded font declarations and walks the file dicts,
@@ -91,6 +91,9 @@ def build_pub_contributions(package_name, fonts_json, font_files_dict, pkg_asset
         shader_includes: list[File] — `ctx.files.shader_includes`, the files
             this package's shaders may `#include`. Each shader carries them
             as `includes` to its compile.
+        pkg_asset_platforms: dict[str, list[str]] — `ctx.attr.pkg_asset_platforms`.
+            For the assets of `pkg_assets_dict` that ship on some platforms
+            only, the path and the platforms. An asset not here ships on all.
 
     Returns:
         Tuple of (extra_pub_fonts, extra_pub_assets, extra_pub_shaders) lists.
@@ -145,6 +148,7 @@ def build_pub_contributions(package_name, fonts_json, font_files_dict, pkg_asset
             package_name = package_name,
             asset_path = asset_path,
             file = files[0],
+            platforms = tuple(pkg_asset_platforms.get(asset_path, [])),
         ))
 
     extra_pub_shaders = []
@@ -161,7 +165,7 @@ def build_pub_contributions(package_name, fonts_json, font_files_dict, pkg_asset
 
     return (extra_pub_fonts, extra_pub_assets, extra_pub_shaders)
 
-def aggregate_pub_contributions(deps):
+def aggregate_pub_contributions(deps, target_platform = None):
     """Walk transitive `FlutterInfo.pub_fonts` / `pub_assets` from deps.
 
     Each contribution carries `package_name` — the empty string sentinel
@@ -174,6 +178,11 @@ def aggregate_pub_contributions(deps):
 
     Args:
         deps: List of Targets — typically `ctx.attr.deps`.
+        target_platform: The platform the bundle is for (`android`, `ios`,
+            `linux`, `macos`, `windows`, `web`, or `tester`). An asset a
+            package restricts to other platforms with `platforms:` is left
+            out. None, and `tester`, which `flutter test` bundles for, leave
+            out nothing.
 
     Returns:
         Tuple of:
@@ -209,10 +218,16 @@ def aggregate_pub_contributions(deps):
         fonts.append({"family": family_str, "fonts": fonts_descriptors})
 
     for entry in pub_assets:
+        if entry.platforms and target_platform not in (None, "tester") and target_platform not in entry.platforms:
+            continue
         prefix = "packages/{}/".format(entry.package_name) if entry.package_name else ""
         extra_asset_copies[prefix + entry.asset_path] = entry.file
 
     return (fonts, extra_asset_copies)
+
+PKG_ASSET_PLATFORMS_ATTR = attr.string_list_dict(
+    doc = "For an asset of `pkg_assets` that ships on some platforms only (a `platforms:` entry of `flutter: assets:`), its package-relative path and the platforms (`android`, `ios`, `linux`, `macos`, `windows`, `web`). An asset not listed here ships on every platform.",
+)
 
 # Analysis-only: `package:sky_engine`'s `lib/_embedder.yaml` is the only way the
 # analyzer resolves `dart:ui`. Reaches `flutter_analyzable_info` alone.
@@ -273,6 +288,7 @@ def _flutter_library_impl(ctx):
         ctx.attr.pkg_assets,
         ctx.attr.pkg_shaders,
         ctx.files.shader_includes,
+        ctx.attr.pkg_asset_platforms,
     )
 
     # `resources` names the non-Dart remainder of `lib/`; a Dart source there
@@ -401,6 +417,7 @@ flutter_library = rule(
             doc = "Map of asset File label -> package-relative path (mirrors `flutter.assets` in pubspec.yaml). Bundled at `packages/<package_name>/<path>` (or bare `<path>` when `package_name` is empty); also included in AssetManifest.",
             allow_files = True,
         ),
+        "pkg_asset_platforms": PKG_ASSET_PLATFORMS_ATTR,
         "_sky_engine": SKY_ENGINE_ATTR,
         "shader_includes": attr.label_list(
             doc = "Files this package's `pkg_shaders` may `#include` (e.g. " +

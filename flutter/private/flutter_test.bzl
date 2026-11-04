@@ -493,6 +493,7 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
         portable_tools(ctx),
         flutter_assets,
         ctx.attr.deps,
+        "tester",
         compiled_shaders,
         kernel_dill = kernel_dill,
         is_debug = True,

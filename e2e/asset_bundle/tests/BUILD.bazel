@@ -117,3 +117,38 @@ bundle_test(
         "pub_package_listed_directory_ships_only_its_own_files_test": "fx_dirs",
     }.items()
 ]
+
+# -- Platforms and flavors -------------------------------------------------------
+
+# Property: a pub package's asset entry with `platforms:` is bundled only for
+# those platforms (and one without, for all). Each platform is one build of the
+# same application; the expectation file says which entries are meant for which.
+[
+    bundle_test(
+        name = "pub_package_assets_bundle_only_for_their_platforms_%s_test" % os,
+        bundle = bundle,
+        expected = "//tests:expected/fx_platforms.json",
+        platform = os,
+        prefix = "packages/fx_platforms/",
+        subdir = "assets" if os == "web" else "",
+    )
+    for os, bundle in {
+        "android": "//:app_with_fx_platforms_android_bundle",
+        "ios": "//:app_with_fx_platforms_ios_bundle",
+        "linux": "//:app_with_fx_platforms_linux_bundle",
+        "macos": "//:app_with_fx_platforms_macos_bundle",
+        "web": "//:web_with_fx_platforms_bundle",
+        "windows": "//:app_with_fx_platforms_windows_bundle",
+    }.items()
+]
+
+# Property: a pub package's asset entry with `flavors:` is bundled only for a
+# build of one of those flavors; this workspace builds none, so such entries
+# (a file or a directory) ship nowhere, as with `flutter build` without
+# `--flavor`.
+bundle_test(
+    name = "pub_package_flavor_restricted_assets_are_not_bundled_without_a_flavor_test",
+    bundle = "//:app_with_fx_flavors_bundle",
+    expected = "//tests:expected/fx_flavors.json",
+    prefix = "packages/fx_flavors/",
+)
