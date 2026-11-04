@@ -1,5 +1,11 @@
 load("@buildifier_prebuilt//:rules.bzl", "buildifier")
 
+# Read by the test that checks the Windows job's output base.
+exports_files(
+    ["ci.yaml"],
+    visibility = ["//tools/ci_matrix:__pkg__"],
+)
+
 buildifier(
     name = "buildifier.fix",
     exclude_patterns = [

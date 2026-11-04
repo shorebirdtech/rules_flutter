@@ -10,9 +10,11 @@
 /// ("no test targets") counts as a pass. Prints a per-folder PASS/FAIL summary
 /// and exits non-zero if any folder failed.
 ///
-/// On Windows a short `--output_user_root` is used so deeply nested runfiles
-/// (e.g. the hermetic Python interpreter's `_socket.pyd`) stay under the
-/// 260-char MAX_PATH limit — the same fix the Windows CI job applies.
+/// On Windows each folder gets a short `--output_base` (`C:/b/<n>`) so deeply
+/// nested runfiles (e.g. the hermetic Python interpreter's `_socket.pyd`) and
+/// the paths aapt2 reads stay under the 260-char MAX_PATH limit, as the Windows
+/// CI job's `output-base` does. (`--output_user_root` would add a hash
+/// directory; docs/TESTING.md, "Windows and MAX_PATH".)
 library;
 
 import 'dart:async';
@@ -38,7 +40,8 @@ const _ciFolders = [
 /// engine download; later folders re-fetch (separate output bases).
 const _folderTimeout = Duration(minutes: 30);
 
-/// Short Windows output root — keeps generated paths under MAX_PATH (260).
+/// Short Windows output bases, one per folder (a Bazel output base serves one
+/// workspace) — keeps generated paths under MAX_PATH (260).
 const _winOutputRoot = 'C:/b';
 
 class _FolderResult {
@@ -139,7 +142,12 @@ Future<void> main(List<String> args) async {
   final results = <_FolderResult>[];
   for (final folder in folders) {
     stdout.writeln('\n=== $folder ===');
-    final result = await _runFolder(vmName, folder, isWindows: isWindows);
+    final result = await _runFolder(
+      vmName,
+      folder,
+      index: results.length,
+      isWindows: isWindows,
+    );
     results.add(result);
     stdout.writeln(
       '${result.pass ? "PASS" : "FAIL"} $folder (exit ${result.exitCode})',
@@ -175,6 +183,7 @@ Future<void> main(List<String> args) async {
 Future<_FolderResult> _runFolder(
   String vmName,
   String folder, {
+  required int index,
   required bool isWindows,
 }) async {
   final String command;
@@ -183,10 +192,10 @@ Future<_FolderResult> _runFolder(
         ? 'C:\\rf\\rules_flutter'
         : 'C:\\rf\\rules_flutter\\${folder.replaceAll('/', '\\')}';
     // /v:on enables delayed expansion so !errorlevel! is bazel's real exit, not
-    // the parse-time value. --output_user_root keeps paths under MAX_PATH.
+    // the parse-time value. --output_base keeps paths under MAX_PATH.
     command =
         'cmd /v:on /c "cd /d $winFolder && '
-        'bazel --output_user_root=$_winOutputRoot '
+        'bazel --output_base=$_winOutputRoot/$index '
         'test --test_output=errors //... & '
         'echo RF_EXIT=!errorlevel!"';
   } else {

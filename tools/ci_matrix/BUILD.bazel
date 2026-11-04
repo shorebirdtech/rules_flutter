@@ -21,3 +21,20 @@ dart_test(
     main = "test/ci_matrix_test.dart",
     deps = ["@dev_tool_deps//:test"],
 )
+
+# The Windows E2E job's output base leaves aapt2 room. See
+# windows_paths_test.dart.
+dart_test(
+    name = "windows_paths_test",
+    size = "small",
+    data = ["//.github/workflows:ci.yaml"],
+    env = {
+        "CI_WORKFLOW": "$(rlocationpath //.github/workflows:ci.yaml)",
+        "RUNFILES_SOURCE_REPO": "",
+    },
+    main = "test/windows_paths_test.dart",
+    deps = [
+        "@dev_tool_deps//:test",
+        "@rules_dart//dart/runfiles",
+    ],
+)

@@ -943,8 +943,8 @@ right. After the lock check, the macOS and Linux jobs run exactly
 `bazel test //... --test_output=errors`
 (`build` for `cross_compile_example`), so a target the system cannot build must
 carry `target_compatible_with` and is then skipped, not failed. The Windows job
-adds `--output_user_root=C:/b` (MAX_PATH) and nothing else, so it builds the
-Android targets as the other two do. Tests on Windows locate their `data`
+runs the same commands in a short output base (`<drive>/b`, "Windows and
+MAX_PATH" below), so it builds the Android targets as the other two do. Tests on Windows locate their `data`
 through `package:runfiles`, never `$TEST_SRCDIR/...` paths, since the runner has
 no runfiles tree, and run no tool from `PATH` that the image lacks: an APK test
 unpacks with Bazel's zipper (`Apk.fromRunfiles` in `//tools/e2e_testing`, which
@@ -958,6 +958,32 @@ emulator or a device (`verify_macos_app_test`, the `*_runtime_test`s,
 profile, and the like). Those are § 4. CI also runs on GitHub's runner images:
 what they ship (Xcode, the Android SDK and NDK, MSVC) is what the jobs build
 with.
+
+### Windows and MAX_PATH
+
+Two tools in an Android build cannot open a path of 260 characters or more:
+aapt2 (it is not long-path aware, so `LongPathsEnabled` does not help it), and
+the DLL loader for the hermetic Python interpreter's `_socket.pyd`. Bazel's
+paths on Windows are `<output base>/execroot/_main/bazel-out/<config>/bin/...`,
+and rules_jvm_external unzips each AAR to `.../bin/external/<repo>/_aar/unzipped/
+resources/<artifact>/res/...`. The longest in `e2e/plugin_example` is
+`.../androidx_appcompat_appcompat/res/interpolator/btn_checkbox_unchecked_mtrl_animation_interpolator_1.xml`,
+233 characters below the execution root, which leaves 26 for the execution root
+itself. `bazel test //...` there failed in `//impeller_shader:impeller_shader_build_test`
+with `aapt2.exe ... error: file not found` on that path under
+`--output_user_root=C:/b`, where the execution root is `C:\b\<8 hex>\execroot\_main\`
+(29 characters, 262 in all).
+
+The fix is an output base named in full and as short as a path can be:
+`<workspace drive>/b`, an execution root of 20. The CI job sets it through
+setup-bazel's `output-base` input. `--output_user_root` cannot do it there:
+setup-bazel puts `startup --output_base=D:/_bazel` in `~/.bazelrc`, and a startup
+option from an rc file beats the command line's. That default is 25 characters of
+execution root, 258 in all: under the limit by one, which the next artifact
+bump may take. `tools/ci_matrix/test/windows_paths_test.dart` checks that the job
+names the base and that the arithmetic holds; when `plugin_example` gains a longer
+resource, change the constant there and shorten nothing else. On a VM pass
+`--output_base=C:/b` (`tools/vm/run_e2e.dart` does, `C:/b/<n>` per folder).
 
 ### What the automated e2e tests cover
 
@@ -1529,7 +1555,7 @@ committed tree the way `tools/vm/run_e2e.dart` does (`git ls-files`, not
 bazel build -c opt --@rules_flutter//flutter:profile //:app
 ```
 
-On Windows add `--output_user_root=C:/b` (MAX_PATH) and run bazel from a
+On Windows add `--output_base=C:/b` (MAX_PATH) and run bazel from a
 scheduled task or another process that outlives the SSH session; the first
 build takes about ten minutes. Run the bundle as the visual check does (Xvfb and
 `scrot` on Linux, `dxgi_screenshot.py` through PsExec on Windows), and confirm

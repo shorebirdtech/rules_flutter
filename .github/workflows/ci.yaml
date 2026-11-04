@@ -170,11 +170,25 @@ jobs:
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v7
-      # See the note above `env` for why only hello_world saves. The output base
-      # setup-bazel sets (~/.bazel; D:/_bazel on Windows) takes precedence over
-      # the Windows step's --output_user_root and is as short.
+      # See the note above `env` for why only hello_world saves.
+      #
+      # On Windows the output base is `<workspace drive>/b`, as short as a
+      # directory can be, because aapt2 cannot open a path of 260 characters or
+      # more, with long paths enabled or not (it is not long-path aware), and an
+      # Android build reads resources from
+      # `<output base>/execroot/_main/bazel-out/<config>/bin/external/<repo>/_aar/
+      # unzipped/resources/...`. plugin_example's longest is 233 characters below
+      # the execution root, so the execution root may take 26: `D:/b` leaves 6
+      # to spare, setup-bazel's default `D:/_bazel` leaves 1, and a longer
+      # artifact name on a bump would fail. The same short root
+      # keeps nested runfiles, such as the hermetic Python interpreter's
+      # `_socket.pyd`, under MAX_PATH. `--output_user_root` on the command line
+      # cannot do this: setup-bazel's `startup --output_base` line in
+      # `~/.bazelrc` beats it. tools/ci_matrix/test/windows_paths_test.dart
+      # checks the arithmetic.
       - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
         with:
+          output-base: ${{ runner.os == 'Windows' && format('{0}/b', substr(github.workspace, 0, 2)) || '' }}
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
           cache-save: ${{ github.event_name == 'push' && matrix.workspace == 'hello_world' }}
       - name: Install GTK3 (Linux)
@@ -210,20 +224,17 @@ jobs:
         if: runner.os != 'Windows'
         working-directory: e2e/${{ matrix.workspace }}
         run: bazel ${{ matrix.command }} //... ${{ matrix.command == 'test' && '--test_output=errors' || '' }}
-      # On Windows the same lock check runs under the short output root the test
-      # step below explains, so both use one Bazel server.
+      # On Windows the same lock check runs, then the tests, in the short output
+      # base the setup step names, so both use one Bazel server. Without it,
+      # nested runfiles (e.g. the hermetic Python interpreter's _socket.pyd
+      # used by rules_android's aar_embedded_jars_extractor) exceed the 260-char
+      # MAX_PATH limit and fail to load with "DLL load failed ... The filename or
+      # extension is too long".
       - name: bazel mod deps (e2e/${{ matrix.workspace }})
         if: runner.os == 'Windows'
         working-directory: e2e/${{ matrix.workspace }}
-        run: bazel --output_user_root=C:/b mod deps --lockfile_mode=error
-      # On Windows, Bazel's default output root lives under a long per-user
-      # temp path; nested runfiles (e.g. the hermetic Python interpreter's
-      # _socket.pyd used by rules_android's aar_embedded_jars_extractor) then
-      # exceed the 260-char MAX_PATH limit and fail to load with
-      # "DLL load failed ... The filename or extension is too long".
-      # A short --output_user_root keeps every generated path well under MAX_PATH.
-      # (`BAZEL_OUTPUT_BASE` is not read by Bazel; the startup flag is required.)
+        run: bazel mod deps --lockfile_mode=error
       - name: bazel test //... (e2e/${{ matrix.workspace }})
         if: runner.os == 'Windows'
         working-directory: e2e/${{ matrix.workspace }}
-        run: bazel --output_user_root=C:/b test //... --test_output=errors
+        run: bazel test //... --test_output=errors
