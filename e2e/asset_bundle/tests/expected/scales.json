@@ -1,0 +1,45 @@
+{
+  "assets": {
+    "scales/d.png": {
+      "variants": [
+        {
+          "asset": "scales/d.png"
+        },
+        {
+          "asset": "scales/0.75x/d.png",
+          "dpr": 0.75
+        },
+        {
+          "asset": "scales/1.25x/d.png",
+          "dpr": 1.25
+        },
+        {
+          "asset": "scales/5x/d.png",
+          "dpr": 5.0
+        },
+        {
+          "asset": "scales/10x/d.png",
+          "dpr": 10.0
+        }
+      ]
+    },
+    "scales/f.png": {
+      "variants": [
+        {
+          "asset": "scales/f.png"
+        },
+        {
+          "asset": "scales/2x/f.png",
+          "dpr": 2.0
+        }
+      ]
+    },
+    "scales/2x/nested/e.png": {
+      "variants": [
+        {
+          "asset": "scales/2x/nested/e.png"
+        }
+      ]
+    }
+  }
+}

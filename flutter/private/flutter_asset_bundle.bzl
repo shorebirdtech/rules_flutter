@@ -8,26 +8,20 @@ Produces a `flutter_assets/` tree artifact containing:
 """
 
 load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
+load("//flutter/private:asset_variants.bzl", "variant_scale")
 load("//flutter/private:exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
 load("//flutter/private:flutter_library.bzl", "aggregate_pub_contributions", "package_relative")
 load("//flutter/private:path_mapping.bzl", "file_ref", "json_config_args")
 
 _TOOL = Label("//flutter/private/tools:generate_asset_manifest.dart")
 
-# Regex-like DPR directory patterns we detect in Starlark.
-# A directory named like "2x", "1.5x", "3.0x" indicates a resolution variant.
-_DPR_SUFFIXES = {
-    "1.5x": 1.5,
-    "2x": 2.0,
-    "2.0x": 2.0,
-    "3x": 3.0,
-    "3.0x": 3.0,
-    "4x": 4.0,
-    "4.0x": 4.0,
-}
-
 def detect_dpr(path):
-    """Detect device-pixel-ratio from a resolution variant directory name.
+    """Detect the device pixel ratio from the directory a file is in.
+
+    A file is a resolution variant of the file of the same name one directory
+    up when its immediate parent directory is named for a scale (`2x`, `1.5x`,
+    `0.75x`; see `variant_scale`). A directory further up, or below, makes no
+    variant of it.
 
     Args:
         path: Asset path string (e.g. "assets/2.0x/icon.png").
@@ -37,10 +31,10 @@ def detect_dpr(path):
         "assets/icon.png").  dpr is a float or None if not a variant.
     """
     parts = path.split("/")
-    for i, part in enumerate(parts):
-        if part in _DPR_SUFFIXES:
-            base = "/".join(parts[:i] + parts[i + 1:])
-            return base, _DPR_SUFFIXES[part]
+    if len(parts) >= 2:
+        dpr = variant_scale(parts[-2])
+        if dpr != None:
+            return "/".join(parts[:-2] + parts[-1:]), dpr
     return path, None
 
 def build_asset_manifest(assets):

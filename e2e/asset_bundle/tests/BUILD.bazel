@@ -94,3 +94,15 @@ bundle_test(
     expected = "//tests:expected/kit.json",
     prefix = "packages/ext_assets/",
 )
+
+# -- Variants --------------------------------------------------------------------
+
+# Property: a file is a resolution variant of the file of the same name one
+# directory up when its directory is named `<number>x` (flutter_tools'
+# `(\d+(\.\d*)?)x`), whatever the number, and only when that directory is its
+# immediate parent. `scales/2x/nested/e.png` is an asset of its own.
+bundle_test(
+    name = "app_variants_of_any_scale_in_the_immediate_parent_directory_test",
+    bundle = "//:app_scales_bundle",
+    expected = "//tests:expected/scales.json",
+)
