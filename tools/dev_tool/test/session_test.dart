@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:dds/dds.dart';
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter_bazel_dev_tool/command_report.dart';
 import 'package:flutter_bazel_dev_tool/command_runner.dart';
 import 'package:flutter_bazel_dev_tool/compiler_config.dart';
@@ -1242,17 +1243,41 @@ void main() {
       fake.callServiceExtensionGate!.complete();
     });
 
+    // A first frame that never lands is not a verdict the tool reaches: the app
+    // may be on a loaded host, minutes from painting. The wait goes on, says so
+    // as it goes, and ends with the run, with a reason.
     test(
-      'an app that never paints settles with a reason, not silence',
+      'an app that never paints is waited for, with a warning as it waits, '
+      'until the run ends',
       () async {
         final sink = BufferSink();
         final protocol = MachineProtocol(enabled: true, output: sink);
-        final session = sessionOn(
-          _ImpatientDevice(),
-          await connected(newFake()),
+        final fake = newFake()..callServiceExtensionGate = Completer<void>();
+        final session = sessionOn(MacOSDevice(), await connected(fake));
+
+        final async = FakeAsync();
+        final waiting = async.run(
+          (_) => track(session.waitUntilDrivable(protocol)),
+        );
+        async.elapse(const Duration(minutes: 3));
+        async.flushMicrotasks();
+
+        expect(session.drivable.isSettled, isFalse);
+        expect(waiting.done, isFalse);
+        expect(
+          [
+            for (final p in progressFrom(sink))
+              if ('${p['message']}'.startsWith('Still waiting')) p,
+          ],
+          hasLength(greaterThanOrEqualTo(2)),
+          reason: 'the wait has to say it is still going',
         );
 
-        await session.waitUntilDrivable(protocol);
+        session.stopWaitingForFirstFrame();
+        for (var i = 0; i < 5; i++) {
+          await pumpEventQueue();
+          async.flushMicrotasks();
+        }
 
         expect(session.drivable.isSettled, isTrue);
         expect(session.drivable.isReady, isFalse);
@@ -1267,6 +1292,7 @@ void main() {
           reason:
               'a progress that starts and never finishes is a stuck spinner',
         );
+        fake.callServiceExtensionGate!.complete();
       },
     );
 
@@ -1409,10 +1435,4 @@ class _TrackingDevice extends Device {
   Future<void> stop(AppInstance instance) async {
     onStop();
   }
-}
-
-/// A device whose budget for the app's first frame is short enough to test.
-class _ImpatientDevice extends MacOSDevice {
-  @override
-  Duration get applyTimeout => const Duration(milliseconds: 100);
 }

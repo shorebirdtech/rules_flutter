@@ -133,20 +133,11 @@ class DeviceSession {
 
   /// Settle [drivable], reporting the wait as `app.progress` while it lasts.
   ///
-  /// Always settles: ready when the app paints, unavailable with a reason when
-  /// it does not, so a command waiting on the gate is never left holding a
-  /// signal that is not coming.
-  ///
-  /// A settlement is for the run. An app that misses this budget has not been
-  /// slow, it has failed to start — the budget is minutes, and a healthy start
-  /// on the slowest platform here is one — so the answer does not get better
-  /// by being asked again, and every command says the same thing rather than
-  /// each one spending the budget over.
-  ///
-  /// Bounded by [Device.applyTimeout] — the same budget that governs a hot
-  /// restart there, for the same reason. A restart re-runs `main()`, which is
-  /// the work being waited on here, and the platform note on the iOS override
-  /// is what both are sized against.
+  /// Settles when the app paints (ready), or when the app exits or the run
+  /// ends (unavailable, with a reason), so a command waiting on the gate is
+  /// never left holding a signal that is not coming. There is no time limit:
+  /// a late first frame makes the app drivable whenever it arrives. After each
+  /// [Device.applyTimeout] without one, the wait says it is still going.
   Future<void> waitUntilDrivable(MachineProtocol protocol) async {
     final client = extensionChannel;
     if (client == null) {
@@ -170,77 +161,85 @@ class DeviceSession {
 
     // Nothing here may throw: callers start this and walk away, so a throw
     // would leave the gate unsettled and every command waiting on it hanging
-    // for good. A failure becomes the gate's reason instead, which is where a
-    // refused command reads it from.
+    // for good.
+    //
+    // There is no deadline. A first frame that lands late is exactly as good as
+    // one that lands early: the app is drivable from that moment, and a verdict
+    // that the app "failed to start" would be about the clock, not the app. The
+    // wait ends on the frame, on the app exiting, or on the run ending, and
+    // [Device.applyTimeout] only paces the warnings that tell the person it is
+    // taking long.
     var rendered = false;
-    String? failure;
-    // Measured, because the wait does not always reach its bound: `until`
-    // abandons it when the run ends, and a failed query returns early.
-    // Reporting the full `applyTimeout` for either would send a reader looking
-    // for a thirty-second hang that had not happened.
+    Object? failure;
     final waited = Stopwatch()..start();
     try {
       rendered = await client.waitForFirstFrame(
-        timeout: device.applyTimeout,
+        timeout: null,
+        slowEvery: device.applyTimeout,
         until: _stopDrivableWait.future,
+        onSlow: (cause) {
+          final seconds = waited.elapsed.inSeconds;
+          final why = cause != null
+              ? ' The last attempt to find out failed: $cause'
+              : '';
+          // Logged as well as reported. The progress event reaches a machine
+          // protocol client, but a terminal run has no one reading it and would
+          // otherwise show nothing for an app that is slow to come up.
+          _logger.warning({
+            'message': 'first_frame_slow',
+            'text':
+                'The app on ${device.name} has not rendered a frame after '
+                '${seconds}s; still waiting. Commands that drive it wait for '
+                'it.$why',
+            'device': device.name,
+            'appId': appId,
+          });
+          protocol.appProgress(
+            appId,
+            'Still waiting for $appId to render its first frame (${seconds}s)',
+            progressId: progressId,
+          );
+        },
       );
     } catch (e) {
-      failure = '$e';
+      // A throw must not leave the gate unsettled. It is the wait reporting
+      // what the app could not be asked, as it ends with the run.
+      failure = e;
+      _logger.warning({
+        'message': 'first_frame_wait_failed',
+        'text': 'Waiting for $appId to render its first frame failed: $e',
+        'appId': appId,
+      });
     }
     waited.stop();
 
     // What the wait found, not what it was for. The closing event repeated the
     // opening one's "Waiting for the app to render its first frame", so a
     // progress item named `first_frame_*` finishing read as the frame having
-    // arrived — while this method was about to refuse every drivable command
-    // for the rest of the run. A client watching the stream had no way to tell
-    // the two endings apart, and the one that costs time is the one that looks
-    // like success.
+    // arrived while it had not. A client watching the stream must be able to
+    // tell the two endings apart.
+    final exited = _terminated.isCompleted;
     protocol.appProgress(
       appId,
       rendered
           ? '$appId rendered its first frame'
-          : _stopDrivableWait.isCompleted
-          ? 'the run ended before $appId rendered its first frame'
-          : '$appId did not render a frame within '
-                '${waited.elapsed.inSeconds}s',
+          : exited
+          ? '$appId exited before it rendered its first frame'
+          : 'the run ended before $appId rendered its first frame',
       progressId: progressId,
       finished: true,
     );
 
     if (rendered) {
       drivable.signalReady();
-      return;
+    } else {
+      drivable.signalUnavailable(
+        exited
+            ? '$appId exited before it rendered'
+            : 'the run ended before $appId rendered'
+                  '${failure != null ? ' (and could not tell whether it had: $failure)' : ''}',
+      );
     }
-
-    if (_stopDrivableWait.isCompleted) {
-      drivable.signalUnavailable('the run ended before $appId rendered');
-      return;
-    }
-
-    // Logged as well as gated. The gate's reason reaches a machine-protocol
-    // client through the command it refuses, but a terminal run issues no
-    // commands and would otherwise show nothing at all for an app that never
-    // came up.
-    _logger.warning({
-      'message': 'first_frame_not_rendered',
-      'text':
-          'The app on ${device.name} did not render a frame within '
-          '${waited.elapsed.inSeconds}s. Commands that drive it are '
-          'refused for the rest of this run; start it again once the app '
-          'comes up.',
-      'device': device.name,
-      'appId': appId,
-    });
-    drivable.signalUnavailable(
-      failure != null
-          ? 'could not tell whether $appId on ${device.name} has rendered: '
-                '$failure'
-          : '$appId on ${device.name} had not rendered a frame after '
-                '${waited.elapsed.inSeconds}s, so the Flutter framework '
-                'is not up and its service extensions are not registered. The '
-                'app is either still starting or stuck before its first build.',
-    );
   }
 
   /// How many times this session's app has been launched: 1 for the original
@@ -329,6 +328,9 @@ class DeviceSession {
 
   void _markTerminated() {
     if (!_terminated.isCompleted) _terminated.complete();
+    // A command waiting for a frame that a dead app will never paint would
+    // wait for good; the wait has no deadline of its own.
+    stopWaitingForFirstFrame();
   }
 
   /// Replace the running app process with a freshly launched one.

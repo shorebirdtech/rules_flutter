@@ -165,6 +165,12 @@ class VmServiceClient {
   /// isolate that registered it.
   final Set<String> _extensionRpcs = {};
 
+  /// Fires when a main isolate becomes known, for [waitForFirstFrame]: the
+  /// engine announces the VM service before the root isolate runs, so a client
+  /// can be connected with no isolate to ask yet.
+  final StreamController<String> _mainIsolateSet =
+      StreamController<String>.broadcast();
+
   /// Newly-registered extension names, for [waitForServiceExtension].
   ///
   /// A stream rather than a completer per name so that an isolate rotation
@@ -448,16 +454,14 @@ class VmServiceClient {
     }
     _service = svc;
 
-    // Find the main isolate.
-    final vm = await _service!.getVM();
-    String? found;
-    for (final isolateRef in vm.isolates ?? <IsolateRef>[]) {
-      if (isolateRef.name == 'main') {
-        found = isolateRef.id;
-        break;
-      }
-    }
-    _setMainIsolate(found ?? _mainIsolateId ?? vm.isolates?.firstOrNull?.id);
+    // Listening before anything is read or asked. The VM announces its service
+    // before the root isolate runs, so an isolate can start at any point of
+    // this handshake; one that starts after the last read and before a
+    // subscription is lost for good, and everything that needs the isolate then
+    // answers "none". With the listener and both streams in place first, an
+    // isolate is either already in the list read below or arrives as an event.
+    await _isolateEvents?.cancel();
+    _isolateEvents = _service!.onIsolateEvent.listen(_onIsolateEvent);
 
     // Register the Extension stream so Flutter.Error / Flutter.Frame
     // events flow; the per-reload verdict listener is attached in
@@ -469,8 +473,18 @@ class VmServiceClient {
     // driven by DwdsReloadStrategy over this same connection, and a user
     // reloading the browser page rotates the isolate with no command at all.
     await _ensureStream(EventStreams.kIsolate);
-    await _isolateEvents?.cancel();
-    _isolateEvents = _service!.onIsolateEvent.listen(_onIsolateEvent);
+
+    // Find the main isolate. An isolate adopted from an event while the streams
+    // were being subscribed stays the target unless a `main` is listed.
+    final vm = await _service!.getVM();
+    String? found;
+    for (final isolateRef in vm.isolates ?? <IsolateRef>[]) {
+      if (isolateRef.name == 'main') {
+        found = isolateRef.id;
+        break;
+      }
+    }
+    _setMainIsolate(found ?? _mainIsolateId ?? vm.isolates?.firstOrNull?.id);
 
     if (createDevFS) await _createDevFS();
 
@@ -707,6 +721,7 @@ class VmServiceClient {
     if (id == _mainIsolateId) return;
     _mainIsolateId = id;
     _extensionRpcs.clear();
+    if (id != null && !_mainIsolateSet.isClosed) _mainIsolateSet.add(id);
   }
 
   /// Record [rpc] as registered and wake anything waiting for it.
@@ -1670,11 +1685,19 @@ class VmServiceClient {
   /// is one call that never returns, and a loop built on it cannot honour its
   /// own deadline.
   ///
+  /// If the app has no root isolate yet (the VM service is announced before it
+  /// runs), the wait goes on for one within the same [timeout]: that is an app
+  /// still starting, not one that never rendered.
+  ///
   /// Built and sent, not rasterized. `didSendFirstFrameRasterizedEvent` is the
   /// neighbouring flag and the wrong question: it reports the *engine* putting
   /// pixels on a display, so it stays false indefinitely on a device that is
   /// not showing them. An app whose framework is up is drivable whether or not
   /// anyone is looking at it, and this is the flag that says so.
+  ///
+  /// A null [timeout] is no deadline: the wait ends on the frame or on [until].
+  /// Every [slowEvery] without either, it calls [onSlow] with the latest
+  /// failure of the query (null if it has not failed).
   ///
   /// [until], when given, ends the wait early with false: the caller has
   /// stopped needing an answer, and the budget above may be minutes. A run
@@ -1682,12 +1705,13 @@ class VmServiceClient {
   /// keeps the process alive long after the thing it was waiting for stopped
   /// mattering.
   Future<bool> waitForFirstFrame({
-    Duration timeout = const Duration(seconds: 15),
+    Duration? timeout = const Duration(seconds: 15),
+    Duration? slowEvery,
+    void Function(Object? cause)? onSlow,
     Future<void>? until,
   }) async {
     final service = _service;
-    final isolateId = _mainIsolateId;
-    if (service == null || isolateId == null) return false;
+    if (service == null) return false;
 
     final rendered = Completer<bool>();
     void answer(bool value) {
@@ -1724,9 +1748,14 @@ class VmServiceClient {
     // wait returns, and would then write `queryFailure` that nothing will ever
     // read again.
     var settled = false;
+    final finished = Completer<void>();
 
     Future<void> pollForFirstFrame() async {
       while (!settled && !rendered.isCompleted) {
+        // The root isolate may not exist yet, or may have been replaced since
+        // the last ask; the query goes to whichever is the target now.
+        final isolateId = await _waitForMainIsolate(finished.future);
+        if (isolateId == null) return;
         try {
           final resp = await _callService(
             (s) => s.callServiceExtension(
@@ -1764,23 +1793,57 @@ class VmServiceClient {
 
     final abandon = until?.then((_) => answer(false));
 
+    // With no deadline, the wait says it is still going, once per [slowEvery],
+    // along with whatever the query has failed with: the event may yet arrive,
+    // but a person watching the wait is owed the reason it is taking long.
+    final slow = slowEvery == null || onSlow == null
+        ? null
+        : Timer.periodic(slowEvery, (_) => onSlow(queryFailure));
+
     try {
-      final painted = await rendered.future.timeout(
-        timeout,
-        onTimeout: () => false,
-      );
+      final painted = timeout == null
+          ? await rendered.future
+          : await rendered.future.timeout(timeout, onTimeout: () => false);
       final failure = queryFailure;
       if (!painted && failure != null) throw failure;
       return painted;
     } finally {
+      slow?.cancel();
       // Settled explicitly, because `timeout` completes the future it returns
       // and leaves this one pending for good. The poll loop reads it to know
       // it is finished, so without this it re-arms its timer forever and the
       // process never exits.
       settled = true;
+      if (!finished.isCompleted) finished.complete();
       answer(false);
       await frames.cancel();
       abandon?.ignore();
+    }
+  }
+
+  /// The main isolate's id, waiting for one to exist if none does yet.
+  ///
+  /// Returns null when [stop] completes first. The wait has no clock of its
+  /// own: "no isolate yet" is an app that is still starting, not one that
+  /// failed, and the caller's deadline or teardown is what ends it.
+  Future<String?> _waitForMainIsolate(Future<void> stop) async {
+    final known = _mainIsolateId;
+    if (known != null) return known;
+    final arrived = Completer<String?>();
+    final sub = _mainIsolateSet.stream.listen((id) {
+      if (!arrived.isCompleted) arrived.complete(id);
+    });
+    unawaited(
+      stop.then((_) {
+        if (!arrived.isCompleted) arrived.complete(null);
+      }),
+    );
+    try {
+      // Re-read after subscribing: an isolate set between the check above and
+      // the listener would otherwise be missed.
+      return _mainIsolateId ?? await arrived.future;
+    } finally {
+      await sub.cancel();
     }
   }
 

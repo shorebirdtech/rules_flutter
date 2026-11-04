@@ -61,8 +61,14 @@ abstract interface class AppExtensionChannel {
 
   /// Wait for the app's first rendered frame, returning whether it came within
   /// [timeout] and before [until] completed.
+  ///
+  /// A null [timeout] is no deadline: the wait ends on the frame or on [until].
+  /// A wait that long says so: every [slowEvery] it calls [onSlow] with the
+  /// latest failure to find out, or null when there is none.
   Future<bool> waitForFirstFrame({
-    required Duration timeout,
+    Duration? timeout,
+    Duration? slowEvery,
+    void Function(Object? cause)? onSlow,
     Future<void>? until,
   });
 
@@ -97,9 +103,16 @@ class VmExtensionChannel implements AppExtensionChannel {
 
   @override
   Future<bool> waitForFirstFrame({
-    required Duration timeout,
+    Duration? timeout,
+    Duration? slowEvery,
+    void Function(Object? cause)? onSlow,
     Future<void>? until,
-  }) => client.waitForFirstFrame(timeout: timeout, until: until);
+  }) => client.waitForFirstFrame(
+    timeout: timeout,
+    slowEvery: slowEvery,
+    onSlow: onSlow,
+    until: until,
+  );
 
   /// What the app's isolate looked like when a dispatch gave up on it.
   ///

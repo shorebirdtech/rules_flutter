@@ -158,6 +158,15 @@ _UNIT_TESTS = {
         ] + _PATH_DEP,
     },
     "file_clock_test": {"deps": _PATH_DEP},
+    "first_frame_properties_test": {
+        "fakes": True,
+        "deps": [
+            "@dev_tool_deps//:fake_async",
+            "@dev_tool_deps//:dds",
+            "@dev_tool_deps//:logging",
+            "@dev_tool_deps//:watcher",
+        ],
+    },
     "flutter_error_report_test": {"deps": _PATH_DEP},
     "key_press_test": {},
     "frontend_server_integration_test": {"fakes": True},
@@ -222,6 +231,7 @@ _UNIT_TESTS = {
         "fakes": True,
         "deps": [
             "@dev_tool_deps//:dds",
+            "@dev_tool_deps//:fake_async",
             "@dev_tool_deps//:logging",
             "@dev_tool_deps//:watcher",
         ],

@@ -173,32 +173,65 @@ class BrowserExtensionChannel implements AppExtensionChannel {
 
   @override
   Future<bool> waitForFirstFrame({
-    required Duration timeout,
+    Duration? timeout,
+    Duration? slowEvery,
+    void Function(Object? cause)? onSlow,
     Future<void>? until,
   }) async {
     final spent = clock.stopwatch()..start();
+    var installed = false;
+    final slow = slowEvery == null || onSlow == null
+        ? null
+        : Timer.periodic(
+            slowEvery,
+            (_) => onSlow(installed ? null : _bridgeMissing(spent.elapsed)),
+          );
     final wait = () async {
-      await _installed(timeout);
-      final left = timeout - spent.elapsed;
       try {
-        await _evaluate(
-          'await agent.firstFrame()',
-        ).timeout(left.isNegative ? Duration.zero : left);
-        return true;
-      } on TimeoutException {
-        return false;
+        await _installed(timeout);
+        installed = true;
+        try {
+          final evaluation = _evaluate('await agent.firstFrame()');
+          if (timeout == null) {
+            await evaluation;
+          } else {
+            final left = timeout - spent.elapsed;
+            await evaluation.timeout(left.isNegative ? Duration.zero : left);
+          }
+          return true;
+        } on TimeoutException {
+          return false;
+        }
+      } finally {
+        slow?.cancel();
       }
     }();
     if (until == null) return wait;
     // Left running if the run ends first: the evaluation settles into nothing
     // when the socket closes.
     unawaited(wait.then<void>((_) {}, onError: (Object _) {}));
-    return Future.any([wait, until.then((_) => false)]);
+    return Future.any([
+      wait,
+      until.then((_) {
+        slow?.cancel();
+        return false;
+      }),
+    ]);
   }
+
+  String _bridgeMissing(Duration waited) =>
+      'the page has not installed the rules_flutter agent bridge after '
+      '${waited.inSeconds}s. The agent surface is compiled into debug web '
+      'builds only, so this is a non-debug build, a build made before the '
+      'bridge existed, or a page that is not the app.';
 
   /// Wait, inside the page, for the bridge to exist, and say so if it never
   /// does within [timeout].
-  Future<void> _installed(Duration timeout) async {
+  Future<void> _installed(Duration? timeout) async {
+    if (timeout == null) {
+      await _evaluate('true');
+      return;
+    }
     try {
       await _evaluate('true').timeout(timeout);
     } on TimeoutException {
