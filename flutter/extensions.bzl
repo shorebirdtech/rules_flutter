@@ -19,6 +19,7 @@ load("//flutter/private:flutter_gen_l10n_repo.bzl", "flutter_gen_l10n_repo")
 load("//flutter/private:flutter_pub_lock_hub.bzl", "flutter_pub_lock_hub")
 load("//flutter/private:flutter_pub_package.bzl", "flutter_pub_package")
 load("//flutter/private:flutter_sdk_package.bzl", "flutter_sdk_package")
+load("//flutter/private:flutter_unsupported_package.bzl", "flutter_unsupported_package", "unsupported_package_message")
 load("//flutter/private:pub_lock_sdks.bzl", "parse_lock_sdk_constraints", "version_below_lower_bound")
 load("//flutter/private:versions.bzl", "flutter_source_sha256")
 load(":repositories.bzl", "flutter_register_toolchains")
@@ -28,6 +29,10 @@ _DEFAULT_NAME = "flutter"
 # Flutter SDK packages that exist as source under packages/ in the Flutter repo.
 # sky_engine is excluded — it provides dart:ui which is already in platform_strong.dill.
 _FLUTTER_SDK_PACKAGES = {"flutter": True, "flutter_test": True, "flutter_driver": True, "flutter_localizations": True, "flutter_web_plugins": True}
+
+# The one `sdk: flutter` package a lock lists that needs no repository:
+# `flutter` depends on it, and the engine toolchain provides its `dart:ui`.
+_ENGINE_PROVIDED_SDK_PACKAGES = {"sky_engine": True}
 
 def _parse_version(v):
     """Splits a version string into a list of ints for comparison."""
@@ -182,19 +187,38 @@ def _toolchain_extension(module_ctx):
             # Classify packages by source.
             hosted = {}
             sdk_flutter = {}
+            unsupported = {}
             all_package_names = []
             for name, info in lock_pkgs.items():
                 source = info.get("source", "unknown")
                 if source == "hosted":
                     hosted[name] = info
                     all_package_names.append(name)
-                elif source == "sdk":
-                    if name in _FLUTTER_SDK_PACKAGES:
-                        sdk_flutter[name] = info
-                        all_package_names.append(name)
+                elif source == "sdk" and name in _FLUTTER_SDK_PACKAGES:
+                    sdk_flutter[name] = info
+                    all_package_names.append(name)
+                elif source == "sdk" and name in _ENGINE_PROVIDED_SDK_PACKAGES:
+                    pass
                 else:
-                    # buildifier: disable=print
-                    print("flutter.pub: skipping package \"{}\" (source: {}). Only hosted and Flutter SDK packages are supported.".format(name, source))
+                    # A git or path package, or an `sdk: flutter` package
+                    # rules_flutter has no repository for (`integration_test`).
+                    # The hub still loads, so an app that only lists it (the
+                    # usual case: `integration_test` in `dev_dependencies`)
+                    # builds. Its target fails when something depends on it.
+                    unsupported[name] = unsupported_package_message(
+                        lock = str(pub_tag.lock),
+                        package = name,
+                        source = source,
+                        provided_sdk_packages = sorted(_FLUTTER_SDK_PACKAGES.keys()),
+                    )
+                    all_package_names.append(name)
+
+            for name, message in unsupported.items():
+                flutter_unsupported_package(
+                    name = hub_name + "__" + name,
+                    package_name = name,
+                    message = message,
+                )
 
             # Create spoke repos for hosted packages. flutter.pub() routes
             # every hosted package through flutter_pub_package — the

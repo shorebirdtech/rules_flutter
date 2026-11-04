@@ -231,6 +231,104 @@ void main() {
     });
   });
 
+  group('a lock entry rules_flutter has no repository for', () {
+    late PubInputsWorkspace ws;
+    setUpAll(() async {
+      ws = await PubInputsFixture(hosted: [HostedPackage('good')])
+          .materialize();
+    });
+
+    String sdkEntry(String name) =>
+        '  $name:\n'
+        '    dependency: "direct dev"\n'
+        '    description: flutter\n'
+        '    source: sdk\n'
+        '    version: "0.0.0"\n';
+
+    // Entries a lock can hold that rules_flutter cannot provide, with what
+    // the lock calls their source. `integration_test` is what `flutter create`
+    // puts in `dev_dependencies`.
+    final entries = {
+      'integration_test': ('sdk', sdkEntry('integration_test')),
+      'flutter_not_in_the_list': ('sdk', sdkEntry('flutter_not_in_the_list')),
+      'from_git': (
+        'git',
+        '  from_git:\n'
+            '    dependency: "direct main"\n'
+            '    description:\n'
+            '      path: "."\n'
+            '      ref: main\n'
+            '      resolved-ref: 0123456789012345678901234567890123456789\n'
+            '      url: "https://example.invalid/from_git.git"\n'
+            '    source: git\n'
+            '    version: "1.0.0"\n',
+      ),
+      'from_path': (
+        'path',
+        '  from_path:\n'
+            '    dependency: "direct main"\n'
+            '    description:\n'
+            '      path: "../from_path"\n'
+            '      relative: true\n'
+            '    source: path\n'
+            '    version: "1.0.0"\n',
+      ),
+    };
+
+    setUp(() {
+      ws.writeLock(ws.lockWith(entries.values.map((e) => e.$2).join()));
+    });
+
+    /// Most apps that list one of these (`integration_test` above all) never
+    /// depend on it from Bazel, and must not pay for it: the hub loads, lists
+    /// the package, and everything else builds.
+    test(
+      'the hub still loads, and what does not depend on it builds',
+      () async {
+        final hub = await ws.query('@pubhub//:all');
+        expect(hub.succeeded, isTrue, reason: '$hub');
+        for (final name in entries.keys) {
+          expect(hub.stdout, contains('@pubhub//:$name'), reason: '$hub');
+        }
+        final good = await ws.bazel(['build', '--nobuild', '@pubhub//:good']);
+        expect(good.succeeded, isTrue, reason: '$good');
+      },
+    );
+
+    /// What something that does depend on one gets instead of a package: a
+    /// failure that names the package, where the lock got it from and what to
+    /// do, not an unknown package in an import.
+    for (final entry in entries.entries) {
+      test(
+        'depending on ${entry.key} fails naming it, its source and the fix',
+        () async {
+          final result = await ws.bazel([
+            'build',
+            '--nobuild',
+            '@pubhub//:${entry.key}',
+          ]);
+          expect(result.succeeded, isFalse, reason: '$result');
+          expect(
+            result.output,
+            contains('package "${entry.key}" (source: ${entry.value.$1})'),
+            reason: 'the failure does not say what the entry is:\n$result',
+          );
+          expect(result.output, contains('pubspec.lock'), reason: '$result');
+          expect(
+            result.output,
+            contains('re-resolve the lock'),
+            reason: '$result',
+          );
+          expect(
+            result.output,
+            isNot(contains('no such target')),
+            reason: 'a missing target is not an explanation:\n$result',
+          );
+        },
+      );
+    }
+  });
+
   group('a plugin overlay', () {
     String template(String marker) =>
         'filegroup(name = "{PKG}", srcs = [])\nfilegroup(name = "$marker")\n';
