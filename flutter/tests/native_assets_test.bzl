@@ -474,8 +474,7 @@ def _legacy_dart_library_impl(ctx):
     return [
         DefaultInfo(files = depset(ctx.files.srcs)),
         DartInfo(
-            package_name = ctx.attr.package_name,
-            lib_root = ctx.label.package,
+            packages = (pkg,),
             transitive_srcs = depset(ctx.files.srcs),
             transitive_resources = depset(),
             transitive_packages = depset([pkg]),

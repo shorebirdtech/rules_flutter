@@ -189,8 +189,7 @@ def _fake_package_impl(ctx):
         code_assets = assets,
     )
     return [DartInfo(
-        package_name = ctx.attr.package_name,
-        lib_root = ctx.label.package,
+        packages = (pkg,),
         transitive_srcs = depset(),
         transitive_resources = depset(),
         transitive_packages = depset([pkg]),
@@ -203,6 +202,35 @@ fake_package = rule(
         "package_name": attr.string(mandatory = True),
     },
     doc = "A Dart package record carrying code assets, with no ownership check.",
+)
+
+def _fake_cycle_impl(ctx):
+    names = ctx.attr.package_names
+    assets = [t[DartCodeAssetInfo] for t in ctx.attr.code_assets]
+    if len(names) != len(assets):
+        fail("%s: one code asset per package" % ctx.label)
+    packages = tuple([
+        DartPackageInfo(
+            package_name = name,
+            lib_root = "%s/%s" % (ctx.label.package, name),
+            code_assets = (asset,),
+        )
+        for name, asset in zip(names, assets)
+    ])
+    return [DartInfo(
+        packages = packages,
+        transitive_srcs = depset(),
+        transitive_resources = depset(),
+        transitive_packages = depset(packages),
+    )]
+
+fake_cycle = rule(
+    implementation = _fake_cycle_impl,
+    attrs = {
+        "code_assets": attr.label_list(providers = [DartCodeAssetInfo]),
+        "package_names": attr.string_list(mandatory = True),
+    },
+    doc = "One target contributing several packages, as rules_dart builds a pub dependency cycle; package `i` owns code asset `i`.",
 )
 
 def _opt_mode_transition_impl(_settings, _attr):
@@ -403,6 +431,29 @@ def shared_code_asset_test_suite(name):
         target_compatible_with = ["@platforms//os:macos"],
     )
     tests += [name + "_conflict_refused", name + "_conflict_resolved_by_naming"]
+
+    # A target that carries several packages (a pub dependency cycle built as
+    # one library) serves the code assets of every one of them, not only the
+    # first.
+    fake_cycle(
+        name = name + "_cycle",
+        package_names = ["shared_a", "shared_b"],
+        code_assets = [_FIXTURE + "a_own", _FIXTURE + "b_own"],
+        tags = ["manual"],
+    )
+    resolve_probe(
+        name = name + "_cycle_probe",
+        deps = [name + "_cycle"],
+        expected = {_A: "liba_own.dylib", _B: "libb_own.dylib"},
+        tags = ["manual"],
+        target_compatible_with = ["@platforms//os:macos"],
+    )
+    _builds_test(
+        name = name + "_every_package_of_a_target_serves_its_assets",
+        target_under_test = name + "_cycle_probe",
+        target_compatible_with = ["@platforms//os:macos"],
+    )
+    tests.append(name + "_every_package_of_a_target_serves_its_assets")
 
     # One library reached in two configurations is two builds of it, which
     # cannot both ship under its file name: refused, as in rules_dart.

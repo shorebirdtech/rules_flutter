@@ -20,16 +20,16 @@ def _inline_asset_package_impl(ctx):
         dynamic_library = library,
         system_uri = "",
     )
-    return [DartInfo(
+    pkg = DartPackageInfo(
         package_name = ctx.attr.package_name,
         lib_root = ctx.label.package,
+        code_assets = (asset,),
+    )
+    return [DartInfo(
+        packages = (pkg,),
         transitive_srcs = depset(),
         transitive_resources = depset(),
-        transitive_packages = depset([DartPackageInfo(
-            package_name = ctx.attr.package_name,
-            lib_root = ctx.label.package,
-            code_assets = (asset,),
-        )]),
+        transitive_packages = depset([pkg]),
     )]
 
 inline_asset_package = rule(
