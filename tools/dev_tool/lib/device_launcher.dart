@@ -385,6 +385,10 @@ class DeviceLauncher {
       vmClient: vmClient,
       appId: appId,
       dds: dds,
+      // An app that dies under a live run ends the run, failed, with the
+      // platform's account of it. `fail` tears the run down, so the session
+      // loop ends and the exit status is the account.
+      onDied: (reason) => host.fail(DevToolException(reason)),
     );
     host.sessions.add(deviceSession);
 

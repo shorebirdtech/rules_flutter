@@ -134,6 +134,14 @@ _UNIT_TESTS = {
     "applied_versions_test": {"deps": _PATH_DEP},
     "asset_bundle_test": {"deps": _PATH_DEP},
     "attach_command_test": {"deps": ["@dev_tool_deps//:args"]},
+    "connected_app_death_test": {
+        "fakes": True,
+        "deps": [
+            "@dev_tool_deps//:dds",
+            "@dev_tool_deps//:logging",
+            "@dev_tool_deps//:watcher",
+        ],
+    },
     "bazel_test": {
         "fakes": True,
         "deps": ["@dev_tool_deps//:logging"],

@@ -235,7 +235,7 @@ class DeviceSession {
     } else {
       drivable.signalUnavailable(
         exited
-            ? '$appId exited before it rendered'
+            ? '$appId exited before it rendered${_death != null ? ': $_death' : ''}'
             : 'the run ended before $appId rendered'
                   '${failure != null ? ' (and could not tell whether it had: $failure)' : ''}',
       );
@@ -276,9 +276,11 @@ class DeviceSession {
     required this.vmClient,
     required this.appId,
     this.dds,
+    this.onDied,
   }) : _appInstance = appInstance {
     if (vmClient != null && dds != null) markDebugReady();
     _watchForExit(appInstance);
+    _watchConnection();
   }
 
   /// Tear this session down: end DevTools, tell the client the app is going,
@@ -299,7 +301,7 @@ class DeviceSession {
     try {
       stopWaitingForFirstFrame();
       devToolsProcess?.kill();
-      protocol.appStop(appId);
+      protocol.appStop(appId, error: _death);
       // Retired, not merely disconnected: this session is over, and a client
       // that could still be dialled would be — an RPC in flight when this lands
       // re-dials on its way back and publishes a socket nothing owns. See
@@ -325,14 +327,111 @@ class DeviceSession {
 
   void _watchForExit(AppInstance instance) {
     unawaited(
-      instance.process.exitCode.then((_) {
-        // Ignore the exit of a process this session no longer owns, and the
-        // exit of the one currently being replaced.
-        if (_relaunching || !identical(instance, _appInstance)) return;
-        _markTerminated();
+      instance.process.exitCode.then((code) {
+        _exitCodes[instance] = code;
+        return _appStopped(instance);
       }),
     );
   }
+
+  /// The exit status of each process this session has watched end.
+  ///
+  /// Kept per instance so that a connection that closes first can still be
+  /// told, once the platform has been asked, that the process it belonged to
+  /// exited cleanly.
+  final Expando<int> _exitCodes = Expando<int>('exit code');
+
+  /// Watch the VM service connection for the app going away with it.
+  ///
+  /// The connection closing and not coming back is the signal that does not
+  /// depend on how the app is held: a process this tool started, an app on a
+  /// simulator or a phone whose process it only follows through a log.
+  void _watchConnection() {
+    final client = vmClient;
+    if (client == null) return;
+    unawaited(client.gone.then((_) => _appStopped(_appInstance)));
+  }
+
+  /// The app's death, once it is established: set before [onDied] is told.
+  String? _death;
+
+  /// Why the app ended without being asked to: the platform's account of it
+  /// (with the app's last output), or null while the app is running, was
+  /// stopped by this tool, or finished cleanly.
+  String? get death => _death;
+
+  /// Called once, with [death], when the app ends without being asked to.
+  final void Function(String reason)? onDied;
+
+  /// The app behind [instance] has stopped answering: the process exited, or
+  /// the connection to it closed and did not come back.
+  ///
+  /// Both signals arrive for one death, in either order, and the first to be
+  /// handled settles it. Three things are not deaths: the tool's own shutdown,
+  /// the replacement of the app by a relaunch, and an exit with code 0, which
+  /// is the app finishing (upstream's "Application finished.") and not a crash.
+  /// The shutdown flag is checked again once the platform has answered,
+  /// because the platform's check takes real time and a quit can land in it.
+  Future<void> _appStopped(AppInstance instance) async {
+    // A replaced app's exit is not the session's.
+    if (_relaunching || !identical(instance, _appInstance)) return;
+    // A stop this tool asked for is the end of the session and not a death:
+    // the app going is exactly what was wanted, and the run is waiting on it.
+    if (_shutDown) {
+      _markTerminated();
+      return;
+    }
+    if (_stopped) return;
+    _stopped = true;
+
+    // Asked before anything is stopped: a process this run killed is not one
+    // that died.
+    String? account;
+    try {
+      account = await device.whyAppExited(instance);
+    } catch (e) {
+      _logger.warning({
+        'message': 'app_exit_check_failed',
+        'text':
+            'Could not ask ${device.name} whether the app is still running: '
+            '$e.',
+        'device': device.name,
+        'error': '$e',
+      });
+    }
+    if (_relaunching || !identical(instance, _appInstance)) {
+      _stopped = false;
+      return;
+    }
+    if (_shutDown) {
+      _markTerminated();
+      return;
+    }
+
+    final code = _exitCodes[instance];
+    if (code == 0) {
+      _logger.info({
+        'message': 'app_finished',
+        'text': 'Application finished.',
+        'device': device.name,
+      });
+      _markTerminated();
+      return;
+    }
+
+    final reason =
+        account ??
+        (code != null
+            ? 'The app on ${device.name} stopped: the process the tool '
+                  'follows for it exited with code $code.'
+            : 'Lost the connection to the app on ${device.name}: '
+                  '${vmClient?.goneReason ?? 'its process ended'}.');
+    _death = reason;
+    _markTerminated();
+    onDied?.call(reason);
+  }
+
+  bool _stopped = false;
 
   void _markTerminated() {
     if (!_terminated.isCompleted) _terminated.complete();

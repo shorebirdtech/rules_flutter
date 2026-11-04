@@ -351,8 +351,12 @@ class MachineProtocol {
   }
 
   /// Send app.stop event.
-  void appStop(String appId) {
-    sendEvent('app.stop', {'appId': appId});
+  ///
+  /// [error] says the app did not stop because it was asked to: it died, or
+  /// the connection to it was lost. Upstream's daemon puts the same field on
+  /// the same event.
+  void appStop(String appId, {String? error}) {
+    sendEvent('app.stop', {'appId': appId, if (error != null) 'error': error});
   }
 
   void _sendResponse(dynamic id, Map<String, dynamic> result) {
