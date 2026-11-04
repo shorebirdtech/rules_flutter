@@ -249,6 +249,23 @@ build_variant_tests(
     test = ":asserts_fire_test",
 )
 
+# Widget creation locations are tracked in a `flutter_test`, as under
+# `flutter test`, in the same four builds. See test/asserts/widget_creation_test.dart.
+flutter_test(
+    name = "widget_creation_test",
+    package_name = "hello_world",
+    main = "test/asserts/widget_creation_test.dart",
+    deps = [
+        "@deps//:flutter",
+        "@deps//:flutter_test",
+    ],
+)
+
+build_variant_tests(
+    name = "widget_creation_builds",
+    test = ":widget_creation_test",
+)
+
 # Constants that break a `const` constructor's assertion. `flutter test` fails
 # to compile a test that holds one, so building each of these MUST FAIL, with a
 # "Constant evaluation error" naming the assertion. They are `manual` because a

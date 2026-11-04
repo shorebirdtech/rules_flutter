@@ -646,6 +646,9 @@ def _compile_whole_program(ctx, tools, bootstrap, own_srcs, packages, native_ass
         output = kernel_dill,
         aot = False,
         defines = merge_dart_defines(ctx),
+        # Widgets know where they were built, as under `flutter test`: the
+        # inspector and the "relevant error-causing widget" of a failure read it.
+        extra_flags = ["--track-widget-creation"],
         target = "flutter",
         native_assets_manifest = native_assets_manifest,
     )
