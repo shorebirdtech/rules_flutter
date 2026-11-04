@@ -40,6 +40,15 @@ dart_binary(
     deps = ["@rules_dart//dart/runfiles"],
 )
 
+# `assemble_directory.dart` as a program, for the test fixtures that build a
+# directory (the production actions run the script with the toolchain's `dart`).
+dart_binary(
+    name = "assemble_directory",
+    compile_mode = "exe",
+    main = "assemble_directory.dart",
+    visibility = ["//flutter/tests:__pkg__"],
+)
+
 dart_binary(
     name = "flutter_test_runner",
     srcs = ["bazel_test_protocol.dart"],

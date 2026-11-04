@@ -16,14 +16,25 @@ _MAX_NODES = 100000
 
 def _source_tree_impl(ctx):
     tree = ctx.actions.declare_directory(ctx.label.name)
-    ctx.actions.run_shell(
+    source = ctx.actions.declare_file(ctx.label.name + "_prebuilt.dart")
+    ctx.actions.write(source, "const prebuilt = 1;\n")
+    ctx.actions.run(
+        executable = ctx.executable._assemble,
+        arguments = ["--output", tree.path, "--add", "lib/prebuilt.dart", source.path],
+        inputs = [source],
         outputs = [tree],
-        command = "mkdir -p {0}/lib && echo 'const prebuilt = 1;' > {0}/lib/prebuilt.dart".format(tree.path),
     )
     return [DefaultInfo(files = depset([tree]))]
 
 source_tree = rule(
     implementation = _source_tree_impl,
+    attrs = {
+        "_assemble": attr.label(
+            default = "//flutter/private/tools:assemble_directory",
+            executable = True,
+            cfg = "exec",
+        ),
+    },
     doc = "A built directory holding a Dart package's `lib/`.",
 )
 

@@ -2,6 +2,7 @@
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
+load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("//flutter:web.bzl", "flutter_web_bundle")
 load("//flutter/private:flutter_native_library.bzl", "flutter_native_library")
 load("//flutter/private:flutter_web_branch.bzl", "WEB_COMPILER_SETTING", "web_branches_target", "web_compile_branches")
@@ -2047,10 +2048,11 @@ def _setup_web_fixtures():
 
     # A generated library in the app's own `lib/`, which makes its package
     # source-assembled: the shape of every codegen app.
-    native.genrule(
+    write_file(
         name = "_web_fixture_generated",
-        outs = ["lib/web_fixture_generated.dart"],
-        cmd = "echo 'const generated = 1;' > $@",
+        out = "lib/web_fixture_generated.dart",
+        content = ["const generated = 1;", ""],
+        newline = "unix",
         tags = ["manual"],
     )
 
@@ -2086,16 +2088,16 @@ def _setup_web_fixtures():
 
     # A native module that a build step produces, as a real one compiled from
     # Rust or C would be.
-    native.genrule(
+    write_file(
         name = "_web_fixture_module_wasm",
-        outs = ["web/fixture_module.wasm"],
-        cmd = "touch $@",
+        out = "web/fixture_module.wasm",
+        content = [],
         tags = ["manual"],
     )
-    native.genrule(
+    write_file(
         name = "_web_fixture_module_api",
-        outs = ["web/fixture_module.api"],
-        cmd = "touch $@",
+        out = "web/fixture_module.api",
+        content = [],
         tags = ["manual"],
     )
     flutter_native_library(

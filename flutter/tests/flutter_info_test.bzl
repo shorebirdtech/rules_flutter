@@ -16,6 +16,7 @@ to skip those rather than fail on them.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
+load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@rules_dart//dart:defs.bzl", "dart_library")
 load("@rules_dart//dart:providers.bzl", "DartInfo")
 load("@rules_dart//dart:utils.bzl", "dart_info_no_package")
@@ -140,15 +141,15 @@ def flutter_info_test_suite(name):
     Args:
         name: Name of the resulting test_suite.
     """
-    native.genrule(
+    write_file(
         name = name + "_own_asset",
-        outs = [name + "_own.png"],
-        cmd = "touch $@",
+        out = name + "_own.png",
+        content = [],
     )
-    native.genrule(
+    write_file(
         name = name + "_dep_asset",
-        outs = [name + "_dep.png"],
-        cmd = "touch $@",
+        out = name + "_dep.png",
+        content = [],
     )
 
     contributing_library(

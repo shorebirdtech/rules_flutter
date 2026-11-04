@@ -41,9 +41,12 @@ def _fake_application_impl(ctx):
         ctx.actions.write(aot_object, str(ctx.label))
 
     flutter_assets = ctx.actions.declare_directory(ctx.label.name + "/flutter_assets")
-    ctx.actions.run_shell(
-        command = 'touch "$1/AssetManifest.bin"',
-        arguments = [flutter_assets.path],
+    manifest = ctx.actions.declare_file(ctx.label.name + "/AssetManifest.bin.src")
+    ctx.actions.write(manifest, "")
+    ctx.actions.run(
+        executable = ctx.executable._assemble,
+        arguments = ["--output", flutter_assets.path, "--add", "AssetManifest.bin", manifest.path],
+        inputs = [manifest],
         outputs = [flutter_assets],
     )
 
@@ -63,6 +66,11 @@ fake_application = rule(
         "code_assets": attr.string_list(),
         "debug": attr.bool(default = False),
         "native_libs": attr.string_list(),
+        "_assemble": attr.label(
+            default = "//flutter/private/tools:assemble_directory",
+            executable = True,
+            cfg = "exec",
+        ),
     },
     doc = "A fake FlutterApplicationInfo for tests over Apple bundling rules.",
 )

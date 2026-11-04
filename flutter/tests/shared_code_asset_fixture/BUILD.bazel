@@ -20,10 +20,14 @@ package(default_visibility = ["//flutter/tests:__subpackages__"])
 
 [
     [
-        genrule(
+        write_file(
             name = "%s_%s" % (library, ext),
-            outs = ["lib%s.%s" % (library, ext)],
-            cmd = "echo %s > $@" % library,
+            out = "lib%s.%s" % (library, ext),
+            content = [
+                library,
+                "",
+            ],
+            newline = "unix",
         )
         for ext in [
             "dylib",
