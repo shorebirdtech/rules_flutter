@@ -33,7 +33,7 @@ from, and `deps` is split the same way.
 
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_dart//dart:providers.bzl", "DartInfo")
-load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "dart_analyzable_info_with_package", "derive_lib_root", "generate_dev_package_config", "import_check_validation")
+load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "dart_analyzable_info_with_packages", "dart_package_info", "derive_lib_root", "generate_dev_package_config", "import_check_validation")
 load("//flutter:providers.bzl", "FlutterInfo", "FlutterNativeLibraryInfo")
 load(
     "//flutter/private:app_entrypoint.bzl",
@@ -1113,7 +1113,7 @@ def _flutter_web_bundle_impl(ctx):
     # Deliberately not offered as a `DartInfo`: `deps` requires one, and an
     # application bundle is not a dependency.
     #
-    # `dart_analyzable_info_with_package`, not `dart_analyzable_info`: this rule
+    # `dart_analyzable_info_with_packages`, not `dart_analyzable_info`: this rule
     # declares a mandatory `package_name` and its `srcs` are that package's
     # `lib/` files, which import each other by `package:<self>/…`. The
     # package-less closure the other constructor nests gives the analyzer no
@@ -1131,16 +1131,20 @@ def _flutter_web_bundle_impl(ctx):
     # compilers get `dart:ui` from the web SDK; the analyzer resolves it only by
     # following the package_config to `package:sky_engine`'s `lib/_embedder.yaml`,
     # so analysis genuinely needs an entry compilation does not.
-    analyzable_info = dart_analyzable_info_with_package(
+    analyzable_info = dart_analyzable_info_with_packages(
         label = ctx.label,
-        package_name = ctx.attr.package_name,
-        lib_root = lib_root,
+        packages = [dart_package_info(
+            label = ctx.label,
+            package_name = ctx.attr.package_name,
+            lib_root = lib_root,
+            # As on the compile path above: the analyzer and the compiler have
+            # to agree on the version, or the attr closes the divergence in
+            # only one.
+            language_version = ctx.attr.language_version,
+        )],
         deps = primary.deps + [ctx.attr._sky_engine],
         srcs = [] if main_in_package else [ctx.file.main],
         package_srcs = ctx.files.srcs + ([ctx.file.main] if main_in_package else []),
-        # As on the compile path above: the analyzer and the compiler have to
-        # agree on the version, or the attr closes the divergence in only one.
-        language_version = ctx.attr.language_version,
     )
 
     # In debug mode, output DDC dev files alongside the web directory.
@@ -1307,7 +1311,7 @@ def _flutter_web_bundle_impl(ctx):
 # The compile inputs arrive as a bundle for the reason `KERNEL_COMPILE_ATTRS`
 # documents. This rule does not call `flutter_compile_kernel`, so omitting one
 # would not crash it — it would go quiet: the bundle is also what
-# `synthesize_app_package` and `dart_analyzable_info_with_package` read, and a
+# `synthesize_app_package` and `dart_analyzable_info_with_packages` read, and a
 # web build that drops one of those compiles the app against something other
 # than what it declared. That is exactly how `language_version` was lost here.
 _WEB_RELEVANT_KEYS = (

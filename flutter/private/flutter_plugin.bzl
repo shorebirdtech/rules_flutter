@@ -25,7 +25,7 @@ load("//flutter:providers.bzl", "FlutterDataAssetInfo", "FlutterInfo", "FlutterN
 load("//flutter/private:common.bzl", "collect_binding_contracts", "collect_native_libs")
 load("//flutter/private:flutter_desktop_plugin_info.bzl", "FlutterLinuxPluginInfo", "FlutterWindowsPluginInfo")
 load("//flutter/private:flutter_info.bzl", "LINK_HOOK_ATTR", "flutter_info")
-load("//flutter/private:flutter_library.bzl", "PKG_ASSET_PLATFORMS_ATTR", "PKG_SHADER_PLATFORMS_ATTR", "SKY_ENGINE_ATTR", "build_pub_contributions", "flutter_analyzable_info", "own_asset_contributions")
+load("//flutter/private:flutter_library.bzl", "PKG_ASSET_PLATFORMS_ATTR", "PKG_SHADER_PLATFORMS_ATTR", "SKY_ENGINE_ATTR", "build_pub_contributions", "flutter_analyzable_info", "flutter_package_record", "own_asset_contributions")
 load("//flutter/private:native_sources.bzl", "collect_native_source_pairs", "native_sources_aspect")
 
 def build_plugin_struct(name, plugin_platforms):
@@ -47,6 +47,7 @@ def _flutter_plugin_impl(ctx):
         ctx.label.name,
     )
     lib_root = derive_lib_root(ctx.label.workspace_root, ctx.label.package)
+    package = flutter_package_record(ctx, package_name, lib_root)
 
     # Build plugin metadata.
     # If plugin_platforms_json is set, decode it directly.
@@ -198,18 +199,12 @@ def _flutter_plugin_impl(ctx):
         DefaultInfo(files = depset(ctx.files.srcs + ctx.files.resources)),
         dart_info(
             label = ctx.label,
-            package_name = package_name,
-            lib_root = lib_root,
+            packages = [package],
             deps = ctx.attr.deps,
             srcs = ctx.files.srcs,
             resources = ctx.files.resources,
-            code_assets = ctx.attr.code_assets,
-            language_version = ctx.attr.language_version,
-            version = ctx.attr.version,
-            has_unreplaced_hook = ctx.attr.has_unreplaced_hook,
-            link_hook = ctx.file.link_hook,
         ),
-        flutter_analyzable_info(ctx, package_name, lib_root),
+        flutter_analyzable_info(ctx, package),
         flutter_info(
             deps = ctx.attr.deps,
             plugins = [plugin],

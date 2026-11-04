@@ -56,7 +56,7 @@ cannot write there.
 
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo", "DartKernelSdkInfo")
-load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "KERNEL_TOOL_ATTR", "collect_modules", "collect_packages", "collect_transitive_srcs", "dart_analyzable_info_with_package", "dart_entry_kernel_action", "dart_import_check_aspect", "dart_link_kernel_action", "derive_lib_root", "import_check_validation", "module_defines_transition", "runfiles_path")
+load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "KERNEL_TOOL_ATTR", "collect_modules", "collect_packages", "collect_transitive_srcs", "dart_analyzable_info_with_packages", "dart_entry_kernel_action", "dart_import_check_aspect", "dart_link_kernel_action", "dart_package_info", "derive_lib_root", "import_check_validation", "module_defines_transition", "runfiles_path")
 load("//flutter:providers.bzl", "FlutterInfo")
 load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "compile_package_config", "synthesize_app_package")
 load(
@@ -555,7 +555,7 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
         # Deliberately not offered as a `DartInfo`: `deps` requires one, and a
         # test is not a dependency.
         #
-        # Built by `dart_analyzable_info_with_package` rather than
+        # Built by `dart_analyzable_info_with_packages` rather than
         # `dart_analyzable_info`, because a `flutter_test` is not package-less
         # the way a `dart_test` is: it declares `package_name`, and its `srcs`
         # are that package's `lib/`. The compile path already says so —
@@ -578,17 +578,20 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
         # supplies; the analyzer resolves it only by following the
         # package_config to `package:sky_engine`'s `lib/_embedder.yaml`, so
         # analysis genuinely needs an entry compilation does not.
-        dart_analyzable_info_with_package(
+        dart_analyzable_info_with_packages(
             label = ctx.label,
-            package_name = ctx.attr.package_name,
-            lib_root = derive_lib_root(ctx.label.workspace_root, ctx.label.package),
+            packages = [dart_package_info(
+                label = ctx.label,
+                package_name = ctx.attr.package_name,
+                lib_root = derive_lib_root(ctx.label.workspace_root, ctx.label.package),
+                # The same version the compile path above states. Analysis
+                # reading a different one than the compiler is the divergence
+                # this attr exists to close, reappearing one layer down.
+                language_version = ctx.attr.language_version,
+            )],
             deps = ctx.attr.deps + [ctx.attr._sky_engine],
             srcs = entry_files,
             package_srcs = ctx.files.srcs,
-            # The same version the compile path above states. Analysis reading
-            # a different one than the compiler is the divergence this attr
-            # exists to close, reappearing one layer down.
-            language_version = ctx.attr.language_version,
         ),
     ])
 

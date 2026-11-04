@@ -1,7 +1,7 @@
 """Implementation of the flutter_library rule."""
 
 load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo")
-load("@rules_dart//dart:utils.bzl", "WEB_COMPILER_INDEPENDENT_ATTR", "dart_analyzable_info_with_package", "dart_info", "derive_lib_root", "derive_package_name", "web_compiler_reset_when_independent")
+load("@rules_dart//dart:utils.bzl", "WEB_COMPILER_INDEPENDENT_ATTR", "dart_analyzable_info_with_packages", "dart_info", "dart_package_info", "derive_lib_root", "derive_package_name", "web_compiler_reset_when_independent")
 load("//flutter:providers.bzl", "FlutterInfo")
 load("//flutter/private:flutter_info.bzl", "LINK_HOOK_ATTR", "flutter_info")
 
@@ -264,7 +264,34 @@ SKY_ENGINE_ATTR = attr.label(
     providers = [DartInfo],
 )
 
-def flutter_analyzable_info(ctx, package_name, lib_root):
+def flutter_package_record(ctx, package_name, lib_root):
+    """The package a Flutter library rule declares, as one `DartPackageInfo`.
+
+    Built once per target, so the compile-side `DartInfo` and the analyzer's
+    `DartAnalyzableInfo` state the same package, with the same language
+    version, code assets, version and hooks.
+
+    Args:
+      ctx: The rule context. Reads `language_version`, `code_assets`,
+        `version`, `has_unreplaced_hook` and `link_hook`.
+      package_name: The Dart package name.
+      lib_root: The package root (parent of `lib/`).
+
+    Returns:
+      A `DartPackageInfo`.
+    """
+    return dart_package_info(
+        label = ctx.label,
+        package_name = package_name,
+        lib_root = lib_root,
+        language_version = ctx.attr.language_version,
+        code_assets = ctx.attr.code_assets,
+        version = ctx.attr.version,
+        has_unreplaced_hook = ctx.attr.has_unreplaced_hook,
+        link_hook = ctx.file.link_hook,
+    )
+
+def flutter_analyzable_info(ctx, package):
     """The package a Flutter library rule declares, as the analyzer sees it.
 
     The same package its `DartInfo` records, with `package:sky_engine` added.
@@ -274,24 +301,19 @@ def flutter_analyzable_info(ctx, package_name, lib_root):
     changes, and the analyzer prefers this provider when a target has both.
 
     Args:
-      ctx: The rule context. Reads `deps`, `srcs`, `resources`, `code_assets`,
-        `language_version`, `version` and `_sky_engine` (`SKY_ENGINE_ATTR`).
-      package_name: The Dart package name the rule's `DartInfo` uses.
-      lib_root: The package root the rule's `DartInfo` uses.
+      ctx: The rule context. Reads `deps`, `srcs`, `resources` and
+        `_sky_engine` (`SKY_ENGINE_ATTR`).
+      package: The target's `DartPackageInfo`, from `flutter_package_record`.
 
     Returns:
       A `DartAnalyzableInfo`.
     """
-    return dart_analyzable_info_with_package(
+    return dart_analyzable_info_with_packages(
         label = ctx.label,
-        package_name = package_name,
-        lib_root = lib_root,
-        language_version = ctx.attr.language_version,
+        packages = [package],
         deps = ctx.attr.deps + [ctx.attr._sky_engine],
         package_srcs = ctx.files.srcs,
         resources = ctx.files.resources,
-        code_assets = ctx.attr.code_assets,
-        version = ctx.attr.version,
     )
 
 def _flutter_library_impl(ctx):
@@ -301,6 +323,7 @@ def _flutter_library_impl(ctx):
         ctx.label.name,
     )
     lib_root = derive_lib_root(ctx.label.workspace_root, ctx.label.package)
+    package = flutter_package_record(ctx, package_name, lib_root)
 
     # The asset-prefix package name uses the rule's `package_name` attr
     # verbatim (empty string sentinel = bare paths, non-empty = `packages/X/`).
@@ -359,18 +382,12 @@ def _flutter_library_impl(ctx):
         ),
         dart_info(
             label = ctx.label,
-            package_name = package_name,
-            lib_root = lib_root,
+            packages = [package],
             deps = ctx.attr.deps,
             srcs = ctx.files.srcs,
             resources = ctx.files.resources,
-            code_assets = ctx.attr.code_assets,
-            language_version = ctx.attr.language_version,
-            version = ctx.attr.version,
-            has_unreplaced_hook = ctx.attr.has_unreplaced_hook,
-            link_hook = ctx.file.link_hook,
         ),
-        flutter_analyzable_info(ctx, package_name, lib_root),
+        flutter_analyzable_info(ctx, package),
         flutter_info(
             deps = ctx.attr.deps,
             shader_srcs = ctx.files.shaders,
