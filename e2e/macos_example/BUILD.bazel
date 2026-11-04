@@ -20,6 +20,7 @@ load(
 )
 load("@rules_flutter//tools/e2e_testing:apple_analysis_test.bzl", "analyses_test", "skipped_test")
 load("@rules_flutter//tools/e2e_testing:apple_release_build.bzl", "apple_release_build")
+load("@rules_flutter//tools/e2e_testing:device_profile.bzl", "device_flag", "device_profile")
 load("@rules_swift//swift:swift.bzl", "swift_library")
 
 exports_files(["pubspec.lock"])
@@ -259,9 +260,22 @@ flutter_macos_app(
 # Group takes the team-prefixed form, which macOS grants to bundles that team
 # signed. Each extension needs a profile of its own; one without is signed ad
 # hoc and loses the group. :verify_macos_team_signing_test checks the result.
+#
+# Both reach //device through flags, `//:device_profile` and
+# `//:device_app_group`, whose defaults fail with the setup steps. A checked-in
+# `//device:...` label would make `bazel query 'deps(//...)'` load the package
+# a fresh clone lacks. Set them in .bazelrc.user (device.example/ says how).
+device_profile()
+
+device_flag(
+    name = "device_app_group",
+    device_target = "AppGroup.entitlements",
+    what = "team-prefixed App Group entitlements",
+)
+
 flutter_macos_app(
     name = "app_extensions_team",
-    additional_entitlements = ["//device:AppGroup.entitlements"],
+    additional_entitlements = [":device_app_group"],
     app_name = "Extensions App",
     application = ":app_flutter",
     bundle_id = "com.example.flutterapp.extensions",
@@ -269,7 +283,7 @@ flutter_macos_app(
         "//extensions:share_team",
         "//extensions:widgets_team",
     ],
-    provisioning_profile = "//device:profile",
+    provisioning_profile = ":device_profile",
     target_compatible_with = ["@platforms//os:macos"],
 )
 
@@ -417,8 +431,8 @@ dart_test(
 # Every bundle in the team-signed app has one TeamIdentifier, not an ad hoc
 # signature, every App Group is prefixed with it, and the signature verifies.
 # `manual`, like the app: it needs the per-developer //device package, so it
-# has no dart_analysis_test either, which would load that package in a plain
-# `bazel test //...`. Running it applies the analysis aspect.
+# has no dart_analysis_test either, which would fail analysis in a plain
+# `bazel test //...` until the device flags are set. Running it applies the analysis aspect.
 dart_test(
     name = "verify_macos_team_signing_test",
     data = [":app_extensions_team"],

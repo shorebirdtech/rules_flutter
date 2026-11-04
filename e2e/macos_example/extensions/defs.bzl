@@ -7,8 +7,9 @@ def example_macos_extension(name, **kwargs):
     """A `macos_extension` as `name` and its team-signed twin as `name + "_team"`.
 
     `name` has no profile, so rules_apple signs it ad hoc, with the `group.`
-    App Group. `name_team` is signed with `//device:profile` and carries the
-    team-prefixed group from `//device`. rules_apple signs each extension in
+    App Group. `name_team` is signed with `//:device_profile` and carries the
+    team-prefixed group from `//:device_app_group`, the flags that stand for the
+    developer's `//device` files. rules_apple signs each extension in
     its own target, so the app's profile does not reach it: an extension
     without its own is signed ad hoc, has no team, and loses its App Group.
 
@@ -31,7 +32,7 @@ def example_macos_extension(name, **kwargs):
         base = dict(entitlements = ":extension_entitlements"),
         twin = dict(
             entitlements = ":extension_entitlements_team",
-            provisioning_profile = "//device:profile",
+            provisioning_profile = "//:device_profile",
         ),
         overrides = kwargs,
     )
