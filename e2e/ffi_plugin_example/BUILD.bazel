@@ -30,6 +30,7 @@ load(
     "flutter_macos_registrant_gen",
     "flutter_macos_runner_lib_gen",
 )
+load("@rules_flutter//tools/e2e_testing:device_profile.bzl", "device_profile")
 
 exports_files(["pubspec.lock"])
 
@@ -194,9 +195,14 @@ ios_application(
 # only difference, so the device bundle shares every Tier-2 `_gen` target with
 # the simulator's `:ffi_plugin_ios` above rather than re-deriving them.
 #
-# `//device` is git-ignored and absent from a fresh clone. That is fine: the
-# target is tagged `manual`, so `bazel build //...` never expands it and
-# therefore never loads the missing package. Create it from device.example/.
+# Signed with the developer's own profile, which is not in this repository:
+# `//:device_profile` is a flag whose default fails with the setup steps (copy
+# device.example/ to the git-ignored device/, then set
+# `--//:device_profile=//device:profile` in .bazelrc.user). The flag keeps
+# `bazel query 'deps(//...)'` from following a label into the //device package
+# a fresh clone lacks. The target is `manual`, so `bazel build //...` skips it.
+device_profile()
+
 ios_application(
     name = "ffi_plugin_ios_device",
     bundle_id = "com.example.ffiplugin",
@@ -204,7 +210,7 @@ ios_application(
     infoplists = [":ios_runner_info_plist"],
     launch_storyboard = IOS_DEFAULT_LAUNCH_STORYBOARD,
     minimum_os_version = IOS_MINIMUM_OS_VERSION,
-    provisioning_profile = "//device:profile",
+    provisioning_profile = ":device_profile",
     tags = ["manual"],
     version = ":ffi_plugin_ios_version",
     deps = _IOS_DEPS,

@@ -50,10 +50,7 @@ void main() {
   test('bazel query deps(//...) loads every package', () async {
     final result = await Process.run('bazel', [
       'query',
-      // The device-signed iOS app names `//device`, a git-ignored package a
-      // clean clone lacks on purpose (hello_world's BUILD.bazel says why), so
-      // its closure cannot load there.
-      'deps(//... except //:hello_world_ios_device)',
+      'deps(//...)',
       '--output=label',
       '--noshow_progress',
       '--curses=no',

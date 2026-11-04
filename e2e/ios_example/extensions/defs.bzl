@@ -8,11 +8,12 @@ def example_ios_extension(name, **kwargs):
     """An `ios_extension` as `name` and its device twin as `name + "_device"`.
 
     `name` carries the App Group and is unsigned, which is all a simulator
-    needs. `name_device` is signed with `//device:profile`, the team wildcard
-    profile, and drops the App Group: a wildcard profile cannot grant one, and
-    a device build that asks for an entitlement its profile lacks fails. With
-    an explicit App ID and profile per bundle id, which register the group,
-    the device twin would keep `entitlements` and name its own profile.
+    needs. `name_device` is signed with `//:device_profile`, the developer's
+    team wildcard profile, and drops the App Group: a wildcard profile cannot
+    grant one, and a device build that asks for an entitlement its profile
+    lacks fails. With an explicit App ID and profile per bundle id, which
+    register the group, the device twin would keep `entitlements` and name its
+    own profile.
 
     Args:
         name: The simulator target's name.
@@ -32,6 +33,6 @@ def example_ios_extension(name, **kwargs):
             tags = ["manual"],
         ),
         base = dict(entitlements = ":AppGroup.entitlements"),
-        twin = dict(provisioning_profile = "//device:profile"),
+        twin = dict(provisioning_profile = "//:device_profile"),
         overrides = kwargs,
     )

@@ -586,7 +586,7 @@ flutter_ios_app(
 )
 ```
 
-That is the only difference from the simulator target, unless the app ships entitlements its profile cannot grant — see below. `flutter_ios_app` is tagged `manual` by default, so `bazel build //...` on a fresh clone does not try to load the missing `//device` package.
+That is the only difference from the simulator target, unless the app ships entitlements its profile cannot grant — see below. `flutter_ios_app` is tagged `manual` by default, so `bazel build //...` on a fresh clone does not try to load the missing `//device` package. `bazel query 'deps(//...)'` still follows the label of a `manual` target into it, so a repository that wants that query to work on a fresh clone points `provisioning_profile` at a `label_flag` whose default is a target that fails with setup steps, and sets the flag to `//device:profile` in `.bazelrc.user`. `e2e/hello_world` does this.
 
 Keep the app target in the committed BUILD file and put only the `local_provisioning_profile` in `//device`. The profile is the one genuinely per-developer fact. If the whole device app lives in a git-ignored package it is invisible to review and CI, and it drifts. Two of this repository's own examples once had a device app that had quietly diverged from its committed simulator twin. The same advice applies if you assemble the app from the composable rules: give the device `ios_application` the same `deps` as the simulator one.
 
@@ -596,7 +596,7 @@ Then run it:
 bazel run @rules_flutter//tools/dev_tool:flutter_bazel -- run -t //:my_app_ios_device -d ios
 ```
 
-Each iOS example ships a `device.example/` folder. Copy it to a git-ignored `device/` and set your bundle id.
+Each iOS example ships a `device.example/` folder. Copy it to a git-ignored `device/`, set your bundle id, and add `common --//:device_profile=//device:profile` to the example's `.bazelrc.user`.
 
 **Finding the profile's name.** `profile_name` matches the profile's `Name` field, and that is not always `iOS Team Provisioning Profile: <bundle id>`. Xcode mints a per-bundle-id profile only for an App ID registered in the developer portal. For an unregistered id, which most example and scratch apps have, automatic signing issues the team wildcard profile, `iOS Team Provisioning Profile: *`, and that is what covers your bundle id. List what you have:
 

@@ -21,6 +21,7 @@ load("@rules_flutter//flutter:linux.bzl", "flutter_linux_app")
 load("@rules_flutter//flutter:macos.bzl", "flutter_macos_app")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
 load("@rules_flutter//flutter:windows.bzl", "flutter_windows_app")
+load("@rules_flutter//tools/e2e_testing:device_profile.bzl", "device_profile")
 load(":build_in_mode.bzl", "build_in_mode")
 load(":build_variant_test.bzl", "build_variant_tests")
 
@@ -144,9 +145,14 @@ apple_bundle_version(
     tags = ["manual"],
 )
 
-# `//device` is git-ignored and absent from a fresh clone. That is fine: the
-# target is tagged `manual`, so `bazel build //...` never expands it and
-# therefore never loads the missing package. Create it from device.example/.
+# Signed with the developer's own profile, which is not in this repository:
+# `//:device_profile` is a flag whose default fails with the setup steps (copy
+# device.example/ to the git-ignored device/, then set
+# `--//:device_profile=//device:profile` in .bazelrc.user). The flag keeps
+# `bazel query 'deps(//...)'` from following a label into the //device package
+# a fresh clone lacks. The target is `manual`, so `bazel build //...` skips it.
+device_profile()
+
 ios_application(
     name = "hello_world_ios_device",
     bundle_id = "com.example.helloworld",
@@ -154,7 +160,7 @@ ios_application(
     infoplists = [":hello_world_ios_runner_info_plist"],
     launch_storyboard = IOS_DEFAULT_LAUNCH_STORYBOARD,
     minimum_os_version = IOS_MINIMUM_OS_VERSION,
-    provisioning_profile = "//device:profile",
+    provisioning_profile = ":device_profile",
     tags = ["manual"],
     version = ":hello_world_ios_version",
     deps = [

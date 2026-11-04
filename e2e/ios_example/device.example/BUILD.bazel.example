@@ -18,7 +18,9 @@
 #      flutter_ios_app itself never reads an Xcode project, so it need not be
 #      this repository's; see the README.
 #   4. Set profile_name below to that profile's own name — see the note.
-#   5. Build:  bazel build //:app_device -c opt --ios_multi_cpus=arm64
+#   5. Point the device targets at the profile (.bazelrc.user is git-ignored):
+#        echo 'common --//:device_profile=//device:profile' >> .bazelrc.user
+#   6. Build:  bazel build //:app_device -c opt --ios_multi_cpus=arm64
 #      Or run: flutter_bazel run -t //:app_device -d ios
 #
 # Naming the profile: `profile_name` matches the profile's `Name` field, which

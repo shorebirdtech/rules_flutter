@@ -19,6 +19,7 @@ load(
 )
 load("@rules_flutter//tools/e2e_testing:apple_analysis_test.bzl", "analyses_test", "command_line_tests", "skipped_test")
 load("@rules_flutter//tools/e2e_testing:apple_release_build.bzl", "apple_release_build")
+load("@rules_flutter//tools/e2e_testing:device_profile.bzl", "device_profile")
 load("@rules_swift//swift:swift.bzl", "swift_library")
 load(":simulator_mode_test.bzl", "device_needs_profile_test", "simulator_fastbuild_refused_test")
 
@@ -125,15 +126,20 @@ flutter_ios_app(
 # only difference, so the device bundle is the identical construction rather
 # than a second one hand-assembled out of Tier-2 `_gen` rules.
 #
-# `//device` is git-ignored and absent from a fresh clone. That is fine:
-# flutter_ios_app defaults to `tags = ["manual"]`, so `bazel build //...`
-# never expands this target and therefore never loads the missing package.
-# Create it from device.example/ — see README.md "Device builds".
+# Signed with the developer's own profile, which is not in this repository:
+# `//:device_profile` is a flag whose default fails with the setup steps (copy
+# device.example/ to the git-ignored device/, then set
+# `--//:device_profile=//device:profile` in .bazelrc.user; see README.md
+# "Device builds"). The flag keeps `bazel query 'deps(//...)'` from following
+# a label into the //device package a fresh clone lacks. flutter_ios_app
+# defaults to `tags = ["manual"]`, so `bazel build //...` skips the target.
+device_profile()
+
 flutter_ios_app(
     name = "app_device",
     application = ":app_flutter",
     bundle_id = "com.rulesflutter.ios.example",
-    provisioning_profile = "//device:profile",
+    provisioning_profile = ":device_profile",
 )
 
 # An app that ships App Intents. The library goes to `runner_deps` so the runner
@@ -184,7 +190,7 @@ flutter_ios_app(
         "//extensions:share_device",
         "//extensions:widgets_device",
     ],
-    provisioning_profile = "//device:profile",
+    provisioning_profile = ":device_profile",
 )
 
 # =============================================================================
