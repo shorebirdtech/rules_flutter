@@ -1,0 +1,11 @@
+load("@rules_flutter//flutter:defs.bzl", "flutter_library")
+
+# The variant of `package:int64_ids` for dart2js and DDC: a `List<int>`, since
+# JavaScript cannot hold a 64-bit integer. The same package name as
+# `//int64/ids_typed`, so the app's import is the same whichever is picked.
+flutter_library(
+    name = "ids",
+    package_name = "int64_ids",
+    srcs = ["lib/ids.dart"],
+    visibility = ["//int64/ids:__pkg__"],
+)

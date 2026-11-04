@@ -1,32 +1,43 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
 
-# An app holding 64-bit integers in an `Int64List`, which only WebAssembly
-# supports: dart2js refuses the largest 64-bit literal at compile time and
-# throws on `Int64List` at runtime. It stands for any code that only works under
-# WebAssembly, and `js_fallback = False` makes `compiler = "dart2wasm"` build
-# it, because then nothing else compiles it.
+# An app holding 64-bit identifiers that keeps the dart2js fallback. dart2wasm
+# compiles it with an `Int64List` and the largest 64-bit integer; dart2js, and
+# DDC under `flutter_bazel run`, compile it with a `List<int>` and 2^53 - 1. One
+# `lib/main.dart`, two programs: it renders `Int64List max: 9223372036854775807`
+# from the WebAssembly build and `List<int> max: 9007199254740991` from the
+# JavaScript one.
 flutter_web_app(
     name = "int64_app",
     package_name = "int64",
-    app_name = "Int64List",
-    js_fallback = False,
-    deps = ["@deps//:flutter"],
+    app_name = "Int64 identifiers",
+    deps = [
+        "//int64/ids",
+        "@deps//:flutter",
+    ],
 )
 
-# The same app with the default dart2js fallback, which compiles it with dart2js
-# as well. Manual, because it is expected NOT to build: dart2js reports "The
-# integer literal 0x7FFFFFFFFFFFFFFF can't be represented exactly in
-# JavaScript". `bazel build //int64:int64_app_with_fallback` shows it.
+# The same program with Chrome left out of the WebAssembly allow-list, so Chrome
+# runs the dart2js build the fallback ships: `main.dart.js` draws the
+# `List<int>` variant, and the end-to-end test shows it on screen.
 flutter_web_app(
-    name = "int64_app_with_fallback",
+    name = "int64_app_js_fallback",
     package_name = "int64",
-    app_name = "Int64List with fallback",
-    tags = ["manual"],
-    deps = ["@deps//:flutter"],
+    app_name = "Int64 identifiers (JavaScript)",
+    wasm_browsers = [
+        "gecko",
+        "webkit",
+    ],
+    deps = [
+        "//int64/ids",
+        "@deps//:flutter",
+    ],
 )
 
 build_test(
-    name = "int64_wasm_only_build_test",
-    targets = [":int64_app"],
+    name = "int64_build_test",
+    targets = [
+        ":int64_app",
+        ":int64_app_js_fallback",
+    ],
 )

@@ -1,20 +1,18 @@
-import 'dart:typed_data';
-
 import 'package:flutter/widgets.dart';
+import 'package:int64_ids/ids.dart';
 
-/// The largest signed 64-bit integer. dart2js cannot represent it ("can't be
-/// represented exactly in JavaScript") and refuses to compile the literal;
-/// dart2wasm holds it in a real 64-bit integer.
-const maxInt64 = 0x7FFFFFFFFFFFFFFF;
-
-/// Stores [maxInt64] in an [Int64List], which dart2js builds but throws on at
-/// runtime ("not supported on the web"), and shows it back.
+/// Shows the largest identifier its compiler can hold.
+///
+/// `package:int64_ids` is two libraries (`ids_typed`, `ids_js`) with one
+/// package name, and `:ids` picks one by the web compiler: the `Int64List`
+/// under dart2wasm, a `List<int>` under dart2js and DDC. This file is the same
+/// for both.
 void main() {
-  final ids = Int64List.fromList([maxInt64, 1 << 40]);
+  final ids = makeIds();
   runApp(
     Directionality(
       textDirection: TextDirection.ltr,
-      child: Center(child: Text('Int64List max: ${ids[0]}')),
+      child: Center(child: Text('$idsType max: ${ids[0]}')),
     ),
   );
 }

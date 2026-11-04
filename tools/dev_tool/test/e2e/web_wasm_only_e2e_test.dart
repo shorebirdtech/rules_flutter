@@ -2,18 +2,19 @@
 /// A web app that ships WebAssembly only (`js_fallback = False`) is developed
 /// under dart2wasm, with no flag asked for.
 ///
-/// `//int64:int64_app` holds its numbers in an `Int64List`, which only
-/// WebAssembly supports, so it stands for any app that cannot run as the
-/// JavaScript the DDC loop compiles. Under the DDC loop it does not render;
-/// under the dart2wasm loop it does, which is what separates the two here.
+/// `//int64/wasm_only:wasm_only_app` holds its numbers in an `Int64List`, which
+/// only WebAssembly supports, and has no JavaScript variant of it, so it stands
+/// for any app that cannot run as the JavaScript the DDC loop compiles. Under
+/// the DDC loop it does not render; under the dart2wasm loop it does, which is
+/// what separates the two here.
 library;
 
 import 'package:test/test.dart';
 
 import 'dev_tool_e2e_harness.dart';
 
-/// What `int64_app` draws: the largest signed 64-bit integer, read back out of
-/// an `Int64List`.
+/// What `wasm_only_app` draws: the largest signed 64-bit integer, read back out
+/// of an `Int64List`.
 const _rendered = 'Int64List max: 9223372036854775807';
 
 void main() {
@@ -24,7 +25,7 @@ void main() {
     () async {
       final dt = await startDevTool(
         workspace: workspace,
-        target: '//int64:int64_app',
+        target: '//int64/wasm_only:wasm_only_app',
         device: 'chrome',
         extraArgs: const ['--web-run-headless'],
       );
@@ -67,7 +68,7 @@ void main() {
     () async {
       final dt = await startDevTool(
         workspace: workspace,
-        target: '//int64:int64_app',
+        target: '//int64/wasm_only:wasm_only_app',
         device: 'chrome',
         extraArgs: const ['--no-wasm', '--web-run-headless'],
       );

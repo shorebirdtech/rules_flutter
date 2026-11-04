@@ -1,0 +1,10 @@
+load("@rules_flutter//flutter:defs.bzl", "flutter_library")
+
+# 64-bit identifiers in an `Int64List`: the variant of `package:int64_ids` for
+# dart2wasm, and for a build under no web compiler.
+flutter_library(
+    name = "ids",
+    package_name = "int64_ids",
+    srcs = ["lib/ids.dart"],
+    visibility = ["//int64/ids:__pkg__"],
+)

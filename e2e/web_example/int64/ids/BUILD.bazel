@@ -1,0 +1,21 @@
+load("@rules_flutter//flutter:defs.bzl", "flutter_library")
+
+# `package:int64_ids` as the app's compiler sees it. The variants are separate
+# libraries with one package name, so the app imports it the same way whichever
+# is picked, and the `select()` is in the `deps` of a library: the bundle
+# builds its `deps` once per compiler, but resolves a `select()` among its own
+# in its own configuration, where no compiler is set.
+#
+# A build with no web compiler (`bazel build //...` reaches this library that way)
+# takes the typed variant, as the VM would.
+flutter_library(
+    name = "ids",
+    package_name = "int64_ids_select",
+    srcs = [],
+    visibility = ["//int64:__pkg__"],
+    deps = select({
+        "@rules_dart//dart:web_compiler_js": ["//int64/ids_js:ids"],
+        "@rules_dart//dart:web_compiler_none": ["//int64/ids_typed:ids"],
+        "@rules_dart//dart:web_compiler_wasm": ["//int64/ids_typed:ids"],
+    }),
+)
