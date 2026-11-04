@@ -674,9 +674,11 @@ def flutter_ios_simulator_build(name, targets, **kwargs):
     """Builds iOS apps for the simulator in debug mode, whatever `-c` says.
 
     The simulator engine runs only debug builds, so a simulator app built in
-    `fastbuild` or `opt` is refused at analysis. This forwards the files of
-    `targets` built with `-c dbg`, for anything that needs a simulator bundle
-    under a default `bazel test //...`: a `build_test`, or a test that reads
+    `fastbuild` or `opt` is refused at analysis, and so is one built with
+    `--@rules_flutter//flutter:profile` (upstream has no profile simulator
+    build either). This forwards the files of `targets` built with `-c dbg`
+    and the flag off, for anything that needs a simulator bundle under a
+    default `bazel test //...`: a `build_test`, or a test that reads
     the bundle through `data`. The files keep their runfiles paths.
 
     Args:

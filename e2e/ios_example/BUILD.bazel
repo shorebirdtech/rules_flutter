@@ -467,6 +467,21 @@ test_suite(
     ),
 )
 
+# The same with the profile flag, which the other targets in a profile run
+# need and the wrappers must not trip over.
+test_suite(
+    name = "simulator_profile_command_line_tests",
+    tests = command_line_tests(
+        name = "simulator_build_profile",
+        profile = True,
+        target = ":app_simulator",
+    ) + command_line_tests(
+        name = "simulator_build_test_profile",
+        profile = True,
+        target = ":ios_app_build_test",
+    ),
+)
+
 # Control for the tests that an app is skipped where it is not for: the same
 # app analyses where it is compatible.
 flutter_ios_app(
