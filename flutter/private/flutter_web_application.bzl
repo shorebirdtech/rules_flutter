@@ -320,6 +320,65 @@ def _check_web_asset_dst(ctx, reserved, dst, short_path):
             "so this is refused instead: " + remedy,
         )
 
+def web_compile_branches(compiler, js_fallback, debug):
+    """The compilers a bundle's Dart goes through, the primary first.
+
+    Each is a branch of the program: what it compiles is read from its own
+    branch of `deps`, so a dependency may differ by compiler. The primary is
+    `compiler`, the build the bundle describes; dart2js joins a dart2wasm
+    bundle as its fallback; and a debug build adds DDC, which compiles the
+    app for `flutter_bazel run -d chrome` from the files `_dev_config.json`
+    names rather than in this rule.
+
+    Args:
+        compiler: The `compiler` attr: "dart2wasm" or "dart2js".
+        js_fallback: The `js_fallback` attr.
+        debug: Whether this is a debug build.
+
+    Returns:
+        A list of "dart2wasm", "dart2js" and "ddc", the primary first.
+    """
+    branches = [compiler]
+    if compiler == "dart2wasm" and js_fallback:
+        branches.append("dart2js")
+    if debug:
+        branches.append("ddc")
+    return branches
+
+def _branch_inputs(ctx, deps, lib_root):
+    """What one compiler reads from its branch of `deps`.
+
+    The one place a branch's sources, packages and package config are worked
+    out, so no consumer derives its own from a different set of dependencies.
+
+    Args:
+        ctx: Rule context.
+        deps: The branch's dependencies.
+        lib_root: The app's own library root (`derive_lib_root`).
+
+    Returns:
+        `struct(deps, srcs, packages, config_file, compile_srcs)`: `srcs` and
+        `packages` as declared, the app's own package last; `config_file` and
+        `compile_srcs` after `compile_package_config` co-locates them, which
+        is what a compile action takes.
+    """
+    srcs = list(ctx.files.srcs) + collect_transitive_srcs(deps).to_list()
+
+    # Register the app's own package (when declared) so `package:<name>/main.dart`
+    # is a valid URI for the wrapper to import. Include `main` in the colocate
+    # inputs so it ends up inside the same assembled directory as its lib/
+    # siblings — that's what lets `main.dart`'s relative imports resolve to
+    # the assembled (codegen-co-located) copies of its package siblings.
+    packages = synthesize_app_package(ctx.label, collect_packages(deps), ctx.attr.package_name, lib_root, ctx.attr.language_version)
+    pc = compile_package_config(ctx, packages, srcs + [ctx.file.main])
+    return struct(
+        deps = deps,
+        srcs = srcs,
+        packages = packages,
+        config_file = pc.config_file,
+        compile_srcs = pc.srcs,
+    )
+
 def _flutter_web_bundle_impl(ctx):
     renderer = web_renderer(ctx.attr.compiler, ctx.attr.renderer)
     validate_web_compiler_renderer(ctx.attr.compiler, renderer)
@@ -385,9 +444,7 @@ def _flutter_web_bundle_impl(ctx):
 
     # Step 1: Collect sources, generate package config, handle plugin registrant.
     # dart compile wasm/js take .dart source directly (not kernel .dill).
-    all_srcs = list(ctx.files.srcs) + collect_transitive_srcs(ctx.attr.deps).to_list()
-    packages = collect_packages(ctx.attr.deps)
-
+    #
     # The app's own library root — the single answer to "what is
     # `package:<self>/…` rooted at" for this target. Everything downstream
     # that asks the question (package synthesis, the wrapper's import, the
@@ -398,15 +455,19 @@ def _flutter_web_bundle_impl(ctx):
     # against the workspace root instead of its own package.
     lib_root = derive_lib_root(ctx.label.workspace_root, ctx.label.package)
 
-    # Register the app's own package (when declared) so `package:<name>/main.dart`
-    # is a valid URI for the wrapper to import. Include `main` in the colocate
-    # inputs so it ends up inside the same assembled directory as its lib/
-    # siblings — that's what lets `main.dart`'s relative imports resolve to
-    # the assembled (codegen-co-located) copies of its package siblings.
-    packages = synthesize_app_package(ctx.label, packages, ctx.attr.package_name, lib_root, ctx.attr.language_version)
+    # Every reader of `deps` reads a named branch. Each compile takes its own
+    # compiler's; everything the bundle holds once — the plugin registrant
+    # every compile imports, the assets, the icon tree-shaker's kernel, the
+    # import check and the analysis closure — takes the primary's, the build
+    # the bundle describes. One `deps` edge feeds every compiler, so their
+    # inputs are one computation.
+    branches = web_compile_branches(ctx.attr.compiler, ctx.attr.js_fallback, is_debug)
+    shared_inputs = _branch_inputs(ctx, ctx.attr.deps, lib_root)
+    branch_inputs = {branch: shared_inputs for branch in branches}
+    primary = branch_inputs[branches[0]]
 
     # `synthesize_app_package` appends the app's own package last.
-    import_checks = import_check_validation(ctx, ctx.executable._kernel_tool, [ctx.file.main] + ctx.files.srcs, packages[-1], ctx.attr.deps)
+    import_checks = import_check_validation(ctx, ctx.executable._kernel_tool, [ctx.file.main] + ctx.files.srcs, primary.packages[-1], primary.deps)
 
     # Hot-reload dev metadata (debug only): a multi-root dev package_config so a
     # source-assembled (codegen) app resolves package: URIs across the live
@@ -420,9 +481,10 @@ def _flutter_web_bundle_impl(ctx):
     dev_generated_sources = []
     dev_generated_source_uris = []
     dev_source_packages = []
-    if is_debug:
+    ddc = branch_inputs.get("ddc")
+    if ddc:
         dev_package_config = ctx.actions.declare_file(ctx.label.name + ".dev_package_config.json")
-        dev_pc = generate_dev_package_config(packages, all_srcs + [ctx.file.main], dev_package_config, scheme = APP_SCHEME)
+        dev_pc = generate_dev_package_config(ddc.packages, ddc.srcs + [ctx.file.main], dev_package_config, scheme = APP_SCHEME)
         ctx.actions.write(dev_package_config, dev_pc.content)
 
         # A `main` with no `package:` URI is imported by the dev loop's
@@ -436,23 +498,19 @@ def _flutter_web_bundle_impl(ctx):
         dev_source_packages = dev_pc.source_packages
         dev_generated_sources = resolve_dev_generated_sources(
             dev_pc.generated_source_paths,
-            all_srcs + [ctx.file.main],
+            ddc.srcs + [ctx.file.main],
         )
 
         # The dev package_config's roots and the filesystem roots reach every
         # file the dev compiler may read.
-        dev_package_config_names = all_srcs + [ctx.file.main]
-
-    pc = compile_package_config(ctx, packages, all_srcs + [ctx.file.main])
-    config_file = pc.config_file
-    all_srcs = pc.srcs
+        dev_package_config_names = ddc.srcs + [ctx.file.main]
 
     # Generate web wrapper main with ui_web.bootstrapEngine().
     # Flutter web ALWAYS needs this wrapper to properly initialize the engine
     # (create the implicit view, set up the platform dispatcher, etc.)
     # before calling the user's main(). This matches `flutter build web`.
     all_dep_plugins = []
-    for dep in ctx.attr.deps:
+    for dep in primary.deps:
         if FlutterInfo in dep:
             all_dep_plugins.extend(dep[FlutterInfo].plugins)
     plugins = dedup_plugins(all_dep_plugins)
@@ -498,7 +556,13 @@ def _flutter_web_bundle_impl(ctx):
         extra_wrapper_srcs.append(registrant)
     if is_debug:
         extra_wrapper_srcs.extend([staged_agent, staged_agent_bridge])
-    all_srcs = all_srcs + extra_wrapper_srcs
+
+    # What a compile of each branch reads: the branch's co-located sources and
+    # the files every compile shares.
+    compile_srcs = {
+        branch: inputs.compile_srcs + extra_wrapper_srcs
+        for branch, inputs in branch_inputs.items()
+    }
 
     # Step 2: Compile to WASM (with a JS build beside it unless `js_fallback = False`) or JS only.
     # dart2js outputs to a tree artifact (directory) to support deferred loading:
@@ -532,8 +596,8 @@ def _flutter_web_bundle_impl(ctx):
             web_sdk_files = web_sdk_file_list,
             dart2wasm_platform_dill = ctx.file._dart2wasm_platform_dill,
             main_dart = entrypoint,
-            srcs = all_srcs,
-            package_config = config_file,
+            srcs = compile_srcs["dart2wasm"],
+            package_config = branch_inputs["dart2wasm"].config_file,
             output_wasm = output_wasm,
             output_mjs = output_mjs,
             mode = mode,
@@ -558,8 +622,8 @@ def _flutter_web_bundle_impl(ctx):
                 web_sdk_files = web_sdk_file_list,
                 dart2js_platform_dill = ctx.file._dart2js_platform_dill,
                 main_dart = entrypoint,
-                srcs = all_srcs,
-                package_config = config_file,
+                srcs = compile_srcs["dart2js"],
+                package_config = branch_inputs["dart2js"].config_file,
                 output_dir = output_js_fallback_dir,
                 mode = mode,
                 optimization_level = ctx.attr.optimization_level_js,
@@ -592,8 +656,8 @@ def _flutter_web_bundle_impl(ctx):
             web_sdk_files = web_sdk_file_list,
             dart2js_platform_dill = ctx.file._dart2js_platform_dill,
             main_dart = entrypoint,
-            srcs = all_srcs,
-            package_config = config_file,
+            srcs = compile_srcs["dart2js"],
+            package_config = branch_inputs["dart2js"].config_file,
             output_dir = output_js_dir,
             mode = mode,
             optimization_level = ctx.attr.optimization_level_js,
@@ -610,7 +674,7 @@ def _flutter_web_bundle_impl(ctx):
         builds = [_JS_BUILD]
 
     # Step 3: Shader compilation + asset bundle.
-    compiled_shaders = flutter_compile_shaders(ctx, tools, "web")
+    compiled_shaders = flutter_compile_shaders(ctx, tools, "web", primary.deps)
 
     # Icon tree shaking: compile a kernel .dill for const_finder analysis.
     # Web targets don't otherwise need a kernel (they use dart2wasm/dart2js),
@@ -640,8 +704,8 @@ def _flutter_web_bundle_impl(ctx):
                 lib_root,
                 ctx.file.main.short_path,
             ),
-            srcs = all_srcs,
-            package_config = config_file,
+            srcs = compile_srcs[branches[0]],
+            package_config = primary.config_file,
             output = kernel_dill,
             aot = True,
             # Mode-derived rather than hardcoded: this branch is reachable in
@@ -657,7 +721,7 @@ def _flutter_web_bundle_impl(ctx):
         )
 
     flutter_assets = declare_flutter_assets_dir(ctx)
-    flutter_build_assets(ctx, tools, flutter_assets, compiled_shaders, kernel_dill = kernel_dill, is_debug = is_debug)
+    flutter_build_assets(ctx, tools, flutter_assets, primary.deps, compiled_shaders, kernel_dill = kernel_dill, is_debug = is_debug)
 
     # Step 4: Pick the index.html and flutter_bootstrap.js *templates*.
     #
@@ -1101,7 +1165,7 @@ def _flutter_web_bundle_impl(ctx):
         label = ctx.label,
         package_name = ctx.attr.package_name,
         lib_root = lib_root,
-        deps = ctx.attr.deps + [ctx.attr._sky_engine],
+        deps = primary.deps + [ctx.attr._sky_engine],
         srcs = [] if main_in_package else [ctx.file.main],
         package_srcs = ctx.files.srcs + ([ctx.file.main] if main_in_package else []),
         # As on the compile path above: the analyzer and the compiler have to
@@ -1216,13 +1280,13 @@ def _flutter_web_bundle_impl(ctx):
             # cannot: DWDS asked through it gets "Cannot extract a file path
             # from a org-dartlang-app URI" and shows no source at all. This
             # one's rootUris are ordinary relative paths, so they resolve.
-            "buildPackageConfig": dev_config_file(config_file, pc.srcs),
+            "buildPackageConfig": dev_config_file(ddc.config_file, ddc.compile_srcs),
             "filesystemRoots": dev_search_roots(dev_filesystem_roots),
             "filesystemScheme": dev_filesystem_scheme,
             "generatedSourcePaths": dev_generated_sources,
             "generatedSourceUris": dev_generated_source_uris,
             # See flutter_application's dev config.
-            "shaders": shader_sources(ctx),
+            "shaders": shader_sources(ctx, primary.deps),
             # The native modules the page instantiates, and per module the files
             # its bindings were generated from. A reload cannot replace an
             # instantiated module any more than a process can replace a `dlopen`ed

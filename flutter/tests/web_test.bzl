@@ -3,7 +3,7 @@
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("//flutter/private:flutter_native_library.bzl", "flutter_native_library")
-load("//flutter/private:flutter_web_application.bzl", "flutter_web_bundle")
+load("//flutter/private:flutter_web_application.bzl", "flutter_web_bundle", "web_compile_branches")
 load(
     "//flutter/private:validation.bzl",
     "escape_html",
@@ -1684,6 +1684,95 @@ def web_reserved_test_suite(name):
         target_under_test = ":_own_worker_collides",
     )
 
+def _web_compile_branches_test_impl(ctx):
+    env = unittest.begin(ctx)
+    for compiler, js_fallback, debug, expected in [
+        ("dart2wasm", True, False, ["dart2wasm", "dart2js"]),
+        ("dart2wasm", False, False, ["dart2wasm"]),
+        ("dart2js", True, False, ["dart2js"]),
+        ("dart2wasm", True, True, ["dart2wasm", "dart2js", "ddc"]),
+        ("dart2wasm", False, True, ["dart2wasm", "ddc"]),
+        ("dart2js", True, True, ["dart2js", "ddc"]),
+    ]:
+        asserts.equals(
+            env,
+            expected,
+            web_compile_branches(compiler, js_fallback, debug),
+            "compiler=%s js_fallback=%s debug=%s" % (compiler, js_fallback, debug),
+        )
+    return unittest.end(env)
+
+_web_compile_branches_test = unittest.make(_web_compile_branches_test_impl)
+
+def _package_config_of(env, action):
+    """The package names in the package config `action` compiles against."""
+    configs = [
+        f
+        for f in action.inputs.to_list()
+        if f.basename.endswith(".package_config.json") and
+           not f.basename.endswith(".import_check_package_config.json")
+    ]
+    asserts.equals(env, 1, len(configs), "%s reads %d package configs" % (action.mnemonic, len(configs)))
+    if len(configs) != 1:
+        return None, []
+    writes = [
+        a
+        for a in analysistest.target_actions(env)
+        if a.mnemonic == "FileWrite" and a.outputs.to_list() == configs
+    ]
+    asserts.equals(env, 1, len(writes), "no write produces " + configs[0].short_path)
+    if len(writes) != 1:
+        return configs[0], []
+    return configs[0], [p["name"] for p in json.decode(writes[0].content)["packages"]]
+
+def _branch_inputs_test_impl(ctx):
+    """Each compile reads one package config naming each package once.
+
+    `deps` is the edge the bundle splits per compiler, and a split edge's
+    `ctx.attr.deps` holds every branch's copy of each dependency. A reader
+    left on it names a package once per branch, so this looks for exactly
+    one entry per package in what every compile reads, and in the font list
+    of the asset bundle.
+
+    The icon tree-shaker's kernel is compiled from the primary compiler's
+    branch, so it reads the package config dart2wasm reads.
+    """
+    env = analysistest.begin(ctx)
+    by_mnemonic = {}
+    for mnemonic in ["FlutterDart2Wasm", "FlutterDart2JS", "FlutterKernelCompile"]:
+        action = _action(env, mnemonic)
+        if action == None:
+            continue
+        config, names = _package_config_of(env, action)
+        by_mnemonic[mnemonic] = config
+        for package in ["web_fixture", "web_branches_dep"]:
+            count = len([n for n in names if n == package])
+            asserts.equals(
+                env,
+                1,
+                count,
+                "%s's package config names %s %d times: %s" % (mnemonic, package, count, names),
+            )
+        asserts.equals(env, len(names), len({n: None for n in names}), "%s: a package named twice: %s" % (mnemonic, names))
+    asserts.equals(
+        env,
+        by_mnemonic.get("FlutterDart2Wasm"),
+        by_mnemonic.get("FlutterKernelCompile"),
+        "the icon tree-shaker's kernel must compile the primary (dart2wasm) branch",
+    )
+
+    bundle = action_config(env, "FlutterAssetBundle")
+    if bundle != None:
+        families = [f["family"] for f in bundle["fonts"]]
+        asserts.equals(env, 1, len([f for f in families if f == "MaterialIcons"]), "fonts: %s" % families)
+        asserts.true(env, "icon_tree_shaking" in bundle, "the release bundle shakes icons, or this test proves nothing about its kernel")
+    return analysistest.end(env)
+
+_branch_inputs_test = analysistest.make(
+    _branch_inputs_test_impl,
+    config_settings = {"//command_line_option:compilation_mode": "opt"},
+)
+
 def _setup_web_fixtures():
     """flutter_web_bundle instances the analysis tests read.
 
@@ -1827,6 +1916,19 @@ def _setup_web_fixtures():
         name = "_web_fixture_generated",
         outs = ["lib/web_fixture_generated.dart"],
         cmd = "echo 'const generated = 1;' > $@",
+        tags = ["manual"],
+    )
+
+    # A dependency with a package of its own and one with fonts, so a package
+    # or a font family counted once per branch shows.
+    flutter_web_bundle(
+        name = "_web_branches_fixture",
+        package_name = "web_fixture",
+        main = "lib/web_fixture_main.dart",
+        deps = [
+            "//flutter:material_icons",
+            "//flutter/tests/web_branches_dep",
+        ],
         tags = ["manual"],
     )
     flutter_web_bundle(
@@ -2172,6 +2274,11 @@ def web_test_suite(name):
     _build_package_roots_declared_test(
         name = name + "_build_package_roots_declared",
         target_under_test = ":_web_codegen_fixture",
+    )
+    _web_compile_branches_test(name = name + "_compile_branches")
+    _branch_inputs_test(
+        name = name + "_branch_inputs",
+        target_under_test = ":_web_branches_fixture",
     )
     _native_modules_declared_test(
         name = name + "_native_modules_declared",

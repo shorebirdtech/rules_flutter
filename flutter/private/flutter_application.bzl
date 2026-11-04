@@ -217,11 +217,12 @@ def _flutter_application_impl(ctx):
 
     # Step 3: Shader compilation + asset bundle. Pass data assets so the
     # bundler places them under flutter_assets/packages/<pkg>/<name>.
-    compiled_shaders = flutter_compile_shaders(ctx, portable_tools(ctx), target_platform)
+    compiled_shaders = flutter_compile_shaders(ctx, portable_tools(ctx), target_platform, ctx.attr.deps)
     flutter_build_assets(
         ctx,
         portable_tools(ctx),
         flutter_assets,
+        ctx.attr.deps,
         compiled_shaders,
         kernel_dill = kernel_dill,
         is_debug = is_debug,
@@ -371,7 +372,7 @@ def _flutter_application_impl(ctx):
                 # Every bundled shader, by bundle path, with the workspace
                 # files it is compiled from. The dev tool watches those and
                 # has the app reload a shader whose compiled bytes changed.
-                "shaders": shader_sources(ctx),
+                "shaders": shader_sources(ctx, ctx.attr.deps),
                 # The loose native libraries this build writes, from the
                 # same list `default_files` carries so the two cannot drift —
                 # `native_deps` and Native Assets code assets alike, because a

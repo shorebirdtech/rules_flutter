@@ -551,7 +551,7 @@ def collect_sdk_shader_srcs(deps):
         return depset(transitive = transitive_depsets).to_list()
     return []
 
-def _shader_jobs(ctx):
+def _shader_jobs(ctx, deps):
     """Every shader this target bundles, as struct(bundle_path, file, includes).
 
     User shaders keep their workspace-relative path ("shaders/my_effect.frag"),
@@ -564,9 +564,9 @@ def _shader_jobs(ctx):
     user_includes = getattr(ctx.files, "shader_includes", [])
     for shader in ctx.files.shaders:
         jobs.append(struct(bundle_path = shader.short_path, file = shader, includes = user_includes))
-    for shader in collect_sdk_shader_srcs(ctx.attr.deps):
+    for shader in collect_sdk_shader_srcs(deps):
         jobs.append(struct(bundle_path = "shaders/" + shader.basename, file = shader, includes = []))
-    for dep in ctx.attr.deps:
+    for dep in deps:
         if FlutterInfo in dep:
             for entry in dep[FlutterInfo].pub_shaders.to_list():
                 prefix = "packages/{}/".format(entry.package_name) if entry.package_name else ""
@@ -592,13 +592,21 @@ def _shader_jobs(ctx):
             ))
     return by_path.values()
 
-def shader_sources(ctx):
+def shader_sources(ctx, deps):
     """The workspace files behind each bundled shader, for the dev tool.
 
     `{bundle path: [workspace-relative path]}`: the shader and what it may
     `#include`, where those are source files of this workspace. A shader from
     another repository maps to an empty list; it is still a shader, which is
     what the dev tool needs to know to make the app reload it.
+
+    Args:
+        ctx: Rule context (must have the shaders attr).
+        deps: The dependencies whose packages' shaders are bundled: the ones
+            `flutter_compile_shaders` was given.
+
+    Returns:
+        The dict above.
     """
     return {
         job.bundle_path: [
@@ -606,10 +614,10 @@ def shader_sources(ctx):
             for f in [job.file] + list(job.includes)
             if f.is_source and not f.short_path.startswith("../")
         ]
-        for job in _shader_jobs(ctx)
+        for job in _shader_jobs(ctx, deps)
     }
 
-def flutter_compile_shaders(ctx, tools, target_platform):
+def flutter_compile_shaders(ctx, tools, target_platform, deps):
     """Compile every shader this target bundles for the target platform.
 
     The shaders are the target's own (`shaders`), the SDK's (collected from
@@ -617,15 +625,18 @@ def flutter_compile_shaders(ctx, tools, target_platform):
     `_shader_jobs` for where each is bundled.
 
     Args:
-        ctx: Rule context (must have shaders attr and deps attr).
+        ctx: Rule context (must have the shaders attr).
         tools: `FlutterExecToolsInfo` of the `PORTABLE` group (`portable_tools`).
         target_platform: Target platform string ("ios", "macos", "android", "linux", "windows", "web").
+        deps: The dependencies whose SDK and package shaders are bundled.
+            Named by the caller rather than read off `ctx.attr.deps`: a rule
+            whose `deps` edge is split sees every branch's copy there.
 
     Returns:
         Dict mapping bundle destination path → compiled File. Pass to
         extra_asset_copies in flutter_asset_bundle_action.
     """
-    jobs = _shader_jobs(ctx)
+    jobs = _shader_jobs(ctx, deps)
     if not jobs or not tools.impellerc:
         return {}
 
@@ -671,7 +682,7 @@ def declare_flutter_assets_dir(ctx):
     """
     return ctx.actions.declare_directory(ctx.label.name + "_flutter_assets")
 
-def flutter_build_assets(ctx, tools, output_dir, compiled_shaders = {}, kernel_dill = None, is_debug = False, data_assets = None):
+def flutter_build_assets(ctx, tools, output_dir, deps, compiled_shaders = {}, kernel_dill = None, is_debug = False, data_assets = None):
     """Run the shared asset bundling step.
 
     Walks `FlutterInfo.pub_fonts` / `pub_assets` from deps to bundle
@@ -679,12 +690,17 @@ def flutter_build_assets(ctx, tools, output_dir, compiled_shaders = {}, kernel_d
     `flutter_compile_shaders` and arrive via `compiled_shaders`).
 
     Args:
-        ctx: Rule context (must have assets, deps, license_files, tree_shake_icons attrs and _asset_bundle_tool).
+        ctx: Rule context (must have assets, license_files, tree_shake_icons attrs and _asset_bundle_tool).
         tools: `FlutterExecToolsInfo` of the `PORTABLE` group (`portable_tools`).
         output_dir: The tree artifact to bundle into, from
             `declare_flutter_assets_dir`. Passed in rather than declared here
             so an application can bake the path into its `build_info` before
             the kernel compile that this action depends on.
+        deps: The dependencies whose assets and pub contributions are
+            bundled. Named by the caller rather than read off
+            `ctx.attr.deps`: a rule whose `deps` edge is split sees every
+            branch's copy there, and would bundle each package once per
+            branch.
         compiled_shaders: Dict mapping bundle dest path → compiled shader File.
         kernel_dill: The compiled kernel .dill File (needed for icon tree shaking).
         is_debug: Whether this is a debug build (icon tree shaking is skipped in debug).
@@ -696,12 +712,12 @@ def flutter_build_assets(ctx, tools, output_dir, compiled_shaders = {}, kernel_d
     Returns:
         The flutter_assets/ tree artifact File.
     """
-    all_assets = collect_assets(ctx.attr.deps, ctx.files.assets)
+    all_assets = collect_assets(deps, ctx.files.assets)
 
     # Walk pub-package font/asset contributions from FlutterInfo.
     # MaterialIcons is no longer special-cased here — apps depend on
     # `@rules_flutter//flutter:material_icons` to get it via this same path.
-    fonts, pub_extra_asset_copies = aggregate_pub_contributions(ctx.attr.deps)
+    fonts, pub_extra_asset_copies = aggregate_pub_contributions(deps)
     extra_asset_copies = dict(compiled_shaders)
     extra_asset_copies.update(pub_extra_asset_copies)
 

@@ -483,12 +483,13 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
     # The test runs on flutter_tester, not the host's embedder: its shaders
     # are compiled for it, as `flutter test` compiles them (SkSL for Skia,
     # Vulkan for Impeller).
-    compiled_shaders = flutter_compile_shaders(ctx, portable_tools(ctx), "tester")
+    compiled_shaders = flutter_compile_shaders(ctx, portable_tools(ctx), "tester", ctx.attr.deps)
     flutter_assets = declare_flutter_assets_dir(ctx)
     flutter_build_assets(
         ctx,
         portable_tools(ctx),
         flutter_assets,
+        ctx.attr.deps,
         compiled_shaders,
         kernel_dill = kernel_dill,
         is_debug = True,
