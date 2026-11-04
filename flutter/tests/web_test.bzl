@@ -2131,6 +2131,58 @@ def _setup_web_fixtures():
         tags = ["manual"],
     )
 
+# -- Which platform a release web build compiles against ---------------------
+
+def _web_platform_dill_inputs(action):
+    """The platform kernels an action reads: any `.dill` named for a platform."""
+    return [
+        f
+        for f in action.inputs.to_list()
+        if f.basename.endswith(".dill") and "platform" in f.basename
+    ]
+
+def _dart2js_reads_precompiled_web_platform_test_impl(ctx):
+    """dart2js compiles against the web SDK's precompiled platform.
+
+    The web SDK ships `web-sdk/kernel/dart2js_platform.dill`, the web libraries
+    (`dart:ui`, `dart:_engine`, ...) already compiled to kernel, and
+    `flutter build web` hands that directory to `dart compile js` as
+    `--platform-binaries`. A compile that is not told to read it recompiles the
+    engine's Dart sources on every build: they show up as `web-sdk/lib/**`
+    entries in the compiler's `.deps` file, and the shipped dill is never
+    loaded. The argv is where this is observable in analysis, because the
+    bundler strips `.deps` from the shipped app.
+    """
+    env = analysistest.begin(ctx)
+    action = _action(env, "FlutterDart2JS")
+    if action == None:
+        return analysistest.end(env)
+    named = [a for a in action.argv if a.startswith("--platform-binaries=")]
+    asserts.equals(
+        env,
+        1,
+        len(named),
+        "dart2js must be given the precompiled web platform (--platform-binaries), argv: %s" % action.argv,
+    )
+    if named:
+        folder = named[0][len("--platform-binaries="):]
+        asserts.true(
+            env,
+            folder.endswith("web-sdk/kernel"),
+            "--platform-binaries must name the web SDK's kernel folder, got %s" % folder,
+        )
+        platform = [f for f in _web_platform_dill_inputs(action) if f.dirname == folder]
+        asserts.true(
+            env,
+            "dart2js_platform.dill" in [f.basename for f in platform],
+            "the folder %s must hold dart2js_platform.dill, and be an input" % folder,
+        )
+    return analysistest.end(env)
+
+_dart2js_reads_precompiled_web_platform_test = analysistest.make(
+    _dart2js_reads_precompiled_web_platform_test_impl,
+)
+
 def web_test_suite(name):
     """Instantiate the web-bundle fixtures and the analysis tests over them.
 
@@ -2396,6 +2448,17 @@ def web_test_suite(name):
     build_test(
         name = name + "_profile_build",
         targets = [":_web_profile_fixture"],
+    )
+
+    # Both call sites that run dart2js: the fallback beside a WASM build, and a
+    # JavaScript-only bundle.
+    _dart2js_reads_precompiled_web_platform_test(
+        name = name + "_dart2js_reads_precompiled_web_platform_fallback",
+        target_under_test = ":_web_fixture",
+    )
+    _dart2js_reads_precompiled_web_platform_test(
+        name = name + "_dart2js_reads_precompiled_web_platform_js_only",
+        target_under_test = ":_web_js_fixture",
     )
 
     unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test, _t6_test, _t7_test)

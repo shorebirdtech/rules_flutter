@@ -180,11 +180,6 @@ def _web_compiler_resources(_os, _inputs):
 def _main_dart_js(output_dir):
     return output_dir.path + "/main.dart.js"
 
-def _libraries_spec(platform_dill):
-    # libraries.json is one level above the kernel/ directory holding the
-    # dill; the web SDK's includes the Dart SDK's via a relative path.
-    return platform_dill.dirname + "/../libraries.json"
-
 def flutter_dart2wasm_action(
         ctx,
         dart,
@@ -384,7 +379,10 @@ def flutter_dart2js_action(
     args.add("compile")
     args.add("js")
 
-    args.add_all([dart2js_platform_dill], map_each = _libraries_spec, format_each = "--libraries-spec=%s")
+    # The web SDK's precompiled platform: its folder holds `dart2js_platform.dill`.
+    # Without it dart2js recompiles the engine's `web-sdk/lib` sources on every
+    # build; `flutter build web` passes the same folder.
+    args.add(dart2js_platform_dill.dirname, format = "--platform-binaries=%s")
 
     # Package config.
     args.add(package_config, format = "--packages=%s")
