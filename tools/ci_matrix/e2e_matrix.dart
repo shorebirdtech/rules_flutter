@@ -206,15 +206,15 @@ const e2eWorkspaces = <E2eWorkspace>[
           'Android app variants (a second app, permissions, the Bazel-generated '
           'and custom Kotlin runners, NDK code assets): platform-neutral past '
           'the host tools, so one run, on the cheapest runner',
+      Os.windows:
+          'Android build on a Windows host: gen_snapshot.exe naming, '
+          'engine-strip path separators, and rules_android JVMs started '
+          'without committing their whole heap (the committed patch)',
     },
     skips: {
       Os.macos:
           'hello_world and plugin_example build Android from a Mac, which is '
           'what depends on the host (aapt2, the NDK, gen_snapshot)',
-      Os.windows:
-          'rules_android compiles resources in a JVM that commits 3 GiB at '
-          'start, which windows-latest cannot, and every target of the '
-          'workspace is an Android one',
     },
   ),
   // Pins `--platforms=linux_x64` for every command, so it has no test

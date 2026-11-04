@@ -257,16 +257,11 @@ flutter_windows_app(
 # resources, and Kotlin runner.
 # =============================================================================
 
-# Every Android target here is tagged `no-windows-ci`: rules_android's resource
-# compiler commits 3 GiB up front and runs out of memory on the Windows CI
-# runner, which filters the tag out of builds and tests. Every other runner
-# builds them. See hello_world's `hello_world_android`.
 flutter_android_app(
     name = "plugin_android",
     package_name = "com.example.plugin_example",
     application = ":plugin_app",
     proguard_specs = ["app_proguard.pro"],
-    tags = ["no-windows-ci"],
 )
 
 # The ABIs of that APK are the platforms of --@rules_android//flags:android_platforms. These build it
@@ -279,14 +274,12 @@ flutter_android_app(
 flutter_android_build(
     name = "plugin_android_arm64_build",
     android_platforms = ["@rules_android//:arm64-v8a"],
-    tags = ["no-windows-ci"],
     targets = [":plugin_android"],
 )
 
 flutter_android_build(
     name = "plugin_android_x86_64_build",
     android_platforms = ["@rules_android//:x86_64"],
-    tags = ["no-windows-ci"],
     targets = [":plugin_android"],
 )
 
@@ -296,7 +289,6 @@ flutter_android_build(
         "@rules_android//:arm64-v8a",
         "@rules_android//:x86_64",
     ],
-    tags = ["no-windows-ci"],
     targets = [":plugin_android"],
 )
 
@@ -338,10 +330,7 @@ build_test(
 
 build_test(
     name = "android_bundle_build_test",
-    tags = [
-        "android",
-        "no-windows-ci",
-    ],
+    tags = ["android"],
     targets = [":plugin_android_arm64_build"],
 )
 
@@ -356,10 +345,7 @@ build_test(
         apk = ":plugin_android_%s_build" % build,
         compilation_mode = mode,
         profile = profile,
-        tags = [
-            "android",
-            "no-windows-ci",
-        ],
+        tags = ["android"],
     )
     for variant, build, mode, profile in [
         ("arm64", "arm64", "", False),
@@ -383,12 +369,11 @@ build_test(
             ":plugin_android_dbg",
             ":plugin_android_opt",
             ":plugin_android_profile",
+            "@bazel_tools//tools/zip:zipper",
         ],
+        env = {"ZIPPER_RUNFILE": "$(rlocationpath @bazel_tools//tools/zip:zipper)"},
         main = "test/verify_android_build_config_%s_test.dart" % check,
-        tags = [
-            "android",
-            "no-windows-ci",
-        ],
+        tags = ["android"],
         deps = ["@rules_flutter//tools/e2e_testing"],
     )
     for check in [
@@ -410,12 +395,11 @@ dart_test(
         ":plugin_android_dbg",
         ":plugin_android_fat",
         ":plugin_android_x86_64",
+        "@bazel_tools//tools/zip:zipper",
     ],
+    env = {"ZIPPER_RUNFILE": "$(rlocationpath @bazel_tools//tools/zip:zipper)"},
     main = "test/verify_android_apk_test.dart",
-    tags = [
-        "android",
-        "no-windows-ci",
-    ],
+    tags = ["android"],
     deps = ["@rules_flutter//tools/e2e_testing"],
 )
 

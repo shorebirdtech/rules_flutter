@@ -890,7 +890,8 @@ quietly never running. A new workspace needs an entry; `bazel run
 | `ffi_example` | macOS, Linux, Windows | native libraries in each platform's bundle | |
 | `cross_compile_example` | macOS (`build`) | the Mac-to-Linux cross toolchain | Linux: a native build is `hello_world`'s; Windows: no such pair |
 | `macos_example`, `ios_example`, `multi_window_example`, `_overlay_tests/native_assets_synthetic` | macOS | Apple-only features | Linux, Windows: Apple-only |
-| `dual_hub`, `ffi_plugin_example`, `web_example`, `android_example`, `_overlay_tests/link_hooks` | Linux | their platform-neutral subject, once, on the cheapest runner | macOS, Windows: the same again (`android_example` also runs out of memory on Windows) |
+| `dual_hub`, `ffi_plugin_example`, `web_example`, `android_example`, `_overlay_tests/link_hooks` | Linux | their platform-neutral subject, once, on the cheapest runner | macOS, Windows: the same again |
+| `android_example` | Windows (also) | an Android build on a Windows host: `gen_snapshot.exe`, engine-strip path separators, rules_android JVMs without an up-front heap commit (the committed patch) | |
 | `asset_bundle` | macOS | the `flutter_assets/` tree of every platform against `flutter build`'s, once | Linux, Windows: no other host can analyse its iOS targets |
 | `linux_example` | Linux | Tier-2 Linux rules | macOS, Windows: Linux-only |
 | `windows_example` | Windows | Tier-2 Windows rules | macOS, Linux: Windows-only |
@@ -900,12 +901,13 @@ right. After the lock check, the macOS and Linux jobs run exactly
 `bazel test //... --test_output=errors`
 (`build` for `cross_compile_example`), so a target the system cannot build must
 carry `target_compatible_with` and is then skipped, not failed. The Windows job
-adds `--output_user_root=C:/b` (MAX_PATH) and `--build_tag_filters=-no-windows-ci
---test_tag_filters=-no-windows-ci`: tag a target `no-windows-ci` when it builds
-elsewhere but exceeds the runner's memory, as `hello_world`'s and
-`plugin_example`'s Android targets do. Tests on Windows locate their `data`
+adds `--output_user_root=C:/b` (MAX_PATH) and nothing else, so it builds the
+Android targets as the other two do. Tests on Windows locate their `data`
 through `package:runfiles`, never `$TEST_SRCDIR/...` paths, since the runner has
-no runfiles tree.
+no runfiles tree, and run no tool from `PATH` that the image lacks: an APK test
+unpacks with Bazel's zipper (`Apk.fromRunfiles` in `//tools/e2e_testing`, which
+needs the zipper's `data` and `ZIPPER_RUNFILE` `env`), as the Windows image has
+no `unzip`.
 
 Everything tagged `manual` or `exclusive` stays out of `bazel test //...`, so CI
 never runs a test that needs a GUI session, a display adapter, a simulator, an

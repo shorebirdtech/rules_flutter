@@ -18,13 +18,19 @@ class Apk {
   /// (`app.apk`, `glass_app/glass_android.apk`). [prefix] names the temporary
   /// directory.
   ///
-  /// Exits 1 if the APK is missing or does not unzip.
+  /// Unpacks with Bazel's zipper, so the test target needs the `data` and
+  /// `env` that [zipperRunfileEnv] describes. Exits 1 if the APK is missing
+  /// or does not unpack.
   factory Apk.fromRunfiles(
     String workspacePath, {
     String prefix = 'apk_test',
     BundleCheck? check,
   }) => Apk(
-    ExtractedArchive.fromRunfiles(workspacePath, prefix: prefix),
+    ExtractedArchive.fromRunfiles(
+      workspacePath,
+      prefix: prefix,
+      extractor: Extractor.zipper,
+    ),
     check: check,
   );
 

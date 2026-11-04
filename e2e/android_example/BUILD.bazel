@@ -276,14 +276,22 @@ build_test(
 
 dart_test(
     name = "verify_android_apk_test",
-    data = [":app"],
+    data = [
+        ":app",
+        "@bazel_tools//tools/zip:zipper",
+    ],
+    env = {"ZIPPER_RUNFILE": "$(rlocationpath @bazel_tools//tools/zip:zipper)"},
     main = "test/verify_android_apk_test.dart",
     deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 dart_test(
     name = "verify_android_second_app_test",
-    data = [":second_app"],
+    data = [
+        ":second_app",
+        "@bazel_tools//tools/zip:zipper",
+    ],
+    env = {"ZIPPER_RUNFILE": "$(rlocationpath @bazel_tools//tools/zip:zipper)"},
     main = "test/verify_android_second_app_test.dart",
     deps = ["@rules_flutter//tools/e2e_testing"],
 )
@@ -295,7 +303,11 @@ dart_test(
 # debug variant overlay.
 dart_test(
     name = "verify_android_permissions_test",
-    data = [":app"],
+    data = [
+        ":app",
+        "@bazel_tools//tools/zip:zipper",
+    ],
+    env = {"ZIPPER_RUNFILE": "$(rlocationpath @bazel_tools//tools/zip:zipper)"},
     main = "test/verify_android_permissions_test.dart",
     deps = ["@rules_flutter//tools/e2e_testing"],
 )
