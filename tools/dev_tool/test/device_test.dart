@@ -5904,8 +5904,10 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
             isA<StateError>().having(
               (e) => e.message,
               'message',
-              'iproxy forward on 127.0.0.1:4242 did not accept connections '
-                  'within 2s of starting.',
+              startsWith(
+                'iproxy forward on 127.0.0.1:4242 did not accept connections '
+                'within 2s of starting.',
+              ),
             ),
           );
           expect(l.asked.last, const Duration(milliseconds: 2250));

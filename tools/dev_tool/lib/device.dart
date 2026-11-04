@@ -1974,11 +1974,13 @@ Future<void> waitForLocalTcpPort(
     try {
       await probe(port);
       return;
-    } catch (_) {
+    } catch (e) {
       if (clock.now().isAfter(deadline)) {
+        // The last attempt's own words: a refusal, a firewall and a wrong
+        // address all read as "did not accept connections".
         throw StateError(
           '$what on 127.0.0.1:$port did not accept connections within '
-          '${budget.inSeconds}s of starting.',
+          '${budget.inSeconds}s of starting. The last attempt failed with: $e',
         );
       }
       await Future<void>.delayed(delay);

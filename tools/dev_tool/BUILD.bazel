@@ -106,6 +106,13 @@ _FAKES_DEPS = [
 ] + _PATH_DEP
 
 _UNIT_TESTS = {
+    "absorbed_failures_properties_test": {
+        "fakes": True,
+        "deps": [
+            "@dev_tool_deps//:fake_async",
+            "@dev_tool_deps//:logging",
+        ],
+    },
     "agent_command_test": {"fakes": True},
     "app_instance_test": {
         "fakes": True,

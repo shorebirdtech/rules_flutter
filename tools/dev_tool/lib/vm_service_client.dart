@@ -1591,9 +1591,15 @@ class VmServiceClient {
     final Isolate isolate;
     try {
       isolate = await _callService((s) => s.getIsolate(_mainIsolateId!));
-    } catch (_) {
+    } catch (e) {
       // Not answerable, so not an answer. Let the caller's own call fail with
-      // whatever the real problem is rather than inventing a pause.
+      // whatever the real problem is rather than inventing a pause. Recorded,
+      // because that call may fail with a different message than this one.
+      _logger.fine({
+        'message': 'paused_reason_unreadable',
+        'text': 'Could not read whether the app is paused: $e',
+        'error': '$e',
+      });
       return null;
     }
     return switch (isolate.pauseEvent?.kind) {
@@ -1641,6 +1647,7 @@ class VmServiceClient {
     }
     final deadline = DateTime.now().add(timeout);
     var everRead = false;
+    Object? lastFailure;
     while (true) {
       try {
         final isolate = await _callService(
@@ -1650,12 +1657,24 @@ class VmServiceClient {
         if (isolate.pauseEvent?.kind == EventKind.kPauseStart) {
           return StartPausedState.pausedAtStart;
         }
-      } catch (_) {
+      } catch (e) {
         // A connection still settling; the deadline below is the bound, and
         // `everRead` is what keeps a poll that only ever failed from being
-        // reported as an isolate seen running.
+        // reported as an isolate seen running. The latest failure is kept for
+        // the record when the poll ends without a pause.
+        lastFailure = e;
       }
       if (!DateTime.now().isBefore(deadline)) {
+        if (lastFailure != null) {
+          _logger.fine({
+            'message': 'start_pause_unreadable',
+            'text':
+                'Reading whether the app paused at start failed until the '
+                'deadline${everRead ? ' (it was read at least once)' : ''}; '
+                'the last failure: $lastFailure',
+            'error': '$lastFailure',
+          });
+        }
         return everRead ? StartPausedState.running : StartPausedState.unknown;
       }
       await Future<void>.delayed(const Duration(milliseconds: 100));

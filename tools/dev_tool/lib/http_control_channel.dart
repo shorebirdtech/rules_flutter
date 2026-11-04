@@ -14,9 +14,12 @@ import 'package:http_multi_server/http_multi_server.dart';
 import 'command_failure.dart';
 import 'command_runner.dart';
 import 'device.dart';
+import 'logging.dart';
 import 'machine_protocol.dart';
 import 'screen.dart';
 import 'session.dart';
+
+final _logger = Logger('dev_tool.http_control_channel');
 
 /// HTTP server that exposes the dev tool's command dispatch and screenshot
 /// endpoints to external clients.
@@ -256,9 +259,17 @@ class HttpControlChannel {
       request.response.statusCode = _statusFor(e.kind);
       request.response.headers.contentType = ContentType.json;
       request.response.write(json.encode({'error': e.message}));
-    } catch (e) {
+    } catch (e, stack) {
       // Not a refusal — the tool broke. 500 is the honest answer, and the
-      // exception's own text is all there is to say.
+      // exception's own text is all there is to say. Said in the run's log as
+      // well, because the person watching the terminal never sees the response.
+      _logger.warning({
+        'message': 'command_failed_internally',
+        'text': 'The command $method broke the tool and was answered 500: $e',
+        'method': method,
+        'error': '$e',
+        'stack': '$stack',
+      });
       request.response.statusCode = HttpStatus.internalServerError;
       request.response.headers.contentType = ContentType.json;
       request.response.write(json.encode({'error': e.toString()}));

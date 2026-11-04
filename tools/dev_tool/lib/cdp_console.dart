@@ -16,6 +16,9 @@ import 'dart:io';
 import 'package:clock/clock.dart';
 
 import 'app_log.dart';
+import 'logging.dart';
+
+final _logger = Logger('dev_tool.cdp_console');
 
 /// Choose the WebSocket debugger URL for the app's page from a CDP
 /// `/json` target listing.
@@ -200,8 +203,17 @@ void handleCdpConsoleMessage(Map<String, dynamic> message, AppLogStream logs) {
           isError: true,
         );
     }
-  } catch (_) {
-    // A console line is never worth failing a run over.
+  } catch (e) {
+    // A console line is never worth failing a run over, but dropping it is
+    // recorded: output that goes missing from the app log has its reason here.
+    _logger.fine({
+      'message': 'cdp_console_message_dropped',
+      'text':
+          'Dropped a ${message['method']} message from the page console that '
+          'could not be read: $e',
+      'method': '${message['method']}',
+      'error': '$e',
+    });
   }
 }
 
