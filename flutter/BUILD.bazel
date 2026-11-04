@@ -143,6 +143,7 @@ bzl_library(
     srcs = ["ios.bzl"],
     visibility = ["//visibility:public"],
     deps = [
+        "//flutter/private:apple_app",
         "//flutter/private:debug_build",
         "//flutter/private:flutter_ios_application",
         "//flutter/private:flutter_ios_registrant",
@@ -156,6 +157,7 @@ bzl_library(
     srcs = ["macos.bzl"],
     visibility = ["//visibility:public"],
     deps = [
+        "//flutter/private:apple_app",
         "//flutter/private:flutter_macos_application",
         "//flutter/private:flutter_macos_registrant",
         "//flutter/private:flutter_plist_merge",

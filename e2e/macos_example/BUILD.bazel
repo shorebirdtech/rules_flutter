@@ -549,15 +549,21 @@ flutter_macos_app(
 # The build as a whole
 # =============================================================================
 
-# Control for the tests that an app is skipped where it is not for: the same
-# app analyses where it is compatible.
+# Property: a `flutter_macos_app` is skipped, not failed, for a platform it
+# declares it is not for, and a constraint the user declares on it is kept.
+# Each such test passes by being skipped (see `skipped_test`); the control is
+# the same app where it is compatible, and passes by analysing.
 analyses_test(
     name = "macos_app_control_test",
     target = ":app",
 )
 
-# Property: a constraint the user declares on the app is kept. This app is for
-# Windows, so it is skipped on the Mac that builds it.
+skipped_test(
+    name = "macos_app_skipped_on_linux_test",
+    on_linux = True,
+    target = ":app",
+)
+
 flutter_macos_app(
     name = "app_windows_only",
     app_name = "Windows Only",

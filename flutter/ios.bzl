@@ -62,6 +62,7 @@ load("@rules_apple//apple:apple.bzl", "apple_dynamic_framework_import", "apple_d
 load("@rules_apple//apple:ios.bzl", "ios_application")
 load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
 load("@rules_swift//swift:swift.bzl", "swift_library")
+load("//flutter/private:apple_app.bzl", "flutter_apple_app")
 load("//flutter/private:apple_engine.bzl", _IOS_ENGINE_XCFRAMEWORK = "IOS_ENGINE_XCFRAMEWORK")
 load("//flutter/private:constants.bzl", _IOS_MINIMUM_OS_VERSION = "IOS_MINIMUM_OS_VERSION")
 load("//flutter/private:debug_build.bzl", _debug_build = "debug_build")
@@ -417,7 +418,11 @@ def flutter_ios_app(
             **kwargs. For App Intents, pass the library here *and* to
             rules_apple's `app_intents` (which passes through **kwargs):
             `app_intents` only extracts the metadata, it does not link.
-        **kwargs: Passed through to ios_application. The macro sets
+        **kwargs: Passed through to ios_application, except `target_compatible_with`
+            and `visibility`, which are the named target's. The app is
+            compatible with macOS (which builds it for iOS) and iOS only,
+            whatever `target_compatible_with` adds, so `bazel build //...`
+            skips it on any other platform. The macro sets
             `bundle_id`, `bundle_name`, `entitlements`, `families`,
             `minimum_os_version`, `infoplists`, `version`,
             `launch_storyboard`, `resources`, `provisioning_profile`,
@@ -437,10 +442,12 @@ def flutter_ios_app(
 
     module_name = runner_module_name("flutter_ios_app", name)
 
-    # target_compatible_with doesn't work on ios_application (it transitions to
-    # iOS platform, so macOS constraints would fail). Users should put
-    # target_compatible_with on build_test instead.
-    kwargs.pop("target_compatible_with", None)
+    # `target_compatible_with` and what decides who can see the app belong to
+    # the target the user names (see `flutter_apple_app`), not to the
+    # `ios_application` behind it.
+    target_compatible_with = kwargs.pop("target_compatible_with", [])
+    visibility = kwargs.pop("visibility", None)
+    testonly = kwargs.get("testonly", False)
 
     # Auto-discover ios/Runner/Runner.entitlements if the user hasn't
     # passed one. Its absence is convention-matching (no-capabilities
@@ -644,9 +651,9 @@ def flutter_ios_app(
         tags = tags,
     )
 
-    # 11. Final ios_application.
+    # 11. Final ios_application, behind the target the user names.
     ios_application(
-        name = name,
+        name = "__%s_app" % name,
         bundle_id = bundle_id,
         bundle_name = display_name,
         entitlements = entitlements,
@@ -668,6 +675,22 @@ def flutter_ios_app(
         ],
         tags = tags,
         **kwargs
+    )
+
+    # 12. The target the user names: carries the compatibility constraints. An
+    # iOS app is for a Mac, and built for iOS from there; `ios` is accepted too
+    # for a build that already names an iOS platform.
+    flutter_apple_app(
+        name = name,
+        app = "__%s_app" % name,
+        tags = tags,
+        target_compatible_with = target_compatible_with + select({
+            "@platforms//os:ios": [],
+            "@platforms//os:macos": [],
+            "//conditions:default": ["@platforms//:incompatible"],
+        }),
+        testonly = testonly,
+        visibility = visibility,
     )
 
 def flutter_ios_simulator_build(name, targets, **kwargs):

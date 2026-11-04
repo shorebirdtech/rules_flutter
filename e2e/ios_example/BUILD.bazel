@@ -17,7 +17,7 @@ load(
     "flutter_ios_simulator_build",
     "flutter_ios_simulator_build_test",
 )
-load("@rules_flutter//tools/e2e_testing:apple_analysis_test.bzl", "analyses_test", "command_line_tests")
+load("@rules_flutter//tools/e2e_testing:apple_analysis_test.bzl", "analyses_test", "command_line_tests", "skipped_test")
 load("@rules_flutter//tools/e2e_testing:apple_release_build.bzl", "apple_release_build")
 load("@rules_swift//swift:swift.bzl", "swift_library")
 load(":simulator_mode_test.bzl", "simulator_fastbuild_refused_test")
@@ -482,8 +482,11 @@ test_suite(
     ),
 )
 
-# Control for the tests that an app is skipped where it is not for: the same
-# app analyses where it is compatible.
+# Property: a `flutter_ios_app` that declares itself for one platform is
+# skipped for another, not failed, and what the user declares on it is kept.
+#
+# Each test passes by being skipped (see `skipped_test`); `..._control_test`
+# is the same app where it is compatible, and passes by analysing.
 flutter_ios_app(
     name = "app_macos_only",
     application = ":app_flutter",
@@ -491,7 +494,31 @@ flutter_ios_app(
     target_compatible_with = ["@platforms//os:macos"],
 )
 
+flutter_ios_app(
+    name = "app_windows_only",
+    application = ":app_flutter",
+    bundle_id = "com.rulesflutter.ios.example.windowsonly",
+    target_compatible_with = ["@platforms//os:windows"],
+)
+
 analyses_test(
     name = "ios_app_macos_only_control_test",
     target = ":app_macos_only",
+)
+
+skipped_test(
+    name = "ios_app_user_constraint_skipped_test",
+    target = ":app_windows_only",
+)
+
+skipped_test(
+    name = "ios_app_macos_only_skipped_on_linux_test",
+    on_linux = True,
+    target = ":app_macos_only",
+)
+
+skipped_test(
+    name = "ios_app_skipped_on_linux_test",
+    on_linux = True,
+    target = ":app",
 )

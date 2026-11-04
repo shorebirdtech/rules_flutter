@@ -62,6 +62,7 @@ load("@rules_apple//apple:apple.bzl", "apple_dynamic_framework_import")
 load("@rules_apple//apple:macos.bzl", "macos_application")
 load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
 load("@rules_swift//swift:swift.bzl", "swift_library")
+load("//flutter/private:apple_app.bzl", "flutter_apple_app")
 load("//flutter/private:apple_engine.bzl", _MACOS_ENGINE_FRAMEWORK = "MACOS_ENGINE_FRAMEWORK")
 load("//flutter/private:constants.bzl", _MACOS_MINIMUM_OS_VERSION = "MACOS_MINIMUM_OS_VERSION")
 load("//flutter/private:flutter_apple_plugin_library.bzl", _flutter_apple_plugin_library_macro = "flutter_apple_plugin_library")
@@ -350,11 +351,22 @@ def flutter_macos_app(
             **kwargs. For App Intents, pass the library here *and* to
             rules_apple's `app_intents` (which passes through **kwargs):
             `app_intents` only extracts the metadata, it does not link.
-        **kwargs: Passed through to macos_application. The macro sets
-            `app_icons` itself, so pass the named parameter instead.
+        **kwargs: Passed through to macos_application, except `target_compatible_with`
+            and `visibility`, which are the named target's. The app is
+            compatible with macOS only, whatever `target_compatible_with`
+            adds, so `bazel build //...` skips it on any other platform. The
+            macro sets `app_icons` itself, so pass the named parameter
+            instead.
     """
     display_name = app_name or name
     tags = kwargs.pop("tags", ["manual"])
+
+    # `target_compatible_with` and what decides who can see the app belong to
+    # the target the user names (see `flutter_apple_app`), not to the
+    # `macos_application` behind it.
+    target_compatible_with = kwargs.pop("target_compatible_with", [])
+    visibility = kwargs.pop("visibility", None)
+    testonly = kwargs.get("testonly", False)
     validate_minimum_os_version(
         "flutter_macos_app",
         name,
@@ -596,9 +608,9 @@ def flutter_macos_app(
     }
     flutter_contents.update(additional_contents)
 
-    # 10. Final macos_application.
+    # 10. Final macos_application, behind the target the user names.
     macos_application(
-        name = name,
+        name = "__%s_app" % name,
         bundle_id = bundle_id,
         bundle_name = display_name,
         minimum_os_version = minimum_os_version,
@@ -611,4 +623,18 @@ def flutter_macos_app(
         deps = ["__%s_runner" % name],
         tags = tags,
         **kwargs
+    )
+
+    # 11. The target the user names: carries the compatibility constraints (see
+    # `flutter_apple_app`). A macOS app is for a Mac.
+    flutter_apple_app(
+        name = name,
+        app = "__%s_app" % name,
+        tags = tags,
+        target_compatible_with = target_compatible_with + select({
+            "@platforms//os:macos": [],
+            "//conditions:default": ["@platforms//:incompatible"],
+        }),
+        testonly = testonly,
+        visibility = visibility,
     )

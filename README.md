@@ -421,7 +421,7 @@ flutter_macos_app(
 | `app_icons` | Defaults to the `AppIcon.appiconset` in `macos/Runner/Assets.xcassets`. See [App icons](#app-icons). |
 | `runner_deps` | `swift_library` targets linked into the runner. See [App Intents](#app-intents). |
 
-The output is a `.app` bundle containing `FlutterMacOS.framework`, `App.framework`, and `flutter_assets/`.
+The output is a `.app` bundle containing `FlutterMacOS.framework`, `App.framework`, and `flutter_assets/`. The target you name is a thin one in front of `macos_application`: `bazel build //...` skips the app on any platform but macOS (a Linux CI runner), and a `target_compatible_with` you pass is kept beside that. The archive is `<name>.zip`.
 
 <details>
 <summary>Composable rules</summary>
@@ -504,7 +504,7 @@ flutter_ios_app(
 | `app_icons` | Defaults to the `AppIcon.appiconset` in `ios/Runner/Assets.xcassets`. See [App icons](#app-icons). |
 | `runner_deps` | `swift_library` targets linked into the runner. See [App Intents](#app-intents). |
 
-`rules_apple`'s `ios_application` handles the transition to iOS arm64.
+`rules_apple`'s `ios_application` handles the transition to iOS arm64. The target you name is a thin one in front of it that keeps the platform of the build: `bazel build //...` skips the app on a platform that is neither macOS nor iOS (a Linux CI runner), and a `target_compatible_with` you pass is kept beside that. The archive is `<name>.ipa`.
 
 <details>
 <summary>Composable rules</summary>
