@@ -407,6 +407,54 @@ def _library_spoke_carries_resources_test_impl(ctx):
 
 library_spoke_carries_resources_test = unittest.make(_library_spoke_carries_resources_test_impl)
 
+def _file_names_are_written_as_string_literals_test_impl(ctx):
+    """A file name never becomes BUILD syntax: it is quoted, whatever it holds.
+
+    A name comes from a package's pubspec (or its directory listing). Spliced
+    into the BUILD file between bare quotes, `a"+fail("x")+".txt` would end the
+    string and run as code in the spoke's repository.
+    """
+    env = unittest.begin(ctx)
+
+    name = 'assets/a"+fail("x")+".txt'
+    for content in [
+        make_flutter_library_build_content(
+            name = "p",
+            deps = [],
+            language_version = "3.4",
+            code_assets = [],
+            has_unreplaced_hook = "",
+            fonts_json_str = "",
+            font_files = {":" + name: name},
+            pkg_assets = {":" + name: name},
+            pkg_shaders = {":" + name: name},
+        ),
+        make_flutter_plugin_build_content(
+            name = "p",
+            deps = [],
+            language_version = "3.4",
+            code_assets = [],
+            has_unreplaced_hook = "",
+            plugin_platforms_json = "{}",
+            apple_macos_srcs_dirs = ["macos/Classes"],
+            apple_ios_srcs_dirs = [],
+            apple_macos_include_dirs = [],
+            apple_ios_include_dirs = [],
+            apple_macos_privacy_manifests = [name],
+            apple_ios_privacy_manifests = [],
+            linux_src_dir = "",
+            windows_src_dir = "",
+            pkg_assets = {":" + name: name},
+        ),
+    ]:
+        asserts.true(env, repr(":" + name) in content or repr(name) in content, content)
+        asserts.false(env, '"' + name in content, content)
+    return unittest.end(env)
+
+file_names_are_written_as_string_literals_test = unittest.make(
+    _file_names_are_written_as_string_literals_test_impl,
+)
+
 def _spoke_with_shaders_declares_their_includes_test_impl(ctx):
     """A spoke with shaders lists its GLSL as what they may `#include`.
 
@@ -625,5 +673,6 @@ def flutter_pub_package_test_suite(name):
         empty_subpackage_test,
         plugin_spoke_carries_resources_test,
         library_spoke_carries_resources_test,
+        file_names_are_written_as_string_literals_test,
         spoke_with_shaders_declares_their_includes_test,
     )

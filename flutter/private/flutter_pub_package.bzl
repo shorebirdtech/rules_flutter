@@ -247,6 +247,36 @@ def parse_android_manifest_package(content):
                 return tag[idx + len(marker):close]
     return ""
 
+def _java_package_problem(name):
+    """Why `name` is not a Java package name, or "".
+
+    The namespace of a plugin is written into its generated `BuildConfig.java`,
+    the genrule that emits it and the library's `custom_package`. It is read
+    from the package's Gradle script or manifest, so it has to be a plain
+    dotted name of identifiers before it goes anywhere near them.
+    """
+    for part in name.split("."):
+        if not part:
+            return "has an empty segment"
+        for i, c in enumerate(part.elems()):
+            letter = ("a" <= c and c <= "z") or ("A" <= c and c <= "Z") or c == "_"
+            digit = "0" <= c and c <= "9"
+            if not (letter or (digit and i > 0)):
+                return "has the character {} where a Java identifier has none".format(repr(c))
+    return ""
+
+def _checked_java_package(package, source, name):
+    """Return the namespace `name`, or fail naming the package and its source."""
+    problem = _java_package_problem(name) if name else ""
+    if problem:
+        fail("package {}: the Android namespace {} (from {}) is not a Java package name: it {}.".format(
+            package,
+            repr(name),
+            source,
+            problem,
+        ))
+    return name
+
 def _detect_android_namespace(ctx):
     """Resolve the plugin's Android namespace the way AGP does.
 
@@ -379,7 +409,11 @@ def _detect_consumer_proguard_specs(ctx):
         if gradle_path.exists:
             for relpath in _parse_consumer_proguard_files(ctx.read(gradle_path)):
                 if ctx.path("android/" + relpath).exists:
-                    paths.append(relpath)
+                    paths.append(_checked_file_name(
+                        ctx.attr.package_name,
+                        "consumerProguardFiles file",
+                        relpath,
+                    ))
     return paths
 
 def _read_plugin_maven_deps(ctx):
@@ -512,6 +546,42 @@ def _readdir_files_recursive(ctx, rel_dir):
                     out.append(rel)
     return out
 
+def _file_name_problem(path):
+    """Why `path` cannot be the name of a file in a BUILD file, or "".
+
+    Every file a package lists (assets, fonts, shaders, and the files under a
+    listed directory) becomes a label in the spoke's generated BUILD file, so a
+    name has to be one a label can carry. A quote or a `$` is fine: the name is
+    written as a string literal (`repr`), never spliced into the BUILD file's
+    text. A colon, a backslash, a control character and a path that leaves the
+    package or is not normalised are not.
+    """
+    if not path:
+        return "is empty"
+    for c in path.elems():
+        if c == ":":
+            return "contains a colon, which a Bazel label cannot"
+        if c == "\\":
+            return "contains a backslash, which a Bazel label cannot"
+        if c < " " or c == "\177":
+            return "contains a control character"
+    for segment in path.split("/"):
+        if segment in ("", ".", ".."):
+            return "is not a normalised path inside the package (it has an empty, `.` or `..` segment)"
+    return ""
+
+def _checked_file_name(package, what, path):
+    """Return `path`, or fail naming the package and the file it cannot hold."""
+    problem = _file_name_problem(path)
+    if problem:
+        fail("package {}: the {} {} {}, so rules_flutter cannot put it in the package's BUILD file.".format(
+            package,
+            what,
+            repr(path),
+            problem,
+        ))
+    return path
+
 def _encode_fonts_json(parsed_fonts):
     """Convert parse_flutter_assets_block().fonts to the JSON shape flutter_library expects."""
     fonts_for_json = []
@@ -527,15 +597,16 @@ def _encode_fonts_json(parsed_fonts):
         fonts_for_json.append({"family": entry.family, "fonts": fonts_list})
     return json.encode(fonts_for_json) if fonts_for_json else ""
 
-def _build_font_files_dict(parsed_fonts):
+def _build_font_files_dict(package, parsed_fonts):
     """Build the `font_files` label_keyed_string_dict literal — {":path": "path", ...}."""
     out = {}
     for entry in parsed_fonts:
         for font in entry.fonts:
-            out[":" + font.asset] = font.asset
+            path = _checked_file_name(package, "font file", font.asset)
+            out[":" + path] = path
     return out
 
-def _build_pkg_assets_dict(ctx, parsed_assets):
+def _build_pkg_assets_dict(ctx, package, parsed_assets):
     """Build the `pkg_assets` dict, expanding directory entries.
 
     Flutter's `flutter.assets:` accepts paths and trailing-slash directory
@@ -547,15 +618,18 @@ def _build_pkg_assets_dict(ctx, parsed_assets):
         path = entry.path
         if path.endswith("/"):
             for f in _readdir_files_recursive(ctx, path.rstrip("/")):
+                _checked_file_name(package, "asset file", f)
                 out[":" + f] = f
         else:
+            _checked_file_name(package, "asset file", path)
             out[":" + path] = path
     return out
 
-def _build_pkg_shaders_dict(parsed_shaders):
+def _build_pkg_shaders_dict(package, parsed_shaders):
     """Build the `pkg_shaders` dict — same shape as pkg_assets, no directories."""
     out = {}
     for entry in parsed_shaders:
+        _checked_file_name(package, "shader file", entry.path)
         out[":" + entry.path] = entry.path
     return out
 
@@ -564,7 +638,7 @@ def _format_label_dict_literal(d, indent = "        "):
     if not d:
         return "{}"
     keys = sorted(d.keys())
-    lines = ['{indent}"{k}": "{v}",'.format(indent = indent, k = k, v = d[k]) for k in keys]
+    lines = ["{indent}{k}: {v},".format(indent = indent, k = repr(k), v = repr(d[k])) for k in keys]
     return "{\n" + "\n".join(lines) + "\n" + indent[:-4] + "}"
 
 # `allow_empty`: most packages ship no shader includes.
@@ -599,10 +673,10 @@ def _format_code_asset_attrs(code_assets, has_unreplaced_hook):
     """
     block = ""
     if code_assets:
-        lines = ['        "{}",'.format(a) for a in code_assets]
+        lines = ["        {},".format(repr(a)) for a in code_assets]
         block += "    code_assets = [\n{}\n    ],\n".format("\n".join(lines))
     if has_unreplaced_hook:
-        block += '    has_unreplaced_hook = "{}",\n'.format(has_unreplaced_hook)
+        block += "    has_unreplaced_hook = {},\n".format(repr(has_unreplaced_hook))
     return block
 
 # The non-Dart remainder of `lib/`, emitted verbatim by both spoke
@@ -902,8 +976,8 @@ flutter_windows_plugin_library(
     # the per-platform bundle.
     apple_privacy_files_arg = ""
     if apple_macos_privacy_manifests or apple_ios_privacy_manifests:
-        macos_lines = "\n".join(['            "{}",'.format(p) for p in apple_macos_privacy_manifests])
-        ios_lines = "\n".join(['            "{}",'.format(p) for p in apple_ios_privacy_manifests])
+        macos_lines = "\n".join(["            {},".format(repr(p)) for p in apple_macos_privacy_manifests])
+        ios_lines = "\n".join(["            {},".format(repr(p)) for p in apple_ios_privacy_manifests])
         apple_privacy_files_arg = """    apple_privacy_files = select({{
         "@platforms//os:macos": [
 {macos_lines}
@@ -1069,13 +1143,16 @@ kt_android_library(
 
         # `allow_empty`: a plugin's Android directory can hold resources and
         # no code.
-        srcs_attr = 'glob(["{d}/**/*.kt", "{d}/**/*.java"], allow_empty = True)'.format(d = sub_src)
+        srcs_attr = "glob([{kt}, {java}], allow_empty = True)".format(
+            kt = repr(sub_src + "/**/*.kt"),
+            java = repr(sub_src + "/**/*.java"),
+        )
     else:
         srcs_attr = "[]"
 
     custom_package_arg = ""
     if java_package:
-        custom_package_arg = '    custom_package = "%s",\n' % java_package
+        custom_package_arg = "    custom_package = %s,\n" % repr(java_package)
 
     # `manifest = "..."` lets `android_binary`'s `ManifestMerger2` pick
     # up the plugin's `<activity>` / `<service>` / `<uses-permission>`
@@ -1098,7 +1175,7 @@ kt_android_library(
         sub_manifest = android_manifest
         if sub_manifest.startswith("android/"):
             sub_manifest = sub_manifest[len("android/"):]
-        manifest_arg = '    manifest = "%s",\n    exports_manifest = 1,\n' % sub_manifest
+        manifest_arg = "    manifest = %s,\n    exports_manifest = 1,\n" % repr(sub_manifest)
     elif has_resources:
         manifest_arg = '    manifest = ":_manifest",\n'
         synthesized_manifest = """
@@ -1126,7 +1203,7 @@ genrule(
     # sub-package, which is where the spoke lives in our layout.
     proguard_specs_arg = ""
     if consumer_proguard_specs:
-        spec_lines = ", ".join(['"%s"' % path for path in consumer_proguard_specs])
+        spec_lines = ", ".join([repr(path) for path in consumer_proguard_specs])
         proguard_specs_arg = "    proguard_specs = [%s],\n" % spec_lines
 
     # Base deps every plugin spoke gets: the engine (which carries the
@@ -1546,9 +1623,9 @@ def _flutter_pub_package_impl(ctx):
     # Pre-compute the pub-asset attr inputs once. Used by either branch
     # below (plugin vs library).
     fonts_json_str = _encode_fonts_json(asset_block.fonts)
-    font_files = _build_font_files_dict(asset_block.fonts)
-    pkg_assets_dict = _build_pkg_assets_dict(ctx, asset_block.assets)
-    pkg_shaders_dict = _build_pkg_shaders_dict(asset_block.shaders)
+    font_files = _build_font_files_dict(ctx.attr.package_name, asset_block.fonts)
+    pkg_assets_dict = _build_pkg_assets_dict(ctx, ctx.attr.package_name, asset_block.assets)
+    pkg_shaders_dict = _build_pkg_shaders_dict(ctx.attr.package_name, asset_block.shaders)
     has_asset_contributions = (
         bool(asset_block.fonts) or bool(asset_block.assets) or bool(asset_block.shaders)
     )
@@ -1700,10 +1777,14 @@ def _flutter_pub_package_impl(ctx):
             # `package` field locates the plugin class for the registrant;
             # it only stands in for the namespace when the plugin declares
             # none of its own.
-            android_java_package = (
-                _detect_android_namespace(ctx) or
-                android_info.get("package", "") or
-                ""
+            android_java_package = _checked_java_package(
+                ctx.attr.package_name,
+                "android/build.gradle(.kts), android/src/main/AndroidManifest.xml or pubspec.yaml",
+                (
+                    _detect_android_namespace(ctx) or
+                    android_info.get("package", "") or
+                    ""
+                ),
             )
             if android_src_dir or android_has_resources:
                 android_gradle_maven = _read_plugin_maven_deps(ctx)
