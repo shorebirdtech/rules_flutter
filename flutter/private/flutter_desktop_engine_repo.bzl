@@ -9,6 +9,7 @@ filegroup is named for the mode (`engine_release_library`,
 `engine_debug_library` or `engine_profile_library`).
 """
 
+load("//flutter/private:pinned.bzl", "pinned")
 load(":artifact_urls.bzl", "cpp_client_wrapper_artifact_path", "desktop_engine_artifact_path", "engine_artifact_url")
 load(":engine_helpers.bzl", "engine_filegroup_for_os", "extract_macos_inner_framework")
 
@@ -24,7 +25,7 @@ def _flutter_desktop_engine_repo_impl(repository_ctx):
 
     repository_ctx.download_and_extract(
         url = engine_artifact_url(engine_revision, artifact_path),
-        sha256 = repository_ctx.attr.sha256 if repository_ctx.attr.sha256 else "",
+        sha256 = pinned(artifact_path, repository_ctx.attr.sha256),
         output = "engine",
     )
 
@@ -36,7 +37,7 @@ def _flutter_desktop_engine_repo_impl(repository_ctx):
     if target_os == "windows":
         repository_ctx.download_and_extract(
             url = engine_artifact_url(engine_revision, cpp_client_wrapper_artifact_path("windows-" + target_arch)),
-            sha256 = repository_ctx.attr.cpp_wrapper_sha256,
+            sha256 = pinned(cpp_client_wrapper_artifact_path("windows-" + target_arch), repository_ctx.attr.cpp_wrapper_sha256),
             output = "cpp-client-wrapper",
         )
 

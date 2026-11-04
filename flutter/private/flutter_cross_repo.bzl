@@ -8,6 +8,7 @@ For iOS, the gen_snapshot is bundled inside the iOS engine artifact
 engine repo's gen_snapshot_arm64 instead of downloading a separate one.
 """
 
+load("//flutter/private:pinned.bzl", "pinned")
 load(":artifact_urls.bzl", "engine_artifact_url", "gen_snapshot_cross_artifact_path")
 load(":engine_helpers.bzl", "dart_binary_name", "dartaotruntime_binary_name", "gen_snapshot_binary_name", "gen_snapshot_host_platform", "platform_to_arch", "platform_to_os")
 
@@ -29,7 +30,7 @@ def _flutter_cross_compilation_repo_impl(repository_ctx):
         artifact_path = gen_snapshot_cross_artifact_path(target_platform, "release", artifact_host)
         repository_ctx.download_and_extract(
             url = engine_artifact_url(engine_revision, artifact_path),
-            sha256 = repository_ctx.attr.gen_snapshot_sha256 if repository_ctx.attr.gen_snapshot_sha256 else "",
+            sha256 = pinned(artifact_path, repository_ctx.attr.gen_snapshot_sha256),
         )
 
         # exports_files does not check that the file exists, so a name that

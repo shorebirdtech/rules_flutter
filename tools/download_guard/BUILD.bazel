@@ -1,11 +1,30 @@
 load("@rules_dart//dart:defs.bzl", "dart_test")
 
 # Guards against a repository rule downloading bytes it has not checked against
-# a pinned digest.
+# a pinned digest. See flutter_sources_test.dart for the property.
 dart_test(
     name = "download_sites_test",
     size = "small",
     srcs = ["download_sites.dart"],
     main = "test/download_sites_test.dart",
     deps = ["@dev_tool_deps//:test"],
+)
+
+dart_test(
+    name = "flutter_sources_test",
+    size = "small",
+    srcs = ["download_sites.dart"],
+    data = [
+        "//flutter:bzl_sources",
+        "//flutter/private:bzl_sources",
+    ],
+    env = {
+        "BZL_SOURCES": "$(rlocationpaths //flutter:bzl_sources) $(rlocationpaths //flutter/private:bzl_sources)",
+        "RUNFILES_SOURCE_REPO": "",
+    },
+    main = "test/flutter_sources_test.dart",
+    deps = [
+        "@dev_tool_deps//:test",
+        "@rules_dart//dart/runfiles",
+    ],
 )

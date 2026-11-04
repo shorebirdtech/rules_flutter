@@ -19,6 +19,7 @@ load("//flutter/private:flutter_profile_repo.bzl", "flutter_profile_repo")
 load("//flutter/private:flutter_sky_engine_repo.bzl", "flutter_sky_engine_repo")
 load("//flutter/private:flutter_web_sdk_repo.bzl", "flutter_web_sdk_repo")
 load("//flutter/private:libraries_spec.bzl", "flutter_libraries_spec")
+load("//flutter/private:pinned.bzl", "pinned")
 load("//flutter/private:toolchains_repo.bzl", "CROSS_COMPILATION_PAIRS", "DESKTOP_CROSS_PAIRS", "HOST_PLATFORMS", "flutter_toolchains_repo")
 load("//flutter/private:versions.bzl", "ARTIFACT_CHECKSUMS", "FLUTTER_VERSIONS", "LINUX_SYSROOT_CHECKSUMS", "flutter_source_sha256")
 
@@ -50,7 +51,7 @@ def _flutter_engine_artifacts_impl(repository_ctx):
     dart_sdk_path = dart_sdk_artifact_path(platform)
     repository_ctx.download_and_extract(
         url = engine_artifact_url(engine_revision, dart_sdk_path),
-        sha256 = checksums.get(dart_sdk_path, ""),
+        sha256 = pinned(dart_sdk_path, checksums.get(dart_sdk_path, "")),
         stripPrefix = "dart-sdk",
         output = "dart-sdk",
     )
@@ -61,7 +62,7 @@ def _flutter_engine_artifacts_impl(repository_ctx):
     host_tools_path = host_artifacts_path(platform)
     repository_ctx.download_and_extract(
         url = engine_artifact_url(engine_revision, host_tools_path),
-        sha256 = checksums.get(host_tools_path, ""),
+        sha256 = pinned(host_tools_path, checksums.get(host_tools_path, "")),
         output = "host-tools",
     )
 
@@ -75,21 +76,21 @@ def _flutter_engine_artifacts_impl(repository_ctx):
         release_tools_path = host_artifacts_path(platform, mode = "release")
         repository_ctx.download_and_extract(
             url = engine_artifact_url(engine_revision, release_tools_path),
-            sha256 = checksums.get(release_tools_path, ""),
+            sha256 = pinned(release_tools_path, checksums.get(release_tools_path, "")),
             output = "host-tools-release",
         )
 
     # 4. Download the patched SDK (debug platform kernel dills).
     repository_ctx.download_and_extract(
         url = engine_artifact_url(engine_revision, "flutter_patched_sdk.zip"),
-        sha256 = checksums.get("flutter_patched_sdk.zip", ""),
+        sha256 = pinned("flutter_patched_sdk.zip", checksums.get("flutter_patched_sdk.zip", "")),
         output = "patched-sdk",
     )
 
     # 5. Download the product patched SDK (release platform kernel dills).
     repository_ctx.download_and_extract(
         url = engine_artifact_url(engine_revision, "flutter_patched_sdk_product.zip"),
-        sha256 = checksums.get("flutter_patched_sdk_product.zip", ""),
+        sha256 = pinned("flutter_patched_sdk_product.zip", checksums.get("flutter_patched_sdk_product.zip", "")),
         output = "patched-sdk-product",
     )
 
@@ -107,7 +108,7 @@ def _flutter_engine_artifacts_impl(repository_ctx):
     if engine_release_path:
         repository_ctx.download_and_extract(
             url = engine_artifact_url(engine_revision, engine_release_path),
-            sha256 = checksums.get(engine_release_path, ""),
+            sha256 = pinned(engine_release_path, checksums.get(engine_release_path, "")),
             output = "engine",
         )
 
@@ -123,7 +124,7 @@ def _flutter_engine_artifacts_impl(repository_ctx):
         if engine_debug_path:
             repository_ctx.download_and_extract(
                 url = engine_artifact_url(engine_revision, engine_debug_path),
-                sha256 = checksums.get(engine_debug_path, ""),
+                sha256 = pinned(engine_debug_path, checksums.get(engine_debug_path, "")),
                 output = "engine-debug",
             )
 
@@ -139,7 +140,7 @@ def _flutter_engine_artifacts_impl(repository_ctx):
         cpp_wrapper_path = cpp_client_wrapper_artifact_path(platform)
         repository_ctx.download_and_extract(
             url = engine_artifact_url(engine_revision, cpp_wrapper_path),
-            sha256 = checksums.get(cpp_wrapper_path, ""),
+            sha256 = pinned(cpp_wrapper_path, checksums.get(cpp_wrapper_path, "")),
             output = "cpp-client-wrapper",
         )
 
@@ -147,7 +148,7 @@ def _flutter_engine_artifacts_impl(repository_ctx):
     font_subset_path = "{platform}/font-subset.zip".format(platform = platform)
     repository_ctx.download_and_extract(
         url = engine_artifact_url(engine_revision, font_subset_path),
-        sha256 = checksums.get(font_subset_path, ""),
+        sha256 = pinned(font_subset_path, checksums.get(font_subset_path, "")),
         output = "font-subset-tools",
     )
 
@@ -155,7 +156,7 @@ def _flutter_engine_artifacts_impl(repository_ctx):
     material_fonts_url = meta.material_fonts_url
     repository_ctx.download_and_extract(
         url = "https://storage.googleapis.com/" + material_fonts_url,
-        sha256 = checksums.get("material_fonts.zip", ""),
+        sha256 = pinned("material_fonts.zip", checksums.get("material_fonts.zip", "")),
         output = "material-fonts",
     )
 
@@ -531,6 +532,7 @@ def flutter_register_toolchains(name, **kwargs):
         name = name + "_web_sdk",
         engine_revision = meta.engine_revision,
         sha256 = checksums.get("flutter-web-sdk.zip", ""),
+        dart_sdk_sha256s = {h: checksums.get(dart_sdk_artifact_path(h), "") for h in HOST_PLATFORMS},
     )
 
     # sky_engine (lazy — only fetched when Flutter code is analyzed). Nothing

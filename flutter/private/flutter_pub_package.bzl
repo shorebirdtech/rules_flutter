@@ -31,6 +31,7 @@ load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version", "m
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_deps", "parse_pubspec_sdk_constraint")
 load("//flutter/private:android_plugin_maven.bzl", "gradle_statements", "parse_gradle_maven_dependencies")
 load("//flutter/private:flutter_pubspec.bzl", "parse_flutter_assets_block", "parse_flutter_plugin_block")
+load("//flutter/private:pinned.bzl", "pinned")
 
 # Apple source extensions we sweep into the per-platform plugin library.
 _APPLE_SRC_EXTENSIONS = ("swift", "m", "mm", "h")
@@ -1580,7 +1581,7 @@ def _flutter_pub_package_impl(ctx):
     ctx.download(
         url = url,
         output = "_archive.tar.gz",
-        sha256 = ctx.attr.sha256 if ctx.attr.sha256 else "",
+        sha256 = pinned("{} {}".format(ctx.attr.package_name, ctx.attr.version), ctx.attr.sha256),
     )
     extract = ctx.execute(["tar", "-xzf", "_archive.tar.gz"])
     if extract.return_code != 0:

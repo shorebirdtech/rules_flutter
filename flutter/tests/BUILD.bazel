@@ -34,6 +34,7 @@ load(":native_assets_test.bzl", "bridge_probe", "native_assets_test_suite")
 load(":native_hot_patch_test.bzl", "native_hot_patch_test_suite")
 load(":native_sources_test.bzl", "native_sources_test_suite")
 load(":path_mapping_test.bzl", "path_mapping_test_suite")
+load(":pinned_test.bzl", "pinned_test_suite")
 load(":platform_bundle_test.bzl", "platform_bundle_test_suite")
 load(":plist_merge_test.bzl", "plist_merge_test_suite")
 load(":plugin_registrant_test.bzl", "plugin_registrant_test_suite")
@@ -52,6 +53,8 @@ load(":widget_creation_flag_test.bzl", "widget_creation_flag_test_suite")
 versions_test_suite(name = "versions_test")
 
 download_digests_test_suite(name = "download_digests_test")
+
+pinned_test_suite(name = "pinned_test")
 
 artifact_urls_test_suite(name = "artifact_urls_test")
 

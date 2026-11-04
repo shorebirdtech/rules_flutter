@@ -27,8 +27,26 @@ import 'digest_probe.dart';
 void main() {
   late Probe fetcher;
 
-  final archive = zipOf({'sky_engine/lib/a.dart': '// a', 'a.txt': 'a'});
+  // `gen_snapshot` is there because the cross-compilation repo checks that the
+  // archive it unpacked holds one.
+  final archive = zipOf({
+    'sky_engine/lib/a.dart': '// a',
+    'a.txt': 'a',
+    'gen_snapshot': '',
+  });
   final digest = sha256Hex(archive);
+
+  // The web SDK repo also fetches the Dart SDK of whichever host it runs on,
+  // and strips its leading `dart-sdk/`.
+  final dartSdk = zipOf({'dart-sdk/version': '1'});
+  final dartSdkDigest = sha256Hex(dartSdk);
+  const hostPlatforms = [
+    'darwin-arm64',
+    'darwin-x64',
+    'linux-arm64',
+    'linux-x64',
+    'windows-x64',
+  ];
   final wrongDigest = '0' * 64;
   const revision = fakeEngineRevision;
 
@@ -42,8 +60,10 @@ void main() {
       'windows-x64-flutter.zip',
       'flutter-cpp-client-wrapper.zip',
       'darwin-x64.zip',
+      'flutter-web-sdk.zip',
     ])
       name: archive,
+    for (final host in hostPlatforms) 'dart-sdk-$host.zip': dartSdk,
   };
 
   final pubArchive = tarGzOf({
@@ -121,6 +141,13 @@ void main() {
           'host_repo_name': str('host'),
           'gen_snapshot_sha256': str(digest),
         }, bzl: 'flutter_cross_repo'),
+        ProbeRepo('web_sdk_ok', 'flutter_web_sdk_repo', {
+          'engine_revision': str(revision),
+          'sha256': str(digest),
+          'dart_sdk_sha256s': strDict({
+            for (final host in hostPlatforms) host: dartSdkDigest,
+          }),
+        }),
         pub('pub_ok', pubDigest),
         // A digest that is a SHA-256 but not these bytes'.
         ProbeRepo('sky_wrong', 'flutter_sky_engine_repo', {
@@ -148,6 +175,7 @@ void main() {
       'desktop_linux_ok',
       'desktop_windows_ok',
       'cross_ok',
+      'web_sdk_ok',
       'pub_ok',
     ]) {
       test(name, () async {

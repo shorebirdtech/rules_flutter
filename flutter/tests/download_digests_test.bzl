@@ -40,6 +40,7 @@ load(
     "engine_arch_for_os",
     "gen_snapshot_host_platform",
 )
+load("//flutter/private:pinned.bzl", "digest_problem")
 load(
     "//flutter/private:toolchains_repo.bzl",
     "CROSS_COMPILATION_PAIRS",
@@ -53,16 +54,9 @@ load(
     "LINUX_SYSROOT_CHECKSUMS",
 )
 
-_HEX = "0123456789abcdef"
-
 def _is_sha256(value):
-    """True for exactly 64 lowercase hex characters."""
-    if type(value) != "string" or len(value) != 64:
-        return False
-    for c in value.elems():
-        if c not in _HEX:
-            return False
-    return True
+    """True for what the repository rules accept as a pinned digest."""
+    return digest_problem(value) == None
 
 def _engine_artifact_paths():
     """Every engine artifact path some repository rule downloads, per tables.

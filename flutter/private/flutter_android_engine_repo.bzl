@@ -13,6 +13,7 @@ needs no select() — mirroring the macOS and iOS engine repos.
 This is lazy — only fetched when an Android build target is used.
 """
 
+load("//flutter/private:pinned.bzl", "pinned")
 load(":artifact_urls.bzl", "android_engine_artifact_path", "engine_artifact_url")
 load(":constants.bzl", "ANDROID_ABI_FOR_ARCH")
 
@@ -23,14 +24,14 @@ def _flutter_android_engine_repo_impl(repository_ctx):
     # Release engine (AOT) at the repo root.
     repository_ctx.download_and_extract(
         url = engine_artifact_url(engine_revision, android_engine_artifact_path(android_arch, "release")),
-        sha256 = repository_ctx.attr.release_sha256,
+        sha256 = pinned(android_engine_artifact_path(android_arch, "release"), repository_ctx.attr.release_sha256),
     )
 
     # Debug engine (JIT) under debug/ — its flutter.jar would otherwise collide
     # with the release one at the repo root.
     repository_ctx.download_and_extract(
         url = engine_artifact_url(engine_revision, android_engine_artifact_path(android_arch, "debug")),
-        sha256 = repository_ctx.attr.debug_sha256,
+        sha256 = pinned(android_engine_artifact_path(android_arch, "debug"), repository_ctx.attr.debug_sha256),
         output = "debug",
     )
 

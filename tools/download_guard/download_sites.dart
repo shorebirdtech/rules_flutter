@@ -44,6 +44,32 @@ class DownloadSite {
 
   String get where => '$file:$line';
 
+  /// True if the digest is the result of a call to `pinned(...)`
+  /// (`flutter/private/pinned.bzl`), the one helper that refuses a missing or
+  /// malformed digest before the request is made.
+  ///
+  /// [problem] names the shapes that are an empty digest; this is the stronger
+  /// property that the check exists at all. `sha256 = repository_ctx.attr.sha256`
+  /// is not [problem] (the attribute may be set), yet a rule declared without
+  /// it would download unchecked.
+  bool get isPinned {
+    final d = digest;
+    if (d == null) return false;
+    final masked = _mask(d.trim());
+    if (!RegExp(r'^pinned\s*\(').hasMatch(masked) || !masked.endsWith(')')) {
+      return false;
+    }
+    // The opening parenthesis must close at the very end: `pinned(a) or ""`
+    // is not a pinned digest.
+    var depth = 0;
+    for (var i = masked.indexOf('('); i < masked.length; i++) {
+      if (masked[i] == '(') depth++;
+      if (masked[i] == ')') depth--;
+      if (depth == 0) return i == masked.length - 1;
+    }
+    return false;
+  }
+
   /// Why this site can fetch unverified bytes, or null if it cannot.
   ///
   /// Only the shapes that *are* an empty digest are named: the literal, and a

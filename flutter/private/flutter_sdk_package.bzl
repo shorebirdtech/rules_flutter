@@ -13,6 +13,7 @@ Omitting it is not neutral: `package_config.json` reads a missing
 load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version")
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_deps", "parse_pubspec_sdk_constraint")
 load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url")
+load("//flutter/private:pinned.bzl", "pinned")
 
 def make_flutter_sdk_build_content(name, deps, language_version):
     """Generate BUILD content for a Flutter SDK spoke.
@@ -108,7 +109,7 @@ def _flutter_sdk_package_impl(repository_ctx):
     # deduplicated that way.
     repository_ctx.download_and_extract(
         url = flutter_source_tarball_url(flutter_version),
-        sha256 = repository_ctx.attr.sha256,
+        sha256 = pinned(flutter_version + ".tar.gz", repository_ctx.attr.sha256),
         stripPrefix = "flutter-{version}/packages/{pkg}".format(
             version = flutter_version,
             pkg = package_name,

@@ -211,6 +211,7 @@ bzl_library(
         "//flutter/private:flutter_sky_engine_repo",
         "//flutter/private:flutter_web_sdk_repo",
         "//flutter/private:libraries_spec",
+        "//flutter/private:pinned",
         "//flutter/private:toolchains_repo",
         "//flutter/private:versions",
     ],
@@ -221,4 +222,12 @@ bzl_library(
     srcs = ["toolchain.bzl"],
     visibility = ["//visibility:public"],
     deps = [":providers"],
+)
+
+# Every .bzl in this package, for //tools/download_guard, which reads them for
+# download calls that could fetch unverified bytes.
+filegroup(
+    name = "bzl_sources",
+    srcs = glob(["*.bzl"]),
+    visibility = ["//tools/download_guard:__pkg__"],
 )

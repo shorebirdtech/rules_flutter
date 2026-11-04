@@ -12,6 +12,7 @@ repo, which the profile target aliases.
 This is lazy — only fetched when an iOS build target is used.
 """
 
+load("//flutter/private:pinned.bzl", "pinned")
 load(":artifact_urls.bzl", "engine_artifact_url", "ios_engine_artifact_path")
 
 def _flutter_ios_engine_repo_impl(repository_ctx):
@@ -21,14 +22,14 @@ def _flutter_ios_engine_repo_impl(repository_ctx):
     # carries the iOS gen_snapshot used by the macos->ios cross-compile toolchain.
     repository_ctx.download_and_extract(
         url = engine_artifact_url(engine_revision, ios_engine_artifact_path("release")),
-        sha256 = repository_ctx.attr.release_sha256,
+        sha256 = pinned(ios_engine_artifact_path("release"), repository_ctx.attr.release_sha256),
     )
 
     # Debug engine (JIT, simulator) under debug/ — its Flutter.xcframework would
     # otherwise collide with the release one at the repo root.
     repository_ctx.download_and_extract(
         url = engine_artifact_url(engine_revision, ios_engine_artifact_path("debug")),
-        sha256 = repository_ctx.attr.debug_sha256,
+        sha256 = pinned(ios_engine_artifact_path("debug"), repository_ctx.attr.debug_sha256),
         output = "debug",
     )
 

@@ -55,6 +55,7 @@ applies is a loud failure, where a rewrite would quietly drift.
 """
 
 load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url")
+load("//flutter/private:pinned.bzl", "pinned")
 
 # The exact closure of `src/localizations/gen_l10n.dart` once the six import
 # edges are cut. Listed explicitly rather than globbed: the subset boundary is
@@ -101,7 +102,7 @@ def _flutter_gen_l10n_repo_impl(repository_ctx):
 
     repository_ctx.download_and_extract(
         url = flutter_source_tarball_url(version),
-        sha256 = repository_ctx.attr.sha256,
+        sha256 = pinned(version + ".tar.gz", repository_ctx.attr.sha256),
         stripPrefix = "flutter-{version}/packages/flutter_tools".format(version = version),
     )
 

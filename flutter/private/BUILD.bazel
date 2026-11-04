@@ -135,6 +135,7 @@ bzl_library(
     deps = [
         ":artifact_urls",
         ":engine_helpers",
+        ":pinned",
     ],
 )
 
@@ -142,13 +143,17 @@ bzl_library(
     name = "flutter_dev_root_repo",
     srcs = ["flutter_dev_root_repo.bzl"],
     visibility = ["//flutter:__subpackages__"],
-    deps = [":artifact_urls"],
+    deps = [
+        ":artifact_urls",
+        ":pinned",
+    ],
 )
 
 bzl_library(
     name = "flutter_sky_engine_repo",
     srcs = ["flutter_sky_engine_repo.bzl"],
     visibility = ["//flutter:__subpackages__"],
+    deps = [":pinned"],
 )
 
 bzl_library(
@@ -470,7 +475,10 @@ bzl_library(
     name = "flutter_web_sdk_repo",
     srcs = ["flutter_web_sdk_repo.bzl"],
     visibility = ["//flutter:__subpackages__"],
-    deps = [":artifact_urls"],
+    deps = [
+        ":artifact_urls",
+        ":pinned",
+    ],
 )
 
 bzl_library(
@@ -506,14 +514,20 @@ bzl_library(
     name = "flutter_android_engine_repo",
     srcs = ["flutter_android_engine_repo.bzl"],
     visibility = ["//flutter:__subpackages__"],
-    deps = [":artifact_urls"],
+    deps = [
+        ":artifact_urls",
+        ":pinned",
+    ],
 )
 
 bzl_library(
     name = "flutter_ios_engine_repo",
     srcs = ["flutter_ios_engine_repo.bzl"],
     visibility = ["//flutter:__subpackages__"],
-    deps = [":artifact_urls"],
+    deps = [
+        ":artifact_urls",
+        ":pinned",
+    ],
 )
 
 bzl_library(
@@ -523,6 +537,7 @@ bzl_library(
     deps = [
         ":artifact_urls",
         ":engine_helpers",
+        ":pinned",
     ],
 )
 
@@ -533,6 +548,7 @@ bzl_library(
     deps = [
         ":artifact_urls",
         ":engine_helpers",
+        ":pinned",
     ],
 )
 
@@ -585,11 +601,28 @@ bzl_library(
     name = "flutter_sdk_package",
     srcs = ["flutter_sdk_package.bzl"],
     visibility = ["//flutter:__subpackages__"],
-    deps = [":artifact_urls"],
+    deps = [
+        ":artifact_urls",
+        ":pinned",
+    ],
+)
+
+bzl_library(
+    name = "pinned",
+    srcs = ["pinned.bzl"],
+    visibility = ["//flutter:__subpackages__"],
 )
 
 bzl_library(
     name = "flutter_unsupported_package",
     srcs = ["flutter_unsupported_package.bzl"],
     visibility = ["//flutter:__subpackages__"],
+)
+
+# Every .bzl in this package, for //tools/download_guard, which reads them for
+# download calls that could fetch unverified bytes.
+filegroup(
+    name = "bzl_sources",
+    srcs = glob(["*.bzl"]),
+    visibility = ["//tools/download_guard:__pkg__"],
 )

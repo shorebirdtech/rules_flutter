@@ -120,6 +120,24 @@ ctx.download(
       expect(s.single.problem, isNull);
     });
 
+    test(
+      'isPinned is true only for a digest that is the result of pinned()',
+      () {
+        bool pinned(String expr) =>
+            sites('ctx.download(url = u, sha256 = $expr)').single.isPinned;
+        expect(pinned('pinned("a.zip", ctx.attr.sha256)'), isTrue);
+        expect(pinned('pinned(path, table.get(path, ""))'), isTrue);
+        expect(pinned('pinned("a (x)", f(")"))'), isTrue);
+        expect(pinned('ctx.attr.sha256'), isFalse);
+        expect(pinned('checksums[path]'), isFalse);
+        expect(pinned('require("a.zip", ctx.attr.sha256)'), isFalse);
+        expect(pinned('pinned("a", x) or ""'), isFalse);
+        expect(pinned('pinned("a", x) if y else z'), isFalse);
+        expect(pinned('my_pinned("a", x)'), isFalse);
+        expect(sites('ctx.download(url = u)').single.isPinned, isFalse);
+      },
+    );
+
     test('names the line of each call', () {
       final s = sites('a = 1\n\nctx.download(url = u, sha256 = "")\n');
       expect(s.single.where, 'x.bzl:3');
