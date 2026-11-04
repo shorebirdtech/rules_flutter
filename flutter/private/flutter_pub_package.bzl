@@ -29,7 +29,7 @@ surface small).
 
 load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version", "make_dart_library_build_content")
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_deps", "parse_pubspec_sdk_constraint")
-load("//flutter/private:android_plugin_maven.bzl", "parse_gradle_maven_dependencies")
+load("//flutter/private:android_plugin_maven.bzl", "gradle_statements", "parse_gradle_maven_dependencies")
 load("//flutter/private:flutter_pubspec.bzl", "parse_flutter_assets_block", "parse_flutter_plugin_block")
 
 # Apple source extensions we sweep into the per-platform plugin library.
@@ -205,8 +205,7 @@ def parse_gradle_android_namespace(content):
         The declared namespace, or empty string when the script
         declares none.
     """
-    for raw_line in content.split("\n"):
-        line = raw_line.strip()
+    for line in gradle_statements(content):
         if not line.startswith("namespace"):
             continue
         rest = line[len("namespace"):].strip()
@@ -277,6 +276,21 @@ def _checked_java_package(package, source, name):
         ))
     return name
 
+def _android_gradle_script(ctx):
+    """The plugin's Gradle build script: `android/build.gradle`, else its `.kts`.
+
+    Gradle runs `build.gradle` when a project has both, so every reader of the
+    script reads that one.
+
+    Returns:
+        The path, or `None` when the plugin has neither.
+    """
+    for filename in ("android/build.gradle", "android/build.gradle.kts"):
+        p = ctx.path(filename)
+        if p.exists:
+            return p
+    return None
+
 def _detect_android_namespace(ctx):
     """Resolve the plugin's Android namespace the way AGP does.
 
@@ -287,12 +301,11 @@ def _detect_android_namespace(ctx):
     references like `R.drawable.ic_mic` only resolve when we use the
     same one. Returns empty string when the plugin declares neither.
     """
-    for filename in ("android/build.gradle", "android/build.gradle.kts"):
-        p = ctx.path(filename)
-        if p.exists:
-            namespace = parse_gradle_android_namespace(ctx.read(p))
-            if namespace:
-                return namespace
+    script = _android_gradle_script(ctx)
+    if script:
+        namespace = parse_gradle_android_namespace(ctx.read(script))
+        if namespace:
+            return namespace
     manifest_path = ctx.path("android/src/main/AndroidManifest.xml")
     if manifest_path.exists:
         return parse_android_manifest_package(ctx.read(manifest_path))
@@ -328,11 +341,8 @@ def _detect_android_native_build(ctx):
     Detection lets the generated android/ sub-package fail loudly instead
     of silently producing an APK missing the library.
     """
-    for filename in ("android/build.gradle", "android/build.gradle.kts"):
-        p = ctx.path(filename)
-        if p.exists and "externalNativeBuild" in ctx.read(p):
-            return True
-    return False
+    script = _android_gradle_script(ctx)
+    return bool(script) and "externalNativeBuild" in ctx.read(script)
 
 def _make_android_native_build_unsupported_content(package_name, version):
     """Generate an `android/BUILD.bazel` that fails at load time.
@@ -404,33 +414,27 @@ def _detect_consumer_proguard_specs(ctx):
     R8 enabled.
     """
     paths = []
-    for filename in ("build.gradle", "build.gradle.kts"):
-        gradle_path = ctx.path("android/" + filename)
-        if gradle_path.exists:
-            for relpath in _parse_consumer_proguard_files(ctx.read(gradle_path)):
-                if ctx.path("android/" + relpath).exists:
-                    paths.append(_checked_file_name(
-                        ctx.attr.package_name,
-                        "consumerProguardFiles file",
-                        relpath,
-                    ))
+    script = _android_gradle_script(ctx)
+    if script:
+        for relpath in _parse_consumer_proguard_files(ctx.read(script)):
+            if ctx.path("android/" + relpath).exists:
+                paths.append(_checked_file_name(
+                    ctx.attr.package_name,
+                    "consumerProguardFiles file",
+                    relpath,
+                ))
     return paths
 
 def _read_plugin_maven_deps(ctx):
     """Parse the spoke's `android/build.gradle*` Maven dependencies.
 
-    Reads the package's Gradle build file (`.gradle.kts` first, then
-    `.gradle`). Returns the parse result of `parse_gradle_maven_dependencies`:
-    the declared dependencies and the lines it could not read. Both are empty
-    when the package has no Gradle script.
+    Reads the package's Gradle build file (`build.gradle`, else the `.kts`).
+    Returns the parse result of `parse_gradle_maven_dependencies`: the declared
+    dependencies and the lines it could not read. Both are empty when the
+    package has no Gradle script.
     """
-    content = ""
-    for cand in ("android/build.gradle.kts", "android/build.gradle"):
-        p = ctx.path(cand)
-        if p.exists:
-            content = ctx.read(p)
-            break
-    return parse_gradle_maven_dependencies(content)
+    script = _android_gradle_script(ctx)
+    return parse_gradle_maven_dependencies(ctx.read(script) if script else "")
 
 def _maven_dep_dicts(parsed):
     """The parsed dependencies as the dicts `maven_deps.json` records."""

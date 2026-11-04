@@ -354,4 +354,60 @@ void main() {
       );
     });
   });
+
+  group('Gradle files of a plugin', () {
+    late PubInputsWorkspace ws;
+    setUpAll(() async {
+      ws = await PubInputsFixture(
+        hosted: [
+          androidPlugin('apply_from', {
+            'android/build.gradle': 'apply from: "deps.gradle"\n',
+            'android/deps.gradle': 'dependencies {\n    implementation "applied.group:applied:3.0"\n}\n',
+          }),
+          androidPlugin('both_files', {
+            'android/build.gradle':
+                'android {\n    namespace = "dev.example.groovy"\n}\n'
+                'dependencies {\n    implementation "groovy.group:groovy:1.0"\n}\n',
+            'android/build.gradle.kts':
+                'android {\n    namespace = "dev.example.kts"\n}\n'
+                'dependencies {\n    implementation("kts.group:kts:1.0")\n}\n',
+          }),
+        ],
+      ).materialize();
+    });
+
+    /// A dependency the reader cannot see is reported, not dropped: a build
+    /// that compiles without it fails at javac or kotlinc, far from the cause.
+    /// `apply from:` pulls a dependency block in from another script. Following
+    /// it and reporting that it was not followed are both honest.
+    test('a dependency in an applied script is read or reported', () async {
+      expect((await ws.loadSpoke('apply_from')).succeeded, isTrue);
+      final deps = await recordedMavenDeps(ws, 'apply_from');
+      final read = deps.coordinates.contains('applied.group:applied');
+      final reported = deps.unread.any(
+        (line) => line.contains('deps.gradle') || line.contains('apply'),
+      );
+      expect(
+        read || reported,
+        isTrue,
+        reason:
+            '`apply from: "deps.gradle"` declares applied.group:applied and '
+            'the spoke recorded neither it nor the line:\n'
+            'read: ${deps.coordinates}, unread: ${deps.unread}',
+      );
+    });
+
+    /// When a plugin has both `build.gradle` and `build.gradle.kts`, Gradle
+    /// uses `build.gradle`. The namespace reader does; the dependency reader
+    /// must read the same file, or the library is compiled with one script's
+    /// namespace and another script's dependencies.
+    test(
+      'the dependencies come from the build file Gradle uses when both exist',
+      () async {
+        expect((await ws.loadSpoke('both_files')).succeeded, isTrue);
+        final deps = await recordedMavenDeps(ws, 'both_files');
+        expect(deps.coordinates, ['groovy.group:groovy']);
+      },
+    );
+  });
 }

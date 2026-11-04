@@ -67,6 +67,101 @@ def _strip_line_comment(line):
             return line[:i]
     return line
 
+def _matching_brace(line, start):
+    """Index of the `}` that closes the `{` at `start`, or -1; quotes are skipped."""
+    depth = 0
+    quote = ""
+    for i in range(start, len(line)):
+        c = line[i]
+        if quote:
+            if c == quote:
+                quote = ""
+        elif c == "'" or c == '"':
+            quote = c
+        elif c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return i
+    return -1
+
+def _opens_a_closure(header):
+    """Whether a `{` after `header` configures a dependency, not opens a block.
+
+    `implementation("a:b:1") { exclude(group = "x") }` is one statement: the
+    braces are the dependency's own closure. `dependencies {`, `if (flag) {`
+    and `kapt {` open blocks, whose contents are statements of their own.
+    """
+    header = header.strip()
+    identifier = _leading_identifier(header)
+    if not identifier or (identifier != "add" and not _classify(identifier)):
+        return False
+    rest = header[len(identifier):]
+    return bool(rest.strip()) and rest[0] in " \t('\"" and not rest.strip().startswith("=")
+
+def _split_statements(line, out):
+    """Appends the statements of one physical line of a Gradle script to `out`.
+
+    A line holds several when a block is opened and closed on it (`dependencies
+    { implementation 'a:b:1' }`) or `;` separates them. Braces, brackets and
+    parentheses inside a string or inside a call's arguments never split, and
+    the closure of a dependency declaration stays with it (see
+    `_opens_a_closure`), so the declaration is reported whole if it is not one
+    the reader supports.
+    """
+    cur = ""
+    quote = ""
+    depth = 0
+    i = 0
+    n = len(line)
+    for _ in range(n + 1):
+        if i >= n:
+            break
+        c = line[i]
+        if quote:
+            cur += c
+            if c == quote:
+                quote = ""
+        elif c == "'" or c == '"':
+            quote = c
+            cur += c
+        elif c == "(" or c == "[":
+            depth += 1
+            cur += c
+        elif c == ")" or c == "]":
+            depth = max(depth - 1, 0)
+            cur += c
+        elif depth == 0 and c == "{" and _opens_a_closure(cur):
+            close = _matching_brace(line, i)
+            end = n if close < 0 else close + 1
+            cur += line[i:end]
+            i = end
+            continue
+        elif depth == 0 and c in ";{}":
+            if cur.strip():
+                out.append(cur.strip())
+            cur = ""
+        else:
+            cur += c
+        i += 1
+    if cur.strip():
+        out.append(cur.strip())
+
+def gradle_statements(content):
+    """The statements of a Gradle build script, comments removed.
+
+    Args:
+        content: The text of `build.gradle` or `build.gradle.kts`.
+
+    Returns:
+        A list of stripped strings, one per statement or block header.
+    """
+    out = []
+    for raw in content.split("\n"):
+        _split_statements(_strip_line_comment(raw), out)
+    return out
+
 def _string_literal(text):
     """The value of `text` when it is exactly one string literal, else None."""
     text = text.strip()
@@ -172,14 +267,55 @@ def _classify(identifier):
                     return "error"
     return ""
 
+def _applies_a_script(rest):
+    """Whether the arguments after `apply` name a script: `from: "x"` / `from = "x"`."""
+    rest = rest.strip()
+    if rest.startswith("("):
+        rest = rest[1:].strip()
+    return rest.startswith("from") and rest[4:5] in (":", " ", "=")
+
+def _add_call_as_declaration(line):
+    """`add("implementation", "a:b:1")` as `implementation("a:b:1")`.
+
+    Anything else (a configuration that is not a dependency one, or a first
+    argument that is not a string) is returned as `add`, which the caller
+    does not treat as a declaration.
+    """
+    rest = line[len("add"):].strip()
+    if not rest.startswith("(") or not rest.endswith(")"):
+        return line
+    inner = rest[1:-1]
+    comma = -1
+    quote = ""
+    for i in range(len(inner)):
+        c = inner[i]
+        if quote:
+            if c == quote:
+                quote = ""
+        elif c == "'" or c == '"':
+            quote = c
+        elif c == ",":
+            comma = i
+            break
+    if comma < 0:
+        return line
+    configuration = _string_literal(inner[:comma])
+    if configuration == None or not _classify(configuration):
+        return line
+    return configuration + "(" + inner[comma + 1:].strip() + ")"
+
 def parse_gradle_maven_dependencies(content):
     """Reads the Maven dependencies out of a Gradle build script.
 
-    Line based. Each dependency must be exactly one string literal of the form
+    Statement based (see `gradle_statements`: a line can hold several, and a
+    block opened and closed on one line is read like one spread over many).
+    Each dependency must be exactly one string literal of the form
     `group:artifact:version` (a `:classifier` and an `@packaging` are allowed
-    and dropped). Anything else that is a dependency on the plugin's compile
-    or runtime classpath is reported in `errors`, so a dependency the parser
-    cannot read is never silently lost.
+    and dropped), declared as `implementation "..."`, `implementation("...")`
+    or `add("implementation", "...")`. Anything else that is a dependency on
+    the plugin's compile or runtime classpath, and an `apply from:` that pulls
+    in statements this reader never sees, is reported in `errors`, so a
+    dependency the parser cannot read is never silently lost.
 
     Args:
         content: The text of `build.gradle` or `build.gradle.kts`.
@@ -191,7 +327,7 @@ def parse_gradle_maven_dependencies(content):
         dynamic version, which get a presence-only check) and `line`.
         `errors` is the list of lines that could not be read.
     """
-    lines = [_strip_line_comment(raw).strip() for raw in content.split("\n")]
+    lines = gradle_statements(content)
 
     variables = {}
     for line in lines:
@@ -201,10 +337,24 @@ def parse_gradle_maven_dependencies(content):
 
     deps = []
     errors = []
-    for line in lines:
+    for original in lines:
+        line = original
         identifier = _leading_identifier(line)
         if not identifier:
             continue
+
+        # `apply from: "deps.gradle"` pulls in statements this reader never
+        # sees, so it is reported rather than followed.
+        if identifier == "apply" and _applies_a_script(line[len(identifier):]):
+            errors.append(original)
+            continue
+
+        # `add("implementation", "a:b:1")` is `implementation("a:b:1")`.
+        if identifier == "add":
+            line = _add_call_as_declaration(line)
+            identifier = _leading_identifier(line)
+            if not identifier:
+                continue
         kind = _classify(identifier)
         if not kind or kind == "ignore":
             continue
@@ -218,23 +368,23 @@ def parse_gradle_maven_dependencies(content):
         if not rest or rest[0] == "=" or rest[0] == "{":
             continue
         if kind == "error":
-            errors.append(line)
+            errors.append(original)
             continue
 
         arg = rest
         if arg.startswith("("):
             if not arg.endswith(")"):
-                errors.append(line)
+                errors.append(original)
                 continue
             arg = arg[1:-1]
         coordinate = _string_literal(arg)
         if coordinate == None:
-            errors.append(line)
+            errors.append(original)
             continue
         coordinate = coordinate.split("@")[0]
         parts = coordinate.split(":")
         if len(parts) < 3 or len(parts) > 4 or not parts[0] or not parts[1] or not parts[2]:
-            errors.append(line)
+            errors.append(original)
             continue
         group = parts[0]
         artifact = parts[1]
@@ -250,7 +400,7 @@ def parse_gradle_maven_dependencies(content):
             group = group,
             artifact = artifact,
             version = version,
-            line = line,
+            line = original,
         ))
     return struct(deps = deps, errors = errors)
 
