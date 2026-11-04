@@ -64,8 +64,9 @@ Some platforms need one more repository from the same extension. Add it to `use_
 |---|---|
 | macOS | `flutter_macos_engine` |
 | iOS | `flutter_ios_engine` |
-| Android | `flutter_android_engine_arm64` and/or `flutter_android_engine_x64`, for each ABI you build |
 | Web | `flutter_web_sdk` |
+
+Android needs none: the engine of each ABI is rules_flutter's own, so a workspace names no Android engine repository.
 
 The macOS and iOS engine repositories name the engine of the build mode directly, for a rule of your own that links the engine: `@flutter_macos_engine//:engine_library` and `@flutter_ios_engine//:Flutter_xcframework` are the debug engine under `-c dbg`, the profile engine under `-c opt --@rules_flutter//flutter:profile`, and the release engine under any other `-c opt`. To pin one engine whatever the mode, use `engine_debug_library`, `engine_profile_library` or `engine_release_library` on macOS (the Linux and Windows engines of the SDK repositories are named the same way), and `Flutter_xcframework_debug`, `Flutter_xcframework_profile` or `Flutter_xcframework_release` on iOS.
 
@@ -783,7 +784,7 @@ Add these to `MODULE.bazel`:
 bazel_dep(name = "rules_android", version = "0.8.0")
 bazel_dep(name = "rules_android_ndk", version = "0.1.5")
 
-use_repo(flutter, "deps", "flutter_toolchains", "flutter_android_engine_arm64")
+use_repo(flutter, "deps", "flutter_toolchains")
 
 # The NDK CC toolchain, used for native and FFI deps built for Android and
 # to strip the engine's native libraries, as a Gradle build does.
@@ -862,7 +863,7 @@ bazel build //:my_app_android \
     --@rules_android//flags:android_platforms=@rules_android//:arm64-v8a,@rules_android//:x86_64
 ```
 
-The platforms are rules_android's own, `@rules_android//:arm64-v8a` and `@rules_android//:x86_64`, and are named for their ABI because rules_android packages a platform's native libraries into `lib/<platform name>/`. Write them as shown: the flag's value is read by rules_android, which resolves the label from its own repository, so a platform of your own repository, or `@rules_flutter//...`, is not found. Put each ABI's engine repository in `use_repo` (`flutter_android_engine_arm64`, `flutter_android_engine_x64`).
+The platforms are rules_android's own, `@rules_android//:arm64-v8a` and `@rules_android//:x86_64`, and are named for their ABI because rules_android packages a platform's native libraries into `lib/<platform name>/`. Write them as shown: the flag's value is read by rules_android, which resolves the label from its own repository, so a platform of your own repository, or `@rules_flutter//...`, is not found. The engine of each ABI comes with rules_flutter; nothing of it goes in your `use_repo`.
 
 The flag is rules_android's Starlark flag, which rules_android reads first. The short `--android_platforms` also works: rules_android aliases it to that flag (`flag_alias`), and Bazel's native option of the same name is what rules_android falls back to while it exists. The long form names `@rules_android` on the command line, so your root `MODULE.bazel` needs `bazel_dep(name = "rules_android", version = "0.8.0")`.
 

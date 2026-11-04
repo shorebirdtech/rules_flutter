@@ -189,12 +189,15 @@ flutter_android_plugin_library = _flutter_android_plugin_library
 flutter_android_registrant = _flutter_android_registrant
 
 # The engine of each ABI an APK can be built for, by the CPU of the platform
-# `android_binary` builds that copy of its dependencies for. The labels are the
-# caller's, as the macro's other repository labels are, so a workspace that
-# builds an ABI names that engine's repository in its `use_repo`.
+# `android_binary` builds that copy of its dependencies for. The labels are
+# rules_flutter's own, resolved from its `use_repo` of the extension's engine
+# repositories, so a workspace names none of them. A caller's label would have
+# to be visible to the workspace for every branch of the `select()`, because
+# `bazel query` and the tooling built on it load them all; a build resolves
+# only the one it takes.
 _ENGINE_FOR_CPU = {
-    "@rules_flutter//flutter/private:android_arm64": ["@flutter_android_engine_arm64//:stripped"],
-    "@rules_flutter//flutter/private:android_x64": ["@flutter_android_engine_x64//:stripped"],
+    "@rules_flutter//flutter/private:android_arm64": [Label("@flutter_android_engine_arm64//:stripped")],
+    "@rules_flutter//flutter/private:android_x64": [Label("@flutter_android_engine_x64//:stripped")],
 }
 
 _NO_ENGINE_FOR_PLATFORM = (
@@ -211,8 +214,7 @@ def flutter_android_engine(name, neverlink = False, **kwargs):
     `android_binary` builds its dependencies once for each platform of
     `--@rules_android//flags:android_platforms`, so an APK for several ABIs carries the engine of
     each, and a target built for neither Android arm64 nor x86_64 fails. The
-    repository of each ABI you build for goes in your `use_repo`
-    (`flutter_android_engine_arm64`, `flutter_android_engine_x64`).
+    engine repositories are rules_flutter's: nothing goes in your `use_repo`.
 
     Auto-selects the engine of the build mode:
     - Debug (-c dbg): JIT engine for emulator/iterative development.
@@ -250,7 +252,7 @@ def flutter_android_engine(name, neverlink = False, **kwargs):
     # built for. That keeps a plugin library buildable on its own, with no
     # Android platform.
     if neverlink:
-        engine = ["@flutter_android_engine_arm64//:stripped"]
+        engine = [Label("@flutter_android_engine_arm64//:stripped")]
     else:
         engine = select(_ENGINE_FOR_CPU, no_match_error = _NO_ENGINE_FOR_PLATFORM)
 
