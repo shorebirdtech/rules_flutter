@@ -1,0 +1,9 @@
+name: rules_flutter_e2e_testing
+description: Checks shared by this repository's e2e tests.
+publish_to: none
+
+environment:
+  sdk: ^3.13.0
+
+dependencies:
+  runfiles: ^0.4.3

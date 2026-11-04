@@ -13,6 +13,9 @@
 /// - the test runner is not trusted for Accessibility, which only the user
 ///   can fix, in System Settings.
 ///
+/// The dev tool's e2e tests use this library through `tools/dev_tool/pubspec.yaml`
+/// (a path dependency) and `//tools/e2e_testing`.
+///
 /// `e2e/_macos_test/verify_macos_app.dart` keeps a small copy of the probe
 /// and the hold: `tools/vm` copies that directory alone to bare machines, so
 /// it cannot import this package. Keep the two in step.

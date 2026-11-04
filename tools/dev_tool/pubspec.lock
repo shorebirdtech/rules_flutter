@@ -321,6 +321,13 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.2.0"
+  rules_flutter_e2e_testing:
+    dependency: "direct dev"
+    description:
+      path: "../e2e_testing"
+      relative: true
+    source: path
+    version: "0.0.0"
   runfiles:
     dependency: "direct main"
     description:

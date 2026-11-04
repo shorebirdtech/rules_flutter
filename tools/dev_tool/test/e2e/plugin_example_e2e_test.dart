@@ -776,7 +776,7 @@ String _documentsPath(String line) =>
 ///
 /// Through AppKit's `NSRunningApplication` in JavaScript for Automation, which
 /// needs no Accessibility or Automation grant — unlike System Events, which
-/// `agent_e2e_test` uses and has to skip without. Bringing an app to the front
+/// `agent_e2e_test` uses and fails without, naming the cause. Bringing an app to the front
 /// goes through `open`, because an app activating another is refused under
 /// macOS's cooperative activation.
 ///

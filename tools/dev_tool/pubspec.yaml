@@ -30,4 +30,8 @@ dependencies:
 
 dev_dependencies:
   fake_async: ^1.3.1
+  # The macOS session probe the e2e tests share with the e2e workspaces. Bazel
+  # builds take it from `//tools/e2e_testing`; this is how `dart test` finds it.
+  rules_flutter_e2e_testing:
+    path: ../e2e_testing
   test: ^1.25.0

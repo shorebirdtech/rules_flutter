@@ -20,7 +20,6 @@
 /dev/ export-ignore
 /references/ export-ignore
 /renovate.json export-ignore
-/tools/e2e_testing/ export-ignore
 /e2e/_compare/ export-ignore
 /e2e/_linux_test/ export-ignore
 /e2e/_macos_test/ export-ignore
