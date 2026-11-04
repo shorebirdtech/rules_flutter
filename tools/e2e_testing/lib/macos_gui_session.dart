@@ -196,7 +196,9 @@ JSON.stringify({
           'trusted for Accessibility, yet System Events reports no windows. '
           'Restart it with `killall "System Events"` and re-run; if the test '
           'runs under a Bazel server started by another tool, `bazel '
-          'shutdown` first.',
+          'shutdown` first. On a busy Mac (`uptime` shows the load) System '
+          'Events can also fail while its process list changes under it '
+          '(`-1719`, "Invalid index"): re-run when the builds have finished.',
   };
 
   /// Reads the session and returns the explanation for what is wrong with it,

@@ -21,6 +21,68 @@ class AppWindows {
   /// The app asked about.
   final AppProcess app;
 
+  /// Counts the windows of every foreground process, one process at a time.
+  ///
+  /// Each process is read inside its own `try`: System Events resolves
+  /// `processes whose …` against a process list that other work changes while
+  /// it is read. On a busy Mac (concurrent builds, other test runs) one process
+  /// exiting mid-read fails the whole expression with `-1719` ("Invalid
+  /// index"), and the same expression failed 12 times out of 12 in a row on
+  /// one measured Mac. Reading per process turns that into a process counted
+  /// as unreadable. The answer is `windows,processes,unreadable`.
+  static const _enumerationScript = '''
+tell application "System Events"
+  set total to 0
+  set seen to 0
+  set unreadable to 0
+  repeat with p in (every application process)
+    try
+      if background only of p is false then
+        set total to total + (count of windows of p)
+        set seen to seen + 1
+      end if
+    on error
+      set unreadable to unreadable + 1
+    end try
+  end repeat
+  return (total as text) & "," & (seen as text) & "," & (unreadable as text)
+end tell''';
+
+  /// What is wrong with an enumeration that [exitCode], [stdout] and [stderr]
+  /// describe, or null if it found windows.
+  ///
+  /// A System Events that errored and one that answered "none" are different
+  /// failures with different fixes, and reading both as "no windows" sent a
+  /// healthy session to the wrong diagnosis. Only an answer of zero windows
+  /// from processes it read is "no windows".
+  static String? assessEnumeration({
+    required int exitCode,
+    required String stdout,
+    required String stderr,
+  }) {
+    if (exitCode != 0) {
+      return 'System Events did not answer the window enumeration: '
+          '${stderr.trim()}';
+    }
+    final parts = stdout.trim().split(',').map(int.tryParse).toList();
+    if (parts.length != 3 || parts.contains(null)) {
+      return 'System Events answered the window enumeration with something '
+          'that is not a reading: "${stdout.trim()}"';
+    }
+    final [windows!, read!, unreadable!] = parts;
+    if (windows > 0) return null;
+    if (read == 0) {
+      return unreadable == 0
+          ? 'System Events lists no foreground processes at all'
+          : 'System Events could not read any process ($unreadable of them '
+                'failed)';
+    }
+    return unreadable == 0
+        ? 'System Events reports no windows for any of $read processes'
+        : 'System Events reports no windows for the $read processes it could '
+              'read, and could not read $unreadable others';
+  }
+
   /// Fails the run if System Events cannot enumerate windows at all.
   ///
   /// It reports success and a count of zero in two very different situations:
@@ -31,35 +93,36 @@ class AppWindows {
   /// blaming the app. A desktop with a window server running always has some
   /// windowed process, so a total of zero is the harness failing, not an
   /// answer.
+  ///
+  /// An enumeration that errors is reported as that ([assessEnumeration]),
+  /// not as zero windows.
   static Future<void> assertEnumerationWorks() async {
-    const script =
-        'tell application "System Events"\n'
-        '  set total to 0\n'
-        '  repeat with p in (processes whose background only is false)\n'
-        '    set total to total + (count of windows of p)\n'
-        '  end repeat\n'
-        '  return total\n'
-        'end tell';
-    final result = await Process.run('osascript', ['-e', script]).timeout(
-      const Duration(seconds: 20),
-      onTimeout: () => ProcessResult(0, 1, '', 'System Events did not respond'),
+    // Reading each process takes 7 to 15 seconds on a Mac running a dozen
+    // builds, so the bound is a hang's, not a typical wait's.
+    const bound = Duration(seconds: 60);
+    final result = await Process.run('osascript', ['-e', _enumerationScript])
+        .timeout(
+          bound,
+          onTimeout: () => ProcessResult(
+            0,
+            1,
+            '',
+            'System Events did not respond in ${bound.inSeconds}s',
+          ),
+        );
+    final problem = assessEnumeration(
+      exitCode: result.exitCode,
+      stdout: result.stdout.toString(),
+      stderr: result.stderr.toString(),
     );
-    final total = result.exitCode == 0
-        ? int.tryParse(result.stdout.toString().trim()) ?? 0
-        : 0;
-    if (total > 0) return;
+    if (problem == null) return;
 
-    stderr.writeln(
-      'FAIL: System Events reports no windows for any process, so '
-      'it cannot answer for ours either.',
-    );
-    if (result.exitCode != 0) {
-      stderr.writeln('osascript: ${result.stderr.toString().trim()}');
-    }
-    stderr.writeln(
-      'This is a harness failure, not an app failure. '
-      '${await GuiSession.diagnosis()}',
-    );
+    stderr
+      ..writeln('FAIL: $problem, so it cannot answer for our app either.')
+      ..writeln(
+        'This is a harness failure, not an app failure. '
+        '${await GuiSession.diagnosis()}',
+      );
     exit(1);
   }
 

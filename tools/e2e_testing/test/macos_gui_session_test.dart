@@ -68,6 +68,10 @@ void main() {
         contains('not the problem'),
       );
     });
+
+    test('a live session with no windows names a busy Mac as a cause', () {
+      expect(GuiSession.explain(GuiBlocker.unknown), contains('busy'));
+    });
   });
 
   test('GuiState reads the probe script output', () {
