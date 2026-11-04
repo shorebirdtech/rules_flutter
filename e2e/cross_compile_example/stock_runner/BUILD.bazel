@@ -25,3 +25,12 @@ flutter_linux_runner_lib_gen(
     engine = ":engine",
     registrant = ":committed_registrant",
 )
+
+# The X11 headers GTK's `gdkx.h` includes, which the runner pulls in on X11.
+flutter_linux_runner_lib_gen(
+    name = "probe_gdk_x11",
+    srcs = ["probes/gdk_x11.cc"],
+    application = "//:cross_app",
+    engine = ":engine",
+    registrant = ":committed_registrant",
+)

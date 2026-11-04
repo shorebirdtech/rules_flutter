@@ -294,6 +294,13 @@ def _compile_linux_runner(ctx, runner_srcs, engine_files, defines, linux_sysroot
     system_include_dirs.append(sysroot_root + "/usr/lib/" + triple + "/glib-2.0/include")
     system_include_dirs.append(sysroot_root + "/usr/lib/" + triple + "/dbus-1.0/include")
 
+    # `<gdk/gdkx.h>` includes `<X11/Xlib.h>`, which sits directly under the
+    # sysroot's `usr/include`. That directory goes last (`-idirafter`) so the
+    # cc toolchain's own C library headers keep precedence over the sysroot's;
+    # the filegroup stages only the library headers it lists, so in a sandboxed
+    # or remote compile nothing else under `usr/include` is visible.
+    sysroot_include_flags = ["-idirafter", sysroot_root + "/usr/include"]
+
     # GTK3 libraries, selected as files from the sysroot filegroup and handed to
     # the linker as explicit inputs (see _GTK3_LIB_FILES for why not `-L`/`-l`).
     gtk3 = gtk3_sysroot_link_inputs(sysroot_files, sysroot_root + "/usr/lib/" + triple)
@@ -304,7 +311,7 @@ def _compile_linux_runner(ctx, runner_srcs, engine_files, defines, linux_sysroot
     # #include directives resolve.  Also add their directories to the include
     # path so runner code can do #include "flutter/generated_plugin_registrant.h".
     all_header_files = header_files + registrant_hdrs + runner_hdrs + plugin_hdrs
-    extra_compile = []
+    extra_compile = list(sysroot_include_flags)
     registrant_include_dirs = {}
     for h in registrant_hdrs:
         d = h.path[:h.path.rfind("/")]

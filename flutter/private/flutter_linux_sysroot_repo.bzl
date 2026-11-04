@@ -56,6 +56,7 @@ filegroup(
         "usr/include/libpng16/**",
         "usr/include/libmount/**",
         "usr/include/blkid/**",
+        "usr/include/X11/**",
         "usr/lib/{triple}/glib-2.0/**",
         "usr/lib/{triple}/dbus-1.0/**",
         "usr/lib/{triple}/*.so",
