@@ -205,6 +205,17 @@ class AppInstance {
   /// privately never deletes it.
   final List<Directory> scratchDirs;
 
+  /// Readers of [process]'s output pipes that must not outlive the run.
+  ///
+  /// A pipe reaches end-of-file only when *every* holder of its write end has
+  /// closed it, and a process can leave a descendant behind that still holds
+  /// one (a browser's helper process outliving the browser, say). A reader that
+  /// waits for that end-of-file is then a live handle, and a Dart VM with a live
+  /// handle does not exit: the tool answers `daemon.shutdown` and keeps
+  /// running. These are cancelled in `stop()`, which is the point at which
+  /// nothing further the process writes matters.
+  final List<AppLogPump> outputPumps;
+
   AppInstance({
     required this.process,
     this.vmServiceUri,
@@ -212,7 +223,14 @@ class AppInstance {
     AppLogStream? logs,
     this.auxiliaryProcesses = const [],
     this.scratchDirs = const [],
+    this.outputPumps = const [],
   }) : logs = logs ?? AppLogStream();
+
+  /// Cancel every [outputPumps] reader, so no pipe subscription outlives the
+  /// run. Safe to call more than once.
+  Future<void> disposeOutputPumps() async {
+    await Future.wait(outputPumps.map((pump) => pump.dispose()));
+  }
 
   /// Kill every [auxiliaryProcesses] entry and await its exit.
   /// [bound] is how long each one gets before it is escalated to SIGKILL —
@@ -2284,6 +2302,7 @@ AppLogStream _startProcessLogs(
     transform: transform,
   );
   logs.closeWhen([pump.done]);
+  logs.own(pump);
   return logs;
 }
 
@@ -4113,6 +4132,15 @@ class ChromeSession {
   /// The CDP debugging port announced on Chrome's stderr.
   final int cdpPort;
 
+  /// The reader of the browser's stdout and stderr.
+  ///
+  /// Held so that it can be let go of: Chrome's helper processes inherit those
+  /// pipes and can outlive the browser, and a reader still waiting for their
+  /// end-of-file keeps this tool's process from exiting after a clean
+  /// `daemon.shutdown`. The caller that takes over the session cancels it when
+  /// the browser is stopped ([AppInstance.outputPumps]).
+  final AppLogPump outputPump;
+
   /// The localhost URL the launched tab serves the app from — the URL every
   /// page-target lookup matches against.
   final String appUrl;
@@ -4127,6 +4155,7 @@ class ChromeSession {
 
   ChromeSession._({
     required this.process,
+    required this.outputPump,
     required this.userDataDir,
     required this.cdpPort,
     required this.appUrl,
@@ -4219,7 +4248,8 @@ class ChromeSession {
     // Deliberately *not* surfaced as app output: the app's console lives
     // inside the page, and Chrome's own chatter would bury it.
     final diagnostics = AppLogStream(capacity: 200);
-    diagnostics.closeWhen([pumpProcessLines(chrome, diagnostics).done]);
+    final outputPump = pumpProcessLines(chrome, diagnostics);
+    diagnostics.closeWhen([outputPump.done]);
 
     try {
       final cdpPort = await unlessAbandoned(
@@ -4251,6 +4281,7 @@ class ChromeSession {
       );
       final session = ChromeSession._(
         process: chrome,
+        outputPump: outputPump,
         userDataDir: userDataDir,
         cdpPort: cdpPort,
         appUrl: url,
@@ -4265,6 +4296,7 @@ class ChromeSession {
       // behind the error.
       chrome.kill();
       await chrome.exitCode;
+      await outputPump.dispose();
       await deleteTempDir(userDataDir);
       rethrow;
     }
@@ -4550,6 +4582,7 @@ class WebDevice extends Device {
       // so it does not close with the browser process.
       logs: _newAppLogs(onLog),
       scratchDirs: [session.userDataDir],
+      outputPumps: [session.outputPump],
     );
   }
 
@@ -4628,6 +4661,7 @@ class WebDevice extends Device {
       server: staticServer.server,
       logs: logs,
       scratchDirs: [session.userDataDir],
+      outputPumps: [session.outputPump],
     );
   }
 
@@ -4669,6 +4703,10 @@ class WebDevice extends Device {
     // writing its caches, and deleting the tree under it leaves a half-removed
     // directory and an error naming a file nobody asked about.
     await _stopProcess('browser', instance.process, teardownBound);
+    // The browser has been asked to die; whatever a helper of it still writes
+    // is nobody's. Not waiting for its end-of-file is what lets this process
+    // exit when that helper is still alive.
+    await instance.disposeOutputPumps();
     await instance.logs.close();
     await instance.disposeScratchDirs();
   }

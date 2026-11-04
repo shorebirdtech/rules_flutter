@@ -1167,6 +1167,25 @@ void main() {
       expect(await profileDirOf(args).exists(), isFalse);
     });
 
+    test('a failed launch lets go of the browser\'s output pipes', () async {
+      // A helper of the browser can outlive it holding the write ends of
+      // these pipes; a reader still attached then keeps the tool's process
+      // from exiting.
+      final proc = FakeProcess();
+      final launch = ChromeSession.launch(
+        url: appUrl,
+        chromePath: '/fake/chrome',
+        options: const BrowserLaunchOptions(debugPort: 9222),
+        startProcess: (exe, a) async => proc,
+      );
+      await proc.outputAttached;
+      proc.emitStderr('Cannot start http server for devtools.\n');
+      await expectLater(launch, throwsA(isA<StateError>()));
+
+      expect(proc.stdoutHasListener, isFalse);
+      expect(proc.stderrHasListener, isFalse);
+    });
+
     test('refuses a debugging server that is not on 127.0.0.1', () async {
       // Chrome falls back to [::1] when 127.0.0.1:port is taken; every CDP
       // consumer here would then dial whatever holds 127.0.0.1:port.
@@ -2875,6 +2894,19 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
 
           await device.stop(instance);
           expect(instance.logs.isClosed, isTrue);
+        });
+
+        test('stop() stops reading the process\'s pipes', () async {
+          // An app can leave a helper behind holding the write ends of its
+          // output pipes; a reader waiting for their end-of-file would keep
+          // this tool's process from exiting after the run is over.
+          final (instance, proc) = await launchWith(build);
+          final device = build((exe, args) async => FakeProcess());
+
+          await device.stop(instance);
+
+          expect(proc.stdoutHasListener, isFalse);
+          expect(proc.stderrHasListener, isFalse);
         });
       });
     });

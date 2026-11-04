@@ -119,6 +119,79 @@ void main() {
     );
 
     test(
+      'stop lets go of the browser\'s output pipes, even when a helper of '
+      'the browser still holds the other end',
+      () async {
+        if (findChrome() == null) {
+          markTestSkipped('Chrome is not installed on this host');
+          return;
+        }
+        final cdp = await HttpServer.bind('127.0.0.1', 0);
+        addTearDown(() => cdp.close(force: true));
+        List<String>? chromeArgs;
+        cdp.listen((request) async {
+          if (request.uri.path == '/json') {
+            request.response.headers.contentType = ContentType.json;
+            request.response.write(
+              json.encode([
+                {
+                  'type': 'page',
+                  'url': chromeArgs!.last,
+                  'webSocketDebuggerUrl': 'ws://127.0.0.1:${cdp.port}/page',
+                },
+              ]),
+            );
+            await request.response.close();
+          } else {
+            final socket = await WebSocketTransformer.upgrade(request);
+            socket.listen((_) {});
+          }
+        });
+        final fakeChrome = FakeProcess();
+        final device =
+            WebDevice(
+                startProcess: (exe, args) async {
+                  chromeArgs = args;
+                  return fakeChrome;
+                },
+              )
+              ..webOptions = const WebOptions(
+                server: WebServerOptions(crossOriginIsolation: false),
+                browser: BrowserLaunchOptions(),
+                enableExpressionEvaluation: false,
+              );
+
+        final launch = device.launch((await appDir()).path);
+        await fakeChrome.outputAttached;
+        fakeChrome.emitStderr(
+          'DevTools listening on '
+          'ws://127.0.0.1:${cdp.port}/devtools/browser/abc123\n',
+        );
+        final instance = await launch;
+        expect(
+          fakeChrome.stderrHasListener,
+          isTrue,
+          reason: 'the browser\'s output is drained while it runs',
+        );
+
+        await device.stop(instance);
+
+        // A Chrome helper that outlives its parent keeps the write end of
+        // these pipes open, so the streams never reach end-of-file, and a Dart
+        // VM with a live pipe subscription does not exit: the tool answered
+        // `daemon.shutdown` and then sat there. Whether anything is still
+        // reading is the part this process controls.
+        expect(
+          fakeChrome.stdoutHasListener || fakeChrome.stderrHasListener,
+          isFalse,
+          reason:
+              'stop left a reader on the browser\'s stdout/stderr; a process '
+              'that still holds those pipes keeps the tool from exiting',
+        );
+      },
+    );
+
+    test(
       'a browser that exits without announcing a debug port fails the launch',
       () async {
         if (findChrome() == null) {
