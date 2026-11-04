@@ -152,3 +152,22 @@ bundle_test(
     expected = "//tests:expected/fx_flavors.json",
     prefix = "packages/fx_flavors/",
 )
+
+# -- Names -----------------------------------------------------------------------
+
+# Property: a file whose name needs URI encoding (a space, a non-ASCII
+# character) is stored at its encoded path, the form the engine asks for
+# (`Uri.encodeFull(key)`), and listed in the manifest by its decoded key, as
+# flutter_tools does; so `rootBundle.load('names/my image.png')` finds it.
+bundle_test(
+    name = "app_asset_names_are_stored_uri_encoded_test",
+    bundle = "//:app_names_bundle",
+    expected = "//tests:expected/names.json",
+)
+
+bundle_test(
+    name = "pub_package_asset_names_are_stored_uri_encoded_test",
+    bundle = "//:app_with_fx_names_bundle",
+    expected = "//tests:expected/fx_names.json",
+    prefix = "packages/fx_names/",
+)

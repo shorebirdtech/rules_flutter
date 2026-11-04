@@ -16,7 +16,7 @@
 ///     ]
 ///   },
 ///   "fonts": [...],
-///   "copies": {"dest/path": "source/path", ...},
+///   "copies": {"key": "source/path", ...},   // stored at the key, URI-encoded
 ///   "notices": "License text..."
 /// }
 import 'dart:convert';
@@ -309,7 +309,10 @@ Future<void> main(List<String> args) async {
   // -- Copy asset files (with optional font subsetting) ----------------------
   final copies = config['copies'] as Map<String, dynamic>? ?? {};
   for (final entry in copies.entries) {
-    final dest = '$outputDir/${entry.key}';
+    // The engine asks for `Uri.encodeFull(key)`, and flutter_tools stores each
+    // file at its URI-encoded path (`my%20image.png`), so a name with a space
+    // or a non-ASCII character is found; the manifest lists the decoded key.
+    final dest = '$outputDir/${Uri(pathSegments: entry.key.split('/')).path}';
     Directory(File(dest).parent.path).createSync(recursive: true);
 
     // Check if this asset should be subsetted.

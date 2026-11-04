@@ -197,7 +197,7 @@ Plugins need no special treatment. A pub package that is a Flutter plugin arrive
 
 #### Pub packages' assets
 
-A package's `flutter: assets:` are bundled at `packages/<package>/<path>`, as `flutter build` bundles them. A listed image ships its resolution variants from the `<number>x/` directories beside it. A listed directory (a trailing slash) ships the files directly in it, and nothing from the directories below it. An entry with `platforms:` ships only in builds for those platforms, and an entry with `flavors:` ships only in a build of one of those flavors, which rules_flutter has none of, so such an entry ships nowhere.
+A package's `flutter: assets:` are bundled at `packages/<package>/<path>`, as `flutter build` bundles them. A listed image ships its resolution variants from the `<number>x/` directories beside it. A listed directory (a trailing slash) ships the files directly in it, and nothing from the directories below it. An entry with `platforms:` ships only in builds for those platforms, and an entry with `flavors:` ships only in a build of one of those flavors, which rules_flutter has none of, so such an entry ships nowhere. A name with a space or a non-ASCII character is stored percent-encoded, the form the engine asks for, and listed in the manifest as written.
 
 #### Plugins' Maven dependencies
 

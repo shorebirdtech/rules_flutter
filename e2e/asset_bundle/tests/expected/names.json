@@ -1,0 +1,32 @@
+{
+  "assets": {
+    "names/my image.png": {
+      "variants": [
+        {
+          "asset": "names/my image.png"
+        }
+      ]
+    },
+    "names/日本語.png": {
+      "variants": [
+        {
+          "asset": "names/日本語.png"
+        }
+      ]
+    },
+    "names/dir with space/x.txt": {
+      "variants": [
+        {
+          "asset": "names/dir with space/x.txt"
+        }
+      ]
+    },
+    "names/plain.txt": {
+      "variants": [
+        {
+          "asset": "names/plain.txt"
+        }
+      ]
+    }
+  }
+}
