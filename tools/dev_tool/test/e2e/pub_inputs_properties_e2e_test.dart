@@ -23,6 +23,8 @@
 @Tags(['e2e'])
 library;
 
+import 'dart:io';
+
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
@@ -409,5 +411,48 @@ void main() {
         expect(deps.coordinates, ['groovy.group:groovy']);
       },
     );
+  });
+
+  group('running pub through Bazel', () {
+    /// `dart pub` records a telemetry identity and a first-run notice state
+    /// under `$HOME/.dart-tool` the first time it runs. A build tool that
+    /// runs it on a developer's behalf, to resolve a lock file, has no
+    /// business making that choice for them: `bazel run
+    /// @rules_flutter//flutter:pub` must leave the HOME it ran under as it
+    /// found it. The cache is given a directory of its own so that the only
+    /// thing the canary could receive is what pub writes besides packages.
+    test('leaves the HOME it runs under untouched', () async {
+      final ws = await PubInputsFixture(
+        files: {'pubspec.yaml': 'name: app\nenvironment:\n  sdk: ^3.0.0\n'},
+      ).materialize();
+      final home = Directory.systemTemp.createTempSync('canary_home_');
+      final cache = Directory.systemTemp.createTempSync('pub_cache_');
+      addTearDown(() {
+        home.deleteSync(recursive: true);
+        cache.deleteSync(recursive: true);
+      });
+
+      // `--run_under` sets HOME for the tool alone: setting it for the
+      // `bazel` client would move Bazel's own output base into the canary.
+      final result = await ws.bazel([
+        'run',
+        '--run_under=env -u CI -u GITHUB_ACTIONS -u BUILD_ID '
+            'HOME=${home.path} PUB_CACHE=${cache.path}',
+        '@rules_flutter//flutter:pub',
+        '--',
+        'get',
+      ]);
+      expect(result.succeeded, isTrue, reason: 'pub get failed:\n$result');
+
+      final written = [
+        for (final entity in home.listSync(recursive: true, followLinks: false))
+          p.relative(entity.path, from: home.path),
+      ];
+      expect(
+        written,
+        isEmpty,
+        reason: 'pub wrote into the HOME it was run under',
+      );
+    });
   });
 }

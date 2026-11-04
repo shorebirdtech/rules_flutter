@@ -89,7 +89,9 @@ Future<void> main(List<String> args) async {
 
   final process = await Process.start(
     dart,
-    ['pub', ...args],
+    // `--suppress-analytics` keeps `dart` from recording a telemetry identity
+    // and its first-run notice under the HOME of whoever ran `bazel run`.
+    ['--suppress-analytics', 'pub', ...args],
     workingDirectory: workspace,
     environment: {'FLUTTER_ROOT': flutterRoot.path},
     mode: ProcessStartMode.inheritStdio,
