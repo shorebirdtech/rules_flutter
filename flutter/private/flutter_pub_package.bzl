@@ -10,15 +10,24 @@ For each package in a Flutter app's pubspec.lock this rule:
   4. Scans the extracted package tree for per-platform Apple source layouts
      (modern SwiftPM `<platform>/<pkg>/Sources/<pkg>/`, shared-darwin
      `darwin/Classes/`, legacy `<platform>/Classes/`).
-  5. Branches on whether a `flutter.plugin` block is present:
-       - Absent → emit a plain `dart_library` via rules_dart's
-         `make_dart_library_build_content`. Pure-Dart pub packages reach
-         consumers exactly as they do under `pub.pub()`.
-       - Present → emit a `flutter_plugin` whose `plugin_platforms_json`
-         carries the parsed metadata, plus per-platform sub-targets:
-         `:<pkg>_apple_macos` / `:<pkg>_apple_ios` `flutter_apple_plugin_library`
-         when Apple sources are detected for the corresponding
-         `flutter.plugin.platforms.<plat>` entry.
+  5. Branches on what the pubspec declares:
+       - Nothing of Flutter's → emit rules_dart's `pub_package_member`.
+         Pure-Dart pub packages reach consumers exactly as they do under
+         `pub.pub()`.
+       - A `flutter.plugin` block, or fonts, assets, shaders or
+         `uses-material-design` → emit a `flutter_pub_member`, a plugin whose
+         `plugin_platforms_json` carries the parsed metadata when the block is
+         there, plus per-platform sub-targets: `:<pkg>_apple_macos` /
+         `:<pkg>_apple_ios` `flutter_apple_plugin_library` when Apple sources
+         are detected for the corresponding `flutter.plugin.platforms.<plat>`
+         entry.
+  6. Records the names the pubspec depends on, and the kind of member this is
+     (`flutter_pub_index.bzl`), for the package's library repository.
+
+This repository is the package's *source*: its files and the facts it states
+about itself. Its *library*, the target other packages depend on, is made by
+`flutter_pub_library_repo` over the members of the package's dependency cycle,
+which is why a member has no dependencies of its own.
 
 This is the rules_flutter sibling of rules_dart's `pub_lock_package`. The
 two rules never run for the same package: `flutter.pub()` always invokes
@@ -28,11 +37,13 @@ rules_dart's `fetch_pub_archive`, so one package version is the same tree
 whichever rule asks for it.
 """
 
-load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version", "fetch_pub_archive", "make_dart_library_build_content")
+load("@rules_dart//dart/pub:pub_graph.bzl", "write_pubspec_dependencies")
+load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version", "fetch_pub_archive")
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_deps", "parse_pubspec_sdk_constraint")
 load("//flutter/private:android_plugin_maven.bzl", "gradle_statements", "parse_gradle_maven_dependencies")
 load("//flutter/private:asset_variants.bzl", "variant_scale")
 load("//flutter/private:cmake_link_libraries.bzl", "parse_cmake_link_libraries")
+load("//flutter/private:flutter_pub_index.bzl", "MEMBER_DART", "MEMBER_FILE", "MEMBER_FLUTTER", "MEMBER_OVERLAY", "library_label", "read_index")
 load("//flutter/private:flutter_pubspec.bzl", "parse_flutter_assets_block", "parse_flutter_plugin_block")
 
 # Apple source extensions we sweep into the per-platform plugin library.
@@ -813,96 +824,56 @@ def _format_version_attr(version):
     """
     return '    version = "{}",\n'.format(version) if version else ""
 
-def make_flutter_library_build_content(
-        name,
-        deps,
-        language_version,
-        code_assets,
-        has_unreplaced_hook,
-        fonts_json_str,
-        font_files,
-        pkg_assets,
-        pkg_shaders,
-        version = "",
-        pkg_asset_platforms = {},
-        pkg_shader_platforms = {}):
-    """Generate BUILD content for a non-plugin Flutter spoke shipping fonts/assets/shaders.
+def make_dart_member_build_content(name, language_version, code_assets, has_unreplaced_hook, version = ""):
+    """Generate BUILD content for the source repository of a pure-Dart pub package.
 
-    Counterpart to `make_dart_library_build_content` — used when the spoke
-    declares anything under `flutter:` other than `plugin:` (e.g.
-    cupertino_icons declaring `flutter.fonts`). The same shape a user
-    would write by hand: `flutter_library` with the new pub-asset attrs,
-    plus the non-Dart `lib/` remainder as `resources`.
+    A package with nothing of Flutter's in its pubspec is rules_dart's own
+    `pub_package_member`, as a package fetched by `pub.from_lock()` is, so
+    it reaches consumers as it does under `pub.pub()`: no `FlutterInfo`.
 
     Args:
         name: Target name (also the `package_name`).
-        deps: Fully-qualified Bazel label strings for sibling spokes.
         language_version: Dart language version string (e.g. `"3.4"`).
         code_assets: `dart_code_asset` label strings replacing this
             package's build hook output.
         has_unreplaced_hook: Path of a build hook nothing replaces, or "".
-        fonts_json_str: JSON-encoded `flutter.fonts` declarations, or "".
-        font_files: Dict of font file label -> package-relative path.
-        pkg_assets: Dict of asset file label -> package-relative path.
-        pkg_asset_platforms: Dict of package-relative asset path -> the platforms
-            it ships on, for the assets a `platforms:` entry restricts.
-        pkg_shaders: Dict of shader file label -> package-relative path.
-        pkg_shader_platforms: Dict of package-relative shader path -> the
-            platforms it ships on, for the shaders a `platforms:` entry restricts.
-        version: The resolved package version this spoke was fetched at, or
-            empty. Emitted only when known, matching
-            `make_dart_library_build_content`: its sole use is agreement
-            checking when one package name arrives from two hubs, and an
-            unstated version never conflicts with a stated one.
+        version: The resolved package version, or "".
 
     Returns:
         BUILD.bazel content as a string.
     """
-    deps_block = ""
-    if deps:
-        dep_lines = ['        "{}",'.format(dep) for dep in deps]
-        deps_block = "    deps = [\n{}\n    ],\n".format("\n".join(dep_lines))
-
-    pub_attrs = _format_pub_asset_attrs(fonts_json_str, font_files, pkg_assets, pkg_shaders, pkg_asset_platforms, pkg_shader_platforms)
-
-    # The `lib/` glob is `allow_empty`: a pub package can be only assets or native
-    # code, with no Dart.
     return """\
-load("@rules_flutter//flutter:defs.bzl", "flutter_library")
+load("@rules_dart//dart/pub:pub_library.bzl", "pub_package_member")
 
-flutter_library(
+pub_package_member(
     name = "{name}",
     srcs = glob(["lib/**/*.dart"], allow_empty = True),
-{resources}{deps}    package_name = "{name}",
+{resources}    package_name = "{name}",
     language_version = "{language_version}",
-{version}{asset_attrs}{pub_attrs}    web_compiler_independent = True,
-    visibility = ["//visibility:public"],
+{version}{asset_attrs}    visibility = ["//visibility:public"],
 )
 """.format(
         name = name,
         resources = _RESOURCES_GLOB_BLOCK,
-        deps = deps_block,
         language_version = language_version,
         version = _format_version_attr(version),
         asset_attrs = _format_code_asset_attrs(code_assets, has_unreplaced_hook),
-        pub_attrs = pub_attrs,
     )
 
-def make_flutter_plugin_build_content(
+def make_flutter_member_build_content(
         name,
-        deps,
         language_version,
         code_assets,
         has_unreplaced_hook,
-        plugin_platforms_json,
-        apple_macos_srcs_dirs,
-        apple_ios_srcs_dirs,
-        apple_macos_include_dirs,
-        apple_ios_include_dirs,
-        apple_macos_privacy_manifests,
-        apple_ios_privacy_manifests,
-        linux_src_dir,
-        windows_src_dir,
+        plugin_platforms_json = "",
+        apple_macos_srcs_dirs = [],
+        apple_ios_srcs_dirs = [],
+        apple_macos_include_dirs = [],
+        apple_ios_include_dirs = [],
+        apple_macos_privacy_manifests = [],
+        apple_ios_privacy_manifests = [],
+        linux_src_dir = "",
+        windows_src_dir = "",
         fonts_json_str = "",
         font_files = {},
         pkg_assets = {},
@@ -912,10 +883,12 @@ def make_flutter_plugin_build_content(
         windows_link = None,
         pkg_asset_platforms = {},
         pkg_shader_platforms = {}):
-    """Generate BUILD content for a Flutter plugin spoke.
+    """Generate BUILD content for the source repository of a Flutter pub package.
 
-    Emits a `flutter_plugin` plus optional per-platform
-    `flutter_apple_plugin_library` (Apple) /
+    Emits the package's `flutter_pub_member`, a plugin when
+    `plugin_platforms_json` is given and otherwise a package that only
+    bundles fonts, assets and shaders (`cupertino_icons`), plus optional
+    per-platform `flutter_apple_plugin_library` (Apple) /
     `flutter_linux_plugin_library` /
     `flutter_windows_plugin_library` sub-targets.
 
@@ -925,14 +898,18 @@ def make_flutter_plugin_build_content(
     `@<spoke>//android:lib` — non-Android workspaces don't pay the
     `@rules_android` / `@rules_kotlin` cost.
 
+    The member has no dependencies: those belong to the library of the
+    package's dependency cycle (`flutter_pub_library`), which the package's
+    library repository writes once it knows the cycle.
+
     Args:
         name: Target name (also the `package_name`).
-        deps: Fully-qualified Bazel label strings for sibling spokes.
         language_version: Dart language version string (e.g. `"3.4"`).
         code_assets: `dart_code_asset` label strings replacing this
             package's build hook output.
         has_unreplaced_hook: Path of a build hook nothing replaces, or "".
-        plugin_platforms_json: JSON-encoded `flutter.plugin.platforms` dict.
+        plugin_platforms_json: JSON-encoded `flutter.plugin.platforms` dict;
+            empty for a package that is not a plugin.
         apple_macos_srcs_dirs: Detected macOS Apple source dirs.
         apple_ios_srcs_dirs: Detected iOS Apple source dirs.
         apple_macos_include_dirs: SwiftPM-style public-header dirs (macOS).
@@ -961,11 +938,6 @@ def make_flutter_plugin_build_content(
     Returns:
         BUILD.bazel content as a string.
     """
-    deps_block = ""
-    if deps:
-        dep_lines = ['        "{}",'.format(dep) for dep in deps]
-        deps_block = "    deps = [\n{}\n    ],\n".format("\n".join(dep_lines))
-
     extra_loads = []
     extra_targets = []
     apple_libs_arg = ""
@@ -1116,16 +1088,14 @@ flutter_windows_plugin_library(
     # The `lib/` glob is `allow_empty`: a pub package can be only assets or native
     # code, with no Dart.
     return """\
-load("@rules_flutter//flutter:defs.bzl", "flutter_plugin")
+load("@rules_flutter//flutter/private:flutter_pub_library.bzl", "flutter_pub_member")
 {extra_loads}
-flutter_plugin(
+flutter_pub_member(
     name = "{name}",
     srcs = glob(["lib/**/*.dart"], allow_empty = True),
-{resources}{deps}    package_name = "{name}",
-    plugin_platforms_json = {plugin_platforms_json_literal},
-    language_version = "{language_version}",
-{version}{apple_libs_arg}{linux_libs_arg}{windows_libs_arg}{apple_privacy_files_arg}{asset_attrs}{pub_attrs}    web_compiler_independent = True,
-    visibility = ["//visibility:public"],
+{resources}    package_name = "{name}",
+{plugin_platforms_json_attr}    language_version = "{language_version}",
+{version}{apple_libs_arg}{linux_libs_arg}{windows_libs_arg}{apple_privacy_files_arg}{asset_attrs}{pub_attrs}    visibility = ["//visibility:public"],
 )
 {extra_targets}
 """.format(
@@ -1133,9 +1103,8 @@ flutter_plugin(
         version = _format_version_attr(version),
         asset_attrs = _format_code_asset_attrs(code_assets, has_unreplaced_hook),
         resources = _RESOURCES_GLOB_BLOCK,
-        deps = deps_block,
         language_version = language_version,
-        plugin_platforms_json_literal = repr(plugin_platforms_json),
+        plugin_platforms_json_attr = "    plugin_platforms_json = {},\n".format(repr(plugin_platforms_json)) if plugin_platforms_json else "",
         extra_loads = "\n".join(extra_loads),
         extra_targets = "\n".join(extra_targets),
         apple_libs_arg = apple_libs_arg,
@@ -1569,7 +1538,8 @@ def _resolve_overlay_template(ctx, overlay_root_label, package_name, version, la
     `{PKG}`, `{VERSION}`, `{LANGUAGE_VERSION}` and `{DEPS}` substitutions
     applied) on first match. Returns empty string when no template is found.
 
-    `dep_labels` are the spoke labels the package's own pubspec resolves to,
+    `dep_labels` is a function of no arguments, giving the labels of the
+    libraries the package's own pubspec resolves to,
     which `{DEPS}` expands into. `guard_hub_deps` rejects a template that
     hand-writes those labels instead — see `find_hardcoded_hub_dep`. Only the
     top-level BUILD sets it: `{DEPS}` is a Dart dependency list, so it is not
@@ -1659,7 +1629,7 @@ def _resolve_overlay_template(ctx, overlay_root_label, package_name, version, la
                 package_name = package_name,
                 version = version,
                 language_version = language_version,
-                deps = render_overlay_deps(dep_labels),
+                deps = render_overlay_deps(dep_labels()),
             )
     return ""
 
@@ -1693,7 +1663,7 @@ def _flutter_pub_package_impl(ctx):
         base_url = ctx.attr.base_url,
     )
 
-    bazel_deps = []
+    pubspec_dependencies = []
     language_version = ""
     plugin_block = struct(
         present = False,
@@ -1710,9 +1680,7 @@ def _flutter_pub_package_impl(ctx):
     pubspec_path = ctx.path("pubspec.yaml")
     if pubspec_path.exists:
         pubspec_content = ctx.read(pubspec_path)
-        all_deps = parse_pubspec_deps(pubspec_content)
-        available = {p: True for p in ctx.attr.lock_packages}
-        bazel_deps = sorted([d for d in all_deps if d in available])
+        pubspec_dependencies = parse_pubspec_deps(pubspec_content)
         language_version = derive_language_version(
             parse_pubspec_sdk_constraint(pubspec_content),
         )
@@ -1725,19 +1693,30 @@ def _flutter_pub_package_impl(ctx):
                     "Bundling the file as it is would ship it untransformed under the transformed file's name."
                 ).format(ctx.attr.package_name, repr(asset.path)))
 
-    # Build full label strings for sibling spoke repos.
-    dep_labels = [
-        "@{hub}__{dep}//:{dep}".format(hub = ctx.attr.hub_name, dep = dep)
-        for dep in bazel_deps
-    ]
+    # The names the pubspec depends on, for the libraries of the packages that
+    # reach this one. Which of them the lock lists, and what that makes of
+    # this package's dependency cycle, is for its library repository to say.
+    write_pubspec_dependencies(ctx, pubspec_dependencies)
 
-    # If the pubspec declares `uses-material-design: true`, the spoke
-    # depends on @rules_flutter//flutter:material_icons so the bundled
+    # If the pubspec declares `uses-material-design: true`, the package's
+    # library depends on @rules_flutter//flutter:material_icons so the bundled
     # font travels through the deps graph automatically — same channel
     # any other pub package's font flows through. Cross-package mismatch
     # (app says false, pub dep says true) becomes structurally impossible.
-    if asset_block.uses_material_design:
-        dep_labels = dep_labels + ["@rules_flutter//flutter:material_icons"]
+    # The library repository reads it from `MEMBER_FILE`.
+    uses_material_icons = asset_block.uses_material_design
+
+    # An overlay's own dependencies are the labels of the libraries of the
+    # packages the pubspec names that the lock lists. Worked out only for a
+    # package an overlay builds: the lock's index is read for no other.
+    def dep_labels():
+        index = read_index(ctx, ctx.attr.hub_name)
+        labels = [
+            library_label(ctx.attr.hub_name, index, dep)
+            for dep in sorted(pubspec_dependencies)
+            if dep in index.hosted or dep in index.other
+        ]
+        return labels + (["@rules_flutter//flutter:material_icons"] if uses_material_icons else [])
 
     # Pre-compute the pub-asset attr inputs once. Used by either branch
     # below (plugin vs library).
@@ -1786,6 +1765,7 @@ def _flutter_pub_package_impl(ctx):
 
     if overlay_content:
         ctx.file("BUILD.bazel", overlay_content)
+        ctx.file(MEMBER_FILE, json.encode({"kind": MEMBER_OVERLAY, "material_icons": False}))
 
         # When the overlay ships an `android/BUILD.bazel.tpl`, use it
         # verbatim. Otherwise emit an empty stub so the hub's
@@ -1913,9 +1893,8 @@ def _flutter_pub_package_impl(ctx):
                 android_consumer_proguard_specs = _detect_consumer_proguard_specs(ctx)
 
         plugin_platforms_json = json.encode(plugin_block.platforms)
-        build_content = make_flutter_plugin_build_content(
+        build_content = make_flutter_member_build_content(
             name = ctx.attr.package_name,
-            deps = dep_labels,
             language_version = language_version,
             version = ctx.attr.version,
             code_assets = ctx.attr.code_assets,
@@ -1938,14 +1917,14 @@ def _flutter_pub_package_impl(ctx):
             linux_link = linux_link,
             windows_link = windows_link,
         )
-    elif has_asset_contributions:
-        # No plugin block, but the pubspec has flutter.fonts/assets/shaders.
-        # Emit a flutter_library (rather than dart_library) so the metadata
-        # propagates via FlutterInfo.pub_fonts/pub_assets/pub_shaders to the
-        # consuming app's bundle aggregator.
-        build_content = make_flutter_library_build_content(
+    elif has_asset_contributions or uses_material_icons:
+        # No plugin block, but the pubspec has flutter.fonts/assets/shaders (or
+        # asks for the Material icon font). A Flutter member (rather than
+        # rules_dart's) so the metadata propagates via
+        # FlutterInfo.pub_fonts/pub_assets/pub_shaders to the consuming app's
+        # bundle aggregator.
+        build_content = make_flutter_member_build_content(
             name = ctx.attr.package_name,
-            deps = dep_labels,
             language_version = language_version,
             version = ctx.attr.version,
             code_assets = ctx.attr.code_assets,
@@ -1965,9 +1944,8 @@ def _flutter_pub_package_impl(ctx):
         android_has_resources = False
         android_native_build = False
     else:
-        build_content = make_dart_library_build_content(
+        build_content = make_dart_member_build_content(
             name = ctx.attr.package_name,
-            deps = dep_labels,
             language_version = language_version,
             code_assets = ctx.attr.code_assets,
             has_unreplaced_hook = unreplaced_hook,
@@ -1982,6 +1960,11 @@ def _flutter_pub_package_impl(ctx):
         android_native_build = False
 
     ctx.file("BUILD.bazel", build_content)
+    is_flutter_member = plugin_block.present or has_asset_contributions or uses_material_icons
+    ctx.file(MEMBER_FILE, json.encode({
+        "kind": MEMBER_FLUTTER if is_flutter_member else MEMBER_DART,
+        "material_icons": uses_material_icons,
+    }))
 
     # Always emit `android/BUILD.bazel`. Bazel only loads it when something
     # queries `@<spoke>//android:lib`, so non-Android workspaces don't pay
@@ -2038,10 +2021,6 @@ flutter_pub_package = repository_rule(
             doc = "Name of the hub repo (for constructing cross-spoke dep labels).",
             mandatory = True,
         ),
-        "lock_packages": attr.string_list(
-            doc = "All hosted package names in the lock file (for dep filtering).",
-            default = [],
-        ),
         "code_assets": attr.string_list(
             doc = "Labels of `dart_code_asset` targets standing in for this " +
                   "package's build hook. Resolved by the extension from " +
@@ -2069,5 +2048,5 @@ flutter_pub_package = repository_rule(
             default = [],
         ),
     },
-    doc = "Downloads a single Flutter pub package and emits a `flutter_plugin` (when `flutter.plugin` is present) or a plain `dart_library` (otherwise). When Apple sources are detected, also emits per-platform `flutter_apple_plugin_library` sub-targets. Honors per-package overlay BUILD.bazel.tpl overrides under `overlay_roots`. The `flutter pub get` analog of `pub_lock_package`.",
+    doc = "Downloads a single Flutter pub package, its source repository, and emits its member: a `flutter_pub_member` (a plugin when `flutter.plugin` is present, otherwise a package bundling fonts, assets or shaders) or rules_dart's `pub_package_member` (for a package with nothing of Flutter's). When Apple sources are detected, also emits per-platform `flutter_apple_plugin_library` sub-targets. Honors per-package overlay BUILD.bazel.tpl overrides under `overlay_roots`, which replace the member with a whole target. The package's library repository (`flutter_pub_library_repo`) builds the member with the others of its dependency cycle. The `flutter pub get` analog of `pub_lock_package`.",
 )

@@ -17,6 +17,8 @@ load("@rules_dart//dart/pub:pub_lock_package.bzl", "check_pub_archive_sha256")
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_lock")
 load("//flutter/private:android_plugin_maven.bzl", "flutter_android_maven")
 load("//flutter/private:flutter_gen_l10n_repo.bzl", "flutter_gen_l10n_repo")
+load("//flutter/private:flutter_pub_index.bzl", "flutter_pub_index", "index_repo", "library_repo", "source_repo")
+load("//flutter/private:flutter_pub_library_repo.bzl", "flutter_pub_library_repo")
 load("//flutter/private:flutter_pub_lock_hub.bzl", "flutter_pub_lock_hub")
 load("//flutter/private:flutter_pub_package.bzl", "flutter_pub_package")
 load("//flutter/private:flutter_sdk_package.bzl", "flutter_sdk_package")
@@ -214,19 +216,32 @@ def _toolchain_extension(module_ctx):
                     )
                     all_package_names.append(name)
 
+            # What every repository of the hub plans against, stated once
+            # rather than on each of them: the lock records each repository's
+            # attributes, so the package list on every repository would grow
+            # it by the square of the package count.
+            flutter_pub_index(
+                name = index_repo(hub_name),
+                hosted = sorted(hosted.keys()),
+                other = sorted([n for n in all_package_names if n not in hosted]),
+            )
+
             for name, message in unsupported.items():
                 flutter_unsupported_package(
-                    name = hub_name + "__" + name,
+                    name = source_repo(hub_name, name),
                     package_name = name,
                     message = message,
                 )
 
-            # Create spoke repos for hosted packages. flutter.pub() routes
-            # every hosted package through flutter_pub_package — the
-            # `flutter pub get` analog — so plugins surface their
-            # `flutter.plugin.platforms` metadata via FlutterInfo. Pure-Dart
-            # packages still emit a plain `dart_library`; the rule branches
-            # internally on whether a `flutter.plugin` block is present.
+            # Create a source repo and a library repo for each hosted package.
+            # flutter.pub() routes every hosted package through
+            # flutter_pub_package — the `flutter pub get` analog — so plugins
+            # surface their `flutter.plugin.platforms` metadata via
+            # FlutterInfo. Pure-Dart packages are still rules_dart's own
+            # member kind; the rule branches internally on whether the
+            # pubspec declares anything of Flutter's. The library repo is the
+            # package's dependency cycle (usually just itself) as one target:
+            # pub allows packages to depend on each other, Bazel does not.
             # Non-Flutter modules using `pub.pub()` keep using rules_dart's
             # `pub_lock_package` directly.
             for name, info in hosted.items():
@@ -238,14 +253,18 @@ def _toolchain_extension(module_ctx):
                 # so a lock entry without one is refused here, where the lock
                 # can be named, rather than fetched on trust.
                 check_pub_archive_sha256(name, version, sha256, str(pub_tag.lock))
+                flutter_pub_library_repo(
+                    name = library_repo(hub_name, name),
+                    package_name = name,
+                    hub_name = hub_name,
+                )
                 flutter_pub_package(
-                    name = hub_name + "__" + name,
+                    name = source_repo(hub_name, name),
                     package_name = name,
                     version = version,
                     sha256 = sha256,
                     base_url = desc.get("url", "https://pub.dev") if type(desc) == "dict" else "https://pub.dev",
                     hub_name = hub_name,
-                    lock_packages = all_package_names,
                     overlay_roots = user_overlay_roots + ["@rules_flutter//ext:BUILD.bazel"],
                     # rules_dart's curated registry is the single source of
                     # truth for which pub package a Bazel-built native library
@@ -264,12 +283,11 @@ def _toolchain_extension(module_ctx):
             sdk_source_sha256 = flutter_source_sha256(flutter_version)
             for name in sdk_flutter.keys():
                 flutter_sdk_package(
-                    name = hub_name + "__" + name,
+                    name = source_repo(hub_name, name),
                     package_name = name,
                     flutter_version = flutter_version,
                     sha256 = sdk_source_sha256,
                     hub_name = hub_name,
-                    lock_packages = all_package_names,
                 )
 
             # The hub's Android Maven check: what every hosted spoke's Gradle
@@ -280,7 +298,7 @@ def _toolchain_extension(module_ctx):
                 name = hub_name + "-android_maven",
                 hub_name = hub_name,
                 spokes = [
-                    "@{}__{}//android:maven_deps.json".format(hub_name, name)
+                    "@{}//android:maven_deps.json".format(source_repo(hub_name, name))
                     for name in sorted(hosted.keys())
                 ],
             )
@@ -297,6 +315,7 @@ def _toolchain_extension(module_ctx):
                 name = hub_name,
                 hub_name = hub_name,
                 packages = sorted(all_package_names),
+                hosted_packages = sorted(hosted.keys()),
             )
 
     # Don't declare root_module_direct_deps: flutter_register_toolchains creates

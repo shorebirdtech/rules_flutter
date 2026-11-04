@@ -13,6 +13,7 @@ Omitting it is not neutral: `package_config.json` reads a missing
 load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version")
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_deps", "parse_pubspec_sdk_constraint")
 load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url")
+load("//flutter/private:flutter_pub_index.bzl", "library_label", "read_index")
 load("//flutter/private:pinned.bzl", "pinned")
 
 def make_flutter_sdk_build_content(name, deps, language_version):
@@ -124,23 +125,20 @@ def _flutter_sdk_package_impl(repository_ctx):
     # language version stays empty rather than taking `derive_language_version`'s
     # missing-constraint default — that default is pub's answer for a pubspec
     # that *has* no `environment.sdk`, not for a package we never inspected.
+    index = read_index(repository_ctx, repository_ctx.attr.hub_name)
     bazel_deps = []
     language_version = ""
     pubspec_path = repository_ctx.path("pubspec.yaml")
     if pubspec_path.exists:
         content = repository_ctx.read(pubspec_path)
         all_deps = parse_pubspec_deps(content)
-        available = {p: True for p in repository_ctx.attr.lock_packages}
-        bazel_deps = sorted([d for d in all_deps if d in available])
+        bazel_deps = sorted([d for d in all_deps if d in index.hosted or d in index.other])
         language_version = derive_language_version(
             parse_pubspec_sdk_constraint(content),
         )
 
-    # Build dep labels pointing to sibling spoke repos.
-    dep_labels = ["@{hub}__{dep}//:{dep}".format(
-        hub = repository_ctx.attr.hub_name,
-        dep = dep,
-    ) for dep in bazel_deps]
+    # Build dep labels pointing to the libraries of the packages' repos.
+    dep_labels = [library_label(repository_ctx.attr.hub_name, index, dep) for dep in bazel_deps]
 
     repository_ctx.file("BUILD.bazel", make_flutter_sdk_build_content(
         name = package_name,
@@ -184,12 +182,8 @@ flutter_sdk_package = repository_rule(
             mandatory = True,
         ),
         "hub_name": attr.string(
-            doc = "Name of the hub repo (for constructing cross-spoke dep labels).",
+            doc = "Name of the hub repo: the prefix of the hub's repositories, whose index lists the lock's packages.",
             mandatory = True,
-        ),
-        "lock_packages": attr.string_list(
-            doc = "All package names in the lock file (for dep filtering).",
-            default = [],
         ),
     },
 )

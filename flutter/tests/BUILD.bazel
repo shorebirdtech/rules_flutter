@@ -18,6 +18,7 @@ load(":flutter_application_test.bzl", "flutter_application_test_suite")
 load(":flutter_info_test.bzl", "flutter_info_test_suite")
 load(":flutter_library_test.bzl", "flutter_library_test_suite")
 load(":flutter_plugin_test.bzl", "flutter_plugin_test_suite")
+load(":flutter_pub_library_repo_test.bzl", "flutter_pub_library_repo_test_suite")
 load(":flutter_pub_package_test.bzl", "flutter_pub_package_test_suite")
 load(":flutter_pubspec_test.bzl", "flutter_pubspec_test_suite")
 load(":flutter_sdk_package_test.bzl", "flutter_sdk_package_test_suite")
@@ -99,6 +100,8 @@ desktop_plugin_link_test_suite(name = "desktop_plugin_link_test")
 gradle_dependency_forms_test_suite(name = "gradle_dependency_forms_test")
 
 gradle_dependency_gaps_test_suite(name = "gradle_dependency_gaps_test")
+
+flutter_pub_library_repo_test_suite(name = "flutter_pub_library_repo_test")
 
 flutter_pub_package_test_suite(name = "flutter_pub_package_test")
 

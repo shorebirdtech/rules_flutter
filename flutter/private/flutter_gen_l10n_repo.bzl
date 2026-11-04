@@ -55,6 +55,7 @@ applies is a loud failure, where a rewrite would quietly drift.
 """
 
 load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url")
+load("//flutter/private:flutter_pub_index.bzl", "library_repo")
 load("//flutter/private:pinned.bzl", "pinned")
 
 # The exact closure of `src/localizations/gen_l10n.dart` once the six import
@@ -114,7 +115,7 @@ def _flutter_gen_l10n_repo_impl(repository_ctx):
 
     srcs = "\n".join(['        "%s",' % s for s in _SUBSET_SRCS])
     deps = "\n".join([
-        '        "@%s__%s//:%s",' % (repository_ctx.attr.hub_name, d, d)
+        '        "@%s//:%s",' % (library_repo(repository_ctx.attr.hub_name, d), d)
         for d in _SUBSET_DEPS
     ])
 

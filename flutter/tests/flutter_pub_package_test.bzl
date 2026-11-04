@@ -18,8 +18,8 @@ load(
     "find_hardcoded_hub_dep",
     "find_hardcoded_language_version",
     "make_android_subpackage_build_content",
-    "make_flutter_library_build_content",
-    "make_flutter_plugin_build_content",
+    "make_dart_member_build_content",
+    "make_flutter_member_build_content",
     "parse_android_manifest_package",
     "parse_gradle_android_namespace",
     "render_overlay_deps",
@@ -284,9 +284,8 @@ def _spokes_state_their_resolved_version_test_impl(ctx):
     """
     env = unittest.begin(ctx)
 
-    plugin = make_flutter_plugin_build_content(
+    plugin = make_flutter_member_build_content(
         name = "sqlite3_web",
-        deps = [],
         language_version = "3.4",
         code_assets = [],
         has_unreplaced_hook = "",
@@ -303,9 +302,8 @@ def _spokes_state_their_resolved_version_test_impl(ctx):
     )
     asserts.true(env, '\n    version = "2.2.0",' in plugin, plugin)
 
-    library = make_flutter_library_build_content(
+    library = make_flutter_member_build_content(
         name = "cupertino_icons",
-        deps = [],
         language_version = "3.4",
         code_assets = [],
         has_unreplaced_hook = "",
@@ -317,10 +315,25 @@ def _spokes_state_their_resolved_version_test_impl(ctx):
     )
     asserts.true(env, '\n    version = "1.0.8",' in library, library)
 
-    # And that it is built once, whichever web compilers an app reaching it
-    # compiles for: no pub package can `select()` on the web compiler.
-    asserts.true(env, "\n    web_compiler_independent = True," in plugin, plugin)
-    asserts.true(env, "\n    web_compiler_independent = True," in library, library)
+    # Both are members, not libraries: they state no dependencies, which belong
+    # to the library of the package's dependency cycle.
+    asserts.true(env, "\nflutter_pub_member(" in plugin, plugin)
+    asserts.true(env, "\nflutter_pub_member(" in library, library)
+    asserts.false(env, "deps" in plugin, plugin)
+    asserts.false(env, "deps" in library, library)
+
+    # A pure-Dart package is rules_dart's own member kind, and states its
+    # version too.
+    dart = make_dart_member_build_content(
+        name = "meta",
+        language_version = "3.4",
+        code_assets = [],
+        has_unreplaced_hook = "",
+        version = "1.17.0",
+    )
+    asserts.true(env, "\npub_package_member(" in dart, dart)
+    asserts.true(env, '\n    version = "1.17.0",' in dart, dart)
+    asserts.true(env, _RESOURCES_GLOB in dart, dart)
 
     return unittest.end(env)
 
@@ -339,9 +352,8 @@ def _spoke_without_a_version_states_none_test_impl(ctx):
     """
     env = unittest.begin(ctx)
 
-    library = make_flutter_library_build_content(
+    library = make_flutter_member_build_content(
         name = "cupertino_icons",
-        deps = [],
         language_version = "3.4",
         code_assets = [],
         has_unreplaced_hook = "",
@@ -366,9 +378,8 @@ def _plugin_spoke_carries_resources_test_impl(ctx):
     """A plugin spoke's BUILD partitions lib/ into srcs + resources."""
     env = unittest.begin(ctx)
 
-    content = make_flutter_plugin_build_content(
+    content = make_flutter_member_build_content(
         name = "sqlite3_web",
-        deps = [],
         language_version = "3.4",
         code_assets = [],
         has_unreplaced_hook = "",
@@ -399,9 +410,8 @@ def _library_spoke_carries_resources_test_impl(ctx):
     """
     env = unittest.begin(ctx)
 
-    content = make_flutter_library_build_content(
+    content = make_flutter_member_build_content(
         name = "shader_pkg",
-        deps = [],
         language_version = "3.4",
         code_assets = [],
         has_unreplaced_hook = "",
@@ -429,9 +439,8 @@ def _file_names_are_written_as_string_literals_test_impl(ctx):
 
     name = 'assets/a"+fail("x")+".txt'
     for content in [
-        make_flutter_library_build_content(
+        make_flutter_member_build_content(
             name = "p",
-            deps = [],
             language_version = "3.4",
             code_assets = [],
             has_unreplaced_hook = "",
@@ -440,9 +449,8 @@ def _file_names_are_written_as_string_literals_test_impl(ctx):
             pkg_assets = {":" + name: name},
             pkg_shaders = {":" + name: name},
         ),
-        make_flutter_plugin_build_content(
+        make_flutter_member_build_content(
             name = "p",
-            deps = [],
             language_version = "3.4",
             code_assets = [],
             has_unreplaced_hook = "",
@@ -475,9 +483,8 @@ def _spoke_with_shaders_declares_their_includes_test_impl(ctx):
     env = unittest.begin(ctx)
 
     def content(pkg_shaders):
-        return make_flutter_library_build_content(
+        return make_flutter_member_build_content(
             name = "shader_pkg",
-            deps = [],
             language_version = "3.4",
             code_assets = [],
             has_unreplaced_hook = "",
@@ -680,9 +687,8 @@ def _desktop_plugin_libraries_carry_their_link_libraries_test_impl(ctx):
         "linux",
         "linux/CMakeLists.txt",
     )
-    content = make_flutter_plugin_build_content(
+    content = make_flutter_member_build_content(
         name = "url_launcher_windows",
-        deps = [],
         language_version = "3.4",
         code_assets = [],
         has_unreplaced_hook = "",
@@ -722,9 +728,8 @@ def _platform_restricted_assets_are_stated_in_the_spoke_test_impl(ctx):
     """An asset a `platforms:` entry restricts is stated with its platforms."""
     env = unittest.begin(ctx)
 
-    content = make_flutter_library_build_content(
+    content = make_flutter_member_build_content(
         name = "restricted",
-        deps = [],
         language_version = "3.4",
         code_assets = [],
         has_unreplaced_hook = "",
@@ -749,9 +754,8 @@ def _platform_restricted_shaders_are_stated_in_the_spoke_test_impl(ctx):
     """A shader a `platforms:` entry restricts is stated with its platforms."""
     env = unittest.begin(ctx)
 
-    content = make_flutter_library_build_content(
+    content = make_flutter_member_build_content(
         name = "restricted",
-        deps = [],
         language_version = "3.4",
         code_assets = [],
         has_unreplaced_hook = "",

@@ -308,12 +308,26 @@ def flutter_analyzable_info(ctx, package):
     Returns:
       A `DartAnalyzableInfo`.
     """
+    return flutter_analyzable_info_of_packages(ctx, [package], ctx.files.srcs, ctx.files.resources)
+
+def flutter_analyzable_info_of_packages(ctx, packages, srcs, resources):
+    """As `flutter_analyzable_info`, for a target that is several packages.
+
+    Args:
+      ctx: The rule context. Reads `deps` and `_sky_engine` (`SKY_ENGINE_ATTR`).
+      packages: The target's `DartPackageInfo`s.
+      srcs: The Dart sources of all of them.
+      resources: Their other files under `lib/`.
+
+    Returns:
+      A `DartAnalyzableInfo`.
+    """
     return dart_analyzable_info_with_packages(
         label = ctx.label,
-        packages = [package],
+        packages = packages,
         deps = ctx.attr.deps + [ctx.attr._sky_engine],
-        package_srcs = ctx.files.srcs,
-        resources = ctx.files.resources,
+        package_srcs = srcs,
+        resources = resources,
     )
 
 def _flutter_library_impl(ctx):

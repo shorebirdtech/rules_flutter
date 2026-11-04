@@ -1,0 +1,197 @@
+"""The library repository of a hosted package of a `flutter.pub()` hub.
+
+A package's files are in its source repository (`flutter_pub_package`); this
+one decides what it is built with. It reads the pubspec dependencies of every
+package the package reaches, as their source repositories record them (which
+fetches only what building the package fetches anyway), and finds its
+dependency cycle with rules_dart's planning (`pub_graph.bzl`). Pub allows
+packages to depend on each other (`dio` and `dio_web_adapter` do), and Bazel
+does not, so a cycle is one library, in the library repository of its first
+package by name, which every other package of the cycle aliases.
+
+The library is a `flutter_pub_library` over the members of the cycle, or
+rules_dart's `pub_library` when none of them has anything of Flutter's.
+Either way its dependencies are the libraries of whatever the cycle depends on
+outside itself.
+"""
+
+load("@rules_dart//dart/pub:pub_graph.bzl", "dependency_cycle", "dependency_graph", "read_pubspec_dependencies")
+load("//flutter/private:flutter_pub_index.bzl", "MEMBER_FILE", "MEMBER_FLUTTER", "MEMBER_OVERLAY", "library_label", "library_repo", "read_index", "read_sibling_file", "source_repo")
+
+_MATERIAL_ICONS = "@rules_flutter//flutter:material_icons"
+
+def _labels(labels):
+    return "[{}]".format(", ".join(['"{}"'.format(label) for label in labels]))
+
+def make_alias_build_content(name, actual):
+    """BUILD content for a package that is its library by another target.
+
+    Args:
+      name: The package's name.
+      actual: The label of the target that is its library.
+
+    Returns:
+      BUILD.bazel content as a string.
+    """
+    return """\
+alias(
+    name = "{name}",
+    actual = "{actual}",
+    visibility = ["//visibility:public"],
+)
+""".format(name = name, actual = actual)
+
+def make_library_build_content(name, members, deps, flutter):
+    """BUILD content for the library of a dependency cycle.
+
+    Args:
+      name: The library's name: the cycle's first package by name.
+      members: Labels of the members of the cycle.
+      deps: Labels of the libraries the cycle depends on outside itself.
+      flutter: Whether a member is of Flutter's kind, so the library is a
+        `flutter_pub_library` and not rules_dart's `pub_library`. `package:test`
+        (never one) also carries the runner `dart_test` uses.
+
+    Returns:
+      BUILD.bazel content as a string.
+    """
+    if name == _TEST_PACKAGE and not flutter:
+        return _test_package_build_content(members, deps)
+    load_statement, rule = (
+        ('load("@rules_flutter//flutter/private:flutter_pub_library.bzl", "flutter_pub_library")', "flutter_pub_library") if flutter else ('load("@rules_dart//dart/pub:pub_library.bzl", "pub_library")', "pub_library")
+    )
+    return """\
+{load_statement}
+
+{rule}(
+    name = "{name}",
+    members = {members},
+    deps = {deps},
+    visibility = ["//visibility:public"],
+)
+""".format(
+        load_statement = load_statement,
+        rule = rule,
+        name = name,
+        members = _labels(members),
+        deps = _labels(deps),
+    )
+
+# `package:test`'s library also carries the runner `dart_test` runs tests
+# through, built from this same package so the two are one version. rules_dart
+# emits the same block for the `test` of its own hubs; `dart_test` finds the
+# runner on the direct dependency that provides `package:test`.
+_TEST_PACKAGE = "test"
+
+def _test_package_build_content(members, deps):
+    return """\
+load("@rules_dart//dart:defs.bzl", "dart_binary")
+load("@rules_dart//dart/pub:pub_library.bzl", "pub_library")
+load(
+    "@rules_dart//dart/private:dart_test_runner.bzl",
+    "dart_test_package",
+    "dart_test_runner_main",
+)
+
+pub_library(
+    name = "test_library",
+    members = {members},
+    deps = {deps},
+    visibility = ["//visibility:private"],
+)
+
+dart_test_runner_main(name = "test_runner_main")
+
+dart_binary(
+    name = "test_runner",
+    compile_mode = "kernel",
+    main = ":test_runner_main",
+    deps = [":test_library"],
+)
+
+dart_test_package(
+    name = "test",
+    library = ":test_library",
+    runner = ":test_runner",
+    visibility = ["//visibility:public"],
+)
+""".format(members = _labels(members), deps = _labels(deps))
+
+def overlay_in_cycle_error(package, cycle):
+    """The error for a package built from an overlay that is in a dependency cycle.
+
+    Args:
+      package: The package built from an overlay.
+      cycle: The names of the packages of its cycle.
+
+    Returns:
+      The message.
+    """
+    return (
+        "package `{package}` is built from a plugin overlay, and is in a dependency cycle " +
+        "with {others}. An overlay replaces the package's whole target, so Bazel cannot " +
+        "build the cycle as one target with it. Pub allows the cycle; Bazel does not. " +
+        "Drop the overlay, or write one for the packages of the cycle together."
+    ).format(
+        package = package,
+        others = ", ".join(["`{}`".format(p) for p in cycle if p != package]),
+    )
+
+def _flutter_pub_library_repo_impl(ctx):
+    hub = ctx.attr.hub_name
+    package = ctx.attr.package_name
+    index = read_index(ctx, hub)
+
+    # Every package this one reaches through hosted packages. The lock's other
+    # entries (Flutter SDK packages, entries nothing supplies) are leaves:
+    # they depend on hosted packages, never the other way round to a package
+    # that depends on them.
+    graph = dependency_graph(
+        package,
+        lambda p: [d for d in read_pubspec_dependencies(ctx, source_repo(hub, p)) if d in index.hosted or d in index.other],
+        follow = index.hosted,
+    )
+    cycle = dependency_cycle(graph, package)
+    if cycle.owner != package:
+        ctx.file("BUILD.bazel", make_alias_build_content(
+            package,
+            "@{}//:{}".format(library_repo(hub, cycle.owner), cycle.owner),
+        ))
+        return ctx.repo_metadata(reproducible = True)
+
+    members = {
+        member: json.decode(read_sibling_file(ctx, source_repo(hub, member), MEMBER_FILE))
+        for member in cycle.packages
+    }
+    overlays = [m for m, info in members.items() if info["kind"] == MEMBER_OVERLAY]
+    if overlays and len(cycle.packages) > 1:
+        fail(overlay_in_cycle_error(overlays[0], cycle.packages))
+    if overlays:
+        # The overlay's target is the library: the member and what it depends
+        # on, in the one target the overlay writes.
+        ctx.file("BUILD.bazel", make_alias_build_content(
+            package,
+            "@{}//:{}".format(source_repo(hub, package), package),
+        ))
+        return ctx.repo_metadata(reproducible = True)
+
+    deps = [library_label(hub, index, dep) for dep in cycle.deps]
+    if [m for m in members.values() if m["material_icons"]]:
+        deps.append(_MATERIAL_ICONS)
+
+    ctx.file("BUILD.bazel", make_library_build_content(
+        name = package,
+        members = ["@{}//:{}".format(source_repo(hub, m), m) for m in cycle.packages],
+        deps = sorted(deps),
+        flutter = bool([m for m in members.values() if m["kind"] == MEMBER_FLUTTER]),
+    ))
+    return ctx.repo_metadata(reproducible = True)
+
+flutter_pub_library_repo = repository_rule(
+    implementation = _flutter_pub_library_repo_impl,
+    attrs = {
+        "package_name": attr.string(mandatory = True, doc = "The hosted package."),
+        "hub_name": attr.string(mandatory = True, doc = "The hub's name: the prefix of its source, library and index repositories."),
+    },
+    doc = "Plans a hosted package's library: its dependency cycle, built as one target.",
+)
