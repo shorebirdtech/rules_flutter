@@ -1,0 +1,12 @@
+load("@rules_flutter//flutter:defs.bzl", "flutter_library")
+
+# A library below the workspace root with an asset of its own, bundled as
+# `packages/ui_kit/assets/greeting.txt`.
+flutter_library(
+    name = "ui_kit",
+    package_name = "ui_kit",
+    srcs = ["lib/ui_kit.dart"],
+    assets = glob(["assets/**"]),
+    visibility = ["//nested_assets:__pkg__"],
+    deps = ["@deps//:flutter"],
+)
