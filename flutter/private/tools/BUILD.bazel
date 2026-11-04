@@ -12,6 +12,7 @@ load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_test")
 # by nothing** — the test is what carries it, not this list.
 exports_files(
     [
+        "assemble_directory.dart",
         "generate_asset_manifest.dart",
         "bundle_app.dart",
         "compile_shader.dart",
@@ -19,6 +20,7 @@ exports_files(
         "merge_android_manifests.dart",
         "merge_plists.dart",
         "strip_native_libs.dart",
+        "validate_android_elf.dart",
         "web_template.dart",
         # Exported for its unit test's `srcs`, not for a build action: unlike
         # its neighbours this one is a `dart_binary` main (below), and rules
@@ -63,6 +65,11 @@ dart_binary(
 #
 # The value is the tool plus whatever that tool imports beyond `package:test`.
 _UNIT_TESTS = {
+    "assemble_directory_test": (
+        "assemble_directory.dart",
+        ["@dev_tool_deps//:path"],
+    ),
+    "validate_android_elf_test": ("validate_android_elf.dart", []),
     "bundle_app_test": ("bundle_app.dart", []),
     "compile_shader_test": ("compile_shader.dart", []),
     "kernel_filter_test": ("kernel_filter.dart", []),

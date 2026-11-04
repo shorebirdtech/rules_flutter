@@ -58,6 +58,7 @@ flag to pass.
 
 load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
 load("//flutter:providers.bzl", "FlutterApplicationInfo")
+load("//flutter/private:assemble_directory.bzl", "ASSEMBLE_DIRECTORY_ATTRS", "assemble_directory")
 load("//flutter/private:common.bzl", "android_elf_machine_for_abi", "compute_android_jni_path")
 load("//flutter/private:exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
 
@@ -82,27 +83,6 @@ def _android_abi(ctx):
         ":x86_64 for a second ABI), or build it through flutter_android_build."
     ).format(label = ctx.label, platform = ctx.fragments.platform.platform))
 
-# Shell function validating that a native library is an ELF shared object
-# with the expected e_machine (2 bytes little-endian at offset 18). Android's
-# linker can only load ELF for the APK's ABI; anything else (e.g. a host
-# Mach-O dylib) would crash at app startup, so packaging fails instead.
-_ELF_VALIDATION_DEF = """\
-validate_android_elf() {
-  local lib="$1" want_machine="$2" abi="$3"
-  local bytes=( $(od -An -v -tu1 -N20 "$lib") )
-  if [ "${#bytes[@]}" -lt 20 ] ||
-      [ "${bytes[0]}" -ne 127 ] || [ "${bytes[1]}" -ne 69 ] ||
-      [ "${bytes[2]}" -ne 76 ] || [ "${bytes[3]}" -ne 70 ]; then
-    echo "ERROR: $lib is not an ELF binary. Android ($abi) cannot load it." >&2
-    exit 1
-  fi
-  local machine=$(( bytes[18] | (bytes[19] << 8) ))
-  if [ "$machine" -ne "$want_machine" ]; then
-    echo "ERROR: $lib has ELF machine $machine; $abi requires $want_machine." >&2
-    exit 1
-  fi
-}"""
-
 def _symlink_to_jni(ctx, src, abi, basename):
     """Create a symlink placing a native lib into the jni/<abi>/ tree."""
     out = ctx.actions.declare_file(
@@ -120,7 +100,7 @@ def _symlink_assets_dir(ctx, flutter_assets):
     ctx.actions.symlink(output = out, target_file = flutter_assets)
     return out
 
-def _stage_native_libs(ctx, aot_output, native_libs, abi):
+def _stage_native_libs(ctx, tools, aot_output, native_libs, abi):
     """Names the app's native libraries as Android loads them, and validates them.
 
     The AOT output is `libapp.so` (the Android convention: the engine loads
@@ -133,8 +113,12 @@ def _stage_native_libs(ctx, aot_output, native_libs, abi):
     claiming the same packaged filename are a hard error too: the APK could
     hold only one of them.
 
+    The check is a Dart script run by the exec-tools toolchain's `dart`, so it
+    runs on any host.
+
     Args:
         ctx: Rule context.
+        tools: The `FlutterExecToolsInfo` of the host the action runs on.
         aot_output: The AOT compile output, packaged as libapp.so. None in
             debug/JIT mode.
         native_libs: Plugin/FFI .so files to package under their own names.
@@ -172,23 +156,21 @@ def _stage_native_libs(ctx, aot_output, native_libs, abi):
             ctx.actions.symlink(output = named, target_file = lib)
             libs.append(named)
 
-    # $1 = ABI, $2 = its ELF machine, $3 = the stamp, then the libraries. Every
-    # path is an argument, so path mapping can rewrite it.
+    # Every path is an argument, so path mapping can rewrite it.
     validated = ctx.actions.declare_file(ctx.label.name + "_native_libs.validated")
     args = ctx.actions.args()
-    args.add(abi)
-    args.add(str(expected_machine))
-    args.add(validated)
+    args.add(ctx.file._validate_tool)
+    args.add("--abi", abi)
+    args.add("--machine", str(expected_machine))
+    args.add("--stamp", validated)
     args.add_all(libs)
-    ctx.actions.run_shell(
-        command = "\n".join([
-            _ELF_VALIDATION_DEF,
-            'abi="$1"; machine="$2"; stamp="$3"; shift 3',
-            'for lib in "$@"; do validate_android_elf "$lib" "$machine" "$abi"; done',
-            'echo "$abi" > "$stamp"',
-        ]),
+    ctx.actions.run(
+        executable = tools.dart,
         arguments = [args],
-        inputs = libs,
+        inputs = depset(
+            direct = [ctx.file._validate_tool] + libs,
+            transitive = [tools.tool_files],
+        ),
         outputs = [validated],
         mnemonic = "FlutterValidateNativeLibs",
         exec_group = PORTABLE,
@@ -209,22 +191,17 @@ def _copy_assets_with_kernel(ctx, flutter_assets, kernel_dill, tools):
 
     vm_snapshot = tools.vm_isolate_snapshot
     iso_snapshot = tools.isolate_snapshot
-    cmd = (
-        'cp -RL "$1"/. "$2" && cp "$3" "$2/kernel_blob.bin"' +
-        ' && cp "$4" "$2/vm_snapshot_data" && cp "$5" "$2/isolate_snapshot_data"'
-    )
-    args = ctx.actions.args()
-    args.add_all([flutter_assets, out, kernel_dill, vm_snapshot, iso_snapshot], expand_directories = False)
-    inputs = [flutter_assets, kernel_dill, vm_snapshot, iso_snapshot]
-
-    ctx.actions.run_shell(
-        command = cmd,
-        arguments = [args],
-        inputs = inputs,
-        outputs = [out],
+    assemble_directory(
+        ctx,
+        tools,
+        out,
+        [
+            ("tree", ".", flutter_assets),
+            ("file", "kernel_blob.bin", kernel_dill),
+            ("file", "vm_snapshot_data", vm_snapshot),
+            ("file", "isolate_snapshot_data", iso_snapshot),
+        ],
         mnemonic = "FlutterAndroidDebugAssets",
-        exec_group = PORTABLE,
-        execution_requirements = PATH_MAPPING,
         progress_message = "Assembling debug flutter_assets with kernel and VM snapshots %s" % ctx.label,
     )
     return out
@@ -255,7 +232,7 @@ def _flutter_android_bundle_impl(ctx):
     packaged = []
     validations = []
     if aot_output or native_libs:
-        packaged, validated = _stage_native_libs(ctx, aot_output, native_libs, abi)
+        packaged, validated = _stage_native_libs(ctx, tools, aot_output, native_libs, abi)
         validations.append(validated)
 
     outputs = [flutter_assets] + packaged
@@ -305,10 +282,14 @@ provided for selective fetching.
 Set to False if you only build release APKs and do not need mobile-install.""",
             default = True,
         ),
+        "_validate_tool": attr.label(
+            default = "//flutter/private/tools:validate_android_elf.dart",
+            allow_single_file = True,
+        ),
         "_android_constraint": attr.label(default = "@platforms//os:android"),
         "_arm64_constraint": attr.label(default = "@platforms//cpu:aarch64"),
         "_x86_64_constraint": attr.label(default = "@platforms//cpu:x86_64"),
-    },
+    } | ASSEMBLE_DIRECTORY_ATTRS,
     # Packaging copies and checks what the application built, the same bytes on
     # any host.
     exec_groups = PORTABLE_EXEC_GROUPS,

@@ -277,7 +277,8 @@ def _java_package_problem(name):
     """Why `name` is not a Java package name, or "".
 
     The namespace of a plugin is written into its generated `BuildConfig.java`,
-    the genrule that emits it and the library's `custom_package`. It is read
+    the manifest synthesized for a plugin with resources and the library's
+    `custom_package`. It is read
     from the package's Gradle script or manifest, so it has to be a plain
     dotted name of identifiers before it goes anywhere near them.
     """
@@ -1250,6 +1251,7 @@ kt_android_library(
     # the merger — hence no `exports_manifest`).
     manifest_arg = ""
     synthesized_manifest = ""
+    write_file_load = ""
     if android_manifest:
         sub_manifest = android_manifest
         if sub_manifest.startswith("android/"):
@@ -1257,14 +1259,21 @@ kt_android_library(
         manifest_arg = "    manifest = %s,\n    exports_manifest = 1,\n" % repr(sub_manifest)
     elif has_resources:
         manifest_arg = '    manifest = ":_manifest",\n'
+        write_file_load = 'load("@bazel_skylib//rules:write_file.bzl", "write_file")\n'
         synthesized_manifest = """
 # Minimal manifest for resource processing. AGP treats a missing library
 # manifest as an empty one; rules_android requires an explicit file when
 # resource_files is set.
-genrule(
+write_file(
     name = "_manifest",
-    outs = ["_manifest/AndroidManifest.xml"],
-    cmd = "cat > $@ <<'EOF'\\n<manifest xmlns:android=\\"http://schemas.android.com/apk/res/android\\"\\n    package=\\"{pkg}\\">\\n</manifest>\\nEOF\\n",
+    out = "_manifest/AndroidManifest.xml",
+    content = [
+        '<manifest xmlns:android="http://schemas.android.com/apk/res/android"',
+        '    package="{pkg}">',
+        "</manifest>",
+        "",
+    ],
+    newline = "unix",
 )
 """.format(pkg = java_package)
 
@@ -1329,7 +1338,7 @@ android_library(
     bc_package = java_package if java_package else "_unknown"
 
     return """\
-{maven_loads}load("@rules_flutter//flutter:android.bzl", "flutter_android_engine")
+{maven_loads}{write_file_load}load("@rules_flutter//flutter:android.bzl", "flutter_android_engine")
 load("@rules_flutter//flutter/private:android_build_config.bzl", "android_build_config")
 load("@rules_kotlin//kotlin:android.bzl", "kt_android_library")
 {maven_call}
@@ -1370,6 +1379,7 @@ kt_android_library(
         runtime_deps = runtime_deps_arg,
         bc_package = bc_package,
         synthesized_manifest = synthesized_manifest,
+        write_file_load = write_file_load,
     )
 
 # The hook entrypoints upstream Dart defines (`package:hooks` — `build` and

@@ -192,9 +192,14 @@ def _resources_without_manifest_test_impl(ctx):
     asserts.true(env, 'manifest = ":_manifest"' in content, content)
     asserts.true(
         env,
-        'package=\\"dev.example.res_only_manifestless\\"' in content,
+        'package="dev.example.res_only_manifestless">' in content,
         content,
     )
+
+    # Written by Starlark, with the same bytes on every host: no shell.
+    asserts.true(env, 'name = "_manifest"' in content, content)
+    asserts.true(env, "write_file(" in content, content)
+    asserts.false(env, "genrule" in content, content)
     asserts.false(env, "exports_manifest" in content, content)
 
     return unittest.end(env)

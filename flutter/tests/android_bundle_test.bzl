@@ -52,6 +52,15 @@ def _libraries_impl(ctx):
             validations[0].outputs.to_list()[0] in stamps,
             "the validation is a requirement of the target: %s" % stamps,
         )
+
+    # Nothing in the bundle needs a POSIX shell: its actions run on whatever
+    # host the exec-tools toolchain resolves, a Windows one included.
+    shells = [
+        a.mnemonic
+        for a in analysistest.target_actions(env)
+        if a.argv and a.argv[0].split("/")[-1] in ("bash", "sh", "cmd.exe")
+    ]
+    asserts.equals(env, [], shells, "actions that run a shell")
     return analysistest.end(env)
 
 _ATTRS = {
