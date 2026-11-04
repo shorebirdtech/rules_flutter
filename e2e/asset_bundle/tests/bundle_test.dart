@@ -1,7 +1,7 @@
 /// Checks one built `flutter_assets/` tree against an expectation file.
 ///
 ///     bundle_test <bundle> <expectation.json> [--prefix=P] [--platform=OS]
-///                 [--subdir=D] [--allow-extra]
+///                 [--subdir=D] [--allow-extra] [--unlisted=PATH]...
 ///
 /// `<bundle>` and `<expectation.json>` are runfiles paths
 /// (`$(rlocationpath ...)`). Exits non-zero, listing every difference, when the
@@ -41,6 +41,10 @@ void main(List<String> args) {
     bundle,
     expected,
     allowExtra: args.contains('--allow-extra'),
+    unlisted: [
+      for (final a in args)
+        if (a.startsWith('--unlisted=')) a.substring('--unlisted='.length),
+    ],
   );
   if (problems.isNotEmpty) {
     stderr.writeln(

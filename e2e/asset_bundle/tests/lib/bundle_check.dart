@@ -6,7 +6,8 @@
 /// flutter_tools (`asset.dart`) writes a bundle:
 ///
 ///  * the manifest holds the decoded key and decoded variant paths, and
-///    nothing else: no file the bundle merely contains;
+///    nothing else: no file the bundle merely contains (the Material shaders
+///    and icon font are in a bundle and not in its manifest);
 ///  * each variant is a file at its URI-encoded path, the form the engine
 ///    asks for (`Uri.encodeFull(key)`), so a name with a space is stored with
 ///    `%20`;
@@ -19,9 +20,9 @@ import 'dart:io';
 import 'dart:typed_data';
 
 /// Files a bundle holds whatever the app declares: the manifests, the license
-/// blob, and the Material shaders flutter_tools adds to every bundle. Those
-/// shaders are no entry of flutter_tools' manifest and are one of ours; the
-/// manifest is compared without them.
+/// blob, and the Material shaders flutter_tools adds to every bundle. The
+/// shaders are no entry of the manifest, so they are left out of the files
+/// compared and the manifest is compared as it is.
 const infrastructure = {
   'AssetManifest.bin',
   'AssetManifest.bin.json',
@@ -77,11 +78,10 @@ Map<String, List<Variant>> readExpectation(
   final decoded = _Reader(bin).read() as Map<Object?, Object?>;
   final manifest = <String, List<Variant>>{
     for (final entry in decoded.entries)
-      if (!infrastructure.contains(entry.key))
-        entry.key! as String: [
-          for (final v in (entry.value! as List).cast<Map<Object?, Object?>>())
-            (asset: v['asset']! as String, dpr: v['dpr'] as double?),
-        ],
+      entry.key! as String: [
+        for (final v in (entry.value! as List).cast<Map<Object?, Object?>>())
+          (asset: v['asset']! as String, dpr: v['dpr'] as double?),
+      ],
   };
   final files = <String>{
     for (final f in dir.listSync(recursive: true).whereType<File>())
@@ -96,10 +96,14 @@ Map<String, List<Variant>> readExpectation(
 /// With [allowExtra] the bundle may also hold more than [expected] (extra keys
 /// and files, not extra variants of a key it lists): the check that nothing
 /// declared goes missing, for a bundle known to hold more than it should.
+///
+/// [unlisted] are files the bundle must hold without any manifest key, as
+/// flutter_tools bundles the Material icon font.
 List<String> compare(
   Directory dir,
   Map<String, List<Variant>> expected, {
   bool allowExtra = false,
+  List<String> unlisted = const [],
 }) {
   final bundle = readBundle(dir);
   final problems = <String>[];
@@ -128,6 +132,7 @@ List<String> compare(
   final wantFiles = {
     for (final variants in expected.values)
       for (final v in variants) storedPath(v.asset),
+    for (final f in unlisted) storedPath(f),
   };
   for (final f in wantFiles.toList()..sort()) {
     if (!bundle.files.contains(f)) problems.add('bundle has no file "$f"');

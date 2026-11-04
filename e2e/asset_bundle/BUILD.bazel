@@ -1,3 +1,4 @@
+load("@rules_flutter//flutter:defs.bzl", "flutter_asset_bundle")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
 load("//tools:bundle.bzl", "bundled_app", "tree_of")
 
@@ -8,6 +9,13 @@ exports_files(["pubspec.lock"])
 bundled_app(
     name = "app_root",
     assets = glob(["assets/**"]),
+)
+
+# -- The Material icon font -----------------------------------------------------
+
+bundled_app(
+    name = "app_with_material_icons",
+    deps = ["@rules_flutter//flutter:material_icons"],
 )
 
 # -- File names the engine URI-encodes -----------------------------------------
@@ -94,4 +102,17 @@ tree_of(
     name = "web_with_fx_platforms_bundle",
     src = ":web_with_fx_platforms",
     visibility = ["//visibility:public"],
+)
+
+# -- Two files for one key ----------------------------------------------------------
+
+# This package's `fonts/MaterialIcons-Regular.otf` and the one the Material
+# icon font brings are two files for one key. Tagged manual: it is not meant
+# to build, `//tests:two_files_claiming_one_asset_key_fail_the_build_test` analyses it and expects the failure.
+flutter_asset_bundle(
+    name = "two_files_one_key",
+    assets = ["fonts/MaterialIcons-Regular.otf"],
+    tags = ["manual"],
+    visibility = ["//visibility:public"],
+    deps = ["@rules_flutter//flutter:material_icons"],
 )

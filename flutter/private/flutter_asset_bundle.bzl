@@ -85,7 +85,8 @@ def flutter_asset_bundle_action(
         font_subset = None,
         kernel_dill = None,
         optional_code_points = [],
-        extra_asset_copies = {}):
+        extra_asset_copies = [],
+        unlisted_asset_copies = []):
     """Create an action that generates the flutter_assets/ tree artifact.
 
     Args:
@@ -112,8 +113,11 @@ def flutter_asset_bundle_action(
         optional_code_points: Code points every subset icon font keeps if the
             font has a glyph for them, used or not (`optional:<n>` to
             font-subset).
-        extra_asset_copies: dict mapping custom dest path → File for assets that
-            need a specific destination path (e.g. "fonts/MaterialIcons-Regular.otf").
+        extra_asset_copies: list of (key, File) for assets that need a specific
+            key (e.g. "fonts/MaterialIcons-Regular.otf"). They are listed in the
+            asset manifest.
+        unlisted_asset_copies: the same, for files that are bundled without
+            being an entry of the asset manifest.
 
     Returns:
         The `output_dir` it was given, so callers can chain.
@@ -126,20 +130,26 @@ def flutter_asset_bundle_action(
     # writes the config, path-mapped where the action is.
     refs = []
 
-    # Build asset paths and copy map relative to the output directory.
-    asset_paths = []
-    copies = {}
-    for f in assets:
-        key = package_relative(ctx, f)
-        asset_paths.append(key)
-        copies[key] = file_ref(refs, f)
+    # Every file is claimed under its key. A key stands for one file: a second,
+    # different file claiming it would have the bundle hold one and the
+    # manifest name the other, so it fails here, naming both. The same file
+    # reached twice (a package behind two dependencies) is one claim.
+    claims = {}
+    listed = {}
+    claimed = [(package_relative(ctx, f), f, True) for f in assets]
+    claimed += [(key, f, True) for key, f in extra_asset_copies]
+    claimed += [(key, f, False) for key, f in unlisted_asset_copies]
+    for key, f, in_manifest in claimed:
+        seen = claims.get(key)
+        if seen != None and seen != f:
+            fail("%s: two files claim the asset key %s: %s and %s. A bundle can hold one of them." % (ctx.label, key, seen.short_path, f.short_path))
+        claims[key] = f
+        if in_manifest:
+            listed[key] = True
 
-    # Add extra copies with custom destination paths.
-    extra_files = []
-    for dest_path, f in extra_asset_copies.items():
-        asset_paths.append(dest_path)
-        copies[dest_path] = file_ref(refs, f)
-        extra_files.append(f)
+    # Build asset paths and copy map relative to the output directory.
+    asset_paths = list(listed.keys())
+    copies = {key: file_ref(refs, f) for key, f in claims.items()}
 
     # Build manifest structure.
     manifest = build_asset_manifest(asset_paths)
@@ -174,7 +184,7 @@ def flutter_asset_bundle_action(
         executable = dart,
         arguments = [args, json_config_args(ctx, config, refs)],
         inputs = depset(
-            direct = [tool] + assets + extra_files + license_files + extra_inputs,
+            direct = [tool] + claims.values() + license_files + extra_inputs,
             transitive = [flutter_sdk_files],
         ),
         outputs = [output_dir],
@@ -192,7 +202,7 @@ def _flutter_asset_bundle_impl(ctx):
     # Walk pub-package font/asset contributions from FlutterInfo. To get
     # MaterialIcons in the bundle, list `@rules_flutter//flutter:material_icons`
     # in deps — the same channel cupertino_icons et al. arrive through.
-    fonts, extra_asset_copies = aggregate_pub_contributions(ctx.attr.deps)
+    fonts, extra_asset_copies, unlisted_asset_copies = aggregate_pub_contributions(ctx.attr.deps)
 
     output_dir = flutter_asset_bundle_action(
         ctx = ctx,
@@ -203,6 +213,7 @@ def _flutter_asset_bundle_impl(ctx):
         notices = "",
         output_dir = ctx.actions.declare_directory(ctx.label.name),
         extra_asset_copies = extra_asset_copies,
+        unlisted_asset_copies = unlisted_asset_copies,
     )
 
     return [DefaultInfo(files = depset([output_dir]))]

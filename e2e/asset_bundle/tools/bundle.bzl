@@ -70,7 +70,7 @@ def bundled_app(name, assets = [], deps = [], package_name = "asset_bundle", pla
         visibility = ["//visibility:public"],
     )
 
-def bundle_test(name, bundle, expected, prefix = "", platform = "", subdir = "", allow_extra = False, **kwargs):
+def bundle_test(name, bundle, expected, prefix = "", platform = "", subdir = "", allow_extra = False, unlisted = [], **kwargs):
     """Checks the tree `bundle` builds against the assets `flutter build` would bundle.
 
     Args:
@@ -85,6 +85,7 @@ def bundle_test(name, bundle, expected, prefix = "", platform = "", subdir = "",
         subdir: Where the `flutter_assets/` tree sits in `bundle`, for a bundle
             that holds more than that.
         allow_extra: Whether the bundle may hold more than `expected` lists.
+        unlisted: Files the bundle must hold that have no key in its manifest.
         **kwargs: More attributes of the test.
     """
     args = ["$(rlocationpath %s)" % bundle, "$(rlocationpath %s)" % expected]
@@ -96,6 +97,7 @@ def bundle_test(name, bundle, expected, prefix = "", platform = "", subdir = "",
         args.append("--subdir=" + subdir)
     if allow_extra:
         args.append("--allow-extra")
+    args += ["--unlisted=" + f for f in unlisted]
     dart_test(
         name = name,
         args = args,

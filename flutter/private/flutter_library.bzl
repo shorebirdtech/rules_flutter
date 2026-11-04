@@ -188,8 +188,12 @@ def aggregate_pub_contributions(deps, target_platform = None):
         Tuple of:
           - fonts: list of FontManifest entries (dicts) with prefixed family
             + per-font asset paths and optional weight/style.
-          - extra_asset_copies: dict[str, File] mapping bundle dest path to
-            File for both fonts and non-font pub-package assets.
+          - copies: list of (bundle path, File) for both fonts and non-font
+            pub-package assets, to be listed in the asset manifest.
+          - unlisted_copies: the same for the files that are bundled but are
+            no entry of the manifest, as flutter_tools has it for the Material
+            icon font. Two entries may name one path; telling whether that is
+            one file reached twice or a conflict is for the bundle action.
     """
     pub_fonts = []
     pub_assets = []
@@ -201,7 +205,8 @@ def aggregate_pub_contributions(deps, target_platform = None):
         pub_assets.extend(info.pub_assets.to_list())
 
     fonts = []
-    extra_asset_copies = {}
+    copies = []
+    unlisted_copies = []
 
     for entry in pub_fonts:
         prefix = "packages/{}/".format(entry.package_name) if entry.package_name else ""
@@ -214,16 +219,16 @@ def aggregate_pub_contributions(deps, target_platform = None):
             if font.style != None:
                 descriptor["style"] = font.style
             fonts_descriptors.append(descriptor)
-            extra_asset_copies[font.bundle_path] = font.file
+            (copies if getattr(entry, "listed", True) else unlisted_copies).append((font.bundle_path, font.file))
         fonts.append({"family": family_str, "fonts": fonts_descriptors})
 
     for entry in pub_assets:
         if entry.platforms and target_platform not in (None, "tester") and target_platform not in entry.platforms:
             continue
         prefix = "packages/{}/".format(entry.package_name) if entry.package_name else ""
-        extra_asset_copies[prefix + entry.asset_path] = entry.file
+        copies.append((prefix + entry.asset_path, entry.file))
 
-    return (fonts, extra_asset_copies)
+    return (fonts, copies, unlisted_copies)
 
 PKG_ASSET_PLATFORMS_ATTR = attr.string_list_dict(
     doc = "For an asset of `pkg_assets` that ships on some platforms only (a `platforms:` entry of `flutter: assets:`), its package-relative path and the platforms (`android`, `ios`, `linux`, `macos`, `windows`, `web`). An asset not listed here ships on every platform.",

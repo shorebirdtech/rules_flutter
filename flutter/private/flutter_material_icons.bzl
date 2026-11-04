@@ -45,6 +45,9 @@ def _flutter_material_icons_impl(ctx):
             weight = None,
             style = None,
         ),),
+        # flutter_tools bundles the font and names it in FontManifest.json, but
+        # lists no Material font in AssetManifest.
+        listed = False,
     )
 
     return [

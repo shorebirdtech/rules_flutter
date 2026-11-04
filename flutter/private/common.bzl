@@ -541,7 +541,13 @@ def collect_sdk_shader_srcs(deps):
     return []
 
 def _shader_jobs(ctx, deps):
-    """Every shader this target bundles, as struct(bundle_path, file, includes).
+    """Every shader this target bundles, as struct(bundle_path, file, includes, listed).
+
+    `listed` says whether the asset manifest lists the shader. Flutter's own
+    (`ink_sparkle.frag`, `stretch_effect.frag`) are bundled and not listed:
+    flutter_tools adds them to every bundle beside, not among, the assets the
+    manifest names, and the engine loads a shader by its path
+    (`FragmentProgram.fromAsset`), never through the manifest.
 
     User shaders keep their path in the target's package ("shaders/my_effect.frag"),
     SDK shaders go under "shaders/<basename>" (Flutter's convention), and a
@@ -552,9 +558,9 @@ def _shader_jobs(ctx, deps):
     jobs = []
     user_includes = getattr(ctx.files, "shader_includes", [])
     for shader in ctx.files.shaders:
-        jobs.append(struct(bundle_path = package_relative(ctx, shader), file = shader, includes = user_includes))
+        jobs.append(struct(bundle_path = package_relative(ctx, shader), file = shader, includes = user_includes, listed = True))
     for shader in collect_sdk_shader_srcs(deps):
-        jobs.append(struct(bundle_path = "shaders/" + shader.basename, file = shader, includes = []))
+        jobs.append(struct(bundle_path = "shaders/" + shader.basename, file = shader, includes = [], listed = False))
     for dep in deps:
         if FlutterInfo in dep:
             for entry in dep[FlutterInfo].pub_shaders.to_list():
@@ -563,6 +569,7 @@ def _shader_jobs(ctx, deps):
                     bundle_path = prefix + entry.shader_path,
                     file = entry.file,
                     includes = entry.includes,
+                    listed = True,
                 ))
 
     # One package can reach a target along several paths; the same file at
@@ -655,14 +662,15 @@ def flutter_compile_shaders(ctx, tools, target_platform, deps):
             whose `deps` edge is split sees every branch's copy there.
 
     Returns:
-        Dict mapping bundle destination path → compiled File. Pass to
-        extra_asset_copies in flutter_asset_bundle_action.
+        struct(listed, unlisted): lists of (bundle destination path, compiled
+        File), the shaders the asset manifest lists and the ones it does not.
+        Pass to `flutter_build_assets`.
     """
     jobs = _shader_jobs(ctx, deps)
+    compiled = struct(listed = [], unlisted = [])
     if not jobs or not tools.impellerc:
-        return {}
+        return compiled
 
-    compiled = {}
     for job in jobs:
         # Named by the bundle path, which is unique, so no two outputs meet.
         out_path = job.bundle_path.replace("../", "_external/")
@@ -683,7 +691,7 @@ def flutter_compile_shaders(ctx, tools, target_platform, deps):
             compile_tool = ctx.file._shader_compile_tool,
             require_sksl = getattr(ctx.attr, "require_sksl_shaders", False),
         )
-        compiled[job.bundle_path] = output
+        (compiled.listed if job.listed else compiled.unlisted).append((job.bundle_path, output))
     return compiled
 
 def declare_flutter_assets_dir(ctx):
@@ -704,7 +712,7 @@ def declare_flutter_assets_dir(ctx):
     """
     return ctx.actions.declare_directory(ctx.label.name + "_flutter_assets")
 
-def flutter_build_assets(ctx, tools, output_dir, deps, target_platform, compiled_shaders = {}, kernel_dill = None, is_debug = False, data_assets = None, optional_code_points = []):
+def flutter_build_assets(ctx, tools, output_dir, deps, target_platform, compiled_shaders = struct(listed = [], unlisted = []), kernel_dill = None, is_debug = False, data_assets = None, optional_code_points = []):
     """Run the shared asset bundling step.
 
     Walks `FlutterInfo.pub_fonts` / `pub_assets` from deps to bundle
@@ -726,7 +734,7 @@ def flutter_build_assets(ctx, tools, output_dir, deps, target_platform, compiled
         target_platform: The platform the bundle is for ("android", "ios",
             "linux", "macos", "windows", "web", or "tester" for a test), which
             leaves out the pub assets restricted to other platforms.
-        compiled_shaders: Dict mapping bundle dest path → compiled shader File.
+        compiled_shaders: What `flutter_compile_shaders` made.
         kernel_dill: The compiled kernel .dill File (needed for icon tree shaking).
         is_debug: Whether this is a debug build (icon tree shaking is skipped in debug).
         data_assets: Optional depset[FlutterDataAssetInfo]. Each entry is
@@ -743,20 +751,16 @@ def flutter_build_assets(ctx, tools, output_dir, deps, target_platform, compiled
     # Walk pub-package font/asset contributions from FlutterInfo.
     # MaterialIcons is no longer special-cased here — apps depend on
     # `@rules_flutter//flutter:material_icons` to get it via this same path.
-    fonts, pub_extra_asset_copies = aggregate_pub_contributions(deps, target_platform)
-    extra_asset_copies = dict(compiled_shaders)
-    extra_asset_copies.update(pub_extra_asset_copies)
+    fonts, pub_copies, unlisted_copies = aggregate_pub_contributions(deps, target_platform)
+    extra_asset_copies = compiled_shaders.listed + pub_copies
+    unlisted_copies = compiled_shaders.unlisted + unlisted_copies
 
     # Drop each DataAsset at flutter_assets/packages/<pkg>/<name>, the key
     # flutter_tools gives a hook's data asset and the one `rootBundle` loads
-    # it by. The bundle action keys extra_asset_copies on a destination path
-    # relative to the assets/ root.
+    # it by.
     if data_assets != None:
         for entry in data_assets.to_list():
-            dst = "packages/{pkg}/{name}".format(pkg = entry.package, name = entry.name)
-            if dst in extra_asset_copies:
-                fail("%s: data asset %s collides with another asset bundled at %s." % (ctx.label, entry.file.short_path, dst))
-            extra_asset_copies[dst] = entry.file
+            extra_asset_copies.append(("packages/{pkg}/{name}".format(pkg = entry.package, name = entry.name), entry.file))
 
     license_files = ctx.files.license_files
 
@@ -782,6 +786,7 @@ def flutter_build_assets(ctx, tools, output_dir, deps, target_platform, compiled
         kernel_dill = kernel_dill if tree_shake_icons else None,
         optional_code_points = optional_code_points,
         extra_asset_copies = extra_asset_copies,
+        unlisted_asset_copies = unlisted_copies,
     )
 
 def compute_desktop_bundle_copies(is_debug, kernel_dill_path, aot_output_path, aot_dst, icu_data_path, engine_basenames, native_basenames, engine_dst_prefix = "lib/", native_dst_prefix = "lib/"):
