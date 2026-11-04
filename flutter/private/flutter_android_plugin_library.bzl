@@ -7,10 +7,13 @@ plugins, `flutter_pub_package` emits this automatically when
 Wraps `kt_android_library` with the Flutter Android engine AAR as a dep
 so the plugin's Kotlin/Java sees the FlutterPlugin SPI. A minimal
 `AndroidManifest.xml` is generated when the plugin doesn't ship its
-own manifest fragment.
+own manifest fragment, and a `BuildConfig` for its package, as Gradle
+generates, with `DEBUG` and `BUILD_TYPE` of the build's mode.
 """
 
+load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@rules_kotlin//kotlin:android.bzl", "kt_android_library")
+load(":android_build_config.bzl", "android_build_config")
 
 _DEFAULT_MANIFEST_TEMPLATE = """\
 <?xml version="1.0" encoding="utf-8"?>
@@ -39,8 +42,9 @@ def flutter_android_plugin_library(
             and nothing about a target in this workspace.
         srcs: Kotlin/Java source files (`.kt`, `.java`).
         java_package: Java package the plugin's classes live in
-            (e.g. `io.flutter.plugins.urllauncher`). Used to generate a
-            minimal manifest when none is provided. Defaults to
+            (e.g. `io.flutter.plugins.urllauncher`). The namespace of its
+            generated `BuildConfig`, and of a minimal manifest when none is
+            provided. Defaults to
             `dev.flutter.plugins.<name>` to match the convention the
             registrant uses for fully-qualified class names.
         flutter_engine: A `flutter_android_engine` target declared with
@@ -73,15 +77,24 @@ def flutter_android_plugin_library(
     actual_manifest = manifest
     if not actual_manifest:
         manifest_target = "_%s__manifest" % name
-        native.genrule(
+        write_file(
             name = manifest_target,
-            outs = ["_%s_AndroidManifest.xml" % name],
-            cmd = "cat > $@ <<'EOF'\n" + _DEFAULT_MANIFEST_TEMPLATE.replace("PACKAGE_NAME", java_package) + "EOF",
+            out = "_%s_AndroidManifest.xml" % name,
+            content = [_DEFAULT_MANIFEST_TEMPLATE.replace("PACKAGE_NAME", java_package)],
             tags = tags,
         )
         actual_manifest = ":" + manifest_target
 
-    plugin_deps = list(deps)
+    # Gradle generates a BuildConfig for every library's namespace and
+    # plugins read BuildConfig.DEBUG from it.
+    build_config = "_%s__build_config" % name
+    android_build_config(
+        name = build_config,
+        package = java_package,
+        tags = tags,
+    )
+
+    plugin_deps = list(deps) + [":" + build_config]
     if flutter_engine:
         plugin_deps.append(flutter_engine)
 
