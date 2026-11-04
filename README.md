@@ -163,6 +163,8 @@ Bazel's compilation mode flag selects how the Dart is compiled:
 
 Note that a plain `bazel build` is a release build, not a debug one. That matters for [permissions](#release-builds-and-permissions).
 
+On iOS and macOS a release or profile build strips `App.framework/App` of its local symbols, as `flutter build ios` and `flutter build macos` do, and keeps them in a dSYM. The dSYM has the binary's UUID, so a crash reporter symbolicates the shipped app with it. It is in the `dsyms` output group of the app target: `bazel build //:app --output_groups=+dsyms`. Keep it with each release. A dSYM of an `obfuscate = True` app holds the unobfuscated Dart names (`gen_snapshot` warns of it), so keep it out of the shipped app. `flutter_aot_target` on an Apple platform is not stripped, and its object is in the `macho_object` output group.
+
 Profile mode is `flutter run --profile`: release-speed code that still serves the Dart VM service, so DevTools can record timelines and CPU profiles. It has no hot reload. Profile uses its own engine and gen_snapshot on every platform, downloaded the first time a profile build needs them, because the engine refuses a snapshot compiled for a different mode. The flag needs `-c opt`, and the build fails if it is set with any other `-c`. Like upstream Flutter, there is no profile mode for the iOS simulator: build profile for a physical device. A `.bazelrc` config saves typing:
 
 ```

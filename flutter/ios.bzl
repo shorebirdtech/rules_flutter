@@ -509,10 +509,20 @@ def flutter_ios_app(
         tags = tags,
     )
 
+    # 3b. The dSYM of the stripped release App binary, for rules_apple to carry
+    # in the `dsyms` output group of the app (`--apple_generate_dsym`).
+    native.filegroup(
+        name = "__%s_app_dsym" % name,
+        srcs = ["__%s_app_framework" % name],
+        output_group = "dsym",
+        tags = tags,
+    )
+
     # 4. Wrap App.framework as dynamic framework import.
     # Debug: bundle_only=True embeds framework without linking (no binary).
     apple_dynamic_framework_import(
         name = "__%s_app_bundle" % name,
+        dsym_imports = ["__%s_app_dsym" % name],
         framework_imports = ["__%s_app_framework" % name],
         bundle_only = select({
             Label("@rules_flutter//flutter/private:dbg"): True,

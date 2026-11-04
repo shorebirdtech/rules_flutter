@@ -30,12 +30,15 @@ def _fake_application_impl(ctx):
     # a fixture that will actually be *built* has to be a debug one.
     if ctx.attr.debug:
         aot_output = None
+        aot_object = None
         kernel_dill = ctx.actions.declare_file(ctx.label.name + "/app.dill")
         ctx.actions.write(kernel_dill, str(ctx.label))
     else:
         kernel_dill = None
         aot_output = ctx.actions.declare_file(ctx.label.name + "/app.so")
         ctx.actions.write(aot_output, str(ctx.label))
+        aot_object = ctx.actions.declare_file(ctx.label.name + "/app.o")
+        ctx.actions.write(aot_object, str(ctx.label))
 
     flutter_assets = ctx.actions.declare_directory(ctx.label.name + "/flutter_assets")
     ctx.actions.run_shell(
@@ -46,6 +49,7 @@ def _fake_application_impl(ctx):
 
     return [FlutterApplicationInfo(
         aot_output = aot_output,
+        aot_object = aot_object,
         kernel_dill = kernel_dill,
         is_debug = ctx.attr.debug,
         flutter_assets = flutter_assets,

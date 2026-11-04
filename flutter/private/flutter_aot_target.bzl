@@ -2,6 +2,11 @@
 
 Chains: sources → kernel .dill → gen_snapshot → platform-specific output.
 
+On an Apple platform the dylib is gen_snapshot's, symbols intact, and the
+relocatable object it was linked from is in the `macho_object` output group.
+`flutter_ios_app` and `flutter_macos_app` strip the dylib they bundle and keep
+a dSYM; this rule is the unbundled compile.
+
 In debug mode, skips AOT and returns the kernel .dill directly (same as
 flutter_application.bzl). Supports macOS/iOS (Mach-O .dylib) and other
 platforms (ELF .so).
@@ -25,11 +30,11 @@ def _flutter_aot_target_impl(ctx):
         aot = not is_debug,
     )
     kernel_dill = compilation.kernel_dill
-    import_checks = OutputGroupInfo(_validation = compilation.import_checks)
+    output_groups = {"_validation": compilation.import_checks}
 
     # In debug mode, return the kernel .dill directly (JIT, no gen_snapshot).
     if is_debug:
-        return [DefaultInfo(files = depset([kernel_dill])), import_checks]
+        return [DefaultInfo(files = depset([kernel_dill])), OutputGroupInfo(**output_groups)]
 
     # Step 2: AOT compile — choose format based on target platform.
     is_ios = ctx.target_platform_has_constraint(
@@ -39,17 +44,17 @@ def _flutter_aot_target_impl(ctx):
         ctx.attr._macos_constraint[platform_common.ConstraintValueInfo],
     )
 
-    strip = ctx.var["COMPILATION_MODE"] == "opt"
-
     if is_ios or is_macos:
         output = ctx.actions.declare_file(ctx.label.name + ".dylib")
+        object = ctx.actions.declare_file(ctx.label.name + ".o")
+        output_groups["macho_object"] = depset([object])
         flutter_aot_macho_action(
             ctx = ctx,
             gen_snapshot = flutter_sdk_info.gen_snapshot,
             flutter_sdk_files = flutter_sdk_info.tool_files,
             kernel_dill = kernel_dill,
             output = output,
-            strip = strip,
+            object = object,
         )
     else:
         output = ctx.actions.declare_file(ctx.label.name + ".so")
@@ -59,12 +64,12 @@ def _flutter_aot_target_impl(ctx):
             flutter_sdk_files = flutter_sdk_info.tool_files,
             kernel_dill = kernel_dill,
             output = output,
-            strip = strip,
+            strip = ctx.var["COMPILATION_MODE"] == "opt",
         )
 
     return [
         DefaultInfo(files = depset([output])),
-        import_checks,
+        OutputGroupInfo(**output_groups),
     ]
 
 # The compile inputs arrive as a bundle, the gen_snapshot options by name.

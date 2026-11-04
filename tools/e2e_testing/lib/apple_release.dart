@@ -39,6 +39,24 @@ void checkAppBinaryStripped(BundleCheck check, String path) {
     );
 }
 
+/// The one `App.framework/App` among the test's runfiles, whatever the target
+/// that produced it.
+///
+/// Exits 1 unless there is exactly one.
+String runfilesAppBinary() {
+  final root = Directory(Runfiles.create().rlocation('_main'));
+  final found = [
+    if (root.existsSync())
+      for (final entity in root.listSync(recursive: true, followLinks: false))
+        if (entity.path.endsWith('/App.framework/App')) entity.path,
+  ];
+  if (found.length != 1) {
+    stderr.writeln('expected one App.framework/App in the runfiles: $found');
+    exit(1);
+  }
+  return found.single;
+}
+
 /// Every `.dSYM` bundle among the test's runfiles, whatever the target that
 /// produced it.
 List<String> runfilesDsyms() {

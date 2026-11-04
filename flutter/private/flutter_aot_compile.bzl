@@ -3,7 +3,8 @@
 gen_snapshot converts a kernel .dill file into native code.
 Output format depends on the target platform:
 - Android/Linux/Windows: ELF shared library (app.so) via --snapshot_kind=app-aot-elf
-- macOS/iOS: Mach-O dylib (App.framework/App) via --snapshot_kind=app-aot-macho-dylib
+- macOS/iOS: Mach-O dylib (App.framework/App) via --snapshot_kind=app-aot-macho-dylib,
+  with the relocatable object it links, which a dSYM is read from.
 """
 
 load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
@@ -21,6 +22,7 @@ def _flutter_aot_action(
         strip = True,
         extra_flags = [],
         debug_info = None,
+        object = None,
         mnemonic = "FlutterAot"):
     """Internal helper for all AOT compilation variants."""
     args = ctx.actions.args()
@@ -32,6 +34,9 @@ def _flutter_aot_action(
         args.add("--strip")
 
     outputs = [output]
+    if object != None:
+        args.add(object, format = "--macho-object=%s")
+        outputs.append(object)
     if debug_info != None:
         args.add("--dwarf-stack-traces")
         args.add("--resolve-dwarf-paths")
@@ -72,7 +77,7 @@ def flutter_aot_elf_action(ctx, gen_snapshot, flutter_sdk_files, kernel_dill, ou
         debug_info: Optional File the split debug info is saved to
             (`--save-debugging-info`), with DWARF stack traces turned on.
     """
-    _flutter_aot_action(ctx, gen_snapshot, flutter_sdk_files, kernel_dill, output, "app-aot-elf", "--elf", strip, extra_flags, debug_info, "FlutterAotElf")
+    _flutter_aot_action(ctx, gen_snapshot, flutter_sdk_files, kernel_dill, output, "app-aot-elf", "--elf", strip, extra_flags, debug_info, mnemonic = "FlutterAotElf")
 
 def flutter_aot_macho_action(
         ctx,
@@ -80,13 +85,17 @@ def flutter_aot_macho_action(
         flutter_sdk_files,
         kernel_dill,
         output,
-        strip = True,
         extra_flags = [],
         debug_info = None,
+        object = None,
         install_name = "@rpath/App.framework/App",
         min_os_version = None,
         rpath = "@executable_path/Frameworks,@loader_path/Frameworks"):
     """AOT compile to Mach-O dylib. Used for macOS and iOS.
+
+    The dylib keeps its symbols: gen_snapshot's `--strip` leaves no debug
+    information to make a dSYM from, so Apple targets strip after extracting
+    one, as `flutter build` does (see `split_and_strip_aot_binary`).
 
     Args:
         ctx: Rule context.
@@ -94,11 +103,13 @@ def flutter_aot_macho_action(
         flutter_sdk_files: SDK support files.
         kernel_dill: Kernel .dill input.
         output: Output dylib File.
-        strip: Whether to strip debug symbols.
         extra_flags: Additional gen_snapshot flags. Not paths: a path
             reaches the action as a File, or path mapping cannot rewrite it.
         debug_info: Optional File the split debug info is saved to
             (`--save-debugging-info`), with DWARF stack traces turned on.
+        object: Optional File the relocatable object is written to
+            (`--macho-object`). The dylib's debugging map points at it, and
+            `dsymutil` reads the dSYM out of it.
         install_name: Mach-O LC_ID_DYLIB install name.
         min_os_version: Minimum OS deployment target (e.g. "15.0" for iOS, "12.0" for macOS).
         rpath: Comma-separated rpath entries for LC_RPATH.
@@ -109,4 +120,4 @@ def flutter_aot_macho_action(
         macho_flags.append("--macho-min-os-version=" + min_os_version)
     if rpath:
         macho_flags.append("--macho-rpath=" + rpath)
-    _flutter_aot_action(ctx, gen_snapshot, flutter_sdk_files, kernel_dill, output, "app-aot-macho-dylib", "--macho", strip, macho_flags, debug_info, "FlutterAotMacho")
+    _flutter_aot_action(ctx, gen_snapshot, flutter_sdk_files, kernel_dill, output, "app-aot-macho-dylib", "--macho", False, macho_flags, debug_info, object, mnemonic = "FlutterAotMacho")

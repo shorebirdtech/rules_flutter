@@ -224,15 +224,16 @@ def path_mapping_test_suite(name):
         "web_dbg": ("web", _path_mapped_dbg_test, ["FlutterAssetBundle", "FlutterDart2Wasm", "FlutterDart2JS", "FlutterWebTemplate", "FlutterWebBundle"]),
         "web_js": ("web_js", _path_mapped_opt_test, ["FlutterDart2JS", "FlutterWebTemplate", "FlutterWebBundle"]),
         "macos_framework_debug": ("macos_framework_debug", _path_mapped_test, ["FlutterMacOSFramework"]),
-        "macos_framework_release": ("macos_framework_release", _path_mapped_test, ["FlutterMacOSFramework"]),
+        "macos_framework_release": ("macos_framework_release", _path_mapped_test, ["FlutterAppleSplitDebugInfo", "FlutterMacOSFramework"]),
         "macos_native_libs": ("macos_native_libs", _path_mapped_test, ["FlutterMacOSNativeLibs"]),
         "ios_framework_debug": ("ios_framework_debug", _path_mapped_test, ["FlutterIOSStubDylib", "FlutterIOSDebugAssets"]),
-        "ios_framework_release": ("ios_framework_release", _path_mapped_test, ["FlutterIOSRetagDylib", "FlutterIOSCopyAssets"]),
+        "ios_framework_release": ("ios_framework_release", _path_mapped_test, ["FlutterAppleSplitDebugInfo", "FlutterIOSCopyAssets"]),
     }
 
-    # Targets an iOS rule: there is no Linux-host-to-iOS Flutter toolchain,
-    # so the rule cannot be analysed on a Linux host.
-    macos_only = ["ios_framework_debug", "ios_framework_release"]
+    # Targets an iOS rule (there is no Linux-host-to-iOS Flutter toolchain, so
+    # it cannot be analysed on a Linux host), or a release macOS framework,
+    # which runs Xcode's `dsymutil` and `strip`.
+    macos_only = ["ios_framework_debug", "ios_framework_release", "macos_framework_release"]
 
     tests = []
     for case, (fixture, rule, mnemonics) in cases.items():

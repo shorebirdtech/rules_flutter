@@ -14,8 +14,17 @@ These are exported as `flutter_macos_framework_gen` and `flutter_macos_native_li
 from flutter/macos.bzl.
 """
 
+load("@apple_support//lib:apple_support.bzl", "apple_support")
+load("@bazel_skylib//lib:dicts.bzl", "dicts")
+
+# framework_import_support is rules_apple-internal, but it is the only way to
+# construct AppleFrameworkImportInfo (its init is banned), which is how a dSYM
+# reaches the bundle's `dsyms` output group. See `flutter_ios_application.bzl`.
+# buildifier: disable=bzl-visibility
+load("@rules_apple//apple/internal:framework_import_support.bzl", "framework_import_support")
 load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
 load("//flutter:providers.bzl", "FlutterApplicationInfo")
+load("//flutter/private:apple_xcode.bzl", "XCODE_TOOL_ATTRS", "XCODE_TOOL_FRAGMENTS", "XCODE_TOOL_TOOLCHAINS", "declare_dsym", "split_and_strip_aot_binary")
 load("//flutter/private:exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
 
 # -- flutter_macos_framework (App.framework assembly) -------------------------
@@ -85,6 +94,7 @@ def _flutter_macos_framework_impl(ctx):
     wrapper_dir = ctx.actions.declare_directory(ctx.label.name)
 
     inputs = [flutter_assets]
+    dsym_files = []
     shell_parts = [
         "set -e",
         'FW="$1/App.framework"',
@@ -109,8 +119,21 @@ def _flutter_macos_framework_impl(ctx):
     else:
         if not app_info.aot_output:
             fail("flutter_macos_framework requires an AOT build (not debug mode) or a kernel_dill in debug mode.")
-        inputs.append(app_info.aot_output)
-        args.add(app_info.aot_output)
+
+        # Extract the dSYM and strip the binary, as `flutter build macos` does.
+        # Not under the wrapper directory, which is all the bundle takes.
+        binary = ctx.actions.declare_file("%s_binary/App" % ctx.label.name)
+        dsym = declare_dsym(ctx, ctx.label.name + "_dsym")
+        dsym_files = dsym.files
+        split_and_strip_aot_binary(
+            ctx,
+            dylib = app_info.aot_output,
+            object = app_info.aot_object,
+            binary = binary,
+            dsym = dsym,
+        )
+        inputs.append(binary)
+        args.add(binary)
         shell_parts.append('cp "$2" "$FW/App"')
 
     args.add_all([flutter_assets], expand_directories = False)
@@ -145,20 +168,42 @@ def _flutter_macos_framework_impl(ctx):
         progress_message = "Assembling App.framework for %s" % ctx.label,
     )
 
-    return [DefaultInfo(files = depset([wrapper_dir]))]
+    providers = [
+        DefaultInfo(files = depset([wrapper_dir])),
+        OutputGroupInfo(dsym = depset(dsym_files)),
+    ]
+    if dsym_files:
+        # A framework import that imports no framework: all it carries is the
+        # dSYM, which rules_apple puts in the app's `dsyms` output group.
+        providers.append(framework_import_support.framework_import_info_with_dependencies(
+            build_archs = [apple_support.target_arch_from_rule_ctx(ctx)],
+            deps = [],
+            dsyms = dsym_files,
+        ))
+    return providers
 
 flutter_macos_framework = rule(
     implementation = _flutter_macos_framework_impl,
-    attrs = {
-        "application": attr.label(
-            doc = "A flutter_application target providing FlutterApplicationInfo.",
-            mandatory = True,
-            providers = [FlutterApplicationInfo],
-        ),
-    },
+    attrs = dicts.add(
+        XCODE_TOOL_ATTRS,
+        {
+            "application": attr.label(
+                doc = "A flutter_application target providing FlutterApplicationInfo.",
+                mandatory = True,
+                providers = [FlutterApplicationInfo],
+            ),
+        },
+    ),
     # Copies and a plist: the same bytes on any host. Signing is rules_apple's.
+    # Only the release binary's dSYM and strip run Xcode's tools.
     exec_groups = PORTABLE_EXEC_GROUPS,
-    doc = "Assembles the Flutter AOT dylib and assets into App.framework for macOS.",
+    fragments = XCODE_TOOL_FRAGMENTS,
+    toolchains = XCODE_TOOL_TOOLCHAINS,
+    doc = """Assembles the Flutter AOT dylib and assets into App.framework for macOS.
+
+The release binary is stripped, as `flutter build macos` strips it; the dSYM it
+was stripped of is in the `dsym` output group, and in the `dsyms` output group
+of the app that bundles this.""",
 )
 
 # -- flutter_macos_native_libs (dylib staging for additional_contents) -------

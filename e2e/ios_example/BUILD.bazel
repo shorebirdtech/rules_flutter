@@ -18,6 +18,7 @@ load(
     "flutter_ios_simulator_build_test",
 )
 load("@rules_flutter//tools/e2e_testing:apple_analysis_test.bzl", "analyses_test", "command_line_tests")
+load("@rules_flutter//tools/e2e_testing:apple_release_build.bzl", "apple_release_build")
 load("@rules_swift//swift:swift.bzl", "swift_library")
 load(":simulator_mode_test.bzl", "simulator_fastbuild_refused_test")
 
@@ -405,6 +406,45 @@ flutter_library(
         "@rules_flutter//flutter:material_icons",
     ],
 )
+
+# =============================================================================
+# What a release iOS app ships
+#
+# `flutter build ios --release` strips App.framework/App. A release bundle is
+# a device build, which needs a provisioning profile this workspace does not
+# have, so the framework is checked where it is assembled: it is the same
+# `App` the bundle embeds. Flutter's release mode is every `-c` but `dbg`.
+# =============================================================================
+
+flutter_ios_framework_gen(
+    name = "release_framework",
+    application = ":app_flutter",
+    tags = ["manual"],
+)
+
+[
+    apple_release_build(
+        name = "release_framework_%s" % mode,
+        compilation_mode = mode,
+        ios_device = True,
+        targets = [":release_framework"],
+    )
+    for mode in ("fastbuild", "opt")
+]
+
+[
+    dart_test(
+        name = "verify_ios_release_stripped_%s_test" % mode,
+        data = [":release_framework_%s" % mode],
+        main = "test/verify_ios_release_stripped_test.dart",
+        target_compatible_with = ["@platforms//os:macos"],
+        deps = ["@rules_flutter//tools/e2e_testing"],
+    )
+    for mode in (
+        "fastbuild",
+        "opt",
+    )
+]
 
 # =============================================================================
 # The build as a whole

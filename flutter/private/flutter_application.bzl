@@ -36,6 +36,7 @@ def _flutter_application_impl(ctx):
 
     # Profile strips like release, as `flutter build --profile` does: the
     # profiler names Dart code from the snapshot, not from native symbols.
+    # (Not for Apple, which strips after making a dSYM: see `apple_xcode.bzl`.)
     strip = ctx.var["COMPILATION_MODE"] == "opt"
 
     # Guard: AOT cross-compilation between desktop OSes is not supported.
@@ -153,6 +154,7 @@ def _flutter_application_impl(ctx):
     package_config = compilation.package_config
 
     aot_output = None
+    aot_object = None
     debug_info_output = None
     if not is_debug:
         # Collect gen_snapshot extra flags from user attrs.
@@ -165,15 +167,16 @@ def _flutter_application_impl(ctx):
         # Step 2: AOT compile — choose format based on target platform.
         if is_ios or is_macos:
             aot_output = ctx.actions.declare_file(ctx.label.name + ".dylib")
+            aot_object = ctx.actions.declare_file(ctx.label.name + ".o")
             flutter_aot_macho_action(
                 ctx = ctx,
                 gen_snapshot = flutter_sdk_info.gen_snapshot,
                 flutter_sdk_files = flutter_sdk_info.tool_files,
                 kernel_dill = kernel_dill,
                 output = aot_output,
-                strip = strip,
                 extra_flags = extra_flags,
                 debug_info = debug_info_output,
+                object = aot_object,
                 min_os_version = ctx.attr.min_os_version if ctx.attr.min_os_version else None,
             )
         else:
@@ -425,6 +428,7 @@ def _flutter_application_impl(ctx):
         DefaultInfo(files = depset(default_files)),
         FlutterApplicationInfo(
             aot_output = aot_output,
+            aot_object = aot_object,
             kernel_dill = kernel_dill if is_debug else None,
             flutter_assets = flutter_assets,
             icu_data = flutter_sdk_info.icu_data,

@@ -195,6 +195,10 @@ def _bundling_tests(name):
         # exists for: a library that is not at the root of its package.
         native_libs = ["libadd.dylib", "vendor/lib/libsub.dylib"],
         code_assets = ["libadd.dylib", "assets/libasset.dylib"],
+        # Debug: a release framework runs `dsymutil` on its dylib, which rejects
+        # a placeholder that is not a Mach-O, and `_two_apps_one_package` below
+        # really builds this one.
+        debug = True,
         tags = ["manual"],
     )
     flutter_macos_native_libs(
@@ -252,6 +256,7 @@ def _bundling_tests(name):
     # actions are shared.
     fake_application(
         name = name + "_fake_app_other",
+        debug = True,
         native_libs = ["libadd.dylib"],
         tags = ["manual"],
     )

@@ -1,0 +1,67 @@
+"""Builds Apple targets in a chosen compilation mode, as a test's `data`.
+
+A test that reads a built bundle takes it as `data`, in whatever configuration
+the test is run with. A property of a *release* bundle has to hold in each
+compilation mode that builds Flutter's release mode (`fastbuild` and `opt`), so
+it needs the bundle built in a mode it names, not the one the command line has.
+"""
+
+load("@rules_apple//apple:providers.bzl", "AppleFrameworkImportInfo")
+
+def _transition_impl(settings, attr):
+    ios_multi_cpus = settings["//command_line_option:ios_multi_cpus"]
+    return {
+        "//command_line_option:apple_generate_dsym": attr.generate_dsym,
+        "//command_line_option:compilation_mode": attr.compilation_mode,
+        "//command_line_option:ios_multi_cpus": ["arm64"] if attr.ios_device else ios_multi_cpus,
+    }
+
+_transition = transition(
+    implementation = _transition_impl,
+    inputs = ["//command_line_option:ios_multi_cpus"],
+    outputs = [
+        "//command_line_option:apple_generate_dsym",
+        "//command_line_option:compilation_mode",
+        "//command_line_option:ios_multi_cpus",
+    ],
+)
+
+def _impl(ctx):
+    files = []
+    for target in ctx.attr.targets:
+        files.append(target[DefaultInfo].files)
+
+        # A framework import has no files of its own: its frameworks are here.
+        if AppleFrameworkImportInfo in target:
+            files.append(target[AppleFrameworkImportInfo].framework_imports)
+        if ctx.attr.generate_dsym and OutputGroupInfo in target and hasattr(target[OutputGroupInfo], "dsyms"):
+            files.append(target[OutputGroupInfo].dsyms)
+    return [DefaultInfo(files = depset(transitive = files))]
+
+apple_release_build = rule(
+    implementation = _impl,
+    doc = """Forwards the files of `targets`, built in `compilation_mode`, and the frameworks
+of the framework imports among them.
+
+With `generate_dsym`, builds them with `--apple_generate_dsym` and forwards
+the dSYM bundles the targets' `dsyms` output group holds besides their own
+files.""",
+    attrs = {
+        "compilation_mode": attr.string(
+            mandatory = True,
+            values = ["dbg", "fastbuild", "opt"],
+        ),
+        "generate_dsym": attr.bool(
+            default = False,
+            doc = "Build with `--apple_generate_dsym` and forward the `dsyms` output group.",
+        ),
+        "ios_device": attr.bool(
+            default = False,
+            doc = "Build for an arm64 iOS device (`--ios_multi_cpus=arm64`).",
+        ),
+        "targets": attr.label_list(
+            cfg = _transition,
+            mandatory = True,
+        ),
+    },
+)

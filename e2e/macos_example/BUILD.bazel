@@ -19,6 +19,7 @@ load(
     "flutter_macos_runner_lib_gen",
 )
 load("@rules_flutter//tools/e2e_testing:apple_analysis_test.bzl", "analyses_test", "skipped_test")
+load("@rules_flutter//tools/e2e_testing:apple_release_build.bzl", "apple_release_build")
 load("@rules_swift//swift:swift.bzl", "swift_library")
 
 exports_files(["pubspec.lock"])
@@ -483,6 +484,66 @@ dart_analysis_test(
     target_compatible_with = ["@platforms//os:macos"],
     targets = [":verify_macos_profile_app_test"],
 )
+
+# =============================================================================
+# What a release bundle ships
+#
+# `flutter build macos --release` strips App.framework/App (no local symbols,
+# no debugging map) and leaves a dSYM for it. Flutter's release mode is every
+# `-c` but `dbg`, so each property below is checked in `fastbuild` and in `opt`.
+# =============================================================================
+
+# The same app with its Dart names obfuscated and the symbols split out.
+flutter_application(
+    name = "app_obfuscated_flutter",
+    package_name = "macos_example",
+    assets = glob(["assets/**"]),
+    main = "lib/main.dart",
+    native_deps = [":sub"],
+    obfuscate = True,
+    split_debug_info = True,
+    deps = _APP_DEPS,
+)
+
+flutter_macos_app(
+    name = "app_obfuscated",
+    app_name = "Flutter App",
+    application = ":app_obfuscated_flutter",
+    bundle_id = "com.example.flutterapp.obfuscated",
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
+[
+    apple_release_build(
+        name = "release_%s" % mode,
+        compilation_mode = mode,
+        generate_dsym = True,
+        targets = [
+            ":app",
+            ":app_obfuscated",
+        ],
+    )
+    for mode in ("fastbuild", "opt")
+]
+
+[
+    dart_test(
+        name = "verify_macos_release_%s_%s_test" % (what, mode),
+        data = [":release_%s" % mode],
+        main = "test/verify_macos_release_%s_test.dart" % what,
+        target_compatible_with = ["@platforms//os:macos"],
+        deps = ["@rules_flutter//tools/e2e_testing"],
+    )
+    for what in (
+        "stripped",
+        "dsym",
+        "obfuscated",
+    )
+    for mode in (
+        "fastbuild",
+        "opt",
+    )
+]
 
 # =============================================================================
 # The build as a whole

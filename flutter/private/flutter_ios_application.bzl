@@ -21,38 +21,13 @@ load("@bazel_skylib//lib:dicts.bzl", "dicts")
 # (it accepts a single .framework). This is the same helper that rule uses.
 # buildifier: disable=bzl-visibility
 load("@rules_apple//apple/internal:framework_import_support.bzl", "framework_import_support")
-load("@rules_cc//cc:find_cc_toolchain.bzl", "CC_TOOLCHAIN_TYPE", "use_cc_toolchain")
+load("@rules_cc//cc:find_cc_toolchain.bzl", "use_cc_toolchain")
 load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
 load("//flutter:providers.bzl", "FlutterApplicationInfo")
+load("//flutter/private:apple_xcode.bzl", "declare_dsym", "run_xcode_tool", "split_and_strip_aot_binary")
 load("//flutter/private:constants.bzl", "IOS_MINIMUM_OS_VERSION")
 load("//flutter/private:exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
 load("//flutter/private:flutter_native_assets.bzl", "native_asset_framework_name")
-
-def _run_xcode_tool(ctx, **kwargs):
-    """Registers a shell action that runs Xcode's tools (`xcrun`).
-
-    `apple_support.run_shell` gives the action the selected Xcode's
-    environment (`DEVELOPER_DIR`, `SDKROOT`) and execution requirements, so the
-    Xcode version is part of the action's key. The workspace's shell
-    environment is left out: an `--action_env` such as
-    `MACOSX_DEPLOYMENT_TARGET` would otherwise retarget clang. The action runs
-    in the auto exec group of the C++ toolchain resolved for this Apple target:
-    that toolchain is Xcode's clang, and its registration says which hosts can
-    run Xcode.
-
-    Args:
-      ctx: A rule context with apple_support's action and platform attrs and
-        the C++ toolchain type.
-      **kwargs: Forwarded to `ctx.actions.run_shell`.
-    """
-    apple_support.run_shell(
-        actions = ctx.actions,
-        xcode_config = ctx.attr._xcode_config[apple_common.XcodeVersionConfig],
-        apple_platform_info = apple_support.platform_info_from_rule_ctx(ctx),
-        toolchain = CC_TOOLCHAIN_TYPE,
-        use_default_shell_env = False,
-        **kwargs
-    )
 
 def _flutter_ios_application_impl(ctx):
     """Bundles Flutter compilation outputs for iOS packaging."""
@@ -180,16 +155,17 @@ def _flutter_ios_framework_impl(ctx):
         # Release mode: AOT binary + flutter_assets.
         dylib = app_info.aot_output
 
-        # Copy the dylib and rewrite its LC_BUILD_VERSION with vtool.
-        _run_xcode_tool(
+        # Extract the dSYM, retag the dylib and strip it, as `flutter build ios`
+        # does. gen_snapshot tags the dylib as macOS, the host it ran on, so its
+        # LC_BUILD_VERSION is rewritten with vtool.
+        dsym = declare_dsym(ctx, ctx.label.name)
+        split_and_strip_aot_binary(
             ctx,
-            command = 'cp "$1" "$2" && xcrun vtool -set-build-version "$3" "$4" "$4" -replace -output "$2" "$2"',
-            arguments = [ctx.actions.args().add_all([dylib, framework_binary, vtool_platform, minimum_os_version])],
-            inputs = [dylib],
-            outputs = [framework_binary],
-            mnemonic = "FlutterIOSRetagDylib",
-            execution_requirements = PATH_MAPPING,
-            progress_message = "Retagging App dylib for %s (min %s)" % (vtool_platform, minimum_os_version),
+            dylib = dylib,
+            object = app_info.aot_object,
+            binary = framework_binary,
+            dsym = dsym,
+            retag = [vtool_platform, minimum_os_version],
         )
 
         # Copy flutter_assets into the framework.
@@ -204,7 +180,10 @@ def _flutter_ios_framework_impl(ctx):
             progress_message = "Copying flutter_assets into App.framework",
         )
 
-        return [DefaultInfo(files = depset([framework_binary, framework_plist, framework_assets]))]
+        return [
+            DefaultInfo(files = depset([framework_binary, framework_plist, framework_assets])),
+            OutputGroupInfo(dsym = depset(dsym.files)),
+        ]
     else:
         # Debug mode: stub binary + flutter_assets with kernel_blob.bin.
         kernel_dill = app_info.kernel_dill
@@ -213,7 +192,7 @@ def _flutter_ios_framework_impl(ctx):
 
         # Create a stub dylib — rules_apple's framework processor requires a
         # binary file. bundle_only=True prevents linking so it's never loaded.
-        _run_xcode_tool(
+        run_xcode_tool(
             ctx,
             command = 'echo "" | xcrun -sdk "$1" clang -shared -o "$2" -x c - && xcrun vtool -set-build-version "$3" "$4" "$4" -replace -output "$2" "$2"',
             arguments = [ctx.actions.args().add_all([sdk, framework_binary, vtool_platform, minimum_os_version])],
@@ -251,7 +230,10 @@ def _flutter_ios_framework_impl(ctx):
             progress_message = "Assembling debug App.framework with kernel and VM snapshots",
         )
 
-        return [DefaultInfo(files = depset([framework_binary, framework_plist, framework_assets]))]
+        return [
+            DefaultInfo(files = depset([framework_binary, framework_plist, framework_assets])),
+            OutputGroupInfo(dsym = depset()),
+        ]
 
 flutter_ios_framework = rule(
     implementation = _flutter_ios_framework_impl,
@@ -275,7 +257,10 @@ flutter_ios_framework = rule(
     exec_groups = PORTABLE_EXEC_GROUPS,
     fragments = ["apple"],
     toolchains = use_cc_toolchain(mandatory = True),
-    doc = "Assembles Flutter artifacts into App.framework for iOS (release: AOT binary + assets; debug: assets + kernel).",
+    doc = """Assembles Flutter artifacts into App.framework for iOS (release: AOT binary + assets; debug: assets + kernel).
+
+The release binary is stripped, as `flutter build ios` strips it; the dSYM it
+was stripped of is in the `dsym` output group.""",
 )
 
 # -- flutter_ios_native_frameworks (dylib -> framework wrapping) ---------------
@@ -341,7 +326,7 @@ def _flutter_ios_native_frameworks_impl(ctx):
 
         # Copy the dylib into the framework and rewrite its install name so the
         # dynamic linker resolves it from the embedded framework via @rpath.
-        _run_xcode_tool(
+        run_xcode_tool(
             ctx,
             command = 'cp "$1" "$2" && xcrun install_name_tool -id "$3" "$2"',
             arguments = [ctx.actions.args().add_all([
