@@ -167,4 +167,50 @@ Error in fail: rules_android_maven_install.json contains an invalid input signat
       expect(repinTargets('ERROR: no such package'), isEmpty);
     });
   });
+
+  group('mavenWarnings', () {
+    const contributions = '''
+DEBUG: /x/rules_jvm_external+/private/extensions/maven.bzl:189:14: The maven repository 'rules_android_maven' has contributions from multiple bzlmod modules, and will be resolved together: ["rules_android", "rules_flutter"].
+See https://github.com/bazel-contrib/rules_jvm_external/blob/master/docs/bzlmod.md#module-dependency-layering for more information.
+ To suppress this warning review the contributions from the other modules and add the following attribute in the root MODULE.bazel file:
+maven.install(
+  name = "rules_android_maven"
+  known_contributing_modules = ["rules_android", "rules_flutter"],
+  ...
+)
+''';
+
+    test('names the module list a root install is missing', () {
+      expect(mavenWarnings(contributions), [
+        'maven.install(name = "rules_android_maven") needs '
+            'known_contributing_modules = ["rules_android", "rules_flutter"]',
+      ]);
+    });
+
+    test('names a root version that a dependency overrides', () {
+      const output = '''
+WARNING: For dependency 'com.android.tools:r8' the root @rules_android_maven repo wants version 8.9.35, but got 9.3.16 from the rules_android bazel dep. Please update the version in your MODULE.bazel or set `force_version = True`.
+''';
+      expect(mavenWarnings(output), [
+        "com.android.tools:r8 is declared at 8.9.35 in @rules_android_maven, "
+            "but rules_android's 9.3.16 is used",
+      ]);
+    });
+
+    test('finds each of several, in order', () {
+      final all = mavenWarnings(
+        contributions.replaceAll('rules_android_maven', 'a_maven') +
+            contributions,
+      );
+      expect(all, hasLength(2));
+      expect(all.first, contains('a_maven'));
+    });
+
+    test('finds nothing in output without them', () {
+      expect(
+        mavenWarnings('INFO: All requested repos fetched successfully.'),
+        isEmpty,
+      );
+    });
+  });
 }

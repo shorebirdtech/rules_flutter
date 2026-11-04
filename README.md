@@ -836,16 +836,35 @@ If you add artifacts to it, say another androidx library that a plugin's `build.
 maven.install(
     name = "rules_android_maven",
     artifacts = ["androidx.browser:browser:1.9.0"],
+    known_contributing_modules = [
+        "rules_android",
+        "rules_flutter",
+    ],
     lock_file = "//:rules_android_maven_install.json",
 )
 ```
+
+`known_contributing_modules` lists the other modules whose artifacts join yours. Without it rules_jvm_external prints a notice naming them each time it evaluates the extension, and with it only the listed modules contribute: a module you add later that declares artifacts for `rules_android_maven` has to be added to the list. rules_android and rules_flutter are the two that contribute today.
 
 ```sh
 touch rules_android_maven_install.json
 bazel run @rules_android_maven//:pin
 ```
 
-Run `REPIN=1 bazel run @rules_android_maven//:pin` again after changing the artifacts, or bumping rules_flutter or rules_android: Bazel fails the build until you do. [`e2e/plugin_example/MODULE.bazel`](e2e/plugin_example/MODULE.bazel) is a worked example.
+Run `REPIN=1 bazel run @rules_android_maven//:pin` again after changing the artifacts, or bumping rules_flutter or rules_android: Bazel fails the build until you do. Do not repeat an artifact that rules_android already declares at a lower version than yours: rules_android's version is the one used (`com.android.tools:r8` is one), and the pin warns that your line has no effect. [`e2e/plugin_example/MODULE.bazel`](e2e/plugin_example/MODULE.bazel) is a worked example.
+
+rules_android also declares two Maven repositories with no lock file, which Bazel then resolves through Coursier at build time, with no checksums, so every fresh output base downloads them again: `bazel_worker_maven` (declared by `bazel_worker_java`, a dependency of rules_android) and `android_ide_common_30_1_3`. rules_jvm_external takes a lock file only from the root module, so to pin one, declare the same repository in your `MODULE.bazel` with a lock of its own and add it to `use_repo`:
+
+```starlark
+maven.install(
+    name = "bazel_worker_maven",
+    known_contributing_modules = ["bazel_worker_java"],
+    lock_file = "//:bazel_worker_maven_install.json",
+)
+use_repo(maven, "bazel_worker_maven")
+```
+
+Create the lock file empty and run `bazel run @bazel_worker_maven//:pin`, as above. It is optional: leave them out and the build works, only slower on a fresh output base. `@android_ide_common_30_1_3` takes the same declaration, with `known_contributing_modules = ["rules_android"]`; [`e2e/plugin_example/MODULE.bazel`](e2e/plugin_example/MODULE.bazel) shows it, with the newer protobuf-java it lists for a protobuf module newer than the jar rules_android pins.
 
 **ABIs.** The ABIs of the APK are the platforms of `--@rules_android//flags:android_platforms`, as for any rules_android `android_binary`. One platform builds an APK for that ABI; several build one APK for all of them, like the fat APK `flutter build apk` makes. The Flutter engine, the app's `libapp.so`, the native libraries of the AARs your plugins bring and any C/C++ deps are each packaged for every ABI, from one mechanism: `android_binary` builds its dependencies once for each platform and packages what each build brings.
 

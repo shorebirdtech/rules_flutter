@@ -137,3 +137,49 @@ String _balanced(String code, int start) {
 List<String> repinTargets(String bazelOutput) => RegExp(
   r'REPIN=1 bazel run (@\S+//:pin)',
 ).allMatches(bazelOutput).map((m) => m.group(1)!).toSet().toList()..sort();
+
+/// What rules_jvm_external says is wrong or noisy about the `maven.install`
+/// tags of a workspace, one line each, from the output of a fetch of one of its
+/// repositories that ran with `REPIN=1` and `--lockfile_mode=off`.
+///
+/// Both warnings come from evaluating the extension, which a lock file lets
+/// Bazel skip, so a locked run never prints them and they showed on every
+/// developer's first build. They are:
+///
+///  * a repository another module also contributes to, whose root install does
+///    not say which modules may (`known_contributing_modules`); the warning
+///    prints the list to write;
+///  * a root install that declares an artifact at a lower version than a
+///    dependency's, which wins, so the declaration is not what is used (printed
+///    only when repinning).
+List<String> mavenWarnings(String bazelOutput) {
+  final warnings = <String>[];
+  final contributions = RegExp(
+    r'The maven repository \x27([^\x27]+)\x27 has contributions from multiple '
+    r'bzlmod modules.*?known_contributing_modules = (\[[^\]]*\])',
+    dotAll: true,
+  );
+  final overridden = RegExp(
+    r"WARNING: For dependency '([^']+)' the root @(\S+) repo wants version "
+    r'(\S+), but got (\S+) from the (\S+) bazel dep',
+  );
+  // Both kinds, in the order Bazel printed them.
+  final all = [
+    ...contributions.allMatches(bazelOutput),
+    ...overridden.allMatches(bazelOutput),
+  ]..sort((a, b) => a.start.compareTo(b.start));
+  for (final m in all) {
+    if (m.pattern == contributions) {
+      warnings.add(
+        'maven.install(name = "${m[1]}") needs '
+        'known_contributing_modules = ${m[2]}',
+      );
+    } else {
+      warnings.add(
+        '${m[1]} is declared at ${m[3]} in @${m[2]}, '
+        "but ${m[5]}'s ${m[4]} is used",
+      );
+    }
+  }
+  return warnings;
+}

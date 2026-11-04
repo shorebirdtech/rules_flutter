@@ -272,9 +272,20 @@ A lock holds the artifacts of every module that contributes to its repo, not
 only the ones the file next to it lists: `@rules_android_maven` merges what
 rules_android, rules_flutter and the workspace declare, and
 rules_jvm_external decides which version of an artifact several of them name
-(`com.android.tools:r8` resolves to 9.3.16, rules_android's, although these
-workspaces say 8.9.35 and warn). So a bump of rules_android, a change to the root `maven.install`, or a
-change to a workspace's list makes the e2e locks stale.
+(`com.android.tools:r8` resolves to 9.3.16, rules_android's, so the workspaces
+do not declare it: a root line at a lower version than a dependency's has no
+effect, and the pin warns). So a bump of rules_android, a change to the root
+`maven.install`, or a change to a workspace's list makes the e2e locks stale.
+
+Evaluating the extension warns when a repository has contributions from other
+modules that its root `maven.install` does not name (`known_contributing_modules`,
+which then limits the contributors to those named), and when a root artifact is
+overridden by a dependency's higher version. A lock lets Bazel replay the last
+evaluation without printing either, so the lock check also evaluates the extension
+afresh: `REPIN=1 bazel fetch --repo=@<install> --lockfile_mode=off` on a new
+server, in the repository root and every workspace with a pinned install, and
+fails on either warning (`mavenWarnings` in `tools/lockfile_check/lockfile_check.dart`).
+It ignores the workspace's `.bazelrc`, which evaluating an extension does not read.
 
 The root `maven.install` also passes Coursier `--reconciliation *:*:relaxed`
 (`additional_coursier_options`), so an exact POM range such as `fragment [1.3.6]`

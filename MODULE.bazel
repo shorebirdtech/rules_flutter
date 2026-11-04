@@ -132,6 +132,10 @@ maven.install(
         "org.jetbrains.kotlin:kotlin-stdlib:2.1.20",
         "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0",
     ],
+    # Read when rules_flutter is the root module (its own tests); a module that
+    # depends on it lists the modules it accepts in its own install. rules_android
+    # adds its tool dependencies to this repository.
+    known_contributing_modules = ["rules_android"],
     lock_file = "//:rules_android_maven_install.json",
     repositories = [
         "https://maven.google.com",

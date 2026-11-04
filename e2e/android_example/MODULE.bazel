@@ -155,6 +155,10 @@ bazel_dep(name = "rules_jvm_external", version = "7.1")
 # the artifacts of every module that contributes to that repo, not only the ones
 # listed here. Refresh them with `bazel run //tools/lockfile_check -- --refresh
 # e2e/<workspace>`; see docs/TESTING.md, "Lock files".
+# `known_contributing_modules` names the modules besides this one that add
+# artifacts to a repo: rules_jvm_external warns on every fresh evaluation of the
+# extension until the root module lists them, and from then on only those
+# modules contribute. `bazel run //tools/lockfile_check` fails while it warns.
 maven = use_extension("@rules_jvm_external//:extensions.bzl", "maven")
 maven.install(
     name = "android_ide_common_30_1_3",
@@ -174,6 +178,7 @@ maven.install(
         "com.google.protobuf:protobuf-java:4.34.0",
         "com.google.protobuf:protobuf-java-util:4.34.0",
     ],
+    known_contributing_modules = ["rules_android"],
     lock_file = "//:android_ide_common_30_1_3_install.json",
     repositories = [
         "https://maven.google.com",
@@ -202,7 +207,6 @@ maven.install(
         "com.android.tools:desugar_jdk_libs_nio:2.1.5",
         "com.android.tools:desugar_jdk_libs_configuration_nio:2.1.5",
         "com.android.tools:desugar_jdk_libs_configuration:2.1.5",
-        "com.android.tools:r8:8.9.35",
         "org.bouncycastle:bcprov-jdk18on:1.77",
         "org.hamcrest:hamcrest-core:2.2",
         "org.robolectric:robolectric:4.14.1",
@@ -247,6 +251,10 @@ maven.install(
         "com.google.truth.extensions:truth-proto-extension:1.4.0",
         "org.mockito:mockito-core:5.4.0",
     ],
+    known_contributing_modules = [
+        "rules_android",
+        "rules_flutter",
+    ],
     lock_file = "//:rules_android_maven_install.json",
     repositories = [
         "https://maven.google.com",
@@ -259,6 +267,7 @@ maven.install(
 # install without a lock file. Its artifacts come from there; the lock is ours.
 maven.install(
     name = "bazel_worker_maven",
+    known_contributing_modules = ["bazel_worker_java"],
     lock_file = "//:bazel_worker_maven_install.json",
 )
 use_repo(

@@ -58,8 +58,11 @@ Future<void> main(List<String> args) async {
     final failed = <String>[];
     // The root's own Maven locks are checked with a full run only.
     final checkRoot = named.isEmpty;
-    if (checkRoot && !await _Runner('.', scratch).checkRootMaven()) {
-      failed.add('.');
+    if (checkRoot) {
+      final root = _Runner('.', scratch);
+      if (!await root.checkRootMaven() || !await root.checkMavenNoise('.')) {
+        failed.add('.');
+      }
     }
     for (final workspace in targets) {
       final runner = _Runner(workspace, scratch);
@@ -155,6 +158,7 @@ class _Runner {
   /// Both lock checks; prints each outcome and returns whether all passed.
   Future<bool> checkAll(String workspace) async {
     var ok = true;
+    if (!await checkMavenNoise(workspace)) ok = false;
     for (final check in LockCheck.values) {
       final watch = Stopwatch()..start();
       final result = await _bazel(
@@ -179,6 +183,53 @@ class _Runner {
       stderr.writeln(_tail(output));
     }
     return ok;
+  }
+
+  /// Whether evaluating the workspace's `maven.install` tags prints nothing
+  /// that says a declaration is wrong or noisy (see [mavenWarnings]).
+  ///
+  /// A lock file lets Bazel replay the extension's last result, and the
+  /// warnings are printed only when it runs, so this evaluates it afresh: on a
+  /// new server, with the lock ignored, and with `REPIN=1`, which turns on the
+  /// warning for a root version a dependency overrides. Fetching one of the
+  /// repositories downloads nothing new when the lock is current. Passes for a
+  /// workspace with no pinned install. The workspace's `.bazelrc` is left out
+  /// altogether: evaluating an extension reads none of it, and its flags name
+  /// settings of rules_flutter, which this must not need to load.
+  Future<bool> checkMavenNoise(String workspace) async {
+    final names = pinnedMavenInstalls(
+      File('$dir/MODULE.bazel').readAsStringSync(),
+    );
+    if (names.isEmpty) return true;
+    await Process.run('bazel', [
+      '--noworkspace_rc',
+      'shutdown',
+    ], workingDirectory: dir);
+    final result = await Process.run(
+      'bazel',
+      bazelArgs(['fetch', '--repo=@${names.first}'], lockfileMode: 'off'),
+      workingDirectory: dir,
+      environment: {'REPIN': '1'},
+    );
+    final output = '${result.stdout}\n${result.stderr}';
+    if (result.exitCode != 0) {
+      stderr.writeln(
+        'FAILED $workspace: bazel fetch --repo=@${names.first} exited '
+        '${result.exitCode}',
+      );
+      stderr.writeln(_tail(output));
+      return false;
+    }
+    final warnings = mavenWarnings(output);
+    if (warnings.isEmpty) {
+      stdout.writeln('ok     $workspace: no Maven declaration warnings');
+      return true;
+    }
+    stderr.writeln('FAILED $workspace: Maven declarations warn');
+    for (final warning in warnings) {
+      stderr.writeln('    $warning');
+    }
+    return false;
   }
 
   /// Whether the Maven lock files of the repository root's own `maven.install`
