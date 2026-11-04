@@ -3,7 +3,8 @@ Flutter pub.dev package.
 
 For each package in a Flutter app's pubspec.lock this rule:
   1. Downloads the same `pub.dev/api/packages/<name>/versions/<version>.tar.gz`
-     archive that rules_dart's `pub_lock_package` would.
+     archive, checked against `pubspec.lock`'s digest, that rules_dart's
+     `pub_lock_package` would (through the shared `fetch_pub_archive`).
   2. Reads the package's pubspec.yaml.
   3. Parses `flutter.plugin.platforms` via `parse_flutter_plugin_block`.
   4. Scans the extracted package tree for per-platform Apple source layouts
@@ -22,18 +23,17 @@ For each package in a Flutter app's pubspec.lock this rule:
 This is the rules_flutter sibling of rules_dart's `pub_lock_package`. The
 two rules never run for the same package: `flutter.pub()` always invokes
 this one for hosted pub packages; `pub.pub()` (in non-Flutter modules)
-keeps using `pub_lock_package`. Both share the same archive download +
-extract pattern (replicated, not abstracted, to keep the cross-repo
-surface small).
+keeps using `pub_lock_package`. Both fetch and lay out the archive with
+rules_dart's `fetch_pub_archive`, so one package version is the same tree
+whichever rule asks for it.
 """
 
-load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version", "make_dart_library_build_content")
+load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version", "fetch_pub_archive", "make_dart_library_build_content")
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_deps", "parse_pubspec_sdk_constraint")
 load("//flutter/private:android_plugin_maven.bzl", "gradle_statements", "parse_gradle_maven_dependencies")
 load("//flutter/private:asset_variants.bzl", "variant_scale")
 load("//flutter/private:cmake_link_libraries.bzl", "parse_cmake_link_libraries")
 load("//flutter/private:flutter_pubspec.bzl", "parse_flutter_assets_block", "parse_flutter_plugin_block")
-load("//flutter/private:pinned.bzl", "pinned")
 
 # Apple source extensions we sweep into the per-platform plugin library.
 _APPLE_SRC_EXTENSIONS = ("swift", "m", "mm", "h")
@@ -1683,27 +1683,15 @@ def _resolve_overlay(ctx, overlay_root_label, package_name, version, language_ve
     )
 
 def _flutter_pub_package_impl(ctx):
-    url = "{base}/packages/{name}/versions/{version}.tar.gz".format(
-        base = ctx.attr.base_url,
-        name = ctx.attr.package_name,
+    # Downloads, verifies and extracts the archive the way every pub-backed
+    # repository does, so a package is laid out the same whichever rule asks.
+    fetch_pub_archive(
+        ctx,
+        package_name = ctx.attr.package_name,
         version = ctx.attr.version,
+        sha256 = ctx.attr.sha256,
+        base_url = ctx.attr.base_url,
     )
-
-    # Match `pub_lock_package`'s download/extract semantics, including the
-    # `tar -xzf` workaround for archives with trailing-garbage gzip streams.
-    ctx.download(
-        url = url,
-        output = "_archive.tar.gz",
-        sha256 = pinned("{} {}".format(ctx.attr.package_name, ctx.attr.version), ctx.attr.sha256),
-    )
-    extract = ctx.execute(["tar", "-xzf", "_archive.tar.gz"])
-    if extract.return_code != 0:
-        fail("tar -xzf failed for {url}:\nstdout: {out}\nstderr: {err}".format(
-            url = url,
-            out = extract.stdout,
-            err = extract.stderr,
-        ))
-    ctx.delete("_archive.tar.gz")
 
     bazel_deps = []
     language_version = ""
@@ -1824,7 +1812,7 @@ def _flutter_pub_package_impl(ctx):
                     java_package = "",
                 ),
             )
-        return
+        return ctx.repo_metadata(reproducible = True)
 
     if plugin_block.present:
         # Detect Apple sources per platform when pluginClass is set.
@@ -2025,6 +2013,7 @@ def _flutter_pub_package_impl(ctx):
         )
     _write_maven_deps(ctx, maven_deps, maven_errors)
     ctx.file("android/BUILD.bazel", android_build_content)
+    return ctx.repo_metadata(reproducible = True)
 
 flutter_pub_package = repository_rule(
     implementation = _flutter_pub_package_impl,
@@ -2038,8 +2027,8 @@ flutter_pub_package = repository_rule(
             mandatory = True,
         ),
         "sha256": attr.string(
-            doc = "SHA256 hash of the package archive.",
-            default = "",
+            doc = "SHA256 hash of the package archive, as pubspec.lock records it. Mandatory: the archive is not fetched without one.",
+            mandatory = True,
         ),
         "base_url": attr.string(
             doc = "Base URL for the pub repository.",

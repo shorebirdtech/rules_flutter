@@ -36,6 +36,7 @@ class HostedPackage {
     this.name, {
     this.version = '1.0.0',
     Map<String, Object> files = const {},
+    this.links = const {},
     String? pubspec,
   }) : files = {
          // Every package has the Dart library its own name promises, and
@@ -48,6 +49,11 @@ class HostedPackage {
   final String name;
   final String version;
   final Map<String, Object> files;
+
+  /// Symbolic links in the archive: path relative to the package root to the
+  /// target exactly as stored (relative to the link, or absolute), whether or
+  /// not it exists.
+  final Map<String, String> links;
 
   /// The smallest pubspec pub itself accepts for [name].
   static String defaultPubspec(String name, String version) =>
@@ -220,6 +226,11 @@ class PubInputsFixture {
           } else {
             file.writeAsBytesSync(content as List<int>);
           }
+        }
+        for (final entry in package.links.entries) {
+          final link = Link(p.join(tree.path, entry.key));
+          link.parent.createSync(recursive: true);
+          link.createSync(entry.value);
         }
         final archive = File(
           p.join(

@@ -254,15 +254,6 @@ void main() {
         // of it does not fail at all.
         add(
           'sample',
-          ProbeRepo('pub_blank', 'flutter_pub_package', {
-            'package_name': str('sample'),
-            'version': str('1.0.0'),
-            'base_url': str(pubBase),
-            'hub_name': str('probe_hub'),
-          }),
-        ),
-        add(
-          'sample',
           ProbeRepo('pub_blank_explicit', 'flutter_pub_package', {
             'package_name': str('sample'),
             'version': str('1.0.0'),
@@ -323,7 +314,6 @@ void main() {
       'dev_root_blank',
       'gen_l10n_blank',
       'sdk_package_blank',
-      'pub_blank',
       'pub_blank_explicit',
     ]) {
       refused(repo, property: 'is refused');
@@ -345,6 +335,34 @@ void main() {
       }
       expect(result.namesTheDigest, isTrue, reason: '$result');
       expect(result.output, contains('dart-sdk'), reason: '$result');
+    },
+  );
+
+  test(
+    'pub_unset: a hosted pub package declared without a digest is not a '
+    'declaration Bazel accepts',
+    () async {
+      // The digest is mandatory, so leaving it out cannot reach a fetch at
+      // all: Bazel refuses the repository where it is declared, naming the
+      // attribute. (Declared beside the others, it would refuse every fetch
+      // in the workspace, so it has a workspace of its own.)
+      final unset = await probe(
+        repos: [
+          ProbeRepo('pub_unset', 'flutter_pub_package', {
+            'package_name': str('sample'),
+            'version': str('1.0.0'),
+            'base_url': str(pubBase),
+            'hub_name': str('probe_hub'),
+          }),
+        ],
+      );
+      final result = await unset.fetch('pub_unset');
+      expect(result.succeeded, isFalse, reason: '$result');
+      expect(
+        result.output,
+        allOf(contains('mandatory'), contains('sha256')),
+        reason: 'the refusal should say the attribute is mandatory\n$result',
+      );
     },
   );
 }

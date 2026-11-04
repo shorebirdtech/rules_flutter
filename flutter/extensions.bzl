@@ -13,6 +13,7 @@ effectively overriding the default named toolchain due to toolchain resolution p
 """
 
 load("@rules_dart//dart/ext:registry.bzl", "curated_code_assets")
+load("@rules_dart//dart/pub:pub_lock_package.bzl", "check_pub_archive_sha256")
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_lock")
 load("//flutter/private:android_plugin_maven.bzl", "flutter_android_maven")
 load("//flutter/private:flutter_gen_l10n_repo.bzl", "flutter_gen_l10n_repo")
@@ -231,11 +232,17 @@ def _toolchain_extension(module_ctx):
             for name, info in hosted.items():
                 desc = info.get("description", {})
                 version = info.get("version", "")
+                sha256 = desc.get("sha256", "") if type(desc) == "dict" else ""
+
+                # An empty digest means "do not check" to Bazel's downloader,
+                # so a lock entry without one is refused here, where the lock
+                # can be named, rather than fetched on trust.
+                check_pub_archive_sha256(name, version, sha256, str(pub_tag.lock))
                 flutter_pub_package(
                     name = hub_name + "__" + name,
                     package_name = name,
                     version = version,
-                    sha256 = desc.get("sha256", "") if type(desc) == "dict" else "",
+                    sha256 = sha256,
                     base_url = desc.get("url", "https://pub.dev") if type(desc) == "dict" else "https://pub.dev",
                     hub_name = hub_name,
                     lock_packages = all_package_names,
