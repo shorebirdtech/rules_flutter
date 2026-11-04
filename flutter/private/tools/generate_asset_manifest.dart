@@ -144,6 +144,18 @@ Uint8List encodeStandardMessage(Object? message) {
 
 // -- Icon tree shaking helpers -----------------------------------------------
 
+/// Ends the build with [message]. Icon tree shaking either does what it was
+/// asked to or fails, as `flutter build` does: a bundle that quietly skipped
+/// it would ship icon fonts whole that the app was said to ship subset, and a
+/// subset made from a wrong answer would drop glyphs the app draws.
+Never _failTreeShaking(String message) {
+  stderr.writeln(message);
+  stderr.writeln(
+    'To build without icon tree shaking, set `tree_shake_icons = False`.',
+  );
+  exit(1);
+}
+
 /// Run font-subset, piping code points via stdin. Returns true on success.
 Future<bool> _runFontSubset(
   String fontSubsetBin,
@@ -254,55 +266,74 @@ Future<void> main(List<String> args) async {
     ]);
 
     if (constFinderResult.exitCode != 0) {
-      stderr.writeln(
-        'const_finder failed (exit ${constFinderResult.exitCode}):',
+      _failTreeShaking(
+        'const_finder failed (exit ${constFinderResult.exitCode}):\n'
+        '${constFinderResult.stderr}',
       );
-      stderr.writeln(constFinderResult.stderr);
-      // Fall through without tree shaking rather than failing the build.
-    } else {
-      final output = json.decode(
-        constFinderResult.stdout as String,
-      ) as Map<String, dynamic>;
+    }
+    final decoded = json.decode(constFinderResult.stdout as String);
+    if (decoded is! Map<String, dynamic>) {
+      _failTreeShaking(
+        'Invalid const_finder output: expected a JSON object, got $decoded.',
+      );
+    }
+    final output = decoded;
 
-      // Check for non-const IconData usage.
-      final nonConst = output['nonConstantLocations'] as List<dynamic>? ?? [];
-      if (nonConst.isNotEmpty) {
-        stderr.writeln(
-          'Warning: ${nonConst.length} non-const IconData instance(s) found. '
-          'Icon tree shaking disabled.',
-        );
-      } else {
-        // Build fontFamily → Set<codePoint> map.
-        usedCodePoints = <String, Set<int>>{};
-        for (final instance
-            in output['constantInstances'] as List<dynamic>? ?? []) {
-          final m = instance as Map<String, dynamic>;
-          final family = m['fontFamily'] as String?;
-          final pkg = m['fontPackage'] as String?;
-          // A kernel built for the web (JavaScript) holds an `int` constant as
-          // a `double`, so const_finder reports its code point as a number.
-          final codePoint = (m['codePoint'] as num?)?.round();
-          if (family != null && codePoint != null) {
-            final key = pkg == null ? family : 'packages/$pkg/$family';
-            usedCodePoints.putIfAbsent(key, () => <int>{}).add(codePoint);
-          }
-        }
+    // Which icons a program uses is unknown where an IconData is not
+    // constant, so no subset of a font is safe.
+    final nonConst = output['nonConstantLocations'] as List<dynamic>? ?? [];
+    if (nonConst.isNotEmpty) {
+      _failTreeShaking(
+        'This application cannot tree shake icon fonts. It has non-constant '
+        'instances of IconData at the following locations:\n'
+        '${[
+          for (final location in nonConst) '- ${(location as Map)['file']}:${location['line']}:${location['column']}',
+        ].join('\n')}\n'
+        'Avoid non-constant invocations of IconData.',
+      );
+    }
 
-        // Build fontFamily → asset key map from FontManifest.
-        fontFamilyToAsset = <String, String>{};
-        for (final entry in fonts) {
-          final m = entry as Map<String, dynamic>;
-          final family = m['family'] as String?;
-          final fontList = m['fonts'] as List<dynamic>? ?? [];
-          if (family != null && fontList.isNotEmpty) {
-            final first = fontList.first as Map<String, dynamic>;
-            final asset = first['asset'] as String?;
-            if (asset != null) {
-              fontFamilyToAsset[family] = asset;
-            }
-          }
-        }
+    // Build fontFamily → Set<codePoint> map.
+    final used = <String, Set<int>>{};
+    for (final instance
+        in output['constantInstances'] as List<dynamic>? ?? []) {
+      final m = instance as Map<String, dynamic>;
+      final family = m['fontFamily'] as String?;
+      final pkg = m['fontPackage'] as String?;
+      // A kernel built for the web (JavaScript) holds an `int` constant as
+      // a `double`, so const_finder reports its code point as a number.
+      final codePoint = (m['codePoint'] as num?)?.round();
+      if (family != null && codePoint != null) {
+        final key = pkg == null ? family : 'packages/$pkg/$family';
+        used.putIfAbsent(key, () => <int>{}).add(codePoint);
       }
+    }
+    usedCodePoints = used;
+
+    // Build fontFamily → font path map from FontManifest. A family the app
+    // draws icons from has one font file: subsetting one of several and
+    // shipping the rest whole would leave the bundle holding icons the app
+    // was said not to use.
+    fontFamilyToAsset = <String, String>{};
+    for (final entry in fonts) {
+      final m = entry as Map<String, dynamic>;
+      final family = m['family'] as String?;
+      final fontList = m['fonts'] as List<dynamic>? ?? [];
+      if (family == null || !used.containsKey(family)) continue;
+      if (fontList.length != 1) {
+        _failTreeShaking(
+          'This tool cannot process icon fonts with multiple fonts in a '
+          'single family ($family has ${fontList.length}).',
+        );
+      }
+      final asset = (fontList.single as Map<String, dynamic>)['asset'];
+      if (asset is! String) {
+        _failTreeShaking(
+          'FontManifest.json invalid: expected the "asset" of $family to be '
+          'a string, got $asset.',
+        );
+      }
+      fontFamilyToAsset[family] = asset;
     }
   }
 
@@ -320,9 +351,12 @@ Future<void> main(List<String> args) async {
         fontFamilyToAsset != null &&
         iconTreeShaking != null) {
       final fontSubsetBin = iconTreeShaking['font_subset'] as String;
+      // A font is the one of a family by its exact path in the bundle, never
+      // by how the paths end: `packages/p/fonts/Icons.ttf` and `fonts/Icons.ttf`
+      // are two fonts, and each takes only its own family's code points.
       String? matchedFamily;
       for (final famEntry in fontFamilyToAsset.entries) {
-        if (famEntry.value == entry.key || entry.key.endsWith(famEntry.value)) {
+        if (famEntry.value == entry.key) {
           matchedFamily = famEntry.key;
           break;
         }
@@ -353,7 +387,7 @@ Future<void> main(List<String> args) async {
           );
           continue;
         }
-        // Fall through to normal copy on failure.
+        _failTreeShaking('Font subsetting failed for ${entry.key}.');
       }
     }
 

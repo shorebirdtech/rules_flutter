@@ -1356,7 +1356,7 @@ flutter_application(
 | `shaders` | Fragment shaders to compile with impellerc. |
 | `shader_includes` | Files the `shaders` may `#include`. |
 | `require_sksl_shaders` | Fail the build when a shader cannot be compiled for Skia (SkSL). By default such a shader, say one that indexes a uniform array in a loop, is compiled for Impeller alone with a warning, as `flutter build` does, and fails to load only where the app renders with Skia. Web builds always need SkSL. Default `False`. |
-| `tree_shake_icons` | Keep only the icon glyphs the app uses. Default `True`. |
+| `tree_shake_icons` | Keep only the icon glyphs the app uses, in a release or profile build. Default `True`. It needs every `IconData` to be constant, and an icon font family of one font file; as with `flutter build`, a non-constant `IconData`, a family of several font files that the app draws icons from, or a `const_finder` or `font-subset` that fails fails the build. Set `False` to ship the fonts whole. |
 | `link_hook_assets` | The data assets packages' link hooks emit, each `package:<package>/<name>`. See [Link hooks](#link-hooks). |
 | `license_files` | License and NOTICE files to include in `NOTICES.Z`. |
 | `min_os_version` | Minimum Apple deployment target, passed to `gen_snapshot` as `--macho-min-os-version`. |

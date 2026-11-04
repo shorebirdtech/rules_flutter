@@ -1289,7 +1289,8 @@ FLUTTER_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | {
     ),
     "tree_shake_icons": attr.bool(
         doc = "If True, tree-shake icon fonts to only include used glyphs. " +
-              "Requires all IconData instances to be const. Only applies to release builds.",
+              "Requires all IconData instances to be const, and one font file in each icon font family; " +
+              "otherwise the build fails, as `flutter build` does. Only applies to release builds.",
         default = True,
     ),
     "license_files": attr.label_list(
