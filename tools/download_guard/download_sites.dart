@@ -12,13 +12,22 @@
 ///  * passes an expression that, at its top level, falls back to the empty
 ///    string (`table.get(key, "")`, `x if x else ""`, `x or ""`).
 ///
+/// A call to rules_dart's `fetch_pub_archive` is a download site too. It
+/// downloads a hosted pub package and refuses an empty digest itself, so it is
+/// held to the same rules as a `download` call (it needs a `sha256` argument
+/// that is not written as empty), and counts as checked ([DownloadSite.isPinned])
+/// only when the file really loads the helper from rules_dart's
+/// `pub_lock_package.bzl` -- a function of the same name defined elsewhere
+/// proves nothing.
+///
 /// This reads source text, so it is a guard against the shapes that have gone
 /// wrong, not a proof: a digest computed some other way that happens to be
 /// empty at run time is invisible to it. The fetch tests in
 /// `tools/dev_tool/test/e2e/digest_*` observe the behaviour.
 library;
 
-/// One call of `*.download(...)` or `*.download_and_extract(...)`.
+/// One call of `*.download(...)`, `*.download_and_extract(...)` or rules_dart's
+/// `fetch_pub_archive(...)`.
 class DownloadSite {
   const DownloadSite({
     required this.file,
@@ -26,6 +35,7 @@ class DownloadSite {
     required this.callee,
     required this.digest,
     required this.text,
+    this.checkedByHelper = false,
   });
 
   final String file;
@@ -33,8 +43,12 @@ class DownloadSite {
   /// 1-based line of the call.
   final int line;
 
-  /// `download` or `download_and_extract`.
+  /// `download`, `download_and_extract` or `fetch_pub_archive`.
   final String callee;
+
+  /// True for a `fetch_pub_archive` call in a file that loads it from
+  /// rules_dart, whose helper refuses a missing digest before any request.
+  final bool checkedByHelper;
 
   /// The text of the `sha256`/`integrity` argument, or null if there is none.
   final String? digest;
@@ -46,7 +60,8 @@ class DownloadSite {
 
   /// True if the digest is the result of a call to `pinned(...)`
   /// (`flutter/private/pinned.bzl`), the one helper that refuses a missing or
-  /// malformed digest before the request is made.
+  /// malformed digest before the request is made, or the call is rules_dart's
+  /// `fetch_pub_archive` with a digest, which refuses a missing one itself.
   ///
   /// [problem] names the shapes that are an empty digest; this is the stronger
   /// property that the check exists at all. `sha256 = repository_ctx.attr.sha256`
@@ -55,6 +70,7 @@ class DownloadSite {
   bool get isPinned {
     final d = digest;
     if (d == null) return false;
+    if (checkedByHelper) return true;
     final masked = _mask(d.trim());
     if (!RegExp(r'^pinned\s*\(').hasMatch(masked) || !masked.endsWith(')')) {
       return false;
@@ -192,10 +208,22 @@ List<(int, int)> _splitArgs(String masked) {
   return parts;
 }
 
+/// Whether [source] loads `fetch_pub_archive` from rules_dart's
+/// `pub_lock_package.bzl`.
+bool _loadsFetchPubArchive(String source) => RegExp(
+  r'load\(\s*"@rules_dart//dart/pub:pub_lock_package\.bzl"[^)]*"fetch_pub_archive"',
+).hasMatch(source);
+
 /// The download calls in [source], which was read from [file].
 List<DownloadSite> findDownloadSites(String file, String source) {
   final masked = _mask(source);
-  final calls = RegExp(r'\.(download_and_extract|download)\s*\(');
+  // `.download(`, `.download_and_extract(`, or a bare `fetch_pub_archive(` that
+  // is neither a method (`x.fetch_pub_archive(`) nor being defined.
+  final calls = RegExp(
+    r'\.(download_and_extract|download)\s*\('
+    r'|(?<![\w.])(?<!def )(fetch_pub_archive)\s*\(',
+  );
+  final helperLoaded = _loadsFetchPubArchive(source);
   final sites = <DownloadSite>[];
   for (final m in calls.allMatches(masked)) {
     final open = m.end - 1;
@@ -226,9 +254,10 @@ List<DownloadSite> findDownloadSites(String file, String source) {
       DownloadSite(
         file: file,
         line: '\n'.allMatches(source.substring(0, m.start)).length + 1,
-        callee: m.group(1)!,
+        callee: (m.group(1) ?? m.group(2))!,
         digest: digest,
         text: source.substring(m.start, close + 1),
+        checkedByHelper: m.group(2) != null && helperLoaded,
       ),
     );
   }

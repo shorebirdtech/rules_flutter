@@ -143,4 +143,87 @@ ctx.download(
       expect(s.single.where, 'x.bzl:3');
     });
   });
+
+  // rules_dart's `fetch_pub_archive` downloads a hosted pub package and
+  // refuses an empty digest itself, so a call into it is a download whose
+  // digest is checked, provided it really is that helper and is given one.
+  group('findDownloadSites on fetch_pub_archive', () {
+    const helperLoad = '''
+load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version", "fetch_pub_archive")
+''';
+
+    String call(String digest) =>
+        '''
+$helperLoad
+def _impl(ctx):
+    fetch_pub_archive(ctx, ctx.attr.package_name, ctx.attr.version, sha256 = $digest, base_url = ctx.attr.base_url)
+''';
+
+    test('is a download site whose digest the helper enforces', () {
+      final s = sites(call('ctx.attr.sha256'));
+      expect(s, hasLength(1));
+      expect(s.single.callee, 'fetch_pub_archive');
+      expect(s.single.digest, 'ctx.attr.sha256');
+      expect(s.single.problem, isNull);
+      expect(s.single.isPinned, isTrue);
+    });
+
+    test('still flags the digests that are empty', () {
+      expect(sites(call('""')).single.problem, contains('empty sha256'));
+      expect(
+        sites(call('ctx.attr.sha256 or ""')).single.problem,
+        contains('falls back to an empty sha256'),
+      );
+    });
+
+    test('flags a call that names no sha256, as a download without one', () {
+      final s = sites('''
+$helperLoad
+fetch_pub_archive(ctx, name, version)
+''');
+      expect(s.single.problem, contains('no sha256 argument'));
+      expect(s.single.isPinned, isFalse);
+    });
+
+    test('is not trusted unless it is loaded from rules_dart', () {
+      for (final source in [
+        // Defined here, so it can do anything.
+        'def fetch_pub_archive(ctx, n, v, sha256):\n    ctx.report_progress("x")\n\n'
+            'fetch_pub_archive(ctx, n, v, sha256 = s)\n',
+        // Loaded from somewhere else.
+        'load("//other:pub.bzl", "fetch_pub_archive")\n'
+            'fetch_pub_archive(ctx, n, v, sha256 = s)\n',
+        // Another rules_dart file.
+        'load("@rules_dart//dart/pub:other.bzl", "fetch_pub_archive")\n'
+            'fetch_pub_archive(ctx, n, v, sha256 = s)\n',
+        // The module is rules_dart's but the symbol is another one.
+        'load("@rules_dart//dart/pub:pub_lock_package.bzl", "other")\n'
+            'fetch_pub_archive(ctx, n, v, sha256 = s)\n',
+      ]) {
+        final s = sites(source);
+        expect(s, hasLength(1), reason: source);
+        expect(s.single.isPinned, isFalse, reason: source);
+      }
+    });
+
+    test('a definition, a method call and a mention are not calls', () {
+      final s = sites('''
+$helperLoad
+def fetch_pub_archive_elsewhere(ctx):
+    pass
+x.fetch_pub_archive(ctx)
+# fetch_pub_archive(ctx, n, v, sha256 = "")
+doc = "fetch_pub_archive(ctx)"
+''');
+      expect(s, isEmpty);
+    });
+
+    test('a plain download is still pinned only by pinned()', () {
+      final s = sites('''
+$helperLoad
+ctx.download(url = u, sha256 = ctx.attr.sha256)
+''');
+      expect(s.single.isPinned, isFalse);
+    });
+  });
 }
