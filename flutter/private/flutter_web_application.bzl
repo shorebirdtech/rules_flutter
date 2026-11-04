@@ -46,6 +46,7 @@ load(
     "AGENT_EXTENSIONS_ATTR",
     "FLUTTER_APPLICATION_ATTRS",
     "KERNEL_COMPILE_ATTRS",
+    "asset_roots",
     "declare_flutter_assets_dir",
     "flutter_build_assets",
     "flutter_compile_shaders",
@@ -1285,6 +1286,7 @@ def _flutter_web_bundle_impl(ctx):
             "generatedSourceUris": dev_generated_source_uris,
             # See flutter_application's dev config.
             "shaders": shader_sources(ctx, primary.deps),
+            "assetRoots": asset_roots(ctx, primary.deps),
             # The native modules the page instantiates, and per module the files
             # its bindings were generated from. A reload cannot replace an
             # instantiated module any more than a process can replace a `dlopen`ed

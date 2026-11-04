@@ -51,3 +51,46 @@ bundle_test(
         "windows": "//:app_with_fx_platforms_windows_bundle",
     }.items()
 ]
+
+# -- Keys ------------------------------------------------------------------------
+
+# Property: an application's asset is keyed by its path relative to the
+# application's package (`assets/a.png`), wherever in the workspace the package
+# is, since that is the key the program loads it by (`rootBundle`,
+# `Image.asset`) and the one `flutter run` gives it. A file in a Bazel package
+# below the application's, listed explicitly, is keyed the same way.
+bundle_test(
+    name = "app_below_workspace_root_keys_assets_by_path_in_its_package_test",
+    bundle = "//apps/sub:app_bundle",
+    expected = "//tests:expected/kit_with_extra.json",
+)
+
+bundle_test(
+    name = "app_deep_below_workspace_root_keys_assets_by_path_in_its_package_test",
+    bundle = "//apps/team/deep:app_bundle",
+    expected = "//tests:expected/kit.json",
+)
+
+# Property: a library's asset is keyed `packages/<package_name>/<path in the
+# library's package>`, whether the library sits below the workspace root or in
+# another repository.
+bundle_test(
+    name = "subdir_library_assets_are_keyed_under_packages_name_test",
+    bundle = "//:app_with_subdir_lib_bundle",
+    expected = "//tests:expected/kit.json",
+    prefix = "packages/lib_assets/",
+)
+
+bundle_test(
+    name = "deep_library_assets_are_keyed_under_packages_name_test",
+    bundle = "//:app_with_deep_lib_bundle",
+    expected = "//tests:expected/kit.json",
+    prefix = "packages/deep_lib/",
+)
+
+bundle_test(
+    name = "external_library_assets_are_keyed_under_packages_name_test",
+    bundle = "//:app_with_external_lib_bundle",
+    expected = "//tests:expected/kit.json",
+    prefix = "packages/ext_assets/",
+)

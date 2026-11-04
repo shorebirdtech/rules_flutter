@@ -19,7 +19,7 @@ load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo")
 load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "dart_link_hook_actions", "link_hook_runner_attr")
 load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterInfo")
 load("//flutter/private:code_asset_libraries.bzl", "code_asset_libraries", "code_asset_libraries_aspect", "describe_code_asset_libraries")
-load("//flutter/private:common.bzl", "FLUTTER_APPLICATION_ATTRS", "PLATFORM_CONSTRAINT_ATTRS", "check_unreplaced_hooks", "collect_binding_contracts", "collect_native_libs", "declare_flutter_assets_dir", "detect_target_platform", "flutter_build_assets", "flutter_build_mode", "flutter_compile_kernel", "flutter_compile_shaders", "flutter_deps_attr", "host_target_arch", "launch_build_args", "shader_sources")
+load("//flutter/private:common.bzl", "FLUTTER_APPLICATION_ATTRS", "PLATFORM_CONSTRAINT_ATTRS", "asset_roots", "check_unreplaced_hooks", "collect_binding_contracts", "collect_native_libs", "declare_flutter_assets_dir", "detect_target_platform", "flutter_build_assets", "flutter_build_mode", "flutter_compile_kernel", "flutter_compile_shaders", "flutter_deps_attr", "host_target_arch", "launch_build_args", "shader_sources")
 load("//flutter/private:dev_config.bzl", "dev_config_file", "dev_search_roots", "dev_source_dir", "write_dev_config")
 load("//flutter/private:exec_groups.bzl", "PORTABLE_EXEC_GROUPS", "portable_tools")
 load("//flutter/private:flutter_aot_compile.bzl", "flutter_aot_elf_action", "flutter_aot_macho_action", "gen_snapshot_options")
@@ -376,6 +376,10 @@ def _flutter_application_impl(ctx):
                 # files it is compiled from. The dev tool watches those and
                 # has the app reload a shader whose compiled bytes changed.
                 "shaders": shader_sources(ctx, ctx.attr.deps),
+                # Where each package's first-party assets are in the workspace,
+                # by bundle path prefix: an asset is bundled under its path in
+                # its package, not in the workspace.
+                "assetRoots": asset_roots(ctx, ctx.attr.deps),
                 # The loose native libraries this build writes, from the
                 # same list `default_files` carries so the two cannot drift —
                 # `native_deps` and Native Assets code assets alike, because a

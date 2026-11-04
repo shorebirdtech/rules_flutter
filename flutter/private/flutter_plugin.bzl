@@ -25,7 +25,7 @@ load("//flutter:providers.bzl", "FlutterDataAssetInfo", "FlutterInfo", "FlutterN
 load("//flutter/private:common.bzl", "collect_binding_contracts", "collect_native_libs")
 load("//flutter/private:flutter_desktop_plugin_info.bzl", "FlutterLinuxPluginInfo", "FlutterWindowsPluginInfo")
 load("//flutter/private:flutter_info.bzl", "LINK_HOOK_ATTR", "flutter_info")
-load("//flutter/private:flutter_library.bzl", "SKY_ENGINE_ATTR", "build_pub_contributions", "flutter_analyzable_info")
+load("//flutter/private:flutter_library.bzl", "SKY_ENGINE_ATTR", "build_pub_contributions", "flutter_analyzable_info", "own_asset_contributions")
 load("//flutter/private:native_sources.bzl", "collect_native_source_pairs", "native_sources_aspect")
 
 def build_plugin_struct(name, plugin_platforms):
@@ -174,6 +174,7 @@ def _flutter_plugin_impl(ctx):
         ctx.attr.pkg_shaders,
         ctx.files.shader_includes,
     )
+    extra_pub_assets.extend(own_asset_contributions(ctx, package_name))
 
     # `resources` names the non-Dart remainder of `lib/`; a Dart source there
     # is a mis-filed `srcs` entry, and identical paths with identical
@@ -209,7 +210,6 @@ def _flutter_plugin_impl(ctx):
         flutter_analyzable_info(ctx, package_name, lib_root),
         flutter_info(
             deps = ctx.attr.deps,
-            asset_dirs = ctx.files.assets,
             plugins = [plugin],
             native_libs = native_libs,
             binding_contracts = binding_contracts,
@@ -243,7 +243,7 @@ flutter_plugin = rule(
             allow_files = True,
         ),
         "assets": attr.label_list(
-            doc = "Asset files to include.",
+            doc = "Asset files to include, bundled at `packages/<package_name>/<path>` (the path in this target's package).",
             allow_files = True,
         ),
         "package_name": attr.string(

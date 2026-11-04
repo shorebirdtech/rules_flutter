@@ -221,6 +221,7 @@ Future<AssetTracker> seedBundle(Directory tmp, String contents) async {
     AssetBundle(
       directory: p.join(tmp.path, 'bundle'),
       workspaceRoot: tmp.path,
+      assetRoots: {'': '.'},
     ),
     builtBefore: DateTime.now().add(const Duration(hours: 1)),
   );
@@ -725,6 +726,7 @@ void main() {
             AssetBundle(
               directory: p.join(h.tmp.path, 'bundle'),
               workspaceRoot: h.tmp.path,
+              assetRoots: {'': '.'},
             ),
             // Later than anything the fixture wrote: these cases are about a
             // tree the build consumed, not one edited during assembly.

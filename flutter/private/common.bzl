@@ -13,7 +13,7 @@ load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "app_main_location", 
 load("//flutter/private:flutter_asset_bundle.bzl", "flutter_asset_bundle_action")
 load("//flutter/private:flutter_compile.bzl", "flutter_kernel_compile_action")
 load("//flutter/private:flutter_info.bzl", "dedup_plugins")
-load("//flutter/private:flutter_library.bzl", "aggregate_pub_contributions")
+load("//flutter/private:flutter_library.bzl", "aggregate_pub_contributions", "package_relative")
 load("//flutter/private:flutter_shader_compile.bzl", "flutter_shader_compile_action")
 load("//flutter/private:native_sources.bzl", "native_sources_aspect")
 load("//flutter/private:plugin_registrant.bzl", "generate_dart_plugin_registrant", "generate_dev_plugin_registrants")
@@ -219,25 +219,6 @@ def collect_binding_contracts(native_deps):
                 if f.extension in ("so", "dylib", "dll"):
                     pairs.append(struct(library = f, contract = ()))
     return pairs
-
-def collect_assets(deps, direct_assets):
-    """Collect asset files from direct attrs and transitive FlutterInfo deps.
-
-    Args:
-        deps: List of targets, some of which may provide FlutterInfo.
-        direct_assets: List of directly specified asset Files.
-
-    Returns:
-        List of all asset Files.
-    """
-    transitive_depsets = [
-        dep[FlutterInfo].asset_dirs
-        for dep in deps
-        if FlutterInfo in dep
-    ]
-    if transitive_depsets:
-        return list(direct_assets) + depset(transitive = transitive_depsets).to_list()
-    return list(direct_assets)
 
 def flutter_compile_kernel(ctx, tools, aot = None, platform_dill = None, target_platform = None, frontend_server_target = "flutter", native_assets_manifest = None, track_widget_creation = False, assets_dir = None, platform_build_args = [], recorded_uses = None):
     """Run the shared kernel compilation step.
@@ -562,7 +543,7 @@ def collect_sdk_shader_srcs(deps):
 def _shader_jobs(ctx, deps):
     """Every shader this target bundles, as struct(bundle_path, file, includes).
 
-    User shaders keep their workspace-relative path ("shaders/my_effect.frag"),
+    User shaders keep their path in the target's package ("shaders/my_effect.frag"),
     SDK shaders go under "shaders/<basename>" (Flutter's convention), and a
     package's under "packages/<pkg>/<path>" (bare "<path>" when it has no
     package name). Two shaders claiming one bundle path fail here: one would
@@ -571,7 +552,7 @@ def _shader_jobs(ctx, deps):
     jobs = []
     user_includes = getattr(ctx.files, "shader_includes", [])
     for shader in ctx.files.shaders:
-        jobs.append(struct(bundle_path = shader.short_path, file = shader, includes = user_includes))
+        jobs.append(struct(bundle_path = package_relative(ctx, shader), file = shader, includes = user_includes))
     for shader in collect_sdk_shader_srcs(deps):
         jobs.append(struct(bundle_path = "shaders/" + shader.basename, file = shader, includes = []))
     for dep in deps:
@@ -624,6 +605,39 @@ def shader_sources(ctx, deps):
         ]
         for job in _shader_jobs(ctx, deps)
     }
+
+def asset_roots(ctx, deps):
+    """The workspace directories the first-party assets come from, for the dev tool.
+
+    `{bundle path prefix: workspace-relative directory}`: `""` for this
+    target's own package, `packages/<name>/` for each library among `deps`
+    with assets in this workspace. An asset is bundled under its path in its
+    package, which says nothing of where in the workspace the package is; this
+    does, so the dev tool can watch the files and find one added later.
+
+    Args:
+        ctx: Rule context.
+        deps: The dependencies whose packages' assets are bundled: the ones
+            `flutter_build_assets` was given.
+
+    Returns:
+        The dict above.
+    """
+    roots = {"": ctx.label.package or "."}
+    for dep in deps:
+        if FlutterInfo not in dep:
+            continue
+        for entry in dep[FlutterInfo].pub_assets.to_list():
+            f = entry.file
+            if not entry.package_name or not f.is_source or f.short_path.startswith("../"):
+                continue
+
+            # The package directory is what precedes the asset's path in it.
+            if f.short_path == entry.asset_path:
+                roots["packages/%s/" % entry.package_name] = "."
+            elif f.short_path.endswith("/" + entry.asset_path):
+                roots["packages/%s/" % entry.package_name] = f.short_path[:-len(entry.asset_path) - 1]
+    return roots
 
 def flutter_compile_shaders(ctx, tools, target_platform, deps):
     """Compile every shader this target bundles for the target platform.
@@ -722,7 +736,6 @@ def flutter_build_assets(ctx, tools, output_dir, deps, compiled_shaders = {}, ke
     Returns:
         The flutter_assets/ tree artifact File.
     """
-    all_assets = collect_assets(deps, ctx.files.assets)
 
     # Walk pub-package font/asset contributions from FlutterInfo.
     # MaterialIcons is no longer special-cased here — apps depend on
@@ -757,7 +770,7 @@ def flutter_build_assets(ctx, tools, output_dir, deps, compiled_shaders = {}, ke
         ctx = ctx,
         dart = tools.dart,
         flutter_sdk_files = tools.tool_files,
-        assets = all_assets,
+        assets = ctx.files.assets,
         fonts = fonts,
         license_files = license_files,
         output_dir = output_dir,
@@ -1205,7 +1218,7 @@ KERNEL_COMPILE_ATTRS = {
 # Shared attrs for all flutter application rules.
 FLUTTER_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | {
     "assets": attr.label_list(
-        doc = "Asset files to include in the bundle.",
+        doc = "Asset files to include in the bundle, each under its path in this target's package. A file from another package fails the build.",
         allow_files = True,
     ),
     "native_deps": attr.label_list(

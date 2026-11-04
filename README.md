@@ -1309,7 +1309,7 @@ flutter_library(
 |---|---|
 | `srcs` | Dart source files. Required. |
 | `deps` | `dart_library` or `flutter_library` targets. |
-| `assets` | Asset files: images, fonts, and so on. |
+| `assets` | Asset files: images, fonts, and so on. Bundled at `packages/<package_name>/<path>`, where the path is the file's path in this Bazel package. |
 | `pkg_shaders` | The package's fragment shaders, as `{file: path}` mirroring `flutter: shaders:` in `pubspec.yaml`. Bundled at `packages/<package_name>/<path>`, where `FragmentProgram.fromAsset` looks for them. |
 | `shader_includes` | Files the `pkg_shaders` may `#include`, such as `glob(["shaders/**/*.glsl"])`. A shader compiles with only its declared inputs, so an include not listed here is not found. |
 | `shaders` | Shaders bundled at `shaders/<file name>`, as Flutter's own are. A package's own shaders go in `pkg_shaders`. |
@@ -1341,7 +1341,7 @@ flutter_application(
 | `package_name` | The Dart package name, the same as `pubspec.yaml`'s `name:`. Required. It keys the compiled libraries under stable `package:` URIs, which hot reload matches against, and resolves `package:<self>/...` imports. |
 | `srcs` | Other Dart sources in the app package, including generated ones. List here any file a `main` outside `lib/` imports by relative path. |
 | `deps` | `dart_library` or `flutter_library` targets. Add `@rules_flutter//flutter:material_icons` to bundle the Material icon font. |
-| `assets` | Asset files for the bundle. |
+| `assets` | Asset files for the bundle, each under its path in the application's Bazel package (`assets/a.png`), wherever in the workspace that package is. That is the key `rootBundle` and `Image.asset` load it by, and the one `flutter run` gives it. A file from another package fails the build. |
 | `native_deps` | Shared libraries to bundle for `dart:ffi`. |
 | `defines` | Dart environment defines, the `-D` flags. |
 | `language_version` | The Dart language version, matching `pubspec.yaml`. |
@@ -1527,7 +1527,7 @@ flutter_plugin(
 | `android_package` | The Java package of the Android `plugin_class`. Required when `platforms` lists `android` with a `plugin_class`. |
 | `native_deps` | Shared libraries bundled for `dart:ffi`. |
 | `native_assets` | `flutter_native_asset` targets, usually inside a `select()` on platform. |
-| `assets`, `resources` | Asset and resource files. |
+| `assets`, `resources` | Asset and resource files. An asset is bundled at `packages/<package_name>/<path>`, as on `flutter_library`. |
 | `pkg_shaders`, `shader_includes` | The package's fragment shaders and what they `#include`, as on `flutter_library`. |
 | `package_name`, `language_version`, `version` | The package's name, language version, and version. |
 | `link_hook` | The package's `hook/link.dart`. See [Link hooks](#link-hooks). `flutter_library` takes it too. |
@@ -1685,7 +1685,7 @@ sdk = ctx.toolchains["@rules_flutter//flutter:toolchain_type"].flutter_sdk_info
 
 | Field | Type | Description |
 |---|---|---|
-| `asset_dirs` | `depset[File]` | Directories containing assets. |
+| `pub_assets` | `depset[struct]` | The asset files of each package, each with its `package_name`, its path in the package and the file. They are bundled as `packages/<package_name>/<path>`. |
 | `plugins` | `list[struct]` | Plugin metadata, each with `name` and `platforms`. |
 | `transitive_native_libs` | `depset[File]` | Shared libraries from plugins' `native_deps`. |
 

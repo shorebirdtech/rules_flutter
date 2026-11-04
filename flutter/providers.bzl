@@ -85,7 +85,6 @@ rules that produce `FlutterInfo`. Constructing it here means enumerating and \
 merging each field by hand, and a field left empty rather than forwarded \
 silently discards every dependency's contribution.""",
     fields = {
-        "asset_dirs": "depset[File]: Directories containing Flutter assets.",
         "shader_srcs": "depset[File]: Raw shader source files (.frag/.glsl) to compile per-platform.",
         "plugins": "list[struct]: Plugin metadata. Each struct has: name (str), platforms (dict of platform -> {pluginClass, dartPluginClass, package}).",
         "transitive_native_libs": "depset[File]: Shared libs from plugin native_deps, merged transitively.",
@@ -98,7 +97,7 @@ silently discards every dependency's contribution.""",
         "native_assets": "depset[FlutterNativeAssetInfo]: Per-target Native Assets `CodeAsset` declarations contributed by transitive `flutter_native_asset` rules.",
         "data_assets": "depset[FlutterDataAssetInfo]: Per-package Native Assets `DataAsset` declarations contributed by transitive `flutter_data_asset` rules.",
         "pub_fonts": "depset[struct]: Per-package font declarations from pub `flutter.fonts`. Each struct has: package_name (str — empty string sentinel for non-package contributions like the toolchain MaterialIcons target), family (str), fonts (tuple[struct(bundle_path, file, weight, style)] — each font's path in the bundle and its .ttf/.otf File). Bundle aggregator prefixes the family with `packages/<pkg>/` only when package_name is non-empty.",
-        "pub_assets": "depset[struct]: Per-package asset files from pub `flutter.assets`. Each struct has: package_name (str — empty sentinel for non-package), asset_path (str — as declared in pubspec, before any prefixing), file (File). Bundle aggregator places them at `packages/<pkg>/<asset_path>` (or bare `asset_path` for empty package_name).",
+        "pub_assets": "depset[struct]: Per-package asset files: a pub package's `flutter.assets`, and the `assets` of a `flutter_library` or `flutter_plugin`. Each struct has: package_name (str — empty sentinel for non-package), asset_path (str — the path in the package, before any prefixing), file (File). Bundle aggregator places them at `packages/<pkg>/<asset_path>` (or bare `asset_path` for empty package_name).",
         "pub_shaders": "depset[struct]: Per-package shader files from pub `flutter.shaders`. Same shape as pub_assets, plus `includes` (the files the shader may `#include`), and routed through the shader compile pipeline before bundling.",
     },
 )

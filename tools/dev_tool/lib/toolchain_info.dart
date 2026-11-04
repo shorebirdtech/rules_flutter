@@ -288,6 +288,16 @@ class DevConfig {
   /// without inferring a URI from a path).
   final List<String> generatedSourceUris;
 
+  /// The workspace-relative directory each package's first-party assets come
+  /// from, by the archive path prefix they are bundled under: `''` for the
+  /// application, `packages/<name>/` for a library.
+  ///
+  /// Declared by the build: an asset is bundled under its path in its package
+  /// (`assets/a.png`), which says nothing of where in the workspace the
+  /// package is. Pub packages' and the SDK's assets are not here: no workspace
+  /// file feeds them.
+  final Map<String, String> assetRoots;
+
   /// Every shader the bundle carries, by archive path, with the
   /// workspace-relative files it is compiled from (the shader and what it may
   /// `#include`; none for a shader from another repository).
@@ -435,6 +445,7 @@ class DevConfig {
     this.filesystemScheme = '',
     this.generatedSourcePaths = const [],
     this.generatedSourceUris = const [],
+    this.assetRoots = const {},
     this.shaders = const {},
     this.nativeLibs = const [],
     this.nativeLibContracts = const {},
@@ -502,6 +513,11 @@ class DevConfig {
       filesystemScheme: (json['filesystemScheme'] as String?) ?? '',
       generatedSourcePaths: strList('generatedSourcePaths'),
       generatedSourceUris: strList('generatedSourceUris'),
+      assetRoots: {
+        for (final MapEntry(:key, :value)
+            in ((json['assetRoots'] as Map?) ?? const {}).entries)
+          key as String: value as String,
+      },
       shaders: {
         for (final MapEntry(:key, :value)
             in ((json['shaders'] as Map?) ?? const {}).entries)

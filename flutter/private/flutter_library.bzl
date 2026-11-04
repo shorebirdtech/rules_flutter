@@ -24,6 +24,49 @@ def _font_bundle_path(package_name, asset_path, file):
         return asset_path
     return "packages/{}/{}".format(package_name, asset_path)
 
+def package_relative(ctx, f):
+    """The path of `f` within the package of the target being analysed.
+
+    This is an asset's key in its own package (`assets/a.png`), whatever the
+    package's place in the workspace or the repository it belongs to: the key
+    `flutter build` gives it, and the one the program loads it by. An asset
+    outside the package has no such key, so it fails rather than being given
+    some other.
+
+    Args:
+        ctx: Rule context.
+        f: A File of `ctx.label`'s package, or a package below it.
+
+    Returns:
+        The path of `f` relative to `ctx.label.package`.
+    """
+    path = f.short_path
+    repo = ""
+    if path.startswith("../"):
+        repo, _, path = path[len("../"):].partition("/")
+    package = ctx.label.package
+    if repo != ctx.label.workspace_name or (package and not path.startswith(package + "/")):
+        fail("%s: the asset %s is not in the target's package. An asset is bundled under its path in the package of the target that lists it (or `packages/<name>/` of a library), so list it from its own package." % (ctx.label, f.short_path))
+    return path[len(package) + 1:] if package else path
+
+def own_asset_contributions(ctx, package_name):
+    """The `pub_assets` entries for the `assets` of a library or plugin.
+
+    A library's own assets are bundled as a pub package's are: under
+    `packages/<package_name>/`, at their path in the package.
+
+    Args:
+        ctx: Rule context, with an `assets` attr.
+        package_name: The Dart package name the assets are bundled under.
+
+    Returns:
+        List of `pub_assets` structs.
+    """
+    return [
+        struct(package_name = package_name, asset_path = package_relative(ctx, f), file = f)
+        for f in ctx.files.assets
+    ]
+
 def build_pub_contributions(package_name, fonts_json, font_files_dict, pkg_assets_dict, pkg_shaders_dict, shader_includes = []):
     """Build pub_fonts/pub_assets/pub_shaders contribution structs from rule attrs.
 
@@ -235,6 +278,8 @@ def _flutter_library_impl(ctx):
     # `resources` names the non-Dart remainder of `lib/`; a Dart source there
     # is a mis-filed `srcs` entry, and identical paths with identical
     # extensions would otherwise collide silently. Mirrors `dart_library`.
+    extra_pub_assets.extend(own_asset_contributions(ctx, package_name))
+
     for f in ctx.files.resources:
         if f.extension == "dart":
             fail(
@@ -284,7 +329,6 @@ def _flutter_library_impl(ctx):
         flutter_analyzable_info(ctx, package_name, lib_root),
         flutter_info(
             deps = ctx.attr.deps,
-            asset_dirs = ctx.files.assets,
             shader_srcs = ctx.files.shaders,
             pub_fonts = extra_pub_fonts,
             pub_assets = extra_pub_assets,
@@ -309,7 +353,7 @@ flutter_library = rule(
             allow_files = True,
         ),
         "assets": attr.label_list(
-            doc = "Flutter asset files (images, fonts, etc.) declared in pubspec.yaml.",
+            doc = "Flutter asset files (images, fonts, etc.) declared in pubspec.yaml. Bundled at `packages/<package_name>/<path>`, where the path is the file's path in this target's package.",
             allow_files = True,
         ),
         "shaders": attr.label_list(

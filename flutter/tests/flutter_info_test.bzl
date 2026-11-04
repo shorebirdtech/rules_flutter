@@ -28,7 +28,6 @@ def _contributing_library_impl(ctx):
         dart_info_no_package(),
         flutter_info(
             deps = ctx.attr.deps,
-            asset_dirs = ctx.files.assets,
             plugins = [
                 struct(name = n, platforms = {})
                 for n in ctx.attr.plugin_names
@@ -71,9 +70,6 @@ single_channel_library = rule(
 def _field(structs, name):
     return sorted([getattr(s, name) for s in structs.to_list()])
 
-def _short_paths(dep):
-    return sorted([f.short_path for f in dep.to_list()])
-
 def _forwards_every_channel_test_impl(ctx):
     env = analysistest.begin(ctx)
     info = analysistest.target_under_test(env)[FlutterInfo]
@@ -81,17 +77,6 @@ def _forwards_every_channel_test_impl(ctx):
     # The channels this target contributes on carry its own value *and* the
     # dependency's. A merge that took only `direct` would pass an
     # own-contribution check and still drop every dependency.
-    assets = _short_paths(info.asset_dirs)
-    asserts.true(
-        env,
-        [p for p in assets if p.endswith("_own.png")] != [],
-        "own asset missing from asset_dirs: %s" % assets,
-    )
-    asserts.true(
-        env,
-        [p for p in assets if p.endswith("_dep.png")] != [],
-        "dependency's asset missing from asset_dirs: %s" % assets,
-    )
     asserts.equals(env, ["dep_plugin", "own_plugin"], sorted([p.name for p in info.plugins]))
     asserts.equals(env, ["dep_pkg", "own_pkg"], _field(info.pub_assets, "package_name"))
 
@@ -141,7 +126,6 @@ def _single_channel_test_impl(ctx):
     # Every other channel is empty rather than absent. `flutter_application`
     # reads them all off every dep, so a missing one is an analysis error and an
     # empty one is the honest "contributes nothing here".
-    asserts.equals(env, [], info.asset_dirs.to_list())
     asserts.equals(env, [], info.plugins)
     asserts.equals(env, [], info.native_assets.to_list())
     asserts.equals(env, [], info.apple_privacy_manifests.to_list())

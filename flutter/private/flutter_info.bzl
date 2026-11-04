@@ -41,7 +41,6 @@ def dedup_plugins(all_plugins):
 
 def flutter_info(
         deps = [],
-        asset_dirs = [],
         shader_srcs = [],
         plugins = [],
         native_libs = [],
@@ -69,7 +68,6 @@ def flutter_info(
     Args:
       deps: Targets whose `FlutterInfo` contributions are merged in. Entries
         without one are ignored.
-      asset_dirs: Directories of Flutter assets this target ships.
       shader_srcs: Raw shader sources (`.frag`/`.glsl`) this target ships.
       plugins: Plugin metadata structs this target declares. Deduplicated by
         name against the dependencies' plugins, this target's first.
@@ -102,10 +100,6 @@ def flutter_info(
         dep_plugins.extend(info.plugins)
 
     return FlutterInfo(
-        asset_dirs = depset(
-            direct = asset_dirs,
-            transitive = [info.asset_dirs for info in dep_infos],
-        ),
         shader_srcs = depset(
             direct = shader_srcs,
             transitive = [info.shader_srcs for info in dep_infos],

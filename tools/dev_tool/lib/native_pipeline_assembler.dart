@@ -565,7 +565,10 @@ class NativePipelineAssembler {
       return;
     }
 
-    final assetsDir = await _wireAssets(shaders: devConfig.shaders);
+    final assetsDir = await _wireAssets(
+      assetRoots: devConfig.assetRoots,
+      shaders: devConfig.shaders,
+    );
 
     // For codegen apps, rebuild the flutter_application via bazel before each
     // reload/restart so edits to codegen inputs are regenerated. Null for
@@ -756,6 +759,7 @@ class NativePipelineAssembler {
   ///
   /// Returns the directory.
   Future<String> _wireAssets({
+    required Map<String, String> assetRoots,
     required Map<String, List<String>> shaders,
   }) async {
     final candidates = await host.bazel.cqueryFlutterAppFiles(
@@ -794,6 +798,7 @@ class NativePipelineAssembler {
       AssetBundle(
         directory: assetsDir,
         workspaceRoot: workspace,
+        assetRoots: assetRoots,
         shaders: shaders,
       ),
       builtBefore: builtBefore,

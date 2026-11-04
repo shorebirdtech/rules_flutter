@@ -8,9 +8,8 @@ Produces a `flutter_assets/` tree artifact containing:
 """
 
 load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
-load("//flutter:providers.bzl", "FlutterInfo")
 load("//flutter/private:exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
-load("//flutter/private:flutter_library.bzl", "aggregate_pub_contributions")
+load("//flutter/private:flutter_library.bzl", "aggregate_pub_contributions", "package_relative")
 load("//flutter/private:path_mapping.bzl", "file_ref", "json_config_args")
 
 _TOOL = Label("//flutter/private/tools:generate_asset_manifest.dart")
@@ -99,7 +98,8 @@ def flutter_asset_bundle_action(
         ctx: Rule context.
         dart: The `dart` executable File from the Flutter SDK.
         flutter_sdk_files: SDK files needed to run dart (for action inputs).
-        assets: list of File objects to include in the bundle.
+        assets: list of File objects of the target's package to include in the
+            bundle, each under its path in that package (`assets/a.png`).
         fonts: list of font declaration dicts (FontManifest.json schema).
         notices: License text string to compress into NOTICES.Z.
         license_files: list of File objects containing license text to include in NOTICES.Z.
@@ -136,9 +136,9 @@ def flutter_asset_bundle_action(
     asset_paths = []
     copies = {}
     for f in assets:
-        # Use short_path as the logical key inside flutter_assets/.
-        asset_paths.append(f.short_path)
-        copies[f.short_path] = file_ref(refs, f)
+        key = package_relative(ctx, f)
+        asset_paths.append(key)
+        copies[key] = file_ref(refs, f)
 
     # Add extra copies with custom destination paths.
     extra_files = []
@@ -195,12 +195,6 @@ def flutter_asset_bundle_action(
 def _flutter_asset_bundle_impl(ctx):
     tools = portable_tools(ctx)
 
-    # Collect assets from direct attr + transitive FlutterInfo deps.
-    all_assets = list(ctx.files.assets)
-    for dep in ctx.attr.deps:
-        if FlutterInfo in dep:
-            all_assets.extend(dep[FlutterInfo].asset_dirs.to_list())
-
     # Walk pub-package font/asset contributions from FlutterInfo. To get
     # MaterialIcons in the bundle, list `@rules_flutter//flutter:material_icons`
     # in deps — the same channel cupertino_icons et al. arrive through.
@@ -210,7 +204,7 @@ def _flutter_asset_bundle_impl(ctx):
         ctx = ctx,
         dart = tools.dart,
         flutter_sdk_files = tools.tool_files,
-        assets = all_assets,
+        assets = ctx.files.assets,
         fonts = fonts,
         notices = "",
         output_dir = ctx.actions.declare_directory(ctx.label.name),
