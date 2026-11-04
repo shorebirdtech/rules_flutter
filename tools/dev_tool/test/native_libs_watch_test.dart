@@ -28,32 +28,6 @@ void main() {
     expect(await watch.verdict(), isA<NativeLibsCurrent>());
   });
 
-  test('a library bazel did not rewrite is never read', () async {
-    // The fast path, pinned by defeating it. A `stat` costs 33µs and hashing a
-    // 20MB debug library costs 126ms (both measured), so a command reads only the
-    // files whose size or mtime moved. Here the bytes change while the stamp is
-    // put back exactly as it was: the watch answers current, which is the
-    // documented limit of the prefilter and the reason it is safe — bazel
-    // advances an output's mtime whenever it re-runs the action that writes it,
-    // so the case constructed here is one no build produces.
-    final lib = file('liba.dylib', [1, 2, 3]);
-    // Written an hour ago: a library a build produced long before this run. A
-    // stamp only vouches for bytes it has had time to settle on, so a file
-    // written a moment before the baseline is read is a different case.
-    lib.setLastModifiedSync(DateTime.now().subtract(const Duration(hours: 1)));
-    final stamp = lib.statSync();
-    final watch = await NativeLibsWatch.of({lib.path: const []});
-
-    lib.writeAsBytesSync([9, 9, 9]);
-    lib.setLastModifiedSync(stamp.modified);
-    expect(await watch.verdict(), isA<NativeLibsCurrent>());
-
-    // And once the mtime moves the way a real rebuild moves it, the content is
-    // read and the change is reported.
-    lib.setLastModifiedSync(stamp.modified.add(const Duration(seconds: 1)));
-    expect(await watch.verdict(), isA<NativeLibsUnverifiable>());
-  });
-
   group('a library with no declared contract', () {
     test(
       'withholds, because nothing says whether its bindings moved',
@@ -314,5 +288,101 @@ void main() {
     // and not "moved", which would blame the app's source for a broken build.
     // The build declared this path and did not write it.
     await expectLater(watch.verdict(), throwsA(isA<FileSystemException>()));
+  });
+
+  /// A watched file that changed is reported as changed, whatever its size and
+  /// mtime say.
+  ///
+  /// A file can be rewritten to the same size in the same mtime tick (a
+  /// filesystem with a coarse timestamp: FAT and exFAT round to 2 s, some
+  /// network and VM shares to 1 s) or by a tool that keeps the old mtime
+  /// (`cp -p`, `rsync -t`, `install -p`), which leaves the stamp exactly as it
+  /// was. The watch decides from content alone, so how recently the file was
+  /// written, or what time it claims, changes nothing. Answering "current" over
+  /// changed bytes lets a reload inject over machine code from before the edit.
+  group('an edit that leaves size and mtime as they were', () {
+    /// Rewrites [target] with [bytes] and puts its stamp back.
+    void rewriteKeepingStamp(File target, List<int> bytes) {
+      final stamp = target.statSync().modified;
+      target.writeAsBytesSync(bytes);
+      target.setLastModifiedSync(stamp);
+    }
+
+    /// How a file comes to be stamped at the moment its baseline is read.
+    final stampedAtBaseline = <String, void Function(File)>{
+      // Written, and read straight away: the stamp is a few milliseconds
+      // older than the read, inside any filesystem's tick.
+      'written just before the baseline is read': (_) {},
+      // A stamp that is not before the read at all: clock skew against a
+      // network share, or a tool that set it.
+      'stamped in the future': (f) =>
+          f.setLastModifiedSync(DateTime.now().add(const Duration(minutes: 5))),
+    };
+
+    for (final MapEntry(key: stamping, value: stampIt)
+        in stampedAtBaseline.entries) {
+      test('is seen in a library with no contract ($stamping)', () async {
+        final lib = file('liba.dylib', [1, 2, 3]);
+        stampIt(lib);
+        final watch = await NativeLibsWatch.of({lib.path: const []});
+
+        rewriteKeepingStamp(lib, [9, 9, 9]);
+
+        expect(await watch.verdict(), isNot(isA<NativeLibsCurrent>()));
+      });
+
+      test('is seen in a library whose contract held ($stamping)', () async {
+        final bridge = file('libbridge.dylib', [1, 2, 3]);
+        final contract = file('codegen.ir', [10, 11]);
+        stampIt(bridge);
+        stampIt(contract);
+        final watch = await NativeLibsWatch.of({
+          bridge.path: [contract.path],
+        });
+
+        rewriteKeepingStamp(bridge, [1, 2, 4]);
+
+        expect(
+          await watch.verdict(),
+          isA<NativeCodeStale>().having((v) => v.libs, 'libs', [bridge.path]),
+        );
+      });
+
+      test('is seen in the bindings contract ($stamping)', () async {
+        final bridge = file('libbridge.dylib', [1, 2, 3]);
+        final contract = file('codegen.ir', [10, 11]);
+        stampIt(bridge);
+        stampIt(contract);
+        final watch = await NativeLibsWatch.of({
+          bridge.path: [contract.path],
+        });
+
+        rewriteKeepingStamp(contract, [10, 12]);
+
+        expect(await watch.verdict(), isA<NativeBindingsMoved>());
+      });
+
+      test('is seen in a source nothing rebuilt ($stamping)', () async {
+        final lib = file('libbridge.dylib', [1, 2, 3]);
+        final contract = file('codegen.ir', [10, 11]);
+        final source = file('bridge.c', [100, 101]);
+        stampIt(source);
+        final watch = await NativeLibsWatch.of(
+          {
+            lib.path: [contract.path],
+          },
+          sources: {
+            lib.path: [source.path],
+          },
+        );
+
+        rewriteKeepingStamp(source, [100, 102]);
+
+        expect(
+          await watch.verdict(),
+          isA<NativeCodeStale>().having((v) => v.libs, 'libs', [lib.path]),
+        );
+      });
+    }
   });
 }

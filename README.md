@@ -365,7 +365,7 @@ flutter_native_library(
 )
 ```
 
-On each hot reload the dev tool checks the source files that target declares. When none moved, that is a `stat` per file and nothing else. When one did, it builds the patch for the configuration the app is running in, puts it where the app can load it (signed with the app's own identity on an iOS device), has the app load it, and then applies the Dart half of the edit. A widget that shows a native result is rebuilt, so the new answer appears even when no Dart changed.
+On each hot reload the dev tool checks the source files that target declares. When none moved, that is a content hash per file and nothing else. When one did, it builds the patch for the configuration the app is running in, puts it where the app can load it (signed with the app's own identity on an iOS device), has the app load it, and then applies the Dart half of the edit. A widget that shows a native result is rebuilt, so the new answer appears even when no Dart changed.
 
 | What changed | What the reload does |
 |---|---|
