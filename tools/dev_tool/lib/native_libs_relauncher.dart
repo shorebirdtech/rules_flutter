@@ -6,14 +6,16 @@
 /// therefore restarts into the old machine code, silently and with a success
 /// message. The only fix is a new process.
 ///
-/// So `app.restart` asks here first. A fingerprint of the launched bundle's
-/// loose native libraries is recorded at assembly; on each restart the bundle is
-/// rebuilt and re-fingerprinted, and only a difference buys a relaunch. Apps
-/// with no loose native libraries never construct one of these at all and keep
-/// the instant restart path.
+/// So `app.restart` asks here first. A fingerprint of the native libraries is
+/// recorded at assembly; on each restart they are rebuilt and re-fingerprinted,
+/// and only a difference buys a relaunch, which is when the bundle itself is
+/// rebuilt. Apps with no loose native libraries never construct one of these at
+/// all and keep the instant restart path.
 library;
 
 import 'dart:async';
+
+import 'package:path/path.dart' as p;
 
 import 'app_log_sink.dart';
 import 'hot_reload/app_instance.dart' as hr;
@@ -27,14 +29,24 @@ import 'session.dart';
 import 'vm_service_client.dart';
 
 class Relauncher {
-  /// The launch artifact, both to relaunch from and to fingerprint.
+  /// The launch artifact to relaunch from.
   final String appFile;
 
-  /// Rebuilds the launch target. Injected rather than called directly so this
-  /// is testable without bazel — and because the *launch* target is what has to
-  /// be rebuilt, not the flutter_application: a platform rule reaches the
-  /// flutter_application through a transition, so building it alone writes a
-  /// different configuration's outputs and leaves the running bundle untouched.
+  /// Rebuilds the native libraries and fingerprints them, the same way the
+  /// fingerprint [liveFingerprint] seeds was taken. Null when the build failed.
+  ///
+  /// Asked on every restart, so it builds as little as answers the question:
+  /// the assembler builds only the `flutter_native_libs` output group, not the
+  /// signed bundle, which a Dart-only edit would rebuild (kernel and all) for
+  /// a restart that then compiles the same edit again.
+  final Future<Map<String, String>?> Function() fingerprint;
+
+  /// Rebuilds the launch target, before a relaunch. Injected rather than called
+  /// directly so this is testable without bazel — and because the *launch*
+  /// target is what has to be rebuilt, not the flutter_application: a platform
+  /// rule reaches the flutter_application through a transition, so building it
+  /// alone writes a different configuration's outputs and leaves the running
+  /// bundle untouched.
   final Future<bool> Function() rebuild;
 
   /// The run's live session list — the same instance the rest of the run holds,
@@ -84,6 +96,7 @@ class Relauncher {
 
   Relauncher({
     required this.appFile,
+    required this.fingerprint,
     required this.rebuild,
     required this.sessions,
     required this.protocol,
@@ -102,12 +115,8 @@ class Relauncher {
   /// caller to run the ordinary isolate restart, and the other two are what the
   /// restart's reply is built from. The words are the renderers' job.
   Future<RelaunchOutcome> relaunchIfNeeded() async {
-    if (!await rebuild()) {
-      return const RelaunchBuildFailed(
-        'bazel build failed during restart; see build output.',
-      );
-    }
-    final fingerprint = await nativeLibsFingerprint(appFile);
+    final fingerprint = await this.fingerprint();
+    if (fingerprint == null) return _buildFailed;
     final patched = patchedLibs?.call() ?? const [];
     final bundleMoved = !fingerprintsEqual(fingerprint, _live);
     if (!bundleMoved && patched.isEmpty) {
@@ -117,7 +126,11 @@ class Relauncher {
     // The bundle's own difference when it has one. Only when it has none is the
     // patch the reason — an edit patched in and then undone — and then the
     // patched libraries are what the reply has to name.
-    final changed = bundleMoved ? changedLibs(_live, fingerprint) : patched;
+    final changed = bundleMoved
+        ? {for (final lib in changedLibs(_live, fingerprint)) p.basename(lib)}
+              .toList()
+        : patched;
+    if (!await rebuild()) return _buildFailed;
     logger.info({
       'message': 'native_libs_changed',
       'text': 'Native libraries changed (${changed.join(', ')}); relaunching.',
@@ -197,6 +210,10 @@ class Relauncher {
       },
     );
   }
+
+  static const _buildFailed = RelaunchBuildFailed(
+    'bazel build failed during restart; see build output.',
+  );
 
   /// Tell the reload path that the running process holds what the tree builds.
   ///

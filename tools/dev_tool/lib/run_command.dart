@@ -410,6 +410,7 @@ class RunCommand {
       // wall clock's: see [fileClockNow].
       final builtBefore = await fileClockNow();
       final build = await plan.buildApp();
+      final launchBuilt = await fileClockNow();
       final appFile = build.appFile;
       final outputFiles = build.outputFiles;
 
@@ -556,7 +557,7 @@ class RunCommand {
           pipeline: pipeline,
           logger: logger,
           builtBefore: builtBefore,
-          launch: NativeLaunch(appFile: appFile),
+          launch: NativeLaunch(appFile: appFile, builtAt: launchBuilt),
         ).assemble();
       }
 

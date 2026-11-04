@@ -346,6 +346,9 @@ Future<SessionHost> _assemble(_World world, {required bool launched}) async {
 
   final relauncher = Relauncher(
     appFile: world.bundle,
+    fingerprint: () async => await world.buildLaunch()
+        ? await nativeLibsFingerprint(world.bundle)
+        : null,
     rebuild: world.buildLaunch,
     // No session to swap: the device is what this does not model.
     sessions: <DeviceSession>[],

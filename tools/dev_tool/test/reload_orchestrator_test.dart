@@ -566,6 +566,9 @@ void main() {
         final outcome = await orchestrator.restart(targets: [app]);
         expect(outcome, isA<ReloadApplied>());
         expect(compiler.fullCompileCalls, hasLength(1));
+        // Nothing changed since the baseline, so nothing is recompiled: the
+        // compiler answers the whole program from what it already holds.
+        expect(compiler.fullCompileCalls.single.invalidated, isEmpty);
         expect(app.calls.last.mode, ApplyMode.hotRestart);
 
         // After restart, applied is repopulated to current snapshot. No
@@ -574,6 +577,29 @@ void main() {
         expect(second, isA<ReloadNoChange>());
       },
     );
+
+    test('restart() invalidates only what changed since the baseline, as '
+        'flutter_tools does', () async {
+      writeFile('a.dart', 'a-v1');
+      writeFile('b.dart', 'b-v1');
+      seedApplied();
+      final orchestrator = makeOrchestrator();
+      writeFile('b.dart', 'b-v2 longer');
+
+      expect(
+        await orchestrator.restart(targets: [app]),
+        isA<ReloadApplied>(),
+      );
+      expect(
+        compiler.fullCompileCalls.single.invalidated.map(p.basename),
+        ['b.dart'],
+      );
+      // The restarted app runs the whole snapshot, a.dart included.
+      expect(
+        await orchestrator.reload(targets: [app]),
+        isA<ReloadNoChange>(),
+      );
+    });
 
     test(
       'reload() over an in-flight first reload still completes (Pool(1) external + bounded compiler)',

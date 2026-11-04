@@ -24,6 +24,8 @@ library;
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:path/path.dart' as p;
+
 /// Per-library content fingerprint, keyed by bundle-relative path. Values
 /// are opaque content tokens — only equality across two calls with the
 /// same artifact form matters.
@@ -69,6 +71,31 @@ Future<Map<String, String>> nativeLibsFingerprintOfFiles(
   }
   return out;
 }
+
+/// The aspect whose [nativeLibsOutputGroup] holds the native libraries a
+/// launch target bundles, built without the bundle — see
+/// `flutter/native_libs.bzl`.
+const nativeLibsAspect =
+    '@rules_flutter//flutter:native_libs.bzl%flutter_native_libs_aspect';
+
+const nativeLibsOutputGroup = 'flutter_native_libs';
+
+/// Whether [built], the files [nativeLibsOutputGroup] held, include every
+/// library in [bundled], the keys of a bundle's [nativeLibsFingerprint].
+///
+/// Matched by file name: the group names build outputs and the bundle names
+/// where they landed. A library renamed on the way in (iOS wraps a dylib as
+/// `<name>.framework/<name>`) reads as not covered, which costs a bundle
+/// rebuild per restart and never a missed change.
+bool nativeLibsCoverBundle(Iterable<String> built, Iterable<String> bundled) {
+  final names = {for (final path in built) p.basename(path)};
+  return bundled.every((path) => names.contains(p.basename(path)));
+}
+
+/// Whether every one of [files] was last written no later than [cutoff], so
+/// that a build finished by then holds them as they are now.
+bool nativeLibsWrittenBy(Iterable<String> files, DateTime cutoff) =>
+    files.every((path) => !File(path).lastModifiedSync().isAfter(cutoff));
 
 bool fingerprintsEqual(Map<String, String> a, Map<String, String> b) {
   if (a.length != b.length) return false;

@@ -90,9 +90,8 @@ class SessionReloader {
 
   /// Compile what this app needs.
   ///
-  /// A restart recompiles the whole program — the committed kernel is being
-  /// thrown away regardless — but is still told what changed, because the
-  /// compiler underneath takes the reset and the invalidation on one request.
+  /// A restart asks for the whole program, but is told only what changed: the
+  /// compiler reuses every library it compiled before, as for a reload.
   Future<CompileOutcome> compile({
     required Set<String> invalidated,
     required String entrypoint,
@@ -137,7 +136,7 @@ class SessionReloader {
   /// business, not the caller's.
   ///
   /// [invalidated] is what was compiled for this unit; for a restart every
-  /// file on disk is now live, so the record is cleared first.
+  /// file in [snapshot] is now live.
   Future<ApplyOutcome> applyAndSettle(
     String dillPath, {
     required ApplyMode mode,
@@ -156,8 +155,16 @@ class SessionReloader {
       return outcome;
     }
     await compiler.commit();
-    if (mode == ApplyMode.hotRestart) applied.clear();
-    applied.markApplied(snapshot, files: invalidated);
+    // A restart runs the whole program the compiler holds, which is the
+    // snapshot: every file it was not told changed is one whose applied version
+    // already matched it.
+    if (mode == ApplyMode.hotRestart) {
+      applied
+        ..clear()
+        ..markApplied(snapshot, files: snapshot.fileUris.toSet());
+    } else {
+      applied.markApplied(snapshot, files: invalidated);
+    }
     return outcome;
   }
 

@@ -235,6 +235,58 @@ void main() {
     expect(await nativeLibsFingerprint(app.path), isEmpty);
   });
 
+  group('nativeLibsCoverBundle', () {
+    const dylib = 'Contents/Frameworks/libsqlite3.dylib';
+    const framework = 'Contents/Frameworks/vendored.framework/vendored';
+
+    test('holds when the group built every bundled library', () {
+      expect(
+        nativeLibsCoverBundle(['bazel-out/bin/libsqlite3.dylib'], [dylib]),
+        isTrue,
+      );
+    });
+
+    // Judging this bundle by the group alone would never see the framework
+    // move, and a restart would run the old machine code.
+    test('fails when the bundle has code the group does not hold', () {
+      expect(
+        nativeLibsCoverBundle(
+          ['bazel-out/bin/libsqlite3.dylib'],
+          [dylib, framework],
+        ),
+        isFalse,
+      );
+    });
+
+    test('fails on an empty group', () {
+      expect(nativeLibsCoverBundle(const [], [dylib]), isFalse);
+    });
+  });
+
+  group('nativeLibsWrittenBy', () {
+    late Directory dir;
+    late File lib;
+    final built = DateTime(2026, 11, 3, 12);
+
+    setUp(() {
+      dir = Directory.systemTemp.createTempSync('written_by');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      lib = File('${dir.path}/libnative.dylib')..writeAsStringSync('code');
+    });
+
+    test('holds for a file the launch build could have bundled', () {
+      lib.setLastModifiedSync(built);
+      expect(nativeLibsWrittenBy([lib.path], built), isTrue);
+    });
+
+    // Saved after the launch build, then compiled by the group build: the
+    // running process never loaded this file, so it can't be the baseline.
+    test('fails for a file written after the launch build', () {
+      lib.setLastModifiedSync(built.add(const Duration(seconds: 1)));
+      expect(nativeLibsWrittenBy([lib.path], built), isFalse);
+    });
+  });
+
   group('declared build outputs', () {
     test(
       'fingerprints the files a build declared, content-sensitive',
