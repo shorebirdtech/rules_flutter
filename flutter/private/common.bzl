@@ -1221,7 +1221,7 @@ FLUTTER_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | {
         doc = "Additional flags passed directly to gen_snapshot (AOT compiler).",
     ),
     "track_widget_creation": attr.bool(
-        doc = "If True, a debug build records where each widget was created, for the DevTools widget inspector, as `flutter run` does. A profile or release build never does. Default `True`.",
+        doc = "If True, a debug or profile build records where each widget was created, for the DevTools widget inspector, as `flutter run` does. A release build never does. Default `True`.",
         default = True,
     ),
     "shaders": attr.label_list(

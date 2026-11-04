@@ -1657,9 +1657,9 @@ compile (`--@rules_dart//dart:modular_kernel=false`), under `-c fastbuild` or
   `--track-widget-creation`.
 
 `//flutter/tests:widget_creation_flag_test` is the analysis half of that, for
-`flutter_application`: a debug build compiles with `--track-widget-creation` and
-records it in `rules_flutter.build_info` (the dev tool's recompiles pass it
-too); profile and release do not.
+`flutter_application`: a debug or profile build compiles with `--track-widget-creation`, a release
+build does not. A debug build also records it in `rules_flutter.build_info`
+(the dev tool's recompiles pass it too).
 
 `//flutter/tests:flutter_test_runfiles_test` is the analysis half: a test's
 runfiles hold nothing from the Dart SDK or the patched SDK, which only a compile

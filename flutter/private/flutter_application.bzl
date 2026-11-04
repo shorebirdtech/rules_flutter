@@ -135,7 +135,7 @@ def _flutter_application_impl(ctx):
         portable_tools(ctx),
         target_platform = target_platform,
         native_assets_manifest = native_assets_manifest_file,
-        track_widget_creation = ctx.attr.track_widget_creation and is_debug,
+        track_widget_creation = ctx.attr.track_widget_creation and mode != "release",
         assets_dir = flutter_assets,
         recorded_uses = recorded_uses,
         platform_build_args = launch_build_args(

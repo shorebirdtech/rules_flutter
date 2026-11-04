@@ -1,13 +1,12 @@
-"""A debug app records where each widget was created, as `flutter run` does.
+"""A debug or profile app records where each widget was created, as `flutter run` does.
 
 The widget inspector shows a widget's creation location only when the kernel
-was compiled with `--track-widget-creation`. A debug `flutter_application`
-passes it by default, because the dev loop is where the inspector is used. A
-profile or release build does not, whatever the attribute says: the inspector
-service extensions are not there, and the transform costs code size. Hot reload
+was compiled with `--track-widget-creation`. A `flutter_application` passes it
+by default in every mode but release, the condition of flutter_tools' assemble
+target (`trackWidgetCreation && buildMode != BuildMode.release`). Hot reload
 recompiles with the dev tool's own frontend server, which must pass the same
-flag, so the app also reports whether it was compiled with it in the
-`rules_flutter.build_info` record.
+flag, so a debug app also reports whether it was compiled with it in the
+`rules_flutter.build_info` record. A profile build has no dev loop and no record.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
@@ -38,8 +37,9 @@ def _recorded(argv):
 def _tracked_impl(ctx):
     env = analysistest.begin(ctx)
     argv = _kernel_argv(env)
-    asserts.true(env, _FLAG in argv, "a debug app compiles with %s: %s" % (_FLAG, argv))
-    asserts.equals(env, True, _recorded(argv), "the app's build-info record says it tracks")
+    asserts.true(env, _FLAG in argv, "compiled without %s: %s" % (_FLAG, argv))
+    if ctx.attr.debug:
+        asserts.equals(env, True, _recorded(argv), "the app's build-info record says it tracks")
     return analysistest.end(env)
 
 def _untracked_impl(ctx):
@@ -50,7 +50,16 @@ def _untracked_impl(ctx):
         asserts.equals(env, False, _recorded(argv), "the app's build-info record says it does not track")
     return analysistest.end(env)
 
-_tracked_debug_test = analysistest.make(_tracked_impl, config_settings = _DBG)
+_tracked_debug_test = analysistest.make(
+    _tracked_impl,
+    attrs = {"debug": attr.bool(default = True)},
+    config_settings = _DBG,
+)
+_tracked_profile_test = analysistest.make(
+    _tracked_impl,
+    attrs = {"debug": attr.bool(default = False)},
+    config_settings = _PROFILE,
+)
 _untracked_debug_test = analysistest.make(
     _untracked_impl,
     attrs = {"debug": attr.bool(default = True)},
@@ -90,7 +99,8 @@ def widget_creation_flag_test_suite(name):
         "debug_default_tracks": (_tracked_debug_test, "_tracking_default_app"),
         "debug_opted_out_does_not": (_untracked_debug_test, "_tracking_off_app"),
         "release_default_does_not": (_untracked_release_test, "_tracking_default_app"),
-        "profile_default_does_not": (_untracked_profile_test, "_tracking_default_app"),
+        "profile_default_tracks": (_tracked_profile_test, "_tracking_default_app"),
+        "profile_opted_out_does_not": (_untracked_profile_test, "_tracking_off_app"),
     }
     tests = []
     for case, (rule, target) in cases.items():
