@@ -701,6 +701,10 @@ class MacOSDevice extends Device {
     );
   }
 
+  @override
+  Future<String?> whyAppExited(AppInstance instance) =>
+      _desktopAppExit(name, instance, posix: true);
+
   /// Bring the launched app's window to the front.
   ///
   /// The app is started as a bare executable, not through LaunchServices, and
@@ -943,6 +947,10 @@ class LinuxDevice extends Device {
   }
 
   @override
+  Future<String?> whyAppExited(AppInstance instance) =>
+      _desktopAppExit(name, instance, posix: true);
+
+  @override
   Future<void> stop(AppInstance instance) async {
     await _stopProcess('Linux app', instance.process, teardownBound);
     await instance.logs.close();
@@ -1086,6 +1094,10 @@ class WindowsDevice extends Device {
       staged.deleteSync(recursive: true);
     }
   }
+
+  @override
+  Future<String?> whyAppExited(AppInstance instance) =>
+      _desktopAppExit(name, instance, posix: false);
 
   @override
   Future<void> stop(AppInstance instance) async {
@@ -2522,6 +2534,50 @@ AppLogStream _startProcessLogs(
   return logs;
 }
 
+/// How long a connection failure waits for an exit it may be the first sign of.
+///
+/// A process that dies right after announcing its VM service refuses the
+/// connection a moment before the operating system reports the exit to this
+/// tool, so asking "has it exited" at that instant can say no to a process that
+/// is already dead. The wait ends the moment the exit arrives; only a process
+/// that is really running spends all of it, on a launch that is failing anyway.
+const _exitReportSettle = Duration(seconds: 2);
+
+/// [process]'s exit code if it exits within [bound], else null.
+Future<int?> _exitCodeWithin(Process process, Duration bound) {
+  final result = Completer<int?>();
+  final timer = Timer(bound, () {
+    if (!result.isCompleted) result.complete(null);
+  });
+  process.exitCode.then((code) {
+    timer.cancel();
+    if (!result.isCompleted) result.complete(code);
+  });
+  return result.future;
+}
+
+/// Why a desktop app's VM service is unreachable when the app is the process
+/// this tool started and that process is gone: its exit, and its last output.
+/// Null while it runs.
+///
+/// A native desktop app has no state beyond its process, and the exit status
+/// the operating system reported for the child is the platform's own word on
+/// whether it is still there. [posix] says a negative code is a signal's
+/// number, which is what `dart:io` reports for a child killed by one.
+Future<String?> _desktopAppExit(
+  String name,
+  AppInstance instance, {
+  required bool posix,
+}) async {
+  final code = await _exitCodeWithin(instance.process, _exitReportSettle);
+  if (code == null) return null;
+  final how = posix && code < 0
+      ? 'was killed by signal ${-code}'
+      : 'exited with code $code';
+  return 'The $name app $how after announcing its VM service. '
+      '${_browserLastWords(instance.logs)}';
+}
+
 /// An empty log stream with [onLog] already attached.
 ///
 /// Wiring the sink before any pump starts is what guarantees no line can slip
@@ -2629,6 +2685,10 @@ class IOSSimulatorDevice extends Device {
   /// terminate for the usual device, which names none, and the app outlived
   /// the run.
   String? _launchedBundleId;
+
+  /// The process `simctl launch` started, which is what the simulator's
+  /// liveness is asked of.
+  int? _launchedPid;
 
   IOSSimulatorDevice({
     required String udid,
@@ -2806,6 +2866,8 @@ class IOSSimulatorDevice extends Device {
       );
     }
 
+    _launchedPid = pid;
+
     // Waits for the app, not a clock: a first launch after a boot, or a host
     // busy with a build, is slow, not failed. It ends on the announcement, on
     // the app's process going away, or on the run's teardown killing the helper.
@@ -2841,6 +2903,35 @@ class IOSSimulatorDevice extends Device {
       auxiliaryProcesses: [outputLog],
       scratchDirs: _scratch.handOver(),
     );
+  }
+
+  /// An app that announced its VM service and then died (an exception once the
+  /// engine was up, say) leaves an address nothing answers; this says the app
+  /// is gone instead, with the end of its log. Null while the process is there.
+  ///
+  /// The simulator's processes are the host's, so signal 0 to the pid
+  /// `simctl launch` named is the platform's own test for it. Only "No such
+  /// process" is a verdict: a refusal (EPERM) says the check could not be made.
+  @override
+  Future<String?> whyAppExited(AppInstance instance) async {
+    final pid = _launchedPid;
+    final bundleId = _launchedBundleId;
+    if (pid == null || bundleId == null) return null;
+    final alive = await _runProcess('kill', ['-0', '$pid']);
+    if (alive.exitCode == 0) return null;
+    if (!'${alive.stderr}'.contains('No such process')) {
+      _logger.warning({
+        'message': 'ios_simulator_liveness_check_failed',
+        'text':
+            'Cannot tell whether $bundleId (pid $pid) is still running on '
+            '$name: kill -0 said "${'${alive.stderr}'.trim()}".',
+        'device': name,
+        'pid': pid,
+      });
+      return null;
+    }
+    return '$bundleId (pid $pid) exited after announcing its VM service on '
+        '$name. ${_browserLastWords(instance.logs, silence: 'It printed nothing.')}';
   }
 
   @override
@@ -3086,6 +3177,10 @@ class IOSDevice extends Device {
   /// Killing lldb does not end the app on a physical device — debugserver
   /// detaches and the app keeps running — so this is what [stop] terminates.
   int? _appPid;
+
+  /// The installed bundle's `installationURL`, which names the app's process
+  /// in the device's process list.
+  String? _installationUrl;
 
   /// What the current launch's lldb does with a stop, once the app runs.
   _LldbStops? _lldbStops;
@@ -3381,6 +3476,7 @@ class IOSDevice extends Device {
         _bundleId ?? await _extractBundleId(installPath, _runProcess);
     _launchedBundleId = bundleId;
     _launchedAppPath = installPath;
+    _installationUrl = installationUrl;
 
     // An iOS debug app needs a debugger (ptrace) attached before the Flutter
     // engine will start, because its JIT has to be given executable pages.
@@ -3979,7 +4075,24 @@ if not error.Success():
   /// executable path is `file://…/<uuid>/Runner.app/Runner`, which contains
   /// the installation URL and never the bundle id, so a bundle-id match behind
   /// it would be dead code that made a broken URL match look recoverable.
-  Future<int> _findAppProcessId(String installationUrl) {
+  Future<int> _findAppProcessId(String installationUrl) async {
+    final found = await _appProcessIdOnDevice(installationUrl);
+    final pid = found.pid;
+    if (pid != null) return pid;
+    throw StateError(
+      'None of the ${found.listed} process(es) running on $name is the '
+      'app installed at $installationUrl. devicectl reported launching it, '
+      'so it should be among them; an app that crashed on launch will not '
+      'be.',
+    );
+  }
+
+  /// The process id of the app installed at [installationUrl] among the
+  /// processes `devicectl` lists on the device (null when none is running),
+  /// and how many processes were listed.
+  Future<({int? pid, int listed})> _appProcessIdOnDevice(
+    String installationUrl,
+  ) {
     return withTempDir('flutter_proc_', (jsonDir) async {
       final jsonPath = p.join(jsonDir.path, 'processes.json');
 
@@ -4034,15 +4147,10 @@ if not error.Success():
         // debugger that went elsewhere. Upstream hit exactly this:
         // flutter/flutter#183263.
         if (executable.contains('.appex')) continue;
-        return pid;
+        return (pid: pid, listed: processes.length);
       }
 
-      throw StateError(
-        'None of the ${processes.length} process(es) running on $name is the '
-        'app installed at $installationUrl. devicectl reported launching it, '
-        'so it should be among them; an app that crashed on launch will not '
-        'be.',
-      );
+      return (pid: null, listed: processes.length);
     });
   }
 
@@ -4080,6 +4188,44 @@ if not error.Success():
     }
     await _lldbOutput?.close();
     _lldbOutput = null;
+  }
+
+  /// An app that announced its VM service and then died (an exception once the
+  /// engine was up, say) leaves an address nothing answers; this says the app
+  /// is gone instead, with what lldb and devicectl last printed. Null while
+  /// the device lists the app's process, and when the device cannot be asked:
+  /// an unanswered question is not a verdict.
+  ///
+  /// The device's own process list is the platform's word on what runs there,
+  /// matched the way the launch found the app: by its bundle's installation
+  /// URL, so another process that has taken the pid does not stand in for it.
+  @override
+  Future<String?> whyAppExited(AppInstance instance) async {
+    final url = _installationUrl;
+    final pid = _appPid;
+    final bundleId = _launchedBundleId;
+    if (url == null || pid == null || bundleId == null) return null;
+    final ({int? pid, int listed}) found;
+    try {
+      found = await _appProcessIdOnDevice(url);
+    } on StateError catch (e) {
+      return _livenessUnknown(bundleId, e.message);
+    } on ProcessException catch (e) {
+      return _livenessUnknown(bundleId, '$e');
+    }
+    if (found.pid == pid) return null;
+    return '$bundleId (pid $pid) exited after announcing its VM service on '
+        '$name. ${_browserLastWords(instance.logs)}';
+  }
+
+  /// The "cannot tell" answer of [whyAppExited]: on the record, and no verdict.
+  String? _livenessUnknown(String bundleId, String why) {
+    _logger.warning({
+      'message': 'ios_liveness_check_failed',
+      'text': 'Cannot tell whether $bundleId is still running on $name: $why',
+      'device': name,
+    });
+    return null;
   }
 
   @override

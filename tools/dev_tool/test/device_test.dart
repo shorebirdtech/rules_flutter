@@ -4727,6 +4727,69 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       },
     );
 
+    group('an app that announced its VM service and then died', () {
+      test(
+        'is said to have exited, with what the debugger last said',
+        () async {
+          final processes = [runningProcess(pid: 4242)];
+          final r = await launchFaked(runningProcesses: processes);
+          emitLldbStop(r.lldb, 'EXC_BAD_ACCESS (code=1, address=0x0)');
+          await pumpEventQueue();
+          processes.clear();
+
+          final why = await r.device.whyAppExited(r.instance);
+
+          expect(
+            why,
+            allOf(
+              contains('com.example.test (pid 4242)'),
+              contains('exited after announcing its VM service'),
+              contains('EXC_BAD_ACCESS (code=1'),
+            ),
+          );
+        },
+      );
+
+      test('is not said to have exited while its process is listed', () async {
+        final r = await launchFaked();
+
+        expect(await r.device.whyAppExited(r.instance), isNull);
+      });
+
+      // The listing is the platform's word on what runs on the phone, so a
+      // different process under the pid (the pid reused) is no evidence for
+      // the app: it is gone.
+      test('is gone when its pid now belongs to another process', () async {
+        final processes = [runningProcess(pid: 4242)];
+        final r = await launchFaked(runningProcesses: processes);
+        processes
+          ..clear()
+          ..add(
+            runningProcess(pid: 4242, executable: 'file:///usr/libexec/other'),
+          );
+
+        expect(
+          await r.device.whyAppExited(r.instance),
+          contains('exited after announcing'),
+        );
+      });
+
+      // A phone that cannot be asked has not said the app is gone.
+      test('is not declared gone when the phone cannot be asked', () async {
+        var asking = false;
+        final r = await launchFaked(
+          onRun: (exe, args) {
+            if (asking && args.contains('processes')) {
+              throw ProcessException(exe, args, 'device unreachable');
+            }
+          },
+        );
+        asking = true;
+
+        expect(await r.device.whyAppExited(r.instance), isNull);
+      });
+    });
+
     // The session lives as long as lldb, and lldb stays at its prompt after
     // the app it debugs exits. An app closed on the phone, or killed by the
     // system, would otherwise leave a run attached to nothing.
