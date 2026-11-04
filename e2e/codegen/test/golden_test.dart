@@ -13,6 +13,7 @@
 // The paired negative lives in `golden_undeclared_test.dart`: the same PNG, on
 // disk at the same path, with no `data` entry.
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -31,25 +32,38 @@ Widget get _subject => const Center(
 /// match.
 const _standIn = 'goldens/stand_in.png';
 
+/// A declared golden's bytes, read the way the comparator reads them: from a
+/// runfiles tree or, where Bazel makes only a manifest (Windows), from that.
+Future<List<int>> _declaredGolden(Uri golden) {
+  final comparator = goldenFileComparator as LocalFileComparator;
+  // `getGoldenBytes` is protected so that tests do not reach for it; this one
+  // is checking what the comparator finds.
+  // ignore: invalid_use_of_protected_member
+  return comparator.getGoldenBytes(golden);
+}
+
 void main() {
-  test('the rule installs a real comparator, rooted at the test file', () {
-    // Flutter's fallback `TrivialComparator` — the sentinel meaning "no tool
-    // bootstrapped this test", whose `compare()` returns true without reading
-    // anything — is not a `LocalFileComparator`, so this single assertion is
-    // what proves a real comparator was installed.
-    expect(goldenFileComparator, isA<LocalFileComparator>());
+  test(
+    'the rule installs a real comparator, rooted at the test file',
+    () async {
+      // Flutter's fallback `TrivialComparator` — the sentinel meaning "no tool
+      // bootstrapped this test", whose `compare()` returns true without reading
+      // anything — is not a `LocalFileComparator`, so this single assertion is
+      // what proves a real comparator was installed.
+      expect(goldenFileComparator, isA<LocalFileComparator>());
 
-    // Upstream's convention, which the Bazel wiring has to reproduce: goldens
-    // are relative to the *directory of the test file*. Here that is the
-    // runfiles copy of `e2e/codegen/test/`.
-    final basedir = (goldenFileComparator as LocalFileComparator).basedir;
-    expect(basedir.path, endsWith('/test/'));
-    expect(File.fromUri(basedir.resolve(_standIn)).existsSync(), isTrue);
+      // Upstream's convention, which the Bazel wiring has to reproduce: goldens
+      // are relative to the *directory of the test file*. Here that is the
+      // runfiles copy of `e2e/codegen/test/`.
+      final basedir = (goldenFileComparator as LocalFileComparator).basedir;
+      expect(basedir.path, endsWith('/test/'));
+      expect(await _declaredGolden(Uri.parse(_standIn)), isNotEmpty);
 
-    // Update mode is off unless `--update-goldens` was passed under
-    // `bazel run`; a test action has no source tree to write back to.
-    expect(autoUpdateGoldenFiles, isFalse);
-  });
+      // Update mode is off unless `--update-goldens` was passed under
+      // `bazel run`; a test action has no source tree to write back to.
+      expect(autoUpdateGoldenFiles, isFalse);
+    },
+  );
 
   testWidgets('a golden that is not a declared input fails, and does not '
       'silently skip', (tester) async {
@@ -124,9 +138,7 @@ void main() {
     // *everything* would still satisfy the two mismatch assertions above.
     final comparator = goldenFileComparator as LocalFileComparator;
     final golden = Uri.parse(_standIn);
-    final bytes = await File.fromUri(
-      comparator.basedir.resolveUri(golden),
-    ).readAsBytes();
+    final bytes = Uint8List.fromList(await _declaredGolden(golden));
 
     expect(await comparator.compare(bytes, golden), isTrue);
   });

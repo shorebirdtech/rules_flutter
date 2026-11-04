@@ -21,7 +21,7 @@
 // not the install mechanism, and using it as one would leave the silent skip
 // as the default for anyone who forgot to wire it.
 //
-// Three things differ under Bazel, and this subclass is exactly those three:
+// Four things differ under Bazel, and this subclass is exactly those four:
 //
 //   1. **Diffs must land in the undeclared-outputs dir.** A sandboxed test's
 //      working tree is deleted when it exits, so upstream's
@@ -36,6 +36,9 @@
 //      `autoUpdateGoldenFiles = true` into a bootstrap it regenerates per run;
 //      here the bootstrap is a build artifact shared by every run of the
 //      target, so the flag has to cross the process boundary at runtime.
+//   4. **A golden may be listed in a runfiles manifest, not present in a
+//      tree.** Bazel on Windows makes no tree by default, so a declared golden
+//      is found by its runfiles path in `RUNFILES_MANIFEST_FILE` instead.
 //
 // Everything else — the basedir convention, the "non-existent file" failure,
 // the four diff PNGs, the pixel-percentage message — is inherited unchanged,
@@ -90,8 +93,36 @@ void installBazelGoldenFileComparator() {
     outputsDir: _dirUri(env['TEST_UNDECLARED_OUTPUTS_DIR']),
     failureHintDir: _failureHintDir(env['TEST_TARGET']),
     updateDir: update ? _updateDir(env, testPath) : null,
+    manifest: _manifestOf(env),
+    testRunfilesPath: _runfilesPathOf(env['TEST_WORKSPACE'], testPath),
   );
   autoUpdateGoldenFiles = update;
+}
+
+/// The runfiles manifest the test runs with, as runfiles path to real path, or
+/// null when there is none: Bazel then made a tree, and the working directory
+/// is its root.
+Map<String, String>? _manifestOf(Map<String, String> env) {
+  final path = env['RUNFILES_MANIFEST_FILE'];
+  if (path == null || path.isEmpty) return null;
+  final file = File(path);
+  if (!file.existsSync()) return null;
+  final manifest = <String, String>{};
+  for (final line in file.readAsLinesSync()) {
+    final space = line.indexOf(' ');
+    if (space > 0)
+      manifest[line.substring(0, space)] = line.substring(space + 1);
+  }
+  return manifest;
+}
+
+/// The runfiles path of the test source whose `short_path` is [testPath]:
+/// `../repo/x` is `repo/x`, and anything else is under [workspace], the main
+/// repository's name (`TEST_WORKSPACE`). Null when that name is not known.
+String? _runfilesPathOf(String? workspace, String testPath) {
+  if (testPath.startsWith('../')) return testPath.substring(3);
+  if (workspace == null || workspace.isEmpty) return null;
+  return '$workspace/$testPath';
 }
 
 /// `TEST_TARGET` (`//pkg:name`) as `bazel-testlogs/pkg/name/test.outputs/`.
@@ -165,13 +196,46 @@ class BazelGoldenFileComparator extends LocalFileComparator {
     Uri? outputsDir,
     Uri? failureHintDir,
     Uri? updateDir,
+    Map<String, String>? manifest,
+    String? testRunfilesPath,
   }) : _outputsDir = outputsDir,
        _failureHintDir = failureHintDir,
-       _updateDir = updateDir;
+       _updateDir = updateDir,
+       _manifest = manifest,
+       _testRunfilesPath = testRunfilesPath;
 
   final Uri? _outputsDir;
   final Uri? _failureHintDir;
   final Uri? _updateDir;
+
+  /// The runfiles manifest, when Bazel made one and no tree: golden paths are
+  /// listed in it, relative to [_testRunfilesPath], and exist only at the real
+  /// paths it names.
+  final Map<String, String>? _manifest;
+  final String? _testRunfilesPath;
+
+  /// A golden's bytes, wherever the runfiles put it.
+  ///
+  /// The file under the basedir when there is one. Failing that, the file the
+  /// manifest names for it. A golden found by neither is upstream's
+  /// "non-existent file" failure, which this passes through to unchanged.
+  @override
+  Future<List<int>> getGoldenBytes(Uri golden) {
+    final manifest = _manifest;
+    final test = _testRunfilesPath;
+    if (manifest != null &&
+        test != null &&
+        !File.fromUri(basedir.resolveUri(golden)).existsSync()) {
+      final key = Uri.parse(
+        'file:///$test',
+      ).resolve('.').resolveUri(golden).path.substring(1);
+      final real = manifest[key];
+      if (real != null && File(real).existsSync()) {
+        return File(real).readAsBytes();
+      }
+    }
+    return super.getGoldenBytes(golden);
+  }
 
   /// Redirects the failure *message* to the archived output location.
   ///
