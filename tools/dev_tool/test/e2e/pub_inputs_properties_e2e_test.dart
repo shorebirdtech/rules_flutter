@@ -23,6 +23,7 @@
 @Tags(['e2e'])
 library;
 
+import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 import 'pub_inputs_fixture.dart';
@@ -224,6 +225,132 @@ void main() {
         package: 'transformed',
         what: 'an asset with transformers',
         mentions: ['transformers'],
+      );
+    });
+  });
+
+  group('a plugin overlay', () {
+    String template(String marker) =>
+        'filegroup(name = "{PKG}", srcs = [])\nfilegroup(name = "$marker")\n';
+
+    // Where, in the overlay root, a template may sit. A package at 1.0.0
+    // matches each; a more specific one wins over a less specific one.
+    final rungs = {
+      'the bare package directory': '',
+      'the major version': '1',
+      'the major and minor version': '1.0',
+      'the exact version': '1.0.0',
+    };
+
+    /// Registers `overlays/` as an overlay root and gives each rung a package.
+    Future<PubInputsWorkspace> workspaceWith({
+      Map<String, String> files = const {},
+    }) => PubInputsFixture(
+      hosted: [
+        for (final name in rungs.values.map(
+          (r) => 'ladder_${r.replaceAll('.', '_')}',
+        ))
+          HostedPackage(name),
+        HostedPackage(
+          'android_ladder',
+          pubspec: _pubspec(
+            'android_ladder',
+            'flutter:\n  plugin:\n    platforms:\n      android:\n        package: dev.example\n        pluginClass: P\n',
+          ),
+        ),
+      ],
+      overlayRoots: ['//overlays:BUILD.bazel'],
+      files: {'overlays/BUILD.bazel': '', ...files},
+    ).materialize();
+
+    String ladder(String rung) => 'ladder_${rung.replaceAll('.', '_')}';
+
+    void write(PubInputsWorkspace ws, String relative, String content) {
+      final file = ws.file(p.join('overlays', relative));
+      file.parent.createSync(recursive: true);
+      file.writeAsStringSync(content);
+    }
+
+    /// An overlay is how a user fixes a plugin rules_flutter cannot build. One
+    /// written after the package was first built, which is when the user finds
+    /// out they need it, must be used by the next build. Adding it changes the
+    /// answer of a lookup the repository rule already made (it asked whether
+    /// the file existed), so the repository has to be fetched again.
+    for (final rung in rungs.entries) {
+      test('added at ${rung.key} after the first build is used by the next', () async {
+        final ws = await workspaceWith();
+        final package = ladder(rung.value);
+        final before = await ws.loadSpoke(package);
+        expect(before.succeeded, isTrue, reason: '$before');
+        expect(before.stdout, isNot(contains('//:added')));
+
+        write(
+          ws,
+          p.join(package, rung.value, 'BUILD.bazel.tpl'),
+          template('added'),
+        );
+
+        final after = await ws.loadSpoke(package);
+        expect(after.succeeded, isTrue, reason: '$after');
+        expect(
+          after.stdout,
+          contains('//:added'),
+          reason:
+              'the overlay at ${rung.key} was written after the spoke was '
+              'fetched and the next build still got the generated BUILD:\n$after',
+        );
+      });
+    }
+
+    /// The ladder is most specific first, so an overlay for the exact version
+    /// written next to a working bare one has to win. The bare one is the
+    /// file the rule read, so changing it is seen; the new one is not a file it
+    /// read at all.
+    test('a more specific overlay added beside an existing one wins on the next build', () async {
+      final package = ladder('1.0');
+      final ws = await workspaceWith(
+        files: {'overlays/$package/BUILD.bazel.tpl': template('bare')},
+      );
+      final before = await ws.loadSpoke(package);
+      expect(before.stdout, contains('//:bare'), reason: '$before');
+
+      write(
+        ws,
+        p.join(package, '1.0', 'BUILD.bazel.tpl'),
+        template('specific'),
+      );
+
+      final after = await ws.loadSpoke(package);
+      expect(
+        after.stdout,
+        contains('//:specific'),
+        reason:
+            'a version-specific overlay was added beside the bare one and '
+            'the next build still used the bare one:\n$after',
+      );
+    });
+
+    /// A top-level overlay without an `android/` template gets an empty
+    /// Android stub. Adding the template later must replace the stub.
+    test('an android/ template added beside an existing overlay is used by the next build', () async {
+      final ws = await workspaceWith(
+        files: {'overlays/android_ladder/BUILD.bazel.tpl': template('top')},
+      );
+      final before = await ws.query('@pubhub__android_ladder//android:all');
+      expect(before.succeeded, isTrue, reason: '$before');
+
+      write(
+        ws,
+        'android_ladder/android/BUILD.bazel.tpl',
+        'filegroup(name = "android_added")\n',
+      );
+
+      final after = await ws.query('@pubhub__android_ladder//android:all');
+      expect(
+        after.stdout,
+        contains('//android:android_added'),
+        reason:
+            'the android/ overlay was added and the next build ignored it:\n$after',
       );
     });
   });

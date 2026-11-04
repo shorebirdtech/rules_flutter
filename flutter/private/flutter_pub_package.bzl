@@ -1471,6 +1471,12 @@ def _resolve_overlay_template(ctx, overlay_root_label, package_name, version, la
     """
     root = ctx.path(overlay_root_label).dirname
     pkg_dir = root.get_child(package_name)
+
+    # Every path looked for is watched, found or not: an overlay written
+    # later, which is when its author finds out they need one, or one that is
+    # more specific than the one in use, must make the next build fetch this
+    # repository again. Reading a template watches that template only.
+    ctx.watch(pkg_dir)
     if not pkg_dir.exists:
         return ""
 
@@ -1490,6 +1496,7 @@ def _resolve_overlay_template(ctx, overlay_root_label, package_name, version, la
         tpl = pkg_dir.get_child(candidate) if candidate else pkg_dir
         for part in relpath_parts:
             tpl = tpl.get_child(part)
+        ctx.watch(tpl)
         if tpl.exists:
             content = ctx.read(tpl)
             hardcoded_dep = find_hardcoded_hub_dep(content) if guard_hub_deps else ""
