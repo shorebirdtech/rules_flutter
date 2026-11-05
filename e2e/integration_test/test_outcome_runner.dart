@@ -66,6 +66,12 @@ Future<void> main() async {
       xml: xml.existsSync() ? xml.readAsStringSync() : null,
       output: output.toString(),
     );
+    final named = config['noSimulatorNamed'] as String?;
+    // The runner names its simulator for its own process: another run of the
+    // same test, at the same time, has simulators of its own.
+    if (named != null) {
+      problems.addAll(await _simulatorsLeft('$named${process.pid}'));
+    }
     if (problems.isEmpty) {
       stdout.writeln('test_outcome: the test ended as it should have.');
       return;
@@ -133,6 +139,22 @@ List<String> _check(
     }
   }
   return problems;
+}
+
+/// The simulators `simctl list` shows that are called [name]: what the
+/// test left behind, which it must not however it ended.
+Future<List<String>> _simulatorsLeft(String name) async {
+  final result = await Process.run('xcrun', ['simctl', 'list', 'devices']);
+  if (result.exitCode != 0) {
+    return [
+      '`xcrun simctl list devices` exited ${result.exitCode}: ${result.stderr}',
+    ];
+  }
+  return [
+    for (final line in const LineSplitter().convert('${result.stdout}'))
+      if (line.trim().startsWith('$name '))
+        'it left the simulator ${line.trim()}',
+  ];
 }
 
 /// The cases of a JUnit report, in order, each with whether it failed.

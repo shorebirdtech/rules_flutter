@@ -17,8 +17,8 @@ rules that compile Dart code, bundle assets, and run tests.
     `flutter_application` rebuilt with another `main`, for a test driver or an
     integration test's program.
 - `@rules_flutter//flutter:integration_test.bzl` — `flutter_macos_integration_test`,
-    `flutter_web_integration_test`, `flutter_android_integration_test` and the
-    rules they compose: `package:integration_test` tests run in the real app on a
+    `flutter_web_integration_test`, `flutter_android_integration_test`,
+    `flutter_ios_simulator_integration_test` and the rules they compose: `package:integration_test` tests run in the real app on a
     device, or in a headless Chrome, and reported per test.
 - `flutter_tester_binary`: Runs a program under flutter_tester as an executable, for build actions.
 - `flutter_profile_build`: Builds targets in profile mode whatever the command line

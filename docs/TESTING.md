@@ -880,11 +880,13 @@ cd e2e/_overlay_tests/native_assets_synthetic && bazel test //...   # macOS-only
 ### `e2e/integration_test`
 
 The integration test rules (`flutter/integration_test.bzl`) on a real app, in the
-host's own desktop session, in a browser and on an Android device. Its macOS tests
+host's own desktop session, in a browser, on an Android device and on an iOS
+simulator. Its macOS tests
 launch a window, so run it on a Mac with an unlocked screen and an awake display
 (§ "macOS permission prerequisites", "The display must be awake"); the runner holds
 the display awake itself and fails, saying which, when the screen is locked or the
-display asleep. The Android tests need a device attached (below). `bazel test //...`
+display asleep. The Android tests need a device attached (below), the iOS ones Xcode with an iOS
+runtime installed. `bazel test //...`
 there runs, with `ANDROID_HOME` and `ANDROID_NDK_HOME` exported as for any
 Android build (§ "The Android SDK/NDK variables must be exported too") and
 `--test_env=ANDROID_SERIAL=<serial>` when more than one device is attached:
@@ -901,6 +903,9 @@ Android build (§ "The Android SDK/NDK variables must be exported too") and
 | `:android_pass_test` | the same two tests on an attached Android device (`abi = "arm64-v8a"`), each reported: the suite is driven through the VM service `adb forward`ed from the device |
 | `:android_red_twin_test` | a failing integration test fails its target on a device, and the JUnit report names the failing case. It wraps `:android_red` (`manual`) in `outcome_test` |
 | `:android_filter_test` | `--test_filter` runs one of the two cases of `:android_pass_test` and no other |
+| `:ios_pass_test` | the same two tests on an iOS simulator the test makes for itself, each reported |
+| `:ios_filter_test` | `--test_filter` runs one of the two cases of `:ios_pass_test` and no other, and `xcrun simctl list` shows no `rules_flutter-*` simulator of that test afterwards (`outcome_test`'s `leaves_no_simulator`) |
+| `:ios_red_twin_test` | a failing integration test fails its target on a simulator, the JUnit report names the failing case, and the simulator is deleted though the test failed. It wraps `:ios_red` (`manual`) |
 
 The web tests run in a headless browser and need no desktop session, but only macOS runs them for now (they are skipped elsewhere): the Linux prerequisites of a browser, the host's libraries and a sandbox the host allows, are not verified.
 
@@ -915,6 +920,15 @@ Their app links `integration_test`'s Android library, so this workspace's
 `x86_64` build (`abi = "x86_64"`) needs an x86_64 emulator, which this machine
 has none of: only the transition is tested for that ABI
 (`//flutter/tests:flutter_integration_test_test`).
+
+The iOS tests need nothing booted or attached: each makes a simulator
+(`rules_flutter-<test>-<pid>`, an iPhone 16 on the newest iOS runtime), runs on it
+and deletes it, whether the test passed, failed or was killed by Bazel's timeout
+(SIGTERM). Only a SIGKILL leaves one behind: `xcrun simctl list devices | grep
+rules_flutter` shows it and `xcrun simctl delete <udid>` removes it. A simulator is
+scheduled as two cores (`cpus` of `flutter_ios_simulator_runner`): the processes
+under a booted simulator measured 15 CPU-seconds over the 20 seconds a test took
+(0.75 of a core), not counting the host services it talks to.
 
 The tests take turns on the screen through the `macos-gui` lock
 (`/tmp/rules_flutter-locks/`), so several at once is fine: a test that has to wait
@@ -998,7 +1012,7 @@ quietly never running. A new workspace needs an entry; `bazel run
 | `ffi_example` | macOS, Linux, Windows | native libraries in each platform's bundle | |
 | `cross_compile_example` | macOS (`build`) | the Mac-to-Linux cross toolchain | Linux: a native build is `hello_world`'s; Windows: no such pair |
 | `macos_example`, `ios_example`, `multi_window_example`, `_overlay_tests/native_assets_synthetic` | macOS | Apple-only features | Linux, Windows: Apple-only |
-| `integration_test` | macOS (`build`) | the integration test rules building the app and test of each case, the Android app included: its tests need a GUI session or a device, which CI never runs a test in | Linux, Windows: macOS-only |
+| `integration_test` | macOS (`build`) | the integration test rules building the app and test of each case, the Android and iOS apps included: its tests need a GUI session or a device, which CI never runs a test in | Linux, Windows: macOS-only |
 | `dual_hub`, `ffi_plugin_example`, `web_example`, `android_example`, `_overlay_tests/link_hooks` | Linux | their platform-neutral subject, once, on the cheapest runner | macOS, Windows: the same again |
 | `android_example` | Windows (also) | an Android build on a Windows host: `gen_snapshot.exe`, engine-strip path separators, rules_android JVMs without an up-front heap commit (the committed patch) | |
 | `asset_bundle` | macOS | the `flutter_assets/` tree of every platform against `flutter build`'s, once | Linux, Windows: no other host can analyse its iOS targets |

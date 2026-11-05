@@ -139,6 +139,33 @@ class IntegrationRunnerConfig {
   /// SDK the app was built against.
   String get adbPath => _launcherPath('adb', 'the SDK\'s');
 
+  /// The device type of the simulator an iOS test runs on, as `simctl list
+  /// devicetypes` names it (`iPhone 16`): the launcher's `deviceType`. A
+  /// [FormatException] names the key when the runner did not give one.
+  String get simulatorDeviceType => _launcherString(
+    'deviceType',
+    'the simulator\'s device type',
+    required: true,
+  );
+
+  /// The runtime of that simulator: the launcher's `runtime`, which is empty
+  /// for the newest installed. A [FormatException] names the key when it is
+  /// not a string at all.
+  String get simulatorRuntime =>
+      _launcherString('runtime', 'the simulator\'s runtime', required: false);
+
+  String _launcherString(String key, String what, {required bool required}) {
+    final value = launcher[key];
+    if (value is! String || (required && value.isEmpty)) {
+      throw FormatException(
+        'the config: "launcher.$key" must be a '
+        '${required ? 'non-empty ' : ''}string, $what, got '
+        '${value == null ? 'nothing' : json.encode(value)}',
+      );
+    }
+    return value;
+  }
+
   String _launcherPath(String key, String whose) {
     final value = launcher[key];
     if (value is! String || value.isEmpty) {

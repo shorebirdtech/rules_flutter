@@ -2,6 +2,15 @@
 
 load("@rules_dart//dart:utils.bzl", "runfiles_path")
 
+def _simulator_prefix(label):
+    """The name of the simulators the iOS integration test `label` makes, up to the process id.
+
+    The runner names one `rules_flutter-<package>_<name>-<pid>`, with what is not
+    a letter, digit or one of `_.-` as `_` (`testSimulatorName`); the id of the
+    process is the checker's to add.
+    """
+    return "rules_flutter-%s_%s-" % (label.package.replace("/", "_"), label.name)
+
 def _test_outcome_impl(ctx):
     wrapped = ctx.attr.test
     wrapped_exe = wrapped[DefaultInfo].files_to_run.executable
@@ -16,6 +25,7 @@ def _test_outcome_impl(ctx):
         "cases": ctx.attr.cases if ctx.attr.cases else None,
         "failingCases": ctx.attr.failing_cases if ctx.attr.failing_cases_given else None,
         "outputContains": ctx.attr.output_contains,
+        "noSimulatorNamed": _simulator_prefix(ctx.attr.test.label) if ctx.attr.leaves_no_simulator else None,
     }))
 
     executable = ctx.actions.declare_file(ctx.label.name)
@@ -64,6 +74,9 @@ outcome_test = rule(
         ),
         "output_contains": attr.string_list(
             doc = "Text its output must contain.",
+        ),
+        "leaves_no_simulator": attr.bool(
+            doc = "Whether `xcrun simctl list` must show no simulator the wrapped iOS integration test made, once it has ended, however it ended.",
         ),
         "_outcome_runner": attr.label(
             default = Label("//:test_outcome_runner"),

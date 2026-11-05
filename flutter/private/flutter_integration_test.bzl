@@ -28,8 +28,35 @@ android_dbg_transition = transition(
     outputs = DBG_SETTINGS.keys() + [_ANDROID_PLATFORMS],
 )
 
+_IOS_MULTI_CPUS = "//command_line_option:ios_multi_cpus"
+
+def ios_simulator_dbg_settings(sim_cpu):
+    """The configuration an iOS simulator test's app is built in.
+
+    Debug mode, and the simulator CPU of this host: the simulator runs the
+    architecture of the Mac it is on, which the dev tool's own build says the
+    same way (`--ios_multi_cpus=sim_arm64`).
+
+    Args:
+        sim_cpu: `sim_arm64` or `x86_64`.
+
+    Returns:
+        The settings the transition sets.
+    """
+    return DBG_SETTINGS | {_IOS_MULTI_CPUS: [sim_cpu]}
+
+def _ios_simulator_dbg_transition_impl(_settings, attr):
+    return ios_simulator_dbg_settings(attr.sim_cpu)
+
+ios_simulator_dbg_transition = transition(
+    implementation = _ios_simulator_dbg_transition_impl,
+    inputs = [],
+    outputs = DBG_SETTINGS.keys() + [_IOS_MULTI_CPUS],
+)
+
 ANDROID = "android"
 DESKTOP = "desktop"
+IOS_SIMULATOR = "ios_simulator"
 WEB = "web"
 
 # What a runner of every family asks of the test's placement: the app runs on
@@ -94,6 +121,7 @@ is a pinned Chrome for Testing headless shell for the host.""",
 # their devices.
 _FAMILIES_WITHOUT_ENVIRONMENT = {
     ANDROID: "an Android device",
+    IOS_SIMULATOR: "an iOS simulator",
 }
 
 def _flutter_android_device_runner_impl(ctx):
@@ -128,6 +156,48 @@ device (`android-<serial>`), so two tests on one device run one after the other
 instead of installing over each other.
 
 `adb` is the SDK's own, never one found on `PATH`.""",
+)
+
+def _flutter_ios_simulator_runner_impl(ctx):
+    return [FlutterIntegrationRunnerInfo(
+        family = IOS_SIMULATOR,
+        launcher_config = struct(
+            deviceType = ctx.attr.device_type,
+            runtime = ctx.attr.runtime,
+        ),
+        runfiles = depset(),
+        # What a simulator takes of the machine, so that Bazel schedules the test
+        # with it. Measured: the processes under a booted simulator's launchd
+        # used 15 CPU-seconds in the 20 seconds a test took, 0.75 of a core on
+        # average; the services the simulator talks to on the host are not in
+        # that, hence two.
+        execution_requirements = dict(_EXECUTION_REQUIREMENTS) | {"cpu:%d" % ctx.attr.cpus: ""},
+        target_compatible_with = [],
+    )]
+
+flutter_ios_simulator_runner = rule(
+    implementation = _flutter_ios_simulator_runner_impl,
+    attrs = {
+        "device_type": attr.string(
+            doc = "The simulator's device type, as `xcrun simctl list devicetypes` names it.",
+            default = "iPhone 16",
+        ),
+        "runtime": attr.string(
+            doc = "The simulator's runtime: an identifier or name `xcrun simctl list runtimes` lists. Empty is the newest installed runtime that suits the device type.",
+        ),
+        "cpus": attr.int(
+            doc = "The cores a test on this runner is scheduled with.",
+            default = 2,
+        ),
+    },
+    doc = """Runs an iOS integration test on a simulator the test makes for itself.
+
+Each test makes a simulator (`rules_flutter-<test>-<pid>`) of `device_type`,
+boots it, installs the app, drives the suite through the app's VM service, and
+shuts the simulator down and deletes it however the test ends, a Bazel timeout
+included. A fresh simulator shares no state with another test or with the
+simulators of the person running it, so tests need no lock. No runtime installed
+fails the test, saying `xcodebuild -downloadPlatform iOS`.""",
 )
 
 def integration_test_impl(ctx, family, inherited_environment = []):
@@ -299,4 +369,31 @@ An integration test's app links `integration_test`'s Android library, which need
 `androidx.test:runner`, `androidx.test:rules`, `androidx.test.espresso:espresso-core`
 and `com.google.guava:guava` in the workspace's `@rules_android_maven` install:
 analysis says which are missing.""",
+)
+
+def _flutter_ios_app_integration_test_impl(ctx):
+    return integration_test_impl(ctx, IOS_SIMULATOR, inherited_environment = ["DEVELOPER_DIR"])
+
+flutter_ios_app_integration_test = rule(
+    implementation = _flutter_ios_app_integration_test_impl,
+    attrs = _test_attrs("//flutter/integration_test:ios_simulator", cfg = ios_simulator_dbg_transition) | {
+        "sim_cpu": attr.string(
+            doc = "The CPU the app is built for, which the simulator runs: `sim_arm64` on an Apple-silicon Mac, `x86_64` on an Intel one.",
+            default = "sim_arm64",
+            values = ["sim_arm64", "x86_64"],
+        ),
+    },
+    test = True,
+    doc = """Runs the iOS app `app` (`flutter_ios_app`) on a simulator made for the test and reports the integration test suite it runs.
+
+The app's program is an integration test (see `flutter_integration_bootstrap`),
+so each `testWidgets` is a test case: `--test_filter` and `shard_count` select
+among them, each is reported as it finishes, and the JUnit file names each. A
+suite that registers no test fails, as does an app that exits during a test, with
+the reason the device gives for its exit.
+
+The app is built in debug mode for `sim_cpu`, whatever the command line says, and
+the test runs outside Bazel's sandbox and never remotely. An app on a simulator
+cannot be handed an environment, so a non-empty `env` fails analysis; its
+`defines` are the program's.""",
 )

@@ -13,6 +13,7 @@ the variant, the platform's app rule and the test.
 - `flutter_macos_integration_test`
 - `flutter_web_integration_test`
 - `flutter_android_integration_test`
+- `flutter_ios_simulator_integration_test`
 
 Tier 2, the composable rules:
 
@@ -25,14 +26,17 @@ Tier 2, the composable rules:
 - `flutter_chrome_runner`: a headless Chrome of its own, where a web test runs.
 - `flutter_android_app_integration_test`: runs an Android app on an attached device.
 - `flutter_android_device_runner`: which `adb` drives that device.
+- `flutter_ios_app_integration_test`: runs an iOS app on a simulator of its own.
+- `flutter_ios_simulator_runner`: which simulator that is.
 """
 
 load("//flutter:android.bzl", "flutter_android_app")
+load("//flutter:ios.bzl", "flutter_ios_app")
 load("//flutter:macos.bzl", "flutter_macos_app")
 load("//flutter:web.bzl", "flutter_web_app")
 load("//flutter/private:flutter_application_variant.bzl", _flutter_application_variant = "flutter_application_variant")
 load("//flutter/private:flutter_integration_bootstrap.bzl", _flutter_integration_bootstrap = "flutter_integration_bootstrap")
-load("//flutter/private:flutter_integration_test.bzl", _flutter_android_app_integration_test = "flutter_android_app_integration_test", _flutter_android_device_runner = "flutter_android_device_runner", _flutter_chrome_runner = "flutter_chrome_runner", _flutter_desktop_integration_test = "flutter_desktop_integration_test", _flutter_desktop_runner = "flutter_desktop_runner", _flutter_web_bundle_integration_test = "flutter_web_bundle_integration_test")
+load("//flutter/private:flutter_integration_test.bzl", _flutter_android_app_integration_test = "flutter_android_app_integration_test", _flutter_android_device_runner = "flutter_android_device_runner", _flutter_chrome_runner = "flutter_chrome_runner", _flutter_desktop_integration_test = "flutter_desktop_integration_test", _flutter_desktop_runner = "flutter_desktop_runner", _flutter_ios_app_integration_test = "flutter_ios_app_integration_test", _flutter_ios_simulator_runner = "flutter_ios_simulator_runner", _flutter_web_bundle_integration_test = "flutter_web_bundle_integration_test")
 load("//flutter/private:test_config.bzl", "find_test_config")
 
 flutter_application_variant = _flutter_application_variant
@@ -43,6 +47,8 @@ flutter_chrome_runner = _flutter_chrome_runner
 flutter_web_bundle_integration_test = _flutter_web_bundle_integration_test
 flutter_android_app_integration_test = _flutter_android_app_integration_test
 flutter_android_device_runner = _flutter_android_device_runner
+flutter_ios_app_integration_test = _flutter_ios_app_integration_test
+flutter_ios_simulator_runner = _flutter_ios_simulator_runner
 
 # What an integration test's program imports beyond the application.
 _REQUIRED_PACKAGES = ["integration_test", "flutter_test"]
@@ -414,4 +420,104 @@ def flutter_android_integration_test(
         flaky = flaky,
         visibility = visibility,
         target_compatible_with = target_compatible_with,
+    )
+
+def flutter_ios_simulator_integration_test(
+        name,
+        src,
+        application,
+        bundle_id,
+        deps = [],
+        srcs = [],
+        test_config = None,
+        env = {},
+        data = [],
+        size = "large",
+        runner = None,
+        tags = [],
+        timeout = None,
+        shard_count = None,
+        flaky = None,
+        visibility = None,
+        **ios_app_kwargs):
+    """Runs a `package:integration_test` file on an iOS simulator: the application with the test as its program.
+
+    The app is built in debug mode for the simulator, and the test makes a
+    simulator of its own, boots it, installs and starts the app and drives its
+    suite through its VM service, then shuts the simulator down and deletes it,
+    however the test ends. A host with no iOS simulator runtime fails the test,
+    saying `xcodebuild -downloadPlatform iOS`. One target per test file, as
+    upstream launches the app once per file.
+
+    Intermediate targets `__<name>_bootstrap`, `__<name>_program` and
+    `__<name>_app` are this macro's: do not name them.
+
+    Args:
+        name: The test's name.
+        src: The test file. Its `main` declares the tests, as for `flutter create`:
+            `IntegrationTestWidgetsFlutterBinding.ensureInitialized()` and
+            `testWidgets`, calling the app's own `main()`.
+        application: The `flutter_application` the test runs. It may be in another
+            package.
+        bundle_id: The bundle identifier of the app, as `flutter_ios_app` takes it.
+        deps: What the test imports beyond the application's own `deps`. It must
+            bring `integration_test` and `flutter_test` (`@<hub>//:integration_test`
+            and `@<hub>//:flutter_test`), which analysis fails without, naming them.
+        srcs: Dart files `src` imports by relative path.
+        test_config: The suite's `flutter_test_config.dart`. By default the one
+            `flutter_test` would find for `src`, in this package.
+        env: Refused when not empty: an app on a simulator cannot be handed an
+            environment. Pass `defines` to the application instead.
+        data: Files the test reads at run time.
+        size: The test size. `large`: an app is built, a simulator booted and the
+            app installed.
+        runner: A `flutter_ios_simulator_runner`, to run on another device type or
+            runtime than the default (an iPhone 16 on the newest installed iOS).
+        tags: Tags of the test.
+        timeout: The test's `timeout`.
+        shard_count: The test's `shard_count`: the tests of the file are divided
+            among the shards, each on a simulator of its own.
+        flaky: The test's `flaky`.
+        visibility: The test's visibility.
+        **ios_app_kwargs: Passed to `flutter_ios_app`: `app_name`, `entitlements`,
+            and the rest. Not `testonly`.
+    """
+    if test_config == None:
+        test_config = _find_test_config(name, src)
+    program = _program(name, src, application, deps, srcs, test_config)
+
+    app = "__%s_app" % name
+    private = {
+        "tags": ["manual"],
+        "visibility": ["//visibility:private"],
+    }
+    flutter_ios_app(
+        name = app,
+        application = program,
+        bundle_id = bundle_id,
+        testonly = True,
+        **(private | ios_app_kwargs)
+    )
+
+    test_kwargs = {}
+    if runner != None:
+        test_kwargs["runner"] = runner
+    _flutter_ios_app_integration_test(
+        name = name,
+        app = ":" + app,
+        # The simulator runs the architecture of the Mac it is on.
+        sim_cpu = select({
+            "@platforms//cpu:arm64": "sim_arm64",
+            "//conditions:default": "x86_64",
+        }),
+        env = env,
+        data = data,
+        size = size,
+        tags = tags,
+        timeout = timeout,
+        shard_count = shard_count,
+        flaky = flaky,
+        visibility = visibility,
+        target_compatible_with = ["@platforms//os:macos"],
+        **test_kwargs
     )

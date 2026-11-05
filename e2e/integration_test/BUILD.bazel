@@ -1,6 +1,6 @@
 load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_analysis_test", "dart_binary")
 load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_library")
-load("@rules_flutter//flutter:integration_test.bzl", "flutter_android_integration_test", "flutter_macos_integration_test", "flutter_web_integration_test")
+load("@rules_flutter//flutter:integration_test.bzl", "flutter_android_integration_test", "flutter_ios_simulator_integration_test", "flutter_macos_integration_test", "flutter_web_integration_test")
 load(":test_outcome.bzl", "outcome_test")
 
 exports_files(["pubspec.lock"])
@@ -228,6 +228,57 @@ outcome_test(
     failing_cases_given = True,
     output_contains = ["Expected: exactly one matching"],
     test = ":android_red",
+)
+
+# -- iOS simulator ---------------------------------------------------------
+
+# The same app on a simulator each test makes for itself and deletes when it
+# ends (an iPhone 16 on the newest iOS runtime installed), which needs Xcode and
+# an iOS runtime (`xcodebuild -downloadPlatform iOS`) and nothing booted or
+# attached beforehand.
+
+# The two tests of `:macos_pass_test`, on a simulator: each is reported.
+flutter_ios_simulator_integration_test(
+    name = "ios_pass_test",
+    src = "integration_test/counter_test.dart",
+    application = ":app_flutter",
+    bundle_id = "com.example.integrationtest",
+    deps = _TEST_DEPS,
+)
+
+# `--test_filter` selects among the tests of one file on a simulator too, and
+# the simulator of a test that passed is gone afterwards.
+outcome_test(
+    name = "ios_filter_test",
+    cases = ["counter increments when tapped"],
+    expect = "pass",
+    failing_cases_given = True,
+    leaves_no_simulator = True,
+    test = ":ios_pass_test",
+    test_filter = "increments",
+)
+
+# `manual`, since it is meant to fail: the red twin below runs it.
+flutter_ios_simulator_integration_test(
+    name = "ios_red",
+    src = "integration_test/failing_test.dart",
+    application = ":app_flutter",
+    bundle_id = "com.example.integrationtest",
+    tags = ["manual"],
+    deps = _TEST_DEPS,
+)
+
+# A failing integration test fails its target on a simulator, its JUnit report
+# names the failing case, and the simulator is deleted though the test failed.
+outcome_test(
+    name = "ios_red_twin_test",
+    cases = ["counter reads 99 after one tap"],
+    expect = "fail",
+    failing_cases = ["counter reads 99 after one tap"],
+    failing_cases_given = True,
+    leaves_no_simulator = True,
+    output_contains = ["Expected: exactly one matching"],
+    test = ":ios_red",
 )
 
 # Runs a test that must fail, or run only some of its cases (see

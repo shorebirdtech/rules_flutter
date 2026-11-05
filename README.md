@@ -1556,7 +1556,7 @@ Build it for the machine it runs on. `bazel run` does that, and a rule that runs
 
 `package:integration_test` tests run in the real app, on a device or in a browser, and each `testWidgets` is reported as a test case. The test is the `integration_test/app_test.dart` that `flutter create` users write, unchanged: `IntegrationTestWidgetsFlutterBinding.ensureInitialized()`, then `testWidgets` that call the app's own `main()`. The rules are in `@rules_flutter//flutter:integration_test.bzl`.
 
-macOS, the web (headless Chrome) and Android devices are the platforms so far; the web is [below](#web-integration-tests), Android [after it](#android-integration-tests).
+macOS, the web (headless Chrome), Android devices and the iOS simulator are the platforms so far; the web is [below](#web-integration-tests), Android [after it](#android-integration-tests) and iOS [after that](#ios-simulator-integration-tests).
 
 ```starlark
 load("@rules_flutter//flutter:defs.bzl", "flutter_application")
@@ -1655,6 +1655,33 @@ bazel test :app_android_test --test_env=ANDROID_SERIAL=<serial>
 - Results, `--test_filter`, `shard_count`, and the failures (a failing case, an app that exits, a suite that registers nothing) are as on the other platforms.
 
 The macro is Tier 1. Tier 2 is `flutter_integration_bootstrap`, `flutter_application_variant`, `flutter_android_app`, `flutter_android_app_integration_test` and `flutter_android_device_runner`, which the macro composes as `__<name>_bootstrap`, `__<name>_program`, `__<name>_app` and, when you name no `runner`, `__<name>_runner`.
+
+#### iOS simulator integration tests
+
+`flutter_ios_simulator_integration_test` runs the same test file on an iOS simulator: the app is built in debug mode for the simulator, and the test makes a simulator of its own, installs and starts the app on it, and drives its suite through the VM service, as `flutter test integration_test/app_test.dart -d <simulator>` does.
+
+```starlark
+load("@rules_flutter//flutter:integration_test.bzl", "flutter_ios_simulator_integration_test")
+
+flutter_ios_simulator_integration_test(
+    name = "app_ios_test",
+    src = "integration_test/app_test.dart",
+    application = ":app_flutter",
+    bundle_id = "com.example.myapp",
+    deps = [
+        "@deps//:flutter_test",
+        "@deps//:integration_test",
+    ],
+)
+```
+
+- **The simulator is the test's own.** It is created as `rules_flutter-<test>-<pid>` (an iPhone 16 on the newest installed iOS runtime), booted, and shut down and deleted when the test ends, however it ends: a failing test, a crash of the app, a Bazel timeout. It shares nothing with another test or with the simulators you use, so tests need no lock, and `shard_count` shards each get one. `runner` takes a `flutter_ios_simulator_runner(device_type = ..., runtime = ...)` for another device type or runtime (names `xcrun simctl list devicetypes` and `runtimes` list).
+- **Needs Xcode and an iOS runtime** (`xcodebuild -downloadPlatform iOS`): a host with none fails the test saying so. It is a failure, not a skip. `DEVELOPER_DIR` reaches the test, so the Xcode you selected for the build is the one `xcrun` uses.
+- **The app is built for the Mac's own simulator CPU** (`sim_arm64` on Apple silicon, `x86_64` on Intel), in debug mode whatever `-c` says.
+- **`env` is refused**: an app started by the simulator cannot be handed an environment. Pass `defines` to the application instead.
+- Results, `--test_filter`, `shard_count`, and the failures (a failing case, an app that exits, a suite that registers nothing) are as on the other platforms. The test is `macos`-only (`target_compatible_with`), scheduled with two cores (`cpus` of the runner), and runs outside Bazel's sandbox and never remotely.
+
+The macro is Tier 1. Tier 2 is `flutter_integration_bootstrap`, `flutter_application_variant`, `flutter_ios_app`, `flutter_ios_app_integration_test` and `flutter_ios_simulator_runner`, which the macro composes as `__<name>_bootstrap`, `__<name>_program` and `__<name>_app`.
 
 ### flutter_android_build
 

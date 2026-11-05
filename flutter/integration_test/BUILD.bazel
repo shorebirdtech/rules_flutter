@@ -1,10 +1,17 @@
-load("//flutter/private:flutter_integration_test.bzl", "flutter_chrome_runner", "flutter_desktop_runner")
+load("//flutter/private:flutter_integration_test.bzl", "flutter_chrome_runner", "flutter_desktop_runner", "flutter_ios_simulator_runner")
 
 # The runners an integration test rule defaults to, one per family of device.
 
 # The host's own desktop: macOS, Linux or Windows.
 flutter_desktop_runner(
     name = "desktop",
+    visibility = ["//visibility:public"],
+)
+
+# A simulator the test makes for itself: an iPhone 16 on the newest iOS runtime
+# installed.
+flutter_ios_simulator_runner(
+    name = "ios_simulator",
     visibility = ["//visibility:public"],
 )
 

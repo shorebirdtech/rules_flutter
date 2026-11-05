@@ -12,6 +12,7 @@ import 'package:flutter_bazel_dev_tool/device.dart';
 import 'package:flutter_bazel_dev_tool/integration/integration_runner_config.dart';
 import 'package:flutter_bazel_dev_tool/integration/integration_test_run.dart';
 import 'package:flutter_bazel_dev_tool/integration/suite_connectors.dart';
+import 'package:flutter_bazel_dev_tool/integration/test_simulator.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 import 'package:vm_service/vm_service_io.dart';
@@ -25,7 +26,11 @@ class _FakeDevice extends Device {
 
   final Future<AppInstance> Function() _launch;
   final stopped = <AppInstance>[];
+  var abandoned = 0;
   String? exitedBecause;
+
+  @override
+  Future<void> abandonLaunch() async => abandoned++;
 
   @override
   String get name => 'fake';
@@ -64,6 +69,7 @@ void main() {
     _FakeDevice device, {
     Map<String, String> environment = const {},
     Future<Future<void> Function()> Function()? prepare,
+    Stream<void> terminated = const Stream.empty(),
   }) => runIntegrationTest(
     _config,
     resolve: (path) => '/runfiles/$path',
@@ -75,6 +81,7 @@ void main() {
     environment: {'TEST_TIMEOUT': '60', ...environment},
     out: out,
     err: err,
+    terminated: terminated,
   );
 
   AppInstance appRunning() =>
@@ -263,7 +270,7 @@ void main() {
       os: 'macos',
       resolve: (path) => runfilesAdb,
       environment: environment,
-      runAdb: (executable, arguments) async {
+      run: (executable, arguments) async {
         asked?.add([executable, ...arguments]);
         return ProcessResult(0, 0, devices, '');
       },
@@ -375,5 +382,161 @@ void main() {
       expect(lockFile.existsSync(), isTrue);
       await give();
     });
+  });
+
+  group('the device of an iOS simulator config', () {
+    final iosConfig = IntegrationRunnerConfig(
+      family: IntegrationFamily.iosSimulator,
+      appArtifacts: const ['_main/app.ipa'],
+      launcher: const {'deviceType': 'iPhone 16', 'runtime': ''},
+      testDisplayName: '//pkg:ios_test',
+      env: const {},
+    );
+
+    test('is a simulator that exists only once the host has prepared, made '
+        'for this test and gone when the run gives it back', () async {
+      final asked = <List<String>>[];
+      final choice = await chooseDevice(
+        iosConfig,
+        os: 'macos',
+        resolve: (path) => path,
+        processId: 4242,
+        run: (executable, arguments) async {
+          asked.add([executable, ...arguments]);
+          return ProcessResult(
+            0,
+            0,
+            arguments[1] == 'create' ? 'UDID-1\n' : '',
+            '',
+          );
+        },
+      );
+      final device = choice.device as TestSimulatorDevice;
+      expect(asked, isEmpty, reason: 'nothing is made before the run is');
+      expect(() => device.udid, throwsStateError);
+
+      final give = await choice.prepare();
+
+      expect(device.udid, 'UDID-1');
+      expect(asked, [
+        [
+          'xcrun',
+          'simctl',
+          'create',
+          'rules_flutter-pkg_ios_test-4242',
+          'iPhone 16',
+        ],
+      ]);
+      await give();
+      expect(asked.skip(1).map((c) => c.skip(1).take(2).join(' ')), [
+        'simctl shutdown',
+        'simctl delete',
+      ]);
+    });
+
+    test('is refused off macOS, which is where the simulators are', () async {
+      await expectLater(
+        chooseDevice(iosConfig, os: 'linux', resolve: (p) => p),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            allOf(contains('macOS'), contains('linux')),
+          ),
+        ),
+      );
+    });
+
+    test('a config that names no device type is refused, naming the key', () {
+      final unnamed = IntegrationRunnerConfig(
+        family: IntegrationFamily.iosSimulator,
+        appArtifacts: const ['_main/app.ipa'],
+        launcher: const {'runtime': ''},
+        testDisplayName: '//pkg:ios_test',
+        env: const {},
+      );
+
+      expect(
+        chooseDevice(unnamed, os: 'macos', resolve: (p) => p),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            contains('"launcher.deviceType"'),
+          ),
+        ),
+      );
+    });
+  });
+
+  group('a run that is ended from outside', () {
+    test('is stopped when Bazel terminates the test: the app is stopped and '
+        'what the host gave is given back, so a timed-out run leaves nothing '
+        'behind', () async {
+      final launching = Completer<void>();
+      final device = _FakeDevice(() {
+        launching.complete();
+        return Completer<AppInstance>().future;
+      });
+      var given = false;
+      final terminate = StreamController<void>();
+
+      final result = run(
+        device,
+        prepare: () async =>
+            () async => given = true,
+        terminated: terminate.stream,
+      );
+      await launching.future;
+      terminate.add(null);
+
+      expect(await result, 143);
+      expect(given, isTrue);
+      expect(device.abandoned, 1, reason: 'the launch in flight is undone');
+      expect(err.toString(), contains('terminated'));
+    });
+
+    test(
+      'is stopped once, though the run it interrupted finishes after',
+      () async {
+        final launched = Completer<AppInstance>();
+        final started = Completer<void>();
+        final device = _FakeDevice(() {
+          started.complete();
+          return launched.future;
+        });
+        var gave = 0;
+        final terminate = StreamController<void>();
+
+        final result = run(
+          device,
+          prepare: () async =>
+              () async => gave++,
+          terminated: terminate.stream,
+        );
+        await started.future;
+        terminate.add(null);
+        expect(await result, 143);
+
+        launched.complete(appRunning());
+        await pumpEventQueue();
+
+        expect(gave, 1);
+      },
+    );
+  });
+
+  test('a host that cannot give back what it gave fails the run, saying '
+      'what is left behind', () async {
+    final device = _FakeDevice(() async => throw StateError('launch failed'));
+
+    final result = await run(
+      device,
+      prepare: () async =>
+          () async => throw StateError('the simulator X was not removed'),
+    );
+
+    expect(result, 1);
+    expect(err.toString(), contains('the simulator X was not removed'));
   });
 }

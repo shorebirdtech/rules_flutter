@@ -23,6 +23,7 @@ import 'android_serial.dart';
 import 'device_lock.dart';
 import 'integration_runner_config.dart';
 import 'suite_connectors.dart';
+import 'test_simulator.dart';
 
 /// What the run needs of its host beyond the device: the locks and the
 /// desktop session the device's family asks for, taken before the app is
@@ -50,9 +51,10 @@ class DeviceChoice {
 ///
 /// [resolve] turns a runfiles path into a file, for what the runner's config
 /// names (the browser, the `adb`). [environment] is the test's environment,
-/// which names the Android device (`ANDROID_SERIAL`). [runAdb] runs the `adb`
-/// that lists the attached devices, and [lockDirectory] is where a device's
-/// lock is kept, unless a test of this says otherwise.
+/// which names the Android device (`ANDROID_SERIAL`). [run] runs the host's own
+/// tools (`adb` to list the attached devices, `simctl` to make a simulator),
+/// [lockDirectory] is where a device's lock is kept, and [processId] is the run
+/// a simulator is named for, unless a test of this says otherwise.
 ///
 /// Throws a [StateError] for a device no runner has been written for, or one
 /// the host does not have: the run fails, saying so, rather than falling back
@@ -62,8 +64,9 @@ Future<DeviceChoice> chooseDevice(
   required String os,
   required String Function(String runfilesPath) resolve,
   Map<String, String> environment = const {},
-  ProcessRunSync? runAdb,
+  ProcessRunSync? run,
   Directory? lockDirectory,
+  int? processId,
   void Function(String message)? log,
 }) async {
   switch (config.family) {
@@ -90,7 +93,7 @@ Future<DeviceChoice> chooseDevice(
       final serial = await chooseAndroidSerial(
         adb: adb,
         requested: environment['ANDROID_SERIAL'],
-        run: runAdb ?? Process.run,
+        run: run ?? Process.run,
       );
       return DeviceChoice(
         AndroidDevice(
@@ -104,10 +107,25 @@ Future<DeviceChoice> chooseDevice(
         () => _hold('android-$serial', lockDirectory, log),
         vmServiceConnector(),
       );
+    case IntegrationFamily.iosSimulator when os == 'macos':
+      final device = TestSimulatorDevice();
+      final deviceType = config.simulatorDeviceType;
+      final runtime = config.simulatorRuntime;
+      return DeviceChoice(device, () async {
+        // Made when the run takes what it needs of the host, not before: a run
+        // that is refused earlier has made nothing to remove.
+        final simulator = await TestSimulator.create(
+          name: testSimulatorName(config.testDisplayName, processId ?? pid),
+          deviceType: deviceType,
+          runtime: runtime,
+          run: run ?? Process.run,
+        );
+        device.simulator = simulator;
+        return simulator.remove;
+      }, vmServiceConnector());
     case IntegrationFamily.iosSimulator:
       throw StateError(
-        'integration tests on "${config.family.key}" devices are not '
-        'supported by this runner.',
+        'iOS simulators run on macOS; this host is $os, which has none.',
       );
   }
 }
@@ -182,7 +200,10 @@ Future<Future<void> Function()> _prepareMacOs(
 ///
 /// [resolve] turns a runfiles path into a file. [environment] is the test's
 /// environment: Bazel's variables for the selection, the timeout and the
-/// report.
+/// report. [terminated] has an event when the test is told to end (Bazel
+/// terminates a test that runs out of time): the run is undone as it ends any
+/// other way, the app stopped and what the host gave given back, and ends with
+/// 143. By default that is SIGTERM and SIGINT.
 Future<int> runIntegrationTest(
   IntegrationRunnerConfig config, {
   required String Function(String runfilesPath) resolve,
@@ -190,6 +211,7 @@ Future<int> runIntegrationTest(
   required Map<String, String> environment,
   StringSink? out,
   StringSink? err,
+  Stream<void>? terminated,
 }) async {
   final sink = out ?? stdout;
   final errors = err ?? stderr;
@@ -205,32 +227,134 @@ Future<int> runIntegrationTest(
   final shardStatus = environment['TEST_SHARD_STATUS_FILE'];
   if (shardStatus != null) File(shardStatus).writeAsStringSync('');
 
+  final teardown = _Teardown(choice.device, errors);
+  final ended = Completer<int>();
+  final signals = (terminated ?? _terminationSignals()).listen((_) {
+    if (ended.isCompleted) return;
+    errors.writeln('integration_test: the test was terminated, so it ends.');
+    // The status is the answer once the run is undone, whichever of this and
+    // the run's own end undoes it first.
+    ended.complete(143);
+    unawaited(teardown.run());
+  });
+  try {
+    final result = await Future.any([
+      _drive(
+        config,
+        resolve: resolve,
+        choice: choice,
+        environment: environment,
+        selection: selection,
+        out: sink,
+        err: errors,
+        teardown: teardown,
+      ),
+      ended.future,
+    ]);
+    if (ended.isCompleted) await teardown.done;
+    return result == 0 && teardown.failed ? 1 : result;
+  } finally {
+    await signals.cancel();
+  }
+}
+
+/// SIGTERM and SIGINT, where the platform has them.
+Stream<void> _terminationSignals() {
+  final subscriptions = <StreamSubscription<ProcessSignal>>[];
+  late final StreamController<void> controller;
+  controller = StreamController<void>(
+    onListen: () {
+      if (Platform.isWindows) return;
+      for (final signal in [ProcessSignal.sigterm, ProcessSignal.sigint]) {
+        subscriptions.add(signal.watch().listen(controller.add));
+      }
+    },
+    onCancel: () => Future.wait(subscriptions.map((s) => s.cancel())),
+  );
+  return controller.stream;
+}
+
+/// What a run has to undo as it ends: the transport and the app it started
+/// and what the host gave it. Once, however many things end the run.
+class _Teardown {
+  _Teardown(this._device, this._errors);
+
+  final Device _device;
+  final StringSink _errors;
+
+  SuiteTransport? transport;
+  AppInstance? instance;
+  Future<void> Function()? give;
+
+  /// Whether something could not be undone, which fails the run: a simulator
+  /// that was left behind is not a pass.
+  bool failed = false;
+
+  Future<void>? _running;
+
+  /// Completes when [run] has.
+  Future<void> get done => _running ?? Future.value();
+
+  Future<void> run() => _running ??= _undo();
+
+  Future<void> _undo() async {
+    try {
+      if (transport != null) await transport!.abandon('the run is over');
+      if (instance != null) {
+        await _device.stop(instance!);
+      } else {
+        await _device.abandonLaunch();
+      }
+    } on Object catch (e) {
+      failed = true;
+      _errors.writeln('integration_test: stopping the app failed: $e');
+    }
+    final giveBack = give;
+    if (giveBack != null) {
+      try {
+        await giveBack();
+      } on StateError catch (e) {
+        failed = true;
+        _errors.writeln('integration_test: ${e.message}');
+      }
+    }
+  }
+}
+
+Future<int> _drive(
+  IntegrationRunnerConfig config, {
+  required String Function(String runfilesPath) resolve,
+  required DeviceChoice choice,
+  required Map<String, String> environment,
+  required TestSelection selection,
+  required StringSink out,
+  required StringSink err,
+  required _Teardown teardown,
+}) async {
   final bazelTimeout = environment['TEST_TIMEOUT'];
   final ceiling = testCeiling(bazelTimeout);
   final device = choice.device;
 
-  Future<void> Function()? give;
   try {
-    give = await choice.prepare();
+    teardown.give = await choice.prepare();
   } on StateError catch (e) {
-    errors.writeln('integration_test: ${e.message}');
+    err.writeln('integration_test: ${e.message}');
     return 1;
   }
 
-  AppInstance? instance;
-  SuiteTransport? transport;
   try {
+    final AppInstance instance;
     try {
       await device.preflight();
       final artifact = device.pickArtifact([
         for (final path in config.appArtifacts) resolve(path),
       ]);
-      instance = await device.launch(
+      instance = teardown.instance = await device.launch(
         artifact,
-        onLog: (line) => errors.writeln('[app] ${line.text}'),
+        onLog: (line) => err.writeln('[app] ${line.text}'),
       );
     } on Object catch (e) {
-      errors.writeln('integration_test: launching the app failed: $e');
+      err.writeln('integration_test: launching the app failed: $e');
       return 1;
     }
 
@@ -238,10 +362,10 @@ Future<int> runIntegrationTest(
     try {
       connected = await choice.connect(device, instance, ceiling: ceiling);
     } on SuiteUnreachable catch (e) {
-      errors.writeln('integration_test: ${e.message}');
+      err.writeln('integration_test: ${e.message}');
       return 1;
     }
-    transport = connected;
+    teardown.transport = connected;
 
     final outcome =
         await RemoteSuiteDriver(
@@ -250,18 +374,16 @@ Future<int> runIntegrationTest(
           timeout: suiteTimeout(bazelTimeout),
           logPrefix: 'integration_test',
           failOnNoTests: true,
-          out: sink,
-          err: errors,
+          out: out,
+          err: err,
         ).run(
           selection: selection,
           xmlOutput: environment['XML_OUTPUT_FILE'],
           ceiling: ceiling,
         );
-    sink.writeln(outcome.summary());
+    out.writeln(outcome.summary());
     return outcome.exitCode;
   } finally {
-    if (transport != null) await transport.abandon('the run is over');
-    if (instance != null) await device.stop(instance);
-    await give();
+    await teardown.run();
   }
 }

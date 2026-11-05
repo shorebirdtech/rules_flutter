@@ -213,4 +213,79 @@ void main() {
       });
     }
   });
+
+  group('the simulator of an iOS test', () {
+    Map<String, Object?> iosConfig(Map<String, Object?> launcher) =>
+        _valid()..addAll({'family': 'ios_simulator', 'launcher': launcher});
+
+    test('is the device type and the runtime the runner named', () {
+      final config = IntegrationRunnerConfig.parse(
+        json.encode(
+          iosConfig({'deviceType': 'iPhone 16', 'runtime': 'iOS 27.2'}),
+        ),
+      );
+
+      expect(config.simulatorDeviceType, 'iPhone 16');
+      expect(config.simulatorRuntime, 'iOS 27.2');
+    });
+
+    test('may name no runtime, which is the newest installed', () {
+      final config = IntegrationRunnerConfig.parse(
+        json.encode(iosConfig({'deviceType': 'iPhone 16', 'runtime': ''})),
+      );
+
+      expect(config.simulatorRuntime, '');
+    });
+
+    for (final launcher in <Map<String, Object?>>[
+      {'runtime': ''},
+      {'deviceType': '', 'runtime': ''},
+      {'deviceType': 3, 'runtime': ''},
+    ]) {
+      test(
+        'a launcher of ${json.encode(launcher)} names launcher.deviceType',
+        () {
+          final config = IntegrationRunnerConfig.parse(
+            json.encode(iosConfig(launcher)),
+          );
+
+          expect(
+            () => config.simulatorDeviceType,
+            throwsA(
+              isA<FormatException>().having(
+                (e) => e.message,
+                'message',
+                allOf(
+                  contains('"launcher.deviceType"'),
+                  contains('non-empty string'),
+                ),
+              ),
+            ),
+          );
+        },
+      );
+    }
+
+    for (final launcher in <Map<String, Object?>>[
+      {'deviceType': 'iPhone 16'},
+      {'deviceType': 'iPhone 16', 'runtime': 9},
+    ]) {
+      test('a launcher of ${json.encode(launcher)} names launcher.runtime', () {
+        final config = IntegrationRunnerConfig.parse(
+          json.encode(iosConfig(launcher)),
+        );
+
+        expect(
+          () => config.simulatorRuntime,
+          throwsA(
+            isA<FormatException>().having(
+              (e) => e.message,
+              'message',
+              allOf(contains('"launcher.runtime"'), contains('string')),
+            ),
+          ),
+        );
+      });
+    }
+  });
 }

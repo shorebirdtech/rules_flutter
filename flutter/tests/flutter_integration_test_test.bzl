@@ -7,7 +7,7 @@ load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("//flutter:providers.bzl", "FlutterIntegrationRunnerInfo")
 load("//flutter/private:flutter_integration_bootstrap.bzl", "make_integration_bootstrap_content")
-load("//flutter/private:flutter_integration_test.bzl", "android_dbg_transition")
+load("//flutter/private:flutter_integration_test.bzl", "android_dbg_transition", "ios_simulator_dbg_settings")
 load(":action_content.bzl", "written_json", "written_text")
 
 _FIXTURE = "//flutter/tests/integration_fixture:"
@@ -354,6 +354,81 @@ def android_probe_targets(name, abi):
         tags = ["manual"],
     )
 
+# -- iOS simulator -------------------------------------------------------------
+
+def _ios_runner_impl(ctx):
+    """The iOS runner tells the host runner which simulator to make, and asks for the cores one takes."""
+    env = analysistest.begin(ctx)
+    runner = analysistest.target_under_test(env)[FlutterIntegrationRunnerInfo]
+    asserts.equals(env, "ios_simulator", runner.family)
+    asserts.equals(env, {"deviceType": "iPhone 16", "runtime": ""}, {"deviceType": runner.launcher_config.deviceType, "runtime": runner.launcher_config.runtime})
+    asserts.equals(env, "1", runner.execution_requirements.get("no-remote"))
+    asserts.equals(env, "1", runner.execution_requirements.get("no-sandbox"))
+    asserts.true(env, "cpu:2" in runner.execution_requirements, "a booting simulator is scheduled with its cores: %s" % runner.execution_requirements)
+    return analysistest.end(env)
+
+_ios_runner_test = analysistest.make(_ios_runner_impl)
+
+def _ios_named_runner_impl(ctx):
+    """An iOS runner passes on the device type and runtime it is given."""
+    env = analysistest.begin(ctx)
+    runner = analysistest.target_under_test(env)[FlutterIntegrationRunnerInfo]
+    asserts.equals(env, "iPad (10th generation)", runner.launcher_config.deviceType)
+    asserts.equals(env, "com.apple.CoreSimulator.SimRuntime.iOS-18-0", runner.launcher_config.runtime)
+    asserts.true(env, "cpu:3" in runner.execution_requirements)
+    return analysistest.end(env)
+
+_ios_named_runner_test = analysistest.make(_ios_named_runner_impl)
+
+def _ios_rule_impl(ctx):
+    """The iOS test rule tells the runner which simulator, takes DEVELOPER_DIR from the invoking shell, and places the test on this Mac."""
+    env = analysistest.begin(ctx)
+    target = analysistest.target_under_test(env)
+    config = written_json(env, ".integration_config.json")
+    if config == None:
+        return analysistest.end(env)
+    asserts.equals(env, "ios_simulator", config["family"])
+    asserts.equals(env, {"deviceType": "iPhone 16", "runtime": ""}, config["launcher"])
+    asserts.equals(env, {}, config["env"])
+    asserts.true(env, len(config["appArtifacts"]) > 0)
+    environment = target[RunEnvironmentInfo]
+    asserts.equals(env, ["DEVELOPER_DIR"], environment.inherited_environment, "the Xcode the invoking shell selected reaches `xcrun`")
+    requirements = target[testing.ExecutionInfo].requirements
+    asserts.equals(env, "1", requirements.get("no-remote"))
+    asserts.equals(env, "1", requirements.get("no-sandbox"))
+    asserts.true(env, "cpu:2" in requirements, "the runner's cores reach the test: %s" % requirements)
+    return analysistest.end(env)
+
+_ios_rule_test = analysistest.make(_ios_rule_impl)
+
+def _ios_env_impl(ctx):
+    """An iOS test given an `env` fails analysis, saying an app on a simulator takes none."""
+    env = analysistest.begin(ctx)
+    asserts.expect_failure(env, "an app on an iOS simulator cannot receive an environment")
+    return analysistest.end(env)
+
+_ios_env_test = analysistest.make(_ios_env_impl, expect_failure = True)
+
+def _ios_wrong_family_impl(ctx):
+    """An iOS test takes only a simulator runner."""
+    env = analysistest.begin(ctx)
+    asserts.expect_failure(env, "is for desktop devices, and this rule runs the app on a ios_simulator one")
+    return analysistest.end(env)
+
+_ios_wrong_family_test = analysistest.make(_ios_wrong_family_impl, expect_failure = True)
+
+def _ios_settings_impl(ctx):
+    """An iOS test's app is built in debug mode, for the simulator CPU the test names, whatever the command line says."""
+    env = unittest.begin(ctx)
+    for cpu in ["sim_arm64", "x86_64"]:
+        settings = ios_simulator_dbg_settings(cpu)
+        asserts.equals(env, "dbg", settings["//command_line_option:compilation_mode"])
+        asserts.equals(env, False, settings[str(Label("//flutter:profile"))])
+        asserts.equals(env, [cpu], settings["//command_line_option:ios_multi_cpus"])
+    return unittest.end(env)
+
+_ios_settings_test = unittest.make(_ios_settings_impl)
+
 # -- The variant's package check ---------------------------------------------
 
 def _missing_package_impl(ctx):
@@ -400,6 +475,12 @@ def flutter_integration_test_test_suite(name):
             target_under_test = _FIXTURE + "built_for_" + abi.replace("-", "_"),
             abi = abi,
         )
+    _ios_runner_test(name = name + "_ios_runner", target_under_test = _FIXTURE + "ios_runner")
+    _ios_named_runner_test(name = name + "_ios_named_runner", target_under_test = _FIXTURE + "ios_named_runner")
+    _ios_rule_test(name = name + "_ios_rule", target_under_test = _FIXTURE + "ios_test")
+    _ios_env_test(name = name + "_ios_env", target_under_test = _FIXTURE + "ios_test_with_env")
+    _ios_wrong_family_test(name = name + "_ios_wrong_family", target_under_test = _FIXTURE + "ios_test_on_a_desktop_runner")
+    _ios_settings_test(name = name + "_ios_settings")
     _relative_test(name = name + "_relative", target_under_test = _FIXTURE + "bootstrap_relative")
     _bootstrap_missing_package_test(name = name + "_bootstrap_missing_package", target_under_test = _FIXTURE + "bootstrap_missing_a_package")
     _web_unchecked_test(name = name + "_web_unchecked", target_under_test = _FIXTURE + "web_unchecked")
@@ -421,6 +502,12 @@ def flutter_integration_test_test_suite(name):
             ":" + name + "_android_wrong_family",
             ":" + name + "_android_transition_arm64_v8a",
             ":" + name + "_android_transition_x86_64",
+            ":" + name + "_ios_runner",
+            ":" + name + "_ios_named_runner",
+            ":" + name + "_ios_rule",
+            ":" + name + "_ios_env",
+            ":" + name + "_ios_wrong_family",
+            ":" + name + "_ios_settings",
             ":" + name + "_relative",
             ":" + name + "_bootstrap_missing_package",
             ":" + name + "_web_rule",
