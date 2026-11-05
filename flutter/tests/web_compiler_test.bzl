@@ -1,9 +1,9 @@
 """What a web bundle's compilers share, and what each gets its own of.
 
-A web bundle builds its program once per compiler, as `@rules_dart//dart:web_compiler`
-`wasm` and `js`. A configured target carries the setting, so a target reached under
+A web bundle builds its program once per compiler, for rules_dart's `wasm` and `js`
+web platforms. A configured target carries its platform, so a target reached under
 both is analysed twice and builds its outputs twice, unless its rule resets the
-setting on the way in. These tests look at where a generated file lands, which is
+platform on the way in. These tests look at where a generated file lands, which is
 the configuration it was built in: the same root as a build with no web compiler
 means built once, and a different one means built per compiler.
 
@@ -23,23 +23,24 @@ Built per compiler, which makes the check above mean something:
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("@rules_dart//dart:providers.bzl", "DartInfo")
-load("//flutter/private:flutter_web_branch.bzl", "WEB_COMPILER_SETTING")
+load("@rules_dart//dart:utils.bzl", "WEB_PLATFORM_SETTINGS", "web_platform_settings")
+load("//flutter:web.bzl", "flutter_web_bundle")
 
 _RootsInfo = provider(
     doc = "Generated file short path to output root, per compiler (`none` for a plain build).",
     fields = ["by_compiler"],
 )
 
-def _both_compilers_impl(_settings, _attr):
+def _both_compilers_impl(settings, _attr):
     return {
-        "js": {WEB_COMPILER_SETTING: "js"},
-        "wasm": {WEB_COMPILER_SETTING: "wasm"},
+        compiler: web_platform_settings(settings, Label("@rules_dart//dart/platforms:" + compiler))
+        for compiler in ["js", "wasm"]
     }
 
 _both_compilers = transition(
     implementation = _both_compilers_impl,
-    inputs = [],
-    outputs = [WEB_COMPILER_SETTING],
+    inputs = WEB_PLATFORM_SETTINGS,
+    outputs = WEB_PLATFORM_SETTINGS,
 )
 
 def _roots(target):
@@ -107,6 +108,15 @@ def _forked_test_impl(ctx):
 # The control: a target that is not reset is built once per compiler.
 _forked_test = analysistest.make(_forked_test_impl)
 
+def _wrong_platform_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    asserts.expect_failure(env, "`wasm_platform` is @@rules_dart+//dart/platforms:js, which must carry @rules_dart//dart/constraints:wasm; its web compiler is js")
+    return analysistest.end(env)
+
+# A bundle's `wasm_platform` that is not a WebAssembly platform is refused,
+# rather than dart2wasm compiling the program's JavaScript variants.
+_wrong_platform_test = analysistest.make(_wrong_platform_test_impl, expect_failure = True)
+
 def web_compiler_test_suite(name):
     """Instantiate the web compiler tests.
 
@@ -137,4 +147,17 @@ def web_compiler_test_suite(name):
             target_under_test = ":%s_%s_roots" % (name, case),
         )
         tests.append(":" + test)
+
+    flutter_web_bundle(
+        name = name + "_wrong_platform_bundle",
+        package_name = "wrong_platform_fixture",
+        main = "lib/language_version_main.dart",
+        wasm_platform = "@rules_dart//dart/platforms:js",
+        tags = ["manual"],
+    )
+    _wrong_platform_test(
+        name = name + "_wrong_platform",
+        target_under_test = ":%s_wrong_platform_bundle" % name,
+    )
+    tests.append(":%s_wrong_platform" % name)
     native.test_suite(name = name, tests = tests)

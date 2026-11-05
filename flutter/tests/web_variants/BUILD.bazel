@@ -1,17 +1,17 @@
 load("//flutter:defs.bzl", "flutter_library")
 
 # A library whose dependency is one of two `web_variant` packages by web
-# compiler, for the bundle tests in `web_test.bzl`. The `select()` is here and
-# not on the bundle because a `select()` resolves in its own target's
-# configuration, where the bundle's compiler is not yet set.
+# platform, for the bundle tests in `web_test.bzl`: the `js` one for dart2js and
+# DDC, the `wasm` one for dart2wasm and the VM. The `select()` is here and not
+# on the bundle because a `select()` resolves in its own target's
+# configuration, where the bundle's web platform is not yet set.
 flutter_library(
     name = "select",
     package_name = "web_variant_select",
     srcs = ["lib/web_variant_select.dart"],
     visibility = ["//flutter/tests:__pkg__"],
     deps = select({
-        "@rules_dart//dart:web_compiler_js": ["//flutter/tests/web_variants/js:variant"],
-        "@rules_dart//dart:web_compiler_none": ["//flutter/tests/web_variants/wasm:variant"],
-        "@rules_dart//dart:web_compiler_wasm": ["//flutter/tests/web_variants/wasm:variant"],
+        "@rules_dart//dart/constraints:js": ["//flutter/tests/web_variants/js:variant"],
+        "//conditions:default": ["//flutter/tests/web_variants/wasm:variant"],
     }),
 )

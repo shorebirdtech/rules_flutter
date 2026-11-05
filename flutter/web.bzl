@@ -75,11 +75,12 @@ def flutter_web_bundle(name, main, package_name, deps = [], srcs = [], unchecked
     flutter_web_app which auto-discovers runner files.
 
     The bundle compiles its program once for each compiler it ships, and the
-    program may differ between them. A library in `deps` picks a variant with
-    a `select()` on `@rules_dart//dart:web_compiler_wasm` or
-    `@rules_dart//dart:web_compiler_js` (dart2js, and DDC in a `-c dbg` build)
-    in its own `deps`; a `select()` in the bundle's `deps` would see no
-    compiler. See "Per-compiler code" in `@rules_dart`'s README. Everything the
+    program may differ between them: each builds for its own web platform
+    (`wasm_platform`, `js_platform`). A library in `deps` picks a variant with
+    a `select()` on `@rules_dart//dart/constraints:wasm` or
+    `@rules_dart//dart/constraints:js` (dart2js, and DDC in a `-c dbg` build)
+    in its own `deps`; a `select()` in the bundle's `deps` would see no web
+    platform. See "Per-compiler code" in this repository's README. Everything the
     bundle holds once (the plugin registrant, assets and shaders) is read from
     the build it describes: the dart2wasm one for `compiler = "dart2wasm"`.
 

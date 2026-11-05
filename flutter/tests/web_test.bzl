@@ -3,9 +3,10 @@
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
+load("@rules_dart//dart:utils.bzl", "web_platform_config_settings")
 load("//flutter:web.bzl", "flutter_web_bundle")
 load("//flutter/private:flutter_native_library.bzl", "flutter_native_library")
-load("//flutter/private:flutter_web_branch.bzl", "WEB_COMPILER_SETTING", "web_branches_target", "web_compile_branches")
+load("//flutter/private:flutter_web_branch.bzl", "web_branches_target", "web_compile_branches")
 load(
     "//flutter/private:validation.bzl",
     "escape_html",
@@ -1834,9 +1835,11 @@ def _branch_config_test_for(compiler):
             "packages": attr.string_list(),
             "roots": attr.string_dict(),
         },
-        config_settings = {
+        # The staging target alone, as the bundle's split builds it: for the
+        # web platform, so rules_dart's resets return what is built once (the
+        # material icons, the pub packages) to the host's.
+        config_settings = web_platform_config_settings(Label("@rules_dart//dart/platforms:" + compiler)) | {
             "//command_line_option:compilation_mode": "opt",
-            WEB_COMPILER_SETTING: compiler,
         },
     )
 

@@ -2,17 +2,17 @@
 
 A web bundle compiles one program with up to three compilers, and the program
 may differ between them: a library's `deps` can `select()` on
-`@rules_dart//dart:web_compiler`, so a dependency that holds an `Int64List`
-for dart2wasm can be a `List<int>` for dart2js. The bundle therefore reads
-each compiler's inputs from a *branch* of its dependencies, built with that
-compiler's value of the setting:
+`@rules_dart//dart/constraints:wasm` or `:js`, so a dependency that holds an
+`Int64List` for dart2wasm can be a `List<int>` for dart2js. The bundle
+therefore reads each compiler's inputs from a *branch* of its dependencies,
+built for that compiler's web platform:
 
-    branch     compiles                              web_compiler
-    dart2wasm  the WebAssembly build                 wasm
-    dart2js    the JavaScript fallback               js
-    ddc        the dev loop (`flutter_bazel run`)    js
+    branch     compiles                              platform
+    dart2wasm  the WebAssembly build                 wasm_platform
+    dart2js    the JavaScript fallback               js_platform
+    ddc        the dev loop (`flutter_bazel run`)    js_platform
 
-Two branches share a setting value, so a debug bundle has at most two
+Two branches share a platform, so a debug bundle has at most two
 configurations of its program: DDC compiles what dart2js does.
 
 Each branch is its own configured target of `flutter_web_branch`, because the
@@ -26,15 +26,16 @@ load("@rules_dart//dart:providers.bzl", "DartInfo")
 load(
     "@rules_dart//dart:utils.bzl",
     "COPY_TO_DIRECTORY_TOOLCHAINS",
+    "WEB_PLATFORM_SETTINGS",
     "collect_packages",
     "collect_transitive_srcs",
     "derive_lib_root",
+    "web_platform_settings",
 )
 load("//flutter/private:app_entrypoint.bzl", "compile_package_config", "synthesize_app_package")
 
-WEB_COMPILER_SETTING = str(Label("@rules_dart//dart:web_compiler"))
-
-# The value of `@rules_dart//dart:web_compiler` each branch is built under.
+# The web runtime each branch builds for, which keys the split: `wasm` is built
+# for the bundle's `wasm_platform`, `js` for its `js_platform`.
 BRANCH_COMPILER = {
     "dart2wasm": "wasm",
     "dart2js": "js",
@@ -78,7 +79,7 @@ def web_compile_branches(compiler, js_fallback, debug):
     return branches
 
 def branch_settings(branches):
-    """The distinct `web_compiler` values of some branches, in order.
+    """The distinct web runtimes of some branches, in order.
 
     Args:
         branches: Branch names, from `web_compile_branches`.
@@ -98,19 +99,37 @@ def _branches_impl(settings, attr):
     # `profile` rules the dev loop out as `web_build_mode` does.
     # The mode arrives as a `CompilationMode`, which compares equal to no string.
     debug = str(settings["//command_line_option:compilation_mode"]) == "dbg" and not attr.profile
+    platforms = {"js": attr.js_platform, "wasm": attr.wasm_platform}
     return {
-        setting: {WEB_COMPILER_SETTING: setting}
+        setting: web_platform_settings(settings, platforms[setting])
         for setting in branch_settings(web_compile_branches(attr.compiler, attr.js_fallback, debug))
     }
 
-# One configuration of a bundle's program per `web_compiler` value its
-# compilers need, keyed by that value (`ctx.split_attr.<attr>["wasm"]`). A
-# dart2js bundle in release builds its program once.
+# One configuration of a bundle's program per web platform its compilers need,
+# keyed by runtime (`ctx.split_attr.<attr>["wasm"]`). A dart2js bundle in
+# release builds its program once. Through rules_dart's `web_platform_settings`,
+# so its resets can rejoin the configuration the build had before.
 web_branches = transition(
     implementation = _branches_impl,
-    inputs = ["//command_line_option:compilation_mode"],
-    outputs = [WEB_COMPILER_SETTING],
+    inputs = ["//command_line_option:compilation_mode"] + WEB_PLATFORM_SETTINGS,
+    outputs = WEB_PLATFORM_SETTINGS,
 )
+
+# The platforms a bundle builds its program for, by runtime.
+WEB_PLATFORM_ATTRS = {
+    "js_platform": attr.label(
+        doc = "The platform the dart2js and DDC builds of the program are built for. " +
+              "It must carry `@rules_dart//dart/constraints:js`. Defaults to rules_dart's, " +
+              "which carries only that.",
+        default = "@rules_dart//dart/platforms:js",
+    ),
+    "wasm_platform": attr.label(
+        doc = "The platform the dart2wasm build of the program is built for. It must " +
+              "carry `@rules_dart//dart/constraints:wasm`. Defaults to rules_dart's, " +
+              "which carries only that.",
+        default = "@rules_dart//dart/platforms:wasm",
+    ),
+}
 
 FlutterWebBranchInfo = provider(
     doc = "What one compiler of a web bundle reads, staged for it.",
@@ -119,8 +138,15 @@ FlutterWebBranchInfo = provider(
         "packages": "list[DartPackageInfo]: as declared, the app's own package last.",
         "config_file": "File: the package config, after co-location.",
         "compile_srcs": "list[File]: the sources the package config reaches, after co-location.",
+        "runtime": "string: the web runtime its target platform carries: `js`, `wasm` or `none`.",
     },
 )
+
+def _runtime(ctx):
+    for runtime in ["js", "wasm"]:
+        if ctx.target_platform_has_constraint(getattr(ctx.attr, "_" + runtime)[platform_common.ConstraintValueInfo]):
+            return runtime
+    return "none"
 
 def _flutter_web_branch_impl(ctx):
     lib_root = derive_lib_root(ctx.label.workspace_root, ctx.label.package)
@@ -140,6 +166,7 @@ def _flutter_web_branch_impl(ctx):
             packages = packages,
             config_file = staged.config_file,
             compile_srcs = staged.srcs,
+            runtime = _runtime(ctx),
         ),
         DefaultInfo(files = depset([staged.config_file] + [f for f in staged.srcs if not f.is_source])),
     ]
@@ -156,6 +183,8 @@ flutter_web_branch = rule(
             doc = "The bundle this stages, for the messages that name it.",
             mandatory = True,
         ),
+        "_js": attr.label(default = "@rules_dart//dart/constraints:js"),
+        "_wasm": attr.label(default = "@rules_dart//dart/constraints:wasm"),
     },
     toolchains = COPY_TO_DIRECTORY_TOOLCHAINS,
     doc = """One compiler's view of a `flutter_web_bundle`'s program.

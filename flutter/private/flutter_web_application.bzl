@@ -67,6 +67,7 @@ load(
     "//flutter/private:flutter_web_branch.bzl",
     "BRANCH_COMPILER",
     "FlutterWebBranchInfo",
+    "WEB_PLATFORM_ATTRS",
     "web_branches",
     "web_compile_branches",
 )
@@ -414,16 +415,19 @@ def _flutter_web_bundle_impl(ctx):
     # every compile imports, the assets, the icon tree-shaker's kernel, the
     # import check and the analysis closure — takes the primary's, the build
     # the bundle describes. A branch is the program built with its compiler's
-    # `@rules_dart//dart:web_compiler`: `deps` and the staging target beside
-    # the bundle are split on that setting, and DDC reads dart2js's.
+    # web platform (`js_platform` or `wasm_platform`): `deps` and the staging
+    # target beside the bundle are split on it, and DDC reads dart2js's.
     branches = web_compile_branches(ctx.attr.compiler, ctx.attr.js_fallback, is_debug)
     branch_inputs = {}
     for branch in branches:
         setting = BRANCH_COMPILER[branch]
         staged = ctx.split_attr.branches.get(setting)
         if staged == None:
-            fail("%s: the %s branch builds for web_compiler=%s, which its dependencies were not split for" % (ctx.label, branch, setting))
+            fail("%s: the %s branch builds for the %s platform, which its dependencies were not split for" % (ctx.label, branch, setting))
         info = staged[FlutterWebBranchInfo]
+        if info.runtime != setting:
+            platform = getattr(ctx.attr, setting + "_platform")
+            fail("%s: `%s_platform` is %s, which must carry @rules_dart//dart/constraints:%s; its web compiler is %s" % (ctx.label, setting, platform.label, setting, info.runtime))
         branch_inputs[branch] = struct(
             # Absent when `deps` is empty: there is nothing to split.
             deps = ctx.split_attr.deps.get(setting, []),
@@ -1373,7 +1377,7 @@ _WEB_APPLICATION_ATTRS["branches"] = attr.label(
 
 flutter_web_bundle = rule(
     implementation = _flutter_web_bundle_impl,
-    attrs = dict(_WEB_APPLICATION_ATTRS, **{
+    attrs = dict(_WEB_APPLICATION_ATTRS | WEB_PLATFORM_ATTRS, **{
         "compiler": attr.string(
             doc = "Web compiler: 'dart2wasm' (default) or 'dart2js'. 'dart2wasm' " +
                   "builds WebAssembly, and by default a dart2js build beside it " +
@@ -1398,7 +1402,8 @@ flutter_web_bundle = rule(
                   "instead of the app (the loader logs `no compatible build found` and " +
                   "throws). With True the app must compile under dart2js too, which " +
                   "code that differs by compiler can: a library in `deps` picks its " +
-                  "dependency by `@rules_dart//dart:web_compiler` with a `select()`, " +
+                  "dependency with a `select()` on `@rules_dart//dart/constraints:js` " +
+                  "or `:wasm`, " +
                   "so dart2js can take a variant without the 64-bit type and keep the " +
                   "fallback. False " +
                   "is what makes `optimization_level_js`, `minify_js`, " +

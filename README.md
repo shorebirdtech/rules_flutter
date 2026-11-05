@@ -1137,7 +1137,7 @@ The cost of `js_fallback = False` is the browsers that cannot run WASM, and unde
 
 #### Per-compiler code
 
-A bundle compiles its program once for each compiler it ships: dart2wasm, dart2js for the fallback, and DDC for `flutter_bazel run -d chrome` (DDC compiles what dart2js does, so a debug bundle has two versions of the program at most). The program can differ between them. Dart's own way to do that is a conditional import on `dart.library.js_interop`, but it cannot give dart2js and dart2wasm different declared types or different files. For that, each compiler builds its dependencies with its own value of `@rules_dart//dart:web_compiler` (`wasm` or `js`), and a library picks its variant with a `select()` in its `deps`. This is [rules_dart's mechanism](https://github.com/aran/rules_dart#per-compiler-code); a Flutter app uses it through `flutter_library` and `flutter_plugin` the same way.
+A bundle compiles its program once for each compiler it ships: dart2wasm, dart2js for the fallback, and DDC for `flutter_bazel run -d chrome` (DDC compiles what dart2js does, so a debug bundle has two versions of the program at most). The program can differ between them. Dart's own way to do that is a conditional import on `dart.library.js_interop`, but it cannot give dart2js and dart2wasm different declared types or different files. For that, each compiler builds its dependencies for its own web platform, one carrying the constraint value `@rules_dart//dart/constraints:wasm` or `:js`, and a library picks its variant with a `select()` on those in its `deps`. This is [rules_dart's mechanism](https://github.com/aran/rules_dart#per-compiler-code); a Flutter app uses it through `flutter_library` and `flutter_plugin` the same way.
 
 ```starlark
 # lib/ids.dart in each variant: the same API, a different type.
@@ -1157,9 +1157,9 @@ flutter_library(
     name = "ids",
     package_name = "ids_select",
     deps = select({
-        "@rules_dart//dart:web_compiler_js": [":ids_js"],
-        "@rules_dart//dart:web_compiler_wasm": [":ids_typed"],
-        "@rules_dart//dart:web_compiler_none": [":ids_typed"],
+        "@rules_dart//dart/constraints:js": [":ids_js"],
+        # dart2wasm, and a build for no web platform (the VM's).
+        "//conditions:default": [":ids_typed"],
     }),
 )
 
@@ -1170,13 +1170,15 @@ flutter_web_app(
 )
 ```
 
-The `select()` goes in a library, not in the bundle's `deps`: a `select()` is resolved in the configuration of the target that holds it, and the bundle's own has no compiler yet. The variants are separate libraries with the same `package_name`, each in a directory of its own, so the import is the same whichever is picked. `e2e/web_example/int64` is this app, which renders `Int64List max: 9223372036854775807` from the WebAssembly build and `List<int> max: 9007199254740991` from the JavaScript one.
+The `select()` goes in a library, not in the bundle's `deps`: a `select()` is resolved in the configuration of the target that holds it, and the bundle's own is not yet a web platform's. The variants are separate libraries with the same `package_name`, each in a directory of its own, so the import is the same whichever is picked. `e2e/web_example/int64` is this app, which renders `Int64List max: 9223372036854775807` from the WebAssembly build and `List<int> max: 9007199254740991` from the JavaScript one.
 
 What the bundle holds once comes from the primary compiler's version of the program (`dart2wasm` for the default `compiler`): the plugin registrant, the assets and shaders, and the icon tree-shaking scan. A dependency that differs by compiler should not differ in what plugins or assets it brings. An icon only the other compiler's variant uses is shaken out of the font unless `tree_shake_icons = False`.
 
 These are built once, however many compilers reach them: pub packages (and Flutter SDK packages), anything a `flutter_library` or `flutter_plugin` marks `web_compiler_independent = True`, `flutter_native_library`, `flutter_native_asset`, `flutter_data_asset`, `flutter_gen_l10n`, and `dart_codegen` and its siblings. Code generation therefore cannot vary by compiler; a generator that needs to emit a variant per compiler emits both, and the library above chooses. Only the first-party libraries on the path from the bundle to a `select()` are analysed once per compiler, and a library has no action, so that costs analysis time only.
 
-Tag a library that has no variant for a build with no web compiler `manual`, and give its `select()` a `no_match_error` saying how to reach it, as in rules_dart.
+A library that has no variant outside the web says so with `target_compatible_with = select({"@rules_dart//dart/constraints:js": [], "@rules_dart//dart/constraints:wasm": [], "//conditions:default": ["@platforms//:incompatible"]})`, as in rules_dart, so `bazel build //...` skips it rather than failing on it.
+
+The platforms are rules_dart's `@rules_dart//dart/platforms:js` and `:wasm`, which carry only that constraint. A bundle builds for others when its `js_platform` or `wasm_platform` names them; each must carry the matching constraint, and the bundle refuses one that does not.
 
 A bundle has a `canvaskit/` directory of renderer files only when something loads it. By default `flutter.js` fetches the renderer from `www.gstatic.com` and never reads a local copy, so the directory would be dead weight and is not shipped. Two things put it there: `use_local_canvaskit = True`, which also tells the loader to read it, and a debug build, whose dev loop renders with CanvasKit served from it. A `bootstrap_js` of your own that points `canvasKitBaseUrl` at the bundle must set `use_local_canvaskit = True` too, or the directory is not there to load; one attribute states "this bundle serves its own renderer" for both routes, where a second could disagree with the files it ships.
 
