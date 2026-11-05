@@ -64,19 +64,6 @@ unsupported_package(
 )
 """.format(name = repr(package), message = repr(repository_ctx.attr.message)))
 
-    # The hub's Android aggregator depends on every spoke's `android:lib`. This
-    # one contributes nothing: the failure belongs to the Dart target, which an
-    # app that uses the package depends on.
-    repository_ctx.file("android/BUILD.bazel", """\
-load("@rules_kotlin//kotlin:android.bzl", "kt_android_library")
-
-kt_android_library(
-    name = "lib",
-    srcs = [],
-    visibility = ["//visibility:public"],
-)
-""")
-
 flutter_unsupported_package = repository_rule(
     implementation = _flutter_unsupported_package_impl,
     attrs = {

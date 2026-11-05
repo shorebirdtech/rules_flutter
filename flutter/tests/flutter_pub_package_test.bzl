@@ -224,11 +224,12 @@ def _no_resources_subpackage_test_impl(ctx):
     )
 
     asserts.false(env, "resource_files" in content, content)
+    asserts.false(env, "check()" in content, "the spoke runs no hub-wide check:\n" + content)
     for needle in [
-        'load("@deps-android_maven//:check.bzl", "check")',
+        'load("@deps-android_maven//:resolved.bzl", "RESOLVED")',
         'load("@rules_flutter//flutter/private:android_plugin_maven.bzl", "maven_labels")',
-        "check()",
         "_maven = maven_labels(",
+        ", RESOLVED)",
         "deps = [\":_engine\", \":_build_config\"] + _maven.deps + [\":_compile_only\"],",
         "runtime_deps = _maven.runtime_deps,",
         "exports = _maven.compile_only,",
@@ -240,22 +241,40 @@ def _no_resources_subpackage_test_impl(ctx):
 
 no_resources_subpackage_test = unittest.make(_no_resources_subpackage_test_impl)
 
-def _empty_subpackage_test_impl(ctx):
-    """No Android sources and no resources → the empty aggregator stub."""
+def _member_exports_android_lib_test_impl(ctx):
+    """A member lists its Android library under `exports` on Android only, and only if it has one.
+
+    So a non-Android build never loads `android/BUILD.bazel`, and a package
+    with no Android code has no such package to load.
+    """
     env = unittest.begin(ctx)
 
-    content = make_android_subpackage_build_content(
-        android_src_dir = "",
-        java_package = "",
+    with_lib = make_flutter_member_build_content(
+        name = "some_android_plugin",
+        language_version = "3.4",
+        code_assets = [],
+        has_unreplaced_hook = "",
+        plugin_platforms_json = "{}",
+        has_android_lib = True,
+    )
+    asserts.true(
+        env,
+        'exports = select({\n        "@platforms//os:android": ["//android:lib"],\n        "//conditions:default": [],\n    }),' in with_lib,
+        with_lib,
     )
 
-    asserts.true(env, "srcs = []" in content, content)
-    asserts.false(env, "resource_files" in content, content)
-    asserts.false(env, "flutter_android_engine" in content, content)
+    without = make_flutter_member_build_content(
+        name = "some_apple_plugin",
+        language_version = "3.4",
+        code_assets = [],
+        has_unreplaced_hook = "",
+        plugin_platforms_json = "{}",
+    )
+    asserts.false(env, "exports" in without, without)
 
     return unittest.end(env)
 
-empty_subpackage_test = unittest.make(_empty_subpackage_test_impl)
+member_exports_android_lib_test = unittest.make(_member_exports_android_lib_test_impl)
 
 # The non-Dart remainder of `lib/` — the same partition rules_dart's
 # `make_dart_library_build_content` emits. `srcs + resources = lib/**`
@@ -791,7 +810,7 @@ def flutter_pub_package_test_suite(name):
         record_android_subpackage_test,
         resources_without_manifest_test,
         no_resources_subpackage_test,
-        empty_subpackage_test,
+        member_exports_android_lib_test,
         plugin_spoke_carries_resources_test,
         library_spoke_carries_resources_test,
         file_names_are_written_as_string_literals_test,

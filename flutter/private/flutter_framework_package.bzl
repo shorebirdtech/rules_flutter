@@ -114,21 +114,6 @@ def _flutter_framework_package_impl(repository_ctx):
         language_version = language_version,
     ))
 
-    # Emit an empty `android/BUILD.bazel` so the hub's aggregator
-    # (`@<hub>//android:all_android_plugin_libs`) can depend on every
-    # spoke uniformly, including `package:flutter`. Loaded lazily — only
-    # parsed when something queries `@<spoke>//android:lib`, so non-Android
-    # workspaces never pay the `@rules_kotlin` cost.
-    repository_ctx.file("android/BUILD.bazel", """\
-load("@rules_kotlin//kotlin:android.bzl", "kt_android_library")
-
-kt_android_library(
-    name = "lib",
-    srcs = [],
-    visibility = ["//visibility:public"],
-)
-""")
-
 flutter_framework_package = repository_rule(
     implementation = _flutter_framework_package_impl,
     doc = "Downloads package:flutter from the pinned Flutter source and generates its flutter_library target.",

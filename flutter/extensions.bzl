@@ -15,7 +15,7 @@ effectively overriding the default named toolchain due to toolchain resolution p
 load("@rules_dart//dart/ext:registry.bzl", "curated_code_assets")
 load("@rules_dart//dart/pub:pub_lock_package.bzl", "check_pub_archive_sha256")
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_lock")
-load("//flutter/private:android_plugin_maven.bzl", "flutter_android_maven")
+load("//flutter/private:android_plugin_maven.bzl", "MAVEN_DEPS_FILE", "flutter_android_maven")
 load("//flutter/private:flutter_chrome_for_testing.bzl", "flutter_chrome_for_testing")
 load("//flutter/private:flutter_framework_package.bzl", "flutter_framework_package")
 load("//flutter/private:flutter_gen_l10n_repo.bzl", "flutter_gen_l10n_repo")
@@ -317,43 +317,31 @@ def _toolchain_extension(module_ctx):
                     overlay_roots = user_overlay_roots + ["@rules_flutter//ext:BUILD.bazel"],
                 )
 
-            # The hub's Android Maven check: what every hosted spoke's Gradle
-            # build declares against what `@rules_android_maven` resolved. A
-            # spoke's `android/` package loads it, so only Android builds
-            # fetch it. The dash keeps its name from any `<hub>__<pkg>` spoke.
-            #
-            # A Flutter SDK package's Android library (`integration_test`'s
-            # needs androidx.test, espresso and guava) is left out of both this
-            # check and the aggregator below. The aggregator links every
-            # package of the lock into every Android app of the hub, so
-            # including it would make every such app link, and the check
-            # demand, Maven artifacts only a test app needs. So no Android app
-            # contains an SDK package's Android library for now; collecting
-            # plugin libraries per application, from the `FlutterInfo` of
-            # what it depends on, rather than lock-wide, is what lifts this.
+            # The hub's Android Maven data: what every built spoke's Gradle
+            # build declares, against what `@rules_android_maven` resolved. An
+            # Android app's `flutter_android_plugin_libs` checks the part its
+            # plugins need, and a spoke's `android/` package reads what
+            # resolved, so only Android builds fetch it. The dash keeps its
+            # name from any `<hub>__<pkg>` spoke.
             flutter_android_maven(
                 name = hub_name + "-android_maven",
                 hub_name = hub_name,
                 spokes = [
-                    "@{}//android:maven_deps.json".format(source_repo(hub_name, name))
-                    for name in sorted(hosted.keys())
+                    "@{}//:{}".format(source_repo(hub_name, name), MAVEN_DEPS_FILE)
+                    for name in sorted(built.keys())
                 ],
             )
 
-            # Create hub repo with aliases for all packages plus the
-            # Android plugin-libs aggregator. flutter.pub() always uses
-            # `flutter_pub_lock_hub` (not rules_dart's plain
-            # `pub_lock_hub`) because the Tier-1 `flutter_android_app`
-            # macro needs `@<hub>//android:all_android_plugin_libs` to
-            # auto-wire transitively-collected plugin Kotlin/Java into
-            # the final APK. Non-Flutter pub.pub() consumers keep using
-            # rules_dart's plain hub.
+            # Create the hub repo with aliases for all packages and its
+            # `android/` package, which hands an Android app the Maven data its
+            # check reads. flutter.pub() always uses `flutter_pub_lock_hub`
+            # (not rules_dart's plain `pub_lock_hub`) for that package.
+            # Non-Flutter pub.pub() consumers keep using rules_dart's plain hub.
             flutter_pub_lock_hub(
                 name = hub_name,
                 hub_name = hub_name,
                 packages = sorted(all_package_names),
                 built_packages = sorted(built.keys()),
-                android_packages = sorted([n for n in all_package_names if n not in flutter_source]),
             )
 
     # Don't declare root_module_direct_deps: flutter_register_toolchains creates

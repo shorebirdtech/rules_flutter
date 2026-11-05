@@ -1087,6 +1087,8 @@ bases of the VM run above. The e2e workspaces carry
 
 The dev_tool screenshot is the dispositive end-to-end gate per platform: if Native Assets are broken the app crashes before drawing, and if plugin auto-wiring is broken `MissingPluginException` blanks the screen — both fail the non-blank PNG check (default threshold 4 KB, well above any blank/solid-color PNG).
 
+An Android app links the plugins it depends on, and those only (`flutter_android_plugin_libs`). `:verify_android_plugin_scope_test` checks it on real APKs: `package_info_only_android` depends on `package_info_plus` alone, though the lock lists six other Android plugins, and its release APK, built once without R8 (each library dexed by rules_android's own aspect, which only follows `deps`, `exports` and `runtime_deps`, hence the `exports` the generated libraries and plugins list their Android libraries under) and once with it, defines no class of the others and declares no `RECORD_AUDIO`. `//flutter/tests:android_plugin_libs_test` checks the link and the per-app Maven check at analysis. `android_example`'s `:testonly_app_build_test` builds a `testonly` `flutter_android_app`.
+
 ### Android plugin native source builds (externalNativeBuild)
 
 Some pub packages compile C/C++ for Android via Gradle's
@@ -1109,7 +1111,7 @@ for arbitrary Gradle native builds; instead:
    the Android build at load time with a message pointing at
    `flutter.plugin_overlays` — never a silently incomplete APK.
    Non-Android platforms are unaffected (the check lives in the spoke's
-   `android/` sub-package, loaded only via the hub's Android aggregator).
+   `android/` sub-package, loaded only by an Android build of an app that depends on the package: the package's `flutter_pub_member` lists its `:lib` under `exports` in a `select()` on Android).
 
 ### Curated code assets (no authoring needed)
 
@@ -1124,7 +1126,7 @@ Pub allows packages to depend on each other (`dio` imports `dio_web_adapter`, wh
 * its **source** repository, `<hub>__<pkg>`: the package's files, its **member** (`flutter_pub_member`, or rules_dart's `pub_package_member` for a package with nothing of Flutter's in its pubspec), the per-platform plugin libraries (`<pkg>_apple_macos`, `<pkg>_linux`, ...), its `android/` sub-package and the facts it records for its library repository (`pubspec_dependencies.txt`, `flutter_pub_member.json`). A member has no dependencies.
 * its **library** repository, `<hub>_lib__<pkg>` (`flutter_pub_library_repo`): it reads the pubspec dependencies of every package the package reaches, finds its dependency cycle with rules_dart's `dependency_cycle()` and builds the cycle as one `flutter_pub_library` over the members' labels, with the cycle's dependencies outside itself as `deps`. The cycle's first package by name owns the library; the others of the cycle alias it. A package in no cycle is a cycle of one, built as before.
 
-A Flutter SDK package other than `package:flutter` (`flutter_test`, `integration_test`, `flutter_driver`, ...) is built the same way, with `packages/<pkg>` of the pinned Flutter source tarball as its files in place of a hosted archive (`flutter_pub_package`'s `flutter_source_version`). `lock_entry_kind.bzl` says which entries these are: every `sdk` entry but `flutter` and `sky_engine`, never by a list of names. Their Android libraries are left out of the hub's `all_android_plugin_libs` and Maven check (`integration_test`'s would link `androidx.test` into every Android app of the hub).
+A Flutter SDK package other than `package:flutter` (`flutter_test`, `integration_test`, `flutter_driver`, ...) is built the same way, with `packages/<pkg>` of the pinned Flutter source tarball as its files in place of a hosted archive (`flutter_pub_package`'s `flutter_source_version`). `lock_entry_kind.bzl` says which entries these are: every `sdk` entry but `flutter` and `sky_engine`, never by a list of names. Their Android libraries link into the Android apps that depend on them, as any plugin's does (`integration_test`'s needs `androidx.test`, Espresso and Guava in the app's `maven.install`).
 
 `@<hub>//:<pkg>` is the package's library. The lock's other entries (`package:flutter`, which `flutter_framework_package` builds, and the stubs for entries nothing supplies) are one repository each, `<hub>__<pkg>`, which is their library. `<hub>_index` holds the lock's package names once for all of them, so no repository's attributes grow with the lock.
 

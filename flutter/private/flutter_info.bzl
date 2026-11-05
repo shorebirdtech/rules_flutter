@@ -54,7 +54,8 @@ def flutter_info(
         data_assets = [],
         pub_fonts = [],
         pub_assets = [],
-        pub_shaders = []):
+        pub_shaders = [],
+        android_libs = []):
     """Builds a `FlutterInfo`, merging its dependencies' contributions.
 
     The caller supplies only what this target contributes itself, as plain
@@ -89,6 +90,9 @@ def flutter_info(
       pub_fonts: Font contribution structs from a pub `flutter.fonts` block.
       pub_assets: Asset contribution structs from a pub `flutter.assets` block.
       pub_shaders: Shader contribution structs from a `flutter.shaders` block.
+      android_libs: `struct(package, lib)` pairs this target contributes, one
+        per plugin Android library it selects (`lib` is the `JavaInfo`-bearing
+        Target).
 
     Returns:
       A `FlutterInfo`.
@@ -161,6 +165,10 @@ def flutter_info(
         pub_shaders = depset(
             direct = pub_shaders,
             transitive = [info.pub_shaders for info in dep_infos],
+        ),
+        android_libs = depset(
+            direct = android_libs,
+            transitive = [info.android_libs for info in dep_infos],
         ),
     )
 

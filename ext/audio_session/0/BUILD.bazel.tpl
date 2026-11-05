@@ -25,6 +25,10 @@ flutter_plugin(
         ["lib/**/*.dart"],
         allow_empty = True,
     ),
+    exports = select({
+        "@platforms//os:android": ["//android:lib"],
+        "//conditions:default": [],
+    }),
     apple_libs = select({
         "@platforms//os:macos": [":{PKG}_apple_macos"],
         "@platforms//os:ios": [":{PKG}_apple_ios"],

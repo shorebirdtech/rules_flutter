@@ -6,6 +6,7 @@ load(
     "compare_maven_versions",
     "format_artifacts_report",
     "format_maven_failure",
+    "maven_check_message",
     "maven_labels",
     "maven_problems",
     "maven_target_name",
@@ -195,6 +196,57 @@ def _labels_test_impl(ctx):
 
 labels_test = unittest.make(_labels_test_impl)
 
+def _labels_leave_out_what_was_not_resolved_test_impl(ctx):
+    """An artifact `@rules_android_maven` lacks has no target, so a library names none.
+
+    The application that links the plugin reports it, by name, with the rest.
+    """
+    env = unittest.begin(ctx)
+    r = maven_labels(
+        [_dep("a:present", None), _dep("b:absent", None), _dep("c:absent", None, "runtime")],
+        {"a:present": "1.0"},
+    )
+    asserts.equals(env, ["@rules_android_maven//:a_present"], r.deps)
+    asserts.equals(env, [], r.runtime_deps)
+    return unittest.end(env)
+
+labels_leave_out_what_was_not_resolved_test = unittest.make(_labels_leave_out_what_was_not_resolved_test_impl)
+
+def _check_names_only_what_the_linked_plugins_need_test_impl(ctx):
+    """An app's Maven check names the artifacts of the plugins it links, and no others.
+
+    A plugin the lock lists and the app does not link may declare artifacts
+    nobody installed; they are no concern of the app.
+    """
+    env = unittest.begin(ctx)
+    data = {
+        "hub": "deps",
+        "resolved": {"g:have": "1.0"},
+        "packages": [
+            _pkg("a", "1.0", [_dep("g:needed_by_a", "2.0"), _dep("g:have", "1.0")]),
+            _pkg("b", "1.0", [_dep("g:needed_by_b", "3.0")], ["implementation(libs.b)"]),
+            _pkg("c", "1.0", [_dep("g:needed_by_c", None)]),
+        ],
+    }
+
+    only_a = maven_check_message(data, {"a": True})
+    asserts.true(env, '"g:needed_by_a:2.0",  # declared by package:a 1.0; missing' in only_a, only_a)
+    for absent in ["needed_by_b", "needed_by_c", "libs.b", "g:have"]:
+        asserts.false(env, absent in only_a, absent + " in:\n" + only_a)
+
+    a_and_b = maven_check_message(data, {"a": True, "b": True})
+    asserts.true(env, "g:needed_by_a" in a_and_b and "g:needed_by_b" in a_and_b, a_and_b)
+    asserts.true(env, "    package:b 1.0\n        implementation(libs.b)" in a_and_b, a_and_b)
+    asserts.false(env, "needed_by_c" in a_and_b, a_and_b)
+
+    # A package the hub records nothing for (no Android library of a pub
+    # plugin's kind) needs nothing, and an app that links none is satisfied.
+    asserts.equals(env, "", maven_check_message(data, {"other": True}))
+    asserts.equals(env, "", maven_check_message(data, {}))
+    return unittest.end(env)
+
+check_names_only_what_the_linked_plugins_need_test = unittest.make(_check_names_only_what_the_linked_plugins_need_test_impl)
+
 def _merge_test_impl(ctx):
     env = unittest.begin(ctx)
     req = merge_plugin_requirements([
@@ -298,6 +350,8 @@ def android_plugin_maven_test_suite(name):
         versions_test,
         escape_test,
         labels_test,
+        labels_leave_out_what_was_not_resolved_test,
+        check_names_only_what_the_linked_plugins_need_test,
         merge_test,
         problems_test,
         failure_message_test,

@@ -1,0 +1,19 @@
+"""Plugin `plugin_ok`, with an Android library."""
+
+load("@rules_java//java:java_library.bzl", "java_library")
+load("//flutter:defs.bzl", "flutter_plugin")
+
+package(default_visibility = ["//flutter/tests:__subpackages__"])
+
+java_library(
+    name = "lib_ok",
+    srcs = ["Ok.java"],
+)
+
+flutter_plugin(
+    name = "plugin_ok",
+    package_name = "plugin_ok",
+    srcs = ["lib/plugin_ok.dart"],
+    tags = ["manual"],
+    exports = [":lib_ok"],
+)

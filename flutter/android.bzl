@@ -62,6 +62,7 @@ load("//flutter/private:flutter_android_application.bzl", _flutter_android_bundl
 load("//flutter/private:flutter_android_build.bzl", _flutter_android_build = "flutter_android_build")
 load("//flutter/private:flutter_android_manifest_merge.bzl", _flutter_android_manifest_merge = "flutter_android_manifest_merge")
 load("//flutter/private:flutter_android_plugin_library.bzl", _flutter_android_plugin_library = "flutter_android_plugin_library")
+load("//flutter/private:flutter_android_plugin_libs.bzl", _flutter_android_plugin_libs = "flutter_android_plugin_libs")
 load("//flutter/private:flutter_android_registrant.bzl", _flutter_android_registrant = "flutter_android_registrant")
 
 # Re-export constants for user BUILD files.
@@ -182,6 +183,11 @@ def flutter_android_permissions_manifest(name, permissions, **kwargs):
 # this automatically; expose it here so users can wire a monorepo plugin's
 # BUILD.bazel without going through the ext/ overlay system.
 flutter_android_plugin_library = _flutter_android_plugin_library
+
+# Links the Android libraries of the plugins a flutter_application depends on,
+# and checks the Maven artifacts their Gradle builds declare. Wired
+# automatically by flutter_android_app; expose for Tier-2 control.
+flutter_android_plugin_libs = _flutter_android_plugin_libs
 
 # Registrant rule that emits GeneratedPluginRegistrant.java from a
 # flutter_application's transitive FlutterInfo. Wired automatically by
@@ -576,11 +582,15 @@ def flutter_android_app(
         `kt_android_library` that goes into `binary_deps`. Every plugin
         whose `flutter.plugin.platforms.android.pluginClass` is set ends up
         registered with the FlutterEngine on startup — no manual wiring.
-      - Adds `@<pub_hub_name>//android:all_android_plugin_libs` to
-        `binary_deps`, pulling in every transitively-resolved plugin
-        spoke's Kotlin/Java sources (and resources) via the hub's
-        aggregator. Spokes without Android sources contribute empty
-        libraries (no-op).
+      - Links the Kotlin/Java sources (and resources) of the plugins
+        `application` depends on, and of those only
+        (`flutter_android_plugin_libs`): the `exports` each plugin
+        selects on Android. A plugin the lock lists and the application does
+        not use contributes no code, no manifest entries and no Maven
+        requirements to the APK.
+      - Checks the Maven artifacts the Gradle builds of those plugins
+        declare against `@rules_android_maven`, failing with every one the
+        app lacks, by name.
       - Permissions that plugins and AARs declare in their own manifests
         (e.g. record_android's RECORD_AUDIO) are lifted into the app's
         manifest, as AGP merges them. Bazel's own merger drops library
@@ -627,11 +637,11 @@ def flutter_android_app(
             against these too, so the plugin is both packaged and
             registered. Pub plugins arrive through the hub instead.
         pub_hub_name: Name of the `flutter.pub(name = ...)` hub providing
-            plugin spokes. The macro depends on
-            `@<pub_hub_name>//android:all_android_plugin_libs` to compile
-            all plugin Kotlin/Java automatically. Defaults to `"deps"`,
-            matching the convention in repo MODULE.bazel files. Set to
-            `None` to opt out (e.g. for a workspace with no pub plugins).
+            plugin spokes. The macro checks the Maven artifacts of the pub
+            plugins `application` depends on against
+            `@<pub_hub_name>//android:maven_requirements`. Defaults to
+            `"deps"`, matching the convention in repo MODULE.bazel files. Set
+            to `None` to opt out (e.g. for a workspace with no pub plugins).
         **kwargs: Passed through to android_binary, except `testonly`, which
             every target the macro declares has, since one that depends on a
             `testonly` application would otherwise fail analysis.
@@ -699,8 +709,16 @@ def flutter_android_app(
     #
     # The registrant references each plugin's `PluginClass` by fully
     # qualified name, so its compile classpath must include every
-    # plugin's `kt_android_library`. We add the hub aggregator so the
-    # plugin classes resolve at javac time too.
+    # plugin's `kt_android_library`. The libraries of the plugins the
+    # application depends on are linked once, for the registrant and the
+    # APK alike.
+    _flutter_android_plugin_libs(
+        name = "__%s_plugin_libs" % name,
+        deps = application,
+        maven = "@%s//android:maven_requirements" % pub_hub_name if pub_hub_name else None,
+        tags = tags,
+        testonly = testonly,
+    )
     _flutter_android_registrant(
         name = "__%s_registrant_src" % name,
         application = application,
@@ -710,10 +728,7 @@ def flutter_android_app(
 
     # `deps` too: a plugin written in the workspace reaches the app only
     # through them, and the registrant names its class.
-    registrant_deps = ["__%s_engine" % name]
-    if pub_hub_name:
-        registrant_deps.append("@%s//android:all_android_plugin_libs" % pub_hub_name)
-    registrant_deps = registrant_deps + deps
+    registrant_deps = ["__%s_engine" % name, "__%s_plugin_libs" % name] + deps
 
     _kt_android_library(
         name = "__%s_registrant" % name,
@@ -733,13 +748,9 @@ def flutter_android_app(
         "__%s_registrant" % name,
     ]
 
-    # 8. Plugin auto-wiring: compile every transitively-needed plugin's
-    # Kotlin/Java via the hub's aggregator. Each spoke unconditionally
-    # exposes `android:lib`; the hub's `all_android_plugin_libs` deps on
-    # all of them. Spokes without Android sources contribute empty
-    # libraries — no-op at link time, mechanical at the macro layer.
-    if pub_hub_name:
-        binary_deps.append("@%s//android:all_android_plugin_libs" % pub_hub_name)
+    # 8. Plugin auto-wiring: the Kotlin/Java of the plugins the application
+    # depends on, linked by `flutter_android_plugin_libs`.
+    binary_deps.append("__%s_plugin_libs" % name)
 
     if not base_manifest:
         # Try to discover flutter create output. `allow_empty`: an app

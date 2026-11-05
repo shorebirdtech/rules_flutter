@@ -1,0 +1,19 @@
+"""Plugin `plugin_a`, with an Android library."""
+
+load("@rules_java//java:java_library.bzl", "java_library")
+load("//flutter:defs.bzl", "flutter_plugin")
+
+package(default_visibility = ["//flutter/tests:__subpackages__"])
+
+java_library(
+    name = "lib_a",
+    srcs = ["A.java"],
+)
+
+flutter_plugin(
+    name = "plugin_a",
+    package_name = "plugin_a",
+    srcs = ["lib/plugin_a.dart"],
+    tags = ["manual"],
+    exports = [":lib_a"],
+)

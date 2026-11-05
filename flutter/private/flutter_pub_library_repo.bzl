@@ -41,7 +41,17 @@ alias(
 )
 """.format(name = name, actual = actual)
 
-def make_library_build_content(name, members, deps, flutter):
+def _android_exports(android_libs):
+    """The `exports` attribute line of a library: its members' Android libraries on Android."""
+    if not android_libs:
+        return ""
+    return """    exports = select({{
+        "@platforms//os:android": {libs},
+        "//conditions:default": [],
+    }}),
+""".format(libs = _labels(android_libs))
+
+def make_library_build_content(name, members, deps, flutter, android_libs = []):
     """BUILD content for the library of a dependency cycle.
 
     Args:
@@ -51,6 +61,8 @@ def make_library_build_content(name, members, deps, flutter):
       flutter: Whether a member is of Flutter's kind, so the library is a
         `flutter_pub_library` and not rules_dart's `pub_library`. `package:test`
         (never one) also carries the runner `dart_test` uses.
+      android_libs: Labels of the members' Android libraries, which a
+        `flutter_pub_library` lists under `exports` on Android.
 
     Returns:
       BUILD.bazel content as a string.
@@ -67,7 +79,7 @@ def make_library_build_content(name, members, deps, flutter):
     name = "{name}",
     members = {members},
     deps = {deps},
-    visibility = ["//visibility:public"],
+{exports}    visibility = ["//visibility:public"],
 )
 """.format(
         load_statement = load_statement,
@@ -75,6 +87,7 @@ def make_library_build_content(name, members, deps, flutter):
         name = name,
         members = _labels(members),
         deps = _labels(deps),
+        exports = _android_exports(android_libs) if flutter else "",
     )
 
 # `package:test`'s library also carries the runner `dart_test` runs tests
@@ -168,6 +181,7 @@ def _flutter_pub_library_repo_impl(ctx):
         members = ["@{}//:{}".format(source_repo(hub, m), m) for m in cycle.packages],
         deps = sorted(deps),
         flutter = bool([m for m in members.values() if m["kind"] == MEMBER_FLUTTER]),
+        android_libs = ["@{}//android:lib".format(source_repo(hub, m)) for m in cycle.packages if members[m].get("android_lib")],
     ))
     return ctx.repo_metadata(reproducible = True)
 

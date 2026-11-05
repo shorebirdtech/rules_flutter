@@ -56,6 +56,34 @@ def _a_cycle_is_one_library_over_its_members_test_impl(ctx):
 
 a_cycle_is_one_library_over_its_members_test = unittest.make(_a_cycle_is_one_library_over_its_members_test_impl)
 
+def _a_library_exports_its_members_android_libraries_on_android_test_impl(ctx):
+    """A library lists its members' Android libraries under `exports`, on Android only.
+
+    `exports` is the one attribute rules_android's dex aspect follows from the
+    library to them, so an APK that depends on the library dexes them.
+    """
+    env = unittest.begin(ctx)
+
+    content = make_library_build_content(
+        name = "dio",
+        members = ["@hub__dio//:dio"],
+        deps = [],
+        flutter = True,
+        android_libs = ["@hub__dio//android:lib"],
+    )
+    asserts.true(
+        env,
+        '    exports = select({\n        "@platforms//os:android": ["@hub__dio//android:lib"],\n        "//conditions:default": [],\n    }),\n' in content,
+        content,
+    )
+
+    # No Android library, no attribute: nothing loads an `android/` package.
+    asserts.false(env, "exports" in make_library_build_content("dio", ["@hub__dio//:dio"], [], True), "exports without a library")
+
+    return unittest.end(env)
+
+a_library_exports_its_members_android_libraries_on_android_test = unittest.make(_a_library_exports_its_members_android_libraries_on_android_test_impl)
+
 def _package_test_carries_the_runner_test_impl(ctx):
     """`dart_test` runs tests through the runner on its direct `package:test`."""
     env = unittest.begin(ctx)
@@ -108,6 +136,7 @@ def flutter_pub_library_repo_test_suite(name):
         name,
         repositories_are_named_by_their_part_test,
         a_cycle_is_one_library_over_its_members_test,
+        a_library_exports_its_members_android_libraries_on_android_test,
         package_test_carries_the_runner_test,
         the_others_of_a_cycle_alias_its_library_test,
         an_overlay_in_a_cycle_is_refused_naming_it_and_the_cycle_test,

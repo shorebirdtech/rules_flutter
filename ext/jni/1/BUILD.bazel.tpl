@@ -31,6 +31,10 @@ flutter_plugin(
         ["lib/**/*.dart"],
         allow_empty = True,
     ),
+    exports = select({
+        "@platforms//os:android": ["//android:lib"],
+        "//conditions:default": [],
+    }),
     language_version = "{LANGUAGE_VERSION}",
     native_deps = select({
         "@platforms//os:android": [":dartjni"],

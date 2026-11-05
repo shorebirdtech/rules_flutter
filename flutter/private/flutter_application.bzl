@@ -262,6 +262,7 @@ def flutter_application_build(ctx, inputs):
     linux_plugin_lib_depsets = []
     windows_plugin_lib_depsets = []
     apple_privacy_manifest_depsets = []
+    android_lib_depsets = []
     for dep in inputs.deps:
         if FlutterInfo in dep:
             all_dep_plugins.extend(dep[FlutterInfo].plugins)
@@ -269,11 +270,13 @@ def flutter_application_build(ctx, inputs):
             linux_plugin_lib_depsets.append(dep[FlutterInfo].linux_plugin_libraries)
             windows_plugin_lib_depsets.append(dep[FlutterInfo].windows_plugin_libraries)
             apple_privacy_manifest_depsets.append(dep[FlutterInfo].apple_privacy_manifests)
+            android_lib_depsets.append(dep[FlutterInfo].android_libs)
     all_plugins = dedup_plugins(all_dep_plugins)
     apple_plugin_libraries = depset(transitive = apple_plugin_lib_depsets)
     linux_plugin_libraries = depset(transitive = linux_plugin_lib_depsets)
     windows_plugin_libraries = depset(transitive = windows_plugin_lib_depsets)
     apple_privacy_manifests = depset(transitive = apple_privacy_manifest_depsets)
+    android_libs = depset(transitive = android_lib_depsets)
 
     # Every loose native library this app carries, by both routes in: the
     # `native_deps` set above, and the Native Assets `CodeAsset` libraries
@@ -472,6 +475,7 @@ def flutter_application_build(ctx, inputs):
             apple_plugin_libraries = apple_plugin_libraries,
             linux_plugin_libraries = linux_plugin_libraries,
             windows_plugin_libraries = windows_plugin_libraries,
+            android_libs = android_libs,
         ),
     ]
     providers.append(OutputGroupInfo(**output_groups))

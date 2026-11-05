@@ -20,6 +20,7 @@ Platform-specific native dependencies use select() in BUILD files:
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo")
 load("@rules_dart//dart:utils.bzl", "WEB_COMPILER_INDEPENDENT_ATTR", "dart_info", "derive_lib_root", "derive_package_name", "web_compiler_reset_when_independent")
+load("@rules_java//java/common:java_info.bzl", "JavaInfo")
 load("@rules_swift//swift:swift.bzl", "SwiftInfo")
 load("//flutter:providers.bzl", "FlutterDataAssetInfo", "FlutterInfo", "FlutterNativeAssetInfo")
 load("//flutter/private:common.bzl", "collect_binding_contracts", "collect_native_libs")
@@ -172,6 +173,13 @@ def plugin_contributions(ctx, package_name, declares_plugin):
 
     extra_apple_privacy_manifests = list(ctx.files.apple_privacy_files)
 
+    # The plugin's Android library, when this build selected one. Only an
+    # Android build does, so nothing else loads the library's package.
+    extra_android_libs = [
+        struct(package = package_name, lib = lib)
+        for lib in ctx.attr.exports
+    ]
+
     # Pub-package asset contributions (fonts/assets/shaders from the parsed
     # flutter:-block, applicable to plugins that also ship icon fonts or
     # bundled assets — same shape as flutter_library). asset_pkg uses the
@@ -214,6 +222,7 @@ def plugin_contributions(ctx, package_name, declares_plugin):
         pub_fonts = extra_pub_fonts,
         pub_assets = extra_pub_assets,
         pub_shaders = extra_pub_shaders,
+        android_libs = extra_android_libs,
     )
 
 def _flutter_plugin_impl(ctx):
@@ -315,6 +324,10 @@ PLUGIN_PACKAGE_ATTRS = {
     "link_hook": LINK_HOOK_ATTR,
     "language_version": attr.string(
         doc = "Dart language version (`<major>.<minor>`) for this package's `package_config.json` entry. Mirrors `dart_library`'s attribute. Empty string means defer to the toolchain default.",
+    ),
+    "exports": attr.label_list(
+        doc = "The plugin's Android libraries: a `flutter_android_plugin_library` or a `kt_android_library`, anything with `JavaInfo`. An Android app links the libraries of the plugins it depends on, and no others. Set this with `select()` on `@platforms//os:android`, with an empty list as the default, so that only an Android build loads and analyses it: `select({\"@platforms//os:android\": [\"//android:lib\"], \"//conditions:default\": []})`. Named `exports`, as a Java library's re-exported dependencies are, because rules_android dexes an APK's libraries one at a time by an aspect that follows `deps`, `exports` and `runtime_deps` and nothing else, so only an `exports` edge makes the library visible to it.",
+        providers = [JavaInfo],
     ),
     "apple_libs": attr.label_list(
         doc = "Per-platform Apple swift_library targets (typically `flutter_apple_plugin_library`s) carrying the plugin's macOS / iOS native code. Each label's name must contain `macos` or `ios` so the runner aggregator can route it. Set this via `select()` on the target platform so only one platform's swift_library analyzes per build — both with the same module name in the same configuration would conflict on the produced `<module>.swiftmodule` output.",

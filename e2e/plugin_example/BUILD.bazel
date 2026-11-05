@@ -78,6 +78,19 @@ flutter_application(
     ],
 )
 
+# An app that uses one of the lock's plugins, `package_info_plus`. Its Android
+# APK must carry that plugin and none of the others the lock lists:
+# `:verify_android_plugin_scope_test`.
+flutter_application(
+    name = "package_info_only_app",
+    package_name = "plugin_example",
+    main = "lib/package_info_only.dart",
+    deps = [
+        "@deps//:flutter",
+        "@deps//:package_info_plus",
+    ],
+)
+
 # =============================================================================
 # macOS build
 # =============================================================================
@@ -279,9 +292,9 @@ flutter_windows_app(
 # =============================================================================
 # Android build
 #
-# `flutter_android_app` auto-wires the registrant and the hub aggregator.
-# Every plugin in pubspec.lock with a `flutter.plugin.platforms.android.package`
-# block contributes its Kotlin/Java sources via @deps//android:all_android_plugin_libs.
+# `flutter_android_app` auto-wires the registrant and links the Kotlin/Java of
+# the plugins `plugin_app` depends on (`flutter_android_plugin_libs`), not of
+# every plugin pubspec.lock lists.
 # `flutter create` output under android/app/src/main/ supplies the manifest,
 # resources, and Kotlin runner.
 # =============================================================================
@@ -291,6 +304,36 @@ flutter_android_app(
     package_name = "com.example.plugin_example",
     application = ":plugin_app",
     proguard_specs = ["app_proguard.pro"],
+)
+
+# The same runner under a second application id, around an application that
+# uses one plugin: once without R8, which dexes each library by rules_android's
+# aspect, and once with it, which shrinks the whole classpath.
+flutter_android_app(
+    name = "package_info_only_android",
+    package_name = "com.example.package_info_only",
+    application = ":package_info_only_app",
+    namespace = "com.example.plugin_example",
+)
+
+flutter_android_app(
+    name = "package_info_only_r8_android",
+    package_name = "com.example.package_info_only.r8",
+    application = ":package_info_only_app",
+    namespace = "com.example.plugin_example",
+    proguard_specs = ["app_proguard.pro"],
+)
+
+flutter_android_build(
+    name = "package_info_only_arm64_build",
+    android_platforms = ["@rules_android//:arm64-v8a"],
+    targets = [":package_info_only_android"],
+)
+
+flutter_android_build(
+    name = "package_info_only_r8_arm64_build",
+    android_platforms = ["@rules_android//:arm64-v8a"],
+    targets = [":package_info_only_r8_android"],
 )
 
 # The ABIs of that APK are the platforms of --@rules_android//flags:android_platforms. These build it
@@ -446,6 +489,40 @@ build_test(
         "mode",
     ]
 ]
+
+# The APKs of `package_info_only_android` and `package_info_only_r8_android`,
+# release: the code of the plugin it uses, and of the plugins pubspec.lock lists
+# that it does not.
+android_apk(
+    name = "package_info_only_opt",
+    apk = ":package_info_only_arm64_build",
+    compilation_mode = "opt",
+    tags = ["android"],
+)
+
+android_apk(
+    name = "package_info_only_r8_opt",
+    apk = ":package_info_only_r8_arm64_build",
+    compilation_mode = "opt",
+    tags = ["android"],
+)
+
+# An app carries the plugins it depends on and no others, whatever else its
+# pubspec.lock lists: the dex of its release APK defines no class of a plugin
+# it does not use, and its manifest declares no permission such a plugin asks
+# for.
+dart_test(
+    name = "verify_android_plugin_scope_test",
+    data = [
+        ":package_info_only_opt",
+        ":package_info_only_r8_opt",
+        "@bazel_tools//tools/zip:zipper",
+    ],
+    env = {"ZIPPER_RUNFILE": "$(rlocationpath @bazel_tools//tools/zip:zipper)"},
+    main = "test/verify_android_plugin_scope_test.dart",
+    tags = ["android"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
+)
 
 # APK content verifier: asserts every plugin's native pieces are packaged —
 # including package:jni's libdartjni.so (jnigen plugins load it via

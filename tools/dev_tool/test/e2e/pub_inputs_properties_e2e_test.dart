@@ -421,14 +421,14 @@ void main() {
       );
     });
 
-    /// A top-level overlay without an `android/` template gets an empty
-    /// Android stub. Adding the template later must replace the stub.
+    /// A top-level overlay without an `android/` template has no Android
+    /// package. Adding the template later must create it.
     test('an android/ template added beside an existing overlay is used by the next build', () async {
       final ws = await workspaceWith(
         files: {'overlays/android_ladder/BUILD.bazel.tpl': template('top')},
       );
       final before = await ws.query('@pubhub__android_ladder//android:all');
-      expect(before.succeeded, isTrue, reason: '$before');
+      expect(before.succeeded, isFalse, reason: '$before');
 
       write(
         ws,

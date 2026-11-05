@@ -388,14 +388,16 @@ HostedPackage androidPlugin(String name, Map<String, Object> files) =>
     );
 
 /// What the spoke of [package] recorded as the Maven dependencies of its
-/// Gradle build: `android/maven_deps.json`.
+/// Gradle build: `flutter_android_maven_deps.json`, at its root.
 Future<({List<String> coordinates, List<String> unread})> recordedMavenDeps(
   PubInputsWorkspace ws,
   String package,
 ) async {
   final dir = await ws.spokeDirectory(package);
   final json = jsonDecode(
-    File(p.join(dir.path, 'android', 'maven_deps.json')).readAsStringSync(),
+    File(
+      p.join(dir.path, 'flutter_android_maven_deps.json'),
+    ).readAsStringSync(),
   ) as Map<String, Object?>;
   return (
     coordinates: [

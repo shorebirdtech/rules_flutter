@@ -231,13 +231,21 @@ void main() {
       expect(result.succeeded, isTrue, reason: '$result');
     });
 
-    test('each member of a cycle keeps its own Android library', () async {
+    test('a member of a cycle keeps its own Android library', () async {
       // A plugin's Kotlin is compiled once per package, whatever its Dart
-      // cycle: the app's Android aggregator lists each package's.
-      for (final package in ['loop_plugin', 'loop_helper']) {
-        final result = await ws.query('@pubhub__$package//android:lib');
-        expect(result.succeeded, isTrue, reason: '$package:\n$result');
-      }
+      // cycle, and the cycle's library exports it on Android, which is how an
+      // app that depends on the library links it. A member with no Android
+      // code has no Android package.
+      final plugin = await ws.query('@pubhub__loop_plugin//android:lib');
+      expect(plugin.succeeded, isTrue, reason: '$plugin');
+      final helper = await ws.query('@pubhub__loop_helper//android:lib');
+      expect(helper.succeeded, isFalse, reason: '$helper');
+      final exports = await ws.query('deps(@pubhub//:loop_helper, 2)');
+      expect(
+        exports.stdout,
+        contains('pubhub__loop_plugin//android:lib'),
+        reason: '$exports',
+      );
     });
 
     test(

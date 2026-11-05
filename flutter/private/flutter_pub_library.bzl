@@ -26,6 +26,7 @@ which a pure-Dart package is, so one cycle can mix packages of both kinds.
 load("@rules_dart//dart:providers.bzl", "DartInfo")
 load("@rules_dart//dart:utils.bzl", "dart_info", "web_compiler_reset")
 load("@rules_dart//dart/pub:pub_library.bzl", "DartPackageMemberInfo", "dart_package_member_info")
+load("@rules_java//java/common:java_info.bzl", "JavaInfo")
 load("//flutter/private:flutter_info.bzl", "flutter_info")
 load("//flutter/private:flutter_library.bzl", "SKY_ENGINE_ATTR", "flutter_analyzable_info_of_packages")
 load("//flutter/private:flutter_plugin.bzl", "PLUGIN_PACKAGE_ATTRS", "plugin_contributions")
@@ -92,6 +93,18 @@ def _flutter_pub_library_impl(ctx):
             for channel, values in member[FlutterPubMemberInfo].contributions.items():
                 contributions.setdefault(channel, []).extend(values)
 
+    # The Android libraries of the members' `exports` are the ones this library
+    # `exports` (see the attribute): the same labels, written once for each.
+    # Disagreeing would hide a plugin's library from the APK's dexing, so it is
+    # an error here rather than a missing class there.
+    member_libs = sorted([entry.lib.label for entry in contributions.get("android_libs", [])])
+    exported = sorted([lib.label for lib in ctx.attr.exports])
+    if member_libs != exported:
+        fail(
+            "%s: its `exports` are %s but its members' are %s. They are the same Android libraries." %
+            (ctx.label, [str(lib) for lib in exported], [str(lib) for lib in member_libs]),
+        )
+
     return [
         DefaultInfo(
             files = depset(srcs + resources),
@@ -122,6 +135,10 @@ flutter_pub_library = rule(
         "deps": attr.label_list(
             providers = [DartInfo],
             doc = "The libraries of the packages the members depend on outside the cycle.",
+        ),
+        "exports": attr.label_list(
+            providers = [JavaInfo],
+            doc = "The members' Android libraries, under a `select()` on Android as theirs are. Named `exports` so that rules_android's dex aspect, which follows `deps`, `exports` and `runtime_deps`, reaches them from an APK that depends on this library through `flutter_android_plugin_libs`. What reaches `FlutterInfo` is the members' own.",
         ),
         "_sky_engine": SKY_ENGINE_ATTR,
     },

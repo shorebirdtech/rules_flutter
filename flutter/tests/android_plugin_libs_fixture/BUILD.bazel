@@ -1,0 +1,84 @@
+"""Three plugins with Android libraries, and applications that use some of them.
+
+`plugin_a`, `plugin_b` and `plugin_ok`, each in a package of its own, export an
+Android library (a plain `java_library`, which is all the link rule needs of one). The Maven
+requirements say `plugin_a` and `plugin_b` declare an artifact nobody
+installed, and `plugin_ok` one that is.
+"""
+
+load("//flutter:android.bzl", "flutter_android_plugin_libs")
+load("//flutter:defs.bzl", "flutter_application")
+load("//flutter/private:flutter_android_plugin_libs.bzl", "flutter_android_maven_requirements")
+
+package(default_visibility = ["//flutter/tests:__subpackages__"])
+
+[
+    [
+        flutter_application(
+            name = "app_uses_" + n,
+            package_name = "app_uses_" + n,
+            main = "main.dart",
+            tags = ["manual"],
+            deps = ["//flutter/tests/android_plugin_libs_fixture/%s:plugin_%s" % (n, n)],
+        ),
+        flutter_android_plugin_libs(
+            name = "libs_of_" + n,
+            tags = ["manual"],
+            deps = ":app_uses_" + n,
+        ),
+        flutter_android_plugin_libs(
+            name = "checked_libs_of_" + n,
+            maven = ":maven",
+            tags = ["manual"],
+            deps = ":app_uses_" + n,
+        ),
+    ]
+    for n in [
+        "a",
+        "b",
+        "ok",
+    ]
+]
+
+flutter_android_maven_requirements(
+    name = "maven",
+    data = json.encode({
+        "hub": "deps",
+        "resolved": {"g:installed": "1.0"},
+        "packages": [
+            {
+                "package": "plugin_a",
+                "version": "1.0",
+                "deps": [{
+                    "kind": "deps",
+                    "coordinate": "g:needed_by_a",
+                    "version": "2.0",
+                    "line": "",
+                }],
+                "errors": [],
+            },
+            {
+                "package": "plugin_b",
+                "version": "1.0",
+                "deps": [{
+                    "kind": "deps",
+                    "coordinate": "g:needed_by_b",
+                    "version": "2.0",
+                    "line": "",
+                }],
+                "errors": [],
+            },
+            {
+                "package": "plugin_ok",
+                "version": "1.0",
+                "deps": [{
+                    "kind": "deps",
+                    "coordinate": "g:installed",
+                    "version": "1.0",
+                    "line": "",
+                }],
+                "errors": [],
+            },
+        ],
+    }),
+)

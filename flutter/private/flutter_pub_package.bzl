@@ -46,7 +46,7 @@ whichever rule asks for it.
 load("@rules_dart//dart/pub:pub_graph.bzl", "write_pubspec_dependencies")
 load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version", "fetch_pub_archive")
 load("@rules_dart//dart/pub:pubspec.bzl", "read_pubspec")
-load("//flutter/private:android_plugin_maven.bzl", "gradle_statements", "parse_gradle_maven_dependencies")
+load("//flutter/private:android_plugin_maven.bzl", "MAVEN_DEPS_FILE", "gradle_statements", "parse_gradle_maven_dependencies")
 load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url")
 load("//flutter/private:asset_variants.bzl", "variant_scale")
 load("//flutter/private:cmake_link_libraries.bzl", "parse_cmake_link_libraries")
@@ -396,9 +396,9 @@ def _make_android_native_build_unsupported_content(package_name, version):
 
     Emitted for plugins whose Gradle build compiles native code for Android
     (externalNativeBuild) when no overlay provides a Bazel translation.
-    Android builds load this file through the hub's
-    `android/all_android_plugin_libs` aggregator and fail with a clear
-    message; non-Android platforms never load it and are unaffected.
+    An Android build that links the plugin loads this file through its
+    member's `exports` and fails with a clear message; non-Android
+    platforms never load it and are unaffected.
     """
     message = (
         "package:{pkg} {version} compiles native code for Android via " +
@@ -501,29 +501,15 @@ def _write_maven_deps(ctx, deps, errors):
     Written for every spoke, so the hub's `@<hub>-android_maven` repo can read
     all of them: empty for a package that is not an Android plugin with
     sources. For a plugin whose `android/BUILD.bazel` an overlay supplies,
-    the dependencies its Gradle build declares and no errors.
+    the dependencies its Gradle build declares and no errors. At the root of
+    the spoke, as a package with no Android library has no `android/` package.
     """
-    ctx.file("android/maven_deps.json", json.encode({
+    ctx.file(MAVEN_DEPS_FILE, json.encode({
         "package": ctx.attr.package_name,
         "version": ctx.attr.version,
         "deps": deps,
         "errors": errors,
     }) + "\n")
-
-def _make_android_maven_check_only_content(hub_name):
-    """Generate an `android/BUILD.bazel` that only runs the hub's Maven check.
-
-    Emitted when the plugin's Gradle build declares Maven dependencies in a
-    form rules_flutter cannot read. The hub's check fails, listing that line
-    with every other shortfall of the hub's plugins, so this BUILD never needs
-    to define `:lib`. Android builds load this file through the hub's
-    `android/all_android_plugin_libs` aggregator; other platforms never load
-    it.
-    """
-    return (
-        'load("@{hub}-android_maven//:check.bzl", "check")\n\n' +
-        "check()\n"
-    ).format(hub = hub_name)
 
 def _glob_block(srcs_dirs, extensions):
     """Format a `glob([...])` expression covering the given extensions.
@@ -890,7 +876,8 @@ def make_flutter_member_build_content(
         linux_link = None,
         windows_link = None,
         pkg_asset_platforms = {},
-        pkg_shader_platforms = {}):
+        pkg_shader_platforms = {},
+        has_android_lib = False):
     """Generate BUILD content for the source repository of a Flutter pub package.
 
     Emits the package's `flutter_pub_member`, a plugin when
@@ -901,10 +888,12 @@ def make_flutter_member_build_content(
     `flutter_windows_plugin_library` sub-targets.
 
     Android Kotlin/Java sources are exposed via a sibling `android/`
-    sub-package (see `make_android_subpackage_build_content`). The
-    sub-package is loaded only when something queries
-    `@<spoke>//android:lib` — non-Android workspaces don't pay the
-    `@rules_android` / `@rules_kotlin` cost.
+    sub-package (see `make_android_subpackage_build_content`), which the
+    member lists under its `exports`, in a `select()` on
+    `@platforms//os:android`. Only an Android build analyses that label, so
+    only an Android build loads the sub-package: a macOS, web or desktop
+    workspace never pays the `@rules_android` / `@rules_kotlin` cost, and an
+    Android app links the libraries of the plugins it depends on, no others.
 
     The member has no dependencies: those belong to the library of the
     package's dependency cycle (`flutter_pub_library`), which the package's
@@ -912,6 +901,9 @@ def make_flutter_member_build_content(
 
     Args:
         name: Target name (also the `package_name`).
+        has_android_lib: Whether the package has an `android/` sub-package
+            that defines `:lib`, which the member lists under `exports`,
+            selected on Android.
         language_version: Dart language version string (e.g. `"3.4"`).
         code_assets: `dart_code_asset` label strings replacing this
             package's build hook output.
@@ -962,13 +954,11 @@ def make_flutter_member_build_content(
     # NOTE: Android Kotlin/Java sources are NOT compiled in the top-level
     # spoke BUILD. Instead, they're exposed via a sibling `android/`
     # sub-package (see make_android_subpackage_build_content) which loads
-    # @rules_android + @rules_kotlin lazily — only when something queries
-    # `@<spoke>//android:lib`. Mac-only / web-only workspaces never trigger
-    # the parse and don't pay the @rules_android / @rules_kotlin cost.
-    # The application-side `flutter_android_app` macro depends on the hub's
-    # `android/all_android_plugin_libs` aggregator, which deps on every
-    # spoke's `android:lib` — so Android-targeted builds pick up all
-    # plugin libraries automatically.
+    # @rules_android + @rules_kotlin lazily. The member names that package's
+    # `:lib` under its `exports`, selected on Android only, so a mac-only /
+    # web-only workspace never triggers the parse and doesn't pay the
+    # @rules_android / @rules_kotlin cost, and an Android app links the
+    # libraries of the plugins it depends on.
 
     if apple_macos_srcs_dirs:
         extra_targets.append("""
@@ -1032,11 +1022,6 @@ flutter_windows_plugin_library(
             link_attrs = _format_link_attrs(windows_link) if windows_link else "",
         ))
 
-    # NB: Android sources are no longer surfaced via a top-level filegroup.
-    # See `make_android_subpackage_build_content` — the spoke's `android/`
-    # sub-package wraps them in a kt_android_library that the hub's
-    # aggregator (`@<hub>//android:all_android_plugin_libs`) depends on.
-
     if apple_macos_srcs_dirs or apple_ios_srcs_dirs:
         macos_branch = '            ":{name}_apple_macos",'.format(name = name) if apple_macos_srcs_dirs else ""
         ios_branch = '            ":{name}_apple_ios",'.format(name = name) if apple_ios_srcs_dirs else ""
@@ -1060,11 +1045,15 @@ flutter_windows_plugin_library(
     if windows_src_dir:
         windows_libs_arg = '    windows_libs = [":{name}_windows"],\n'.format(name = name)
 
-    # Android sources travel through a sibling `android/` sub-package, which
-    # the hub's `all_android_plugin_libs` deps on and the application macro
-    # adds to `binary_deps`. See `make_android_subpackage_build_content`.
-    # Nothing rides a provider: the wiring happens at macro-load time, where
-    # providers cannot be read.
+    # Android sources travel through a sibling `android/` sub-package, whose
+    # `:lib` the member lists under its `exports` on Android only.
+    android_lib_arg = ""
+    if has_android_lib:
+        android_lib_arg = """    exports = select({
+        "@platforms//os:android": ["//android:lib"],
+        "//conditions:default": [],
+    }),
+"""
 
     # Apple PrivacyInfo.xcprivacy files: thread through `apple_privacy_files`
     # on the flutter_plugin so they propagate via FlutterInfo to the platform
@@ -1103,7 +1092,7 @@ flutter_pub_member(
     srcs = glob(["lib/**/*.dart"], allow_empty = True),
 {resources}    package_name = "{name}",
 {plugin_platforms_json_attr}    language_version = "{language_version}",
-{version}{apple_libs_arg}{linux_libs_arg}{windows_libs_arg}{apple_privacy_files_arg}{asset_attrs}{pub_attrs}    visibility = ["//visibility:public"],
+{version}{android_lib_arg}{apple_libs_arg}{linux_libs_arg}{windows_libs_arg}{apple_privacy_files_arg}{asset_attrs}{pub_attrs}    visibility = ["//visibility:public"],
 )
 {extra_targets}
 """.format(
@@ -1115,6 +1104,7 @@ flutter_pub_member(
         plugin_platforms_json_attr = "    plugin_platforms_json = {},\n".format(repr(plugin_platforms_json)) if plugin_platforms_json else "",
         extra_loads = "\n".join(extra_loads),
         extra_targets = "\n".join(extra_targets),
+        android_lib_arg = android_lib_arg,
         apple_libs_arg = apple_libs_arg,
         linux_libs_arg = linux_libs_arg,
         windows_libs_arg = windows_libs_arg,
@@ -1132,14 +1122,13 @@ def make_android_subpackage_build_content(
         has_resources = False):
     """Generate `android/BUILD.bazel` content for a Flutter plugin spoke.
 
-    Always emits a `kt_android_library(name = "lib", ...)`. The aggregator
-    in the hub's `android/all_android_plugin_libs` depends on `:lib` for
-    every spoke; spokes without Android sources still contribute an empty
-    library (a no-op at link time).
+    Emits a `kt_android_library(name = "lib", ...)`, which the spoke's member
+    lists under `exports` on Android. The spoke of a package with no Android
+    sources or resources has no such package.
 
-    Loaded lazily — Bazel only parses this file when something queries
-    `@<spoke>//android:lib`. Non-Android workspaces never trigger it and
-    don't pay the `@rules_android` / `@rules_kotlin` cost.
+    Loaded lazily — Bazel only parses this file when an Android build
+    analyses the member's `exports`. Non-Android workspaces never trigger
+    it and don't pay the `@rules_android` / `@rules_kotlin` cost.
 
     The `_engine` target gives the plugin's Kotlin/Java source access to
     the FlutterPlugin SPI on the compile classpath. It is `neverlink`, as
@@ -1174,14 +1163,16 @@ def make_android_subpackage_build_content(
             `kt_android_library` so the generated `R` and `BuildConfig`
             classes land in the package the plugin's sources expect.
         hub_name: The pub hub the spoke belongs to; its
-            `@<hub>-android_maven` repo holds the Maven check.
+            `@<hub>-android_maven` repo lists what `@rules_android_maven`
+            resolved.
         maven_deps: The plugin's Maven dependencies as declared in its
             `build.gradle*`: dicts with `kind` (`"deps"`, `"compile_only"`,
             `"runtime"`), `coordinate` (`group:artifact`), `version` (string
-            or None) and `line`. When non-empty the generated BUILD runs the
-            hub's check, which compares every plugin's dependencies with
-            `@rules_android_maven` when an Android build loads it, and
-            depends on the artifacts there.
+            or None) and `line`. When non-empty the generated library depends
+            on the artifacts `@rules_android_maven` resolved. One it lacks is
+            left out, so that the application's `flutter_android_plugin_libs`
+            reports it, by name, with the rest the app needs, rather than
+            Bazel failing on a label that does not exist.
         android_manifest: Path to the plugin's
             `android/src/main/AndroidManifest.xml` if it ships one, or
             empty. When set, the generated `kt_android_library` declares
@@ -1205,20 +1196,6 @@ def make_android_subpackage_build_content(
     Returns:
         Generated BUILD content as a string.
     """
-    if not android_src_dir and not has_resources:
-        # Empty kt_android_library is valid in rules_kotlin. The hub's
-        # aggregator depends on this spoke's `:lib` unconditionally, so
-        # this no-op contribution keeps the deps list mechanical.
-        return """\
-load("@rules_kotlin//kotlin:android.bzl", "kt_android_library")
-
-kt_android_library(
-    name = "lib",
-    srcs = [],
-    visibility = ["//visibility:public"],
-)
-"""
-
     if has_resources and not java_package:
         fail(
             "Plugin ships Android resources (android/src/main/res/) but " +
@@ -1313,8 +1290,8 @@ write_file(
     # Base deps every plugin spoke gets: the engine (which carries the
     # FlutterPlugin SPI plus the embedding's androidx compile classpath
     # via its exports) and the BuildConfig stub. The plugin's own Maven
-    # artifacts come from `@rules_android_maven`, checked when this file
-    # is loaded (see `plugin_maven_deps`).
+    # artifacts come from `@rules_android_maven`, checked by the application
+    # that links this library (see `flutter_android_plugin_libs`).
     deps_expr = '[":_engine", ":_build_config"]'
     maven_loads = ""
     maven_call = ""
@@ -1322,16 +1299,15 @@ write_file(
     runtime_deps_arg = ""
     if maven_deps:
         maven_loads = (
-            'load("@{hub}-android_maven//:check.bzl", "check")\n' +
+            'load("@{hub}-android_maven//:resolved.bzl", "RESOLVED")\n' +
             'load("@rules_android//android:rules.bzl", "android_library")\n' +
             'load("@rules_flutter//flutter/private:android_plugin_maven.bzl", "maven_labels")\n'
         ).format(hub = hub_name)
         maven_call = """
-# The hub's Maven check: fails, listing everything @rules_android_maven lacks
-# for the hub's Android plugins, if anything is missing or too low.
-check()
-
-_maven = maven_labels({declared})
+# The artifacts this plugin's Gradle build declares that @rules_android_maven
+# has. An application that links the plugin fails, naming every one it lacks
+# or has too low, before this library is built (`flutter_android_plugin_libs`).
+_maven = maven_labels({declared}, RESOLVED)
 """.format(declared = repr(maven_deps))
         deps_expr += " + _maven.deps"
         if [d for d in maven_deps if d["kind"] == "compile_only"]:
@@ -1804,33 +1780,23 @@ def _flutter_pub_package_impl(ctx):
 
     if overlay_content:
         ctx.file("BUILD.bazel", overlay_content)
-        ctx.file(MEMBER_FILE, json.encode({"kind": MEMBER_OVERLAY, "material_icons": False}))
+        ctx.file(MEMBER_FILE, json.encode({"kind": MEMBER_OVERLAY, "material_icons": False, "android_lib": False}))
 
         # When the overlay ships an `android/BUILD.bazel.tpl`, use it
-        # verbatim. Otherwise emit an empty stub so the hub's
-        # `android/all_android_plugin_libs` aggregator can depend on
-        # `@<spoke>//android:lib` uniformly across overlay-and-no-Android
-        # plugins (audio_session declares Android sources and ships the
-        # full sub-package; objective_c is pure Apple and gets the stub).
+        # verbatim: the overlay's own plugin target names its `:lib` as its
+        # `exports` (audio_session declares Android sources and ships the
+        # full sub-package; objective_c is pure Apple and ships none).
         #
         # An overlay's Android library still depends on the artifacts the
-        # plugin's Gradle build declares, so they join the hub's check and
-        # its `maven_artifacts` block. Lines the parser cannot read are what
-        # the overlay replaces, so they are not reported.
+        # plugin's Gradle build declares, so they join the hub's Maven data
+        # and its `maven_artifacts` block. Lines the parser cannot read are
+        # what the overlay replaces, so they are not reported.
         overlay_maven_deps = []
         if overlay_android_content:
             overlay_maven_deps = _maven_dep_dicts(_read_plugin_maven_deps(ctx))
         _write_maven_deps(ctx, overlay_maven_deps, [])
         if overlay_android_content:
             ctx.file("android/BUILD.bazel", overlay_android_content)
-        else:
-            ctx.file(
-                "android/BUILD.bazel",
-                make_android_subpackage_build_content(
-                    android_src_dir = "",
-                    java_package = "",
-                ),
-            )
         return ctx.repo_metadata(reproducible = True)
 
     if plugin_block.present:
@@ -1955,6 +1921,7 @@ def _flutter_pub_package_impl(ctx):
             pkg_shader_platforms = pkg_shaders.platforms,
             linux_link = linux_link,
             windows_link = windows_link,
+            has_android_lib = bool(android_src_dir or android_has_resources or android_native_build),
         )
     elif has_asset_contributions or uses_material_icons:
         # No plugin block, but the pubspec has flutter.fonts/assets/shaders (or
@@ -2003,28 +1970,32 @@ def _flutter_pub_package_impl(ctx):
     ctx.file(MEMBER_FILE, json.encode({
         "kind": MEMBER_FLUTTER if is_flutter_member else MEMBER_DART,
         "material_icons": uses_material_icons,
+        "android_lib": bool(android_src_dir or android_has_resources or android_native_build),
     }))
 
-    # Always emit `android/BUILD.bazel`. Bazel only loads it when something
-    # queries `@<spoke>//android:lib`, so non-Android workspaces don't pay
-    # the @rules_android / @rules_kotlin cost. Plugins whose Gradle build
-    # compiles native Android code that autogen cannot translate get a
-    # load-time fail() here instead — Android builds break loudly rather
-    # than shipping an APK missing the library.
+    # `android/BUILD.bazel` exists for a package with an Android library: the
+    # member selects its `:lib` on Android, so non-Android workspaces don't
+    # load it or pay the @rules_android / @rules_kotlin cost. Plugins whose
+    # Gradle build compiles native Android code that autogen cannot translate
+    # get a load-time fail() here instead: an Android app that links one
+    # breaks loudly rather than shipping an APK missing the library.
+    #
+    # Gradle dependencies the reader cannot translate are recorded, not
+    # failed on here: the library is written as for the ones it can read, and
+    # the application that links the plugin fails, naming the lines with
+    # everything else it lacks (`flutter_android_plugin_libs`).
     maven_deps = []
     maven_errors = []
     if android_gradle_maven and not android_native_build:
         maven_deps = _maven_dep_dicts(android_gradle_maven)
         maven_errors = android_gradle_maven.errors
     if android_native_build:
-        android_build_content = _make_android_native_build_unsupported_content(
+        ctx.file("android/BUILD.bazel", _make_android_native_build_unsupported_content(
             ctx.attr.package_name,
             ctx.attr.version,
-        )
-    elif maven_errors:
-        android_build_content = _make_android_maven_check_only_content(ctx.attr.hub_name)
-    else:
-        android_build_content = make_android_subpackage_build_content(
+        ))
+    elif android_src_dir or android_has_resources:
+        ctx.file("android/BUILD.bazel", make_android_subpackage_build_content(
             android_src_dir = android_src_dir,
             java_package = android_java_package,
             hub_name = ctx.attr.hub_name,
@@ -2032,9 +2003,8 @@ def _flutter_pub_package_impl(ctx):
             android_manifest = android_manifest,
             consumer_proguard_specs = android_consumer_proguard_specs,
             has_resources = android_has_resources,
-        )
+        ))
     _write_maven_deps(ctx, maven_deps, maven_errors)
-    ctx.file("android/BUILD.bazel", android_build_content)
     return ctx.repo_metadata(reproducible = True)
 
 flutter_pub_package = repository_rule(

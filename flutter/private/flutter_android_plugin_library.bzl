@@ -36,10 +36,10 @@ def flutter_android_plugin_library(
 
     Args:
         name: Target name. Add it to `flutter_android_app(deps = ...)`,
-            which packages it and registers its plugin class. The macro's
-            automatic wiring covers pub.dev plugins only — it deps on the
-            hub's `all_android_plugin_libs`, which knows the resolved spokes
-            and nothing about a target in this workspace.
+            which packages it and registers its plugin class, or list it in
+            the `exports` of the plugin's `flutter_plugin` (under a
+            `select()` on `@platforms//os:android`), so that every app that
+            depends on the plugin links it, as it does a pub.dev plugin's.
         srcs: Kotlin/Java source files (`.kt`, `.java`).
         java_package: Java package the plugin's classes live in
             (e.g. `io.flutter.plugins.urllauncher`). The namespace of its
