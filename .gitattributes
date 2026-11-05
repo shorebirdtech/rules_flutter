@@ -35,6 +35,7 @@
 /e2e/ffi_example/ export-ignore
 /e2e/ffi_plugin_example/ export-ignore
 /e2e/hello_world/ export-ignore
+/e2e/integration_test/ export-ignore
 /e2e/ios_example/ export-ignore
 /e2e/linux_example/ export-ignore
 /e2e/macos_example/ export-ignore

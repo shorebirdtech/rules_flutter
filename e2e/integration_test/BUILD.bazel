@@ -1,0 +1,134 @@
+load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_analysis_test", "dart_binary")
+load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_library")
+load("@rules_flutter//flutter:integration_test.bzl", "flutter_macos_integration_test")
+load(":test_outcome.bzl", "outcome_test")
+
+exports_files(["pubspec.lock"])
+
+# The workspace's lint ruleset, bundled with the pub package whose YAML its
+# `include:` resolves against, as the other e2e workspaces do.
+dart_analysis_options(
+    name = "options",
+    src = "analysis_options.yaml",
+    deps = ["@deps//:very_good_analysis"],
+)
+
+dart_analysis_config(
+    name = "analysis_config",
+    options = [":options"],
+)
+
+# The app's Dart as a library, so the analyzer has something to stage:
+# `flutter_application` is a bundle and carries no `DartInfo`.
+flutter_library(
+    name = "app_lib",
+    package_name = "integration_test_example",
+    srcs = glob(["lib/**/*.dart"]),
+    deps = ["@deps//:flutter"],
+)
+
+dart_analysis_test(
+    name = "app_lib_analysis",
+    targets = [":app_lib"],
+)
+
+# The counter app. Each integration test runs it as the application with the
+# test as its program.
+flutter_application(
+    name = "app_flutter",
+    package_name = "integration_test_example",
+    main = "lib/main.dart",
+    deps = ["@deps//:flutter"],
+)
+
+_TEST_DEPS = [
+    "@deps//:flutter_test",
+    "@deps//:integration_test",
+]
+
+# -- macOS -----------------------------------------------------------------
+
+# Two tests tapping the counter and reading what it shows: passes.
+flutter_macos_integration_test(
+    name = "macos_pass_test",
+    src = "integration_test/counter_test.dart",
+    application = ":app_flutter",
+    bundle_id = "com.example.integrationtest",
+    deps = _TEST_DEPS,
+)
+
+# `--test_filter` selects among the tests of one file. The wrapper runs
+# `:macos_pass_test` with a filter that matches one of its two cases and
+# checks that the report holds that one and no other.
+outcome_test(
+    name = "macos_filter_test",
+    cases = ["counter increments when tapped"],
+    expect = "pass",
+    failing_cases_given = True,
+    test = ":macos_pass_test",
+    test_filter = "increments",
+)
+
+# A test that is wrong. `manual`, because it is meant to fail: the red twin
+# below is what runs it, and passes only while it fails the way it should.
+flutter_macos_integration_test(
+    name = "macos_red",
+    src = "integration_test/failing_test.dart",
+    application = ":app_flutter",
+    bundle_id = "com.example.integrationtest",
+    tags = ["manual"],
+    deps = _TEST_DEPS,
+)
+
+# A failing integration test fails its target, and its JUnit report names the
+# failing case.
+outcome_test(
+    name = "macos_red_twin_test",
+    cases = ["counter reads 99 after one tap"],
+    expect = "fail",
+    failing_cases = ["counter reads 99 after one tap"],
+    failing_cases_given = True,
+    output_contains = ["Expected: exactly one matching"],
+    test = ":macos_red",
+)
+
+# The app ends during a test, with status 3.
+flutter_macos_integration_test(
+    name = "macos_crash",
+    src = "integration_test/crash_test.dart",
+    application = ":app_flutter",
+    bundle_id = "com.example.integrationtest",
+    tags = ["manual"],
+    deps = _TEST_DEPS,
+)
+
+# An app that dies during a test fails its target, and the failure says how the
+# app ended.
+#
+# The suite's `tearDownAll`, which the integration binding registers, cannot
+# run in an app that is gone either, and is reported failing with it.
+outcome_test(
+    name = "macos_crash_test",
+    cases = [
+        "app exits during the test",
+        "(tearDownAll)",
+    ],
+    expect = "fail",
+    failing_cases = [
+        "app exits during the test",
+        "(tearDownAll)",
+    ],
+    failing_cases_given = True,
+    output_contains = ["exited with code 3"],
+    test = ":macos_crash",
+)
+
+# Runs a test that must fail, or run only some of its cases (see
+# `test_outcome.bzl`).
+dart_binary(
+    name = "test_outcome_runner",
+    testonly = True,
+    compile_mode = "exe",
+    main = "test_outcome_runner.dart",
+    deps = ["@rules_dart//dart/runfiles"],
+)

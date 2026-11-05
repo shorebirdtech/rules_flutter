@@ -783,6 +783,7 @@ cd e2e/ffi_example && bazel test //...
 cd e2e/ffi_plugin_example && bazel test //...
 cd e2e/plugin_example && bazel test //...
 cd e2e/macos_example && bazel test //...
+cd e2e/integration_test && bazel test //...  # macOS-only; needs an unlocked, awake desktop
 cd e2e/ios_example && bazel test //...
 cd e2e/multi_window_example && bazel test //...
 cd e2e/android_example && bazel test //...
@@ -865,6 +866,33 @@ cd e2e/_overlay_tests/native_assets_synthetic && bazel test //...   # macOS-only
   `bazel test //...` there exits 4 ("No test targets were found") however clean
   the checks are.
 
+### `e2e/integration_test`
+
+The integration test rules (`flutter/integration_test.bzl`) on a real app, in the
+host's own desktop session. Its tests launch a window, so run it on a Mac with an
+unlocked screen and an awake display (§ "macOS permission prerequisites", "The
+display must be awake"); the runner holds the display awake itself and fails,
+saying which, when the screen is locked or the display asleep. `bazel test //...`
+there runs:
+
+| Target | Property |
+|---|---|
+| `:macos_pass_test` | a two-test suite that taps a counter and reads its text passes, each test reported (Bazel lists each case from the JUnit file) |
+| `:macos_red_twin_test` | a failing integration test fails its target, and the JUnit report names the failing case with a `<failure>`. It wraps `:macos_red` (`manual`, since it is meant to fail) in `outcome_test`, which runs the wrapped test's own executable and passes only when it ends as the target says |
+| `:macos_crash_test` | an app that `exit(3)`s mid-test fails its target, and the output says `exited with code 3` |
+| `:macos_filter_test` | `--test_filter` runs one of the two cases of `:macos_pass_test` and no other |
+
+The tests take turns on the screen through the `macos-gui` lock
+(`/tmp/rules_flutter-locks/`), so several at once is fine: a test that has to wait
+says `waiting for macos-gui, held by another test`. CI builds this workspace and
+does not run it (it never runs a test that needs a GUI session).
+
+Changing the integration test rules (`flutter/integration_test.bzl`,
+`flutter/private/flutter_integration_*.bzl`, the support library in
+`flutter/private/integration_test/support/`) or the runner
+(`tools/dev_tool/lib/integration/`, `bin/integration_test_runner.dart`) takes this
+workspace's `//...` on the platform it touches, and the platform's row below.
+
 ### Test code the e2e workspaces share
 
 Each workspace is its own Bazel project, so a test in one cannot import a file
@@ -934,6 +962,7 @@ quietly never running. A new workspace needs an entry; `bazel run
 | `ffi_example` | macOS, Linux, Windows | native libraries in each platform's bundle | |
 | `cross_compile_example` | macOS (`build`) | the Mac-to-Linux cross toolchain | Linux: a native build is `hello_world`'s; Windows: no such pair |
 | `macos_example`, `ios_example`, `multi_window_example`, `_overlay_tests/native_assets_synthetic` | macOS | Apple-only features | Linux, Windows: Apple-only |
+| `integration_test` | macOS (`build`) | the integration test rules building the app and test of each case: its tests need a GUI session, which CI never runs a test in | Linux, Windows: macOS-only |
 | `dual_hub`, `ffi_plugin_example`, `web_example`, `android_example`, `_overlay_tests/link_hooks` | Linux | their platform-neutral subject, once, on the cheapest runner | macOS, Windows: the same again |
 | `android_example` | Windows (also) | an Android build on a Windows host: `gen_snapshot.exe`, engine-strip path separators, rules_android JVMs without an up-front heap commit (the committed patch) | |
 | `asset_bundle` | macOS | the `flutter_assets/` tree of every platform against `flutter build`'s, once | Linux, Windows: no other host can analyse its iOS targets |
@@ -1662,6 +1691,8 @@ script's own package requires ≥ 3.13.
 | Windows runner / bundle (`flutter/private/*windows*`) | windows_example (on Windows), GCP VM visual test |
 | Desktop engine selection (debug/profile/release) | cross_compile_example `bazel build :cross_linux` + verify on VM |
 | Profile mode (`flutter:profile` selects, profile engine repos) | Root `//...`, macOS and a device by hand, hello_world `//...` on Linux and Windows (CI does this), and the profile run on the Linux and Windows VMs (§ Profile mode on Linux and Windows) |
+| Integration tests (`flutter/integration_test.bzl`, `flutter/private/flutter_integration_*.bzl`, `flutter/private/integration_test/support/`, `tools/dev_tool/lib/integration/`, `bin/integration_test_runner.dart`) | `e2e/integration_test` `//...` on each platform the change touches (macOS, with an unlocked screen), dev_tool unit, plus the platform's row |
+| `flutter_application_variant` (`flutter/private/flutter_application_variant.bzl`, `flutter_program_inputs` in `common.bzl`) | Root `//...`, macos_example `//...` and `dart run tools/dev_tool/tool/e2e.dart test/e2e/main_outside_lib_e2e_test.dart --plain-name="macOS"`, which reloads and restarts a variant; plus the macOS manual runtime test |
 | Dart compilation / AOT | hello_world, ffi_example, macos_example |
 | Asset bundling | hello_world, plugin_example |
 | Shader compilation, bundling or hot reload, or how a workspace plugin is wired | `glass_plugin_e2e_test.dart` on every platform it covers, and by hand: `bazel build //impeller_shader:app_flutter_sksl_required` in plugin_example must **fail**, saying the shader does not compile for Skia |

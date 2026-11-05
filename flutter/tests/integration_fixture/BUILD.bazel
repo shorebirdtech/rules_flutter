@@ -1,0 +1,55 @@
+load("//flutter:integration_test.bzl", "flutter_application_variant", "flutter_desktop_integration_test", "flutter_integration_bootstrap")
+load("//flutter/tests:flutter_integration_test_test.bzl", "stub_runner")
+
+package(default_visibility = ["//flutter/tests:__subpackages__"])
+
+flutter_integration_bootstrap(
+    name = "bootstrap",
+    src = "test/a_test.dart",
+    tags = ["manual"],
+)
+
+flutter_integration_bootstrap(
+    name = "bootstrap_with_config",
+    src = "test/a_test.dart",
+    tags = ["manual"],
+    test_config = "test/flutter_test_config.dart",
+)
+
+stub_runner(
+    name = "web_runner",
+    family = "web",
+    tags = ["manual"],
+)
+
+flutter_desktop_integration_test(
+    name = "desktop_test",
+    app = "//flutter/tests/variant_fixture/app",
+    env = {"FIXTURE_KEY": "fixture value"},
+    tags = ["manual"],
+)
+
+# A test given a runner of another family.
+flutter_desktop_integration_test(
+    name = "desktop_test_on_a_web_runner",
+    app = "//flutter/tests/variant_fixture/app",
+    runner = ":web_runner",
+    tags = ["manual"],
+)
+
+# A program that needs a package no dependency brings, and one that has it.
+flutter_application_variant(
+    name = "program_missing_a_package",
+    application = "//flutter/tests/variant_fixture/app",
+    main = "test/a_test.dart",
+    requires_packages = ["integration_test"],
+    tags = ["manual"],
+)
+
+flutter_application_variant(
+    name = "program_with_its_packages",
+    application = "//flutter/tests/variant_fixture/app",
+    main = "test/a_test.dart",
+    requires_packages = ["variant_base_plugin"],
+    tags = ["manual"],
+)

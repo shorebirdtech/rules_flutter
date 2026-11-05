@@ -115,7 +115,12 @@ bzl_library(
     name = "integration_test",
     srcs = ["integration_test.bzl"],
     visibility = ["//visibility:public"],
-    deps = ["//flutter/private:flutter_application_variant"],
+    deps = [
+        ":macos",
+        "//flutter/private:flutter_application_variant",
+        "//flutter/private:flutter_integration_bootstrap",
+        "//flutter/private:flutter_integration_test",
+    ],
 )
 
 bzl_library(

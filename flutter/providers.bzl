@@ -178,3 +178,14 @@ FlutterApplicationInputsInfo = provider(
         "inputs": "struct: `flutter_program_inputs` of the application. `label` is the application's own, and with it the package that `package:<name>/…` imports and asset keys are in; `main`, `srcs`, `assets` and the other source fields are Files; `deps`, `native_deps` and `code_assets` are the Targets the application's attributes named, with the providers its aspects attached.",
     },
 )
+
+FlutterIntegrationRunnerInfo = provider(
+    doc = "Where an integration test runs: the family of device, what the host runner needs to reach one, and how the test is placed. Returned by the runner rules (`flutter_desktop_runner` and the others) and read by the test rule of the same family.",
+    fields = {
+        "family": "string: `\"web\"`, `\"desktop\"`, `\"ios_simulator\"` or `\"android\"`. A test rule takes only a runner of its own family.",
+        "launcher_config": "struct: JSON-able settings for the host runner, which are the family's own (Chrome's runfiles path, a simulator's device type and runtime, an emulator's image).",
+        "runfiles": "depset[File]: what the runner needs at run time beside the app (a Chrome, an emulator, a system image).",
+        "execution_requirements": "dict: the test's `execution_requirements`. Always `no-remote` and `no-sandbox`: the app runs on this machine, in this machine's session.",
+        "target_compatible_with": "list[Label]: the platforms the runner works on, which a macro puts on the test it declares.",
+    },
+)

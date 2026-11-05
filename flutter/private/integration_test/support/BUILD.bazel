@@ -1,0 +1,14 @@
+"""The support library an integration test's program carries.
+
+Not a library target: it imports `package:integration_test`, `package:flutter_test`,
+`package:test_api`, `package:stream_channel` and `package:stack_trace`, which
+resolve from the *user's* pub hub, and a rules_flutter-owned library cannot depend
+on a user's hub label. `flutter_integration_bootstrap` stages these files beside
+the bootstrap it generates, so they are compiled as the program's own sources, as
+the agent extensions are.
+"""
+
+exports_files(
+    glob(["*.dart"]),
+    visibility = ["//flutter:__subpackages__"],
+)

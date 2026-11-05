@@ -69,9 +69,16 @@ bzl_library(
 )
 
 bzl_library(
+    name = "dbg_transition",
+    srcs = ["dbg_transition.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+)
+
+bzl_library(
     name = "debug_build",
     srcs = ["debug_build.bzl"],
     visibility = ["//flutter:__subpackages__"],
+    deps = [":dbg_transition"],
 )
 
 bzl_library(
@@ -263,6 +270,23 @@ bzl_library(
         "//flutter:providers",
         "@apple_support//lib:apple_support",
         "@bazel_skylib//lib:structs",
+    ],
+)
+
+bzl_library(
+    name = "flutter_integration_bootstrap",
+    srcs = ["flutter_integration_bootstrap.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+)
+
+bzl_library(
+    name = "flutter_integration_test",
+    srcs = ["flutter_integration_test.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+    deps = [
+        ":dbg_transition",
+        "//flutter:providers",
+        "@rules_dart//dart:utils",
     ],
 )
 

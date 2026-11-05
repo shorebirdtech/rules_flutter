@@ -22,7 +22,7 @@ If `flutter build` works for you, here is what Bazel adds:
 - [Getting started](#getting-started)
 - [Dependencies](#dependencies): pub packages, build hooks, native code
 - [Building for each platform](#building-for-each-platform): macOS, iOS, Android, Linux, Windows, web, cross-compiling, release permissions
-- [Rules reference](#rules-reference): libraries, applications, tests, plugins, code generation, providers
+- [Rules reference](#rules-reference): libraries, applications, tests, integration tests, plugins, code generation, providers
 - [The dev tool](#the-dev-tool): running apps, hot reload, driving an app from a script
 - [Examples](#examples)
 
@@ -1430,7 +1430,7 @@ flutter_application(
 
 ### flutter_application_variant
 
-The same application with another `main`. It compiles the application's program again with `main` as the entry point, adds `srcs`, `deps` and `defines` to the application's, and keeps the rest: its Dart package (so `package:my_app/...` imports in the new `main` resolve), assets, native libraries, shaders and build options. It returns what `flutter_application` returns, so every platform rule takes it as its `application`. The framework and each package are compiled once for the variant and the application alike.
+The same application with another `main`. It compiles the application's program again with `main` as the entry point, adds `srcs`, `deps` and `defines` to the application's, and keeps the rest (the application's own `main` stays a source, for the new one to import): its Dart package (so `package:my_app/...` imports in the new `main` resolve), assets, native libraries, shaders and build options. It returns what `flutter_application` returns, so every platform rule takes it as its `application`. The framework and each package are compiled once for the variant and the application alike.
 
 It is exported from `@rules_flutter//flutter:integration_test.bzl`, beside the rules that run integration tests, but it is not tied to them: an entry point of its own, as `flutter run -t test_driver/app.dart` runs, is the same shape.
 
@@ -1456,6 +1456,8 @@ flutter_macos_app(
 | `application` | The `flutter_application` to rebuild. Required. It may be in another Bazel package: the variant is in the application's Dart package and its assets keep their keys there. |
 | `main` | The entry point, in place of the application's. Required. It may sit outside the package's `lib/`. |
 | `srcs`, `deps`, `defines` | Added to the application's. A plugin only the variant's `deps` bring is registered in the variant and not in the application. |
+| `unchecked_srcs` | Sources added like `srcs` whose imports are not checked against the program's `deps`: files a rule wrote for the program, whose imports are that rule's to get right. The integration test macros use it for the bootstrap and its support library. |
+| `requires_packages` | Packages the program must have, by name. Analysis fails, naming the package and the `@<hub>//:<package>` target to add, if no dependency brings one. |
 
 ### flutter_test
 
@@ -1549,6 +1551,47 @@ The program is written as a test suite, because `flutter_tester` draws frames th
 The program sees the environment it was started with and runs in the working directory it was started in, which for a build action is the exec root, so it can be handed paths of the action's inputs and outputs. Native Assets load from any working directory. Arguments are not passed to the program.
 
 Build it for the machine it runs on. `bazel run` does that, and a rule that runs it in an action takes it as an executable attribute with `cfg = "exec"`, as `genrule` takes `tools`. With `enable_impeller = True` it needs that machine's GPU, so keep such an action off remote executors (`execution_requirements = {"no-remote-exec": "1"}`).
+
+### Integration tests
+
+`package:integration_test` tests run in the real app, on a device, and each `testWidgets` is reported as a test case. The test is the `integration_test/app_test.dart` that `flutter create` users write, unchanged: `IntegrationTestWidgetsFlutterBinding.ensureInitialized()`, then `testWidgets` that call the app's own `main()`. The rules are in `@rules_flutter//flutter:integration_test.bzl`.
+
+macOS is the platform so far.
+
+```starlark
+load("@rules_flutter//flutter:defs.bzl", "flutter_application")
+load("@rules_flutter//flutter:integration_test.bzl", "flutter_macos_integration_test")
+
+flutter_application(
+    name = "app_flutter",
+    package_name = "my_app",
+    main = "lib/main.dart",
+    srcs = glob(["lib/**/*.dart"]),
+    deps = ["@deps//:flutter"],
+)
+
+flutter_macos_integration_test(
+    name = "app_test",
+    src = "integration_test/app_test.dart",
+    application = ":app_flutter",
+    bundle_id = "com.example.myapp",
+    deps = [
+        "@deps//:flutter_test",
+        "@deps//:integration_test",
+    ],
+)
+```
+
+`bazel test :app_test` builds the application with the test as its program, in debug mode whatever `-c` says (the suite is driven through the VM service a debug build serves, and `flutter test` forces debug for an integration test too), launches it on the host's own desktop, and drives the suite over that VM service, as `flutter test integration_test/app_test.dart -d macos` does. `integration_test` is in your `pubspec.yaml`'s `dev_dependencies`, as `sdk: flutter`. The app's own `main` is unchanged and carries no test code: the test is a program of its own, a variant of the application (see [flutter_application_variant](#flutter_application_variant)).
+
+- **Per-test results.** Each test case is reported as it finishes, and the JUnit report names each one. `--test_filter` selects test cases by name, a regular expression matched against each full name, and `shard_count` divides them among shards.
+- **A failing test fails the target**, and the JUnit report names the failing case. So does an app that exits during a test, with the reason the device gives: `The macOS app exited with code 3 …`. A suite that registers no test fails, since a program that declared nothing has not been tested.
+- **One target per test file**, as `flutter test` launches the app once per file. `srcs` lists the files the test imports by relative path. A `flutter_test_config.dart` beside the test is found by the same search `flutter_test` runs, or is named with `test_config`.
+- **`deps` must bring `integration_test` and `flutter_test`**: analysis fails, naming the package and the `@<hub>//:<package>` target to add, if they are missing.
+- **The test needs an unlocked, awake desktop.** The runner holds the display awake for the run and fails, saying which, if the screen is locked or the display is asleep. A test that cannot run is a failure, not a skip: a skipped test reads as a pass. Two tests do not share the screen at once, since a covered window stops drawing: they take turns on a lock (`/tmp/rules_flutter-locks/macos-gui.lock`), which the operating system releases if a test dies.
+- **`env` reaches the runner and the app's process.** `data` is available to the test at run time.
+
+The macro is Tier 1. Tier 2 is `flutter_integration_bootstrap` (the program a test file runs as), `flutter_application_variant`, `flutter_macos_app`, `flutter_desktop_integration_test` and `flutter_desktop_runner`, which the macro composes as `__<name>_bootstrap`, `__<name>_program` and `__<name>_app` (the macro's own targets, which you do not name).
 
 ### flutter_android_build
 
@@ -1801,6 +1844,8 @@ sdk = ctx.toolchains["@rules_flutter//flutter:toolchain_type"].flutter_sdk_info
 | `native_plugin_registrant` | `File` or `None` | The generated plugin registrant source for desktop platforms. |
 
 **`FlutterApplicationInputsInfo`** is carried by `flutter_application` and `flutter_application_variant`. Its one field, `inputs`, is the program the application was built from, which `flutter_application_variant` changes and builds again.
+
+**`FlutterIntegrationRunnerInfo`** is returned by the runner rules (`flutter_desktop_runner`) and read by the test rule of the same family: the `family` of device (`"web"`, `"desktop"`, `"ios_simulator"` or `"android"`), the runner's own `launcher_config`, the `runfiles` it needs, the test's `execution_requirements` and `target_compatible_with`. A test rule takes only a runner of its own family.
 
 ## The dev tool
 

@@ -1,0 +1,9 @@
+load("//flutter/private:flutter_integration_test.bzl", "flutter_desktop_runner")
+
+# The runners an integration test rule defaults to, one per family of device.
+
+# The host's own desktop: macOS, Linux or Windows.
+flutter_desktop_runner(
+    name = "desktop",
+    visibility = ["//visibility:public"],
+)

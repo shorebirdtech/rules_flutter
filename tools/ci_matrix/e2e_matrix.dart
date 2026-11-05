@@ -240,6 +240,19 @@ const e2eWorkspaces = <E2eWorkspace>[
     },
     skips: {Os.linux: _appleOnly, Os.windows: _appleOnly},
   ),
+  // Its tests launch the app in a window, which needs a desktop session that
+  // CI never runs a test in (docs/TESTING.md, "What CI covers"): CI builds it,
+  // and the tests run by hand.
+  E2eWorkspace(
+    'integration_test',
+    runs: {
+      Os.macos:
+          'the integration test rules building: the bootstrap, the variant of '
+          'the application, the macOS app and the test, for each case',
+    },
+    skips: {Os.linux: _appleOnly, Os.windows: _appleOnly},
+    command: 'build',
+  ),
   E2eWorkspace(
     'ios_example',
     runs: {
