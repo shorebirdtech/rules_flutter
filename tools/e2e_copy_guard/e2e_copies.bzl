@@ -1,8 +1,8 @@
 """Repository rule exposing files the e2e workspaces each carry a copy of.
 
-`e2e/` is in `.bazelignore` (each workspace is its own Bazel project), so the
-root cannot name those files as labels. This rule links two kinds of file into
-a repo, for `//tools/e2e_copy_guard:copies_identical_test` to compare:
+`e2e/` is in `REPO.bazel`'s `ignore_directories` (each workspace is its own
+Bazel project), so the root cannot name those files as labels. This rule links
+two kinds of file into a repo, for `//tools/e2e_copy_guard:copies_identical_test` to compare:
 
 * every `e2e/<workspace>/patches/*.patch`, as `<workspace>/<file>`, listed one
   per line in `index.txt`;

@@ -1,0 +1,17 @@
+"""A module that depends on rules_flutter, and nothing else of its own."""
+
+module(name = "external_module_e2e")
+
+# Lists every target of the published module, the way tools and IDE plugins
+# do (`bazel query @rules_flutter//...`), from the release archive and not the
+# checkout: what the archive omits (.gitattributes) the module must not need,
+# and development tooling loads repos a consumer never sees, so it lives in
+# directories REPO.bazel keeps out of the module's packages. Extract the
+# archive first: `bazel run //tools/consumer_archive` in the repository root.
+bazel_dep(name = "rules_flutter", version = "0.0.0")
+bazel_dep(name = "rules_dart", version = "0.8.1")
+
+local_path_override(
+    module_name = "rules_flutter",
+    path = "rules_flutter",
+)

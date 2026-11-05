@@ -782,6 +782,9 @@ Run `bazel test //...` in each workspace. All non-manual tests run automatically
 
 ```sh
 cd e2e/smoke && bazel test //...
+bazel run //tools/consumer_archive                            # extract the release archive for the next line
+cd e2e/external_module && bazel query "@rules_flutter//..."   # a consumer lists the whole module (CI: consumer-query)
+cd tools/preset && bazel test //...                           # the generated .bazelrc preset is current
 cd e2e/dual_hub && bazel test //...
 cd e2e/hello_world && bazel test //...
 cd e2e/codegen && bazel test //...
@@ -1709,6 +1712,8 @@ script's own package requires ≥ 3.13.
 | Toolchain / SDK, or any action's inputs from the Dart SDK | smoke, hello_world, and `//flutter/tests:sdk_inputs_test` with `//flutter/tests/sdk_sets:sdk_sets_test` (see § "SDK inputs") |
 | Anything that downloads (`download*` in a repository rule, `ARTIFACT_CHECKSUMS` / `source_sha256` in `versions.bzl`, `flutter_pub_package`, `update_flutter_version`) | Root `//flutter/tests:download_digests_test` (every table digest is 64-hex, for every version, host, target and mode the macros iterate) and `//flutter/tests:pinned_test` (what counts as a digest) and `//tools/download_guard/...` (every `download*` call in `//flutter` passes its digest through `pinned()`, which refuses a missing or malformed one before the request; a hosted pub package goes through rules_dart's `fetch_pub_archive`, which the lint accepts only when it is loaded from `@rules_dart//dart/pub:pub_lock_package.bzl` and given a `sha256`), **and** `dart run tools/dev_tool/tool/e2e.dart test/e2e/digest_pinned_e2e_test.dart test/e2e/digest_missing_e2e_test.dart test/e2e/pub_archive_e2e_test.dart test/e2e/sdk_source_e2e_test.dart` (what a fetch does with a good, a bad and a missing digest, and what a Flutter SDK package's fetch from the source tarball does with a package that is, and is not, in it; needs no device; the generated workspace resolves its modules from Bazel's registry or repository cache) |
 | A new or removed e2e workspace, or where one runs in CI (`tools/ci_matrix/e2e_matrix.dart`, `.github/workflows/ci.yaml`) | `bazel run //tools/ci_matrix` (fails on a gap) and `bazel test //tools/ci_matrix/...` |
+| A new package with a `BUILD` that loads a repo only development has (a dev dependency of `MODULE.bazel`), or a change to `ignore_directories` in `REPO.bazel` | `bazel run //tools/consumer_archive`, then `cd e2e/external_module && bazel query "@rules_flutter//..."` must list the module with no error (the archive is committed state only, and omits what `.gitattributes` trims); put such a package in `ignore_directories` |
+| The bazelrc preset (`tools/preset`) | `cd tools/preset && bazel run //:preset.update`, then `bazel test //...` there |
 | Maven artifacts (a `maven.install` in any `MODULE.bazel`, or a bump of `rules_android` or `rules_jvm_external`) | `bazel run //tools/maven_locks -- --refresh` on hello_world, plugin_example, android_example and `.`, then `bazel run @overhead//locks -- --refresh` on each — see "Maven lock files" in § 1 |
 | dev_tool (unit) | `bazel test //tools/dev_tool/...` (already covered by root `//...`) |
 | dev_tool (e2e) | `dart run tools/dev_tool/tool/e2e.dart` — needs a Dart ≥3.13 on `PATH`, see § 2 |

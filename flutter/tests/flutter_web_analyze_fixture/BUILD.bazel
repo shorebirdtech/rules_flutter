@@ -2,8 +2,9 @@ load("@rules_dart//dart:defs.bzl", "dart_analysis_test")
 load("//flutter:web.bzl", "flutter_web_bundle")
 
 # The guard on `flutter_web_bundle`'s `DartAnalyzableInfo`, in the root
-# workspace so `bazel test //...` covers it — `e2e/` is in `.bazelignore`, so
-# the web examples that exercise this in anger are outside the root sweep.
+# workspace so `bazel test //...` covers it — `e2e/` is in `REPO.bazel`'s
+# `ignore_directories`, so the web examples that exercise this in anger are
+# outside the root sweep.
 #
 # Four things have to hold for `:analysis_test` to pass, and it fails loudly
 # if any stops:

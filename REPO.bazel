@@ -5,3 +5,14 @@ repo(
         "//:package_metadata",
     ],
 )
+
+# Not packages of this module, here or in a consumer's copy of it: the
+# end-to-end workspaces, each its own Bazel project; the checkout's own state;
+# and the packages that need a repo only development has.
+ignore_directories([
+    "bazel-*",
+    ".claude",
+    "e2e",
+    "references",
+    "tools/preset",
+])

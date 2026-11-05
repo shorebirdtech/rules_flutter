@@ -57,6 +57,10 @@ const _appleOnly =
     'every test is target_compatible_with macOS: it builds Apple bundles, '
     'which no other host can analyse';
 
+const _consumerQuery =
+    'it has no targets; the `consumer-query` job queries the whole module '
+    'from it instead';
+
 const _linuxOnly = 'every test is target_compatible_with Linux';
 
 const _windowsOnly = 'every test is target_compatible_with Windows';
@@ -78,6 +82,16 @@ const e2eWorkspaces = <E2eWorkspace>[
           'the BCR presubmit module resolving its toolchain on Linux (BCR '
           'runs Debian and Ubuntu)',
       Os.windows: 'the BCR presubmit module resolving its toolchain on Windows',
+    },
+  ),
+  // Not an E2E job: the `consumer-query` job in ci.yaml queries
+  // `@rules_flutter//...` from it, on all three systems.
+  E2eWorkspace(
+    'external_module',
+    skips: {
+      Os.macos: _consumerQuery,
+      Os.linux: _consumerQuery,
+      Os.windows: _consumerQuery,
     },
   ),
   E2eWorkspace(
