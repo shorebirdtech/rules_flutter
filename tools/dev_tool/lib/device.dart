@@ -1035,8 +1035,43 @@ class WindowsDevice extends Device {
     // action does exactly that on any rebuild, which `app.restart` performs
     // before it swaps the kernel in. macOS and Linux let a running image be
     // unlinked and replaced, so only Windows needs the copy.
+    _launchInFlight = true;
     final launchPath = _stage(appPath);
+    try {
+      return await _launch(launchPath, onLog: onLog);
+    } catch (_) {
+      await _releaseLaunch();
+      rethrow;
+    }
+  }
 
+  /// Whether a launch has begun and not yet returned its app.
+  bool _launchInFlight = false;
+
+  /// The app a launch in flight has started, until the launch returns it.
+  Process? _launching;
+
+  @override
+  Future<void> abandonLaunch() => _releaseLaunch();
+
+  /// Undo a launch that did not return: the app it started, which runs out of
+  /// the staged copy and holds it open, and then that copy. A launch that
+  /// returned its app has handed both to [stop], and this leaves them.
+  Future<void> _releaseLaunch() async {
+    if (!_launchInFlight) return;
+    _launchInFlight = false;
+    final process = _launching;
+    _launching = null;
+    if (process != null) {
+      await _stopProcess('Windows app', process, teardownBound);
+    }
+    _clearStaging();
+  }
+
+  Future<AppInstance> _launch(
+    String launchPath, {
+    AppLogListener? onLog,
+  }) async {
     // Bundle directories contain the executable at <dir>/<name>.exe.
     String executable = launchPath;
     if (FileSystemEntity.isDirectorySync(launchPath)) {
@@ -1044,9 +1079,11 @@ class WindowsDevice extends Device {
       executable = p.join(launchPath, '$dirName.exe');
     }
 
-    final process = await _startProcess(executable, []);
+    final process = _launching = await _startProcess(executable, []);
     final logs = _startProcessLogs(process, onLog);
     final vmServiceUri = await discoverVmServiceUri(logs);
+    _launching = null;
+    _launchInFlight = false;
     return AppInstance(
       process: process,
       vmServiceUri: vmServiceUri,

@@ -3486,6 +3486,47 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
 
       expect(File(launched).existsSync(), isFalse);
     });
+
+    // A test that Bazel ends while the app is starting runs its teardown before
+    // `launch` has returned an instance, so the device hears of the app only
+    // through [Device.abandonLaunch]. The app is a window on the desktop, and
+    // its copy of the bundle is held open by it: neither may outlive the run.
+    test(
+      'abandoning a launch in flight stops the app and removes its copy',
+      () async {
+        final started = Completer<FakeProcess>();
+        final launched = <String>[];
+        final device = WindowsDevice(
+          makeStagingDir: () =>
+              Directory(p.join(sandbox.path, 'staged'))..createSync(),
+          // The app starts and never announces a VM service.
+          startProcess: (exe, args) async {
+            launched.add(exe);
+            final proc = FakeProcess();
+            started.complete(proc);
+            return proc;
+          },
+        );
+        unawaited(device.launch(bundle.path));
+        final app = await started.future;
+        await app.outputAttached;
+
+        await device.abandonLaunch();
+
+        expect(app.killed, isTrue);
+        expect(File(launched.single).existsSync(), isFalse);
+      },
+    );
+
+    test('abandoning a launch that returned leaves the app to stop', () async {
+      final h = makeDevice();
+      await h.device.launch(bundle.path);
+
+      await h.device.abandonLaunch();
+
+      expect(h.procs.single.killed, isFalse);
+      expect(File(h.launched.single).existsSync(), isTrue);
+    });
   });
 
   group('WindowsDevice.screenshot', () {
