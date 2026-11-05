@@ -177,3 +177,24 @@ the reason the device gives for its exit.
 The test is built in debug mode, runs outside Bazel's sandbox and never remotely.
 A macOS app needs an unlocked, awake desktop session.""",
 )
+
+def _flutter_web_bundle_integration_test_impl(ctx):
+    return integration_test_impl(ctx, WEB)
+
+flutter_web_bundle_integration_test = rule(
+    implementation = _flutter_web_bundle_integration_test_impl,
+    attrs = _test_attrs("//flutter/integration_test:chrome"),
+    test = True,
+    doc = """Runs the web bundle `app` (`flutter_web_app` or `flutter_web_bundle`) in the runner's headless Chrome and reports the integration test suite it runs.
+
+The bundle's program is an integration test (see `flutter_integration_bootstrap`),
+so each `testWidgets` is a test case: `--test_filter` and `shard_count` select
+among them, each is reported as it finishes, and the JUnit file names each. The
+suite is driven over the browser's DevTools protocol, which is what a web bundle
+has in place of a VM service. A suite that registers no test fails, as does a
+page that is lost during a test, with the reason the browser gives.
+
+The test is built in debug mode, runs outside Bazel's sandbox and never remotely.
+The bundle is served from a directory of its own on the loopback, and the
+browser's profile is deleted when the test ends.""",
+)

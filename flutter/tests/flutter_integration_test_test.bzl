@@ -56,7 +56,12 @@ def _bootstrap_impl(ctx):
         if a.mnemonic == "Symlink"
         for f in a.outputs.to_list()
     ])
-    asserts.equals(env, ["_channel.dart", "_channel_io.dart", "integration_suite.dart"], staged, "the support library staged beside the bootstrap")
+    asserts.equals(
+        env,
+        ["_channel.dart", "_channel_io.dart", "_channel_web.dart", "integration_suite.dart"],
+        staged,
+        "the support library staged beside the bootstrap, both platforms' channel: the import that picks one is the compiler's",
+    )
     return analysistest.end(env)
 
 _bootstrap_test = analysistest.make(
@@ -66,6 +71,37 @@ _bootstrap_test = analysistest.make(
         "name_of_target": attr.string(mandatory = True),
     },
 )
+
+def _relative_impl(ctx):
+    """A bootstrap for a web program imports the test by a path from itself, since the web compilers mount no file-system root."""
+    env = analysistest.begin(ctx)
+    text = written_text(env, ".dart")
+    if text == None:
+        return analysistest.end(env)
+    bootstrap = [f for f in analysistest.target_under_test(env)[DefaultInfo].files.to_list() if f.basename == "bootstrap_relative.dart"][0]
+    depth = len(bootstrap.dirname.split("/"))
+    asserts.true(
+        env,
+        "import '%sflutter/tests/integration_fixture/test/a_test.dart' as test;" % ("../" * depth) in text,
+        "the test is imported from the exec root, %d levels above the bootstrap: %s" % (depth, text),
+    )
+    asserts.true(
+        env,
+        "import '%sflutter/tests/integration_fixture/test/flutter_test_config.dart' as test_config;" % ("../" * depth) in text,
+        "and so is its config: %s" % text,
+    )
+    asserts.false(env, "org-dartlang-app" in text, "no URI a web compile cannot resolve: %s" % text)
+    return analysistest.end(env)
+
+_relative_test = analysistest.make(_relative_impl)
+
+def _bootstrap_missing_package_impl(ctx):
+    """A web bootstrap whose deps lack a package its program needs fails analysis, naming the package and the hub target to add."""
+    env = analysistest.begin(ctx)
+    asserts.expect_failure(env, "the program needs `package:integration_test`, which no dependency of it brings; add `@<hub>//:integration_test`")
+    return analysistest.end(env)
+
+_bootstrap_missing_package_test = analysistest.make(_bootstrap_missing_package_impl, expect_failure = True)
 
 # -- The test rule -----------------------------------------------------------
 
@@ -100,6 +136,42 @@ def _test_rule_impl(ctx):
     return analysistest.end(env)
 
 _test_rule_test = analysistest.make(_test_rule_impl)
+
+def _web_rule_impl(ctx):
+    """The web test rule tells the runner which browser, and hands it the bundle to serve."""
+    env = analysistest.begin(ctx)
+    config = written_json(env, ".integration_config.json")
+    if config == None:
+        return analysistest.end(env)
+    asserts.equals(env, "web", config["family"])
+    asserts.equals(
+        env,
+        {"chrome": "_main/flutter/tests/integration_fixture/fake_chrome/chrome-headless-shell"},
+        config["launcher"],
+        "the browser is the runner's, by runfiles path",
+    )
+    bundles = [a for a in config["appArtifacts"] if a.endswith("_web")]
+    asserts.equals(env, 1, len(bundles), "the bundle directory is among the app's files: %s" % config["appArtifacts"])
+    target = analysistest.target_under_test(env)
+    requirements = target[testing.ExecutionInfo].requirements
+    asserts.equals(env, "1", requirements.get("no-remote"))
+    asserts.equals(env, "1", requirements.get("no-sandbox"))
+    return analysistest.end(env)
+
+_web_rule_test = analysistest.make(_web_rule_impl)
+
+def _web_unchecked_impl(ctx):
+    """A web bundle checks the imports of the user's sources against its deps, and not of the files a rule wrote for it."""
+    env = analysistest.begin(ctx)
+    checks = [a for a in analysistest.target_actions(env) if a.mnemonic == "DartImportCheck"]
+    asserts.equals(env, 1, len(checks), "one import check")
+    if checks:
+        checked = " ".join(checks[0].argv)
+        asserts.true(env, "b_test.dart" in checked, "the user's source is checked: %s" % checked)
+        asserts.false(env, "flutter_test_config.dart" in checked, "the rule's own file is not: %s" % checked)
+    return analysistest.end(env)
+
+_web_unchecked_test = analysistest.make(_web_unchecked_impl)
 
 def _wrong_family_impl(ctx):
     """A test rule takes only a runner of its own family."""
@@ -181,6 +253,10 @@ def flutter_integration_test_test_suite(name):
         configured = True,
     )
     _chrome_runner_test(name = name + "_chrome_runner", target_under_test = _FIXTURE + "chrome_runner")
+    _relative_test(name = name + "_relative", target_under_test = _FIXTURE + "bootstrap_relative")
+    _bootstrap_missing_package_test(name = name + "_bootstrap_missing_package", target_under_test = _FIXTURE + "bootstrap_missing_a_package")
+    _web_unchecked_test(name = name + "_web_unchecked", target_under_test = _FIXTURE + "web_unchecked")
+    _web_rule_test(name = name + "_web_rule", target_under_test = _FIXTURE + "web_test")
     _test_rule_test(name = name + "_test_rule", target_under_test = _FIXTURE + "desktop_test")
     _wrong_family_test(name = name + "_wrong_family", target_under_test = _FIXTURE + "desktop_test_on_a_web_runner")
     _missing_package_test(name = name + "_missing_package", target_under_test = _FIXTURE + "program_missing_a_package")
@@ -192,6 +268,10 @@ def flutter_integration_test_test_suite(name):
             ":" + name + "_bootstrap",
             ":" + name + "_bootstrap_with_config",
             ":" + name + "_chrome_runner",
+            ":" + name + "_relative",
+            ":" + name + "_bootstrap_missing_package",
+            ":" + name + "_web_rule",
+            ":" + name + "_web_unchecked",
             ":" + name + "_test_rule",
             ":" + name + "_wrong_family",
             ":" + name + "_missing_package",

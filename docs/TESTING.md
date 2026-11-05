@@ -892,6 +892,11 @@ there runs:
 | `:macos_red_twin_test` | a failing integration test fails its target, and the JUnit report names the failing case with a `<failure>`. It wraps `:macos_red` (`manual`, since it is meant to fail) in `outcome_test`, which runs the wrapped test's own executable and passes only when it ends as the target says |
 | `:macos_crash_test` | an app that `exit(3)`s mid-test fails its target, and the output says `exited with code 3` |
 | `:macos_filter_test` | `--test_filter` runs one of the two cases of `:macos_pass_test` and no other |
+| `:web_pass_test` | the same two tests in headless Chrome (a pinned Chrome for Testing shell), each reported: the suite is driven over the browser's DevTools protocol |
+| `:web_red_twin_test` | a failing integration test fails its target in a browser too, and the JUnit report names the failing case. It wraps `:web_red` (`manual`) in `outcome_test` |
+| `:web_filter_test` | `--test_filter` runs one of the two cases of `:web_pass_test` and no other |
+
+The web tests run in a headless browser and need no desktop session, but only macOS runs them for now (they are skipped elsewhere): the Linux prerequisites of a browser, the host's libraries and a sandbox the host allows, are not verified.
 
 The tests take turns on the screen through the `macos-gui` lock
 (`/tmp/rules_flutter-locks/`), so several at once is fine: a test that has to wait
@@ -1649,11 +1654,12 @@ checks above still cover those. The profile build is exercised through
 
 ## 5. Web rendering verification
 
-Web rendering is verified from Dart, through the dev tool, as part of the e2e
+Web rendering is verified from Dart: as a `bazel test` in `e2e/web_example`, and through the dev tool as part of the e2e
 suite. There is no browser-test toolchain in this repo and no `npx` step.
 
 | Check | Where | What it proves |
 |-------|-------|----------------|
+| Render, as a test | `e2e/web_example`, `bazel test :render_test` (macOS) | The app run in a pinned headless Chrome (Chrome for Testing) with an integration test as its program (`flutter_web_integration_test`, `integration_test/render_test.dart`). Three cases, each its own entry in Bazel's report: the screen's text read back out of the widget tree (the engine booted and the framework built the tree), the text of a widget fed by `assets/message.txt` (the asset bundle resolved: a bundle that boots and paints but cannot resolve its assets, or left one out, shows an empty label), and a tap that reaches the app. This is the check that used to be run by hand; it needs no flags and no dev tool, and fails on a blank page. It is skipped where the browser is not verified (Linux, Windows). |
 | Render | `web_smoke_e2e_test.dart` | Reads text back out of a keyed widget over the agent surface. Answering proves the framework built the tree *and* resolved the asset bundle behind it — a bundle that boots, answers the VM service and paints nothing fails here. |
 | Plugins on web | `plugin_example_e2e_test.dart` (`Web e2e`) | The four `plugin_example_results` strings on web, where each plugin takes a different path than on desktop (`package_info_plus` reads a generated JS manifest, `path_provider` has no web implementation, `url_launcher` goes through `window.open`). |
 | Templating / defines | `custom_boot/test/verify_templating_test.dart` | Substitution outcomes in the built bytes: web defines resolved, kept placeholders survived, `buildConfig` emitted, no `{{` left. |
@@ -1702,12 +1708,12 @@ script's own package requires ≥ 3.13.
 | Windows runner / bundle (`flutter/private/*windows*`) | windows_example (on Windows), GCP VM visual test |
 | Desktop engine selection (debug/profile/release) | cross_compile_example `bazel build :cross_linux` + verify on VM |
 | Profile mode (`flutter:profile` selects, profile engine repos) | Root `//...`, macOS and a device by hand, hello_world `//...` on Linux and Windows (CI does this), and the profile run on the Linux and Windows VMs (§ Profile mode on Linux and Windows) |
-| Integration tests (`flutter/integration_test.bzl`, `flutter/private/flutter_integration_*.bzl`, `flutter/private/integration_test/support/`, `tools/dev_tool/lib/integration/`, `bin/integration_test_runner.dart`) | `e2e/integration_test` `//...` on each platform the change touches (macOS, with an unlocked screen), dev_tool unit, plus the platform's row |
+| Integration tests (`flutter/integration_test.bzl`, `flutter/private/flutter_integration_*.bzl`, `flutter/private/integration_test/support/`, `tools/dev_tool/lib/integration/`, `bin/integration_test_runner.dart`) | `e2e/integration_test` `//...` on each platform the change touches (macOS, with an unlocked screen, for desktop; macOS for web), dev_tool unit, plus the platform's row; for web, `e2e/web_example` `:render_test` and the Web support row |
 | `flutter_application_variant` (`flutter/private/flutter_application_variant.bzl`, `flutter_program_inputs` in `common.bzl`) | Root `//...`, macos_example `//...` and `dart run tools/dev_tool/tool/e2e.dart test/e2e/main_outside_lib_e2e_test.dart --plain-name="macOS"`, which reloads and restarts a variant; plus the macOS manual runtime test |
 | Dart compilation / AOT | hello_world, ffi_example, macos_example |
 | Asset bundling | hello_world, plugin_example |
 | Shader compilation, bundling or hot reload, or how a workspace plugin is wired | `glass_plugin_e2e_test.dart` on every platform it covers, and by hand: `bazel build //impeller_shader:app_flutter_sksl_required` in plugin_example must **fail**, saying the shader does not compile for Skia |
-| Web support | web_example `//...` (a WASM-only bundle, and an `Int64List` app that keeps the dart2js fallback through a per-compiler `select()`) + `web_smoke_e2e_test.dart` (render) + `web_per_compiler_e2e_test.dart` (both programs of a per-compiler app, in Chrome) + `plugin_example_e2e_test.dart` (plugins on web) + `native_libs_reload_e2e_test.dart`'s web group if the change touches `native_modules` or the web reload arms |
+| Web support | web_example `//...` (a WASM-only bundle, an `Int64List` app that keeps the dart2js fallback through a per-compiler `select()`, and `:render_test`, the render check in headless Chrome) + `web_smoke_e2e_test.dart` (render) + `web_per_compiler_e2e_test.dart` (both programs of a per-compiler app, in Chrome) + `plugin_example_e2e_test.dart` (plugins on web) + `native_libs_reload_e2e_test.dart`'s web group if the change touches `native_modules` or the web reload arms |
 | FFI / native deps / native assets | ffi_example (incl. manual iOS-sim + macOS runtime tests), ffi_plugin_example |
 | Plugins | plugin_example, ffi_plugin_example |
 | Android ABI selection (`flutter_android_engine`, `flutter_android_bundle`, `flutter_android_build`, `AndroidDevice` ABI in `device.dart`) | Root `//...`, android_example, hello_world and plugin_example `//...` (force-run `verify_android_apk_test`), dev_tool unit **and** `flutter_bazel run` on the attached phone (arm64-v8a) and on an x86_64 emulator, which must each launch the app |

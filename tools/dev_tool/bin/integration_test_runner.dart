@@ -49,11 +49,15 @@ Future<void> main() async {
     choice = chooseDevice(
       config,
       os: Platform.operatingSystem,
+      resolve: runfiles.rlocation,
       log: stderr.writeln,
     );
   } on StateError catch (e) {
     stderr.writeln('integration_test: ${e.message}');
     exit(1);
+  } on FormatException catch (e) {
+    stderr.writeln('integration_test: ${e.message}');
+    exit(64);
   }
 
   exitCode = await runIntegrationTest(

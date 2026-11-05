@@ -1,5 +1,6 @@
 /// One integration test run: launch the app on its device, drive the suite it
-/// runs over its VM service, report each test, stop the app.
+/// runs over the channel its device gives (a native app's VM service, a web
+/// app's DevTools connection), report each test, stop the app.
 ///
 /// What `flutter test integration_test/x_test.dart -d <device>` does, with
 /// Bazel's test protocol in place of `flutter test`'s reporters: a
@@ -13,16 +14,12 @@ import 'dart:io';
 
 import 'package:flutter_rule_tools/remote_suite.dart';
 import 'package:rules_flutter_macos_gui_session/macos_gui_session.dart';
-import 'package:vm_service/vm_service.dart';
-import 'package:vm_service/vm_service_io.dart';
 
 import '../device.dart';
+import '../web_options.dart';
 import 'device_lock.dart';
 import 'integration_runner_config.dart';
-import 'vm_service_suite_transport.dart';
-
-/// Connects to the VM service at [wsUri].
-typedef VmServiceDialer = Future<VmService> Function(String wsUri);
+import 'suite_connectors.dart';
 
 /// What the run needs of its host beyond the device: the locks and the
 /// desktop session the device's family asks for, taken before the app is
@@ -31,8 +28,9 @@ typedef HostPreparation = Future<Future<void> Function()> Function();
 
 /// A device and what must be true of the host to use it.
 class DeviceChoice {
-  /// A [device] and the [prepare] that has to run before it is launched on.
-  const DeviceChoice(this.device, this.prepare);
+  /// A [device], the [prepare] that has to run before it is launched on, and
+  /// the [connect] that reaches the suite of an app launched on it.
+  const DeviceChoice(this.device, this.prepare, this.connect);
 
   /// The device the app runs on.
   final Device device;
@@ -40,34 +38,60 @@ class DeviceChoice {
   /// Takes what the device needs of the host, and returns what gives it back.
   /// Fails, naming the remedy, when the host cannot give it.
   final HostPreparation prepare;
+
+  /// How the suite of an app launched on [device] is reached.
+  final SuiteConnector connect;
 }
 
 /// The device `config` runs on, on a host whose operating system is [os].
+///
+/// [resolve] turns a runfiles path into a file, for what the runner's config
+/// names (the browser).
 ///
 /// Throws a [StateError] for a device no runner has been written for: the run
 /// fails, saying so, rather than falling back to another.
 DeviceChoice chooseDevice(
   IntegrationRunnerConfig config, {
   required String os,
+  required String Function(String runfilesPath) resolve,
   void Function(String message)? log,
 }) {
   switch (config.family) {
     case IntegrationFamily.desktop when os == 'macos':
-      return DeviceChoice(MacOSDevice(), () => _prepareMacOs(log));
+      return DeviceChoice(
+        MacOSDevice(),
+        () => _prepareMacOs(log),
+        vmServiceConnector(),
+      );
     case IntegrationFamily.desktop:
       throw StateError(
         'integration tests run on macOS desktops; this host is $os, which has '
         'no runner.',
       );
-    case IntegrationFamily.web ||
-        IntegrationFamily.iosSimulator ||
-        IntegrationFamily.android:
+    case IntegrationFamily.web:
+      return DeviceChoice(
+        WebDevice(chromePath: resolve(config.chromePath))
+          ..webOptions = headlessWebOptions,
+        () async => () async {},
+        chromePageConnector(),
+      );
+    case IntegrationFamily.iosSimulator || IntegrationFamily.android:
       throw StateError(
         'integration tests on "${config.family.key}" devices are not '
         'supported by this runner.',
       );
   }
 }
+
+/// What a test's browser is: headless, serving the bundle as a static site, with
+/// the cross-origin isolation `flutter_bazel run -d chrome --wasm` serves a
+/// WebAssembly app under (the renderer's threads need it), and no debugger, so
+/// no expression evaluation.
+const headlessWebOptions = WebOptions(
+  server: WebServerOptions(crossOriginIsolation: true),
+  browser: BrowserLaunchOptions(headless: true),
+  enableExpressionEvaluation: false,
+);
 
 /// The lock on the screen and the held-awake session a macOS window needs.
 Future<Future<void> Function()> _prepareMacOs(
@@ -100,14 +124,12 @@ Future<Future<void> Function()> _prepareMacOs(
 ///
 /// [resolve] turns a runfiles path into a file. [environment] is the test's
 /// environment: Bazel's variables for the selection, the timeout and the
-/// report. [dial] is how the app's VM service is reached, the real one unless
-/// a test says otherwise.
+/// report.
 Future<int> runIntegrationTest(
   IntegrationRunnerConfig config, {
   required String Function(String runfilesPath) resolve,
   required DeviceChoice choice,
   required Map<String, String> environment,
-  VmServiceDialer dial = vmServiceConnectUri,
   StringSink? out,
   StringSink? err,
 }) async {
@@ -154,39 +176,11 @@ Future<int> runIntegrationTest(
       return 1;
     }
 
-    final uri = instance.vmServiceUri;
-    if (uri == null) {
-      errors.writeln(
-        'integration_test: the app started but did not announce a VM service, '
-        'which the suite is driven through.',
-      );
-      return 1;
-    }
-
-    final VmServiceSuiteTransport connected;
+    final SuiteTransport connected;
     try {
-      final service = await dial(
-        uri
-            .replace(
-              scheme: uri.scheme == 'https' ? 'wss' : 'ws',
-              path: '${uri.path}ws',
-            )
-            .toString(),
-      );
-      final started = instance;
-      connected = await VmServiceSuiteTransport.connect(
-        service,
-        whyLost: () => device.whyAppExited(started),
-      ).timeout(ceiling);
-    } on AppLostBeforeSuite catch (e) {
-      errors.writeln('integration_test: $e');
-      return 1;
-    } on TimeoutException {
-      errors.writeln(
-        'integration_test: the app did not register $integrationTestMethod '
-        'within ${ceiling.inSeconds}s. Its test bootstrap, '
-        '`runIntegrationSuite`, was never reached.',
-      );
+      connected = await choice.connect(device, instance, ceiling: ceiling);
+    } on SuiteUnreachable catch (e) {
+      errors.writeln('integration_test: ${e.message}');
       return 1;
     }
     transport = connected;

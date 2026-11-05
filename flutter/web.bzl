@@ -68,7 +68,7 @@ def flutter_web_manifest_gen(name, app_name, **kwargs):
 
 # -- Low-level assembler (Tier 2) --------------------------------------------
 
-def flutter_web_bundle(name, main, package_name, deps = [], srcs = [], language_version = "", web_sdk = None, tags = [], testonly = None, **kwargs):
+def flutter_web_bundle(name, main, package_name, deps = [], srcs = [], unchecked_srcs = [], language_version = "", web_sdk = None, tags = [], testonly = None, **kwargs):
     """Builds a Flutter web application (WASM or JS) with all deployment artifacts.
 
     This is the low-level assembler rule. For most projects, prefer
@@ -93,6 +93,10 @@ def flutter_web_bundle(name, main, package_name, deps = [], srcs = [], language_
         package_name: The Dart package name of the app.
         deps: The program's Dart and Flutter libraries.
         srcs: The app's own Dart sources beside `main`.
+        unchecked_srcs: More Dart sources beside `main`, whose imports are not
+            checked against `deps`: files a rule wrote for the program, whose
+            imports are that rule's to get right. `main` is exempt when listed
+            here too.
         language_version: The app package's language version (`<major>.<minor>`).
         web_sdk: Optional web SDK repo name (e.g. "@my_flutter_web_sdk").
             Defaults to "@flutter_web_sdk".
@@ -111,7 +115,7 @@ def flutter_web_bundle(name, main, package_name, deps = [], srcs = [], language_
         name = branches,
         bundle = str(native.package_relative_label(name)),
         deps = deps,
-        srcs = srcs,
+        srcs = srcs + unchecked_srcs,
         main = main,
         package_name = package_name,
         language_version = language_version,
@@ -124,7 +128,8 @@ def flutter_web_bundle(name, main, package_name, deps = [], srcs = [], language_
         main = main,
         package_name = package_name,
         deps = deps,
-        srcs = srcs,
+        srcs = srcs + unchecked_srcs,
+        unchecked_srcs = unchecked_srcs,
         language_version = language_version,
         branches = ":" + branches,
         tags = tags,

@@ -4,13 +4,14 @@ An integration test is run as the application with its test as the program
 (`flutter_application_variant`, whose `main` is the generated
 `flutter_integration_bootstrap`), and the host drives the suite it runs over the
 app's VM service, as `flutter test integration_test/x_test.dart -d <device>`
-does. Each `testWidgets` is a test case: `--test_filter`, `shard_count` and the
+does, or, for a web app, which has none, over the browser's DevTools protocol. Each `testWidgets` is a test case: `--test_filter`, `shard_count` and the
 JUnit report see each one.
 
 Tier 1, the convenience macros: one per platform, each composing the bootstrap,
 the variant, the platform's app rule and the test.
 
 - `flutter_macos_integration_test`
+- `flutter_web_integration_test`
 
 Tier 2, the composable rules:
 
@@ -19,13 +20,15 @@ Tier 2, the composable rules:
   `main`, plus extra `srcs`, `deps` and `defines`.
 - `flutter_desktop_integration_test`: runs a desktop app on the host's desktop.
 - `flutter_desktop_runner`: where it runs.
+- `flutter_web_bundle_integration_test`: runs a web bundle in a headless Chrome.
 - `flutter_chrome_runner`: a headless Chrome of its own, where a web test runs.
 """
 
 load("//flutter:macos.bzl", "flutter_macos_app")
+load("//flutter:web.bzl", "flutter_web_app")
 load("//flutter/private:flutter_application_variant.bzl", _flutter_application_variant = "flutter_application_variant")
 load("//flutter/private:flutter_integration_bootstrap.bzl", _flutter_integration_bootstrap = "flutter_integration_bootstrap")
-load("//flutter/private:flutter_integration_test.bzl", _flutter_chrome_runner = "flutter_chrome_runner", _flutter_desktop_integration_test = "flutter_desktop_integration_test", _flutter_desktop_runner = "flutter_desktop_runner")
+load("//flutter/private:flutter_integration_test.bzl", _flutter_chrome_runner = "flutter_chrome_runner", _flutter_desktop_integration_test = "flutter_desktop_integration_test", _flutter_desktop_runner = "flutter_desktop_runner", _flutter_web_bundle_integration_test = "flutter_web_bundle_integration_test")
 load("//flutter/private:test_config.bzl", "find_test_config")
 
 flutter_application_variant = _flutter_application_variant
@@ -33,6 +36,7 @@ flutter_integration_bootstrap = _flutter_integration_bootstrap
 flutter_desktop_integration_test = _flutter_desktop_integration_test
 flutter_desktop_runner = _flutter_desktop_runner
 flutter_chrome_runner = _flutter_chrome_runner
+flutter_web_bundle_integration_test = _flutter_web_bundle_integration_test
 
 # What an integration test's program imports beyond the application.
 _REQUIRED_PACKAGES = ["integration_test", "flutter_test"]
@@ -176,5 +180,118 @@ def flutter_macos_integration_test(
         flaky = flaky,
         visibility = visibility,
         target_compatible_with = ["@platforms//os:macos"],
+        **test_kwargs
+    )
+
+def flutter_web_integration_test(
+        name,
+        src,
+        package_name,
+        deps,
+        srcs = [],
+        test_config = None,
+        env = {},
+        data = [],
+        size = "medium",
+        runner = None,
+        tags = [],
+        timeout = None,
+        shard_count = None,
+        flaky = None,
+        visibility = None,
+        target_compatible_with = [],
+        **web_app_kwargs):
+    """Runs a `package:integration_test` file in headless Chrome: the web app with the test as its program.
+
+    The app is built in debug mode and run in a pinned Chrome for Testing
+    headless shell, which `flutter test` cannot do: it refuses web devices. The
+    suite is driven over the browser's DevTools protocol, so each `testWidgets`
+    is a case in Bazel's test report, which `flutter drive -d chrome` cannot
+    give. One target per test file, as upstream launches the app once per file.
+
+    The test's program is a web app of its own, built from the same sources as
+    the application it tests and so compiled again for each test; the Flutter
+    framework's and each package's kernels are shared.
+
+    Intermediate targets `__<name>_bootstrap` and `__<name>_app` are this macro's:
+    do not name them.
+
+    Args:
+        name: The test's name.
+        src: The test file. Its `main` declares the tests, as for `flutter create`:
+            `IntegrationTestWidgetsFlutterBinding.ensureInitialized()` and
+            `testWidgets`, calling the app's own `main()`.
+        package_name: The Dart package name of the app (`pubspec.yaml`'s `name:`),
+            as `flutter_web_app` takes it.
+        deps: The program's libraries: the app's own and what the test imports. It
+            must bring `integration_test` and `flutter_test` (`@<hub>//:integration_test`
+            and `@<hub>//:flutter_test`), which analysis fails without, naming them.
+        srcs: The app's Dart sources and the files `src` imports by relative path.
+        test_config: The suite's `flutter_test_config.dart`. By default the one
+            `flutter_test` would find for `src`, in this package.
+        env: Environment variables for the host runner.
+        data: Files the test reads at run time.
+        size: The test size. `medium`: a browser is launched and the app drawn.
+        runner: A `flutter_chrome_runner`, to run the test in a browser other than
+            the pinned one.
+        tags: Tags of the test.
+        timeout: The test's `timeout`.
+        shard_count: The test's `shard_count`: the tests of the file are divided
+            among the shards.
+        flaky: The test's `flaky`.
+        visibility: The test's visibility.
+        target_compatible_with: The test's `target_compatible_with`. A host the pinned
+            browser has no build for is incompatible whatever this says.
+        **web_app_kwargs: Passed to `flutter_web_app`: `assets`, `web_dir`, `base_href`,
+            and the rest. Not `main`, which is the test's program, nor `testonly`.
+    """
+    if test_config == None:
+        test_config = _find_test_config(name, src)
+
+    bootstrap = "__%s_bootstrap" % name
+    app = "__%s_app" % name
+    private = {
+        "tags": ["manual"],
+        "testonly": True,
+        "visibility": ["//visibility:private"],
+    }
+    _flutter_integration_bootstrap(
+        name = bootstrap,
+        src = src,
+        test_config = test_config,
+        # A web compile mounts no file-system root to name the test under.
+        src_import = "relative",
+        deps = deps,
+        requires_packages = _REQUIRED_PACKAGES,
+        **private
+    )
+    flutter_web_app(
+        name = app,
+        package_name = package_name,
+        main = ":%s.dart" % bootstrap,
+        # The test, what it imports, and its config.
+        srcs = srcs + [src] + ([test_config] if test_config else []),
+        # The bootstrap and the support library staged beside it are the rule's
+        # own files: what they import is not the user's `deps` to list.
+        unchecked_srcs = [":" + bootstrap],
+        deps = deps,
+        **(private | web_app_kwargs)
+    )
+
+    test_kwargs = {}
+    if runner != None:
+        test_kwargs["runner"] = runner
+    _flutter_web_bundle_integration_test(
+        name = name,
+        app = ":" + app,
+        env = env,
+        data = data,
+        size = size,
+        tags = tags,
+        timeout = timeout,
+        shard_count = shard_count,
+        flaky = flaky,
+        visibility = visibility,
+        target_compatible_with = target_compatible_with,
         **test_kwargs
     )

@@ -10,6 +10,7 @@ import 'dart:async';
 import 'package:flutter_bazel_dev_tool/device.dart';
 import 'package:flutter_bazel_dev_tool/integration/integration_runner_config.dart';
 import 'package:flutter_bazel_dev_tool/integration/integration_test_run.dart';
+import 'package:flutter_bazel_dev_tool/integration/suite_connectors.dart';
 import 'package:test/test.dart';
 import 'package:vm_service/vm_service_io.dart';
 
@@ -64,9 +65,12 @@ void main() {
   }) => runIntegrationTest(
     _config,
     resolve: (path) => '/runfiles/$path',
-    choice: DeviceChoice(device, prepare ?? () async => () async {}),
+    choice: DeviceChoice(
+      device,
+      prepare ?? () async => () async {},
+      vmServiceConnector(dial: vmServiceConnectUri),
+    ),
     environment: {'TEST_TIMEOUT': '60', ...environment},
-    dial: vmServiceConnectUri,
     out: out,
     err: err,
   );
@@ -172,4 +176,51 @@ void main() {
       contains('did not register ext.flutter.integrationTest'),
     );
   }, timeout: const Timeout(Duration(seconds: 30)));
+
+  group('the device of a web config', () {
+    final webConfig = IntegrationRunnerConfig(
+      family: IntegrationFamily.web,
+      appArtifacts: const ['_main/app_web'],
+      launcher: const {'chrome': 'chrome+/chrome-headless-shell'},
+      testDisplayName: '//pkg:web_test',
+      env: const {},
+    );
+
+    test('is a headless Chrome, and the one the runner named, resolved from '
+        'the runfiles', () async {
+      final choice = chooseDevice(
+        webConfig,
+        os: 'linux',
+        resolve: (path) => '/runfiles/$path',
+      );
+
+      final device = choice.device as WebDevice;
+      expect(device.webOptions!.browser.headless, isTrue);
+      expect(
+        (await device.requiredHostTools()).single.candidates,
+        ['/runfiles/chrome+/chrome-headless-shell'],
+      );
+    });
+
+    test('a config that names no browser is refused, naming the key', () {
+      final unnamed = IntegrationRunnerConfig(
+        family: IntegrationFamily.web,
+        appArtifacts: const ['_main/app_web'],
+        launcher: const {},
+        testDisplayName: '//pkg:web_test',
+        env: const {},
+      );
+
+      expect(
+        () => chooseDevice(unnamed, os: 'linux', resolve: (p) => p),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            contains('"launcher.chrome"'),
+          ),
+        ),
+      );
+    });
+  });
 }

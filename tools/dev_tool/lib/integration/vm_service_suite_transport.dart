@@ -14,6 +14,8 @@ import 'dart:async';
 import 'package:flutter_rule_tools/remote_suite.dart';
 import 'package:vm_service/vm_service.dart';
 
+import 'lost_before_suite.dart';
+
 /// The service extension the app registers for the host's messages.
 const integrationTestMethod = 'ext.flutter.integrationTest';
 
@@ -27,15 +29,9 @@ const integrationTestDataKey = 'data';
 const _streamAlreadySubscribed = 103;
 
 /// The app went away before it registered [integrationTestMethod], with why.
-///
-/// Distinct from a transport lost mid-suite, which a [RemoteSuiteDriver]
-/// reports as the failure of the test it interrupted: here there is no test.
-class AppLostBeforeSuite implements Exception {
+class AppLostBeforeSuite extends LostBeforeSuite {
   /// Says what became of the app.
-  AppLostBeforeSuite(this.reason);
-
-  /// How the app ended, in the device's words.
-  final String reason;
+  AppLostBeforeSuite(super.reason);
 
   @override
   String toString() =>

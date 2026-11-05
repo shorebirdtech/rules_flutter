@@ -1,6 +1,7 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_test")
 load("@rules_flutter//flutter:defs.bzl", "flutter_library")
+load("@rules_flutter//flutter:integration_test.bzl", "flutter_web_integration_test")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_app", "flutter_web_bundle", "flutter_web_manifest_gen")
 
 exports_files(["pubspec.lock"])
@@ -365,4 +366,31 @@ dart_test(
     ],
     main = "test/verify_compiler_flags_test.dart",
     deps = ["@rules_flutter//tools/e2e_testing"],
+)
+
+# =============================================================================
+# The render check, as a test
+#
+# The app run in headless Chrome with an integration test as its program, which
+# reads text back out of the widget tree and out of a widget fed by the asset
+# bundle: a bundle that boots and paints nothing, or cannot resolve its assets,
+# fails here. This is docs/TESTING.md § 5's render check. Only macOS runs it
+# until the Linux prerequisites of a browser (the host's libraries, the sandbox)
+# are settled and tested there; Bazel reports it skipped elsewhere.
+# =============================================================================
+
+flutter_web_integration_test(
+    name = "render_test",
+    package_name = "web_example",
+    src = "integration_test/render_test.dart",
+    srcs = glob(["lib/**/*.dart"]),
+    # A first-party asset, which the second case reads.
+    assets = glob(["assets/**"]),
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = [
+        "@deps//:flutter",
+        "@deps//:flutter_test",
+        "@deps//:integration_test",
+        "@rules_flutter//flutter:material_icons",
+    ],
 )

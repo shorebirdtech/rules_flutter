@@ -4792,15 +4792,62 @@ class WebDevice extends Device {
   /// bundle that is not a debug build, which compiles the extensions out.
   BrowserExtensionChannel? browserChannel;
 
-  WebDevice({ProcessStarter? startProcess, ChromeProfiles? profiles})
-    : _startProcess = startProcess ?? Process.start,
-      _profiles = profiles ?? ChromeProfiles();
+  /// The browser to launch, or null to use the one [findChrome] finds on this
+  /// host. A test run names its own: the pinned browser it was given is the one
+  /// that runs, never another found on the host in its place.
+  final String? _chromePath;
+
+  WebDevice({
+    ProcessStarter? startProcess,
+    ChromeProfiles? profiles,
+    String? chromePath,
+  }) : _startProcess = startProcess ?? Process.start,
+       _profiles = profiles ?? ChromeProfiles(),
+       _chromePath = chromePath;
 
   @override
   String get name => 'Chrome';
 
   @override
-  Future<List<HostTool>> requiredHostTools() async => [chromeTool()];
+  Future<List<HostTool>> requiredHostTools() async {
+    final given = _chromePath;
+    if (given == null) return [chromeTool()];
+    // Only the browser that was named: were it missing, falling back to the
+    // host's own would run the test in a browser nobody chose.
+    return [
+      HostTool(
+        name: 'Chrome ($given)',
+        purpose: 'run the app in the browser this run was configured with',
+        candidates: [given],
+        pathNames: const [],
+        remedy:
+            'This run names its browser itself and does not look for another, '
+            'so the file is missing from where it was said to be.',
+      ),
+    ];
+  }
+
+  /// The bundle directory of a web app's build outputs: the `<name>_web`
+  /// directory, which holds the page, and not the files built beside it (its
+  /// `.serving.json`, the debug build's dev files). The output order is not the
+  /// choice.
+  @override
+  String pickArtifact(List<String> outputs) => findWebOutputDir(outputs);
+
+  /// Why the page is unreachable when the browser this tool started is gone: its
+  /// exit, and its last words. Null while it runs, since a browser that is up
+  /// and a page that is not is something only the page's own connection can
+  /// say.
+  @override
+  Future<String?> whyAppExited(AppInstance instance) async {
+    final code = await _exitCodeWithin(instance.process, _exitReportSettle);
+    if (code == null) return null;
+    final how = code < 0 && !Platform.isWindows
+        ? 'was killed by signal ${-code}'
+        : 'exited with code $code';
+    return 'Chrome $how while the app was running. '
+        '${_browserLastWords(instance.logs)}';
+  }
 
   /// Set the DDC module server for dev mode (hot restart support).
   void setModuleServer(WebModuleServer server) => _moduleServer = server;
@@ -4958,6 +5005,7 @@ class WebDevice extends Device {
     final session = await ChromeSession.launch(
       url: url,
       startProcess: _startProcess,
+      chromePath: _chromePath,
       options: options.browser,
       profiles: _profiles,
       abandoned: _abandoned.future,
@@ -4999,6 +5047,7 @@ class WebDevice extends Device {
       session = await ChromeSession.launch(
         url: url,
         startProcess: _startProcess,
+        chromePath: _chromePath,
         options: options.browser,
         profiles: _profiles,
         abandoned: _abandoned.future,

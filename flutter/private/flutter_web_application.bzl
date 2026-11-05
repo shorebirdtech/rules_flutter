@@ -435,7 +435,16 @@ def _flutter_web_bundle_impl(ctx):
     primary = branch_inputs[branches[0]]
 
     # `synthesize_app_package` appends the app's own package last.
-    import_checks = import_check_validation(ctx, ctx.executable._kernel_tool, [ctx.file.main] + ctx.files.srcs, primary.packages[-1], primary.deps)
+    # `unchecked_srcs` are files a rule wrote for the program, whose imports are
+    # that rule's to get right and need not be the user's `deps`.
+    unchecked = ctx.files.unchecked_srcs
+    import_checks = import_check_validation(
+        ctx,
+        ctx.executable._kernel_tool,
+        [f for f in [ctx.file.main] + ctx.files.srcs if f not in unchecked],
+        primary.packages[-1],
+        primary.deps,
+    )
 
     # Hot-reload dev metadata (debug only): a multi-root dev package_config so a
     # source-assembled (codegen) app resolves package: URIs across the live
@@ -1342,6 +1351,11 @@ _WEB_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | {
 _WEB_APPLICATION_ATTRS["_sky_engine"] = attr.label(
     default = Label("@flutter_sky_engine//:sky_engine"),
     providers = [DartInfo],
+)
+
+_WEB_APPLICATION_ATTRS["unchecked_srcs"] = attr.label_list(
+    doc = "Dart sources among `srcs` whose imports are not checked against `deps`: files a rule wrote for the program (an integration test's bootstrap and support library), whose imports are that rule's to get right. `main` is exempt when listed here too. Set by the bundle macro from its `unchecked_srcs`.",
+    allow_files = [".dart"],
 )
 
 # The program once per compiler. `deps` is what the bundle reads its plugins,

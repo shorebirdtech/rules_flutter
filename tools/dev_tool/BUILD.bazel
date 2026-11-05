@@ -118,6 +118,10 @@ dart_binary(
 #           in process, so no test depends on the host having a `zip`.
 #   suite_app — the test includes test/fake_suite_app.dart, a VM service on a
 #           loopback socket that runs an integration test's suite.
+#   cdp_page — the test includes test/fake_cdp_page.dart, a page's DevTools
+#           connection that records commands and sends the events a browser
+#           sends: what a web app running an integration test looks like from
+#           the host.
 #   deps  — packages the test imports directly, beyond :lib and test.
 _TEST_DEPS = [
     ":lib",
@@ -180,6 +184,10 @@ _UNIT_TESTS = {
         "fakes": True,
         "deps": ["@dev_tool_deps//:logging"],
     },
+    "cdp_suite_transport_test": {
+        "cdp_page": True,
+        "deps": ["@dev_tool_deps//:vm_service"],
+    },
     "cdp_console_test": {
         "fakes": True,
         "deps": ["@dev_tool_deps//:fake_async"],
@@ -231,6 +239,11 @@ _UNIT_TESTS = {
         "deps": ["@dev_tool_deps//:vm_service"],
     },
     "key_press_test": {},
+    "suite_connectors_test": {
+        "cdp_page": True,
+        "fakes": True,
+        "deps": ["@dev_tool_deps//:fake_async"],
+    },
     "macos_gui_test": {
         "gui": True,
         "harness": True,
@@ -362,6 +375,7 @@ _UNIT_TESTS = {
            (["test/loopbacks.dart"] if cfg.get("loopbacks") else []) +
            (["test/zip_fixture.dart"] if cfg.get("zip") else []) +
            (["test/fake_suite_app.dart"] if cfg.get("suite_app") else []) +
+           (["test/fake_cdp_page.dart"] if cfg.get("cdp_page") else []) +
            (["test/test_lifetime.dart"] if cfg.get("lifetime") else []) +
            (["test/e2e/dev_tool_e2e_harness.dart"] if cfg.get("harness") else []) +
            (["test/e2e/macos_gui.dart"] if cfg.get("gui") else []),

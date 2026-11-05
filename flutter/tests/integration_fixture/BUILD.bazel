@@ -1,4 +1,5 @@
-load("//flutter:integration_test.bzl", "flutter_application_variant", "flutter_chrome_runner", "flutter_desktop_integration_test", "flutter_integration_bootstrap")
+load("//flutter:integration_test.bzl", "flutter_application_variant", "flutter_chrome_runner", "flutter_desktop_integration_test", "flutter_integration_bootstrap", "flutter_web_bundle_integration_test")
+load("//flutter:web.bzl", "flutter_web_bundle")
 load("//flutter/tests:flutter_integration_test_test.bzl", "stub_runner")
 
 package(default_visibility = ["//flutter/tests:__subpackages__"])
@@ -14,6 +15,23 @@ flutter_integration_bootstrap(
     src = "test/a_test.dart",
     tags = ["manual"],
     test_config = "test/flutter_test_config.dart",
+)
+
+# What a web program's bootstrap imports the test by.
+flutter_integration_bootstrap(
+    name = "bootstrap_relative",
+    src = "test/a_test.dart",
+    src_import = "relative",
+    tags = ["manual"],
+    test_config = "test/flutter_test_config.dart",
+)
+
+# A bootstrap given deps without a package its program needs.
+flutter_integration_bootstrap(
+    name = "bootstrap_missing_a_package",
+    src = "test/a_test.dart",
+    requires_packages = ["integration_test"],
+    tags = ["manual"],
 )
 
 stub_runner(
@@ -67,4 +85,30 @@ flutter_chrome_runner(
     name = "chrome_runner",
     chrome = ":fake_chrome",
     tags = ["manual"],
+)
+
+# A web bundle run by the web test rule, in the fake browser.
+flutter_web_bundle(
+    name = "web_app",
+    package_name = "integration_fixture",
+    main = "test/a_test.dart",
+    tags = ["manual"],
+)
+
+flutter_web_bundle_integration_test(
+    name = "web_test",
+    app = ":web_app",
+    runner = ":chrome_runner",
+    tags = ["manual"],
+)
+
+# A web bundle with a file a rule wrote beside the user's, whose imports are not
+# checked against the bundle's `deps`.
+flutter_web_bundle(
+    name = "web_unchecked",
+    package_name = "integration_fixture",
+    srcs = ["test/b_test.dart"],
+    main = "test/a_test.dart",
+    tags = ["manual"],
+    unchecked_srcs = ["test/flutter_test_config.dart"],
 )

@@ -738,6 +738,78 @@ void main() {
     });
   });
 
+  group('WebDevice running a named browser', () {
+    test('needs that browser and no other, so a missing one is not made up for '
+        'by the host\'s own Chrome', () async {
+      final tools = await WebDevice(
+        chromePath: '/no/such/chrome',
+      ).requiredHostTools();
+
+      expect(tools, hasLength(1));
+      expect(tools.single.candidates, ['/no/such/chrome']);
+      expect(tools.single.pathNames, isEmpty);
+      expect(
+        tools.single.require,
+        throwsA(
+          isA<MissingHostToolException>().having(
+            (e) => e.message,
+            'message',
+            contains('/no/such/chrome'),
+          ),
+        ),
+      );
+    });
+
+    test('picks the bundle directory out of what the build made, whatever '
+        'order the outputs come in', () async {
+      final out = await Directory.systemTemp.createTemp('web_outputs_');
+      addTearDown(() => out.delete(recursive: true));
+      final bundle = Directory(p.join(out.path, 'app_web'))..createSync();
+      final serving = File(p.join(out.path, 'app_web.serving.json'))
+        ..writeAsStringSync('{}');
+      final dev = File(p.join(out.path, 'app.dev_config.json'))
+        ..writeAsStringSync('{}');
+
+      for (final order in [
+        [bundle.path, serving.path, dev.path],
+        [serving.path, dev.path, bundle.path],
+      ]) {
+        expect(WebDevice().pickArtifact(order), bundle.path);
+      }
+    });
+
+    test('says so when the build made no bundle directory', () {
+      expect(
+        () => WebDevice().pickArtifact(['/out/app_web.serving.json']),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            contains('_web'),
+          ),
+        ),
+      );
+    });
+
+    test('says how Chrome ended when it did, and nothing when it is still '
+        'running', () async {
+      final process = FakeProcess();
+      final instance = AppInstance(process: process);
+      final device = WebDevice();
+
+      fakeAsync((async) {
+        String? whileRunning = 'unset';
+        device.whyAppExited(instance).then((r) => whileRunning = r);
+        async.elapse(const Duration(minutes: 1));
+        expect(whileRunning, isNull);
+      });
+
+      process.complete(139);
+      final why = await device.whyAppExited(instance);
+      expect(why, allOf(contains('Chrome'), contains('exited with code 139')));
+    });
+  });
+
   group('findChrome', () {
     test('returns a string or null', () {
       // Just verifies it doesn't throw.

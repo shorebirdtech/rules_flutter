@@ -141,4 +141,40 @@ void main() {
       );
     });
   });
+
+  group('the browser of a web test', () {
+    test('is the runfiles path the runner named', () {
+      final config = IntegrationRunnerConfig.parse(
+        _with({'family': 'web'}),
+      );
+
+      expect(config.chromePath, '_main/chrome');
+    });
+
+    for (final launcher in <Map<String, Object?>>[
+      {},
+      {'chrome': ''},
+      {'chrome': 7},
+    ]) {
+      test('a launcher of ${json.encode(launcher)} names launcher.chrome', () {
+        final config = IntegrationRunnerConfig.parse(
+          _with({'family': 'web', 'launcher': launcher}),
+        );
+
+        expect(
+          () => config.chromePath,
+          throwsA(
+            isA<FormatException>().having(
+              (e) => e.message,
+              'message',
+              allOf(
+                contains('"launcher.chrome"'),
+                contains('non-empty string'),
+              ),
+            ),
+          ),
+        );
+      });
+    }
+  });
 }

@@ -107,6 +107,44 @@ void main() {
       },
     );
 
+    test('launch starts the browser it was given, which no Chrome found on '
+        'the host stands in for', () async {
+      final cdp = await FakeBrowserCdp.start();
+      addTearDown(cdp.close);
+      cdp.onPageConnection = (socket) => socket.listen((_) {});
+      final profileRoot = await Directory.systemTemp.createTemp(
+        'web_profiles_',
+      );
+      addTearDown(() => profileRoot.delete(recursive: true));
+      final fakeChrome = FakeProcess();
+      late String started;
+      late List<String> chromeArgs;
+      final device =
+          WebDevice(
+              chromePath: '/pinned/chrome-headless-shell',
+              startProcess: (exe, args) async {
+                started = exe;
+                chromeArgs = args;
+                return fakeChrome;
+              },
+              profiles: ChromeProfiles(parent: profileRoot),
+            )
+            ..webOptions = const WebOptions(
+              server: WebServerOptions(crossOriginIsolation: false),
+              browser: BrowserLaunchOptions(),
+              enableExpressionEvaluation: false,
+            );
+
+      final launch = device.launch((await appDir()).path);
+      await fakeChrome.outputAttached;
+      cdp.target('tab', type: 'page', url: chromeArgs.last);
+      fakeChrome.emitStderr(cdp.announcement);
+      final instance = await launch;
+
+      expect(started, '/pinned/chrome-headless-shell');
+      await device.stop(instance);
+    });
+
     test('stop still ends the browser and clears its profile when a step '
         'before it throws', () async {
       if (findChrome() == null) {

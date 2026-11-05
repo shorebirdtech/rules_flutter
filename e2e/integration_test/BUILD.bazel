@@ -1,6 +1,6 @@
 load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_analysis_test", "dart_binary")
 load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_library")
-load("@rules_flutter//flutter:integration_test.bzl", "flutter_macos_integration_test")
+load("@rules_flutter//flutter:integration_test.bzl", "flutter_macos_integration_test", "flutter_web_integration_test")
 load(":test_outcome.bzl", "outcome_test")
 
 exports_files(["pubspec.lock"])
@@ -121,6 +121,57 @@ outcome_test(
     failing_cases_given = True,
     output_contains = ["exited with code 3"],
     test = ":macos_crash",
+)
+
+# -- Web -------------------------------------------------------------------
+
+# The same app in headless Chrome. Only macOS runs these until the Linux
+# prerequisites of a browser (the host's libraries, the sandbox) are settled and
+# tested there; Bazel reports the test skipped elsewhere.
+
+# The two tests of `:macos_pass_test`, in a browser: each is reported.
+flutter_web_integration_test(
+    name = "web_pass_test",
+    package_name = "integration_test_example",
+    src = "integration_test/counter_test.dart",
+    srcs = glob(["lib/**/*.dart"]),
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@deps//:flutter"] + _TEST_DEPS,
+)
+
+# `--test_filter` selects among the tests of one file in a browser too.
+outcome_test(
+    name = "web_filter_test",
+    cases = ["counter increments when tapped"],
+    expect = "pass",
+    failing_cases_given = True,
+    target_compatible_with = ["@platforms//os:macos"],
+    test = ":web_pass_test",
+    test_filter = "increments",
+)
+
+# `manual`, since it is meant to fail: the red twin below runs it.
+flutter_web_integration_test(
+    name = "web_red",
+    package_name = "integration_test_example",
+    src = "integration_test/failing_test.dart",
+    srcs = glob(["lib/**/*.dart"]),
+    tags = ["manual"],
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@deps//:flutter"] + _TEST_DEPS,
+)
+
+# A failing integration test fails its target in a browser, and its JUnit report
+# names the failing case.
+outcome_test(
+    name = "web_red_twin_test",
+    cases = ["counter reads 99 after one tap"],
+    expect = "fail",
+    failing_cases = ["counter reads 99 after one tap"],
+    failing_cases_given = True,
+    output_contains = ["Expected: exactly one matching"],
+    target_compatible_with = ["@platforms//os:macos"],
+    test = ":web_red",
 )
 
 # Runs a test that must fail, or run only some of its cases (see

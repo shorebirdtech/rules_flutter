@@ -2,38 +2,18 @@
 
 load("@apple_support//lib:apple_support.bzl", "apple_support")
 load("@bazel_skylib//lib:structs.bzl", "structs")
-load("@rules_dart//dart:providers.bzl", "DartInfo")
 load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "link_hook_runner_attr")
 load("//flutter:providers.bzl", "FlutterApplicationInputsInfo")
 load("//flutter/private:code_asset_libraries.bzl", "code_asset_libraries_aspect")
 load("//flutter/private:common.bzl", "FLUTTER_APPLICATION_TOOL_ATTRS", "PLATFORM_CONSTRAINT_ATTRS", "flutter_deps_attr")
 load("//flutter/private:exec_groups.bzl", "PORTABLE_EXEC_GROUPS")
 load("//flutter/private:flutter_application.bzl", "flutter_application_build")
-
-def _check_required_packages(label, deps, required):
-    """Fails unless the program's dependencies bring each of `required`.
-
-    Stated for what the program needs and the compile would otherwise report as
-    an unresolved import in a file the user did not write.
-    """
-    if not required:
-        return
-    have = {}
-    for dep in deps:
-        if DartInfo in dep:
-            for package in dep[DartInfo].transitive_packages.to_list():
-                have[package.package_name] = True
-    for name in required:
-        if name not in have:
-            fail((
-                "%s: the program needs `package:%s`, which no dependency of it brings; " +
-                "add `@<hub>//:%s` (your pub hub's target for it) to `deps`."
-            ) % (label, name, name))
+load("//flutter/private:required_packages.bzl", "check_required_packages")
 
 def _flutter_application_variant_impl(ctx):
     program = ctx.attr.application[FlutterApplicationInputsInfo].inputs
     deps = program.deps + ctx.attr.deps
-    _check_required_packages(ctx.label, deps, ctx.attr.requires_packages)
+    check_required_packages(ctx.label, deps, ctx.attr.requires_packages)
 
     # Everything not named here is the application's own: its package and so
     # its `package:` URIs and asset keys, its assets, native dependencies and

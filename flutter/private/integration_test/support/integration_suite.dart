@@ -11,10 +11,8 @@
 // `package:integration_test`, `package:flutter_test` and `package:test_api` the
 // program's `deps` provide.
 import 'dart:async';
-import 'dart:isolate';
 
 import 'package:integration_test/integration_test.dart';
-import 'package:stack_trace/stack_trace.dart';
 import 'package:test_api/backend.dart';
 
 import '_channel.dart';
@@ -40,28 +38,8 @@ Future<void> runIntegrationSuite(
   }
 
   final testChannel = RemoteListener.start(() {
-    _catchIsolateErrors();
-    VmServiceProxyGoldenFileComparator.useIfRunningOnDevice();
+    preparePlatform();
     return testExecutable == null ? suiteMain : () => testExecutable(suiteMain);
   });
   connectSuiteChannel(testChannel);
-}
-
-/// Reports any top-level error (mostly lazy syntax errors, since the others are
-/// caught by the test) to the host as the suite's own.
-void _catchIsolateErrors() {
-  final errorPort = ReceivePort();
-  // Treat errors as non-fatal because otherwise they would be printed twice.
-  Isolate.current.setErrorsFatal(false);
-  Isolate.current.addErrorListener(errorPort.sendPort);
-  errorPort.listen((dynamic message) {
-    // Masquerade as an IsolateSpawnException, which is what this would be had
-    // the error been detected statically.
-    final list = message as List<dynamic>;
-    final error = IsolateSpawnException(list[0] as String);
-    final stackTrace = list[1] == null
-        ? Trace(const <Frame>[])
-        : Trace.parse(list[1] as String);
-    Zone.current.handleUncaughtError(error, stackTrace);
-  });
 }

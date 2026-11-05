@@ -1,6 +1,17 @@
 """`flutter_integration_bootstrap`: the program an integration test file runs as."""
 
-load("//flutter/private:app_entrypoint.bzl", "app_scheme_location")
+load("@rules_dart//dart:providers.bzl", "DartInfo")
+load("//flutter/private:app_entrypoint.bzl", "app_scheme_location", "compute_wrapper_main_import")
+load("//flutter/private:required_packages.bzl", "check_required_packages")
+
+# How the program reaches the test file it runs.
+#
+# The app scheme (`org-dartlang-app:///<workspace path>`) is what the kernel
+# compile of a native app mounts the workspace under. The web compilers have no
+# file-system roots, so a web program imports the file by its path relative to
+# the bootstrap, as it imports an app's `main` outside `lib/`.
+APP_SCHEME = "app_scheme"
+RELATIVE = "relative"
 
 def make_integration_bootstrap_content(test_import, support_import, test_config_import = None):
     """The bootstrap's Dart source.
@@ -35,8 +46,15 @@ def make_integration_bootstrap_content(test_import, support_import, test_config_
         "",
     ])
 
+def _source_import(ctx, file):
+    """The URI by which the bootstrap imports `file`, as `ctx.attr.src_import` says."""
+    if ctx.attr.src_import == RELATIVE:
+        return compute_wrapper_main_import(len(ctx.outputs.main.dirname.split("/")), file.path)
+    return app_scheme_location(file).uri
+
 def _flutter_integration_bootstrap_impl(ctx):
     bootstrap = ctx.outputs.main
+    check_required_packages(ctx.label, ctx.attr.deps, ctx.attr.requires_packages)
     support_dir = ctx.label.name + "_support"
 
     # The support library is staged beside the bootstrap rather than named by
@@ -50,9 +68,9 @@ def _flutter_integration_bootstrap_impl(ctx):
 
     config = ctx.file.test_config
     ctx.actions.write(bootstrap, make_integration_bootstrap_content(
-        app_scheme_location(ctx.file.src).uri,
+        _source_import(ctx, ctx.file.src),
         "%s/integration_suite.dart" % support_dir,
-        test_config_import = app_scheme_location(config).uri if config else None,
+        test_config_import = _source_import(ctx, config) if config else None,
     ))
     return [DefaultInfo(files = depset([bootstrap] + support))]
 
@@ -69,11 +87,24 @@ flutter_integration_bootstrap = rule(
             doc = "The suite's `flutter_test_config.dart`, whose `testExecutable` runs the test's main.",
             allow_single_file = [".dart"],
         ),
+        "src_import": attr.string(
+            doc = "How the program imports `src` and `test_config`: `app_scheme` (`org-dartlang-app:///<workspace path>`, which a native app's compile mounts) or `relative` (a path from the bootstrap, for the web compilers, which mount nothing).",
+            default = APP_SCHEME,
+            values = [APP_SCHEME, RELATIVE],
+        ),
+        "deps": attr.label_list(
+            doc = "The program's dependencies, read only to check `requires_packages`: a program whose bootstrap is the only file that knows what it needs fails analysis naming what is missing, instead of the compile reporting an unresolved import in a file the user did not write.",
+            providers = [DartInfo],
+        ),
+        "requires_packages": attr.string_list(
+            doc = "Dart packages `deps` must bring, by name: analysis fails, naming the package and the hub target to add, if none does.",
+        ),
         "_support": attr.label_list(
             default = [
                 Label("//flutter/private/integration_test/support:integration_suite.dart"),
                 Label("//flutter/private/integration_test/support:_channel.dart"),
                 Label("//flutter/private/integration_test/support:_channel_io.dart"),
+                Label("//flutter/private/integration_test/support:_channel_web.dart"),
             ],
             allow_files = [".dart"],
         ),
@@ -81,10 +112,12 @@ flutter_integration_bootstrap = rule(
     outputs = {"main": "%{name}.dart"},
     doc = """Generates the program an integration test file runs as, `<name>.dart`.
 
-The program imports the test file by its workspace path and calls
+The program imports the test file (by its workspace path, or by a path relative to
+itself: `src_import`) and calls
 `runIntegrationSuite` (a support library this rule stages beside it, in
 `<name>_support/`) on its `main`. That registers the file's tests as a suite
-the host drives over the app's VM service, with the same
+the host drives over the app's VM service (a web app's page, over the browser's
+DevTools protocol), with the same
 `IntegrationTestWidgetsFlutterBinding` set-up, golden comparator and
 `flutter_test_config.dart` `flutter test` gives it. The `DefaultInfo` carries
 the bootstrap and the staged support files.

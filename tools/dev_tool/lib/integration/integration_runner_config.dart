@@ -127,4 +127,19 @@ class IntegrationRunnerConfig {
   /// What the test was given in `env`, which the runner's own environment
   /// already carries.
   final Map<String, String> env;
+
+  /// The runfiles path of the browser a web test runs in: the launcher's
+  /// `chrome`. A [FormatException] names the key when the runner did not give
+  /// one, since a browser guessed at would not be the pinned one.
+  String get chromePath {
+    final value = launcher['chrome'];
+    if (value is! String || value.isEmpty) {
+      throw FormatException(
+        'the config: "launcher.chrome" must be a non-empty string, the '
+        'browser\'s runfiles path, got '
+        '${value == null ? 'nothing' : json.encode(value)}',
+      );
+    }
+    return value;
+  }
 }
