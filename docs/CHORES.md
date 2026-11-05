@@ -158,9 +158,9 @@ aside and run `bazel mod deps --lockfile_mode=error`.
 **Verification**: Both tools run successfully against the repo.
 
 Also update the matching `rev:` values in `.pre-commit-config.yaml` for yamlfmt
-and typos to keep CI and local hooks in sync. When bumping prek, update
-`prek-version` in `.github/workflows/ci.yaml` to match, and run
-`uv tool upgrade prek` so the installed git hooks use the new version.
+and typos to keep CI and local hooks in sync. CI runs prek from
+`multitool.lock.json`; when bumping it, run `uv tool upgrade prek` so the
+installed git hooks use the new version.
 
 **Automation**: `/bump-multitool` slash command. Alternatively, install the
 [multitool CLI](https://github.com/theoremlp/multitool) and run
