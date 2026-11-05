@@ -7,6 +7,8 @@ platform's build turns it into its own fields:
     Android        versionName                  versionCode
     iOS, macOS     CFBundleShortVersionString   CFBundleVersion
     Web            version.json "version"       version.json "build_number"
+    Windows        Runner.rc FileVersion "<name>+<number>",
+                   FILEVERSION MAJOR,MINOR,PATCH,<number>
 
 The app macros take the same two arguments. Unset, they are `flutter create`'s
 `1.0.0+1`: build name `1.0.0`, build number `1`.
@@ -149,6 +151,70 @@ def web_version(build_name, build_number):
     return _result(
         version = build_name or DEFAULT_BUILD_NAME,
         build_number = build_number or DEFAULT_BUILD_NUMBER,
+    )
+
+# A VERSIONINFO number is 16 bits; the resource compiler keeps the low ones of
+# a larger value.
+_WINDOWS_MAX_VERSION_PART = 65535
+
+_WINDOWS_DOC = "https://learn.microsoft.com/windows/win32/menurc/versioninfo-resource"
+
+def _is_identifiers(s):
+    """Whether `s` is semver's dot-separated identifiers, as in `beta.1`."""
+    for part in s.split("."):
+        if part == "" or not all([c.isalnum() or c == "-" for c in part.elems()]):
+            return False
+    return True
+
+def windows_version(build_name, build_number):
+    """The version `flutter create`'s `Runner.rc` gives a Windows app.
+
+    `flutter build windows` parses `<build_name>+<build_number>` as a semantic
+    version and defines `FLUTTER_VERSION` (the whole) and
+    `FLUTTER_VERSION_MAJOR`, `_MINOR`, `_PATCH` and `_BUILD` (the four numbers
+    of the executable's FILEVERSION). Where it falls back to `1.0.0` for a
+    version it cannot parse, or to a build of 0 for a build number that is not
+    a whole number, the build fails here.
+
+    Args:
+        build_name: The build name, or "" for the default.
+        build_number: The build number, or "" for the default.
+
+    Returns:
+        struct(version, major, minor, patch, build, error).
+    """
+    name = build_name or DEFAULT_BUILD_NAME
+    number = build_number or DEFAULT_BUILD_NUMBER
+    core, _, prerelease = name.partition("-")
+    parts = core.split(".")
+    if ("+" in name or len(parts) != 3 or not all([_is_digits(p) for p in parts]) or
+        (prerelease != "" and not _is_identifiers(prerelease)) or name.endswith("-")):
+        return _result(error = (
+            "build_name = %r is not a valid Windows version: it is three " +
+            "numbers separated by periods, such as \"2.1.0\", with an optional " +
+            "prerelease such as \"2.1.0-beta.1\"."
+        ) % name)
+    if not _is_digits(number):
+        return _result(error = (
+            "build_number = %r is not a valid Windows build number: a whole " +
+            "number, the last of the executable's four version numbers."
+        ) % number)
+    numbers = [int(p, 10) for p in parts] + [int(number, 10)]
+    for arg, value, too_large in [
+        ("build_name", name, any([n > _WINDOWS_MAX_VERSION_PART for n in numbers[:3]])),
+        ("build_number", number, numbers[3] > _WINDOWS_MAX_VERSION_PART),
+    ]:
+        if too_large:
+            return _result(error = (
+                "%s = %r is too large for a Windows version: each of its " +
+                "four numbers is at most %d. See %s"
+            ) % (arg, value, _WINDOWS_MAX_VERSION_PART, _WINDOWS_DOC))
+    return _result(
+        version = "%s+%s" % (name, number),
+        major = numbers[0],
+        minor = numbers[1],
+        patch = numbers[2],
+        build = numbers[3],
     )
 
 def version_target_conflict(owner, version, build_name, build_number):

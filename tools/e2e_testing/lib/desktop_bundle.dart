@@ -3,7 +3,10 @@ library;
 
 import 'dart:io';
 
+import 'dart:convert';
+
 import 'bundle_check.dart';
+import 'bytes.dart';
 import 'runfiles_paths.dart';
 
 /// A bundle directory `flutter_linux_app` or `flutter_windows_app` produced,
@@ -140,4 +143,72 @@ class WindowsBundle extends DesktopBundle {
 
   @override
   String get aotSnapshot => '$dataDir/app.so';
+
+  /// Checks that the runner carries the resources `flutter create`'s
+  /// `Runner.rc` and `runner.exe.manifest` give it: version information
+  /// for [version] (`FLUTTER_VERSION`) with the numeric file version
+  /// [fileVersion] (major, minor, patch, build), every image of the icon file
+  /// [icon], and the manifest's per-monitor DPI awareness.
+  void checkRunnerResources({
+    required String version,
+    required List<int> fileVersion,
+    required String icon,
+  }) {
+    final exe = File(runner).readAsBytesSync();
+    final [major, minor, patch, build] = fileVersion;
+    // VS_FIXEDFILEINFO: its signature and structure version, then the file
+    // version as two little-endian words, (major, minor) and (patch, build).
+    final fixedFileInfo = [
+      ..._u32le(0xFEEF04BD),
+      ..._u32le(0x00010000),
+      ..._u32le(major << 16 | minor),
+      ..._u32le(patch << 16 | build),
+    ];
+    check
+      ..expect(
+        'Version information, file version ${fileVersion.join('.')}',
+        condition: containsBytes(exe, fixedFileInfo),
+      )
+      ..expect(
+        'Version string $version',
+        condition:
+            containsBytes(exe, utf16leBytes('FileVersion')) &&
+            containsBytes(exe, utf16leBytes(version)),
+      )
+      ..expect(
+        'Embedded manifest (PerMonitorV2 DPI awareness)',
+        condition: containsBytes(
+          exe,
+          utf8.encode(
+            '<dpiAwareness xmlns="http://schemas.microsoft.com/'
+            'SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>',
+          ),
+        ),
+      );
+    final images = iconImages(File(icon).readAsBytesSync());
+    check.expect(
+      'Icon (${images.length} images of ${icon.split(RegExp(r'[\\/]')).last})',
+      condition:
+          images.isNotEmpty &&
+          images.every((image) => containsBytes(exe, image)),
+    );
+  }
 }
+
+/// The images an `.ico` file holds, each as the bytes a resource compiler
+/// copies into an `RT_ICON` resource.
+List<List<int>> iconImages(List<int> ico) {
+  int u16(int at) => ico[at] | ico[at + 1] << 8;
+  int u32(int at) => u16(at) | u16(at + 2) << 16;
+  return [
+    for (var i = 0; i < u16(4); i++)
+      ico.sublist(
+        u32(6 + i * 16 + 12),
+        u32(6 + i * 16 + 12) + u32(6 + i * 16 + 8),
+      ),
+  ];
+}
+
+List<int> _u32le(int value) => [
+  for (var shift = 0; shift < 32; shift += 8) value >> shift & 0xff,
+];

@@ -45,11 +45,15 @@ flutter_windows_registrant_gen(
 # Approach 1: Flutter-generated runner (flutter_windows_app)
 #
 # Recommended for most users. Requires windows/runner/ from `flutter create`.
+# A version other than the default, so the test can tell it reached the
+# executable's version information.
 # =============================================================================
 
 flutter_windows_app(
     name = "app",
     application = ":app_flutter",
+    build_name = "2.3.4",
+    build_number = 56,
     target_compatible_with = ["@platforms//os:windows"],
 )
 
@@ -151,7 +155,10 @@ build_test(
 
 dart_test(
     name = "verify_windows_bundle_test",
-    data = [":app"],
+    data = [
+        "windows/runner/resources/app_icon.ico",
+        ":app",
+    ],
     main = "test/verify_windows_bundle_test.dart",
     target_compatible_with = ["@platforms//os:windows"],
     deps = ["@rules_flutter//tools/e2e_testing"],

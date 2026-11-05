@@ -413,15 +413,16 @@ The macros take `flutter create` output as it is. You do not need to edit the ge
 
 ### App version
 
-The Android, iOS, macOS and web app macros take `build_name` and `build_number`, Flutter's names for the version that `flutter build --build-name 2.3.4 --build-number 42` sets, and that a `pubspec.yaml` writes as `version: 2.3.4+42`. Unset, they are `flutter create`'s `1.0.0` and `1`. Each platform puts them where its own build does:
+The Android, iOS, macOS, Windows and web app macros take `build_name` and `build_number`, Flutter's names for the version that `flutter build --build-name 2.3.4 --build-number 42` sets, and that a `pubspec.yaml` writes as `version: 2.3.4+42`. Unset, they are `flutter create`'s `1.0.0` and `1`. Each platform puts them where its own build does:
 
 | Platform | `build_name` | `build_number` |
 |---|---|---|
 | Android | `versionName` | `versionCode`: a whole number from 1 to 2100000000 |
 | iOS, macOS | `CFBundleShortVersionString`: numbers separated by periods, padded to three as `flutter build` pads them (`2.3` is `2.3.0`) | `CFBundleVersion`: numbers separated by periods |
 | Web | `version` in `version.json` | `build_number` in `version.json` |
+| Windows | The executable's version, `<build_name>+<build_number>`, and the first three of its four file version numbers: `MAJOR.MINOR.PATCH`, with an optional `-prerelease` | The fourth file version number: a whole number. Each of the four is at most 65535 |
 
-Linux apps carry no version. A value the platform cannot use fails the build and says what it accepts, where `flutter build` would quietly change it (`0` to `1` on Android, `1.0-beta` to `1.0.0` on iOS).
+Linux apps carry no version. A value the platform cannot use fails the build and says what it accepts, where `flutter build` would quietly change it (`0` to `1` on Android, `1.0-beta` to `1.0.0` on iOS, a build number of `1.2` to `0` on Windows).
 
 Each platform's own way of setting the version still works: `version` (an `apple_bundle_version`) on iOS and macOS, `manifest_values` or an `android:versionCode` in your own manifest on Android, `version_json` (or `web/version.json`) on web. Setting a field both ways is an error, rather than one value silently winning.
 
@@ -1148,6 +1149,12 @@ flutter_windows_app(
 |---|---|
 | `application` | A `flutter_application` target. Required. |
 | `app_name` | Binary name. Defaults to the target name. |
+| `build_name` | The version, `MAJOR.MINOR.PATCH`. Defaults to `"1.0.0"`. See [App version](#app-version). |
+| `build_number` | The fourth version number. Defaults to `"1"`. |
+
+The executable carries what `windows/runner/` gives it, as with `flutter build windows`: `Runner.rc` is compiled into its icon and version information (`build_name+build_number`, with the file version `MAJOR.MINOR.PATCH.BUILD`), and `runner.exe.manifest` is embedded. The built-in runner has the `flutter create` icon and manifest.
+
+Compiling `Runner.rc` takes a Windows resource compiler, registered for Bazel's `@bazel_tools//tools/res:toolchain_type`. On a Windows host with Visual Studio Build Tools, Bazel registers the Windows SDK's `rc.exe` itself, so there is nothing to do. Building for Windows from another host fails until your `MODULE.bazel` registers one, such as `llvm-rc`, wrapped in `windows_resource_compiler_toolchain` from `@bazel_tools//tools/res:winsdk_toolchain.bzl`; rules_flutter registers none, so the choice stays with your module.
 
 The output directory:
 
@@ -1169,15 +1176,30 @@ load("@rules_flutter//flutter:windows.bzl",
     "flutter_windows_bundle",
     "flutter_windows_engine",
     "flutter_windows_registrant_gen",
+    "flutter_windows_resources",
     "flutter_windows_runner_lib_gen")
 
 flutter_windows_engine(name = "flutter_engine")
 flutter_windows_registrant_gen(name = "app_registrant", application = ":my_app")
 
+flutter_windows_resources(
+    name = "my_resources",
+    rc = "windows/runner/Runner.rc",
+    srcs = glob(["windows/runner/*.h", "windows/runner/resources/**"]),
+    build_name = "1.2.3",
+    build_number = "4",
+)
+
 flutter_windows_runner_lib_gen(
     name = "my_runner",
     engine = ":flutter_engine",
     registrant = ":app_registrant",
+    srcs = glob(["windows/runner/*.cpp"]),
+    hdrs = glob(["windows/runner/*.h"]),
+    resources = [":my_resources"],
+    manifest = "windows/runner/runner.exe.manifest",
+    build_name = "1.2.3",
+    build_number = "4",
 )
 
 flutter_windows_bundle(

@@ -19,6 +19,8 @@ Output bundle structure:
         icudtl.dat
 """
 
+load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
+load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
 load("//flutter:providers.bzl", "FlutterApplicationInfo")
 load("//flutter/private:cc_runner_compile.bzl", "compile_and_link_runner")
@@ -26,6 +28,7 @@ load("//flutter/private:common.bzl", "compute_desktop_bundle_copies")
 load("//flutter/private:engine_helpers.bzl", "find_engine_header_dir")
 load("//flutter/private:exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
 load("//flutter/private:flutter_desktop_plugin_info.bzl", "plugin_link_flags")
+load("//flutter/private:flutter_windows_resources.bzl", "WINDOWS_VERSION_ATTRS", "windows_version_defines")
 load("//flutter/private:path_mapping.bzl", "file_ref", "json_config_args")
 load("//flutter/private:plugin_registrant.bzl", "registrant_include_dirs")
 
@@ -87,6 +90,9 @@ def _flutter_windows_runner_lib_impl(ctx):
         plugin_hdrs = plugin_hdrs,
         plugin_include_dirs = plugin_include_dirs,
         plugin_linkopts = plugin_link_flags(plugin_entries, "Windows"),
+        defines = windows_version_defines(ctx),
+        linking_contexts = [r[CcInfo].linking_context for r in ctx.attr.resources] +
+                           _manifest_linking_contexts(ctx),
     )
 
     return [DefaultInfo(
@@ -94,7 +100,20 @@ def _flutter_windows_runner_lib_impl(ctx):
         executable = runner_binary,
     )]
 
-def _compile_windows_runner(ctx, runner_srcs, engine_files, is_debug, registrant_srcs = [], registrant_hdrs = [], runner_hdrs = [], plugin_srcs = [], plugin_hdrs = [], plugin_include_dirs = [], plugin_linkopts = []):
+def _manifest_linking_contexts(ctx):
+    """Embeds the application manifest, as CMake does with a `.manifest` source."""
+    manifest = ctx.file.manifest
+    if not manifest:
+        return []
+    return [cc_common.create_linking_context(linker_inputs = depset([
+        cc_common.create_linker_input(
+            owner = ctx.label,
+            additional_inputs = depset([manifest]),
+            user_link_flags = depset(["/MANIFEST:EMBED", "/MANIFESTINPUT:" + manifest.path]),
+        ),
+    ]))]
+
+def _compile_windows_runner(ctx, runner_srcs, engine_files, is_debug, registrant_srcs = [], registrant_hdrs = [], runner_hdrs = [], plugin_srcs = [], plugin_hdrs = [], plugin_include_dirs = [], plugin_linkopts = [], defines = [], linking_contexts = []):
     """Compile the C++ Win32 runner binary.
 
     Uses cc_common.compile() + cc_common.link() with Bazel's hermetic CC
@@ -121,6 +140,11 @@ def _compile_windows_runner(ctx, runner_srcs, engine_files, is_debug, registrant
             `-I` flags.
         plugin_linkopts: Linker flags for the system libraries the plugins'
             sources need (e.g. `shlwapi.lib`).
+        defines: Further defines for the runner's sources: the
+            `FLUTTER_VERSION*` ones, which `flutter build windows` defines for
+            the runner's C++ too.
+        linking_contexts: Further linking contexts: the compiled resources
+            and the manifest.
 
     Returns:
         The compiled runner executable File.
@@ -167,7 +191,7 @@ def _compile_windows_runner(ctx, runner_srcs, engine_files, is_debug, registrant
 
     # UNICODE/_UNICODE: use wide-char Win32 APIs (CreateWindowW, RegGetValueW, etc.)
     # Required by the flutter create runner which uses wchar_t throughout.
-    defines = ["UNICODE", "_UNICODE"]
+    defines = ["UNICODE", "_UNICODE"] + defines
     if not is_debug:
         defines.append("NDEBUG")
 
@@ -226,11 +250,12 @@ def _compile_windows_runner(ctx, runner_srcs, engine_files, is_debug, registrant
         extra_link_flags = ["/SUBSYSTEM:WINDOWS", "user32.lib", "ole32.lib", "dwmapi.lib", "shell32.lib", "advapi32.lib"] + plugin_linkopts,
         extra_defines = defines,
         additional_srcs = additional_srcs + plugin_srcs,
+        linking_contexts = linking_contexts,
     )
 
 flutter_windows_runner_lib = rule(
     implementation = _flutter_windows_runner_lib_impl,
-    attrs = {
+    attrs = WINDOWS_VERSION_ATTRS | {
         "engine": attr.label(
             doc = "A flutter_windows_engine target providing engine DLL + headers.",
             mandatory = True,
@@ -254,6 +279,17 @@ flutter_windows_runner_lib = rule(
                   "alongside its own (collected from " +
                   "FlutterApplicationInfo.windows_plugin_libraries).",
             providers = [FlutterApplicationInfo],
+        ),
+        "resources": attr.label_list(
+            doc = "Compiled resources to link, `flutter_windows_resources` targets " +
+                  "(or anything else providing `CcInfo`): the icon and version " +
+                  "information of `Runner.rc`.",
+            providers = [CcInfo],
+        ),
+        "manifest": attr.label(
+            doc = "An application manifest to embed in the executable, " +
+                  "`windows/runner/runner.exe.manifest` in a `flutter create` tree.",
+            allow_single_file = [".manifest"],
         ),
         "_runner_sources": attr.label(
             default = Label("//flutter/private/runners:windows_runner_srcs"),

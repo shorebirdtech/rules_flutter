@@ -14,3 +14,23 @@ filegroup(
     srcs = glob(["windows/*.h"]),
     visibility = ["//flutter:__subpackages__"],
 )
+
+# The built-in runner's resource script, the files it reads, and its manifest,
+# for an app with no `windows/runner/` of its own. Public: `flutter_windows_app`
+# names them from the app's package.
+exports_files(
+    [
+        "windows/Runner.rc",
+        "windows/runner.exe.manifest",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "windows_runner_resource_srcs",
+    srcs = [
+        "windows/resource.h",
+        "windows/resources/app_icon.ico",
+    ],
+    visibility = ["//visibility:public"],
+)
