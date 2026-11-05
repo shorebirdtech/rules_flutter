@@ -4,7 +4,7 @@ import 'package:integration_test/integration_test.dart';
 import 'package:integration_test_example/main.dart' as app;
 
 /// A test that is wrong: it expects the counter to read 99 after one tap. It
-/// runs only under `:macos_red_twin_test`, which checks that a failing
+/// runs only under the `_red_twin_test`s, which check that a failing
 /// integration test fails its target.
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();

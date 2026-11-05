@@ -9,6 +9,10 @@
 ///    tests' windows at once hang one of them;
 ///  * `android-<serial>`: two tests would install over each other;
 ///  * `ios-sim-<udid>`: when a runner reuses a simulator.
+///
+/// Windows has no key of its own: windows that overlap on a Windows desktop keep
+/// drawing (measured with two tests' windows at one origin), so two tests there
+/// do not hang one another.
 library;
 
 import 'dart:io';

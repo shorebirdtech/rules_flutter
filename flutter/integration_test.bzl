@@ -11,6 +11,7 @@ Tier 1, the convenience macros: one per platform, each composing the bootstrap,
 the variant, the platform's app rule and the test.
 
 - `flutter_macos_integration_test`
+- `flutter_windows_integration_test`
 - `flutter_web_integration_test`
 - `flutter_android_integration_test`
 - `flutter_ios_simulator_integration_test`
@@ -34,6 +35,7 @@ load("//flutter:android.bzl", "flutter_android_app")
 load("//flutter:ios.bzl", "flutter_ios_app")
 load("//flutter:macos.bzl", "flutter_macos_app")
 load("//flutter:web.bzl", "flutter_web_app")
+load("//flutter:windows.bzl", "flutter_windows_app")
 load("//flutter/private:flutter_application_variant.bzl", _flutter_application_variant = "flutter_application_variant")
 load("//flutter/private:flutter_integration_bootstrap.bzl", _flutter_integration_bootstrap = "flutter_integration_bootstrap")
 load("//flutter/private:flutter_integration_test.bzl", _flutter_android_app_integration_test = "flutter_android_app_integration_test", _flutter_android_device_runner = "flutter_android_device_runner", _flutter_chrome_runner = "flutter_chrome_runner", _flutter_desktop_integration_test = "flutter_desktop_integration_test", _flutter_desktop_runner = "flutter_desktop_runner", _flutter_ios_app_integration_test = "flutter_ios_app_integration_test", _flutter_ios_simulator_runner = "flutter_ios_simulator_runner", _flutter_web_bundle_integration_test = "flutter_web_bundle_integration_test")
@@ -223,6 +225,99 @@ def flutter_macos_integration_test(
         flaky = flaky,
         visibility = visibility,
         target_compatible_with = ["@platforms//os:macos"],
+        **test_kwargs
+    )
+
+def flutter_windows_integration_test(
+        name,
+        src,
+        application,
+        deps = [],
+        srcs = [],
+        test_config = None,
+        env = {},
+        data = [],
+        size = "medium",
+        runner = None,
+        tags = [],
+        timeout = None,
+        shard_count = None,
+        flaky = None,
+        visibility = None,
+        **windows_app_kwargs):
+    """Runs a `package:integration_test` file on Windows: the application with the test as its program.
+
+    The app is built in debug mode and launched in the session the test runs in,
+    which is where its window is created. Windows that overlap keep drawing, so
+    tests need no turns on the screen. One target per test file, as upstream
+    launches the app once per file.
+
+    Intermediate targets `__<name>_bootstrap`, `__<name>_program` and
+    `__<name>_app` are this macro's: do not name them.
+
+    Args:
+        name: The test's name.
+        src: The test file. Its `main` declares the tests, as for `flutter create`:
+            `IntegrationTestWidgetsFlutterBinding.ensureInitialized()` and
+            `testWidgets`, calling the app's own `main()`.
+        application: The `flutter_application` the test runs. It may be in another
+            package.
+        deps: What the test imports beyond the application's own `deps`. It must
+            bring `integration_test` and `flutter_test` (`@<hub>//:integration_test`
+            and `@<hub>//:flutter_test`), which analysis fails without, naming them.
+        srcs: Dart files `src` imports by relative path.
+        test_config: The suite's `flutter_test_config.dart`. By default the one
+            `flutter_test` would find for `src`, in this package.
+        env: Environment variables for the runner and the app.
+        data: Files the test reads at run time, and its golden files:
+            `matchesGoldenFile('goldens/x.png')` reads `goldens/x.png` from the
+            directory of `src`, compared on the host. `bazel run :<name> --
+            --update-goldens` writes them.
+        size: The test size. `medium`: a window is launched and drawn.
+        runner: A `flutter_desktop_runner`, to run the test with something other than
+            the host's own desktop.
+        tags: Tags of the test.
+        timeout: The test's `timeout`.
+        shard_count: The test's `shard_count`: the tests of the file are divided
+            among the shards.
+        flaky: The test's `flaky`.
+        visibility: The test's visibility.
+        **windows_app_kwargs: Passed to `flutter_windows_app`: `app_name`, and the
+            rest.
+    """
+    if test_config == None:
+        test_config = _find_test_config(name, src)
+    program = _program(name, src, application, deps, srcs, test_config)
+
+    app = "__%s_app" % name
+    flutter_windows_app(
+        name = app,
+        application = program,
+        tags = ["manual"],
+        testonly = True,
+        visibility = ["//visibility:private"],
+        # An app is for Windows, so is its test: another host skips both.
+        target_compatible_with = ["@platforms//os:windows"],
+        **windows_app_kwargs
+    )
+
+    test_kwargs = {}
+    if runner != None:
+        test_kwargs["runner"] = runner
+    _flutter_desktop_integration_test(
+        name = name,
+        app = ":" + app,
+        src = src,
+        golden_service = _golden_service(name, deps),
+        env = env,
+        data = data,
+        size = size,
+        tags = tags,
+        timeout = timeout,
+        shard_count = shard_count,
+        flaky = flaky,
+        visibility = visibility,
+        target_compatible_with = ["@platforms//os:windows"],
         **test_kwargs
     )
 

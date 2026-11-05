@@ -794,7 +794,7 @@ cd e2e/ffi_example && bazel test //...
 cd e2e/ffi_plugin_example && bazel test //...
 cd e2e/plugin_example && bazel test //...
 cd e2e/macos_example && bazel test //...
-cd e2e/integration_test && bazel test //...  # macOS-only; needs an unlocked, awake desktop
+cd e2e/integration_test && bazel test //...  # macOS: needs an unlocked, awake desktop; Windows: `build //...`, its tests run on the VM (below)
 cd e2e/ios_example && bazel test //...
 cd e2e/multi_window_example && bazel test //...
 cd e2e/android_example && bazel test //...
@@ -880,8 +880,10 @@ cd e2e/_overlay_tests/native_assets_synthetic && bazel test //...   # macOS-only
 ### `e2e/integration_test`
 
 The integration test rules (`flutter/integration_test.bzl`) on a real app, in the
-host's own desktop session, in a browser, on an Android device and on an iOS
-simulator. Its macOS tests
+host's own desktop session (macOS or Windows), in a browser, on an Android device and
+on an iOS simulator. Its Windows tests are run on a Windows host, by hand or on the
+GCP VM (§ "Windows integration tests (GCP VM)"); on a Mac or Linux host they are
+skipped. Its macOS tests
 launch a window, so run it on a Mac with an unlocked screen and an awake display
 (§ "macOS permission prerequisites", "The display must be awake"); the runner holds
 the display awake itself and fails, saying which, when the screen is locked or the
@@ -897,6 +899,11 @@ Android build (§ "The Android SDK/NDK variables must be exported too") and
 | `:macos_red_twin_test` | a failing integration test fails its target, and the JUnit report names the failing case with a `<failure>`. It wraps `:macos_red` (`manual`, since it is meant to fail) in `outcome_test`, which runs the wrapped test's own executable and passes only when it ends as the target says |
 | `:macos_crash_test` | an app that `exit(3)`s mid-test fails its target, and the output says `exited with code 3` |
 | `:macos_filter_test` | `--test_filter` runs one of the two cases of `:macos_pass_test` and no other |
+| `:windows_pass_test` | the same two tests in a Windows app's window, each reported: the suite is driven through the app's VM service |
+| `:windows_red_twin_test` | a failing integration test fails its target on Windows, and the JUnit report names the failing case. It wraps `:windows_red` (`manual`) in `outcome_test` |
+| `:windows_crash_test` | an app that `exit(3)`s mid-test fails its target, and the output says `The Windows app exited with code 3` |
+| `:windows_filter_test` | `--test_filter` runs one of the two cases of `:windows_pass_test` and no other |
+| `:windows_golden_test`, `:windows_golden_mismatch_twin_test` | `matchesGoldenFile` compares with `goldens/windows/swatch.png` and passes; a golden that does not match fails, naming the file, and leaves the four pictures of the failure in the undeclared outputs, as on the other platforms |
 | `:web_pass_test` | the same two tests in headless Chrome (a pinned Chrome for Testing shell), each reported: the suite is driven over the browser's DevTools protocol |
 | `:web_red_twin_test` | a failing integration test fails its target in a browser too, and the JUnit report names the failing case. It wraps `:web_red` (`manual`) in `outcome_test` |
 | `:web_filter_test` | `--test_filter` runs one of the two cases of `:web_pass_test` and no other |
@@ -952,11 +959,17 @@ scheduled as two cores (`cpus` of `flutter_ios_simulator_runner`): the processes
 under a booted simulator measured 15 CPU-seconds over the 20 seconds a test took
 (0.75 of a core), not counting the host services it talks to.
 
-The tests take turns on the screen through the `macos-gui` lock
+The macOS tests take turns on the screen through the `macos-gui` lock
 (`/tmp/rules_flutter-locks/`), so several at once is fine: a test that has to wait
 says `waiting for macos-gui, held by another test`; two on one Android device take
-turns on `android-<serial>` the same way. CI builds this workspace, Android apps
-included, and does not run it (it never runs a test that needs a GUI session or a
+turns on `android-<serial>` the same way. The Windows tests take no lock, which was
+measured: two tests' windows at one origin (`windows_hold_a` and `windows_hold_b`,
+each tapping once a second for forty seconds and awaiting a frame after each tap)
+both finished all forty, so a window another covers keeps drawing, unlike macOS's.
+They also ran from the VM's SSH logon, which has no visible desktop, as well as from
+its console session, so the interactive session is for the screenshot, not for the
+test (a host with no display adapter was not tried). CI builds this workspace, Android
+apps included, and does not run it (it never runs a test that needs a GUI session or a
 device).
 
 Changing the integration test rules (`flutter/integration_test.bzl`,
@@ -1661,6 +1674,46 @@ gcloud compute instances delete flutter-windows-test --quiet
 
 **When to run:** After any change to Windows runner code, engine selection, or bundle assembly.
 
+### Windows integration tests (GCP VM)
+
+`e2e/integration_test`'s Windows targets run on the VM above, with three additions to what
+the visual verification installs:
+
+- **The Android SDK and NDK.** The workspace registers the Android NDK toolchain, so any
+  target in it, a Windows one included, fails analysis without `ANDROID_HOME` and
+  `ANDROID_NDK_HOME` (§ "The Android SDK/NDK variables must be exported too"). The VM
+  has neither: install a JDK, then `sdkmanager --sdk_root=C:\android "platforms;android-35"
+  "build-tools;35.0.0" "ndk;28.2.13676358"`, and export both with forward slashes.
+- **rules_dart's checkout.** The committed pin lags the tree (a build loads
+  `web_compiler_reset`, which the pinned release lacks): ship the sibling checkout to
+  `C:\rules_dart` and build with `--override_module=rules_dart=C:/rules_dart
+  --lockfile_mode=off`, as the workstation's `.bazelrc.user` does.
+- **A short output base**, `--output_base=C:/b/<n>` (§ "Windows and MAX_PATH").
+
+The first build takes about eight minutes. Run the tests by name: `//...` from a Windows
+host does not build, because the Android integration tests' runner is
+`@androidsdk//:adb`, which rules_android points at `platform-tools/adb` and a Windows SDK
+has only as `adb.exe` (`missing input file ... platform-tools/adb`; the five
+`android_*_test` targets are the only ones that fail, the Windows ones and the rest
+build), which is also why CI does not build this workspace on Windows:
+
+```sh
+bazel --output_base=C:/b/2 test //:windows_pass_test //:windows_filter_test \
+  //:windows_red_twin_test //:windows_crash_test //:windows_golden_test \
+  //:windows_golden_mismatch_twin_test
+```
+
+A test's window is created in the session the test runs in. To see it, run Bazel in the
+console session (`PsExec64.exe -accepteula -i 1 -u testuser -p <password> cmd /c <script>`,
+the script writing Bazel's output to a file, as `tools/vm/deploy_bundle.dart` does) and
+take a DXGI screenshot while a test holds its window up (`dxcam` through `PsExec -i 1`,
+`e2e/_windows_test/dxgi_screenshot.py` is the capture). The window's title is the
+runner's, `hello_world`. The console is
+800x600, so a 1280x720 window is clamped to 804x581 physical pixels.
+
+**When to run:** After any change to the integration test rules or the runner for Windows
+(`flutter_windows_integration_test`, `WindowsDevice`, `tools/dev_tool/lib/integration/`).
+
 ### Profile mode on Linux and Windows (GCP VM)
 
 `gen_snapshot` cannot cross-compile AOT between desktop OSes, so a profile (or
@@ -1764,9 +1817,10 @@ script's own package requires ≥ 3.13.
 | macOS runner (`flutter/private/runners/macos/`) | macos_example `//...` + manual runtime test |
 | Linux runner / bundle (`flutter/private/*linux*`) | linux_example, cross_compile_example, GCP VM visual test |
 | Windows runner / bundle (`flutter/private/*windows*`) | windows_example (on Windows), GCP VM visual test |
+| Windows integration tests (`flutter_windows_integration_test`, `WindowsDevice`) | `e2e/integration_test`'s Windows targets on the GCP VM (§ Windows integration tests), windows_example `//...` on Windows, and the platform-neutral integration row |
 | Desktop engine selection (debug/profile/release) | cross_compile_example `bazel build :cross_linux` + verify on VM |
 | Profile mode (`flutter:profile` selects, profile engine repos) | Root `//...`, macOS and a device by hand, hello_world `//...` on Linux and Windows (CI does this), and the profile run on the Linux and Windows VMs (§ Profile mode on Linux and Windows) |
-| Integration tests (`flutter/integration_test.bzl`, `flutter/private/flutter_integration_*.bzl`, `flutter/private/integration_test/support/`, `tools/dev_tool/lib/integration/`, `bin/integration_test_runner.dart`) | `e2e/integration_test` `//...` on each platform the change touches (macOS, with an unlocked screen, for desktop; macOS for web; an attached device and `ANDROID_SERIAL` for Android), dev_tool unit, plus the platform's row; for web, `e2e/web_example` `:render_test` and the Web support row |
+| Integration tests (`flutter/integration_test.bzl`, `flutter/private/flutter_integration_*.bzl`, `flutter/private/integration_test/support/`, `tools/dev_tool/lib/integration/`, `bin/integration_test_runner.dart`) | `e2e/integration_test` `//...` on each platform the change touches (macOS, with an unlocked screen, for macOS desktop; the Windows VM for Windows; macOS for web; an attached device and `ANDROID_SERIAL` for Android), dev_tool unit, plus the platform's row; for web, `e2e/web_example` `:render_test` and the Web support row |
 | `flutter_application_variant` (`flutter/private/flutter_application_variant.bzl`, `flutter_program_inputs` in `common.bzl`) | Root `//...`, macos_example `//...` and `dart run tools/dev_tool/tool/e2e.dart test/e2e/main_outside_lib_e2e_test.dart --plain-name="macOS"`, which reloads and restarts a variant; plus the macOS manual runtime test |
 | Dart compilation / AOT | hello_world, ffi_example, macos_example |
 | Asset bundling | hello_world, plugin_example |

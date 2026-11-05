@@ -84,7 +84,10 @@ The test needs a desktop session. On macOS that is an unlocked screen and an
 awake display; the runner checks both before it launches the app and fails,
 saying which, when either is not so. It holds the display awake for the run
 and takes a lock on the screen (`macos-gui`), because a window that is covered
-stops producing frames, so two tests share the screen one after the other.""",
+stops producing frames, so two tests share the screen one after the other.
+
+On Windows the app's window is created on the desktop of the session the test
+runs in, which needs no check and no lock: windows that overlap keep drawing.""",
 )
 
 def _flutter_chrome_runner_impl(ctx):
@@ -338,7 +341,7 @@ flutter_desktop_integration_test = rule(
     implementation = _flutter_desktop_integration_test_impl,
     attrs = _test_attrs("//flutter/integration_test:desktop"),
     test = True,
-    doc = """Runs the desktop app `app` (`flutter_macos_app`) on the host and reports the integration test suite it runs.
+    doc = """Runs the desktop app `app` (`flutter_macos_app` or `flutter_windows_app`) on the host and reports the integration test suite it runs.
 
 The app's program is an integration test (see `flutter_integration_bootstrap`),
 so each `testWidgets` is a test case: `--test_filter` and `shard_count` select
@@ -347,7 +350,8 @@ suite that registers no test fails, as does an app that exits during a test, wit
 the reason the device gives for its exit.
 
 The test is built in debug mode, runs outside Bazel's sandbox and never remotely.
-A macOS app needs an unlocked, awake desktop session.""",
+A macOS app needs an unlocked, awake desktop session; a Windows app (`flutter_windows_app`)
+needs a Windows session that can create a window.""",
 )
 
 def _flutter_web_bundle_integration_test_impl(ctx):

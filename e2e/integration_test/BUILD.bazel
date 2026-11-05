@@ -1,6 +1,6 @@
 load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_analysis_test", "dart_binary")
 load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_library")
-load("@rules_flutter//flutter:integration_test.bzl", "flutter_android_integration_test", "flutter_ios_simulator_integration_test", "flutter_macos_integration_test", "flutter_web_integration_test")
+load("@rules_flutter//flutter:integration_test.bzl", "flutter_android_integration_test", "flutter_ios_simulator_integration_test", "flutter_macos_integration_test", "flutter_web_integration_test", "flutter_windows_integration_test")
 load(":test_outcome.bzl", "outcome_test")
 
 exports_files(["pubspec.lock"])
@@ -183,6 +183,118 @@ outcome_test(
     failing_cases_given = True,
     output_contains = _MISMATCH_SAYS,
     test = ":macos_golden_mismatch",
+    undeclared_outputs = _FAILURE_PICTURES,
+)
+
+# -- Windows ---------------------------------------------------------------
+
+# The same app on the Windows desktop of the host. Measured on a GCP VM with a
+# display device, they pass from its console session and from an SSH logon. Run
+# them by hand or on the VM of docs/TESTING.md, "Windows integration tests", by
+# name: `//...` from a Windows host also asks for the Android tests below, whose
+# runner needs `@androidsdk//:adb`, a file the SDK has only as `adb.exe` there.
+
+# The two tests of `:macos_pass_test`, in a window: each is reported.
+flutter_windows_integration_test(
+    name = "windows_pass_test",
+    src = "integration_test/counter_test.dart",
+    application = ":app_flutter",
+    deps = _TEST_DEPS,
+)
+
+# `--test_filter` selects among the tests of one file in a window too.
+outcome_test(
+    name = "windows_filter_test",
+    cases = ["counter increments when tapped"],
+    expect = "pass",
+    failing_cases_given = True,
+    target_compatible_with = ["@platforms//os:windows"],
+    test = ":windows_pass_test",
+    test_filter = "increments",
+)
+
+# `manual`, since it is meant to fail: the red twin below runs it.
+flutter_windows_integration_test(
+    name = "windows_red",
+    src = "integration_test/failing_test.dart",
+    application = ":app_flutter",
+    tags = ["manual"],
+    deps = _TEST_DEPS,
+)
+
+# A failing integration test fails its target on Windows, and its JUnit report
+# names the failing case.
+outcome_test(
+    name = "windows_red_twin_test",
+    cases = ["counter reads 99 after one tap"],
+    expect = "fail",
+    failing_cases = ["counter reads 99 after one tap"],
+    failing_cases_given = True,
+    output_contains = ["Expected: exactly one matching"],
+    target_compatible_with = ["@platforms//os:windows"],
+    test = ":windows_red",
+)
+
+# The app ends during a test, with status 3.
+flutter_windows_integration_test(
+    name = "windows_crash",
+    src = "integration_test/crash_test.dart",
+    application = ":app_flutter",
+    tags = ["manual"],
+    deps = _TEST_DEPS,
+)
+
+# An app that dies during a test fails its target on Windows, and the failure
+# says how the app ended. (`tearDownAll` cannot run in an app that is gone.)
+outcome_test(
+    name = "windows_crash_test",
+    cases = [
+        "app exits during the test",
+        "(tearDownAll)",
+    ],
+    expect = "fail",
+    failing_cases = [
+        "app exits during the test",
+        "(tearDownAll)",
+    ],
+    failing_cases_given = True,
+    output_contains = ["exited with code 3"],
+    target_compatible_with = ["@platforms//os:windows"],
+    test = ":windows_crash",
+)
+
+# The swatch in a window, against `goldens/windows/swatch.png`: the golden is
+# compared on the host, where the app's `matchesGoldenFile` sends the picture.
+# Regenerated with `bazel run //:windows_golden_test -- --update-goldens`.
+flutter_windows_integration_test(
+    name = "windows_golden_test",
+    src = "integration_test/golden_test.dart",
+    srcs = _GOLDEN_SRCS,
+    application = ":app_flutter",
+    data = _GOLDENS,
+    deps = _TEST_DEPS,
+)
+
+# `manual`, since it is meant to fail: the red twin below runs it.
+flutter_windows_integration_test(
+    name = "windows_golden_mismatch",
+    src = "integration_test/golden_mismatch_test.dart",
+    srcs = _GOLDEN_SRCS,
+    application = ":app_flutter",
+    data = _GOLDENS,
+    tags = ["manual"],
+    deps = _TEST_DEPS,
+)
+
+outcome_test(
+    name = "windows_golden_mismatch_twin_test",
+    cases = ["an orange swatch matches the blue golden"],
+    expect = "fail",
+    failing_cases = ["an orange swatch matches the blue golden"],
+    failing_cases_given = True,
+    output_contains = _MISMATCH_SAYS,
+    target_compatible_with = ["@platforms//os:windows"],
+    test = ":windows_golden_mismatch",
     undeclared_outputs = _FAILURE_PICTURES,
 )
 

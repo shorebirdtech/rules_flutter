@@ -79,10 +79,22 @@ Future<DeviceChoice> chooseDevice(
         () => _prepareMacOs(log),
         vmServiceConnector(),
       );
+    case IntegrationFamily.desktop when os == 'windows':
+      // No lock and no session probe, as macOS has. Measured on a Windows VM:
+      // windows that overlap keep drawing (two tests' windows at one origin
+      // each completed forty awaited frames), so tests need not take turns on
+      // the screen, and an app started from an SSH logon, which has no visible
+      // desktop, drew and was driven all the same. An app that cannot start
+      // is reported by the launch, by name (`whyAppExited`, `SuiteUnreachable`).
+      return DeviceChoice(
+        WindowsDevice(),
+        () async => () async {},
+        vmServiceConnector(),
+      );
     case IntegrationFamily.desktop:
       throw StateError(
-        'integration tests run on macOS desktops; this host is $os, which has '
-        'no runner.',
+        'integration tests run on macOS and Windows desktops; this host is $os, '
+        'which has no runner.',
       );
     case IntegrationFamily.web:
       return DeviceChoice(

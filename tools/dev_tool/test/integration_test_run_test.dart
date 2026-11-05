@@ -233,6 +233,45 @@ void main() {
     });
   });
 
+  group('the device of a desktop config', () {
+    test('is the Windows desktop on a Windows host, which takes nothing of the '
+        'host beforehand', () async {
+      final choice = await chooseDevice(
+        _config,
+        os: 'windows',
+        resolve: (path) => path,
+      );
+
+      expect(choice.device, isA<WindowsDevice>());
+      final give = await choice.prepare();
+      await give();
+    });
+
+    test('is the macOS desktop on a macOS host', () async {
+      final choice = await chooseDevice(
+        _config,
+        os: 'macos',
+        resolve: (path) => path,
+      );
+
+      expect(choice.device, isA<MacOSDevice>());
+    });
+
+    test('is refused on a host with no runner, naming the hosts that have '
+        'one', () async {
+      await expectLater(
+        chooseDevice(_config, os: 'linux', resolve: (path) => path),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            allOf(contains('macOS'), contains('Windows'), contains('linux')),
+          ),
+        ),
+      );
+    });
+  });
+
   group('the device of an Android config', () {
     late Directory scratch;
     late String sdkAdb;

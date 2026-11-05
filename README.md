@@ -1556,7 +1556,7 @@ Build it for the machine it runs on. `bazel run` does that, and a rule that runs
 
 `package:integration_test` tests run in the real app, on a device or in a browser, and each `testWidgets` is reported as a test case. The test is the `integration_test/app_test.dart` that `flutter create` users write, unchanged: `IntegrationTestWidgetsFlutterBinding.ensureInitialized()`, then `testWidgets` that call the app's own `main()`. The rules are in `@rules_flutter//flutter:integration_test.bzl`.
 
-macOS, the web (headless Chrome), Android devices and the iOS simulator are the platforms so far; the web is [below](#web-integration-tests), Android [after it](#android-integration-tests) and iOS [after that](#ios-simulator-integration-tests).
+macOS, Windows, the web (headless Chrome), Android devices and the iOS simulator are the platforms so far; Windows is [below](#windows-integration-tests), the web [after it](#web-integration-tests), Android [after that](#android-integration-tests) and iOS [last](#ios-simulator-integration-tests).
 
 ```starlark
 load("@rules_flutter//flutter:defs.bzl", "flutter_application")
@@ -1593,6 +1593,31 @@ flutter_macos_integration_test(
 - **Goldens work as in `flutter_test`**: `matchesGoldenFile('goldens/x.png')` reads `goldens/x.png` from the directory of `src`, so the goldens are `data` (`data = glob(["integration_test/goldens/**"])`). The picture is sent from the app to the host, which compares it with the same comparator `flutter_test` uses (a `flutter_tester` it starts for it), on every platform, an app on a phone or in a browser included. A mismatch fails the test, naming the golden and how far it is off, and leaves the pictures of the failure in the target's undeclared outputs (`bazel-testlogs/<target>/test.outputs/failures/`). `bazel run :app_test -- --update-goldens` writes the goldens into the source tree instead of comparing, naming each file it wrote. A golden is a function of the platform that rendered it: keep one per platform (the test chooses the path), and do not commit one whose rendering depends on the machine's fonts.
 
 The macro is Tier 1. Tier 2 is `flutter_integration_bootstrap` (the program a test file runs as), `flutter_application_variant`, `flutter_macos_app`, `flutter_desktop_integration_test` and `flutter_desktop_runner`, which the macro composes as `__<name>_bootstrap`, `__<name>_program` and `__<name>_app` (the macro's own targets, which you do not name).
+
+#### Windows integration tests
+
+`flutter_windows_integration_test` runs the same test file on the Windows desktop: the application with the test as its program is built as a Windows bundle in debug mode, launched on the host's own desktop, and its suite driven over its VM service, as `flutter test integration_test/app_test.dart -d windows` does. It is the macOS macro without `bundle_id`.
+
+```starlark
+load("@rules_flutter//flutter:integration_test.bzl", "flutter_windows_integration_test")
+
+flutter_windows_integration_test(
+    name = "app_windows_test",
+    src = "integration_test/app_test.dart",
+    application = ":app_flutter",
+    deps = [
+        "@deps//:flutter_test",
+        "@deps//:integration_test",
+    ],
+)
+```
+
+- **Runs on a Windows host** (`target_compatible_with`); a Mac or Linux host skips it. The app is built as for `flutter_windows_app`, whose arguments (`app_name`) the macro passes on, and the runner is `windows/runner/` when the package has one, else the built-in template.
+- **The window is real.** The app's window is created on the desktop of the session the test runs in, and the test reads and taps what it draws. Windows that overlap keep drawing, so two tests at once do not hang each other (measured with two windows at one origin), and there is no lock. A session with no visible desktop, such as an SSH logon, still runs the test: the window exists and is not on screen, so a screenshot needs the interactive session.
+- **Per-test results, `--test_filter`, `shard_count`, `env`, `data`, goldens and the failures** (a failing case, an app that exits, a suite that registers nothing) are as on macOS; an app that exits says `The Windows app exited with code 3 …`. `bazel run :app_windows_test -- --update-goldens` writes the goldens, the Windows one in `goldens/windows/`.
+- **Use a short output base.** Windows limits a path to 260 characters and a Flutter bundle is deep: `bazel --output_base=C:/b test ...`.
+
+The macro is Tier 1. Tier 2 is `flutter_integration_bootstrap`, `flutter_application_variant`, `flutter_windows_app`, `flutter_desktop_integration_test` and `flutter_desktop_runner`, which the macro composes as `__<name>_bootstrap`, `__<name>_program` and `__<name>_app`.
 
 #### Web integration tests
 
