@@ -1047,7 +1047,7 @@ quietly never running. A new workspace needs an entry; `bazel run
 | `ffi_example` | macOS, Linux, Windows | native libraries in each platform's bundle | |
 | `cross_compile_example` | macOS (`build`) | the Mac-to-Linux cross toolchain | Linux: a native build is `hello_world`'s; Windows: no such pair |
 | `macos_example`, `ios_example`, `multi_window_example`, `_overlay_tests/native_assets_synthetic` | macOS | Apple-only features | Linux, Windows: Apple-only |
-| `integration_test` | macOS (`build`) | the integration test rules building the app and test of each case, the Android and iOS apps included: its tests need a GUI session or a device, which CI never runs a test in | Linux, Windows: macOS-only |
+| `integration_test` | macOS, Windows (`build`) | the integration test rules building the app and test of each case, the Android and iOS apps included on macOS; on Windows the Windows and Android ones, the Android runner with the SDK's `adb.exe`: its tests need a GUI session or a device, which CI never runs a test in | Linux: macOS-only |
 | `dual_hub`, `ffi_plugin_example`, `web_example`, `android_example`, `_overlay_tests/link_hooks` | Linux | their platform-neutral subject, once, on the cheapest runner | macOS, Windows: the same again |
 | `android_example` | Windows (also) | an Android build on a Windows host: `gen_snapshot.exe`, engine-strip path separators, rules_android JVMs without an up-front heap commit (the committed patch) | |
 | `asset_bundle` | macOS | the `flutter_assets/` tree of every platform against `flutter build`'s, once | Linux, Windows: no other host can analyse its iOS targets |
@@ -1690,12 +1690,9 @@ the visual verification installs:
   --lockfile_mode=off`, as the workstation's `.bazelrc.user` does.
 - **A short output base**, `--output_base=C:/b/<n>` (§ "Windows and MAX_PATH").
 
-The first build takes about eight minutes. Run the tests by name: `//...` from a Windows
-host does not build, because the Android integration tests' runner is
-`@androidsdk//:adb`, which rules_android points at `platform-tools/adb` and a Windows SDK
-has only as `adb.exe` (`missing input file ... platform-tools/adb`; the five
-`android_*_test` targets are the only ones that fail, the Windows ones and the rest
-build), which is also why CI does not build this workspace on Windows:
+The first build takes about eight minutes. `build //...` works from a Windows host: the Android
+integration tests' runner takes the `adb` of rules_android's SDK for the host (`adb.exe`), and CI
+builds this workspace on Windows. Run the tests by name, as they need the console session:
 
 ```sh
 bazel --output_base=C:/b/2 test //:windows_pass_test //:windows_filter_test \

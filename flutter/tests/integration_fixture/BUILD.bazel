@@ -1,5 +1,6 @@
 load("//flutter:integration_test.bzl", "flutter_android_app_integration_test", "flutter_android_device_runner", "flutter_application_variant", "flutter_chrome_runner", "flutter_desktop_integration_test", "flutter_integration_bootstrap", "flutter_ios_app_integration_test", "flutter_ios_simulator_runner", "flutter_web_bundle_integration_test")
 load("//flutter:web.bzl", "flutter_web_bundle")
+load("//flutter/tests:fake_android_sdk.bzl", "fake_android_sdk")
 load("//flutter/tests:flutter_integration_test_test.bzl", "android_probe_targets", "stub_golden_service", "stub_runner")
 
 package(default_visibility = ["//flutter/tests:__subpackages__"])
@@ -135,10 +136,19 @@ flutter_web_bundle(
     unchecked_srcs = ["test/flutter_test_config.dart"],
 )
 
-# An `adb` shaped as the SDK's: a file, in a directory that stands for the SDK.
+# An SDK shaped as rules_android's: its `adb` is a different file on Windows.
+fake_android_sdk(
+    name = "fake_android_sdk",
+    adb = select({
+        "@platforms//os:windows": "fake_sdk/platform-tools/adb.exe",
+        "//conditions:default": "fake_sdk/platform-tools/adb",
+    }),
+    tags = ["manual"],
+)
+
 flutter_android_device_runner(
     name = "android_runner",
-    adb = "fake_sdk/platform-tools/adb",
+    sdk = ":fake_android_sdk",
     tags = ["manual"],
 )
 

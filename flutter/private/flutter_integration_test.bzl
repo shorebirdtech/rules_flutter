@@ -7,6 +7,7 @@ so they cannot come from the runner. The runner rule of a family says which
 device of the family, and the test rule refuses a runner of another.
 """
 
+load("@rules_android//providers:providers.bzl", "AndroidSdkInfo")
 load("@rules_dart//dart:utils.bzl", "runfiles_path")
 load("//flutter:providers.bzl", "FlutterIntegrationRunnerInfo")
 load("//flutter/private:dbg_transition.bzl", "DBG_SETTINGS", "dbg_transition")
@@ -128,7 +129,9 @@ _FAMILIES_WITHOUT_ENVIRONMENT = {
 }
 
 def _flutter_android_device_runner_impl(ctx):
-    adb = ctx.file.adb
+    # The SDK says which `adb` it has for the platform its tools run on, so the
+    # one named here runs on the host that runs the test: `adb.exe` on Windows.
+    adb = ctx.attr.sdk[AndroidSdkInfo].adb.executable
     return [FlutterIntegrationRunnerInfo(
         family = ANDROID,
         launcher_config = struct(adb = runfiles_path(adb, ctx.workspace_name)),
@@ -142,23 +145,25 @@ def _flutter_android_device_runner_impl(ctx):
 flutter_android_device_runner = rule(
     implementation = _flutter_android_device_runner_impl,
     attrs = {
-        "adb": attr.label(
-            doc = "The `adb` of the Android SDK the app is built against, such as `@androidsdk//:adb`, the one rules_android resolves from `ANDROID_HOME`.",
+        "sdk": attr.label(
+            doc = "The Android SDK, an `android_sdk` target such as `@androidsdk//:sdk`, the one rules_android resolves from `ANDROID_HOME`. Its `adb` runs the test.",
             mandatory = True,
-            allow_single_file = True,
+            cfg = "exec",
+            providers = [AndroidSdkInfo],
         ),
     },
     doc = """Runs an Android integration test on an attached phone or a running emulator.
 
 The device is the one `ANDROID_SERIAL` names (`--test_env=ANDROID_SERIAL=<serial>`),
 else the only one attached; none, or several with none named, fails the test,
-naming `adb devices`. The app is installed over `adb` from the SDK `adb` names,
+naming `adb devices`. The app is installed over the `adb` of `sdk`,
 started, and driven through the VM service forwarded from the device. It stays
 installed afterwards, as `flutter test` leaves it. The test takes a lock on the
 device (`android-<serial>`), so two tests on one device run one after the other
 instead of installing over each other.
 
-`adb` is the SDK's own, never one found on `PATH`.""",
+`adb` is the SDK's own, never one found on `PATH`, and the one the SDK has for the
+host the test runs on (`adb.exe` on Windows).""",
 )
 
 def _flutter_ios_simulator_runner_impl(ctx):

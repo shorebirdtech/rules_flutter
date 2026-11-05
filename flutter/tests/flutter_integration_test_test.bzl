@@ -261,22 +261,37 @@ _chrome_runner_test = analysistest.make(_chrome_runner_impl)
 # -- Android -----------------------------------------------------------------
 
 def _android_runner_impl(ctx):
-    """The Android runner names the SDK's `adb` by runfiles path and brings it."""
+    """The Android runner names the `adb` its SDK has for the host the test runs on, by runfiles path, and brings it."""
     env = analysistest.begin(ctx)
     runner = analysistest.target_under_test(env)[FlutterIntegrationRunnerInfo]
     asserts.equals(env, "android", runner.family)
-    asserts.equals(
-        env,
-        "_main/flutter/tests/integration_fixture/fake_sdk/platform-tools/adb",
-        runner.launcher_config.adb,
-        "the runner reads the adb from the runfiles",
-    )
-    asserts.equals(env, ["adb"], [f.basename for f in runner.runfiles.to_list()], "the adb is brought")
+    expected = "_main/flutter/tests/integration_fixture/fake_sdk/platform-tools/" + ctx.attr.adb
+    asserts.equals(env, expected, runner.launcher_config.adb, "the adb of the %s host, read from the runfiles" % ctx.attr.host)
+    asserts.equals(env, [ctx.attr.adb], [f.basename for f in runner.runfiles.to_list()], "that adb is brought")
     asserts.equals(env, "1", runner.execution_requirements.get("no-remote"))
     asserts.equals(env, "1", runner.execution_requirements.get("no-sandbox"))
     return analysistest.end(env)
 
-_android_runner_test = analysistest.make(_android_runner_impl)
+def _on_host(host):
+    """The configuration of a build whose tests run on a host: the platform in `//flutter/platforms`."""
+    return {"//command_line_option:extra_execution_platforms": [str(Label("//flutter/platforms:" + host))]}
+
+def _android_runner_test(host, adb):
+    return analysistest.make(
+        _android_runner_impl,
+        attrs = {"adb": attr.string(default = adb), "host": attr.string(default = host)},
+        config_settings = _on_host(host),
+    )
+
+# The `adb` of the SDK on each host the Android rules run on.
+_android_runner_linux_test = _android_runner_test("linux_x64", "adb")
+_android_runner_macos_test = _android_runner_test("macos_arm64", "adb")
+_android_runner_windows_test = _android_runner_test("windows_x64", "adb.exe")
+_ANDROID_RUNNER_TESTS = {
+    "linux_x64": _android_runner_linux_test,
+    "macos_arm64": _android_runner_macos_test,
+    "windows_x64": _android_runner_windows_test,
+}
 
 def _android_rule_impl(ctx):
     """The Android test rule tells the runner which adb, takes the device from the invoking shell, and places the test where its device is."""
@@ -307,7 +322,7 @@ def _android_rule_impl(ctx):
     asserts.equals(env, "1", requirements.get("no-sandbox"), "and reached from outside Bazel's sandbox")
     return analysistest.end(env)
 
-_android_rule_test = analysistest.make(_android_rule_impl)
+_android_rule_test = analysistest.make(_android_rule_impl, config_settings = _on_host("linux_x64"))
 
 def _android_env_impl(ctx):
     """An Android test given an `env` fails analysis, saying an app on a device takes none and where its defines go."""
@@ -504,10 +519,14 @@ def flutter_integration_test_test_suite(name):
         configured = True,
     )
     _chrome_runner_test(name = name + "_chrome_runner", target_under_test = _FIXTURE + "chrome_runner")
-    _android_runner_test(name = name + "_android_runner", target_under_test = _FIXTURE + "android_runner")
     _android_rule_test(name = name + "_android_rule", target_under_test = _FIXTURE + "android_test")
     _android_env_test(name = name + "_android_env", target_under_test = _FIXTURE + "android_test_with_env")
     _android_wrong_family_test(name = name + "_android_wrong_family", target_under_test = _FIXTURE + "android_test_on_a_desktop_runner")
+    for host, host_test in _ANDROID_RUNNER_TESTS.items():
+        host_test(
+            name = name + "_android_runner_" + host,
+            target_under_test = _FIXTURE + "android_runner",
+        )
     for abi in ["arm64-v8a", "x86_64"]:
         _android_transition_test(
             name = name + "_android_transition_" + abi.replace("-", "_"),
@@ -537,8 +556,8 @@ def flutter_integration_test_test_suite(name):
             ":" + name + "_bootstrap",
             ":" + name + "_bootstrap_with_config",
             ":" + name + "_chrome_runner",
-            ":" + name + "_android_runner",
             ":" + name + "_android_rule",
+        ] + [":%s_android_runner_%s" % (name, host) for host in _ANDROID_RUNNER_TESTS] + [
             ":" + name + "_android_env",
             ":" + name + "_android_wrong_family",
             ":" + name + "_android_transition_arm64_v8a",

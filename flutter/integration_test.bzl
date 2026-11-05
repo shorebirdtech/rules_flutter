@@ -534,9 +534,9 @@ def flutter_android_integration_test(
         runner = ":__%s_runner" % name
         _flutter_android_device_runner(
             name = "__%s_runner" % name,
-            # The SDK's `adb`, from the workspace the test is declared in: the
+            # The SDK of the workspace the test is declared in: the
             # `@androidsdk` of the one SDK this workspace builds its APKs with.
-            adb = "@androidsdk//:adb",
+            sdk = "@androidsdk//:sdk",
             **private
         )
 

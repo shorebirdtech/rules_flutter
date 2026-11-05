@@ -264,8 +264,11 @@ const e2eWorkspaces = <E2eWorkspace>[
           'the integration test rules building: the bootstrap, the variant of '
           'the application, the macOS, web, Android and iOS app and the test, '
           'for each case',
+      Os.windows:
+          'the Windows and Android apps and tests building, the Android '
+          'runner with the SDK\'s `adb.exe`',
     },
-    skips: {Os.linux: _appleOnly, Os.windows: _appleOnly},
+    skips: {Os.linux: _appleOnly},
     command: 'build',
   ),
   E2eWorkspace(
