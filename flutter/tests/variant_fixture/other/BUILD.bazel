@@ -1,3 +1,4 @@
+load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("//flutter:integration_test.bzl", "flutter_application_variant")
 
 package(default_visibility = ["//flutter/tests:__subpackages__"])
@@ -12,4 +13,26 @@ flutter_application_variant(
     main = "variant_main.dart",
     tags = ["manual"],
     deps = ["//flutter/tests/variant_fixture/plugins/extra:extra_plugin"],
+)
+
+# A `main` a rule wrote, importing a source file: the two sit under different
+# roots (the output directory and the exec root), and the generated one is the
+# rule's own, so what it imports is not checked against `deps`.
+write_file(
+    name = "generated_main",
+    out = "generated_main.dart",
+    content = [
+        "import 'extra.dart';",
+        "void main() => extra;",
+    ],
+    newline = "unix",
+)
+
+flutter_application_variant(
+    name = "generated",
+    srcs = ["extra.dart"],
+    application = "//flutter/tests/variant_fixture/app",
+    main = ":generated_main.dart",
+    tags = ["manual"],
+    unchecked_srcs = [":generated_main"],
 )

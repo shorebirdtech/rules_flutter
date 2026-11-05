@@ -340,15 +340,13 @@ def app_main_package_uri(package_name, lib_root, main_short_path):
         return None
     return "package:%s/%s" % (package_name, rel)
 
-def app_scheme_sources(package_name, lib_root, main, srcs):
-    """The files the dev loop reloads under `APP_SCHEME`, by workspace path.
+def app_scheme_files(package_name, lib_root, main, srcs):
+    """The first-party source files the app reads under `APP_SCHEME`.
 
     Empty for a `main` with a `package:` URI. Otherwise the `main` and every
     first-party source in `srcs` outside the package's `lib/` — the only files
     outside a package the app can read, since the build's compile sees nothing
-    it does not declare. The dev loop keys an edit to one of them by this URI;
-    without the list, an edit to a file outside every `lib/` maps to nothing
-    and a reload drops it.
+    it does not declare.
 
     Only source files in this repository: a generated file is rewritten by a
     build, not edited, and a file in another repository is not in the
@@ -361,7 +359,7 @@ def app_scheme_sources(package_name, lib_root, main, srcs):
         srcs: The app's own `srcs` `File`s.
 
     Returns:
-        A list of `{"path": <workspace-relative path>, "uri": <APP_SCHEME URI>}`.
+        A list of `File`s.
     """
     if app_main_package_uri(package_name, lib_root, main.short_path):
         return []
@@ -372,8 +370,29 @@ def app_scheme_sources(package_name, lib_root, main, srcs):
             continue
         if package_name and f.short_path.startswith(prefix):
             continue
-        out.append({"path": f.short_path, "uri": app_scheme_location(f).uri})
+        out.append(f)
     return out
+
+def app_scheme_sources(package_name, lib_root, main, srcs):
+    """The files the dev loop reloads under `APP_SCHEME`, by workspace path.
+
+    The files of `app_scheme_files`, each keyed by its URI: an edit to a file
+    outside every `lib/` maps to nothing in the dev loop without the list, and a
+    reload drops it.
+
+    Args:
+        package_name: The app's Dart package name, or `""`.
+        lib_root: The app's library root, from `derive_lib_root`.
+        main: The app's `main` `File`.
+        srcs: The app's own `srcs` `File`s.
+
+    Returns:
+        A list of `{"path": <workspace-relative path>, "uri": <APP_SCHEME URI>}`.
+    """
+    return [
+        {"path": f.short_path, "uri": app_scheme_location(f).uri}
+        for f in app_scheme_files(package_name, lib_root, main, srcs)
+    ]
 
 def resolve_kernel_entrypoint(main, package_name, lib_root):
     """Resolve the application kernel entrypoint: the user's own `main`.

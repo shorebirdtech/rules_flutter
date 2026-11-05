@@ -9,7 +9,7 @@ load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_dart//dart:providers.bzl", "DartInfo")
 load("@rules_dart//dart:utils.bzl", "KERNEL_TOOL_ATTR", "collect_packages", "collect_transitive_srcs", "dart_import_check_aspect", "derive_lib_root", "generate_dev_package_config", "import_check_validation")
 load("//flutter:providers.bzl", "FlutterInfo", "FlutterNativeLibraryInfo")
-load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "app_main_location", "app_scheme_location", "app_scheme_sources", "compile_package_config", "resolve_kernel_entrypoint", "synthesize_app_package", "with_root")
+load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "app_main_location", "app_scheme_files", "app_scheme_location", "app_scheme_sources", "compile_package_config", "resolve_kernel_entrypoint", "synthesize_app_package", "with_root")
 load("//flutter/private:flutter_asset_bundle.bzl", "flutter_asset_bundle_action")
 load("//flutter/private:flutter_compile.bzl", "flutter_kernel_compile_action")
 load("//flutter/private:flutter_info.bzl", "dedup_plugins")
@@ -299,7 +299,13 @@ def flutter_compile_kernel(ctx, tools, aot = None, platform_dill = None, target_
     )
 
     # `synthesize_app_package` appends the app's own package last.
-    import_checks = import_check_validation(ctx, ctx.executable._kernel_tool, [inputs.main] + inputs.srcs, packages[-1], inputs.deps)
+    import_checks = import_check_validation(
+        ctx,
+        ctx.executable._kernel_tool,
+        [f for f in [inputs.main] + inputs.srcs if f not in inputs.unchecked_srcs],
+        packages[-1],
+        inputs.deps,
+    )
 
     # Include the app's own `main` so the synthesized package keyed as
     # `package:<name>/main.dart` (hot-reload URI parity) is co-located with
@@ -326,6 +332,12 @@ def flutter_compile_kernel(ctx, tools, aot = None, platform_dill = None, target_
     dev_app_sources = []
     main_location = app_main_location(app_pkg_name, app_lib_root, inputs.main) if inputs.main else None
     app_entrypoint_uri = main_location.uri if main_location else None
+
+    # The sources the program reads by workspace path rather than by a
+    # `package:` URI. Each is found under the root it sits in, which is not the
+    # `main`'s when the two differ: a generated `main` (a variant's test
+    # bootstrap) importing a source test beside the application.
+    scheme_files = app_scheme_files(app_pkg_name, app_lib_root, inputs.main, inputs.srcs) if inputs.main else []
     if emit_dev_config:
         dev_package_config = ctx.actions.declare_file(ctx.label.name + ".dev_package_config.json")
         dev_pc = generate_dev_package_config(packages, colocate_inputs, dev_package_config, scheme = APP_SCHEME)
@@ -335,6 +347,8 @@ def flutter_compile_kernel(ctx, tools, aot = None, platform_dill = None, target_
         # and the dev loop's compiler has to mount the same root to name it
         # the same way.
         dev_filesystem_roots = with_root(dev_pc.filesystem_roots, main_location.root if main_location else None)
+        for scheme_file in scheme_files:
+            dev_filesystem_roots = with_root(dev_filesystem_roots, app_scheme_location(scheme_file).root)
         dev_filesystem_scheme = dev_pc.scheme
         dev_app_sources = app_scheme_sources(app_pkg_name, app_lib_root, inputs.main, inputs.srcs) if inputs.main else []
         dev_generated_source_uris = dev_pc.generated_source_uris
@@ -496,7 +510,8 @@ def flutter_compile_kernel(ctx, tools, aot = None, platform_dill = None, target_
         native_assets_manifest = native_assets_manifest,
         dart_plugin_registrant_uri = registrant_location.uri if registrant_location else None,
         filesystem_root_files = ([registrant] if registrant_location else []) +
-                                ([entrypoint_info.file] if entrypoint_info.root != None else []),
+                                ([entrypoint_info.file] if entrypoint_info.root != None else []) +
+                                scheme_files,
         recorded_uses = recorded_uses,
     )
     return struct(
@@ -1211,7 +1226,8 @@ def flutter_program_inputs(ctx):
     Returns:
         A struct. `label` is the target whose package the program is in (its
         library root, and the key of each asset); `main`, `srcs`, `assets`,
-        `shaders`, `shader_includes` and `license_files` are Files; `deps`,
+        `shaders`, `shader_includes` and `license_files` are Files
+        (`unchecked_srcs`, among `srcs`, are not checked against `deps`); `deps`,
         `native_deps` and `code_assets` are Targets; the rest are as the
         attributes of `flutter_application` of the same names.
     """
@@ -1219,6 +1235,7 @@ def flutter_program_inputs(ctx):
         label = ctx.label,
         main = getattr(ctx.file, "main", None),
         srcs = list(getattr(ctx.files, "srcs", [])),
+        unchecked_srcs = [],
         deps = getattr(ctx.attr, "deps", []),
         defines = list(getattr(ctx.attr, "defines", [])),
         package_name = getattr(ctx.attr, "package_name", ""),

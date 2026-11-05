@@ -30,7 +30,7 @@ def _input_basenames(action):
 # -- The program it compiles ---------------------------------------------------
 
 def _compiles_given_main_impl(ctx):
-    """The variant compiles the `main` it was given, and not the application's."""
+    """The variant compiles the `main` it was given, and keeps the application's as a source."""
     env = analysistest.begin(ctx)
     kernel = _kernel(env)
     if kernel == None:
@@ -40,10 +40,10 @@ def _compiles_given_main_impl(ctx):
     asserts.equals(env, ctx.attr.entrypoint, kernel.argv[-1])
     inputs = _input_basenames(kernel)
     asserts.true(env, ctx.attr.main in inputs, "the given main %s is compiled: %s" % (ctx.attr.main, inputs))
-    asserts.false(
+    asserts.true(
         env,
         "main.dart" in inputs,
-        "the application's own main.dart is not part of the variant's program: %s" % inputs,
+        "the application's own main.dart stays a source, for the new main to import: %s" % inputs,
     )
     return analysistest.end(env)
 
@@ -167,6 +167,41 @@ def _dev_config_impl(ctx):
 
 _dev_config_test = analysistest.make(_dev_config_impl, config_settings = _DBG)
 
+def _generated_main_impl(ctx):
+    """A `main` a rule wrote, beside the source it imports, is compiled from both their roots."""
+    env = analysistest.begin(ctx)
+    kernel = _kernel(env)
+    if kernel == None:
+        return analysistest.end(env)
+    argv = kernel.argv
+    asserts.equals(
+        env,
+        "org-dartlang-app:///flutter/tests/variant_fixture/other/generated_main.dart",
+        argv[-1],
+    )
+
+    # The generated `main` is in the output directory and `extra.dart` in the
+    # exec root, and the compiler finds each under its own root.
+    roots = [argv[i + 1] for i in range(len(argv) - 1) if argv[i] == "--filesystem-root"]
+    asserts.true(env, "." in roots, "the exec root, where the source is, is mounted: %s" % roots)
+    asserts.true(
+        env,
+        [r for r in roots if r.startswith("bazel-out/") and r.endswith("/bin")] != [],
+        "the output directory, where the generated main is, is mounted: %s" % roots,
+    )
+
+    # What is checked against the program's deps is the user's source, and not
+    # the file the rule wrote.
+    checks = [a for a in analysistest.target_actions(env) if a.mnemonic == "DartImportCheck"]
+    asserts.equals(env, 1, len(checks), "one import check")
+    if checks:
+        checked = " ".join(checks[0].argv)
+        asserts.true(env, "extra.dart" in checked, "the user's source is checked: %s" % checked)
+        asserts.false(env, "generated_main.dart" in checked, "the rule's own file is not: %s" % checked)
+    return analysistest.end(env)
+
+_generated_main_test = analysistest.make(_generated_main_impl, config_settings = _DBG)
+
 def _code_asset_impl(ctx):
     """A variant of an app with a code asset bundles it, with what its build declared."""
     env = analysistest.begin(ctx)
@@ -222,6 +257,10 @@ def flutter_application_variant_test_suite(name):
     _in_package_main_test(name = name + "_in_package_main", target_under_test = in_package)
     _assets_test(name = name + "_assets", target_under_test = elsewhere)
     _dev_config_test(name = name + "_dev_config", target_under_test = elsewhere)
+    _generated_main_test(
+        name = name + "_generated_main",
+        target_under_test = "//flutter/tests/variant_fixture/other:generated",
+    )
     _code_asset_test(
         name = name + "_code_asset",
         target_under_test = "//flutter/tests/code_asset_fixture:variant_dart_owner",
@@ -238,6 +277,7 @@ def flutter_application_variant_test_suite(name):
             ":" + name + "_in_package_main",
             ":" + name + "_assets",
             ":" + name + "_dev_config",
+            ":" + name + "_generated_main",
             ":" + name + "_code_asset",
         ],
     )
