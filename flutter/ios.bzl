@@ -429,7 +429,9 @@ def flutter_ios_app(
             rules_apple's `app_intents` (which passes through **kwargs):
             `app_intents` only extracts the metadata, it does not link.
         **kwargs: Passed through to ios_application, except `target_compatible_with`
-            and `visibility`, which are the named target's. The app is
+            and `visibility`, which are the named target's, and `testonly`, which
+            every target the macro declares has, since one that depends on a
+            `testonly` application would otherwise fail analysis. The app is
             compatible with macOS (which builds it for iOS) and iOS only,
             whatever `target_compatible_with` adds, so `bazel build //...`
             skips it on any other platform. The macro sets
@@ -457,7 +459,7 @@ def flutter_ios_app(
     # `ios_application` behind it.
     target_compatible_with = kwargs.pop("target_compatible_with", [])
     visibility = kwargs.pop("visibility", None)
-    testonly = kwargs.get("testonly", False)
+    testonly = kwargs.pop("testonly", False)
 
     # Auto-discover ios/Runner/Runner.entitlements if the user hasn't
     # passed one. Its absence is convention-matching (no-capabilities
@@ -483,6 +485,7 @@ def flutter_ios_app(
             base = entitlements,
             additions = additional_entitlements,
             tags = tags,
+            testonly = testonly,
         )
         entitlements = "__%s_entitlements" % name
 
@@ -509,6 +512,7 @@ def flutter_ios_app(
         name = "__%s_registrant" % name,
         application = application,
         tags = tags,
+        testonly = testonly,
     )
 
     # 2. Extract intermediates (AOT dylib + flutter_assets + native_libs).
@@ -516,6 +520,7 @@ def flutter_ios_app(
         name = "__%s_intermediates" % name,
         application = application,
         tags = tags,
+        testonly = testonly,
     )
 
     # 3. Assemble App.framework from the AOT dylib.
@@ -524,6 +529,7 @@ def flutter_ios_app(
         application = "__%s_intermediates" % name,
         minimum_os_version = minimum_os_version,
         tags = tags,
+        testonly = testonly,
     )
 
     # 3b. The dSYM of the stripped release App binary, for rules_apple to carry
@@ -533,6 +539,7 @@ def flutter_ios_app(
         srcs = ["__%s_app_framework" % name],
         output_group = "dsym",
         tags = tags,
+        testonly = testonly,
     )
 
     # 4. Wrap App.framework as dynamic framework import.
@@ -546,6 +553,7 @@ def flutter_ios_app(
             "//conditions:default": False,
         }),
         tags = tags,
+        testonly = testonly,
     )
 
     # 5. Import Flutter.xcframework engine — follows the build mode.
@@ -553,6 +561,7 @@ def flutter_ios_app(
         name = "__%s_engine" % name,
         xcframework_imports = _IOS_ENGINE_XCFRAMEWORK,
         tags = tags,
+        testonly = testonly,
     )
 
     # 6. Wrap native plugin/native-asset dylibs in signed .frameworks for bundling.
@@ -561,6 +570,7 @@ def flutter_ios_app(
         application = application,
         minimum_os_version = minimum_os_version,
         tags = tags,
+        testonly = testonly,
     )
 
     # 6b. Expose plugin PrivacyInfo.xcprivacy files for bundling.
@@ -568,6 +578,7 @@ def flutter_ios_app(
         name = "__%s_privacy_manifests" % name,
         application = application,
         tags = tags,
+        testonly = testonly,
     )
 
     # 7. Discover runner Swift sources and build swift_library.
@@ -584,6 +595,7 @@ def flutter_ios_app(
         application = application,
         platform = "ios",
         tags = tags,
+        testonly = testonly,
     )
 
     swift_library(
@@ -592,6 +604,7 @@ def flutter_ios_app(
         data = native.glob(["ios/Runner/Base.lproj/Main.storyboard"]),
         module_name = module_name,
         tags = tags,
+        testonly = testonly,
         deps = [
             "__%s_engine" % name,
             "__%s_apple_plugins" % name,
@@ -615,6 +628,7 @@ def flutter_ios_app(
                 "$(FLUTTER_BUILD_NUMBER)": "1",
             },
             tags = tags,
+            testonly = testonly,
         )
         actual_info_plist = "__%s_info_plist" % name
     else:
@@ -627,6 +641,7 @@ def flutter_ios_app(
             build_version = "1.0",
             short_version_string = "1.0",
             tags = tags,
+            testonly = testonly,
         )
         version = ":%s" % ("__%s_version" % name)
 
@@ -659,6 +674,7 @@ def flutter_ios_app(
         mode = "supplement",
         output_basename = "Info.plist",
         tags = tags,
+        testonly = testonly,
     )
 
     # 10c. Fails a device build that has no provisioning profile with the reason
@@ -669,6 +685,7 @@ def flutter_ios_app(
         app_label = str(native.package_relative_label(name)),
         provisioning_profile_set = provisioning_profile != None,
         tags = tags,
+        testonly = testonly,
     )
 
     # 11. Final ios_application, behind the target the user names.
@@ -695,6 +712,7 @@ def flutter_ios_app(
             "__%s_signing_check" % name,
         ],
         tags = tags,
+        testonly = testonly,
         **kwargs
     )
 
