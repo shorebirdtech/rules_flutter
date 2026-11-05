@@ -142,15 +142,20 @@ def flutter_windows_app(
         name: Target name (Bazel identifier).
         application: A flutter_application target (required).
         app_name: Bundle/binary name (defaults to target name).
-        **kwargs: Passed through to flutter_windows_bundle.
+        **kwargs: Passed through to flutter_windows_bundle, except `testonly`,
+            which every target the macro declares has, since one that depends on a
+            `testonly` application would otherwise fail analysis.
     """
     tags = kwargs.pop("tags", [])
     target_compatible_with = kwargs.pop("target_compatible_with", None)
+    testonly = kwargs.pop("testonly", False)
 
     # Attributes propagated to all intermediate targets so that
     # `target_compatible_with` (and tags) cause Bazel to skip analysis on
-    # incompatible platforms (e.g. building Windows targets on macOS).
-    common = {"tags": tags}
+    # incompatible platforms (e.g. building Windows targets on macOS), and
+    # `testonly`, which a target that depends on a `testonly` application has to
+    # have too.
+    common = {"tags": tags, "testonly": testonly}
     if target_compatible_with:
         common["target_compatible_with"] = target_compatible_with
 
