@@ -632,11 +632,14 @@ def flutter_android_app(
             all plugin Kotlin/Java automatically. Defaults to `"deps"`,
             matching the convention in repo MODULE.bazel files. Set to
             `None` to opt out (e.g. for a workspace with no pub plugins).
-        **kwargs: Passed through to android_binary.
+        **kwargs: Passed through to android_binary, except `testonly`, which
+            every target the macro declares has, since one that depends on a
+            `testonly` application would otherwise fail analysis.
     """
     display_name = app_name or name
     namespace = namespace or package_name
     tags = kwargs.pop("tags", ["manual"])
+    testonly = kwargs.pop("testonly", False)
 
     # -- Internal targets (all __{name}_ prefixed) --
     #
@@ -652,6 +655,7 @@ def flutter_android_app(
         name = "__%s_bundle" % name,
         application = application,
         tags = tags,
+        testonly = testonly,
     )
 
     # 2. The bundle's native libraries, as a cc_library: the dep android_binary
@@ -661,17 +665,20 @@ def flutter_android_app(
         srcs = ["__%s_bundle" % name],
         output_group = "native_libs",
         tags = tags,
+        testonly = testonly,
     )
     _cc_library(
         name = "__%s_native_libs" % name,
         srcs = ["__%s_native_libs_files" % name],
         tags = tags,
+        testonly = testonly,
     )
 
     # 4. Import Flutter engine.
     flutter_android_engine(
         name = "__%s_engine" % name,
         tags = tags,
+        testonly = testonly,
     )
 
     # 5. Extract flutter_assets for inclusion in the APK.
@@ -681,6 +688,7 @@ def flutter_android_app(
         srcs = ["__%s_bundle" % name],
         output_group = "mobile_install",
         tags = tags,
+        testonly = testonly,
     )
 
     # 6. Auto-wire the plugin registrant. Generates
@@ -697,6 +705,7 @@ def flutter_android_app(
         name = "__%s_registrant_src" % name,
         application = application,
         tags = tags,
+        testonly = testonly,
     )
 
     # `deps` too: a plugin written in the workspace reaches the app only
@@ -711,6 +720,7 @@ def flutter_android_app(
         srcs = ["__%s_registrant_src" % name],
         custom_package = "io.flutter.plugins",
         tags = tags,
+        testonly = testonly,
         deps = registrant_deps,
     )
 
@@ -751,6 +761,7 @@ def flutter_android_app(
                     "${applicationName}": "android.app.Application",
                 },
                 tags = tags,
+                testonly = testonly,
             )
             base_manifest = "__%s_manifest" % name
 
@@ -784,6 +795,7 @@ def flutter_android_app(
                     srcs = runner_sources,
                     custom_package = namespace,
                     tags = tags,
+                    testonly = testonly,
                     deps = ["__%s_engine" % name],
                 )
                 binary_deps.append("__%s_runner" % name)
@@ -806,6 +818,7 @@ def flutter_android_app(
             min_sdk_version = min_sdk_version,
             target_sdk_version = target_sdk_version,
             tags = tags,
+            testonly = testonly,
         )
         actual_manifest = "__%s_manifest" % name
     elif debug_overlay != None or profile_overlay != None:
@@ -821,6 +834,7 @@ def flutter_android_app(
                 base = base_manifest,
                 overlay = overlay,
                 tags = tags,
+                testonly = testonly,
             )
             variants["@rules_flutter//flutter/private:" + mode] = "__%s_manifest_merged_%s" % (name, mode)
         actual_manifest = select(variants | {"//conditions:default": base_manifest})
@@ -836,12 +850,14 @@ def flutter_android_app(
             name = "__%s_permissions" % name,
             permissions = permissions,
             tags = tags,
+            testonly = testonly,
         )
         flutter_android_manifest_merge(
             name = "__%s_manifest_with_permissions" % name,
             base = actual_manifest,
             overlay = "__%s_permissions" % name,
             tags = tags,
+            testonly = testonly,
         )
         actual_manifest = "__%s_manifest_with_permissions" % name
 
@@ -862,6 +878,7 @@ def flutter_android_app(
         placeholders = ["applicationId", "minSdkVersion", "targetSdkVersion"],
         namespace = namespace,
         tags = tags,
+        testonly = testonly,
     )
     actual_manifest = "__%s_manifest_with_library_permissions" % name
 
@@ -879,5 +896,6 @@ def flutter_android_app(
         assets_dir = "assets",
         deps = binary_deps + deps,
         tags = tags,
+        testonly = testonly,
         **kwargs
     )

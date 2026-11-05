@@ -98,6 +98,18 @@ flutter_application(
     ],
 )
 
+# An application only a test may depend on, as one an integration test builds for
+# itself is. Everything `flutter_android_app` declares around it has to be
+# `testonly` too: `:testonly_app_build_test`.
+flutter_application(
+    name = "testonly_flutter",
+    package_name = "android_example",
+    testonly = True,
+    srcs = glob(["lib/**/*.dart"]),
+    main = "lib/testonly_main.dart",
+    deps = ["@deps//:flutter"],
+)
+
 # =============================================================================
 # Approach 1: Flutter-generated runner (flutter_android_app)
 #
@@ -135,6 +147,14 @@ flutter_android_app(
     # The VM service's grant, which this workspace has no debug variant
     # manifest to give, so `flutter_bazel run` can debug it.
     permissions = ["android.permission.INTERNET"],
+)
+
+flutter_android_app(
+    name = "testonly_app",
+    package_name = "com.example.flutterapp.testonly",
+    testonly = True,
+    application = ":testonly_flutter",
+    namespace = "com.example.flutterapp",
 )
 
 # A native library the APK packages that is not the Flutter application's: a
@@ -344,6 +364,14 @@ flutter_web_bundle(
 build_test(
     name = "android_app_build_test",
     targets = [":app"],
+)
+
+# `flutter_android_app` takes `testonly = True`: every target it declares is
+# `testonly` too, so none is a non-test target depending on a `testonly`
+# application.
+build_test(
+    name = "testonly_app_build_test",
+    targets = [":testonly_app"],
 )
 
 build_test(
