@@ -352,7 +352,9 @@ def flutter_macos_app(
             rules_apple's `app_intents` (which passes through **kwargs):
             `app_intents` only extracts the metadata, it does not link.
         **kwargs: Passed through to macos_application, except `target_compatible_with`
-            and `visibility`, which are the named target's. The app is
+            and `visibility`, which are the named target's, and `testonly`, which
+            every target the macro declares has, since one that depends on a
+            `testonly` application would otherwise fail analysis. The app is
             compatible with macOS only, whatever `target_compatible_with`
             adds, so `bazel build //...` skips it on any other platform. The
             macro sets `app_icons` itself, so pass the named parameter
@@ -366,7 +368,7 @@ def flutter_macos_app(
     # `macos_application` behind it.
     target_compatible_with = kwargs.pop("target_compatible_with", [])
     visibility = kwargs.pop("visibility", None)
-    testonly = kwargs.get("testonly", False)
+    testonly = kwargs.pop("testonly", False)
     validate_minimum_os_version(
         "flutter_macos_app",
         name,
@@ -430,6 +432,7 @@ def flutter_macos_app(
             base = entitlements,
             additions = additional_entitlements,
             tags = tags,
+            testonly = testonly,
         )
         entitlements = "__%s_entitlements" % name
 
@@ -440,6 +443,7 @@ def flutter_macos_app(
         name = "__%s_registrant" % name,
         application = application,
         tags = tags,
+        testonly = testonly,
     )
 
     # 2. Assemble App.framework (versioned layout with AOT dylib + flutter_assets).
@@ -447,6 +451,7 @@ def flutter_macos_app(
         name = "__%s_app_framework" % name,
         application = application,
         tags = tags,
+        testonly = testonly,
     )
 
     # 3. Expose native plugin .dylib files for bundling.
@@ -454,6 +459,7 @@ def flutter_macos_app(
         name = "__%s_native_libs" % name,
         application = application,
         tags = tags,
+        testonly = testonly,
     )
 
     # 3b. Expose plugin PrivacyInfo.xcprivacy files for bundling.
@@ -461,6 +467,7 @@ def flutter_macos_app(
         name = "__%s_privacy_manifests" % name,
         application = application,
         tags = tags,
+        testonly = testonly,
     )
 
     # 4. Import FlutterMacOS.framework engine — follows the build mode.
@@ -468,6 +475,7 @@ def flutter_macos_app(
         name = "__%s_engine" % name,
         framework_imports = _MACOS_ENGINE_FRAMEWORK,
         tags = tags,
+        testonly = testonly,
     )
 
     # 5. Discover runner Swift sources and build swift_library.
@@ -484,6 +492,7 @@ def flutter_macos_app(
         application = application,
         platform = "macos",
         tags = tags,
+        testonly = testonly,
     )
 
     # 6. XIB — substitute APP_NAME and keep the NIB's module in sync.
@@ -518,6 +527,7 @@ def flutter_macos_app(
             "customModule=\"Runner\"": "customModule=\"%s\"" % module_name,
         },
         tags = tags,
+        testonly = testonly,
     )
 
     swift_library(
@@ -526,6 +536,7 @@ def flutter_macos_app(
         data = ["__%s_menu_xib" % name],
         module_name = module_name,
         tags = tags,
+        testonly = testonly,
         deps = [
             "__%s_engine" % name,
             "__%s_apple_plugins" % name,
@@ -561,6 +572,7 @@ def flutter_macos_app(
                 "$(PRODUCT_COPYRIGHT)": "",
             },
             tags = tags,
+            testonly = testonly,
         )
         actual_info_plist = "__%s_info_plist" % name
     else:
@@ -587,6 +599,7 @@ def flutter_macos_app(
             mode = "supplement",
             output_basename = "Info.plist",
             tags = tags,
+            testonly = testonly,
         )
         actual_info_plist = "__%s_info_plist_icon" % name
 
@@ -597,6 +610,7 @@ def flutter_macos_app(
             build_version = "1.0",
             short_version_string = "1.0",
             tags = tags,
+            testonly = testonly,
         )
         version = ":%s" % ("__%s_version" % name)
 
@@ -622,6 +636,7 @@ def flutter_macos_app(
         entitlements = entitlements,
         deps = ["__%s_runner" % name],
         tags = tags,
+        testonly = testonly,
         **kwargs
     )
 
