@@ -1,5 +1,5 @@
-name: flutter_tools_test
-description: Tests for Flutter Bazel rule tools.
+name: flutter_rule_tools
+description: The rule tools' shared library, and their tests.
 version: 0.0.0
 publish_to: none
 

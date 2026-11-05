@@ -1,4 +1,4 @@
-load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_test")
+load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_library", "dart_test")
 
 # The scripts build actions run directly, handed to those actions as raw
 # sources — a rule's `_tool` attr resolves the file label and passes its path to
@@ -26,7 +26,6 @@ exports_files(
         # its neighbours this one is a `dart_binary` main (below), and rules
         # reach it through that target rather than by file label.
         "flutter_test_runner.dart",
-        "bazel_test_protocol.dart",
         "print_report.dart",
     ],
     visibility = ["//flutter:__subpackages__"],
@@ -49,13 +48,31 @@ dart_binary(
     visibility = ["//flutter/tests:__pkg__"],
 )
 
+# The host half of `package:test`'s `RemoteListener` protocol, and Bazel's test
+# protocol (`--test_filter`, sharding, JUnit) it applies. `flutter_test_runner`
+# carries it over a WebSocket; the integration test runner carries it over an
+# app's VM service. A library rather than a `srcs` entry because the two live in
+# different packages. It is a Dart package of its own, `flutter_rule_tools`,
+# which this directory's pubspec names, so `lib/` is where its files must sit.
+dart_library(
+    name = "remote_suite",
+    package_name = "flutter_rule_tools",
+    srcs = glob(["lib/**/*.dart"]),
+    visibility = [
+        "//flutter:__subpackages__",
+        "//tools/dev_tool:__subpackages__",
+    ],
+)
+
 dart_binary(
     name = "flutter_test_runner",
-    srcs = ["bazel_test_protocol.dart"],
     compile_mode = "exe",
     main = "flutter_test_runner.dart",
     visibility = ["//flutter:__subpackages__"],
-    deps = ["@rules_dart//dart/runfiles"],
+    deps = [
+        ":remote_suite",
+        "@rules_dart//dart/runfiles",
+    ],
 )
 
 # Unit tests for the tools above.
@@ -63,7 +80,9 @@ dart_binary(
 # Each test imports its tool by relative path (`../merge_plists.dart`), so the
 # tool is a `srcs` entry rather than a dep: these tools are plain scripts with
 # no pub dependencies, deliberately, since a build action runs them straight
-# from the toolchain's Dart.
+# from the toolchain's Dart. The exceptions are the runner, which is a compiled
+# binary and takes `:remote_suite` as a dep, and `:remote_suite`'s own tests,
+# which have no tool file at all (they import the package).
 #
 # A new test file needs an entry here, or nothing runs it.
 #
@@ -89,20 +108,27 @@ _UNIT_TESTS = {
     "web_template_test": ("web_template.dart", []),
     "flutter_test_runner_test": (
         "flutter_test_runner.dart",
-        ["@rules_dart//dart/runfiles"],
+        [
+            ":remote_suite",
+            "@rules_dart//dart/runfiles",
+        ],
     ),
-    "bazel_test_protocol_test": ("bazel_test_protocol.dart", []),
-}
-
-# The runner imports its protocol module by relative path, so every test of the
-# runner carries it too.
-_TOOL_SRCS = {
-    "flutter_test_runner.dart": ["bazel_test_protocol.dart"],
+    "bazel_test_protocol_test": (
+        None,
+        [":remote_suite"],
+    ),
+    "remote_suite_test": (
+        None,
+        [
+            ":remote_suite",
+            "@dev_tool_deps//:fake_async",
+        ],
+    ),
 }
 
 [dart_test(
     name = name,
-    srcs = [tool] + _TOOL_SRCS.get(tool, []),
+    srcs = [tool] if tool else [],
     main = "test/%s.dart" % name,
     deps = ["@dev_tool_deps//:test"] + extra_deps,
 ) for name, (tool, extra_deps) in _UNIT_TESTS.items()]

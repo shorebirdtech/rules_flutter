@@ -255,46 +255,6 @@ void main() {
     });
   });
 
-  group('suiteTimeout', () {
-    test('is Bazel\'s TEST_TIMEOUT, not package:test\'s 30 seconds', () {
-      expect(runner.suiteTimeout('300'), {
-        'duration': const Duration(seconds: 300).inMicroseconds,
-        'scaleFactor': null,
-      });
-    });
-
-    test('is never none under Bazel, so a test\'s own timeout still fires', () {
-      // `Timeout.merge` lets `none` on either side win.
-      expect(runner.suiteTimeout('60'), isNot('none'));
-    });
-
-    test('is none outside bazel test, where there is no limit to state', () {
-      expect(runner.suiteTimeout(null), 'none');
-      expect(runner.suiteTimeout(''), 'none');
-    });
-  });
-
-  group('testCeiling', () {
-    test("derives the wedged-test backstop from Bazel's TEST_TIMEOUT, so a "
-        'test given --test_timeout=1200 runs its full length', () {
-      expect(runner.testCeiling('1200').inSeconds, greaterThan(600));
-    });
-
-    test('stays inside the Bazel budget, so a wedged test is reported here '
-        'rather than killed from outside with no diagnostic', () {
-      expect(runner.testCeiling('1200').inSeconds, lessThan(1200));
-      expect(runner.testCeiling('60').inSeconds, lessThan(60));
-    });
-
-    test('falls back to five minutes with no TEST_TIMEOUT — a direct run '
-        'outside `bazel test` has no budget to derive one from', () {
-      expect(runner.testCeiling(null), const Duration(minutes: 5));
-      expect(runner.testCeiling(''), const Duration(minutes: 5));
-      expect(runner.testCeiling('not-a-number'), const Duration(minutes: 5));
-      expect(runner.testCeiling('0'), const Duration(minutes: 5));
-    });
-  });
-
   group('libraryPathEnvironment', () {
     test('sets nothing without a staged directory', () {
       expect(

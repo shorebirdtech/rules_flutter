@@ -6,17 +6,8 @@
 /// pass/fail to stdout and exits non-zero on the first failure (or on
 /// flutter_tester crash).
 ///
-/// Wire protocol (mirrors `package:test`'s `flutter_platform.dart`):
-///   - WebSocket transport carries JSON-encoded `[id, data]` lists, plus
-///     `[id]` for channel-close. id 0 is the default channel.
-///   - We send `{type: 'initial', metadata, platform, ...}` on id 0.
-///   - Bootstrap responds `{type: 'success', root: <groupTree>}` on id 0;
-///     each test in the tree carries a `channel` id (bootstrap-created).
-///   - To run a test, we allocate our own outputId and send
-///     `{command: 'run', channel: outputId}` on `testChannel + 1`. Bootstrap
-///     replies with `state-change`/`error`/`message`/`complete` events on
-///     `outputId + 1`, which we deliver back to our test handler.
-///   - When the suite is exhausted we send `{type: 'close'}` on id 0.
+/// The protocol itself is `remote_suite.dart`'s; this file carries it over a
+/// WebSocket the bootstrap dials back on.
 ///
 /// Coverage: when `bazel coverage` sets `COVERAGE_OUTPUT_FILE`, the spawn
 /// switches to `--vm-service-port=0`. The runner pulls the VM service URI from
@@ -32,14 +23,13 @@
 /// is Bazel's own (`TEST_TIMEOUT`), not `package:test`'s 30 seconds; a test's
 /// own `timeout:` still applies — see [suiteTimeout].
 /// `--test_filter`, sharding and the per-case XML report follow
-/// `bazel_test_protocol.dart`.
+/// `lib/bazel_test_protocol.dart`.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter_rule_tools/remote_suite.dart';
 import 'package:runfiles/runfiles.dart';
-
-import 'bazel_test_protocol.dart';
 
 /// Whether this run should regenerate goldens instead of comparing them.
 ///
@@ -364,77 +354,52 @@ Future<int> _runOnce({
   }
 }
 
-/// The per-test ceiling the wedged-test backstop waits out.
-///
-/// Bazel exports the target's timeout in `TEST_TIMEOUT` (seconds), so honour it
-/// and stay a beat inside: the backstop exists to name a wedged test here
-/// rather than let it run out Bazel's clock, and a flat bound silently overrode
-/// whatever `--test_timeout` a longer-running test was given. Outside
-/// `bazel test` there is no budget to derive one from, so five minutes stands.
-///
-/// Public, like [collectCoverage], because the test reaches it directly.
-Duration testCeiling(String? bazelTestTimeout) {
-  final seconds = int.tryParse(bazelTestTimeout ?? '');
-  if (seconds == null || seconds <= 0) return const Duration(minutes: 5);
-  final margin = seconds ~/ 20;
-  return Duration(seconds: seconds - (margin < 10 ? 10 : margin));
+/// The `flutter_tester` bootstrap's WebSocket, as a [SuiteTransport].
+class _TesterTransport implements SuiteTransport {
+  _TesterTransport(this._ws, this._process) {
+    _ws.listen(
+      (raw) => _incoming.add(raw as String),
+      onDone: () {
+        unawaited(_incoming.close());
+        if (!_lost.isCompleted) _lost.complete('flutter_tester disconnected');
+      },
+    );
+  }
+
+  final WebSocket _ws;
+  final Process _process;
+  final _incoming = StreamController<String>();
+  final _lost = Completer<String?>();
+
+  @override
+  Stream<String> get incoming => _incoming.stream;
+
+  @override
+  void send(String json) {
+    if (_lost.isCompleted) return;
+    _ws.add(json);
+  }
+
+  @override
+  Future<String?> get lostReason => _lost.future;
+
+  @override
+  Future<void> close() => _ws.close();
+
+  @override
+  Future<void> abandon(String why) async {
+    stderr.writeln('flutter_test: killing flutter_tester.');
+    _process.kill(ProcessSignal.sigkill);
+  }
 }
 
-/// The suite's default timeout, serialized as `Metadata` carries it.
-///
-/// Bazel's own limit (`TEST_TIMEOUT`, seconds) in place of `package:test`'s
-/// 30-second default, as `dart_test` sets it. Not `none`: `Timeout.merge`
-/// lets `none` on either side win, so it would discard a limit a test's author
-/// wrote on a case to catch a hang. With Bazel's limit as the default, such a
-/// `timeout:` still fires, `Timeout.factor` scales Bazel's limit, and a case
-/// with neither runs as long as Bazel lets the target run. Outside `bazel
-/// test` there is no limit to state, so the default is none.
-///
-/// Public, like [testCeiling], because the test reaches it directly.
-Object suiteTimeout(String? bazelTestTimeout) {
-  final seconds = int.tryParse(bazelTestTimeout ?? '');
-  if (seconds == null || seconds <= 0) return 'none';
-  return {
-    'duration': Duration(seconds: seconds).inMicroseconds,
-    'scaleFactor': null,
-  };
-}
-
-/// Harness state: server, tester process, WebSocket, channel demux.
+/// Harness state: server, tester process, WebSocket.
 class _Harness {
   _Harness._(this._server);
 
   final HttpServer _server;
   Process? _process;
   WebSocket? _ws;
-  bool _socketClosed = false;
-
-  /// Per-channel inbound dispatchers, keyed by inputId.
-  final Map<int, void Function(Object?)> _inbound = {};
-
-  /// Pending test completers indexed by their reply-channel inputId. When the
-  /// socket closes mid-suite, we surface that as a failure on every
-  /// outstanding test so we can't hang waiting on a `complete` event that
-  /// will never arrive.
-  final Map<int, Completer<void>> _pendingTests = {};
-
-  /// MultiChannel-compatible counter for our locally-allocated channels.
-  /// `package:stream_channel`'s MultiChannel allocates outputId = nextId,
-  /// inputId = nextId+1, then increments by 2.
-  int _nextId = 1;
-
-  /// Allocates a virtual channel pair for our side. Returns (outputId, inputId).
-  ({int outputId, int inputId}) _allocChannel() {
-    final out = _nextId;
-    final inp = _nextId + 1;
-    _nextId += 2;
-    return (outputId: out, inputId: inp);
-  }
-
-  void _send(int outputId, Object? data) {
-    if (_socketClosed) return;
-    _ws!.add(json.encode([outputId, data]));
-  }
 
   /// Binds the socket the test bootstrap dials back on.
   ///
@@ -618,78 +583,11 @@ class _Harness {
         _ws = await WebSocketTransformer.upgrade(request);
     }
 
-    // Default channel handler — receives the suite tree plus print/error
-    // events. We resolve `suiteReady` once the bootstrap finishes registering
-    // tests (or surfaces a load failure).
-    final suiteReady = Completer<Map<String, dynamic>?>();
-    _inbound[0] = (data) {
-      final msg = (data as Map).cast<String, dynamic>();
-      switch (msg['type']) {
-        case 'success':
-          if (!suiteReady.isCompleted) {
-            suiteReady.complete((msg['root'] as Map).cast<String, dynamic>());
-          }
-        case 'loadException':
-          stderr.writeln('flutter_test: load failure — ${msg['message']}');
-          if (!suiteReady.isCompleted) suiteReady.complete(null);
-        case 'error':
-          final err = (msg['error'] as Map).cast<String, dynamic>();
-          stderr.writeln(
-            'flutter_test: top-level error — ${err['message']}\n'
-            '${err['stackChain']}',
-          );
-          if (!suiteReady.isCompleted) suiteReady.complete(null);
-        case 'print':
-          stdout.writeln(msg['line']);
-      }
-    };
-
-    _ws!.listen(
-      _onSocketMessage,
-      onDone: () {
-        _socketClosed = true;
-        if (!suiteReady.isCompleted) suiteReady.complete(null);
-        for (final c in _pendingTests.values) {
-          if (!c.isCompleted) c.complete();
-        }
-        _pendingTests.clear();
-      },
-    );
-
-    // Send the initial suite handshake.
-    _send(0, _initialMessage(testPath));
-
-    // Bounded inside Bazel's own budget, like each test below, so a suite that
-    // never finishes loading is reported here rather than killed silently.
-    final root = await suiteReady.future.timeout(
-      testCeiling(Platform.environment['TEST_TIMEOUT']),
-      onTimeout: () => null,
-    );
-
-    final results = _Results();
-    if (root != null) {
-      final selected = selection.select(root);
-      if (selected != null) {
-        await _runGroup(selected, results);
-      } else if (selection.narrows) {
-        stdout.writeln(
-          'flutter_test: no test case in this suite matches this run\'s '
-          '--test_filter or shard.',
-        );
-      }
-    } else {
-      results.recordError('suite did not load');
-    }
-    if (xmlOutput != null) {
-      await File(
-        xmlOutput,
-      ).writeAsString(junitXml(results.cases, suiteName: testPath));
-    }
-
-    // Collect coverage before tearing the tester down — the isolate must still
-    // be alive when we fetch source reports.
+    // Collect coverage before the driver tells the tester to close — the
+    // isolate must still be alive when we fetch source reports.
     String? coverageError;
-    if (enableVmService && coverageVmServiceUri != null) {
+    Future<void> collect() async {
+      if (!enableVmService || coverageVmServiceUri == null) return;
       try {
         // Bounded inside Bazel's own budget, like the suite and each test: a
         // VM service that stops answering mid-collection would otherwise park
@@ -713,21 +611,29 @@ class _Harness {
       } catch (e) {
         coverageError = 'failed to collect coverage: $e';
       }
-    }
-    if (coverageError != null) {
-      stderr.writeln('flutter_test (coverage): $coverageError');
+      if (coverageError != null) {
+        stderr.writeln('flutter_test (coverage): $coverageError');
+      }
     }
 
-    // Politely shut down: tell RemoteListener to close, then close the
-    // WebSocket. The bootstrap's `socket.map(...).pipe(sink)` and
-    // `socket.addStream(...)` both terminate on socket close, draining the
+    // The driver ends the suite politely: it tells RemoteListener to close,
+    // then closes the WebSocket. The bootstrap's `socket.map(...).pipe(sink)`
+    // and `socket.addStream(...)` both terminate on socket close, draining the
     // isolate so flutter_tester exits on its own. Without the explicit
     // close, the bootstrap's main isolate keeps the engine alive and
     // we'd block on the tester-exit timeout for every test run.
-    _send(0, {'type': 'close'});
-    try {
-      await _ws?.close();
-    } catch (_) {}
+    final ceiling = testCeiling(Platform.environment['TEST_TIMEOUT']);
+    final outcome =
+        await RemoteSuiteDriver(
+          _TesterTransport(_ws!, _process!),
+          suitePath: testPath,
+          timeout: suiteTimeout(Platform.environment['TEST_TIMEOUT']),
+        ).run(
+          selection: selection,
+          xmlOutput: xmlOutput,
+          ceiling: ceiling,
+          afterSuite: collect,
+        );
 
     // `-1` can't double as a "we killed it" sentinel here: on POSIX a
     // signal-killed process reports `-signum`, and SIGHUP is signal 1, so
@@ -748,9 +654,9 @@ class _Harness {
       );
     }
 
-    stdout.writeln(results.summary());
+    stdout.writeln(outcome.summary());
 
-    if (results.hasFailure) return 1;
+    if (outcome.hasFailure) return 1;
     // A requested coverage run that produced no data is a failure — Bazel
     // would otherwise record a green test with an empty/absent LCOV file.
     if (coverageError != null) return 1;
@@ -780,220 +686,6 @@ class _Harness {
     ]).timeout(_dialBackBound, onTimeout: () => null);
     return outcome ?? const _DialBackTimedOut();
   }
-
-  void _onSocketMessage(dynamic raw) {
-    final list = json.decode(raw as String) as List;
-    final id = (list[0] as num).toInt();
-    if (list.length == 1) {
-      // Channel closed by remote — drop the handler so we stop dispatching.
-      _inbound.remove(id);
-      return;
-    }
-    final handler = _inbound[id];
-    if (handler != null) {
-      handler(list[1]);
-    }
-  }
-
-  Future<void> _runGroup(Map<String, dynamic> group, _Results results) async {
-    final setUpAll = group['setUpAll'] as Map?;
-    if (setUpAll != null) {
-      await _runTest(setUpAll.cast<String, dynamic>(), results, fixture: true);
-    }
-
-    final entries = group['entries'] as List? ?? const [];
-    for (final entry in entries) {
-      final m = (entry as Map).cast<String, dynamic>();
-      if (m['type'] == 'group') {
-        await _runGroup(m, results);
-      } else {
-        await _runTest(m, results);
-      }
-    }
-
-    final tearDownAll = group['tearDownAll'] as Map?;
-    if (tearDownAll != null) {
-      await _runTest(
-        tearDownAll.cast<String, dynamic>(),
-        results,
-        fixture: true,
-      );
-    }
-  }
-
-  /// Runs one test, or one `setUpAll`/`tearDownAll` when [fixture] is set: a
-  /// fixture is reported only when it fails, as `package:test` hides it.
-  ///
-  /// `test['name']` is already the full name, enclosing groups included —
-  /// `package:test` names a test that way when it is declared.
-  Future<void> _runTest(
-    Map<String, dynamic> test,
-    _Results results, {
-    bool fixture = false,
-  }) async {
-    final testChannelId = (test['channel'] as num).toInt();
-    final reportName = test['name'] as String? ?? '';
-
-    final metadata = test['metadata'] as Map?;
-    final skipReason = metadata == null ? null : metadata['skipReason'];
-    final skipFlag = metadata == null
-        ? false
-        : (metadata['skip'] as bool? ?? false);
-    if (!fixture && skipFlag) {
-      results.recordSkipped(reportName, skipReason as String?);
-      return;
-    }
-
-    if (_socketClosed) {
-      results.recordFailure(
-        reportName,
-        _TestFailureSummary(
-          message: 'flutter_tester disconnected before this test ran',
-          type: 'TestDeviceException',
-          stackChain: '',
-        ),
-        Duration.zero,
-        '',
-      );
-      return;
-    }
-
-    final ch = _allocChannel();
-    final completer = Completer<void>();
-    final started = Stopwatch()..start();
-    final output = StringBuffer();
-    _pendingTests[ch.inputId] = completer;
-    _TestFailureSummary? failure;
-
-    _inbound[ch.inputId] = (data) {
-      final msg = (data as Map).cast<String, dynamic>();
-      switch (msg['type']) {
-        case 'state-change':
-          // We rely on the explicit error events for failure tracking; state
-          // changes alone don't tell us the difference between "still
-          // running" and "failed and continuing".
-          break;
-        case 'error':
-          final err = (msg['error'] as Map).cast<String, dynamic>();
-          failure ??= _TestFailureSummary(
-            message:
-                err['message'] as String? ?? err['toString'] as String? ?? '',
-            type: err['type'] as String? ?? 'TestFailure',
-            stackChain: err['stackChain'] as String? ?? '',
-          );
-        case 'message':
-          final mtype = msg['message-type'] as String? ?? 'print';
-          final text = msg['text'] as String? ?? '';
-          final line = mtype == 'print' ? text : '[$mtype] $text';
-          stdout.writeln(line);
-          output.writeln(line);
-        case 'complete':
-          if (!completer.isCompleted) completer.complete();
-      }
-    };
-
-    // Send "run" to the test channel. testChannelId is bootstrap's outputId
-    // for the test's virtual channel; per MultiChannel framing we send back
-    // on testChannelId+1.
-    _send(testChannelId + 1, {'command': 'run', 'channel': ch.outputId});
-
-    // `test_api` enforces the timeout from the metadata we sent — Bazel's own,
-    // or the test's — but that's a Timer: a test that spins synchronously
-    // without yielding never lets it fire. This ceiling stays just inside
-    // Bazel's limit, so a wedged test is named as a failure here instead of the
-    // whole target being killed with no word on which test hung. Kill the tester and treat
-    // the socket as gone so the remaining tests bail out fast.
-    final ceiling = testCeiling(Platform.environment['TEST_TIMEOUT']);
-    await completer.future.timeout(
-      ceiling,
-      onTimeout: () {
-        stderr.writeln(
-          'flutter_test: test "$reportName" did not finish within '
-          '${ceiling.inSeconds}s; killing flutter_tester.',
-        );
-        _socketClosed = true;
-        _process?.kill(ProcessSignal.sigkill);
-      },
-    );
-    _pendingTests.remove(ch.inputId);
-    _inbound.remove(ch.inputId);
-
-    if (_socketClosed && failure == null) {
-      failure = _TestFailureSummary(
-        message: 'flutter_tester disconnected mid-test (or test timed out)',
-        type: 'TestDeviceException',
-        stackChain: '',
-      );
-    }
-
-    started.stop();
-    if (failure != null) {
-      results.recordFailure(
-        reportName,
-        failure!,
-        started.elapsed,
-        output.toString(),
-      );
-    } else if (!fixture) {
-      results.recordSuccess(reportName, started.elapsed, output.toString());
-    }
-  }
-
-  Map<String, dynamic> _initialMessage(String testPath) {
-    return {
-      'type': 'initial',
-      'metadata': _defaultMetadata(
-        suiteTimeout(Platform.environment['TEST_TIMEOUT']),
-      ),
-      'platform': _suitePlatform(),
-      'platformVariables': const <String>[],
-      'collectTraces': true,
-      'noRetry': true,
-      'allowDuplicateTestNames': true,
-      'foldTraceExcept': const <String>[],
-      'foldTraceOnly': const <String>[],
-      'path': testPath,
-      'asciiGlyphs': !stdout.supportsAnsiEscapes,
-      'ignoreTimeouts': false,
-    };
-  }
-
-  /// Minimal `Metadata.serialize` payload — all optional flags omitted, an
-  /// empty `forTag`, and [timeout] as [suiteTimeout] serializes it.
-  static Map<String, Object?> _defaultMetadata(Object timeout) {
-    return {
-      'testOn': null,
-      'timeout': timeout,
-      'skip': null,
-      'skipReason': null,
-      'verboseTrace': null,
-      'chainStackTraces': null,
-      'retry': null,
-      'tags': const <String>[],
-      'onPlatform': const <List<Object>>[],
-      'forTag': const <String, Object?>{},
-      'languageVersionComment': null,
-    };
-  }
-
-  /// Built-in `Runtime.vm` and `Compiler.kernel` serialize as plain identifiers.
-  static Map<String, Object?> _suitePlatform() {
-    return {
-      'runtime': 'vm',
-      'compiler': 'kernel',
-      'os': _osIdentifier(),
-      'inGoogle': false,
-    };
-  }
-
-  static String _osIdentifier() {
-    if (Platform.isMacOS) return 'mac-os';
-    if (Platform.isLinux) return 'linux';
-    if (Platform.isWindows) return 'windows';
-    if (Platform.isAndroid) return 'android';
-    if (Platform.isIOS) return 'ios';
-    return 'none';
-  }
 }
 
 /// The outcome of waiting for flutter_tester's bootstrap to connect back.
@@ -1019,92 +711,6 @@ final class _TesterExited extends _DialBack {
 /// connected. There is no exit code to wait for.
 final class _DialBackTimedOut extends _DialBack {
   const _DialBackTimedOut();
-}
-
-class _TestFailureSummary {
-  _TestFailureSummary({
-    required this.message,
-    required this.type,
-    required this.stackChain,
-  });
-
-  final String message;
-  final String type;
-  final String stackChain;
-
-  @override
-  String toString() {
-    final buf = StringBuffer()
-      ..writeln('$type: $message')
-      ..write(stackChain);
-    return buf.toString();
-  }
-}
-
-class _Results {
-  int passed = 0;
-  int failed = 0;
-  int skipped = 0;
-  bool _suiteError = false;
-
-  /// Every case in the order it ran, for the JUnit report.
-  final List<TestCaseResult> cases = [];
-
-  void recordSuccess(String name, Duration elapsed, String output) {
-    passed++;
-    cases.add(TestCaseResult.passed(name, elapsed, output));
-    stdout.writeln('  PASS  $name');
-  }
-
-  void recordFailure(
-    String name,
-    _TestFailureSummary summary,
-    Duration elapsed,
-    String output,
-  ) {
-    failed++;
-    cases.add(
-      TestCaseResult.failed(
-        name,
-        elapsed,
-        output,
-        failureType: summary.type,
-        message: summary.message,
-        detail: summary.toString(),
-      ),
-    );
-    stdout.writeln('  FAIL  $name');
-    stdout.writeln(_indent(summary.toString(), '        '));
-  }
-
-  void recordSkipped(String name, String? reason) {
-    skipped++;
-    cases.add(TestCaseResult.skipped(name));
-    stdout.writeln(
-      reason == null ? '  SKIP  $name' : '  SKIP  $name (${reason.trim()})',
-    );
-  }
-
-  void recordError(String message) {
-    _suiteError = true;
-    stderr.writeln('flutter_test: $message');
-  }
-
-  bool get hasFailure => failed > 0 || _suiteError;
-
-  String summary() {
-    final pieces = <String>[
-      if (passed > 0) '$passed passed',
-      if (failed > 0) '$failed failed',
-      if (skipped > 0) '$skipped skipped',
-    ];
-    final body = pieces.isEmpty ? 'no tests' : pieces.join(', ');
-    return '\n$body${_suiteError ? ' (suite error)' : ''}';
-  }
-}
-
-String _indent(String body, String prefix) {
-  return body.split('\n').map((l) => l.isEmpty ? l : '$prefix$l').join('\n');
 }
 
 // ---------------------------------------------------------------------------

@@ -1,7 +1,6 @@
 // How `flutter_test` applies Bazel's test protocol to a `RemoteListener` tree.
+import 'package:flutter_rule_tools/bazel_test_protocol.dart';
 import 'package:test/test.dart';
-
-import '../bazel_test_protocol.dart';
 
 /// A test entry, named in full as `package:test` names it.
 Map<String, dynamic> _test(String name) => {'type': 'test', 'name': name};
