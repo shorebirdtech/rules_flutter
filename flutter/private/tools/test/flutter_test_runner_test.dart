@@ -206,55 +206,6 @@ void main() {
     );
   });
 
-  group('parseUpdateGoldens', () {
-    // The refusal is the reason this is a function rather than three lines in
-    // `main`: `bazel test` cannot be made to pass and fail the same target, so
-    // the only place the rejected case is reachable as a *passing* assertion
-    // is here.
-
-    test('is off with no arguments, whether or not a workspace is set', () {
-      expect(runner.parseUpdateGoldens([], null), isFalse);
-      expect(runner.parseUpdateGoldens([], '/ws'), isFalse);
-    });
-
-    test('is on under `bazel run`, which sets BUILD_WORKSPACE_DIRECTORY', () {
-      expect(runner.parseUpdateGoldens(['--update-goldens'], '/ws'), isTrue);
-    });
-
-    test('refuses under `bazel test`, where there is no source tree to write '
-        'to — a golden regenerated into the sandbox would report success and '
-        'change nothing', () {
-      expect(
-        () => runner.parseUpdateGoldens(['--update-goldens'], null),
-        throwsA(
-          isA<FormatException>().having(
-            (e) => e.message,
-            'message',
-            allOf(contains('bazel run'), contains('--update-goldens')),
-          ),
-        ),
-      );
-      expect(
-        () => runner.parseUpdateGoldens(['--update-goldens'], ''),
-        throwsA(isA<FormatException>()),
-      );
-    });
-
-    test('rejects an unrecognised argument rather than ignoring it, so a '
-        'mistyped flag cannot report a green run that regenerated nothing', () {
-      expect(
-        () => runner.parseUpdateGoldens(['--update-golden'], '/ws'),
-        throwsA(
-          isA<FormatException>().having(
-            (e) => e.message,
-            'message',
-            contains('--update-golden'),
-          ),
-        ),
-      );
-    });
-  });
-
   group('libraryPathEnvironment', () {
     test('sets nothing without a staged directory', () {
       expect(

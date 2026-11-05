@@ -16,6 +16,45 @@
 ///   `dart_test` writes.
 library;
 
+/// Whether this run should regenerate goldens instead of comparing them.
+///
+/// Pure so it can be tested without a Bazel invocation to produce each case;
+/// [workspaceDir] is `BUILD_WORKSPACE_DIRECTORY`, which `bazel run` sets and
+/// `bazel test` does not. That variable is the discriminator rather than
+/// anything about the arguments, because it is the actual constraint: update
+/// mode writes to the source tree, and a test action has no source tree.
+///
+/// [program] names the runner in the messages.
+///
+/// Throws [FormatException] for an unrecognised argument. Nothing passes argv
+/// to a `flutter_test` today — not `bazel test`, not `bazel coverage` — so an
+/// unrecognised one came from a person, and silently ignoring a mistyped
+/// `--update-golden` would report a green run that regenerated nothing.
+bool parseUpdateGoldens(
+  List<String> args,
+  String? workspaceDir, {
+  required String program,
+}) {
+  var update = false;
+  for (final arg in args) {
+    if (arg != '--update-goldens') {
+      throw FormatException(
+        '$program: unrecognised argument "$arg". The only '
+        'supported argument is --update-goldens.',
+      );
+    }
+    update = true;
+  }
+  if (update && (workspaceDir == null || workspaceDir.isEmpty)) {
+    throw FormatException(
+      '$program: --update-goldens rewrites goldens in the source '
+      'tree, which a test action cannot do. Regenerate with '
+      '`bazel run //<pkg>:<target> -- --update-goldens`.',
+    );
+  }
+  return update;
+}
+
 /// Which of a suite's tests this run executes.
 class TestSelection {
   TestSelection({this.filter, this.totalShards = 1, this.shardIndex = 0}) {

@@ -198,4 +198,58 @@ void main() {
       expect(xml, contains('<skipped/>'));
     });
   });
+
+  group('parseUpdateGoldens', () {
+    // The refusal is the reason this is a function rather than three lines in
+    // `main`: `bazel test` cannot be made to pass and fail the same target, so
+    // the only place the rejected case is reachable as a *passing* assertion
+    // is here.
+
+    test('is off with no arguments, whether or not a workspace is set', () {
+      expect(parseUpdateGoldens([], null, program: 'a runner'), isFalse);
+      expect(parseUpdateGoldens([], '/ws', program: 'a runner'), isFalse);
+    });
+
+    test('is on under `bazel run`, which sets BUILD_WORKSPACE_DIRECTORY', () {
+      expect(
+        parseUpdateGoldens(['--update-goldens'], '/ws', program: 'a runner'),
+        isTrue,
+      );
+    });
+
+    test('refuses under `bazel test`, where there is no source tree to write '
+        'to — a golden regenerated into the sandbox would report success and '
+        'change nothing', () {
+      expect(
+        () =>
+            parseUpdateGoldens(['--update-goldens'], null, program: 'a runner'),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            allOf(contains('bazel run'), contains('--update-goldens')),
+          ),
+        ),
+      );
+      expect(
+        () => parseUpdateGoldens(['--update-goldens'], '', program: 'a runner'),
+        throwsA(isA<FormatException>()),
+      );
+    });
+
+    test('rejects an unrecognised argument rather than ignoring it, so a '
+        'mistyped flag cannot report a green run that regenerated nothing', () {
+      expect(
+        () =>
+            parseUpdateGoldens(['--update-golden'], '/ws', program: 'a runner'),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            contains('--update-golden'),
+          ),
+        ),
+      );
+    });
+  });
 }

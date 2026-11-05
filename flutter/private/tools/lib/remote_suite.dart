@@ -34,7 +34,7 @@ import 'dart:io';
 
 import 'bazel_test_protocol.dart';
 
-export 'bazel_test_protocol.dart' show TestSelection;
+export 'bazel_test_protocol.dart' show TestSelection, parseUpdateGoldens;
 
 /// How a suite's messages travel between this host and the program running it.
 abstract interface class SuiteTransport {
