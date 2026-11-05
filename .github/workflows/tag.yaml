@@ -9,7 +9,7 @@ on:
     - cron: "0 15 * * *" # Daily at 3PM UTC
 jobs:
   tag:
-    uses: aran/rules_dart/.github/workflows/overhead-tag.yaml@62139e713288a2296569f650953cb9940db9055a
+    uses: aran/rules_dart/.github/workflows/overhead-tag.yaml@2d78bccaa5ce13d09810ab85cc185a38e8f42d40
     permissions:
       contents: write # allow create tag
       actions: read # the tag job checks CI passed on the commit

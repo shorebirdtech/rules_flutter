@@ -46,7 +46,7 @@ bazel_dep(name = "bazelrc-preset.bzl", version = "1.9.2", dev_dependency = True)
 bazel_dep(name = "overhead", version = "0.0.0", dev_dependency = True)
 git_override(
     module_name = "overhead",
-    commit = "62139e713288a2296569f650953cb9940db9055a",
+    commit = "2d78bccaa5ce13d09810ab85cc185a38e8f42d40",
     remote = "https://github.com/aran/rules_dart.git",
     strip_prefix = "overhead",
 )
