@@ -197,7 +197,7 @@ repository that takes overhead as a dev dependency shares. Bump them there
 `.github/workflows` to the new rules_dart commit; `bazel run @overhead//pins:check`
 fails if they differ.
 
-**Verification**: `bazel run @overhead//lint:prek -- run --all-files` passes.
+**Verification**: `bazel run @overhead//lint:prek -- run --all-files --hook-stage manual` passes.
 
 ---
 

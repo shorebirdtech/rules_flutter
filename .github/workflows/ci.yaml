@@ -58,7 +58,8 @@ jobs:
         run: bazel test //... --test_output=errors
   # The hooks in .pre-commit-config.yaml, over every file. Nothing else runs
   # them for a commit made without `prek install`. prek, yamlfmt and typos are
-  # the versions overhead pins.
+  # the versions overhead pins. The manual stage runs overhead's tools through
+  # `bazel run`, not .bazel_env.
   pre-commit:
     name: pre-commit
     runs-on: ubuntu-latest
@@ -68,7 +69,7 @@ jobs:
         with:
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
           cache-save: false
-      - run: bazel run @overhead//lint:prek -- run --all-files --show-diff-on-failure
+      - run: bazel run @overhead//lint:prek -- run --all-files --hook-stage manual --show-diff-on-failure
   # A module that depends on rules_flutter must be able to list all of it, as
   # tools and IDE plugins do with `@rules_flutter//...`, from the release
   # archive it gets. Development tooling

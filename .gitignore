@@ -1,10 +1,12 @@
 bazel-*
+.bazel_env
 .DS_Store
 .bazelrc.user
 # Local Claude Code state (settings, other sessions' worktrees), except the
 # project's shared skills.
 .claude/*
 !.claude/skills/
+!.claude/settings.json
 .dart_tool/
 .idea/
 .ijwb/

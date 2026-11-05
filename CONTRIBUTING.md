@@ -19,10 +19,37 @@ at `~/.local/bin/prek`, which stays put across `uv tool upgrade prek` and
 `bazel clean`. Set `PREK_QUIET=1` in your shell profile for hooks that print
 nothing unless one fails.
 
-To run every hook without installing anything beyond Bazel:
+The commit message, yamlfmt and typos hooks run overhead's tools from
+`.bazel_env/bin`, without Bazel. Set that up in the main checkout, and again
+after any `bazel clean` or bump of overhead's pin:
 
 ```shell
-bazel run @overhead//lint:prek -- run --all-files
+bazel run --noincompatible_auto_exec_groups @overhead//:bazel_env
+```
+
+A hook that fails with "No such file or directory" means it is not set up.
+The flag is there because bazel_env 0.10.0 fails analysis under
+`--incompatible_auto_exec_groups`, which `.bazelrc` sets; it costs the next
+build a re-analysis, not a rebuild.
+
+Worktrees that Claude Code makes need nothing more: `.claude/settings.json`
+links their `.bazel_env` to the main checkout's and starts them from your
+local `HEAD`, and `.worktreeinclude` copies `.bazelrc.user` and `tools/bazel`
+into them. A worktree you make yourself with `git worktree add` runs the
+command above in the worktree.
+
+To run every check through `bazel run` instead, without `.bazel_env`, as CI
+does:
+
+```shell
+bazel run @overhead//lint:prek -- run --all-files --hook-stage manual
+```
+
+On Windows, where bazel_env does not run, install the hooks without the three
+that need it and run that command before you push:
+
+```shell
+prek install -f --skip commit-message --skip yamlfmt --skip typos
 ```
 
 ## Commit messages
