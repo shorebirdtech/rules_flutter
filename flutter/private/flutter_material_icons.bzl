@@ -22,7 +22,7 @@ selecting the platform-specific toolchain repo at the call site: the rule
 discovers the font File via `ctx.toolchains[...]` instead.
 """
 
-load("@rules_dart//dart:utils.bzl", "dart_info_no_package", "web_compiler_reset")
+load("@rules_dart//dart:utils.bzl", "dart_compile_reset", "dart_info_no_package")
 load("//flutter/private:flutter_info.bzl", "flutter_info")
 
 _MATERIAL_ICONS_BUNDLE_PATH = "fonts/MaterialIcons-Regular.otf"
@@ -63,8 +63,9 @@ def _flutter_material_icons_impl(ctx):
 
 flutter_material_icons = rule(
     implementation = _flutter_material_icons_impl,
-    # A font and no Dart: the same under every web compiler.
-    cfg = web_compiler_reset,
+    # A font and no Dart: the same under every web compiler, and whether or
+    # not creation locations are tracked.
+    cfg = dart_compile_reset,
     toolchains = ["@rules_flutter//flutter:toolchain_type"],
     doc = "Toolchain-backed MaterialIcons font target. List in " +
           "`flutter_application(deps = [...])` to bundle MaterialIcons.",

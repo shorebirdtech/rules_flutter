@@ -1484,7 +1484,7 @@ A test runs where its target runs, as a `cc_test` does: its `deps`, native code 
 - **`exec_group_compatible_with = {"test": [...]}`** narrows the execution platforms a test may run on, and execution-requirement tags such as `no-remote-exec` keep it local. A test whose result depends on the machine, such as a golden, and one that loads an FFI library from `data`, are pinned this way.
 - **A toolchain for `@bazel_tools//tools/test:default_test_toolchain_type`** registered in your root module changes where every test rule's tests may run, `flutter_test` included, as it does for `cc_test`. A test sent to a machine other than the one it was built for fails when it starts there, as a `cc_test` does.
 
-A widget built in a test records where it was built, as under `flutter test`'s `--track-widget-creation`, when the test is compiled as one whole program (`--@rules_dart//dart:modular_kernel=false`). The default per-library compile does not record it: `WidgetInspectorService.isWidgetCreationTracked()` is false in a test built that way.
+A widget built in a test records where it was built, as under `flutter test`'s `--track-widget-creation`. A `flutter_test` sets `--@rules_dart//dart:track_creation_locations` for itself and its `deps`, so every library's kernel module and the test's own compile agree on it.
 
 `enable_impeller = True` renders with Impeller in `flutter_tester`, as `flutter test --enable-impeller` does, instead of software Skia. A test that draws a shader SkSL cannot compile needs it, and so does a golden meant to match an Impeller device. Shaders are compiled for `flutter_tester` either way, with the SkSL and Vulkan stages `flutter test` gives them.
 

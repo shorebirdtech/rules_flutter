@@ -56,7 +56,7 @@ cannot write there.
 
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo", "DartKernelSdkInfo")
-load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "KERNEL_TOOL_ATTR", "collect_modules", "collect_packages", "collect_transitive_srcs", "dart_analyzable_info_with_packages", "dart_entry_kernel_action", "dart_import_check_aspect", "dart_link_kernel_action", "dart_package_info", "derive_lib_root", "import_check_validation", "module_defines_transition", "runfiles_path")
+load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "KERNEL_TOOL_ATTR", "TRACK_CREATION_LOCATIONS_ATTR", "collect_modules", "collect_packages", "collect_transitive_srcs", "dart_analyzable_info_with_packages", "dart_entry_kernel_action", "dart_import_check_aspect", "dart_link_kernel_action", "dart_package_info", "derive_lib_root", "import_check_validation", "module_defines_transition", "runfiles_path", "track_creation_locations")
 load("//flutter:providers.bzl", "FlutterInfo")
 load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "compile_package_config", "synthesize_app_package")
 load(
@@ -616,6 +616,7 @@ def _link_modules(ctx, bootstrap, own_srcs, packages, native_assets_manifest, ke
         output = entry_dill,
         defines = merge_dart_defines(ctx),
         native_assets_yaml = native_assets_manifest,
+        track_creation_locations = track_creation_locations(ctx),
     )
     dart_link_kernel_action(ctx, ctx.executable._kernel_tool, entry_dill, linked, kernel_dill)
 
@@ -651,8 +652,9 @@ def _compile_whole_program(ctx, tools, bootstrap, own_srcs, packages, native_ass
         aot = False,
         defines = merge_dart_defines(ctx),
         # Widgets know where they were built, as under `flutter test`: the
-        # inspector and the "relevant error-causing widget" of a failure read it.
-        extra_flags = ["--track-widget-creation"],
+        # inspector and the "relevant error-causing widget" of a failure read
+        # it. Set by `_track_widget_creation`, as the modules' is.
+        extra_flags = ["--track-widget-creation"] if track_creation_locations(ctx) else [],
         target = "flutter",
         native_assets_manifest = native_assets_manifest,
     )
@@ -750,6 +752,24 @@ _TEST_ATTRS["env"] = attr.string_dict(
 )
 _TEST_ATTRS.update(PLATFORM_CONSTRAINT_ATTRS)
 _TEST_ATTRS.update(KERNEL_TOOL_ATTR)
+_TEST_ATTRS.update(TRACK_CREATION_LOCATIONS_ATTR)
+
+_TRACK_CREATION_LOCATIONS = str(Label("@rules_dart//dart:track_creation_locations"))
+
+def _track_widget_creation_impl(_settings, _attr):
+    return {_TRACK_CREATION_LOCATIONS: True}
+
+# Widgets record where they were created, as under `flutter test`, whose
+# `--track-widget-creation` is on by default and applies to any JIT build,
+# which a test always is. rules_dart's flag of the same transform reaches every
+# kernel module of `deps` and the entry compile alike, which a tracked class's
+# constructors need to agree on, so the test sets it for itself and all it
+# depends on rather than passing the front-end flag to its own compile only.
+_track_widget_creation = transition(
+    implementation = _track_widget_creation_impl,
+    inputs = [],
+    outputs = [_TRACK_CREATION_LOCATIONS],
+)
 
 # Each library in `deps` is compiled into a kernel module by the aspect, and its
 # imports checked by another, with the test's own `defines` (the transition) so a dependency's
@@ -814,6 +834,7 @@ _TEST_ATTRS["_sky_engine"] = attr.label(
 flutter_test = rule(
     implementation = _flutter_test_impl,
     attrs = _TEST_ATTRS,
+    cfg = _track_widget_creation,
     test = True,
     # The compiles are `portable`. The run is placed by Bazel's default `test`
     # group, as any test rule's is: on a host matching the target, which
@@ -913,6 +934,7 @@ _BINARY_ATTRS["_tool"] = attr.label(
 flutter_tester_binary = rule(
     implementation = _flutter_tester_binary_impl,
     attrs = _BINARY_ATTRS,
+    cfg = _track_widget_creation,
     executable = True,
     toolchains = COPY_TO_DIRECTORY_TOOLCHAINS,
     exec_groups = PORTABLE_EXEC_GROUPS | {

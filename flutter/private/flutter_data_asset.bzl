@@ -8,7 +8,7 @@ Assets spec), and propagates a `FlutterDataAssetInfo` that
 hook's data asset and `rootBundle` loads it by.
 """
 
-load("@rules_dart//dart:utils.bzl", "web_compiler_reset")
+load("@rules_dart//dart:utils.bzl", "dart_compile_reset")
 load("//flutter:providers.bzl", "FlutterDataAssetInfo", "FlutterInfo")
 load("//flutter/private:flutter_info.bzl", flutter_info_provider = "flutter_info")
 
@@ -49,8 +49,9 @@ def _flutter_data_asset_impl(ctx):
 
 flutter_data_asset = rule(
     implementation = _flutter_data_asset_impl,
-    # A data file is the same under every web compiler.
-    cfg = web_compiler_reset,
+    # A data file is the same under every web compiler, and whether or not
+    # creation locations are tracked.
+    cfg = dart_compile_reset,
     attrs = {
         "asset_id": attr.string(
             doc = "Native Assets `DataAsset` id of the form " +

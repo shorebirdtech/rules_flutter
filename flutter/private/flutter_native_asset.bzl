@@ -26,7 +26,7 @@ of Native Assets today.
 """
 
 load("@rules_cc//cc/common:cc_shared_library_info.bzl", "CcSharedLibraryInfo")
-load("@rules_dart//dart:utils.bzl", "web_compiler_reset")
+load("@rules_dart//dart:utils.bzl", "dart_compile_reset")
 load("//flutter:providers.bzl", "FlutterInfo", "FlutterNativeAssetInfo")
 load("//flutter/private:flutter_info.bzl", flutter_info_provider = "flutter_info")
 load("//flutter/private:native_sources.bzl", "collect_native_sources", "native_sources_aspect")
@@ -164,8 +164,9 @@ def _flutter_native_asset_impl(ctx):
 flutter_native_asset = rule(
     implementation = _flutter_native_asset_impl,
     # The native library it bundles is not Dart: built once, whatever web
-    # compiler an app reaching it compiles for.
-    cfg = web_compiler_reset,
+    # compiler an app reaching it compiles for and whether a test reaching it
+    # tracks creation locations.
+    cfg = dart_compile_reset,
     attrs = {
         "asset_id": attr.string(
             doc = "The Dart asset id (e.g. `package:objective_c/objective_c.dylib`). " +
