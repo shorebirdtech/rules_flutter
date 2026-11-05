@@ -21,7 +21,7 @@ dart_analysis_config(
 # versions together.
 exports_files(
     ["rules_android_maven_install.json"],
-    visibility = ["//tools/lockfile_check:__pkg__"],
+    visibility = ["//tools/maven_locks:__pkg__"],
 )
 
 package_metadata(

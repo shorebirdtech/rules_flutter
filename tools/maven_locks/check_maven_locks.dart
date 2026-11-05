@@ -1,104 +1,86 @@
-// Checks that every e2e workspace's committed MODULE.bazel.lock is complete.
+// Checks the Maven lock files of the root and the e2e workspaces: the part of
+// lock checking that is rules_flutter's own. `bazel run @overhead//locks`
+// checks every MODULE.bazel.lock; this checks what that cannot know about
+// `rules_jvm_external`.
 //
-//   bazel run //tools/lockfile_check                       check every workspace
-//   bazel run //tools/lockfile_check -- --refresh e2e/smoke  regenerate one lock
-//
-// Each workspace gets both `bazel mod deps` and `bazel build --nobuild
-// //...`, with `--lockfile_mode=error`: they catch different stale locks (the
-// first a stale module-graph entry, the second a module extension the lock
-// never recorded), and each passes locks the other rejects.
+//   bazel run //tools/maven_locks                        check
+//   bazel run //tools/maven_locks -- --refresh e2e/smoke  re-pin one workspace
+//   bazel run //tools/maven_locks -- --refresh .          re-pin the root's
 //
 // Every `maven.install` in the root and e2e MODULE.bazel files must name a
 // `lock_file`, so its jars are fetched by checksum and land in Bazel's
-// repository cache. A stale one fails the `--nobuild` build (rules_jvm_external
-// compares the lock with the declared artifacts when it loads the repo);
-// `--refresh` re-pins it with `bazel run @repo//:pin`, which needs Maven access.
+// repository cache. The root's own locks ship to every consumer of the
+// ruleset and no e2e workspace pins them, so fetching each root install's
+// repo (rules_jvm_external compares the lock with the declared artifacts when
+// it loads the repo) is what finds a stale one. Every workspace's installs
+// are also evaluated afresh, to print the warnings a lock file lets Bazel
+// skip (see `checkMavenNoise`).
+//
+// `--refresh` re-pins a stale lock with `REPIN=1 bazel run @repo//:pin`, which
+// needs Maven access, then `bazel run @overhead//locks -- --refresh` records
+// what the new lock changes in MODULE.bazel.lock.
 //
 // Bazel runs with the workspace's committed `.bazelrc` but not its gitignored
 // `.bazelrc.user`, which overrides rules_dart with a sibling checkout and
 // turns the lock check off. See `withoutUserRc`.
-//
-// Analysing `//...` needs every platform's toolchain, so run this on macOS.
 import 'dart:io';
 
 import '../e2e_workspaces/e2e_workspaces.dart';
-import 'lockfile_check.dart';
+import 'maven_locks.dart';
 
-const _target = '//tools/lockfile_check';
+const _target = '//tools/maven_locks';
 
 final _repo =
     Platform.environment['BUILD_WORKSPACE_DIRECTORY'] ?? Directory.current.path;
 
 Future<void> main(List<String> args) async {
-  final workspaces = findWorkspaces(Directory('$_repo/e2e'));
-  if (workspaces.isEmpty) {
-    stderr.writeln(
-      'lockfile check: no workspace with a MODULE.bazel under $_repo/e2e',
-    );
-    exit(2);
-  }
-
+  final workspaces = ['.', ...findWorkspaces(Directory('$_repo/e2e'))];
   final refresh = args.isNotEmpty && args.first == '--refresh';
   final named = refresh ? args.skip(1).toList() : args;
   final unknown = named.where((w) => !workspaces.contains(w)).toList();
   if ((refresh && named.isEmpty) || unknown.isNotEmpty) {
     if (unknown.isNotEmpty) {
-      stderr.writeln('lockfile check: not a workspace: ${unknown.join(', ')}');
+      stderr.writeln('maven locks: not a workspace: ${unknown.join(', ')}');
     }
-    stderr.writeln('usage: lockfile_check [--refresh] <workspace>...');
+    stderr.writeln('usage: maven_locks [--refresh <workspace>...]');
     stderr.writeln('workspaces:\n  ${workspaces.join('\n  ')}');
     exit(2);
   }
 
-  if (!_allMavenInstallsPinned(['.', ...workspaces])) exit(1);
+  if (!_allMavenInstallsPinned(workspaces)) exit(1);
 
-  final scratch = await Directory.systemTemp.createTemp('lockfile_check');
+  final scratch = await Directory.systemTemp.createTemp('maven_locks');
   try {
     final targets = named.isEmpty ? workspaces : named;
     final failed = <String>[];
-    // The root's own Maven locks are checked with a full run only.
-    final checkRoot = named.isEmpty;
-    if (checkRoot) {
-      final root = _Runner('.', scratch);
-      if (!await root.checkRootMaven() || !await root.checkMavenNoise('.')) {
-        failed.add('.');
-      }
-    }
     for (final workspace in targets) {
       final runner = _Runner(workspace, scratch);
       if (refresh) {
-        stdout.writeln('== $workspace: refreshing');
-        if (!await runner.refresh()) {
-          exit(1);
-        }
+        stdout.writeln('== $workspace: re-pinning stale locks');
+        if (!await runner.refresh()) exit(1);
       }
-      if (!await runner.checkAll(workspace)) failed.add(workspace);
+      // The root's installs ship to consumers: that is the one fetch check.
+      final ok =
+          (workspace != '.' || await runner.checkRootMaven()) &&
+          await runner.checkMavenNoise(workspace);
+      if (!ok) failed.add(workspace);
     }
     if (failed.isEmpty) {
-      stdout.writeln(
-        'lockfile check: ${targets.length} workspace(s)'
-        '${checkRoot ? ' and the root Maven locks' : ''} ok',
-      );
+      stdout.writeln('maven locks: ${targets.length} workspace(s) ok');
       return;
     }
     stderr.writeln(
-      '\nlockfile check: ${failed.length} of '
-      '${targets.length + (checkRoot ? 1 : 0)} failed',
+      '\nmaven locks: ${failed.length} of ${targets.length} failed',
     );
     for (final workspace in failed) {
       stderr.writeln('  $workspace');
     }
     stderr.writeln(
-      '\nWhere the output above says the lock file is out of date or lacks an '
-      'entry, or that a *_install.json must be regenerated, regenerate it:',
+      '\nWhere the output above says a *_install.json must be regenerated, '
+      're-pin it:',
     );
     for (final workspace in failed) {
-      stderr.writeln(
-        workspace == '.'
-            ? '  REPIN=1 bazel run @<repo>//:pin   (in the repository root; the '
-                  'repo is named above)'
-            : '  bazel run $_target -- --refresh $workspace',
-      );
+      stderr.writeln('  bazel run $_target -- --refresh $workspace');
     }
     stderr.writeln(
       'Any other error (a missing ANDROID_HOME or ANDROID_NDK_HOME, say) is the '
@@ -149,41 +131,18 @@ class _Runner {
     return copy.path;
   }
 
-  Future<ProcessResult> _bazel(List<String> bazelArgs) => Process.run(
+  Future<ProcessResult> _bazel(
+    List<String> bazelArgs, {
+    Map<String, String>? environment,
+  }) => Process.run(
     'bazel',
     bazelArgs,
     workingDirectory: dir,
+    environment: environment,
   );
 
-  /// Both lock checks; prints each outcome and returns whether all passed.
-  Future<bool> checkAll(String workspace) async {
-    var ok = true;
-    if (!await checkMavenNoise(workspace)) ok = false;
-    for (final check in LockCheck.values) {
-      final watch = Stopwatch()..start();
-      final result = await _bazel(
-        bazelArgs(check.args, rcFile: rcFile),
-      );
-      final seconds = (watch.elapsedMilliseconds / 1000).toStringAsFixed(1);
-      if (result.exitCode == 0) {
-        stdout.writeln('ok     $workspace: ${check.label} (${seconds}s)');
-        continue;
-      }
-      ok = false;
-      stderr.writeln(
-        'FAILED $workspace: ${check.label} exited ${result.exitCode}',
-      );
-      final output = '${result.stdout}\n${result.stderr}';
-      for (final target in repinTargets(output)) {
-        stderr.writeln(
-          '    A Maven lock file is stale: the artifacts declared in '
-          'MODULE.bazel no longer match it ($target).',
-        );
-      }
-      stderr.writeln(_tail(output));
-    }
-    return ok;
-  }
+  List<String> get _installs =>
+      pinnedMavenInstalls(File('$dir/MODULE.bazel').readAsStringSync());
 
   /// Whether evaluating the workspace's `maven.install` tags prints nothing
   /// that says a declaration is wrong or noisy (see [mavenWarnings]).
@@ -197,18 +156,14 @@ class _Runner {
   /// altogether: evaluating an extension reads none of it, and its flags name
   /// settings of rules_flutter, which this must not need to load.
   Future<bool> checkMavenNoise(String workspace) async {
-    final names = pinnedMavenInstalls(
-      File('$dir/MODULE.bazel').readAsStringSync(),
-    );
+    final names = _installs;
     if (names.isEmpty) return true;
     await Process.run('bazel', [
       '--noworkspace_rc',
       'shutdown',
     ], workingDirectory: dir);
-    final result = await Process.run(
-      'bazel',
+    final result = await _bazel(
       bazelArgs(['fetch', '--repo=@${names.first}'], lockfileMode: 'off'),
-      workingDirectory: dir,
       environment: {'REPIN': '1'},
     );
     final output = '${result.stdout}\n${result.stderr}';
@@ -232,15 +187,28 @@ class _Runner {
     return false;
   }
 
+  /// Fetches the repo of each of the workspace's pinned installs with the lock
+  /// required current, which fails when the lock and the declared artifacts
+  /// differ. Returns the outputs of those that failed, empty when all are
+  /// current.
+  Future<List<String>> _staleOutputs() async {
+    final stale = <String>[];
+    for (final name in _installs) {
+      final result = await _bazel(
+        bazelArgs(['fetch', '--repo=@$name'], rcFile: rcFile),
+      );
+      if (result.exitCode == 0) continue;
+      stale.add('${result.stdout}\n${result.stderr}');
+    }
+    return stale;
+  }
+
   /// Whether the Maven lock files of the repository root's own `maven.install`
   /// tags are current. Those ship to every user of the ruleset; no e2e
   /// workspace pins them (each pins its own, merged, copy), so a stale one
-  /// would reach consumers unseen. Fetching the repo compares the lock with
-  /// the declared artifacts and fails when they differ.
+  /// would reach consumers unseen.
   Future<bool> checkRootMaven() async {
-    final names = pinnedMavenInstalls(
-      File('$dir/MODULE.bazel').readAsStringSync(),
-    );
+    final names = _installs;
     var ok = true;
     for (final name in names) {
       final result = await _bazel(
@@ -266,54 +234,30 @@ class _Runner {
     return ok;
   }
 
-  /// Regenerates the locks: `mod tidy` settles the module graph but evaluates
-  /// only the extensions it needs, and the `update` build forces the rest in.
-  /// That build also fails on a stale rules_jvm_external lock and names the
-  /// `@repo//:pin` target that regenerates it; those are run (with `REPIN=1`,
-  /// which pins even where the lock still looks current) and the build again.
+  /// Re-pins each lock that [_staleOutputs] finds stale, by running the
+  /// `@repo//:pin` target Bazel names (with `REPIN=1`, which pins even where
+  /// the lock still looks current), then requires every one current.
   Future<bool> refresh() async {
-    if (!await _run(['mod', 'tidy'], 'refresh')) return false;
-    final pinned = <String>{};
-    while (true) {
+    final targets = {
+      for (final output in await _staleOutputs()) ...repinTargets(output),
+    };
+    for (final target in targets) {
+      stdout.writeln('   re-pinning $target');
       final result = await _bazel(
-        bazelArgs(_analysis, rcFile: rcFile, lockfileMode: 'update'),
+        bazelArgs(['run', target], rcFile: rcFile, lockfileMode: 'update'),
+        environment: {'REPIN': '1'},
       );
-      if (result.exitCode == 0) return true;
-      final output = '${result.stdout}\n${result.stderr}';
-      final stale = repinTargets(output).where(pinned.add).toList();
-      if (stale.isEmpty) {
-        stderr.writeln(
-          'refresh: bazel ${_analysis.join(' ')} exited ${result.exitCode}',
-        );
-        stderr.writeln(_tail(output));
+      if (result.exitCode != 0) {
+        stderr.writeln('refresh: bazel run $target exited ${result.exitCode}');
+        stderr.writeln(_tail('${result.stdout}\n${result.stderr}'));
         return false;
       }
-      for (final target in stale) {
-        stdout.writeln('   re-pinning $target');
-        if (!await _run(['run', target], 'update', repin: true)) return false;
-      }
     }
-  }
-
-  static const _analysis = ['build', '--nobuild', '--keep_going', '//...'];
-
-  Future<bool> _run(
-    List<String> args,
-    String lockfileMode, {
-    bool repin = false,
-  }) async {
-    final result = await Process.run(
-      'bazel',
-      bazelArgs(args, rcFile: rcFile, lockfileMode: lockfileMode),
-      workingDirectory: dir,
-      environment: repin ? {'REPIN': '1'} : null,
-    );
-    if (result.exitCode == 0) return true;
-    stderr.writeln(
-      'refresh: bazel ${args.join(' ')} exited ${result.exitCode}',
-    );
-    stderr.writeln(_tail('${result.stdout}\n${result.stderr}'));
-    return false;
+    final stillStale = await _staleOutputs();
+    for (final output in stillStale) {
+      stderr.writeln(_tail(output));
+    }
+    return stillStale.isEmpty;
   }
 }
 

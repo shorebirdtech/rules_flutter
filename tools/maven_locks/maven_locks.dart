@@ -1,5 +1,5 @@
-/// What `check_lockfiles.dart` needs to run Bazel in an e2e workspace without
-/// the developer's own overrides, and to read the `maven.install` tags of a
+/// What `check_maven_locks.dart` needs to run Bazel in a workspace without the
+/// developer's own overrides, and to read the `maven.install` tags of a
 /// `MODULE.bazel`.
 library;
 
@@ -10,30 +10,13 @@ library;
 /// sets `--lockfile_mode=off`: exactly what a lock check must not see. Bazel
 /// has no switch for leaving out one imported file (`--ignore_all_rc_files`
 /// also drops the committed `.bazelrc`, whose flags decide what resolves), so
-/// the check hands Bazel this copy instead.
+/// the tool hands Bazel this copy instead.
 String withoutUserRc(String bazelrc) => bazelrc
     .split('\n')
     .where((line) => !_userRcImport.hasMatch(line))
     .join('\n');
 
 final _userRcImport = RegExp(r'^\s*(try-)?import\s+\S*\.bazelrc\.user\s*$');
-
-/// Which of the two lock checks a [LockCheck] is. Each catches stale locks the
-/// other passes: `mod deps` the module graph (a stale registry entry), a
-/// `--nobuild` build the module extensions (a missing extension result).
-enum LockCheck {
-  modDeps('bazel mod deps', ['mod', 'deps']),
-  analysis('bazel build --nobuild //...', [
-    'build',
-    '--nobuild',
-    '--keep_going',
-    '//...',
-  ]);
-
-  const LockCheck(this.label, this.args);
-  final String label;
-  final List<String> args;
-}
 
 /// The Bazel arguments to run [args] (a command and its flags) in a
 /// workspace whose rc file is [rcFile], if it has one, with the lock file

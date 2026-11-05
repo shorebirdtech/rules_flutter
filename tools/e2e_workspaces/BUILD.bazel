@@ -1,6 +1,6 @@
 load("@rules_dart//dart:defs.bzl", "dart_test")
 
-# Finds the Bazel workspaces under e2e/. Shared by //tools/lockfile_check and
+# Finds the Bazel workspaces under e2e/. Shared by //tools/maven_locks and
 # //tools/ci_matrix, which import the file by relative path so that
 # `dart run` works on it without Bazel too.
 exports_files(

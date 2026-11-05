@@ -1,24 +1,24 @@
 load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_test")
 
-# Checks that every e2e workspace's MODULE.bazel.lock is complete, running
-# `bazel mod deps` and `bazel build --nobuild //...` in each with
-# `--lockfile_mode=error` and without its gitignored `.bazelrc.user`.
-#   bazel run //tools/lockfile_check                          every workspace
-#   bazel run //tools/lockfile_check -- --refresh e2e/smoke   regenerate one lock
+# The Maven half of lock checking, which `bazel run @overhead//locks` cannot
+# know: every `maven.install` names a `lock_file`, the root's locks (which
+# consumers get) are current, and the declarations print no warnings.
+#   bazel run //tools/maven_locks                         check
+#   bazel run //tools/maven_locks -- --refresh e2e/smoke  re-pin one workspace
 dart_binary(
-    name = "lockfile_check",
+    name = "maven_locks",
     srcs = [
-        "lockfile_check.dart",
+        "maven_locks.dart",
         "//tools/e2e_workspaces:e2e_workspaces.dart",
     ],
-    main = "check_lockfiles.dart",
+    main = "check_maven_locks.dart",
 )
 
 dart_test(
-    name = "lockfile_check_test",
+    name = "maven_locks_test",
     size = "small",
-    srcs = ["lockfile_check.dart"],
-    main = "test/lockfile_check_test.dart",
+    srcs = ["maven_locks.dart"],
+    main = "test/maven_locks_test.dart",
     deps = ["@dev_tool_deps//:test"],
 )
 

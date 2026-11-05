@@ -123,7 +123,7 @@ maven.install(
         # Relaxed reconciliation lets Coursier resolve without them, but takes
         # the old version another artifact asks for (livedata 2.0.0,
         # livedata-core and viewmodel-savedstate 2.6.1, savedstate 1.2.1) next
-        # to lifecycle-runtime 2.10.0. //tools/lockfile_check:root_lock_test
+        # to lifecycle-runtime 2.10.0. //tools/maven_locks:root_lock_test
         # fails on that.
         "androidx.lifecycle:lifecycle-livedata:2.10.0",
         "androidx.lifecycle:lifecycle-livedata-core:2.10.0",

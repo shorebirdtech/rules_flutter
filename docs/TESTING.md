@@ -209,38 +209,39 @@ deliberate so nobody later "restores" it.
 
 Every `e2e/` workspace commits a `MODULE.bazel.lock`, and the committed
 `.bazelrc` of each says `common --lockfile_mode=error`: a build fails rather
-than rewrite or quietly ignore a lock that is stale or incomplete. Your own
-`.bazelrc.user` turns that off (see above), which is why a local sweep cannot
-tell you a lock has drifted. This does:
+than rewrite or quietly ignore a lock that is stale or incomplete. So does the
+root's. Your own `.bazelrc.user` turns that off (see above), which is why a
+local sweep cannot tell you a lock has drifted. This does, from the repository
+root:
 
-    bazel run //tools/lockfile_check
+    bazel run @overhead//locks
 
-For every workspace under `e2e/` with a `MODULE.bazel` — found by walking the
-tree, so a new workspace is covered without being listed anywhere — it runs
-both `bazel mod deps` and `bazel build --nobuild //...` with
-`--lockfile_mode=error`. Run both: each has passed a lock the other rejected
+overhead is the dev-tooling module rules_flutter shares with rules_dart (see
+"Tooling" in `AGENTS.md`). For the root and every workspace under `e2e/` with a
+`MODULE.bazel` it runs both `bazel mod deps` and `bazel build --nobuild //...`
+with `--lockfile_mode=error`. Run both: each has passed a lock the other rejected
 (`mod deps` caught a stale `rules_dart` `pub` entry in `e2e/smoke` and a
 missing protobuf entry in `e2e/_overlay_tests/native_assets_synthetic`;
 `build --nobuild` passed both; and a `build --nobuild` has caught a stale lock
-`mod deps` passed).
+`mod deps` passed). Workspaces are found from `git ls-files`, so a new tracked
+workspace is covered without being listed anywhere. A workspace that is meant to
+fail carries a `lock_expected_failure.txt` naming what its failure prints.
 
 It runs Bazel with each workspace's committed `.bazelrc` but without its
-gitignored `.bazelrc.user`, by handing Bazel a copy of the `.bazelrc` that lacks
-the `try-import` line (`--noworkspace_rc --bazelrc=<copy>`). Bazel has no way
-to leave out one imported file, and `--ignore_all_rc_files` would also drop the
-committed flags that decide what resolves. Nothing in your tree is moved or
-edited. Your `~/.bazelrc` still applies.
+gitignored `.bazelrc.user` (keeping that file's `startup` lines, so the server is
+not restarted). Nothing in your tree is moved or edited. Your `~/.bazelrc` still
+applies.
 
 It lists each stale workspace with the command that fixes it:
 
-    bazel run //tools/lockfile_check -- --refresh e2e/smoke
+    bazel run @overhead//locks -- --refresh e2e/smoke
 
 which runs `bazel mod tidy --lockfile_mode=refresh`, then
-`bazel build --nobuild --lockfile_mode=update //...` (re-pinning any stale Maven
-lock it names, see below), then the two checks, again
+`bazel mod deps` and `bazel build --nobuild --lockfile_mode=update //...`, again
 without the `.bazelrc.user` (regenerating through it writes a lock that omits
-the registry entry for rules_dart). Commit the changed lock with the change that
-made it stale.
+the registry entry for rules_dart). A stale Maven lock fails these steps; see
+"Maven lock files" below for the re-pin, then refresh again. Commit the changed
+lock with the change that made it stale.
 
 Analysing `//...` needs every platform's toolchain, so run it on macOS. CI does
 not run it. Each `E2E` job builds with the workspace's committed `.bazelrc`, so
@@ -284,7 +285,7 @@ overridden by a dependency's higher version. A lock lets Bazel replay the last
 evaluation without printing either, so the lock check also evaluates the extension
 afresh: `REPIN=1 bazel fetch --repo=@<install> --lockfile_mode=off` on a new
 server, in the repository root and every workspace with a pinned install, and
-fails on either warning (`mavenWarnings` in `tools/lockfile_check/lockfile_check.dart`).
+fails on either warning (`mavenWarnings` in `tools/maven_locks/maven_locks.dart`).
 It ignores the workspace's `.bazelrc`, which evaluating an extension does not read.
 
 The root `maven.install` also passes Coursier `--reconciliation *:*:relaxed`
@@ -296,7 +297,7 @@ make the root install's `androidx.lifecycle` entries unnecessary: without the
 lines that pin `lifecycle-livedata`, `-livedata-core` and
 `-viewmodel-savedstate` to 2.10.0, Coursier resolves but takes the old versions
 other artifacts ask for (2.0.0, 2.6.1, 2.6.1, and `savedstate` 1.2.1) beside
-`lifecycle-runtime` 2.10.0. `//tools/lockfile_check:root_lock_test` fails on a
+`lifecycle-runtime` 2.10.0. `//tools/maven_locks:root_lock_test` fails on a
 root lock where the group is not at one version.
 
 The root's lock is the one consumers get. When rules_flutter is a dependency
@@ -309,25 +310,30 @@ The e2e workspaces do exactly that, so they carry their own.
 
 A stale lock fails the build, at the point the repo loads:
 `rules_android_maven_install.json contains an invalid input signature ... must
-be regenerated`. The lock check finds it: `build --nobuild //...` in each e2e
-workspace, and `bazel fetch --repo=@rules_android_maven` for the root's. It also
-fails a `maven.install` in the root or an e2e `MODULE.bazel` that names no
-`lock_file` (installs a dependency declares are not seen; that is why
-`bazel_worker_maven` is declared in the three workspaces).
+be regenerated`. `bazel run @overhead//locks` finds it in each e2e workspace
+(`build --nobuild //...`), and the Maven check of rules_flutter's own finds the
+root's: `bazel fetch --repo=@rules_android_maven`. That check is
+
+    bazel run //tools/maven_locks
+
+and also fails a `maven.install` in the root or an e2e `MODULE.bazel` that names
+no `lock_file` (installs a dependency declares are not seen; that is why
+`bazel_worker_maven` is declared in the three workspaces), and the warnings
+above. Run both commands; neither covers the other.
 
 To regenerate, after a change to the artifacts or to a module that contributes
 them:
 
-    bazel run //tools/lockfile_check -- --refresh e2e/hello_world
+    bazel run //tools/maven_locks -- --refresh e2e/hello_world
+    bazel run @overhead//locks -- --refresh e2e/hello_world
 
-re-pins every stale Maven repo of that workspace (`REPIN=1 bazel run
-@rules_android_maven//:pin` underneath, run in the workspace) along with the
-`MODULE.bazel.lock` refresh above. The root's lock is re-pinned by hand,
-`REPIN=1 bazel run @rules_android_maven//:pin` in the repository root, and then
-every Android e2e lock the change reaches with `--refresh`. Pinning resolves
-through Coursier, so it needs Maven Central and maven.google.com, and the
-`ANDROID_HOME` and `ANDROID_NDK_HOME` the workspace needs. Commit the changed
-lock with the change that made it stale. A new `maven.install` needs its lock
+The first re-pins every stale Maven repo of that workspace (`REPIN=1 bazel run
+@rules_android_maven//:pin` underneath, run in the workspace); the second
+refreshes its `MODULE.bazel.lock` as above. The root's lock is re-pinned the same
+way, `bazel run //tools/maven_locks -- --refresh .`, and then every Android e2e
+lock the change reaches. Pinning resolves through Coursier, so it needs Maven
+Central and maven.google.com, and the `ANDROID_HOME` and `ANDROID_NDK_HOME` the
+workspace needs. Commit the changed lock with the change that made it stale. A new `maven.install` needs its lock
 file to exist first (an empty file will do); the run then fills it.
 
 ## 2. dev_tool tests
@@ -1703,7 +1709,7 @@ script's own package requires ≥ 3.13.
 | Toolchain / SDK, or any action's inputs from the Dart SDK | smoke, hello_world, and `//flutter/tests:sdk_inputs_test` with `//flutter/tests/sdk_sets:sdk_sets_test` (see § "SDK inputs") |
 | Anything that downloads (`download*` in a repository rule, `ARTIFACT_CHECKSUMS` / `source_sha256` in `versions.bzl`, `flutter_pub_package`, `update_flutter_version`) | Root `//flutter/tests:download_digests_test` (every table digest is 64-hex, for every version, host, target and mode the macros iterate) and `//flutter/tests:pinned_test` (what counts as a digest) and `//tools/download_guard/...` (every `download*` call in `//flutter` passes its digest through `pinned()`, which refuses a missing or malformed one before the request; a hosted pub package goes through rules_dart's `fetch_pub_archive`, which the lint accepts only when it is loaded from `@rules_dart//dart/pub:pub_lock_package.bzl` and given a `sha256`), **and** `dart run tools/dev_tool/tool/e2e.dart test/e2e/digest_pinned_e2e_test.dart test/e2e/digest_missing_e2e_test.dart test/e2e/pub_archive_e2e_test.dart test/e2e/sdk_source_e2e_test.dart` (what a fetch does with a good, a bad and a missing digest, and what a Flutter SDK package's fetch from the source tarball does with a package that is, and is not, in it; needs no device; the generated workspace resolves its modules from Bazel's registry or repository cache) |
 | A new or removed e2e workspace, or where one runs in CI (`tools/ci_matrix/e2e_matrix.dart`, `.github/workflows/ci.yaml`) | `bazel run //tools/ci_matrix` (fails on a gap) and `bazel test //tools/ci_matrix/...` |
-| Maven artifacts (a `maven.install` in any `MODULE.bazel`, or a bump of `rules_android` or `rules_jvm_external`) | `bazel run //tools/lockfile_check -- --refresh` on hello_world, plugin_example and android_example, and the root's lock by hand — see "Maven lock files" in § 1 |
+| Maven artifacts (a `maven.install` in any `MODULE.bazel`, or a bump of `rules_android` or `rules_jvm_external`) | `bazel run //tools/maven_locks -- --refresh` on hello_world, plugin_example, android_example and `.`, then `bazel run @overhead//locks -- --refresh` on each — see "Maven lock files" in § 1 |
 | dev_tool (unit) | `bazel test //tools/dev_tool/...` (already covered by root `//...`) |
 | dev_tool (e2e) | `dart run tools/dev_tool/tool/e2e.dart` — needs a Dart ≥3.13 on `PATH`, see § 2 |
 | dev_tool reload paths (`run_command.dart`, `vm_service_client.dart`, `hot_reload/**`, `session.dart`, `reload_pipeline.dart`) | dev_tool unit + e2e **and** manual hot reload **and** hot restart — see "Hot reload / hot restart (manual)" |
