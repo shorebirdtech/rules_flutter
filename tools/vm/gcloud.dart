@@ -49,7 +49,7 @@ Future<String> getZone() async {
 /// Wait for a VM to be ready (SSH-able for Linux, RDP-able for Windows).
 Future<void> waitForSsh(
   String vmName, {
-  Duration timeout = const Duration(minutes: 5),
+  Duration timeout = const Duration(minutes: 8),
 }) async {
   final deadline = DateTime.now().add(timeout);
   stderr.writeln('Waiting for $vmName to accept SSH ...');

@@ -120,7 +120,7 @@ Future<void> main(List<String> args) async {
 
   // Wait for startup script to complete.
   print('Waiting for startup script to complete ...');
-  final deadline = DateTime.now().add(const Duration(minutes: 5));
+  final deadline = DateTime.now().add(const Duration(minutes: 8));
   while (true) {
     final result = await sshRun(
       vmName,
