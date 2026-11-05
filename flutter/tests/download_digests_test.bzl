@@ -3,7 +3,8 @@
 The property: for every pinned Flutter version, every archive the repository
 rules fetch (engine artifacts for each host, cross target, desktop target,
 build mode and ABI; the framework source tarball; the Linux sysroot) has a
-recorded sha256 that is exactly 64 lowercase hex characters.
+recorded sha256 that is exactly 64 lowercase hex characters, and so does each
+host's Chrome for Testing archive.
 
 Why this form. `versions_test.bzl` checks the tables against a list of paths
 written out in the test, so a download added to a repository rule but not to
@@ -24,6 +25,7 @@ load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load(
     "//flutter/private:artifact_urls.bzl",
     "android_engine_artifact_path",
+    "chrome_for_testing_url",
     "cpp_client_wrapper_artifact_path",
     "dart_sdk_artifact_path",
     "desktop_engine_artifact_path",
@@ -50,6 +52,7 @@ load(
 load(
     "//flutter/private:versions.bzl",
     "ARTIFACT_CHECKSUMS",
+    "CHROME_FOR_TESTING",
     "FLUTTER_VERSIONS",
     "LINUX_SYSROOT_CHECKSUMS",
 )
@@ -169,10 +172,29 @@ def _every_version_has_a_table_test_impl(ctx):
         asserts.true(env, version in FLUTTER_VERSIONS, "ARTIFACT_CHECKSUMS has a table for unknown Flutter " + version)
     return unittest.end(env)
 
+def _chrome_for_testing_digests_test_impl(ctx):
+    # The runtime web integration tests run in: one archive per host it exists
+    # for, fetched only when a test needs it, and pinned like everything else.
+    env = unittest.begin(ctx)
+    asserts.true(env, CHROME_FOR_TESTING.version, "CHROME_FOR_TESTING has no version")
+    asserts.true(env, len(CHROME_FOR_TESTING.sha256) > 0, "CHROME_FOR_TESTING pins no host")
+    for platform, digest in CHROME_FOR_TESTING.sha256.items():
+        asserts.true(
+            env,
+            _is_sha256(digest),
+            ("CHROME_FOR_TESTING.sha256[{}] is not 64 lowercase hex characters; a fetch of {} would be unverified. " +
+             "Run `bazel run //tools/update_chrome_for_testing`").format(
+                platform,
+                chrome_for_testing_url(CHROME_FOR_TESTING.version, platform),
+            ),
+        )
+    return unittest.end(env)
+
 _t0_test = unittest.make(_every_derived_download_has_a_digest_test_impl)
 _t1_test = unittest.make(_no_stray_or_blank_table_entries_test_impl)
 _t2_test = unittest.make(_source_tarball_and_sysroot_digests_test_impl)
 _t3_test = unittest.make(_every_version_has_a_table_test_impl)
+_t4_test = unittest.make(_chrome_for_testing_digests_test_impl)
 
 def download_digests_test_suite(name):
-    unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test)
+    unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test)

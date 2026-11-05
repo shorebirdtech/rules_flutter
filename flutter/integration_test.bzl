@@ -19,18 +19,20 @@ Tier 2, the composable rules:
   `main`, plus extra `srcs`, `deps` and `defines`.
 - `flutter_desktop_integration_test`: runs a desktop app on the host's desktop.
 - `flutter_desktop_runner`: where it runs.
+- `flutter_chrome_runner`: a headless Chrome of its own, where a web test runs.
 """
 
 load("//flutter:macos.bzl", "flutter_macos_app")
 load("//flutter/private:flutter_application_variant.bzl", _flutter_application_variant = "flutter_application_variant")
 load("//flutter/private:flutter_integration_bootstrap.bzl", _flutter_integration_bootstrap = "flutter_integration_bootstrap")
-load("//flutter/private:flutter_integration_test.bzl", _flutter_desktop_integration_test = "flutter_desktop_integration_test", _flutter_desktop_runner = "flutter_desktop_runner")
+load("//flutter/private:flutter_integration_test.bzl", _flutter_chrome_runner = "flutter_chrome_runner", _flutter_desktop_integration_test = "flutter_desktop_integration_test", _flutter_desktop_runner = "flutter_desktop_runner")
 load("//flutter/private:test_config.bzl", "find_test_config")
 
 flutter_application_variant = _flutter_application_variant
 flutter_integration_bootstrap = _flutter_integration_bootstrap
 flutter_desktop_integration_test = _flutter_desktop_integration_test
 flutter_desktop_runner = _flutter_desktop_runner
+flutter_chrome_runner = _flutter_chrome_runner
 
 # What an integration test's program imports beyond the application.
 _REQUIRED_PACKAGES = ["integration_test", "flutter_test"]

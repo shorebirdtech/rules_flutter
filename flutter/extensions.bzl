@@ -16,6 +16,7 @@ load("@rules_dart//dart/ext:registry.bzl", "curated_code_assets")
 load("@rules_dart//dart/pub:pub_lock_package.bzl", "check_pub_archive_sha256")
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_lock")
 load("//flutter/private:android_plugin_maven.bzl", "flutter_android_maven")
+load("//flutter/private:flutter_chrome_for_testing.bzl", "flutter_chrome_for_testing")
 load("//flutter/private:flutter_framework_package.bzl", "flutter_framework_package")
 load("//flutter/private:flutter_gen_l10n_repo.bzl", "flutter_gen_l10n_repo")
 load("//flutter/private:flutter_pub_index.bzl", "flutter_pub_index", "index_repo", "library_repo", "source_repo")
@@ -25,7 +26,7 @@ load("//flutter/private:flutter_pub_package.bzl", "flutter_pub_package")
 load("//flutter/private:flutter_unsupported_package.bzl", "flutter_unsupported_package", "unsupported_package_message")
 load("//flutter/private:lock_entry_kind.bzl", "ENGINE_PROVIDED", "FLUTTER_FRAMEWORK", "FLUTTER_SOURCE", "HOSTED", "lock_entry_kind")
 load("//flutter/private:pub_lock_sdks.bzl", "parse_lock_sdk_constraints", "version_below_lower_bound")
-load("//flutter/private:versions.bzl", "flutter_source_sha256")
+load("//flutter/private:versions.bzl", "CHROME_FOR_TESTING", "flutter_source_sha256")
 load(":repositories.bzl", "flutter_register_toolchains")
 
 _DEFAULT_NAME = "flutter"
@@ -134,6 +135,18 @@ def _toolchain_extension(module_ctx):
             hub_name = "gen_l10n_deps",
         )
         selected_versions[name] = selected
+
+    # The browser web integration tests run in, one repository per host it is
+    # built for. Declared unconditionally: a repository is fetched only when
+    # something references it, and only the `chrome` runner of
+    # `//flutter/integration_test` does, selecting the host's own.
+    for platform, sha256 in CHROME_FOR_TESTING.sha256.items():
+        flutter_chrome_for_testing(
+            name = "flutter_chrome_for_testing_" + platform.replace("-", "_"),
+            platform = platform,
+            version = CHROME_FOR_TESTING.version,
+            sha256 = sha256,
+        )
 
     # Collect user-supplied overlay roots from `flutter.plugin_overlays(...)`
     # tags. They're applied to every flutter_pub_package invocation in

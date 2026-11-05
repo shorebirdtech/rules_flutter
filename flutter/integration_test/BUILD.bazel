@@ -1,4 +1,4 @@
-load("//flutter/private:flutter_integration_test.bzl", "flutter_desktop_runner")
+load("//flutter/private:flutter_integration_test.bzl", "flutter_chrome_runner", "flutter_desktop_runner")
 
 # The runners an integration test rule defaults to, one per family of device.
 
@@ -6,4 +6,54 @@ load("//flutter/private:flutter_integration_test.bzl", "flutter_desktop_runner")
 flutter_desktop_runner(
     name = "desktop",
     visibility = ["//visibility:public"],
+)
+
+# A pinned Chrome for Testing headless shell, the browser a web integration
+# test runs in. Each host's own is a repository of its own, and only the one
+# the test runs on is fetched. A test runs on its host, so the host's platform
+# is the one to select on. A host with no pinned shell gets
+# `@platforms//:incompatible`, and a web integration test is skipped there
+# rather than run in some other browser.
+flutter_chrome_runner(
+    name = "chrome",
+    chrome = select({
+        ":chrome_linux_x64": "@flutter_chrome_for_testing_linux64//:chrome",
+        ":chrome_macos_arm64": "@flutter_chrome_for_testing_mac_arm64//:chrome",
+        ":chrome_macos_x64": "@flutter_chrome_for_testing_mac_x64//:chrome",
+        ":chrome_windows_x64": "@flutter_chrome_for_testing_win64//:chrome",
+        "//conditions:default": "@platforms//:incompatible",
+    }),
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "chrome_linux_x64",
+    constraint_values = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+)
+
+config_setting(
+    name = "chrome_macos_arm64",
+    constraint_values = [
+        "@platforms//cpu:arm64",
+        "@platforms//os:macos",
+    ],
+)
+
+config_setting(
+    name = "chrome_macos_x64",
+    constraint_values = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:macos",
+    ],
+)
+
+config_setting(
+    name = "chrome_windows_x64",
+    constraint_values = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:windows",
+    ],
 )

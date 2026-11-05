@@ -199,6 +199,14 @@ build_test(
     targets = [":dart_code_asset_bridge_probe"],
 )
 
+# The pinned Chrome for Testing shell of this host downloads, verifies and
+# unpacks, and the runner that names it analyses. Builds nothing on a host with
+# no pinned shell, where the runner is incompatible.
+build_test(
+    name = "chrome_runner_build_test",
+    targets = ["//flutter/integration_test:chrome"],
+)
+
 validation_test_suite(name = "validation_test")
 
 path_mapping_test_suite(name = "path_mapping_test")

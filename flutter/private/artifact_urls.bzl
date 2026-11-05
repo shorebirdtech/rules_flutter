@@ -1,7 +1,7 @@
 """URL construction helpers for the archives rules_flutter downloads.
 
-Two independent origins, and the distinction matters when reading the rest of
-this file:
+Three independent origins, and the distinction matters when reading the rest
+of this file:
 
   * **Engine artifacts** — prebuilt binaries (gen_snapshot, frontend_server,
     the patched SDK, per-platform engine libraries), hosted on Google Cloud
@@ -21,11 +21,31 @@ this file:
       - `flutter_dev_root_repo` → `packages` and the sky_engine tree.
 
     The URL is built here rather than restated in each of them.
+
+  * **Chrome for Testing** — the browser web integration tests run in, hosted by
+    the Chrome for Testing project, keyed by *Chrome version* and host
+    platform; unrelated to the Flutter version.
 """
 
 _GCS_BASE = "https://storage.googleapis.com/flutter_infra_release/flutter"
 
 _SOURCE_TARBALL_TEMPLATE = "https://github.com/flutter/flutter/archive/refs/tags/{version}.tar.gz"
+
+_CHROME_FOR_TESTING_TEMPLATE = "https://storage.googleapis.com/chrome-for-testing-public/{version}/{platform}/chrome-headless-shell-{platform}.zip"
+
+def chrome_for_testing_url(version, platform):
+    """Constructs the download URL for a Chrome for Testing headless shell.
+
+    Args:
+        version: Chrome version (e.g. "157.0.8103.38").
+        platform: Chrome for Testing's name for the host: `mac-arm64`, `mac-x64`,
+            `linux64` or `win64`.
+
+    Returns:
+        The full HTTPS URL of the archive, which extracts to one
+        `chrome-headless-shell-<platform>/` directory.
+    """
+    return _CHROME_FOR_TESTING_TEMPLATE.format(version = version, platform = platform)
 
 def flutter_source_tarball_url(flutter_version):
     """Constructs the download URL for the Flutter framework source tarball.

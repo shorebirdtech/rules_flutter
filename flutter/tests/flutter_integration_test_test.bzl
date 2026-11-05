@@ -124,6 +124,27 @@ stub_runner = rule(
     doc = "A runner of a family, for a test of what a test rule does with one.",
 )
 
+# -- The Chrome runner -------------------------------------------------------
+
+def _chrome_runner_impl(ctx):
+    """The Chrome runner names its browser by runfiles path and brings everything the browser needs."""
+    env = analysistest.begin(ctx)
+    runner = analysistest.target_under_test(env)[FlutterIntegrationRunnerInfo]
+    asserts.equals(env, "web", runner.family)
+    asserts.equals(
+        env,
+        "_main/flutter/tests/integration_fixture/fake_chrome/chrome-headless-shell",
+        runner.launcher_config.chrome,
+        "the runner reads the browser from the runfiles",
+    )
+    brought = sorted([f.basename for f in runner.runfiles.to_list()])
+    asserts.equals(env, ["chrome-headless-shell", "resources.pak"], brought, "the executable and the files beside it that it needs")
+    asserts.equals(env, "1", runner.execution_requirements.get("no-remote"))
+    asserts.equals(env, "1", runner.execution_requirements.get("no-sandbox"))
+    return analysistest.end(env)
+
+_chrome_runner_test = analysistest.make(_chrome_runner_impl)
+
 # -- The variant's package check ---------------------------------------------
 
 def _missing_package_impl(ctx):
@@ -159,6 +180,7 @@ def flutter_integration_test_test_suite(name):
         name_of_target = "bootstrap_with_config",
         configured = True,
     )
+    _chrome_runner_test(name = name + "_chrome_runner", target_under_test = _FIXTURE + "chrome_runner")
     _test_rule_test(name = name + "_test_rule", target_under_test = _FIXTURE + "desktop_test")
     _wrong_family_test(name = name + "_wrong_family", target_under_test = _FIXTURE + "desktop_test_on_a_web_runner")
     _missing_package_test(name = name + "_missing_package", target_under_test = _FIXTURE + "program_missing_a_package")
@@ -169,6 +191,7 @@ def flutter_integration_test_test_suite(name):
             ":" + name + "_content",
             ":" + name + "_bootstrap",
             ":" + name + "_bootstrap_with_config",
+            ":" + name + "_chrome_runner",
             ":" + name + "_test_rule",
             ":" + name + "_wrong_family",
             ":" + name + "_missing_package",

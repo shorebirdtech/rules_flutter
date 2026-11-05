@@ -12,6 +12,7 @@ load("//flutter:providers.bzl", "FlutterIntegrationRunnerInfo")
 load("//flutter/private:dbg_transition.bzl", "dbg_transition")
 
 DESKTOP = "desktop"
+WEB = "web"
 
 # What a runner of every family asks of the test's placement: the app runs on
 # this machine, in this machine's session, so neither a remote executor nor
@@ -39,6 +40,36 @@ awake display; the runner checks both before it launches the app and fails,
 saying which, when either is not so. It holds the display awake for the run
 and takes a lock on the screen (`macos-gui`), because a window that is covered
 stops producing frames, so two tests share the screen one after the other.""",
+)
+
+def _flutter_chrome_runner_impl(ctx):
+    chrome = ctx.file.chrome
+    return [DefaultInfo(files = depset([chrome])), FlutterIntegrationRunnerInfo(
+        family = WEB,
+        launcher_config = struct(chrome = runfiles_path(chrome, ctx.workspace_name)),
+        # The browser and what it needs beside itself: `chrome` is the file to
+        # run and its `data` the libraries and resources it loads.
+        runfiles = depset([chrome], transitive = [ctx.attr.chrome[DefaultInfo].default_runfiles.files]),
+        execution_requirements = dict(_EXECUTION_REQUIREMENTS),
+        target_compatible_with = [],
+    )]
+
+flutter_chrome_runner = rule(
+    implementation = _flutter_chrome_runner_impl,
+    attrs = {
+        "chrome": attr.label(
+            doc = "The browser: a target whose one file is the executable, carrying the rest of the browser as `data` (the Chrome for Testing repositories' `chrome`).",
+            mandatory = True,
+            allow_single_file = True,
+        ),
+    },
+    doc = """Runs a web integration test in a headless Chrome of the runner's own.
+
+`chrome` is the executable the test launches, on a profile of its own that is
+deleted when the test ends; the browser is the one the runner names rather than
+one found on the host, so the page is drawn by the same browser everywhere the
+test runs. The default runner, `@rules_flutter//flutter/integration_test:chrome`,
+is a pinned Chrome for Testing headless shell for the host.""",
 )
 
 def integration_test_impl(ctx, family, inherited_environment = []):

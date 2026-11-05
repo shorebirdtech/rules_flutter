@@ -1,4 +1,4 @@
-load("//flutter:integration_test.bzl", "flutter_application_variant", "flutter_desktop_integration_test", "flutter_integration_bootstrap")
+load("//flutter:integration_test.bzl", "flutter_application_variant", "flutter_chrome_runner", "flutter_desktop_integration_test", "flutter_integration_bootstrap")
 load("//flutter/tests:flutter_integration_test_test.bzl", "stub_runner")
 
 package(default_visibility = ["//flutter/tests:__subpackages__"])
@@ -51,5 +51,20 @@ flutter_application_variant(
     application = "//flutter/tests/variant_fixture/app",
     main = "test/a_test.dart",
     requires_packages = ["variant_base_plugin"],
+    tags = ["manual"],
+)
+
+# A browser shaped as the Chrome for Testing repository's: an executable, with
+# what it needs beside it as `data`.
+filegroup(
+    name = "fake_chrome",
+    srcs = ["fake_chrome/chrome-headless-shell"],
+    data = ["fake_chrome/resources.pak"],
+    tags = ["manual"],
+)
+
+flutter_chrome_runner(
+    name = "chrome_runner",
+    chrome = ":fake_chrome",
     tags = ["manual"],
 )
