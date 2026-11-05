@@ -89,21 +89,32 @@ void main() {
   });
 
   group('a lock entry for a Flutter SDK package', () {
-    /// The five SDK packages rules_flutter lists are provided by the hub.
-    test('flutter_driver, one of the listed ones, is in the hub', () async {
+    /// Every `sdk: flutter` entry is in the hub, whatever its name: the hub
+    /// takes them from the lock, not from a list of the packages it knows.
+    test('an `sdk: flutter` entry is in the hub', () async {
+      final names = [
+        'flutter_driver',
+        'integration_test',
+        'fuchsia_remote_debug_protocol',
+      ];
       final ws = await PubInputsFixture(
         hosted: [HostedPackage('good')],
-        extraLockEntries: '''
-  flutter_driver:
+        extraLockEntries: [
+          for (final name in names)
+            '''
+  $name:
     dependency: "direct dev"
     description: flutter
     source: sdk
     version: "0.0.0"
 ''',
+        ].join(),
       ).materialize();
       final result = await ws.query('@pubhub//:all');
       expect(result.succeeded, isTrue, reason: '$result');
-      expect(result.stdout, contains('@pubhub//:flutter_driver'));
+      for (final name in names) {
+        expect(result.stdout, contains('@pubhub//:$name'));
+      }
     });
   });
 

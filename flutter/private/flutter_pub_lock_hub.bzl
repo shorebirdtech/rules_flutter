@@ -2,7 +2,7 @@
 
 Mirrors `rules_dart//dart/pub:pub_lock_hub.bzl`'s top-level alias
 structure (`@<hub>//:pkg` → the package's library: `@<hub>_lib__<pkg>//:<pkg>`
-for a hosted package, whose dependency cycle is built as one target, and
+for a built package, whose dependency cycle is built as one target, and
 `@<hub>__<pkg>//:<pkg>` for the lock's other entries) and additionally
 emits an `android/BUILD.bazel` containing the
 `all_android_plugin_libs` aggregator. The aggregator is a
@@ -31,7 +31,7 @@ def _flutter_pub_lock_hub_impl(ctx):
     spoke_prefix = ctx.attr.spoke_prefix if ctx.attr.spoke_prefix else ctx.attr.hub_name
 
     # Top-level aliases — same shape as rules_dart's pub_lock_hub.
-    hosted = {pkg: True for pkg in ctx.attr.hosted_packages}
+    built = {pkg: True for pkg in ctx.attr.built_packages}
     aliases = []
     for pkg in ctx.attr.packages:
         aliases.append("""\
@@ -41,17 +41,17 @@ alias(
     visibility = ["//visibility:public"],
 )""".format(
             pkg = pkg,
-            repo = library_repo(spoke_prefix, pkg) if pkg in hosted else source_repo(spoke_prefix, pkg),
+            repo = library_repo(spoke_prefix, pkg) if pkg in built else source_repo(spoke_prefix, pkg),
         ))
     ctx.file("BUILD.bazel", "\n\n".join(aliases) + "\n")
 
     # `android/all_android_plugin_libs` aggregator. Every source repository
     # unconditionally exposes `android:lib` (a plugin's Android library is its
     # own, whatever dependency cycle its Dart is built in), so the deps list is
-    # just the package list mapped to `@<hub>__<pkg>//android:lib`.
+    # the `android_packages` mapped to `@<hub>__<pkg>//android:lib`.
     android_deps = [
         '"@{repo}//android:lib"'.format(repo = source_repo(spoke_prefix, pkg))
-        for pkg in ctx.attr.packages
+        for pkg in ctx.attr.android_packages
     ]
     deps_block = ",\n        ".join(android_deps)
     if deps_block:
@@ -110,9 +110,13 @@ flutter_pub_lock_hub = repository_rule(
             doc = "All package names of the lock to create aliases and Android-aggregator deps for.",
             mandatory = True,
         ),
-        "hosted_packages": attr.string_list(
-            doc = "The hosted ones among `packages`: their alias is their library repository's, the others' their one repository's.",
+        "built_packages": attr.string_list(
+            doc = "The built ones among `packages` (hosted, and Flutter SDK packages built from the Flutter source): their alias is their library repository's, the others' their one repository's.",
             default = [],
+        ),
+        "android_packages": attr.string_list(
+            doc = "The ones among `packages` whose `android:lib` the `all_android_plugin_libs` aggregator exports.",
+            mandatory = True,
         ),
     },
     doc = "Creates a Flutter pub hub repo with both the standard top-level package aliases " +

@@ -50,6 +50,14 @@ void main() {
   final wrongDigest = '0' * 64;
   const revision = fakeEngineRevision;
 
+  // A Flutter SDK package is fetched from the source tarball of a release.
+  final flutterSource = tarGzOf({
+    'flutter-$fakeFlutterVersion/packages/integration_test/pubspec.yaml':
+        'name: integration_test\nenvironment:\n  sdk: ^3.0.0\n',
+    'flutter-$fakeFlutterVersion/packages/integration_test/lib/a.dart':
+        'const x = 1;\n',
+  });
+
   // One archive under each file name the rules ask for. Bazel serves a
   // download that names a digest from the distdir by file name.
   final archives = {
@@ -64,6 +72,7 @@ void main() {
     ])
       name: archive,
     for (final host in hostPlatforms) 'dart-sdk-$host.zip': dartSdk,
+    '$fakeFlutterVersion.tar.gz': flutterSource,
   };
 
   final pubArchive = tarGzOf({
@@ -149,6 +158,13 @@ void main() {
           }),
         }),
         pub('pub_ok', pubDigest),
+        ProbeRepo('sdk_source_ok', 'flutter_pub_package', {
+          'package_name': str('integration_test'),
+          'version': str('0.0.0'),
+          'sha256': str(sha256Hex(flutterSource)),
+          'flutter_source_version': str(fakeFlutterVersion),
+          'hub_name': str('probe_hub'),
+        }),
         // A digest that is a SHA-256 but not these bytes'.
         ProbeRepo('sky_wrong', 'flutter_sky_engine_repo', {
           'engine_revision': str(revision),
@@ -177,6 +193,7 @@ void main() {
       'cross_ok',
       'web_sdk_ok',
       'pub_ok',
+      'sdk_source_ok',
     ]) {
       test(name, () async {
         final result = await fetcher.fetch(name);

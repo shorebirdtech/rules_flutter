@@ -234,6 +234,34 @@ flutter_test(
     ],
 )
 
+# `package:integration_test` is a Flutter SDK package: `pubspec.lock` lists it as
+# `source: sdk`, and it is built from the pinned Flutter source like a hosted
+# package. Its binding must initialise and pump a widget under flutter_tester.
+flutter_test(
+    name = "integration_binding_test",
+    package_name = "hello_world",
+    srcs = [
+        "lib/common_widgets.dart",
+        "lib/main.dart",
+    ],
+    main = "test/integration_binding_test.dart",
+    deps = [
+        "@deps//:cupertino_icons",
+        "@deps//:flutter",
+        "@deps//:flutter_localized_locales",
+        "@deps//:flutter_test",
+        "@deps//:integration_test",
+        "@rules_flutter//flutter:material_icons",
+    ],
+)
+
+# `flutter_driver`, and `fuchsia_remote_debug_protocol` which it depends on and
+# which no pubspec of ours names, build from the Flutter source too.
+build_test(
+    name = "flutter_driver_build_test",
+    targets = ["@deps//:flutter_driver"],
+)
+
 # `assert`s fire in a `flutter_test`, as under `flutter test`, whichever way the
 # test is built: per-library kernel modules or one whole-program compile
 # (`--@rules_dart//dart:modular_kernel=false`), `-c fastbuild` or `-c dbg`. The

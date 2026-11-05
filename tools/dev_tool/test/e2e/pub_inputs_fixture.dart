@@ -2,9 +2,10 @@
 /// test writes, served from `file://` so no network is involved.
 ///
 /// The hub is the real one: `flutter.pub()` in the module extension, one
-/// `flutter_pub_package` repository per hosted package, `flutter_sdk_package`
-/// per `sdk: flutter` entry. A test chooses what the lock holds and what each
-/// archive contains, then asks Bazel to load a package of a spoke
+/// `flutter_pub_package` repository per hosted package and per `sdk: flutter`
+/// entry but `flutter` (whose `flutter_framework_package` is its own). A test
+/// chooses what the lock holds and what each archive contains, then asks Bazel
+/// to load a package of a spoke
 /// ([PubInputsWorkspace.query]); the answer is whatever rules_flutter does
 /// with that input.
 ///

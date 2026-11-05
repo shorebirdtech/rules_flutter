@@ -14,9 +14,9 @@ this file:
     that needs Flutter's own Dart source, and they differ only in which subtree
     they strip to:
 
-      - `flutter_sdk_package` → `packages/<name>`, once per SDK package in the
-        lock (flutter, flutter_test, flutter_driver, flutter_localizations,
-        flutter_web_plugins),
+      - `flutter_framework_package` → `packages/flutter`, and
+        `flutter_pub_package` → `packages/<name>` for every other SDK package
+        in the lock (flutter_test, flutter_driver, integration_test, ...),
       - `flutter_gen_l10n_repo` → `packages/flutter_tools`,
       - `flutter_dev_root_repo` → `packages` and the sky_engine tree.
 

@@ -16,3 +16,5 @@ dependencies:
   record_android: 1.5.1
 dev_dependencies:
   very_good_analysis: ^10.3.0
+  integration_test:
+    sdk: flutter

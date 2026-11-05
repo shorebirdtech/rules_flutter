@@ -164,6 +164,12 @@ bzl_library(
 )
 
 bzl_library(
+    name = "lock_entry_kind",
+    srcs = ["lock_entry_kind.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+)
+
+bzl_library(
     name = "pub_lock_sdks",
     srcs = ["pub_lock_sdks.bzl"],
     visibility = ["//flutter:__subpackages__"],
@@ -616,8 +622,8 @@ bzl_library(
 )
 
 bzl_library(
-    name = "flutter_sdk_package",
-    srcs = ["flutter_sdk_package.bzl"],
+    name = "flutter_framework_package",
+    srcs = ["flutter_framework_package.bzl"],
     visibility = ["//flutter:__subpackages__"],
     deps = [
         ":artifact_urls",

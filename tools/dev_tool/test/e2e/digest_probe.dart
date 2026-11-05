@@ -101,6 +101,16 @@ class Probe {
   /// Where `--distdir` points; each archive is a file here.
   String get distdir => p.join(_workspace.root, 'distdir');
 
+  /// Runs `bazel [args]` in the workspace.
+  Future<FetchResult> bazel(List<String> args) async {
+    final result = await Process.run(
+      'bazel',
+      args,
+      workingDirectory: _workspace.root,
+    );
+    return FetchResult(result.exitCode, '${result.stdout}\n${result.stderr}');
+  }
+
   /// Fetch repository [name], and nothing else.
   ///
   /// No retries: an unpinned fetch of a revision that does not exist is a 404,

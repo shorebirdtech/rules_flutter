@@ -1,10 +1,16 @@
 """flutter_pub_package — the `flutter pub get` analog for a single hosted
-Flutter pub.dev package.
+Flutter pub.dev package, or a Flutter SDK package built from the pinned
+Flutter source.
 
-For each package in a Flutter app's pubspec.lock this rule:
+For each such package in a Flutter app's pubspec.lock this rule:
   1. Downloads the same `pub.dev/api/packages/<name>/versions/<version>.tar.gz`
      archive, checked against `pubspec.lock`'s digest, that rules_dart's
-     `pub_lock_package` would (through the shared `fetch_pub_archive`).
+     `pub_lock_package` would (through the shared `fetch_pub_archive`). A
+     Flutter SDK package (`sdk: flutter` in the lock: `flutter_test`,
+     `integration_test`, `flutter_driver`, ...) has no archive: with
+     `flutter_source_version` set, its tree is `packages/<name>` of the
+     toolchain's pinned Flutter source tarball, checked against that
+     tarball's recorded digest. Everything after this step is the same.
   2. Reads the package's pubspec.yaml.
   3. Parses `flutter.plugin.platforms` via `parse_flutter_plugin_block`.
   4. Scans the extracted package tree for per-platform Apple source layouts
@@ -41,10 +47,12 @@ load("@rules_dart//dart/pub:pub_graph.bzl", "write_pubspec_dependencies")
 load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version", "fetch_pub_archive")
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_deps", "parse_pubspec_sdk_constraint")
 load("//flutter/private:android_plugin_maven.bzl", "gradle_statements", "parse_gradle_maven_dependencies")
+load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url")
 load("//flutter/private:asset_variants.bzl", "variant_scale")
 load("//flutter/private:cmake_link_libraries.bzl", "parse_cmake_link_libraries")
 load("//flutter/private:flutter_pub_index.bzl", "MEMBER_DART", "MEMBER_FILE", "MEMBER_FLUTTER", "MEMBER_OVERLAY", "library_label", "read_index")
 load("//flutter/private:flutter_pubspec.bzl", "parse_flutter_assets_block", "parse_flutter_plugin_block")
+load("//flutter/private:pinned.bzl", "pinned")
 
 # Apple source extensions we sweep into the per-platform plugin library.
 _APPLE_SRC_EXTENSIONS = ("swift", "m", "mm", "h")
@@ -1652,16 +1660,62 @@ def _resolve_overlay(ctx, overlay_root_label, package_name, version, language_ve
         guard_hub_deps = True,
     )
 
-def _flutter_pub_package_impl(ctx):
-    # Downloads, verifies and extracts the archive the way every pub-backed
-    # repository does, so a package is laid out the same whichever rule asks.
-    fetch_pub_archive(
-        ctx,
-        package_name = ctx.attr.package_name,
-        version = ctx.attr.version,
-        sha256 = ctx.attr.sha256,
-        base_url = ctx.attr.base_url,
+# Where the Flutter source's `packages/` is extracted before the one package
+# wanted is moved to the repository root.
+_FLUTTER_PACKAGES_STAGING = "_flutter_packages"
+
+def fetch_flutter_source_package(ctx, package_name, flutter_version, sha256):
+    """Extracts `packages/<package_name>` of the pinned Flutter source at the repository root.
+
+    The tarball is the one every consumer of the framework source fetches,
+    pinned to the same digest, so Bazel's repository cache serves it to all
+    of them from one download. Extracting it with `stripPrefix` straight to
+    the package would fail, for a name the release lacks, with a message about
+    archive prefixes that names neither the package nor the lock. So
+    `packages/` is extracted into a staging directory, the package's
+    pubspec is looked for there, and the package's files are moved up.
+
+    Args:
+        ctx: The `repository_ctx`.
+        package_name: The package under `packages/` of the Flutter source.
+        flutter_version: The Flutter version whose source tarball to fetch.
+        sha256: The recorded digest of that tarball.
+    """
+    ctx.download_and_extract(
+        url = flutter_source_tarball_url(flutter_version),
+        sha256 = pinned(flutter_version + ".tar.gz", sha256),
+        output = _FLUTTER_PACKAGES_STAGING,
+        stripPrefix = "flutter-{}/packages".format(flutter_version),
     )
+    package_dir = ctx.path(_FLUTTER_PACKAGES_STAGING).get_child(package_name)
+    if not package_dir.get_child("pubspec.yaml").exists:
+        fail((
+            "pubspec.lock lists `{name}` from the Flutter SDK, but Flutter {version}'s " +
+            "source has no packages/{name}; re-resolve the lock with the pinned " +
+            "toolchain (`bazel run @rules_flutter//flutter:pub -- get`)."
+        ).format(name = package_name, version = flutter_version))
+    for child in package_dir.readdir():
+        ctx.rename(child, ctx.path(child.basename))
+    ctx.delete(ctx.path(_FLUTTER_PACKAGES_STAGING))
+
+def _flutter_pub_package_impl(ctx):
+    if ctx.attr.flutter_source_version:
+        fetch_flutter_source_package(
+            ctx,
+            package_name = ctx.attr.package_name,
+            flutter_version = ctx.attr.flutter_source_version,
+            sha256 = ctx.attr.sha256,
+        )
+    else:
+        # Downloads, verifies and extracts the archive the way every pub-backed
+        # repository does, so a package is laid out the same whichever rule asks.
+        fetch_pub_archive(
+            ctx,
+            package_name = ctx.attr.package_name,
+            version = ctx.attr.version,
+            sha256 = ctx.attr.sha256,
+            base_url = ctx.attr.base_url,
+        )
 
     pubspec_dependencies = []
     language_version = ""
@@ -1714,7 +1768,7 @@ def _flutter_pub_package_impl(ctx):
         labels = [
             library_label(ctx.attr.hub_name, index, dep)
             for dep in sorted(pubspec_dependencies)
-            if dep in index.hosted or dep in index.other
+            if dep in index.built or dep in index.other
         ]
         return labels + (["@rules_flutter//flutter:material_icons"] if uses_material_icons else [])
 
@@ -2002,20 +2056,25 @@ flutter_pub_package = repository_rule(
     implementation = _flutter_pub_package_impl,
     attrs = {
         "package_name": attr.string(
-            doc = "The pub.dev package name.",
+            doc = "The pub.dev package name, or the name of the Flutter SDK package under `packages/` of the Flutter source.",
             mandatory = True,
         ),
         "version": attr.string(
-            doc = "The package version to download.",
+            doc = "The package version, as pubspec.lock records it (`0.0.0` for an SDK package). Downloaded when `flutter_source_version` is empty.",
             mandatory = True,
         ),
         "sha256": attr.string(
-            doc = "SHA256 hash of the package archive, as pubspec.lock records it. Mandatory: the archive is not fetched without one.",
+            doc = "SHA256 hash of the archive fetched: the package's, as pubspec.lock records it, or, with `flutter_source_version`, the Flutter source tarball's (`flutter_source_sha256`). Mandatory: nothing is fetched without one.",
             mandatory = True,
         ),
         "base_url": attr.string(
-            doc = "Base URL for the pub repository.",
+            doc = "Base URL for the pub repository. Ignored with `flutter_source_version`.",
             default = "https://pub.dev",
+        ),
+        "flutter_source_version": attr.string(
+            doc = "The Flutter version whose pinned source tarball holds this package as `packages/<package_name>`, for a Flutter SDK package " +
+                  "(`source: sdk` in the lock). When empty, the package is downloaded from a pub registry.",
+            default = "",
         ),
         "hub_name": attr.string(
             doc = "Name of the hub repo (for constructing cross-spoke dep labels).",

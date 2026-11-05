@@ -15,13 +15,14 @@ load(":dev_config_test.bzl", "dev_config_test_suite")
 load(":download_digests_test.bzl", "download_digests_test_suite")
 load(":engine_targets_test.bzl", "engine_targets_test_suite")
 load(":flutter_application_test.bzl", "flutter_application_test_suite")
+load(":flutter_framework_package_test.bzl", "flutter_framework_package_test_suite")
 load(":flutter_info_test.bzl", "flutter_info_test_suite")
 load(":flutter_library_test.bzl", "flutter_library_test_suite")
 load(":flutter_plugin_test.bzl", "flutter_plugin_test_suite")
 load(":flutter_pub_library_repo_test.bzl", "flutter_pub_library_repo_test_suite")
+load(":flutter_pub_package_sdk_source_test.bzl", "flutter_pub_package_sdk_source_test_suite")
 load(":flutter_pub_package_test.bzl", "flutter_pub_package_test_suite")
 load(":flutter_pubspec_test.bzl", "flutter_pubspec_test_suite")
-load(":flutter_sdk_package_test.bzl", "flutter_sdk_package_test_suite")
 load(":flutter_test_bootstrap_test.bzl", "flutter_test_bootstrap_test_suite")
 load(":flutter_test_runfiles_test.bzl", "flutter_test_runfiles_test_suite")
 load(":gradle_dependency_forms_test.bzl", "gradle_dependency_forms_test_suite")
@@ -103,11 +104,13 @@ gradle_dependency_gaps_test_suite(name = "gradle_dependency_gaps_test")
 
 flutter_pub_library_repo_test_suite(name = "flutter_pub_library_repo_test")
 
+flutter_framework_package_test_suite(name = "flutter_framework_package_test")
+
+flutter_pub_package_sdk_source_test_suite(name = "flutter_pub_package_sdk_source_test")
+
 flutter_pub_package_test_suite(name = "flutter_pub_package_test")
 
 flutter_pubspec_test_suite(name = "flutter_pubspec_test")
-
-flutter_sdk_package_test_suite(name = "flutter_sdk_package_test")
 
 flutter_test_bootstrap_test_suite(name = "flutter_test_bootstrap_test")
 

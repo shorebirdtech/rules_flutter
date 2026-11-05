@@ -9,6 +9,7 @@ load(
     "@rules_flutter//flutter:ios.bzl",
     "IOS_DEFAULT_LAUNCH_STORYBOARD",
     "IOS_MINIMUM_OS_VERSION",
+    "flutter_ios_app",
     "flutter_ios_engine",
     "flutter_ios_framework_gen",
     "flutter_ios_info_plist_gen",
@@ -47,6 +48,27 @@ flutter_application(
         "//greeting_plugin",
         "@deps//:audio_session",
         "@deps//:flutter",
+        "@deps//:package_info_plus",
+        "@deps//:path_provider",
+        "@deps//:record_android",
+        "@deps//:shared_preferences",
+        "@deps//:url_launcher",
+        "@rules_flutter//flutter:material_icons",
+    ],
+)
+
+# The same app with `package:integration_test`, a Flutter SDK package built from
+# the pinned Flutter source, as a dependency. Its iOS plugin is ObjC: the iOS app
+# below compiles it and registers it.
+flutter_application(
+    name = "integration_app",
+    package_name = "plugin_example",
+    main = "lib/main.dart",
+    deps = [
+        "//greeting_plugin",
+        "@deps//:audio_session",
+        "@deps//:flutter",
+        "@deps//:integration_test",
         "@deps//:package_info_plus",
         "@deps//:path_provider",
         "@deps//:record_android",
@@ -299,6 +321,19 @@ flutter_android_build(
     targets = [":plugin_android"],
 )
 
+flutter_ios_app(
+    name = "integration_ios",
+    app_name = "Integration Example",
+    application = ":integration_app",
+    bundle_id = "com.example.plugin.integration",
+    tags = ["manual"],
+)
+
+flutter_ios_registrant_gen(
+    name = "integration_ios_registrant",
+    application = ":integration_app",
+)
+
 # =============================================================================
 # Tests
 # =============================================================================
@@ -321,6 +356,23 @@ flutter_ios_simulator_build_test(
     name = "ios_bundle_build_test",
     target_compatible_with = ["@platforms//os:macos"],
     targets = [":plugin_ios"],
+)
+
+# The iOS app that depends on `package:integration_test` builds: the plugin's
+# ObjC compiles and links.
+flutter_ios_simulator_build_test(
+    name = "integration_ios_build_test",
+    target_compatible_with = ["@platforms//os:macos"],
+    targets = [":integration_ios"],
+)
+
+# ... and the app's registrant registers it. Without the registration the
+# plugin would compile into the app and never run.
+dart_test(
+    name = "integration_ios_registrant_test",
+    data = [":integration_ios_registrant"],
+    main = "test/integration_ios_registrant_test.dart",
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 build_test(

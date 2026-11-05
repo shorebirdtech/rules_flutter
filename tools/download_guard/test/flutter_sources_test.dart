@@ -47,7 +47,7 @@ void main() {
         'flutter/repositories.bzl',
         'flutter/private/flutter_web_sdk_repo.bzl',
         'flutter/private/flutter_pub_package.bzl',
-        'flutter/private/flutter_sdk_package.bzl',
+        'flutter/private/flutter_framework_package.bzl',
       ]),
     );
     expect(sites.length, greaterThan(15));

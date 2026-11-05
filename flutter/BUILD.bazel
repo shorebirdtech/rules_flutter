@@ -183,8 +183,9 @@ bzl_library(
     visibility = ["//visibility:public"],
     deps = [
         ":repositories",
-        "//flutter/private:flutter_sdk_package",
+        "//flutter/private:flutter_framework_package",
         "//flutter/private:flutter_unsupported_package",
+        "//flutter/private:lock_entry_kind",
         "//flutter/private:pub_lock_sdks",
     ],
 )

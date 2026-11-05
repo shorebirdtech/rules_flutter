@@ -1,4 +1,4 @@
-"""Unit tests for the library repository of a hosted pub package.
+"""Unit tests for the library repository of a built pub package.
 
 A package's library is its dependency cycle built as one target (Bazel has no
 cycles; pub does). What is decided here, away from a fetch: which repository
@@ -17,9 +17,9 @@ def _repositories_are_named_by_their_part_test_impl(ctx):
     asserts.equals(env, "hub_lib__dio", library_repo("hub", "dio"))
     asserts.equals(env, "hub_index", index_repo("hub"))
 
-    # A hosted package is depended on through its library; the lock's other
-    # entries (a Flutter SDK package, a stub) are their own.
-    index = struct(hosted = {"dio": True}, other = {"flutter": True})
+    # A built package is depended on through its library; the lock's other
+    # entries (package:flutter, a stub) are their own.
+    index = struct(built = {"dio": True}, other = {"flutter": True})
     asserts.equals(env, "@hub_lib__dio//:dio", library_label("hub", index, "dio"))
     asserts.equals(env, "@hub__flutter//:flutter", library_label("hub", index, "flutter"))
 

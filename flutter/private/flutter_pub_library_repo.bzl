@@ -1,4 +1,4 @@
-"""The library repository of a hosted package of a `flutter.pub()` hub.
+"""The library repository of a built package of a `flutter.pub()` hub.
 
 A package's files are in its source repository (`flutter_pub_package`); this
 one decides what it is built with. It reads the pubspec dependencies of every
@@ -126,14 +126,14 @@ def _flutter_pub_library_repo_impl(ctx):
     package = ctx.attr.package_name
     index = read_index(ctx, hub)
 
-    # Every package this one reaches through hosted packages. The lock's other
-    # entries (Flutter SDK packages, entries nothing supplies) are leaves:
-    # they depend on hosted packages, never the other way round to a package
+    # Every package this one reaches through built packages. The lock's other
+    # entries (`package:flutter`, entries nothing supplies) are leaves:
+    # they depend on built packages, never the other way round to a package
     # that depends on them.
     graph = dependency_graph(
         package,
-        lambda p: [d for d in read_pubspec_dependencies(ctx, source_repo(hub, p)) if d in index.hosted or d in index.other],
-        follow = index.hosted,
+        lambda p: [d for d in read_pubspec_dependencies(ctx, source_repo(hub, p)) if d in index.built or d in index.other],
+        follow = index.built,
     )
     cycle = dependency_cycle(graph, package)
     if cycle.owner != package:
@@ -174,8 +174,8 @@ def _flutter_pub_library_repo_impl(ctx):
 flutter_pub_library_repo = repository_rule(
     implementation = _flutter_pub_library_repo_impl,
     attrs = {
-        "package_name": attr.string(mandatory = True, doc = "The hosted package."),
+        "package_name": attr.string(mandatory = True, doc = "The built package."),
         "hub_name": attr.string(mandatory = True, doc = "The hub's name: the prefix of its source, library and index repositories."),
     },
-    doc = "Plans a hosted package's library: its dependency cycle, built as one target.",
+    doc = "Plans a built package's library: its dependency cycle, built as one target.",
 )

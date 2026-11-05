@@ -16,26 +16,19 @@ load("@rules_dart//dart/ext:registry.bzl", "curated_code_assets")
 load("@rules_dart//dart/pub:pub_lock_package.bzl", "check_pub_archive_sha256")
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_lock")
 load("//flutter/private:android_plugin_maven.bzl", "flutter_android_maven")
+load("//flutter/private:flutter_framework_package.bzl", "flutter_framework_package")
 load("//flutter/private:flutter_gen_l10n_repo.bzl", "flutter_gen_l10n_repo")
 load("//flutter/private:flutter_pub_index.bzl", "flutter_pub_index", "index_repo", "library_repo", "source_repo")
 load("//flutter/private:flutter_pub_library_repo.bzl", "flutter_pub_library_repo")
 load("//flutter/private:flutter_pub_lock_hub.bzl", "flutter_pub_lock_hub")
 load("//flutter/private:flutter_pub_package.bzl", "flutter_pub_package")
-load("//flutter/private:flutter_sdk_package.bzl", "flutter_sdk_package")
 load("//flutter/private:flutter_unsupported_package.bzl", "flutter_unsupported_package", "unsupported_package_message")
+load("//flutter/private:lock_entry_kind.bzl", "ENGINE_PROVIDED", "FLUTTER_FRAMEWORK", "FLUTTER_SOURCE", "HOSTED", "lock_entry_kind")
 load("//flutter/private:pub_lock_sdks.bzl", "parse_lock_sdk_constraints", "version_below_lower_bound")
 load("//flutter/private:versions.bzl", "flutter_source_sha256")
 load(":repositories.bzl", "flutter_register_toolchains")
 
 _DEFAULT_NAME = "flutter"
-
-# Flutter SDK packages that exist as source under packages/ in the Flutter repo.
-# sky_engine is excluded — it provides dart:ui which is already in platform_strong.dill.
-_FLUTTER_SDK_PACKAGES = {"flutter": True, "flutter_test": True, "flutter_driver": True, "flutter_localizations": True, "flutter_web_plugins": True}
-
-# The one `sdk: flutter` package a lock lists that needs no repository:
-# `flutter` depends on it, and the engine toolchain provides its `dart:ui`.
-_ENGINE_PROVIDED_SDK_PACKAGES = {"sky_engine": True}
 
 def _parse_version(v):
     """Splits a version string into a list of ints for comparison."""
@@ -187,34 +180,36 @@ def _toolchain_extension(module_ctx):
                     version = flutter_version,
                 ))
 
-            # Classify packages by source.
+            # Classify packages by who builds them (`lock_entry_kind`).
+            built = {}  # hosted and Flutter-source packages: a source and a library repository
             hosted = {}
-            sdk_flutter = {}
+            flutter_source = {}
+            framework = {}
             unsupported = {}
             all_package_names = []
             for name, info in lock_pkgs.items():
                 source = info.get("source", "unknown")
-                if source == "hosted":
+                kind = lock_entry_kind(name, source)
+                if kind == ENGINE_PROVIDED:
+                    continue
+                all_package_names.append(name)
+                if kind == HOSTED:
                     hosted[name] = info
-                    all_package_names.append(name)
-                elif source == "sdk" and name in _FLUTTER_SDK_PACKAGES:
-                    sdk_flutter[name] = info
-                    all_package_names.append(name)
-                elif source == "sdk" and name in _ENGINE_PROVIDED_SDK_PACKAGES:
-                    pass
+                    built[name] = info
+                elif kind == FLUTTER_SOURCE:
+                    flutter_source[name] = info
+                    built[name] = info
+                elif kind == FLUTTER_FRAMEWORK:
+                    framework[name] = info
                 else:
-                    # A git or path package, or an `sdk: flutter` package
-                    # rules_flutter has no repository for (`integration_test`).
-                    # The hub still loads, so an app that only lists it (the
-                    # usual case: `integration_test` in `dev_dependencies`)
-                    # builds. Its target fails when something depends on it.
+                    # A git or path package. The hub still loads, so an app
+                    # that only lists it builds. Its target fails when
+                    # something depends on it.
                     unsupported[name] = unsupported_package_message(
                         lock = str(pub_tag.lock),
                         package = name,
                         source = source,
-                        provided_sdk_packages = sorted(_FLUTTER_SDK_PACKAGES.keys()),
                     )
-                    all_package_names.append(name)
 
             # What every repository of the hub plans against, stated once
             # rather than on each of them: the lock records each repository's
@@ -222,8 +217,8 @@ def _toolchain_extension(module_ctx):
             # it by the square of the package count.
             flutter_pub_index(
                 name = index_repo(hub_name),
-                hosted = sorted(hosted.keys()),
-                other = sorted([n for n in all_package_names if n not in hosted]),
+                built = sorted(built.keys()),
+                other = sorted([n for n in all_package_names if n not in built]),
             )
 
             for name, message in unsupported.items():
@@ -233,7 +228,8 @@ def _toolchain_extension(module_ctx):
                     message = message,
                 )
 
-            # Create a source repo and a library repo for each hosted package.
+            # Create a source repo and a library repo for each built package
+            # (a hosted one, below, or a Flutter SDK one, after it).
             # flutter.pub() routes every hosted package through
             # flutter_pub_package — the `flutter pub get` analog — so plugins
             # surface their `flutter.plugin.platforms` metadata via
@@ -277,23 +273,51 @@ def _toolchain_extension(module_ctx):
                     ignore_hook = name in ignore_hooks,
                 )
 
-            # Create spoke repos for Flutter SDK packages. Each pins the same
+            # Create the repos of the Flutter SDK packages. Each pins the same
             # framework source tarball, so the checksum is read once here for
-            # all of them.
+            # all of them. `package:flutter` has a rule of its own (its shaders
+            # are declared in no pubspec); every other `sdk: flutter` package
+            # is built from `packages/<name>` of that source exactly as a
+            # hosted package is built from its archive, `ext/` overlays
+            # (keyed `<package>/0.0.0`) and library repository included.
             sdk_source_sha256 = flutter_source_sha256(flutter_version)
-            for name in sdk_flutter.keys():
-                flutter_sdk_package(
+            for name in framework.keys():
+                flutter_framework_package(
                     name = source_repo(hub_name, name),
-                    package_name = name,
                     flutter_version = flutter_version,
                     sha256 = sdk_source_sha256,
                     hub_name = hub_name,
+                )
+            for name, info in flutter_source.items():
+                flutter_pub_library_repo(
+                    name = library_repo(hub_name, name),
+                    package_name = name,
+                    hub_name = hub_name,
+                )
+                flutter_pub_package(
+                    name = source_repo(hub_name, name),
+                    package_name = name,
+                    version = info.get("version", ""),
+                    sha256 = sdk_source_sha256,
+                    flutter_source_version = flutter_version,
+                    hub_name = hub_name,
+                    overlay_roots = user_overlay_roots + ["@rules_flutter//ext:BUILD.bazel"],
                 )
 
             # The hub's Android Maven check: what every hosted spoke's Gradle
             # build declares against what `@rules_android_maven` resolved. A
             # spoke's `android/` package loads it, so only Android builds
             # fetch it. The dash keeps its name from any `<hub>__<pkg>` spoke.
+            #
+            # A Flutter SDK package's Android library (`integration_test`'s
+            # needs androidx.test, espresso and guava) is left out of both this
+            # check and the aggregator below. The aggregator links every
+            # package of the lock into every Android app of the hub, so
+            # including it would make every such app link, and the check
+            # demand, Maven artifacts only a test app needs. So no Android app
+            # contains an SDK package's Android library for now; collecting
+            # plugin libraries per application, from the `FlutterInfo` of
+            # what it depends on, rather than lock-wide, is what lifts this.
             flutter_android_maven(
                 name = hub_name + "-android_maven",
                 hub_name = hub_name,
@@ -315,7 +339,8 @@ def _toolchain_extension(module_ctx):
                 name = hub_name,
                 hub_name = hub_name,
                 packages = sorted(all_package_names),
-                hosted_packages = sorted(hosted.keys()),
+                built_packages = sorted(built.keys()),
+                android_packages = sorted([n for n in all_package_names if n not in flutter_source]),
             )
 
     # Don't declare root_module_direct_deps: flutter_register_toolchains creates

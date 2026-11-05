@@ -231,26 +231,17 @@ void main() {
     });
   });
 
-  group('a lock entry rules_flutter has no repository for', () {
+  group('a lock entry rules_flutter has no repository for (git, path)', () {
     late PubInputsWorkspace ws;
     setUpAll(() async {
       ws = await PubInputsFixture(hosted: [HostedPackage('good')])
           .materialize();
     });
 
-    String sdkEntry(String name) =>
-        '  $name:\n'
-        '    dependency: "direct dev"\n'
-        '    description: flutter\n'
-        '    source: sdk\n'
-        '    version: "0.0.0"\n';
-
     // Entries a lock can hold that rules_flutter cannot provide, with what
-    // the lock calls their source. `integration_test` is what `flutter create`
-    // puts in `dev_dependencies`.
+    // the lock calls their source. (An `sdk: flutter` entry, whatever its
+    // name, is built from the Flutter source; see `sdk_source_e2e_test.dart`.)
     final entries = {
-      'integration_test': ('sdk', sdkEntry('integration_test')),
-      'flutter_not_in_the_list': ('sdk', sdkEntry('flutter_not_in_the_list')),
       'from_git': (
         'git',
         '  from_git:\n'
@@ -279,9 +270,9 @@ void main() {
       ws.writeLock(ws.lockWith(entries.values.map((e) => e.$2).join()));
     });
 
-    /// Most apps that list one of these (`integration_test` above all) never
-    /// depend on it from Bazel, and must not pay for it: the hub loads, lists
-    /// the package, and everything else builds.
+    /// Most apps that list one of these never depend on it from Bazel, and must
+    /// not pay for it: the hub loads, lists the package, and everything else
+    /// builds.
     test(
       'the hub still loads, and what does not depend on it builds',
       () async {

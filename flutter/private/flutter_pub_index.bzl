@@ -1,6 +1,8 @@
 """How the repositories of one `flutter.pub()` hub find each other.
 
-A hosted package is two repositories, made by the one module extension:
+A built package (a hosted package, or a Flutter SDK package other than
+`package:flutter`, which `flutter_pub_package` builds from the pinned Flutter
+source) is two repositories, made by the one module extension:
 
 * its source repository, `<hub>__<package>` (`flutter_pub_package`): the
   package's files, its `flutter_pub_member` (or rules_dart's
@@ -10,8 +12,9 @@ A hosted package is two repositories, made by the one module extension:
   the package's dependency cycle as one library, in the repository of the
   cycle's first package by name, which the others alias.
 
-A Flutter SDK package, and the stub for a lock entry nothing supplies, is one
-repository named `<hub>__<package>` and is its own library.
+`package:flutter` (`flutter_framework_package`), and the stub for a lock entry
+nothing supplies, is one repository named `<hub>__<package>` and is its own
+library.
 
 Library repositories read what source repositories record (their pubspec
 dependencies, and `MEMBER_FILE`), which is why the source repositories read
@@ -42,7 +45,7 @@ def source_repo(hub, package):
     return "{}__{}".format(hub, package)
 
 def library_repo(hub, package):
-    """The name of the repository holding a hosted package's library."""
+    """The name of the repository holding a built package's library."""
     return "{}_lib__{}".format(hub, package)
 
 def index_repo(hub):
@@ -74,14 +77,15 @@ def read_index(ctx, hub):
       hub: The hub's name.
 
     Returns:
-      `struct(hosted, other)`: `hosted`, a dict of the names of the hosted
-      packages (each has a library repository); `other`, a dict of the names
-      of the lock's other entries (Flutter SDK packages, and entries nothing
+      `struct(built, other)`: `built`, a dict of the names of the built
+      packages (hosted ones and Flutter SDK ones built from the Flutter
+      source; each has a library repository); `other`, a dict of the names of
+      the lock's other entries (`package:flutter`, and entries nothing
       supplies), whose `<hub>__<name>` repository is the library.
     """
     index = json.decode(read_sibling_file(ctx, index_repo(hub), _INDEX_FILE))
     return struct(
-        hosted = {n: True for n in index["hosted"]},
+        built = {n: True for n in index["built"]},
         other = {n: True for n in index["other"]},
     )
 
@@ -96,13 +100,13 @@ def library_label(hub, index, package):
     Returns:
       The label string.
     """
-    repo = library_repo(hub, package) if package in index.hosted else source_repo(hub, package)
+    repo = library_repo(hub, package) if package in index.built else source_repo(hub, package)
     return "@{}//:{}".format(repo, package)
 
 def _flutter_pub_index_impl(ctx):
     ctx.file("BUILD.bazel", "")
     ctx.file(_INDEX_FILE, json.encode({
-        "hosted": ctx.attr.hosted,
+        "built": ctx.attr.built,
         "other": ctx.attr.other,
     }))
     return ctx.repo_metadata(reproducible = True)
@@ -110,8 +114,8 @@ def _flutter_pub_index_impl(ctx):
 flutter_pub_index = repository_rule(
     implementation = _flutter_pub_index_impl,
     attrs = {
-        "hosted": attr.string_list(doc = "The hosted packages of the lock: each has a source and a library repository."),
-        "other": attr.string_list(doc = "The lock's other entries: Flutter SDK packages, and entries nothing supplies."),
+        "built": attr.string_list(doc = "The lock's built packages, hosted and from the Flutter source: each has a source and a library repository."),
+        "other": attr.string_list(doc = "The lock's other entries: `package:flutter`, and entries nothing supplies."),
     },
     doc = "The packages one `flutter.pub()` hub's repositories plan against.",
 )

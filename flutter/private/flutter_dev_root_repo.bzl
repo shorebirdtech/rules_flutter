@@ -21,7 +21,7 @@ needs exactly three things from that directory:
     SDK is not available" and refuses to resolve at all.
 
 This repository assembles those three from the same GitHub tag tarball
-`flutter_sdk_package` already downloads, at the version the toolchain pins. It
+`flutter_framework_package` and `flutter_pub_package` already download, at the version the toolchain pins. It
 is fetched only when `@rules_flutter//flutter:pub` is built, never by a normal
 build.
 """
@@ -108,7 +108,7 @@ flutter_dev_root_repo = repository_rule(
         ),
         "sha256": attr.string(
             doc = "Checksum of the flutter/flutter tag tarball. Shared with " +
-                  "flutter_sdk_package, which fetches the same archive. " +
+                  "flutter_framework_package, which fetches the same archive. " +
                   "Guaranteed non-empty by the caller: repositories.bzl reads " +
                   "it through `flutter_source_sha256()`, which refuses a " +
                   "version with no recorded checksum.",

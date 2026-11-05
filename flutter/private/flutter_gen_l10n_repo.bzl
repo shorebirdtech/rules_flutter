@@ -4,7 +4,7 @@
 is a command inside `flutter_tools`, which the rules deliberately do not
 download (they take engine artifacts plus framework source, never the CLI). Its
 generator code is nevertheless ordinary Dart, sitting in the same GitHub tarball
-`flutter_sdk_package` already fetches for `package:flutter`.
+`flutter_framework_package` already fetches for `package:flutter`.
 
 Importing it as-is is not viable: Dart resolves dependencies by *file import*,
 not by call graph, so `gen_l10n.dart` transitively reaches 187 files and 33 pub

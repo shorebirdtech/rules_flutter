@@ -243,10 +243,19 @@ void main() {
         ),
         add(
           '$fakeFlutterVersion.tar.gz',
-          ProbeRepo('sdk_package_blank', 'flutter_sdk_package', {
+          ProbeRepo('sdk_package_blank', 'flutter_framework_package', {
             'flutter_version': str(fakeFlutterVersion),
-            'package_name': str('flutter'),
             'sha256': str(''),
+            'hub_name': str('probe_hub'),
+          }),
+        ),
+        add(
+          '$fakeFlutterVersion.tar.gz',
+          ProbeRepo('sdk_source_blank', 'flutter_pub_package', {
+            'package_name': str('integration_test'),
+            'version': str('0.0.0'),
+            'sha256': str(''),
+            'flutter_source_version': str(fakeFlutterVersion),
             'hub_name': str('probe_hub'),
           }),
         ),
@@ -314,6 +323,7 @@ void main() {
       'dev_root_blank',
       'gen_l10n_blank',
       'sdk_package_blank',
+      'sdk_source_blank',
       'pub_blank_explicit',
     ]) {
       refused(repo, property: 'is refused');
