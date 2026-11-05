@@ -45,6 +45,7 @@ use_repo(
     fixture_pubs,
     fx_dirs = "fixture_lib__fx_dirs",
     fx_flavors = "fixture_lib__fx_flavors",
+    fx_font_borrower = "fixture_lib__fx_font_borrower",
     fx_names = "fixture_lib__fx_names",
     fx_platforms = "fixture_lib__fx_platforms",
     fx_shader_flavors = "fixture_lib__fx_shader_flavors",

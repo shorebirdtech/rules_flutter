@@ -50,7 +50,7 @@ load("//flutter/private:android_plugin_maven.bzl", "MAVEN_DEPS_FILE", "gradle_st
 load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url")
 load("//flutter/private:asset_variants.bzl", "variant_scale")
 load("//flutter/private:cmake_link_libraries.bzl", "parse_cmake_link_libraries")
-load("//flutter/private:flutter_pub_index.bzl", "MEMBER_DART", "MEMBER_FILE", "MEMBER_FLUTTER", "MEMBER_OVERLAY", "library_label", "read_index")
+load("//flutter/private:flutter_pub_index.bzl", "MEMBER_DART", "MEMBER_FILE", "MEMBER_FLUTTER", "MEMBER_OVERLAY", "library_label", "read_index", "sibling_path", "source_repo")
 load("//flutter/private:flutter_pubspec.bzl", "flutter_assets_block", "flutter_plugin_block")
 load("//flutter/private:pinned.bzl", "pinned")
 
@@ -614,13 +614,37 @@ def _encode_fonts_json(parsed_fonts):
         fonts_for_json.append({"family": entry.family, "fonts": fonts_list})
     return json.encode(fonts_for_json) if fonts_for_json else ""
 
-def _build_font_files_dict(package, parsed_fonts):
-    """Build the `font_files` label_keyed_string_dict literal — {":path": "path", ...}."""
+def _font_label(ctx, path):
+    """The label of the file of the font a package lists at `path`.
+
+    As in flutter_tools, `packages/<other>/<rest>` that is no file of this
+    package is the file `<rest>` of the package `<other>`, which need not list
+    it. A file of another package is linked into this repository rather than
+    named across repositories: a package's files are private to it, and any of
+    them can be named this way.
+    """
+    parts = path.split("/", 2)
+    if parts[0] != "packages" or len(parts) < 3 or ctx.path(path).exists:
+        return ":" + path
+    other, rest = parts[1], parts[2]
+    if other == ctx.attr.package_name:
+        return ":" + rest
+    if other not in read_index(ctx, ctx.attr.hub_name).built:
+        fail("package {}: the font file {} names the package {}, which the lock does not build.".format(ctx.attr.package_name, repr(path), other))
+    file = sibling_path(ctx, source_repo(ctx.attr.hub_name, other), "pubspec.yaml").dirname.get_child(rest)
+    if not file.exists:
+        fail("package {}: the font file {} names {} of the package {}, which has no such file.".format(ctx.attr.package_name, repr(path), repr(rest), other))
+    link = "_fonts_of_other_packages/{}/{}".format(other, rest)
+    ctx.symlink(file, link)
+    return ":" + link
+
+def _build_font_files_dict(ctx, parsed_fonts):
+    """Build the `font_files` label_keyed_string_dict literal, {label: path, ...}."""
     out = {}
     for entry in parsed_fonts:
         for font in entry.fonts:
-            path = _checked_file_name(package, "font file", font.asset)
-            out[":" + path] = path
+            path = _checked_file_name(ctx.attr.package_name, "font file", font.asset)
+            out[_font_label(ctx, path)] = path
     return out
 
 def _with_variants(ctx, package, path):
@@ -1736,7 +1760,7 @@ def _flutter_pub_package_impl(ctx):
     # Pre-compute the pub-asset attr inputs once. Used by either branch
     # below (plugin vs library).
     fonts_json_str = _encode_fonts_json(asset_block.fonts)
-    font_files = _build_font_files_dict(ctx.attr.package_name, asset_block.fonts)
+    font_files = _build_font_files_dict(ctx, asset_block.fonts)
     pkg_assets = _build_pkg_assets(ctx, ctx.attr.package_name, asset_block.assets)
     pkg_shaders = _build_pkg_shaders(ctx.attr.package_name, asset_block.shaders)
     has_asset_contributions = (

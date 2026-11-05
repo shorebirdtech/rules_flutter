@@ -1,5 +1,6 @@
 load("@rules_dart//dart:defs.bzl", "dart_library")
 load("//tools:bundle.bzl", "bundle_test")
+load(":font_of_other_package_test.bzl", "font_of_other_package_test")
 load(":two_files_one_key_test.bzl", "two_files_one_key_test")
 
 dart_library(
@@ -210,4 +211,18 @@ bundle_test(
     bundle = "//:app_with_fx_shader_flavors_bundle",
     expected = "//tests:expected/fx_shader_flavors.json",
     prefix = "packages/fx_shader_flavors/",
+)
+
+# Property: a pub package's font named `packages/<other>/<path>` is the file of
+# the package `<other>`, at that key, though `<other>` does not list it; only
+# the family is under the declaring package.
+bundle_test(
+    name = "font_of_other_package_is_bundled_at_its_own_key_test",
+    bundle = "//:app_with_font_of_other_package_bundle",
+    expected = "//tests:expected/fx_font_of_other_package.json",
+)
+
+font_of_other_package_test(
+    name = "font_of_other_package_keeps_its_path_in_the_font_manifest_test",
+    target_under_test = "@fx_font_borrower",
 )

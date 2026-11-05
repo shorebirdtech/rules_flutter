@@ -56,6 +56,19 @@ def _canonical_prefix(ctx):
     """What canonical names of the extension's repositories start with, seen from `ctx`."""
     return ctx.name[:len(ctx.name) - len(ctx.original_name)]
 
+def sibling_path(ctx, repo, path):
+    """The path of a file at the root of another repository of the same module extension.
+
+    Args:
+      ctx: The reading repository's `repository_ctx`.
+      repo: The other repository's name, as the extension gave it.
+      path: A file at its root.
+
+    Returns:
+      Its path.
+    """
+    return ctx.path(Label("@@{}{}//:{}".format(_canonical_prefix(ctx), repo, path)))
+
 def read_sibling_file(ctx, repo, path):
     """Reads a file of another repository of the same module extension.
 
@@ -67,7 +80,7 @@ def read_sibling_file(ctx, repo, path):
     Returns:
       The file's text.
     """
-    return ctx.read(Label("@@{}{}//:{}".format(_canonical_prefix(ctx), repo, path)))
+    return ctx.read(sibling_path(ctx, repo, path))
 
 def read_index(ctx, hub):
     """The hub's index: which packages the lock lists, by who supplies them.

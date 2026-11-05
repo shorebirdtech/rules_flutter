@@ -22,6 +22,8 @@ _HUB = "fixture"
 PACKAGES = {
     "fx_dirs": "1.0.0",
     "fx_flavors": "1.0.0",
+    "fx_font_borrower": "1.0.0",
+    "fx_font_owner": "1.0.0",
     "fx_names": "1.0.0",
     "fx_platforms": "1.0.0",
     "fx_shader_flavors": "1.0.0",

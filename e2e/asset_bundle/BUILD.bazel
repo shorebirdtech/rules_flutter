@@ -105,6 +105,12 @@ tree_of(
     visibility = ["//visibility:public"],
 )
 
+# A package whose font is a file of another package it depends on.
+bundled_app(
+    name = "app_with_font_of_other_package",
+    deps = ["@fx_font_borrower"],
+)
+
 # A package that ships shaders is bundled the same way.
 
 [
