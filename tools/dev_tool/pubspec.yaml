@@ -16,12 +16,22 @@ dependencies:
   clock: ^1.1.1
   dds: ^5.4.0
   dwds: ^27.1.1
+  # The host half of the `RemoteListener` protocol, shared with the
+  # `flutter_test` runner. Bazel builds take it from `//flutter/private/tools:remote_suite`;
+  # this is how `dart test` finds it.
+  flutter_rule_tools:
+    path: ../../flutter/private/tools
   http_multi_server: ^3.2.1
   logging: ^1.2.0
   multicast_dns: ^0.3.2
   package_config: ^2.1.0
   path: ^1.9.0
   pool: ^1.5.0
+  # Whether a macOS desktop session can show an integration test's window. Bazel
+  # builds take it from `//tools/macos_gui_session`; this is how `dart test`
+  # finds it.
+  rules_flutter_macos_gui_session:
+    path: ../macos_gui_session
   runfiles: ^0.4.3
   shelf: ^1.4.0
   vm_service: ^15.2.0

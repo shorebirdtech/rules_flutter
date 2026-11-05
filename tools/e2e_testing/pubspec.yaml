@@ -6,4 +6,8 @@ environment:
   sdk: ^3.13.0
 
 dependencies:
+  # The session probe, re-exported. Bazel builds take it from
+  # `//tools/macos_gui_session`; this is how `dart test` finds it.
+  rules_flutter_macos_gui_session:
+    path: ../macos_gui_session
   runfiles: ^0.4.3

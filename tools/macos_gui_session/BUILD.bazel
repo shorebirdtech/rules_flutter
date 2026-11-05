@@ -1,0 +1,15 @@
+load("@rules_dart//dart:defs.bzl", "dart_library")
+
+# Whether a macOS desktop session can show a window, kept awake for a run, and
+# why not when it cannot. A shipped library: the integration test runner checks
+# it before launching an app, and `//tools/e2e_testing` re-exports it for the e2e
+# workspaces' tests, which are not shipped.
+dart_library(
+    name = "macos_gui_session",
+    package_name = "rules_flutter_macos_gui_session",
+    srcs = glob(["lib/**/*.dart"]),
+    visibility = [
+        "//tools/dev_tool:__subpackages__",
+        "//tools/e2e_testing:__pkg__",
+    ],
+)

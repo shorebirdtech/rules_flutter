@@ -25,7 +25,10 @@ dart_library(
     package_name = "rules_flutter_e2e_testing",
     srcs = glob(["lib/**/*.dart"]),
     visibility = ["//visibility:public"],
-    deps = ["@rules_dart//dart/runfiles"],
+    deps = [
+        "//tools/macos_gui_session",
+        "@rules_dart//dart/runfiles",
+    ],
 )
 
 [

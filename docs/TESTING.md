@@ -506,7 +506,7 @@ exercises the behaviour it exists to guard.
 
 A missing permission, a locked screen and a sleeping display all fail the test,
 with the session read after the failure (`GuiSession` in
-`tools/e2e_testing/lib/macos_gui_session.dart`, shared with the e2e workspaces'
+`tools/macos_gui_session/lib/macos_gui_session.dart`, shared with the e2e workspaces'
 tests) naming which one it is. The group also holds the display awake for its
 run (`caffeinate -d -u`), so a dark panel is woken before the first window is
 asked about. A test that cannot get the window it exists to drive has not
@@ -1131,7 +1131,7 @@ bazel test :verify_macos_app_test --test_tag_filters= --strategy=TestRunner=stan
 
 **When to run:** After any change to macOS runner code (`flutter/private/runners/macos/`) or to what the macOS bundle carries (`flutter_macos_application.bzl`).
 
-**`System Events reports no windows for any process` is usually the session, not your grant.** The test reads windows through System Events, which answers "no windows" (`-1719`) for every process, while reporting accessibility as enabled, in three different situations that look identical from the error alone. The failure therefore reads the session (`tools/e2e_testing/lib/macos_gui_session.dart`) and says which one it is:
+**`System Events reports no windows for any process` is usually the session, not your grant.** The test reads windows through System Events, which answers "no windows" (`-1719`) for every process, while reporting accessibility as enabled, in three different situations that look identical from the error alone. The failure therefore reads the session (`tools/macos_gui_session/lib/macos_gui_session.dart`) and says which one it is:
 
 | It prints | Meaning | Remedy |
 |---|---|---|
