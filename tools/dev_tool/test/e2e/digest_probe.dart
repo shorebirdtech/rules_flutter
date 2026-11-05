@@ -130,9 +130,16 @@ class Probe {
 /// in its distdir.
 ///
 /// Call from `setUpAll`: the workspace is disposed after the group.
+///
+/// Repositories that find each other by name through one module extension (a
+/// hub's, `flutter_pub_index.bzl`) can only be declared by one: [extension] is
+/// the source of a module extension named `probe` that declares them, and
+/// [extensionRepos] the names it makes, which are `use_repo`d into the probe.
 Future<Probe> probe({
   required List<ProbeRepo> repos,
   Map<String, List<int>> archives = const {},
+  String? extension,
+  List<String> extensionRepos = const [],
 }) async {
   final repoRoot = p.normalize(p.join(Directory.current.path, '..', '..'));
   final rulesDart = RegExp(
@@ -152,6 +159,11 @@ Future<Probe> probe({
       '"@rules_flutter//flutter/private:${repo.bzl}.bzl", "${repo.rule}")',
     );
   }
+  if (extension != null) {
+    module
+      ..writeln('probe = use_extension("//:probe_extension.bzl", "probe")')
+      ..writeln('use_repo(probe, ${extensionRepos.map(str).join(', ')})');
+  }
   for (final repo in repos) {
     final attrs = repo.attrs.entries.map((e) => '${e.key} = ${e.value}');
     module.writeln(
@@ -159,14 +171,17 @@ Future<Probe> probe({
     );
   }
 
+  // The repo's own .bazelrc.user carries a developer's overrides (on this
+  // project, rules_dart from a sibling checkout), so the probe resolves the
+  // same code the rest of the suite does. Absent in CI; try-import allows it.
+  final userConfig = repositoryUserConfigFor(repoRoot, module.toString());
   final workspace = await generatedWorkspace('fetch_probe', {
     'MODULE.bazel': module.toString(),
     'BUILD.bazel': '',
-    // The repo's own .bazelrc.user carries a developer's overrides (on this
-    // project, rules_dart from a sibling checkout), so the probe resolves the
-    // same code the rest of the suite does. Absent in CI; try-import allows it.
+    if (extension != null) 'probe_extension.bzl': extension,
+    if (userConfig != null) '.bazelrc.user': userConfig,
     '.bazelrc': [
-      'try-import ${_rc(p.join(repoRoot, '.bazelrc.user'))}',
+      'try-import %workspace%/.bazelrc.user',
       'common --lockfile_mode=off',
       'common --override_module=rules_flutter=${_rc(repoRoot)}',
     ].join('\n'),

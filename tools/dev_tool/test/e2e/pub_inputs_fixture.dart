@@ -309,14 +309,13 @@ use_repo(flutter, "$pubHub"${spokeNames.map((n) => ', "${pubHub}__$n"').join()})
     // developer machine, what points `rules_dart` at a sibling checkout).
     // The lock is switched off because that override, and the generated
     // `file://` lock, no longer match anything checked in.
-    final userConfig = File(p.join(repo, '.bazelrc.user'));
+    final userConfig = repositoryUserConfigFor(repo, module);
     final ws = await generatedWorkspace('pub_inputs', {
       '.bazelversion': File(p.join(repo, '.bazelversion')).readAsStringSync(),
       '.bazelrc':
           'common --lockfile_mode=off\n'
           'try-import %workspace%/.bazelrc.user\n',
-      if (userConfig.existsSync())
-        '.bazelrc.user': userConfig.readAsStringSync(),
+      if (userConfig != null) '.bazelrc.user': userConfig,
       'MODULE.bazel': module,
       'BUILD.bazel': '',
       'pubspec.lock': renderLock(

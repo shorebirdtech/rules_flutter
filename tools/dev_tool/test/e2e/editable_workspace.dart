@@ -113,6 +113,35 @@ const _diskCacheMaxSize = '50G';
 /// run cold.
 const _diskCacheMaxAge = '30d';
 
+/// The repository's `.bazelrc.user` as a generated workspace can use it, or
+/// null when the repository has none.
+///
+/// On a developer machine that file points modules at sibling checkouts
+/// (`--override_module`), among them ones only the repository's own
+/// development depends on. Bazel refuses an override of a module the root
+/// does not depend on ("the root module specifies overrides on nonexistent
+/// module(s)"), so a generated workspace takes the overrides of the modules
+/// its own `MODULE.bazel` ([moduleBazel]) names with `bazel_dep`, and nothing
+/// else of the file changes.
+String? repositoryUserConfigFor(String repository, String moduleBazel) {
+  final file = File(p.join(repository, '.bazelrc.user'));
+  if (!file.existsSync()) return null;
+  final depends = {
+    for (final m in RegExp(
+      r'bazel_dep\(\s*name\s*=\s*"([^"]+)"',
+    ).allMatches(moduleBazel))
+      m.group(1)!,
+  };
+  final override = RegExp(r'^\s*\w+\s+--override_module=([^=\s]+)=');
+  return file
+      .readAsLinesSync()
+      .where((line) {
+        final module = override.firstMatch(line)?.group(1);
+        return module == null || depends.contains(module);
+      })
+      .join('\n');
+}
+
 /// A workspace copy that belongs to one test.
 class EditableWorkspace {
   /// The name it was copied from, for messages.

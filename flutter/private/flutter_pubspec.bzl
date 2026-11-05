@@ -1,10 +1,11 @@
-"""Parse pub package pubspec.yaml `flutter:` block metadata.
+"""Project a pub package's `flutter:` block to the shapes rules_flutter consumes.
 
-YAML parsing itself delegates to `@yaml.bzl//:yaml.bzl`. This module projects
-the parsed value down to the shapes rules_flutter consumes:
+Reading the pubspec is rules_dart's `read_pubspec`, which loads it as pub does
+and refuses what pub refuses. Its `fields` (the whole document as JSON values)
+are what these functions take:
 
-- `parse_flutter_plugin_block` — `flutter.plugin` for plugin-spoke emission.
-- `parse_flutter_assets_block` — `flutter.{fonts,assets,shaders,uses-material-design}`
+- `flutter_plugin_block` — `flutter.plugin` for plugin-spoke emission.
+- `flutter_assets_block` — `flutter.{fonts,assets,shaders,uses-material-design}`
   for the asset-bundling pipeline.
 
 Schema reference (Flutter's pubspec):
@@ -37,31 +38,17 @@ Schema reference (Flutter's pubspec):
             ...
 """
 
-load("@yaml.bzl//:yaml.bzl", "yaml")
-
-def parse_pubspec(content):
-    """Parse pubspec.yaml content into a Starlark dict.
+def flutter_block(fields):
+    """Return the `flutter:` sub-dict, or empty dict when absent.
 
     Args:
-        content: Full pubspec.yaml content as a string.
+        fields: A pubspec's `fields`, as `read_pubspec` returns them.
 
     Returns:
-        Native dict (possibly empty) of the parsed pubspec, or empty dict on
-        non-mapping root / parser errors. Errors are not surfaced — callers
-        that need strict behavior should validate fields themselves.
+        The `flutter:` mapping, or `{}` when the pubspec has none (or has a
+        `flutter:` that is not a mapping).
     """
-    if not content.strip():
-        return {}
-    doc = yaml.parse(content)
-    if yaml.has_errors(doc):
-        return {}
-    data = yaml.get_value(doc)
-    return data if type(data) == "dict" else {}
-
-def parse_flutter_block(content):
-    """Return the `flutter:` sub-dict, or empty dict when absent."""
-    pubspec = parse_pubspec(content)
-    flutter = pubspec.get("flutter")
+    flutter = fields.get("flutter")
     return flutter if type(flutter) == "dict" else {}
 
 # ---------------------------------------------------------------------------
@@ -76,11 +63,11 @@ def _coerce_plugin_value(v):
         return ""
     return str(v)
 
-def parse_flutter_plugin_block(content):
-    """Parse `flutter.plugin` out of a pubspec.yaml string.
+def flutter_plugin_block(fields):
+    """Project `flutter.plugin` out of a pubspec's fields.
 
     Args:
-        content: Full pubspec.yaml content as a string.
+        fields: A pubspec's `fields`, as `read_pubspec` returns them.
 
     Returns:
         A struct with:
@@ -90,7 +77,7 @@ def parse_flutter_plugin_block(content):
             implements: str — value of `flutter.plugin.implements` or `""`.
             ffi_plugin: bool — value of `flutter.plugin.ffiPlugin` or False.
     """
-    flutter = parse_flutter_block(content)
+    flutter = flutter_block(fields)
     plugin = flutter.get("plugin")
     if type(plugin) != "dict":
         return struct(
@@ -124,7 +111,7 @@ def parse_flutter_plugin_block(content):
 # flutter.fonts / flutter.assets / flutter.shaders / flutter.uses-material-design
 # ---------------------------------------------------------------------------
 
-def _parse_fonts(raw):
+def _project_fonts(raw):
     if type(raw) != "list":
         return []
     out = []
@@ -154,7 +141,7 @@ def _parse_fonts(raw):
         out.append(struct(family = family, fonts = fonts))
     return out
 
-def _parse_assets(raw):
+def _project_assets(raw):
     if type(raw) != "list":
         return []
     out = []
@@ -178,7 +165,7 @@ def _parse_assets(raw):
         ))
     return out
 
-def _parse_shaders(raw):
+def _project_shaders(raw):
     if type(raw) != "list":
         return []
     out = []
@@ -198,11 +185,11 @@ def _parse_shaders(raw):
                 ))
     return out
 
-def parse_flutter_assets_block(content):
-    """Parse `flutter.fonts`, `flutter.assets`, `flutter.shaders`, and `flutter.uses-material-design`.
+def flutter_assets_block(fields):
+    """Project `flutter.fonts`, `flutter.assets`, `flutter.shaders`, and `flutter.uses-material-design`.
 
     Args:
-        content: Full pubspec.yaml content as a string.
+        fields: A pubspec's `fields`, as `read_pubspec` returns them.
 
     Returns:
         struct(
@@ -216,11 +203,11 @@ def parse_flutter_assets_block(content):
     are captured from modern-shape asset and shader entries; `flutter_pub_package`
     acts on them.
     """
-    flutter = parse_flutter_block(content)
+    flutter = flutter_block(fields)
     umd_raw = flutter.get("uses-material-design", False)
     return struct(
-        fonts = _parse_fonts(flutter.get("fonts")),
-        assets = _parse_assets(flutter.get("assets")),
-        shaders = _parse_shaders(flutter.get("shaders")),
+        fonts = _project_fonts(flutter.get("fonts")),
+        assets = _project_assets(flutter.get("assets")),
+        shaders = _project_shaders(flutter.get("shaders")),
         uses_material_design = umd_raw if type(umd_raw) == "bool" else False,
     )

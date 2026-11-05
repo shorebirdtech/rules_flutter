@@ -18,7 +18,7 @@ current SDK's.
 """
 
 load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version")
-load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_deps", "parse_pubspec_sdk_constraint")
+load("@rules_dart//dart/pub:pubspec.bzl", "read_pubspec")
 load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url")
 load("//flutter/private:flutter_pub_index.bzl", "library_label", "read_index")
 load("//flutter/private:pinned.bzl", "pinned")
@@ -42,11 +42,8 @@ def make_flutter_framework_build_content(deps, language_version):
 
     Args:
         deps: Fully-qualified Bazel label strings for sibling spokes.
-        language_version: Dart language version string (e.g. `"3.11"`), or
-            `""` when no pubspec was read. An empty string reaches the
-            generated target as `language_version = ""`, which is what makes
-            the `languageVersion` key absent from `package_config.json`
-            entries downstream.
+        language_version: Dart language version string (e.g. `"3.11"`), as
+            derived from the package's `environment.sdk`.
 
     Returns:
         BUILD.bazel content as a string.
@@ -100,22 +97,14 @@ def _flutter_framework_package_impl(repository_ctx):
     )
 
     # Discover deps and the language version from the downloaded pubspec.yaml,
-    # filtering deps to packages available in the lock file (same pattern as
-    # pub_lock_package). No pubspec means no constraint was read, so the
-    # language version stays empty rather than taking `derive_language_version`'s
-    # missing-constraint default — that default is pub's answer for a pubspec
-    # that *has* no `environment.sdk`, not for a package we never inspected.
+    # read as pub reads it, and filter deps to packages available in the lock
+    # file (same pattern as pub_lock_package). A pubspec with no
+    # `environment.sdk` gets pub's default language version, which is what pub
+    # writes for such a package.
     index = read_index(repository_ctx, repository_ctx.attr.hub_name)
-    bazel_deps = []
-    language_version = ""
-    pubspec_path = repository_ctx.path("pubspec.yaml")
-    if pubspec_path.exists:
-        content = repository_ctx.read(pubspec_path)
-        all_deps = parse_pubspec_deps(content)
-        bazel_deps = sorted([d for d in all_deps if d in index.built or d in index.other])
-        language_version = derive_language_version(
-            parse_pubspec_sdk_constraint(content),
-        )
+    pubspec = read_pubspec(repository_ctx, _PACKAGE, repository_ctx.attr.flutter_version)
+    bazel_deps = sorted([d for d in pubspec.dependencies if d in index.built or d in index.other])
+    language_version = derive_language_version(pubspec.sdk_constraint)
 
     # Build dep labels pointing to the libraries of the packages' repos.
     dep_labels = [library_label(repository_ctx.attr.hub_name, index, dep) for dep in bazel_deps]

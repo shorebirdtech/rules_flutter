@@ -11,8 +11,8 @@ For each such package in a Flutter app's pubspec.lock this rule:
      `flutter_source_version` set, its tree is `packages/<name>` of the
      toolchain's pinned Flutter source tarball, checked against that
      tarball's recorded digest. Everything after this step is the same.
-  2. Reads the package's pubspec.yaml.
-  3. Parses `flutter.plugin.platforms` via `parse_flutter_plugin_block`.
+  2. Reads the package's pubspec.yaml, as pub does (rules_dart's `read_pubspec`).
+  3. Projects `flutter.plugin.platforms` via `flutter_plugin_block`.
   4. Scans the extracted package tree for per-platform Apple source layouts
      (modern SwiftPM `<platform>/<pkg>/Sources/<pkg>/`, shared-darwin
      `darwin/Classes/`, legacy `<platform>/Classes/`).
@@ -45,13 +45,13 @@ whichever rule asks for it.
 
 load("@rules_dart//dart/pub:pub_graph.bzl", "write_pubspec_dependencies")
 load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version", "fetch_pub_archive")
-load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_deps", "parse_pubspec_sdk_constraint")
+load("@rules_dart//dart/pub:pubspec.bzl", "read_pubspec")
 load("//flutter/private:android_plugin_maven.bzl", "gradle_statements", "parse_gradle_maven_dependencies")
 load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url")
 load("//flutter/private:asset_variants.bzl", "variant_scale")
 load("//flutter/private:cmake_link_libraries.bzl", "parse_cmake_link_libraries")
 load("//flutter/private:flutter_pub_index.bzl", "MEMBER_DART", "MEMBER_FILE", "MEMBER_FLUTTER", "MEMBER_OVERLAY", "library_label", "read_index")
-load("//flutter/private:flutter_pubspec.bzl", "parse_flutter_assets_block", "parse_flutter_plugin_block")
+load("//flutter/private:flutter_pubspec.bzl", "flutter_assets_block", "flutter_plugin_block")
 load("//flutter/private:pinned.bzl", "pinned")
 
 # Apple source extensions we sweep into the per-platform plugin library.
@@ -614,7 +614,7 @@ def _checked_file_name(package, what, path):
     return path
 
 def _encode_fonts_json(parsed_fonts):
-    """Convert parse_flutter_assets_block().fonts to the JSON shape flutter_library expects."""
+    """Convert flutter_assets_block().fonts to the JSON shape flutter_library expects."""
     fonts_for_json = []
     for entry in parsed_fonts:
         fonts_list = []
@@ -1717,35 +1717,20 @@ def _flutter_pub_package_impl(ctx):
             base_url = ctx.attr.base_url,
         )
 
-    pubspec_dependencies = []
-    language_version = ""
-    plugin_block = struct(
-        present = False,
-        platforms = {},
-        implements = "",
-        ffi_plugin = False,
-    )
-    asset_block = struct(
-        fonts = [],
-        assets = [],
-        shaders = [],
-        uses_material_design = False,
-    )
-    pubspec_path = ctx.path("pubspec.yaml")
-    if pubspec_path.exists:
-        pubspec_content = ctx.read(pubspec_path)
-        pubspec_dependencies = parse_pubspec_deps(pubspec_content)
-        language_version = derive_language_version(
-            parse_pubspec_sdk_constraint(pubspec_content),
-        )
-        plugin_block = parse_flutter_plugin_block(pubspec_content)
-        asset_block = parse_flutter_assets_block(pubspec_content)
-        for asset in asset_block.assets:
-            if asset.transformers:
-                fail((
-                    "package {}: its asset {} lists `transformers`, which rules_flutter does not run. " +
-                    "Bundling the file as it is would ship it untransformed under the transformed file's name."
-                ).format(ctx.attr.package_name, repr(asset.path)))
+    # Pub's own reading of the pubspec: a package pub would refuse (malformed
+    # YAML, a `name` that is not this package's, a dependency or constraint of
+    # the wrong type) fails the fetch, naming the package.
+    pubspec = read_pubspec(ctx, ctx.attr.package_name, ctx.attr.version)
+    pubspec_dependencies = pubspec.dependencies
+    language_version = derive_language_version(pubspec.sdk_constraint)
+    plugin_block = flutter_plugin_block(pubspec.fields)
+    asset_block = flutter_assets_block(pubspec.fields)
+    for asset in asset_block.assets:
+        if asset.transformers:
+            fail((
+                "package {}: its asset {} lists `transformers`, which rules_flutter does not run. " +
+                "Bundling the file as it is would ship it untransformed under the transformed file's name."
+            ).format(ctx.attr.package_name, repr(asset.path)))
 
     # The names the pubspec depends on, for the libraries of the packages that
     # reach this one. Which of them the lock lists, and what that makes of
