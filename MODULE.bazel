@@ -39,9 +39,18 @@ bazel_dep(name = "rules_jvm_external", version = "7.1")
 bazel_dep(name = "rules_dart", version = "0.8.1")
 bazel_dep(name = "yaml.bzl", version = "0.1.2")
 
-bazel_dep(name = "rules_multitool", version = "1.11.1", dev_dependency = True)
-bazel_dep(name = "buildifier_prebuilt", version = "10.1.0", dev_dependency = True)
 bazel_dep(name = "bazelrc-preset.bzl", version = "1.9.2", dev_dependency = True)
+
+# The development tooling rules_flutter shares with the repositories built on
+# rules_dart (the commit policy, release notes, tool pins, lock checks): the
+# `overhead/` module of rules_dart. `bazel run @overhead//changelog:check`, say.
+bazel_dep(name = "overhead", version = "0.0.0", dev_dependency = True)
+git_override(
+    module_name = "overhead",
+    commit = "fcb5e1b4cfbca03197a201d9b9a2469b3ced3bd7",
+    remote = "https://github.com/aran/rules_dart.git",
+    strip_prefix = "overhead",
+)
 
 # Put the apple_cc CC toolchain first for this repository's own builds, so
 # rules_swift's xcode_swift_toolchain resolves to a CC toolchain with a valid
@@ -158,14 +167,6 @@ maven.artifact(
     version = "1.0",
 )
 use_repo(maven, "rules_android_maven")
-
-multitool = use_extension(
-    "@rules_multitool//multitool:extension.bzl",
-    "multitool",
-    dev_dependency = True,
-)
-multitool.hub(lockfile = "//:multitool.lock.json")
-use_repo(multitool, "multitool")
 
 # Dev tool pub dependencies (args, vm_service, watcher, path).
 flutter.pub(

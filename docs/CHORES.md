@@ -185,34 +185,19 @@ workspace is. To check it builds, extract the archive somewhere clean and run
 
 ---
 
-## Multitool Version Bumps
+## Tool Version Bumps
 
 **Trigger**: Periodic (monthly) or when a managed tool releases a version we need.
 
-**Files**:
+**Files**: none in this repository. `git-cliff`, `prek`, `typos` and `yamlfmt`
+are pinned in rules_dart's `overhead/multitool.lock.json`, which every
+repository that takes overhead as a dev dependency shares. Bump them there
+(rules_dart's CHORES.md has the procedure), then bump the `commit` of the
+`overhead` `git_override` in `MODULE.bazel` and the `uses:` refs in
+`.github/workflows` to the new rules_dart commit; `bazel run @overhead//pins:check`
+fails if they differ.
 
-- `multitool.lock.json` — tool versions, URLs, and SHA-256 hashes
-
-**Managed tools**: `git-cliff`, `prek`, `typos`, `yamlfmt`
-
-**Procedure**:
-
-1. For each tool in `multitool.lock.json`, check its GitHub releases for newer versions
-2. Download archives for all platform variants (macOS/Linux, arm64/x86_64)
-3. Compute SHA-256 hashes and update the lockfile entries
-4. Run `bazel run @multitool//tools/yamlfmt -- -lint .` and
-   `bazel run @multitool//tools/typos -- .` to verify the updated tools work
-
-**Verification**: Both tools run successfully against the repo.
-
-Also update the matching `rev:` values in `.pre-commit-config.yaml` for yamlfmt
-and typos to keep CI and local hooks in sync. When bumping prek, update
-`prek-version` in `.github/workflows/ci.yaml` to match, and run
-`uv tool upgrade prek` so the installed git hooks use the new version.
-
-**Automation**: `/bump-multitool` slash command. Alternatively, install the
-[multitool CLI](https://github.com/theoremlp/multitool) and run
-`multitool --lockfile ./multitool.lock.json update`.
+**Verification**: `bazel run @overhead//lint:prek -- run --all-files` passes.
 
 ---
 
@@ -229,12 +214,11 @@ manual until you have actually seen a Renovate PR land here.
 
 Reconcile the revs that track something else in this repo:
 
-- `keith/pre-commit-buildifier` tracks `buildifier_prebuilt` in `MODULE.bazel`
-  on the buildifier version — the first three components. The fourth is the
-  ruleset's own packaging revision and the mirror repo tags only some of them
-  (there is no 8.5.1.4), so a fourth-component gap is not drift.
-- `google/yamlfmt` and `crate-ci/typos` track `multitool.lock.json` (see
-  § "Multitool Version Bumps").
+- `keith/pre-commit-buildifier` is the only buildifier in this repository; pick
+  the newest tag of the mirror. The fourth component is the mirror's own
+  packaging revision and it tags only some of them (there is no 8.5.1.4).
+- The yamlfmt and typos hooks are local hooks that run overhead's pinned
+  versions (see § "Tool Version Bumps").
 - `pre-commit/mirrors-prettier` is archived upstream; `v3.1.0` is the last
   stable tag and is expected to stay pinned.
 

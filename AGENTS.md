@@ -3,8 +3,8 @@
 ## Changelog
 
 The changelog is built from `Changelog:` trailers on commits. Nobody edits a
-changelog file by hand. `cliff.toml` renders the trailers between version tags
-into the release notes.
+changelog file by hand. overhead's `cliff.toml` renders the trailers between
+version tags into the release notes.
 
 **When.** Add a trailer when a user of this project would notice the change:
 new or removed API, a changed default or behaviour, a bug they could hit, a
@@ -46,11 +46,11 @@ other trailers, with no blank line inside that paragraph. Mark breaking changes
 with `!` in the subject (`feat(ios)!: ...`), not a `BREAKING CHANGE:` footer,
 which git does not treat as a trailer.
 
-**Checks.** `bazel run //tools/changelog:check` checks the commit subject and
-the trailers. It runs as the `commit-msg` hook, and in CI on every push where
-the repo has CI. To install the hook, `uv tool install prek`, then
+**Checks.** `bazel run @overhead//changelog:check` checks the commit subject
+and the trailers. It runs as the `commit-msg` hook, and in CI on every push
+where the repo has CI. To install the hook, `uv tool install prek`, then
 `prek install -f` (without `-f`, prek keeps an existing hook and runs both).
-`bazel run //tools/changelog` prints the unreleased notes so you can see how
+`bazel run @overhead//changelog` prints the unreleased notes so you can see how
 they read.
 
 ## Tooling
@@ -63,10 +63,13 @@ Shell is acceptable only where an outside interface requires it, such as the
 `release_prep.sh` the bazel-contrib release workflow calls; keep it to the
 lines that interface needs.
 
+Tooling these repositories share lives in overhead, a module in rules_dart's
+`overhead/` that each takes as a dev dependency: the commit policy, release
+notes and release workflows, the tool pins, the lock checks. Change it there,
+not in a copy. What only one repository needs stays in that repository.
+
 ## Public repository
 
 This repository is public: it names only itself and the public projects it
 depends on or serves, never private ones, and a comment that came from a
-downstream report describes the behaviour, not who reported it. The
-`private-names` hooks enforce this when a maintainer has configured them
-(CONTRIBUTING.md, "Private names").
+downstream report describes the behaviour, not who reported it.

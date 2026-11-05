@@ -22,7 +22,7 @@ nothing unless one fails.
 To run every hook without installing anything beyond Bazel:
 
 ```shell
-bazel run @multitool//tools/prek -- -C "$PWD" run --all-files
+bazel run @overhead//lint:prek -- run --all-files
 ```
 
 ## Commit messages
@@ -33,10 +33,10 @@ and user-visible commits carry a `Changelog:` trailer; see
 `commit-msg` hook. To check a message by hand:
 
 ```shell
-bazel run //tools/changelog:check -- <message-file>
+bazel run @overhead//changelog:check -- <message-file>
 ```
 
-`bazel run //tools/changelog` prints the release notes the unreleased commits
+`bazel run @overhead//changelog` prints the release notes the unreleased commits
 would produce.
 
 ## Private names
