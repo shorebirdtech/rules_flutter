@@ -60,6 +60,6 @@ repos:
         types: [yaml]
       - id: typos
         name: typos
-        entry: bazel run --ui_event_filters=-info --noshow_progress --show_result=0 @overhead//lint:typos -- --write-changes --force-exclude
+        entry: bazel run --ui_event_filters=-info --noshow_progress --show_result=0 @overhead//lint:typos -- --force-exclude
         language: system
         types: [text]
