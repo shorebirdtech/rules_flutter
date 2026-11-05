@@ -40,6 +40,7 @@ load(
     "APP_SCHEME",
     "app_main_location",
     "app_scheme_sources",
+    "compute_same_root_main_import",
     "package_lib_prefix",
     "resolve_wrapper_main_import",
     "with_root",
@@ -505,14 +506,25 @@ def _flutter_web_bundle_impl(ctx):
     # resolves through `package_config.json` to the colocated package's
     # `rootUri`, so the user's `main.dart` is read from the assembled
     # directory and its relative imports find their colocated siblings.
+    main_import = resolve_wrapper_main_import(
+        ctx.attr.package_name,
+        lib_root,
+        ctx.file.main.short_path,
+        ctx.file.main.path,
+        wrapper_depth,
+    )
+    if not ctx.file.main.is_source and ctx.file.main.root.path == wrapper.root.path:
+        # A `main` a rule wrote, in the directory the wrapper is in. Named from
+        # that directory's root: its own path has the configuration in it, which
+        # a path-mapped compile reads under another name.
+        root = wrapper.root.path
+        wrapper_path = wrapper.path[len(root) + 1:]
+        main_import = compute_same_root_main_import(
+            wrapper_path.rpartition("/")[0],
+            ctx.file.main.path[len(root) + 1:],
+        )
     wrapper_content = make_web_wrapper_main_content(
-        resolve_wrapper_main_import(
-            ctx.attr.package_name,
-            lib_root,
-            ctx.file.main.short_path,
-            ctx.file.main.path,
-            wrapper_depth,
-        ),
+        main_import,
         registrant.basename if registrant else None,
         agent_imports = (staged_agent.basename, staged_agent_bridge.basename) if is_debug else None,
     )

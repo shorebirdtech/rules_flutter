@@ -301,6 +301,27 @@ def compute_wrapper_main_import(wrapper_dir_depth, main_path):
     """
     return "../" * wrapper_dir_depth + main_path
 
+def compute_same_root_main_import(wrapper_dir, main_path):
+    """Relative import path from a generated wrapper to a `main` generated beside it.
+
+    A `main` a rule wrote is in the same output directory as the wrapper
+    (`bazel-out/<config>/bin`), so the way from one to the other does not go
+    through the config segment, which a path-mapped action sees under a name of
+    its own: a path written into the wrapper as `bazel-out/<config>/bin/...`
+    names a directory that does not exist where the action runs. Both paths are
+    relative to the output directory, which is what they have in common.
+
+    Args:
+        wrapper_dir: The wrapper's directory, relative to the output directory
+            (`""` for its top).
+        main_path: The main's path, relative to the output directory.
+
+    Returns:
+        A relative import string like "../../pkg/main.dart".
+    """
+    depth = len(wrapper_dir.split("/")) if wrapper_dir else 0
+    return "../" * depth + main_path
+
 def app_main_package_uri(package_name, lib_root, main_short_path):
     """The `package:` URI for the app's own `main`, for hot-reload URI parity.
 

@@ -12,7 +12,8 @@ The generated plugin registrant rides the same scheme, since a frontend_server
 mounts one scheme at a time.
 """
 
-load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
+load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
+load("//flutter/private:app_entrypoint.bzl", "compute_same_root_main_import")
 load("//flutter/private:flutter_application.bzl", "flutter_application")
 load(":action_content.bzl", "written_json")
 
@@ -124,6 +125,16 @@ _DBG = {"//command_line_option:compilation_mode": "dbg"}
 _outside_lib_test = analysistest.make(_outside_lib_test_impl, config_settings = _DBG)
 _in_lib_test = analysistest.make(_in_lib_test_impl, config_settings = _DBG)
 
+def _same_root_import_impl(ctx):
+    """A `main` generated beside a web wrapper is named from their shared output root, without the configuration in the way."""
+    env = unittest.begin(ctx)
+    asserts.equals(env, "x_main.dart", compute_same_root_main_import("", "x_main.dart"))
+    asserts.equals(env, "../../pkg/x_main.dart", compute_same_root_main_import("pkg/sub", "pkg/x_main.dart"))
+    asserts.equals(env, "../pkg/x_main.dart", compute_same_root_main_import("pkg", "pkg/x_main.dart"))
+    return unittest.end(env)
+
+_same_root_import_test = unittest.make(_same_root_import_impl)
+
 def app_entrypoint_test_suite(name):
     """Fixtures and tests for where a native app's `main` is compiled from.
 
@@ -155,9 +166,11 @@ def app_entrypoint_test_suite(name):
         name = name + "_in_lib",
         target_under_test = ":_ae_in_lib",
     )
+    _same_root_import_test(name = name + "_same_root_import")
     native.test_suite(
         name = name,
         tests = [
+            ":" + name + "_same_root_import",
             ":" + name + "_outside_lib",
             ":" + name + "_in_lib",
         ],
