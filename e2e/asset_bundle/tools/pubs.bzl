@@ -1,9 +1,22 @@
-"""Spoke repositories for the fixture packages, as `flutter.pub` would make them."""
+"""Repositories for the fixture packages, as `flutter.pub` would make them.
 
-# The repository rule `flutter.pub` makes a spoke with, loaded to make one of
-# our own: there is no public name for it.
+Each package is the three repositories `flutter.pub` makes of a built package:
+its source, its library and the hub's index. `MODULE.bazel` names the library
+of each, which is what an application depends on.
+"""
+
+# The repository rules `flutter.pub` makes a package's repositories with, loaded
+# to make our own: there is no public name for them.
+# buildifier: disable=bzl-visibility
+load("@rules_flutter//flutter/private:flutter_pub_index.bzl", "flutter_pub_index", "index_repo", "library_repo", "source_repo")
+
+# buildifier: disable=bzl-visibility
+load("@rules_flutter//flutter/private:flutter_pub_library_repo.bzl", "flutter_pub_library_repo")
+
 # buildifier: disable=bzl-visibility
 load("@rules_flutter//flutter/private:flutter_pub_package.bzl", "flutter_pub_package")
+
+_HUB = "fixture"
 
 # The packages under `//registry`, with the version of each.
 PACKAGES = {
@@ -21,14 +34,24 @@ def _pubs_impl(mctx):
     # directory exist to be named in a URL.
     registry = mctx.path(Label("@pub_registry//:registry")).dirname
     checksums = json.decode(mctx.read(Label("@pub_registry//:checksums.json")))
+    flutter_pub_index(
+        name = index_repo(_HUB),
+        built = sorted(PACKAGES.keys()),
+        other = [],
+    )
     for name, version in PACKAGES.items():
         flutter_pub_package(
-            name = name,
+            name = source_repo(_HUB, name),
             package_name = name,
             version = version,
             sha256 = checksums[name],
             base_url = "file://" + str(registry),
-            hub_name = "fixture",
+            hub_name = _HUB,
+        )
+        flutter_pub_library_repo(
+            name = library_repo(_HUB, name),
+            package_name = name,
+            hub_name = _HUB,
         )
     return mctx.extension_metadata(reproducible = True)
 
