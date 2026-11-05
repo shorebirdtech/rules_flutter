@@ -113,8 +113,8 @@ void main() {
 
     test('turns the golden events the app posts into requests, and leaves its '
         'suite messages to the suite', () async {
-      final requests = <GoldenRequest>[];
-      final sub = transport.goldenRequests.listen(requests.add);
+      final golden = transport.goldenRequests.first;
+      final suite = transport.incoming.first;
 
       app.postGolden('isolates/1', {
         'op': 'compare',
@@ -123,14 +123,13 @@ void main() {
         'bytes': base64.encode([9, 8]),
       });
       app.post('isolates/1', integrationTestEventKind, '"suite"');
-      await _settle();
-      await sub.cancel();
 
-      expect(requests, hasLength(1));
-      expect(requests.single.id, 1001);
-      expect(requests.single.operation, GoldenOperation.compare);
-      expect(requests.single.key, 'goldens/macos/a.png');
-      expect(requests.single.bytes, [9, 8]);
+      final request = await golden;
+      expect(request.id, 1001);
+      expect(request.operation, GoldenOperation.compare);
+      expect(request.key, 'goldens/macos/a.png');
+      expect(request.bytes, [9, 8]);
+      expect(await suite, '"suite"', reason: 'a suite message, not a golden');
     });
 
     test(
@@ -162,17 +161,15 @@ void main() {
 
     test('carries the app\'s messages to the host, and nothing else the app '
         'posts', () async {
-      final seen = <String>[];
-      final sub = transport.incoming.listen(seen.add);
+      final seen = transport.incoming.take(2).toList();
 
       app.post('isolates/1', 'Flutter.Frame', '"a frame"');
       app.post('isolates/9', integrationTestEventKind, '"another isolate"');
       app.post('isolates/1', integrationTestEventKind, '[1,{"type":"x"}]');
       app.post('isolates/1', integrationTestEventKind, '"second"');
-      await _settle();
-      await sub.cancel();
 
-      expect(seen, ['[1,{"type":"x"}]', '"second"']);
+      // The other two were posted first, so they would be among these.
+      expect(await seen, ['[1,{"type":"x"}]', '"second"']);
     });
 
     test('reports the app ending, in the device\'s words', () async {
