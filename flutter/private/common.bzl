@@ -218,7 +218,7 @@ def collect_binding_contracts(native_deps):
                     pairs.append(struct(library = f, contract = ()))
     return pairs
 
-def flutter_compile_kernel(ctx, tools, aot = None, platform_dill = None, target_platform = None, frontend_server_target = "flutter", native_assets_manifest = None, track_widget_creation = False, assets_dir = None, platform_build_args = [], recorded_uses = None):
+def flutter_compile_kernel(ctx, tools, aot = None, platform_dill = None, target_platform = None, frontend_server_target = "flutter", native_assets_manifest = None, track_widget_creation = False, assets_dir = None, platform_build_args = [], recorded_uses = None, inputs = None):
     """Run the shared kernel compilation step.
 
     Collects sources, generates package_config.json, and invokes
@@ -262,42 +262,49 @@ def flutter_compile_kernel(ctx, tools, aot = None, platform_dill = None, target_
         recorded_uses: Optional declared File for the compiler's recorded
             `@RecordUse` uses, the input of package link hooks. Pass it for
             AOT compiles only.
+        inputs: The program to compile, from `flutter_program_inputs`; `ctx`'s
+            own when None. A program rebuilt under another target
+            (`flutter_application_variant`) is the application's, changed, and
+            keeps the application's package: its library root, and so what
+            `package:<name>/…` resolves to.
 
     Returns:
         struct with kernel_dill (File), package_config (File) and
         import_checks (the depset of the app's and its libraries' import
         checks, for the `_validation` output group).
     """
-    all_srcs = list(ctx.files.srcs) + collect_transitive_srcs(ctx.attr.deps).to_list()
-    packages = collect_packages(ctx.attr.deps)
+    if inputs == None:
+        inputs = flutter_program_inputs(ctx)
+    all_srcs = list(inputs.srcs) + collect_transitive_srcs(inputs.deps).to_list()
+    packages = collect_packages(inputs.deps)
 
     # Register the app itself as a package so the frontend_server keys the
     # entrypoint as `package:<name>/main.dart` — the URI the dev tool's
     # incremental compiler uses (without this, hot-reload deltas keyed via
     # sandbox `file://` URIs can't be matched against the kernel's libraries).
-    app_pkg_name = ctx.attr.package_name
+    app_pkg_name = inputs.package_name
 
     # The app's own library root, which is what `package:<name>/…` resolves
     # against. Derived from the label rather than assumed to be the workspace
     # root, so an app in a nested Bazel package registers a `rootUri` pointing
     # at its own directory; assuming `""` pointed every nested app's
     # `package:` URIs at whatever sits in the *workspace's* `lib/`.
-    app_lib_root = derive_lib_root(ctx.label.workspace_root, ctx.label.package)
+    app_lib_root = derive_lib_root(inputs.label.workspace_root, inputs.label.package)
     packages = synthesize_app_package(
         ctx.label,
         packages,
         app_pkg_name,
         app_lib_root,
-        ctx.attr.language_version,
+        inputs.language_version,
     )
 
     # `synthesize_app_package` appends the app's own package last.
-    import_checks = import_check_validation(ctx, ctx.executable._kernel_tool, [ctx.file.main] + ctx.files.srcs, packages[-1], ctx.attr.deps)
+    import_checks = import_check_validation(ctx, ctx.executable._kernel_tool, [inputs.main] + inputs.srcs, packages[-1], inputs.deps)
 
     # Include the app's own `main` so the synthesized package keyed as
     # `package:<name>/main.dart` (hot-reload URI parity) is co-located with
     # its lib/ siblings when any of them are generated.
-    colocate_inputs = all_srcs + ([ctx.file.main] if ctx.file.main else [])
+    colocate_inputs = all_srcs + ([inputs.main] if inputs.main else [])
 
     # Dev hot-reload metadata (debug only): a *second* package_config that, for a
     # source-assembled app package, points its `rootUri` at the live source tree
@@ -317,7 +324,7 @@ def flutter_compile_kernel(ctx, tools, aot = None, platform_dill = None, target_
     dev_generated_source_uris = []
     dev_source_packages = []
     dev_app_sources = []
-    main_location = app_main_location(app_pkg_name, app_lib_root, ctx.file.main) if ctx.file.main else None
+    main_location = app_main_location(app_pkg_name, app_lib_root, inputs.main) if inputs.main else None
     app_entrypoint_uri = main_location.uri if main_location else None
     if emit_dev_config:
         dev_package_config = ctx.actions.declare_file(ctx.label.name + ".dev_package_config.json")
@@ -329,7 +336,7 @@ def flutter_compile_kernel(ctx, tools, aot = None, platform_dill = None, target_
         # the same way.
         dev_filesystem_roots = with_root(dev_pc.filesystem_roots, main_location.root if main_location else None)
         dev_filesystem_scheme = dev_pc.scheme
-        dev_app_sources = app_scheme_sources(app_pkg_name, app_lib_root, ctx.file.main, ctx.files.srcs) if ctx.file.main else []
+        dev_app_sources = app_scheme_sources(app_pkg_name, app_lib_root, inputs.main, inputs.srcs) if inputs.main else []
         dev_generated_source_uris = dev_pc.generated_source_uris
         dev_source_packages = dev_pc.source_packages
         dev_generated_sources = resolve_dev_generated_sources(
@@ -381,7 +388,7 @@ def flutter_compile_kernel(ctx, tools, aot = None, platform_dill = None, target_
     # a side library (upstream _PluginRegistrant shape) the engine invokes
     # before main() on every root-isolate launch — including hot restart.
     all_dep_plugins = []
-    for dep in ctx.attr.deps:
+    for dep in inputs.deps:
         if FlutterInfo in dep:
             all_dep_plugins.extend(dep[FlutterInfo].plugins)
     plugins = dedup_plugins(all_dep_plugins)
@@ -410,7 +417,7 @@ def flutter_compile_kernel(ctx, tools, aot = None, platform_dill = None, target_
 
     # Resolve the kernel entrypoint: the user's main, keyed by its package:
     # URI for hot-reload parity with the dev tool.
-    entrypoint_info = resolve_kernel_entrypoint(ctx, app_pkg_name, app_lib_root)
+    entrypoint_info = resolve_kernel_entrypoint(inputs.main, app_pkg_name, app_lib_root)
     if registrant:
         all_srcs = all_srcs + [registrant]
     if staged_agent:
@@ -424,7 +431,7 @@ def flutter_compile_kernel(ctx, tools, aot = None, platform_dill = None, target_
     # Merge defines with mode-specific Dart VM flags. user_defines (attr +
     # extra_dart_defines flag, no mode keys) is surfaced in the return struct
     # so dev-config writers can replay it on the dev tool's frontend_server.
-    user_defines = merge_dart_defines(ctx)
+    user_defines = merge_dart_defines(ctx, inputs.defines)
     all_defines = list(user_defines)
     if mode == "profile":
         all_defines.append("dart.vm.profile=true")
@@ -538,7 +545,7 @@ def collect_sdk_shader_srcs(deps):
         return depset(transitive = transitive_depsets).to_list()
     return []
 
-def _shader_jobs(ctx, deps, target_platform):
+def _shader_jobs(ctx, deps, target_platform, inputs):
     """Every shader this target bundles, as struct(bundle_path, file, includes, listed).
 
     `listed` says whether the asset manifest lists the shader. Flutter's own
@@ -558,9 +565,8 @@ def _shader_jobs(ctx, deps, target_platform):
     for them; `tester` and None leave out nothing.
     """
     jobs = []
-    user_includes = getattr(ctx.files, "shader_includes", [])
-    for shader in ctx.files.shaders:
-        jobs.append(struct(bundle_path = package_relative(ctx, shader), file = shader, includes = user_includes, listed = True))
+    for shader in inputs.shaders:
+        jobs.append(struct(bundle_path = package_relative(inputs, shader), file = shader, includes = inputs.shader_includes, listed = True))
     for shader in collect_sdk_shader_srcs(deps):
         jobs.append(struct(bundle_path = "shaders/" + shader.basename, file = shader, includes = [], listed = False))
     for dep in deps:
@@ -592,7 +598,7 @@ def _shader_jobs(ctx, deps, target_platform):
             ))
     return by_path.values()
 
-def shader_sources(ctx, deps, target_platform):
+def shader_sources(ctx, deps, target_platform, inputs = None):
     """The workspace files behind each bundled shader, for the dev tool.
 
     `{bundle path: [workspace-relative path]}`: the shader and what it may
@@ -606,20 +612,24 @@ def shader_sources(ctx, deps, target_platform):
             `flutter_compile_shaders` was given.
         target_platform: The platform the build is for, as `flutter_compile_shaders`
             was given it.
+        inputs: The program whose shaders these are, as `flutter_compile_shaders`
+            was given it.
 
     Returns:
         The dict above.
     """
+    if inputs == None:
+        inputs = flutter_program_inputs(ctx)
     return {
         job.bundle_path: [
             f.short_path
             for f in [job.file] + list(job.includes)
             if f.is_source and not f.short_path.startswith("../")
         ]
-        for job in _shader_jobs(ctx, deps, target_platform)
+        for job in _shader_jobs(ctx, deps, target_platform, inputs)
     }
 
-def asset_roots(ctx, deps):
+def asset_roots(ctx, deps, inputs = None):
     """The workspace directories the first-party assets come from, for the dev tool.
 
     `{bundle path prefix: workspace-relative directory}`: `""` for this
@@ -632,11 +642,15 @@ def asset_roots(ctx, deps):
         ctx: Rule context.
         deps: The dependencies whose packages' assets are bundled: the ones
             `flutter_build_assets` was given.
+        inputs: The program whose assets these are, as `flutter_build_assets`
+            was given it; its `label` says which package is "this target's own".
 
     Returns:
         The dict above.
     """
-    roots = {"": ctx.label.package or "."}
+    if inputs == None:
+        inputs = flutter_program_inputs(ctx)
+    roots = {"": inputs.label.package or "."}
     for dep in deps:
         if FlutterInfo not in dep:
             continue
@@ -652,7 +666,7 @@ def asset_roots(ctx, deps):
                 roots["packages/%s/" % entry.package_name] = f.short_path[:-len(entry.asset_path) - 1]
     return roots
 
-def flutter_compile_shaders(ctx, tools, target_platform, deps):
+def flutter_compile_shaders(ctx, tools, target_platform, deps, inputs = None):
     """Compile every shader this target bundles for the target platform.
 
     The shaders are the target's own (`shaders`), the SDK's (collected from
@@ -666,13 +680,17 @@ def flutter_compile_shaders(ctx, tools, target_platform, deps):
         deps: The dependencies whose SDK and package shaders are bundled.
             Named by the caller rather than read off `ctx.attr.deps`: a rule
             whose `deps` edge is split sees every branch's copy there.
+        inputs: The program whose shaders are bundled, from
+            `flutter_program_inputs`; `ctx`'s own when None.
 
     Returns:
         struct(listed, unlisted): lists of (bundle destination path, compiled
         File), the shaders the asset manifest lists and the ones it does not.
         Pass to `flutter_build_assets`.
     """
-    jobs = _shader_jobs(ctx, deps, target_platform)
+    if inputs == None:
+        inputs = flutter_program_inputs(ctx)
+    jobs = _shader_jobs(ctx, deps, target_platform, inputs)
     compiled = struct(listed = [], unlisted = [])
     if not jobs or not tools.impellerc:
         return compiled
@@ -695,7 +713,7 @@ def flutter_compile_shaders(ctx, tools, target_platform, deps):
             dart = tools.dart,
             dart_files = tools.sdk_files.run,
             compile_tool = ctx.file._shader_compile_tool,
-            require_sksl = getattr(ctx.attr, "require_sksl_shaders", False),
+            require_sksl = inputs.require_sksl_shaders,
         )
         (compiled.listed if job.listed else compiled.unlisted).append((job.bundle_path, output))
     return compiled
@@ -718,7 +736,7 @@ def declare_flutter_assets_dir(ctx):
     """
     return ctx.actions.declare_directory(ctx.label.name + "_flutter_assets")
 
-def flutter_build_assets(ctx, tools, output_dir, deps, target_platform, compiled_shaders = struct(listed = [], unlisted = []), kernel_dill = None, is_debug = False, data_assets = None, optional_code_points = []):
+def flutter_build_assets(ctx, tools, output_dir, deps, target_platform, compiled_shaders = struct(listed = [], unlisted = []), kernel_dill = None, is_debug = False, data_assets = None, optional_code_points = [], inputs = None):
     """Run the shared asset bundling step.
 
     Walks `FlutterInfo.pub_fonts` / `pub_assets` from deps to bundle
@@ -749,10 +767,15 @@ def flutter_build_assets(ctx, tools, output_dir, deps, target_platform, compiled
             hook's data asset.
         optional_code_points: Code points every subset icon font keeps if it
             has a glyph for them, whether or not the app uses them.
+        inputs: The program whose assets are bundled, from
+            `flutter_program_inputs`; `ctx`'s own when None. Its assets are
+            keyed by their path in the package of `inputs.label`.
 
     Returns:
         The flutter_assets/ tree artifact File.
     """
+    if inputs == None:
+        inputs = flutter_program_inputs(ctx)
 
     # Walk pub-package font/asset contributions from FlutterInfo.
     # MaterialIcons is no longer special-cased here — apps depend on
@@ -768,11 +791,11 @@ def flutter_build_assets(ctx, tools, output_dir, deps, target_platform, compiled
         for entry in data_assets.to_list():
             extra_asset_copies.append(("packages/{pkg}/{name}".format(pkg = entry.package, name = entry.name), entry.file))
 
-    license_files = ctx.files.license_files
+    license_files = inputs.license_files
 
     # Icon tree shaking: enabled only in non-debug mode with tree_shake_icons=True.
     tree_shake_icons = (
-        ctx.attr.tree_shake_icons and
+        inputs.tree_shake_icons and
         not is_debug and
         kernel_dill != None and
         tools.const_finder != None and
@@ -783,7 +806,8 @@ def flutter_build_assets(ctx, tools, output_dir, deps, target_platform, compiled
         ctx = ctx,
         dart = tools.dart,
         dart_files = tools.sdk_files.run,
-        assets = ctx.files.assets,
+        assets = inputs.assets,
+        owner = inputs,
         fonts = fonts,
         license_files = license_files,
         output_dir = output_dir,
@@ -1122,7 +1146,7 @@ EXTRA_DART_DEFINES_ATTR = {
     ),
 }
 
-def merge_dart_defines(ctx):
+def merge_dart_defines(ctx, defines = None):
     """Merge a target's `defines` attr with the extra_dart_defines flag.
 
     Flag values come after attr values, so on a duplicated key the command
@@ -1131,12 +1155,16 @@ def merge_dart_defines(ctx):
 
     Args:
         ctx: Rule context with `defines` and `_extra_dart_defines` attrs.
+        defines: The target's own defines, if not `ctx`'s: a program rebuilt
+            under another target carries the application's, and its own.
 
     Returns:
         The merged list of KEY=VALUE define strings.
     """
-    validate_dart_defines(ctx.attr.defines, "defines attribute of %s" % ctx.label)
-    return list(ctx.attr.defines) + ctx.attr._extra_dart_defines[BuildSettingInfo].value
+    if defines == None:
+        defines = ctx.attr.defines
+    validate_dart_defines(defines, "defines attribute of %s" % ctx.label)
+    return list(defines) + ctx.attr._extra_dart_defines[BuildSettingInfo].value
 
 def flutter_deps_attr(aspects = [], **kwargs):
     """The `deps` attribute of every rule that compiles a Flutter program.
@@ -1161,6 +1189,54 @@ def flutter_deps_attr(aspects = [], **kwargs):
         # `_validation` output group.
         aspects = [dart_import_check_aspect] + aspects,
         **kwargs
+    )
+
+def flutter_program_inputs(ctx):
+    """The Flutter program a rule compiles, read off its attributes.
+
+    What the compile and bundling helpers (`flutter_compile_kernel`,
+    `flutter_compile_shaders`, `flutter_build_assets`, `gen_snapshot_options`)
+    read of the program, as one value. A rule that is not the program's own
+    (`flutter_application_variant`: the application, with another `main`)
+    passes an `inputs` of its own making, so those helpers need no rule
+    context shaped like the application's.
+
+    Every field is read whether or not `ctx` declares it, and is empty when it
+    does not: a rule compiling a kernel has no assets, and one with no
+    `main` attribute has no `main`.
+
+    Args:
+        ctx: Rule context.
+
+    Returns:
+        A struct. `label` is the target whose package the program is in (its
+        library root, and the key of each asset); `main`, `srcs`, `assets`,
+        `shaders`, `shader_includes` and `license_files` are Files; `deps`,
+        `native_deps` and `code_assets` are Targets; the rest are as the
+        attributes of `flutter_application` of the same names.
+    """
+    return struct(
+        label = ctx.label,
+        main = getattr(ctx.file, "main", None),
+        srcs = list(getattr(ctx.files, "srcs", [])),
+        deps = getattr(ctx.attr, "deps", []),
+        defines = list(getattr(ctx.attr, "defines", [])),
+        package_name = getattr(ctx.attr, "package_name", ""),
+        language_version = getattr(ctx.attr, "language_version", ""),
+        assets = list(getattr(ctx.files, "assets", [])),
+        shaders = list(getattr(ctx.files, "shaders", [])),
+        shader_includes = list(getattr(ctx.files, "shader_includes", [])),
+        require_sksl_shaders = getattr(ctx.attr, "require_sksl_shaders", False),
+        license_files = list(getattr(ctx.files, "license_files", [])),
+        tree_shake_icons = getattr(ctx.attr, "tree_shake_icons", False),
+        native_deps = list(getattr(ctx.attr, "native_deps", [])),
+        code_assets = list(getattr(ctx.attr, "code_assets", [])),
+        link_hook_assets = list(getattr(ctx.attr, "link_hook_assets", [])),
+        track_widget_creation = getattr(ctx.attr, "track_widget_creation", False),
+        min_os_version = getattr(ctx.attr, "min_os_version", ""),
+        obfuscate = getattr(ctx.attr, "obfuscate", False),
+        split_debug_info = getattr(ctx.attr, "split_debug_info", False),
+        extra_gen_snapshot_options = list(getattr(ctx.attr, "extra_gen_snapshot_options", [])),
     )
 
 # The attrs `flutter_compile_kernel` reads off its caller's `ctx`. Every rule
@@ -1316,3 +1392,54 @@ FLUTTER_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | {
         allow_single_file = True,
     ),
 } | AGENT_EXTENSIONS_ATTR
+
+# What a `flutter_application` states about its program: the attributes
+# `flutter_program_inputs` reads, and so the ones a rule that rebuilds the
+# program under another target (`flutter_application_variant`) takes from the
+# application instead of declaring its own.
+FLUTTER_PROGRAM_ATTR_NAMES = [
+    "assets",
+    "defines",
+    "deps",
+    "extra_gen_snapshot_options",
+    "language_version",
+    "license_files",
+    "link_hook_assets",
+    "main",
+    "min_os_version",
+    "native_deps",
+    "obfuscate",
+    "package_name",
+    "require_sksl_shaders",
+    "shader_includes",
+    "shaders",
+    "split_debug_info",
+    "srcs",
+    "track_widget_creation",
+    "tree_shake_icons",
+]
+
+# The rest of `FLUTTER_APPLICATION_ATTRS`: the tools and build settings every
+# application target carries, which a rebuild under another target needs for
+# itself. Every one is private: a public attribute here is one nobody decided
+# the variant's behaviour for, so adding it to `FLUTTER_APPLICATION_ATTRS`
+# without listing it above fails at load.
+FLUTTER_APPLICATION_TOOL_ATTRS = {
+    name: value
+    for name, value in FLUTTER_APPLICATION_ATTRS.items()
+    if name not in FLUTTER_PROGRAM_ATTR_NAMES
+}
+
+def _check_program_attrs():
+    unclassified = [name for name in FLUTTER_APPLICATION_TOOL_ATTRS if not name.startswith("_")]
+    unknown = [name for name in FLUTTER_PROGRAM_ATTR_NAMES if name not in FLUTTER_APPLICATION_ATTRS]
+    if unclassified or unknown:
+        fail(
+            "common.bzl: FLUTTER_APPLICATION_ATTRS and FLUTTER_PROGRAM_ATTR_NAMES disagree: " +
+            "%s are public attributes of the application not listed as program content, " % unclassified +
+            "%s are listed as program content and are not attributes of it. " % unknown +
+            "A flutter_application_variant takes the first from the application and would " +
+            "silently ignore them.",
+        )
+
+_check_program_attrs()

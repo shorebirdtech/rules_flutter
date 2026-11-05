@@ -375,11 +375,11 @@ def app_scheme_sources(package_name, lib_root, main, srcs):
         out.append({"path": f.short_path, "uri": app_scheme_location(f).uri})
     return out
 
-def resolve_kernel_entrypoint(ctx, package_name, lib_root):
+def resolve_kernel_entrypoint(main, package_name, lib_root):
     """Resolve the application kernel entrypoint: the user's own `main`.
 
     Args:
-        ctx: The rule context (for `file.main`).
+        main: The app's `main` `File`.
         package_name: The app's Dart package name, or "" when the app is not
             registered as a package (no `package:` URI is possible then).
         lib_root: The app's library root, from `derive_lib_root`.
@@ -394,9 +394,9 @@ def resolve_kernel_entrypoint(ctx, package_name, lib_root):
                 mounted under `APP_SCHEME`, or None for a `package:` URI.
         )
     """
-    location = app_main_location(package_name, lib_root, ctx.file.main)
+    location = app_main_location(package_name, lib_root, main)
     return struct(
-        file = ctx.file.main,
+        file = main,
         uri = location.uri,
         root = location.root,
     )

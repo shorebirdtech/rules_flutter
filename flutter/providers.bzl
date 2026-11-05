@@ -171,3 +171,10 @@ FlutterApplicationInfo = provider(
         "windows_plugin_libraries": "depset[struct]: Aggregated Windows plugin source bundles, same shape as `FlutterInfo.windows_plugin_libraries`. The Windows runner folds these into its compile.",
     },
 )
+
+FlutterApplicationInputsInfo = provider(
+    doc = "The program a `flutter_application` compiled, as the value its analysis ran over: what `flutter_application_variant` changes and compiles again.",
+    fields = {
+        "inputs": "struct: `flutter_program_inputs` of the application. `label` is the application's own, and with it the package that `package:<name>/…` imports and asset keys are in; `main`, `srcs`, `assets` and the other source fields are Files; `deps`, `native_deps` and `code_assets` are the Targets the application's attributes named, with the providers its aspects attached.",
+    },
+)

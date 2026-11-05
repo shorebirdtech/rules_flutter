@@ -19,7 +19,7 @@ _FILE_WRITING_FLAGS = [
     "write-v8-snapshot-profile-to",
 ]
 
-def gen_snapshot_options(ctx):
+def gen_snapshot_options(ctx, inputs = None):
     """Reads the gen_snapshot options a rule's attributes ask for.
 
     `obfuscate`, `split_debug_info` and `extra_gen_snapshot_options` mean the
@@ -33,7 +33,11 @@ def gen_snapshot_options(ctx):
 
     Args:
         ctx: A rule context with `obfuscate`, `split_debug_info` and
-            `extra_gen_snapshot_options` attributes.
+            `extra_gen_snapshot_options` attributes, which says where the
+            declared files go (`<name>_gen_snapshot/`).
+        inputs: What to read the three attributes from, if not `ctx`:
+            `flutter_program_inputs`, which a program rebuilt under another
+            target (`flutter_application_variant`) carries from its own.
 
     Returns:
         A struct of `flags` (strings), `file_flags` ((flag, File) pairs),
@@ -44,7 +48,13 @@ def gen_snapshot_options(ctx):
     flags = []
     file_flags = []
     strip = True
-    for option in ctx.attr.extra_gen_snapshot_options:
+    if inputs == None:
+        inputs = struct(
+            extra_gen_snapshot_options = ctx.attr.extra_gen_snapshot_options,
+            obfuscate = ctx.attr.obfuscate,
+            split_debug_info = ctx.attr.split_debug_info,
+        )
+    for option in inputs.extra_gen_snapshot_options:
         # As flutter_tools does, `--no-strip` is read here and not passed on:
         # whether the snapshot is stripped is the rule's to decide, and an
         # Apple rule strips after its dSYM is made, not in gen_snapshot.
@@ -62,10 +72,10 @@ def gen_snapshot_options(ctx):
             )
         output = ctx.actions.declare_file("%s_gen_snapshot/%s" % (ctx.label.name, value))
         file_flags.append((flag, output))
-    if ctx.attr.obfuscate:
+    if inputs.obfuscate:
         flags.append("--obfuscate")
     debug_info = None
-    if ctx.attr.split_debug_info:
+    if inputs.split_debug_info:
         debug_info = ctx.actions.declare_file(ctx.label.name + ".symbols")
     return struct(
         flags = flags,

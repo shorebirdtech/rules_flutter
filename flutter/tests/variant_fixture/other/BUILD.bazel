@@ -1,0 +1,15 @@
+load("//flutter:integration_test.bzl", "flutter_application_variant")
+
+package(default_visibility = ["//flutter/tests:__subpackages__"])
+
+# A variant in another Bazel package than its application, with its own `main`
+# and source, and a plugin the application does not have.
+flutter_application_variant(
+    name = "elsewhere",
+    srcs = ["extra.dart"],
+    application = "//flutter/tests/variant_fixture/app",
+    defines = ["VARIANT=1"],
+    main = "variant_main.dart",
+    tags = ["manual"],
+    deps = ["//flutter/tests/variant_fixture/plugins/extra:extra_plugin"],
+)

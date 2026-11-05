@@ -1,0 +1,25 @@
+load("//flutter:defs.bzl", "flutter_application")
+load("//flutter:integration_test.bzl", "flutter_application_variant")
+
+package(default_visibility = ["//flutter/tests:__subpackages__"])
+
+# The application the variants rebuild: a source beside its `main`, an asset, a
+# plugin, all in this package.
+flutter_application(
+    name = "app",
+    package_name = "variant_app",
+    srcs = ["lib/helper.dart"],
+    assets = ["assets/a.txt"],
+    main = "lib/main.dart",
+    tags = ["manual"],
+    deps = ["//flutter/tests/variant_fixture/plugins/base:base_plugin"],
+)
+
+# A variant whose `main` is in the application's own `lib/`: it has a
+# `package:` URI.
+flutter_application_variant(
+    name = "in_package",
+    application = ":app",
+    main = "lib/variant_main.dart",
+    tags = ["manual"],
+)

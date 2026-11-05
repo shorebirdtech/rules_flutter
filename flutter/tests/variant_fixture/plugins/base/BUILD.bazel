@@ -1,0 +1,11 @@
+load("//flutter:defs.bzl", "flutter_plugin")
+
+# A plugin the application depends on.
+flutter_plugin(
+    name = "base_plugin",
+    package_name = "variant_base_plugin",
+    srcs = ["lib/base_plugin.dart"],
+    plugin_platforms_json = '{"macos":{"pluginClass":"BasePlugin"}}',
+    tags = ["manual"],
+    visibility = ["//flutter/tests:__subpackages__"],
+)

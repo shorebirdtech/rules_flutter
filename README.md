@@ -1428,6 +1428,35 @@ flutter_application(
 
 **Defines from the command line.** The repeatable flag `--@rules_flutter//flutter:extra_dart_defines=KEY=VALUE` adds a define to every Dart compile: native kernel, `flutter_test`, dart2wasm, and dart2js. Each occurrence of the flag is one define, so values may contain commas, except in a `flutter_test`: its dependencies are compiled one library at a time by the SDK's `kernel_worker`, which splits every value on commas, so a comma there is refused at analysis. When a key is set both by the flag and by the `defines` attribute, the flag wins. The keys `dart.vm.profile` and `dart.vm.product` are set by the build from the compilation mode and cannot be passed. The dev tool's `--dart-define` forwards to this flag and replays the defines on hot reload and restart, matching `flutter run --dart-define`.
 
+### flutter_application_variant
+
+The same application with another `main`. It compiles the application's program again with `main` as the entry point, adds `srcs`, `deps` and `defines` to the application's, and keeps the rest: its Dart package (so `package:my_app/...` imports in the new `main` resolve), assets, native libraries, shaders and build options. It returns what `flutter_application` returns, so every platform rule takes it as its `application`. The framework and each package are compiled once for the variant and the application alike.
+
+It is exported from `@rules_flutter//flutter:integration_test.bzl`, beside the rules that run integration tests, but it is not tied to them: an entry point of its own, as `flutter run -t test_driver/app.dart` runs, is the same shape.
+
+```starlark
+load("@rules_flutter//flutter:integration_test.bzl", "flutter_application_variant")
+
+flutter_application_variant(
+    name = "driver_flutter",
+    application = ":my_app",
+    main = "test_driver/app.dart",
+    srcs = ["test_driver/banner.dart"],
+)
+
+flutter_macos_app(
+    name = "driver_app",
+    application = ":driver_flutter",
+    bundle_id = "com.example.myapp.driver",
+)
+```
+
+| Attribute | Description |
+|---|---|
+| `application` | The `flutter_application` to rebuild. Required. It may be in another Bazel package: the variant is in the application's Dart package and its assets keep their keys there. |
+| `main` | The entry point, in place of the application's. Required. It may sit outside the package's `lib/`. |
+| `srcs`, `deps`, `defines` | Added to the application's. A plugin only the variant's `deps` bring is registered in the variant and not in the application. |
+
 ### flutter_test
 
 Compiles and runs widget and unit tests on the Dart VM with Flutter's test engine. Assertions are enabled.
@@ -1770,6 +1799,8 @@ sdk = ctx.toolchains["@rules_flutter//flutter:toolchain_type"].flutter_sdk_info
 | `native_libs` | `list[File]` | Shared libraries from `native_deps`. |
 | `is_debug` | `bool` | `True` for a debug build. |
 | `native_plugin_registrant` | `File` or `None` | The generated plugin registrant source for desktop platforms. |
+
+**`FlutterApplicationInputsInfo`** is carried by `flutter_application` and `flutter_application_variant`. Its one field, `inputs`, is the program the application was built from, which `flutter_application_variant` changes and builds again.
 
 ## The dev tool
 

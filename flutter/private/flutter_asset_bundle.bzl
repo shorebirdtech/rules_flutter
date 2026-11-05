@@ -86,7 +86,8 @@ def flutter_asset_bundle_action(
         kernel_dill = None,
         optional_code_points = [],
         extra_asset_copies = [],
-        unlisted_asset_copies = []):
+        unlisted_asset_copies = [],
+        owner = None):
     """Create an action that generates the flutter_assets/ tree artifact.
 
     Args:
@@ -120,6 +121,9 @@ def flutter_asset_bundle_action(
             asset manifest.
         unlisted_asset_copies: the same, for files that are bundled without
             being an entry of the asset manifest.
+        owner: What has the package `assets` are keyed in: anything with a
+            `label`, `ctx` when None. A program rebuilt under another target
+            (`flutter_application_variant`) keeps its own package's keys.
 
     Returns:
         The `output_dir` it was given, so callers can chain.
@@ -138,7 +142,7 @@ def flutter_asset_bundle_action(
     # reached twice (a package behind two dependencies) is one claim.
     claims = {}
     listed = {}
-    claimed = [(package_relative(ctx, f), f, True) for f in assets]
+    claimed = [(package_relative(owner or ctx, f), f, True) for f in assets]
     claimed += [(key, f, True) for key, f in extra_asset_copies]
     claimed += [(key, f, False) for key, f in unlisted_asset_copies]
     for key, f, in_manifest in claimed:

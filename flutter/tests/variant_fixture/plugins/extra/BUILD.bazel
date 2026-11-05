@@ -1,0 +1,11 @@
+load("//flutter:defs.bzl", "flutter_plugin")
+
+# A plugin only a variant depends on.
+flutter_plugin(
+    name = "extra_plugin",
+    package_name = "variant_extra_plugin",
+    srcs = ["lib/extra_plugin.dart"],
+    plugin_platforms_json = '{"macos":{"pluginClass":"ExtraPlugin"}}',
+    tags = ["manual"],
+    visibility = ["//flutter/tests:__subpackages__"],
+)

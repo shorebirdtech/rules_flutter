@@ -34,7 +34,8 @@ def package_relative(ctx, f):
     some other.
 
     Args:
-        ctx: Rule context.
+        ctx: Rule context, or anything else with a `label` (a program's inputs,
+            whose `label` is the target whose package it is).
         f: A File of `ctx.label`'s package, or a package below it.
 
     Returns:

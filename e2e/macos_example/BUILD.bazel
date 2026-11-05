@@ -6,6 +6,7 @@ load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
 load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_analysis_test", "dart_test")
 load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_library", "flutter_profile_build")
+load("@rules_flutter//flutter:integration_test.bzl", "flutter_application_variant")
 load(
     "@rules_flutter//flutter:macos.bzl",
     "MACOS_MINIMUM_OS_VERSION",
@@ -123,12 +124,13 @@ flutter_application(
 # `flutter run -t test_driver/app.dart` runs. It has no `package:` URI, so the
 # build and the dev loop both name it under the app scheme; hot reload of it,
 # and of the sibling it imports by relative path, is what this pair is for.
-flutter_application(
+# It is the application with that `main`: same package, assets, plugins and
+# native library.
+flutter_application_variant(
     name = "driver_flutter",
-    package_name = "macos_example",
     srcs = ["test_driver/banner.dart"],
+    application = ":app_flutter",
     main = "test_driver/app.dart",
-    deps = ["@deps//:flutter"],
 )
 
 flutter_macos_app(
