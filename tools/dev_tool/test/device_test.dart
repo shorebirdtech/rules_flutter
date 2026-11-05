@@ -6061,6 +6061,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
           reason: 'the wait is bounded, not merely eventual',
         );
       },
+      testOn: '!windows',
     );
 
     // A Ctrl-C in a terminal reaches the app as well as this tool — they share

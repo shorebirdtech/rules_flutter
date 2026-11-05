@@ -20,6 +20,9 @@ import 'package:vm_service/vm_service_io.dart';
 import 'fake_suite_app.dart';
 import 'fakes.dart';
 
+/// What the Android SDK calls aapt2 on this host.
+final _aapt2 = Platform.isWindows ? 'aapt2.exe' : 'aapt2';
+
 /// A device whose launch is whatever the test says.
 class _FakeDevice extends Device {
   _FakeDevice(this._launch);
@@ -284,7 +287,7 @@ void main() {
       sdkAdb = p.join(sdk.path, 'platform-tools', 'adb');
       File(sdkAdb).createSync(recursive: true);
       File(
-        p.join(sdk.path, 'build-tools', '35.0.0', 'aapt2'),
+        p.join(sdk.path, 'build-tools', '35.0.0', _aapt2),
       ).createSync(recursive: true);
       runfilesAdb = p.join(scratch.path, 'runfiles', 'adb');
       Directory(p.dirname(runfilesAdb)).createSync(recursive: true);
@@ -338,7 +341,7 @@ void main() {
           'sdk',
           'build-tools',
           '35.0.0',
-          'aapt2',
+          _aapt2,
         ),
       );
       expect(device.expectsVmService, isTrue);
@@ -374,7 +377,7 @@ void main() {
       'is refused when the SDK of the adb has no aapt2, naming it',
       () async {
         File(
-          p.join(scratch.path, 'sdk', 'build-tools', '35.0.0', 'aapt2'),
+          p.join(scratch.path, 'sdk', 'build-tools', '35.0.0', _aapt2),
         ).deleteSync();
 
         await expectLater(

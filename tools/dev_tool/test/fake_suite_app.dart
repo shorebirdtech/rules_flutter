@@ -33,6 +33,7 @@ class FakeSuiteApp {
   final HttpServer _server;
   WebSocket? _socket;
   final _closed = Completer<void>();
+  var _vanished = false;
 
   /// Completes when the client's socket has closed.
   Future<void> get closed => _closed.future;
@@ -74,6 +75,8 @@ class FakeSuiteApp {
   };
 
   void _answer(Map<String, Object?> request) {
+    // A request already on the wire when the app ended gets no answer.
+    if (_vanished) return;
     final id = request['id'];
     final method = request['method'] as String;
     final params = (request['params'] as Map?)?.cast<String, Object?>() ?? {};
@@ -194,6 +197,7 @@ class FakeSuiteApp {
 
   /// The app ends: its VM service's socket closes.
   Future<void> vanish() async {
+    _vanished = true;
     await _socket!.close();
     await _closed.future;
   }
