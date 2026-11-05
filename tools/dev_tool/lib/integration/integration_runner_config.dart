@@ -131,12 +131,20 @@ class IntegrationRunnerConfig {
   /// The runfiles path of the browser a web test runs in: the launcher's
   /// `chrome`. A [FormatException] names the key when the runner did not give
   /// one, since a browser guessed at would not be the pinned one.
-  String get chromePath {
-    final value = launcher['chrome'];
+  String get chromePath => _launcherPath('chrome', 'the browser\'s');
+
+  /// The runfiles path of the `adb` an Android test drives its device with: the
+  /// launcher's `adb`. A [FormatException] names the key when the runner did
+  /// not give one, since an `adb` found on the host would not be the one of the
+  /// SDK the app was built against.
+  String get adbPath => _launcherPath('adb', 'the SDK\'s');
+
+  String _launcherPath(String key, String whose) {
+    final value = launcher[key];
     if (value is! String || value.isEmpty) {
       throw FormatException(
-        'the config: "launcher.chrome" must be a non-empty string, the '
-        'browser\'s runfiles path, got '
+        'the config: "launcher.$key" must be a non-empty string, $whose '
+        'runfiles path, got '
         '${value == null ? 'nothing' : json.encode(value)}',
       );
     }

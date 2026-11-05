@@ -1,6 +1,6 @@
-load("//flutter:integration_test.bzl", "flutter_application_variant", "flutter_chrome_runner", "flutter_desktop_integration_test", "flutter_integration_bootstrap", "flutter_web_bundle_integration_test")
+load("//flutter:integration_test.bzl", "flutter_android_app_integration_test", "flutter_android_device_runner", "flutter_application_variant", "flutter_chrome_runner", "flutter_desktop_integration_test", "flutter_integration_bootstrap", "flutter_web_bundle_integration_test")
 load("//flutter:web.bzl", "flutter_web_bundle")
-load("//flutter/tests:flutter_integration_test_test.bzl", "stub_runner")
+load("//flutter/tests:flutter_integration_test_test.bzl", "android_probe_targets", "stub_runner")
 
 package(default_visibility = ["//flutter/tests:__subpackages__"])
 
@@ -111,4 +111,46 @@ flutter_web_bundle(
     main = "test/a_test.dart",
     tags = ["manual"],
     unchecked_srcs = ["test/flutter_test_config.dart"],
+)
+
+# An `adb` shaped as the SDK's: a file, in a directory that stands for the SDK.
+flutter_android_device_runner(
+    name = "android_runner",
+    adb = "fake_sdk/platform-tools/adb",
+    tags = ["manual"],
+)
+
+flutter_android_app_integration_test(
+    name = "android_test",
+    app = "//flutter/tests/variant_fixture/app",
+    runner = ":android_runner",
+    tags = ["manual"],
+)
+
+# An environment, which an app on a device cannot be given.
+flutter_android_app_integration_test(
+    name = "android_test_with_env",
+    app = "//flutter/tests/variant_fixture/app",
+    env = {"FIXTURE_KEY": "fixture value"},
+    runner = ":android_runner",
+    tags = ["manual"],
+)
+
+# A runner of another family.
+flutter_android_app_integration_test(
+    name = "android_test_on_a_desktop_runner",
+    app = "//flutter/tests/variant_fixture/app",
+    runner = "//flutter/integration_test:desktop",
+    tags = ["manual"],
+)
+
+# What the Android test builds its app as, for each ABI it takes.
+android_probe_targets(
+    name = "built_for_arm64_v8a",
+    abi = "arm64-v8a",
+)
+
+android_probe_targets(
+    name = "built_for_x86_64",
+    abi = "x86_64",
 )

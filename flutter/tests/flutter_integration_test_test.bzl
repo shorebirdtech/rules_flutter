@@ -4,8 +4,10 @@ Over `//flutter/tests/integration_fixture`.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
+load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("//flutter:providers.bzl", "FlutterIntegrationRunnerInfo")
 load("//flutter/private:flutter_integration_bootstrap.bzl", "make_integration_bootstrap_content")
+load("//flutter/private:flutter_integration_test.bzl", "android_dbg_transition")
 load(":action_content.bzl", "written_json", "written_text")
 
 _FIXTURE = "//flutter/tests/integration_fixture:"
@@ -217,6 +219,141 @@ def _chrome_runner_impl(ctx):
 
 _chrome_runner_test = analysistest.make(_chrome_runner_impl)
 
+# -- Android -----------------------------------------------------------------
+
+def _android_runner_impl(ctx):
+    """The Android runner names the SDK's `adb` by runfiles path and brings it."""
+    env = analysistest.begin(ctx)
+    runner = analysistest.target_under_test(env)[FlutterIntegrationRunnerInfo]
+    asserts.equals(env, "android", runner.family)
+    asserts.equals(
+        env,
+        "_main/flutter/tests/integration_fixture/fake_sdk/platform-tools/adb",
+        runner.launcher_config.adb,
+        "the runner reads the adb from the runfiles",
+    )
+    asserts.equals(env, ["adb"], [f.basename for f in runner.runfiles.to_list()], "the adb is brought")
+    asserts.equals(env, "1", runner.execution_requirements.get("no-remote"))
+    asserts.equals(env, "1", runner.execution_requirements.get("no-sandbox"))
+    return analysistest.end(env)
+
+_android_runner_test = analysistest.make(_android_runner_impl)
+
+def _android_rule_impl(ctx):
+    """The Android test rule tells the runner which adb, takes the device from the invoking shell, and places the test where its device is."""
+    env = analysistest.begin(ctx)
+    target = analysistest.target_under_test(env)
+    config = written_json(env, ".integration_config.json")
+    if config == None:
+        return analysistest.end(env)
+    asserts.equals(env, "android", config["family"])
+    asserts.equals(
+        env,
+        {"adb": "_main/flutter/tests/integration_fixture/fake_sdk/platform-tools/adb"},
+        config["launcher"],
+    )
+    asserts.equals(env, {}, config["env"])
+    asserts.true(env, len(config["appArtifacts"]) > 0, "the app's files are the runner's to choose from")
+
+    environment = target[RunEnvironmentInfo]
+    asserts.equals(
+        env,
+        ["ANDROID_SERIAL"],
+        environment.inherited_environment,
+        "the device the invoking shell names reaches the runner",
+    )
+    asserts.true(env, environment.environment["FLUTTER_INTEGRATION_TEST_CONFIG"].endswith("android_test.integration_config.json"))
+    requirements = target[testing.ExecutionInfo].requirements
+    asserts.equals(env, "1", requirements.get("no-remote"), "the device is attached to this machine")
+    asserts.equals(env, "1", requirements.get("no-sandbox"), "and reached from outside Bazel's sandbox")
+    return analysistest.end(env)
+
+_android_rule_test = analysistest.make(_android_rule_impl)
+
+def _android_env_impl(ctx):
+    """An Android test given an `env` fails analysis, saying an app on a device takes none and where its defines go."""
+    env = analysistest.begin(ctx)
+    asserts.expect_failure(env, "an app on an Android device cannot receive an environment")
+    return analysistest.end(env)
+
+_android_env_test = analysistest.make(_android_env_impl, expect_failure = True)
+
+def _android_wrong_family_impl(ctx):
+    """An Android test takes only an Android runner."""
+    env = analysistest.begin(ctx)
+    asserts.expect_failure(env, "is for desktop devices, and this rule runs the app on a android one")
+    return analysistest.end(env)
+
+_android_wrong_family_test = analysistest.make(_android_wrong_family_impl, expect_failure = True)
+
+BuiltAsInfo = provider(
+    doc = "How a probe was built.",
+    fields = ["mode", "profile", "platforms"],
+)
+
+def _probe_impl(ctx):
+    return [BuiltAsInfo(
+        mode = ctx.var["COMPILATION_MODE"],
+        profile = ctx.attr._profile[BuildSettingInfo].value,
+        platforms = ctx.attr._platforms[BuildSettingInfo].value,
+    )]
+
+_probe = rule(
+    implementation = _probe_impl,
+    attrs = {
+        "_platforms": attr.label(default = Label("@rules_android//flags:android_platforms")),
+        "_profile": attr.label(default = Label("//flutter:profile")),
+    },
+    doc = "Records the configuration it is built in.",
+)
+
+def _built_under_impl(ctx):
+    return [ctx.attr.target[0][BuiltAsInfo]]
+
+_built_under_android_transition = rule(
+    implementation = _built_under_impl,
+    attrs = {
+        "abi": attr.string(mandatory = True),
+        "target": attr.label(cfg = android_dbg_transition, mandatory = True),
+    },
+    doc = "Builds `target` as an Android integration test builds its app, for `abi`.",
+)
+
+def _android_transition_impl(ctx):
+    """An Android test's app is built in debug mode, for the ABI the test names, whatever the command line says."""
+    env = analysistest.begin(ctx)
+    built = analysistest.target_under_test(env)[BuiltAsInfo]
+    asserts.equals(env, "dbg", built.mode, "debug, the mode a VM service is served in")
+    asserts.equals(env, False, built.profile)
+    asserts.equals(env, [str(Label("@rules_android//:" + ctx.attr.abi))], built.platforms, "the platform of the device's ABI")
+    return analysistest.end(env)
+
+_android_transition_test = analysistest.make(
+    _android_transition_impl,
+    attrs = {"abi": attr.string(mandatory = True)},
+    # What the command line says, which the transition overrides.
+    config_settings = {
+        "//command_line_option:compilation_mode": "opt",
+        str(Label("//flutter:profile")): True,
+        str(Label("@rules_android//flags:android_platforms")): [str(Label("@rules_android//:x86_64"))],
+    },
+)
+
+def android_probe_targets(name, abi):
+    """A probe built as an Android test builds its app, for the test of what that does.
+
+    Args:
+        name: The name of the target that has the probe's configuration.
+        abi: The ABI the transition is told.
+    """
+    _probe(name = name + "_probe", tags = ["manual"])
+    _built_under_android_transition(
+        name = name,
+        abi = abi,
+        target = ":" + name + "_probe",
+        tags = ["manual"],
+    )
+
 # -- The variant's package check ---------------------------------------------
 
 def _missing_package_impl(ctx):
@@ -253,6 +390,16 @@ def flutter_integration_test_test_suite(name):
         configured = True,
     )
     _chrome_runner_test(name = name + "_chrome_runner", target_under_test = _FIXTURE + "chrome_runner")
+    _android_runner_test(name = name + "_android_runner", target_under_test = _FIXTURE + "android_runner")
+    _android_rule_test(name = name + "_android_rule", target_under_test = _FIXTURE + "android_test")
+    _android_env_test(name = name + "_android_env", target_under_test = _FIXTURE + "android_test_with_env")
+    _android_wrong_family_test(name = name + "_android_wrong_family", target_under_test = _FIXTURE + "android_test_on_a_desktop_runner")
+    for abi in ["arm64-v8a", "x86_64"]:
+        _android_transition_test(
+            name = name + "_android_transition_" + abi.replace("-", "_"),
+            target_under_test = _FIXTURE + "built_for_" + abi.replace("-", "_"),
+            abi = abi,
+        )
     _relative_test(name = name + "_relative", target_under_test = _FIXTURE + "bootstrap_relative")
     _bootstrap_missing_package_test(name = name + "_bootstrap_missing_package", target_under_test = _FIXTURE + "bootstrap_missing_a_package")
     _web_unchecked_test(name = name + "_web_unchecked", target_under_test = _FIXTURE + "web_unchecked")
@@ -268,6 +415,12 @@ def flutter_integration_test_test_suite(name):
             ":" + name + "_bootstrap",
             ":" + name + "_bootstrap_with_config",
             ":" + name + "_chrome_runner",
+            ":" + name + "_android_runner",
+            ":" + name + "_android_rule",
+            ":" + name + "_android_env",
+            ":" + name + "_android_wrong_family",
+            ":" + name + "_android_transition_arm64_v8a",
+            ":" + name + "_android_transition_x86_64",
             ":" + name + "_relative",
             ":" + name + "_bootstrap_missing_package",
             ":" + name + "_web_rule",

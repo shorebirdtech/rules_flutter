@@ -1,6 +1,6 @@
 load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_analysis_test", "dart_binary")
 load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_library")
-load("@rules_flutter//flutter:integration_test.bzl", "flutter_macos_integration_test", "flutter_web_integration_test")
+load("@rules_flutter//flutter:integration_test.bzl", "flutter_android_integration_test", "flutter_macos_integration_test", "flutter_web_integration_test")
 load(":test_outcome.bzl", "outcome_test")
 
 exports_files(["pubspec.lock"])
@@ -172,6 +172,62 @@ outcome_test(
     output_contains = ["Expected: exactly one matching"],
     target_compatible_with = ["@platforms//os:macos"],
     test = ":web_red",
+)
+
+# -- Android ---------------------------------------------------------------
+
+# The same app on an attached phone or a running emulator, which is a
+# precondition: with none attached, or several and no `ANDROID_SERIAL`, the
+# tests fail saying so, as `flutter test -d` does. Run them by name with the
+# device named, e.g.
+#
+#     bazel test //:android_pass_test //:android_filter_test //:android_red_twin_test \
+#         --test_env=ANDROID_SERIAL=<serial>
+#
+# The app is built for `abi` (arm64-v8a, the default, is a phone or an
+# Apple-silicon emulator) and needs `androidx.test` and Espresso in this
+# workspace's `rules_android_maven` install, which `integration_test`'s Android
+# library links.
+
+# The two tests of `:macos_pass_test`, on a device: each is reported.
+flutter_android_integration_test(
+    name = "android_pass_test",
+    package_name = "com.example.integration_test_example",
+    src = "integration_test/counter_test.dart",
+    application = ":app_flutter",
+    deps = _TEST_DEPS,
+)
+
+# `--test_filter` selects among the tests of one file on a device too.
+outcome_test(
+    name = "android_filter_test",
+    cases = ["counter increments when tapped"],
+    expect = "pass",
+    failing_cases_given = True,
+    test = ":android_pass_test",
+    test_filter = "increments",
+)
+
+# `manual`, since it is meant to fail: the red twin below runs it.
+flutter_android_integration_test(
+    name = "android_red",
+    package_name = "com.example.integration_test_example",
+    src = "integration_test/failing_test.dart",
+    application = ":app_flutter",
+    tags = ["manual"],
+    deps = _TEST_DEPS,
+)
+
+# A failing integration test fails its target on a device, and its JUnit report
+# names the failing case.
+outcome_test(
+    name = "android_red_twin_test",
+    cases = ["counter reads 99 after one tap"],
+    expect = "fail",
+    failing_cases = ["counter reads 99 after one tap"],
+    failing_cases_given = True,
+    output_contains = ["Expected: exactly one matching"],
+    test = ":android_red",
 )
 
 # Runs a test that must fail, or run only some of its cases (see

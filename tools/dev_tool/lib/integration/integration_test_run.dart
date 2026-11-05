@@ -13,10 +13,13 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_rule_tools/remote_suite.dart';
+import 'package:path/path.dart' as p;
 import 'package:rules_flutter_macos_gui_session/macos_gui_session.dart';
 
 import '../device.dart';
+import '../host_tools.dart';
 import '../web_options.dart';
+import 'android_serial.dart';
 import 'device_lock.dart';
 import 'integration_runner_config.dart';
 import 'suite_connectors.dart';
@@ -46,16 +49,23 @@ class DeviceChoice {
 /// The device `config` runs on, on a host whose operating system is [os].
 ///
 /// [resolve] turns a runfiles path into a file, for what the runner's config
-/// names (the browser).
+/// names (the browser, the `adb`). [environment] is the test's environment,
+/// which names the Android device (`ANDROID_SERIAL`). [runAdb] runs the `adb`
+/// that lists the attached devices, and [lockDirectory] is where a device's
+/// lock is kept, unless a test of this says otherwise.
 ///
-/// Throws a [StateError] for a device no runner has been written for: the run
-/// fails, saying so, rather than falling back to another.
-DeviceChoice chooseDevice(
+/// Throws a [StateError] for a device no runner has been written for, or one
+/// the host does not have: the run fails, saying so, rather than falling back
+/// to another.
+Future<DeviceChoice> chooseDevice(
   IntegrationRunnerConfig config, {
   required String os,
   required String Function(String runfilesPath) resolve,
+  Map<String, String> environment = const {},
+  ProcessRunSync? runAdb,
+  Directory? lockDirectory,
   void Function(String message)? log,
-}) {
+}) async {
   switch (config.family) {
     case IntegrationFamily.desktop when os == 'macos':
       return DeviceChoice(
@@ -75,12 +85,60 @@ DeviceChoice chooseDevice(
         () async => () async {},
         chromePageConnector(),
       );
-    case IntegrationFamily.iosSimulator || IntegrationFamily.android:
+    case IntegrationFamily.android:
+      final adb = resolve(config.adbPath);
+      final serial = await chooseAndroidSerial(
+        adb: adb,
+        requested: environment['ANDROID_SERIAL'],
+        run: runAdb ?? Process.run,
+      );
+      return DeviceChoice(
+        AndroidDevice(
+            deviceId: serial,
+            adbPath: adb,
+            aapt2Path: _aapt2OfSdkOf(adb),
+          )
+          // A debug app serves the VM service the suite is driven through, and
+          // cannot without the INTERNET permission, which the launch checks.
+          ..expectsVmService = true,
+        () => _hold('android-$serial', lockDirectory, log),
+        vmServiceConnector(),
+      );
+    case IntegrationFamily.iosSimulator:
       throw StateError(
         'integration tests on "${config.family.key}" devices are not '
         'supported by this runner.',
       );
   }
+}
+
+/// The `aapt2` of the Android SDK that [adb] belongs to.
+///
+/// The runner's `adb` is a link to the SDK's own, and the build tools that read
+/// the APK's package and launchable activity are the same SDK's: found from the
+/// `adb`, never from the host's environment, so a test reads the APK with the
+/// tools of the SDK it was built against.
+String _aapt2OfSdkOf(String adb) {
+  final String sdk;
+  try {
+    sdk = p.dirname(p.dirname(File(adb).resolveSymbolicLinksSync()));
+  } on FileSystemException catch (e) {
+    throw StateError(
+      'the runner\'s adb $adb is not there (${e.osError?.message ?? e.message}): '
+      'the Android SDK it links to is gone.',
+    );
+  }
+  return aapt2Tool(environment: {'ANDROID_HOME': sdk, 'PATH': ''}).require();
+}
+
+/// Takes the lock [key] for the run, and returns what gives it back.
+Future<Future<void> Function()> _hold(
+  String key,
+  Directory? directory,
+  void Function(String message)? log,
+) async {
+  final lock = await DeviceLock.acquire(key, directory: directory, log: log);
+  return lock.release;
 }
 
 /// What a test's browser is: headless, serving the bundle as a static site, with

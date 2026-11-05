@@ -144,6 +144,7 @@ _UNIT_TESTS = {
         ],
     },
     "agent_command_test": {"fakes": True},
+    "android_serial_test": {},
     "app_exit_test": {
         "fakes": True,
         "deps": ["@dev_tool_deps//:fake_async"] + _PATH_DEP,
@@ -236,7 +237,7 @@ _UNIT_TESTS = {
     "integration_test_run_test": {
         "fakes": True,
         "suite_app": True,
-        "deps": ["@dev_tool_deps//:vm_service"],
+        "deps": ["@dev_tool_deps//:vm_service"] + _PATH_DEP,
     },
     "key_press_test": {},
     "suite_connectors_test": {

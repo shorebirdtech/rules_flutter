@@ -262,7 +262,8 @@ const e2eWorkspaces = <E2eWorkspace>[
     runs: {
       Os.macos:
           'the integration test rules building: the bootstrap, the variant of '
-          'the application, the macOS app and the test, for each case',
+          'the application, the macOS, web and Android app and the test, for '
+          'each case',
     },
     skips: {Os.linux: _appleOnly, Os.windows: _appleOnly},
     command: 'build',

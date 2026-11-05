@@ -46,10 +46,11 @@ Future<void> main() async {
 
   final DeviceChoice choice;
   try {
-    choice = chooseDevice(
+    choice = await chooseDevice(
       config,
       os: Platform.operatingSystem,
       resolve: runfiles.rlocation,
+      environment: Platform.environment,
       log: stderr.writeln,
     );
   } on StateError catch (e) {

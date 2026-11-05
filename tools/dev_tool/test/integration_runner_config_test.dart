@@ -177,4 +177,40 @@ void main() {
       });
     }
   });
+
+  group('the adb of an Android test', () {
+    test('is the runfiles path the runner named', () {
+      final config = IntegrationRunnerConfig.parse(
+        _with({
+          'family': 'android',
+          'launcher': {'adb': '_main/external/androidsdk/platform-tools/adb'},
+        }),
+      );
+
+      expect(config.adbPath, '_main/external/androidsdk/platform-tools/adb');
+    });
+
+    for (final launcher in <Map<String, Object?>>[
+      {},
+      {'adb': ''},
+      {'adb': 7},
+    ]) {
+      test('a launcher of ${json.encode(launcher)} names launcher.adb', () {
+        final config = IntegrationRunnerConfig.parse(
+          _with({'family': 'android', 'launcher': launcher}),
+        );
+
+        expect(
+          () => config.adbPath,
+          throwsA(
+            isA<FormatException>().having(
+              (e) => e.message,
+              'message',
+              allOf(contains('"launcher.adb"'), contains('non-empty string')),
+            ),
+          ),
+        );
+      });
+    }
+  });
 }

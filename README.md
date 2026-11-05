@@ -1556,7 +1556,7 @@ Build it for the machine it runs on. `bazel run` does that, and a rule that runs
 
 `package:integration_test` tests run in the real app, on a device or in a browser, and each `testWidgets` is reported as a test case. The test is the `integration_test/app_test.dart` that `flutter create` users write, unchanged: `IntegrationTestWidgetsFlutterBinding.ensureInitialized()`, then `testWidgets` that call the app's own `main()`. The rules are in `@rules_flutter//flutter:integration_test.bzl`.
 
-macOS and the web (headless Chrome) are the platforms so far; the web is [below](#web-integration-tests).
+macOS, the web (headless Chrome) and Android devices are the platforms so far; the web is [below](#web-integration-tests), Android [after it](#android-integration-tests).
 
 ```starlark
 load("@rules_flutter//flutter:defs.bzl", "flutter_application")
@@ -1622,6 +1622,39 @@ A web app is its own program and takes the sources and `deps` the test compiles,
 - **Linux and Windows are not verified yet.** On Linux the shell needs the host's libraries (NSS and the X11 client libraries), and a sandbox the host allows; a missing library fails the launch with the browser's own message. Windows is not run at all.
 
 The macro is Tier 1. Tier 2 is `flutter_integration_bootstrap` (with `src_import = "relative"`: a web compile mounts no file-system root to name the test under), `flutter_web_app` or `flutter_web_bundle`, `flutter_web_bundle_integration_test` and `flutter_chrome_runner`, which the macro composes as `__<name>_bootstrap` and `__<name>_app`.
+
+#### Android integration tests
+
+`flutter_android_integration_test` runs the same test file on an attached phone or a running emulator: the app is built in debug mode for the device's ABI, installed, started, and its suite driven through the VM service forwarded from the device, as `flutter test integration_test/app_test.dart -d <device>` does.
+
+```starlark
+load("@rules_flutter//flutter:integration_test.bzl", "flutter_android_integration_test")
+
+flutter_android_integration_test(
+    name = "app_android_test",
+    src = "integration_test/app_test.dart",
+    application = ":app_flutter",
+    package_name = "com.example.myapp",
+    deps = [
+        "@deps//:flutter_test",
+        "@deps//:integration_test",
+    ],
+)
+```
+
+```sh
+bazel test :app_android_test --test_env=ANDROID_SERIAL=<serial>
+```
+
+- **A device is a precondition.** The test runs on the device `ANDROID_SERIAL` names, else the only one attached; with none, or several and none named, it fails, naming `adb devices` and the variable that picks one. It is a failure, not a skip: a skipped test reads as a pass. Two tests on one device take turns on a lock (`/tmp/rules_flutter-locks/android-<serial>.lock`), which the operating system releases if a test dies.
+- **`adb` is the SDK's own**, the `@androidsdk` repository rules_android resolves from `ANDROID_HOME`, which your `MODULE.bazel` already declares for building an APK, not one found on `PATH`. The `aapt2` that reads the APK's package and launch activity is the one of that same SDK. `runner` takes a `flutter_android_device_runner(adb = ...)` of your own.
+- **`abi`** (`arm64-v8a` by default, or `x86_64`) is the ABI the app is built for, whatever `--@rules_android//flags:android_platforms` says: it has to be the one the device runs (an Apple-silicon emulator runs `arm64-v8a`).
+- **`integration_test`'s Android library links into the app**, and its Gradle build asks for `androidx.test:runner`, `androidx.test:rules`, `androidx.test.espresso:espresso-core` and `com.google.guava:guava`. Name a version of each in the `rules_android_maven` install of your `MODULE.bazel` (Gradle's `1.2+`, `1.2+` and `3.3+` are ranges; analysis names whatever is missing, and `bazel run @deps//android:maven_artifacts` prints the block). Only the tests' apps link it: your own app does not.
+- **The app stays installed**, as `flutter test` leaves it. `adb uninstall <package_name>` removes it.
+- **`env` is refused**: an app started by the device cannot be handed an environment. Pass `defines` to the application instead.
+- Results, `--test_filter`, `shard_count`, and the failures (a failing case, an app that exits, a suite that registers nothing) are as on the other platforms.
+
+The macro is Tier 1. Tier 2 is `flutter_integration_bootstrap`, `flutter_application_variant`, `flutter_android_app`, `flutter_android_app_integration_test` and `flutter_android_device_runner`, which the macro composes as `__<name>_bootstrap`, `__<name>_program`, `__<name>_app` and, when you name no `runner`, `__<name>_runner`.
 
 ### flutter_android_build
 

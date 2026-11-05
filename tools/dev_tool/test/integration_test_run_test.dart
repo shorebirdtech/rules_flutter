@@ -6,11 +6,13 @@
 library;
 
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter_bazel_dev_tool/device.dart';
 import 'package:flutter_bazel_dev_tool/integration/integration_runner_config.dart';
 import 'package:flutter_bazel_dev_tool/integration/integration_test_run.dart';
 import 'package:flutter_bazel_dev_tool/integration/suite_connectors.dart';
+import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 import 'package:vm_service/vm_service_io.dart';
 
@@ -188,7 +190,7 @@ void main() {
 
     test('is a headless Chrome, and the one the runner named, resolved from '
         'the runfiles', () async {
-      final choice = chooseDevice(
+      final choice = await chooseDevice(
         webConfig,
         os: 'linux',
         resolve: (path) => '/runfiles/$path',
@@ -202,7 +204,7 @@ void main() {
       );
     });
 
-    test('a config that names no browser is refused, naming the key', () {
+    test('a config that names no browser is refused, naming the key', () async {
       final unnamed = IntegrationRunnerConfig(
         family: IntegrationFamily.web,
         appArtifacts: const ['_main/app_web'],
@@ -211,8 +213,8 @@ void main() {
         env: const {},
       );
 
-      expect(
-        () => chooseDevice(unnamed, os: 'linux', resolve: (p) => p),
+      await expectLater(
+        chooseDevice(unnamed, os: 'linux', resolve: (p) => p),
         throwsA(
           isA<FormatException>().having(
             (e) => e.message,
@@ -221,6 +223,157 @@ void main() {
           ),
         ),
       );
+    });
+  });
+
+  group('the device of an Android config', () {
+    late Directory scratch;
+    late String sdkAdb;
+    late String runfilesAdb;
+    setUp(() {
+      scratch = Directory.systemTemp.createTempSync('android_choice_test');
+      // The SDK the runner's `adb` belongs to, and the runfiles entry that
+      // links to it, as Bazel's `@androidsdk` repository does.
+      final sdk = Directory(p.join(scratch.path, 'sdk'));
+      sdkAdb = p.join(sdk.path, 'platform-tools', 'adb');
+      File(sdkAdb).createSync(recursive: true);
+      File(
+        p.join(sdk.path, 'build-tools', '35.0.0', 'aapt2'),
+      ).createSync(recursive: true);
+      runfilesAdb = p.join(scratch.path, 'runfiles', 'adb');
+      Directory(p.dirname(runfilesAdb)).createSync(recursive: true);
+      Link(runfilesAdb).createSync(sdkAdb);
+    });
+    tearDown(() => scratch.deleteSync(recursive: true));
+
+    final androidConfig = IntegrationRunnerConfig(
+      family: IntegrationFamily.android,
+      appArtifacts: const ['_main/app.apk'],
+      launcher: const {'adb': 'androidsdk/platform-tools/adb'},
+      testDisplayName: '//pkg:android_test',
+      env: const {},
+    );
+
+    Future<DeviceChoice> choose({
+      Map<String, String> environment = const {},
+      required String devices,
+      List<List<String>>? asked,
+    }) => chooseDevice(
+      androidConfig,
+      os: 'macos',
+      resolve: (path) => runfilesAdb,
+      environment: environment,
+      runAdb: (executable, arguments) async {
+        asked?.add([executable, ...arguments]);
+        return ProcessResult(0, 0, devices, '');
+      },
+      lockDirectory: Directory(p.join(scratch.path, 'locks')),
+    );
+
+    const oneDevice = 'List of devices attached\n58051JEBF01271\tdevice\n';
+    const twoDevices =
+        'List of devices attached\n58051JEBF01271\tdevice\n'
+        'emulator-5554\tdevice\n';
+
+    test('is the attached device, driven with the adb the runner named and '
+        'the aapt2 of the same SDK, and expects the VM service a debug app '
+        'serves', () async {
+      final asked = <List<String>>[];
+
+      final choice = await choose(devices: oneDevice, asked: asked);
+
+      final device = choice.device as AndroidDevice;
+      expect(device.deviceId, '58051JEBF01271');
+      expect(device.adbPath, runfilesAdb);
+      expect(
+        device.aapt2Path,
+        p.join(
+          scratch.resolveSymbolicLinksSync(),
+          'sdk',
+          'build-tools',
+          '35.0.0',
+          'aapt2',
+        ),
+      );
+      expect(device.expectsVmService, isTrue);
+      expect(asked, [
+        [runfilesAdb, 'devices'],
+      ]);
+    });
+
+    test('is the one ANDROID_SERIAL names when several are attached', () async {
+      final choice = await choose(
+        devices: twoDevices,
+        environment: {'ANDROID_SERIAL': 'emulator-5554'},
+      );
+
+      expect((choice.device as AndroidDevice).deviceId, 'emulator-5554');
+    });
+
+    test('is refused when several are attached and none is named, naming '
+        '`adb devices`', () async {
+      await expectLater(
+        choose(devices: twoDevices),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            allOf(contains('`adb devices`'), contains('ANDROID_SERIAL')),
+          ),
+        ),
+      );
+    });
+
+    test(
+      'is refused when the SDK of the adb has no aapt2, naming it',
+      () async {
+        File(
+          p.join(scratch.path, 'sdk', 'build-tools', '35.0.0', 'aapt2'),
+        ).deleteSync();
+
+        await expectLater(
+          choose(devices: oneDevice),
+          throwsA(
+            isA<StateError>().having(
+              (e) => e.message,
+              'message',
+              allOf(contains('aapt2'), contains('build-tools')),
+            ),
+          ),
+        );
+      },
+    );
+
+    test(
+      'is refused when the runner\'s adb is not there, naming the path',
+      () async {
+        File(sdkAdb).deleteSync();
+
+        await expectLater(
+          choose(devices: oneDevice),
+          throwsA(
+            isA<StateError>().having(
+              (e) => e.message,
+              'message',
+              allOf(contains('adb'), contains(runfilesAdb)),
+            ),
+          ),
+        );
+      },
+    );
+
+    test('takes the lock on its serial for the run, so two tests do not '
+        'install over each other', () async {
+      final lockFile = File(
+        p.join(scratch.path, 'locks', 'android-58051JEBF01271.lock'),
+      );
+      final choice = await choose(devices: oneDevice);
+      expect(lockFile.existsSync(), isFalse, reason: 'taken when the run is');
+
+      final give = await choice.prepare();
+
+      expect(lockFile.existsSync(), isTrue);
+      await give();
     });
   });
 }

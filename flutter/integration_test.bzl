@@ -12,6 +12,7 @@ the variant, the platform's app rule and the test.
 
 - `flutter_macos_integration_test`
 - `flutter_web_integration_test`
+- `flutter_android_integration_test`
 
 Tier 2, the composable rules:
 
@@ -22,13 +23,16 @@ Tier 2, the composable rules:
 - `flutter_desktop_runner`: where it runs.
 - `flutter_web_bundle_integration_test`: runs a web bundle in a headless Chrome.
 - `flutter_chrome_runner`: a headless Chrome of its own, where a web test runs.
+- `flutter_android_app_integration_test`: runs an Android app on an attached device.
+- `flutter_android_device_runner`: which `adb` drives that device.
 """
 
+load("//flutter:android.bzl", "flutter_android_app")
 load("//flutter:macos.bzl", "flutter_macos_app")
 load("//flutter:web.bzl", "flutter_web_app")
 load("//flutter/private:flutter_application_variant.bzl", _flutter_application_variant = "flutter_application_variant")
 load("//flutter/private:flutter_integration_bootstrap.bzl", _flutter_integration_bootstrap = "flutter_integration_bootstrap")
-load("//flutter/private:flutter_integration_test.bzl", _flutter_chrome_runner = "flutter_chrome_runner", _flutter_desktop_integration_test = "flutter_desktop_integration_test", _flutter_desktop_runner = "flutter_desktop_runner", _flutter_web_bundle_integration_test = "flutter_web_bundle_integration_test")
+load("//flutter/private:flutter_integration_test.bzl", _flutter_android_app_integration_test = "flutter_android_app_integration_test", _flutter_android_device_runner = "flutter_android_device_runner", _flutter_chrome_runner = "flutter_chrome_runner", _flutter_desktop_integration_test = "flutter_desktop_integration_test", _flutter_desktop_runner = "flutter_desktop_runner", _flutter_web_bundle_integration_test = "flutter_web_bundle_integration_test")
 load("//flutter/private:test_config.bzl", "find_test_config")
 
 flutter_application_variant = _flutter_application_variant
@@ -37,6 +41,8 @@ flutter_desktop_integration_test = _flutter_desktop_integration_test
 flutter_desktop_runner = _flutter_desktop_runner
 flutter_chrome_runner = _flutter_chrome_runner
 flutter_web_bundle_integration_test = _flutter_web_bundle_integration_test
+flutter_android_app_integration_test = _flutter_android_app_integration_test
+flutter_android_device_runner = _flutter_android_device_runner
 
 # What an integration test's program imports beyond the application.
 _REQUIRED_PACKAGES = ["integration_test", "flutter_test"]
@@ -294,4 +300,118 @@ def flutter_web_integration_test(
         visibility = visibility,
         target_compatible_with = target_compatible_with,
         **test_kwargs
+    )
+
+def flutter_android_integration_test(
+        name,
+        src,
+        application,
+        package_name,
+        deps = [],
+        srcs = [],
+        test_config = None,
+        env = {},
+        data = [],
+        size = "large",
+        runner = None,
+        abi = "arm64-v8a",
+        tags = [],
+        timeout = None,
+        shard_count = None,
+        flaky = None,
+        visibility = None,
+        target_compatible_with = [],
+        **android_app_kwargs):
+    """Runs a `package:integration_test` file on an Android device: the application with the test as its program.
+
+    The app is built in debug mode for `abi`, installed on the attached phone or
+    running emulator (`ANDROID_SERIAL` names one when several are attached),
+    started, and its suite driven through its VM service. A device is a
+    precondition: with none attached, or several and none named, the test fails
+    naming `adb devices`. The app stays installed afterwards. One target per
+    test file, as upstream launches the app once per file.
+
+    Android's `integration_test` library needs `androidx.test:runner`,
+    `androidx.test:rules`, `androidx.test.espresso:espresso-core` and
+    `com.google.guava:guava` in the workspace's `maven.install` of
+    `rules_android_maven`; analysis names the ones that are missing.
+
+    Intermediate targets `__<name>_bootstrap`, `__<name>_program`, `__<name>_app`
+    and, without a `runner`, `__<name>_runner` are this macro's: do not name them.
+
+    Args:
+        name: The test's name.
+        src: The test file. Its `main` declares the tests, as for `flutter create`:
+            `IntegrationTestWidgetsFlutterBinding.ensureInitialized()` and
+            `testWidgets`, calling the app's own `main()`.
+        application: The `flutter_application` the test runs. It may be in another
+            package.
+        package_name: The application id of the app, as `flutter_android_app`
+            takes it.
+        deps: What the test imports beyond the application's own `deps`. It must
+            bring `integration_test` and `flutter_test` (`@<hub>//:integration_test`
+            and `@<hub>//:flutter_test`), which analysis fails without, naming them.
+        srcs: Dart files `src` imports by relative path.
+        test_config: The suite's `flutter_test_config.dart`. By default the one
+            `flutter_test` would find for `src`, in this package.
+        env: Refused when not empty: an app on a device cannot be handed an
+            environment. Pass `defines` to the application instead.
+        data: Files the test reads at run time.
+        size: The test size. `large`: an APK is built, installed and started.
+        runner: A `flutter_android_device_runner`. By default one that drives the
+            device with the `adb` of `@androidsdk`, the Android SDK rules_android
+            resolves from `ANDROID_HOME`.
+        abi: The ABI the app is built for, which the device must run: `arm64-v8a`
+            for a phone or an Apple-silicon emulator, `x86_64` for an Intel one.
+        tags: Tags of the test.
+        timeout: The test's `timeout`.
+        shard_count: The test's `shard_count`: the tests of the file are divided
+            among the shards.
+        flaky: The test's `flaky`.
+        visibility: The test's visibility.
+        target_compatible_with: The test's `target_compatible_with`.
+        **android_app_kwargs: Passed to `flutter_android_app`: `permissions`,
+            `namespace`, `manifest`, and the rest. Not `testonly`.
+    """
+    if test_config == None:
+        test_config = _find_test_config(name, src)
+    program = _program(name, src, application, deps, srcs, test_config)
+
+    app = "__%s_app" % name
+    private = {
+        "tags": ["manual"],
+        "visibility": ["//visibility:private"],
+    }
+    flutter_android_app(
+        name = app,
+        application = program,
+        package_name = package_name,
+        testonly = True,
+        **(private | android_app_kwargs)
+    )
+
+    if runner == None:
+        runner = ":__%s_runner" % name
+        _flutter_android_device_runner(
+            name = "__%s_runner" % name,
+            # The SDK's `adb`, from the workspace the test is declared in: the
+            # `@androidsdk` of the one SDK this workspace builds its APKs with.
+            adb = "@androidsdk//:adb",
+            **private
+        )
+
+    _flutter_android_app_integration_test(
+        name = name,
+        app = ":" + app,
+        runner = runner,
+        abi = abi,
+        env = env,
+        data = data,
+        size = size,
+        tags = tags,
+        timeout = timeout,
+        shard_count = shard_count,
+        flaky = flaky,
+        visibility = visibility,
+        target_compatible_with = target_compatible_with,
     )
