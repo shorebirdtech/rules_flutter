@@ -25,6 +25,7 @@ def _test_outcome_impl(ctx):
         "cases": ctx.attr.cases if ctx.attr.cases else None,
         "failingCases": ctx.attr.failing_cases if ctx.attr.failing_cases_given else None,
         "outputContains": ctx.attr.output_contains,
+        "undeclaredOutputs": ctx.attr.undeclared_outputs,
         "noSimulatorNamed": _simulator_prefix(ctx.attr.test.label) if ctx.attr.leaves_no_simulator else None,
     }))
 
@@ -74,6 +75,9 @@ outcome_test = rule(
         ),
         "output_contains": attr.string_list(
             doc = "Text its output must contain.",
+        ),
+        "undeclared_outputs": attr.string_list(
+            doc = "Files, relative to `TEST_UNDECLARED_OUTPUTS_DIR`, the test must have written and that must not be empty: where a failed golden leaves its pictures.",
         ),
         "leaves_no_simulator": attr.bool(
             doc = "Whether `xcrun simctl list` must show no simulator the wrapped iOS integration test made, once it has ended, however it ended.",

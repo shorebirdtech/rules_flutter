@@ -29,6 +29,28 @@ enum IntegrationFamily {
   final String key;
 }
 
+/// What a test needs to have its goldens compared on the host.
+class GoldenServiceConfig {
+  /// A golden service, started as [executable] with [environment], comparing
+  /// for the test whose source has the `short_path` [testSource].
+  const GoldenServiceConfig({
+    required this.executable,
+    required this.environment,
+    required this.testSource,
+  });
+
+  /// The runfiles path of the golden service's executable: a `flutter_test`.
+  final String executable;
+
+  /// What the service is started with, which its `flutter_test` rule says: where
+  /// its kernel, `flutter_tester` and assets are in the runfiles.
+  final Map<String, String> environment;
+
+  /// The `short_path` of the integration test's source: goldens are relative to
+  /// its directory.
+  final String testSource;
+}
+
 /// The settings of one run.
 class IntegrationRunnerConfig {
   /// Settings read from [parse].
@@ -38,6 +60,7 @@ class IntegrationRunnerConfig {
     required this.launcher,
     required this.testDisplayName,
     required this.env,
+    this.goldens,
   });
 
   /// Reads the JSON text [source], read from [origin] (a path, for the
@@ -101,12 +124,46 @@ class IntegrationRunnerConfig {
       );
     }
 
+    GoldenServiceConfig? goldens;
+    final goldenConfig = config['goldens'];
+    if (goldenConfig != null) {
+      if (goldenConfig is! Map<String, Object?>) {
+        throw FormatException(
+          '$where: "goldens" must be an object, got ${json.encode(goldenConfig)}',
+        );
+      }
+      String goldenString(String key) {
+        final value = goldenConfig[key];
+        if (value is! String || value.isEmpty) {
+          throw FormatException(
+            '$where: "goldens.$key" must be a non-empty string, got '
+            '${value == null ? 'nothing' : json.encode(value)}',
+          );
+        }
+        return value;
+      }
+
+      final goldenEnv = goldenConfig['environment'];
+      if (goldenEnv is! Map || goldenEnv.values.any((v) => v is! String)) {
+        throw FormatException(
+          '$where: "goldens.environment" must be an object of strings, got '
+          '${json.encode(goldenEnv)}',
+        );
+      }
+      goldens = GoldenServiceConfig(
+        executable: goldenString('executable'),
+        environment: goldenEnv.cast<String, String>(),
+        testSource: goldenString('testSource'),
+      );
+    }
+
     return IntegrationRunnerConfig(
       family: family,
       appArtifacts: artifacts.cast<String>(),
       launcher: launcher,
       testDisplayName: string('testDisplayName'),
       env: env.cast<String, String>(),
+      goldens: goldens,
     );
   }
 
@@ -127,6 +184,10 @@ class IntegrationRunnerConfig {
   /// What the test was given in `env`, which the runner's own environment
   /// already carries.
   final Map<String, String> env;
+
+  /// How the goldens of the test are compared, or null when it has no golden
+  /// comparator: a golden it asks for then fails, saying so.
+  final GoldenServiceConfig? goldens;
 
   /// The runfiles path of the browser a web test runs in: the launcher's
   /// `chrome`. A [FormatException] names the key when the runner did not give

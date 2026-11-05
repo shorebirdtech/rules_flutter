@@ -12,7 +12,6 @@
 // program's `deps` provide.
 import 'dart:async';
 
-import 'package:integration_test/integration_test.dart';
 import 'package:test_api/backend.dart';
 
 import '_channel.dart';
@@ -31,7 +30,7 @@ Future<void> runIntegrationSuite(
   Future<void> Function(FutureOr<void> Function())? testExecutable,
 }) async {
   Future<void> suiteMain() async {
-    IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+    initializeBinding();
     // Not returned: if the user's `main` is annotated with `@doNotStore`, its
     // result may not be propagated.
     await Future<void>(testMain);

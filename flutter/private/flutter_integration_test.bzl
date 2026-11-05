@@ -232,6 +232,25 @@ def integration_test_impl(ctx, family, inherited_environment = []):
         fail("%s: `app` %s builds no files, so there is nothing to launch." % (ctx.label, app.label))
 
     workspace = ctx.workspace_name
+
+    # The goldens of the test are compared by a `flutter_test` the host runner
+    # starts (it has no `dart:ui`), which is told the test's source: goldens are
+    # relative to its directory.
+    service = ctx.attr.golden_service
+    if bool(service) != bool(ctx.file.src):
+        fail((
+            "%s: `src` (the test's source, which goldens are relative to) and " +
+            "`golden_service` (the `flutter_test` that compares them) go together; " +
+            "only %s is given."
+        ) % (ctx.label, "`golden_service`" if service else "`src`"))
+    goldens = None
+    if service:
+        goldens = {
+            "executable": runfiles_path(service[DefaultInfo].files_to_run.executable, workspace),
+            "environment": service[RunEnvironmentInfo].environment,
+            "testSource": ctx.file.src.short_path,
+        }
+
     config = ctx.actions.declare_file(ctx.label.name + ".integration_config.json")
     ctx.actions.write(config, json.encode({
         "family": family,
@@ -239,6 +258,7 @@ def integration_test_impl(ctx, family, inherited_environment = []):
         "launcher": runner.launcher_config,
         "testDisplayName": str(ctx.label),
         "env": ctx.attr.env,
+        "goldens": goldens,
     }))
 
     tool = ctx.attr._runner
@@ -255,6 +275,8 @@ def integration_test_impl(ctx, family, inherited_environment = []):
     ).merge(tool[DefaultInfo].default_runfiles).merge(app[DefaultInfo].default_runfiles)
     for data in ctx.attr.data:
         runfiles = runfiles.merge(data[DefaultInfo].default_runfiles)
+    if service:
+        runfiles = runfiles.merge(service[DefaultInfo].default_runfiles)
 
     return [
         DefaultInfo(executable = executable, runfiles = runfiles),
@@ -289,8 +311,18 @@ def _test_attrs(default_runner, cfg = dbg_transition):
             doc = "Environment variables for the host runner and, on desktop, for the app's process.",
         ),
         "data": attr.label_list(
-            doc = "Files the test reads at run time.",
+            doc = "Files the test reads at run time, and its golden files: `matchesGoldenFile('goldens/x.png')` reads `goldens/x.png` from the directory of `src`, so the goldens are listed here (`data = glob([\"integration_test/goldens/**\"])`).",
             allow_files = True,
+        ),
+        "src": attr.label(
+            doc = "The test's source file, which the golden files are relative to the directory of. With `golden_service`, which it goes with.",
+            allow_single_file = [".dart"],
+        ),
+        "golden_service": attr.label(
+            doc = "A `flutter_test` running `@rules_flutter//flutter/private/goldens:service.dart`, which compares the test's goldens for the host runner: comparing needs `dart:ui`, which the runner has not. The macros declare one. With `src`, which it goes with; without them every golden fails, saying there is no comparator.",
+            executable = True,
+            cfg = "target",
+            providers = [RunEnvironmentInfo],
         ),
         "_runner": attr.label(
             default = Label("//tools/dev_tool:integration_test_runner"),

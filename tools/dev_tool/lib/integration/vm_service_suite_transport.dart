@@ -10,10 +10,12 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter_rule_tools/remote_suite.dart';
 import 'package:vm_service/vm_service.dart';
 
+import 'golden_requests.dart';
 import 'lost_before_suite.dart';
 
 /// The service extension the app registers for the host's messages.
@@ -24,6 +26,19 @@ const integrationTestEventKind = 'Flutter.IntegrationTest';
 
 /// The key both directions carry the JSON text under.
 const integrationTestDataKey = 'data';
+
+/// The kind of the event the app posts for each golden it asks the host about:
+/// `{op, id, path, bytes}` with the picture's bytes in base64.
+///
+/// On the Extension stream with the suite's own events, since that is the one
+/// stream the VM lets a client listen to that an app posts to: a stream of the
+/// app's own naming, as upstream's `VmServiceProxyGoldenFileComparator` posts
+/// to, is one only the debug service's proxy (DDS) accepts a listener for.
+const goldenEventKind = 'Flutter.IntegrationTest.Golden';
+
+/// The service extension the app answers golden requests through: the host
+/// calls it with `{id, result}` or `{id, error}`.
+const goldenMethod = 'ext.flutter.integrationTest.golden';
 
 /// The JSON-RPC code of `streamListen` on a stream already subscribed.
 const _streamAlreadySubscribed = 103;
@@ -40,19 +55,14 @@ class AppLostBeforeSuite extends LostBeforeSuite {
 
 /// A [SuiteTransport] over [service], the VM service of the app running the
 /// suite.
-class VmServiceSuiteTransport implements SuiteTransport {
+///
+/// The app's golden requests come over the same service: events of kind
+/// [goldenEventKind], answered by calling [goldenMethod].
+class VmServiceSuiteTransport implements IntegrationSuiteTransport {
   VmServiceSuiteTransport._(this._service, this._isolateId, this._whyLost) {
     _events = service.onExtensionEvent
-        .where(
-          (event) =>
-              event.extensionKind == integrationTestEventKind &&
-              (event.isolate?.id ?? _isolateId) == _isolateId,
-        )
-        .map(
-          (event) =>
-              event.extensionData!.data[integrationTestDataKey]! as String,
-        )
-        .listen(_incoming.add);
+        .where((event) => (event.isolate?.id ?? _isolateId) == _isolateId)
+        .listen(_onExtensionEvent);
     unawaited(
       _service.onDone.then((_) async {
         if (_closing || _lost.isCompleted) return;
@@ -154,7 +164,8 @@ class VmServiceSuiteTransport implements SuiteTransport {
   final Future<String> Function() _whyLost;
   final _incoming = StreamController<String>();
   final _lost = Completer<String?>();
-  late final StreamSubscription<String> _events;
+  late final StreamSubscription<Event> _events;
+  final _goldenRequests = StreamController<GoldenRequest>();
   var _closing = false;
 
   /// The sends in flight, one after another: the app handles the messages of a
@@ -163,6 +174,48 @@ class VmServiceSuiteTransport implements SuiteTransport {
 
   @override
   Stream<String> get incoming => _incoming.stream;
+
+  @override
+  Stream<GoldenRequest> get goldenRequests => _goldenRequests.stream;
+
+  void _onExtensionEvent(Event event) {
+    final data = event.extensionData?.data;
+    if (data == null) return;
+    switch (event.extensionKind) {
+      case integrationTestEventKind:
+        _incoming.add(data[integrationTestDataKey]! as String);
+      case goldenEventKind:
+        final operation = GoldenOperation.named('${data['op']}');
+        if (operation == null) {
+          if (!_lost.isCompleted) {
+            _lost.complete('the app asked for a golden to be "${data['op']}"');
+          }
+          return;
+        }
+        _goldenRequests.add(
+          GoldenRequest(
+            id: data['id']! as int,
+            operation: operation,
+            key: data['path']! as String,
+            bytes: base64.decode(data['bytes']! as String),
+          ),
+        );
+    }
+  }
+
+  @override
+  Future<void> answerGolden(int id, GoldenAnswer answer) async {
+    final error = answer.error;
+    // The extension's parameters are strings, as the app's handler reads them.
+    await _service.callServiceExtension(
+      goldenMethod,
+      isolateId: _isolateId,
+      args: {
+        'id': '$id',
+        if (error != null) 'error': error else 'result': '${answer.matched}',
+      },
+    );
+  }
 
   @override
   Future<String?> get lostReason => _lost.future;
@@ -200,6 +253,7 @@ class VmServiceSuiteTransport implements SuiteTransport {
     _closing = true;
     await _events.cancel();
     unawaited(_incoming.close()); // done when its listener is, if it has one
+    unawaited(_goldenRequests.close());
     await _service.dispose();
   }
 
@@ -208,6 +262,7 @@ class VmServiceSuiteTransport implements SuiteTransport {
     _closing = true;
     await _events.cancel();
     unawaited(_incoming.close()); // done when its listener is, if it has one
+    unawaited(_goldenRequests.close());
     unawaited(_service.dispose());
   }
 }

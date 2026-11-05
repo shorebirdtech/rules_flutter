@@ -37,6 +37,7 @@ load("//flutter:web.bzl", "flutter_web_app")
 load("//flutter/private:flutter_application_variant.bzl", _flutter_application_variant = "flutter_application_variant")
 load("//flutter/private:flutter_integration_bootstrap.bzl", _flutter_integration_bootstrap = "flutter_integration_bootstrap")
 load("//flutter/private:flutter_integration_test.bzl", _flutter_android_app_integration_test = "flutter_android_app_integration_test", _flutter_android_device_runner = "flutter_android_device_runner", _flutter_chrome_runner = "flutter_chrome_runner", _flutter_desktop_integration_test = "flutter_desktop_integration_test", _flutter_desktop_runner = "flutter_desktop_runner", _flutter_ios_app_integration_test = "flutter_ios_app_integration_test", _flutter_ios_simulator_runner = "flutter_ios_simulator_runner", _flutter_web_bundle_integration_test = "flutter_web_bundle_integration_test")
+load("//flutter/private:flutter_test.bzl", _flutter_test = "flutter_test")
 load("//flutter/private:test_config.bzl", "find_test_config")
 
 flutter_application_variant = _flutter_application_variant
@@ -71,6 +72,31 @@ def _find_test_config(name, src):
         # and most tests have none.
         lambda path: bool(native.glob([path], allow_empty = True)),
     )
+
+def _golden_service(name, deps):
+    """Declares the `flutter_test` that compares the test's goldens on the host.
+
+    The host runner has no `dart:ui`, which comparing two pictures needs, so a
+    `flutter_test` of the rule's own (`flutter/private/goldens/service.dart`)
+    does it, as `flutter test` runs a `flutter_tester` to compare for the tool.
+    It needs `package:flutter_test` and nothing else, and takes that of `deps`:
+    the one that is `flutter_test`.
+
+    Returns:
+        The label of the service. It is the macro's own, named `__<name>_goldens`.
+    """
+    service = "__%s_goldens" % name
+    _flutter_test(
+        name = service,
+        main = str(Label("//flutter/private/goldens:service.dart")),
+        srcs = [str(Label("//flutter/private/goldens:comparator.dart"))],
+        package_name = "rules_flutter_golden_service",
+        deps = [d for d in deps if native.package_relative_label(d).name == "flutter_test"],
+        tags = ["manual"],
+        testonly = True,
+        visibility = ["//visibility:private"],
+    )
+    return ":" + service
 
 def _program(name, src, application, deps, srcs, test_config):
     """Declares the bootstrap and the variant that is the test's program.
@@ -149,7 +175,10 @@ def flutter_macos_integration_test(
         test_config: The suite's `flutter_test_config.dart`. By default the one
             `flutter_test` would find for `src`, in this package.
         env: Environment variables for the runner and the app.
-        data: Files the test reads at run time.
+        data: Files the test reads at run time, and its golden files:
+            `matchesGoldenFile('goldens/x.png')` reads `goldens/x.png` from the
+            directory of `src`, compared on the host. `bazel run :<name> --
+            --update-goldens` writes them.
         size: The test size. `medium`: a window is launched and drawn.
         runner: A `flutter_desktop_runner`, to run the test with something other than
             the host's own desktop.
@@ -183,6 +212,8 @@ def flutter_macos_integration_test(
     _flutter_desktop_integration_test(
         name = name,
         app = ":" + app,
+        src = src,
+        golden_service = _golden_service(name, deps),
         env = env,
         data = data,
         size = size,
@@ -242,7 +273,10 @@ def flutter_web_integration_test(
         test_config: The suite's `flutter_test_config.dart`. By default the one
             `flutter_test` would find for `src`, in this package.
         env: Environment variables for the host runner.
-        data: Files the test reads at run time.
+        data: Files the test reads at run time, and its golden files:
+            `matchesGoldenFile('goldens/x.png')` reads `goldens/x.png` from the
+            directory of `src`, compared on the host. `bazel run :<name> --
+            --update-goldens` writes them.
         size: The test size. `medium`: a browser is launched and the app drawn.
         runner: A `flutter_chrome_runner`, to run the test in a browser other than
             the pinned one.
@@ -296,6 +330,8 @@ def flutter_web_integration_test(
     _flutter_web_bundle_integration_test(
         name = name,
         app = ":" + app,
+        src = src,
+        golden_service = _golden_service(name, deps),
         env = env,
         data = data,
         size = size,
@@ -362,7 +398,10 @@ def flutter_android_integration_test(
             `flutter_test` would find for `src`, in this package.
         env: Refused when not empty: an app on a device cannot be handed an
             environment. Pass `defines` to the application instead.
-        data: Files the test reads at run time.
+        data: Files the test reads at run time, and its golden files:
+            `matchesGoldenFile('goldens/x.png')` reads `goldens/x.png` from the
+            directory of `src`, compared on the host. `bazel run :<name> --
+            --update-goldens` writes them.
         size: The test size. `large`: an APK is built, installed and started.
         runner: A `flutter_android_device_runner`. By default one that drives the
             device with the `adb` of `@androidsdk`, the Android SDK rules_android
@@ -409,6 +448,8 @@ def flutter_android_integration_test(
     _flutter_android_app_integration_test(
         name = name,
         app = ":" + app,
+        src = src,
+        golden_service = _golden_service(name, deps),
         runner = runner,
         abi = abi,
         env = env,
@@ -468,7 +509,10 @@ def flutter_ios_simulator_integration_test(
             `flutter_test` would find for `src`, in this package.
         env: Refused when not empty: an app on a simulator cannot be handed an
             environment. Pass `defines` to the application instead.
-        data: Files the test reads at run time.
+        data: Files the test reads at run time, and its golden files:
+            `matchesGoldenFile('goldens/x.png')` reads `goldens/x.png` from the
+            directory of `src`, compared on the host. `bazel run :<name> --
+            --update-goldens` writes them.
         size: The test size. `large`: an app is built, a simulator booted and the
             app installed.
         runner: A `flutter_ios_simulator_runner`, to run on another device type or
@@ -505,6 +549,8 @@ def flutter_ios_simulator_integration_test(
     _flutter_ios_app_integration_test(
         name = name,
         app = ":" + app,
+        src = src,
+        golden_service = _golden_service(name, deps),
         # The simulator runs the architecture of the Mac it is on.
         sim_cpu = select({
             "@platforms//cpu:arm64": "sim_arm64",

@@ -105,6 +105,7 @@ flutter_integration_bootstrap = rule(
                 Label("//flutter/private/integration_test/support:_channel.dart"),
                 Label("//flutter/private/integration_test/support:_channel_io.dart"),
                 Label("//flutter/private/integration_test/support:_channel_web.dart"),
+                Label("//flutter/private/integration_test/support:_golden.dart"),
             ],
             allow_files = [".dart"],
         ),

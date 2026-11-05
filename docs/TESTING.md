@@ -906,6 +906,28 @@ Android build (§ "The Android SDK/NDK variables must be exported too") and
 | `:ios_pass_test` | the same two tests on an iOS simulator the test makes for itself, each reported |
 | `:ios_filter_test` | `--test_filter` runs one of the two cases of `:ios_pass_test` and no other, and `xcrun simctl list` shows no `rules_flutter-*` simulator of that test afterwards (`outcome_test`'s `leaves_no_simulator`) |
 | `:ios_red_twin_test` | a failing integration test fails its target on a simulator, the JUnit report names the failing case, and the simulator is deleted though the test failed. It wraps `:ios_red` (`manual`) |
+| `:macos_golden_test`, `:web_golden_test`, `:android_golden_test`, `:ios_golden_test` | `matchesGoldenFile` in an integration test compares with the golden committed for the platform (`integration_test/goldens/<platform>/swatch.png`) and passes: the app sends the picture to the host runner, which compares it with the comparator every `flutter_test` here uses |
+| `:web_golden_mid_frame_test` | a golden taken in a browser while the engine is still drawing the frames before it is the widget's own 64×64 picture, not the whole page: a slow picture holds the frames up so the last waits behind the other when `matchesGoldenFile` captures |
+| `:macos_golden_mismatch_twin_test` and the `web_`, `android_` and `ios_` ones | a golden that does not match fails its target, the failure names the golden file (`Golden "goldens/<platform>/swatch.png": Pixel test failed, 100.00%, 4096px diff detected.`), and the four pictures of the failure are left in the test's undeclared outputs (`bazel-testlogs/<target>/test.outputs/failures/swatch_*.png`), where `flutter_test` leaves them. They wrap `:<platform>_golden_mismatch` (`manual`: the same swatch in another colour against the same golden) in `outcome_test`, whose `undeclared_outputs` checks the pictures |
+
+The golden tests draw a flat, text-free square at a fixed logical size, so the
+picture depends on no font and no window size; the goldens are still one per
+platform (the test names the directory from `defaultTargetPlatform`, `web` for a
+browser), because a golden is a function of the platform that rendered it, and
+the day the swatch has text it will differ between them. They are regenerated
+with `bazel run //:<platform>_golden_test -- --update-goldens`, which launches the
+app as the test does and writes the golden into the source tree, naming the file
+(`integration_test: wrote golden <path>`); under `bazel test` the flag is refused
+(exit 64) like `flutter_test`'s. The comparison is made on the host by a
+`flutter_tester` the runner starts when the first golden is asked for (the runner
+has no `dart:ui`), so an app on a phone or in a browser compares exactly as one on
+the desktop does. The update round trip, run for macOS: `bazel run
+//:macos_golden_mismatch -- --update-goldens` rewrites `goldens/macOS/swatch.png`
+as the orange swatch (the file's `shasum` changes), `bazel test
+//:macos_golden_test` then fails with the pixel diff, and `bazel run
+//:macos_golden_test -- --update-goldens` writes the blue one back, byte for byte
+what is committed (`git status` shows nothing) and `bazel test
+//:macos_golden_test` passes.
 
 The web tests run in a headless browser and need no desktop session, but only macOS runs them for now (they are skipped elsewhere): the Linux prerequisites of a browser, the host's libraries and a sandbox the host allows, are not verified.
 
@@ -1771,7 +1793,7 @@ script's own package requires ≥ 3.13.
 | dev_tool iOS device paths (`mdns_vm_service_discovery.dart`, `IOSDevice` in `device.dart`) | dev_tool unit **and** manual hot reload + hot restart on hardware, **wired and wireless** — see "iOS hardware (manual)" |
 | New or changed analysis coverage (a target's `srcs` glob or `main`, a new `manual` tag, a new `analysis_options.yaml`) | Root `//...` **and** the probe — see § 1 |
 | `flutter_test` compile flags, runfiles or kernel mode (`flutter/private/flutter_test.bzl`) | Root `//...`, hello_world `//...` (the `asserts_fire_test` and `widget_creation_test` variants) **and** the by-hand const-violation builds in § "`flutter_test` build modes" |
-| Golden comparator (`flutter/private/goldens/`, `flutter_test.bzl` bootstrap) | Root `//...` + codegen `//...` **and** the manual regeneration round trip below |
+| Golden comparator (`flutter/private/goldens/`, `flutter_test.bzl` bootstrap) | Root `//...` + codegen `//...` **and** the manual regeneration round trip below. `service.dart` and the integration test runner's golden handling (`tools/dev_tool/lib/integration/golden_*.dart`, the support library's `_golden.dart`) also take `e2e/integration_test`'s golden tests on each platform touched and the round trip in its section |
 | Everything | All sections above |
 
 ### SDK inputs

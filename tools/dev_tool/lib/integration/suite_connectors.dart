@@ -18,6 +18,7 @@ import 'package:vm_service/vm_service_io.dart';
 import '../browser_extension_channel.dart' show CdpSender;
 import '../device.dart';
 import 'cdp_suite_transport.dart';
+import 'golden_requests.dart';
 import 'lost_before_suite.dart';
 import 'vm_service_suite_transport.dart';
 
@@ -39,7 +40,7 @@ class SuiteUnreachable implements Exception {
 /// the app starting it or ending.
 ///
 /// Throws a [SuiteUnreachable] saying why when it cannot.
-typedef SuiteConnector = Future<SuiteTransport> Function(
+typedef SuiteConnector = Future<IntegrationSuiteTransport> Function(
   Device device,
   AppInstance instance, {
   required Duration ceiling,

@@ -47,7 +47,9 @@
 //
 // Imports only `package:flutter_test` and `dart:*`. Staged next to the
 // generated bootstrap by `flutter_test` and imported from it by basename, the
-// same way `agent_extensions/agent.dart` reaches an application's kernel.
+// same way `agent_extensions/agent.dart` reaches an application's kernel. The
+// integration test runner's golden service (`service.dart`) imports it by path,
+// to compare for a test that runs in an app: see `BazelGoldenFileComparator.forTest`.
 
 import 'dart:io';
 import 'dart:typed_data';
@@ -75,26 +77,10 @@ void installBazelGoldenFileComparator() {
   }
 
   final update = env['FLUTTER_TEST_UPDATE_GOLDENS'] == '1';
-
-  goldenFileComparator = BazelGoldenFileComparator(
-    // `Uri.base` is the runfiles workspace root (the runner leaves the
-    // tester's working directory there) and `FLUTTER_TEST_PATH` is the test
-    // source's `short_path`, so this resolves to the test file — and
-    // `LocalFileComparator` roots goldens at its *directory*. That is
-    // upstream's whole convention: `matchesGoldenFile('goldens/x.png')` reads
-    // `<dir of the test file>/goldens/x.png`.
-    //
-    // Under the sandbox that directory holds only what the target declared, so
-    // a golden that exists in the source tree but was never added to `data`
-    // fails as "non-existent" rather than being read behind Bazel's back. That
-    // is the property that keeps a cached result honest, and it is why no
-    // "find the workspace and read from there" shortcut belongs here.
-    Uri.base.resolve(testPath),
-    outputsDir: _dirUri(env['TEST_UNDECLARED_OUTPUTS_DIR']),
-    failureHintDir: _failureHintDir(env['TEST_TARGET']),
-    updateDir: update ? _updateDir(env, testPath) : null,
-    manifest: _manifestOf(env),
-    testRunfilesPath: _runfilesPathOf(env['TEST_WORKSPACE'], testPath),
+  goldenFileComparator = BazelGoldenFileComparator.forTest(
+    testPath,
+    environment: env,
+    update: update,
   );
   autoUpdateGoldenFiles = update;
 }
@@ -131,7 +117,7 @@ String? _runfilesPathOf(String? workspace, String testPath) {
 /// has archived the undeclared outputs out of the sandbox. Null when
 /// `TEST_TARGET` is unset — `bazel run` on a test target is not obliged to set
 /// it — in which case the hint falls back to the real directory.
-Uri? _failureHintDir(String? testTarget) {
+Uri? _failureHintDirOf(String? testTarget) {
   if (testTarget == null || testTarget.isEmpty) return null;
   final label = testTarget.startsWith('//')
       ? testTarget.substring(2)
@@ -156,7 +142,7 @@ Uri? _dirUri(String? path) {
 /// The same relative position the comparator reads from, but rooted at the
 /// workspace instead of at runfiles, so a regenerated PNG lands beside the
 /// test where the next build will pick it up from `data`.
-Uri _updateDir(Map<String, String> env, String testPath) {
+Uri _updateDirOf(Map<String, String> env, String testPath) {
   final workspace = env['BUILD_WORKSPACE_DIRECTORY'];
   if (workspace == null || workspace.isEmpty) {
     throw StateError(
@@ -203,6 +189,47 @@ class BazelGoldenFileComparator extends LocalFileComparator {
        _updateDir = updateDir,
        _manifest = manifest,
        _testRunfilesPath = testRunfilesPath;
+
+  /// The comparator for the test whose source has the `short_path` [testPath],
+  /// as a test run by Bazel with [environment] needs it, regenerating goldens
+  /// into the source tree when [update].
+  ///
+  /// [environment] is the test's own: where its undeclared outputs go, which
+  /// runfiles it has and, under `bazel run`, the source tree. The process that
+  /// compares need not be the test: the integration test runner's golden
+  /// service compares for a test that runs in an app, with the environment of
+  /// the Bazel test it serves.
+  factory BazelGoldenFileComparator.forTest(
+    String testPath, {
+    required Map<String, String> environment,
+    required bool update,
+  }) {
+    final env = environment;
+    return BazelGoldenFileComparator(
+      // `Uri.base` is the runfiles workspace root (the runner leaves the
+      // tester's working directory there) and `FLUTTER_TEST_PATH` is the test
+      // source's `short_path`, so this resolves to the test file — and
+      // `LocalFileComparator` roots goldens at its *directory*. That is
+      // upstream's whole convention: `matchesGoldenFile('goldens/x.png')` reads
+      // `<dir of the test file>/goldens/x.png`.
+      //
+      // Under the sandbox that directory holds only what the target declared, so
+      // a golden that exists in the source tree but was never added to `data`
+      // fails as "non-existent" rather than being read behind Bazel's back. That
+      // is the property that keeps a cached result honest, and it is why no
+      // "find the workspace and read from there" shortcut belongs here.
+      Uri.base.resolve(testPath),
+      outputsDir: _dirUri(env['TEST_UNDECLARED_OUTPUTS_DIR']),
+      failureHintDir: _failureHintDirOf(env['TEST_TARGET']),
+      updateDir: update ? _updateDirOf(env, testPath) : null,
+      manifest: _manifestOf(env),
+      testRunfilesPath: _runfilesPathOf(env['TEST_WORKSPACE'], testPath),
+    );
+  }
+
+  /// The path of the golden `update()` wrote last, or null if it has written
+  /// none: what a caller that is not the test can report.
+  String? lastWritten;
 
   final Uri? _outputsDir;
   final Uri? _failureHintDir;
@@ -292,6 +319,7 @@ class BazelGoldenFileComparator extends LocalFileComparator {
     final target = File.fromUri(dir.resolveUri(golden));
     await target.parent.create(recursive: true);
     await target.writeAsBytes(imageBytes, flush: true);
+    lastWritten = target.path;
     // Named on stderr because the run is otherwise silent about it: a golden
     // update reports as a passing test, and "which files did that rewrite" is
     // the one thing the developer needs before committing.

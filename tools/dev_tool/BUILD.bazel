@@ -233,6 +233,8 @@ _UNIT_TESTS = {
         "deps": ["@dev_tool_deps//:fake_async"],
     },
     "device_lock_test": {},
+    "golden_comparator_test": {},
+    "golden_host_test": {},
     "integration_runner_config_test": {},
     "integration_test_run_test": {
         "fakes": True,

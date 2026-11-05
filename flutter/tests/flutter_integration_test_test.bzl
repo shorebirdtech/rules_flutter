@@ -60,7 +60,7 @@ def _bootstrap_impl(ctx):
     ])
     asserts.equals(
         env,
-        ["_channel.dart", "_channel_io.dart", "_channel_web.dart", "integration_suite.dart"],
+        ["_channel.dart", "_channel_io.dart", "_channel_web.dart", "_golden.dart", "integration_suite.dart"],
         staged,
         "the support library staged beside the bootstrap, both platforms' channel: the import that picks one is the compiler's",
     )
@@ -117,6 +117,7 @@ def _test_rule_impl(ctx):
 
     asserts.equals(env, "desktop", config["family"])
     asserts.equals(env, {"FIXTURE_KEY": "fixture value"}, config["env"])
+    asserts.equals(env, None, config["goldens"], "a test given no golden comparator has none")
     asserts.equals(env, "@@//flutter/tests/integration_fixture:desktop_test", config["testDisplayName"])
     asserts.true(env, len(config["appArtifacts"]) > 0, "the app's files are the runner's to choose from")
     asserts.true(
@@ -197,6 +198,44 @@ stub_runner = rule(
     attrs = {"family": attr.string(mandatory = True)},
     doc = "A runner of a family, for a test of what a test rule does with one.",
 )
+
+# -- Goldens -------------------------------------------------------------------
+
+def _stub_golden_service_impl(ctx):
+    executable = ctx.actions.declare_file(ctx.label.name)
+    ctx.actions.write(executable, "", is_executable = True)
+    return [
+        DefaultInfo(executable = executable, runfiles = ctx.runfiles(files = [executable])),
+        RunEnvironmentInfo(environment = {"FLUTTER_TEST_DILL": "_main/stub.dill"}),
+    ]
+
+stub_golden_service = rule(
+    implementation = _stub_golden_service_impl,
+    executable = True,
+    doc = "An executable with an environment, shaped as the `flutter_test` that compares goldens, for a test of what a test rule does with one.",
+)
+
+def _goldens_rule_impl(ctx):
+    """A test with a golden service tells the runner how to start it and which test's goldens it compares."""
+    env = analysistest.begin(ctx)
+    config = written_json(env, ".integration_config.json")
+    if config == None:
+        return analysistest.end(env)
+
+    goldens = config["goldens"]
+    asserts.equals(env, "_main/flutter/tests/integration_fixture/golden_service", goldens["executable"], "the service is started from the runfiles")
+    asserts.equals(env, {"FLUTTER_TEST_DILL": "_main/stub.dill"}, goldens["environment"], "with the environment its rule gave it")
+    asserts.equals(env, "flutter/tests/integration_fixture/test/a_test.dart", goldens["testSource"], "goldens are relative to the directory of the test's source")
+    return analysistest.end(env)
+
+_goldens_rule_test = analysistest.make(_goldens_rule_impl)
+
+def _goldens_without_source_impl(ctx):
+    env = analysistest.begin(ctx)
+    asserts.expect_failure(env, "`src` (the test's source, which goldens are relative to) and `golden_service`")
+    return analysistest.end(env)
+
+_goldens_without_source_test = analysistest.make(_goldens_without_source_impl, expect_failure = True)
 
 # -- The Chrome runner -------------------------------------------------------
 
@@ -487,6 +526,8 @@ def flutter_integration_test_test_suite(name):
     _web_rule_test(name = name + "_web_rule", target_under_test = _FIXTURE + "web_test")
     _test_rule_test(name = name + "_test_rule", target_under_test = _FIXTURE + "desktop_test")
     _wrong_family_test(name = name + "_wrong_family", target_under_test = _FIXTURE + "desktop_test_on_a_web_runner")
+    _goldens_rule_test(name = name + "_goldens_rule", target_under_test = _FIXTURE + "desktop_test_with_goldens")
+    _goldens_without_source_test(name = name + "_goldens_without_source", target_under_test = _FIXTURE + "desktop_test_with_goldens_and_no_source")
     _missing_package_test(name = name + "_missing_package", target_under_test = _FIXTURE + "program_missing_a_package")
     _has_package_test(name = name + "_has_package", target_under_test = _FIXTURE + "program_with_its_packages")
     native.test_suite(
@@ -514,6 +555,8 @@ def flutter_integration_test_test_suite(name):
             ":" + name + "_web_unchecked",
             ":" + name + "_test_rule",
             ":" + name + "_wrong_family",
+            ":" + name + "_goldens_rule",
+            ":" + name + "_goldens_without_source",
             ":" + name + "_missing_package",
             ":" + name + "_has_package",
         ],

@@ -31,6 +31,9 @@ class FakeCdpPage implements CdpSender {
   /// null for a page that takes the message.
   String? bridgeThrows;
 
+  /// The answers to goldens the bridge was handed, as the JSON text each was.
+  final goldenAnswers = <String>[];
+
   final _events = StreamController<Map<String, dynamic>>.broadcast();
   var _closed = false;
 
@@ -109,6 +112,18 @@ class FakeCdpPage implements CdpSender {
               'text': 'Uncaught',
               'exception': {'description': bridgeThrows},
             },
+        },
+      };
+    }
+    const golden = r'globalThis.$rulesFlutterIntegration.golden(';
+    if (expression.startsWith(golden)) {
+      goldenAnswers.add(
+        json.decode(expression.substring(golden.length, expression.length - 1))
+            as String,
+      );
+      return {
+        'result': {
+          'result': <String, Object?>{'type': 'undefined'},
         },
       };
     }

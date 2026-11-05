@@ -27,10 +27,17 @@ import 'dart:convert';
 import 'package:flutter_rule_tools/remote_suite.dart';
 
 import '../browser_extension_channel.dart' show CdpSender;
+import 'golden_requests.dart';
 import 'lost_before_suite.dart';
 
 /// The name of the binding the page calls to post to the host.
 const cdpBindingName = 'rulesFlutterIntegrationPost';
+
+/// The name of the binding the page calls to ask the host about a golden: the
+/// JSON text of `{id, op, key, bytes}`, `bytes` in base64. It is answered by
+/// calling `golden(jsonText)` of the bridge with `{id, matched}` or
+/// `{id, error}`.
+const cdpGoldenBindingName = 'rulesFlutterGoldenPost';
 
 /// The global the page publishes the host's way in under.
 const _bridge = r'globalThis.$rulesFlutterIntegration';
@@ -60,7 +67,7 @@ class PageLostBeforeSuite extends LostBeforeSuite {
 
 /// A [SuiteTransport] over [_page], the DevTools connection of the page running
 /// the suite.
-class CdpSuiteTransport implements SuiteTransport {
+class CdpSuiteTransport implements IntegrationSuiteTransport {
   CdpSuiteTransport._(this._page, this._whyLost) {
     // Subscribed before anything is asked of the page, so that no event falls
     // between a command and the listener for what it provokes.
@@ -95,6 +102,7 @@ class CdpSuiteTransport implements SuiteTransport {
       // the browser device's own connection.
       await page.send('Runtime.enable', const {});
       await page.send('Runtime.addBinding', {'name': cdpBindingName});
+      await page.send('Runtime.addBinding', {'name': cdpGoldenBindingName});
       final installed = transport._awaitBridge();
       // An evaluation the wait gives up on settles into nothing when the
       // connection closes.
@@ -182,6 +190,7 @@ class CdpSuiteTransport implements SuiteTransport {
   final Future<String?> Function() _whyLost;
   late final StreamSubscription<Map<String, dynamic>> _events;
   final _incoming = StreamController<String>();
+  final _goldenRequests = StreamController<GoldenRequest>();
   final _lost = Completer<String?>();
   var _closing = false;
 
@@ -198,9 +207,15 @@ class CdpSuiteTransport implements SuiteTransport {
     final params = event['params'];
     switch (event['method']) {
       case 'Runtime.bindingCalled':
-        if (params is! Map || params['name'] != cdpBindingName) return;
+        if (params is! Map) return;
         final payload = params['payload'];
-        if (payload is String && !_incoming.isClosed) _incoming.add(payload);
+        if (payload is! String) return;
+        switch (params['name']) {
+          case cdpBindingName:
+            if (!_incoming.isClosed) _incoming.add(payload);
+          case cdpGoldenBindingName:
+            _onGoldenRequest(payload);
+        }
       case 'Runtime.executionContextCreated':
         final context = params is Map ? params['context'] : null;
         final aux = context is Map ? context['auxData'] : null;
@@ -221,6 +236,47 @@ class CdpSuiteTransport implements SuiteTransport {
     if (_closing || _lost.isCompleted) return;
     final reason = await _closedBecause(_whyLost);
     _loseWith(reason);
+  }
+
+  void _onGoldenRequest(String payload) {
+    final Object? request = json.decode(payload);
+    if (request is! Map || _goldenRequests.isClosed) return;
+    final operation = GoldenOperation.named('${request['op']}');
+    if (operation == null) {
+      _loseWith('the page asked for a golden to be "${request['op']}"');
+      return;
+    }
+    _goldenRequests.add(
+      GoldenRequest(
+        id: request['id']! as int,
+        operation: operation,
+        key: request['key']! as String,
+        bytes: base64.decode(request['bytes']! as String),
+      ),
+    );
+  }
+
+  @override
+  Stream<GoldenRequest> get goldenRequests => _goldenRequests.stream;
+
+  @override
+  Future<void> answerGolden(int id, GoldenAnswer answer) async {
+    final error = answer.error;
+    final reply = await _page.send('Runtime.evaluate', {
+      // The answer is a JSON string handed to the bridge as a string literal.
+      'expression':
+          '$_bridge.golden(${jsonEncode(json.encode({'id': id, if (error != null) 'error': error else 'matched': answer.matched}))})',
+      'returnByValue': true,
+    }, timeout: _evaluationCeiling);
+    final result = reply['result'];
+    if (result is Map && result['exceptionDetails'] is Map) {
+      final details = result['exceptionDetails'] as Map;
+      final description =
+          (details['exception'] as Map?)?['description'] ?? details['text'];
+      throw StateError(
+        'the page refused the answer to golden $id: $description',
+      );
+    }
   }
 
   @override
@@ -265,6 +321,7 @@ class CdpSuiteTransport implements SuiteTransport {
     _closing = true;
     await _events.cancel();
     unawaited(_incoming.close()); // done when its listener is, if it has one
+    unawaited(_goldenRequests.close());
     await _page.close();
   }
 
@@ -273,6 +330,7 @@ class CdpSuiteTransport implements SuiteTransport {
     _closing = true;
     await _events.cancel();
     unawaited(_incoming.close()); // done when its listener is, if it has one
+    unawaited(_goldenRequests.close());
     unawaited(_page.close());
   }
 }

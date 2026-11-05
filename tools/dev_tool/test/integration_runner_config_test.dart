@@ -37,6 +37,25 @@ void main() {
     expect(config.env, {'A': 'b'});
   });
 
+  test('a test without a golden comparator has none, and one with it names '
+      'the service, what it is started with and the test\'s source', () {
+    expect(IntegrationRunnerConfig.parse(_with({})).goldens, isNull);
+
+    final goldens = IntegrationRunnerConfig.parse(
+      _with({
+        'goldens': {
+          'executable': '_main/__t_goldens',
+          'environment': {'FLUTTER_TEST_DILL': '_main/g.dill'},
+          'testSource': 'pkg/t_test.dart',
+        },
+      }),
+    ).goldens!;
+
+    expect(goldens.executable, '_main/__t_goldens');
+    expect(goldens.environment, {'FLUTTER_TEST_DILL': '_main/g.dill'});
+    expect(goldens.testSource, 'pkg/t_test.dart');
+  });
+
   test('every family the rules write is one the runner knows', () {
     for (final family in ['web', 'desktop', 'ios_simulator', 'android']) {
       expect(
@@ -95,6 +114,39 @@ void main() {
       'a missing env': (
         config: _with({}, without: ['env']),
         key: 'env',
+        says: 'object of strings',
+      ),
+      'goldens that is a list': (
+        config: _with({'goldens': <String>[]}),
+        key: 'goldens',
+        says: 'object',
+      ),
+      'goldens without an executable': (
+        config: _with({
+          'goldens': {
+            'environment': <String, String>{},
+            'testSource': 't.dart',
+          },
+        }),
+        key: 'goldens.executable',
+        says: 'non-empty string',
+      ),
+      'goldens without the test\'s source': (
+        config: _with({
+          'goldens': {'executable': 'x', 'environment': <String, String>{}},
+        }),
+        key: 'goldens.testSource',
+        says: 'non-empty string',
+      ),
+      'goldens with an environment of numbers': (
+        config: _with({
+          'goldens': {
+            'executable': 'x',
+            'testSource': 't.dart',
+            'environment': {'A': 1},
+          },
+        }),
+        key: 'goldens.environment',
         says: 'object of strings',
       ),
     };

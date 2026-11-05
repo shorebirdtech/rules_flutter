@@ -1,6 +1,6 @@
 load("//flutter:integration_test.bzl", "flutter_android_app_integration_test", "flutter_android_device_runner", "flutter_application_variant", "flutter_chrome_runner", "flutter_desktop_integration_test", "flutter_integration_bootstrap", "flutter_ios_app_integration_test", "flutter_ios_simulator_runner", "flutter_web_bundle_integration_test")
 load("//flutter:web.bzl", "flutter_web_bundle")
-load("//flutter/tests:flutter_integration_test_test.bzl", "android_probe_targets", "stub_runner")
+load("//flutter/tests:flutter_integration_test_test.bzl", "android_probe_targets", "stub_golden_service", "stub_runner")
 
 package(default_visibility = ["//flutter/tests:__subpackages__"])
 
@@ -44,6 +44,28 @@ flutter_desktop_integration_test(
     name = "desktop_test",
     app = "//flutter/tests/variant_fixture/app",
     env = {"FIXTURE_KEY": "fixture value"},
+    tags = ["manual"],
+)
+
+stub_golden_service(
+    name = "golden_service",
+    tags = ["manual"],
+)
+
+# A test given the comparator of its goldens, and the source they are relative to.
+flutter_desktop_integration_test(
+    name = "desktop_test_with_goldens",
+    src = "test/a_test.dart",
+    app = "//flutter/tests/variant_fixture/app",
+    golden_service = ":golden_service",
+    tags = ["manual"],
+)
+
+# A comparator with no test source to compare for.
+flutter_desktop_integration_test(
+    name = "desktop_test_with_goldens_and_no_source",
+    app = "//flutter/tests/variant_fixture/app",
+    golden_service = ":golden_service",
     tags = ["manual"],
 )
 

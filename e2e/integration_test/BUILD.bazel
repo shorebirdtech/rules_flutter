@@ -46,6 +46,29 @@ _TEST_DEPS = [
     "@deps//:integration_test",
 ]
 
+# The golden tests' own files. A golden is a function of the platform that
+# rendered it, so `integration_test/goldens/<platform>/` holds one per platform
+# (the test names the directory), and `matchesGoldenFile` reads them from the
+# directory of the test, so they are the test's `data`.
+_GOLDEN_SRCS = ["integration_test/swatch.dart"]
+
+_GOLDENS = glob(["integration_test/goldens/**"])
+
+# Where a failed golden leaves its pictures, as `flutter_test` does: the golden
+# as it is, the picture the test made, and the two differences.
+_FAILURE_PICTURES = [
+    "failures/swatch_masterImage.png",
+    "failures/swatch_testImage.png",
+    "failures/swatch_isolatedDiff.png",
+    "failures/swatch_maskedDiff.png",
+]
+
+# What a golden that does not match says, which names the golden.
+_MISMATCH_SAYS = [
+    "Golden \"goldens/",
+    "swatch.png\": Pixel test failed",
+]
+
 # -- macOS -----------------------------------------------------------------
 
 # Two tests tapping the counter and reading what it shows: passes.
@@ -123,6 +146,46 @@ outcome_test(
     test = ":macos_crash",
 )
 
+# A flat swatch compared with `goldens/macOS/swatch.png`: the golden is
+# compared on the host, where the app's `matchesGoldenFile` sends the picture.
+# Regenerated with `bazel run //:macos_golden_test -- --update-goldens`.
+flutter_macos_integration_test(
+    name = "macos_golden_test",
+    src = "integration_test/golden_test.dart",
+    srcs = _GOLDEN_SRCS,
+    application = ":app_flutter",
+    bundle_id = "com.example.integrationtest",
+    data = _GOLDENS,
+    deps = _TEST_DEPS,
+)
+
+# The same swatch in another colour against the same golden: `manual`, since it
+# is meant to fail.
+flutter_macos_integration_test(
+    name = "macos_golden_mismatch",
+    src = "integration_test/golden_mismatch_test.dart",
+    srcs = _GOLDEN_SRCS,
+    application = ":app_flutter",
+    bundle_id = "com.example.integrationtest",
+    data = _GOLDENS,
+    tags = ["manual"],
+    deps = _TEST_DEPS,
+)
+
+# A golden that does not match fails the target, names the golden and says how
+# far it is off, and leaves the pictures of the failure where `flutter_test`
+# leaves them, in the target's undeclared outputs.
+outcome_test(
+    name = "macos_golden_mismatch_twin_test",
+    cases = ["an orange swatch matches the blue golden"],
+    expect = "fail",
+    failing_cases = ["an orange swatch matches the blue golden"],
+    failing_cases_given = True,
+    output_contains = _MISMATCH_SAYS,
+    test = ":macos_golden_mismatch",
+    undeclared_outputs = _FAILURE_PICTURES,
+)
+
 # -- Web -------------------------------------------------------------------
 
 # The same app in headless Chrome. Only macOS runs these until the Linux
@@ -172,6 +235,54 @@ outcome_test(
     output_contains = ["Expected: exactly one matching"],
     target_compatible_with = ["@platforms//os:macos"],
     test = ":web_red",
+)
+
+# The swatch in a browser, against `goldens/web/swatch.png`: the page sends the
+# picture over the DevTools connection and the host compares it.
+flutter_web_integration_test(
+    name = "web_golden_test",
+    package_name = "integration_test_example",
+    src = "integration_test/golden_test.dart",
+    srcs = glob(["lib/**/*.dart"]) + _GOLDEN_SRCS,
+    data = _GOLDENS,
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@deps//:flutter"] + _TEST_DEPS,
+)
+
+# The swatch captured while the engine is still drawing the frames before it,
+# as a busy machine leaves it: the picture is still the swatch's own.
+flutter_web_integration_test(
+    name = "web_golden_mid_frame_test",
+    package_name = "integration_test_example",
+    src = "integration_test/golden_mid_frame_test.dart",
+    srcs = glob(["lib/**/*.dart"]) + _GOLDEN_SRCS,
+    data = _GOLDENS,
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@deps//:flutter"] + _TEST_DEPS,
+)
+
+# `manual`, since it is meant to fail: the red twin below runs it.
+flutter_web_integration_test(
+    name = "web_golden_mismatch",
+    package_name = "integration_test_example",
+    src = "integration_test/golden_mismatch_test.dart",
+    srcs = glob(["lib/**/*.dart"]) + _GOLDEN_SRCS,
+    data = _GOLDENS,
+    tags = ["manual"],
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@deps//:flutter"] + _TEST_DEPS,
+)
+
+outcome_test(
+    name = "web_golden_mismatch_twin_test",
+    cases = ["an orange swatch matches the blue golden"],
+    expect = "fail",
+    failing_cases = ["an orange swatch matches the blue golden"],
+    failing_cases_given = True,
+    output_contains = _MISMATCH_SAYS,
+    target_compatible_with = ["@platforms//os:macos"],
+    test = ":web_golden_mismatch",
+    undeclared_outputs = _FAILURE_PICTURES,
 )
 
 # -- Android ---------------------------------------------------------------
@@ -230,6 +341,44 @@ outcome_test(
     test = ":android_red",
 )
 
+# The swatch on a device, against `goldens/android/swatch.png`: the golden is
+# compared on the host, which the phone's app reaches over the VM service. The
+# picture is the same on the phone and in the other tests because the swatch is
+# flat and captured at one pixel per logical pixel; what differs is the platform
+# that rendered it, which is why each platform keeps its own.
+flutter_android_integration_test(
+    name = "android_golden_test",
+    package_name = "com.example.integration_test_example",
+    src = "integration_test/golden_test.dart",
+    srcs = _GOLDEN_SRCS,
+    application = ":app_flutter",
+    data = _GOLDENS,
+    deps = _TEST_DEPS,
+)
+
+# `manual`, since it is meant to fail: the red twin below runs it.
+flutter_android_integration_test(
+    name = "android_golden_mismatch",
+    package_name = "com.example.integration_test_example",
+    src = "integration_test/golden_mismatch_test.dart",
+    srcs = _GOLDEN_SRCS,
+    application = ":app_flutter",
+    data = _GOLDENS,
+    tags = ["manual"],
+    deps = _TEST_DEPS,
+)
+
+outcome_test(
+    name = "android_golden_mismatch_twin_test",
+    cases = ["an orange swatch matches the blue golden"],
+    expect = "fail",
+    failing_cases = ["an orange swatch matches the blue golden"],
+    failing_cases_given = True,
+    output_contains = _MISMATCH_SAYS,
+    test = ":android_golden_mismatch",
+    undeclared_outputs = _FAILURE_PICTURES,
+)
+
 # -- iOS simulator ---------------------------------------------------------
 
 # The same app on a simulator each test makes for itself and deletes when it
@@ -279,6 +428,41 @@ outcome_test(
     leaves_no_simulator = True,
     output_contains = ["Expected: exactly one matching"],
     test = ":ios_red",
+)
+
+# The swatch on a simulator, against `goldens/iOS/swatch.png`.
+flutter_ios_simulator_integration_test(
+    name = "ios_golden_test",
+    src = "integration_test/golden_test.dart",
+    srcs = _GOLDEN_SRCS,
+    application = ":app_flutter",
+    bundle_id = "com.example.integrationtest",
+    data = _GOLDENS,
+    deps = _TEST_DEPS,
+)
+
+# `manual`, since it is meant to fail: the red twin below runs it.
+flutter_ios_simulator_integration_test(
+    name = "ios_golden_mismatch",
+    src = "integration_test/golden_mismatch_test.dart",
+    srcs = _GOLDEN_SRCS,
+    application = ":app_flutter",
+    bundle_id = "com.example.integrationtest",
+    data = _GOLDENS,
+    tags = ["manual"],
+    deps = _TEST_DEPS,
+)
+
+outcome_test(
+    name = "ios_golden_mismatch_twin_test",
+    cases = ["an orange swatch matches the blue golden"],
+    expect = "fail",
+    failing_cases = ["an orange swatch matches the blue golden"],
+    failing_cases_given = True,
+    leaves_no_simulator = True,
+    output_contains = _MISMATCH_SAYS,
+    test = ":ios_golden_mismatch",
+    undeclared_outputs = _FAILURE_PICTURES,
 )
 
 # Runs a test that must fail, or run only some of its cases (see

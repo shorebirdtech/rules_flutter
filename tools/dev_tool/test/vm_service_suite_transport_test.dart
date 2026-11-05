@@ -6,7 +6,9 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 
+import 'package:flutter_bazel_dev_tool/integration/golden_requests.dart';
 import 'package:flutter_bazel_dev_tool/integration/vm_service_suite_transport.dart';
 import 'package:test/test.dart';
 import 'package:vm_service/vm_service.dart';
@@ -108,6 +110,45 @@ void main() {
         whyLost: deathReason,
       );
     });
+
+    test('turns the golden events the app posts into requests, and leaves its '
+        'suite messages to the suite', () async {
+      final requests = <GoldenRequest>[];
+      final sub = transport.goldenRequests.listen(requests.add);
+
+      app.postGolden('isolates/1', {
+        'op': 'compare',
+        'id': 1001,
+        'path': 'goldens/macos/a.png',
+        'bytes': base64.encode([9, 8]),
+      });
+      app.post('isolates/1', integrationTestEventKind, '"suite"');
+      await _settle();
+      await sub.cancel();
+
+      expect(requests, hasLength(1));
+      expect(requests.single.id, 1001);
+      expect(requests.single.operation, GoldenOperation.compare);
+      expect(requests.single.key, 'goldens/macos/a.png');
+      expect(requests.single.bytes, [9, 8]);
+    });
+
+    test(
+      'answers a golden through the extension the app registered, with '
+      'the strings its handler reads: the id and a result or an error',
+      () async {
+        await transport.answerGolden(1001, const GoldenAnswer.matched(false));
+        await transport.answerGolden(
+          1002,
+          const GoldenAnswer.failed('no file'),
+        );
+
+        expect(app.goldenAnswers, [
+          {'id': '1001', 'result': 'false'},
+          {'id': '1002', 'error': 'no file'},
+        ]);
+      },
+    );
 
     test('carries the host\'s messages to the app, in the order they were '
         'sent', () async {

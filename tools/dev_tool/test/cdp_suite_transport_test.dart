@@ -9,8 +9,10 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter_bazel_dev_tool/integration/cdp_suite_transport.dart';
+import 'package:flutter_bazel_dev_tool/integration/golden_requests.dart';
 import 'package:test/test.dart';
 
 import 'fake_cdp_page.dart';
@@ -43,12 +45,13 @@ void main() {
       page.bridgeInstalled.complete();
       await connect();
 
-      final binding = page.commands.singleWhere(
-        (c) => c.method == 'Runtime.addBinding',
-      );
-      expect(binding.params, {'name': cdpBindingName});
+      final bindings = [
+        for (final c in page.commands)
+          if (c.method == 'Runtime.addBinding') c.params['name'],
+      ];
+      expect(bindings, [cdpBindingName, cdpGoldenBindingName]);
       expect(
-        page.methods.indexOf('Runtime.addBinding'),
+        page.methods.lastIndexOf('Runtime.addBinding'),
         lessThan(page.methods.indexOf('Runtime.evaluate')),
       );
     });
@@ -62,7 +65,12 @@ void main() {
 
       expect(
         page.methods.where((m) => m.startsWith('Runtime.')),
-        ['Runtime.enable', 'Runtime.addBinding', 'Runtime.evaluate'],
+        [
+          'Runtime.enable',
+          'Runtime.addBinding',
+          'Runtime.addBinding',
+          'Runtime.evaluate',
+        ],
       );
     });
 
@@ -218,6 +226,45 @@ void main() {
       await sub.cancel();
 
       expect(seen, ['[1,{"type":"x"}]', '"second"']);
+    });
+
+    test('carries the page\'s golden requests to the host as requests, and '
+        'its suite messages as none', () async {
+      final requests = <GoldenRequest>[];
+      final sub = transport.goldenRequests.listen(requests.add);
+
+      page.callBinding(
+        cdpGoldenBindingName,
+        json.encode({
+          'id': 4,
+          'op': 'update',
+          'key': 'goldens/web/a.png',
+          'bytes': base64.encode([1, 2, 3]),
+        }),
+      );
+      page.callBinding(cdpBindingName, '[1,{"type":"x"}]');
+      await _settle();
+      await sub.cancel();
+
+      expect(requests, hasLength(1));
+      expect(requests.single.id, 4);
+      expect(requests.single.operation, GoldenOperation.update);
+      expect(requests.single.key, 'goldens/web/a.png');
+      expect(requests.single.bytes, [1, 2, 3]);
+    });
+
+    test('answers a golden by handing the page the answer as text, under the '
+        'request\'s id', () async {
+      await transport.answerGolden(4, const GoldenAnswer.matched(true));
+      await transport.answerGolden(5, const GoldenAnswer.failed('no "x"'));
+
+      expect(
+        page.goldenAnswers.map((a) => json.decode(a)),
+        [
+          {'id': 4, 'matched': true},
+          {'id': 5, 'error': 'no "x"'},
+        ],
+      );
     });
 
     test('reports a crashed page, with the crash as the reason', () async {

@@ -43,6 +43,9 @@ class FakeSuiteApp {
   /// The streams a client has subscribed to.
   final subscribed = <String>{};
 
+  /// The parameters of each call to the golden extension, in arrival order.
+  final goldenAnswers = <Map<String, String>>[];
+
   /// The `data` of each call to the integration extension, in arrival order.
   final received = <String>[];
 
@@ -114,6 +117,9 @@ class FakeSuiteApp {
       case 'streamListen':
         subscribed.add(params['streamId']! as String);
         result = {'type': 'Success'};
+      case goldenMethod:
+        goldenAnswers.add(params.cast<String, String>()..remove('isolateId'));
+        result = {'type': 'Response'};
       case integrationTestMethod:
         received.add(params[integrationTestDataKey]! as String);
         final error = refuse;
@@ -173,6 +179,18 @@ class FakeSuiteApp {
     'extensionKind': kind,
     'extensionData': {integrationTestDataKey: data},
   });
+
+  /// The app asks about a golden: `postEvent(goldenEventKind, data)` in
+  /// [isolate].
+  void postGolden(String isolate, Map<String, Object?> data) =>
+      _notify('Extension', {
+        'type': 'Event',
+        'kind': 'Extension',
+        'timestamp': 0,
+        'isolate': _ref(isolate),
+        'extensionKind': goldenEventKind,
+        'extensionData': data,
+      });
 
   /// The app ends: its VM service's socket closes.
   Future<void> vanish() async {

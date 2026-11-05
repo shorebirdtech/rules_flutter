@@ -21,6 +21,9 @@ import '../host_tools.dart';
 import '../web_options.dart';
 import 'android_serial.dart';
 import 'device_lock.dart';
+import 'golden_comparator.dart';
+import 'golden_requests.dart';
+import 'golden_service_process.dart';
 import 'integration_runner_config.dart';
 import 'suite_connectors.dart';
 import 'test_simulator.dart';
@@ -204,6 +207,10 @@ Future<Future<void> Function()> _prepareMacOs(
 /// terminates a test that runs out of time): the run is undone as it ends any
 /// other way, the app stopped and what the host gave given back, and ends with
 /// 143. By default that is SIGTERM and SIGINT.
+///
+/// The goldens the app asks about are compared by the golden service the config
+/// names, started by [startGoldenService] (by default as a process) when the
+/// first is asked, and written instead of compared when [updateGoldens].
 Future<int> runIntegrationTest(
   IntegrationRunnerConfig config, {
   required String Function(String runfilesPath) resolve,
@@ -212,6 +219,8 @@ Future<int> runIntegrationTest(
   StringSink? out,
   StringSink? err,
   Stream<void>? terminated,
+  bool updateGoldens = false,
+  GoldenServiceLauncher? startGoldenService,
 }) async {
   final sink = out ?? stdout;
   final errors = err ?? stderr;
@@ -248,6 +257,8 @@ Future<int> runIntegrationTest(
         out: sink,
         err: errors,
         teardown: teardown,
+        updateGoldens: updateGoldens,
+        startGoldenService: startGoldenService,
       ),
       ended.future,
     ]);
@@ -283,6 +294,7 @@ class _Teardown {
   final StringSink _errors;
 
   SuiteTransport? transport;
+  GoldenHost? goldens;
   AppInstance? instance;
   Future<void> Function()? give;
 
@@ -300,6 +312,8 @@ class _Teardown {
   Future<void> _undo() async {
     try {
       if (transport != null) await transport!.abandon('the run is over');
+      // After the transport, whose end is the end of what the app asks.
+      await goldens?.close();
       if (instance != null) {
         await _device.stop(instance!);
       } else {
@@ -330,6 +344,8 @@ Future<int> _drive(
   required StringSink out,
   required StringSink err,
   required _Teardown teardown,
+  required bool updateGoldens,
+  required GoldenServiceLauncher? startGoldenService,
 }) async {
   final bazelTimeout = environment['TEST_TIMEOUT'];
   final ceiling = testCeiling(bazelTimeout);
@@ -358,7 +374,7 @@ Future<int> _drive(
       return 1;
     }
 
-    final SuiteTransport connected;
+    final IntegrationSuiteTransport connected;
     try {
       connected = await choice.connect(device, instance, ceiling: ceiling);
     } on SuiteUnreachable catch (e) {
@@ -366,6 +382,19 @@ Future<int> _drive(
       return 1;
     }
     teardown.transport = connected;
+    teardown.goldens = GoldenHost(
+      connected,
+      _goldenComparator(
+        config,
+        resolve: resolve,
+        environment: environment,
+        update: updateGoldens,
+        ceiling: ceiling,
+        start: startGoldenService,
+      ),
+      update: updateGoldens,
+      log: (message) => err.writeln('integration_test: $message'),
+    );
 
     final outcome =
         await RemoteSuiteDriver(
@@ -387,3 +416,39 @@ Future<int> _drive(
     await teardown.run();
   }
 }
+
+/// The comparator for the goldens the app asks about: the service the config
+/// names, or one that says there is none.
+GoldenComparator _goldenComparator(
+  IntegrationRunnerConfig config, {
+  required String Function(String runfilesPath) resolve,
+  required Map<String, String> environment,
+  required bool update,
+  required Duration ceiling,
+  required GoldenServiceLauncher? start,
+}) {
+  final goldens = config.goldens;
+  if (goldens == null) {
+    return const NoGoldenComparator(
+      'this test was given no golden comparator. The `flutter_*_integration_test` '
+      'macros declare one; a test made of the rules themselves gives its '
+      'source as `src` and the comparator as `golden_service`.',
+    );
+  }
+  final executable = resolve(goldens.executable);
+  return GoldenServiceComparator(
+    testPath: goldens.testSource,
+    ceiling: ceiling,
+    environment: goldenServiceEnvironment(
+      environment,
+      goldens.environment,
+      update: update,
+    ),
+    launch: (serviceEnvironment) => (start ?? _startProcess(executable))(
+      serviceEnvironment,
+    ),
+  );
+}
+
+GoldenServiceLauncher _startProcess(String executable) =>
+    (environment) => startGoldenServiceProcess(executable, environment);

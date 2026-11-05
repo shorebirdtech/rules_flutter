@@ -1,12 +1,23 @@
-"""Golden-file comparator for `flutter_test`.
+"""Golden-file comparison for `flutter_test` and for integration tests.
 
-Exports `comparator.dart` for the bootstrap staging in `flutter_test`. Not a
-`dart_library`: the source is added to each test's kernel-compile srcs
-directly so it resolves `package:flutter_test` through the user's pub-managed
-`@deps`, the same arrangement `agent_extensions/agent.dart` uses.
+`comparator.dart` is the `flutter_test` comparator, staged next to each test's
+generated bootstrap. `service.dart` is the program an integration test's host
+runner starts to compare the goldens of a test that runs in an app, as a
+`flutter_test` (the host runner has no `dart:ui`); it imports `comparator.dart`
+by relative path.
+
+Neither is a `dart_library`: the sources are added to a test's kernel-compile
+srcs directly so they resolve `package:flutter_test` through the user's
+pub-managed `@deps`, the same arrangement `agent_extensions/agent.dart` uses.
 """
 
+# `service.dart` and the comparator it imports are named by the `flutter_test`
+# each integration test macro declares in the user's package, so they are
+# visible from any package. Not for use outside the macros.
 exports_files(
-    ["comparator.dart"],
-    visibility = ["//flutter:__subpackages__"],
+    [
+        "comparator.dart",
+        "service.dart",
+    ],
+    visibility = ["//visibility:public"],
 )

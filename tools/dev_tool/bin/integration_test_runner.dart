@@ -7,6 +7,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter_rule_tools/remote_suite.dart' show parseUpdateGoldens;
 import 'package:runfiles/runfiles.dart';
 
 import '../lib/integration/integration_runner_config.dart';
@@ -16,7 +17,7 @@ import '../lib/integration/integration_test_run.dart';
 /// paths are resolved from; set by the BUILD target.
 const _runfilesSourceRepo = String.fromEnvironment('RUNFILES_SOURCE_REPO');
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
   final configPath = Platform.environment['FLUTTER_INTEGRATION_TEST_CONFIG'];
   if (configPath == null || configPath.isEmpty) {
     stderr.writeln(
@@ -24,6 +25,18 @@ Future<void> main() async {
       'program is the executable of a flutter_*_integration_test rule and is '
       'started by `bazel test`.',
     );
+    exit(64);
+  }
+
+  final bool updateGoldens;
+  try {
+    updateGoldens = parseUpdateGoldens(
+      args,
+      Platform.environment['BUILD_WORKSPACE_DIRECTORY'],
+      program: 'integration_test',
+    );
+  } on FormatException catch (e) {
+    stderr.writeln(e.message);
     exit(64);
   }
 
@@ -66,6 +79,7 @@ Future<void> main() async {
     resolve: runfiles.rlocation,
     choice: choice,
     environment: Platform.environment,
+    updateGoldens: updateGoldens,
   );
   // The app's VM service and its log pumps are stopped by now, but a live
   // handle in a dependency would keep the process; the result is final.

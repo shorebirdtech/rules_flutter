@@ -65,7 +65,7 @@ Future<void> main() async {
       exitCode: exitCode,
       xml: xml.existsSync() ? xml.readAsStringSync() : null,
       output: output.toString(),
-    );
+    )..addAll(_undeclaredOutputsMissing(config));
     final named = config['noSimulatorNamed'] as String?;
     // The runner names its simulator for its own process: another run of the
     // same test, at the same time, has simulators of its own.
@@ -139,6 +139,27 @@ List<String> _check(
     }
   }
   return problems;
+}
+
+/// The files of `undeclaredOutputs` that the test did not leave in
+/// `TEST_UNDECLARED_OUTPUTS_DIR`, which Bazel archives to the test's
+/// `test.outputs`, or left empty.
+List<String> _undeclaredOutputsMissing(Map<String, Object?> config) {
+  final wanted = (config['undeclaredOutputs'] as List<Object?>? ?? const [])
+      .cast<String>();
+  if (wanted.isEmpty) return const [];
+  final dir = Platform.environment['TEST_UNDECLARED_OUTPUTS_DIR'];
+  if (dir == null || dir.isEmpty) {
+    return [
+      'TEST_UNDECLARED_OUTPUTS_DIR is not set, so $wanted cannot be seen',
+    ];
+  }
+  return [
+    for (final path in wanted)
+      if (!File('$dir/$path').existsSync() ||
+          File('$dir/$path').lengthSync() == 0)
+        'it did not leave $path in its undeclared outputs',
+  ];
 }
 
 /// The simulators `simctl list` shows that are called [name]: what the
