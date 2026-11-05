@@ -157,15 +157,20 @@ def flutter_linux_app(
         window_title: Title of the window (defaults to `app_name`, then the
             target name). Used by the built-in runner; a `linux/runner/`
             from `flutter create` sets its own title in `my_application.cc`.
-        **kwargs: Passed through to flutter_linux_bundle.
+        **kwargs: Passed through to flutter_linux_bundle, except `testonly`,
+            which every target the macro declares has, since one that depends on a
+            `testonly` application would otherwise fail analysis.
     """
     tags = kwargs.pop("tags", [])
     target_compatible_with = kwargs.pop("target_compatible_with", None)
+    testonly = kwargs.pop("testonly", False)
 
     # Attributes propagated to all intermediate targets so that
     # `target_compatible_with` (and tags) cause Bazel to skip analysis on
-    # incompatible platforms (e.g. building Linux targets on macOS).
-    common = {"tags": tags}
+    # incompatible platforms (e.g. building Linux targets on macOS), and
+    # `testonly`, which a target that depends on a `testonly` application has to
+    # have too.
+    common = {"tags": tags, "testonly": testonly}
     if target_compatible_with:
         common["target_compatible_with"] = target_compatible_with
 

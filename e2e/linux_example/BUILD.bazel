@@ -55,6 +55,25 @@ flutter_linux_app(
     target_compatible_with = ["@platforms//os:linux"],
 )
 
+# An application only a test may depend on, as one an integration test builds for
+# itself is, and an app over it. Everything `flutter_linux_app` declares around
+# the app has to be `testonly` too: `:testonly_app_build_test`.
+flutter_application(
+    name = "testonly_flutter",
+    package_name = "linux_example",
+    testonly = True,
+    main = "lib/testonly_main.dart",
+    deps = ["@deps//:flutter"],
+)
+
+flutter_linux_app(
+    name = "testonly_app",
+    testonly = True,
+    application = ":testonly_flutter",
+    tags = ["manual"],
+    target_compatible_with = ["@platforms//os:linux"],
+)
+
 # =============================================================================
 # Approach 2: Bazel-generated runner (flutter_linux_runner_lib_gen)
 #
@@ -85,6 +104,15 @@ build_test(
     name = "linux_app_build_test",
     target_compatible_with = ["@platforms//os:linux"],
     targets = [":app"],
+)
+
+# A `testonly` app builds: every target `flutter_linux_app` declares around it
+# is `testonly` too, so none is a non-test target depending on a `testonly`
+# application.
+build_test(
+    name = "testonly_app_build_test",
+    target_compatible_with = ["@platforms//os:linux"],
+    targets = [":testonly_app"],
 )
 
 build_test(
