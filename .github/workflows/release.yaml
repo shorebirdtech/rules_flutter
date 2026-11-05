@@ -20,15 +20,18 @@ permissions:
   contents: write
 jobs:
   release:
-    uses: bazel-contrib/.github/.github/workflows/release_ruleset.yaml@v7.7.0
+    uses: aran/rules_dart/.github/workflows/overhead-release.yaml@fcb5e1b4cfbca03197a201d9b9a2469b3ced3bd7
     with:
       release_files: rules_flutter-*.tar.gz
-      prerelease: false
       tag_name: ${{ inputs.tag_name || github.ref_name }}
   publish:
     needs: release
-    uses: ./.github/workflows/publish.yaml
+    uses: aran/rules_dart/.github/workflows/overhead-publish.yaml@fcb5e1b4cfbca03197a201d9b9a2469b3ced3bd7
     with:
       tag_name: ${{ inputs.tag_name || github.ref_name }}
     secrets:
       publish_token: ${{ secrets.publish_token || secrets.BCR_PUBLISH_TOKEN }}
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write

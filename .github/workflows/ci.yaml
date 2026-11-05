@@ -1,6 +1,6 @@
 # CI workflow for rules_flutter
 #
-# Runs repo-root tests (Starlark unit tests, buildifier lint) and the e2e tests
+# Runs repo-root tests (Starlark unit tests, the pre-commit hooks) and the e2e tests
 # on every push/PR. Each e2e workspace runs on the operating systems where it
 # exercises something no other job does; the `plan` job reads which, and why,
 # from tools/ci_matrix/e2e_matrix.dart.
@@ -45,26 +45,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+      - uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # 0.19.1
         with:
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
           cache-save: false
       - name: bazel test //...
         run: bazel test //... --test_output=errors
   # The hooks in .pre-commit-config.yaml, over every file. Nothing else runs
-  # them for a commit made without `prek install`.
+  # them for a commit made without `prek install`. prek, yamlfmt and typos are
+  # the versions overhead pins.
   pre-commit:
     name: pre-commit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # 0.19.1
         with:
-          python-version: "3.13"
-      - uses: j178/prek-action@v3.0.1
-        with:
-          # Keep in step with prek in multitool.lock.json
-          prek-version: 0.5.5
+          repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
+          cache-save: false
+      - run: bazel run @overhead//lint:prek -- run --all-files --show-diff-on-failure
   dart-tool-tests:
     name: Dart tool tests
     runs-on: ubuntu-latest
@@ -104,7 +103,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
-      - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+      - uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # 0.19.1
         with:
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
           cache-save: false
@@ -187,7 +186,7 @@ jobs:
       # cannot do this: setup-bazel's `startup --output_base` line in
       # `~/.bazelrc` beats it. tools/ci_matrix/test/windows_paths_test.dart
       # checks the arithmetic.
-      - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+      - uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # 0.19.1
         with:
           output-base: ${{ runner.os == 'Windows' && format('{0}/b', substr(github.workspace, 0, 2)) || '' }}
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
