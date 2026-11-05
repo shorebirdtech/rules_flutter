@@ -1,0 +1,50 @@
+"""An Apple bundle's version, from Flutter's build name and build number."""
+
+load("@rules_apple//apple:providers.bzl", "apple_provider")
+load("//flutter/private:app_version.bzl", "apple_version")
+
+def _impl(ctx):
+    version = apple_version(ctx.attr.build_name, ctx.attr.build_number)
+    if version.error:
+        fail("%s: %s" % (ctx.label, version.error))
+
+    # The file rules_apple's `apple_bundle_version` writes, which its
+    # Info.plist step reads for the two keys.
+    version_file = ctx.actions.declare_file(ctx.label.name + ".bundle_version")
+    ctx.actions.write(version_file, json.encode({
+        "build_version": version.build_version,
+        "short_version_string": version.short_version_string,
+    }))
+    return [
+        apple_provider.make_apple_bundle_version_info(version_file = version_file),
+        DefaultInfo(files = depset([version_file])),
+    ]
+
+flutter_apple_bundle_version = rule(
+    implementation = _impl,
+    attrs = {
+        "build_name": attr.string(
+            doc = "CFBundleShortVersionString, as `flutter build --build-name`: " +
+                  "numbers separated by periods, padded to three (`2.1` is " +
+                  "`2.1.0`). Empty is `1.0.0`.",
+        ),
+        "build_number": attr.string(
+            doc = "CFBundleVersion, as `flutter build --build-number`: numbers " +
+                  "separated by periods. Empty is `1`.",
+        ),
+    },
+    doc = """The version of an iOS or macOS bundle, from Flutter's build name and number.
+
+`flutter_ios_app` and `flutter_macos_app` declare one from their `build_name`
+and `build_number`. Declare one yourself to give an app extension the same
+version as its app, passing it as the `version` of both:
+
+    flutter_apple_bundle_version(
+        name = "version",
+        build_name = "2.1.0",
+        build_number = "42",
+    )
+
+It provides what rules_apple's `apple_bundle_version` provides, so either fits
+any `version` attribute.""",
+)

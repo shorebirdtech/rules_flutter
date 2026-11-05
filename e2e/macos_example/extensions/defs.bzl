@@ -25,7 +25,7 @@ def example_macos_extension(name, **kwargs):
             tags = ["manual"],
             target_compatible_with = ["@platforms//os:macos"],
             # rules_apple's default is no version at all, and an extension's
-            # version must match the app's: 1.0, flutter_macos_app's default.
+            # version must match the app's, so the app takes this one too.
             version = "//:app_version",
             visibility = ["//:__pkg__"],
         ),

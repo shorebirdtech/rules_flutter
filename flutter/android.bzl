@@ -57,6 +57,7 @@ load("@rules_android//android:rules.bzl", _android_binary = "android_binary", _a
 load("@rules_cc//cc:cc_library.bzl", _cc_library = "cc_library")
 load("@rules_java//java:java_import.bzl", _java_import = "java_import")
 load("@rules_kotlin//kotlin:android.bzl", _kt_android_library = "kt_android_library")
+load("//flutter/private:app_version.bzl", "manifest_values_conflict", "version_arg")
 load("//flutter/private:constants.bzl", _ANDROID_MIN_SDK_VERSION = "ANDROID_MIN_SDK_VERSION", _ANDROID_TARGET_SDK_VERSION = "ANDROID_TARGET_SDK_VERSION")
 load("//flutter/private:flutter_android_application.bzl", _flutter_android_bundle = "flutter_android_bundle")
 load("//flutter/private:flutter_android_build.bzl", _flutter_android_build = "flutter_android_build")
@@ -508,6 +509,9 @@ def flutter_android_app(
         deps = [],
         pub_hub_name = "deps",
         namespace = None,
+        build_name = None,
+        build_number = None,
+        manifest_values = None,
         **kwargs):
     """Builds a Flutter Android APK from a flutter_application target.
 
@@ -636,6 +640,21 @@ def flutter_android_app(
             `flutter_android_plugin_library`: the registrant compiles
             against these too, so the plugin is both packaged and
             registered. Pub plugins arrive through the hub instead.
+        build_name: versionName, as `flutter build --build-name`. Defaults to
+            `1.0.0`. May be a `select()`, whose `None` is the default.
+        build_number: versionCode, as `flutter build --build-number`: a
+            whole number from 1 to 2100000000, Google Play's limit. Defaults
+            to `1`. May be a `select()`. A manifest that declares
+            `android:versionCode` or `android:versionName` itself keeps it
+            while the matching argument is unset, and is an error once it
+            is set.
+        manifest_values: `android_binary`'s `manifest_values`: values for
+            the manifest's `${...}` placeholders. The macro sets
+            `applicationId`, `minSdkVersion` and `targetSdkVersion` from
+            `package_name`, `min_sdk_version` and `target_sdk_version`, so
+            naming them here is an error. `versionCode` and `versionName`
+            are allowed while `build_number` and `build_name` are unset.
+            Other keys pass through. A dict, not a `select()`.
         pub_hub_name: Name of the `flutter.pub(name = ...)` hub providing
             plugin spokes. The macro checks the Maven artifacts of the pub
             plugins `application` depends on against
@@ -650,6 +669,20 @@ def flutter_android_app(
     namespace = namespace or package_name
     tags = kwargs.pop("tags", ["manual"])
     testonly = kwargs.pop("testonly", False)
+    manifest_values = {} if manifest_values == None else manifest_values
+    conflict = manifest_values_conflict(
+        "flutter_android_app(name = %r)" % name,
+        manifest_values,
+        build_name,
+        build_number,
+    )
+    if conflict:
+        fail(conflict)
+    manifest_values = {
+        "applicationId": package_name,
+        "minSdkVersion": min_sdk_version,
+        "targetSdkVersion": target_sdk_version,
+    } | manifest_values
 
     # -- Internal targets (all __{name}_ prefixed) --
     #
@@ -882,12 +915,18 @@ def flutter_android_app(
     # relative, Android resolves them against `package_name`, the application
     # id, which need not be the code's package: a second app shipping the
     # same runner under its own id would name a class that does not exist.
+    #
+    # And it sets the app's version on the manifest, from `build_name` and
+    # `build_number`.
     flutter_android_manifest_merge(
         name = "__%s_manifest_with_library_permissions" % name,
         base = actual_manifest,
         libraries = binary_deps + deps,
-        placeholders = ["applicationId", "minSdkVersion", "targetSdkVersion"],
+        placeholders = sorted(manifest_values.keys()),
         namespace = namespace,
+        set_version = True,
+        build_name = version_arg(build_name),
+        build_number = version_arg(build_number),
         tags = tags,
         testonly = testonly,
     )
@@ -897,11 +936,7 @@ def flutter_android_app(
     _android_binary(
         name = name,
         manifest = actual_manifest,
-        manifest_values = {
-            "applicationId": package_name,
-            "minSdkVersion": min_sdk_version,
-            "targetSdkVersion": target_sdk_version,
-        },
+        manifest_values = manifest_values,
         resource_files = resources if resources else None,
         assets = ["__%s_flutter_assets" % name],
         assets_dir = "assets",

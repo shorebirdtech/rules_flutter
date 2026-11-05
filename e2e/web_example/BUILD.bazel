@@ -35,6 +35,9 @@ flutter_web_app(
     # real to deliver.
     assets = glob(["assets/**"]),
     base_href = "/web_example/",
+    # Not the default, so :verify_version_json_test can see it arrive.
+    build_name = "2.3.4",
+    build_number = "42",
     deps = [
         "@deps//:flutter",
         "@rules_flutter//flutter:material_icons",
@@ -179,6 +182,16 @@ dart_test(
         ":app_wasm_subpath",
     ],
     main = "test/verify_index_html_test.dart",
+    deps = ["@rules_flutter//tools/e2e_testing"],
+)
+
+dart_test(
+    name = "verify_version_json_test",
+    data = [
+        ":app_wasm",
+        ":app_wasm_subpath",
+    ],
+    main = "test/verify_version_json_test.dart",
     deps = ["@rules_flutter//tools/e2e_testing"],
 )
 

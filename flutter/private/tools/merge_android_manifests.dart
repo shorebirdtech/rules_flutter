@@ -46,6 +46,15 @@
 /// `<namespace>.X`, `<namespace>.a.X`, `<namespace>.X`; any other is already
 /// qualified. Without `--namespace` the names are left as they are.
 ///
+/// The app's version (`--version-code`, `--version-name`): Gradle writes
+/// `android:versionCode` and `android:versionName` onto the root
+/// `<manifest>` from `flutter.versionCode` and `flutter.versionName`, and so
+/// does this tool, from `flutter_android_app`'s `build_number` and
+/// `build_name`. A base that declares either attribute itself conflicts with
+/// a value the app sets, which is an error; `--default-version-code` and
+/// `--default-version-name` give the value used only when the base declares
+/// none, for an app that leaves the arguments unset.
+///
 /// The base manifest is never re-serialized: merged permissions are inserted
 /// textually right after the root `<manifest ...>` open tag, and qualified
 /// class names replace their attribute values in place, so every other base
@@ -56,6 +65,8 @@
 /// Usage:
 ///   dart merge_android_manifests.dart --base <path> [--overlay <path>]
 ///       [--library <path>]... [--placeholder <name>]... [--namespace <package>]
+///       [--version-code <n> | --default-version-code <n>]
+///       [--version-name <s> | --default-version-name <s>]
 ///       --output <path>
 import 'dart:io';
 
@@ -514,6 +525,52 @@ String qualifyClassNames(String xml, String namespace) {
   return out.toString();
 }
 
+/// A version attribute for the root `<manifest>`: its [value], and whether
+/// that is only the default, which a value the base declares replaces.
+typedef VersionAttribute = ({String value, bool isDefault});
+
+String _escapeAttribute(String value) => value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
+
+/// [xml] with `android:versionCode` and `android:versionName` set on its root
+/// `<manifest>` from [versionCode] and [versionName]. An attribute the root
+/// already declares stays when the value is a default; otherwise it is an
+/// error, so neither value is silently lost.
+String setVersion(
+  String xml, {
+  required String basePath,
+  VersionAttribute? versionCode,
+  VersionAttribute? versionName,
+}) {
+  final scanner = _Scanner(xml)..skipInsignificant();
+  final (_, rootAttributes, _, _) = scanner.readTag();
+  final insertAt = scanner.pos - 1;
+  final added = StringBuffer();
+  for (final (attribute, argument, version) in [
+    ('android:versionCode', 'build_number', versionCode),
+    ('android:versionName', 'build_name', versionName),
+  ]) {
+    if (version == null) continue;
+    final declared = rootAttributes[attribute];
+    if (declared != null) {
+      if (version.isDefault) continue;
+      throw FormatException(
+        'The manifest $basePath declares $attribute="$declared", and '
+        '`$argument` sets it to "${version.value}". Remove the attribute '
+        'from the manifest, or leave `$argument` unset to keep it.',
+      );
+    }
+    added.write(' $attribute="${_escapeAttribute(version.value)}"');
+  }
+  if (added.isEmpty) return xml;
+  return xml.substring(0, insertAt) +
+      added.toString() +
+      xml.substring(insertAt);
+}
+
 /// Merges [overlayXml]'s permissions into [baseXml], returning the merged
 /// manifest text with its class names qualified against [namespace] when
 /// given (see [qualifyClassNames]). Throws [FormatException] when the overlay
@@ -526,8 +583,19 @@ String mergeManifests({
   Map<String, String> libraries = const {},
   Set<String> placeholders = const {},
   String? namespace,
+  VersionAttribute? versionCode,
+  VersionAttribute? versionName,
 }) {
   if (namespace != null) baseXml = qualifyClassNames(baseXml, namespace);
+  if (versionCode != null || versionName != null) {
+    _baseInsertionPoint(baseXml, basePath);
+    baseXml = setVersion(
+      baseXml,
+      basePath: basePath,
+      versionCode: versionCode,
+      versionName: versionName,
+    );
+  }
   final overlayPermissions = overlayXml == null
       ? const <OverlayPermission>[]
       : parseOverlayPermissions(overlayXml, overlayPath!);
@@ -587,6 +655,8 @@ void main(List<String> args) {
   final libraryPaths = <String>[];
   final placeholders = <String>{};
   String? namespace;
+  VersionAttribute? versionCode;
+  VersionAttribute? versionName;
 
   for (var i = 0; i < args.length; i++) {
     if (args[i] == '--base' && i + 1 < args.length) {
@@ -599,6 +669,14 @@ void main(List<String> args) {
       placeholders.add(args[++i]);
     } else if (args[i] == '--namespace' && i + 1 < args.length) {
       namespace = args[++i];
+    } else if (args[i] == '--version-code' && i + 1 < args.length) {
+      versionCode = (value: args[++i], isDefault: false);
+    } else if (args[i] == '--default-version-code' && i + 1 < args.length) {
+      versionCode = (value: args[++i], isDefault: true);
+    } else if (args[i] == '--version-name' && i + 1 < args.length) {
+      versionName = (value: args[++i], isDefault: false);
+    } else if (args[i] == '--default-version-name' && i + 1 < args.length) {
+      versionName = (value: args[++i], isDefault: true);
     } else if (args[i] == '--output' && i + 1 < args.length) {
       outputPath = args[++i];
     }
@@ -608,7 +686,9 @@ void main(List<String> args) {
     stderr.writeln(
       'Usage: dart merge_android_manifests.dart --base <path> '
       '[--overlay <path>] [--library <path>]... [--placeholder <name>]... '
-      '[--namespace <package>] --output <path>',
+      '[--namespace <package>] '
+      '[--version-code <n> | --default-version-code <n>] '
+      '[--version-name <s> | --default-version-name <s>] --output <path>',
     );
     exit(1);
   }
@@ -627,6 +707,8 @@ void main(List<String> args) {
       },
       placeholders: placeholders,
       namespace: namespace,
+      versionCode: versionCode,
+      versionName: versionName,
     );
   } on FormatException catch (e) {
     stderr.writeln(e.message);

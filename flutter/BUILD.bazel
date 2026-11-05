@@ -128,6 +128,7 @@ bzl_library(
     srcs = ["android.bzl"],
     visibility = ["//visibility:public"],
     deps = [
+        "//flutter/private:app_version",
         "//flutter/private:flutter_android_application",
         "//flutter/private:flutter_android_build",
         "//flutter/private:flutter_android_manifest_merge",
@@ -155,8 +156,10 @@ bzl_library(
     srcs = ["ios.bzl"],
     visibility = ["//visibility:public"],
     deps = [
+        "//flutter/private:app_version",
         "//flutter/private:apple_app",
         "//flutter/private:debug_build",
+        "//flutter/private:flutter_apple_bundle_version",
         "//flutter/private:flutter_ios_application",
         "//flutter/private:flutter_ios_registrant",
         "//flutter/private:flutter_plist_merge",
@@ -170,7 +173,9 @@ bzl_library(
     srcs = ["macos.bzl"],
     visibility = ["//visibility:public"],
     deps = [
+        "//flutter/private:app_version",
         "//flutter/private:apple_app",
+        "//flutter/private:flutter_apple_bundle_version",
         "//flutter/private:flutter_macos_application",
         "//flutter/private:flutter_macos_registrant",
         "//flutter/private:flutter_plist_merge",
@@ -183,6 +188,7 @@ bzl_library(
     srcs = ["web.bzl"],
     visibility = ["//visibility:public"],
     deps = [
+        "//flutter/private:app_version",
         "//flutter/private:flutter_web_application",
         "//flutter/private:flutter_web_branch",
         "@bazel_skylib//rules:expand_template",

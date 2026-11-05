@@ -60,11 +60,12 @@ Two tiers of API:
 load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
 load("@rules_apple//apple:apple.bzl", "apple_dynamic_framework_import")
 load("@rules_apple//apple:macos.bzl", "macos_application")
-load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
 load("@rules_swift//swift:swift.bzl", "swift_library")
+load("//flutter/private:app_version.bzl", "version_arg", "version_target_conflict")
 load("//flutter/private:apple_app.bzl", "flutter_apple_app")
 load("//flutter/private:apple_engine.bzl", _MACOS_ENGINE_FRAMEWORK = "MACOS_ENGINE_FRAMEWORK")
 load("//flutter/private:constants.bzl", _MACOS_MINIMUM_OS_VERSION = "MACOS_MINIMUM_OS_VERSION")
+load("//flutter/private:flutter_apple_bundle_version.bzl", _flutter_apple_bundle_version = "flutter_apple_bundle_version")
 load("//flutter/private:flutter_apple_plugin_library.bzl", _flutter_apple_plugin_library_macro = "flutter_apple_plugin_library")
 load("//flutter/private:flutter_apple_plugins_aggregator.bzl", _flutter_apple_plugins_aggregator = "flutter_apple_plugins_aggregator")
 load("//flutter/private:flutter_macos_application.bzl", _flutter_macos_framework_rule = "flutter_macos_framework", _flutter_macos_native_libs_rule = "flutter_macos_native_libs", _flutter_macos_privacy_manifests_rule = "flutter_macos_privacy_manifests")
@@ -81,6 +82,11 @@ MACOS_MINIMUM_OS_VERSION = _MACOS_MINIMUM_OS_VERSION
 # Wired into flutter_macos_app as `additional_entitlements`; exposed for
 # Tier 2 users assembling a macos_application themselves.
 flutter_entitlements_merge = _flutter_entitlements_merge
+
+# A macOS bundle's version from Flutter's build name and build number: what
+# flutter_macos_app's `build_name` and `build_number` declare. Exposed to
+# give an app extension the version of its app.
+flutter_apple_bundle_version = _flutter_apple_bundle_version
 
 # -- Composable rules (Tier 2) ------------------------------------------------
 #
@@ -263,6 +269,8 @@ def flutter_macos_app(
         minimum_os_version = MACOS_MINIMUM_OS_VERSION,
         info_plist = None,
         version = None,
+        build_name = None,
+        build_number = None,
         additional_contents = {},
         entitlements = None,
         additional_entitlements = [],
@@ -309,7 +317,17 @@ def flutter_macos_app(
         app_name: User-facing display name (menu bar, window title). Defaults to name.
         minimum_os_version: Minimum macOS version.
         info_plist: Override conventional macos/Runner/Info.plist.
-        version: An apple_bundle_version target. Defaults to "1.0".
+        version: An `apple_bundle_version` (or `flutter_apple_bundle_version`)
+            target, rules_apple's own way to set the version, for example
+            from `--embed_label`. Setting it with `build_name` or
+            `build_number` is an error.
+        build_name: CFBundleShortVersionString, as `flutter build
+            --build-name`: numbers separated by periods, padded to three
+            as `flutter build` pads them (`2.1` is `2.1.0`). Defaults to
+            `1.0.0`. May be a `select()`, whose `None` is the default.
+        build_number: CFBundleVersion, as `flutter build --build-number`:
+            numbers separated by periods. Defaults to `1`. May be a
+            `select()`.
         additional_contents: Extra content for the bundle (merged with Flutter defaults).
         entitlements: Override entitlements wiring. By default the macro
             auto-discovers `macos/Runner/{DebugProfile,Release}.entitlements`
@@ -362,6 +380,14 @@ def flutter_macos_app(
     """
     display_name = app_name or name
     tags = kwargs.pop("tags", ["manual"])
+    conflict = version_target_conflict(
+        "flutter_macos_app(name = %r)" % name,
+        version,
+        build_name,
+        build_number,
+    )
+    if conflict:
+        fail(conflict)
 
     # `target_compatible_with` and what decides who can see the app belong to
     # the target the user names (see `flutter_apple_app`), not to the
@@ -562,6 +588,8 @@ def flutter_macos_app(
 
     # 7. Info.plist — preprocess to resolve Xcode variables that rules_apple
     #    doesn't handle (PRODUCT_COPYRIGHT, DEVELOPMENT_LANGUAGE).
+    #    $(FLUTTER_BUILD_NAME) and $(FLUTTER_BUILD_NUMBER) stay: rules_apple
+    #    replaces both keys with `version`'s values.
     if not info_plist:
         expand_template(
             name = "__%s_info_plist" % name,
@@ -603,12 +631,13 @@ def flutter_macos_app(
         )
         actual_info_plist = "__%s_info_plist_icon" % name
 
-    # 8. Version — create default apple_bundle_version if not provided.
+    # 8. Version, from `build_name` and `build_number` unless the app names
+    #    its own.
     if not version:
-        apple_bundle_version(
+        _flutter_apple_bundle_version(
             name = "__%s_version" % name,
-            build_version = "1.0",
-            short_version_string = "1.0",
+            build_name = version_arg(build_name),
+            build_number = version_arg(build_number),
             tags = tags,
             testonly = testonly,
         )

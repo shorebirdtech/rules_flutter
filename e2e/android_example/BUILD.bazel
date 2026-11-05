@@ -137,12 +137,18 @@ flutter_android_app(
 # The same flutter create runner shipped under a second application id. Its
 # MainActivity.kt declares `package com.example.flutterapp`, and the manifest
 # names `.MainActivity`, which Android resolves against the code's package
-# (Gradle's `namespace`), not the application id. Checked by
+# (Gradle's `namespace`), not the application id. Its version, from
+# `build_name` and `build_number`, is not the default. Both checked by
 # :verify_android_second_app_test.
 flutter_android_app(
     name = "second_app",
     package_name = "com.example.flutterapp.second",
     application = ":app_flutter",
+    build_name = "2.3.4",
+    build_number = 42,
+    # A placeholder of the app's own passes through to `android_binary`
+    # beside the ones the macro sets.
+    manifest_values = {"appLabelSuffix": " (second)"},
     namespace = "com.example.flutterapp",
     # The VM service's grant, which this workspace has no debug variant
     # manifest to give, so `flutter_bazel run` can debug it.

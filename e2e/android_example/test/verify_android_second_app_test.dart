@@ -8,6 +8,9 @@
 /// name belongs to the former. Resolved against the application id instead, the
 /// APK names `com.example.flutterapp.second.MainActivity`, which does not
 /// exist, and the app dies on launch with a ClassNotFoundException.
+///
+/// It also sets `build_name` and `build_number`, which must reach the APK's
+/// manifest as `versionName` and `versionCode`.
 library;
 
 // This script's diagnostics are its product: it reports what it found in
@@ -19,12 +22,16 @@ import 'package:rules_flutter_e2e_testing/apk.dart';
 import 'package:rules_flutter_e2e_testing/apk_contents.dart';
 
 const _applicationId = 'com.example.flutterapp.second';
+const _versionName = '2.3.4';
+const _versionCode = '42';
 
 void main() {
   final apk = Apk.fromRunfiles('second_app.apk', prefix: 'android_second_app');
   final check = apk.check;
   final elements = manifestElements(apk.manifest.readAsBytesSync());
   final package = elements.first.attributes['package'];
+  final versionName = elements.first.attributes['versionName'];
+  final versionCode = elements.first.attributes['versionCode'];
   final activities = [
     for (final e in elements)
       if (e.name == 'activity') e.attributes['name']!,
@@ -32,7 +39,18 @@ void main() {
   final classes = apk.definedClasses();
 
   print('Application id: $package');
+  print('Version: $versionName ($versionCode)');
   check
+    ..expect(
+      'versionName is $_versionName',
+      condition: versionName == _versionName,
+      detail: 'expected versionName $_versionName from `build_name`',
+    )
+    ..expect(
+      'versionCode is $_versionCode',
+      condition: versionCode == _versionCode,
+      detail: 'expected versionCode $_versionCode from `build_number`',
+    )
     ..expect(
       'application id is $_applicationId',
       condition: package == _applicationId,

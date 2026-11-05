@@ -45,6 +45,7 @@ pipeline is structurally different from AOT platforms.
 """
 
 load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
+load("//flutter/private:app_version.bzl", "version_arg")
 load("//flutter/private:flutter_web_application.bzl", _flutter_web_bundle_rule = "flutter_web_bundle")
 load("//flutter/private:flutter_web_branch.bzl", "flutter_web_branch", "web_branches_target")
 
@@ -150,6 +151,8 @@ def flutter_web_app(
         static_assets_url = "/",
         web_sdk = None,
         web_dir = "web",
+        build_name = None,
+        build_number = None,
         **kwargs):
     """Builds a Flutter web application, auto-discovering runner files.
 
@@ -164,7 +167,9 @@ def flutter_web_app(
         web/index.html            the page (built-in default if absent)
         web/flutter_bootstrap.js  the loader script (built-in default if absent)
         web/manifest.json         (built-in default if absent)
-        web/version.json          (generated from the app attrs if absent)
+        web/version.json          (generated from `build_name` and
+                                  `build_number` if absent; setting either
+                                  with the file present is an error)
 
     Everything else under `web/` is copied into the bundle root verbatim.
 
@@ -213,6 +218,12 @@ def flutter_web_app(
             whose contents are served at the bundle root (default "web").
             An `index_html`, `bootstrap_js`, `manifest_json` or `version_json`
             passed explicitly wins over the discovered file.
+        build_name: The `version` of the generated version.json, as
+            `flutter build web --build-name`, which `package_info_plus`
+            reports. Defaults to `1.0.0`. May be a `select()`.
+        build_number: The `build_number` of the generated version.json, as
+            `flutter build web --build-number`. Defaults to `1`. May be a
+            `select()`.
         **kwargs: Additional arguments forwarded to flutter_web_bundle
             (e.g. assets, shaders, defines, pwa, web_defines,
             keep_placeholders, tags, visibility).
@@ -292,6 +303,8 @@ def flutter_web_app(
         static_assets_url = static_assets_url,
         web_assets = web_assets,
         web_dir = web_dir,
+        build_name = version_arg(build_name),
+        build_number = version_arg(build_number),
         web_sdk = web_sdk,
         pwa = pwa,
         tags = tags,

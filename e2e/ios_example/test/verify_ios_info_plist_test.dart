@@ -14,6 +14,10 @@
 /// different values, so the VM service keys are merged into the app's own
 /// plist — the app's values win and the Bonjour service lists are unioned —
 /// rather than passed beside it. This test asserts that on the real artifact.
+///
+/// It also checks the version keys come from the app's `build_name` and
+/// `build_number`, the build name padded to three numbers as `flutter build`
+/// pads it.
 library;
 
 import 'dart:io';
@@ -42,6 +46,7 @@ void main() {
     if (check.ok) {
       // The bundled plist is in Apple's binary format; plutil renders it.
       final plist = Plist.readXml(bundle.infoPlist);
+      final values = Plist.read(bundle.infoPlist);
 
       check
         ..expect(
@@ -62,6 +67,14 @@ void main() {
           "rules_flutter's VM-service description did not overwrite the "
           "app's",
           condition: !plist.contains('Allow Flutter tools to find and connect'),
+        )
+        ..expect(
+          'CFBundleShortVersionString is 2.3.0, from build_name "2.3"',
+          condition: values['CFBundleShortVersionString'] == '2.3.0',
+        )
+        ..expect(
+          'CFBundleVersion is 42, from build_number',
+          condition: values['CFBundleVersion'] == '42',
         );
       if (!check.ok) {
         stderr

@@ -60,12 +60,13 @@ load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
 load("@rules_apple//apple:apple.bzl", "apple_dynamic_framework_import", "apple_dynamic_xcframework_import")
 load("@rules_apple//apple:ios.bzl", "ios_application")
-load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
 load("@rules_swift//swift:swift.bzl", "swift_library")
+load("//flutter/private:app_version.bzl", "version_arg", "version_target_conflict")
 load("//flutter/private:apple_app.bzl", "flutter_apple_app")
 load("//flutter/private:apple_engine.bzl", _IOS_ENGINE_XCFRAMEWORK = "IOS_ENGINE_XCFRAMEWORK")
 load("//flutter/private:constants.bzl", _IOS_MINIMUM_OS_VERSION = "IOS_MINIMUM_OS_VERSION")
 load("//flutter/private:debug_build.bzl", _debug_build = "debug_build")
+load("//flutter/private:flutter_apple_bundle_version.bzl", _flutter_apple_bundle_version = "flutter_apple_bundle_version")
 load("//flutter/private:flutter_apple_plugin_library.bzl", _flutter_apple_plugin_library_macro = "flutter_apple_plugin_library")
 load("//flutter/private:flutter_apple_plugins_aggregator.bzl", _flutter_apple_plugins_aggregator = "flutter_apple_plugins_aggregator")
 load("//flutter/private:flutter_ios_application.bzl", _flutter_ios_application = "flutter_ios_application", _flutter_ios_framework_rule = "flutter_ios_framework", _flutter_ios_native_frameworks_rule = "flutter_ios_native_frameworks", _flutter_ios_privacy_manifests_rule = "flutter_ios_privacy_manifests")
@@ -86,6 +87,11 @@ IOS_DEFAULT_MAIN_STORYBOARD = "@rules_flutter//flutter/private/runners/ios:Base.
 # Wired into flutter_ios_app as `additional_entitlements`; exposed for Tier 2
 # users assembling an ios_application themselves.
 flutter_entitlements_merge = _flutter_entitlements_merge
+
+# An Apple bundle's version from Flutter's build name and build number:
+# what flutter_ios_app's `build_name` and `build_number` declare. Exposed to
+# give an app extension the version of its app.
+flutter_apple_bundle_version = _flutter_apple_bundle_version
 
 # The Dart VM service's Info.plist keys, merged into non-release builds so
 # the engine can advertise the service over mDNS. Matches flutter_tools'
@@ -314,6 +320,8 @@ def flutter_ios_app(
         minimum_os_version = IOS_MINIMUM_OS_VERSION,
         info_plist = None,
         version = None,
+        build_name = None,
+        build_number = None,
         launch_storyboard = None,
         entitlements = None,
         additional_entitlements = [],
@@ -372,7 +380,17 @@ def flutter_ios_app(
             `UISceneDelegateClassName` out as `Runner.SceneDelegate` will not
             find the scene delegate. Keep the `$(PRODUCT_MODULE_NAME)`
             variable, or write `<name>.SceneDelegate`.
-        version: An apple_bundle_version target. Defaults to "1.0".
+        version: An `apple_bundle_version` (or `flutter_apple_bundle_version`)
+            target, rules_apple's own way to set the version, for example
+            from `--embed_label`. Setting it with `build_name` or
+            `build_number` is an error.
+        build_name: CFBundleShortVersionString, as `flutter build
+            --build-name`: numbers separated by periods, padded to three
+            as `flutter build` pads them (`2.1` is `2.1.0`). Defaults to
+            `1.0.0`. May be a `select()`, whose `None` is the default.
+        build_number: CFBundleVersion, as `flutter build --build-number`:
+            numbers separated by periods. Defaults to `1`. May be a
+            `select()`.
         launch_storyboard: Override launch storyboard. Defaults to
             ios/Runner/Base.lproj/LaunchScreen.storyboard.
         entitlements: Override entitlements wiring. By default the macro
@@ -444,6 +462,14 @@ def flutter_ios_app(
     """
     display_name = app_name or name
     tags = kwargs.pop("tags", ["manual"])
+    conflict = version_target_conflict(
+        "flutter_ios_app(name = %r)" % name,
+        version,
+        build_name,
+        build_number,
+    )
+    if conflict:
+        fail(conflict)
     validate_minimum_os_version(
         "flutter_ios_app",
         name,
@@ -624,8 +650,8 @@ def flutter_ios_app(
                 # flutter create SceneDelegate carries no @objc, so its
                 # runtime name is module-qualified and must track module_name.
                 "$(PRODUCT_MODULE_NAME)": module_name,
-                "$(FLUTTER_BUILD_NAME)": "1.0",
-                "$(FLUTTER_BUILD_NUMBER)": "1",
+                # $(FLUTTER_BUILD_NAME) and $(FLUTTER_BUILD_NUMBER) stay:
+                # rules_apple replaces both keys with `version`'s values.
             },
             tags = tags,
             testonly = testonly,
@@ -634,12 +660,13 @@ def flutter_ios_app(
     else:
         actual_info_plist = info_plist
 
-    # 9. Version — create default apple_bundle_version if not provided.
+    # 9. Version, from `build_name` and `build_number` unless the app names
+    #    its own.
     if not version:
-        apple_bundle_version(
+        _flutter_apple_bundle_version(
             name = "__%s_version" % name,
-            build_version = "1.0",
-            short_version_string = "1.0",
+            build_name = version_arg(build_name),
+            build_number = version_arg(build_number),
             tags = tags,
             testonly = testonly,
         )

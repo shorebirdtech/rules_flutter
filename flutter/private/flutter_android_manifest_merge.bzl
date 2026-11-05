@@ -22,6 +22,12 @@ against it, as AGP's manifest merger does, so they do not resolve against the
 application id instead: one `flutter create` runner can then ship under any
 application id.
 
+Given `set_version`, it writes the app's version onto the root
+`<manifest>` as `android:versionCode` and `android:versionName`, from
+`build_number` and `build_name`, the attributes Gradle writes from
+`flutter.versionCode` and `flutter.versionName`. Done here rather than through
+`android_binary`'s `manifest_values` so that the values may be a `select()`.
+
 Each runs the rules_flutter merger tool
 (`merge_android_manifests.dart`) over a base manifest and an overlay.
 
@@ -32,6 +38,7 @@ silently mis-merge a variant manifest it does not fully understand.
 
 load("@rules_android//providers:providers.bzl", "StarlarkAndroidResourcesInfo")
 load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
+load("//flutter/private:app_version.bzl", "android_version")
 load("//flutter/private:exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
 
 _TOOL = Label("//flutter/private/tools:merge_android_manifests.dart")
@@ -69,6 +76,21 @@ def _flutter_android_manifest_merge_impl(ctx):
     args.add_all(ctx.attr.placeholders, before_each = "--placeholder")
     if ctx.attr.namespace:
         args.add("--namespace", ctx.attr.namespace)
+    if ctx.attr.set_version:
+        version = android_version(ctx.attr.build_name, ctx.attr.build_number)
+        if version.error:
+            fail("%s: %s" % (ctx.label, version.error))
+
+        # A value the app gives conflicts with one the manifest declares; a
+        # default gives way to it.
+        args.add(
+            "--version-code" if ctx.attr.build_number else "--default-version-code",
+            version.version_code,
+        )
+        args.add(
+            "--version-name" if ctx.attr.build_name else "--default-version-name",
+            version.version_name,
+        )
     args.add("--output", output)
 
     ctx.actions.run(
@@ -119,11 +141,25 @@ flutter_android_manifest_merge = rule(
                   "against it, rather than left to resolve against the " +
                   "application id. Empty leaves them as they are.",
         ),
+        "set_version": attr.bool(
+            doc = "Write `android:versionCode` and `android:versionName` " +
+                  "onto the root `<manifest>` from `build_number` and " +
+                  "`build_name`.",
+        ),
+        "build_name": attr.string(
+            doc = "versionName, as `flutter build --build-name`. Empty is " +
+                  "`1.0.0`, which a versionName the base declares replaces.",
+        ),
+        "build_number": attr.string(
+            doc = "versionCode, as `flutter build --build-number`: a whole " +
+                  "number from 1 to 2100000000. Empty is `1`, which a " +
+                  "versionCode the base declares replaces.",
+        ),
         "_merge_tool": attr.label(
             default = _TOOL,
             allow_single_file = True,
         ),
     },
     exec_groups = PORTABLE_EXEC_GROUPS,
-    doc = "Merges an overlay manifest's permissions, and those of the app's Android libraries, into a base manifest, and qualifies its relative class names against a namespace.",
+    doc = "Merges an overlay manifest's permissions, and those of the app's Android libraries, into a base manifest, qualifies its relative class names against a namespace, and sets the app's version.",
 )

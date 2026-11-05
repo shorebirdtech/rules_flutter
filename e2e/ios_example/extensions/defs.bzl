@@ -27,7 +27,7 @@ def example_ios_extension(name, **kwargs):
             families = ["iphone"],
             minimum_os_version = IOS_MINIMUM_OS_VERSION,
             # rules_apple's default is no version at all, and an extension's
-            # version must match the app's: 1.0, flutter_ios_app's default.
+            # version must match the app's, so the app takes this one too.
             version = "//:app_version",
             visibility = ["//:__pkg__"],
             tags = ["manual"],

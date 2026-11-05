@@ -460,4 +460,111 @@ void main() {
       expect(out, contains('package="com.example.app.second"'));
     });
   });
+
+  group('version', () {
+    String withVersion(
+      String base, {
+      VersionAttribute? code,
+      VersionAttribute? name,
+    }) => mergeManifests(
+      baseXml: base,
+      basePath: 'out/base/AndroidManifest.xml',
+      versionCode: code,
+      versionName: name,
+    );
+
+    test('sets both attributes on the root manifest', () {
+      final out = withVersion(
+        _base,
+        code: (value: '42', isDefault: false),
+        name: (value: '2.1.0', isDefault: false),
+      );
+      expect(
+        out,
+        contains(
+          '<manifest xmlns:android="http://schemas.android.com/apk/res/android"'
+          ' android:versionCode="42" android:versionName="2.1.0">',
+        ),
+      );
+      // Nothing else of the base changes.
+      expect(
+        out.replaceFirst(
+          ' android:versionCode="42" android:versionName="2.1.0"',
+          '',
+        ),
+        _base,
+      );
+    });
+
+    test('sets defaults on a base that declares no version', () {
+      final out = withVersion(
+        _base,
+        code: (value: '1', isDefault: true),
+        name: (value: '1.0.0', isDefault: true),
+      );
+      expect(out, contains('android:versionCode="1"'));
+      expect(out, contains('android:versionName="1.0.0"'));
+    });
+
+    test('escapes the version name', () {
+      final out = withVersion(
+        _base,
+        name: (value: '1.0 "beta" <&>', isDefault: false),
+      );
+      expect(
+        out,
+        contains('android:versionName="1.0 &quot;beta&quot; &lt;&amp;&gt;"'),
+      );
+    });
+
+    const declaring = '''
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    android:versionCode="7"
+    android:versionName="3.0">
+    <application android:label="example"/>
+</manifest>
+''';
+
+    test("keeps the base's own version over a default", () {
+      final out = withVersion(
+        declaring,
+        code: (value: '1', isDefault: true),
+        name: (value: '1.0.0', isDefault: true),
+      );
+      expect(out, declaring);
+    });
+
+    test('refuses a version the base declares too', () {
+      expect(
+        () => withVersion(
+          declaring,
+          code: (value: '8', isDefault: false),
+          name: (value: '1.0.0', isDefault: true),
+        ),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            allOf(
+              contains('android:versionCode="7"'),
+              contains('`build_number` sets it to "8"'),
+            ),
+          ),
+        ),
+      );
+      expect(
+        () => withVersion(
+          declaring,
+          name: (value: '4.0', isDefault: false),
+        ),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            contains('`build_name`'),
+          ),
+        ),
+      );
+    });
+  });
 }

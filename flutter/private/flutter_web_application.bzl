@@ -45,6 +45,7 @@ load(
     "resolve_wrapper_main_import",
     "with_root",
 )
+load("//flutter/private:app_version.bzl", "web_version")
 load(
     "//flutter/private:common.bzl",
     "AGENT_EXTENSIONS_ATTR",
@@ -239,14 +240,6 @@ _MANIFEST_JSON_TEMPLATE = """\
 # fetches it to populate `appName`, `version`, `buildNumber`, and
 # `packageName`. Without it, those fields come back empty even when the
 # plugin registrant fired correctly.
-_VERSION_JSON_TEMPLATE = """\
-{{
-    "app_name": "{app_name}",
-    "version": "{version}",
-    "build_number": "{build_number}",
-    "package_name": "{package_name}"
-}}
-"""
 
 # Bundle destinations the rule generates itself, and what a user who wants to
 # supply their own should do instead.
@@ -755,16 +748,24 @@ def _flutter_web_bundle_impl(ctx):
 
     # Use user-provided version.json or generate from attrs.
     if ctx.file.version_json:
+        given = [a for a in ["build_name", "build_number"] if getattr(ctx.attr, a)]
+        if given:
+            fail((
+                "%s has two versions: the version.json in `version_json` (%s) " +
+                "and `%s`. Set the version in one of them; `flutter_web_app` " +
+                "uses `<web_dir>/version.json` as `version_json` when it exists."
+            ) % (ctx.label, ctx.file.version_json.short_path, "` and `".join(given)))
         version_json = ctx.file.version_json
     else:
         app_name = ctx.attr.package_name or ctx.label.name
+        version = web_version(ctx.attr.build_name, ctx.attr.build_number)
         version_json = ctx.actions.declare_file(ctx.label.name + "_version.json")
-        ctx.actions.write(version_json, _VERSION_JSON_TEMPLATE.format(
-            app_name = app_name,
-            version = ctx.attr.app_version or "1.0.0",
-            build_number = ctx.attr.app_build_number or "1",
-            package_name = app_name,
-        ))
+        ctx.actions.write(version_json, json.encode({
+            "app_name": app_name,
+            "version": version.version,
+            "build_number": version.build_number,
+            "package_name": app_name,
+        }))
 
     # Step 5: Generate service worker (if enabled).
     #
@@ -1683,16 +1684,19 @@ build knows which served file is a native module.
         ),
         "version_json": attr.label(
             doc = "User-provided version.json file. If not set, a version.json is generated from " +
-                  "the package_name + app_version + app_build_number attrs. The web `package_info_plus` " +
+                  "the package_name + build_name + build_number attrs; setting either with this is an " +
+                  "error. The web `package_info_plus` " +
                   "plugin (and similar PackageInfo-style web plugins) reads this file to populate " +
                   "appName/version/buildNumber/packageName at runtime.",
             allow_single_file = [".json"],
         ),
-        "app_version": attr.string(
-            doc = "App version string written to the generated version.json. Defaults to '1.0.0'.",
+        "build_name": attr.string(
+            doc = "The `version` of the generated version.json, as `flutter build web --build-name`. " +
+                  "Empty is '1.0.0'.",
         ),
-        "app_build_number": attr.string(
-            doc = "Build number written to the generated version.json. Defaults to '1'.",
+        "build_number": attr.string(
+            doc = "The `build_number` of the generated version.json, as `flutter build web " +
+                  "--build-number`. Empty is '1'.",
         ),
         "pwa": attr.bool(
             doc = "If True (default), ship flutter_service_worker.js and register it " +

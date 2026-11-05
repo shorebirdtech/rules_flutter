@@ -1,5 +1,4 @@
 load("@rules_apple//apple:ios.bzl", "ios_application")
-load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
 load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_test")
 load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_library")
 load(
@@ -7,6 +6,7 @@ load(
     "IOS_DEFAULT_LAUNCH_STORYBOARD",
     "IOS_DEFAULT_MAIN_STORYBOARD",
     "IOS_MINIMUM_OS_VERSION",
+    "flutter_apple_bundle_version",
     "flutter_ios_app",
     "flutter_ios_engine",
     "flutter_ios_framework_gen",
@@ -67,11 +67,9 @@ flutter_ios_native_frameworks_gen(
     application = ":app_flutter",
 )
 
-# Shared version for approaches 2 & 3.
-apple_bundle_version(
+# Shared version for approaches 2 & 3 and the app with extensions.
+flutter_apple_bundle_version(
     name = "app_version",
-    build_version = "1.0",
-    short_version_string = "1.0",
     tags = ["manual"],
     visibility = ["//extensions:__pkg__"],
 )
@@ -87,6 +85,10 @@ apple_bundle_version(
 flutter_ios_app(
     name = "app",
     application = ":app_flutter",
+    # Not the default, so :verify_ios_info_plist_test can see it arrive. Two
+    # numbers, which become three as `flutter build` pads them: 2.3.0.
+    build_name = "2.3",
+    build_number = "42",
     bundle_id = "com.rulesflutter.ios.example",
 )
 
@@ -197,6 +199,8 @@ flutter_ios_app(
         "//extensions:share",
         "//extensions:widgets",
     ],
+    # The extensions' version: an extension's must match its app's.
+    version = ":app_version",
 )
 
 # The same app for a device, signed with //device's team wildcard profile. A
@@ -211,6 +215,7 @@ flutter_ios_app(
         "//extensions:widgets_device",
     ],
     provisioning_profile = ":device_profile",
+    version = ":app_version",
 )
 
 # =============================================================================

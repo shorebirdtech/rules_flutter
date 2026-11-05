@@ -411,6 +411,35 @@ Every platform has two levels of API:
 
 The macros take `flutter create` output as it is. You do not need to edit the generated `Runner` folders.
 
+### App version
+
+The Android, iOS, macOS and web app macros take `build_name` and `build_number`, Flutter's names for the version that `flutter build --build-name 2.3.4 --build-number 42` sets, and that a `pubspec.yaml` writes as `version: 2.3.4+42`. Unset, they are `flutter create`'s `1.0.0` and `1`. Each platform puts them where its own build does:
+
+| Platform | `build_name` | `build_number` |
+|---|---|---|
+| Android | `versionName` | `versionCode`: a whole number from 1 to 2100000000 |
+| iOS, macOS | `CFBundleShortVersionString`: numbers separated by periods, padded to three as `flutter build` pads them (`2.3` is `2.3.0`) | `CFBundleVersion`: numbers separated by periods |
+| Web | `version` in `version.json` | `build_number` in `version.json` |
+
+Linux apps carry no version. A value the platform cannot use fails the build and says what it accepts, where `flutter build` would quietly change it (`0` to `1` on Android, `1.0-beta` to `1.0.0` on iOS).
+
+Each platform's own way of setting the version still works: `version` (an `apple_bundle_version`) on iOS and macOS, `manifest_values` or an `android:versionCode` in your own manifest on Android, `version_json` (or `web/version.json`) on web. Setting a field both ways is an error, rather than one value silently winning.
+
+rules_flutter has no flag for a release version. Give the arguments a `select()` over a flag of your own, whose `None` keeps the default:
+
+```starlark
+flutter_android_app(
+    name = "my_app_android",
+    ...
+    build_number = select({
+        ":release": "42",
+        "//conditions:default": None,
+    }),
+)
+```
+
+On iOS and macOS, rules_apple's `apple_bundle_version` can instead read the version from `bazel build --embed_label=...`; pass it as `version`.
+
 ### macOS
 
 Requires Xcode. Run `flutter create --platforms=macos .` first so `macos/Runner/` exists.
@@ -433,7 +462,9 @@ flutter_macos_app(
 | `app_name` | Display name for the menu bar and window title. Defaults to the target name. |
 | `minimum_os_version` | Defaults to `"12.0"`, which is what the prebuilt engine is built for. A lower value is refused rather than warned about. |
 | `info_plist` | Replaces the discovered `macos/Runner/Info.plist`. |
-| `version` | An `apple_bundle_version` target. Defaults to `"1.0"`. |
+| `build_name` | `CFBundleShortVersionString`. Defaults to `"1.0.0"`. See [App version](#app-version). |
+| `build_number` | `CFBundleVersion`. Defaults to `"1"`. |
+| `version` | An `apple_bundle_version` or `flutter_apple_bundle_version` target, in place of `build_name` and `build_number`. |
 | `entitlements` | Replaces the entitlements wiring. By default the macro finds `macos/Runner/DebugProfile.entitlements` and `Release.entitlements` and picks one by compilation mode. |
 | `additional_entitlements` | Entitlement plist files merged into the selected base in every compilation mode. See [Release builds and permissions](#release-builds-and-permissions). |
 | `app_icons` | Defaults to the `AppIcon.appiconset` in `macos/Runner/Assets.xcassets`. See [App icons](#app-icons). |
@@ -514,7 +545,9 @@ flutter_ios_app(
 | `app_name` | Display name. Defaults to the target name. |
 | `minimum_os_version` | Defaults to `"15.0"`, which is what the prebuilt engine is built for. A lower value is refused rather than warned about. |
 | `info_plist` | Replaces the discovered `ios/Runner/Info.plist`. |
-| `version` | An `apple_bundle_version` target. Defaults to `"1.0"`. |
+| `build_name` | `CFBundleShortVersionString`. Defaults to `"1.0.0"`. See [App version](#app-version). |
+| `build_number` | `CFBundleVersion`. Defaults to `"1"`. |
+| `version` | An `apple_bundle_version` or `flutter_apple_bundle_version` target, in place of `build_name` and `build_number`. |
 | `launch_storyboard` | Replaces the launch storyboard. |
 | `entitlements` | Replaces the entitlements wiring. By default the macro uses `ios/Runner/Runner.entitlements` if it exists. An app with no entitlements file is fine. |
 | `additional_entitlements` | Entitlement plist files merged into the base in every compilation mode. Works even when the app has no entitlements file. See [Release builds and permissions](#release-builds-and-permissions). |
@@ -712,13 +745,14 @@ Widgets, Control Center controls, share extensions and other app extensions are 
 
 ```starlark
 load("@rules_apple//apple:ios.bzl", "ios_extension")
-load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
+load("@rules_flutter//flutter:ios.bzl", "flutter_apple_bundle_version", "flutter_ios_app")
 load("@rules_swift//swift:swift.bzl", "swift_library")
 
-apple_bundle_version(
+# The version of the app and its extension.
+flutter_apple_bundle_version(
     name = "version",
-    build_version = "1.0",
-    short_version_string = "1.0",
+    build_name = "2.3.4",
+    build_number = "42",
 )
 
 swift_library(
@@ -746,12 +780,13 @@ flutter_ios_app(
     application = ":my_app",
     bundle_id = "com.example.myapp",
     extensions = [":widgets"],
+    version = ":version",
 )
 ```
 
 What the extension needs:
 
-- **A version equal to the app's.** rules_apple gives an extension no version unless you pass one, and the system expects an extension's version to match its app's. `flutter_ios_app` and `flutter_macos_app` default to 1.0, so pass an `apple_bundle_version` of 1.0, or the same one you give the app.
+- **A version equal to the app's.** rules_apple gives an extension no version unless you pass one, and the system expects an extension's version to match its app's. Declare the version once, with `flutter_apple_bundle_version` (from `flutter:ios.bzl` or `flutter:macos.bzl`, taking `build_name` and `build_number`) or rules_apple's `apple_bundle_version`, and pass it as the `version` of the app and of each extension.
 - **A bundle id under the app's**, such as `com.example.myapp.widgets`.
 - **An Info.plist with the bundle keys.** Besides `NSExtension` and its `NSExtensionPointIdentifier`, give `CFBundleName` (`$(PRODUCT_NAME)`), `CFBundleExecutable` (`$(EXECUTABLE_NAME)`), `CFBundleIdentifier` (`$(PRODUCT_BUNDLE_IDENTIFIER)`) and `CFBundlePackageType` `XPC!`. Without them the simulator refuses to install the app.
 - **Its App Intents.** A control's button, an interactive widget or a configurable widget runs an App Intent in the extension, so give the library to the extension's `app_intents` as well as its `deps`. rules_apple 5.2.0's `macos_extension` has no `app_intents` attribute. `e2e/macos_example/patches/` has a patch that adds it; apply it with `single_version_override(module_name = "rules_apple", version = "5.2.0", patch_strip = 1, patches = [...])`. Overrides only apply in the root module, so an app needs the override in its own `MODULE.bazel`; it does not come with rules_flutter.
@@ -908,6 +943,9 @@ To build an app for fixed ABIs whatever the command line says, wrap it in [`flut
 | `app_name` | Display name. Defaults to the target name. |
 | `min_sdk_version` | Minimum Android SDK version. |
 | `target_sdk_version` | Target Android SDK version. |
+| `build_name` | `versionName`. Defaults to `"1.0.0"`. See [App version](#app-version). |
+| `build_number` | `versionCode`. Defaults to `"1"`. |
+| `manifest_values` | Values for `${...}` placeholders in the manifest, as `android_binary` takes them. `applicationId`, `minSdkVersion` and `targetSdkVersion` come from the attributes above and cannot be set here; `versionCode` and `versionName` only while `build_number` and `build_name` are unset. |
 | `manifest` | A manifest you wrote yourself, used verbatim. Placeholders like `${applicationName}` are not substituted, so do not pass `flutter create`'s own manifest here; let the macro discover that one. |
 | `debug_manifest` | A variant manifest whose permissions merge into `-c dbg` builds only. `None` (default) discovers `android/app/src/debug/AndroidManifest.xml`. A label overrides discovery. `False` disables variant handling. |
 | `profile_manifest` | The same for profile builds. `None` (default) discovers `android/app/src/profile/AndroidManifest.xml`. |
@@ -1119,6 +1157,8 @@ Unlike the other platforms, the web macro takes `main` and `deps` directly rathe
 | `deps` | `dart_library` or `flutter_library` targets. Required. |
 | `main` | The entry point. Defaults to `"lib/main.dart"`. It can sit outside the package's `lib/`; list any file it imports by relative path in `srcs`. |
 | `app_name` | Used for the HTML title and manifest. Defaults to the target name. |
+| `build_name` | `version` in the bundle's `version.json`, which the web `package_info_plus` reads. Defaults to `"1.0.0"`. See [App version](#app-version). |
+| `build_number` | `build_number` in `version.json`. Defaults to `"1"`. |
 | `base_href` | Substituted for `$FLUTTER_BASE_HREF` in `web/index.html`. Defaults to `"/"`. `flutter_bazel run -d chrome` serves the app under it, as `flutter run` does. |
 | `extra_web_assets` | Extra files copied into the bundle root, for generated files the `web/` glob cannot see. |
 | `web_dir` | The directory the runner files are discovered in and served from at the bundle root. Defaults to `"web"`. Give each app its own, such as `"web_apps/reminders"`, to build several web apps from one package. `flutter_web_bundle` takes it too. |

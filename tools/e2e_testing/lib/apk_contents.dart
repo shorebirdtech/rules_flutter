@@ -218,9 +218,12 @@ Map<String, Map<String, Object?>> dexStaticConstants(Uint8List bytes) {
 const _chunkStringPool = 0x0001;
 const _chunkXmlStartElement = 0x0102;
 const _typeString = 0x03;
+const _typeIntDec = 0x10;
+const _typeIntHex = 0x11;
 
 /// Every element of a compiled [manifest], in document order, with its
-/// string-valued attributes keyed by local name (`name`, not `android:name`).
+/// string- and integer-valued attributes keyed by local name (`name`, not
+/// `android:name`). An integer, such as `versionCode`, is in decimal.
 List<ManifestElement> manifestElements(Uint8List manifest) {
   final data = ByteData.sublistView(manifest);
   if (manifest.length < 8) {
@@ -308,6 +311,8 @@ ManifestElement _readStartElement(
       attributes[attrName] = stringAt(rawValue);
     } else if (dataType == _typeString) {
       attributes[attrName] = stringAt(typedData);
+    } else if (dataType == _typeIntDec || dataType == _typeIntHex) {
+      attributes[attrName] = typedData.toSigned(32).toString();
     }
   }
 

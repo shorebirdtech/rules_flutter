@@ -61,7 +61,10 @@ void main() {
     bundle
       ..checkInfoPlistValue('NSMainNibFile', 'MainMenu')
       ..checkInfoPlistValue('CFBundleExecutable', 'Flutter App')
-      ..checkInfoPlistValue('CFBundleName', 'Flutter App');
+      ..checkInfoPlistValue('CFBundleName', 'Flutter App')
+      // From the app's `build_name` and `build_number`.
+      ..checkInfoPlistValue('CFBundleShortVersionString', '2.3.4')
+      ..checkInfoPlistValue('CFBundleVersion', '42');
 
     check.command('MainMenu.nib references AppDelegate class', 'strings', [
       '${bundle.contents}/Resources/Base.lproj/MainMenu.nib',
