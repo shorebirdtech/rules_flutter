@@ -243,29 +243,20 @@ jobs:
       # an entry that has gone stale, which a build never reads. A runner has no
       # `.bazelrc.user` to switch the check off. See docs/TESTING.md, "Lock
       # files".
+      # On Windows this and the step below run in the short output base the
+      # setup step names, so both use one Bazel server. Without it, nested
+      # runfiles (e.g. the hermetic Python interpreter's _socket.pyd used by
+      # rules_android's aar_embedded_jars_extractor) exceed the 260-char
+      # MAX_PATH limit and fail to load with "DLL load failed ... The filename
+      # or extension is too long".
       - name: bazel mod deps (e2e/${{ matrix.workspace }})
-        if: runner.os != 'Windows'
         working-directory: e2e/${{ matrix.workspace }}
         run: bazel mod deps --lockfile_mode=error
       # --test_output=errors so a failure's assertion reaches this log. Without
       # it the output stays in a test.log on the runner and is discarded with
       # the machine. `build` takes no test flags: the workspaces that run it
-      # have no test targets (see tools/ci_matrix/e2e_matrix.dart).
-      - name: bazel ${{ matrix.command }} //... (e2e/${{ matrix.workspace }})
-        if: runner.os != 'Windows'
+      # have no test targets (see tools/ci_matrix/e2e_matrix.dart). The targets
+      # are `//...` unless the table names others for the system.
+      - name: bazel ${{ matrix.command }} ${{ matrix.targets }} (e2e/${{ matrix.workspace }})
         working-directory: e2e/${{ matrix.workspace }}
-        run: bazel ${{ matrix.command }} //... ${{ matrix.command == 'test' && '--test_output=errors' || '' }}
-      # On Windows the same lock check runs, then the tests, in the short output
-      # base the setup step names, so both use one Bazel server. Without it,
-      # nested runfiles (e.g. the hermetic Python interpreter's _socket.pyd
-      # used by rules_android's aar_embedded_jars_extractor) exceed the 260-char
-      # MAX_PATH limit and fail to load with "DLL load failed ... The filename or
-      # extension is too long".
-      - name: bazel mod deps (e2e/${{ matrix.workspace }})
-        if: runner.os == 'Windows'
-        working-directory: e2e/${{ matrix.workspace }}
-        run: bazel mod deps --lockfile_mode=error
-      - name: bazel test //... (e2e/${{ matrix.workspace }})
-        if: runner.os == 'Windows'
-        working-directory: e2e/${{ matrix.workspace }}
-        run: bazel test //... --test_output=errors
+        run: bazel ${{ matrix.command }} ${{ matrix.targets }} ${{ matrix.command == 'test' && '--test_output=errors' || '' }}

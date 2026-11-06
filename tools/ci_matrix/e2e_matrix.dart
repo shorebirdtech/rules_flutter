@@ -35,6 +35,8 @@ class E2eWorkspace {
     this.runs = const {},
     this.skips = const {},
     this.command = 'test',
+    this.commands = const {},
+    this.targets = const {},
   });
 
   /// The directory under `e2e/`, with `/` separators.
@@ -51,6 +53,22 @@ class E2eWorkspace {
   /// The Bazel command run in the workspace: `test`, or `build` where a
   /// workspace has no test targets (`bazel test` exits 4 for those).
   final String command;
+
+  /// The systems that run another Bazel command than [command]: a workspace
+  /// that only builds on most systems can test on one.
+  final Map<Os, String> commands;
+
+  /// The target patterns each system runs the command on, where they are not
+  /// `//...`: a workspace whose `//...` holds tests that need hardware or a
+  /// desktop session names the ones a runner can run. Explicit labels, which
+  /// [targetProblems] holds to the workspace's BUILD file.
+  final Map<Os, List<String>> targets;
+
+  /// The Bazel command CI runs in the workspace on [os].
+  String commandOn(Os os) => commands[os] ?? command;
+
+  /// The target patterns CI runs [commandOn] on in the workspace on [os].
+  List<String> targetsOn(Os os) => targets[os] ?? const ['//...'];
 }
 
 const _appleOnly =
@@ -258,8 +276,8 @@ const e2eWorkspaces = <E2eWorkspace>[
   ),
   // Most of its tests launch the app in a window, which needs a desktop
   // session that CI never runs a test in, or on a device (docs/TESTING.md,
-  // "What CI covers"): CI builds it, and the tests run by hand. web_example's
-  // `:render_test` runs a web integration test on Linux in CI.
+  // "What CI covers"): CI builds it, and those run by hand. The Linux and web
+  // tests need neither, on the pinned Linux runtime, so Linux runs them.
   E2eWorkspace(
     'integration_test',
     runs: {
@@ -268,14 +286,32 @@ const e2eWorkspaces = <E2eWorkspace>[
           'the application, the macOS, web, Android and iOS app and the test, '
           'for each case',
       Os.linux:
-          'the Linux apps and tests building, with the pinned Linux runtime '
-          'fetched and every file of it, and of the Chrome that loads it, '
-          'checked against the oldest supported host',
+          'the Linux and web integration tests running headless on the pinned '
+          'Linux runtime, which is fetched with every file of it, and of the '
+          'Chrome that loads it, checked against the oldest supported host',
       Os.windows:
           'the Windows and Android apps and tests building, the Android '
           'runner with the SDK\'s `adb.exe`',
     },
     command: 'build',
+    commands: {Os.linux: 'test'},
+    targets: {
+      Os.linux: [
+        '//:linux_pass_test',
+        '//:linux_filter_test',
+        '//:linux_red_twin_test',
+        '//:linux_crash_test',
+        '//:linux_golden_test',
+        '//:linux_golden_mismatch_twin_test',
+        '//:web_licences_test',
+        '//:web_pass_test',
+        '//:web_filter_test',
+        '//:web_red_twin_test',
+        '//:web_golden_test',
+        '//:web_golden_mid_frame_test',
+        '//:web_golden_mismatch_twin_test',
+      ],
+    },
   ),
   E2eWorkspace(
     'ios_example',
@@ -438,6 +474,47 @@ List<Map<String, String>> matrixInclude(List<E2eWorkspace> table) => [
         {
           'workspace': workspace.name,
           'os': os.runner,
-          'command': workspace.command,
+          'command': workspace.commandOn(os),
+          'targets': workspace.targetsOn(os).join(' '),
         },
 ];
+
+/// What is wrong with the explicit target patterns of [table]: a `//:name` that
+/// names no target in its workspace's BUILD file. [buildFile] returns the text
+/// of `e2e/<workspace>/BUILD.bazel`.
+List<String> targetProblems(
+  List<E2eWorkspace> table,
+  String Function(String workspace) buildFile,
+) {
+  final problems = <String>[];
+  for (final workspace in table) {
+    for (final MapEntry(key: os, value: patterns)
+        in workspace.targets.entries) {
+      for (final pattern in patterns) {
+        final name = RegExp(r'^//:([\w.-]+)$').firstMatch(pattern)?.group(1);
+        if (name == null) {
+          if (pattern != '//...') {
+            problems.add(
+              '${workspace.name} on ${os.name}: $pattern is not `//...` or a '
+              '`//:target` of the workspace root package',
+            );
+          }
+          continue;
+        }
+        if (!RegExp('name\\s*=\\s*"${RegExp.escape(name)}"')
+            .hasMatch(buildFile(workspace.name))) {
+          problems.add(
+            '${workspace.name} on ${os.name}: $pattern is in no target of '
+            'e2e/${workspace.name}/BUILD.bazel',
+          );
+        }
+      }
+    }
+    for (final os in workspace.targets.keys) {
+      if (workspace.targets[os]!.isEmpty) {
+        problems.add('${workspace.name} on ${os.name} has no target patterns');
+      }
+    }
+  }
+  return problems..sort();
+}

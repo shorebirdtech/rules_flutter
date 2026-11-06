@@ -1024,8 +1024,12 @@ fourth thing to do when none applies.
 - `bazel mod deps --lockfile_mode=error` in each e2e workspace before its build,
   which fails on a stale `MODULE.bazel.lock`, see "Lock files" in § 1;
 - the pre-commit hooks, the dev_tool unit tests, and the web smoke test (§ 5);
-- `bazel test //...` in every e2e workspace, on each operating system where it
-  exercises something no other job does.
+- `bazel test //...` in every e2e workspace (`build //...` where it has no test
+  targets, or its tests need a desktop session or a device), on each operating
+  system where it exercises something no other job does. A system can have its
+  own command and target patterns in the table: `integration_test` builds on
+  macOS and Windows, and on Linux tests the `:linux_*` and `:web_*` targets,
+  which need no desktop.
 
 The last is a matrix of one job per workspace and system, named `E2E
 (<workspace>, <runner>)`. It is generated: the `Plan E2E jobs` job runs
@@ -1043,8 +1047,9 @@ there.
 The run fails when the table and `e2e/` disagree, when a run gives no purpose,
 or when one workspace gives two systems the same purpose. So a workspace added
 without a decision (or removed without its entry) turns CI red rather than
-quietly never running. A new workspace needs an entry; `bazel run
-//tools/ci_matrix` finds a gap before a push.
+quietly never running. A target pattern the table names that is in no target of the workspace's BUILD
+file fails it too. A new workspace needs an entry; `bazel run //tools/ci_matrix`
+finds a gap before a push.
 
 | Workspace | Runs on | What each run adds | Not on |
 |---|---|---|---|
@@ -1055,7 +1060,7 @@ quietly never running. A new workspace needs an entry; `bazel run
 | `ffi_example` | macOS, Linux, Windows | native libraries in each platform's bundle | |
 | `cross_compile_example` | macOS (`build`) | the Mac-to-Linux cross toolchain | Linux: a native build is `hello_world`'s; Windows: no such pair |
 | `macos_example`, `ios_example`, `multi_window_example`, `_overlay_tests/native_assets_synthetic` | macOS | Apple-only features | Linux, Windows: Apple-only |
-| `integration_test` | macOS, Linux, Windows (`build`) | the integration test rules building the app and test of each case, the Android and iOS apps included on macOS; on Linux the Linux and web ones, with the pinned Linux runtime fetched and every file of it and of the Chrome that loads it checked against the oldest supported host; on Windows the Windows and Android ones, the Android runner with the SDK's `adb.exe`: most of its tests need a GUI session or a device, which CI never runs a test in | |
+| `integration_test` | macOS, Windows (`build`), Linux (`test` of the `:linux_*` and `:web_*` targets) | the integration test rules building the app and test of each case, the Android and iOS apps included on macOS; on Linux those tests running headless on the pinned Linux runtime, fetched with every file of it and of the Chrome that loads it checked against the oldest supported host; on Windows the Windows and Android ones, the Android runner with the SDK's `adb.exe`: most of its tests need a GUI session or a device, which CI never runs a test in | |
 | `dual_hub`, `ffi_plugin_example`, `web_example`, `android_example`, `_overlay_tests/link_hooks` | Linux | their platform-neutral subject, once, on the cheapest runner; web_example's `:render_test` runs the app in the pinned headless Chrome with the pinned Linux runtime | macOS, Windows: the same again |
 | `android_example` | Windows (also) | an Android build on a Windows host: `gen_snapshot.exe`, engine-strip path separators, rules_android JVMs without an up-front heap commit (the committed patch) | |
 | `asset_bundle` | macOS | the `flutter_assets/` tree of every platform against `flutter build`'s, once | Linux, Windows: no other host can analyse its iOS targets |

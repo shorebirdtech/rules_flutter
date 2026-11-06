@@ -130,9 +130,111 @@ void main() {
           ),
         ]),
         [
-          {'workspace': 'x', 'os': 'macos-latest', 'command': 'build'},
-          {'workspace': 'x', 'os': 'windows-latest', 'command': 'build'},
+          {
+            'workspace': 'x',
+            'os': 'macos-latest',
+            'command': 'build',
+            'targets': '//...',
+          },
+          {
+            'workspace': 'x',
+            'os': 'windows-latest',
+            'command': 'build',
+            'targets': '//...',
+          },
         ],
+      );
+    });
+
+    test('gives a system its own command and target patterns', () {
+      expect(
+        matrixInclude([
+          const E2eWorkspace(
+            'x',
+            runs: {Os.linux: 'a', Os.macos: 'b'},
+            skips: {Os.windows: 'why'},
+            command: 'build',
+            commands: {Os.linux: 'test'},
+            targets: {
+              Os.linux: ['//:one', '//:two'],
+            },
+          ),
+        ]),
+        [
+          {
+            'workspace': 'x',
+            'os': 'macos-latest',
+            'command': 'build',
+            'targets': '//...',
+          },
+          {
+            'workspace': 'x',
+            'os': 'ubuntu-latest',
+            'command': 'test',
+            'targets': '//:one //:two',
+          },
+        ],
+      );
+    });
+  });
+
+  group('targetProblems', () {
+    const build = 'foo(\n    name = "one",\n)\nbar(name="two")\n';
+    String file(String _) => build;
+
+    test('accepts labels the BUILD file defines', () {
+      expect(
+        targetProblems([
+          const E2eWorkspace(
+            'x',
+            targets: {
+              Os.linux: ['//:one', '//:two'],
+            },
+          ),
+        ], file),
+        isEmpty,
+      );
+    });
+
+    test('names a label no target defines', () {
+      expect(
+        targetProblems([
+          const E2eWorkspace(
+            'x',
+            targets: {
+              Os.linux: ['//:one', '//:gone'],
+            },
+          ),
+        ], file),
+        [contains('//:gone is in no target of e2e/x/BUILD.bazel')],
+      );
+    });
+
+    test('does not take a prefix of a name for the name', () {
+      expect(
+        targetProblems([
+          const E2eWorkspace(
+            'x',
+            targets: {
+              Os.linux: ['//:on'],
+            },
+          ),
+        ], file),
+        [contains('//:on is in no target')],
+      );
+    });
+
+    test('rejects a pattern it cannot check', () {
+      expect(
+        targetProblems([
+          const E2eWorkspace(
+            'x',
+            targets: {
+              Os.linux: ['//sub:one'],
+            },
+          ),
+        ], file),
+        [contains('is not `//...` or a `//:target`')],
       );
     });
   });
