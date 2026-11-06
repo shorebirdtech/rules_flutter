@@ -201,8 +201,8 @@ outcome_test(
 # The same app on the Windows desktop of the host. Measured on a GCP VM with a
 # display device, they pass from its console session and from an SSH logon. Run
 # them by hand or on the VM of docs/TESTING.md, "Windows integration tests", by
-# name: `//...` from a Windows host also asks for the Android tests below, whose
-# runner needs `@androidsdk//:adb`, a file the SDK has only as `adb.exe` there.
+# name: they need the console session. `build //...` works from a Windows host:
+# the Android tests below take the `adb` their SDK has for it, `adb.exe`.
 
 # The two tests of `:macos_pass_test`, in a window: each is reported.
 flutter_windows_integration_test(
