@@ -53,6 +53,7 @@ load("//flutter/private:cmake_link_libraries.bzl", "parse_cmake_link_libraries")
 load("//flutter/private:flutter_pub_index.bzl", "MEMBER_DART", "MEMBER_FILE", "MEMBER_FLUTTER", "MEMBER_OVERLAY", "library_label", "read_index", "sibling_path", "source_repo")
 load("//flutter/private:flutter_pubspec.bzl", "flutter_assets_block", "flutter_plugin_block")
 load("//flutter/private:pinned.bzl", "pinned")
+load("//flutter/private:swiftpm_dependencies.bzl", "find_unsupported_swiftpm_dependencies")
 
 # Apple source extensions we sweep into the per-platform plugin library.
 _APPLE_SRC_EXTENSIONS = ("swift", "m", "mm", "h")
@@ -125,6 +126,41 @@ def _detect_apple_source_dirs(ctx, package_name, platform, shared_darwin_source)
         candidates.append(legacy_dir)
 
     return candidates
+
+def _fail_on_swiftpm_dependencies(ctx, package_name, platform, shared_darwin_source):
+    """Fails when a plugin's SwiftPM package depends on other Swift packages.
+
+    Reads each `<platform>/<dir>/Package.swift` (and `darwin/<dir>/` for a
+    shared darwin plugin). rules_flutter compiles the plugin's own sources and
+    does not resolve other Swift packages, so a remote dependency would leave
+    the app without code the plugin needs.
+    """
+    roots = [platform] + (["darwin"] if shared_darwin_source else [])
+    for root in roots:
+        root_path = ctx.path(root)
+        if not root_path.exists:
+            continue
+        for entry in root_path.readdir():
+            manifest = entry.get_child("Package.swift")
+            if not entry.is_dir or not manifest.exists:
+                continue
+            unsupported = find_unsupported_swiftpm_dependencies(
+                ctx.read(manifest),
+                "%s/%s" % (root, entry.basename),
+            )
+            if unsupported:
+                fail((
+                    "package:{pkg} ({plat}) declares Swift package dependencies in " +
+                    "{root}/{dir}/Package.swift that rules_flutter does not yet " +
+                    "resolve (SwiftPM dependencies of plugins are not supported):\n" +
+                    "{deps}"
+                ).format(
+                    pkg = package_name,
+                    plat = platform,
+                    root = root,
+                    dir = entry.basename,
+                    deps = "\n".join(["  - " + d for d in unsupported]),
+                ))
 
 def _detect_apple_include_dirs(ctx, source_dirs, package_name):
     """Collect SwiftPM-canonical public-header directories for the given Apple sources.
@@ -1842,6 +1878,12 @@ def _flutter_pub_package_impl(ctx):
         apple_ios_privacy_manifests = []
 
         if macos_info and macos_info.get("pluginClass", ""):
+            _fail_on_swiftpm_dependencies(
+                ctx,
+                ctx.attr.package_name,
+                "macos",
+                macos_shared_darwin,
+            )
             apple_macos_srcs_dirs = _detect_apple_source_dirs(
                 ctx,
                 ctx.attr.package_name,
@@ -1859,6 +1901,12 @@ def _flutter_pub_package_impl(ctx):
             )
 
         if ios_info and ios_info.get("pluginClass", ""):
+            _fail_on_swiftpm_dependencies(
+                ctx,
+                ctx.attr.package_name,
+                "ios",
+                ios_shared_darwin,
+            )
             apple_ios_srcs_dirs = _detect_apple_source_dirs(
                 ctx,
                 ctx.attr.package_name,
