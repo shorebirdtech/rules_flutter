@@ -15,13 +15,12 @@
 /// On success the tool writes `--stamp`, which the build requires so that a
 /// plist that fails the check fails the build.
 ///
-/// It has no package dependencies beyond its sibling `merge_plists.dart` and
+/// It has no package dependencies beyond its siblings `merge_plists.dart` and `plist_binary.dart`, and
 /// runs with the bare Dart SDK.
 ///
 /// Usage:
 ///   dart check_apple_version_keys.dart --plist <file> --name <shown name>
 ///       --app <label> --rule <macro> --stamp <file>
-import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -96,121 +95,6 @@ Map<String, PlistValue> readXmlValues(
   return values;
 }
 
-/// Whether [bytes] begin a binary property list.
-bool isBinaryPlist(List<int> bytes) =>
-    bytes.length >= 8 &&
-    ascii.decode(bytes.sublist(0, 8), allowInvalid: true) == 'bplist00';
-
-/// The root dictionary's [PlistValue] for each of [wanted] it declares, from a
-/// binary plist (`bplist00`).
-Map<String, PlistValue> readBinaryValues(
-  Uint8List b,
-  String name,
-  Set<String> wanted,
-) {
-  Never bad(String why) =>
-      throw PlistFormatException('$name is a malformed binary plist: $why.');
-
-  if (b.length < 40) bad('it is too short');
-  int uint(int offset, int size) {
-    if (offset < 0 || offset + size > b.length)
-      bad('an offset is past the end');
-    var v = 0;
-    for (var i = 0; i < size; i++) {
-      v = (v << 8) | b[offset + i];
-    }
-    return v;
-  }
-
-  final trailer = b.length - 32;
-  final offsetSize = b[trailer + 6];
-  final refSize = b[trailer + 7];
-  final count = uint(trailer + 8, 8);
-  final top = uint(trailer + 16, 8);
-  final table = uint(trailer + 24, 8);
-  if (offsetSize < 1 || offsetSize > 8 || refSize < 1 || refSize > 8) {
-    bad('its trailer sizes are invalid');
-  }
-  if (top >= count) bad('its top object does not exist');
-
-  int offsetOf(int object) {
-    if (object >= count) bad('an object reference is out of range');
-    return uint(table + object * offsetSize, offsetSize);
-  }
-
-  // The length in a marker's low nibble, or the integer object that follows
-  // when the nibble is 0xF. Returns (length, offset of what comes next).
-  (int, int) lengthAt(int at) {
-    final low = b[at] & 0x0f;
-    if (low != 0x0f) return (low, at + 1);
-    final intMarker = b[at + 1];
-    if (intMarker >> 4 != 0x1) bad('a length is not an integer');
-    final size = 1 << (intMarker & 0x0f);
-    return (uint(at + 2, size), at + 2 + size);
-  }
-
-  PlistValue valueAt(int object) {
-    final at = offsetOf(object);
-    final marker = b[at];
-    switch (marker >> 4) {
-      case 0x5:
-        final (n, start) = lengthAt(at);
-        return PlistValue.string(
-          ascii.decode(b.sublist(start, start + n), allowInvalid: true),
-        );
-      case 0x7:
-        final (n, start) = lengthAt(at);
-        return PlistValue.string(
-          utf8.decode(b.sublist(start, start + n), allowMalformed: true),
-        );
-      case 0x6:
-        final (n, start) = lengthAt(at);
-        return PlistValue.string(
-          String.fromCharCodes([
-            for (var i = 0; i < n; i++) uint(start + 2 * i, 2),
-          ]),
-        );
-      case 0x1:
-        return PlistValue.other(
-          '<integer>${uint(at + 1, 1 << (marker & 0x0f))}</integer>',
-        );
-      case 0x2:
-        return const PlistValue.other('a real number');
-      case 0x0:
-        return PlistValue.other(
-          marker == 0x08
-              ? '<false/>'
-              : marker == 0x09
-              ? '<true/>'
-              : 'a null value',
-        );
-      case 0x3:
-        return const PlistValue.other('a date');
-      case 0x4:
-        return const PlistValue.other('data');
-      case 0xA:
-      case 0xC:
-        return const PlistValue.other('an array');
-      case 0xD:
-        return const PlistValue.other('a dictionary');
-      default:
-        return const PlistValue.other('a value of an unknown type');
-    }
-  }
-
-  final rootAt = offsetOf(top);
-  if (b[rootAt] >> 4 != 0xD) bad('its root is not a dictionary');
-  final (n, start) = lengthAt(rootAt);
-  final values = <String, PlistValue>{};
-  for (var i = 0; i < n; i++) {
-    final key = valueAt(uint(start + i * refSize, refSize));
-    final name = key.text;
-    if (name == null || !wanted.contains(name)) continue;
-    values[name] = valueAt(uint(start + (n + i) * refSize, refSize));
-  }
-  return values;
-}
-
 /// Whether [value] is [variable] in either of the spellings Xcode expands.
 bool isVariable(String value, String variable) =>
     value == '\$($variable)' || value == '\${$variable}';
@@ -225,9 +109,7 @@ List<String> versionKeyProblems({
   required String rule,
 }) {
   final wanted = {for (final k in versionKeys) k.key};
-  final values = isBinaryPlist(bytes)
-      ? readBinaryValues(bytes, name, wanted)
-      : readXmlValues(utf8.decode(bytes), name, wanted);
+  final values = readXmlValues(plistXml(bytes, name), name, wanted);
   final problems = <String>[];
   for (final k in versionKeys) {
     final value = values[k.key];

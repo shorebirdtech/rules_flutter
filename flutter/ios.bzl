@@ -646,10 +646,13 @@ def flutter_ios_app(
     # 8. Info.plist — preprocess to resolve Xcode variables that rules_apple
     #    doesn't handle.
     if not info_plist:
-        expand_template(
+        # A merge rather than a text template: the app's plist may be saved
+        # in binary form, which a text substitution would corrupt.
+        _flutter_plist_merge(
             name = "__%s_info_plist" % name,
-            template = "ios/Runner/Info.plist",
-            out = "__%s_Info.plist" % name,
+            base = "ios/Runner/Info.plist",
+            mode = "supplement",
+            output_basename = "Info.plist",
             substitutions = {
                 "$(DEVELOPMENT_LANGUAGE)": "en",
                 # UISceneDelegateClassName is <module>.SceneDelegate: the

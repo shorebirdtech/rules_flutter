@@ -23,6 +23,7 @@ exports_files(
         "linux_runtime.dart",
         "merge_android_manifests.dart",
         "merge_plists.dart",
+        "plist_binary.dart",
         "strip_native_libs.dart",
         "validate_android_elf.dart",
         "web_template.dart",
@@ -133,7 +134,6 @@ _UNIT_TESTS = {
     "linux_runtime_test": ("linux_runtime.dart", []),
     "generate_asset_manifest_test": ("generate_asset_manifest.dart", []),
     "merge_android_manifests_test": ("merge_android_manifests.dart", []),
-    "merge_plists_test": ("merge_plists.dart", []),
     "strip_native_libs_test": ("strip_native_libs.dart", []),
     "web_template_test": ("web_template.dart", []),
     "flutter_test_runner_test": (
@@ -188,13 +188,37 @@ dart_test(
     ],
 )
 
-# The version-key check imports the plist parser of `merge_plists.dart`, so both
-# are its `srcs`.
+# The merger imports the binary plist reader, so both are its `srcs`.
+dart_test(
+    name = "merge_plists_test",
+    srcs = [
+        "merge_plists.dart",
+        "plist_binary.dart",
+        "test/binary_plist_fixture.dart",
+    ],
+    main = "test/merge_plists_test.dart",
+    deps = ["@dev_tool_deps//:test"],
+)
+
+dart_test(
+    name = "plist_binary_test",
+    srcs = [
+        "merge_plists.dart",
+        "plist_binary.dart",
+        "test/binary_plist_fixture.dart",
+    ],
+    main = "test/plist_binary_test.dart",
+    deps = ["@dev_tool_deps//:test"],
+)
+
+# The version-key check imports the plist parser of `merge_plists.dart`, which
+# imports `plist_binary.dart`, so all three are its `srcs`.
 dart_test(
     name = "check_apple_version_keys_test",
     srcs = [
         "check_apple_version_keys.dart",
         "merge_plists.dart",
+        "plist_binary.dart",
     ],
     main = "test/check_apple_version_keys_test.dart",
     deps = ["@dev_tool_deps//:test"],

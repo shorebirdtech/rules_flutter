@@ -25,7 +25,7 @@ def _impl(ctx):
         executable = tools.dart,
         arguments = [args],
         inputs = depset(
-            direct = [ctx.file._tool, ctx.file._merge_plists, ctx.file.plist],
+            direct = [ctx.file._tool, ctx.file._merge_plists, ctx.file._plist_binary, ctx.file.plist],
             transitive = [tools.sdk_files.run],
         ),
         outputs = [stamp],
@@ -65,6 +65,10 @@ flutter_apple_version_check = rule(
         ),
         "_merge_plists": attr.label(
             default = "//flutter/private/tools:merge_plists.dart",
+            allow_single_file = True,
+        ),
+        "_plist_binary": attr.label(
+            default = "//flutter/private/tools:plist_binary.dart",
             allow_single_file = True,
         ),
     },

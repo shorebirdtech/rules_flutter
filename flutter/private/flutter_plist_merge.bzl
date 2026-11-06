@@ -37,13 +37,17 @@ def _flutter_plist_merge_impl(ctx):
     args = ctx.actions.args()
     args.add(tool)
     args.add("--mode", ctx.attr.mode)
-    inputs = [tool]
+    inputs = [tool, ctx.file._plist_binary]
     if ctx.file.base:
         args.add("--base", ctx.file.base)
         inputs.append(ctx.file.base)
     args.add_all(ctx.files.additions, before_each = "--addition")
     inputs.extend(ctx.files.additions)
     args.add_all(ctx.attr.drop_empty_keys, before_each = "--drop-empty")
+    args.add_all(
+        ["%s=%s" % (k, v) for k, v in ctx.attr.substitutions.items()],
+        before_each = "--substitute",
+    )
     args.add("--output", output)
 
     ctx.actions.run(
@@ -87,6 +91,12 @@ flutter_plist_merge = rule(
                   "catalog. A key with a real value is left alone, so a " +
                   "genuine conflict is still reported.",
         ),
+        "substitutions": attr.string_dict(
+            doc = "Text to replace in `base` before it is read, from to " +
+                  "to: the Xcode variables a `flutter create` Info.plist " +
+                  "leaves for the build. Unlike `expand_template`, it reads " +
+                  "a plist saved in binary form.",
+        ),
         "mode": attr.string(
             doc = "How a key present in both the base and an addition is " +
                   "resolved. See the module docstring.",
@@ -100,6 +110,11 @@ flutter_plist_merge = rule(
         ),
         "_merge_tool": attr.label(
             default = _TOOL,
+            allow_single_file = True,
+        ),
+        # Imported by the merge tool to read a binary plist.
+        "_plist_binary": attr.label(
+            default = "//flutter/private/tools:plist_binary.dart",
             allow_single_file = True,
         ),
     },

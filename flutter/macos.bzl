@@ -597,10 +597,13 @@ def flutter_macos_app(
     #    $(FLUTTER_BUILD_NAME) and $(FLUTTER_BUILD_NUMBER) stay: rules_apple
     #    replaces both keys with `version`'s values.
     if not info_plist:
-        expand_template(
+        # A merge rather than a text template: the app's plist may be saved
+        # in binary form, which a text substitution would corrupt.
+        _flutter_plist_merge(
             name = "__%s_info_plist" % name,
-            template = "macos/Runner/Info.plist",
-            out = "__%s_Info.plist" % name,
+            base = "macos/Runner/Info.plist",
+            mode = "supplement",
+            output_basename = "Info.plist",
             substitutions = {
                 "$(DEVELOPMENT_LANGUAGE)": "en",
                 "$(PRODUCT_COPYRIGHT)": "",

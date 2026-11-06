@@ -31,8 +31,8 @@ def _check_test_impl(ctx):
     asserts.equals(
         env,
         sorted([f.basename for f in actions[0].inputs.to_list() if f.basename.endswith(".dart")]),
-        ["check_apple_version_keys.dart", "merge_plists.dart"],
-        "the tool and the parser it imports",
+        ["check_apple_version_keys.dart", "merge_plists.dart", "plist_binary.dart"],
+        "the tool and the parsers it imports",
     )
 
     # The build requires the check: the stamp is a validation output.
