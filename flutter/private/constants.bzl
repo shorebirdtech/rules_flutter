@@ -18,7 +18,11 @@ IOS_MINIMUM_OS_VERSION = "15.0"
 MACOS_MINIMUM_OS_VERSION = "12.0"
 
 # Default Android SDK version targets.
-ANDROID_MIN_SDK_VERSION = "21"
+#
+# The minimum is the Flutter Gradle plugin's `flutter.minSdkVersion`, and the
+# floor of both the engine (`libflutter.so`'s `.note.android.ident` names API
+# 24) and rules_android, which raises any lower `minSdkVersion` to 24.
+ANDROID_MIN_SDK_VERSION = "24"
 ANDROID_TARGET_SDK_VERSION = "35"
 
 # Android ABI directory name for each engine architecture this ruleset builds.

@@ -1015,7 +1015,7 @@ To build an app for fixed ABIs whatever the command line says, wrap it in [`flut
 | `package_name` | The Android package name, for example `"com.example.myapp"`. Required. |
 | `namespace` | The package the runner's code declares (Gradle's `namespace`). Relative class names in the manifest (`.MainActivity`, `.sub.Receiver`, `MainActivity`) are written out in full against it, as AGP does. Defaults to `package_name`. |
 | `app_name` | Display name. Defaults to the target name. |
-| `min_sdk_version` | Minimum Android SDK version. |
+| `min_sdk_version` | Minimum Android SDK version. Defaults to 24, Flutter's `flutter.minSdkVersion` and the engine's own minimum. |
 | `target_sdk_version` | Target Android SDK version. |
 | `build_name` | `versionName`. Defaults to `"1.0.0"`. See [App version](#app-version). |
 | `build_number` | `versionCode`. Defaults to `"1"`. |
