@@ -304,6 +304,9 @@ class FakeProcess implements Process {
   /// End stdout only, leaving stderr open — the shape of a process that is
   /// still complaining after its normal output has finished.
   Future<void> closeStdout() => _stdoutController.close();
+
+  /// Whether stdout has ended, after which nothing more can be emitted on it.
+  bool get stdoutClosed => _stdoutController.isClosed;
 }
 
 /// The stdin of a [FakeProcess]: every write method funnelled into one path.
@@ -1721,4 +1724,79 @@ class FakeBrowserCdp {
   }
 
   Future<void> close() => _server.close(force: true);
+}
+
+/// The simulator's half of a launch's check that its `log stream` helpers are
+/// listening (see `simulator_log_stream.dart`), for fakes of `xcrun`.
+///
+/// Wrap a test's process fakes with [start] and [run]: every `log stream`
+/// started prints its banner, and the `syslog -s` the launch logs its marker
+/// with is delivered to every stream whose predicate admits it, in that
+/// stream's `--style`.
+class FakeSimulatorLog {
+  /// [endStreamsAtLaunch] ends every stream once `simctl launch` has run, for
+  /// a test that only needs the launch to return: with its discovery stream
+  /// ended, it returns with no VM service.
+  FakeSimulatorLog({this.endStreamsAtLaunch = false});
+
+  final bool endStreamsAtLaunch;
+
+  final _streams = <({FakeProcess process, String style, String marker})>[];
+
+  /// How many times the launch logged its marker.
+  int markersLogged = 0;
+
+  static final _markerClause = RegExp(
+    r'eventMessage == "(flutter_bazel log stream listening [0-9a-f]+)"',
+  );
+
+  Future<Process> Function(String, List<String>) start(
+    Future<Process> Function(String, List<String>) inner,
+  ) => (executable, args) async {
+    final process = await inner(executable, args);
+    final i = args.indexOf('stream');
+    if (i > 0 && args[i - 1] == 'log' && process is FakeProcess) {
+      final predicate = args[args.indexOf('--predicate') + 1];
+      final marker = _markerClause.firstMatch(predicate)?.group(1);
+      if (marker != null) {
+        _streams.add((
+          process: process,
+          style: args[args.indexOf('--style') + 1],
+          marker: marker,
+        ));
+      }
+      // After the launch has subscribed to the stream it was handed. A test
+      // handing one fake out for every stream may have ended it by then.
+      Timer.run(() {
+        if (process.stdoutClosed) return;
+        process.emitStdout('Filtering the log data using "$predicate"');
+      });
+    }
+    return process;
+  };
+
+  Future<ProcessResult> Function(String, List<String>) run(
+    Future<ProcessResult> Function(String, List<String>) inner,
+  ) => (executable, args) async {
+    if (!args.contains('syslog')) {
+      final result = await inner(executable, args);
+      if (endStreamsAtLaunch && args.length > 1 && args[1] == 'launch') {
+        for (final s in _streams) {
+          s.process.complete(0);
+        }
+      }
+      return result;
+    }
+    markersLogged++;
+    final message = args.last;
+    for (final s in _streams) {
+      if (s.marker != message) continue;
+      s.process.emitStdout(
+        s.style == 'ndjson'
+            ? jsonEncode({'eventType': 'logEvent', 'eventMessage': message})
+            : '  "eventMessage" : ${jsonEncode(message)},',
+      );
+    }
+    return ProcessResult(0, 0, '', '');
+  };
 }

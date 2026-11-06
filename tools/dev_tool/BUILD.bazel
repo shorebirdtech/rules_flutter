@@ -367,6 +367,7 @@ _UNIT_TESTS = {
     "package_roots_test": {},
     "process_group_exec_test": {"data": [":process_group_exec"]},
     "shutdown_signals_test": {},
+    "simulator_log_stream_test": {"fakes": True},
     "simulator_terminations_test": {},
     "semantics_dump_test": {},
     "screen_test": {

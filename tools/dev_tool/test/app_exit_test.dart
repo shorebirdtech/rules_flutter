@@ -183,17 +183,18 @@ void main() {
       final kills = <List<String>>[];
       final output = FakeProcess();
       final terminations = FakeProcess();
+      final sim = FakeSimulatorLog();
       final device = IOSSimulatorDevice(
         udid: 'TEST-UDID',
         bundleId: bundleId,
-        runProcess: (exe, args) async {
+        runProcess: sim.run((exe, args) async {
           if (exe == 'kill') {
             kills.add([...args]);
             return killAnswer;
           }
           return simctlOkWithPid(args, pid);
-        },
-        startProcess: (exe, args) async {
+        }),
+        startProcess: sim.start((exe, args) async {
           if (args.any((a) => a.contains('termination reported by launchd'))) {
             return terminations;
           }
@@ -212,7 +213,7 @@ void main() {
             return discovery;
           }
           return output;
-        },
+        }),
       );
       // A record that is not coming is waited for this long, not the real
       // bound.

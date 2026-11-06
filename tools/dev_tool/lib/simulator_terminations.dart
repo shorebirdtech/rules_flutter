@@ -32,7 +32,8 @@
 library;
 
 import 'dart:async';
-import 'dart:convert';
+
+import 'simulator_log_stream.dart';
 
 /// The `log stream` predicate selecting the termination records of the app
 /// [bundleId], and nothing else.
@@ -83,22 +84,6 @@ const _signalNames = {
   13: 'SIGPIPE',
   15: 'SIGTERM',
 };
-
-/// The message of one record of `log stream --style ndjson`, or null for any
-/// other line.
-String? _eventMessage(String line) {
-  // `log stream` also prints a plain-text banner that quotes the predicate.
-  if (!line.startsWith('{')) return null;
-  final Object? record;
-  try {
-    record = json.decode(line);
-  } on FormatException {
-    return null;
-  }
-  if (record is! Map) return null;
-  final message = record['eventMessage'];
-  return message is String ? message : null;
-}
 
 /// One app process's end, as the simulator's RunningBoard logged it.
 class SimulatorTermination {
@@ -152,7 +137,7 @@ class SimulatorTermination {
   /// The record in one line of `log stream --style ndjson`, or null if the
   /// line is not one.
   static SimulatorTermination? parse(String line) {
-    final message = _eventMessage(line);
+    final message = ndjsonEventMessage(line);
     if (message == null) return null;
     final match = _record.firstMatch(message);
     if (match == null) return null;
@@ -228,7 +213,7 @@ class SimulatorTerminations {
   }
 
   static ({int pid, int namespace, int code})? _parseIntent(String line) {
-    final message = _eventMessage(line);
+    final message = ndjsonEventMessage(line);
     if (message == null) return null;
     final match = _intent.firstMatch(message);
     if (match == null) return null;

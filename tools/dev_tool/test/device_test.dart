@@ -378,21 +378,20 @@ void main() {
     test('calls simctl install and launch', () async {
       final calls = <(String, List<String>)>[];
       final fakeLog = FakeProcess();
+      final sim = FakeSimulatorLog(endStreamsAtLaunch: true);
 
       final device = IOSSimulatorDevice(
         udid: 'TEST-UDID',
         bundleId: 'com.example.test',
-        runProcess: (exe, args) async {
+        runProcess: sim.run((exe, args) async {
           calls.add((exe, args));
           return simctlOk(args);
-        },
-        startProcess: (exe, args) async {
+        }),
+        startProcess: sim.start((exe, args) async {
           calls.add((exe, args));
           return fakeLog;
-        },
+        }),
       );
-
-      unawaited(fakeLog.outputAttached.then((_) => fakeLog.complete(0)));
 
       await device.launch('/path/to/MyApp.app');
 
@@ -425,14 +424,15 @@ void main() {
     // every run after the first on a simulator someone left booted.
     test('a simulator that is already booted is launched on', () async {
       final calls = <String>[];
+      final sim = FakeSimulatorLog();
       final device = IOSSimulatorDevice(
         udid: 'TEST-UDID',
         bundleId: 'com.example.test',
-        runProcess: (exe, args) async {
+        runProcess: sim.run((exe, args) async {
           calls.add(args.join(' '));
           return simctlOk(args);
-        },
-        startProcess: (exe, args) async {
+        }),
+        startProcess: sim.start((exe, args) async {
           final p = FakeProcess();
           if (args.contains('ndjson')) {
             unawaited(
@@ -447,7 +447,7 @@ void main() {
             );
           }
           return p;
-        },
+        }),
       );
 
       final instance = await device.launch('/path/to/MyApp.app');
@@ -562,18 +562,18 @@ void main() {
       () async {
         final calls = <List<String>>[];
         final fakeLog = FakeProcess();
+        final sim = FakeSimulatorLog(endStreamsAtLaunch: true);
         final device = IOSSimulatorDevice(
           udid: 'TEST-UDID',
-          runProcess: (exe, args) async {
+          runProcess: sim.run((exe, args) async {
             calls.add([exe, ...args]);
             if (exe == 'defaults') {
               return ProcessResult(0, 0, 'com.example.fromplist\n', '');
             }
             return simctlOk(args);
-          },
-          startProcess: (exe, args) async => fakeLog,
+          }),
+          startProcess: sim.start((exe, args) async => fakeLog),
         );
-        unawaited(fakeLog.outputAttached.then((_) => fakeLog.complete(0)));
 
         final instance = await device.launch('/path/to/MyApp.app');
         await device.stop(instance);
@@ -596,11 +596,12 @@ void main() {
     test('extracts .app from .ipa before install', () async {
       final calls = <(String, List<String>)>[];
       final fakeLog = FakeProcess();
+      final sim = FakeSimulatorLog(endStreamsAtLaunch: true);
 
       final device = IOSSimulatorDevice(
         udid: 'TEST-UDID',
         bundleId: 'com.example.test',
-        runProcess: (exe, args) async {
+        runProcess: sim.run((exe, args) async {
           calls.add((exe, args));
           if (exe == 'unzip') {
             // Simulate unzip by creating Payload/app.app directory.
@@ -609,14 +610,12 @@ void main() {
             File('$dest/Payload/app.app/Info.plist').writeAsStringSync('');
           }
           return simctlOk(args);
-        },
-        startProcess: (exe, args) async {
+        }),
+        startProcess: sim.start((exe, args) async {
           calls.add((exe, args));
           return fakeLog;
-        },
+        }),
       );
-
-      unawaited(fakeLog.outputAttached.then((_) => fakeLog.complete(0)));
 
       final app = await device.launch('/path/to/app.ipa');
       addTearDown(app.disposeScratchDirs);
@@ -643,13 +642,14 @@ void main() {
         // simulator: `simctl install` of the new bundle left the old `add`, and
         // the same install after a `touch` replaced it.
         final fakeLog = FakeProcess();
+        final sim = FakeSimulatorLog(endStreamsAtLaunch: true);
         DateTime? mtimeAtInstall;
         late String extractedLib;
 
         final device = IOSSimulatorDevice(
           udid: 'TEST-UDID',
           bundleId: 'com.example.test',
-          runProcess: (exe, args) async {
+          runProcess: sim.run((exe, args) async {
             if (exe == 'unzip') {
               final dest = args.last;
               extractedLib =
@@ -663,11 +663,9 @@ void main() {
               mtimeAtInstall = File(extractedLib).lastModifiedSync();
             }
             return simctlOk(args);
-          },
-          startProcess: (exe, args) async => fakeLog,
+          }),
+          startProcess: sim.start((exe, args) async => fakeLog),
         );
-
-        unawaited(fakeLog.outputAttached.then((_) => fakeLog.complete(0)));
         final before = DateTime.now().subtract(const Duration(seconds: 5));
         final app = await device.launch('/path/to/app.ipa');
         addTearDown(app.disposeScratchDirs);
@@ -686,11 +684,12 @@ void main() {
       // which happens first, and FakeProcess's controllers are broadcast, so
       // the line would be delivered to the log drain and dropped for
       // discovery.
+      final sim = FakeSimulatorLog();
       final device = IOSSimulatorDevice(
         udid: 'TEST-UDID',
         bundleId: 'com.example.test',
-        runProcess: (exe, args) async => simctlOk(args),
-        startProcess: (exe, args) async {
+        runProcess: sim.run((exe, args) async => simctlOk(args)),
+        startProcess: sim.start((exe, args) async {
           final p = FakeProcess();
           if (args.contains('ndjson')) {
             unawaited(
@@ -707,7 +706,7 @@ void main() {
             );
           }
           return p;
-        },
+        }),
       );
 
       final instance = await device.launch('/path/to/MyApp.app');
@@ -2999,13 +2998,16 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     });
 
     test('an iOS Simulator launch attaches to the app it launched', () async {
+      final sim = FakeSimulatorLog();
       final device = IOSSimulatorDevice(
         udid: 'TEST-UDID',
         bundleId: 'com.example.test',
-        runProcess: (exe, args) async => args.contains('launch')
-            ? ProcessResult(0, 0, 'com.example.test: 1234\n', '')
-            : ProcessResult(0, 0, '', ''),
-        startProcess: (exe, args) async {
+        runProcess: sim.run(
+          (exe, args) async => args.contains('launch')
+              ? ProcessResult(0, 0, 'com.example.test: 1234\n', '')
+              : ProcessResult(0, 0, '', ''),
+        ),
+        startProcess: sim.start((exe, args) async {
           final p = FakeProcess();
           if (args.contains('ndjson')) {
             unawaited(
@@ -3016,18 +3018,65 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
             );
           }
           return p;
-        },
+        }),
       );
       final instance = await device.launch('/path/to/MyApp.app');
       expect(instance.vmServiceUri, Uri.parse('http://127.0.0.1:2222/k=/'));
     });
 
-    test('an iOS Simulator launch that reports no pid fails', () async {
+    // The race this closes: `log stream` delivers only what is logged after
+    // it attaches, and its banner is no proof that it has. Here the discovery
+    // stream attaches only after the launch's first marker: an app launched
+    // then announces its VM service into nothing, and the run waits for good
+    // on an app that is up.
+    test('an iOS Simulator app is launched only once every log stream has '
+        'shown it is listening', () async {
+      final streams = <FakeProcess>[];
+      var markersLogged = 0;
+      // A stream sees what is logged once it is attached, and nothing before.
+      bool attached(int stream) => stream > 0 || markersLogged >= 2;
+      void log(String line) {
+        for (final (i, s) in streams.indexed) {
+          if (attached(i)) s.emitStdout(line);
+        }
+      }
+
       final device = IOSSimulatorDevice(
         udid: 'TEST-UDID',
         bundleId: 'com.example.test',
-        runProcess: (exe, args) async => ProcessResult(0, 0, '', ''),
-        startProcess: (exe, args) async => FakeProcess(),
+        runProcess: (exe, args) async {
+          if (args.contains('syslog')) {
+            markersLogged++;
+            // In both styles: the output stream is `--style json`.
+            log(json.encode({'eventMessage': args.last}));
+            log('  "eventMessage" : ${json.encode(args.last)},');
+          } else if (args.contains('launch')) {
+            log(ndjson(1234, announce(2222)));
+            return ProcessResult(0, 0, 'com.example.test: 1234\n', '');
+          }
+          return ProcessResult(0, 0, '', '');
+        },
+        startProcess: (exe, args) async {
+          final p = FakeProcess();
+          streams.add(p);
+          Timer.run(() => p.emitStdout('Filtering the log data using "..."'));
+          return p;
+        },
+      );
+
+      final instance = await device.launch('/path/to/MyApp.app');
+
+      expect(markersLogged, greaterThanOrEqualTo(2));
+      expect(instance.vmServiceUri, Uri.parse('http://127.0.0.1:2222/k=/'));
+    });
+
+    test('an iOS Simulator launch that reports no pid fails', () async {
+      final sim = FakeSimulatorLog();
+      final device = IOSSimulatorDevice(
+        udid: 'TEST-UDID',
+        bundleId: 'com.example.test',
+        runProcess: sim.run((exe, args) async => ProcessResult(0, 0, '', '')),
+        startProcess: sim.start((exe, args) async => FakeProcess()),
       );
       await expectLater(
         device.launch('/path/to/MyApp.app'),
@@ -3071,6 +3120,99 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       expect(forwards, ['tcp:2222']);
       expect(instance.vmServiceUri, Uri.parse('http://127.0.0.1:40001/k=/'));
     });
+
+    // `-T 1` starts at whatever is last in the log when logcat gets round to
+    // reading it, and the app is launched alongside: on a busy host the app
+    // can announce its VM service first, and the run then waits for good. The
+    // log is read instead from the last record before the launch, which the
+    // device keeps, so nothing logged after it can be missed.
+    test(
+      'an Android launch reads the log from before the app started',
+      () async {
+        final calls = <List<String>>[];
+        final device = AndroidDevice(
+          packageName: 'com.example.app',
+          adbPath: 'adb',
+          runProcess: (exe, args) async {
+            calls.add(args);
+            if (args.contains('logcat') && args.contains('-t')) {
+              return ProcessResult(
+                0,
+                0,
+                '--------- beginning of main\n'
+                    '11-06 15:31:53.862 I/adbd    ( 1418): adbd service '
+                    'requested\n',
+                '',
+              );
+            }
+            return adbOk(args);
+          },
+          startProcess: (exe, args) async {
+            calls.add(args);
+            return FakeProcess()..complete(0);
+          },
+        );
+        await device.launch('/path/to/app.apk');
+
+        final last = calls.indexWhere((c) => c.contains('-t'));
+        final follow = calls.indexWhere(
+          (c) => c.contains('logcat') && !c.contains('-t'),
+        );
+        final start = calls.indexWhere((c) => c.contains('start'));
+        expect(last, isNonNegative);
+        expect(last, lessThan(follow));
+        expect(follow, lessThan(start));
+        expect(calls[follow], containsAllInOrder(['-T', '11-06 15:31:53.862']));
+      },
+    );
+
+    test('an Android launch on an empty log reads all of it', () async {
+      final calls = <List<String>>[];
+      final device = AndroidDevice(
+        packageName: 'com.example.app',
+        adbPath: 'adb',
+        runProcess: (exe, args) async {
+          calls.add(args);
+          return adbOk(args);
+        },
+        startProcess: (exe, args) async {
+          calls.add(args);
+          return FakeProcess()..complete(0);
+        },
+      );
+      await device.launch('/path/to/app.apk');
+      final follow = calls.firstWhere(
+        (c) => c.contains('logcat') && !c.contains('-t'),
+      );
+      expect(follow, isNot(contains('-T')));
+    });
+
+    test(
+      'an Android launch that cannot read the log fails, saying so',
+      () async {
+        final device = AndroidDevice(
+          packageName: 'com.example.app',
+          adbPath: 'adb',
+          runProcess: (exe, args) async {
+            if (args.contains('logcat')) {
+              return ProcessResult(0, 1, '', 'error: closed');
+            }
+            return adbOk(args);
+          },
+          startProcess: (exe, args) async => FakeProcess(),
+        );
+        await expectLater(
+          device.launch('/path/to/app.apk'),
+          throwsA(
+            isA<StateError>().having(
+              (e) => e.message,
+              'message',
+              allOf(contains('logcat'), contains('error: closed')),
+            ),
+          ),
+        );
+      },
+    );
   });
 
   group('iOS Simulator log capture', () {
@@ -3128,14 +3270,15 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     test('launch spawns separate log streams for app output and for how '
         'the app ends', () async {
       final started = <(String, List<String>)>[];
+      final sim = FakeSimulatorLog(endStreamsAtLaunch: true);
       final device = IOSSimulatorDevice(
         udid: 'TEST-UDID',
         bundleId: 'com.example.test',
-        runProcess: (exe, args) async => simctlOk(args),
-        startProcess: (exe, args) async {
+        runProcess: sim.run((exe, args) async => simctlOk(args)),
+        startProcess: sim.start((exe, args) async {
           started.add((exe, args));
-          return FakeProcess()..complete(0);
-        },
+          return FakeProcess();
+        }),
       );
 
       await device.launch('/path/to/MyApp.app');
@@ -3176,21 +3319,16 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       // simctl treats everything after the bundle id as the app's argv, which
       // is where the iOS embedder reads engine switches from.
       final runs = <(String, List<String>)>[];
-      final spawned = <FakeProcess>[];
+      // Ending the discovery stream is what lets launch return.
+      final sim = FakeSimulatorLog(endStreamsAtLaunch: true);
       final device = IOSSimulatorDevice(
         udid: 'TEST-UDID',
         bundleId: 'com.example.test',
-        runProcess: (exe, args) async {
+        runProcess: sim.run((exe, args) async {
           runs.add((exe, args));
           return simctlOk(args);
-        },
-        startProcess: (exe, args) async {
-          final p = FakeProcess();
-          spawned.add(p);
-          // Ending the discovery stream is what lets launch return.
-          unawaited(p.outputAttached.then((_) => p.complete(0)));
-          return p;
-        },
+        }),
+        startProcess: sim.start((exe, args) async => FakeProcess()),
       )..startPaused = true;
 
       await device.launch('/path/to/MyApp.app');
@@ -3209,18 +3347,19 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       // launch call — so the test has to wait for both to exist *and* both to
       // be listening before it emits anything into these broadcast streams.
       final bothSpawned = Completer<void>();
+      final sim = FakeSimulatorLog();
       final device = IOSSimulatorDevice(
         udid: 'TEST-UDID',
         bundleId: 'com.example.test',
-        runProcess: (exe, args) async => simctlOk(args),
-        startProcess: (exe, args) async {
+        runProcess: sim.run((exe, args) async => simctlOk(args)),
+        startProcess: sim.start((exe, args) async {
           final p = FakeProcess();
           spawned.add(p);
           if (spawned.length == 2 && !bothSpawned.isCompleted) {
             bothSpawned.complete();
           }
           return p;
-        },
+        }),
       );
 
       final pending = device.launch('/path/to/MyApp.app');

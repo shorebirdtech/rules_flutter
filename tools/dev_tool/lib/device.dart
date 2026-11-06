@@ -67,6 +67,7 @@ import 'native_patch_delivery.dart';
 import 'reload_strategy.dart';
 import 'runfiles_helper.dart';
 import 'screen.dart';
+import 'simulator_log_stream.dart';
 import 'simulator_terminations.dart';
 import 'temp_dir.dart';
 import 'toolchain_info.dart';
@@ -1563,6 +1564,27 @@ class AndroidDevice extends Device {
   ///
   /// Omitted entirely when no device was named, because there is then no serial
   /// to doubt: adb chose, and its message says so.
+  /// The time of the last record in the device's log, in the form `logcat -T`
+  /// takes, or null when the log is empty (and so can be read whole).
+  ///
+  /// adb passes each argument on to the device's shell quoted, so the time,
+  /// which has a space in it, goes as one argument as it is.
+  Future<String?> _lastLogcatTimestamp() async {
+    final result = await _runProcess(
+      adbPath,
+      _adbArgs(['logcat', '-v', 'time', '-t', '1']),
+    );
+    if (result.exitCode != 0) {
+      throw StateError(_adbFailure('logcat -t 1', result.stderr));
+    }
+    return _logcatRecordTime.firstMatch('${result.stdout}')?.group(0);
+  }
+
+  static final _logcatRecordTime = RegExp(
+    r'^\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}',
+    multiLine: true,
+  );
+
   String _adbFailure(String what, Object? stderr) => deviceId == null
       ? 'adb $what failed: $stderr'
       : 'adb $what failed (adb -s $deviceId): $stderr';
@@ -1601,9 +1623,22 @@ class AndroidDevice extends Device {
     // exceptions (`AndroidRuntime`), VM messages (`DartVM`) and native crashes
     // — exactly the output you most need when an app misbehaves. Matches
     // flutter_tools' AdbLogReader, which filters host-side for the same reason.
+    //
+    // Read from the last record already in the log, not from wherever the log
+    // has got to once logcat starts reading it (`-T 1`): the app is launched
+    // straight after this, and a logcat slow to start (a busy host, a busy
+    // adb) would miss the VM-service announcement and wait for it for good.
+    // The device keeps its log, so every record after that one is read
+    // whenever logcat gets to it. flutter_tools' AdbLogReader does the same.
+    final since = await _lastLogcatTimestamp();
     final logcat = await _startProcess(
       adbPath,
-      _adbArgs(['logcat', '-v', 'time', '-T', '1']),
+      _adbArgs([
+        'logcat',
+        '-v',
+        'time',
+        if (since != null) ...['-T', since],
+      ]),
     );
     // logcat has no stdout/stderr split: severity lives in the line's tag, so
     // [androidLogFilter] decides, and the raw stderr channel (adb's own
@@ -2893,6 +2928,33 @@ class IOSSimulatorDevice extends Device {
     return process;
   }
 
+  /// A `log stream` of the simulator's records matching [predicate], in
+  /// [style], that also admits [marker] (see simulator_log_stream.dart).
+  Future<SimulatorLogStream> _startLogStream(
+    String style,
+    String predicate,
+    String marker,
+  ) async {
+    final helper = await _startHelper('xcrun', [
+      'simctl',
+      'spawn',
+      udid,
+      'log',
+      'stream',
+      '--style',
+      style,
+      '--predicate',
+      listeningPredicate(predicate, marker),
+    ]);
+    return SimulatorLogStream(
+      helper,
+      marker: marker,
+      messageOf: style == 'ndjson'
+          ? ndjsonEventMessage
+          : parseUnifiedLoggingLine,
+    );
+  }
+
   Future<AppInstance> _launch(String appPath, {AppLogListener? onLog}) async {
     // Extract .app from .ipa if needed — simctl install requires .app.
     String installPath = appPath;
@@ -2931,7 +2993,7 @@ class IOSSimulatorDevice extends Device {
       throw StateError('simctl install failed: ${installResult.stderr}');
     }
 
-    // Two log streams, deliberately.
+    // Three log streams, deliberately.
     //
     // Discovery matches on message content and nothing else. App output needs
     // a process-scoped predicate with several NOT(...) noise filters
@@ -2939,35 +3001,33 @@ class IOSSimulatorDevice extends Device {
     // VM-service discovery — which hot reload, screenshots and agent control
     // all depend on — contingent on those exclusion clauses continuing to
     // spare the announcement. Two narrow streams fail independently and
-    // visibly; one broad stream fails silently.
+    // visibly; one broad stream fails silently. The third is for how the app
+    // ends: the simulator's record of it is what tells a close from a crash
+    // (see simulator_terminations.dart).
     //
     // The discovery stream is the whole simulator's, so every Flutter app on
     // it announces there. ndjson puts each record's pid on the record's own
     // line, which is how discovery keeps to the pid `simctl launch` reports.
-    final discoveryLog = await _startHelper('xcrun', [
-      'simctl',
-      'spawn',
-      udid,
-      'log',
-      'stream',
-      '--style',
+    //
+    // Each also admits a marker this launch logs, and the app is launched only
+    // once every stream has delivered it: a stream not yet listening when the
+    // app announces its VM service never sees the announcement, and the run
+    // would wait for good. See simulator_log_stream.dart.
+    final marker = newListeningMarker();
+    final discovery = await _startLogStream(
       'ndjson',
-      '--predicate',
       'eventMessage contains "Observatory" or eventMessage contains "Dart VM service"',
-    ]);
+      marker,
+    );
+    final discoveryLog = discovery.process;
 
     final appName = p.basename(installPath).replaceAll('.app', '');
-    final outputLog = await _startHelper('xcrun', [
-      'simctl',
-      'spawn',
-      udid,
-      'log',
-      'stream',
-      '--style',
+    final output = await _startLogStream(
       'json',
-      '--predicate',
       iosSimulatorLogPredicate(appName),
-    ]);
+      marker,
+    );
+    final outputLog = output.process;
 
     // Unified logging carries no stdout/stderr split, so nothing is flagged as
     // an error channel here.
@@ -2981,25 +3041,38 @@ class IOSSimulatorDevice extends Device {
     final bundleId = _launchedBundleId =
         _bundleId ?? await _extractBundleId(installPath, _runProcess);
 
-    // A third stream, for how the app ends: the simulator's record of it is
-    // what tells a close from a crash (see simulator_terminations.dart).
-    final terminationLog = await _startHelper('xcrun', [
-      'simctl',
-      'spawn',
-      udid,
-      'log',
-      'stream',
-      '--style',
+    final termination = await _startLogStream(
       'ndjson',
-      '--predicate',
       simulatorTerminationPredicate(bundleId),
-    ]);
+      marker,
+    );
+    final terminationLog = termination.process;
     _terminations = SimulatorTerminations(
       terminationLog.stdout
           .transform(utf8.decoder)
           .transform(const LineSplitter()),
     );
     terminationLog.stderr.drain<void>().ignore();
+
+    await waitUntilListening([discovery, output, termination], () async {
+      final logged = await _runProcess('xcrun', [
+        'simctl',
+        'spawn',
+        udid,
+        'syslog',
+        '-s',
+        '-l',
+        'notice',
+        marker,
+      ]);
+      if (logged.exitCode != 0) {
+        throw StateError(
+          'Could not log a message on the iOS Simulator $udid to tell when '
+          'its log streams are listening (syslog exited ${logged.exitCode}): '
+          '${'${logged.stderr}'.trim()}',
+        );
+      }
+    });
 
     // Launch app.
     final launchResult = await _runProcess('xcrun', [

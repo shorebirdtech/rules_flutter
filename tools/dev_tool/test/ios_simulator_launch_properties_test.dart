@@ -150,11 +150,12 @@ const _announcement =
   FakeSimulator simulator, {
   Duration? announceAfter = const Duration(seconds: 1),
 }) {
+  final log = FakeSimulatorLog();
   final device = IOSSimulatorDevice(
     udid: 'SIM-UDID',
     bundleId: 'com.example.app',
-    runProcess: simulator.run,
-    startProcess: (executable, args) async {
+    runProcess: log.run(simulator.run),
+    startProcess: log.start((executable, args) async {
       final process = FakeProcess();
       if (args.contains('ndjson') && announceAfter != null) {
         unawaited(
@@ -171,7 +172,7 @@ const _announcement =
         );
       }
       return process;
-    },
+    }),
   );
   final launched = async.run((_) => track(device.launch('/build/Runner.app')));
   return (device: device, launched: launched);
