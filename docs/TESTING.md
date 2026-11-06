@@ -1652,7 +1652,7 @@ $JAVA -jar $BT install-apks --apks="$K/out/device.apks" --adb=$ADB --device-id=$
 $ADB shell am start -W -n com.example.flutterapp/.MainActivity
 $ADB exec-out screencap -p > /tmp/release_aab.png
 
-# The universal APK.
+# The APK.
 $ADB uninstall com.example.flutterapp
 $ADB install "$K/out/app-release.apk"
 $ADB shell am start -W -n com.example.flutterapp/.MainActivity

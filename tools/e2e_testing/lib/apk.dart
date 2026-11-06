@@ -7,12 +7,16 @@ import 'apk_contents.dart';
 import 'archive.dart';
 import 'bundle_check.dart';
 import 'elf.dart';
+import 'runfiles_paths.dart';
+import 'zip_entries.dart';
 
 /// An APK extracted to a temporary directory, with the checks every Android
 /// test makes of one.
 class Apk {
-  /// Wraps an APK extracted to [archive], recording checks in [check].
-  Apk(this.archive, {BundleCheck? check}) : check = check ?? BundleCheck();
+  /// Wraps the APK [apkFile] extracted to [archive], recording checks in
+  /// [check].
+  Apk(this.archive, {required this.apkFile, BundleCheck? check})
+    : check = check ?? BundleCheck();
 
   /// Extracts the APK at [workspacePath] in the test's runfiles
   /// (`app.apk`, `glass_app/glass_android.apk`). [prefix] names the temporary
@@ -25,14 +29,21 @@ class Apk {
     String workspacePath, {
     String prefix = 'apk_test',
     BundleCheck? check,
-  }) => Apk(
-    ExtractedArchive.fromRunfiles(
-      workspacePath,
-      prefix: prefix,
-      extractor: Extractor.zipper,
-    ),
-    check: check,
-  );
+  }) {
+    final apkFile = requireRunfile(workspacePath, what: 'APK');
+    return Apk(
+      ExtractedArchive.fromPath(
+        apkFile,
+        prefix: prefix,
+        extractor: Extractor.zipper,
+      ),
+      apkFile: apkFile,
+      check: check,
+    );
+  }
+
+  /// The APK itself.
+  final String apkFile;
 
   /// The extracted files.
   final ExtractedArchive archive;
@@ -131,6 +142,40 @@ class Apk {
         'correct for $abi) aligned 0x${align.toRadixString(16)}',
       );
     }
+  }
+
+  /// Checks that the native libraries are packaged as AGP packages them for
+  /// a minimum SDK of 23 or more (`jniLibs.useLegacyPackaging = false`, its
+  /// default): every `lib/<abi>/*.so` stored uncompressed at a
+  /// [pageSize]-aligned offset, so Android maps it straight from the APK, and
+  /// the manifest's `<application android:extractNativeLibs="false">`, so the
+  /// installer does not copy it out as well.
+  void checkNativeLibrariesUncompressed({int pageSize = 16384}) {
+    var checked = 0;
+    for (final entry in zipEntries(File(apkFile).readAsBytesSync())) {
+      if (!RegExp(r'^lib/[^/]+/[^/]+\.so$').hasMatch(entry.name)) continue;
+      checked++;
+      if (!entry.stored) {
+        check.fail('${entry.name} is compressed (method ${entry.method})');
+      } else if (entry.dataOffset % pageSize != 0) {
+        check.fail(
+          '${entry.name} is stored at offset ${entry.dataOffset}, which is '
+          'not $pageSize-aligned',
+        );
+      } else {
+        check.pass('${entry.name} is stored $pageSize-aligned');
+      }
+    }
+    if (checked == 0) check.fail('no native libraries found under lib/');
+    final extract = [
+      for (final e in manifestElements(manifest.readAsBytesSync()))
+        if (e.name == 'application') e.attributes['extractNativeLibs'],
+    ];
+    check.expect(
+      'the manifest says android:extractNativeLibs="false"',
+      condition: extract.length == 1 && extract.single == 'false',
+      detail: 'android:extractNativeLibs $extract',
+    );
   }
 
   /// Checks that the dex files define every class in [required], keyed by

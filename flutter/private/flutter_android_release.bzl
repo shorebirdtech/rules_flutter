@@ -18,7 +18,7 @@ The program, `flutter/private/tools/android_release.dart`, writes
 """
 
 load("@platforms//host:constraints.bzl", "HOST_CONSTRAINTS")
-load("@rules_android//providers:providers.bzl", "AndroidBundleInfo")
+load("@rules_android//providers:providers.bzl", "AndroidBundleInfo", "ApkInfo")
 load("@rules_dart//dart:utils.bzl", "runfiles_path")
 load("//flutter/private:host_transition.bzl", "host_transition")
 load("//flutter/private:release_transition.bzl", "android_release_transition")
@@ -26,18 +26,18 @@ load("//flutter/private:release_transition.bzl", "android_release_transition")
 _ANDROID_TOOLCHAIN = "@rules_android//toolchains/android:toolchain_type"
 _JAVA_RUNTIME_TOOLCHAIN = "@bazel_tools//tools/jdk:runtime_toolchain_type"
 
-# The Android tools the program runs (bundletool, aapt2) run where `bazel run`
+# The Android tool the program runs (bundletool) runs where `bazel run`
 # starts it: on this machine, never on a registered remote platform.
 _HOST_TOOLS = "android_release_host_tools"
 
-_JDK_TOOLS = ["java", "jar", "jarsigner", "keytool"]
+_JDK_TOOLS = ["java", "jarsigner", "keytool"]
 
 def _jdk_tool(java_runtime, tool, is_windows):
     suffix = "/bin/" + tool + (".exe" if is_windows else "")
     for file in java_runtime.files.to_list():
         if file.path.endswith(suffix):
             return file
-    fail(("flutter_android_release needs a full JDK (java, jar, jarsigner, keytool) as " +
+    fail(("flutter_android_release needs a full JDK (java, jarsigner, keytool) as " +
           "the Java runtime, and %s has no %s. Set --java_runtime_version to a remote " +
           "JDK such as remotejdk_25.") % (java_runtime.java_home, suffix[1:]))
 
@@ -69,16 +69,20 @@ def _flutter_android_release_impl(ctx):
 
     android = ctx.exec_groups[_HOST_TOOLS].toolchains[_ANDROID_TOOLCHAIN]
     bundletool = android.bundletool[DefaultInfo].files.to_list()[0]
-    aapt2 = android.aapt2[DefaultInfo].files_to_run.executable
 
     bundle = ctx.attr.app_bundle[0]
     aab = bundle[AndroidBundleInfo].unsigned_aab
+
+    # The APK of the bundle's base module: the same release build, zipaligned
+    # and signed with the debug key, which the program replaces.
+    apk = bundle[ApkInfo].signed_apk
 
     workspace = ctx.workspace_name
     config = ctx.actions.declare_file(ctx.label.name + ".android_release.json")
     ctx.actions.write(config, json.encode_indent({
         "aab": runfiles_path(aab, workspace),
-        "aapt2": runfiles_path(aapt2, workspace),
+        "apk": runfiles_path(apk, workspace),
+        "apksigner": runfiles_path(ctx.file.apksigner, workspace),
         "bundletool": runfiles_path(bundletool, workspace),
         "keyProperties": ctx.attr.key_properties,
         "label": "//%s:%s" % (ctx.label.package, ctx.label.name),
@@ -94,13 +98,10 @@ def _flutter_android_release_impl(ctx):
     )
 
     runfiles = ctx.runfiles(
-        files = [config, aab, bundletool, aapt2],
+        files = [config, aab, apk, bundletool, ctx.file.apksigner],
         transitive_files = java_runtime.files,
     )
-    runfiles = runfiles.merge_all([
-        tool[DefaultInfo].default_runfiles,
-        android.aapt2[DefaultInfo].default_runfiles,
-    ])
+    runfiles = runfiles.merge(tool[DefaultInfo].default_runfiles)
 
     return [
         DefaultInfo(executable = executable, runfiles = runfiles),
@@ -110,10 +111,10 @@ def _flutter_android_release_impl(ctx):
         OutputGroupInfo(android_release_config = depset([config])),
     ]
 
-flutter_android_release = rule(
+_flutter_android_release = rule(
     implementation = _flutter_android_release_impl,
     executable = True,
-    # `bazel run` starts the program, the JDK and aapt2 on this machine.
+    # `bazel run` starts the program and the JDK on this machine.
     cfg = host_transition,
     toolchains = [_JAVA_RUNTIME_TOOLCHAIN],
     exec_groups = {_HOST_TOOLS: exec_group(
@@ -121,6 +122,13 @@ flutter_android_release = rule(
         toolchains = [_ANDROID_TOOLCHAIN],
     )},
     attrs = {
+        "apksigner": attr.label(
+            doc = "The Android SDK's `apksigner` as one jar, which aligns and " +
+                  "signs the APK: the deploy jar of its `java_binary`, such as " +
+                  "`@androidsdk//:apksigner_deploy.jar`.",
+            mandatory = True,
+            allow_single_file = [".jar"],
+        ),
         "android_platforms": attr.label_list(
             doc = "The ABIs of the release build, whatever " +
                   "`--@rules_android//flags:android_platforms` says. Defaults to " +
@@ -139,7 +147,7 @@ flutter_android_release = rule(
                   "`android_platforms`, whatever the command line says.",
             mandatory = True,
             cfg = android_release_transition,
-            providers = [AndroidBundleInfo],
+            providers = [AndroidBundleInfo, ApkInfo],
         ),
         "key_properties": attr.string(
             doc = "Where the signing configuration is, relative to this target's " +
@@ -156,11 +164,12 @@ flutter_android_release = rule(
         ),
         "_windows_constraint": attr.label(default = "@platforms//os:windows"),
     },
-    doc = """Signs an App Bundle and a universal APK with the app's upload key, when run.
+    doc = """Signs an App Bundle and its APK with the app's upload key, when run.
 
 `bazel run` of this target builds `app_bundle` in release mode for every ABI
-of `android_platforms`, signs it with the key `key.properties` names, makes a
-universal APK from it signed with the same key, checks both, and writes them to
+of `android_platforms`, signs it with the key `key.properties` names, signs
+the APK of the same build (its bundle's base module) with the same key through
+the SDK's `apksigner`, checks both, and writes them to
 `build/app/outputs/bundle/release/app-release.aab` and
 `build/app/outputs/flutter-apk/app-release.apk` under the package. Nothing is
 signed in a build action: the keystore and its passwords are read when the
@@ -172,3 +181,19 @@ Commands (after `--`):
     create-key          --key-properties=<path>  --dname=<X.500 name>
 """,
 )
+
+def flutter_android_release(name, apksigner = "@androidsdk//:apksigner_deploy.jar", **kwargs):
+    """Signs an App Bundle and its APK with the app's upload key, when run.
+
+    See the rule, `_flutter_android_release`, for what it does and its
+    attributes.
+
+    Args:
+        name: Target name; `bazel run` it to sign.
+        apksigner: The Android SDK's `apksigner`, as one jar. Defaults to that of
+            `@androidsdk`, the SDK rules_android resolves from `ANDROID_HOME`,
+            which builds the APKs.
+        **kwargs: The rule's other attributes: `app_bundle`,
+            `android_platforms`, `key_properties`, and the common ones.
+    """
+    _flutter_android_release(name = name, apksigner = apksigner, **kwargs)

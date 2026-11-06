@@ -55,6 +55,14 @@
 /// `--default-version-name` give the value used only when the base declares
 /// none, for an app that leaves the arguments unset.
 ///
+/// Uncompressed native libraries (`--uncompressed-native-libs`): AGP stores
+/// an app's native libraries uncompressed and page-aligned when its minimum
+/// SDK is 23 or more (`jniLibs.useLegacyPackaging = false`, the default), and
+/// sets `android:extractNativeLibs="false"` on `<application>` so the
+/// installer leaves them in the APK; so does this tool. A base that declares
+/// `"true"` asks for the legacy packaging, which these rules do not build,
+/// and is an error.
+///
 /// The base manifest is never re-serialized: merged permissions are inserted
 /// textually right after the root `<manifest ...>` open tag, and qualified
 /// class names replace their attribute values in place, so every other base
@@ -67,7 +75,7 @@
 ///       [--library <path>]... [--placeholder <name>]... [--namespace <package>]
 ///       [--version-code <n> | --default-version-code <n>]
 ///       [--version-name <s> | --default-version-name <s>]
-///       --output <path>
+///       [--uncompressed-native-libs] --output <path>
 import 'dart:io';
 
 /// Pointer at the Tier-1 escape hatch, appended to every rejection.
@@ -525,6 +533,40 @@ String qualifyClassNames(String xml, String namespace) {
   return out.toString();
 }
 
+/// [xml] with `android:extractNativeLibs="false"` on its `<application>`,
+/// written first among its attributes. A base that declares it `false`
+/// already is returned unchanged; one that declares anything else, or has no
+/// `<application>`, is an error.
+String markNativeLibsUncompressed(String xml, {required String basePath}) {
+  // Comments, CDATA and processing instructions blanked, as in
+  // [qualifyClassNames].
+  final masked = xml.replaceAllMapped(
+    RegExp(r'<!--.*?-->|<!\[CDATA\[.*?\]\]>|<\?.*?\?>', dotAll: true),
+    (m) => ' ' * m[0]!.length,
+  );
+  final application = RegExp(
+    r'''<application((?:\s+[\w:.-]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*/?>''',
+  ).firstMatch(masked);
+  if (application == null) {
+    throw FormatException('The manifest $basePath has no <application>.');
+  }
+  final declared = RegExp(
+    r'''android:extractNativeLibs\s*=\s*(["'])(.*?)\1''',
+  ).firstMatch(application[1]!);
+  if (declared != null) {
+    if (declared[2] == 'false') return xml;
+    throw FormatException(
+      'The manifest $basePath declares '
+      'android:extractNativeLibs="${declared[2]}", but the APK stores its '
+      'native libraries uncompressed, as AGP does from a minimum SDK of 23, '
+      'so the installer must not extract them. Remove the attribute.',
+    );
+  }
+  final insertAt = application.start + '<application'.length;
+  return '${xml.substring(0, insertAt)} android:extractNativeLibs="false"'
+      '${xml.substring(insertAt)}';
+}
+
 /// A version attribute for the root `<manifest>`: its [value], and whether
 /// that is only the default, which a value the base declares replaces.
 typedef VersionAttribute = ({String value, bool isDefault});
@@ -585,8 +627,12 @@ String mergeManifests({
   String? namespace,
   VersionAttribute? versionCode,
   VersionAttribute? versionName,
+  bool uncompressedNativeLibs = false,
 }) {
   if (namespace != null) baseXml = qualifyClassNames(baseXml, namespace);
+  if (uncompressedNativeLibs) {
+    baseXml = markNativeLibsUncompressed(baseXml, basePath: basePath);
+  }
   if (versionCode != null || versionName != null) {
     _baseInsertionPoint(baseXml, basePath);
     baseXml = setVersion(
@@ -657,6 +703,7 @@ void main(List<String> args) {
   String? namespace;
   VersionAttribute? versionCode;
   VersionAttribute? versionName;
+  var uncompressedNativeLibs = false;
 
   for (var i = 0; i < args.length; i++) {
     if (args[i] == '--base' && i + 1 < args.length) {
@@ -677,6 +724,8 @@ void main(List<String> args) {
       versionName = (value: args[++i], isDefault: false);
     } else if (args[i] == '--default-version-name' && i + 1 < args.length) {
       versionName = (value: args[++i], isDefault: true);
+    } else if (args[i] == '--uncompressed-native-libs') {
+      uncompressedNativeLibs = true;
     } else if (args[i] == '--output' && i + 1 < args.length) {
       outputPath = args[++i];
     }
@@ -688,7 +737,8 @@ void main(List<String> args) {
       '[--overlay <path>] [--library <path>]... [--placeholder <name>]... '
       '[--namespace <package>] '
       '[--version-code <n> | --default-version-code <n>] '
-      '[--version-name <s> | --default-version-name <s>] --output <path>',
+      '[--version-name <s> | --default-version-name <s>] '
+      '[--uncompressed-native-libs] --output <path>',
     );
     exit(1);
   }
@@ -709,6 +759,7 @@ void main(List<String> args) {
       namespace: namespace,
       versionCode: versionCode,
       versionName: versionName,
+      uncompressedNativeLibs: uncompressedNativeLibs,
     );
   } on FormatException catch (e) {
     stderr.writeln(e.message);

@@ -28,6 +28,11 @@ Given `set_version`, it writes the app's version onto the root
 `flutter.versionCode` and `flutter.versionName`. Done here rather than through
 `android_binary`'s `manifest_values` so that the values may be a `select()`.
 
+Given `uncompressed_native_libs`, it marks `<application>` with
+`android:extractNativeLibs="false"`, as AGP does for an app whose native
+libraries it stores uncompressed (`jniLibs.useLegacyPackaging = false`, its
+default from a minimum SDK of 23).
+
 Each runs the rules_flutter merger tool
 (`merge_android_manifests.dart`) over a base manifest and an overlay.
 
@@ -91,6 +96,8 @@ def _flutter_android_manifest_merge_impl(ctx):
             "--version-name" if ctx.attr.build_name else "--default-version-name",
             version.version_name,
         )
+    if ctx.attr.uncompressed_native_libs:
+        args.add("--uncompressed-native-libs")
     args.add("--output", output)
 
     ctx.actions.run(
@@ -155,11 +162,18 @@ flutter_android_manifest_merge = rule(
                   "number from 1 to 2100000000. Empty is `1`, which a " +
                   "versionCode the base declares replaces.",
         ),
+        "uncompressed_native_libs": attr.bool(
+            doc = "Set `android:extractNativeLibs=\"false\"` on " +
+                  "`<application>`, for an APK that stores its native " +
+                  "libraries uncompressed (`android_binary`'s " +
+                  "`nocompress_extensions = [\".so\"]`), as AGP does. A " +
+                  "base that declares `\"true\"` is an error.",
+        ),
         "_merge_tool": attr.label(
             default = _TOOL,
             allow_single_file = True,
         ),
     },
     exec_groups = PORTABLE_EXEC_GROUPS,
-    doc = "Merges an overlay manifest's permissions, and those of the app's Android libraries, into a base manifest, qualifies its relative class names against a namespace, and sets the app's version.",
+    doc = "Merges an overlay manifest's permissions, and those of the app's Android libraries, into a base manifest, qualifies its relative class names against a namespace, sets the app's version, and marks its native libraries as not to be extracted.",
 )

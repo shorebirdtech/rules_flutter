@@ -136,8 +136,8 @@ flutter_android_app(
     permissions = ["android.permission.INTERNET"],
 )
 
-# `bazel run :app_release` signs `:app_bundle` and a universal APK made from
-# it with the upload key android/key.properties names: release mode, both
+# `bazel run :app_release` signs `:app_bundle` and the APK of the same build
+# with the upload key android/key.properties names: release mode, both
 # ABIs. `:verify_android_release_test` signs with a key it makes itself.
 flutter_android_release(
     name = "app_release",
@@ -245,6 +245,9 @@ android_binary(
     assets_dir = "assets",
     custom_package = "com.example.flutterapp.nativedep",
     manifest = ":native_dep_manifest",
+    # Stored uncompressed, as the manifest's android:extractNativeLibs="false"
+    # requires: Android refuses to install the APK otherwise.
+    nocompress_extensions = [".so"],
     tags = ["manual"],
     deps = [
         ":aar_native",
@@ -318,6 +321,9 @@ android_binary(
     assets_dir = "assets",
     custom_package = "com.example.flutterapp.bazelrunner",
     manifest = ":bazel_runner_manifest",
+    # Stored uncompressed, as the manifest's android:extractNativeLibs="false"
+    # requires: Android refuses to install the APK otherwise.
+    nocompress_extensions = [".so"],
     tags = ["manual"],
     deps = [
         ":app_engine",

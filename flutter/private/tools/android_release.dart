@@ -1,18 +1,17 @@
 /// The program behind `bazel run` of a `flutter_android_release` target: signs
-/// a Flutter app's Android App Bundle with the user's upload key, and makes the
-/// signed universal APK.
+/// a Flutter app's Android App Bundle and the APK of the same release build
+/// with the user's upload key.
 ///
 /// Signing happens here, at run time, rather than in a build action, so the
 /// key and its passwords never enter Bazel's graph or caches. Passwords reach
-/// the JDK tools only through environment variables set on that one child, or
-/// through files in a private temporary directory (bundletool accepts nothing
-/// else); no argument list built in this file contains one.
+/// the JDK tools and apksigner only through environment variables set on that
+/// one child; no argument list built in this file contains one.
 ///
 /// Environment:
 ///   RULES_FLUTTER_ANDROID_RELEASE_CONFIG  runfiles path of the JSON file the
 ///       rule writes: `label`, `package`, `keyProperties` (plain strings), and
-///       the runfiles paths `aab`, `java`, `jar`, `jarsigner`, `keytool`,
-///       `bundletool`, `aapt2`.
+///       the runfiles paths `aab`, `apk`, `java`, `jarsigner`, `keytool`,
+///       `bundletool`, `apksigner`.
 ///   BUILD_WORKSPACE_DIRECTORY, BUILD_WORKING_DIRECTORY  set by `bazel run`.
 library;
 
@@ -315,27 +314,36 @@ List<String> bundletoolValidateArgs({
   required String bundle,
 }) => ['-jar', bundletool, 'validate', '--bundle=$bundle'];
 
-List<String> bundletoolUniversalArgs({
-  required String bundletool,
-  required String bundle,
-  required String output,
-  required String aapt2,
+/// Signs the APK [unsigned] with the upload key, writing [signedOut], with
+/// the SDK's apksigner, the jar [apksigner].
+///
+/// The build stored the APK's native libraries uncompressed and zipaligned
+/// them to 16 KB, as AGP packages `flutter build apk`, which a device with
+/// 16 KB pages needs to map them; apksigner keeps that alignment, and
+/// replaces the debug signature the build gave the APK.
+List<String> apksignerSignArgs({
+  required String apksigner,
   required String keystore,
   required String alias,
-  required String storePasswordFile,
-  required String keyPasswordFile,
+  required String unsigned,
+  required String signedOut,
 }) => [
   '-jar',
-  bundletool,
-  'build-apks',
-  '--mode=universal',
-  '--bundle=$bundle',
-  '--output=$output',
-  '--aapt2=$aapt2',
-  '--ks=$keystore',
-  '--ks-pass=file:$storePasswordFile',
-  '--ks-key-alias=$alias',
-  '--key-pass=file:$keyPasswordFile',
+  apksigner,
+  'sign',
+  '--ks',
+  keystore,
+  '--ks-key-alias',
+  alias,
+  '--ks-pass',
+  'env:$storePasswordEnv',
+  '--key-pass',
+  'env:$keyPasswordEnv',
+  '--alignment-preserved',
+  'true',
+  '--out',
+  signedOut,
+  unsigned,
 ];
 
 // ---------------------------------------------------------------------------
@@ -395,12 +403,12 @@ class ToolConfig {
     required this.package,
     required this.keyProperties,
     required this.aab,
+    required this.apk,
     required this.java,
-    required this.jar,
     required this.jarsigner,
     required this.keytool,
     required this.bundletool,
-    required this.aapt2,
+    required this.apksigner,
   });
 
   factory ToolConfig.load(Runfiles runfiles, String configRunfilesPath) {
@@ -423,12 +431,12 @@ class ToolConfig {
       package: plain('package'),
       keyProperties: plain('keyProperties'),
       aab: path('aab'),
+      apk: path('apk'),
       java: path('java'),
-      jar: path('jar'),
       jarsigner: path('jarsigner'),
       keytool: path('keytool'),
       bundletool: path('bundletool'),
-      aapt2: path('aapt2'),
+      apksigner: path('apksigner'),
     );
   }
 
@@ -436,12 +444,16 @@ class ToolConfig {
   final String package;
   final String keyProperties;
   final String aab;
+
+  /// The release build's APK, signed with the debug key.
+  final String apk;
   final String java;
-  final String jar;
   final String jarsigner;
   final String keytool;
   final String bundletool;
-  final String aapt2;
+
+  /// The Android SDK's apksigner, as one jar.
+  final String apksigner;
 }
 
 String _join(Iterable<String> parts) =>
@@ -630,35 +642,23 @@ Future<void> _sign(_Context ctx) async {
       what: 'bundletool validate',
     );
 
-    // 5. The universal APK.
-    final storePasswordFile = '${tmp.path}/store_password';
-    final keyPasswordFile = '${tmp.path}/key_password';
-    File(storePasswordFile).writeAsStringSync(signing.storePassword);
-    File(keyPasswordFile).writeAsStringSync(signing.keyPassword);
+    // 5. The APK.
     await _run(
       config.java,
-      bundletoolUniversalArgs(
-        bundletool: config.bundletool,
-        bundle: config.aab,
-        output: '${tmp.path}/universal.apks',
-        aapt2: config.aapt2,
+      apksignerSignArgs(
+        apksigner: config.apksigner,
         keystore: signing.storeFile,
         alias: signing.keyAlias,
-        storePasswordFile: storePasswordFile,
-        keyPasswordFile: keyPasswordFile,
+        unsigned: config.apk,
+        signedOut: '${tmp.path}/app-release.apk',
       ),
-      what: 'bundletool build-apks',
-    );
-    await _run(
-      config.jar,
-      ['xf', 'universal.apks', 'universal.apk'],
-      what: 'jar xf',
-      workingDirectory: tmp.path,
+      what: 'apksigner sign',
+      passwords: signing,
     );
 
     // 6. Write both, only now that everything succeeded.
     _writeAtomically('${tmp.path}/app-release.aab', aabOut);
-    _writeAtomically('${tmp.path}/universal.apk', apkOut);
+    _writeAtomically('${tmp.path}/app-release.apk', apkOut);
 
     // 7. Report.
     stdout

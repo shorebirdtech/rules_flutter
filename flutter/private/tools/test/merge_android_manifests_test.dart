@@ -461,6 +461,95 @@ void main() {
     });
   });
 
+  group('uncompressed native libraries', () {
+    String marked(String base) => mergeManifests(
+      baseXml: base,
+      basePath: 'out/base/AndroidManifest.xml',
+      uncompressedNativeLibs: true,
+    );
+
+    test('marks the application not to extract them', () {
+      final out = marked(_base);
+      expect(
+        out,
+        contains(
+          '<application android:extractNativeLibs="false"\n'
+          '        android:label="example"',
+        ),
+      );
+      // Nothing else of the base changes.
+      expect(out.replaceFirst(' android:extractNativeLibs="false"', ''), _base);
+    });
+
+    test('keeps a base that says so already', () {
+      const declaring = '''
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:extractNativeLibs='false' android:label="example"/>
+</manifest>
+''';
+      expect(marked(declaring), declaring);
+    });
+
+    test('a comment naming the element changes nothing', () {
+      const commented = '''
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- <application android:label="old"> -->
+    <application android:label="example"/>
+</manifest>
+''';
+      expect(
+        marked(commented),
+        contains(
+          '<application android:extractNativeLibs="false" '
+          'android:label="example"/>',
+        ),
+      );
+      expect(
+        marked(commented),
+        contains('<!-- <application android:label="old"> -->'),
+      );
+    });
+
+    test('refuses a base that asks for them to be extracted', () {
+      expect(
+        () => marked('''
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:extractNativeLibs="true"/>
+</manifest>
+'''),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            allOf(
+              contains('android:extractNativeLibs="true"'),
+              contains('uncompressed'),
+            ),
+          ),
+        ),
+      );
+    });
+
+    test('refuses a base with no application', () {
+      expect(
+        () => marked(
+          '<manifest xmlns:android="http://schemas.android.com/apk/res/android"/>',
+        ),
+        throwsFormatException,
+      );
+    });
+
+    test('leaves the base alone unless asked', () {
+      expect(
+        mergeManifests(
+          baseXml: _base,
+          basePath: 'out/base/AndroidManifest.xml',
+        ),
+        _base,
+      );
+    });
+  });
+
   group('version', () {
     String withVersion(
       String base, {

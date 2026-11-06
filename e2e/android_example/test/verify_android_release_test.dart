@@ -8,7 +8,7 @@
 /// - `sign` writes `app-release.aab` and `app-release.apk`. The bundle is
 ///   signed by the test's key alone and passes `bundletool validate`; the APK
 ///   verifies with the SDK's `apksigner` (v2) against the same certificate and
-///   is 16 KB-aligned.
+///   is 16 KB-aligned, its native libraries stored uncompressed.
 /// - Both are release builds for both ABIs, though the test is not built with
 ///   `-c opt`: AOT `libapp.so` for arm64-v8a and x86_64, no kernel snapshot, a
 ///   manifest that is not debuggable, and dex shrunk by R8 (the bundle carries
@@ -315,6 +315,7 @@ void main() {
       prefix: 'release_apk',
       extractor: Extractor.zipper,
     ),
+    apkFile: apk,
     check: _check,
   );
   _check.expect(
@@ -328,6 +329,7 @@ void main() {
       '${extracted.path}/lib/$abi/libapp.so',
     );
   }
+  extracted.checkNativeLibrariesUncompressed();
   final root = manifestElements(extracted.manifest.readAsBytesSync());
   final debuggable = [
     for (final e in root)

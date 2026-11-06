@@ -54,6 +54,9 @@ Two tiers of API:
         android_binary(
             name = "my_apk",
             manifest = ":my_manifest",
+            # Stored uncompressed, as the manifest's
+            # android:extractNativeLibs="false" requires.
+            nocompress_extensions = [".so"],
             deps = [":my_native_libs", ":my_engine", ":my_runner"],
         )
 
@@ -65,6 +68,7 @@ Two tiers of API:
             bundle_config_file = "@rules_flutter//flutter:android_bundle_config.pb.json",
             manifest = ":my_manifest",
             manifest_values = {"applicationId": "com.example.myapp"},
+            nocompress_extensions = [".so"],
             deps = [":my_native_libs", ":my_engine", ":my_runner"],
         )
 
@@ -163,7 +167,7 @@ def flutter_android_bundle(name, **kwargs):
 flutter_android_build = _flutter_android_build
 
 # Signs an App Bundle (an `android_application`, such as
-# `flutter_android_app`'s `app_bundle`) and a universal APK made from it with
+# `flutter_android_app`'s `app_bundle`) and the APK of the same build with
 # the app's upload key, when `bazel run`. Builds the bundle in release mode for
 # every ABI. The key is read at run time from Flutter's `key.properties` and
 # never reaches the build graph. See flutter/private/flutter_android_release.bzl.
@@ -379,6 +383,11 @@ def flutter_android_manifest_gen(
     """Generates an AndroidManifest.xml from the default Bazel template.
 
     The template uses FlutterActivity as the main activity with embedding v2.
+
+    It declares `android:extractNativeLibs="false"`, as AGP does, so the
+    `android_binary` it goes to must store its libraries uncompressed with
+    `nocompress_extensions = [".so"]`: Android refuses to install an APK whose
+    manifest says so and whose libraries are compressed.
 
     Debug builds (`-c dbg`) declare `android.permission.INTERNET`, matching
     the permission Gradle merges from flutter create's debug variant
@@ -1035,7 +1044,7 @@ def flutter_android_app(
     # same runner under its own id would name a class that does not exist.
     #
     # And it sets the app's version on the manifest, from `build_name` and
-    # `build_number`.
+    # `build_number`, and `android:extractNativeLibs="false"`: see step 10.
     flutter_android_manifest_merge(
         name = "__%s_manifest_with_library_permissions" % name,
         base = actual_manifest,
@@ -1043,6 +1052,7 @@ def flutter_android_app(
         placeholders = sorted(manifest_values.keys()),
         namespace = namespace,
         set_version = True,
+        uncompressed_native_libs = True,
         build_name = version_arg(build_name),
         build_number = version_arg(build_number),
         tags = tags,
@@ -1060,6 +1070,15 @@ def flutter_android_app(
             "//conditions:default": [],
         })
     kwargs.setdefault("shrink_resources", True)
+
+    # Native libraries stored uncompressed and 16 KB-aligned, as AGP packages
+    # them for a minimum SDK of 23 or more (`jniLibs.useLegacyPackaging`,
+    # false by default): Android maps them straight from the APK instead of
+    # extracting a second copy at install. rules_android's zipalign
+    # page-aligns stored `.so` files; the manifest step above tells the
+    # installer not to extract them. `.so` stays whatever else is given,
+    # since the manifest promises it.
+    kwargs["nocompress_extensions"] = kwargs.pop("nocompress_extensions", []) + [".so"]
 
     # 10. Final android_binary, and the App Bundle beside it. rules_android's
     # `android_application` declares an `android_binary` of its own,

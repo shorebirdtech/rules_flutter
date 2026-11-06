@@ -209,15 +209,12 @@ void main() {
         bundletool: '/b.jar',
         bundle: '/out.aab',
       ),
-      'bundletoolUniversalArgs': bundletoolUniversalArgs(
-        bundletool: '/b.jar',
-        bundle: '/in.aab',
-        output: '/u.apks',
-        aapt2: '/aapt2',
+      'apksignerSignArgs': apksignerSignArgs(
+        apksigner: '/apksigner.jar',
         keystore: '/k.jks',
         alias: 'upload',
-        storePasswordFile: '/t/store_password',
-        keyPasswordFile: '/t/key_password',
+        unsigned: '/u.apk',
+        signedOut: '/s.apk',
       ),
     };
 
@@ -259,12 +256,32 @@ void main() {
       );
     });
 
-    test('bundletool reads passwords from files', () {
-      final args = lists['bundletoolUniversalArgs']!;
-      expect(args, contains('--ks-pass=file:/t/store_password'));
-      expect(args, contains('--key-pass=file:/t/key_password'));
-      expect(args.where((a) => a.contains('pass:')), isEmpty);
-      expect(args, containsAll(['--mode=universal', '--aapt2=/aapt2']));
+    test('apksigner reads passwords from the environment', () {
+      expect(
+        lists['apksignerSignArgs'],
+        containsAllInOrder([
+          '--ks-pass',
+          'env:$storePasswordEnv',
+          '--key-pass',
+          'env:$keyPasswordEnv',
+        ]),
+      );
+    });
+
+    test("apksigner keeps the build's 16 KB alignment", () {
+      expect(
+        lists['apksignerSignArgs'],
+        containsAllInOrder([
+          '-jar',
+          '/apksigner.jar',
+          'sign',
+          '--alignment-preserved',
+          'true',
+          '--out',
+          '/s.apk',
+          '/u.apk',
+        ]),
+      );
     });
 
     test('verification is not strict', () {

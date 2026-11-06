@@ -1055,7 +1055,7 @@ flutter_android_release(
 # First time only: make the upload keystore android/key.properties describes.
 bazel run //:app_release -- create-key
 
-# Each release: build, sign and check the bundle and a universal APK.
+# Each release: build, sign and check the bundle and the APK.
 bazel run //:app_release
 # -> build/app/outputs/bundle/release/app-release.aab
 # -> build/app/outputs/flutter-apk/app-release.apk
@@ -1075,7 +1075,7 @@ bazel run //:app_release
 
   A relative `storeFile` is relative to `android/app/`, as in Gradle. Never commit the file or the keystore (`flutter create`'s `android/.gitignore` already ignores `key.properties` and `*.jks`). On CI, write the file from your secret store before `bazel run`. `--key-properties=<path>` reads another file, and `--output-dir=<dir>` writes `app-release.aab` and `app-release.apk` there instead.
 - `create-key` makes the keystore `storeFile` names (PKCS12, RSA 2048, valid 10000 days, the values in Flutter's guide), with the JDK Bazel already has, so you need no Java installed. It refuses to replace an existing keystore. Back up the keystore and its password: a lost upload key can be reset through Play Console, but only by asking.
-- With Play App Signing, the bundle you upload is signed with the upload key, and Google signs the APKs it serves with the app signing key it keeps. `app-release.apk` is for distribution outside Play; it is bundletool's universal APK of the same bundle, signed with the same key, so it will not update a copy installed from Play. Unlike Gradle's APK, its native libraries are stored compressed.
+- With Play App Signing, the bundle you upload is signed with the upload key, and Google signs the APKs it serves with the app signing key it keeps. `app-release.apk` is for distribution outside Play; it is the APK of the same release build, signed with the same key (by the Android SDK's `apksigner`, which `flutter_android_release` takes from `@androidsdk`), so it will not update a copy installed from Play. As in Gradle's, its native libraries are stored uncompressed and 16 KB-aligned.
 - Raise `build_number` for each upload: Play refuses a version code it has seen.
 
 `bazel run //:app_bundle` installs the bundle on the device `ANDROID_SERIAL` names, through bundletool and signed with the debug key, as rules_android intends. rules_android 0.8.0 needs [`rules_android_bundle_run.patch`](e2e/android_example/patches/rules_android_bundle_run.patch) in your `single_version_override` of rules_android for that: without it the command fails to find the JDK, aapt2, the Kotlin runtime and adb. `flutter_android_release` does not need the patch.
@@ -1119,6 +1119,9 @@ android_binary(
     name = "my_apk",
     manifest = ":my_manifest",
     multidex = "native",
+    # Stored uncompressed, as the manifest's android:extractNativeLibs="false"
+    # requires: Android refuses to install the APK otherwise.
+    nocompress_extensions = [".so"],
     deps = [":my_native_libs", ":my_engine", ":my_runner"],
 )
 ```
@@ -1971,7 +1974,7 @@ The rule forwards the files of `targets`, so a test names them in `data` and fin
 
 ### flutter_android_release
 
-Signs an App Bundle and a universal APK made from it with your upload key when you `bazel run` it. See [Release: App Bundle and signing](#release-app-bundle-and-signing).
+Signs an App Bundle and the APK of the same release build with your upload key when you `bazel run` it. See [Release: App Bundle and signing](#release-app-bundle-and-signing).
 
 ```starlark
 load("@rules_flutter//flutter:android.bzl", "flutter_android_release")
