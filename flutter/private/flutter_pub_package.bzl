@@ -744,7 +744,9 @@ def _build_pkg_assets(ctx, package, parsed_assets, flavors):
             for variant in _with_variants(ctx, package, main):
                 files[":" + variant] = variant
                 restrictions.add(variant, entry.platforms)
-                flavors.add(variant, path, entry.flavors, main = variant == main)
+                conflict = flavors.add(variant, path, entry.flavors, main = variant == main)
+                if conflict:
+                    fail(conflict)
     return struct(files = files, platforms = restrictions.platforms())
 
 def _build_additional_licenses(ctx, package, paths):
@@ -790,7 +792,9 @@ def _build_pkg_shaders(package, parsed_shaders, flavors):
         _checked_file_name(package, "shader file", entry.path)
         files[":" + entry.path] = entry.path
         restrictions.add(entry.path, entry.platforms)
-        flavors.add(entry.path, entry.path, entry.flavors)
+        conflict = flavors.add(entry.path, entry.path, entry.flavors)
+        if conflict:
+            fail(conflict)
     return struct(files = files, platforms = restrictions.platforms())
 
 def _platform_restrictions():
@@ -822,7 +826,8 @@ def flavor_restrictions(package):
 
     Assets and shaders share one tracker per package, as flutter_tools keeps
     one map per package: a file that two entries reach with different flavor
-    sets is a conflict, whatever flavor is being built.
+    sets is a conflict, whatever flavor is being built, and fails the
+    package as it fails `flutter build`.
 
     Args:
         package: The package name, for the conflict message.
