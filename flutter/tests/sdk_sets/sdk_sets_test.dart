@@ -23,7 +23,11 @@ void main(List<String> args) {
   final exe = Platform.isWindows ? '.exe' : '';
 
   /// A file of a copy: `dart-sdk/<path>` for the SDK's own, else `extra/`.
-  String sdk(String copy, String path) => '${paths[copy]}/dart-sdk/$path$exe';
+  String sdk(String copy, String path) => '${paths[copy]}/dart-sdk/$path';
+
+  /// A program of a copy's SDK, `bin/<name>`, which on Windows ends `.exe`;
+  /// the snapshots it runs do not.
+  String program(String copy, String name) => sdk(copy, 'bin/$name$exe');
   String extra(String copy, String name) => '${paths[copy]}/extra/$name';
 
   late Directory work;
@@ -102,10 +106,10 @@ void main(List<String> args) {
   Future<String>? compiled;
   Future<String> appKernel() => compiled ??= () async {
     final output = '${work.path}/app.dill';
-    await run(sdk('kernel_compile', 'bin/dart'), [
+    await run(program('kernel_compile', 'dart'), [
       paths['kernel_filter']!,
       '--',
-      sdk('kernel_compile', 'bin/dartaotruntime'),
+      program('kernel_compile', 'dartaotruntime'),
       sdk('kernel_compile', 'bin/snapshots/frontend_server_aot.dart.snapshot'),
       '--sdk-root',
       '${paths['kernel_compile']}/extra/',
@@ -129,14 +133,17 @@ void main(List<String> args) {
 
     test('kernel_worker compiles a module with no tool_files', () async {
       final output = '${work.path}/module.dill';
-      await run(sdk('kernel_worker', 'bin/dartaotruntime'), [
+      await run(program('kernel_worker', 'dartaotruntime'), [
         sdk('kernel_worker', 'bin/snapshots/kernel_worker_aot.dart.snapshot'),
         '--target',
         'flutter',
+        // URIs: kernel_worker resolves both as URIs, so an absolute Windows
+        // path would read as the scheme `c:`. The build's actions pass
+        // relative paths, which resolve either way.
         '--dart-sdk-summary',
-        extra('kernel_worker', 'platform_strong.dill'),
+        Uri.file(extra('kernel_worker', 'platform_strong.dill')).toString(),
         '--packages-file',
-        packages,
+        Uri.file(packages).toString(),
         '--no-summary-only',
         '--exclude-non-sources',
         '--source',
@@ -153,7 +160,7 @@ void main(List<String> args) {
       final bundle = '${work.path}/flutter_assets';
       final config = File('${work.path}/assets.json')
         ..writeAsStringSync(jsonEncode({'assets': {}, 'fonts': []}));
-      await run(sdk('script', 'bin/dart'), [
+      await run(program('script', 'dart'), [
         paths['generate_asset_manifest']!,
         '--config',
         config.path,
@@ -165,7 +172,7 @@ void main(List<String> args) {
 
     test('the VM runs const_finder', () async {
       final kernel = await appKernel();
-      final result = await run(sdk('script', 'bin/dart'), [
+      final result = await run(program('script', 'dart'), [
         extra('script', 'const_finder.dart.snapshot'),
         '--kernel-file',
         kernel,
@@ -188,7 +195,7 @@ void main(List<String> args) {
   group('web', () {
     test('dart compile js', () async {
       final output = '${work.path}/js/main.dart.js';
-      await run(sdk('dart2js', 'bin/dart'), [
+      await run(program('dart2js', 'dart'), [
         'compile',
         'js',
         '--platform-binaries=${paths['dart2js']}/extra',
@@ -203,7 +210,7 @@ void main(List<String> args) {
 
     test('dart compile wasm, optimizing', () async {
       final output = '${work.path}/wasm/main.dart.wasm';
-      await run(sdk('dart2wasm', 'bin/dart'), [
+      await run(program('dart2wasm', 'dart'), [
         'compile',
         'wasm',
         '--extra-compiler-option=--platform=${extra('dart2wasm', 'dart2wasm_platform.dill')}',
