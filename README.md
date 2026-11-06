@@ -480,7 +480,7 @@ What it does not do. Everything else that differs between flavors, the app id, n
 - The app's own assets come from the target's `assets`, not its pubspec, so a flavor's own assets go in that flavor's target. A library's flavor-only assets go in a small library that only that flavor's application depends on.
 - `FLUTTER_APP_FLAVOR` cannot be set by hand: it is refused in `defines` and `--dart-define`, as `flutter build` refuses it.
 - Web bundles a flavor's `flavors:` assets and shaders like the other platforms. `flutter build web` has no `--flavor` and bundles none, so this is a deliberate difference.
-- `flutter_test` has no `flavor` yet: a test sees no `appFlavor` and no `flavors:` entry.
+- `flutter_test` takes `flavor` too, as `flutter test --flavor` does: `appFlavor` is set, and the pub assets and shaders whose `flavors:` name it are bundled for the test. Without it, a test sees no `appFlavor` and no `flavors:` entry.
 
 ### macOS
 

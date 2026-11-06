@@ -66,6 +66,7 @@ load(
     "check_unreplaced_hooks",
     "declare_flutter_assets_dir",
     "detect_target_platform",
+    "flavor_dart_defines",
     "flutter_build_assets",
     "flutter_compile_shaders",
 )
@@ -672,9 +673,14 @@ def _compile_whole_program(ctx, tools, bootstrap, own_srcs, packages, native_ass
         native_assets_manifest = native_assets_manifest,
     )
 
+def _app_flavor_defines(attrs):
+    """The define `appFlavor` reads for the test's `flavor`; none for no flavor."""
+    return flavor_dart_defines(attrs.flavor)
+
 # The environment the test and its `deps`' modules compile in: its `defines`,
-# then the extra_dart_defines flag.
-_ENVIRONMENT = executable_defines_config()
+# then the flavor's, then the extra_dart_defines flag. A `defines` entry that
+# sets the flavor's key too is refused.
+_ENVIRONMENT = executable_defines_config(_app_flavor_defines)
 
 # flutter_test takes the compilation attrs plus the asset-bundle attrs.
 # Material widgets implicitly require `shaders/ink_sparkle.frag` and the
@@ -690,6 +696,7 @@ _TEST_ATTRS = {
         "srcs",
         "deps",
         "defines",
+        "flavor",
         "language_version",
         "_extra_dart_defines",
         "package_name",

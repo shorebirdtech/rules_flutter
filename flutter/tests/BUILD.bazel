@@ -29,6 +29,7 @@ load(":flutter_pub_package_sdk_source_test.bzl", "flutter_pub_package_sdk_source
 load(":flutter_pub_package_test.bzl", "flutter_pub_package_test_suite")
 load(":flutter_pubspec_test.bzl", "flutter_pubspec_test_suite")
 load(":flutter_test_bootstrap_test.bzl", "flutter_test_bootstrap_test_suite")
+load(":flutter_test_flavor_test.bzl", "flutter_test_flavor_test_suite")
 load(":flutter_test_runfiles_test.bzl", "flutter_test_runfiles_test_suite")
 load(":flutter_test_tags_test.bzl", "flutter_test_tags_test_suite")
 load(":gradle_dependency_forms_test.bzl", "gradle_dependency_forms_test_suite")
@@ -173,6 +174,8 @@ dev_config_test_suite(name = "dev_config_test")
 app_defines_test_suite(name = "app_defines_test")
 
 app_flavor_test_suite(name = "app_flavor_test")
+
+flutter_test_flavor_test_suite(name = "flutter_test_flavor_test")
 
 widget_creation_flag_test_suite(name = "widget_creation_flag_test")
 

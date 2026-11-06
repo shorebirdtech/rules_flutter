@@ -8,7 +8,7 @@ rules that compile Dart code, bundle assets, and run tests.
 - `flutter_application`: Compiles Dart code (kernel + AOT) and bundles assets.
     This is the primary rule — it produces a `FlutterApplicationInfo` provider
     that platform-specific packaging rules consume.
-- Flavors: `flavor` on `flutter_application` (and `flutter_web_app`) makes the
+- Flavors: `flavor` on `flutter_application` (`flutter_web_app` and `flutter_test`) makes the
     target that flavor, as `flutter build --flavor` does: `appFlavor` is set and
     the pub assets and shaders whose `flavors:` name it are bundled. Declare one
     application per flavor; see the README's Flavors section.

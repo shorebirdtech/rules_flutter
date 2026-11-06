@@ -323,6 +323,34 @@ build_variant_tests(
     test = ":widget_creation_test",
 )
 
+# `appFlavor` is the test's `flavor`, and null without one, in both kernel modes.
+# See test/flavor_test.dart and test/no_flavor_test.dart.
+flutter_test(
+    name = "flavor_test",
+    package_name = "hello_world",
+    flavor = "paid",
+    main = "test/flavor_test.dart",
+    deps = [
+        "@deps//:flutter",
+        "@deps//:flutter_test",
+    ],
+)
+
+flutter_test(
+    name = "no_flavor_test",
+    package_name = "hello_world",
+    main = "test/no_flavor_test.dart",
+    deps = [
+        "@deps//:flutter",
+        "@deps//:flutter_test",
+    ],
+)
+
+build_variant_tests(
+    name = "flavor_builds",
+    test = ":flavor_test",
+)
+
 # Constants that break a `const` constructor's assertion. `flutter test` fails
 # to compile a test that holds one, so building each of these MUST FAIL, with a
 # "Constant evaluation error" naming the assertion. They are `manual` because a
