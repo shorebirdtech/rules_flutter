@@ -71,6 +71,16 @@ _MISMATCH_SAYS = [
 
 # -- macOS -----------------------------------------------------------------
 
+# The licence registry of a running app lists the engine's licences, read
+# from the bundle's `NOTICES.Z`.
+flutter_macos_integration_test(
+    name = "macos_licences_test",
+    src = "integration_test/licences_test.dart",
+    application = ":app_flutter",
+    bundle_id = "com.example.integrationtest",
+    deps = _TEST_DEPS,
+)
+
 # Two tests tapping the counter and reading what it shows: passes.
 flutter_macos_integration_test(
     name = "macos_pass_test",
@@ -419,6 +429,16 @@ _WEB_HOSTS = select({
     "@platforms//os:macos": [],
     "//conditions:default": ["@platforms//:incompatible"],
 })
+
+# The same in a browser, where the framework reads `NOTICES`, uncompressed.
+flutter_web_integration_test(
+    name = "web_licences_test",
+    package_name = "integration_test_example",
+    src = "integration_test/licences_test.dart",
+    srcs = glob(["lib/**/*.dart"]),
+    target_compatible_with = _WEB_HOSTS,
+    deps = ["@deps//:flutter"] + _TEST_DEPS,
+)
 
 # The two tests of `:macos_pass_test`, in a browser: each is reported.
 flutter_web_integration_test(

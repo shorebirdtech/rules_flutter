@@ -3,7 +3,7 @@
 Produces a `flutter_assets/` tree artifact containing:
 - AssetManifest.bin  (StandardMessageCodec binary manifest)
 - FontManifest.json  (font family declarations)
-- NOTICES.Z          (gzip-compressed license text)
+- NOTICES.Z          (gzip-compressed license text; `NOTICES` for the web)
 - Copied asset files (images, etc.)
 """
 
@@ -11,6 +11,7 @@ load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
 load("//flutter/private:asset_variants.bzl", "variant_scale")
 load("//flutter/private:exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
 load("//flutter/private:flutter_library.bzl", "aggregate_pub_contributions", "package_relative")
+load("//flutter/private:notices.bzl", "NOTICES_ATTRS", "flutter_notices_action", "notices_asset_key")
 load("//flutter/private:path_mapping.bzl", "file_ref", "json_config_args")
 
 _TOOL = Label("//flutter/private/tools:generate_asset_manifest.dart")
@@ -78,8 +79,6 @@ def flutter_asset_bundle_action(
         dart_files,
         assets = [],
         fonts = [],
-        notices = "",
-        license_files = [],
         output_dir = None,
         const_finder = None,
         font_subset = None,
@@ -99,8 +98,6 @@ def flutter_asset_bundle_action(
         assets: list of File objects of the target's package to include in the
             bundle, each under its path in that package (`assets/a.png`).
         fonts: list of font declaration dicts (FontManifest.json schema).
-        notices: License text string to compress into NOTICES.Z.
-        license_files: list of File objects containing license text to include in NOTICES.Z.
         output_dir: The already-declared directory (tree artifact) File to
             write the bundle into. Declared by the caller rather than here
             because an application has to know where its assets will land
@@ -165,8 +162,6 @@ def flutter_asset_bundle_action(
         "assets": manifest,
         "fonts": fonts,
         "copies": copies,
-        "notices": notices,
-        "license_files": [file_ref(refs, f) for f in license_files],
     }
 
     # Icon tree shaking config.
@@ -190,7 +185,7 @@ def flutter_asset_bundle_action(
         executable = dart,
         arguments = [args, json_config_args(ctx, config, refs)],
         inputs = depset(
-            direct = [tool] + claims.values() + license_files + extra_inputs,
+            direct = [tool] + claims.values() + extra_inputs,
             transitive = [dart_files],
         ),
         outputs = [output_dir],
@@ -210,16 +205,24 @@ def _flutter_asset_bundle_impl(ctx):
     # in deps — the same channel cupertino_icons et al. arrive through.
     fonts, extra_asset_copies, unlisted_asset_copies = aggregate_pub_contributions(ctx.attr.deps)
 
+    notices = flutter_notices_action(
+        ctx = ctx,
+        tools = tools,
+        packages = [],
+        additional = [],
+        engine_license = ctx.file._engine_license,
+        web = False,
+    )
+
     output_dir = flutter_asset_bundle_action(
         ctx = ctx,
         dart = tools.dart,
         dart_files = tools.sdk_files.run,
         assets = ctx.files.assets,
         fonts = fonts,
-        notices = "",
         output_dir = ctx.actions.declare_directory(ctx.label.name),
         extra_asset_copies = extra_asset_copies,
-        unlisted_asset_copies = unlisted_asset_copies,
+        unlisted_asset_copies = unlisted_asset_copies + [(notices_asset_key(False), notices)],
     )
 
     return [DefaultInfo(files = depset([output_dir]))]
@@ -238,7 +241,7 @@ flutter_asset_bundle = rule(
             default = _TOOL,
             allow_single_file = True,
         ),
-    },
+    } | NOTICES_ATTRS,
     exec_groups = PORTABLE_EXEC_GROUPS,
     doc = "Generates a flutter_assets/ tree artifact with manifests and asset files. It is for no platform in particular, so it holds the assets of `deps` that a package restricts to some platforms (`platforms:`) too.",
 )

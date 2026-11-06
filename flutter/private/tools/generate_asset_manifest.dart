@@ -16,8 +16,7 @@
 ///     ]
 ///   },
 ///   "fonts": [...],
-///   "copies": {"key": "source/path", ...},   // stored at the key, URI-encoded
-///   "notices": "License text..."
+///   "copies": {"key": "source/path", ...}   // stored at the key, URI-encoded
 /// }
 import 'dart:convert';
 import 'dart:io';
@@ -393,45 +392,4 @@ Future<void> main(List<String> args) async {
 
     File(entry.value as String).copySync(dest);
   }
-
-  // -- NOTICES.Z -------------------------------------------------------------
-  // Collect license text from inline string and/or license file paths.
-  final noticesBuf = StringBuffer();
-  final notices = config['notices'] as String? ?? '';
-  if (notices.isNotEmpty) {
-    noticesBuf.write(notices);
-  }
-  final licenseFiles = config['license_files'] as List<dynamic>? ?? [];
-  for (final path in licenseFiles) {
-    final file = File(path as String);
-    if (file.existsSync()) {
-      if (noticesBuf.isNotEmpty) noticesBuf.write('\n\n---\n\n');
-      noticesBuf.write(file.readAsStringSync());
-    }
-  }
-  File('$outputDir/NOTICES.Z').writeAsBytesSync(
-    _hostIndependentGzip(utf8.encode(noticesBuf.toString())),
-  );
-}
-
-/// Compresses [data] as gzip with a header that names no host.
-///
-/// `dart:io`'s `GZipCodec` has no option for the header's fields, and zlib
-/// fills two of them from the machine: the OS byte (3 on Linux, 19 on macOS,
-/// 10 on Windows, from the platform zlib was built for) and, in some builds,
-/// the modification time. The same licences would then be different bytes on
-/// each build host. RFC 1952 gives 255 as "unknown" and 0 as "no time
-/// available", so those are written over the header. Neither field is covered
-/// by the trailer's CRC-32 (which is over the data alone), so the stream stays
-/// valid.
-List<int> _hostIndependentGzip(List<int> data) {
-  final z = Uint8List.fromList(gzip.encode(data));
-  // A 10-byte header with no optional fields (FLG = 0) is what zlib writes
-  // when asked for a plain gzip stream; anything else is not ours to rewrite.
-  if (z.length < 18 || z[0] != 0x1f || z[1] != 0x8b || z[3] != 0) {
-    throw StateError('gzip.encode did not produce a plain gzip header');
-  }
-  z.setRange(4, 8, const [0, 0, 0, 0]); // MTIME
-  z[9] = 255; // OS: unknown
-  return z;
 }

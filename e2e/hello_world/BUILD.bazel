@@ -74,6 +74,29 @@ flutter_application(
     ],
 )
 
+# An app that opens the licence page, to see the bundled licences listed.
+flutter_application(
+    name = "licences_app",
+    package_name = "hello_world",
+    main = "lib/licences_main.dart",
+    deps = ["@deps//:flutter"],
+)
+
+flutter_macos_app(
+    name = "licences_macos",
+    app_name = "Licences",
+    application = ":licences_app",
+    bundle_id = "com.example.licences",
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
+flutter_web_app(
+    name = "licences_web",
+    package_name = "hello_world",
+    main = "lib/licences_main.dart",
+    deps = ["@deps//:flutter"],
+)
+
 # -- macOS desktop app --------------------------------------------------------
 
 flutter_macos_app(

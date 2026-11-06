@@ -1,12 +1,10 @@
 import 'dart:convert';
-import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:test/test.dart';
 
 // Import the library directly.
 import '../generate_asset_manifest.dart';
-import '../generate_asset_manifest.dart' as tool show main;
 
 void main() {
   group('encodeStandardMessage', () {
@@ -86,67 +84,6 @@ void main() {
       expect(medium[1], 254); // marker for 2-byte size
 
       // 4-byte: would need a huge string (65536+), skip for perf.
-    });
-  });
-
-  group('NOTICES.Z', () {
-    // Property: the bundle is a function of its declared inputs, so the same
-    // licence text gives the same NOTICES.Z bytes whichever machine built it.
-    //
-    // A gzip header records the compressor's OS, and zlib fills that in from
-    // the platform it was built for: 3 on Linux, 19 on macOS, 10 on Windows.
-    // This test runs on one host and cannot see the others, so it asserts the
-    // one value that names no host (255, "unknown" in RFC 1952) and a zero
-    // modification time. Anything else is the bytes of the host that ran it.
-    late Directory dir;
-    setUp(() => dir = Directory.systemTemp.createTempSync('notices_test'));
-    tearDown(() => dir.deleteSync(recursive: true));
-
-    Future<List<int>> noticesFor(Map<String, Object?> config) async {
-      final configFile = File('${dir.path}/config.json')
-        ..writeAsStringSync(json.encode(config));
-      await tool.main([
-        '--config',
-        configFile.path,
-        '--output-dir',
-        '${dir.path}/out',
-      ]);
-      return File('${dir.path}/out/NOTICES.Z').readAsBytesSync();
-    }
-
-    void expectHostIndependentHeader(List<int> z) {
-      expect(z.sublist(0, 2), [0x1f, 0x8b], reason: 'a gzip stream');
-      expect(z.sublist(4, 8), [0, 0, 0, 0], reason: 'no modification time');
-      expect(
-        z[9],
-        255,
-        reason:
-            'the OS byte names the host that compressed it (3 Unix, 19 '
-            'Darwin, 10 Windows), so the same inputs would give different '
-            'bytes on another host',
-      );
-    }
-
-    test('the gzip header names no host, for inline text', () async {
-      final z = await noticesFor({'notices': 'Licence text'});
-      expectHostIndependentHeader(z);
-      expect(utf8.decode(gzip.decode(z)), 'Licence text');
-    });
-
-    test('the gzip header names no host, for licence files', () async {
-      final licence = File('${dir.path}/LICENSE')..writeAsStringSync('MIT');
-      final z = await noticesFor({
-        'notices': 'first',
-        'license_files': [licence.path],
-      });
-      expectHostIndependentHeader(z);
-      expect(utf8.decode(gzip.decode(z)), 'first\n\n---\n\nMIT');
-    });
-
-    test('the gzip header names no host, with no licences at all', () async {
-      final z = await noticesFor({});
-      expectHostIndependentHeader(z);
-      expect(gzip.decode(z), isEmpty);
     });
   });
 }

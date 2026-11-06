@@ -1,5 +1,5 @@
 load("@rules_dart//dart:defs.bzl", "dart_library")
-load("//tools:bundle.bzl", "bundle_test")
+load("//tools:bundle.bzl", "bundle_test", "notices_test")
 load(":font_of_other_package_test.bzl", "font_of_other_package_test")
 load(":two_files_one_key_test.bzl", "two_files_one_key_test")
 
@@ -10,7 +10,10 @@ dart_library(
     visibility = ["//visibility:public"],
 )
 
-exports_files(glob(["expected/*.json"]) + ["bundle_test.dart"])
+exports_files(glob(["expected/*.json"]) + [
+    "bundle_test.dart",
+    "notices_test.dart",
+])
 
 # Each test is one property, stated above it, checked on a layout, name or
 # platform of its kind. The reference is flutter_tools (`asset.dart`, 3.47.x):
@@ -225,4 +228,47 @@ bundle_test(
 font_of_other_package_test(
     name = "font_of_other_package_keeps_its_path_in_the_font_manifest_test",
     target_under_test = "@fx_font_borrower",
+)
+
+# -- Licences ----------------------------------------------------------------------
+
+# Property: every bundle ships the licences the framework's `showLicensePage`
+# lists, in the asset it loads: `NOTICES.Z` (gzip), or `NOTICES` on the web
+# where nothing decompresses it. It holds the engine's licences, which every
+# program ships, as entries of their own, sorted as flutter_tools sorts them.
+[
+    notices_test(
+        name = "notices_list_the_engine_licences_%s_test" % os,
+        bundle = bundle,
+        subdir = "assets" if os == "web" else "",
+        web = os == "web",
+    )
+    for os, bundle in {
+        "android": "//:app_with_fx_platforms_android_bundle",
+        "ios": "//:app_with_fx_platforms_ios_bundle",
+        "linux": "//:app_with_fx_platforms_linux_bundle",
+        "macos": "//:app_with_fx_platforms_macos_bundle",
+        "web": "//:web_with_fx_platforms_bundle",
+        "windows": "//:app_with_fx_platforms_windows_bundle",
+    }.items()
+]
+
+# Property: a program's own `LICENSE` is an entry named by its package, and the
+# files its pubspec lists under `flutter: licenses:` come last, as they are.
+notices_test(
+    name = "notices_list_the_programs_own_licences_test",
+    additional = ["//:licenses/THIRD_PARTY.txt"],
+    bundle = "//:app_with_licences_bundle",
+    own_license = "//:licenses/LICENSE",
+    package = "asset_bundle",
+)
+
+notices_test(
+    name = "notices_list_the_programs_own_licences_web_test",
+    additional = ["//:licenses/THIRD_PARTY.txt"],
+    bundle = "//:web_with_licences_bundle",
+    own_license = "//:licenses/LICENSE",
+    package = "asset_bundle",
+    subdir = "assets",
+    web = True,
 )

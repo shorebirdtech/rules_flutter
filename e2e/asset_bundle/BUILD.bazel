@@ -144,6 +144,36 @@ tree_of(
     visibility = ["//visibility:public"],
 )
 
+# -- Licences ---------------------------------------------------------------------
+
+# An application that states its own licence and the files its pubspec's
+# `flutter: licenses:` lists.
+bundled_app(
+    name = "app_with_licences",
+    additional_licenses = ["licenses/THIRD_PARTY.txt"],
+    license = "licenses/LICENSE",
+)
+
+flutter_web_app(
+    name = "web_with_licences",
+    package_name = "asset_bundle",
+    additional_licenses = ["licenses/THIRD_PARTY.txt"],
+    js_fallback = False,
+    license = "licenses/LICENSE",
+    deps = ["@deps//:flutter"],
+)
+
+tree_of(
+    name = "web_with_licences_bundle",
+    src = ":web_with_licences",
+    visibility = ["//visibility:public"],
+)
+
+exports_files([
+    "licenses/LICENSE",
+    "licenses/THIRD_PARTY.txt",
+])
+
 # -- Two files for one key ----------------------------------------------------------
 
 # This package's `fonts/MaterialIcons-Regular.otf` and the one the Material

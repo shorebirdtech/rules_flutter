@@ -16,6 +16,7 @@ load("//flutter/private:flutter_info.bzl", "dedup_plugins")
 load("//flutter/private:flutter_library.bzl", "aggregate_pub_contributions", "package_relative", "ships_on")
 load("//flutter/private:flutter_shader_compile.bzl", "flutter_shader_compile_action")
 load("//flutter/private:native_sources.bzl", "native_sources_aspect")
+load("//flutter/private:notices.bzl", "NOTICES_ATTRS", "flutter_notices_action", "notices_asset_key")
 load("//flutter/private:plugin_registrant.bzl", "generate_dart_plugin_registrant", "generate_dev_plugin_registrants")
 load("//flutter/private:validation.bzl", "validate_dart_defines")
 
@@ -759,7 +760,7 @@ def flutter_build_assets(ctx, tools, output_dir, deps, target_platform, compiled
     `flutter_compile_shaders` and arrive via `compiled_shaders`).
 
     Args:
-        ctx: Rule context (must have assets, license_files, tree_shake_icons attrs and _asset_bundle_tool).
+        ctx: Rule context (must have assets, tree_shake_icons attrs, `_asset_bundle_tool`, `_notices_tool` and `_engine_license`).
         tools: `FlutterExecToolsInfo` of the `PORTABLE` group (`portable_tools`).
         output_dir: The tree artifact to bundle into, from
             `declare_flutter_assets_dir`. Passed in rather than declared here
@@ -806,7 +807,21 @@ def flutter_build_assets(ctx, tools, output_dir, deps, target_platform, compiled
         for entry in data_assets.to_list():
             extra_asset_copies.append(("packages/{pkg}/{name}".format(pkg = entry.package, name = entry.name), entry.file))
 
-    license_files = inputs.license_files
+    # The licences the program ships, in the one asset the framework reads
+    # them from. `inputs` has the program's own; a package's reach this when
+    # the closure's licences are collected too.
+    web = target_platform == "web"
+    own_package = [(inputs.package_name, inputs.license)] if inputs.license else []
+    own_additional = [(inputs.package_name, inputs.additional_licenses)] if inputs.additional_licenses else []
+    notices = flutter_notices_action(
+        ctx = ctx,
+        tools = tools,
+        packages = own_package,
+        additional = own_additional,
+        engine_license = ctx.file._engine_license,
+        web = web,
+    )
+    unlisted_copies = unlisted_copies + [(notices_asset_key(web), notices)]
 
     # Icon tree shaking: enabled only in non-debug mode with tree_shake_icons=True.
     tree_shake_icons = (
@@ -824,7 +839,6 @@ def flutter_build_assets(ctx, tools, output_dir, deps, target_platform, compiled
         assets = inputs.assets,
         owner = inputs,
         fonts = fonts,
-        license_files = license_files,
         output_dir = output_dir,
         const_finder = tools.const_finder if tree_shake_icons else None,
         font_subset = tools.font_subset if tree_shake_icons else None,
@@ -1226,7 +1240,7 @@ def flutter_program_inputs(ctx):
     Returns:
         A struct. `label` is the target whose package the program is in (its
         library root, and the key of each asset); `main`, `srcs`, `assets`,
-        `shaders`, `shader_includes` and `license_files` are Files
+        `shaders`, `shader_includes`, `license` and `additional_licenses` are Files
         (`unchecked_srcs`, among `srcs`, are not checked against `deps`); `deps`,
         `native_deps` and `code_assets` are Targets; the rest are as the
         attributes of `flutter_application` of the same names.
@@ -1244,7 +1258,8 @@ def flutter_program_inputs(ctx):
         shaders = list(getattr(ctx.files, "shaders", [])),
         shader_includes = list(getattr(ctx.files, "shader_includes", [])),
         require_sksl_shaders = getattr(ctx.attr, "require_sksl_shaders", False),
-        license_files = list(getattr(ctx.files, "license_files", [])),
+        license = getattr(ctx.file, "license", None),
+        additional_licenses = list(getattr(ctx.files, "additional_licenses", [])),
         tree_shake_icons = getattr(ctx.attr, "tree_shake_icons", False),
         native_deps = list(getattr(ctx.attr, "native_deps", [])),
         code_assets = list(getattr(ctx.attr, "code_assets", [])),
@@ -1395,8 +1410,16 @@ FLUTTER_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | {
               "otherwise the build fails, as `flutter build` does. Only applies to release builds.",
         default = True,
     ),
-    "license_files": attr.label_list(
-        doc = "License/NOTICE files to include in NOTICES.Z. Typically LICENSE files from dependencies.",
+    "license": attr.label(
+        doc = "The program's own licence: the `NOTICES` or `LICENSE` file at the root of its " +
+              "package, which `flutter build` reads from the app's package root. It is listed " +
+              "in `NOTICES.Z` under `package_name`, with the engine's licences and the " +
+              "additional ones.",
+        allow_single_file = True,
+    ),
+    "additional_licenses": attr.label_list(
+        doc = "Licence files appended to `NOTICES.Z` as they are, after the packages' " +
+              "licences: what `flutter: licenses:` lists in the program's `pubspec.yaml`.",
         allow_files = True,
     ),
     "min_os_version": attr.string(
@@ -1408,19 +1431,20 @@ FLUTTER_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | {
         default = Label("//flutter/private/tools:generate_asset_manifest.dart"),
         allow_single_file = True,
     ),
-} | AGENT_EXTENSIONS_ATTR
+} | NOTICES_ATTRS | AGENT_EXTENSIONS_ATTR
 
 # What a `flutter_application` states about its program: the attributes
 # `flutter_program_inputs` reads, and so the ones a rule that rebuilds the
 # program under another target (`flutter_application_variant`) takes from the
 # application instead of declaring its own.
 FLUTTER_PROGRAM_ATTR_NAMES = [
+    "additional_licenses",
     "assets",
     "defines",
     "deps",
     "extra_gen_snapshot_options",
     "language_version",
-    "license_files",
+    "license",
     "link_hook_assets",
     "main",
     "min_os_version",

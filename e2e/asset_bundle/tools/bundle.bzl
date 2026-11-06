@@ -119,3 +119,39 @@ tree_of = rule(
     doc = "The directory `src` builds, without the files beside it.",
     attrs = {"src": attr.label(mandatory = True)},
 )
+
+def notices_test(name, bundle, web = False, subdir = "", own_license = None, package = None, additional = [], **kwargs):
+    """Checks the `NOTICES` asset of the tree `bundle` builds.
+
+    Args:
+        name: The test's name, which states the property it checks.
+        bundle: An `app_bundle` target (or a tree of the web build).
+        web: Whether the bundle is the web's, which holds `NOTICES`, not `NOTICES.Z`.
+        subdir: Where the `flutter_assets/` tree sits in `bundle`.
+        own_license: The licence file of the application, listed under `package`.
+        package: The application's package name, when `own_license` is set.
+        additional: The files the application lists in `additional_licenses`,
+            which the asset ends with in this order.
+        **kwargs: More attributes of the test.
+    """
+    args = ["$(rlocationpath %s)" % bundle]
+    data = [bundle]
+    if web:
+        args.append("--web")
+    if subdir:
+        args.append("--subdir=" + subdir)
+    if own_license:
+        args += ["--own-license=$(rlocationpath %s)" % own_license, "--package=" + package]
+        data.append(own_license)
+    for f in additional:
+        args.append("--additional=$(rlocationpath %s)" % f)
+        data.append(f)
+    dart_test(
+        name = name,
+        args = args,
+        data = data,
+        main = "//tests:notices_test.dart",
+        size = "small",
+        deps = ["@rules_dart//dart/runfiles"],
+        **kwargs
+    )

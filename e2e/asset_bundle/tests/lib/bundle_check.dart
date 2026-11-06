@@ -27,6 +27,7 @@ const infrastructure = {
   'AssetManifest.bin',
   'AssetManifest.bin.json',
   'FontManifest.json',
+  'NOTICES',
   'NOTICES.Z',
   'shaders/ink_sparkle.frag',
   'shaders/stretch_effect.frag',

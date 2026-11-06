@@ -1342,8 +1342,11 @@ _WEB_RELEVANT_KEYS = (
     "require_sksl_shaders",
     "_shader_compile_tool",
     "tree_shake_icons",
-    "license_files",
+    "license",
+    "additional_licenses",
     "_asset_bundle_tool",
+    "_notices_tool",
+    "_engine_license",
 )
 _WEB_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | {
     k: v
