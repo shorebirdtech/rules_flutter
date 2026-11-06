@@ -200,35 +200,15 @@ maven.artifact(
 
 use_repo(maven, "rules_android_maven")
 
-# Dev tool pub dependencies (args, vm_service, watcher, path).
+# Pub dependencies of every Dart tool in this repository: the dev tool, the rule
+# tools, the vendored `flutter gen-l10n` generator and the integration-test
+# support analysis. One pub workspace (the root `pubspec.yaml`) resolves them
+# together, so they share one version of each package and honour
+# `flutter_test`'s exact pins. The workspace's members are not lock entries, so
+# nothing is mapped with `resolve`. The generator's own `intl` is in this lock;
+# an app using the generated localizations needs `intl` in its own.
 flutter.pub(
     name = "dev_tool_deps",
-    lock = "//tools/dev_tool:pubspec.lock",
-    # The dev tool's `path:` dependencies: this repository's own packages.
-    resolve = {
-        "flutter_rule_tools": "//flutter/private/tools:remote_suite",
-        "rules_flutter_e2e_testing": "//tools/e2e_testing",
-        "rules_flutter_macos_gui_session": "//tools/macos_gui_session",
-    },
+    lock = "//:pubspec.lock",
 )
 use_repo(flutter, "dev_tool_deps")
-
-# Generation-time dependencies of the vendored `flutter gen-l10n` generator.
-# Separate from anything a consuming app resolves: this `intl` is the one the
-# generator's own code imports, while an app *using* the generated
-# localizations needs `intl` in its own lock. Upstream splits them the same way.
-flutter.pub(
-    name = "gen_l10n_deps",
-    lock = "//flutter/private/gen_l10n:pubspec.lock",
-)
-use_repo(flutter, "gen_l10n_deps")
-
-# The packages the integration-test support library imports, for the analysis
-# of that library (//flutter/tests/integration_support_analysis). A dev
-# dependency: the release archive omits that package.
-flutter_dev = use_extension("//flutter:extensions.bzl", "flutter", dev_dependency = True)
-flutter_dev.pub(
-    name = "integration_support_deps",
-    lock = "//flutter/tests/integration_support_analysis:pubspec.lock",
-)
-use_repo(flutter_dev, "integration_support_deps")

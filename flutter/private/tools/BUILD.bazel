@@ -114,9 +114,8 @@ dart_binary(
 # A new test file needs an entry here, or nothing runs it.
 #
 # `@dev_tool_deps//:test` is `package:test` from the one pub hub this workspace
-# declares (MODULE.bazel `flutter.pub(name = "dev_tool_deps")`). These tools are
-# not part of the dev tool; they share its hub because a second hub would mean a
-# second pubspec to resolve and keep pinned for a single test-only dependency.
+# declares (MODULE.bazel `flutter.pub(name = "dev_tool_deps")`), resolved with
+# every other tool of this repository by the root pub workspace.
 #
 # The value is the tool plus whatever that tool imports beyond `package:test`.
 _UNIT_TESTS = {

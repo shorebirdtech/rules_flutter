@@ -11,8 +11,14 @@ dart_analysis_options(
     visibility = ["//dev:__pkg__"],
 )
 
-# The Maven lock consumers get, read by the test that keeps its androidx
-# versions together.
+# `pubspec.lock` is the lock of the tool workspace (`dev_tool_deps` in
+# MODULE.bazel); the Maven lock is what consumers get, read by the test that
+# keeps its androidx versions together.
+exports_files(
+    ["pubspec.lock"],
+    visibility = ["//visibility:public"],
+)
+
 exports_files(
     ["rules_android_maven_install.json"],
     visibility = ["//tools/maven_locks:__pkg__"],

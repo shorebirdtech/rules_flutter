@@ -18,10 +18,10 @@ flutter_library(
         "//flutter/private/integration_test/support:integration_suite.dart",
     ],
     deps = [
-        "@integration_support_deps//:flutter_test",
-        "@integration_support_deps//:integration_test",
-        "@integration_support_deps//:stack_trace",
-        "@integration_support_deps//:stream_channel",
-        "@integration_support_deps//:test_api",
+        "@dev_tool_deps//:flutter_test",
+        "@dev_tool_deps//:integration_test",
+        "@dev_tool_deps//:stack_trace",
+        "@dev_tool_deps//:stream_channel",
+        "@dev_tool_deps//:test_api",
     ],
 )

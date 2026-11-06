@@ -5,6 +5,8 @@ publish_to: none
 environment:
   sdk: ^3.13.0
 
+resolution: workspace
+
 dependencies:
   # The session probe, re-exported. Bazel builds take it from
   # `//tools/macos_gui_session`; this is how `dart test` finds it.

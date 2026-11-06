@@ -148,7 +148,7 @@ def _toolchain_extension(module_ctx):
             name = name + "_gen_l10n",
             flutter_version = selected,
             sha256 = flutter_source_sha256(selected),
-            hub_name = "gen_l10n_deps",
+            hub_name = "dev_tool_deps",
         )
         selected_versions[name] = selected
 

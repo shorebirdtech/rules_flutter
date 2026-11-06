@@ -11,11 +11,15 @@ environment:
   # `final T? _x` here.
   sdk: ^3.13.0
 
+resolution: workspace
+
 dependencies:
   args: ^2.4.0
   clock: ^1.1.1
   dds: ^5.4.0
-  dwds: ^27.1.1
+  # Exactly this release: dwds 27.1.4 never answers the `$dartHotRestartBeginDwds`
+  # request, so a hot restart of a web app hangs (`agent_e2e_test.dart`, web).
+  dwds: 27.1.1
   # The host half of the `RemoteListener` protocol, shared with the
   # `flutter_test` runner. Bazel builds take it from `//flutter/private/tools:remote_suite`;
   # this is how `dart test` finds it.
