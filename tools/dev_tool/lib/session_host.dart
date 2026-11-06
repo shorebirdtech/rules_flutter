@@ -155,6 +155,44 @@ class SessionHost {
     }
   }
 
+  /// End the run once every app in [sessions] has ended for good, whatever
+  /// the run is doing at that moment.
+  ///
+  /// The session loop ends on the same thing, but a run reaches it only after
+  /// its setup, and setup goes on past the launch: the hot-reload pipeline is
+  /// a bazel build and a compile of its own, minutes long on a cold cache. An
+  /// app closed (or finished) in that window leaves that work nothing to
+  /// serve, so the teardown runs then: it stops the bazel commands in flight,
+  /// which is what ends the setup step waiting on them, and the run exits as
+  /// the session loop would have. A crash ends the run through [fail] anyway.
+  ///
+  /// Called once the launches are done, so that [sessions] is every app the
+  /// run has. Ending the run earlier, while another device's launch is still
+  /// to come, would take that one down with it.
+  void endWhenEveryAppHasEnded() {
+    if (sessions.isEmpty) return;
+    unawaited(
+      Future.wait([for (final s in sessions) s.terminated]).then((_) async {
+        if (teardown.hasRun) return;
+        _logger.info({
+          'message': 'all_apps_ended',
+          'text': sessions.length == 1
+              ? 'The app has ended; stopping the run.'
+              : 'Every app has ended; stopping the run.',
+        });
+        try {
+          await performCleanup();
+        } catch (e) {
+          _logger.warning({
+            'message': 'cleanup_failed',
+            'text': 'Warning: cleanup after the apps ended failed: $e',
+            'error': '$e',
+          });
+        }
+      }),
+    );
+  }
+
   /// End the run because of a failure that surfaced after it was already live,
   /// and so could not simply be thrown where it was found.
   ///

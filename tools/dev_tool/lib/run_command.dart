@@ -497,6 +497,9 @@ class RunCommand {
           webSession.complete(deviceSession);
         }
       }
+      // An app that ends while the steps below are still setting up its
+      // reload pipeline ends the run there, with the build it was waiting on.
+      host.endWhenEveryAppHasEnded();
 
       // `app.setViewport` exists only where it can work. It is registered here,
       // for any web run, rather than always with a handler that refuses on

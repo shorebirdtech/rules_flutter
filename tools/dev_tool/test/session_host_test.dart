@@ -169,6 +169,78 @@ void main() {
     });
   });
 
+  group('SessionHost.endWhenEveryAppHasEnded', () {
+    // The run's setup goes on after the launch: the hot-reload inputs are a
+    // bazel build of their own. An app closed during it leaves nothing for
+    // that build to serve, so the run ends there and then, stopping the build,
+    // rather than when the build is done.
+    test('stops a bazel command in flight once every app has ended', () async {
+      final build = FakeProcess();
+      var interrupted = false;
+      final host = SessionHost(
+        isMachine: false,
+        logger: Logger('test.session_host'),
+        bazel: Bazel.using(
+          spawn: (args, {required workingDirectory}) async => build,
+          interrupt: (process) {
+            interrupted = true;
+            (process as FakeProcess).complete(8);
+          },
+        ),
+      );
+      final first = FakeProcess();
+      final second = FakeProcess();
+      host.sessions.addAll([
+        DeviceSession(
+          device: MacOSDevice(),
+          appInstance: AppInstance(process: first),
+          vmClient: null,
+          appId: 'first',
+        ),
+        DeviceSession(
+          device: MacOSDevice(),
+          appInstance: AppInstance(process: second),
+          vmClient: null,
+          appId: 'second',
+        ),
+      ]);
+      final running = host.bazel.run([
+        'build',
+        '//:dev_inputs',
+      ], workingDirectory: '/ws');
+      final cancelled = expectLater(running, throwsA(isA<BazelCancelled>()));
+      await pumpEventQueue();
+
+      host.endWhenEveryAppHasEnded();
+      first.complete(0);
+      await host.sessions.first.terminated;
+      await pumpEventQueue();
+      expect(
+        interrupted,
+        isFalse,
+        reason: 'another app is still running, and the run is still its',
+      );
+      expect(host.shutdownRequested.isCompleted, isFalse);
+
+      second.complete(0);
+      await host.shutdownRequested.future;
+      expect(interrupted, isTrue);
+      await cancelled;
+      expect(
+        host.deferredFailure,
+        isNull,
+        reason: 'apps that finished are not a failure of the run',
+      );
+    });
+
+    test('does nothing for a run with no app', () async {
+      final host = newHost();
+      host.endWhenEveryAppHasEnded();
+      await pumpEventQueue();
+      expect(host.shutdownRequested.isCompleted, isFalse);
+    });
+  });
+
   group('SessionHost.fail', () {
     test('records the failure and tears the session down', () async {
       final host = newHost();
