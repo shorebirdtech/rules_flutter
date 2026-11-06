@@ -15,6 +15,7 @@ exports_files(
         "assemble_directory.dart",
         "generate_asset_manifest.dart",
         "bundle_app.dart",
+        "check_apple_version_keys.dart",
         "compile_shader.dart",
         "kernel_filter.dart",
         "linux_runtime.dart",
@@ -134,6 +135,18 @@ _UNIT_TESTS = {
     main = "test/%s.dart" % name,
     deps = ["@dev_tool_deps//:test"] + extra_deps,
 ) for name, (tool, extra_deps) in _UNIT_TESTS.items()]
+
+# The version-key check imports the plist parser of `merge_plists.dart`, so both
+# are its `srcs`.
+dart_test(
+    name = "check_apple_version_keys_test",
+    srcs = [
+        "check_apple_version_keys.dart",
+        "merge_plists.dart",
+    ],
+    main = "test/check_apple_version_keys_test.dart",
+    deps = ["@dev_tool_deps//:test"],
+)
 
 # Stand-in for the engine's `font-subset`, which the tree-shaking tests below
 # make `generate_asset_manifest.dart` run. A compiled executable, since the tool

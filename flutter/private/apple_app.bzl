@@ -53,13 +53,22 @@ def _impl(ctx):
         is_executable = True,
     )
 
+    # The app's own output groups, and the checks of this target in
+    # `_validation`: building the app runs them.
+    groups = {name: getattr(app[OutputGroupInfo], name) for name in dir(app[OutputGroupInfo]) if name != "to_json"} if OutputGroupInfo in app else {}
+    groups["_validation"] = depset(
+        ctx.files.validations,
+        transitive = [groups["_validation"]] if "_validation" in groups else [],
+    )
+
     return [
         DefaultInfo(
             executable = executable,
             files = depset([link] + [f for f in app[DefaultInfo].files.to_list() if f != archive]),
             runfiles = app[DefaultInfo].default_runfiles.merge(ctx.runfiles(files = [link])),
         ),
-    ] + [app[provider] for provider in _FORWARDED if provider in app]
+        OutputGroupInfo(**groups),
+    ] + [app[provider] for provider in _FORWARDED if provider in app and provider != OutputGroupInfo]
 
 flutter_apple_app = rule(
     implementation = _impl,
@@ -68,6 +77,10 @@ flutter_apple_app = rule(
             doc = "The rules_apple application. Not built for this target's platform: it sets its own.",
             mandatory = True,
             providers = [AppleBundleInfo],
+        ),
+        "validations": attr.label_list(
+            doc = "Checks that must pass for the app to build: targets whose files are validation outputs.",
+            allow_files = True,
         ),
     },
     executable = True,

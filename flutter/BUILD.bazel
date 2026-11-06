@@ -158,6 +158,7 @@ bzl_library(
     deps = [
         "//flutter/private:app_version",
         "//flutter/private:apple_app",
+        "//flutter/private:apple_version_check",
         "//flutter/private:debug_build",
         "//flutter/private:flutter_apple_bundle_version",
         "//flutter/private:flutter_ios_application",
@@ -175,6 +176,7 @@ bzl_library(
     deps = [
         "//flutter/private:app_version",
         "//flutter/private:apple_app",
+        "//flutter/private:apple_version_check",
         "//flutter/private:flutter_apple_bundle_version",
         "//flutter/private:flutter_macos_application",
         "//flutter/private:flutter_macos_registrant",

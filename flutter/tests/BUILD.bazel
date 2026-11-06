@@ -6,6 +6,7 @@ load(":aot_options_test.bzl", "aot_file_flags_test_suite", "aot_no_strip_test_su
 load(":app_defines_test.bzl", "app_defines_test_suite")
 load(":app_entrypoint_test.bzl", "app_entrypoint_test_suite")
 load(":apple_engine_test.bzl", "apple_engine_test_suite")
+load(":apple_version_check_test.bzl", "apple_version_check_test_suite")
 load(":artifact_urls_test.bzl", "artifact_urls_test_suite")
 load(":asset_bundle_test.bzl", "asset_bundle_test_suite")
 load(":cmake_link_libraries_test.bzl", "cmake_link_libraries_test_suite")
@@ -186,6 +187,8 @@ native_sources_test_suite(name = "native_sources_test")
 code_asset_native_library_test_suite(name = "code_asset_native_library_test")
 
 apple_engine_test_suite(name = "apple_engine_test")
+
+apple_version_check_test_suite(name = "apple_version_check_test")
 
 engine_targets_test_suite(name = "engine_targets_test")
 

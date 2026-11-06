@@ -64,6 +64,7 @@ load("@rules_swift//swift:swift.bzl", "swift_library")
 load("//flutter/private:app_version.bzl", "version_arg", "version_target_conflict")
 load("//flutter/private:apple_app.bzl", "flutter_apple_app")
 load("//flutter/private:apple_engine.bzl", _MACOS_ENGINE_FRAMEWORK = "MACOS_ENGINE_FRAMEWORK")
+load("//flutter/private:apple_version_check.bzl", _flutter_apple_version_check = "flutter_apple_version_check")
 load("//flutter/private:constants.bzl", _MACOS_MINIMUM_OS_VERSION = "MACOS_MINIMUM_OS_VERSION")
 load("//flutter/private:flutter_apple_bundle_version.bzl", _flutter_apple_bundle_version = "flutter_apple_bundle_version")
 load("//flutter/private:flutter_apple_plugin_library.bzl", _flutter_apple_plugin_library_macro = "flutter_apple_plugin_library")
@@ -317,6 +318,11 @@ def flutter_macos_app(
         app_name: User-facing display name (menu bar, window title). Defaults to name.
         minimum_os_version: Minimum macOS version.
         info_plist: Override conventional macos/Runner/Info.plist.
+            The plist leaves `CFBundleShortVersionString` and
+            `CFBundleVersion` to the app's version: a literal value there
+            fails the build, and `$(FLUTTER_BUILD_NAME)` and
+            `$(FLUTTER_BUILD_NUMBER)`, as `flutter create` writes them, or
+            no key at all, pass.
         version: An `apple_bundle_version` (or `flutter_apple_bundle_version`)
             target, rules_apple's own way to set the version, for example
             from `--embed_label`. Setting it with `build_name` or
@@ -606,6 +612,19 @@ def flutter_macos_app(
     else:
         actual_info_plist = info_plist
 
+    # 7a. The plist leaves the version keys to `build_name` and
+    #     `build_number`: rules_apple replaces both, so a literal would be
+    #     dropped silently.
+    _flutter_apple_version_check(
+        name = "__%s_version_check" % name,
+        plist = actual_info_plist,
+        plist_name = "macos/Runner/Info.plist" if not info_plist else "",
+        app_label = str(native.package_relative_label(name)),
+        rule_name = "flutter_macos_app",
+        tags = tags,
+        testonly = testonly,
+    )
+
     # 7b. Drop the scaffold's empty `CFBundleIconFile`.
     #
     #     `flutter create` writes it as `<string></string>` for Xcode to fill
@@ -674,6 +693,7 @@ def flutter_macos_app(
     flutter_apple_app(
         name = name,
         app = "__%s_app" % name,
+        validations = ["__%s_version_check" % name],
         tags = tags,
         target_compatible_with = target_compatible_with + select({
             "@platforms//os:macos": [],

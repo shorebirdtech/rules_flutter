@@ -64,6 +64,7 @@ load("@rules_swift//swift:swift.bzl", "swift_library")
 load("//flutter/private:app_version.bzl", "version_arg", "version_target_conflict")
 load("//flutter/private:apple_app.bzl", "flutter_apple_app")
 load("//flutter/private:apple_engine.bzl", _IOS_ENGINE_XCFRAMEWORK = "IOS_ENGINE_XCFRAMEWORK")
+load("//flutter/private:apple_version_check.bzl", _flutter_apple_version_check = "flutter_apple_version_check")
 load("//flutter/private:constants.bzl", _IOS_MINIMUM_OS_VERSION = "IOS_MINIMUM_OS_VERSION")
 load("//flutter/private:debug_build.bzl", _debug_build = "debug_build")
 load("//flutter/private:flutter_apple_bundle_version.bzl", _flutter_apple_bundle_version = "flutter_apple_bundle_version")
@@ -380,6 +381,11 @@ def flutter_ios_app(
             `UISceneDelegateClassName` out as `Runner.SceneDelegate` will not
             find the scene delegate. Keep the `$(PRODUCT_MODULE_NAME)`
             variable, or write `<name>.SceneDelegate`.
+            The plist leaves `CFBundleShortVersionString` and
+            `CFBundleVersion` to the app's version: a literal value there
+            fails the build, and `$(FLUTTER_BUILD_NAME)` and
+            `$(FLUTTER_BUILD_NUMBER)`, as `flutter create` writes them, or
+            no key at all, pass.
         version: An `apple_bundle_version` (or `flutter_apple_bundle_version`)
             target, rules_apple's own way to set the version, for example
             from `--embed_label`. Setting it with `build_name` or
@@ -660,6 +666,18 @@ def flutter_ios_app(
     else:
         actual_info_plist = info_plist
 
+    # 8b. The plist leaves the version keys to `build_name` and `build_number`:
+    #     rules_apple replaces both, so a literal would be dropped silently.
+    _flutter_apple_version_check(
+        name = "__%s_version_check" % name,
+        plist = actual_info_plist,
+        plist_name = "ios/Runner/Info.plist" if not info_plist else "",
+        app_label = str(native.package_relative_label(name)),
+        rule_name = "flutter_ios_app",
+        tags = tags,
+        testonly = testonly,
+    )
+
     # 9. Version, from `build_name` and `build_number` unless the app names
     #    its own.
     if not version:
@@ -749,6 +767,7 @@ def flutter_ios_app(
     flutter_apple_app(
         name = name,
         app = "__%s_app" % name,
+        validations = ["__%s_version_check" % name],
         tags = tags,
         target_compatible_with = target_compatible_with + select({
             "@platforms//os:ios": [],
