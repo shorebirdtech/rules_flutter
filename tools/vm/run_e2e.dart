@@ -100,10 +100,12 @@ Future<void> main(List<String> args) async {
   // the archive stores bare repo-relative paths and the VM extracts into a
   // directory it names itself. COPYFILE_DISABLE stops macOS bsdtar emitting
   // AppleDouble `._name` sidecars, which would land beside real sources where
-  // Bazel's `glob(["lib/**"])` reads `._main.dart` as a Dart file.
+  // Bazel's `glob(["lib/**"])` reads `._main.dart` as a Dart file, and
+  // `--no-xattrs` (bsdtar and GNU tar both take it) keeps macOS attributes
+  // such as `com.apple.provenance` out of the pax headers.
   _run(
     'tar',
-    ['-C', repoRoot, '-czf', tgz, '--null', '-T', listing.path],
+    ['-C', repoRoot, '--no-xattrs', '-czf', tgz, '--null', '-T', listing.path],
     environment: {'COPYFILE_DISABLE': '1'},
   );
 
@@ -116,7 +118,16 @@ Future<void> main(List<String> args) async {
     // through gcloud ssh -> Windows cmd and can silently no-op.
     await sshExec(vmName, 'rmdir /s /q C:\\rf'); // tolerate "not found"
     await sshRun(vmName, 'mkdir C:\\rf\\rules_flutter');
-    await sshRun(vmName, 'tar -xf C:\\rf_src.tgz -C C:\\rf\\rules_flutter');
+    // Git for Windows' GNU tar, not Windows' own tar.exe: that one cannot
+    // decode a UTF-8 path from a pax header ("empty or unreadable filename")
+    // and reads a bare ustar name in the OEM code page, so the e2e assets
+    // named `日本語.png` are skipped or arrive misnamed. GNU tar reads a path
+    // given as `C:/...` as a remote host, hence the MSYS `/c/` form.
+    await sshRun(
+      vmName,
+      '"C:\\Program Files\\Git\\usr\\bin\\tar.exe" '
+      '-xzf /c/rf_src.tgz -C /c/rf/rules_flutter',
+    );
     await sshExec(vmName, 'rmdir /s /q C:\\rules_dart');
     await sshRun(
       vmName,
