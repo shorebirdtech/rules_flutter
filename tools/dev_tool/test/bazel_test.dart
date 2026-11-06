@@ -669,6 +669,50 @@ void main() {
         expect(result.outputFiles, ['/ws/bazel-out/darwin/bin/app.zip']);
       });
 
+      // A reload that sits in bazel and one that sits in the query after it are
+      // different stalls; each ends with a line that says so, and the query
+      // announces itself because it is a second invocation.
+      test('says when the build ended and when the query after it ended, with '
+          'timings', () async {
+        final fake = fakeBazel();
+        final lines = <Map<String, dynamic>>[];
+        final sub = Logger.root.onRecord.listen((r) {
+          final o = r.object;
+          if (o is Map && o['message'] == 'bazel_phase') {
+            lines.add(Map<String, dynamic>.from(o));
+          }
+        });
+        addTearDown(sub.cancel);
+        final build = fake.bazel.build('//:app', workspace: '/ws');
+        await pumpEventQueue();
+        final buildProcess = fake.processes.single;
+        await buildProcess.outputAttached;
+        buildProcess.complete(0);
+        await pumpEventQueue();
+        final cquery = fake.processes.last;
+        await cquery.outputAttached;
+        cquery.emitStdout('bazel-out/darwin/bin/app.zip');
+        cquery.complete(0);
+        await build;
+
+        expect(
+          [for (final l in lines) '${l['phase']} ${l['event']}'],
+          [
+            'bazel build finished',
+            'bazel query started',
+            'bazel query finished',
+          ],
+        );
+        expect(
+          lines.first['text'],
+          matches(r'^bazel build //:app finished in \d+ms \(exit 0\)$'),
+        );
+        expect(
+          lines.last['text'],
+          matches(r'^bazel query of //:app outputs finished in \d+ms$'),
+        );
+      });
+
       test('a build that failed carries the tail of what bazel said, and '
           'lists nothing', () async {
         final fake = fakeBazel();

@@ -41,6 +41,7 @@ import 'dart:async';
 import 'package:pool/pool.dart';
 
 import 'command_failure.dart';
+import 'phase_log.dart';
 
 /// Handler signature for a registered command.
 typedef CommandHandler = Future<Map<String, dynamic>> Function(
@@ -187,17 +188,48 @@ class CommandRunner {
     // Announced before the pool is requested, not after it is granted: a
     // command queued behind one that never finishes has also not started, and
     // that is exactly the state worth being able to see.
-    final report = _slow.contains(method) ? onProgress : null;
+    final slow = _slow.contains(method);
+    final report = slow ? onProgress : null;
     final id = 'cmd_${_nextProgressId++}';
     report?.call(method, params, id, finished: false);
+    // Said in the log as well, because the event above is sent before this
+    // command has the queue: a reload that is waiting behind a stuck command
+    // and one that is slow to run are otherwise the same silence.
+    final queued = Stopwatch()..start();
+    final ahead = _active;
+    if (slow && ahead != null) {
+      logPhase(
+        verb: method,
+        phase: 'queue',
+        event: 'waiting',
+        text:
+            '$method is waiting for the command queue: ${ahead.method} has '
+            'been running for ${formatElapsed(ahead.since.elapsed)}',
+      );
+    }
     final resource = await _pool.request();
+    _active = (method: method, since: Stopwatch()..start());
+    if (slow) {
+      logPhase(
+        verb: method,
+        phase: 'queue',
+        event: 'finished',
+        text: '$method: queue acquired after ${formatElapsed(queued.elapsed)}',
+        took: queued.elapsed,
+      );
+    }
     try {
       return await handler(params);
     } finally {
+      _active = null;
       resource.release();
       report?.call(method, params, id, finished: true);
     }
   }
+
+  /// The command holding the pool, and since when. Read by a command that has
+  /// to wait, so its log can say what it is waiting for.
+  ({String method, Stopwatch since})? _active;
 
   /// Whether [method] has a registered handler.
   bool hasCommand(String method) => _handlers.containsKey(method);

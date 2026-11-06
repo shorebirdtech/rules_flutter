@@ -24,6 +24,7 @@
 import 'dart:async';
 
 import 'app_instance.dart';
+import '../phase_log.dart';
 import 'compiler.dart';
 import 'session_reloader.dart';
 import 'workspace.dart';
@@ -153,30 +154,38 @@ class ReloadOrchestrator {
   /// IDE that knows about edits the FS may not yet show). Declared files are
   /// recompiled even if their disk version equals what's applied — but the
   /// response distinguishes that case via `ReloadApplied.isEmpty = true`.
+  ///
+  /// [phases], when given, is told how long the compile and the apply took.
   Future<ReloadOutcome> reload({
     Set<String>? declared,
     required List<AppInstance> targets,
+    PhaseLog? phases,
   }) => _runPipeline(
     declared: declared,
     mode: ApplyMode.hotReload,
     targets: targets,
+    phases: phases,
   );
 
   /// Full restart of [targets] — full compile, hotRestart, and each target's
   /// applied record reset to the full disk snapshot. Untargeted apps keep their
   /// records and their compilers, so their next `reload()` still delivers what
   /// they missed, dependent libraries included.
-  Future<ReloadOutcome> restart({required List<AppInstance> targets}) =>
-      _runPipeline(
-        declared: null,
-        mode: ApplyMode.hotRestart,
-        targets: targets,
-      );
+  Future<ReloadOutcome> restart({
+    required List<AppInstance> targets,
+    PhaseLog? phases,
+  }) => _runPipeline(
+    declared: null,
+    mode: ApplyMode.hotRestart,
+    targets: targets,
+    phases: phases,
+  );
 
   Future<ReloadOutcome> _runPipeline({
     required Set<String>? declared,
     required ApplyMode mode,
     required List<AppInstance> targets,
+    PhaseLog? phases,
   }) async {
     if (targets.isEmpty) {
       throw StateError('A reload needs at least one target app.');
@@ -225,10 +234,18 @@ class ReloadOrchestrator {
       (u) => work[u]!.every((f) => snap.versionOf(f) == u.applied.versionOf(f)),
     );
 
-    final compiled = await Future.wait([
-      for (final u in working)
-        u.compile(invalidated: work[u]!, entrypoint: entrypoint, mode: mode),
-    ]);
+    // Said per phase, not per target: the targets run side by side, and a line
+    // each would be an interleaving to untangle.
+    Future<T> phase<T>(String name, Future<T> Function() body) =>
+        phases?.run(name, body) ?? body();
+
+    final compiled = await phase(
+      'compile',
+      () => Future.wait([
+        for (final u in working)
+          u.compile(invalidated: work[u]!, entrypoint: entrypoint, mode: mode),
+      ]),
+    );
 
     // Every target compiles the same disk, so a failure is a property of the
     // source and they agree in practice — but the rule is atomic regardless:
@@ -239,15 +256,18 @@ class ReloadOrchestrator {
       return ReloadCompileFailed(failure.diagnostics);
     }
 
-    final results = await Future.wait([
-      for (var i = 0; i < working.length; i++)
-        working[i].applyAndSettle(
-          (compiled[i] as CompileSucceeded).dillPath,
-          mode: mode,
-          snapshot: snap,
-          invalidated: work[working[i]]!,
-        ),
-    ]);
+    final results = await phase(
+      'apply',
+      () => Future.wait([
+        for (var i = 0; i < working.length; i++)
+          working[i].applyAndSettle(
+            (compiled[i] as CompileSucceeded).dillPath,
+            mode: mode,
+            snapshot: snap,
+            invalidated: work[working[i]]!,
+          ),
+      ]),
+    );
 
     final perApp = <String, ApplyOutcome>{
       for (var i = 0; i < working.length; i++) working[i].id: results[i],

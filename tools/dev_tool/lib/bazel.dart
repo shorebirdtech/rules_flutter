@@ -5,6 +5,7 @@ import 'dart:io';
 
 import 'dev_tool_exception.dart';
 import 'logging.dart';
+import 'phase_log.dart';
 import 'runfiles_helper.dart';
 import 'web_bundle_facts.dart';
 
@@ -525,7 +526,13 @@ class Bazel {
       'workspace': workspace,
     });
 
-    final built = await _streamed(args, workspace);
+    final built = await _timed(
+      phase: 'bazel build',
+      target: target,
+      what: 'bazel build $target',
+      body: () => _streamed(args, workspace),
+      detail: (r) => ' (exit ${r.exitCode})',
+    );
     if (built.exitCode != 0) {
       return BazelBuildResult(
         exitCode: built.exitCode,
@@ -540,7 +547,13 @@ class Bazel {
       cqueryArgs.addAll(['-c', compilationMode]);
     }
     cqueryArgs.addAll(extraArgs);
-    final cqueryResult = await run(cqueryArgs, workingDirectory: workspace);
+    final cqueryResult = await _timed(
+      phase: 'bazel query',
+      target: target,
+      what: 'bazel query of $target outputs',
+      announce: true,
+      body: () => run(cqueryArgs, workingDirectory: workspace),
+    );
     final outputFiles = _absolutizeCqueryPaths(
       cqueryResult.stdout as String,
       workspace,
@@ -601,7 +614,13 @@ class Bazel {
         'args': args,
         'workspace': workspace,
       });
-      final built = await _streamed(args, workspace);
+      final built = await _timed(
+        phase: 'bazel build',
+        target: target,
+        what: 'bazel build $target ($outputGroup)',
+        body: () => _streamed(args, workspace),
+        detail: (r) => ' (exit ${r.exitCode})',
+      );
       if (built.exitCode != 0) {
         return BazelAspectOutputs(
           exitCode: built.exitCode,
@@ -618,6 +637,48 @@ class Bazel {
       );
     } finally {
       await events.delete(recursive: true);
+    }
+  }
+
+  /// Run [body], a bazel invocation, and say how long it took.
+  ///
+  /// A reload that stalls inside bazel and one that stalls in the query after
+  /// it look the same without this: the build prints a line when it starts and
+  /// nothing when it ends. [announce] adds a line at the start, for an
+  /// invocation that does not print its own command. Observation only: the
+  /// result is [body]'s own, and a failure is rethrown unchanged.
+  Future<R> _timed<R>({
+    required String phase,
+    required String target,
+    required String what,
+    required Future<R> Function() body,
+    bool announce = false,
+    String Function(R result)? detail,
+  }) async {
+    final clock = Stopwatch()..start();
+    void say(String event, String text) => _logger.info({
+      'message': 'bazel_phase',
+      'text': text,
+      'phase': phase,
+      'event': event,
+      'target': target,
+      'ms': clock.elapsedMilliseconds,
+    });
+    if (announce) say('started', 'Running $what');
+    try {
+      final result = await body();
+      say(
+        'finished',
+        '$what finished in ${formatElapsed(clock.elapsed)}'
+            '${detail?.call(result) ?? ''}',
+      );
+      return result;
+    } catch (e) {
+      say(
+        'failed',
+        '$what failed after ${formatElapsed(clock.elapsed)}: $e',
+      );
+      rethrow;
     }
   }
 

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_bazel_dev_tool/command_failure.dart';
 import 'package:flutter_bazel_dev_tool/command_runner.dart';
+import 'package:flutter_bazel_dev_tool/logging.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -342,6 +343,80 @@ void main() {
         ['start', 'end'],
         reason: 'an unfinished command must not be left looking unfinished',
       );
+    });
+  });
+
+  group('queue lines', () {
+    late List<Map<String, dynamic>> lines;
+
+    setUp(() {
+      lines = [];
+      final sub = Logger.root.onRecord.listen((r) {
+        final o = r.object;
+        if (o is Map && o['phase'] == 'queue') {
+          lines.add(Map<String, dynamic>.from(o));
+        }
+      });
+      addTearDown(sub.cancel);
+    });
+
+    test('a long command says when it got the queue', () async {
+      final runner = CommandRunner();
+      runner.register('app.hotReload', (_) async => {}, longRunning: true);
+
+      await runner.run('app.hotReload', {});
+
+      expect(lines.single['event'], 'finished');
+      expect(
+        lines.single['text'],
+        matches(r'^app\.hotReload: queue acquired after \d+ms$'),
+      );
+    });
+
+    test('a command behind a busy one says it is waiting, and for what, '
+        'then says it got the queue', () async {
+      final runner = CommandRunner();
+      final release = Completer<void>();
+      runner.register('app.restart', (_) async {
+        await release.future;
+        return {};
+      }, longRunning: true);
+      runner.register('app.hotReload', (_) async => {}, longRunning: true);
+
+      final first = runner.run('app.restart', {});
+      await pumpEventQueue();
+      final second = runner.run('app.hotReload', {});
+      await pumpEventQueue();
+
+      final waiting = lines.where((l) => l['event'] == 'waiting').single;
+      expect(waiting['text'], contains('app.hotReload is waiting'));
+      expect(waiting['text'], contains('app.restart'));
+      expect(
+        lines.where(
+          (l) =>
+              l['event'] == 'finished' &&
+              '${l['text']}'.startsWith('app.hotReload'),
+        ),
+        isEmpty,
+        reason: 'it has not got the queue yet',
+      );
+
+      release.complete();
+      await first;
+      await second;
+      expect(
+        lines.last['text'],
+        matches(r'^app\.hotReload: queue acquired after \d+ms$'),
+      );
+    });
+
+    test('a short command is not reported', () async {
+      final runner = CommandRunner();
+      runner.register('app.getText', (_) async => {});
+
+      await runner.run('app.getText', {});
+
+      expect(lines, isEmpty);
     });
   });
 }

@@ -302,6 +302,7 @@ _UNIT_TESTS = {
         "deps": _PATH_DEP,
     },
     "outcome_renderer_test": {"fakes": True},
+    "phase_log_test": {},
     "process_cpu_time_test": {},
     "source_uri_resolver_test": {"deps": _PATH_DEP},
     "readiness_gate_test": {},
