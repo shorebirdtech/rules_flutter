@@ -355,9 +355,8 @@ class RunPlan {
     // Resolve the workspace root once rather than per callsite: it avoids
     // redundant `bazel info` spawns and gives every consumer the same answer.
     final workspace = await bazel.findWorkspaceRoot();
-    // The native pipeline needs the frontend server and dartaotruntime out of
-    // this, and DevTools needs the toolchain's `dart` on every platform —
-    // including web, which otherwise never resolves a toolchain at all.
+    // DevTools needs the toolchain's `dart` on every platform. The compilers
+    // take nothing from here: they run what the app's dev config names.
     //
     // With the flags the run will build with, because the fetch analyses the
     // target: see [resolveToolchainPaths]. The profile flag is among them, so

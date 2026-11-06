@@ -563,7 +563,6 @@ class RunCommand {
       if (!isWebDevice && hasVmClient && plan.hotReloadOff == null) {
         await NativePipelineAssembler(
           workspace: workspace,
-          toolchain: toolchain,
           target: target,
           configDevice: devices.first,
           userBuildArgs: plan.userBuildArgs,

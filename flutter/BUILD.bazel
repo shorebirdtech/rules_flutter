@@ -1,5 +1,5 @@
 load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
-load("@bazel_skylib//rules:common_settings.bzl", "bool_flag", "int_flag")
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag", "int_flag", "string_flag")
 load("//flutter/private:build_settings.bzl", "dart_defines_flag")
 load("//flutter/private:flutter_material_icons.bzl", "flutter_material_icons")
 load("//flutter/private:flutter_pub.bzl", "flutter_pub")
@@ -42,6 +42,19 @@ toolchain_type(
 bool_flag(
     name = "profile",
     build_setting_default = False,
+    visibility = ["//visibility:public"],
+)
+
+# The Flutter SDK a build uses: the name of one `flutter.toolchain()` the root
+# module declares. The default is the stock release, `flutter`.
+#
+#   bazel build --@rules_flutter//flutter:sdk=local //app
+#
+# A name that no `flutter.toolchain()` declares resolves no toolchain, and the
+# build fails saying so.
+string_flag(
+    name = "sdk",
+    build_setting_default = "flutter",
     visibility = ["//visibility:public"],
 )
 
@@ -229,6 +242,12 @@ bzl_library(
 )
 
 bzl_library(
+    name = "engine",
+    srcs = ["engine.bzl"],
+    visibility = ["//visibility:public"],
+)
+
+bzl_library(
     name = "providers",
     srcs = ["providers.bzl"],
     visibility = ["//visibility:public"],
@@ -243,14 +262,14 @@ bzl_library(
         "//flutter/private:engine_helpers",
         "//flutter/private:flutter_android_engine_repo",
         "//flutter/private:flutter_cross_repo",
-        "//flutter/private:flutter_desktop_cross_repo",
         "//flutter/private:flutter_desktop_engine_repo",
         "//flutter/private:flutter_dev_root_repo",
         "//flutter/private:flutter_ios_engine_repo",
         "//flutter/private:flutter_profile_repo",
+        "//flutter/private:flutter_sdk_toolchains_repo",
         "//flutter/private:flutter_sky_engine_repo",
+        "//flutter/private:flutter_stock_engine_repo",
         "//flutter/private:flutter_web_sdk_repo",
-        "//flutter/private:libraries_spec",
         "//flutter/private:pinned",
         "//flutter/private:toolchains_repo",
         "//flutter/private:versions",
@@ -261,7 +280,10 @@ bzl_library(
     name = "toolchain",
     srcs = ["toolchain.bzl"],
     visibility = ["//visibility:public"],
-    deps = [":providers"],
+    deps = [
+        ":engine",
+        ":providers",
+    ],
 )
 
 # Every .bzl in this package, for //tools/download_guard, which reads them for

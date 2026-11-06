@@ -3,12 +3,15 @@
 /// Two sources, answering two different questions:
 ///
 ///  * [resolveToolchainPaths] finds the Flutter host toolchain repo in a
-///    workspace's Bazel output base and builds the five paths a run needs out
-///    of it — `dart`, `dartaotruntime`, `frontend_server_aot.dart.snapshot`,
-///    `platform_strong.dill` and the patched SDK root. It answers before
-///    anything is built, which is why it is here and not read off a build.
+///    workspace's Bazel output base and takes the `dart` a run starts DevTools
+///    and the e2e harness with out of it. It answers before anything is built,
+///    which is why it is here and not read off a build.
 ///  * [parseDevConfig] reads the `_dev_config.json` a `flutter_application` or
-///    `flutter_web_bundle` emits, which is what the *build* resolved.
+///    `flutter_web_bundle` emits, which is what the *build* resolved. Every
+///    compiler input — `dartaotruntime`, the frontend server snapshot, the
+///    patched SDK — comes from there and never from the output base: a
+///    workspace can declare several SDKs and custom engines, and only the
+///    build knows which one an app is compiled with.
 import 'dart:convert';
 import 'dart:ffi' show Abi;
 import 'dart:io';
@@ -20,18 +23,8 @@ import 'dev_tool_exception.dart';
 /// Toolchain paths resolved from Bazel.
 class ToolchainPaths {
   final String dart;
-  final String dartaotruntime;
-  final String frontendServer;
-  final String platformDill;
-  final String patchedSdkRoot;
 
-  ToolchainPaths({
-    required this.dart,
-    required this.dartaotruntime,
-    required this.frontendServer,
-    required this.platformDill,
-    required this.patchedSdkRoot,
-  });
+  ToolchainPaths({required this.dart});
 }
 
 /// How [resolveToolchainPaths] reaches bazel.
@@ -70,8 +63,8 @@ List<String> flutterToolchainRepoNames(String platform) => [
 /// bazel process's `workingDirectory` so the call works under `bazel run`
 /// (where `Directory.current` is the runfiles execroot).
 ///
-/// Runs before anything is built, because the frontend server and the
-/// dartaotruntime that drives it are needed to assemble a run at all. That is
+/// Runs before anything is built, because the run needs its `dart` before the
+/// build has said anything. That is
 /// what makes the fetch below load-bearing rather than incidental: on a
 /// workspace whose output base has never been built there is no external repo
 /// to find yet, and this is the call that creates it.
@@ -137,28 +130,8 @@ Future<ToolchainPaths> resolveToolchainPaths(
     );
   }
 
-  final isWindows = Platform.isWindows;
-  final dartBin = isWindows ? 'dart.exe' : 'dart';
-  final dartaotruntimeBin = isWindows ? 'dartaotruntime.exe' : 'dartaotruntime';
-
-  return ToolchainPaths(
-    dart: p.join(externalDir, 'dart-sdk', 'bin', dartBin),
-    dartaotruntime: p.join(externalDir, 'dart-sdk', 'bin', dartaotruntimeBin),
-    frontendServer: p.join(
-      externalDir,
-      'dart-sdk',
-      'bin',
-      'snapshots',
-      'frontend_server_aot.dart.snapshot',
-    ),
-    platformDill: p.join(
-      externalDir,
-      'patched-sdk',
-      'flutter_patched_sdk',
-      'platform_strong.dill',
-    ),
-    patchedSdkRoot: p.join(externalDir, 'patched-sdk', 'flutter_patched_sdk'),
-  );
+  final dartBin = Platform.isWindows ? 'dart.exe' : 'dart';
+  return ToolchainPaths(dart: p.join(externalDir, 'dart-sdk', 'bin', dartBin));
 }
 
 /// Whichever of [candidates] exists under [externalBase], or null.

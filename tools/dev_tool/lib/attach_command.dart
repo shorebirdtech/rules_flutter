@@ -354,7 +354,6 @@ class AttachCommand {
       // `refreshGenerated` for codegen apps, and asset tracking.
       await NativePipelineAssembler(
         workspace: workspace,
-        toolchain: toolchain,
         target: target,
         configDevice: sessions.first.device,
         userBuildArgs: userBuildArgs,

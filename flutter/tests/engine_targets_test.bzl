@@ -11,7 +11,7 @@ engines come from repos of their own per mode.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
-load("//flutter/private:engine_helpers.bzl", "desktop_cross_engine_attr", "engine_filegroup_for_os", "engine_target_name", "host_engine_targets")
+load("//flutter/private:engine_helpers.bzl", "engine_filegroup_for_os", "engine_target_name")
 load("//flutter/private:flutter_android_engine_repo.bzl", "android_engine_build_file")
 load(":engine_mode.bzl", "engine_modes")
 
@@ -46,11 +46,6 @@ def _strict_globs_test_impl(ctx):
     for os_name in ["macos", "linux", "windows"]:
         for mode in ["release", "debug", "profile"]:
             asserts.false(env, "allow_empty" in engine_filegroup_for_os(os_name, mode), "%s %s" % (os_name, mode))
-        asserts.false(
-            env,
-            "allow_empty" in host_engine_targets(os_name, has_debug = True, profile_repo = "sdk_profile"),
-            os_name,
-        )
 
     # The Windows engine's files are named one by one, the wrapper's by
     # directory, and the wrapper is not in the engine archive.
@@ -70,54 +65,11 @@ def _filegroup_dirs_test_impl(ctx):
         asserts.false(env, "engine-debug" in text, os_name)
     return unittest.end(env)
 
-def _host_targets_test_impl(ctx):
-    env = unittest.begin(ctx)
-    for os_name in ["macos", "linux", "windows"]:
-        text = host_engine_targets(os_name, has_debug = True, profile_repo = "sdk_profile")
-        asserts.equals(
-            env,
-            ["engine_debug_library", "engine_library", "engine_profile_library", "engine_release_library"],
-            _names(text),
-            os_name,
-        )
-
-        # `engine_library` is the select over the three engines, never a
-        # filegroup of one mode's files.
-        asserts.true(env, "alias(\n    name = \"engine_library\"" in text, os_name)
-        asserts.true(env, "\"@rules_flutter//flutter/private:dbg\": \":engine_debug_library\"" in text, os_name)
-        asserts.true(env, "\"@rules_flutter//flutter/private:profile\": \":engine_profile_library\"" in text, os_name)
-        asserts.true(env, "\"//conditions:default\": \":engine_release_library\"" in text, os_name)
-        asserts.true(env, "actual = \"@sdk_profile//:engine_profile_library\"" in text, os_name)
-
-        # The profile repo names its engine for its mode.
-        asserts.equals(env, ["engine_profile_library"], _names(engine_filegroup_for_os(os_name, "profile")))
-    return unittest.end(env)
-
-def _host_targets_without_optional_modes_test_impl(ctx):
-    env = unittest.begin(ctx)
-    text = host_engine_targets("linux", has_debug = False, profile_repo = "")
-    asserts.equals(env, ["engine_library", "engine_release_library"], _names(text))
-    asserts.false(env, "flutter/private:dbg" in text)
-    asserts.false(env, "flutter/private:profile" in text)
-    return unittest.end(env)
-
 def _target_name_test_impl(ctx):
     env = unittest.begin(ctx)
     asserts.equals(env, "engine_debug_library", engine_target_name("debug"))
     asserts.equals(env, "engine_profile_library", engine_target_name("profile"))
     asserts.equals(env, "engine_release_library", engine_target_name("release"))
-    return unittest.end(env)
-
-def _cross_engine_attr_test_impl(ctx):
-    env = unittest.begin(ctx)
-    text = desktop_cross_engine_attr({
-        "debug": "sdk_engine_linux-x64_debug",
-        "profile": "sdk_engine_linux-x64_profile",
-        "release": "sdk_engine_linux-x64_release",
-    })
-    asserts.true(env, "\"@rules_flutter//flutter/private:dbg\": \"@sdk_engine_linux-x64_debug//:engine_debug_library\"" in text)
-    asserts.true(env, "\"@rules_flutter//flutter/private:profile\": \"@sdk_engine_linux-x64_profile//:engine_profile_library\"" in text)
-    asserts.true(env, "\"//conditions:default\": \"@sdk_engine_linux-x64_release//:engine_release_library\"" in text)
     return unittest.end(env)
 
 def _android_engine_targets_test_impl(ctx):
@@ -142,10 +94,7 @@ def _android_engine_targets_test_impl(ctx):
 _filegroup_names_test = unittest.make(_filegroup_names_test_impl)
 _strict_globs_test = unittest.make(_strict_globs_test_impl)
 _filegroup_dirs_test = unittest.make(_filegroup_dirs_test_impl)
-_host_targets_test = unittest.make(_host_targets_test_impl)
-_host_targets_without_optional_modes_test = unittest.make(_host_targets_without_optional_modes_test_impl)
 _target_name_test = unittest.make(_target_name_test_impl)
-_cross_engine_attr_test = unittest.make(_cross_engine_attr_test_impl)
 _android_engine_targets_test = unittest.make(_android_engine_targets_test_impl)
 
 def _mode_transition_impl(settings, attr):
@@ -214,10 +163,7 @@ def engine_targets_test_suite(name):
         "filegroup_names": _filegroup_names_test,
         "filegroup_dirs": _filegroup_dirs_test,
         "strict_globs": _strict_globs_test,
-        "host_targets": _host_targets_test,
-        "host_targets_without_optional_modes": _host_targets_without_optional_modes_test,
         "target_name": _target_name_test,
-        "cross_engine_attr": _cross_engine_attr_test,
         "android_engine_targets": _android_engine_targets_test,
     }.items():
         test(name = "%s_%s" % (name, case))

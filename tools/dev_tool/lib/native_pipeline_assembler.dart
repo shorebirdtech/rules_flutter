@@ -80,7 +80,6 @@ class NativeLaunch {
 
 class NativePipelineAssembler {
   final String workspace;
-  final ToolchainPaths toolchain;
 
   /// The target the user named. Also what gets rebuilt for assets and for a
   /// relaunch — never the flutter_application, whose own outputs live in a
@@ -120,7 +119,6 @@ class NativePipelineAssembler {
 
   NativePipelineAssembler({
     required this.workspace,
-    required this.toolchain,
     required this.target,
     required this.configDevice,
     this.userBuildArgs = const [],
@@ -304,7 +302,6 @@ class NativePipelineAssembler {
   Future<void> _assembleAgain() async {
     await NativePipelineAssembler(
       workspace: workspace,
-      toolchain: toolchain,
       target: target,
       configDevice: configDevice,
       userBuildArgs: userBuildArgs,
@@ -437,8 +434,11 @@ class NativePipelineAssembler {
     // an iOS run driven from a macOS host, and feeding the host's registers
     // the wrong plugin set after a hot restart, silently.
     final registrant = devConfig.registrantFor(_info.targetPlatform);
+    // The compiler is the one the build resolved, not one found in the
+    // output base: a workspace can declare several SDKs and custom engines,
+    // and only the build knows which one this app compiles with.
     final compilerConfig = configDevice.createCompilerConfig(
-      toolchain,
+      devConfig.patchedSdkRoot,
       fileSystemRoots: devConfig.filesystemRoots,
       fileSystemScheme: devConfig.filesystemScheme,
       // The app's own record travels with them. `flutter_compile_kernel` bakes
@@ -555,7 +555,7 @@ class NativePipelineAssembler {
     final units = await Future.wait([
       for (final session in host.sessions)
         if (session.vmClient != null)
-          _assembleUnit(session, compilerConfig, packageConfig),
+          _assembleUnit(session, devConfig, compilerConfig, packageConfig),
     ]);
     // Null means the compiler itself is gone — not that the source failed to
     // compile, which is a state the unit carries and recovers from. All or
@@ -1071,12 +1071,13 @@ class NativePipelineAssembler {
   /// the VM open.
   Future<SessionReloader?> _assembleUnit(
     DeviceSession session,
+    DevConfig devConfig,
     CompilerConfig compilerConfig,
     String packageConfig,
   ) async {
     final fs = FrontendServer(
-      dartaotruntimePath: toolchain.dartaotruntime,
-      frontendServerPath: toolchain.frontendServer,
+      dartaotruntimePath: devConfig.dartaotruntime,
+      frontendServerPath: devConfig.frontendServer,
       config: compilerConfig,
       packageConfig: packageConfig,
     );

@@ -23,7 +23,6 @@ import 'package:flutter_bazel_dev_tool/native_pipeline_assembler.dart';
 import 'package:flutter_bazel_dev_tool/reload_pipeline.dart';
 import 'package:flutter_bazel_dev_tool/session.dart';
 import 'package:flutter_bazel_dev_tool/session_host.dart';
-import 'package:flutter_bazel_dev_tool/toolchain_info.dart';
 import 'package:flutter_bazel_dev_tool/vm_service_client.dart';
 import 'package:test/test.dart';
 import 'package:vm_service/vm_service.dart';
@@ -34,14 +33,6 @@ import 'fakes.dart';
 /// working directory that does not exist, so anything reaching bazel fails
 /// immediately and says so in the reason the gate carries.
 const _noWorkspace = '/nonexistent/rules_flutter/assembler_test_workspace';
-
-final _toolchain = ToolchainPaths(
-  dart: '/nonexistent/dart',
-  dartaotruntime: '/nonexistent/dartaotruntime',
-  frontendServer: '/nonexistent/frontend_server.dart.snapshot',
-  platformDill: '/nonexistent/platform_strong.dill',
-  patchedSdkRoot: '/nonexistent/flutter_patched_sdk',
-);
 
 Map<String, dynamic> buildInfoJson({String compilationMode = 'dbg'}) => {
   'label': '@@//:app_flutter',
@@ -115,7 +106,6 @@ void main() {
     final pipeline = ReloadPipeline(host: host);
     await NativePipelineAssembler(
       workspace: _noWorkspace,
-      toolchain: _toolchain,
       target: '//:app',
       configDevice: _StubDevice(),
       host: host,
@@ -250,7 +240,6 @@ void main() {
       final pipeline = ReloadPipeline(host: host);
       await NativePipelineAssembler(
         workspace: _noWorkspace,
-        toolchain: _toolchain,
         target: '//:app',
         configDevice: _StubDevice(),
         host: host,

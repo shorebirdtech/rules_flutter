@@ -574,9 +574,12 @@ abstract class Device {
 
   /// Create the compiler config for hot reload on this platform.
   ///
+  /// [patchedSdkRoot] is the patched SDK the app's build compiled against,
+  /// from its dev config.
+  ///
   /// Returns null if this device does not support hot reload.
   CompilerConfig? createCompilerConfig(
-    ToolchainPaths toolchain, {
+    String patchedSdkRoot, {
     WebToolchainPaths? webToolchain,
     List<String> fileSystemRoots = const [],
     String fileSystemScheme = '',
@@ -586,7 +589,7 @@ abstract class Device {
     bool trackWidgetCreation = false,
     List<String> enableExperiments = const [],
   }) => NativeCompilerConfig(
-    patchedSdkRoot: toolchain.patchedSdkRoot,
+    patchedSdkRoot: patchedSdkRoot,
     fileSystemRoots: fileSystemRoots,
     fileSystemScheme: fileSystemScheme,
     dartDefines: dartDefines,
@@ -5128,7 +5131,7 @@ class WebDevice extends Device {
 
   @override
   CompilerConfig? createCompilerConfig(
-    ToolchainPaths toolchain, {
+    String patchedSdkRoot, {
     WebToolchainPaths? webToolchain,
     List<String> fileSystemRoots = const [],
     String fileSystemScheme = '',

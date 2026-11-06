@@ -33,6 +33,7 @@ load("//flutter/private:pub_lock_sdks.bzl", "parse_lock_sdk_constraints", "versi
 load("//flutter/private:pub_reconcile.bzl", "reconcile_package", "sdk_pin_errors", "unsupported_locks")
 load("//flutter/private:pub_resolve.bzl", "resolve_errors", "resolved_targets")
 load("//flutter/private:toolchain_version.bzl", "select_flutter_version")
+load("//flutter/private:toolchains_repo.bzl", "flutter_toolchains_repo")
 load("//flutter/private:versions.bzl", "CHROME_FOR_TESTING", "flutter_sdk_exact_pins", "flutter_source_sha256")
 load(":repositories.bzl", "flutter_register_toolchains")
 
@@ -182,6 +183,12 @@ def _toolchain_extension(module_ctx):
             sha256 = flutter_source_sha256(selected),
         )
         selected_versions[name] = selected
+
+    # Every SDK's toolchains, chosen among by `--@rules_flutter//flutter:sdk`.
+    flutter_toolchains_repo(
+        name = "flutter_toolchains",
+        sdks = sorted(registrations.keys()),
+    )
 
     # The browser web integration tests run in, one repository per host it is
     # built for. Declared unconditionally: a repository is fetched only when

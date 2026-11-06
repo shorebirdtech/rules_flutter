@@ -7,19 +7,27 @@ FlutterSdkInfo = provider(
         "engine_revision": "str: The engine commit hash.",
         "dart": "File: The `dart` executable from the Flutter-bundled Dart SDK.",
         "dartaotruntime": "File: The `dartaotruntime` executable for running AOT snapshots.",
-        "gen_snapshot": "File: The `gen_snapshot` AOT compiler binary.",
+        "gen_snapshot": "File or None: The `gen_snapshot` AOT compiler binary. None in debug mode, " +
+                        "which compiles no snapshot, and for a toolchain that cannot compile one.",
         "flutter_tester": "File or None: The `flutter_tester` binary — a headless Flutter engine " +
                           "used to run widget tests (`flutter_test` rule). None if the host SDK " +
                           "doesn't include it (e.g. cross-compilation targets).",
         "frontend_server": "File: The `frontend_server_aot.dart.snapshot` for kernel compilation.",
         "kernel_worker": "File or None: `kernel_worker_aot.dart.snapshot`, which compiles one " +
                          "library target to a kernel module. None where `flutter_tester` is None.",
-        "libraries_spec": "File or None: A `libraries.json` whose `flutter` target names the dart: " +
-                          "libraries a Flutter program can import. It lists names only and is " +
-                          "not for compiling. None where `flutter_tester` is None.",
+        "dart_libraries_json": "File: The Dart SDK's own `lib/libraries.json`, from which a " +
+                               "`libraries.json` naming the dart: libraries a Flutter program can " +
+                               "import is derived (`flutter_kernel_sdk`).",
         "platform_kernel_dill": "File: `platform_strong.dill` — the debug platform kernel.",
-        "platform_kernel_dill_product": "File: `platform_strong_product.dill` — the release platform kernel.",
+        "platform_kernel_dill_product": "File or None: `platform_strong_product.dill` — the release platform kernel. None in debug mode.",
         "patched_sdk": "Target: The Flutter patched Dart SDK root directory.",
+        "sdk": "str: The name of the SDK this toolchain belongs to (`flutter`, the stock release, or the " +
+               "name of a declared one).",
+        "host_tools": "FlutterHostToolsInfo: The host tools slice the toolchain was assembled from.",
+        "kernel_debug": "FlutterPlatformKernelInfo: The debug (non-product) platform kernel slice.",
+        "kernel_release": "FlutterPlatformKernelInfo or None: The release (product) platform kernel slice. None in debug mode.",
+        "engine": "FlutterEngineInfo or None: The engine slice `engine_library` is the target of.",
+        "gen_snapshot_info": "FlutterGenSnapshotInfo or None: The gen_snapshot slice `gen_snapshot` is the binary of.",
         "icu_data": "File: `icudtl.dat` — ICU data file required by the engine.",
         "tool_files": "depset[File]: Every file of the bundled Dart SDK and of the patched SDK, " +
                       "for running any SDK command (`dart pub`). An action that runs one tool " +
@@ -61,10 +69,12 @@ FlutterExecToolsInfo = provider(
         "dartaotruntime": "File: The `dartaotruntime` executable for running AOT snapshots.",
         "frontend_server": "File: The `frontend_server_aot.dart.snapshot` for kernel compilation.",
         "kernel_worker": "File: `kernel_worker_aot.dart.snapshot`, which compiles one library target to a kernel module.",
-        "libraries_spec": "File: A `libraries.json` whose `flutter` target names the dart: libraries a Flutter program can import.",
+        "dart_libraries_json": "File: The Dart SDK's own `lib/libraries.json`.",
         "platform_kernel_dill": "File: `platform_strong.dill` — the debug platform kernel.",
-        "platform_kernel_dill_product": "File: `platform_strong_product.dill` — the release platform kernel.",
+        "platform_kernel_dill_product": "File or None: `platform_strong_product.dill` — the release platform kernel.",
         "patched_sdk": "Target: The Flutter patched Dart SDK root directory.",
+        "sdk": "str: The name of the SDK these tools belong to.",
+        "host_tools": "FlutterHostToolsInfo: The host tools slice these were assembled from.",
         "flutter_tester": "File: The `flutter_tester` headless engine that runs widget tests.",
         "icu_data": "File: `icudtl.dat`, the ICU data `flutter_tester` loads.",
         "vm_isolate_snapshot": "File: `vm_isolate_snapshot.bin`, the VM bootstrap snapshot a debug app ships.",

@@ -13,19 +13,35 @@ load("//flutter/private:exec_groups.bzl", "FLUTTER_EXEC_TOOLS")
 
 def _flutter_kernel_sdk_impl(ctx):
     sdk = ctx.toolchains["@rules_flutter//flutter:toolchain_type"].flutter_sdk_info
-    if not sdk.kernel_worker or not sdk.libraries_spec:
+    if not sdk.kernel_worker or not sdk.dart_libraries_json:
         fail(
             "The resolved Flutter toolchain cannot compile kernel modules: it " +
-            "carries no kernel_worker or libraries_spec. Only a host toolchain " +
+            "carries no kernel_worker or Dart libraries spec. Only a host toolchain " +
             "does; build Flutter tests for the host platform.",
         )
+
+    # The libraries Flutter provides, derived from the Dart SDK's own spec.
+    libraries_spec = ctx.actions.declare_file(ctx.label.name + "/flutter_libraries.json")
+    ctx.actions.run(
+        executable = sdk.dart,
+        arguments = [
+            ctx.file._libraries_spec_tool.path,
+            "--sdk-libraries=" + sdk.dart_libraries_json.path,
+            "--output=" + libraries_spec.path,
+        ],
+        inputs = depset([ctx.file._libraries_spec_tool, sdk.dart_libraries_json], transitive = [sdk.sdk_files.run]),
+        outputs = [libraries_spec],
+        mnemonic = "FlutterLibrariesSpec",
+        toolchain = "@rules_flutter//flutter:toolchain_type",
+        progress_message = "Deriving Flutter's libraries.json for %s" % ctx.label,
+    )
     return [DartKernelSdkInfo(
         target = "flutter",
         runtime = sdk.dartaotruntime,
         kernel_worker = sdk.kernel_worker,
         frontend_server = sdk.frontend_server,
         platform = sdk.platform_kernel_dill,
-        libraries_spec = sdk.libraries_spec,
+        libraries_spec = libraries_spec,
         libraries_target = "flutter",
         # What flutter_tools folds into a debug compile. A module is compiled
         # with an explicit environment, so a declaration left out here would
@@ -38,6 +54,12 @@ def _flutter_kernel_sdk_impl(ctx):
 
 flutter_kernel_sdk = rule(
     implementation = _flutter_kernel_sdk_impl,
+    attrs = {
+        "_libraries_spec_tool": attr.label(
+            default = "//flutter/private/tools:libraries_spec.dart",
+            allow_single_file = True,
+        ),
+    },
     toolchains = ["@rules_flutter//flutter:toolchain_type"],
     doc = "The `DartKernelSdkInfo` for the debug Flutter platform, from the resolved Flutter toolchain.",
 )
