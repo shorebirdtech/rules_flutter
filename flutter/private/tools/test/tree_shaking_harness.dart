@@ -85,7 +85,8 @@ void main() {
             'dart': Platform.resolvedExecutable,
             'const_finder': constFinder.path,
             'font_subset': runfile(
-              '_main/flutter/private/tools/fake_font_subset',
+              '_main/flutter/private/tools/fake_font_subset'
+              '${Platform.isWindows ? '.exe' : ''}',
             ),
             'kernel_dill': '${work.path}/app.dill',
           },
