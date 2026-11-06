@@ -67,6 +67,7 @@ import 'native_patch_delivery.dart';
 import 'reload_strategy.dart';
 import 'runfiles_helper.dart';
 import 'screen.dart';
+import 'simulator_terminations.dart';
 import 'temp_dir.dart';
 import 'toolchain_info.dart';
 import 'vm_service_client.dart';
@@ -285,6 +286,22 @@ class _LaunchScratch {
   }
 }
 
+/// How an app the tool was connected to ended, as its platform tells it.
+class AppExit {
+  /// The app ended because someone asked it to (it was closed, or quit), or it
+  /// ended itself with code 0: what upstream calls "Application finished."
+  const AppExit.closed(this.account) : closed = true;
+
+  /// The app ended without being asked to: a crash, a kill, a failing exit.
+  const AppExit.crashed(this.account) : closed = false;
+
+  /// The platform's account of the end, for the user.
+  final String account;
+
+  /// Whether the end was asked for rather than a crash.
+  final bool closed;
+}
+
 /// Abstract device that can launch and manage a Flutter app.
 abstract class Device {
   /// How long [stop] waits on any one thing it is stopping before giving up on
@@ -318,6 +335,17 @@ abstract class Device {
   /// Why [instance] is no longer running, once its VM service could not be
   /// reached: null while it runs, or on a device that cannot tell.
   Future<String?> whyAppExited(AppInstance instance) async => null;
+
+  /// How [instance] ended, once its VM service could not be reached: null
+  /// while it runs, or on a device that cannot tell.
+  ///
+  /// Every end [whyAppExited] reports is a crash unless the device says
+  /// otherwise: a device whose platform can tell a close from a crash, when
+  /// the tool does not hold the app's exit status itself, overrides this.
+  Future<AppExit?> howAppExited(AppInstance instance) async {
+    final account = await whyAppExited(instance);
+    return account == null ? null : AppExit.crashed(account);
+  }
 
   /// Release what a launch left running when no session took ownership of it.
   ///
@@ -2773,6 +2801,21 @@ class IOSSimulatorDevice extends Device {
   /// liveness is asked of.
   int? _launchedPid;
 
+  /// The simulator's records of how the last launch's app processes ended.
+  SimulatorTerminations? _terminations;
+
+  /// How long [howAppExited] waits for the simulator's record of an app's end
+  /// once the tool lost it, before asking whether the process is there at all.
+  /// The record is logged as the process goes; this bounds the wait for one
+  /// when the app has not gone. Settable so tests do not wait it out.
+  Duration terminationRecordBound = _exitReportSettle;
+
+  /// How long [howAppExited] waits for the record of a process known to be
+  /// gone. RunningBoard logs every app's end, but a host under load delivers
+  /// the log late: seconds, where the process check answers at once. Settable
+  /// so tests do not wait it out.
+  Duration goneRecordBound = const Duration(seconds: 30);
+
   IOSSimulatorDevice({
     required String udid,
     String? bundleId,
@@ -2926,9 +2969,30 @@ class IOSSimulatorDevice extends Device {
       transform: parseUnifiedLoggingLine,
     );
 
-    // Launch app.
     final bundleId = _launchedBundleId =
         _bundleId ?? await _extractBundleId(installPath, _runProcess);
+
+    // A third stream, for how the app ends: the simulator's record of it is
+    // what tells a close from a crash (see simulator_terminations.dart).
+    final terminationLog = await _startHelper('xcrun', [
+      'simctl',
+      'spawn',
+      udid,
+      'log',
+      'stream',
+      '--style',
+      'ndjson',
+      '--predicate',
+      simulatorTerminationPredicate(bundleId),
+    ]);
+    _terminations = SimulatorTerminations(
+      terminationLog.stdout
+          .transform(utf8.decoder)
+          .transform(const LineSplitter()),
+    );
+    terminationLog.stderr.drain<void>().ignore();
+
+    // Launch app.
     final launchResult = await _runProcess('xcrun', [
       'simctl', 'launch', udid, bundleId,
       // Anything after the bundle id is passed to the app as argv, which is
@@ -2983,7 +3047,7 @@ class IOSSimulatorDevice extends Device {
       process: discoveryLog,
       vmServiceUri: uri,
       logs: logs,
-      auxiliaryProcesses: [outputLog],
+      auxiliaryProcesses: [outputLog, terminationLog],
       scratchDirs: _scratch.handOver(),
     );
   }
@@ -2991,17 +3055,47 @@ class IOSSimulatorDevice extends Device {
   /// An app that announced its VM service and then died (an exception once the
   /// engine was up, say) leaves an address nothing answers; this says the app
   /// is gone instead, with the end of its log. Null while the process is there.
-  ///
-  /// The simulator's processes are the host's, so signal 0 to the pid
-  /// `simctl launch` named is the platform's own test for it. Only "No such
-  /// process" is a verdict: a refusal (EPERM) says the check could not be made.
   @override
-  Future<String?> whyAppExited(AppInstance instance) async {
+  Future<String?> whyAppExited(AppInstance instance) async =>
+      (await howAppExited(instance))?.account;
+
+  /// The simulator's record of the app's end says how it went, and whether it
+  /// was closed or crashed.
+  ///
+  /// Without a record within [terminationRecordBound], the process is asked
+  /// after directly: the simulator's processes are the host's, so signal 0 to
+  /// the pid `simctl launch` named is the platform's own test for it. Only "No
+  /// such process" is a verdict, and then the record is waited for again, up
+  /// to [goneRecordBound]; with none, the app is taken to have crashed, since
+  /// nothing recorded a close. A refusal (EPERM) says the check could not be
+  /// made.
+  @override
+  Future<AppExit?> howAppExited(AppInstance instance) async {
     final pid = _launchedPid;
     final bundleId = _launchedBundleId;
     if (pid == null || bundleId == null) return null;
+    Future<SimulatorTermination?> record(Duration bound) async =>
+        await _terminations
+            ?.of(pid)
+            .then<SimulatorTermination?>((t) => t)
+            .timeout(bound, onTimeout: () => null);
+    AppExit told(SimulatorTermination ended) {
+      final account = '$bundleId (pid $pid) ${ended.how} on $name.';
+      return ended.closed
+          ? AppExit.closed(account)
+          : AppExit.crashed(
+              '$account ${_browserLastWords(instance.logs, silence: 'It printed nothing.')}',
+            );
+    }
+
+    final ended = await record(terminationRecordBound);
+    if (ended != null) return told(ended);
     final alive = await _runProcess('kill', ['-0', '$pid']);
     if (alive.exitCode == 0) return null;
+    if ('${alive.stderr}'.contains('No such process')) {
+      final late = await record(goneRecordBound);
+      if (late != null) return told(late);
+    }
     if (!'${alive.stderr}'.contains('No such process')) {
       _logger.warning({
         'message': 'ios_simulator_liveness_check_failed',
@@ -3013,8 +3107,11 @@ class IOSSimulatorDevice extends Device {
       });
       return null;
     }
-    return '$bundleId (pid $pid) exited after announcing its VM service on '
-        '$name. ${_browserLastWords(instance.logs, silence: 'It printed nothing.')}';
+    return AppExit.crashed(
+      '$bundleId (pid $pid) exited after announcing its VM service on '
+      '$name, and the simulator recorded no termination for it. '
+      '${_browserLastWords(instance.logs, silence: 'It printed nothing.')}',
+    );
   }
 
   @override

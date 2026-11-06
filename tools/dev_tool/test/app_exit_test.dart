@@ -173,6 +173,7 @@ void main() {
         IOSSimulatorDevice device,
         AppInstance instance,
         FakeProcess output,
+        FakeProcess terminations,
         List<List<String>> kills,
         void Function(ProcessResult) answerKill,
       })
@@ -181,6 +182,7 @@ void main() {
       var killAnswer = ProcessResult(0, 0, '', '');
       final kills = <List<String>>[];
       final output = FakeProcess();
+      final terminations = FakeProcess();
       final device = IOSSimulatorDevice(
         udid: 'TEST-UDID',
         bundleId: bundleId,
@@ -192,6 +194,9 @@ void main() {
           return simctlOkWithPid(args, pid);
         },
         startProcess: (exe, args) async {
+          if (args.any((a) => a.contains('termination reported by launchd'))) {
+            return terminations;
+          }
           if (args.contains('ndjson')) {
             final discovery = FakeProcess();
             unawaited(
@@ -209,19 +214,101 @@ void main() {
           return output;
         },
       );
+      // A record that is not coming is waited for this long, not the real
+      // bound.
+      device
+        ..terminationRecordBound = const Duration(milliseconds: 10)
+        ..goneRecordBound = const Duration(milliseconds: 10);
       final instance = await device.launch('/path/to/MyApp.app');
       kills.clear();
       return (
         device: device,
         instance: instance,
         output: output,
+        terminations: terminations,
         kills: kills,
         answerKill: (r) => killAnswer = r,
       );
     }
 
+    String record(String tuple) => json.encode({
+      'processID': 99,
+      'eventMessage':
+          '[app<$bundleId((null))>:$pid] termination reported by launchd '
+          '$tuple',
+    });
+
+    test('closed from the app switcher is said to have been closed, which '
+        'is not a crash', () async {
+      final sim = await launched();
+      sim.terminations.emitStdout(record('(0, 0, 0)'));
+
+      final exit = await sim.device.howAppExited(sim.instance);
+
+      expect(exit!.closed, isTrue);
+      expect(exit.account, contains('$bundleId (pid $pid)'));
+      expect(sim.kills, isEmpty, reason: 'the record is the answer');
+    });
+
+    test('terminated with simctl is said to have been closed', () async {
+      final sim = await launched();
+      sim.terminations.emitStdout(record('(10, 4227595259, 9)'));
+
+      final exit = await sim.device.howAppExited(sim.instance);
+
+      expect(exit!.closed, isTrue);
+      expect(exit.account, contains('simctl terminate'));
+    });
+
+    test('killed by a signal is said to have crashed, with the signal and '
+        'its log', () async {
+      final sim = await launched();
+      sim.output.emitStdout('  "eventMessage" : "about to fault",');
+      await pumpEventQueue();
+      sim.terminations.emitStdout(record('(2, 11, 11)'));
+
+      final exit = await sim.device.howAppExited(sim.instance);
+
+      expect(exit!.closed, isFalse);
+      expect(
+        exit.account,
+        allOf(contains('signal 11 (SIGSEGV)'), contains('about to fault')),
+      );
+      expect(await sim.device.whyAppExited(sim.instance), exit.account);
+    });
+
+    test('gone, with the record arriving late, is said to have been closed '
+        'all the same', () async {
+      final sim = await launched();
+      sim.device.goneRecordBound = const Duration(seconds: 5);
+      sim.answerKill(ProcessResult(0, 1, '', 'kill: $pid: No such process'));
+      // The record arrives once the process check has answered.
+      sim.device.terminationRecordBound = Duration.zero;
+      final asked = sim.device.howAppExited(sim.instance);
+      await pumpEventQueue();
+      expect(sim.kills, isNotEmpty);
+      sim.terminations.emitStdout(record('(10, 4227595259, 9)'));
+
+      expect((await asked)!.closed, isTrue);
+    });
+
+    test("another process's end says nothing about this one", () async {
+      final sim = await launched();
+      sim.terminations.emitStdout(
+        json.encode({
+          'processID': 99,
+          'eventMessage':
+              '[app<$bundleId((null))>:${pid + 1}] termination reported by '
+              'launchd (0, 0, 0)',
+        }),
+      );
+
+      expect(await sim.device.howAppExited(sim.instance), isNull);
+    });
+
     test(
-      'whose process is gone is said to have exited, with its log',
+      'whose process is gone with no record is said to have exited, with '
+      'its log',
       () async {
         final sim = await launched();
         sim.output.emitStdout(

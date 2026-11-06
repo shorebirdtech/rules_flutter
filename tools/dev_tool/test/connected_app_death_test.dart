@@ -3,9 +3,10 @@
 /// The property: an app that dies while a session is connected to it (before
 /// its first frame, mid-session, mid-reload) ends the session with the
 /// platform's account of why, and the run fails with that account. A quit the
-/// user asked for, a relaunch the tool asked for, and an app that exits
-/// cleanly are none of them a crash. The signal is the connection closing and
-/// not coming back, or the process exiting; no timer decides anything.
+/// user asked for (of the tool, or of the app, as the platform reports it), a
+/// relaunch the tool asked for, and an app that exits cleanly are none of them
+/// a crash. The signal is the connection closing and not coming back, or the
+/// process exiting; no timer decides anything.
 ///
 /// Before this, nothing in a `run` listened for the connection closing: the
 /// wait for the first frame kept asking a service that was gone and printing
@@ -23,11 +24,14 @@ import 'package:vm_service/vm_service.dart';
 
 import 'fakes.dart';
 
-/// A device whose platform answers [whyAppExited] as the test says.
+/// A device whose platform answers [howAppExited] as the test says.
 class _Platform extends Device {
   /// What the platform says about the app: null while it runs or when it
   /// cannot tell.
   String? verdict;
+
+  /// Whether the platform says the app was closed rather than crashed.
+  bool closed = false;
 
   /// Asked of the platform, in order: the property is that it is asked before
   /// the app is stopped.
@@ -41,9 +45,11 @@ class _Platform extends Device {
       throw UnsupportedError('not launched in this test');
 
   @override
-  Future<String?> whyAppExited(AppInstance instance) async {
-    calls.add('whyAppExited');
-    return verdict;
+  Future<AppExit?> howAppExited(AppInstance instance) async {
+    calls.add('howAppExited');
+    final account = verdict;
+    if (account == null) return null;
+    return closed ? AppExit.closed(account) : AppExit.crashed(account);
   }
 
   @override
@@ -100,7 +106,7 @@ void main() {
     await session.terminated.timeout(const Duration(seconds: 5));
     await session.shutdown(MachineProtocol(enabled: false));
 
-    expect(device.calls, ['whyAppExited', 'stop']);
+    expect(device.calls, ['howAppExited', 'stop']);
   });
 
   test('a platform that cannot tell still ends the session, naming the '
@@ -148,6 +154,31 @@ void main() {
 
     expect(deaths, isEmpty);
     expect(session.death, isNull);
+  });
+
+  // A simulator's app is launchd's child, not the tool's, so the tool holds
+  // no exit status for it: the platform says whether it was closed.
+  test('an app the platform says was closed finished; it did not crash, and '
+      'app.stop carries no error', () async {
+    device.verdict =
+        'com.example.app (pid 42) was closed from the app switcher on Test '
+        'Phone.';
+    device.closed = true;
+    final sink = BufferSink();
+    final protocol = MachineProtocol(enabled: true, output: sink);
+
+    fake.simulateDisposed();
+    await session.terminated.timeout(const Duration(seconds: 5));
+    await session.shutdown(protocol);
+
+    expect(deaths, isEmpty);
+    expect(session.death, isNull);
+    final stop = sink.buffer
+        .toString()
+        .split('\n')
+        .where((l) => l.contains('"app.stop"'))
+        .single;
+    expect(stop, isNot(contains('"error"')));
   });
 
   test('the connection closing because the user quit is not a death', () async {

@@ -367,9 +367,10 @@ class DeviceSession {
   /// the connection to it closed and did not come back.
   ///
   /// Both signals arrive for one death, in either order, and the first to be
-  /// handled settles it. Three things are not deaths: the tool's own shutdown,
-  /// the replacement of the app by a relaunch, and an exit with code 0, which
-  /// is the app finishing (upstream's "Application finished.") and not a crash.
+  /// handled settles it. Four things are not deaths: the tool's own shutdown,
+  /// the replacement of the app by a relaunch, an exit with code 0, which is
+  /// the app finishing (upstream's "Application finished.") and not a crash,
+  /// and a close the platform says was asked for (the user closing the app).
   /// The shutdown flag is checked again once the platform has answered,
   /// because the platform's check takes real time and a quit can land in it.
   Future<void> _appStopped(AppInstance instance) async {
@@ -386,9 +387,9 @@ class DeviceSession {
 
     // Asked before anything is stopped: a process this run killed is not one
     // that died.
-    String? account;
+    AppExit? ending;
     try {
-      account = await device.whyAppExited(instance);
+      ending = await device.howAppExited(instance);
     } catch (e) {
       _logger.warning({
         'message': 'app_exit_check_failed',
@@ -418,9 +419,20 @@ class DeviceSession {
       _markTerminated();
       return;
     }
+    // A device that does not hold the app's exit status (a simulator, whose
+    // app launchd starts) says itself when the app was closed.
+    if (ending != null && ending.closed) {
+      _logger.info({
+        'message': 'app_closed',
+        'text': '${ending.account} Application finished.',
+        'device': device.name,
+      });
+      _markTerminated();
+      return;
+    }
 
     final reason =
-        account ??
+        ending?.account ??
         (code != null
             ? 'The app on ${device.name} stopped: the process the tool '
                   'follows for it exited with code $code.'

@@ -3122,7 +3122,8 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       );
     });
 
-    test('launch spawns a second log stream for app output', () async {
+    test('launch spawns separate log streams for app output and for how '
+        'the app ends', () async {
       final started = <(String, List<String>)>[];
       final device = IOSSimulatorDevice(
         udid: 'TEST-UDID',
@@ -3139,8 +3140,10 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       final logStreams = started.where((c) => c.$2.contains('stream')).toList();
       expect(
         logStreams,
-        hasLength(2),
-        reason: 'one narrow stream for discovery, one for app output',
+        hasLength(3),
+        reason:
+            'one narrow stream for discovery, one for app output, one for '
+            "the simulator's record of the app's end",
       );
 
       // Discovery keeps its content match; output gets the process-scoped
@@ -3152,6 +3155,16 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       );
       expect(
         logStreams.any((c) => c.$2.any((a) => a.contains('processImagePath'))),
+        isTrue,
+      );
+      expect(
+        logStreams.any(
+          (c) => c.$2.any(
+            (a) =>
+                a.contains('termination reported by launchd') &&
+                a.contains('com.example.test'),
+          ),
+        ),
         isTrue,
       );
     });
