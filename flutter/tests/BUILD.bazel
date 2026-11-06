@@ -28,6 +28,7 @@ load(":flutter_pub_library_repo_test.bzl", "flutter_pub_library_repo_test_suite"
 load(":flutter_pub_package_sdk_source_test.bzl", "flutter_pub_package_sdk_source_test_suite")
 load(":flutter_pub_package_test.bzl", "flutter_pub_package_test_suite")
 load(":flutter_pubspec_test.bzl", "flutter_pubspec_test_suite")
+load(":flutter_test_application_test.bzl", "flutter_test_application_test_suite")
 load(":flutter_test_bootstrap_test.bzl", "flutter_test_bootstrap_test_suite")
 load(":flutter_test_flavor_test.bzl", "flutter_test_flavor_test_suite")
 load(":flutter_test_runfiles_test.bzl", "flutter_test_runfiles_test_suite")
@@ -142,6 +143,8 @@ windows_version_test_suite(name = "windows_version_test")
 linux_sysroot_link_test_suite(name = "linux_sysroot_link_test")
 
 language_version_test_suite(name = "language_version_test")
+
+flutter_test_application_test_suite(name = "flutter_test_application_test")
 
 profile_mode_test_suite(name = "profile_mode_test")
 

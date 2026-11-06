@@ -1661,6 +1661,17 @@ flutter_test(
 
 It takes the compile attributes of `flutter_application` (`main`, `srcs`, `deps`, `defines`, `package_name`, `language_version`, `assets`, `shaders`) plus the usual `data` and `env`, and `include_tags` and `exclude_tags` (below). Values in `env` are literal; there is no `$(location)` expansion.
 
+A test of an app can name the app's `flutter_application` as `application` instead of repeating its package, as `flutter test` compiles a test in the package it is in. The application's package name, language version, sources, `deps`, `code_assets` and assets become the test's, so `package:my_app/…` resolves; the test's `main`, `srcs`, `deps` and `code_assets` add to them, and its `defines` and `flavor` are its own:
+
+```starlark
+flutter_test(
+    name = "widget_test",
+    application = ":my_app",
+    main = "test/widget_test.dart",
+    deps = ["@deps//:flutter_test"],
+)
+```
+
 A test runs where its target runs, as a `cc_test` does: its `deps`, native code included, and the `flutter_tester` that runs it are built for the target platform, and Bazel's default test toolchain runs it on an execution platform matching that platform. On a Mac that is the Mac. To run tests on other machines, a Linux remote worker say:
 
 - **`--platforms`** builds every test for that platform, so Bazel runs them on an execution platform matching it.
