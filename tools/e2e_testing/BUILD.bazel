@@ -38,6 +38,7 @@ dart_library(
         main = test,
         deps = [
             ":e2e_testing",
+            "@dev_tool_deps//:path",
             "@dev_tool_deps//:test",
         ],
     )

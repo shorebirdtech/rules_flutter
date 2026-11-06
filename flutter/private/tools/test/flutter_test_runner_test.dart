@@ -123,7 +123,8 @@ void main() {
     test('renders hits and misses as LCOV line records', () async {
       expect(
         await runner.collectCoverage(vm.httpUri, const ['package:pkg/']),
-        'SF:/pkg/a.dart\n'
+        // A file: URI read back as the host spells that path.
+        'SF:${Uri.parse('file:///pkg/a.dart').toFilePath()}\n'
         'DA:5,1\n'
         'DA:7,0\n'
         'end_of_record',

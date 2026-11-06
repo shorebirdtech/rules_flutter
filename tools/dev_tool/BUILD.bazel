@@ -279,7 +279,7 @@ _UNIT_TESTS = {
     "native_hot_patch_tool_test": {},
     "native_hot_patcher_test": {"deps": ["@dev_tool_deps//:vm_service"]},
     "native_image_identity_test": {"zip": True},
-    "native_patch_delivery_test": {},
+    "native_patch_delivery_test": {"deps": _PATH_DEP},
     "native_libs_fingerprint_test": {"zip": True},
     "native_libs_watch_test": {},
     "native_libs_relauncher_test": {
@@ -351,6 +351,7 @@ _UNIT_TESTS = {
     "web_module_server_test": {
         "tls": True,
         "loopbacks": True,
+        "deps": _PATH_DEP,
     },
     "package_roots_test": {},
     "process_group_exec_test": {"data": [":process_group_exec"]},

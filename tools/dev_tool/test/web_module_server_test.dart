@@ -6,6 +6,7 @@ import 'package:flutter_bazel_dev_tool/logging.dart';
 import 'package:flutter_bazel_dev_tool/toolchain_info.dart';
 import 'package:flutter_bazel_dev_tool/web_module_server.dart';
 import 'package:flutter_bazel_dev_tool/web_options.dart';
+import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 import 'loopbacks.dart';
@@ -985,7 +986,7 @@ void main() {
         () => serverWith(buildOutputDir: dir.path).start(),
         throwsDevToolException(
           allOf(
-            contains('${dir.path}/flutter.js'),
+            contains(p.join(dir.path, 'flutter.js')),
             contains('blank'),
           ),
         ),

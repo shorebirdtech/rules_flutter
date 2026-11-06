@@ -2,9 +2,14 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_bazel_dev_tool/integration/linux_runtime.dart';
+import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 import 'fakes.dart';
+
+// The runtime's paths are joined with the host's separator, so what a test
+// expects is joined the same way rather than written out with `/`.
+String _under(String base, List<String> parts) => p.joinAll([base, ...parts]);
 
 const _runtime = LinuxRuntime(
   root: '/rf/rt/root',
@@ -12,6 +17,8 @@ const _runtime = LinuxRuntime(
   xvfb: '/rf/rt/runtime/Xvfb',
   fontsConf: '/rf/rt/fonts.conf',
 );
+
+final _lib = _under('/rf/rt/root', ['usr', 'lib', 'x86_64-linux-gnu']);
 
 const _host = {
   'HOME': '/home/me',
@@ -69,15 +76,9 @@ void main() {
     });
 
     test('loads the runtime\'s libraries and modules, not the host\'s', () {
-      expect(env['LD_LIBRARY_PATH'], '/rf/rt/root/usr/lib/x86_64-linux-gnu');
-      expect(
-        env['LIBGL_DRIVERS_PATH'],
-        '/rf/rt/root/usr/lib/x86_64-linux-gnu/dri',
-      );
-      expect(
-        env['GIO_MODULE_DIR'],
-        '/rf/rt/root/usr/lib/x86_64-linux-gnu/gio/modules',
-      );
+      expect(env['LD_LIBRARY_PATH'], _lib);
+      expect(env['LIBGL_DRIVERS_PATH'], p.join(_lib, 'dri'));
+      expect(env['GIO_MODULE_DIR'], p.join(_lib, 'gio', 'modules'));
       expect(env['FONTCONFIG_FILE'], '/rf/rt/fonts.conf');
       expect(env.containsKey('GTK_PATH'), isFalse);
       expect(env.containsKey('XDG_DATA_DIRS'), isFalse);
@@ -128,9 +129,12 @@ void main() {
       expect(args, containsAllInOrder(['-displayfd', '1']));
       expect(
         args,
-        containsAllInOrder(['-xkbdir', '/rf/rt/root/usr/share/X11/xkb']),
+        containsAllInOrder([
+          '-xkbdir',
+          _under('/rf/rt/root', ['usr', 'share', 'X11', 'xkb']),
+        ]),
       );
-      expect(env['PATH'], '/rf/rt/root/usr/bin');
+      expect(env['PATH'], _under('/rf/rt/root', ['usr', 'bin']));
       expect(env.containsKey('DISPLAY'), isFalse);
     });
 

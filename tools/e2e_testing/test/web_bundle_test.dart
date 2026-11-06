@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:rules_flutter_e2e_testing/bundle_check.dart';
 import 'package:rules_flutter_e2e_testing/web_bundle.dart';
+import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 void main() {
@@ -44,13 +45,13 @@ void main() {
   test('filesEndingWith looks in subdirectories', () {
     expect(
       bundle.filesEndingWith('.info.json').map((f) => f.path),
-      ['${dir.path}/canvaskit/a.info.json'],
+      [p.join(dir.path, 'canvaskit', 'a.info.json')],
     );
     expect(bundle.filesEndingWith('.deps'), isEmpty);
   });
 
   test('the label defaults to the directory name', () {
     final unnamed = WebBundle(dir.path, check);
-    expect(unnamed.label, dir.path.split('/').last);
+    expect(unnamed.label, p.basename(dir.path));
   });
 }

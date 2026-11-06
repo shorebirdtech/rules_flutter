@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:rules_flutter_e2e_testing/host_leaks.dart';
+import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 void main() {
@@ -88,7 +89,7 @@ void main() {
       File('${dir.path}/a/b/c.dill').writeAsStringSync('/execroot/');
       File('${dir.path}/clean.txt').writeAsStringSync('nothing');
       final leaks = markers.inTree(dir.path);
-      expect(leaks.map((l) => l.source), ['a/b/c.dill']);
+      expect(leaks.map((l) => l.source), [p.join('a', 'b', 'c.dill')]);
     });
   });
 

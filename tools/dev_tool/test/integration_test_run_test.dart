@@ -353,7 +353,7 @@ void main() {
       expect(device.environment!['DISPLAY'], ':5');
       expect(
         device.environment!['LD_LIBRARY_PATH'],
-        '/runfiles/rt/root/usr/lib/x86_64-linux-gnu',
+        p.join('/runfiles/rt/root', 'usr', 'lib', 'x86_64-linux-gnu'),
       );
       expect(server.killed, isFalse);
       await give();
