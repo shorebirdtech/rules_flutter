@@ -16,6 +16,8 @@
 ///   `dart_test` writes.
 library;
 
+import 'package:boolean_selector/boolean_selector.dart';
+
 /// Whether this run should regenerate goldens instead of comparing them.
 ///
 /// Pure so it can be tested without a Bazel invocation to produce each case;
@@ -55,9 +57,155 @@ bool parseUpdateGoldens(
   return update;
 }
 
+/// Which tests a set of `package:test` tag selectors keeps.
+///
+/// An include selector keeps a test whose tags it matches and an exclude
+/// selector drops one whose tags it matches, as `--tags` and `--exclude-tags`
+/// do. Selectors combine as `package:test` combines `dart_test.yaml` with the
+/// command line: includes intersect, excludes unite.
+class TagSelection {
+  const TagSelection({
+    this.include = BooleanSelector.all,
+    this.exclude = BooleanSelector.none,
+    this.includeRaw,
+    this.excludeRaw,
+  });
+
+  /// Reads the value of `DART_TEST_TAGS` and `DART_TEST_EXCLUDE_TAGS`: each is
+  /// comma-separated selectors, as `--tags` takes them. Unset, empty and
+  /// blank pieces select nothing away.
+  ///
+  /// Throws [FormatException] naming the variable for a piece that is not a
+  /// selector.
+  factory TagSelection.fromEnvironmentValues(String? include, String? exclude) {
+    final includes = _pieces(include);
+    final excludes = _pieces(exclude);
+    return TagSelection(
+      include: _combine(
+        includes,
+        (_) => 'DART_TEST_TAGS "$include" is not a tag selector: ',
+        intersect: true,
+      ),
+      exclude: _combine(
+        excludes,
+        (_) => 'DART_TEST_EXCLUDE_TAGS "$exclude" is not a tag selector: ',
+        intersect: false,
+      ),
+      includeRaw: includes.isEmpty ? null : include,
+      excludeRaw: excludes.isEmpty ? null : exclude,
+    );
+  }
+
+  /// Reads the `include_tags` and `exclude_tags` attributes: each entry is one
+  /// selector and is not split.
+  ///
+  /// Throws [FormatException] naming the attribute and the entry.
+  factory TagSelection.fromAttribute(
+    List<String> include,
+    List<String> exclude,
+  ) => TagSelection(
+    include: _combine(
+      include,
+      (entry) => 'include_tags entry "$entry" is not a tag selector: ',
+      intersect: true,
+    ),
+    exclude: _combine(
+      exclude,
+      (entry) => 'exclude_tags entry "$entry" is not a tag selector: ',
+      intersect: false,
+    ),
+  );
+
+  static List<String> _pieces(String? value) => [
+    for (final piece in (value ?? '').split(','))
+      if (piece.trim().isNotEmpty) piece.trim(),
+  ];
+
+  /// [selectors] folded into one, an intersection or a union. [describe] gives
+  /// the start of the error message, which then ends with the parser's own
+  /// words.
+  static BooleanSelector _combine(
+    List<String> selectors,
+    String Function(String selector) describe, {
+    required bool intersect,
+  }) {
+    var result = intersect ? BooleanSelector.all : BooleanSelector.none;
+    for (final selector in selectors) {
+      final BooleanSelector parsed;
+      try {
+        parsed = BooleanSelector.parse(selector);
+      } on FormatException catch (e) {
+        throw FormatException('${describe(selector)}${e.message}');
+      }
+      result = intersect ? result.intersection(parsed) : result.union(parsed);
+    }
+    return result;
+  }
+
+  /// A test must match this to be kept.
+  final BooleanSelector include;
+
+  /// A test that matches this is dropped.
+  final BooleanSelector exclude;
+
+  /// The variables' values as given, for messages. Null when not selecting.
+  final String? includeRaw;
+  final String? excludeRaw;
+
+  /// Whether this keeps less than every test.
+  bool get selects =>
+      !identical(include, BooleanSelector.all) ||
+      !identical(exclude, BooleanSelector.none);
+
+  bool matches(Set<String> tags) =>
+      include.evaluate(tags.contains) && !exclude.evaluate(tags.contains);
+
+  /// Both selections at once: a test must pass each.
+  TagSelection merge(TagSelection other) => TagSelection(
+    include: include.intersection(other.include),
+    exclude: exclude.union(other.exclude),
+    includeRaw: includeRaw ?? other.includeRaw,
+    excludeRaw: excludeRaw ?? other.excludeRaw,
+  );
+}
+
+/// What a [TestSelection] made of a suite's tree.
+sealed class SelectionResult {
+  const SelectionResult();
+}
+
+/// Run [tree], the tests this run executes.
+class RunThese extends SelectionResult {
+  const RunThese(this.tree);
+  final Map<String, dynamic> tree;
+}
+
+/// The suite registered no test at all and nothing narrowed the run.
+class NoneRegistered extends SelectionResult {
+  const NoneRegistered();
+}
+
+/// The target's own fixed tag selection keeps no test: a broken target.
+class FixedSelectionEmpty extends SelectionResult {
+  const FixedSelectionEmpty(this.message);
+  final String message;
+}
+
+/// This run's tags, filter or shard keep no test; a pass, with [note].
+class NarrowedToNothing extends SelectionResult {
+  const NarrowedToNothing(this.note);
+  final String note;
+}
+
 /// Which of a suite's tests this run executes.
 class TestSelection {
-  TestSelection({this.filter, this.totalShards = 1, this.shardIndex = 0}) {
+  TestSelection({
+    this.filter,
+    this.totalShards = 1,
+    this.shardIndex = 0,
+    this.fixedTags = const TagSelection(),
+    this.runTags = const TagSelection(),
+  }) {
     if (totalShards < 1 || shardIndex < 0 || shardIndex >= totalShards) {
       throw FormatException(
         'shard $shardIndex of $totalShards is not a shard Bazel would ask for',
@@ -65,12 +213,16 @@ class TestSelection {
     }
   }
 
-  /// Reads Bazel's variables out of [env].
+  /// Reads Bazel's variables out of [env], and `DART_TEST_TAGS` and
+  /// `DART_TEST_EXCLUDE_TAGS`. [fixedTags] is the target's own selection.
   ///
-  /// Throws [FormatException] for a filter that is not a regular expression or
-  /// shard numbers that are not numbers: a run that guessed would report a
-  /// selection that never happened.
-  factory TestSelection.fromEnvironment(Map<String, String> env) {
+  /// Throws [FormatException] for a filter that is not a regular expression,
+  /// shard numbers that are not numbers or a tag selector that does not parse:
+  /// a run that guessed would report a selection that never happened.
+  factory TestSelection.fromEnvironment(
+    Map<String, String> env, {
+    TagSelection fixedTags = const TagSelection(),
+  }) {
     final pattern = env['TESTBRIDGE_TEST_ONLY'];
     RegExp? filter;
     if (pattern != null && pattern.isNotEmpty) {
@@ -82,8 +234,18 @@ class TestSelection {
         );
       }
     }
+    final runTags = TagSelection.fromEnvironmentValues(
+      env['DART_TEST_TAGS'],
+      env['DART_TEST_EXCLUDE_TAGS'],
+    );
     final total = env['TEST_TOTAL_SHARDS'];
-    if (total == null) return TestSelection(filter: filter);
+    if (total == null) {
+      return TestSelection(
+        filter: filter,
+        fixedTags: fixedTags,
+        runTags: runTags,
+      );
+    }
     final totalShards = int.tryParse(total);
     final shardIndex = int.tryParse(env['TEST_SHARD_INDEX'] ?? '');
     if (totalShards == null || shardIndex == null) {
@@ -96,6 +258,8 @@ class TestSelection {
       filter: filter,
       totalShards: totalShards,
       shardIndex: shardIndex,
+      fixedTags: fixedTags,
+      runTags: runTags,
     );
   }
 
@@ -103,20 +267,50 @@ class TestSelection {
   final int totalShards;
   final int shardIndex;
 
+  /// The target's own tag selection (`include_tags`, `exclude_tags`).
+  final TagSelection fixedTags;
+
+  /// This run's tag selection (`DART_TEST_TAGS`, `DART_TEST_EXCLUDE_TAGS`).
+  final TagSelection runTags;
+
   /// Whether this run asked for less than the whole suite. A selection that
   /// matches nothing is then a pass, not a failure: `bazel test //...
   /// --test_filter=x` has to pass every target the filter does not touch, and
   /// a shard can draw no case at all.
-  bool get narrows => filter != null || totalShards > 1;
+  bool get narrows => filter != null || totalShards > 1 || runTags.selects;
 
-  /// [root], a `RemoteListener` group tree, cut down to the tests this run
-  /// executes. Null when none is left.
-  Map<String, dynamic>? select(Map<String, dynamic> root) {
+  /// What this run does with [root], a `RemoteListener` group tree; [program]
+  /// names the runner in messages. Tags select first, then the filter, then
+  /// the shards split what is left.
+  SelectionResult select(
+    Map<String, dynamic> root, {
+    String program = 'flutter_test',
+  }) {
     final all = <Map<Object?, Object?>>[];
     _collect(root, all);
-    final matching = [
+    if (all.isEmpty) {
+      return narrows
+          ? NarrowedToNothing(_note(program, const {}))
+          : const NoneRegistered();
+    }
+    final used = {for (final test in all) ..._tags(test)};
+    final fixed = [
       for (final test in all)
-        if (filter?.hasMatch(test['name'] as String? ?? '') ?? true) test,
+        if (fixedTags.matches(_tags(test))) test,
+    ];
+    if (fixed.isEmpty) {
+      return FixedSelectionEmpty(
+        '$program: No tests match the requested tag selectors:\n'
+        '  include: "${fixedTags.include}"\n'
+        '  exclude: "${fixedTags.exclude}"\n'
+        '${_tagsUsed(program, used)}',
+      );
+    }
+    final matching = [
+      for (final test in fixed)
+        if (runTags.matches(_tags(test)) &&
+            (filter?.hasMatch(test['name'] as String? ?? '') ?? true))
+          test,
     ];
     final share = matching.length / totalShards;
     final start = (share * shardIndex).round();
@@ -125,7 +319,37 @@ class TestSelection {
     // object each time, so two walks would never find each other's.
     final chosen = Set<Map<Object?, Object?>>.identity()
       ..addAll(matching.sublist(start, end));
-    return _prune(root, chosen);
+    final tree = _prune(root, chosen);
+    return tree == null
+        ? NarrowedToNothing(_note(program, used))
+        : RunThese(tree);
+  }
+
+  /// [test]'s tags: the ones `RemoteListener` merged from its library, groups
+  /// and the test itself.
+  static Set<String> _tags(Map<Object?, Object?> test) => {
+    for (final tag
+        in (test['metadata'] as Map<Object?, Object?>?)?['tags'] as List? ??
+            const [])
+      tag as String,
+  };
+
+  static String _tagsUsed(String program, Set<String> used) => used.isEmpty
+      ? '$program: no test in this suite has a tag'
+      : '$program: tags used in this suite: '
+            '${(used.toList()..sort()).join(', ')}';
+
+  String _note(String program, Set<String> used) {
+    final parts = [
+      if (filter != null) '--test_filter "${filter!.pattern}"',
+      if (totalShards > 1) 'shard ${shardIndex + 1} of $totalShards',
+      if (runTags.includeRaw != null) 'DART_TEST_TAGS "${runTags.includeRaw}"',
+      if (runTags.excludeRaw != null)
+        'DART_TEST_EXCLUDE_TAGS "${runTags.excludeRaw}"',
+    ];
+    return '$program: no test case in this suite matches this run\'s '
+        '${parts.join(', ')}.'
+        '${runTags.selects ? '\n${_tagsUsed(program, used)}' : ''}';
   }
 
   static void _collect(

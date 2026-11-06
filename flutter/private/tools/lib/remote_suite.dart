@@ -24,8 +24,8 @@
 ///
 /// Bazel's test protocol wins wherever it has one: the suite's default timeout
 /// is Bazel's own (`TEST_TIMEOUT`), not `package:test`'s 30 seconds, and
-/// `--test_filter`, sharding and the per-case XML report follow
-/// `bazel_test_protocol.dart`.
+/// `--test_filter`, sharding, tag selection (`DART_TEST_TAGS`) and the per-case
+/// XML report follow `bazel_test_protocol.dart`.
 library;
 
 import 'dart:async';
@@ -34,7 +34,8 @@ import 'dart:io';
 
 import 'bazel_test_protocol.dart';
 
-export 'bazel_test_protocol.dart' show TestSelection, parseUpdateGoldens;
+export 'bazel_test_protocol.dart'
+    show TagSelection, TestSelection, parseUpdateGoldens;
 
 /// How a suite's messages travel between this host and the program running it.
 abstract interface class SuiteTransport {
@@ -249,16 +250,16 @@ class RemoteSuiteDriver {
       );
 
       if (root != null) {
-        final selected = selection.select(root);
-        if (selected != null) {
-          await _runGroup(selected, outcome, ceiling);
-        } else if (selection.narrows) {
-          _out.writeln(
-            '$logPrefix: no test case in this suite matches this run\'s '
-            '--test_filter or shard.',
-          );
-        } else {
-          _record(outcome, 'the suite registered no tests');
+        switch (selection.select(root, program: logPrefix)) {
+          case RunThese(:final tree):
+            await _runGroup(tree, outcome, ceiling);
+          case NoneRegistered():
+            _record(outcome, 'the suite registered no tests');
+          case FixedSelectionEmpty(:final message):
+            outcome._suiteError = true;
+            _err.writeln(message);
+          case NarrowedToNothing(:final note):
+            _out.writeln(note);
         }
       } else {
         _record(

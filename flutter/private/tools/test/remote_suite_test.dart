@@ -22,7 +22,12 @@ enum _Behaviour { passes, fails, hangs, skipped }
 /// A program that answers the protocol: a suite of named tests, each behaving
 /// as told, behind a [SuiteTransport] the driver cannot tell from a real one.
 class _FakeProgram implements SuiteTransport {
-  _FakeProgram(Map<String, _Behaviour> tests, {this.diesDuring, this.lose}) {
+  _FakeProgram(
+    Map<String, _Behaviour> tests, {
+    this.diesDuring,
+    this.lose,
+    this.tags = const {},
+  }) {
     var channel = 2;
     for (final MapEntry(:key, :value) in tests.entries) {
       _tests.add((
@@ -37,6 +42,9 @@ class _FakeProgram implements SuiteTransport {
   /// The test during which the program disappears, with the reason it gives.
   final String? diesDuring;
   final String? lose;
+
+  /// The tags `RemoteListener` would report for a test, by name.
+  final Map<String, List<String>> tags;
 
   final _tests = <({String name, _Behaviour behaviour, int channel})>[];
   final _incoming = StreamController<String>();
@@ -120,8 +128,14 @@ class _FakeProgram implements SuiteTransport {
           'type': 'test',
           'name': t.name,
           'channel': t.channel,
-          if (t.behaviour == _Behaviour.skipped)
-            'metadata': {'skip': true, 'skipReason': 'not here'},
+          if (t.behaviour == _Behaviour.skipped || tags.containsKey(t.name))
+            'metadata': {
+              if (t.behaviour == _Behaviour.skipped) ...{
+                'skip': true,
+                'skipReason': 'not here',
+              },
+              if (tags.containsKey(t.name)) 'tags': tags[t.name],
+            },
         },
     ],
   };
@@ -130,10 +144,11 @@ class _FakeProgram implements SuiteTransport {
 RemoteSuiteDriver _driver(
   _FakeProgram program, {
   StringBuffer? err,
+  StringBuffer? out,
 }) => RemoteSuiteDriver(
   program,
   suitePath: 'integration_test/x_test.dart',
-  out: StringBuffer(),
+  out: out ?? StringBuffer(),
   err: err ?? StringBuffer(),
   asciiGlyphs: true,
 );
@@ -323,6 +338,80 @@ void main() {
 
       expect(outcome.exitCode, isNonZero);
       expect(err.toString(), contains('the suite registered no tests'));
+    });
+
+    test('fails when a fixed tag selection keeps no test, saying what the '
+        'suite has', () async {
+      final err = StringBuffer();
+      final program = _FakeProgram(
+        {'a': _Behaviour.passes},
+        tags: {
+          'a': ['golden'],
+        },
+      );
+
+      final outcome = await _driver(program, err: err).run(
+        ceiling: _ceiling,
+        selection: TestSelection(
+          fixedTags: TagSelection.fromAttribute(['slow'], const []),
+        ),
+      );
+
+      expect(outcome.exitCode, isNonZero);
+      expect(program.ran, isEmpty);
+      expect(
+        err.toString(),
+        allOf(
+          contains('No tests match the requested tag selectors:'),
+          contains('include: "slow"'),
+          contains('tags used in this suite: golden'),
+        ),
+      );
+    });
+
+    test('passes with a note when this run\'s tags keep no test', () async {
+      final out = StringBuffer();
+      final program = _FakeProgram(
+        {'a': _Behaviour.passes},
+        tags: {
+          'a': ['golden'],
+        },
+      );
+
+      final outcome = await _driver(program, out: out).run(
+        ceiling: _ceiling,
+        selection: TestSelection(
+          runTags: TagSelection.fromEnvironmentValues('slow', null),
+        ),
+      );
+
+      expect(outcome.exitCode, 0);
+      expect(program.ran, isEmpty);
+      expect(
+        out.toString(),
+        contains(
+          'no test case in this suite matches this run\'s '
+          'DART_TEST_TAGS "slow"',
+        ),
+      );
+    });
+
+    test('runs only the tests this run\'s tags keep', () async {
+      final program = _FakeProgram(
+        {'a': _Behaviour.passes, 'b': _Behaviour.passes},
+        tags: {
+          'a': ['golden'],
+        },
+      );
+
+      await _driver(program).run(
+        ceiling: _ceiling,
+        selection: TestSelection(
+          runTags: TagSelection.fromEnvironmentValues('golden', null),
+        ),
+      );
+
+      expect(program.ran, ['a']);
     });
 
     test('passes when a filter or shard narrowed the run', () async {

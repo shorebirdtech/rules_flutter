@@ -76,6 +76,7 @@ dart_library(
         "//flutter:__subpackages__",
         "//tools/dev_tool:__subpackages__",
     ],
+    deps = ["@dev_tool_deps//:boolean_selector"],
 )
 
 dart_binary(
