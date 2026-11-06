@@ -5,9 +5,9 @@ load("@rules_dart//dart:utils.bzl", "runfiles_path")
 def _simulator_prefix(label):
     """The name of the simulators the iOS integration test `label` makes, up to the process id.
 
-    The runner names one `rules_flutter-<package>_<name>-<pid>`, with what is not
-    a letter, digit or one of `_.-` as `_` (`testSimulatorName`); the id of the
-    process is the checker's to add.
+    The runner names one `rules_flutter-<package>_<name>-<pid>-<start>`, with what
+    is not a letter, digit or one of `_.-` as `_` (`testSimulatorName`); the id and
+    start time of the process are the checker's to add.
     """
     return "rules_flutter-%s_%s-" % (label.package.replace("/", "_"), label.name)
 

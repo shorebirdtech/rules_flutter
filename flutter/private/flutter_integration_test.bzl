@@ -258,10 +258,11 @@ flutter_ios_simulator_runner = rule(
     },
     doc = """Runs an iOS integration test on a simulator the test makes for itself.
 
-Each test makes a simulator (`rules_flutter-<test>-<pid>`) of `device_type`,
+Each test makes a simulator (`rules_flutter-<test>-<pid>-<start>`) of `device_type`,
 boots it, installs the app, drives the suite through the app's VM service, and
 shuts the simulator down and deletes it however the test ends, a Bazel timeout
-included. A fresh simulator shares no state with another test or with the
+included. A simulator that a SIGKILL left behind is deleted by the next iOS test
+run, once the run that made it is gone. A fresh simulator shares no state with another test or with the
 simulators of the person running it, so tests need no lock. No runtime installed
 fails the test, saying `xcodebuild -downloadPlatform iOS`.""",
 )

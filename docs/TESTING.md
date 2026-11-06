@@ -960,10 +960,13 @@ has none of: only the transition is tested for that ABI
 (`//flutter/tests:flutter_integration_test_test`).
 
 The iOS tests need nothing booted or attached: each makes a simulator
-(`rules_flutter-<test>-<pid>`, an iPhone 16 on the newest iOS runtime), runs on it
-and deletes it, whether the test passed, failed or was killed by Bazel's timeout
-(SIGTERM). Only a SIGKILL leaves one behind: `xcrun simctl list devices | grep
-rules_flutter` shows it and `xcrun simctl delete <udid>` removes it. A simulator is
+(`rules_flutter-<test>-<pid>-<start>`, an iPhone 16 on the newest iOS runtime;
+`<pid>` and `<start>` are the runner's process id and start time in epoch seconds),
+runs on it and deletes it, whether the test passed, failed or was killed by Bazel's
+timeout (SIGTERM). A SIGKILL leaves one behind, which the next iOS test run deletes
+(and logs: `deleting the simulator ... its run (process N) is gone`) because no
+process N started at `<start>` is running; a simulator of a run that is still alive
+is never touched. A simulator is
 scheduled as two cores (`cpus` of `flutter_ios_simulator_runner`): the processes
 under a booted simulator measured 15 CPU-seconds over the 20 seconds a test took
 (0.75 of a core), not counting the host services it talks to.

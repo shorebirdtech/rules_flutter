@@ -169,11 +169,14 @@ Future<DeviceChoice> chooseDevice(
       return DeviceChoice(device, () async {
         // Made when the run takes what it needs of the host, not before: a run
         // that is refused earlier has made nothing to remove.
+        final runner = run ?? Process.run;
+        await reclaimOrphanedSimulators(run: runner, log: log ?? (_) {});
+        final owner = await simulatorOwnerOfProcess(processId ?? pid, runner);
         final simulator = await TestSimulator.create(
-          name: testSimulatorName(config.testDisplayName, processId ?? pid),
+          name: testSimulatorName(config.testDisplayName, owner),
           deviceType: deviceType,
           runtime: runtime,
-          run: run ?? Process.run,
+          run: runner,
         );
         device.simulator = simulator;
         return simulator.remove;

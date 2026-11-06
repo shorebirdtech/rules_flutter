@@ -612,11 +612,18 @@ void main() {
         resolve: (path) => path,
         processId: 4242,
         run: (executable, arguments) async {
+          if (executable == 'ps') {
+            return ProcessResult(0, 0, 'Fri Nov  6 10:25:55 2026\n', '');
+          }
           asked.add([executable, ...arguments]);
           return ProcessResult(
             0,
             0,
-            arguments[1] == 'create' ? 'UDID-1\n' : '',
+            switch (arguments[1]) {
+              'create' => 'UDID-1\n',
+              'list' => '{"devices":{}}',
+              _ => '',
+            },
             '',
           );
         },
@@ -627,18 +634,21 @@ void main() {
 
       final give = await choice.prepare();
 
+      final startedAt =
+          DateTime(2026, 11, 6, 10, 25, 55).millisecondsSinceEpoch ~/ 1000;
       expect(device.udid, 'UDID-1');
       expect(asked, [
+        ['xcrun', 'simctl', 'list', 'devices', '-j'],
         [
           'xcrun',
           'simctl',
           'create',
-          'rules_flutter-pkg_ios_test-4242',
+          'rules_flutter-pkg_ios_test-4242-$startedAt',
           'iPhone 16',
         ],
       ]);
       await give();
-      expect(asked.skip(1).map((c) => c.skip(1).take(2).join(' ')), [
+      expect(asked.skip(2).map((c) => c.skip(1).take(2).join(' ')), [
         'simctl shutdown',
         'simctl delete',
       ]);

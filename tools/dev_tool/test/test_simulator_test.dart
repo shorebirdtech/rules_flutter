@@ -5,6 +5,7 @@
 /// about a device type.
 library;
 
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_bazel_dev_tool/integration/test_simulator.dart';
@@ -264,17 +265,215 @@ void main() {
   group('the name of a test\'s simulator', () {
     test('says it is rules_flutter\'s, which test it is for and which run', () {
       expect(
-        testSimulatorName('//e2e:ios_pass_test', 4242),
-        'rules_flutter-e2e_ios_pass_test-4242',
+        testSimulatorName(
+          '//e2e:ios_pass_test',
+          const SimulatorOwner(4242, 99),
+        ),
+        'rules_flutter-e2e_ios_pass_test-4242-99',
       );
     });
 
     test('has nothing in it simctl or a person reading `simctl list` would '
         'trip on', () {
       expect(
-        testSimulatorName(r'@@repo+//a b/c:d$e', 7),
-        matches(RegExp(r'^rules_flutter-[A-Za-z0-9_.-]+-7$')),
+        testSimulatorName(r'@@repo+//a b/c:d$e', const SimulatorOwner(7, 8)),
+        matches(RegExp(r'^rules_flutter-[A-Za-z0-9_.-]+-7-8$')),
       );
     });
+
+    test('gives back the owner it records, whatever the test\'s own name ends '
+        'in', () {
+      const owner = SimulatorOwner(4242, 1793960755);
+      expect(
+        simulatorOwnerOf(testSimulatorName('//a:t-12-34', owner)),
+        owner,
+      );
+    });
+
+    test('of a person\'s simulator, or of one made before names recorded '
+        'their owner, records no owner', () {
+      expect(simulatorOwnerOf('iPhone 16'), isNull);
+      expect(simulatorOwnerOf('rules_flutter-e2e_ios_pass_test-4242'), isNull);
+    });
+  });
+
+  group('reclaiming the simulators of runs that are gone', () {
+    // Process 100 started at 1000; 200 is gone; 300 now runs, started at 5000.
+    final started = {100: '1000', 200: '', 300: '5000'};
+
+    /// A host with [devices] (name to udid) and the processes of [started].
+    /// `ps` answers in the local-time format real `ps` does.
+    Future<ProcessResult> Function(String, List<String>) host(
+      Map<String, String> devices,
+      List<List<String>> calls, {
+      Set<String> undeletable = const {},
+    }) {
+      final present = {...devices};
+      return (executable, arguments) async {
+        if (executable == 'ps') {
+          final epoch = started[int.parse(arguments.last)];
+          if (epoch == null || epoch.isEmpty)
+            return ProcessResult(0, 1, '', '');
+          final t = DateTime.fromMillisecondsSinceEpoch(
+            int.parse(epoch) * 1000,
+          );
+          const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+          const months = [
+            'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+            'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec', //
+          ];
+          String two(int n) => n.toString().padLeft(2, '0');
+          return ProcessResult(
+            0,
+            0,
+            '${days[t.weekday - 1]} ${months[t.month - 1]} '
+                '${t.day.toString().padLeft(2)} '
+                '${two(t.hour)}:${two(t.minute)}:${two(t.second)} ${t.year}\n',
+            '',
+          );
+        }
+        final simctl = arguments.skip(1).toList();
+        calls.add(simctl);
+        if (simctl.first == 'list') {
+          return ProcessResult(
+            0,
+            0,
+            jsonEncode({
+              'devices': {
+                'iOS-27-2': [
+                  for (final e in present.entries)
+                    {'name': e.key, 'udid': e.value, 'state': 'Shutdown'},
+                ],
+              },
+            }),
+            '',
+          );
+        }
+        if (simctl.first == 'delete') {
+          if (undeletable.contains(simctl.last)) {
+            return ProcessResult(0, 1, '', 'busy');
+          }
+          present.removeWhere((_, udid) => udid == simctl.last);
+        }
+        return ProcessResult(0, 0, '', '');
+      };
+    }
+
+    test('deletes the simulator of a run whose process is gone, shutting it '
+        'down first, and says so', () async {
+      final calls = <List<String>>[];
+      final logged = <String>[];
+
+      await reclaimOrphanedSimulators(
+        run: host({'rules_flutter-t-200-1000': 'U-GONE'}, calls),
+        log: logged.add,
+      );
+
+      expect(calls.where((c) => c.first != 'list'), [
+        ['shutdown', 'U-GONE'],
+        ['delete', 'U-GONE'],
+      ]);
+      expect(
+        logged.single,
+        allOf(contains('rules_flutter-t-200-1000'), contains('U-GONE')),
+      );
+    });
+
+    test('keeps the simulator of a run that is still there, so that tests '
+        'running at once do not delete each other\'s', () async {
+      final calls = <List<String>>[];
+      final logged = <String>[];
+
+      await reclaimOrphanedSimulators(
+        run: host({'rules_flutter-t-100-1000': 'U-LIVE'}, calls),
+        log: logged.add,
+      );
+
+      expect(calls.where((c) => c.first != 'list'), isEmpty);
+      expect(logged, isEmpty);
+    });
+
+    test('deletes the simulator of a run whose process id another process '
+        'has since taken', () async {
+      final calls = <List<String>>[];
+
+      await reclaimOrphanedSimulators(
+        run: host({'rules_flutter-t-300-1000': 'U-REUSED'}, calls),
+        log: (_) {},
+      );
+
+      expect(calls.last, ['delete', 'U-REUSED']);
+    });
+
+    test('leaves alone every simulator that is not a test run\'s, or does '
+        'not record its owner', () async {
+      final calls = <List<String>>[];
+
+      await reclaimOrphanedSimulators(
+        run: host({
+          'iPhone 16': 'U1',
+          'my-sim-200-1000': 'U2',
+          'rules_flutter-old-200': 'U3',
+        }, calls),
+        log: (_) {},
+      );
+
+      expect(calls.where((c) => c.first != 'list'), isEmpty);
+    });
+
+    test(
+      'is not undone by another run having deleted the simulator first',
+      () async {
+        var listed = 0;
+        final calls = <List<String>>[];
+        final inner = host({'rules_flutter-t-200-1000': 'U-GONE'}, calls);
+        await reclaimOrphanedSimulators(
+          run: (executable, arguments) async {
+            if (arguments.length > 1 && arguments[1] == 'delete') {
+              return ProcessResult(0, 1, '', 'Invalid device');
+            }
+            // The second listing, after the failed delete, shows it gone.
+            if (arguments.length > 1 &&
+                arguments[1] == 'list' &&
+                ++listed > 1) {
+              return ProcessResult(0, 0, jsonEncode({'devices': {}}), '');
+            }
+            return inner(executable, arguments);
+          },
+          log: (_) {},
+        );
+      },
+    );
+
+    test('that cannot be deleted is reported', () async {
+      await expectLater(
+        reclaimOrphanedSimulators(
+          run: host(
+            {'rules_flutter-t-200-1000': 'U-GONE'},
+            [],
+            undeletable: {'U-GONE'},
+          ),
+          log: (_) {},
+        ),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            allOf(contains('U-GONE'), contains('busy')),
+          ),
+        ),
+      );
+    });
+
+    test(
+      'the owner of a running process is its id and `ps`\'s start time',
+      () async {
+        final owner = await simulatorOwnerOfProcess(
+          100,
+          host({}, []),
+        );
+        expect(owner, const SimulatorOwner(100, 1000));
+      },
+    );
   });
 }
