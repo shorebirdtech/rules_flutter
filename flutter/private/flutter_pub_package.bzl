@@ -709,7 +709,7 @@ def _with_variants(ctx, package, path):
         fail("package {}: it lists the asset {}, but neither that file nor a resolution variant of it exists.".format(package, repr(path)))
     return sorted(found)
 
-def _build_pkg_assets(ctx, package, parsed_assets):
+def _build_pkg_assets(ctx, package, parsed_assets, flavors):
     """Expand the package's `flutter: assets:` entries into files.
 
     Bazel needs an explicit label per file, so each entry is expanded at
@@ -718,11 +718,16 @@ def _build_pkg_assets(ctx, package, parsed_assets):
     directly in it, each with its variants, and nothing from the directories
     below it, which need an entry of their own.
 
-    An entry with `flavors:` is for a build of one of those flavors. rules_flutter
-    builds none, so the entry ships in no build, as with `flutter build`
-    without `--flavor`. An entry with `platforms:` ships in builds for those
-    platforms only; a file that several entries list ships wherever any of
-    them does.
+    An entry with `flavors:` ships in builds of one of those flavors (the
+    `flavor` of the application), and in no build without a flavor. An entry
+    with `platforms:` ships in builds for those platforms only; a file that
+    several entries list ships wherever any of them does.
+
+    Args:
+        ctx: The repository context.
+        package: The package name.
+        parsed_assets: The package's parsed `flutter: assets:` entries.
+        flavors: The package's `flavor_restrictions`, shared with its shaders.
 
     Returns:
         struct(files, platforms): `files` is the `pkg_assets` dict (file label
@@ -732,14 +737,14 @@ def _build_pkg_assets(ctx, package, parsed_assets):
     files = {}
     restrictions = _platform_restrictions()
     for entry in parsed_assets:
-        if entry.flavors:
-            continue
         path = entry.path
         listed = _files_in(ctx, path.rstrip("/")) if path.endswith("/") else [path]
         for f in listed:
-            for variant in _with_variants(ctx, package, _checked_file_name(package, "asset file", f)):
+            main = _checked_file_name(package, "asset file", f)
+            for variant in _with_variants(ctx, package, main):
                 files[":" + variant] = variant
                 restrictions.add(variant, entry.platforms)
+                flavors.add(variant, path, entry.flavors, main = variant == main)
     return struct(files = files, platforms = restrictions.platforms())
 
 def _build_additional_licenses(ctx, package, paths):
@@ -761,12 +766,18 @@ def _build_additional_licenses(ctx, package, paths):
         labels.append(":" + path)
     return labels
 
-def _build_pkg_shaders(package, parsed_shaders):
+def _build_pkg_shaders(package, parsed_shaders, flavors):
     """Expand the package's `flutter: shaders:` entries into files.
 
     The same rules as for assets (see `_build_pkg_assets`): an entry with
-    `flavors:` ships in no build, one with `platforms:` only in builds for
-    those platforms. There are no directories and no resolution variants.
+    `flavors:` ships in builds of those flavors, one with `platforms:` only in
+    builds for those platforms. There are no directories and no resolution
+    variants.
+
+    Args:
+        package: The package name.
+        parsed_shaders: The package's parsed `flutter: shaders:` entries.
+        flavors: The package's `flavor_restrictions`, shared with its assets.
 
     Returns:
         struct(files, platforms): `files` is the `pkg_shaders` dict;
@@ -776,11 +787,10 @@ def _build_pkg_shaders(package, parsed_shaders):
     files = {}
     restrictions = _platform_restrictions()
     for entry in parsed_shaders:
-        if entry.flavors:
-            continue
         _checked_file_name(package, "shader file", entry.path)
         files[":" + entry.path] = entry.path
         restrictions.add(entry.path, entry.platforms)
+        flavors.add(entry.path, entry.path, entry.flavors)
     return struct(files = files, platforms = restrictions.platforms())
 
 def _platform_restrictions():
@@ -807,6 +817,58 @@ def _platform_restrictions():
 
     return struct(add = add, platforms = restricted)
 
+def flavor_restrictions(package):
+    """The flavors each file of a package ships in, from the entries that list it.
+
+    Assets and shaders share one tracker per package, as flutter_tools keeps
+    one map per package: a file that two entries reach with different flavor
+    sets is a conflict, whatever flavor is being built.
+
+    Args:
+        package: The package name, for the conflict message.
+
+    Returns:
+        struct(add, flavors). `add(path, origin, flavors, main = True)` records
+        that the entry written `origin` (a directory ends in `/`) lists the
+        file `path` for `flavors`. It returns None, or for a main file whose
+        flavors differ from an earlier entry's, flutter_tools' conflict
+        message. A resolution variant (`main = False`) is recorded without the
+        check, as flutter_tools checks the main file only. `flavors()` is the
+        flavors of each file that ships in some flavors only.
+    """
+    seen = {}
+
+    def describe(origin, flavors):
+        if not flavors:
+            return 'An entry with the path "{}" does not specify any flavors.'.format(origin)
+        return 'An entry with the path "{}" specifies the flavor(s): {}.'.format(
+            origin,
+            ", ".join(['"{}"'.format(f) for f in flavors]),
+        )
+
+    def add(path, origin, flavors, main = True):
+        flavors = sorted({f: True for f in flavors}.keys())
+        if path not in seen:
+            seen[path] = (origin, flavors)
+            return None
+        earlier_origin, earlier_flavors = seen[path]
+        if not main or earlier_flavors == flavors:
+            return None
+        message = 'package {}: Multiple assets entries include the file "{}", but they specify different lists of flavors.\n{}\n{}'.format(
+            package,
+            path,
+            describe(earlier_origin, earlier_flavors),
+            describe(origin, flavors),
+        )
+        if origin.endswith("/") or earlier_origin.endswith("/"):
+            message += "\n\nConsider organizing assets with different flavors into different directories."
+        return message
+
+    def restricted():
+        return {path: flavors for path, (_, flavors) in seen.items() if flavors}
+
+    return struct(add = add, flavors = restricted)
+
 def _format_label_dict_literal(d, indent = "        "):
     """Render `{":foo": "foo", ":bar": "bar"}` as a multi-line BUILD source dict."""
     if not d:
@@ -826,7 +888,7 @@ _SHADER_INCLUDES_GLOB = """    shader_includes = glob(
         allow_empty = True,
     ),"""
 
-def _format_pub_asset_attrs(fonts_json_str, font_files, pkg_assets, pkg_shaders, pkg_asset_platforms = {}, pkg_shader_platforms = {}, additional_licenses = []):
+def _format_pub_asset_attrs(fonts_json_str, font_files, pkg_assets, pkg_shaders, pkg_asset_platforms = {}, pkg_shader_platforms = {}, pkg_asset_flavors = {}, pkg_shader_flavors = {}, additional_licenses = []):
     """Render the four pub-asset attrs as BUILD source, omitting empty ones."""
     parts = []
     if fonts_json_str:
@@ -837,12 +899,16 @@ def _format_pub_asset_attrs(fonts_json_str, font_files, pkg_assets, pkg_shaders,
         parts.append("    pkg_assets = {},".format(_format_label_dict_literal(pkg_assets)))
     if pkg_asset_platforms:
         parts.append("    pkg_asset_platforms = {},".format(_format_list_dict_literal(pkg_asset_platforms)))
+    if pkg_asset_flavors:
+        parts.append("    pkg_asset_flavors = {},".format(_format_list_dict_literal(pkg_asset_flavors)))
     if pkg_shaders:
         parts.append("    pkg_shaders = {},".format(_format_label_dict_literal(pkg_shaders)))
     if additional_licenses:
         parts.append("    additional_licenses = {},".format(repr(additional_licenses)))
     if pkg_shader_platforms:
         parts.append("    pkg_shader_platforms = {},".format(_format_list_dict_literal(pkg_shader_platforms)))
+    if pkg_shader_flavors:
+        parts.append("    pkg_shader_flavors = {},".format(_format_list_dict_literal(pkg_shader_flavors)))
     if pkg_shaders:
         # What the shaders may `#include`: a package's GLSL anywhere in it,
         # since an include can reach `../`.
@@ -959,6 +1025,8 @@ def make_flutter_member_build_content(
         pkg_asset_platforms = {},
         pkg_shader_platforms = {},
         additional_licenses = [],
+        pkg_asset_flavors = {},
+        pkg_shader_flavors = {},
         has_android_lib = False):
     """Generate BUILD content for the source repository of a Flutter pub package.
 
@@ -1005,9 +1073,13 @@ def make_flutter_member_build_content(
         pkg_assets: Dict of asset file label -> package-relative path.
         pkg_asset_platforms: Dict of package-relative asset path -> the platforms
             it ships on, for the assets a `platforms:` entry restricts.
+        pkg_asset_flavors: Dict of package-relative asset path -> the flavors
+            it ships in, for the assets a `flavors:` entry restricts.
         pkg_shaders: Dict of shader file label -> package-relative path.
         pkg_shader_platforms: Dict of package-relative shader path -> the
             platforms it ships on, for the shaders a `platforms:` entry restricts.
+        pkg_shader_flavors: Dict of package-relative shader path -> the flavors
+            it ships in, for the shaders a `flavors:` entry restricts.
         version: The resolved package version this spoke was fetched at, or
             empty. Emitted only when known, matching
             `make_dart_library_build_content`: its sole use is agreement
@@ -1163,7 +1235,7 @@ flutter_windows_plugin_library(
             ios_lines = ios_lines,
         )
 
-    pub_attrs = _format_pub_asset_attrs(fonts_json_str, font_files, pkg_assets, pkg_shaders, pkg_asset_platforms, pkg_shader_platforms, additional_licenses)
+    pub_attrs = _format_pub_asset_attrs(fonts_json_str, font_files, pkg_assets, pkg_shaders, pkg_asset_platforms, pkg_shader_platforms, additional_licenses = additional_licenses, pkg_asset_flavors = pkg_asset_flavors, pkg_shader_flavors = pkg_shader_flavors)
 
     # The `lib/` glob is `allow_empty`: a pub package can be only assets or native
     # code, with no Dart.
@@ -1821,8 +1893,12 @@ def _flutter_pub_package_impl(ctx):
     # below (plugin vs library).
     fonts_json_str = _encode_fonts_json(asset_block.fonts)
     font_files = _build_font_files_dict(ctx, asset_block.fonts)
-    pkg_assets = _build_pkg_assets(ctx, ctx.attr.package_name, asset_block.assets)
-    pkg_shaders = _build_pkg_shaders(ctx.attr.package_name, asset_block.shaders)
+    flavors = flavor_restrictions(ctx.attr.package_name)
+    pkg_assets = _build_pkg_assets(ctx, ctx.attr.package_name, asset_block.assets, flavors)
+    pkg_shaders = _build_pkg_shaders(ctx.attr.package_name, asset_block.shaders, flavors)
+    flavored = flavors.flavors()
+    pkg_asset_flavors = {p: f for p, f in flavored.items() if ":" + p in pkg_assets.files}
+    pkg_shader_flavors = {p: f for p, f in flavored.items() if ":" + p in pkg_shaders.files}
     has_asset_contributions = (
         bool(asset_block.fonts) or bool(asset_block.assets) or bool(asset_block.shaders)
     )
@@ -2016,6 +2092,8 @@ def _flutter_pub_package_impl(ctx):
             pkg_shaders = pkg_shaders.files,
             pkg_shader_platforms = pkg_shaders.platforms,
             additional_licenses = additional_licenses,
+            pkg_asset_flavors = pkg_asset_flavors,
+            pkg_shader_flavors = pkg_shader_flavors,
             linux_link = linux_link,
             windows_link = windows_link,
             has_android_lib = bool(android_src_dir or android_has_resources or android_native_build),
@@ -2039,6 +2117,8 @@ def _flutter_pub_package_impl(ctx):
             pkg_shaders = pkg_shaders.files,
             pkg_shader_platforms = pkg_shaders.platforms,
             additional_licenses = additional_licenses,
+            pkg_asset_flavors = pkg_asset_flavors,
+            pkg_shader_flavors = pkg_shader_flavors,
         )
         android_src_dir = ""
         android_java_package = ""

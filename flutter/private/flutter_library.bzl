@@ -64,7 +64,7 @@ def own_asset_contributions(ctx, package_name):
         List of `pub_assets` structs.
     """
     return [
-        struct(package_name = package_name, asset_path = package_relative(ctx, f), file = f, platforms = ())
+        struct(package_name = package_name, asset_path = package_relative(ctx, f), file = f, platforms = (), flavors = ())
         for f in ctx.files.assets
     ]
 
@@ -88,7 +88,7 @@ def own_additional_licenses(ctx, package_name):
         return []
     return [struct(package_name = package_name, files = tuple(ctx.files.additional_licenses))]
 
-def build_pub_contributions(package_name, fonts_json, font_files_dict, pkg_assets_dict, pkg_shaders_dict, shader_includes = [], pkg_asset_platforms = {}, pkg_shader_platforms = {}):
+def build_pub_contributions(package_name, fonts_json, font_files_dict, pkg_assets_dict, pkg_shaders_dict, shader_includes = [], pkg_asset_platforms = {}, pkg_shader_platforms = {}, pkg_asset_flavors = {}, pkg_shader_flavors = {}):
     """Build pub_fonts/pub_assets/pub_shaders contribution structs from rule attrs.
 
     Decodes the JSON-encoded font declarations and walks the file dicts,
@@ -116,6 +116,11 @@ def build_pub_contributions(package_name, fonts_json, font_files_dict, pkg_asset
             For the assets of `pkg_assets_dict` that ship on some platforms
             only, the path and the platforms. An asset not here ships on all.
         pkg_shader_platforms: dict[str, list[str]] — `ctx.attr.pkg_shader_platforms`,
+            the same for the shaders of `pkg_shaders_dict`.
+        pkg_asset_flavors: dict[str, list[str]] — `ctx.attr.pkg_asset_flavors`.
+            For the assets of `pkg_assets_dict` that ship in some flavors only,
+            the path and the flavors. An asset not here ships in every build.
+        pkg_shader_flavors: dict[str, list[str]] — `ctx.attr.pkg_shader_flavors`,
             the same for the shaders of `pkg_shaders_dict`.
 
     Returns:
@@ -172,6 +177,7 @@ def build_pub_contributions(package_name, fonts_json, font_files_dict, pkg_asset
             asset_path = asset_path,
             file = files[0],
             platforms = tuple(pkg_asset_platforms.get(asset_path, [])),
+            flavors = tuple(pkg_asset_flavors.get(asset_path, [])),
         ))
 
     extra_pub_shaders = []
@@ -185,6 +191,7 @@ def build_pub_contributions(package_name, fonts_json, font_files_dict, pkg_asset
             file = files[0],
             includes = tuple(shader_includes),
             platforms = tuple(pkg_shader_platforms.get(shader_path, [])),
+            flavors = tuple(pkg_shader_flavors.get(shader_path, [])),
         ))
 
     return (extra_pub_fonts, extra_pub_assets, extra_pub_shaders)
@@ -204,7 +211,26 @@ def ships_on(platforms, target_platform):
     """
     return not platforms or target_platform in (None, "tester") or target_platform in platforms
 
-def aggregate_pub_contributions(deps, target_platform = None):
+def ships_in(entry, target_platform, flavor):
+    """Whether a pub asset or shader is in a bundle for `target_platform` and `flavor`.
+
+    Its `platforms:` as `ships_on` reads them; its `flavors:` as flutter_tools
+    matches them: no flavors is every build, otherwise a build of one of
+    them, never a build without a flavor (`tester` included).
+
+    Args:
+        entry: A `pub_assets` or `pub_shaders` struct.
+        target_platform: As for `ships_on`.
+        flavor: The flavor the bundle is for; empty or None for none.
+
+    Returns:
+        True if the bundle holds it.
+    """
+    if entry.flavors and flavor not in entry.flavors:
+        return False
+    return ships_on(entry.platforms, target_platform)
+
+def aggregate_pub_contributions(deps, target_platform = None, flavor = ""):
     """Walk transitive `FlutterInfo.pub_fonts` / `pub_assets` from deps.
 
     Each contribution carries `package_name` — the empty string sentinel
@@ -222,6 +248,9 @@ def aggregate_pub_contributions(deps, target_platform = None):
             package restricts to other platforms with `platforms:` is left
             out. None, and `tester`, which `flutter test` bundles for, leave
             out nothing.
+        flavor: The flavor the bundle is for; empty for none. An asset a
+            package restricts to flavors with `flavors:` is bundled only in a
+            build of one of them, and in none without a flavor.
 
     Returns:
         Tuple of:
@@ -262,7 +291,7 @@ def aggregate_pub_contributions(deps, target_platform = None):
         fonts.append({"family": family_str, "fonts": fonts_descriptors})
 
     for entry in pub_assets:
-        if not ships_on(entry.platforms, target_platform):
+        if not ships_in(entry, target_platform, flavor):
             continue
         prefix = "packages/{}/".format(entry.package_name) if entry.package_name else ""
         copies.append((prefix + entry.asset_path, entry.file))
@@ -271,6 +300,14 @@ def aggregate_pub_contributions(deps, target_platform = None):
 
 PKG_SHADER_PLATFORMS_ATTR = attr.string_list_dict(
     doc = "For a shader of `pkg_shaders` that ships on some platforms only (a `platforms:` entry of `flutter: shaders:`), its package-relative path and the platforms (`android`, `ios`, `linux`, `macos`, `windows`, `web`). A shader not listed here ships on every platform.",
+)
+
+PKG_SHADER_FLAVORS_ATTR = attr.string_list_dict(
+    doc = "For a shader of `pkg_shaders` that ships in some flavors only (a `flavors:` entry of `flutter: shaders:`), its package-relative path and the flavors. A shader not listed here ships in every build.",
+)
+
+PKG_ASSET_FLAVORS_ATTR = attr.string_list_dict(
+    doc = "For an asset of `pkg_assets` that ships in some flavors only (a `flavors:` entry of `flutter: assets:`), its package-relative path and the flavors. An asset not listed here ships in every build.",
 )
 
 PKG_ASSET_PLATFORMS_ATTR = attr.string_list_dict(
@@ -375,6 +412,8 @@ def _flutter_library_impl(ctx):
         ctx.files.shader_includes,
         ctx.attr.pkg_asset_platforms,
         ctx.attr.pkg_shader_platforms,
+        ctx.attr.pkg_asset_flavors,
+        ctx.attr.pkg_shader_flavors,
     )
 
     # `resources` names the non-Dart remainder of `lib/`; a Dart source there
@@ -505,6 +544,8 @@ flutter_library = rule(
         "additional_licenses": ADDITIONAL_LICENSES_ATTR,
         "pkg_asset_platforms": PKG_ASSET_PLATFORMS_ATTR,
         "pkg_shader_platforms": PKG_SHADER_PLATFORMS_ATTR,
+        "pkg_asset_flavors": PKG_ASSET_FLAVORS_ATTR,
+        "pkg_shader_flavors": PKG_SHADER_FLAVORS_ATTR,
         "_sky_engine": SKY_ENGINE_ATTR,
         "shader_includes": attr.label_list(
             doc = "Files this package's `pkg_shaders` may `#include` (e.g. " +

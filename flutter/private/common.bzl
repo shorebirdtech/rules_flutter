@@ -13,7 +13,7 @@ load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "app_main_location", 
 load("//flutter/private:flutter_asset_bundle.bzl", "flutter_asset_bundle_action")
 load("//flutter/private:flutter_compile.bzl", "flutter_kernel_compile_action")
 load("//flutter/private:flutter_info.bzl", "dedup_plugins")
-load("//flutter/private:flutter_library.bzl", "aggregate_pub_contributions", "package_relative", "ships_on")
+load("//flutter/private:flutter_library.bzl", "aggregate_pub_contributions", "package_relative", "ships_in")
 load("//flutter/private:flutter_shader_compile.bzl", "flutter_shader_compile_action")
 load("//flutter/private:native_sources.bzl", "native_sources_aspect")
 load("//flutter/private:notices.bzl", "NOTICES_ATTRS", "additional_licenses_of", "flutter_notices_action", "notices_asset_key")
@@ -588,7 +588,7 @@ def _shader_jobs(ctx, deps, target_platform, inputs):
     for dep in deps:
         if FlutterInfo in dep:
             for entry in dep[FlutterInfo].pub_shaders.to_list():
-                if not ships_on(entry.platforms, target_platform):
+                if not ships_in(entry, target_platform, inputs.flavor):
                     continue
                 prefix = "packages/{}/".format(entry.package_name) if entry.package_name else ""
                 jobs.append(struct(
@@ -796,7 +796,7 @@ def flutter_build_assets(ctx, tools, output_dir, deps, target_platform, compiled
     # Walk pub-package font/asset contributions from FlutterInfo.
     # MaterialIcons is no longer special-cased here — apps depend on
     # `@rules_flutter//flutter:material_icons` to get it via this same path.
-    fonts, pub_copies, unlisted_copies = aggregate_pub_contributions(deps, target_platform)
+    fonts, pub_copies, unlisted_copies = aggregate_pub_contributions(deps, target_platform, inputs.flavor)
     extra_asset_copies = compiled_shaders.listed + pub_copies
     unlisted_copies = compiled_shaders.unlisted + unlisted_copies
 
@@ -1252,6 +1252,7 @@ def flutter_program_inputs(ctx):
         unchecked_srcs = [],
         deps = getattr(ctx.attr, "deps", []),
         defines = list(getattr(ctx.attr, "defines", [])),
+        flavor = getattr(ctx.attr, "flavor", ""),
         package_name = getattr(ctx.attr, "package_name", ""),
         language_version = getattr(ctx.attr, "language_version", ""),
         assets = list(getattr(ctx.files, "assets", [])),
