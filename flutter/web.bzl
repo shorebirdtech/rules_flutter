@@ -227,6 +227,9 @@ def flutter_web_app(
         **kwargs: Additional arguments forwarded to flutter_web_bundle
             (e.g. assets, shaders, defines, pwa, web_defines,
             keep_placeholders, tags, visibility).
+            `flavor` is one of them: see `flutter_application`. The web app
+            bundles the flavor's `flavors:` assets, which `flutter build web`
+            does not do, as it has no `--flavor`.
             The compiler settings live there too and are forwarded the same
             way: `profile`, `js_fallback`, `wasm_browsers`, `optimization_level_js`,
             `optimization_level_wasm`, `minify_js`, `minify_wasm`,

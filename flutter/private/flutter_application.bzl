@@ -371,9 +371,10 @@ def flutter_application_build(ctx, inputs):
                 "frontendServer": flutter_sdk_info.frontend_server,
                 "patchedSdkRoot": dev_source_dir(platform_dill, platform_dill.dirname),
                 "appEntrypoint": compilation.app_entrypoint_uri,
-                # Merged user defines (attr + extra_dart_defines flag). The
-                # dev tool replays these as -D on its resident frontend_server
-                # so hot reload/restart recompiles keep the same environment.
+                # Merged user defines (attr + extra_dart_defines flag) and the
+                # flavor's `FLUTTER_APP_FLAVOR`. The dev tool replays these as
+                # -D on its resident frontend_server so hot reload/restart
+                # recompiles keep the same environment.
                 "dartDefines": compilation.dart_defines,
                 # Generated plugin registrants, keyed by platform ("" when
                 # that platform has no Dart plugins and no agent). One per

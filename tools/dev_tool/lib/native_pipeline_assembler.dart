@@ -135,7 +135,8 @@ class NativePipelineAssembler {
   ///
   /// The defines come from the app rather than from a flag the user repeats,
   /// which is what makes them right on both routes in: the dev config's
-  /// `dartDefines` are what the resident frontend_server replays as `-D` on
+  /// `dartDefines` (the user's defines and the flavor's `FLUTTER_APP_FLAVOR`)
+  /// are what the resident frontend_server replays as `-D` on
   /// every recompile, so a dev build that did not know the app's defines
   /// produces an app that loses them at the first reload.
   ///

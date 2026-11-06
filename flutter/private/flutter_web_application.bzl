@@ -53,6 +53,7 @@ load(
     "KERNEL_COMPILE_ATTRS",
     "asset_roots",
     "declare_flutter_assets_dir",
+    "flavor_dart_defines",
     "flutter_build_assets",
     "flutter_compile_shaders",
     "flutter_deps_attr",
@@ -382,8 +383,9 @@ def _flutter_web_bundle_impl(ctx):
     tools = portable_tools(ctx)
 
     # Merged once for all compile actions below (dart2wasm, dart2js, icon
-    # tree-shake kernel) and the dev-config emission.
-    user_defines = merge_dart_defines(ctx)
+    # tree-shake kernel) and the dev-config emission: the user's defines and
+    # the flavor's. There is no `build_info` on web to keep the flavor out of.
+    user_defines = merge_dart_defines(ctx) + flavor_dart_defines(ctx.attr.flavor)
 
     # The build mode drives the mode defines of every compile action below,
     # the same way the native kernel path switches on COMPILATION_MODE.
@@ -1245,8 +1247,9 @@ def _flutter_web_bundle_impl(ctx):
             # suffix because it is one file per target, and a run that served
             # another target's would boot the wrong app.
             "flutterBootstrapJs": dev_bootstrap_js,
-            # Merged user defines (attr + extra_dart_defines flag). The dev
-            # tool replays these as -D on its resident frontend_server so
+            # Merged user defines (attr + extra_dart_defines flag) and the
+            # flavor's. The dev tool replays these as -D on its resident
+            # frontend_server so
             # hot reload/restart recompiles keep the same environment.
             "dartDefines": user_defines,
             # Whether the DDC dev loop asserts native nullability, so a run of

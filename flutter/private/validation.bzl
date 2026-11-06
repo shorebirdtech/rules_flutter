@@ -370,11 +370,13 @@ def is_valid_web_compiler_renderer(compiler, renderer):
 
 # Define keys the ruleset sets itself: the dart.vm.* mode keys come from the
 # compilation mode (see flutter_compile_kernel and the web compile actions),
-# and flutter.dart_plugin_registrant names the generated registrant library
-# the engine invokes before main(). User-supplied values would silently
-# corrupt mode semantics or break plugin registration, so they are rejected
-# up front — matching flutter_tools' own --dart-define policy.
-RESERVED_DART_DEFINE_KEYS = ("dart.vm.profile", "dart.vm.product", "flutter.dart_plugin_registrant")
+# flutter.dart_plugin_registrant names the generated registrant library the
+# engine invokes before main(), and FLUTTER_APP_FLAVOR is what `appFlavor`
+# reads, set from the target's `flavor`. User-supplied values would silently
+# corrupt mode semantics, break plugin registration or disagree with the
+# target's flavor, so they are rejected up front — matching flutter_tools' own
+# --dart-define policy.
+RESERVED_DART_DEFINE_KEYS = ("dart.vm.profile", "dart.vm.product", "flutter.dart_plugin_registrant", "FLUTTER_APP_FLAVOR")
 
 def validate_dart_defines(defines, what):
     """Validate a list of Dart environment defines (KEY=VALUE strings).
@@ -389,7 +391,9 @@ def validate_dart_defines(defines, what):
             fail(
                 ("Invalid Dart define %r in %s: defines must be non-empty " +
                  "and must not set the reserved keys %s (the build sets " +
-                 "these from the compilation mode)") % (define, what, ", ".join(RESERVED_DART_DEFINE_KEYS)),
+                 "these itself: the dart.vm.* keys from the compilation mode, " +
+                 "FLUTTER_APP_FLAVOR from `flavor`, and " +
+                 "flutter.dart_plugin_registrant for the plugin registrant)") % (define, what, ", ".join(RESERVED_DART_DEFINE_KEYS)),
             )
 
 def is_valid_dart_define(define):

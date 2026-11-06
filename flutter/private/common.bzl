@@ -443,11 +443,13 @@ def flutter_compile_kernel(ctx, tools, aot = None, platform_dill = None, target_
     if track_widget_creation:
         extra_frontend_flags.append("--track-widget-creation")
 
-    # Merge defines with mode-specific Dart VM flags. user_defines (attr +
-    # extra_dart_defines flag, no mode keys) is surfaced in the return struct
-    # so dev-config writers can replay it on the dev tool's frontend_server.
+    # Merge defines with mode-specific Dart VM flags. program_defines (the
+    # user's attr + extra_dart_defines flag, and the flavor's) is surfaced in
+    # the return struct so dev-config writers can replay it on the dev tool's
+    # frontend_server; no mode keys are in it.
     user_defines = merge_dart_defines(ctx, inputs.defines)
-    all_defines = list(user_defines)
+    program_defines = user_defines + flavor_dart_defines(inputs.flavor)
+    all_defines = list(program_defines)
     if mode == "profile":
         all_defines.append("dart.vm.profile=true")
     elif aot:
@@ -460,7 +462,7 @@ def flutter_compile_kernel(ctx, tools, aot = None, platform_dill = None, target_
     # for flags they never typed. Debug only — profile mode must look like
     # release on the agent surface, and there is no dev loop to serve in AOT.
     #
-    # Deliberately NOT added to `user_defines`: that list is replayed by the dev
+    # Deliberately NOT added to `program_defines`: that list is replayed by the dev
     # tool's own frontend_server, which runs against the host-configured dev
     # build. Replaying this one would have the app start reporting the dev
     # pipeline's configuration as its launch truth. The dev tool re-injects the
@@ -470,6 +472,9 @@ def flutter_compile_kernel(ctx, tools, aot = None, platform_dill = None, target_
             "label": str(ctx.label),
             "compilationMode": ctx.var["COMPILATION_MODE"],
             "platformBuildArgs": platform_build_args,
+            # The user's defines alone, not the flavor's: the dev tool passes
+            # them back as `extra_dart_defines` to a build of this label, which
+            # takes the flavor from the target and refuses the reserved key.
             "dartDefines": user_defines,
             "assetsDir": assets_dir.path,
             # The platform this kernel was compiled for. The dev tool's own
@@ -524,9 +529,10 @@ def flutter_compile_kernel(ctx, tools, aot = None, platform_dill = None, target_
         # platform on its resident frontend_server so the engine hook keeps
         # firing — with the right plugin set — after hot restart.
         dev_plugin_registrants = dev_plugin_registrants,
-        # Merged user defines (attr + flag), without the mode-specific
-        # dart.vm.* keys — the dev tool replays these on its own compiler.
-        dart_defines = user_defines,
+        # Merged user defines (attr + flag) and the flavor's, without the
+        # mode-specific dart.vm.* keys — the dev tool replays these on its own
+        # compiler.
+        dart_defines = program_defines,
         # Hot-reload dev metadata (None/empty outside debug). Consumed by the
         # rule impl to emit `_dev_config.json` for the dev tool.
         app_entrypoint_uri = app_entrypoint_uri,
@@ -578,7 +584,9 @@ def _shader_jobs(ctx, deps, target_platform, inputs):
 
     A package's shader that its `platforms:` entry restricts to other platforms
     than `target_platform` is no job, as flutter_tools leaves it out of a build
-    for them; `tester` and None leave out nothing.
+    for them; `tester` and None leave out nothing. One that its `flavors:` entry
+    restricts is a job only for a build of one of those flavors (`inputs.flavor`),
+    never for a build without one, `tester` included.
     """
     jobs = []
     for shader in inputs.shaders:
@@ -1175,6 +1183,21 @@ EXTRA_DART_DEFINES_ATTR = {
     ),
 }
 
+# The define `appFlavor` reads. flutter_tools sets it from `--flavor` and
+# refuses a user's own, as the ruleset does from `flavor`.
+APP_FLAVOR_DEFINE = "FLUTTER_APP_FLAVOR"
+
+def flavor_dart_defines(flavor):
+    """The define `appFlavor` reads for `flavor`, as flutter_tools adds it; none for no flavor.
+
+    Args:
+        flavor: The program's `flavor`; empty for none.
+
+    Returns:
+        A list of zero or one `KEY=VALUE` define.
+    """
+    return ["%s=%s" % (APP_FLAVOR_DEFINE, flavor)] if flavor else []
+
 def merge_dart_defines(ctx, defines = None):
     """Merge a target's `defines` attr with the extra_dart_defines flag.
 
@@ -1242,8 +1265,9 @@ def flutter_program_inputs(ctx):
         library root, and the key of each asset); `main`, `srcs`, `assets`,
         `shaders`, `shader_includes`, `license` and `additional_licenses` are Files
         (`unchecked_srcs`, among `srcs`, are not checked against `deps`); `deps`,
-        `native_deps` and `code_assets` are Targets; the rest are as the
-        attributes of `flutter_application` of the same names.
+        `native_deps` and `code_assets` are Targets; the rest, `flavor`
+        among them, are as the attributes of `flutter_application` of the same
+        names.
     """
     return struct(
         label = ctx.label,
@@ -1338,6 +1362,16 @@ KERNEL_COMPILE_ATTRS = {
     "deps": flutter_deps_attr(),
     "defines": attr.string_list(
         doc = "Dart environment defines (-D flags).",
+    ),
+    "flavor": attr.string(
+        doc = "The app's flavor, as `flutter build --flavor`: `appFlavor` " +
+              "(`package:flutter/services.dart`) reads it, and a pub package's " +
+              "assets and shaders whose `flavors:` name it are bundled. Empty, " +
+              "the default, is no flavor: `appFlavor` is null and no `flavors:` " +
+              "entry ships. A flavor is a target: declare one application per " +
+              "flavor, and give each flavor's platform target its own app id, " +
+              "name and resources. The app's own `assets` are not filtered by " +
+              "flavor: list a flavor's assets in that flavor's target.",
     ),
 } | EXTRA_DART_DEFINES_ATTR | BUILD_MODE_ATTR | KERNEL_TOOL_ATTR
 
@@ -1444,6 +1478,7 @@ FLUTTER_PROGRAM_ATTR_NAMES = [
     "defines",
     "deps",
     "extra_gen_snapshot_options",
+    "flavor",
     "language_version",
     "license",
     "link_hook_assets",

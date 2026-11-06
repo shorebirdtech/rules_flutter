@@ -203,7 +203,7 @@ def _flutter_asset_bundle_impl(ctx):
     # Walk pub-package font/asset contributions from FlutterInfo. To get
     # MaterialIcons in the bundle, list `@rules_flutter//flutter:material_icons`
     # in deps — the same channel cupertino_icons et al. arrive through.
-    fonts, extra_asset_copies, unlisted_asset_copies = aggregate_pub_contributions(ctx.attr.deps)
+    fonts, extra_asset_copies, unlisted_asset_copies = aggregate_pub_contributions(ctx.attr.deps, flavor = ctx.attr.flavor)
 
     notices = flutter_notices_action(
         ctx = ctx,
@@ -237,11 +237,14 @@ flutter_asset_bundle = rule(
         "deps": attr.label_list(
             doc = "Flutter library dependencies whose assets to include.",
         ),
+        "flavor": attr.string(
+            doc = "The flavor the bundle is for: a pub package's `flavors:` entries naming it are bundled, other `flavors:` entries are not. Empty is no flavor.",
+        ),
         "_asset_bundle_tool": attr.label(
             default = _TOOL,
             allow_single_file = True,
         ),
     } | NOTICES_ATTRS,
     exec_groups = PORTABLE_EXEC_GROUPS,
-    doc = "Generates a flutter_assets/ tree artifact with manifests and asset files. It is for no platform in particular, so it holds the assets of `deps` that a package restricts to some platforms (`platforms:`) too.",
+    doc = "Generates a flutter_assets/ tree artifact with manifests and asset files. It is for no platform in particular, so it holds the assets of `deps` that a package restricts to some platforms (`platforms:`) too, and only those it restricts to flavors (`flavors:`) that name `flavor`.",
 )

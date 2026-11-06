@@ -8,6 +8,10 @@ rules that compile Dart code, bundle assets, and run tests.
 - `flutter_application`: Compiles Dart code (kernel + AOT) and bundles assets.
     This is the primary rule — it produces a `FlutterApplicationInfo` provider
     that platform-specific packaging rules consume.
+- Flavors: `flavor` on `flutter_application` (and `flutter_web_app`) makes the
+    target that flavor, as `flutter build --flavor` does: `appFlavor` is set and
+    the pub assets and shaders whose `flavors:` name it are bundled. Declare one
+    application per flavor; see the README's Flavors section.
 - `flutter_library`: Collects Flutter Dart sources and assets into a reusable
     dependency. Wire into `flutter_application` via `deps`.
 - `flutter_plugin`: Declares a Flutter plugin with optional Dart registration
@@ -70,6 +74,10 @@ def flutter_application(name, package_name = "", **kwargs):
     This ensures the kernel uses `package:<name>/main.dart` URIs instead of
     sandbox `file:///` URIs, which is required for hot reload incremental
     deltas to match the running application's library URIs.
+
+    `flavor` makes the application one flavor (`appFlavor`, and the pub
+    packages' `flavors:` assets and shaders): declare one application per
+    flavor.
 
     Args:
         name: Target name.

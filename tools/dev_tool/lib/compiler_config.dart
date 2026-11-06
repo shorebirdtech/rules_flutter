@@ -55,7 +55,8 @@ class NativeCompilerConfig implements CompilerConfig {
   /// Dart environment defines (KEY=VALUE) emitted as `-D` launch flags.
   /// The frontend_server is persistent, so launch-time defines apply to
   /// every subsequent recompile — keeping String.fromEnvironment stable
-  /// across hot reload/restart. Sourced from the dev config's dartDefines.
+  /// across hot reload/restart. Sourced from the dev config's dartDefines: the
+  /// user's defines and the flavor's `FLUTTER_APP_FLAVOR`.
   final List<String> dartDefines;
 
   /// `file://` URI of the generated plugin registrant, or empty when the
