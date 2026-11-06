@@ -24,6 +24,8 @@ library;
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:path/path.dart' as p;
+
 /// Per-library content fingerprint, keyed by bundle-relative path. Values
 /// are opaque content tokens — only equality across two calls with the
 /// same artifact form matters.
@@ -235,7 +237,11 @@ Future<Map<String, String>> _fromExtractedBundle(Directory appDir) async {
   final out = <String, String>{};
   await for (final entity in appDir.list(recursive: true, followLinks: false)) {
     if (entity is! File) continue;
-    final rel = entity.path.substring(appDir.path.length + 1);
+    // Keyed with `/` on every host, as the entries of an archive are, so the
+    // `.framework` and `libapp.so` rules below read a key the same way.
+    final rel = p.posix.joinAll(
+      p.split(p.relative(entity.path, from: appDir.path)),
+    );
     if (!_isNativeLib(rel)) continue;
     out[rel] = 'fnv:${await _fnv1a64(entity)}';
   }
