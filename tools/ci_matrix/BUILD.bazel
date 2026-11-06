@@ -22,6 +22,23 @@ dart_test(
     deps = ["@dev_tool_deps//:test"],
 )
 
+# Every non-local `uses:` in a workflow names a full commit SHA and the ref it
+# came from. See pinned_actions_test.dart.
+dart_test(
+    name = "pinned_actions_test",
+    size = "small",
+    data = ["//.github/workflows"],
+    env = {
+        "WORKFLOWS": "$(rlocationpaths //.github/workflows:workflows)",
+        "RUNFILES_SOURCE_REPO": "",
+    },
+    main = "test/pinned_actions_test.dart",
+    deps = [
+        "@dev_tool_deps//:test",
+        "@rules_dart//dart/runfiles",
+    ],
+)
+
 # The Windows E2E job's output base leaves aapt2 room. See
 # windows_paths_test.dart.
 dart_test(

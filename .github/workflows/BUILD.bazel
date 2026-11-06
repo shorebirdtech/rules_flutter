@@ -1,5 +1,12 @@
-# Read by the test that checks the Windows job's output base.
+# Read by the tests that check the Windows job's output base and that every
+# `uses:` is pinned to a commit.
 exports_files(
     ["ci.yaml"],
+    visibility = ["//tools/ci_matrix:__pkg__"],
+)
+
+filegroup(
+    name = "workflows",
+    srcs = glob(["*.yaml"]),
     visibility = ["//tools/ci_matrix:__pkg__"],
 )

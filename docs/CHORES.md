@@ -236,8 +236,20 @@ Reconcile the revs that track something else in this repo:
 
 **Procedure**:
 
-1. For each `uses:` reference, check the repo's tags/releases for newer versions
-2. Update the version ref
-3. For reusable workflows, review changelogs for new inputs or breaking changes
+Every `uses:` that is not local (`./.github/...`) is pinned to a full commit SHA
+with the version in a trailing comment: `uses: owner/repo@<sha> # v1.2.3`
+(`owner/repo/path@<sha> # v1.2.3` for a subpath). A bump changes both.
 
-**Verification**: CI workflow runs successfully.
+1. For each `uses:` reference, check the repo's tags/releases for newer versions
+2. Resolve the new tag to its commit. For an annotated tag, take the peeled
+   `^{}` line (the commit), not the tag object:
+   `git ls-remote https://github.com/owner/repo refs/tags/<tag> 'refs/tags/<tag>^{}'`
+3. Replace the SHA and the comment together
+4. For reusable workflows, review changelogs for new inputs or breaking changes
+
+overhead's workflows (`aran/rules_dart/.github/workflows/overhead-*`) move with
+the rules_dart commit instead (see § "Tool Version Bumps").
+
+**Verification**: `bazel test //tools/ci_matrix:pinned_actions_test` passes (it
+fails on a `uses:` that is not a 40-hex SHA with a `# <ref>` comment), and the CI
+workflow runs successfully.
