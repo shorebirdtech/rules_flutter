@@ -131,7 +131,7 @@ typedef GoldenServiceLauncher = Future<RunningGoldenService> Function(
 const goldenServicePortVariable = 'RULES_FLUTTER_GOLDEN_SERVICE_PORT';
 
 /// The variable the service is told the test's source in.
-const goldenServiceTestPathVariable = 'RULES_FLUTTER_GOLDEN_TEST_PATH';
+const goldenServiceTestPathVariable = 'FLUTTER_TEST_PATH';
 
 /// How long a service gets to end once its connection is closed.
 const _exitBound = Duration(seconds: 30);

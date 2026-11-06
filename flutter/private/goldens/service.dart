@@ -28,12 +28,18 @@
 //
 // The host closes the connection when the test is over, and the program ends.
 //
-// What it compares for is in the environment:
+// A test whose package has a `flutter_test_config.dart` gets a service built
+// with it, so the config runs before the service does, as it runs in
+// `TestGoldenComparator`'s bootstrap: a `goldenFileComparator` it installs, or
+// a tolerance it sets, is what compares.
 //
-//   RULES_FLUTTER_GOLDEN_TEST_PATH      the `short_path` of the integration
+// What it compares for is in the environment, as for any `flutter_test`, set
+// by the host that starts it:
+//
+//   FLUTTER_TEST_PATH                   the `short_path` of the integration
 //                                       test's source: goldens are relative to
 //                                       its directory.
-//   RULES_FLUTTER_GOLDEN_UPDATE         `1` to write goldens into the source
+//   FLUTTER_TEST_UPDATE_GOLDENS         `1` to write goldens into the source
 //                                       tree instead of comparing, as
 //                                       `bazel run //<test> -- --update-goldens`
 //                                       does for a `flutter_test`.
@@ -50,8 +56,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'comparator.dart';
 
 const _portVariable = 'RULES_FLUTTER_GOLDEN_SERVICE_PORT';
-const _testPathVariable = 'RULES_FLUTTER_GOLDEN_TEST_PATH';
-const _updateVariable = 'RULES_FLUTTER_GOLDEN_UPDATE';
 
 /// Answers one request of the host with [comparator].
 ///
@@ -59,7 +63,7 @@ const _updateVariable = 'RULES_FLUTTER_GOLDEN_UPDATE';
 /// not tied to a process to be tested.
 Future<Map<String, Object?>> answerGoldenRequest(
   Map<String, Object?> request,
-  BazelGoldenFileComparator comparator,
+  GoldenFileComparator comparator,
 ) async {
   final id = request['id'];
   try {
@@ -70,7 +74,15 @@ Future<Map<String, Object?>> answerGoldenRequest(
         return {'id': id, 'matched': await comparator.compare(bytes, key)};
       case 'update':
         await comparator.update(key, bytes);
-        return {'id': id, 'matched': true, 'wrote': comparator.lastWritten};
+        return {
+          'id': id,
+          'matched': true,
+          // Only the Bazel comparator knows where it wrote: a config's own
+          // comparator in its place says nothing of it.
+          'wrote': comparator is BazelGoldenFileComparator
+              ? comparator.lastWritten
+              : null,
+        };
       default:
         return {'id': id, 'error': 'unknown operation "${request['op']}"'};
     }
@@ -79,23 +91,6 @@ Future<Map<String, Object?>> answerGoldenRequest(
     // `FlutterError`, a golden that is not there a `TestFailure`.
     return {'id': id, 'error': e is TestFailure ? e.message ?? '$e' : '$e'};
   }
-}
-
-/// The comparator this service compares with, for the test and mode the host
-/// named.
-BazelGoldenFileComparator comparatorFromEnvironment(Map<String, String> env) {
-  final testPath = env[_testPathVariable];
-  if (testPath == null || testPath.isEmpty) {
-    throw StateError(
-      'golden service: $_testPathVariable is not set, so there is no test '
-      'file to root the goldens at. The integration test runner sets it.',
-    );
-  }
-  return BazelGoldenFileComparator.forTest(
-    testPath,
-    environment: env,
-    update: env[_updateVariable] == '1',
-  );
 }
 
 void main() {
@@ -109,7 +104,10 @@ void main() {
         'program is started by it.',
       );
     }
-    final comparator = comparatorFromEnvironment(Platform.environment);
+    // The comparator the `flutter_test` bootstrap installed for the test and
+    // mode the host named, or the one the test's `flutter_test_config.dart`
+    // put in its place: read per request, as `flutter test`'s comparator
+    // bootstrap reads `goldenFileComparator`.
     final socket = await Socket.connect(InternetAddress.loopbackIPv4, port);
     try {
       await for (final line
@@ -121,7 +119,7 @@ void main() {
               )) {
         final response = await answerGoldenRequest(
           json.decode(line) as Map<String, Object?>,
-          comparator,
+          goldenFileComparator,
         );
         socket.writeln(json.encode(response));
         await socket.flush();

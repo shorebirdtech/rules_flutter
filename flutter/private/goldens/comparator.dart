@@ -66,6 +66,10 @@ import 'package:flutter_test/flutter_test.dart';
 void installBazelGoldenFileComparator() {
   final env = Platform.environment;
 
+  // Whoever starts the process sets these two: Bazel's test rule for a
+  // `flutter_test`, the integration test's host for its golden service (which
+  // is a `flutter_test` comparing for another test, so the comparator a
+  // `flutter_test_config.dart` finds installed is rooted at that test).
   final testPath = env['FLUTTER_TEST_PATH'];
   if (testPath == null || testPath.isEmpty) {
     throw StateError(

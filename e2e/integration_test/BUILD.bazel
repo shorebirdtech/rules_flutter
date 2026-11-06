@@ -63,6 +63,9 @@ _GOLDEN_SRCS = ["integration_test/swatch.dart"]
 
 _GOLDENS = glob(["integration_test/goldens/**"])
 
+# The files of the golden test whose directory has a `flutter_test_config.dart`.
+_TOLERANT_FILES = glob(["integration_test/tolerant/**"])
+
 # Where a failed golden leaves its pictures, as `flutter_test` does: the golden
 # as it is, the picture the test made, and the two differences.
 _FAILURE_PICTURES = [
@@ -321,6 +324,22 @@ flutter_macos_integration_test(
     bundle_id = "com.example.integrationtest",
     data = _GOLDENS,
     deps = _TEST_DEPS,
+)
+
+# A golden test whose directory has a `flutter_test_config.dart`, which the
+# golden service runs as `flutter test` runs a config for its comparator: an
+# orange swatch passes against the blue golden only because the config's
+# comparator tolerates the difference.
+flutter_macos_integration_test(
+    name = "macos_golden_config_test",
+    src = "integration_test/tolerant/golden_tolerant_test.dart",
+    srcs = _GOLDEN_SRCS,
+    application = ":app_flutter",
+    bundle_id = "com.example.integrationtest",
+    data = _TOLERANT_FILES,
+    # The config imports `package:flutter`, which the golden service built with
+    # it takes from here.
+    deps = ["@deps//:flutter"] + _TEST_DEPS,
 )
 
 # The same swatch in another colour against the same golden: `manual`, since it
@@ -667,6 +686,20 @@ flutter_web_integration_test(
     src = "integration_test/golden_test.dart",
     srcs = glob(["lib/**/*.dart"]) + _GOLDEN_SRCS,
     data = _GOLDENS,
+    target_compatible_with = _WEB_HOSTS,
+    deps = ["@deps//:flutter"] + _TEST_DEPS,
+)
+
+# A golden test whose directory has a `flutter_test_config.dart`, which the
+# golden service runs as `flutter test` runs a config for its comparator: an
+# orange swatch passes against the blue golden only because the config's
+# comparator tolerates the difference.
+flutter_web_integration_test(
+    name = "web_golden_config_test",
+    package_name = "integration_test_example",
+    src = "integration_test/tolerant/golden_tolerant_test.dart",
+    srcs = glob(["lib/**/*.dart"]) + _GOLDEN_SRCS,
+    data = _TOLERANT_FILES,
     target_compatible_with = _WEB_HOSTS,
     deps = ["@deps//:flutter"] + _TEST_DEPS,
 )

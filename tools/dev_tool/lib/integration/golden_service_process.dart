@@ -30,7 +30,7 @@ const _belongsToTheTest = [
 ];
 
 /// The variable that tells the service to write goldens, not compare them.
-const goldenServiceUpdateVariable = 'RULES_FLUTTER_GOLDEN_UPDATE';
+const goldenServiceUpdateVariable = 'FLUTTER_TEST_UPDATE_GOLDENS';
 
 /// The environment to start the golden service with: the host's, so that it
 /// finds the runfiles and the test's undeclared outputs directory and, under
