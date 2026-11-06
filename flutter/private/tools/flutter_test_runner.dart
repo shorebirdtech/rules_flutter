@@ -22,13 +22,18 @@
 /// Bazel's test protocol wins wherever it has one. The suite's default timeout
 /// is Bazel's own (`TEST_TIMEOUT`), not `package:test`'s 30 seconds; a test's
 /// own `timeout:` still applies — see [suiteTimeout].
-/// `--test_filter`, sharding and the per-case XML report follow
-/// `lib/bazel_test_protocol.dart`.
+/// `--test_filter`, sharding, tag selection (`DART_TEST_TAGS`,
+/// `DART_TEST_EXCLUDE_TAGS`, the rule's `include_tags` and `exclude_tags`) and
+/// the per-case XML report follow `lib/bazel_test_protocol.dart`. A suite that
+/// registers no test fails, as under `flutter test`. The test file's library
+/// `@Tags` are read from `FLUTTER_TEST_SOURCE` with `package:test`'s own
+/// parser, so every case carries them.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_rule_tools/remote_suite.dart';
+import 'package:flutter_rule_tools/suite_annotations.dart';
 import 'package:runfiles/runfiles.dart';
 
 /// The runfiles of the program started as [executable], or null.
@@ -213,12 +218,30 @@ void main(List<String> args) async {
       settings['FLUTTER_TEST_COVERAGE_LIBRARIES']?.split('\n') ??
       const <String>[];
 
+  final isTest = Platform.environment['FLUTTER_TEST_DILL'] != null;
   final TestSelection selection;
   try {
-    selection = TestSelection.fromEnvironment(settings);
+    selection = runSelection(settings, isTest: isTest);
   } on FormatException catch (e) {
     stderr.writeln('flutter_test runner: ${e.message}');
     exit(64);
+  }
+  var libraryTags = const <String>{};
+  if (isTest) {
+    final sourceKey = settings['FLUTTER_TEST_SOURCE'];
+    if (sourceKey == null) {
+      stderr.writeln('flutter_test runner: FLUTTER_TEST_SOURCE must be set.');
+      exit(64);
+    }
+    try {
+      libraryTags = libraryTagsOf(File(r.rlocation(sourceKey)), testPath);
+    } on FormatException catch (e) {
+      stderr.writeln(
+        'flutter_test runner: cannot read the annotations of $testPath: '
+        '${e.message}',
+      );
+      exit(1);
+    }
   }
   // Touched before the run, as Bazel asks: it is how a runner says it supports
   // sharding at all, and Bazel 9 fails a sharded test whose runner never does.
@@ -235,11 +258,58 @@ void main(List<String> args) async {
     coverageLibraries: coverageLibraries,
     updateGoldens: updateGoldens,
     selection: selection,
+    libraryTags: libraryTags,
     xmlOutput: Platform.environment['XML_OUTPUT_FILE'],
     impeller: settings['FLUTTER_TEST_IMPELLER'] == '1',
     loader: {...launched, ...loader},
   );
 }
+
+/// The selection this run applies, from [settings].
+///
+/// A `flutter_test` ([isTest]) selects cases by the target's own
+/// `include_tags`/`exclude_tags`, which the rule passes as newline-joined
+/// `FLUTTER_TEST_INCLUDE_TAGS`/`FLUTTER_TEST_EXCLUDE_TAGS`, and by the
+/// `DART_TEST_TAGS`/`DART_TEST_EXCLUDE_TAGS` of the run. A
+/// `flutter_tester_binary` is not a test, and a shell's variable must not
+/// change what a build tool does: it takes neither.
+///
+/// Throws [FormatException] for a selector that does not parse.
+///
+/// Public, like [testCeiling], because the test reaches it directly.
+TestSelection runSelection(
+  Map<String, String> settings, {
+  required bool isTest,
+}) {
+  if (!isTest) {
+    return TestSelection.fromEnvironment({
+      for (final entry in settings.entries)
+        if (entry.key != 'DART_TEST_TAGS' &&
+            entry.key != 'DART_TEST_EXCLUDE_TAGS')
+          entry.key: entry.value,
+    });
+  }
+  List<String> lines(String key) {
+    final value = settings[key];
+    return value == null || value.isEmpty ? const [] : value.split('\n');
+  }
+
+  return TestSelection.fromEnvironment(
+    settings,
+    fixedTags: TagSelection.fromAttribute(
+      lines('FLUTTER_TEST_INCLUDE_TAGS'),
+      lines('FLUTTER_TEST_EXCLUDE_TAGS'),
+    ),
+  );
+}
+
+/// The `@Tags` of [source], the test file shown to people as [displayPath].
+///
+/// Throws [FormatException] when the file's annotations cannot be read.
+///
+/// Public, like [testCeiling], because the test reaches it directly.
+Set<String> libraryTagsOf(File source, String displayPath) =>
+    libraryTags(displayPath, source.readAsStringSync());
 
 /// The loader's search path for a `flutter_tester_binary`'s Native Assets.
 ///
@@ -297,6 +367,7 @@ Future<int> _runOnce({
   required List<String> coverageLibraries,
   required bool updateGoldens,
   required TestSelection selection,
+  required Set<String> libraryTags,
   required String? xmlOutput,
   required bool impeller,
   required Map<String, String> loader,
@@ -313,6 +384,7 @@ Future<int> _runOnce({
       coverageLibraries: coverageLibraries,
       updateGoldens: updateGoldens,
       selection: selection,
+      libraryTags: libraryTags,
       xmlOutput: xmlOutput,
       impeller: impeller,
       loader: loader,
@@ -436,6 +508,7 @@ class _Harness {
     required List<String> coverageLibraries,
     required bool updateGoldens,
     required TestSelection selection,
+    required Set<String> libraryTags,
     required String? xmlOutput,
     required bool impeller,
     required Map<String, String> loader,
@@ -596,6 +669,7 @@ class _Harness {
           _TesterTransport(_ws!, _process!),
           suitePath: testPath,
           timeout: suiteTimeout(Platform.environment['TEST_TIMEOUT']),
+          libraryTags: libraryTags,
         ).run(
           selection: selection,
           xmlOutput: xmlOutput,

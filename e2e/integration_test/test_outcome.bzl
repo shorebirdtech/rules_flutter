@@ -22,6 +22,7 @@ def _test_outcome_impl(ctx):
         "env": wrapped[RunEnvironmentInfo].environment,
         "expect": ctx.attr.expect,
         "testFilter": ctx.attr.test_filter if ctx.attr.test_filter else None,
+        "runEnv": ctx.attr.run_env,
         "cases": ctx.attr.cases if ctx.attr.cases else None,
         "failingCases": ctx.attr.failing_cases if ctx.attr.failing_cases_given else None,
         "outputContains": ctx.attr.output_contains,
@@ -44,9 +45,11 @@ def _test_outcome_impl(ctx):
             environment = {"TEST_OUTCOME_CONFIG": runfiles_path(config, workspace)},
             inherited_environment = wrapped[RunEnvironmentInfo].inherited_environment,
         ),
-        # The wrapped test's own placement: it runs here, in this machine's session.
-        testing.ExecutionInfo(wrapped[testing.ExecutionInfo].requirements),
-    ]
+    ] + (
+        # The wrapped test's own placement: it runs here, in this machine's
+        # session. A `flutter_test` states none.
+        [testing.ExecutionInfo(wrapped[testing.ExecutionInfo].requirements)] if testing.ExecutionInfo in wrapped else []
+    )
 
 outcome_test = rule(
     implementation = _test_outcome_impl,
@@ -63,6 +66,9 @@ outcome_test = rule(
         ),
         "test_filter": attr.string(
             doc = "A `--test_filter` to run the test with.",
+        ),
+        "run_env": attr.string_dict(
+            doc = "Variables the wrapped test runs with, as `--test_env` gives them.",
         ),
         "cases": attr.string_list(
             doc = "The names of the cases its report must hold, in order. Unchecked when empty.",

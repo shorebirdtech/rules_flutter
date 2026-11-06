@@ -41,6 +41,10 @@ Future<void> main() async {
     } else {
       environment['TESTBRIDGE_TEST_ONLY'] = filter;
     }
+    environment.addAll(
+      (config['runEnv'] as Map<String, Object?>? ?? const {})
+          .cast<String, String>(),
+    );
 
     final process = await Process.start(
       runfiles.rlocation(config['executable']! as String),

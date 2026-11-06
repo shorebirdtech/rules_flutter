@@ -29,6 +29,7 @@ load(":flutter_pub_package_test.bzl", "flutter_pub_package_test_suite")
 load(":flutter_pubspec_test.bzl", "flutter_pubspec_test_suite")
 load(":flutter_test_bootstrap_test.bzl", "flutter_test_bootstrap_test_suite")
 load(":flutter_test_runfiles_test.bzl", "flutter_test_runfiles_test_suite")
+load(":flutter_test_tags_test.bzl", "flutter_test_tags_test_suite")
 load(":gradle_dependency_forms_test.bzl", "gradle_dependency_forms_test_suite")
 load(":gradle_dependency_gaps_test.bzl", "gradle_dependency_gaps_test_suite")
 load(":ios_test.bzl", "ios_test_suite")
@@ -226,5 +227,7 @@ path_mapping_test_suite(name = "path_mapping_test")
 tester_binary_test_suite(name = "tester_binary_test")
 
 flutter_test_runfiles_test_suite(name = "flutter_test_runfiles_test")
+
+flutter_test_tags_test_suite(name = "flutter_test_tags_test")
 
 sdk_inputs_test_suite(name = "sdk_inputs_test")

@@ -1,5 +1,5 @@
 load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_analysis_test", "dart_binary")
-load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_library")
+load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_library", "flutter_test")
 load("@rules_flutter//flutter:integration_test.bzl", "flutter_android_integration_test", "flutter_ios_simulator_integration_test", "flutter_linux_integration_test", "flutter_macos_integration_test", "flutter_web_integration_test", "flutter_windows_integration_test")
 load(":test_outcome.bzl", "outcome_test")
 
@@ -68,6 +68,133 @@ _MISMATCH_SAYS = [
     "Golden \"goldens/",
     "swatch.png\": Pixel test failed",
 ]
+
+# -- Tag selection and an empty suite (`flutter_test`) ---------------------
+
+_TAGS_TEST_DEPS = [
+    "@deps//:flutter",
+    "@deps//:flutter_test",
+]
+
+# Three cases, tagged `golden`, `slow` and neither, and
+# `library_tag` on every one. Passes as a whole.
+flutter_test(
+    name = "tags_test",
+    package_name = "integration_test_example",
+    main = "test/tags_test.dart",
+    deps = _TAGS_TEST_DEPS,
+)
+
+# `manual`, since each is meant to fail or is only run by the outcome tests
+# below: the same suite with a fixed selection, and a suite with no case.
+flutter_test(
+    name = "tags_fixed",
+    package_name = "integration_test_example",
+    include_tags = ["golden"],
+    main = "test/tags_test.dart",
+    tags = ["manual"],
+    deps = _TAGS_TEST_DEPS,
+)
+
+flutter_test(
+    name = "tags_fixed_empty",
+    package_name = "integration_test_example",
+    include_tags = ["no_such_tag"],
+    main = "test/tags_test.dart",
+    tags = ["manual"],
+    deps = _TAGS_TEST_DEPS,
+)
+
+flutter_test(
+    name = "no_tests",
+    package_name = "integration_test_example",
+    main = "test/no_tests_test.dart",
+    tags = ["manual"],
+    deps = _TAGS_TEST_DEPS,
+)
+
+# `--test_env=DART_TEST_TAGS=golden` runs the case tagged so.
+outcome_test(
+    name = "tags_run_include_test",
+    cases = ["golden group a golden case"],
+    expect = "pass",
+    failing_cases_given = True,
+    run_env = {"DART_TEST_TAGS": "golden"},
+    test = ":tags_test",
+)
+
+outcome_test(
+    name = "tags_run_exclude_test",
+    cases = ["an untagged case"],
+    expect = "pass",
+    failing_cases_given = True,
+    run_env = {"DART_TEST_EXCLUDE_TAGS": "golden,slow"},
+    test = ":tags_test",
+)
+
+# A selector is a boolean expression.
+outcome_test(
+    name = "tags_run_selector_test",
+    cases = [
+        "golden group a golden case",
+        "a slow case",
+    ],
+    expect = "pass",
+    failing_cases_given = True,
+    run_env = {"DART_TEST_TAGS": "golden || slow"},
+    test = ":tags_test",
+)
+
+# The library's `@Tags` reached every case: excluding it leaves none, and a run
+# that narrowed a target to nothing passes.
+outcome_test(
+    name = "tags_library_test",
+    expect = "pass",
+    output_contains = ["no test case in this suite matches"],
+    run_env = {"DART_TEST_EXCLUDE_TAGS": "library_tag"},
+    test = ":tags_test",
+)
+
+outcome_test(
+    name = "tags_fixed_test",
+    cases = ["golden group a golden case"],
+    expect = "pass",
+    failing_cases_given = True,
+    test = ":tags_fixed",
+)
+
+# The target's own selection and the run's both apply: `slow` is not among the
+# cases `include_tags = ["golden"]` keeps, so the run keeps none and passes.
+outcome_test(
+    name = "tags_fixed_narrowed_test",
+    expect = "pass",
+    output_contains = ["no test case in this suite matches"],
+    run_env = {"DART_TEST_TAGS": "slow"},
+    test = ":tags_fixed",
+)
+
+# A target whose own selection keeps nothing is broken.
+outcome_test(
+    name = "tags_fixed_empty_test",
+    expect = "fail",
+    output_contains = ["No tests match the requested tag selectors"],
+    test = ":tags_fixed_empty",
+)
+
+outcome_test(
+    name = "tags_bad_selector_test",
+    expect = "fail",
+    output_contains = ["is not a tag selector"],
+    run_env = {"DART_TEST_TAGS": "golden &&"},
+    test = ":tags_test",
+)
+
+outcome_test(
+    name = "no_tests_test",
+    expect = "fail",
+    output_contains = ["the suite registered no tests"],
+    test = ":no_tests",
+)
 
 # -- macOS -----------------------------------------------------------------
 

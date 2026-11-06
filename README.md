@@ -1594,7 +1594,7 @@ flutter_test(
 )
 ```
 
-It takes the compile attributes of `flutter_application` (`main`, `srcs`, `deps`, `defines`, `package_name`, `language_version`, `assets`, `shaders`) plus the usual `data` and `env`. Values in `env` are literal; there is no `$(location)` expansion.
+It takes the compile attributes of `flutter_application` (`main`, `srcs`, `deps`, `defines`, `package_name`, `language_version`, `assets`, `shaders`) plus the usual `data` and `env`, and `include_tags` and `exclude_tags` (below). Values in `env` are literal; there is no `$(location)` expansion.
 
 A test runs where its target runs, as a `cc_test` does: its `deps`, native code included, and the `flutter_tester` that runs it are built for the target platform, and Bazel's default test toolchain runs it on an execution platform matching that platform. On a Mac that is the Mac. To run tests on other machines, a Linux remote worker say:
 
@@ -1614,6 +1614,8 @@ Bazel's test protocol applies, as it does to `dart_test`:
 - **Time.** The target's `size` or `timeout` replaces `package:test`'s 30-second default, so a test with no `timeout:` of its own runs as long as Bazel lets the target run. A `timeout:` written on a test still applies, and `Timeout.factor` scales Bazel's limit.
 - **`--test_filter`.** A regular expression matched against each test's full name, group names included, like `flutter test --name`. A target the filter matches nothing in passes, so `bazel test //... --test_filter=x` runs only what it names.
 - **`shard_count`.** Splits the suite's tests into contiguous shares, one per shard.
+- **Tags.** `@Tags` on the test library, and `tags:` on a `test`, select cases as under `flutter test --tags`. Per run: `bazel test //... --test_env=DART_TEST_TAGS=golden` (and `DART_TEST_EXCLUDE_TAGS`), comma-separated boolean selectors as `--tags` takes them. A target it matches nothing in passes, and nothing is rebuilt. Fixed: `include_tags` and `exclude_tags`, the keys of `dart_test.yaml`, one selector per entry; a target whose fixed selection matches nothing fails. Both apply together. These are `package:test` tags: Bazel's `tags` and `--test_tag_filters` choose targets, not cases. `dart_test.yaml` itself is not read: its `include_tags` and `exclude_tags` become the attributes, and its per-tag settings (`tags:` with `skip` or `timeout`), `add_tags` and presets do not apply.
+- **No tests.** A suite that registers no test fails, as under `flutter test`; one whose every test is `testOn` another platform registers none here too.
 - **Results.** Each case is reported in the `test.xml` Bazel collects, so CI shows cases rather than one pass or fail per target.
 
 #### Golden files
@@ -1648,7 +1650,7 @@ Two limits come from Flutter rather than from these rules:
 
 ### flutter_tester_binary
 
-Runs a program under `flutter_tester`, the headless engine `flutter_test` uses, as an ordinary executable rather than a test. Use it to make build outputs with Flutter's rendering, such as store screenshots: the outputs do not have to be `testonly`. It is compiled as `flutter_test` compiles a test and takes the same attributes, `enable_impeller` included.
+Runs a program under `flutter_tester`, the headless engine `flutter_test` uses, as an ordinary executable rather than a test. Use it to make build outputs with Flutter's rendering, such as store screenshots: the outputs do not have to be `testonly`. It is compiled as `flutter_test` compiles a test and takes the same attributes, `enable_impeller` included, except `include_tags` and `exclude_tags`: it is not a test, and `DART_TEST_TAGS` in a shell does not change it. A program that registers no test fails.
 
 ```starlark
 flutter_tester_binary(

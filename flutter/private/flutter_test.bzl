@@ -293,7 +293,18 @@ def _flutter_test_impl(ctx):
             ["package:%s/" % ctx.attr.package_name] +
             [_own_source_uri(f, program.modular) for f in [ctx.file.main] + ctx.files.srcs],
         ),
+        # The test's source in the runfiles, which the runner reads for the
+        # library annotations (`@Tags`) the way `flutter test` does.
+        # FLUTTER_TEST_PATH stays the display path.
+        "FLUTTER_TEST_SOURCE": runfiles_path(ctx.file.main, ctx.workspace_name),
     }
+    for key, attr_name in [
+        ("FLUTTER_TEST_INCLUDE_TAGS", "include_tags"),
+        ("FLUTTER_TEST_EXCLUDE_TAGS", "exclude_tags"),
+    ]:
+        selectors = _tag_selectors(ctx, attr_name)
+        if selectors:
+            env[key] = "\n".join(selectors)
     _add_user_env(ctx, "flutter_test", env)
 
     instrumented_files_info = coverage_common.instrumented_files_info(
@@ -305,11 +316,32 @@ def _flutter_test_impl(ctx):
     return [
         DefaultInfo(
             executable = executable,
-            runfiles = program.runfiles.merge(tool[DefaultInfo].default_runfiles),
+            runfiles = program.runfiles.merge_all([
+                ctx.runfiles(files = [ctx.file.main]),
+                tool[DefaultInfo].default_runfiles,
+            ]),
         ),
         testing.TestEnvironment(env),
         instrumented_files_info,
     ] + program.providers
+
+def _tag_selectors(ctx, attr_name):
+    """The entries of the `include_tags` or `exclude_tags` attribute.
+
+    The runner joins them with newlines, so an entry may not span lines; an
+    empty one selects nothing and is a mistake in the BUILD file. Whether an
+    entry is a selector `package:test` can parse is only known to the runner,
+    which says so when the test runs.
+    """
+    entries = getattr(ctx.attr, attr_name)
+    for entry in entries:
+        if not entry.strip() or "\n" in entry:
+            fail("flutter_test {label}: {attr} entry {entry} is empty or spans lines".format(
+                label = ctx.label,
+                attr = attr_name,
+                entry = repr(entry),
+            ))
+    return entries
 
 def _add_user_env(ctx, kind, env):
     """Merges the target's `env` into `env`, never over the rule's own keys.
@@ -725,7 +757,7 @@ _TEST_ATTRS["data"] = attr.label_list(
 # worse than not expanding, because the unexpanded form still looks like a
 # path.
 #
-# The five `FLUTTER_TEST_*` keys the rule sets are the runner's start-up
+# The `FLUTTER_TEST_*` keys the rule sets are the runner's start-up
 # contract; supplying one is rejected in the implementation rather than
 # silently honoured or silently dropped.
 _TEST_ATTRS["test_config"] = attr.label(
@@ -756,6 +788,30 @@ _TEST_ATTRS["env"] = attr.string_dict(
           "FLUTTER_TEST_* keys the rule sets itself cannot be overridden.",
 )
 _TEST_ATTRS.update(_ENVIRONMENT.attrs)
+
+# Which cases of the suite run: `package:test`'s tag selectors, as the
+# `include_tags` and `exclude_tags` keys of `dart_test.yaml`. They choose cases
+# inside this target, unlike Bazel's `tags` and `--test_tag_filters`, which
+# choose targets.
+_TEST_ATTRS["include_tags"] = attr.string_list(
+    doc = "Tag selectors a case must match to run, as `flutter test --tags` " +
+          "takes them and as `dart_test.yaml`'s `include_tags` does: each " +
+          "entry is one boolean selector (`golden`, `a && !b`), and a case " +
+          "must match every entry. Tags come from `@Tags` on the test " +
+          "library and `tags:` on `group` and `test`. These are " +
+          "`package:test` tags, not Bazel's `tags`. A target none of whose " +
+          "cases match fails. `--test_env=DART_TEST_TAGS=...` narrows " +
+          "further for one run.",
+)
+
+_TEST_ATTRS["exclude_tags"] = attr.string_list(
+    doc = "Tag selectors that drop a case, as `flutter test " +
+          "--exclude-tags` takes them and as `dart_test.yaml`'s " +
+          "`exclude_tags` does: a case matching any entry does not run. " +
+          "`package:test` tags, not Bazel's `tags`. A target none of whose " +
+          "cases remain fails. `--test_env=DART_TEST_EXCLUDE_TAGS=...` " +
+          "drops more for one run.",
+)
 _TEST_ATTRS.update(PLATFORM_CONSTRAINT_ATTRS)
 _TEST_ATTRS.update(KERNEL_TOOL_ATTR)
 _TEST_ATTRS.update(TRACK_CREATION_LOCATIONS_ATTR)
@@ -920,7 +976,7 @@ def _flutter_tester_binary_impl(ctx):
 _BINARY_ATTRS = {
     k: v
     for k, v in _TEST_ATTRS.items()
-    if k != "_tool"
+    if k not in ["_tool", "include_tags", "exclude_tags"]
 }
 
 _BINARY_ATTRS["test_config"] = attr.label(

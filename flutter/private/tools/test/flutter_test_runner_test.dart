@@ -416,4 +416,65 @@ void main() {
       );
     });
   });
+
+  group('runSelection', () {
+    const env = {
+      'FLUTTER_TEST_INCLUDE_TAGS': 'golden\n!slow',
+      'FLUTTER_TEST_EXCLUDE_TAGS': 'flaky',
+      'DART_TEST_TAGS': 'a',
+      'DART_TEST_EXCLUDE_TAGS': 'b',
+    };
+
+    test('a flutter_test reads the rule\'s attributes and the run\'s '
+        'variables', () {
+      final selection = runner.runSelection(env, isTest: true);
+
+      expect(selection.fixedTags.include.toString(), contains('golden'));
+      expect(selection.fixedTags.include.toString(), contains('!slow'));
+      expect(selection.fixedTags.exclude.toString(), 'flaky');
+      expect(selection.runTags.includeRaw, 'a');
+      expect(selection.runTags.excludeRaw, 'b');
+    });
+
+    test('a flutter_tester_binary ignores the shell\'s DART_TEST_* '
+        'variables', () {
+      final selection = runner.runSelection(env, isTest: false);
+
+      expect(selection.narrows, isFalse);
+      expect(selection.fixedTags.selects, isFalse);
+    });
+
+    test('a flutter_test with no tag keys selects nothing away', () {
+      final selection = runner.runSelection(const {}, isTest: true);
+
+      expect(selection.narrows, isFalse);
+      expect(selection.fixedTags.selects, isFalse);
+    });
+
+    test('an attribute entry that is not a selector is refused', () {
+      expect(
+        () => runner.runSelection(const {
+          'FLUTTER_TEST_INCLUDE_TAGS': 'a &&',
+        }, isTest: true),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            contains('include_tags entry "a &&"'),
+          ),
+        ),
+      );
+    });
+  });
+
+  group('libraryTagsOf', () {
+    test('reads the annotations of the file', () {
+      final tmp = Directory.systemTemp.createTempSync('lib_tags_');
+      addTearDown(() => tmp.deleteSync(recursive: true));
+      final file = File('${tmp.path}/a_test.dart')
+        ..writeAsStringSync("@Tags(['x'])\nlibrary;\nvoid main() {}\n");
+
+      expect(runner.libraryTagsOf(file, 'pkg/a_test.dart'), {'x'});
+    });
+  });
 }
