@@ -95,6 +95,12 @@ jobs:
       - name: Query the whole module from a consumer
         working-directory: e2e/external_module
         run: bazel query "@rules_flutter//..."
+      # Listing targets loads their packages; analysing them also resolves
+      # every label, repo and rule input, which is where a target that needs
+      # something only a checkout has fails.
+      - name: Analyse the whole module from a consumer
+        working-directory: e2e/external_module
+        run: bazel build --nobuild "@rules_flutter//..."
   dart-tool-tests:
     name: Dart tool tests
     runs-on: ubuntu-latest

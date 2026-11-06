@@ -15,7 +15,7 @@ common --config=ruleset
 test --aspects=@rules_dart//dart:analyze.bzl%dart_analyze
 test --output_groups=+dart_analyze
 test --output_groups=+dart_format
-common --@rules_dart//dart:analysis_config=//:analysis_config
+common --@rules_dart//dart:analysis_config=//dev:analysis_config
 
 # Bazel settings that apply to this repository.
 # Take care to document any settings that you expect users to apply.

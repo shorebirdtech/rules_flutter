@@ -191,9 +191,11 @@ flutter.pub(
 use_repo(flutter, "gen_l10n_deps")
 
 # The packages the integration-test support library imports, for the analysis
-# of that library (//flutter/tests/integration_support_analysis).
-flutter.pub(
+# of that library (//flutter/tests/integration_support_analysis). A dev
+# dependency: the release archive omits that package.
+flutter_dev = use_extension("//flutter:extensions.bzl", "flutter", dev_dependency = True)
+flutter_dev.pub(
     name = "integration_support_deps",
     lock = "//flutter/tests/integration_support_analysis:pubspec.lock",
 )
-use_repo(flutter, "integration_support_deps")
+use_repo(flutter_dev, "integration_support_deps")
