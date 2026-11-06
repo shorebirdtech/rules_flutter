@@ -124,6 +124,45 @@ void main() {
     });
   });
 
+  group('androidApiLevel', () {
+    // Section headers: null, `.note.android.ident`, string table. The note
+    // follows them: namesz 8 ("Android\0"), descsz 4, type 1, the level.
+    Uint8List elf64WithIdent(int api) {
+      const shentsize = 64;
+      final strtab = [0, ...'.note.android.ident'.codeUnits, 0];
+      final noteOffset = 64 + 3 * shentsize;
+      final strtabOffset = noteOffset + 24;
+      final bytes = Uint8List(strtabOffset + strtab.length);
+      ByteData.sublistView(bytes)
+        ..setUint64(0x28, 64, Endian.little)
+        ..setUint16(0x3a, shentsize, Endian.little)
+        ..setUint16(0x3c, 3, Endian.little)
+        ..setUint16(0x3e, 2, Endian.little)
+        ..setUint32(64 + shentsize, 1, Endian.little)
+        ..setUint64(64 + shentsize + 0x18, noteOffset, Endian.little)
+        ..setUint64(64 + shentsize + 0x20, 24, Endian.little)
+        ..setUint64(64 + 2 * shentsize + 0x18, strtabOffset, Endian.little)
+        ..setUint32(noteOffset, 8, Endian.little)
+        ..setUint32(noteOffset + 4, 4, Endian.little)
+        ..setUint32(noteOffset + 8, 1, Endian.little)
+        ..setUint32(noteOffset + 20, api, Endian.little);
+      bytes
+        ..setRange(noteOffset + 12, noteOffset + 19, 'Android'.codeUnits)
+        ..setRange(strtabOffset, strtabOffset + strtab.length, strtab);
+      return bytes;
+    }
+
+    test('reads the level of the note', () {
+      expect(ElfImage(elf64WithIdent(24)).androidApiLevel(), 24);
+      expect(ElfImage(elf64WithIdent(31)).androidApiLevel(), 31);
+    });
+
+    test('is null without the note', () {
+      expect(ElfImage(elf64WithSections(['.text'])).androidApiLevel(), isNull);
+      expect(ElfImage(elf64()).androidApiLevel(), isNull);
+    });
+  });
+
   group('sectionNames', () {
     test('lists the names, starting with the null section', () {
       expect(

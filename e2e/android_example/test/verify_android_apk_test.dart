@@ -77,6 +77,7 @@ void main() {
   // --- Binary format checks ---
   apk
     ..checkNativeLibraries()
+    ..checkNativeLibraryApiLevels()
     // --- Packaging, as AGP packages a Flutter app ---
     ..checkNativeLibrariesUncompressed()
     ..checkNoMultiplatformMetadata()

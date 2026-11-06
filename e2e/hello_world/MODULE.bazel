@@ -137,6 +137,9 @@ android_ndk_repository_extension = use_extension(
     "@rules_android_ndk//:extension.bzl",
     "android_ndk_repository_extension",
 )
+
+# Native code is compiled at the app's min_sdk_version (24), as Gradle does.
+android_ndk_repository_extension.configure(api_level = 24)
 use_repo(android_ndk_repository_extension, "androidndk")
 
 register_toolchains("@androidndk//:all")

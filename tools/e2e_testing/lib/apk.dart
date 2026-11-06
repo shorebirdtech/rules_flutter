@@ -144,6 +144,46 @@ class Apk {
     }
   }
 
+  /// Checks that no native library demands a newer Android than the app's
+  /// `minSdkVersion`: a library built against API 31 may call functions that
+  /// API 24 to 30 devices lack, and then fails to load there. Gradle builds
+  /// native code at the minimum SDK; the NDK `api_level` of the root module
+  /// has to match it.
+  ///
+  /// A library without an `.note.android.ident` (the Dart AOT `libapp.so`) is
+  /// not built by the NDK's compiler and is skipped, but at least one library
+  /// has to carry the note.
+  void checkNativeLibraryApiLevels() {
+    final uses = [
+      for (final e in manifestElements(manifest.readAsBytesSync()))
+        if (e.name == 'uses-sdk') e.attributes['minSdkVersion'],
+    ];
+    final minSdk = uses.length == 1 ? int.tryParse(uses.single ?? '') : null;
+    if (minSdk == null) {
+      check.fail('the manifest has no single <uses-sdk android:minSdkVersion>');
+      return;
+    }
+    var checked = 0;
+    for (final abiDir in _libDir.listSync().whereType<Directory>()) {
+      final abi = _basename(abiDir.path);
+      for (final lib in abiDir.listSync().whereType<File>()) {
+        final level = ElfImage.fromFile(lib).androidApiLevel();
+        if (level == null) continue;
+        checked++;
+        final name = 'lib/$abi/${_basename(lib.path)}';
+        check.expect(
+          '$name needs API $level, at most the minSdkVersion $minSdk',
+          condition: level <= minSdk,
+          detail:
+              'built against API $level: it can call functions that '
+              'API $minSdk devices lack. Set the NDK api_level in MODULE.bazel '
+              'to the min_sdk_version ($minSdk).',
+        );
+      }
+    }
+    if (checked == 0) check.fail('no native library carries an API level');
+  }
+
   /// Checks that the native libraries are packaged as AGP packages them for
   /// a minimum SDK of 23 or more (`jniLibs.useLegacyPackaging = false`, its
   /// default): every `lib/<abi>/*.so` stored uncompressed at a

@@ -112,7 +112,31 @@ class ElfImage {
 
   /// The section names of a little-endian ELF64 file, or none if it has no
   /// section headers.
-  List<String> sectionNames() {
+  List<String> sectionNames() => [for (final s in _sections()) s.name];
+
+  /// The API level the file was built against, from its `.note.android.ident`
+  /// section (what clang writes for a target such as
+  /// `aarch64-linux-android24`), or null if the file has no such note.
+  ///
+  /// A library that calls a libc function newer than its device's API level
+  /// fails to load there, so this is the level the library demands of one.
+  int? androidApiLevel() {
+    for (final section in _sections()) {
+      if (section.name != '.note.android.ident') continue;
+      // A note: namesz, descsz, type, then the name and the descriptor, each
+      // padded to 4 bytes. The descriptor starts with the API level.
+      if (section.size < 12 || section.offset + section.size > bytes.length) {
+        return null;
+      }
+      final namesz = _data.getUint32(section.offset, Endian.little);
+      final descOffset = section.offset + 12 + ((namesz + 3) & ~3);
+      if (descOffset + 4 > section.offset + section.size) return null;
+      return _data.getUint32(descOffset, Endian.little);
+    }
+    return null;
+  }
+
+  List<({String name, int offset, int size})> _sections() {
     if (bytes.length < 0x40) return const [];
     final shoff = _data.getUint64(0x28, Endian.little);
     final shentsize = _data.getUint16(0x3a, Endian.little);
@@ -133,7 +157,13 @@ class ElfImage {
 
     return [
       for (var i = 0; i < shnum; i++)
-        nameAt(names + _data.getUint32(shoff + i * shentsize, Endian.little)),
+        (
+          name: nameAt(
+            names + _data.getUint32(shoff + i * shentsize, Endian.little),
+          ),
+          offset: _data.getUint64(shoff + i * shentsize + 0x18, Endian.little),
+          size: _data.getUint64(shoff + i * shentsize + 0x20, Endian.little),
+        ),
     ];
   }
 }
