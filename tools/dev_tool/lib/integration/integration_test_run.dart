@@ -335,12 +335,12 @@ Future<int> runIntegrationTest(
     errors.writeln('integration_test: ${e.message}');
     return 64;
   }
-  // The library's `@Tags`, which give every case its tags: read before the
-  // app is launched, since a test whose annotations cannot be read cannot be
-  // selected from.
-  final Set<String> libraryTags;
+  // The library's annotations, which give every case its tags, skips and
+  // timeout: read before the app is launched, since a test whose annotations
+  // cannot be read cannot be selected from.
+  final SuiteAnnotations annotations;
   try {
-    libraryTags = readLibraryTags(config, resolve, readSource);
+    annotations = readSuiteAnnotations(config, resolve, readSource);
   } on FormatException catch (e) {
     errors.writeln(
       'integration_test: cannot read the annotations of '
@@ -352,6 +352,22 @@ Future<int> runIntegrationTest(
   // sharding at all, and Bazel 9 fails a sharded test whose runner never does.
   final shardStatus = environment['TEST_SHARD_STATUS_FILE'];
   if (shardStatus != null) File(shardStatus).writeAsStringSync('');
+
+  // A suite the platform excludes is never launched, as `flutter test` never
+  // loads it.
+  final exclusion = annotations.exclusion;
+  if (exclusion != null) {
+    final note = StringBuffer();
+    final status = await reportSuiteNotRun(
+      suitePath: config.testDisplayName,
+      note: exclusion,
+      logPrefix: 'integration_test',
+      xmlOutput: environment['XML_OUTPUT_FILE'],
+      out: note,
+    );
+    sink.write(note);
+    return status;
+  }
 
   final teardown = _Teardown(choice.device, errors);
   final ended = Completer<int>();
@@ -371,7 +387,7 @@ Future<int> runIntegrationTest(
         choice: choice,
         environment: environment,
         selection: selection,
-        libraryTags: libraryTags,
+        annotations: annotations,
         out: sink,
         err: errors,
         teardown: teardown,
@@ -459,7 +475,7 @@ Future<int> _drive(
   required DeviceChoice choice,
   required Map<String, String> environment,
   required TestSelection selection,
-  required Set<String> libraryTags,
+  required SuiteAnnotations annotations,
   required StringSink out,
   required StringSink err,
   required _Teardown teardown,
@@ -520,9 +536,8 @@ Future<int> _drive(
         await RemoteSuiteDriver(
           connected,
           suitePath: config.testDisplayName,
-          timeout: suiteTimeout(bazelTimeout),
+          metadata: annotations.handshakeMetadata(bazelTimeout),
           logPrefix: 'integration_test',
-          libraryTags: libraryTags,
           out: out,
           err: err,
         ).run(
@@ -575,12 +590,12 @@ GoldenComparator _goldenComparator(
 GoldenServiceLauncher _startProcess(String executable) =>
     (environment) => startGoldenServiceProcess(executable, environment);
 
-/// The library `@Tags` of [config]'s test source, read through [resolve] with
+/// The library annotations of [config]'s test source, read through [resolve] with
 /// [readSource] (by default, the file).
 ///
 /// Throws [FormatException] when the source cannot be read or its annotations
 /// cannot be parsed.
-Set<String> readLibraryTags(
+SuiteAnnotations readSuiteAnnotations(
   IntegrationRunnerConfig config,
   String Function(String runfilesPath) resolve,
   String Function(String path)? readSource,
@@ -592,5 +607,5 @@ Set<String> readLibraryTags(
   } on FileSystemException catch (e) {
     throw FormatException('${e.message}: $path');
   }
-  return libraryTags(config.testDisplayName, contents);
+  return SuiteAnnotations.parse(config.testDisplayName, contents);
 }

@@ -467,14 +467,14 @@ void main() {
     });
   });
 
-  group('libraryTagsOf', () {
+  group('suiteAnnotationsOf', () {
     test('reads the annotations of the file', () {
       final tmp = Directory.systemTemp.createTempSync('lib_tags_');
       addTearDown(() => tmp.deleteSync(recursive: true));
       final file = File('${tmp.path}/a_test.dart')
         ..writeAsStringSync("@Tags(['x'])\nlibrary;\nvoid main() {}\n");
 
-      expect(runner.libraryTagsOf(file, 'pkg/a_test.dart'), {'x'});
+      expect(runner.suiteAnnotationsOf(file, 'pkg/a_test.dart').tags, {'x'});
     });
   });
 }

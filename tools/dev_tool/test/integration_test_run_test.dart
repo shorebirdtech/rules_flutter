@@ -242,6 +242,30 @@ void main() {
     expect(launched, isFalse);
   });
 
+  test('a suite its @TestOn excludes passes with a note and the app is never '
+      'launched', () async {
+    var launched = false;
+    final device = _FakeDevice(() async {
+      launched = true;
+      return appRunning();
+    });
+
+    final result = await run(
+      device,
+      source: "@TestOn('browser')\nlibrary;\nvoid main() {}\n",
+    );
+
+    expect(result, 0);
+    expect(
+      out.toString(),
+      contains(
+        'integration_test: //pkg:app_test is not run: '
+        '@TestOn("browser") does not match the platform vm on ',
+      ),
+    );
+    expect(launched, isFalse);
+  });
+
   test('an app whose suite never registers fails at the ceiling, naming the '
       'extension it waited for', () async {
     // No isolate ever registers the extension: the wait is bounded by the

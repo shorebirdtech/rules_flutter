@@ -23,8 +23,8 @@
 ///   - When the suite is exhausted we send `{type: 'close'}` on id 0.
 ///
 /// Bazel's test protocol wins wherever it has one: the suite's default timeout
-/// is Bazel's own (`TEST_TIMEOUT`), not `package:test`'s 30 seconds, and
-/// `--test_filter`, sharding, tag selection (`DART_TEST_TAGS`) and the per-case
+/// is Bazel's own (`TEST_TIMEOUT`), not `package:test`'s 30 seconds (see
+/// `suite_annotations.dart`), and `--test_filter`, sharding, tag selection (`DART_TEST_TAGS`) and the per-case
 /// XML report follow `bazel_test_protocol.dart`.
 library;
 
@@ -75,24 +75,26 @@ Duration testCeiling(String? bazelTestTimeout) {
   return Duration(seconds: seconds - (margin < 10 ? 10 : margin));
 }
 
-/// The suite's default timeout, serialized as `Metadata` carries it.
+/// Passes a suite that is not run on this host, as `package:test` does for a
+/// suite whose `@TestOn` does not match: the program is never started, [note]
+/// says why, and the report holds no case. Returns the exit status, zero.
 ///
-/// Bazel's own limit (`TEST_TIMEOUT`, seconds) in place of `package:test`'s
-/// 30-second default, as `dart_test` sets it. Not `none`: `Timeout.merge`
-/// lets `none` on either side win, so it would discard a limit a test's author
-/// wrote on a case to catch a hang. With Bazel's limit as the default, such a
-/// `timeout:` still fires, `Timeout.factor` scales Bazel's limit, and a case
-/// with neither runs as long as Bazel lets the target run. Outside `bazel
-/// test` there is no limit to state, so the default is none.
-///
-/// Public because the test reaches it directly.
-Object suiteTimeout(String? bazelTestTimeout) {
-  final seconds = int.tryParse(bazelTestTimeout ?? '');
-  if (seconds == null || seconds <= 0) return 'none';
-  return {
-    'duration': Duration(seconds: seconds).inMicroseconds,
-    'scaleFactor': null,
-  };
+/// This is not the failure of a suite that registers no test: that is a
+/// program that ran and declared nothing, and this suite was never asked to
+/// run.
+Future<int> reportSuiteNotRun({
+  required String suitePath,
+  required String note,
+  required String logPrefix,
+  String? xmlOutput,
+  StringSink? out,
+}) async {
+  (out ?? stdout).writeln('$logPrefix: $suitePath is not run: $note');
+  if (xmlOutput != null) {
+    await File(xmlOutput)
+        .writeAsString(junitXml(const [], suiteName: suitePath));
+  }
+  return 0;
 }
 
 /// What a suite run came to.
@@ -128,7 +130,10 @@ class SuiteOutcome {
 /// Drives one suite over [transport], once.
 class RemoteSuiteDriver {
   /// [suitePath] names the suite in the handshake and the JUnit report.
-  /// [timeout] is the suite's default timeout, as [suiteTimeout] serializes it.
+  /// [metadata] is the suite's `Metadata`, serialized, which the handshake
+  /// carries and `RemoteListener` applies to every group and test: the file's
+  /// annotations with Bazel's timeout merged in (`SuiteAnnotations`). Without
+  /// one the suite has no annotations and no timeout.
   /// [logPrefix] starts the lines this writes to [err], and [out] and [err]
   /// default to the process's own streams.
   ///
@@ -138,25 +143,20 @@ class RemoteSuiteDriver {
   RemoteSuiteDriver(
     this.transport, {
     required this.suitePath,
-    this.timeout = 'none',
+    Map<String, Object?>? metadata,
     this.logPrefix = 'flutter_test',
-    this.libraryTags = const {},
     StringSink? out,
     StringSink? err,
     bool? asciiGlyphs,
-  }) : _out = out ?? stdout,
+  }) : metadata = metadata ?? _defaultMetadata(),
+       _out = out ?? stdout,
        _err = err ?? stderr,
        _asciiGlyphs = asciiGlyphs ?? !stdout.supportsAnsiEscapes;
 
   final SuiteTransport transport;
   final String suitePath;
-  final Object timeout;
+  final Map<String, Object?> metadata;
   final String logPrefix;
-
-  /// The tags the test file declares on its library. They go in the handshake,
-  /// and the program gives every group and test them, so tag selection only
-  /// ever looks at each test's own merged tags.
-  final Set<String> libraryTags;
   final StringSink _out;
   final StringSink _err;
   final bool _asciiGlyphs;
@@ -520,8 +520,8 @@ class RemoteSuiteDriver {
   Map<String, dynamic> _initialMessage() {
     return {
       'type': 'initial',
-      'metadata': _defaultMetadata(timeout, libraryTags),
-      'platform': _suitePlatform(),
+      'metadata': metadata,
+      'platform': suitePlatform(),
       'platformVariables': const <String>[],
       'collectTraces': true,
       'noRetry': true,
@@ -534,46 +534,46 @@ class RemoteSuiteDriver {
     };
   }
 
-  /// Minimal `Metadata.serialize` payload — all optional flags omitted, an
-  /// empty `forTag`, [timeout] as [suiteTimeout] serializes it and the library
-  /// [tags].
-  static Map<String, Object?> _defaultMetadata(
-    Object timeout,
-    Set<String> tags,
-  ) {
+  /// A `Metadata.serialize` payload that says nothing: no annotations, no
+  /// timeout.
+  static Map<String, Object?> _defaultMetadata() {
     return {
       'testOn': null,
-      'timeout': timeout,
+      'timeout': 'none',
       'skip': null,
       'skipReason': null,
       'verboseTrace': null,
       'chainStackTraces': null,
       'retry': null,
-      'tags': tags.toList(),
+      'tags': const <String>[],
       'onPlatform': const <List<Object>>[],
       'forTag': const <String, Object?>{},
       'languageVersionComment': null,
     };
   }
+}
 
-  /// Built-in `Runtime.vm` and `Compiler.kernel` serialize as plain identifiers.
-  static Map<String, Object?> _suitePlatform() {
-    return {
-      'runtime': 'vm',
-      'compiler': 'kernel',
-      'os': _osIdentifier(),
-      'inGoogle': false,
-    };
-  }
+/// The platform every suite runs as, serialized as `SuitePlatform` carries it:
+/// runtime `vm`, compiler `kernel` and the host's operating system, which is
+/// what `flutter test` reports for widget tests and integration tests alike,
+/// whatever device runs them. Built-in `Runtime.vm` and `Compiler.kernel`
+/// serialize as plain identifiers.
+Map<String, Object?> suitePlatform() {
+  return {
+    'runtime': 'vm',
+    'compiler': 'kernel',
+    'os': _osIdentifier(),
+    'inGoogle': false,
+  };
+}
 
-  static String _osIdentifier() {
-    if (Platform.isMacOS) return 'mac-os';
-    if (Platform.isLinux) return 'linux';
-    if (Platform.isWindows) return 'windows';
-    if (Platform.isAndroid) return 'android';
-    if (Platform.isIOS) return 'ios';
-    return 'none';
-  }
+String _osIdentifier() {
+  if (Platform.isMacOS) return 'mac-os';
+  if (Platform.isLinux) return 'linux';
+  if (Platform.isWindows) return 'windows';
+  if (Platform.isAndroid) return 'android';
+  if (Platform.isIOS) return 'ios';
+  return 'none';
 }
 
 class _FailureSummary {

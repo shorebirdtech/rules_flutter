@@ -208,6 +208,63 @@ outcome_test(
     test = ":no_tests",
 )
 
+# -- Library annotations (`flutter_test`) ----------------------------------
+
+# `manual`, since the outcome tests below are what run them.
+[
+    flutter_test(
+        name = name,
+        package_name = "integration_test_example",
+        main = "test/%s_test.dart" % name,
+        tags = ["manual"],
+        deps = _TAGS_TEST_DEPS,
+    )
+    for name in [
+        "skip",
+        "on_platform",
+        "test_on",
+        "timeout",
+    ]
+]
+
+# A library `@Skip` skips every case, with its reason; a case body that ran
+# would fail.
+outcome_test(
+    name = "skip_library_test",
+    expect = "pass",
+    output_contains = ["SKIP  a skipped case (skipped for the outcome test)"],
+    test = ":skip",
+)
+
+# A library `@OnPlatform` resolves against the host.
+outcome_test(
+    name = "on_platform_library_test",
+    expect = "pass",
+    output_contains = ["SKIP  a case skipped by platform (skipped on this host)"],
+    test = ":on_platform",
+)
+
+# A suite `@TestOn` excludes passes with a note naming the selector and the
+# platform, and is not the no-tests failure.
+outcome_test(
+    name = "test_on_library_test",
+    expect = "pass",
+    output_contains = [
+        "is not run: @TestOn(\"browser\") does not match the platform vm on ",
+    ],
+    test = ":test_on",
+)
+
+# A library `@Timeout` replaces Bazel's limit: the case that outlives it fails.
+outcome_test(
+    name = "timeout_library_test",
+    expect = "fail",
+    failing_cases = ["a case that outlives the timeout"],
+    failing_cases_given = True,
+    output_contains = ["Test timed out after 0.5 seconds"],
+    test = ":timeout",
+)
+
 # -- macOS -----------------------------------------------------------------
 
 # The licence registry of a running app lists the engine's licences, read
@@ -245,6 +302,43 @@ flutter_macos_integration_test(
     application = ":app_flutter",
     bundle_id = "com.example.integrationtest",
     deps = _TEST_DEPS,
+)
+
+# A library `@Skip` skips the cases of an integration test, and a `@TestOn`
+# its platform excludes passes without the app being launched. `manual`: the
+# outcome tests that follow run them and read what they say.
+flutter_macos_integration_test(
+    name = "macos_skip",
+    src = "integration_test/skip_test.dart",
+    application = ":app_flutter",
+    bundle_id = "com.example.integrationtest",
+    tags = ["manual"],
+    deps = _TEST_DEPS,
+)
+
+flutter_macos_integration_test(
+    name = "macos_test_on",
+    src = "integration_test/test_on_test.dart",
+    application = ":app_flutter",
+    bundle_id = "com.example.integrationtest",
+    tags = ["manual"],
+    deps = _TEST_DEPS,
+)
+
+outcome_test(
+    name = "macos_skip_library_test",
+    expect = "pass",
+    output_contains = ["SKIP  a skipped case (skipped for the outcome test)"],
+    test = ":macos_skip",
+)
+
+outcome_test(
+    name = "macos_test_on_library_test",
+    expect = "pass",
+    output_contains = [
+        "is not run: @TestOn(\"browser\") does not match the platform vm on mac-os",
+    ],
+    test = ":macos_test_on",
 )
 
 # `--test_filter` selects among the tests of one file. The wrapper runs
@@ -641,6 +735,46 @@ flutter_web_integration_test(
     srcs = glob(["lib/**/*.dart"]),
     target_compatible_with = _WEB_HOSTS,
     deps = ["@deps//:flutter"] + _TEST_DEPS,
+)
+
+# The library annotations in a browser: the platform they are read against is
+# the host's `vm`, as `flutter test` reads it, not the browser the app runs in.
+flutter_web_integration_test(
+    name = "web_skip",
+    package_name = "integration_test_example",
+    src = "integration_test/skip_test.dart",
+    srcs = glob(["lib/**/*.dart"]),
+    tags = ["manual"],
+    target_compatible_with = _WEB_HOSTS,
+    deps = ["@deps//:flutter"] + _TEST_DEPS,
+)
+
+flutter_web_integration_test(
+    name = "web_test_on",
+    package_name = "integration_test_example",
+    src = "integration_test/test_on_test.dart",
+    srcs = glob(["lib/**/*.dart"]),
+    tags = ["manual"],
+    target_compatible_with = _WEB_HOSTS,
+    deps = ["@deps//:flutter"] + _TEST_DEPS,
+)
+
+outcome_test(
+    name = "web_skip_library_test",
+    expect = "pass",
+    output_contains = ["SKIP  a skipped case (skipped for the outcome test)"],
+    target_compatible_with = _WEB_HOSTS,
+    test = ":web_skip",
+)
+
+outcome_test(
+    name = "web_test_on_library_test",
+    expect = "pass",
+    output_contains = [
+        "is not run: @TestOn(\"browser\") does not match the platform vm on ",
+    ],
+    target_compatible_with = _WEB_HOSTS,
+    test = ":web_test_on",
 )
 
 # `--test_filter` selects among the tests of one file in a browser too.

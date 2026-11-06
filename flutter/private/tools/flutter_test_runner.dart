@@ -226,7 +226,7 @@ void main(List<String> args) async {
     stderr.writeln('flutter_test runner: ${e.message}');
     exit(64);
   }
-  var libraryTags = const <String>{};
+  var annotations = SuiteAnnotations.none();
   if (isTest) {
     final sourceKey = settings['FLUTTER_TEST_SOURCE'];
     if (sourceKey == null) {
@@ -234,7 +234,7 @@ void main(List<String> args) async {
       exit(64);
     }
     try {
-      libraryTags = libraryTagsOf(File(r.rlocation(sourceKey)), testPath);
+      annotations = suiteAnnotationsOf(File(r.rlocation(sourceKey)), testPath);
     } on FormatException catch (e) {
       stderr.writeln(
         'flutter_test runner: cannot read the annotations of $testPath: '
@@ -248,6 +248,17 @@ void main(List<String> args) async {
   final shardStatus = Platform.environment['TEST_SHARD_STATUS_FILE'];
   if (shardStatus != null) File(shardStatus).writeAsStringSync('');
 
+  final exclusion = annotations.exclusion;
+  if (exclusion != null) {
+    exitCode = await reportSuiteNotRun(
+      suitePath: testPath,
+      note: exclusion,
+      logPrefix: 'flutter_test',
+      xmlOutput: Platform.environment['XML_OUTPUT_FILE'],
+    );
+    return;
+  }
+
   exitCode = await _runOnce(
     tester: tester,
     icu: icu,
@@ -258,7 +269,9 @@ void main(List<String> args) async {
     coverageLibraries: coverageLibraries,
     updateGoldens: updateGoldens,
     selection: selection,
-    libraryTags: libraryTags,
+    metadata: annotations.handshakeMetadata(
+      Platform.environment['TEST_TIMEOUT'],
+    ),
     xmlOutput: Platform.environment['XML_OUTPUT_FILE'],
     impeller: settings['FLUTTER_TEST_IMPELLER'] == '1',
     loader: {...launched, ...loader},
@@ -303,13 +316,13 @@ TestSelection runSelection(
   );
 }
 
-/// The `@Tags` of [source], the test file shown to people as [displayPath].
+/// The library annotations of [source], the test file shown to people as [displayPath].
 ///
 /// Throws [FormatException] when the file's annotations cannot be read.
 ///
 /// Public, like [testCeiling], because the test reaches it directly.
-Set<String> libraryTagsOf(File source, String displayPath) =>
-    libraryTags(displayPath, source.readAsStringSync());
+SuiteAnnotations suiteAnnotationsOf(File source, String displayPath) =>
+    SuiteAnnotations.parse(displayPath, source.readAsStringSync());
 
 /// The loader's search path for a `flutter_tester_binary`'s Native Assets.
 ///
@@ -367,7 +380,7 @@ Future<int> _runOnce({
   required List<String> coverageLibraries,
   required bool updateGoldens,
   required TestSelection selection,
-  required Set<String> libraryTags,
+  required Map<String, Object?> metadata,
   required String? xmlOutput,
   required bool impeller,
   required Map<String, String> loader,
@@ -384,7 +397,7 @@ Future<int> _runOnce({
       coverageLibraries: coverageLibraries,
       updateGoldens: updateGoldens,
       selection: selection,
-      libraryTags: libraryTags,
+      metadata: metadata,
       xmlOutput: xmlOutput,
       impeller: impeller,
       loader: loader,
@@ -508,7 +521,7 @@ class _Harness {
     required List<String> coverageLibraries,
     required bool updateGoldens,
     required TestSelection selection,
-    required Set<String> libraryTags,
+    required Map<String, Object?> metadata,
     required String? xmlOutput,
     required bool impeller,
     required Map<String, String> loader,
@@ -668,8 +681,7 @@ class _Harness {
         await RemoteSuiteDriver(
           _TesterTransport(_ws!, _process!),
           suitePath: testPath,
-          timeout: suiteTimeout(Platform.environment['TEST_TIMEOUT']),
-          libraryTags: libraryTags,
+          metadata: metadata,
         ).run(
           selection: selection,
           xmlOutput: xmlOutput,

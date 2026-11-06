@@ -14,6 +14,7 @@ import 'dart:io';
 
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter_rule_tools/remote_suite.dart';
+import 'package:flutter_rule_tools/suite_annotations.dart';
 import 'package:test/test.dart';
 
 /// How a fake test behaves when asked to run.
@@ -145,11 +146,11 @@ RemoteSuiteDriver _driver(
   _FakeProgram program, {
   StringBuffer? err,
   StringBuffer? out,
-  Set<String> libraryTags = const {},
+  Map<String, Object?>? metadata,
 }) => RemoteSuiteDriver(
   program,
   suitePath: 'integration_test/x_test.dart',
-  libraryTags: libraryTags,
+  metadata: metadata,
   out: out ?? StringBuffer(),
   err: err ?? StringBuffer(),
   asciiGlyphs: true,
@@ -218,7 +219,7 @@ void main() {
     await RemoteSuiteDriver(
       program,
       suitePath: 'p/x_test.dart',
-      timeout: suiteTimeout('120'),
+      metadata: SuiteAnnotations.none().handshakeMetadata('120'),
       out: StringBuffer(),
       err: StringBuffer(),
       asciiGlyphs: true,
@@ -229,7 +230,10 @@ void main() {
     final data = initial[1] as Map;
     expect(data['type'], 'initial');
     expect(data['path'], 'p/x_test.dart');
-    expect((data['metadata'] as Map)['timeout'], suiteTimeout('120'));
+    expect(
+      (data['metadata'] as Map)['timeout'],
+      SuiteAnnotations.none().handshakeMetadata('120')['timeout'],
+    );
   });
 
   group('selection', () {
@@ -329,14 +333,52 @@ void main() {
     });
   });
 
-  test('the handshake carries the library tags for the program to give every '
-      'test', () async {
+  test('the handshake carries the library\'s metadata whole for the program '
+      'to give every test', () async {
     final program = _FakeProgram({'a': _Behaviour.passes});
+    final annotations = SuiteAnnotations.parse('x_test.dart', '''
+@Tags(['lib'])
+@Skip('not here')
+@OnPlatform({'mac-os': Timeout.factor(2)})
+library;
 
-    await _driver(program, libraryTags: {'lib'}).run(ceiling: _ceiling);
+import 'package:test/test.dart';
 
-    final initial = program.sent.first[1] as Map;
-    expect((initial['metadata'] as Map)['tags'], ['lib']);
+void main() {}
+''');
+
+    await _driver(
+      program,
+      metadata: annotations.handshakeMetadata('60'),
+    ).run(ceiling: _ceiling);
+
+    final metadata = (program.sent.first[1] as Map)['metadata'] as Map;
+    expect(metadata['tags'], ['lib']);
+    expect(metadata['skip'], isTrue);
+    expect(metadata['skipReason'], 'not here');
+    expect(metadata['onPlatform'], hasLength(1));
+  });
+
+  test('a suite not run passes with a note and an empty report', () async {
+    final tmp = Directory.systemTemp.createTempSync('not_run_');
+    addTearDown(() => tmp.deleteSync(recursive: true));
+    final out = StringBuffer();
+
+    final status = await reportSuiteNotRun(
+      suitePath: 'x_test.dart',
+      note: '@TestOn("browser") does not match the platform vm on mac-os',
+      logPrefix: 'flutter_test',
+      xmlOutput: '${tmp.path}/test.xml',
+      out: out,
+    );
+
+    expect(status, 0);
+    expect(
+      out.toString(),
+      'flutter_test: x_test.dart is not run: @TestOn("browser") does not '
+      'match the platform vm on mac-os\n',
+    );
+    expect(File('${tmp.path}/test.xml').existsSync(), isTrue);
   });
 
   group('a suite that registers no tests', () {
@@ -464,25 +506,6 @@ void main() {
       expect(outcome!.passed, 1);
       expect(outcome!.failed, 2);
       expect(program.ran, ['a passes', 'b hangs']);
-    });
-  });
-
-  group('suiteTimeout', () {
-    test('is Bazel\'s TEST_TIMEOUT, not package:test\'s 30 seconds', () {
-      expect(suiteTimeout('300'), {
-        'duration': const Duration(seconds: 300).inMicroseconds,
-        'scaleFactor': null,
-      });
-    });
-
-    test('is never none under Bazel, so a test\'s own timeout still fires', () {
-      // `Timeout.merge` lets `none` on either side win.
-      expect(suiteTimeout('60'), isNot('none'));
-    });
-
-    test('is none outside bazel test, where there is no limit to state', () {
-      expect(suiteTimeout(null), 'none');
-      expect(suiteTimeout(''), 'none');
     });
   });
 
