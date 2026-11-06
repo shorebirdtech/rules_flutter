@@ -936,14 +936,36 @@ class LinuxDevice extends Device {
       executable = p.join(appPath, dirName);
     }
 
-    final process = await _startProcess(executable, []);
-    final logs = _startProcessLogs(process, onLog);
-    final vmServiceUri = await discoverVmServiceUri(logs);
-    return AppInstance(
-      process: process,
-      vmServiceUri: vmServiceUri,
-      logs: logs,
-    );
+    try {
+      final process = _launching = await _startProcess(executable, []);
+      final logs = _startProcessLogs(process, onLog);
+      final vmServiceUri = await discoverVmServiceUri(logs);
+      _launching = null;
+      return AppInstance(
+        process: process,
+        vmServiceUri: vmServiceUri,
+        logs: logs,
+      );
+    } catch (_) {
+      await _releaseLaunch();
+      rethrow;
+    }
+  }
+
+  /// The app a launch in flight has started, until the launch returns it.
+  Process? _launching;
+
+  @override
+  Future<void> abandonLaunch() => _releaseLaunch();
+
+  /// Stops the app of a launch that did not return. A launch that returned its
+  /// app has handed it to [stop], and this leaves it.
+  Future<void> _releaseLaunch() async {
+    final process = _launching;
+    _launching = null;
+    if (process != null) {
+      await _stopProcess('Linux app', process, teardownBound);
+    }
   }
 
   @override

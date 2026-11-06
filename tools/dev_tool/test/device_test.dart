@@ -3376,6 +3376,44 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     });
   });
 
+  group('LinuxDevice.launch', () {
+    // A test that Bazel ends while the app is starting runs its teardown before
+    // `launch` has returned an instance, so the device hears of the app only
+    // through [Device.abandonLaunch]. The app is a window on a display: it may
+    // not outlive the run.
+    test('abandoning a launch in flight stops the app', () async {
+      final started = Completer<FakeProcess>();
+      final device = LinuxDevice(
+        // The app starts and never announces a VM service.
+        startProcess: (exe, args) async {
+          final proc = FakeProcess();
+          started.complete(proc);
+          return proc;
+        },
+      );
+      unawaited(device.launch('/bundle/app').then((_) {}, onError: (_) {}));
+      final app = await started.future;
+      await app.outputAttached;
+
+      await device.abandonLaunch();
+
+      expect(app.killed, isTrue);
+    });
+
+    test('abandoning a launch that returned leaves the app to stop', () async {
+      final app = FakeProcess();
+      final device = LinuxDevice(startProcess: (exe, args) async => app);
+      final launch = device.launch('/bundle/app');
+      await app.outputAttached;
+      app.emitStdout(_vmServiceLine);
+      await launch;
+
+      await device.abandonLaunch();
+
+      expect(app.killed, isFalse);
+    });
+  });
+
   group('WindowsDevice.launch staging', () {
     // Windows keeps an exclusive lock on a running executable image, so an app
     // launched straight out of `bazel-out` makes the next bundling action fail
