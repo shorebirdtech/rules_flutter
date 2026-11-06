@@ -220,10 +220,12 @@ const _chunkXmlStartElement = 0x0102;
 const _typeString = 0x03;
 const _typeIntDec = 0x10;
 const _typeIntHex = 0x11;
+const _typeIntBoolean = 0x12;
 
 /// Every element of a compiled [manifest], in document order, with its
-/// string- and integer-valued attributes keyed by local name (`name`, not
-/// `android:name`). An integer, such as `versionCode`, is in decimal.
+/// string-, integer- and boolean-valued attributes keyed by local name
+/// (`name`, not `android:name`). An integer, such as `versionCode`, is in
+/// decimal; a boolean, such as `debuggable`, is `true` or `false`.
 List<ManifestElement> manifestElements(Uint8List manifest) {
   final data = ByteData.sublistView(manifest);
   if (manifest.length < 8) {
@@ -313,6 +315,8 @@ ManifestElement _readStartElement(
       attributes[attrName] = stringAt(typedData);
     } else if (dataType == _typeIntDec || dataType == _typeIntHex) {
       attributes[attrName] = typedData.toSigned(32).toString();
+    } else if (dataType == _typeIntBoolean) {
+      attributes[attrName] = typedData == 0 ? 'false' : 'true';
     }
   }
 

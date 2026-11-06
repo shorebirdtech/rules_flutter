@@ -113,9 +113,10 @@ Uint8List dexWithStaticConstants() {
 }
 
 /// A compiled manifest holding an element per entry of [elements]: its name,
-/// then its attributes, each a local name and a string value.
+/// then its attributes, each a local name and a value: a string, or a bool,
+/// which aapt2 compiles to a typed boolean with no raw string.
 Uint8List axml(
-  List<(String, Map<String, String>)> elements, {
+  List<(String, Map<String, Object>)> elements, {
   bool utf8Pool = false,
 }) {
   final pool = <String>[];
@@ -140,12 +141,22 @@ Uint8List axml(
     attributes.forEach((key, value) {
       body
         ..add(_u32(0xFFFFFFFF)) // namespace
-        ..add(_u32(index(key)))
-        ..add(_u32(index(value))) // rawValue
-        ..add(_u16(8)) // typed value size
-        ..addByte(0)
-        ..addByte(0x03) // TYPE_STRING
-        ..add(_u32(index(value)));
+        ..add(_u32(index(key)));
+      if (value is bool) {
+        body
+          ..add(_u32(0xFFFFFFFF)) // no rawValue
+          ..add(_u16(8)) // typed value size
+          ..addByte(0)
+          ..addByte(0x12) // TYPE_INT_BOOLEAN
+          ..add(_u32(value ? 0xFFFFFFFF : 0));
+      } else {
+        body
+          ..add(_u32(index(value as String))) // rawValue
+          ..add(_u16(8)) // typed value size
+          ..addByte(0)
+          ..addByte(0x03) // TYPE_STRING
+          ..add(_u32(index(value)));
+      }
     });
     final b = body.toBytes();
     chunks
@@ -286,6 +297,18 @@ void main() {
         ], utf8Pool: true),
       );
       expect(elements.single.attributes['package'], 'com.example.app');
+    });
+
+    test('reads a boolean attribute as true or false', () {
+      final elements = manifestElements(
+        axml([
+          ('application', {'debuggable': true, 'extractNativeLibs': false}),
+        ]),
+      );
+      expect(elements.single.attributes, {
+        'debuggable': 'true',
+        'extractNativeLibs': 'false',
+      });
     });
 
     test('usesPermissions names the permissions and nothing else', () {
