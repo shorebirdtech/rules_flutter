@@ -991,9 +991,8 @@ LINUX_SYSROOT_CHECKSUMS = {
 
 # The browser web integration tests run in: Chrome for Testing's headless shell,
 # one archive per host it is built for. Independent of the Flutter version, so
-# one entry serves every toolchain; a host not listed (Linux arm64, which Chrome
-# for Testing builds but nothing here has run) has no pinned shell, and a web
-# integration test is skipped there. Fetched only when a test's runner is
+# one entry serves every toolchain; a host not listed has no pinned shell, and a
+# web integration test is skipped there. Fetched only when a test's runner is
 # analysed.
 # `bazel run //tools/update_chrome_for_testing` prints a new entry.
 CHROME_FOR_TESTING = struct(
@@ -1001,6 +1000,7 @@ CHROME_FOR_TESTING = struct(
     # Platform (Chrome for Testing's name) to the sha256 of its
     # chrome-headless-shell archive.
     sha256 = {
+        "linux-arm64": "b9b910a57b2a15eb3e55000a2339f93a973934a413ebfc6e585a50ec6c42fd6c",
         "linux64": "deafffa74660b34853a4119c361fd427ac8c9fcb62db51ddb8a797cd83a4ba2d",
         "mac-arm64": "e6a6b13551aa12f951d0891d79282606b13742837c8fa0505e1272bae116ce82",
         "mac-x64": "79821745d0a72d2ba752d981284ed0a9e6fa320dad133596941a17dba6186de3",

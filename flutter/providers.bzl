@@ -181,6 +181,16 @@ FlutterApplicationInputsInfo = provider(
     },
 )
 
+FlutterLinuxRuntimeInfo = provider(
+    doc = "The X server, GTK, Mesa and libraries a Linux integration test runs with, in place of the host's: a `flutter_linux_runtime`. A Linux runner of the desktop or web family carries it.",
+    fields = {
+        "files": "depset[File]: everything the runtime is, for the test's runfiles.",
+        "libraries": "depset[File]: the runtime's files a program it runs may load, which a check of another program's needs is given.",
+        "config": "struct: JSON-able runfiles paths for the host runner: `root` (the runtime's `/`), `triple` (the multiarch directory of its libraries), `xvfb` and `fontsConf`.",
+        "floor": "dict: the newest symbol version of each host library a file may ask for (`GLIBC` to `2.39`): the oldest host supported.",
+    },
+)
+
 FlutterIntegrationRunnerInfo = provider(
     doc = "Where an integration test runs: the family of device, what the host runner needs to reach one, and how the test is placed. Returned by the runner rules (`flutter_desktop_runner` and the others) and read by the test rule of the same family.",
     fields = {

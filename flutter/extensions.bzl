@@ -19,11 +19,13 @@ load("//flutter/private:android_plugin_maven.bzl", "MAVEN_DEPS_FILE", "flutter_a
 load("//flutter/private:flutter_chrome_for_testing.bzl", "flutter_chrome_for_testing")
 load("//flutter/private:flutter_framework_package.bzl", "flutter_framework_package")
 load("//flutter/private:flutter_gen_l10n_repo.bzl", "flutter_gen_l10n_repo")
+load("//flutter/private:flutter_linux_runtime_repo.bzl", "flutter_linux_runtime_repo")
 load("//flutter/private:flutter_pub_index.bzl", "flutter_pub_index", "index_repo", "library_repo", "source_repo")
 load("//flutter/private:flutter_pub_library_repo.bzl", "flutter_pub_library_repo")
 load("//flutter/private:flutter_pub_lock_hub.bzl", "flutter_pub_lock_hub")
 load("//flutter/private:flutter_pub_package.bzl", "flutter_pub_package")
 load("//flutter/private:flutter_unsupported_package.bzl", "flutter_unsupported_package", "unsupported_package_message")
+load("//flutter/private:linux_runtime_pins.bzl", "LINUX_RUNTIME")
 load("//flutter/private:lock_entry_kind.bzl", "ENGINE_PROVIDED", "FLUTTER_FRAMEWORK", "FLUTTER_SOURCE", "HOSTED", "lock_entry_kind")
 load("//flutter/private:pub_lock_sdks.bzl", "parse_lock_sdk_constraints", "version_below_lower_bound")
 load("//flutter/private:versions.bzl", "CHROME_FOR_TESTING", "flutter_source_sha256")
@@ -146,6 +148,18 @@ def _toolchain_extension(module_ctx):
             platform = platform,
             version = CHROME_FOR_TESTING.version,
             sha256 = sha256,
+        )
+
+    # The X server, GTK, Mesa and libraries a Linux integration test runs with,
+    # one repository per architecture, fetched only when a Linux runner of
+    # `//flutter/integration_test` selects the host's.
+    for arch, packages in LINUX_RUNTIME.packages.items():
+        flutter_linux_runtime_repo(
+            name = "flutter_linux_runtime_" + arch,
+            arch = arch,
+            snapshot = LINUX_RUNTIME.snapshot,
+            debs = {path: sha256 for _, _, path, sha256 in packages},
+            floor = LINUX_RUNTIME.floor,
         )
 
     # Collect user-supplied overlay roots from `flutter.plugin_overlays(...)`

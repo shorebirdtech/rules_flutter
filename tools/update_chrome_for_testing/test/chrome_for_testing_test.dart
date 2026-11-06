@@ -5,6 +5,7 @@ import 'package:test/test.dart';
 import '../chrome_for_testing.dart';
 
 final _digests = {
+  'linux-arm64': 'e' * 64,
   'linux64': 'a' * 64,
   'mac-arm64': 'b' * 64,
   'mac-x64': 'c' * 64,
@@ -13,7 +14,13 @@ final _digests = {
 
 String _listing({
   String version = '157.0.1.1',
-  List<String> shells = const ['linux64', 'mac-arm64', 'mac-x64', 'win64'],
+  List<String> shells = const [
+    'linux-arm64',
+    'linux64',
+    'mac-arm64',
+    'mac-x64',
+    'win64',
+  ],
 }) => json.encode({
   'channels': {
     'Beta': {'version': '158.0.0.0', 'downloads': <String, Object?>{}},
@@ -47,7 +54,7 @@ void main() {
           isA<FormatException>().having(
             (e) => e.message,
             'message',
-            contains('linux64, mac-x64'),
+            contains('linux-arm64, linux64, mac-x64'),
           ),
         ),
       );
@@ -75,6 +82,7 @@ CHROME_FOR_TESTING = struct(
     # Platform (Chrome for Testing's name) to the sha256 of its
     # chrome-headless-shell archive.
     sha256 = {
+        "linux-arm64": "${'e' * 64}",
         "linux64": "${'a' * 64}",
         "mac-arm64": "${'b' * 64}",
         "mac-x64": "${'c' * 64}",

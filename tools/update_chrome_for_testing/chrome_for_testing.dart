@@ -9,9 +9,9 @@ import 'dart:convert';
 /// The hosts `CHROME_FOR_TESTING` pins, by Chrome for Testing's name for each.
 ///
 /// The `flutter_chrome_for_testing_<platform>` repositories and the `chrome`
-/// runner's `select` name the same four; a host missing here is one a web
+/// runner's `select` name the same hosts; a host missing here is one a web
 /// integration test is skipped on.
-const platforms = ['linux64', 'mac-arm64', 'mac-x64', 'win64'];
+const platforms = ['linux-arm64', 'linux64', 'mac-arm64', 'mac-x64', 'win64'];
 
 const _origin = 'https://storage.googleapis.com/chrome-for-testing-public';
 

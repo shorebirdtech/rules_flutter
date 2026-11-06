@@ -42,6 +42,8 @@ load(
     "engine_arch_for_os",
     "gen_snapshot_host_platform",
 )
+load("//flutter/private:flutter_linux_runtime_repo.bzl", "debian_package_urls")
+load("//flutter/private:linux_runtime_pins.bzl", "LINUX_RUNTIME")
 load("//flutter/private:pinned.bzl", "digest_problem")
 load(
     "//flutter/private:toolchains_repo.bzl",
@@ -190,11 +192,34 @@ def _chrome_for_testing_digests_test_impl(ctx):
         )
     return unittest.end(env)
 
+def _linux_runtime_digests_test_impl(ctx):
+    # The runtime Linux integration tests run with: each architecture's Debian
+    # packages, pinned like everything else, at one snapshot, held to one floor.
+    env = unittest.begin(ctx)
+    asserts.true(env, LINUX_RUNTIME.snapshot, "LINUX_RUNTIME has no snapshot")
+    asserts.true(env, len(LINUX_RUNTIME.floor) > 0, "LINUX_RUNTIME has no floor")
+    asserts.equals(env, ["amd64", "arm64"], sorted(LINUX_RUNTIME.packages.keys()))
+    for arch, packages in LINUX_RUNTIME.packages.items():
+        asserts.true(env, len(packages) > 0, "LINUX_RUNTIME pins no package for " + arch)
+        for name, _, path, digest in packages:
+            asserts.true(
+                env,
+                _is_sha256(digest),
+                ("LINUX_RUNTIME's {} for {} is pinned with a digest that is not 64 lowercase hex " +
+                 "characters; a fetch of {} would be unverified. Run `bazel run //tools/update_linux_runtime`").format(
+                    name,
+                    arch,
+                    debian_package_urls(LINUX_RUNTIME.snapshot, path)[0],
+                ),
+            )
+    return unittest.end(env)
+
 _t0_test = unittest.make(_every_derived_download_has_a_digest_test_impl)
 _t1_test = unittest.make(_no_stray_or_blank_table_entries_test_impl)
 _t2_test = unittest.make(_source_tarball_and_sysroot_digests_test_impl)
 _t3_test = unittest.make(_every_version_has_a_table_test_impl)
 _t4_test = unittest.make(_chrome_for_testing_digests_test_impl)
+_t5_test = unittest.make(_linux_runtime_digests_test_impl)
 
 def download_digests_test_suite(name):
-    unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test)
+    unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test)

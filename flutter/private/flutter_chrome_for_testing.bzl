@@ -47,7 +47,7 @@ flutter_chrome_for_testing = repository_rule(
     doc = "Downloads the Chrome for Testing headless shell of one host platform.",
     attrs = {
         "platform": attr.string(
-            doc = "Chrome for Testing's name for the host: `mac-arm64`, `mac-x64`, `linux64` or `win64`.",
+            doc = "Chrome for Testing's name for the host: `mac-arm64`, `mac-x64`, `linux64`, `linux-arm64` or `win64`.",
             mandatory = True,
         ),
         "sha256": attr.string(doc = "Expected SHA-256 of the archive."),

@@ -39,7 +39,7 @@ def chrome_for_testing_url(version, platform):
     Args:
         version: Chrome version (e.g. "157.0.8103.38").
         platform: Chrome for Testing's name for the host: `mac-arm64`, `mac-x64`,
-            `linux64` or `win64`.
+            `linux64`, `linux-arm64` or `win64`.
 
     Returns:
         The full HTTPS URL of the archive, which extracts to one
