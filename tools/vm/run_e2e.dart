@@ -236,6 +236,9 @@ Future<void> _waitForToolchain(String vmName, {required bool isWindows}) async {
       if (r.exitCode == 0 && r.stdout.toString().contains('STARTUP_COMPLETE')) {
         return;
       }
+      if (r.stdout.toString().contains('STARTUP_FAILED')) {
+        throw Exception('$vmName: the startup script failed: ${r.stdout}');
+      }
     } else {
       r = await sshExec(
         vmName,

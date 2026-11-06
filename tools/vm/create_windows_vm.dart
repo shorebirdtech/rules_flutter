@@ -64,7 +64,23 @@ choco install -y bazelisk
 choco install -y vcredist140
 choco install -y visualstudio2022buildtools --package-parameters "--add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
 choco install -y python3
-choco install -y psexec
+
+# PsExec, from Sysinternals itself rather than chocolatey: the `psexec`
+# package downloads PSTools.zip and checks PsExec64.exe against a pinned hash,
+# but Sysinternals replaces its files in place at unversioned URLs, so the
+# package fails to install whenever a release lands after it was packaged.
+# Pinning a hash here would fail the same way, so the download is checked by
+# its Authenticode signature instead, which every release carries. A file that
+# is not Microsoft-signed is deleted and the startup marker says why.
+New-Item -ItemType Directory -Force -Path C:\tools | Out-Null
+$psexec = "C:\tools\PsExec64.exe"
+curl.exe -sSL --retry 5 -o $psexec "https://live.sysinternals.com/PsExec64.exe"
+$signature = Get-AuthenticodeSignature $psexec
+if ($signature.Status -ne "Valid" -or $signature.SignerCertificate.Subject -notmatch "O=Microsoft Corporation") {
+    Remove-Item -Force $psexec -ErrorAction SilentlyContinue
+    New-Item -Path C:\startup_complete.txt -Value "STARTUP_FAILED: PsExec64.exe signature $($signature.Status) $($signature.SignerCertificate.Subject)" -Force
+    exit 1
+}
 
 # Install Python packages for DXGI screen capture.
 # Redirect output to a log file — the GCE agent's stdout pipe breaks during
