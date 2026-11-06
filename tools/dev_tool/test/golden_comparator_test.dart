@@ -32,14 +32,28 @@ class _FakeService implements RunningGoldenService {
   @override
   Future<int> get exitCode => _exit.future;
 
+  final _output = StreamController<String>();
+
   @override
-  final output = <String>[];
+  Stream<String> get output => _output.stream;
+
+  /// What the service prints as it ends, once its connection is closed.
+  var lastWords = <String>[];
+
+  /// The service prints [line].
+  void say(String line) => _output.add(line);
+
+  void _end(int code) {
+    if (_exit.isCompleted) return;
+    _exit.complete(code);
+    unawaited(_output.close());
+  }
 
   @override
   void kill() {
     killed = true;
     socket?.destroy();
-    if (!_exit.isCompleted) _exit.complete(-9);
+    _end(-9);
   }
 
   Future<void> connect() async {
@@ -61,23 +75,26 @@ class _FakeService implements RunningGoldenService {
           },
           onDone: () {
             connected.destroy();
-            if (!_exit.isCompleted) _exit.complete(0);
+            lastWords.forEach(say);
+            _end(0);
           },
         );
   }
 
   void die(int code) {
     socket?.destroy();
-    if (!_exit.isCompleted) _exit.complete(code);
+    _end(code);
   }
 }
 
 void main() {
   late List<_FakeService> started;
   late bool Function() connectsOnStart;
+  late List<String> logged;
   setUp(() {
     started = [];
     connectsOnStart = () => true;
+    logged = [];
   });
 
   GoldenServiceComparator comparatorOf({
@@ -87,6 +104,7 @@ void main() {
     testPath: 'pkg/x_test.dart',
     ceiling: ceiling,
     environment: const {'TEST_TARGET': '//pkg:x_test'},
+    log: logged.add,
     launch: (environment) async {
       final service = _FakeService(environment);
       started.add(service);
@@ -185,6 +203,33 @@ void main() {
     await comparator.close();
   });
 
+  test('what the service prints is logged as it prints it, though it lives, '
+      'so warnings from a comparison reach the test\'s log', () async {
+    final comparator = comparatorOf();
+    await comparator.compare('goldens/a.png', bytes);
+    final service = started.single;
+
+    service
+      ..say('[ERROR:flutter/impeller] a warning')
+      ..say('second line');
+    await pumpEventQueue();
+
+    expect(logged, ['[ERROR:flutter/impeller] a warning', 'second line']);
+    await comparator.close();
+  });
+
+  test('what the service prints as it ends is logged before closing '
+      'returns', () async {
+    final comparator = comparatorOf();
+    await comparator.compare('goldens/a.png', bytes);
+    final service = started.single;
+    service.lastWords = ['last words'];
+
+    await comparator.close();
+
+    expect(logged, ['last words']);
+  });
+
   test('closing ends the service by closing its connection, and waits for it '
       'to end', () async {
     final comparator = comparatorOf();
@@ -201,7 +246,7 @@ void main() {
     final comparator = comparatorOf();
     await comparator.compare('goldens/a.png', bytes);
     final service = started.single;
-    service.output.addAll(['[flutter_tester] Segmentation fault']);
+    service.say('[flutter_tester] Segmentation fault');
     service.answer = (request) {
       service.die(139);
       return null;
@@ -228,7 +273,7 @@ void main() {
     connectsOnStart = () => false;
     final comparator = comparatorOf(
       onStart: (service) {
-        service.output.add('[flutter_tester] cannot open the kernel');
+        service.say('[flutter_tester] cannot open the kernel');
         Timer.run(() => service.die(64));
       },
     );

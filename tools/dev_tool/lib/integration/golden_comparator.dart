@@ -8,6 +8,7 @@
 library;
 
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -114,8 +115,8 @@ abstract interface class RunningGoldenService {
   /// How the process ended.
   Future<int> get exitCode;
 
-  /// What it printed, in order, for the message that says why it died.
-  List<String> get output;
+  /// What it prints, line by line, in order; done once it has printed all.
+  Stream<String> get output;
 
   /// Ends the process.
   void kill();
@@ -141,15 +142,19 @@ const _outputTail = 40;
 /// A [GoldenComparator] that is a golden service, started on the first request.
 class GoldenServiceComparator implements GoldenComparator {
   /// A comparator served by what [launch] starts, within [ceiling] of being
-  /// asked, for the test whose source has the `short_path` [testPath].
+  /// asked, for the test whose source has the `short_path` [testPath]. Each
+  /// line the service prints is given to [log] as it is printed.
   GoldenServiceComparator({
     required GoldenServiceLauncher launch,
     required this.testPath,
     required this.ceiling,
     this.environment = const {},
-  }) : _launch = launch;
+    void Function(String line)? log,
+  }) : _launch = launch,
+       _log = log;
 
   final GoldenServiceLauncher _launch;
+  final void Function(String line)? _log;
 
   /// The `short_path` of the test's source, which goldens are relative to the
   /// directory of.
@@ -196,13 +201,16 @@ class GoldenServiceComparator implements GoldenComparator {
 
   Future<_Connection> _connect() async {
     final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-    RunningGoldenService? service;
+    _Service? service;
     try {
-      service = await _launch({
-        ...environment,
-        goldenServicePortVariable: '${server.port}',
-        goldenServiceTestPathVariable: testPath,
-      });
+      service = _Service(
+        await _launch({
+          ...environment,
+          goldenServicePortVariable: '${server.port}',
+          goldenServiceTestPathVariable: testPath,
+        }),
+        _log,
+      );
       final running = service;
       final ended = running.exitCode.then<Socket?>((_) => null);
       final Socket? socket = await Future.any([
@@ -224,7 +232,7 @@ class GoldenServiceComparator implements GoldenComparator {
     }
   }
 
-  StateError _noConnection(RunningGoldenService service) {
+  StateError _noConnection(_Service service) {
     service.kill();
     return StateError(
       'the golden comparator did not connect within ${ceiling.inSeconds}s: '
@@ -246,19 +254,40 @@ class GoldenServiceComparator implements GoldenComparator {
   }
 }
 
+/// A started service whose output is logged as it comes, and whose last lines
+/// are kept for the message that says why it died.
+class _Service {
+  _Service(this._running, void Function(String line)? log) {
+    _printed = _running.output.listen((line) {
+      log?.call(line);
+      _last.add(line);
+      if (_last.length > _outputTail) _last.removeFirst();
+    }).asFuture<void>();
+  }
+
+  final RunningGoldenService _running;
+  final _last = Queue<String>();
+  late final Future<void> _printed;
+
+  /// How the process ended, once all it printed has been read.
+  Future<int> get exitCode async {
+    final code = await _running.exitCode;
+    await _printed;
+    return code;
+  }
+
+  void kill() => _running.kill();
+}
+
 /// Why a service that is not answering is not: how it ended and what it said.
-Future<String> _because(RunningGoldenService service) async {
+Future<String> _because(_Service service) async {
   final code = await service.exitCode;
   return 'it exited with code $code. ${_tail(service)}';
 }
 
-String _tail(RunningGoldenService service) {
-  final lines = service.output;
-  if (lines.isEmpty) return 'It printed nothing.';
-  final tail = lines.length > _outputTail
-      ? lines.sublist(lines.length - _outputTail)
-      : lines;
-  return 'Its output:\n${tail.join('\n')}';
+String _tail(_Service service) {
+  if (service._last.isEmpty) return 'It printed nothing.';
+  return 'Its output:\n${service._last.join('\n')}';
 }
 
 /// The connection to a started service, which answers one request at a time.
@@ -272,7 +301,7 @@ class _Connection {
   }
 
   final Socket _socket;
-  final RunningGoldenService _service;
+  final _Service _service;
   late final StreamSubscription<String> _lines;
   var _closing = false;
   Completer<Map<String, Object?>>? _waiting;

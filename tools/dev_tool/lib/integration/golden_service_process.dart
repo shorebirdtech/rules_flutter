@@ -7,6 +7,7 @@
 /// the test.
 library;
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -42,7 +43,8 @@ Map<String, String> goldenServiceEnvironment(
   if (update) goldenServiceUpdateVariable: '1',
 };
 
-/// Starts [executable] with exactly [environment], keeping what it prints.
+/// Starts [executable] with exactly [environment]; its output is its stdout's
+/// and its stderr's lines, as each comes.
 Future<RunningGoldenService> startGoldenServiceProcess(
   String executable,
   Map<String, String> environment,
@@ -53,26 +55,33 @@ Future<RunningGoldenService> startGoldenServiceProcess(
     environment: environment,
     includeParentEnvironment: false,
   );
-  final service = _ProcessService(process);
-  for (final stream in [process.stdout, process.stderr]) {
-    stream
-        .transform(utf8.decoder)
-        .transform(const LineSplitter())
-        .listen(service.output.add);
-  }
-  return service;
+  return _ProcessService(process);
 }
 
 class _ProcessService implements RunningGoldenService {
-  _ProcessService(this._process);
+  _ProcessService(this._process) {
+    var open = 2;
+    for (final stream in [_process.stdout, _process.stderr]) {
+      stream
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())
+          .listen(
+            _output.add,
+            onDone: () {
+              if (--open == 0) _output.close();
+            },
+          );
+    }
+  }
 
   final Process _process;
+  final _output = StreamController<String>();
 
   @override
   Future<int> get exitCode => _process.exitCode;
 
   @override
-  final output = <String>[];
+  Stream<String> get output => _output.stream;
 
   @override
   void kill() => _process.kill(ProcessSignal.sigkill);

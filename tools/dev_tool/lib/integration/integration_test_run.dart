@@ -482,6 +482,7 @@ Future<int> _drive(
         update: updateGoldens,
         ceiling: ceiling,
         start: startGoldenService,
+        err: err,
       ),
       update: updateGoldens,
       log: (message) => err.writeln('integration_test: $message'),
@@ -517,6 +518,7 @@ GoldenComparator _goldenComparator(
   required bool update,
   required Duration ceiling,
   required GoldenServiceLauncher? start,
+  required StringSink err,
 }) {
   final goldens = config.goldens;
   if (goldens == null) {
@@ -530,6 +532,7 @@ GoldenComparator _goldenComparator(
   return GoldenServiceComparator(
     testPath: goldens.testSource,
     ceiling: ceiling,
+    log: (line) => err.writeln('[golden service] $line'),
     environment: goldenServiceEnvironment(
       environment,
       goldens.environment,
