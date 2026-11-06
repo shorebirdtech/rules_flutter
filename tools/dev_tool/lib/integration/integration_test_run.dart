@@ -494,7 +494,6 @@ Future<int> _drive(
           suitePath: config.testDisplayName,
           timeout: suiteTimeout(bazelTimeout),
           logPrefix: 'integration_test',
-          failOnNoTests: true,
           out: out,
           err: err,
         ).run(

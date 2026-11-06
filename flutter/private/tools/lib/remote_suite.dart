@@ -131,16 +131,14 @@ class RemoteSuiteDriver {
   /// [logPrefix] starts the lines this writes to [err], and [out] and [err]
   /// default to the process's own streams.
   ///
-  /// [failOnNoTests] makes a suite that registers no test at all a failure
-  /// when the selection did not narrow it: a program that ran to its end
-  /// without declaring a test has not been tested, and a green result would
-  /// say it had.
+  /// A suite that registers no test at all is a failure when the selection did
+  /// not narrow it: a program that ran to its end without declaring a test has
+  /// not been tested, and a green result would say it had.
   RemoteSuiteDriver(
     this.transport, {
     required this.suitePath,
     this.timeout = 'none',
     this.logPrefix = 'flutter_test',
-    this.failOnNoTests = false,
     StringSink? out,
     StringSink? err,
     bool? asciiGlyphs,
@@ -152,7 +150,6 @@ class RemoteSuiteDriver {
   final String suitePath;
   final Object timeout;
   final String logPrefix;
-  final bool failOnNoTests;
   final StringSink _out;
   final StringSink _err;
   final bool _asciiGlyphs;
@@ -260,7 +257,7 @@ class RemoteSuiteDriver {
             '$logPrefix: no test case in this suite matches this run\'s '
             '--test_filter or shard.',
           );
-        } else if (failOnNoTests) {
+        } else {
           _record(outcome, 'the suite registered no tests');
         }
       } else {

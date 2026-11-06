@@ -129,12 +129,10 @@ class _FakeProgram implements SuiteTransport {
 
 RemoteSuiteDriver _driver(
   _FakeProgram program, {
-  bool failOnNoTests = false,
   StringBuffer? err,
 }) => RemoteSuiteDriver(
   program,
   suitePath: 'integration_test/x_test.dart',
-  failOnNoTests: failOnNoTests,
   out: StringBuffer(),
   err: err ?? StringBuffer(),
   asciiGlyphs: true,
@@ -254,14 +252,10 @@ void main() {
 
     test('a filter that matches nothing passes, since --test_filter must pass '
         'every target it does not touch', () async {
-      final outcome =
-          await _driver(
-            _FakeProgram({'a': _Behaviour.passes}),
-            failOnNoTests: true,
-          ).run(
-            ceiling: _ceiling,
-            selection: TestSelection(filter: RegExp('nothing')),
-          );
+      final outcome = await _driver(_FakeProgram({'a': _Behaviour.passes})).run(
+        ceiling: _ceiling,
+        selection: TestSelection(filter: RegExp('nothing')),
+      );
 
       expect(outcome.exitCode, 0);
     });
@@ -319,31 +313,25 @@ void main() {
   });
 
   group('a suite that registers no tests', () {
-    test(
-      'fails when the run was not narrowed and the caller asked for it',
-      () async {
-        final err = StringBuffer();
+    test('fails when the run was not narrowed', () async {
+      final err = StringBuffer();
 
-        final outcome = await _driver(
-          _FakeProgram({}),
-          failOnNoTests: true,
-          err: err,
-        ).run(ceiling: _ceiling);
+      final outcome = await _driver(
+        _FakeProgram({}),
+        err: err,
+      ).run(ceiling: _ceiling);
 
-        expect(outcome.exitCode, isNonZero);
-        expect(err.toString(), contains('the suite registered no tests'));
-      },
-    );
+      expect(outcome.exitCode, isNonZero);
+      expect(err.toString(), contains('the suite registered no tests'));
+    });
 
-    test(
-      'passes where the caller did not ask, as flutter_test always has',
-      () async {
-        final outcome = await _driver(_FakeProgram({})).run(ceiling: _ceiling);
+    test('passes when a filter or shard narrowed the run', () async {
+      final outcome = await _driver(
+        _FakeProgram({}),
+      ).run(ceiling: _ceiling, selection: TestSelection(totalShards: 2));
 
-        expect(outcome.exitCode, 0);
-        expect(outcome.summary(), contains('no tests'));
-      },
-    );
+      expect(outcome.exitCode, 0);
+    });
   });
 
   test('a test that never finishes is named at the ceiling and the program is '
