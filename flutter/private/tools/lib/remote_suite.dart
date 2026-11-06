@@ -140,6 +140,7 @@ class RemoteSuiteDriver {
     required this.suitePath,
     this.timeout = 'none',
     this.logPrefix = 'flutter_test',
+    this.libraryTags = const {},
     StringSink? out,
     StringSink? err,
     bool? asciiGlyphs,
@@ -151,6 +152,11 @@ class RemoteSuiteDriver {
   final String suitePath;
   final Object timeout;
   final String logPrefix;
+
+  /// The tags the test file declares on its library. They go in the handshake,
+  /// and the program gives every group and test them, so tag selection only
+  /// ever looks at each test's own merged tags.
+  final Set<String> libraryTags;
   final StringSink _out;
   final StringSink _err;
   final bool _asciiGlyphs;
@@ -514,7 +520,7 @@ class RemoteSuiteDriver {
   Map<String, dynamic> _initialMessage() {
     return {
       'type': 'initial',
-      'metadata': _defaultMetadata(timeout),
+      'metadata': _defaultMetadata(timeout, libraryTags),
       'platform': _suitePlatform(),
       'platformVariables': const <String>[],
       'collectTraces': true,
@@ -529,8 +535,12 @@ class RemoteSuiteDriver {
   }
 
   /// Minimal `Metadata.serialize` payload — all optional flags omitted, an
-  /// empty `forTag`, and [timeout] as [suiteTimeout] serializes it.
-  static Map<String, Object?> _defaultMetadata(Object timeout) {
+  /// empty `forTag`, [timeout] as [suiteTimeout] serializes it and the library
+  /// [tags].
+  static Map<String, Object?> _defaultMetadata(
+    Object timeout,
+    Set<String> tags,
+  ) {
     return {
       'testOn': null,
       'timeout': timeout,
@@ -539,7 +549,7 @@ class RemoteSuiteDriver {
       'verboseTrace': null,
       'chainStackTraces': null,
       'retry': null,
-      'tags': const <String>[],
+      'tags': tags.toList(),
       'onPlatform': const <List<Object>>[],
       'forTag': const <String, Object?>{},
       'languageVersionComment': null,

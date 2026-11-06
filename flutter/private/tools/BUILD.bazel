@@ -76,7 +76,11 @@ dart_library(
         "//flutter:__subpackages__",
         "//tools/dev_tool:__subpackages__",
     ],
-    deps = ["@dev_tool_deps//:boolean_selector"],
+    deps = [
+        "@dev_tool_deps//:boolean_selector",
+        "@dev_tool_deps//:test_api",
+        "@dev_tool_deps//:test_core",
+    ],
 )
 
 dart_binary(
@@ -134,6 +138,10 @@ _UNIT_TESTS = {
         ],
     ),
     "bazel_test_protocol_test": (
+        None,
+        [":remote_suite"],
+    ),
+    "suite_annotations_test": (
         None,
         [":remote_suite"],
     ),

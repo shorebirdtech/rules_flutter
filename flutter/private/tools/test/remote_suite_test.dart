@@ -145,9 +145,11 @@ RemoteSuiteDriver _driver(
   _FakeProgram program, {
   StringBuffer? err,
   StringBuffer? out,
+  Set<String> libraryTags = const {},
 }) => RemoteSuiteDriver(
   program,
   suitePath: 'integration_test/x_test.dart',
+  libraryTags: libraryTags,
   out: out ?? StringBuffer(),
   err: err ?? StringBuffer(),
   asciiGlyphs: true,
@@ -325,6 +327,16 @@ void main() {
       expect(err.toString(), contains('load failure — no such file'));
       expect(err.toString(), contains('suite did not load'));
     });
+  });
+
+  test('the handshake carries the library tags for the program to give every '
+      'test', () async {
+    final program = _FakeProgram({'a': _Behaviour.passes});
+
+    await _driver(program, libraryTags: {'lib'}).run(ceiling: _ceiling);
+
+    final initial = program.sent.first[1] as Map;
+    expect((initial['metadata'] as Map)['tags'], ['lib']);
   });
 
   group('a suite that registers no tests', () {

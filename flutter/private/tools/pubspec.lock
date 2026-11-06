@@ -298,7 +298,7 @@ packages:
     source: hosted
     version: "1.30.0"
   test_api:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: test_api
       sha256: "8161c84903fd860b26bfdefb7963b3f0b68fee7adea0f59ef805ecca346f0c7a"
@@ -306,7 +306,7 @@ packages:
     source: hosted
     version: "0.7.10"
   test_core:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: test_core
       sha256: "0381bd1585d1a924763c308100f2138205252fb90c9d4eeaf28489ee65ccde51"
