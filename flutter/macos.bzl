@@ -478,7 +478,7 @@ def flutter_macos_app(
         testonly = testonly,
     )
 
-    # 2. Assemble App.framework (versioned layout with AOT dylib + flutter_assets).
+    # 2. Assemble App.framework (flat layout with the AOT binary + flutter_assets).
     _flutter_macos_framework_rule(
         name = "__%s_app_framework" % name,
         application = application,

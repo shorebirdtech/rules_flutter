@@ -86,15 +86,14 @@ def flutter_apple_plugin_library(
             ObjC sources `#import <Foo/Bar.h>` against an Apple SDK
             framework — Clang's `enable_modules` auto-link metadata
             (`LC_LINKER_OPTION`) is stripped by Apple's `libtool` static-archive
-            step, so explicit declaration is the only reliable path. When the
-            plugin declares its frameworks in `Package.swift`'s
-            `linkerSettings.linkedFramework` they are auto-detected by
-            `flutter_pub_package`; otherwise users supply them here (typically
-            via an `ext/<pkg>/<major>/BUILD.bazel.tpl` overlay).
+            step, so explicit declaration is the only reliable path. Nothing
+            reads `Package.swift`'s `linkerSettings.linkedFramework`; list the
+            frameworks here (typically via an `ext/<pkg>/<major>/BUILD.bazel.tpl`
+            overlay).
         sdk_dylibs: Apple SDK dynamic libraries to link (e.g. `["c++"]`,
             `["sqlite3"]`). Forwarded to the inner `objc_library`. Same
-            rationale as `sdk_frameworks`; auto-detected from
-            `linkerSettings.linkedLibrary` when present.
+            rationale as `sdk_frameworks`; `Package.swift`'s
+            `linkerSettings.linkedLibrary` is not read, so list them here.
         visibility: Target visibility.
         tags: Bazel tags. Defaults to `["manual"]` so the spoke target
             is only built when something depends on it.

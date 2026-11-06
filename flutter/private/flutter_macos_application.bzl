@@ -55,20 +55,17 @@ _APP_FRAMEWORK_INFO_PLIST = """\
 """
 
 def _flutter_macos_framework_impl(ctx):
-    """Assembles App.framework as a versioned macOS framework (tree artifact).
+    """Assembles App.framework as a flat macOS framework (tree artifact).
 
-    Uses the standard macOS versioned framework layout required by NSBundle:
+    The layout has no `Versions/` directory and no symlinks:
         App.framework/
-            App -> Versions/Current/App
-            Resources -> Versions/Current/Resources
-            Versions/
-                A/
-                    App                          (AOT dylib, release only)
-                    Resources/
-                        Info.plist
-                        flutter_assets/          (asset bundle)
-                        app.dill                 (kernel snapshot, debug only)
-                Current -> A
+            App                          (AOT binary, release only)
+            Resources/
+                Info.plist
+                flutter_assets/          (asset bundle)
+
+    In debug mode the kernel (`kernel_blob.bin`) and VM snapshots sit inside
+    `flutter_assets/`.
 
     The framework is NOT linked against the runner binary. Instead it is placed
     into the .app bundle via additional_contents, matching how `flutter build
