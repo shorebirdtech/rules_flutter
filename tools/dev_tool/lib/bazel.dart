@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'dev_tool_exception.dart';
+import 'launch_bundle_parts.dart';
 import 'logging.dart';
 import 'phase_log.dart';
 import 'runfiles_helper.dart';
@@ -67,10 +68,15 @@ class BazelBuildResult {
   /// own output, on success the stderr of the cquery that listed the outputs.
   final String stderr;
 
+  /// The files of each group of the bundle parts the build was asked for (see
+  /// [Bazel.build]'s `parts`), by group name; empty when it was asked for none.
+  final Map<String, List<String>> partsFiles;
+
   BazelBuildResult({
     required this.exitCode,
     required this.outputFiles,
     required this.stderr,
+    this.partsFiles = const {},
   });
 
   bool get success => exitCode == 0;
@@ -278,16 +284,25 @@ const _devFilesAspect = [
 /// The aspect flags go last. `--output_groups=+name` is additive and a
 /// repeated aspect is applied once, so nothing here overrides what the caller
 /// passed as `--build-arg`.
+///
+/// [parts] adds the groups a restart reads of the bundle (see
+/// [LaunchBundleParts]), for the launch build, whose parts are the baseline a
+/// restart compares against.
 List<String> bazelBuildArgs(
   String target, {
   String? compilationMode,
   List<String> extraArgs = const [],
+  LaunchBundleParts? parts,
 }) => [
   'build',
   target,
   if (compilationMode != null) ...['-c', compilationMode],
   ...extraArgs,
   ..._devFilesAspect,
+  if (parts != null) ...[
+    '--aspects=${parts.aspect}',
+    '--output_groups=+${parts.assetsGroup},+${parts.nativeLibsGroup}',
+  ],
 ];
 
 /// Starts the `bazel` client for [args], in [workingDirectory].
@@ -508,12 +523,44 @@ class Bazel {
     required String workspace,
     String? compilationMode,
     List<String> extraArgs = const [],
+    LaunchBundleParts? parts,
   }) async {
-    final args = bazelBuildArgs(
-      target,
-      compilationMode: compilationMode,
-      extraArgs: extraArgs,
-    );
+    // The parts are an aspect's outputs, which no cquery lists, so they are
+    // read from the build's own event stream.
+    final events = parts == null
+        ? null
+        : await Directory.systemTemp.createTemp('flutter_bep_');
+    try {
+      return await _build(
+        target,
+        workspace: workspace,
+        compilationMode: compilationMode,
+        extraArgs: extraArgs,
+        parts: parts,
+        eventFile: events == null ? null : '${events.path}/events.json',
+      );
+    } finally {
+      await events?.delete(recursive: true);
+    }
+  }
+
+  Future<BazelBuildResult> _build(
+    String target, {
+    required String workspace,
+    required String? compilationMode,
+    required List<String> extraArgs,
+    required LaunchBundleParts? parts,
+    required String? eventFile,
+  }) async {
+    final args = [
+      ...bazelBuildArgs(
+        target,
+        compilationMode: compilationMode,
+        extraArgs: extraArgs,
+        parts: parts,
+      ),
+      if (eventFile != null) '--build_event_json_file=$eventFile',
+    ];
 
     // Diagnostics + bazel's own output go to STDERR, never stdout: in
     // `--machine` mode the dev tool's stdout is the JSON protocol channel, and
@@ -563,6 +610,14 @@ class Bazel {
       exitCode: built.exitCode,
       outputFiles: outputFiles,
       stderr: cqueryResult.stderr as String,
+      partsFiles: parts == null || eventFile == null
+          ? const {}
+          : aspectOutputsFromBuildEvents(
+              await File(eventFile).readAsString(),
+              aspect: parts.aspect,
+              outputGroup: parts.assetsGroup,
+              otherGroups: [parts.nativeLibsGroup],
+            ).filesByGroup,
     );
   }
 

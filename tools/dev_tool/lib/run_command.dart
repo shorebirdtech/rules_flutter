@@ -568,7 +568,10 @@ class RunCommand {
           pipeline: pipeline,
           logger: logger,
           builtBefore: builtBefore,
-          launch: NativeLaunch(appFile: appFile),
+          launch: NativeLaunch(
+            appFile: appFile,
+            partsNativeLibs: build.partsNativeLibs,
+          ),
         ).assemble();
       }
 

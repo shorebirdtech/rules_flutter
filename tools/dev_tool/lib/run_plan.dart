@@ -19,6 +19,7 @@ import 'dev_tool_exception.dart';
 import 'device.dart';
 import 'device_id.dart';
 import 'logging.dart';
+import 'native_libs_fingerprint.dart';
 import 'toolchain_info.dart';
 import 'web_mode.dart';
 import 'web_options.dart';
@@ -520,7 +521,15 @@ class RunPlan {
   }
 
   /// Build the target and pick the artifact to launch from.
-  Future<({String appFile, List<String> outputFiles})> buildApp() async {
+  Future<
+    ({
+      String appFile,
+      List<String> outputFiles,
+      Map<String, String>? partsNativeLibs,
+    })
+  >
+  buildApp() async {
+    final parts = devices.first.launchBundleParts;
     logger.fine({
       'message': 'compilation_config',
       'text': 'Compilation mode: $compilationMode, extra args: $extraArgs',
@@ -539,6 +548,9 @@ class RunPlan {
       workspace: workspace,
       compilationMode: compilationMode,
       extraArgs: extraArgs,
+      // Built with the launch and read as it returns, so a restart's baseline
+      // is what the launched artifact was made from.
+      parts: parts,
     );
     if (!result.success) {
       throw DevToolException(
@@ -557,7 +569,17 @@ class RunPlan {
       'text': 'Launch artifact: $appFile',
       'outputs': result.outputFiles,
     });
-    return (appFile: appFile, outputFiles: result.outputFiles);
+    return (
+      appFile: appFile,
+      outputFiles: result.outputFiles,
+      // Read before anything else builds: a later build of the parts may hold
+      // an edit the launched artifact does not.
+      partsNativeLibs: parts == null
+          ? null
+          : await nativeLibsFingerprintOfBuiltFiles(
+              result.partsFiles[parts.nativeLibsGroup]!,
+            ),
+    );
   }
 }
 

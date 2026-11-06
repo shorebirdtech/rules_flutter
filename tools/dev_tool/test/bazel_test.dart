@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter_bazel_dev_tool/bazel.dart';
 import 'package:flutter_bazel_dev_tool/dev_tool_exception.dart';
+import 'package:flutter_bazel_dev_tool/launch_bundle_parts.dart';
 import 'package:flutter_bazel_dev_tool/web_bundle_facts.dart';
 import 'package:logging/logging.dart';
 import 'package:test/test.dart';
@@ -230,6 +231,30 @@ void main() {
         ),
       );
       expect(args, contains('--output_groups=+flutter_dev_files'));
+    });
+
+    // A restart compares the bundle's parts against the ones the launch built:
+    // a build of them made later can hold an edit the launched app does not.
+    test('adds the bundle parts a restart reads, for the launch build', () {
+      const parts = LaunchBundleParts(
+        aspect: '//:parts.bzl%parts',
+        assetsGroup: 'assets_group',
+        nativeLibsGroup: 'native_group',
+      );
+      final args = bazelBuildArgs(
+        '//:app',
+        compilationMode: 'dbg',
+        parts: parts,
+      );
+      expect(args, contains('--aspects=//:parts.bzl%parts'));
+      expect(args, contains('--output_groups=+assets_group,+native_group'));
+      // Added to the outputs, not in place of them: the launch artifact and
+      // the dev files are still built.
+      expect(args, contains('--output_groups=+flutter_dev_files'));
+      expect(
+        bazelBuildArgs('//:app').any((a) => a.contains('parts.bzl')),
+        isFalse,
+      );
     });
 
     test('does not touch the download policy', () {
@@ -767,6 +792,58 @@ void main() {
           contains(
             '/output_base/execroot/_main/bazel-out/darwin_arm64-dbg-macos-arm64-min12.0-ST-fea79f7fcfbc/bin/mul_hot_patch.hot_patch.json',
           ),
+        );
+      });
+
+      // What a restart compares against is what the launch built, so the
+      // launch build itself reports the parts, from its own event stream: an
+      // aspect's outputs are in no cquery.
+      test('a launch build with bundle parts reads them from its event '
+          'stream', () async {
+        final fake = fakeBazel();
+        final build = fake.bazel.build(
+          '//:app',
+          workspace: '/ws',
+          parts: const LaunchBundleParts(
+            aspect: '@rules_flutter//flutter:a.bzl%an_aspect',
+            assetsGroup: 'assets',
+            nativeLibsGroup: 'libs',
+          ),
+        );
+        while (fake.processes.isEmpty) {
+          await pumpEventQueue();
+        }
+        final process = fake.processes.single;
+        await process.outputAttached;
+        final args = fake.spawned.single.args;
+        expect(args, contains('--output_groups=+assets,+libs'));
+        final eventFile = args
+            .singleWhere((a) => a.startsWith('--build_event_json_file='))
+            .split('=')
+            .last;
+        File(eventFile).writeAsStringSync(
+          [
+            '{"id":{"workspace":{}},"workspaceInfo":{"localExecRoot":"/x/root"}}',
+            '{"id":{"namedSet":{"id":"0"}},"namedSetOfFiles":{"files":[{"name":"libx.dylib","pathPrefix":["bazel-out","k","bin"]}]}}',
+            '{"id":{"targetCompleted":{"label":"//:app","aspect":"@@rules_flutter+//flutter:a.bzl%an_aspect"}},"completed":{"outputGroup":[{"name":"libs","fileSets":[{"id":"0"}]}]}}',
+          ].join('\n'),
+        );
+        process.complete(0);
+        await pumpEventQueue();
+        final cquery = fake.processes.last;
+        await cquery.outputAttached;
+        cquery.emitStdout('bazel-out/darwin/bin/app.zip');
+        cquery.complete(0);
+
+        final result = await build;
+        expect(result.partsFiles, {
+          'assets': <String>[],
+          'libs': ['/x/root/bazel-out/k/bin/libx.dylib'],
+        });
+        expect(
+          fake.spawned.last.args,
+          isNot(contains(startsWith('--build_event_json_file'))),
+          reason: 'the cquery lists outputs; it writes no event stream',
         );
       });
 

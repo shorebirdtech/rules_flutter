@@ -66,7 +66,16 @@ class NativeLaunch {
   /// The artifact the app was launched from.
   final String appFile;
 
-  const NativeLaunch({required this.appFile});
+  /// The fingerprint of the native libraries in the bundle's parts
+  /// (`Device.launchBundleParts`), read as the build of [appFile] returned, or
+  /// null for a device that has no parts.
+  ///
+  /// Read then, not at assembly: assembly comes after the launch, and an edit
+  /// saved in between would be in a build of the parts made then and not in
+  /// the process, so no restart would ever relaunch over it.
+  final Map<String, String>? partsNativeLibs;
+
+  const NativeLaunch({required this.appFile, this.partsNativeLibs});
 }
 
 class NativePipelineAssembler {
@@ -901,28 +910,18 @@ class NativePipelineAssembler {
     // loose native libraries skip all of this and keep the instant restart path.
     // Read the way a restart will read it, so the two are compared in one form.
     // For a device that has a cheaper way to read the libraries than building
-    // its artifact, that is that way, taken now rather than from the artifact:
-    // the same bytes the dev build above has already paid for.
-    final parts = _parts;
-    final Map<String, String> fingerprint;
-    if (parts == null) {
-      fingerprint = await nativeLibsFingerprint(launched.appFile);
-    } else {
-      // Not through [_partsRebuild]: that answers for the command in flight,
-      // and a restart can arrive while this assembly is still running. It would
-      // then be handed this baseline as its own rebuild, and compare the
-      // libraries against themselves.
-      final built = await _buildParts();
-      // A failure like the dev build's, and recoverable the same way: the next
-      // reload assembles again.
-      if (!built.success) {
-        throw BazelInvocationFailure(
-          command: 'build $target (the bundle parts)',
-          diagnostics: built.stderr,
-        );
-      }
-      fingerprint = await nativeLibsFingerprintOfBuiltFiles(
-        built.filesByGroup[parts.nativeLibsGroup]!,
+    // its artifact, that is that way, read off the launch build itself.
+    final fingerprint = _parts == null
+        ? await nativeLibsFingerprint(launched.appFile)
+        : launched.partsNativeLibs;
+    // A launch build that named the parts reports them, so this is a run whose
+    // build did not: a broken contract between the two, not an app without
+    // native libraries, and calling it the second would turn restarts into
+    // isolate restarts over whatever native code moves.
+    if (fingerprint == null) {
+      throw StateError(
+        'The launch build of $target reported no bundle parts, so a restart '
+        'could not tell whether its native libraries moved.',
       );
     }
     if (fingerprint.isEmpty) return;
