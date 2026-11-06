@@ -17,6 +17,10 @@ load(":action_content.bzl", "written_json")
 _FIXTURE = "//flutter/tests/code_asset_fixture:"
 _DBG = {"//command_line_option:compilation_mode": "dbg"}
 
+# What `cc_shared_library` names `bridge` on each OS. Windows takes no `lib`
+# prefix, as Dart's own `OS.windows.dylibFileName` does not.
+_BRIDGE_NAMES = ["libbridge.dylib", "libbridge.so", "bridge.dll"]
+
 def _basenames(paths):
     return sorted([p.rsplit("/", 1)[-1] for p in paths])
 
@@ -55,7 +59,7 @@ def _hot_patch_impl(ctx):
     env = analysistest.begin(ctx)
     target = analysistest.target_under_test(env)
     files = getattr(target[OutputGroupInfo], HOT_PATCH_OUTPUT_GROUP).to_list()
-    asserts.equals(env, ctx.attr.expected, sorted([f.basename for f in files]))
+    asserts.equals(env, sorted(ctx.attr.expected), sorted([f.basename for f in files]))
     return analysistest.end(env)
 
 _hot_patch_test = analysistest.make(
@@ -98,7 +102,7 @@ def _test_host_impl(ctx):
     found = [
         f
         for f in target[DefaultInfo].default_runfiles.files.to_list()
-        if f.basename.startswith("libbridge.")
+        if f.basename in _BRIDGE_NAMES
     ]
     asserts.equals(env, 1, len(found), "the wrapped library in the test's runfiles: %s" % found)
     if found:
@@ -158,7 +162,7 @@ def code_asset_native_library_test_suite(name):
             target_under_test = _FIXTURE + "app_" + owner,
             expected = ["bridge.hot_patch.json"] + select({
                 "@platforms//os:macos": ["libbridge.dylib"],
-                "@platforms//os:windows": ["libbridge.dll"],
+                "@platforms//os:windows": ["bridge.dll"],
                 "//conditions:default": ["libbridge.so"],
             }),
         )
