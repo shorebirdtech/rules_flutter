@@ -14,6 +14,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter_bazel_dev_tool/runfiles_helper.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
@@ -39,6 +40,19 @@ Map<String, dynamic> _progress(String method, {required bool finished}) => {
     'finished': finished,
   },
 };
+
+/// The compiled stand-in for `adb` (`fake_adb.dart`), from the runfiles.
+String _fakeAdb() {
+  const key = 'rules_flutter/tools/dev_tool/fake_adb';
+  final path = resolveRunfile(key);
+  if (path == null) {
+    throw StateError(
+      'Could not resolve $key from runfiles. Run this with '
+      '`bazel test //tools/dev_tool:dev_tool_e2e_harness_test`.',
+    );
+  }
+  return path;
+}
 
 void main() {
   // Every case waits one of these out, so it is as short as the work allows.
@@ -359,13 +373,20 @@ void main() {
 
       test('a connection that is refused says so, and quotes the run', () async {
         // Nothing is listening on that port from here on, so the request stops
-        // before it is ever sent.
+        // before it is ever sent. Windows reports the refusal only after it
+        // has retried the connection, about two seconds in, so the bound is
+        // one that a refusal beats on every host; a bound that expired first
+        // would test the timeout message instead.
         await server.close(force: true);
         process.emitStderr('dev tool: the session is still up\n');
         await tool.waitForStderr('the session is still up');
 
         await expectLater(
-          tool.httpCommand('app.getText', {'appId': 'app-1'}, timeout: bound),
+          tool.httpCommand(
+            'app.getText',
+            {'appId': 'app-1'},
+            timeout: const Duration(seconds: 30),
+          ),
           throwsA(
             isA<StateError>().having(
               (e) => e.message,
@@ -650,14 +671,11 @@ void main() {
       String stderr = '',
       int exitCode = 0,
     }) {
-      final path = p.join(dir.path, 'adb');
-      File(path).writeAsStringSync(
-        '#!/bin/sh\n'
-        "cat <<'STDOUT_EOF'\n$stdout\nSTDOUT_EOF\n"
-        "cat >&2 <<'STDERR_EOF'\n$stderr\nSTDERR_EOF\n"
-        'exit $exitCode\n',
+      final path = p.join(dir.path, Platform.isWindows ? 'adb.exe' : 'adb');
+      File(_fakeAdb()).copySync(path);
+      File('$path.json').writeAsStringSync(
+        jsonEncode({'stdout': stdout, 'stderr': stderr, 'exitCode': exitCode}),
       );
-      Process.runSync('chmod', ['+x', path]);
       return path;
     }
 

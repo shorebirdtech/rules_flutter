@@ -116,7 +116,6 @@ _UNIT_TESTS = {
     ),
     "validate_android_elf_test": ("validate_android_elf.dart", []),
     "bundle_app_test": ("bundle_app.dart", []),
-    "compile_shader_test": ("compile_shader.dart", []),
     "kernel_filter_test": ("kernel_filter.dart", []),
     "linux_runtime_test": ("linux_runtime.dart", []),
     "generate_asset_manifest_test": ("generate_asset_manifest.dart", []),
@@ -150,6 +149,27 @@ _UNIT_TESTS = {
     main = "test/%s.dart" % name,
     deps = ["@dev_tool_deps//:test"] + extra_deps,
 ) for name, (tool, extra_deps) in _UNIT_TESTS.items()]
+
+# Stand-in for `impellerc`, which `compile_shader_test` runs through
+# `compile_shader.dart`. A compiled executable, as `fake_font_subset` is.
+dart_binary(
+    name = "fake_impellerc",
+    testonly = True,
+    srcs = [],
+    compile_mode = "exe",
+    main = "test/fake_impellerc.dart",
+)
+
+dart_test(
+    name = "compile_shader_test",
+    srcs = ["compile_shader.dart"],
+    data = [":fake_impellerc"],
+    main = "test/compile_shader_test.dart",
+    deps = [
+        "@dev_tool_deps//:test",
+        "@rules_dart//dart/runfiles",
+    ],
+)
 
 # The version-key check imports the plist parser of `merge_plists.dart`, so both
 # are its `srcs`.

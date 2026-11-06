@@ -90,6 +90,15 @@ dart_binary(
     }),
 )
 
+# Stand-in for `adb` in `dev_tool_e2e_harness_test`. A compiled executable, since
+# a shell script would not start on Windows.
+dart_binary(
+    name = "fake_adb",
+    testonly = True,
+    compile_mode = "exe",
+    main = "test/fake_adb.dart",
+)
+
 # Every unit test under test/. Adding an entry here is the whole cost of a new
 # test file, and the list is the reason a file cannot quietly go unrun: the
 # `/logs` endpoint's tests shipped without a target and so were never covered
@@ -203,6 +212,7 @@ _UNIT_TESTS = {
     "compiler_test": {"fakes": True},
     "dependency_compiler_fake_test": {"fakes": True},
     "dev_tool_e2e_harness_test": {
+        "data": [":fake_adb"],
         "fakes": True,
         "harness": True,
         "lifetime": True,
