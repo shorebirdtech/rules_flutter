@@ -51,6 +51,7 @@ load(":plist_merge_test.bzl", "plist_merge_test_suite")
 load(":plugin_registrant_test.bzl", "plugin_registrant_test_suite")
 load(":profile_mode_test.bzl", "profile_mode_test_suite")
 load(":pub_lock_sdks_test.bzl", "pub_lock_sdks_test_suite")
+load(":pub_resolve_test.bzl", "pub_resolve_test_suite")
 load(":sdk_inputs_test.bzl", "sdk_inputs_test_suite")
 load(":shader_compile_test.bzl", "shader_compile_test_suite")
 load(":shared_code_asset_test.bzl", "shared_code_asset_test_suite")
@@ -120,6 +121,8 @@ flutter_pub_library_repo_test_suite(name = "flutter_pub_library_repo_test")
 flutter_framework_package_test_suite(name = "flutter_framework_package_test")
 
 flutter_pub_package_sdk_source_test_suite(name = "flutter_pub_package_sdk_source_test")
+
+pub_resolve_test_suite(name = "pub_resolve_test")
 
 flutter_pub_package_test_suite(name = "flutter_pub_package_test")
 

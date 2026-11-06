@@ -171,6 +171,12 @@ use_repo(maven, "rules_android_maven")
 flutter.pub(
     name = "dev_tool_deps",
     lock = "//tools/dev_tool:pubspec.lock",
+    # The dev tool's `path:` dependencies: this repository's own packages.
+    resolve = {
+        "flutter_rule_tools": "//flutter/private/tools:remote_suite",
+        "rules_flutter_e2e_testing": "//tools/e2e_testing",
+        "rules_flutter_macos_gui_session": "//tools/macos_gui_session",
+    },
 )
 use_repo(flutter, "dev_tool_deps")
 

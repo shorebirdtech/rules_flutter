@@ -72,10 +72,10 @@ dart_library(
     name = "remote_suite",
     package_name = "flutter_rule_tools",
     srcs = glob(["lib/**/*.dart"]),
-    visibility = [
-        "//flutter:__subpackages__",
-        "//tools/dev_tool:__subpackages__",
-    ],
+    # Public because `flutter.pub(resolve = ...)` in MODULE.bazel maps the dev
+    # tool's lock entry for this package to it, and the hub's repository
+    # forwards to it from outside this repository's packages.
+    visibility = ["//visibility:public"],
     deps = [
         "@dev_tool_deps//:boolean_selector",
         "@dev_tool_deps//:test_api",

@@ -231,7 +231,7 @@ void main() {
     });
   });
 
-  group('a lock entry rules_flutter has no repository for (git, path)', () {
+  group('a lock entry rules_flutter has no repository for (git)', () {
     late PubInputsWorkspace ws;
     setUpAll(() async {
       ws = await PubInputsFixture(hosted: [HostedPackage('good')])
@@ -239,7 +239,8 @@ void main() {
     });
 
     // Entries a lock can hold that rules_flutter cannot provide, with what
-    // the lock calls their source. (An `sdk: flutter` entry, whatever its
+    // the lock calls their source. (A `path` entry is the user's own target:
+    // see `pub_resolve_e2e_test.dart`.) (An `sdk: flutter` entry, whatever its
     // name, is built from the Flutter source; see `sdk_source_e2e_test.dart`.)
     final entries = {
       'from_git': (
@@ -252,16 +253,6 @@ void main() {
             '      resolved-ref: 0123456789012345678901234567890123456789\n'
             '      url: "https://example.invalid/from_git.git"\n'
             '    source: git\n'
-            '    version: "1.0.0"\n',
-      ),
-      'from_path': (
-        'path',
-        '  from_path:\n'
-            '    dependency: "direct main"\n'
-            '    description:\n'
-            '      path: "../from_path"\n'
-            '      relative: true\n'
-            '    source: path\n'
             '    version: "1.0.0"\n',
       ),
     };

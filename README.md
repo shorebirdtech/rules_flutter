@@ -178,7 +178,7 @@ To check a profile build from a test without those flags on the command line, wr
 
 ### Pub packages
 
-`flutter.pub` turns `pubspec.lock` into Bazel targets. Every package in the lock gets a target in the hub repository: `@deps//:collection`, `@deps//:url_launcher`, `@deps//:flutter_test`. List them in `deps` like any other target:
+`flutter.pub` turns `pubspec.lock` into Bazel targets. Every package in the lock gets a target in the hub repository (a package you map with `resolve` is your target, see "Packages in your workspace" below): `@deps//:collection`, `@deps//:url_launcher`, `@deps//:flutter_test`. List them in `deps` like any other target:
 
 ```starlark
 flutter_application(
@@ -201,6 +201,30 @@ The Flutter SDK packages a lock lists with `source: sdk` build too. `package:flu
 #### Pub packages' assets
 
 A package's `flutter: assets:` are bundled at `packages/<package>/<path>`, as `flutter build` bundles them. A listed image ships its resolution variants from the `<number>x/` directories beside it. A listed directory (a trailing slash) ships the files directly in it, and nothing from the directories below it. An entry with `platforms:` ships only in builds for those platforms, and an entry with `flavors:` ships only in a build of one of those flavors (an application's `flavor`), and in no build without one. Two entries that give one file different flavors fail the build, as `flutter build` does. A package's `flutter: shaders:` entries follow the same rules. A name with a space or a non-ASCII character is stored percent-encoded, the form the engine asks for, and listed in the manifest as written.
+
+#### Packages in your workspace (`path:` dependencies, forks)
+
+A `path:` dependency in `pubspec.yaml` is a package whose files are in your repository, and `pubspec.lock` lists it with `source: path`. You build those files with a target of your own, and `resolve` tells the hub which one builds which package:
+
+```starlark
+flutter.pub(
+    name = "deps",
+    lock = "//apps/greeter:pubspec.lock",
+    resolve = {
+        "greeting": "//packages/greeting",              # //packages/greeting:greeting
+        "tagline": "//packages/tagline:tagline_lib",
+    },
+)
+```
+
+- The target is a `flutter_library`, a `flutter_plugin` or a `dart_library`. Its name is free; its `package_name` must be the pub package's name, or analysis fails naming the target, the key and the name it declares. For a package with assets, fonts or shaders that is also what bundles them at `packages/<package>/<path>`, as `flutter build` does. The target must be `//visibility:public`, because the hub's repository forwards to it.
+- Every `path` package of the lock must be mapped. Usually that is the target in the Bazel package at the path (`../../packages/greeting` from `apps/greeter` is `//packages/greeting`), but where the path points is pub's concern only: a package pub reads from a sibling checkout can be mapped to a target of the module Bazel takes it from (`"ui_kit": "@ui_kit"`). A `path` package with no entry fails as soon as Bazel reads the lock, naming the lock and the package, with the line to add.
+- A hosted, git or `sdk` package may be mapped as well, from any repository, to replace it for the whole graph with a fork or a patched copy. The hub's `@deps//:<package>` is then your target, a hosted package that depends on it gets it too, and the locked package is never fetched. The lock's version is not checked against your target. Naming a package the lock does not list is an error.
+- Depend on a mapped package as `@deps//:greeting`, or by its label.
+- If your target depends back on a hosted package that depends on it, the build fails with Bazel's cycle error: pub allows the cycle, and Bazel does not.
+- One lock serves one repository: the package's `BUILD.bazel` names one hub's labels (`@deps//:intl`), so two apps with two locks cannot share a package this way. Use one lock for the monorepo, resolved from a pub workspace or from one app.
+- The members of a pub workspace (`workspace:` in the root `pubspec.yaml`) are not in the lock. Depend on them by label.
+- A lock below the repository root is resolved with `bazel run @rules_flutter//flutter:pub -- get --directory=apps/greeter`.
 
 #### Plugins' Maven dependencies
 
@@ -261,7 +285,7 @@ The version of Flutter that resolves the lock matters, and a mismatch is easy to
 
 The fetched toolchain contains engine artifacts and a Dart SDK but no `bin/flutter`, so this target runs `dart pub` with `FLUTTER_ROOT` pointed at a tree assembled from the same Flutter release. That tree is fetched the first time you run the target. Because it is `dart pub` rather than `flutter pub`, it writes `pubspec.lock` and `.dart_tool/package_config.json` and does not write `.flutter-plugins-dependencies`. rules_flutter generates plugin registrants from the build graph, so nothing needs that file.
 
-A package below the workspace root, such as a `tools/*` package, is resolved by the same target with pub's `--directory` flag. The path is relative to the workspace root:
+A package below the workspace root, such as a `tools/*` package or an app of a monorepo, is resolved by the same target with pub's `--directory` flag. The path is relative to the workspace root, and the lock lands beside that package's `pubspec.yaml`:
 
 ```sh
 bazel run @rules_flutter//flutter:pub -- get --directory tools/my_tool

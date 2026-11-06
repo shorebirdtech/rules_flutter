@@ -24,10 +24,12 @@ load("//flutter/private:flutter_pub_index.bzl", "flutter_pub_index", "index_repo
 load("//flutter/private:flutter_pub_library_repo.bzl", "flutter_pub_library_repo")
 load("//flutter/private:flutter_pub_lock_hub.bzl", "flutter_pub_lock_hub")
 load("//flutter/private:flutter_pub_package.bzl", "flutter_pub_package")
+load("//flutter/private:flutter_resolved_package.bzl", "flutter_resolved_package")
 load("//flutter/private:flutter_unsupported_package.bzl", "flutter_unsupported_package", "unsupported_package_message")
 load("//flutter/private:linux_runtime_pins.bzl", "LINUX_RUNTIME")
 load("//flutter/private:lock_entry_kind.bzl", "ENGINE_PROVIDED", "FLUTTER_FRAMEWORK", "FLUTTER_SOURCE", "HOSTED", "lock_entry_kind")
 load("//flutter/private:pub_lock_sdks.bzl", "parse_lock_sdk_constraints", "version_below_lower_bound")
+load("//flutter/private:pub_resolve.bzl", "resolve_errors")
 load("//flutter/private:versions.bzl", "CHROME_FOR_TESTING", "flutter_source_sha256")
 load(":repositories.bzl", "flutter_register_toolchains")
 
@@ -70,6 +72,35 @@ _flutter_pub = tag_class(attrs = {
         doc = "The pubspec.lock file to parse.",
         mandatory = True,
         allow_single_file = True,
+    ),
+    "resolve": attr.string_keyed_label_dict(
+        doc = """\
+Lock packages, each mapped to the target that builds it: a `flutter_library`,
+`flutter_plugin` or `dart_library` whose `package_name` is the pub package's
+name (a target that declares another name fails analysis, naming both). The
+hub's `@<name>//:<package>` is that target, and a hosted package that depends
+on the package gets it too.
+
+Every `path` package of the lock must be mapped, to a target in the Bazel
+package at the path the lock gives, relative to the lock, in this repository.
+A hosted, git or sdk package may be mapped, to replace it for the whole graph
+with a fork or a patched copy, from any repository; the locked package is then
+not fetched, and its version is not checked. Naming a package the lock does
+not list is an error.
+
+```starlark
+flutter.pub(
+    name = "deps",
+    lock = "//apps/greeter:pubspec.lock",
+    resolve = {
+        "greeting": "//packages/greeting",
+        "tagline": "//packages/tagline:tagline_lib",
+        "intl": "//third_party/intl",  # replaces the locked hosted package
+    },
+)
+```
+""",
+        default = {},
     ),
     "ignore_hooks": attr.string_list(
         doc = "Pub package names whose `hook/build.dart` is knowingly " +
@@ -179,6 +210,11 @@ def _toolchain_extension(module_ctx):
             hub_name = pub_tag.name
             lock_content = module_ctx.read(pub_tag.lock)
             lock_pkgs = parse_pubspec_lock(lock_content)
+
+            # Before anything else is checked, so a wrong map is not masked.
+            resolve_problems = resolve_errors(pub_tag.lock, hub_name, lock_pkgs, pub_tag.resolve)
+            if resolve_problems:
+                fail("\n\n".join(resolve_problems))
             ignore_hooks = {pkg_name: True for pkg_name in pub_tag.ignore_hooks}
 
             # Determine the Flutter version to use for SDK packages.
@@ -212,11 +248,16 @@ def _toolchain_extension(module_ctx):
             hosted = {}
             flutter_source = {}
             framework = {}
+            resolved = {}  # mapped to a workspace target: one repository, whatever the lock says
             unsupported = {}
             all_package_names = []
             for name, info in lock_pkgs.items():
                 source = info.get("source", "unknown")
                 kind = lock_entry_kind(name, source)
+                if name in pub_tag.resolve:
+                    all_package_names.append(name)
+                    resolved[name] = info
+                    continue
                 if kind == ENGINE_PROVIDED:
                     continue
                 all_package_names.append(name)
@@ -229,9 +270,10 @@ def _toolchain_extension(module_ctx):
                 elif kind == FLUTTER_FRAMEWORK:
                     framework[name] = info
                 else:
-                    # A git or path package. The hub still loads, so an app
-                    # that only lists it builds. Its target fails when
-                    # something depends on it.
+                    # A git package, or a source rules_flutter has never heard
+                    # of (a `path` package is always mapped, above). The hub
+                    # still loads, so an app that only lists it builds. Its
+                    # target fails when something depends on it.
                     unsupported[name] = unsupported_package_message(
                         lock = str(pub_tag.lock),
                         package = name,
@@ -253,6 +295,19 @@ def _toolchain_extension(module_ctx):
                     name = source_repo(hub_name, name),
                     package_name = name,
                     message = message,
+                )
+
+            # A mapped package is one repository, the workspace target the user
+            # mapped it to, so it sits among the index's `other` packages
+            # whatever the lock lists it from: a hosted package that depends on
+            # it reaches the target, the hub's label for it is the same
+            # repository, and the locked package is not fetched.
+            for name in resolved:
+                flutter_resolved_package(
+                    name = source_repo(hub_name, name),
+                    package_name = name,
+                    actual = str(pub_tag.resolve[name]),
+                    lock = str(pub_tag.lock),
                 )
 
             # Create a source repo and a library repo for each built package

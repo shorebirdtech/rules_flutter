@@ -82,9 +82,17 @@ class BazelResult {
 
 /// The workspace a [PubInputsFixture] materialised.
 class PubInputsWorkspace {
-  PubInputsWorkspace._(this._ws, this.serverUrl, this._hosted);
+  PubInputsWorkspace._(
+    this._ws,
+    this.serverUrl,
+    this._hosted,
+    this._lockPackage,
+  );
 
   final EditableWorkspace _ws;
+
+  /// The directory of `pubspec.lock`, relative to the root; empty for the root.
+  final String _lockPackage;
 
   /// The `file://` URL the lock's hosted entries name.
   final String serverUrl;
@@ -147,7 +155,8 @@ class PubInputsWorkspace {
   }
 
   /// Replace `pubspec.lock`, for a test that changes what the hub holds.
-  void writeLock(String lock) => file('pubspec.lock').writeAsStringSync(lock);
+  void writeLock(String lock) =>
+      file(p.posix.join(_lockPackage, 'pubspec.lock')).writeAsStringSync(lock);
 
   /// The lock for the hosted packages this workspace was made with, plus
   /// [entries]: raw `packages:` entries, indented two spaces.
@@ -166,6 +175,8 @@ class PubInputsFixture {
     this.files = const {},
     this.overlayRoots = const [],
     this.spokes = const [],
+    this.resolve = const {},
+    this.lockPackage = '',
   });
 
   /// The hosted packages: archives are made and listed in the lock.
@@ -183,6 +194,15 @@ class PubInputsFixture {
 
   /// Spoke names to `use_repo` beyond the hosted packages' own.
   final List<String> spokes;
+
+  /// `flutter.pub(resolve = {...})`: package name to the label of its target.
+  /// The packages' files go in [files], their lock entries in
+  /// [extraLockEntries].
+  final Map<String, String> resolve;
+
+  /// The Bazel package of `pubspec.lock`, so a monorepo's lock sits at
+  /// `apps/app/pubspec.lock`; empty for the root.
+  final String lockPackage;
 
   /// The `pubspec.lock` text for [hosted] served from [serverUrl].
   static String renderLock(
@@ -298,7 +318,8 @@ flutter.toolchain(flutter_version = "$flutterVersion")
 ${overlayRoots.isEmpty ? '' : 'flutter.plugin_overlays(roots = ${jsonEncode(overlayRoots)})'}
 flutter.pub(
     name = "$pubHub",
-    lock = "//:pubspec.lock",
+    lock = "//$lockPackage:pubspec.lock",
+${resolve.isEmpty ? '' : '    resolve = {${resolve.entries.map((e) => '${jsonEncode(e.key)}: ${jsonEncode(e.value)}').join(', ')}},'}
 )
 use_repo(flutter, "$pubHub"${spokeNames.map((n) => ', "${pubHub}__$n"').join()})
 ''';
@@ -318,14 +339,15 @@ use_repo(flutter, "$pubHub"${spokeNames.map((n) => ', "${pubHub}__$n"').join()})
       if (userConfig != null) '.bazelrc.user': userConfig,
       'MODULE.bazel': module,
       'BUILD.bazel': '',
-      'pubspec.lock': renderLock(
+      if (lockPackage.isNotEmpty) p.posix.join(lockPackage, 'BUILD.bazel'): '',
+      p.posix.join(lockPackage, 'pubspec.lock'): renderLock(
         hosted,
         serverUrl,
         extraEntries: extraLockEntries,
       ),
       ...files,
     });
-    return PubInputsWorkspace._(ws, serverUrl, hosted);
+    return PubInputsWorkspace._(ws, serverUrl, hosted, lockPackage);
   }
 }
 

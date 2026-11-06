@@ -12,9 +12,10 @@ source) is two repositories, made by the one module extension:
   the package's dependency cycle as one library, in the repository of the
   cycle's first package by name, which the others alias.
 
-`package:flutter` (`flutter_framework_package`), and the stub for a lock entry
-nothing supplies, is one repository named `<hub>__<package>` and is its own
-library.
+`package:flutter` (`flutter_framework_package`), the stub for a lock entry
+nothing supplies, and a package `flutter.pub(resolve = ...)` maps to a workspace
+target (`flutter_resolved_package`) are each one repository named
+`<hub>__<package>`, which is its own library.
 
 Library repositories read what source repositories record (their pubspec
 dependencies, and `MEMBER_FILE`), which is why the source repositories read
@@ -93,8 +94,8 @@ def read_index(ctx, hub):
       `struct(built, other)`: `built`, a dict of the names of the built
       packages (hosted ones and Flutter SDK ones built from the Flutter
       source; each has a library repository); `other`, a dict of the names of
-      the lock's other entries (`package:flutter`, and entries nothing
-      supplies), whose `<hub>__<name>` repository is the library.
+      the lock's other entries (`package:flutter`, the lock's path
+      packages, and entries nothing supplies), whose `<hub>__<name>` repository is the library.
     """
     index = json.decode(read_sibling_file(ctx, index_repo(hub), _INDEX_FILE))
     return struct(
@@ -128,7 +129,7 @@ flutter_pub_index = repository_rule(
     implementation = _flutter_pub_index_impl,
     attrs = {
         "built": attr.string_list(doc = "The lock's built packages, hosted and from the Flutter source: each has a source and a library repository."),
-        "other": attr.string_list(doc = "The lock's other entries: `package:flutter`, and entries nothing supplies."),
+        "other": attr.string_list(doc = "The lock's other entries: `package:flutter`, the `path` packages (aliases to workspace targets), and entries nothing supplies."),
     },
     doc = "The packages one `flutter.pub()` hub's repositories plan against.",
 )

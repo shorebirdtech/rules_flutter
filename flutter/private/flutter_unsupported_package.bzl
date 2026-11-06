@@ -1,7 +1,8 @@
 """Spoke for a lock entry rules_flutter has no repository for.
 
 A `pubspec.lock` lists packages from sources rules_flutter cannot provide: git
-and path packages. (Hosted packages and `sdk: flutter` packages it builds; see
+packages, and sources it has never heard of. (Hosted packages and `sdk: flutter`
+packages it builds, and `path` packages are the user's own targets; see
 `lock_entry_kind.bzl`.) A hub that failed to load over such an entry would break
 every app that merely lists it, a git-sourced `dev_dependencies` entry being the
 usual case, even though nothing in Bazel uses it.
@@ -34,11 +35,11 @@ def unsupported_package_message(lock, package, source):
     Returns:
         The message.
     """
-    if source == "git" or source == "path":
+    if source == "git":
         advice = (
             "rules_flutter fetches hosted packages and builds the Flutter SDK packages, " +
-            "not {} packages. Depend on a hosted release of \"{}\" and re-resolve the lock."
-        ).format(source, package)
+            "not git packages. Depend on a hosted release of \"{}\" and re-resolve the lock."
+        ).format(package)
     else:
         advice = (
             "rules_flutter fetches hosted packages and builds the Flutter SDK packages, " +

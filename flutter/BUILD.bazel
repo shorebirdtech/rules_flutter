@@ -219,9 +219,11 @@ bzl_library(
     deps = [
         ":repositories",
         "//flutter/private:flutter_framework_package",
+        "//flutter/private:flutter_resolved_package",
         "//flutter/private:flutter_unsupported_package",
         "//flutter/private:lock_entry_kind",
         "//flutter/private:pub_lock_sdks",
+        "//flutter/private:pub_resolve",
     ],
 )
 

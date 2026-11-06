@@ -6,7 +6,8 @@ writes one for every `sdk: flutter` package the app's dependencies reach, not
 only the ones the app names: `integration_test` brings `flutter_driver`, which
 brings `fuchsia_remote_debug_protocol`. A list of package names would be wrong
 the day a Flutter release adds one, so the only names this file knows are the
-two `sdk` packages that are not built like the rest.
+two `sdk` packages that are not built like the rest. A `path` package is the
+user's own, built by the target `flutter.pub(resolve = ...)` names for it.
 """
 
 # A package fetched from a pub registry.
@@ -23,7 +24,10 @@ ENGINE_PROVIDED = "engine_provided"
 # pub-package writer, as a hosted package is built from its archive.
 FLUTTER_SOURCE = "flutter_source"
 
-# A git or path package, or a source rules_flutter has never heard of.
+# A `path` package: a target in the workspace, named by `flutter.pub(resolve = ...)`.
+PATH = "path"
+
+# A git package, or a source rules_flutter has never heard of.
 UNSUPPORTED = "unsupported"
 
 def lock_entry_kind(name, source):
@@ -35,7 +39,7 @@ def lock_entry_kind(name, source):
 
     Returns:
         One of `HOSTED`, `FLUTTER_FRAMEWORK`, `ENGINE_PROVIDED`,
-        `FLUTTER_SOURCE`, `UNSUPPORTED`.
+        `FLUTTER_SOURCE`, `PATH`, `UNSUPPORTED`.
     """
     if source == "hosted":
         return HOSTED
@@ -45,4 +49,6 @@ def lock_entry_kind(name, source):
         if name == "sky_engine":
             return ENGINE_PROVIDED
         return FLUTTER_SOURCE
+    if source == "path":
+        return PATH
     return UNSUPPORTED

@@ -177,6 +177,41 @@ bzl_library(
 )
 
 bzl_library(
+    name = "pub_resolve",
+    srcs = ["pub_resolve.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+)
+
+bzl_library(
+    name = "resolved_package",
+    srcs = ["resolved_package.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+)
+
+bzl_library(
+    name = "flutter_resolved_package",
+    srcs = ["flutter_resolved_package.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+    deps = [
+        ":flutter_pub_index",
+        ":flutter_pub_library_repo",
+    ],
+)
+
+bzl_library(
+    name = "flutter_pub_index",
+    srcs = ["flutter_pub_index.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+)
+
+bzl_library(
+    name = "flutter_pub_library_repo",
+    srcs = ["flutter_pub_library_repo.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+    deps = [":flutter_pub_index"],
+)
+
+bzl_library(
     name = "pub_lock_sdks",
     srcs = ["pub_lock_sdks.bzl"],
     visibility = ["//flutter:__subpackages__"],
