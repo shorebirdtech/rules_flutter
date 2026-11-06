@@ -903,9 +903,13 @@ android_ndk_repository_extension = use_extension(
     "@rules_android_ndk//:extension.bzl",
     "android_ndk_repository_extension",
 )
+# Your app's `min_sdk_version` (24 unless you set it).
+android_ndk_repository_extension.configure(api_level = 24)
 use_repo(android_ndk_repository_extension, "androidndk")
 register_toolchains("@androidndk//:all")
 ```
+
+**NDK `api_level`.** Set it to the app's `min_sdk_version`, as Gradle compiles native code at `minSdkVersion`. The extension defaults to 31, so without `configure` your `cc_library` code (an FFI library, a plugin's C code) is built against API 31 and can call functions that devices on API 24 to 30 lack. Such a library installs, and then fails to load there with an unresolved symbol. The root module's `configure` is the one that counts; a dependency's is ignored.
 
 **Environment variables.** Two are needed, and both are read by repository rules while Bazel fetches:
 
