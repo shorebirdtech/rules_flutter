@@ -45,7 +45,7 @@ jobs:
     name: Unit tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
         with:
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
@@ -58,20 +58,18 @@ jobs:
     name: pre-commit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.13"
-      - uses: j178/prek-action@v3.0.1
-        with:
-          # Keep in step with prek in multitool.lock.json
-          prek-version: 0.5.5
+      # The prek pinned in multitool.lock.json
+      - run: bazel run @multitool//tools/prek -- -C "$PWD" run --all-files --show-diff-on-failure
   dart-tool-tests:
     name: Dart tool tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: dart-lang/setup-dart@v1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1.8.1
       - name: Run dev_tool tests
         working-directory: tools/dev_tool
         # Exclude e2e tests (tagged @Tags(['e2e'])): they need a browser/CDP,
@@ -102,7 +100,7 @@ jobs:
     # SDK, then AOT-compiles the dev tool before the run itself starts.
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
         with:
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
@@ -118,7 +116,7 @@ jobs:
       # The test process itself resolves this package's pubspec, and dwds
       # requires a Dart newer than the runner's default. The tool under test
       # runs on the hermetic Flutter toolchain either way.
-      - uses: dart-lang/setup-dart@v1
+      - uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1.8.1
         with:
           sdk: 3.13.0
       - name: Install xvfb
@@ -178,7 +176,7 @@ jobs:
           - workspace: codegen
             os: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # See the note above `env` for why only hello_world saves. The output base
       # setup-bazel sets (~/.bazel; D:/_bazel on Windows) takes precedence over
       # the Windows step's --output_user_root and is as short.
