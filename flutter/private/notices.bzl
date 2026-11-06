@@ -9,6 +9,7 @@ the costly part of bundling.
 """
 
 load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
+load("//flutter:providers.bzl", "FlutterInfo")
 load("//flutter/private:exec_groups.bzl", "PORTABLE")
 load("//flutter/private:path_mapping.bzl", "file_ref", "json_config_args")
 
@@ -40,6 +41,24 @@ def notices_asset_key(web):
         `NOTICES` for the web, `NOTICES.Z` otherwise.
     """
     return "NOTICES" if web else "NOTICES.Z"
+
+def additional_licenses_of(deps, own = []):
+    """The `flutter: licenses:` files of the packages `deps` reach, in the order they are appended.
+
+    flutter_tools appends them in the order its walk of the package graph meets
+    the packages, which a build cannot recover: it depends on the order of
+    each pubspec's dependencies. They are ordered by package name instead,
+    each package's files as it lists them, and the program's own last.
+
+    Args:
+        deps: Targets; those with `FlutterInfo` contribute.
+        own: `(package name, [File])` of the program itself, if it lists any.
+
+    Returns:
+        A list of `(package name, [File])`, for `flutter_notices_action`.
+    """
+    listed = depset(transitive = [dep[FlutterInfo].additional_licenses for dep in deps if FlutterInfo in dep]).to_list()
+    return [(entry.package_name, list(entry.files)) for entry in sorted(listed, key = lambda entry: entry.package_name)] + own
 
 def flutter_notices_action(ctx, tools, packages, additional, engine_license, web):
     """Merge licence files into the program's `NOTICES` asset.

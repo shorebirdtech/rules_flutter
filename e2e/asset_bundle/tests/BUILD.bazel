@@ -272,3 +272,12 @@ notices_test(
     subdir = "assets",
     web = True,
 )
+
+# Property: a pub package's `flutter: licenses:` files are appended to the
+# program's `NOTICES` as they are, after the sorted entries, as flutter_tools
+# appends them.
+notices_test(
+    name = "notices_end_with_the_licences_a_pub_package_lists_test",
+    additional = ["//registry:fx_extra/1.0.0/THIRD_PARTY.txt"],
+    bundle = "//:app_with_fx_extra_bundle",
+)

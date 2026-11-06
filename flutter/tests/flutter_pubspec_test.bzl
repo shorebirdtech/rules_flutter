@@ -11,6 +11,7 @@ load(
     "//flutter/private:flutter_pubspec.bzl",
     "flutter_assets_block",
     "flutter_block",
+    "flutter_licenses_block",
     "flutter_plugin_block",
 )
 
@@ -376,6 +377,39 @@ def _asset_transformers_test_impl(ctx):
 
 _asset_transformers_test = unittest.make(_asset_transformers_test_impl)
 
+# ---------------------------------------------------------------------------
+# flutter_licenses_block
+# ---------------------------------------------------------------------------
+
+# A pubspec whose `flutter:` block has the `licenses:` key set to `value`. The
+# key is pubspec's, not an attribute of a rule, which the linter takes it for.
+def _pubspec_with_licenses(value):
+    # buildifier: disable=attr-licenses
+    return {"flutter": {"licenses": value}}
+
+def _licenses_listed_test_impl(ctx):
+    env = unittest.begin(ctx)
+    asserts.equals(
+        env,
+        ["THIRD_PARTY.txt", "licenses/other"],
+        flutter_licenses_block(_pubspec_with_licenses(["THIRD_PARTY.txt", "licenses/other"])),
+    )
+
+    # An item that is not a string is taken as its text, as flutter_tools does.
+    asserts.equals(env, ["7"], flutter_licenses_block(_pubspec_with_licenses([7])))
+    return unittest.end(env)
+
+_licenses_listed_test = unittest.make(_licenses_listed_test_impl)
+
+def _licenses_absent_test_impl(ctx):
+    env = unittest.begin(ctx)
+    asserts.equals(env, [], flutter_licenses_block({"name": "foo"}))
+    asserts.equals(env, [], flutter_licenses_block({"flutter": {}}))
+    asserts.equals(env, [], flutter_licenses_block(_pubspec_with_licenses("LICENSE")))
+    return unittest.end(env)
+
+_licenses_absent_test = unittest.make(_licenses_absent_test_impl)
+
 def flutter_pubspec_test_suite(name):
     unittest.suite(
         name,
@@ -393,4 +427,6 @@ def flutter_pubspec_test_suite(name):
         _t11_test,
         _t12_test,
         _asset_transformers_test,
+        _licenses_listed_test,
+        _licenses_absent_test,
     )

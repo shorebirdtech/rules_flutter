@@ -51,7 +51,7 @@ load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url")
 load("//flutter/private:asset_variants.bzl", "variant_scale")
 load("//flutter/private:cmake_link_libraries.bzl", "parse_cmake_link_libraries")
 load("//flutter/private:flutter_pub_index.bzl", "MEMBER_DART", "MEMBER_FILE", "MEMBER_FLUTTER", "MEMBER_OVERLAY", "library_label", "read_index", "sibling_path", "source_repo")
-load("//flutter/private:flutter_pubspec.bzl", "flutter_assets_block", "flutter_plugin_block")
+load("//flutter/private:flutter_pubspec.bzl", "flutter_assets_block", "flutter_licenses_block", "flutter_plugin_block")
 load("//flutter/private:pinned.bzl", "pinned")
 load("//flutter/private:swiftpm_dependencies.bzl", "find_unsupported_swiftpm_dependencies")
 
@@ -742,6 +742,25 @@ def _build_pkg_assets(ctx, package, parsed_assets):
                 restrictions.add(variant, entry.platforms)
     return struct(files = files, platforms = restrictions.platforms())
 
+def _build_additional_licenses(ctx, package, paths):
+    """The labels of the files a package lists under `flutter: licenses:`.
+
+    flutter_tools fails the build when one is missing; here the fetch does,
+    naming the package and the file, since a label for it cannot be written.
+
+    Returns:
+        The package-relative paths, in the order listed, as labels of the
+        package's own files.
+    """
+    labels = []
+    for path in paths:
+        _checked_file_name(package, "licence file", path)
+        file = ctx.path(path)
+        if not file.exists or file.is_dir:
+            fail("package {}: its `flutter: licenses:` lists {}, which is not a file of the package.".format(package, repr(path)))
+        labels.append(":" + path)
+    return labels
+
 def _build_pkg_shaders(package, parsed_shaders):
     """Expand the package's `flutter: shaders:` entries into files.
 
@@ -807,7 +826,7 @@ _SHADER_INCLUDES_GLOB = """    shader_includes = glob(
         allow_empty = True,
     ),"""
 
-def _format_pub_asset_attrs(fonts_json_str, font_files, pkg_assets, pkg_shaders, pkg_asset_platforms = {}, pkg_shader_platforms = {}):
+def _format_pub_asset_attrs(fonts_json_str, font_files, pkg_assets, pkg_shaders, pkg_asset_platforms = {}, pkg_shader_platforms = {}, additional_licenses = []):
     """Render the four pub-asset attrs as BUILD source, omitting empty ones."""
     parts = []
     if fonts_json_str:
@@ -820,6 +839,8 @@ def _format_pub_asset_attrs(fonts_json_str, font_files, pkg_assets, pkg_shaders,
         parts.append("    pkg_asset_platforms = {},".format(_format_list_dict_literal(pkg_asset_platforms)))
     if pkg_shaders:
         parts.append("    pkg_shaders = {},".format(_format_label_dict_literal(pkg_shaders)))
+    if additional_licenses:
+        parts.append("    additional_licenses = {},".format(repr(additional_licenses)))
     if pkg_shader_platforms:
         parts.append("    pkg_shader_platforms = {},".format(_format_list_dict_literal(pkg_shader_platforms)))
     if pkg_shaders:
@@ -937,6 +958,7 @@ def make_flutter_member_build_content(
         windows_link = None,
         pkg_asset_platforms = {},
         pkg_shader_platforms = {},
+        additional_licenses = [],
         has_android_lib = False):
     """Generate BUILD content for the source repository of a Flutter pub package.
 
@@ -994,6 +1016,7 @@ def make_flutter_member_build_content(
         linux_link: The result of `parse_cmake_link_libraries` for the plugin's
             `linux/CMakeLists.txt`, or None.
         windows_link: Same, for `windows/CMakeLists.txt`.
+        additional_licenses: Labels of the files `flutter: licenses:` lists.
 
     Returns:
         BUILD.bazel content as a string.
@@ -1140,7 +1163,7 @@ flutter_windows_plugin_library(
             ios_lines = ios_lines,
         )
 
-    pub_attrs = _format_pub_asset_attrs(fonts_json_str, font_files, pkg_assets, pkg_shaders, pkg_asset_platforms, pkg_shader_platforms)
+    pub_attrs = _format_pub_asset_attrs(fonts_json_str, font_files, pkg_assets, pkg_shaders, pkg_asset_platforms, pkg_shader_platforms, additional_licenses)
 
     # The `lib/` glob is `allow_empty`: a pub package can be only assets or native
     # code, with no Dart.
@@ -1761,6 +1784,7 @@ def _flutter_pub_package_impl(ctx):
     language_version = derive_language_version(pubspec.sdk_constraint)
     plugin_block = flutter_plugin_block(pubspec.fields)
     asset_block = flutter_assets_block(pubspec.fields)
+    additional_licenses = _build_additional_licenses(ctx, ctx.attr.package_name, flutter_licenses_block(pubspec.fields))
     for asset in asset_block.assets:
         if asset.transformers:
             fail((
@@ -1991,11 +2015,12 @@ def _flutter_pub_package_impl(ctx):
             pkg_asset_platforms = pkg_assets.platforms,
             pkg_shaders = pkg_shaders.files,
             pkg_shader_platforms = pkg_shaders.platforms,
+            additional_licenses = additional_licenses,
             linux_link = linux_link,
             windows_link = windows_link,
             has_android_lib = bool(android_src_dir or android_has_resources or android_native_build),
         )
-    elif has_asset_contributions or uses_material_icons:
+    elif has_asset_contributions or uses_material_icons or additional_licenses:
         # No plugin block, but the pubspec has flutter.fonts/assets/shaders (or
         # asks for the Material icon font). A Flutter member (rather than
         # rules_dart's) so the metadata propagates via
@@ -2013,6 +2038,7 @@ def _flutter_pub_package_impl(ctx):
             pkg_asset_platforms = pkg_assets.platforms,
             pkg_shaders = pkg_shaders.files,
             pkg_shader_platforms = pkg_shaders.platforms,
+            additional_licenses = additional_licenses,
         )
         android_src_dir = ""
         android_java_package = ""
@@ -2038,7 +2064,7 @@ def _flutter_pub_package_impl(ctx):
         android_native_build = False
 
     ctx.file("BUILD.bazel", build_content)
-    is_flutter_member = plugin_block.present or has_asset_contributions or uses_material_icons
+    is_flutter_member = plugin_block.present or has_asset_contributions or uses_material_icons or bool(additional_licenses)
     ctx.file(MEMBER_FILE, json.encode({
         "kind": MEMBER_FLUTTER if is_flutter_member else MEMBER_DART,
         "material_icons": uses_material_icons,

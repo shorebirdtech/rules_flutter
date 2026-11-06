@@ -44,6 +44,7 @@ fixture_pubs = use_extension("//tools:pubs.bzl", "fixture_pubs")
 use_repo(
     fixture_pubs,
     fx_dirs = "fixture_lib__fx_dirs",
+    fx_extra = "fixture_lib__fx_extra",
     fx_flavors = "fixture_lib__fx_flavors",
     fx_font_borrower = "fixture_lib__fx_font_borrower",
     fx_names = "fixture_lib__fx_names",

@@ -68,6 +68,26 @@ def own_asset_contributions(ctx, package_name):
         for f in ctx.files.assets
     ]
 
+ADDITIONAL_LICENSES_ATTR = attr.label_list(
+    doc = "Licence files beyond the package's `LICENSE`: what its pubspec's `flutter: licenses:` lists. " +
+          "An application that depends on the package appends them to its `NOTICES` as they are.",
+    allow_files = True,
+)
+
+def own_additional_licenses(ctx, package_name):
+    """The `additional_licenses` entries for the `additional_licenses` of a library or plugin.
+
+    Args:
+        ctx: Rule context with an `additional_licenses` attribute.
+        package_name: The Dart package name the files are listed under.
+
+    Returns:
+        A list of one `struct(package_name, files)`, or none for a package that lists nothing.
+    """
+    if not ctx.files.additional_licenses:
+        return []
+    return [struct(package_name = package_name, files = tuple(ctx.files.additional_licenses))]
+
 def build_pub_contributions(package_name, fonts_json, font_files_dict, pkg_assets_dict, pkg_shaders_dict, shader_includes = [], pkg_asset_platforms = {}, pkg_shader_platforms = {}):
     """Build pub_fonts/pub_assets/pub_shaders contribution structs from rule attrs.
 
@@ -409,6 +429,7 @@ def _flutter_library_impl(ctx):
             pub_fonts = extra_pub_fonts,
             pub_assets = extra_pub_assets,
             pub_shaders = extra_pub_shaders,
+            additional_licenses = own_additional_licenses(ctx, package_name),
         ),
     ]
 
@@ -481,6 +502,7 @@ flutter_library = rule(
             doc = "Map of asset File label -> package-relative path (mirrors `flutter.assets` in pubspec.yaml). Bundled at `packages/<package_name>/<path>` (or bare `<path>` when `package_name` is empty); also included in AssetManifest.",
             allow_files = True,
         ),
+        "additional_licenses": ADDITIONAL_LICENSES_ATTR,
         "pkg_asset_platforms": PKG_ASSET_PLATFORMS_ATTR,
         "pkg_shader_platforms": PKG_SHADER_PLATFORMS_ATTR,
         "_sky_engine": SKY_ENGINE_ATTR,

@@ -7,6 +7,7 @@ are what these functions take:
 - `flutter_plugin_block` — `flutter.plugin` for plugin-spoke emission.
 - `flutter_assets_block` — `flutter.{fonts,assets,shaders,uses-material-design}`
   for the asset-bundling pipeline.
+- `flutter_licenses_block` — `flutter.licenses`, the files `NOTICES` appends.
 
 Schema reference (Flutter's pubspec):
 
@@ -30,6 +31,8 @@ Schema reference (Flutter's pubspec):
         - path: <path>               # map form
           flavors: [<flavor>, ...]
           platforms: [<platform>, ...]
+      licenses:
+        - <path>                     # a file of the package, appended to NOTICES
       plugin:
         implements: <umbrella>
         platforms:
@@ -211,3 +214,19 @@ def flutter_assets_block(fields):
         shaders = _project_shaders(flutter.get("shaders")),
         uses_material_design = umd_raw if type(umd_raw) == "bool" else False,
     )
+
+def flutter_licenses_block(fields):
+    """Project `flutter.licenses`, the licence files a package adds to `NOTICES`.
+
+    Args:
+        fields: A pubspec's `fields`, as `read_pubspec` returns them.
+
+    Returns:
+        The paths, relative to the package, in the order listed. Each item is
+        taken as a string, as flutter_tools does (`flutter_manifest.dart`);
+        a `licenses:` that is not a list names none.
+    """
+    raw = flutter_block(fields).get("licenses")
+    if type(raw) != "list":
+        return []
+    return [str(item) for item in raw]

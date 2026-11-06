@@ -21,6 +21,7 @@ _HUB = "fixture"
 # The packages under `//registry`, with the version of each.
 PACKAGES = {
     "fx_dirs": "1.0.0",
+    "fx_extra": "1.0.0",
     "fx_flavors": "1.0.0",
     "fx_font_borrower": "1.0.0",
     "fx_font_owner": "1.0.0",

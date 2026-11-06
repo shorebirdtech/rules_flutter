@@ -1,0 +1,1 @@
+Licence text of a part of fx_extra that LICENSE does not cover.

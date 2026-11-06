@@ -16,7 +16,7 @@ load("//flutter/private:flutter_info.bzl", "dedup_plugins")
 load("//flutter/private:flutter_library.bzl", "aggregate_pub_contributions", "package_relative", "ships_on")
 load("//flutter/private:flutter_shader_compile.bzl", "flutter_shader_compile_action")
 load("//flutter/private:native_sources.bzl", "native_sources_aspect")
-load("//flutter/private:notices.bzl", "NOTICES_ATTRS", "flutter_notices_action", "notices_asset_key")
+load("//flutter/private:notices.bzl", "NOTICES_ATTRS", "additional_licenses_of", "flutter_notices_action", "notices_asset_key")
 load("//flutter/private:plugin_registrant.bzl", "generate_dart_plugin_registrant", "generate_dev_plugin_registrants")
 load("//flutter/private:validation.bzl", "validate_dart_defines")
 
@@ -817,7 +817,7 @@ def flutter_build_assets(ctx, tools, output_dir, deps, target_platform, compiled
         ctx = ctx,
         tools = tools,
         packages = own_package,
-        additional = own_additional,
+        additional = additional_licenses_of(deps, own_additional),
         engine_license = ctx.file._engine_license,
         web = web,
     )
