@@ -123,6 +123,7 @@ dart_binary(
 #           sends: what a web app running an integration test looks like from
 #           the host.
 #   deps  — packages the test imports directly, beyond :lib and test.
+#   target_compatible_with — the hosts the test runs on, when not every one.
 _TEST_DEPS = [
     ":lib",
     "@dev_tool_deps//:test",
@@ -250,6 +251,9 @@ _UNIT_TESTS = {
         "deps": ["@dev_tool_deps//:fake_async"],
     },
     "macos_gui_test": {
+        # Its cases are `@TestOn('mac-os')`, and a suite with none to run
+        # fails: another host skips the target instead.
+        "target_compatible_with": ["@platforms//os:macos"],
         "gui": True,
         "harness": True,
         "lifetime": True,
@@ -386,6 +390,7 @@ _UNIT_TESTS = {
            (["test/e2e/macos_gui.dart"] if cfg.get("gui") else []),
     data = cfg.get("data", []),
     main = "test/%s.dart" % name,
+    target_compatible_with = cfg.get("target_compatible_with", []),
     # A test that imports a fakes package itself lists it too; each once.
     deps = {
         dep: None
