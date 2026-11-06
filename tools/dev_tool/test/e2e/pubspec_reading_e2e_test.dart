@@ -84,6 +84,130 @@ void main() {
     }
   });
 
+  group('a flutter block flutter build refuses', () {
+    // Package name to its `flutter:` block, and what flutter_tools says of it
+    // (every refusal is a case in `flutter_pubspec_test.bzl`; these go through
+    // the fetch). The entry is named by where it is in the pubspec.
+    final refused = <String, (String, List<String>)>{
+      'asset_not_a_list': (
+        'flutter:\n  assets: a.txt\n',
+        ['flutter.assets', 'Expected "assets" to be a list'],
+      ),
+      'asset_unknown_platform': (
+        'flutter:\n  assets:\n    - path: a.txt\n      platforms: [fuchsia]\n',
+        ['flutter.assets[0]', 'Invalid platform(s): "fuchsia"'],
+      ),
+      'asset_without_path': (
+        'flutter:\n  assets:\n    - flavors: [x]\n',
+        ['flutter.assets[0]', 'containing a "path" entry'],
+      ),
+      'shader_empty_entry': (
+        'flutter:\n  shaders:\n    - ""\n',
+        ['flutter.shaders[0]', 'null or empty uri'],
+      ),
+      'font_bad_weight': (
+        'flutter:\n  fonts:\n    - family: F\n      fonts:\n'
+            '        - asset: f.ttf\n          weight: 450\n',
+        ['flutter.fonts[0]', 'Invalid value 450', 'weight'],
+      ),
+      'font_bad_style': (
+        'flutter:\n  fonts:\n    - family: F\n      fonts:\n'
+            '        - asset: f.ttf\n          style: oblique\n',
+        ['flutter.fonts[0]', 'Invalid value oblique', 'style'],
+      ),
+      'asset_bad_uri': (
+        'flutter:\n  assets:\n    - "1a:b"\n',
+        ['flutter.assets[0]', 'invalid uri: 1a:b'],
+      ),
+      'unknown_flutter_key': (
+        'flutter:\n  colour: red\n',
+        ['flutter.colour', 'Unexpected child "colour" found under "flutter"'],
+      ),
+      'material_design_not_bool': (
+        'flutter:\n  uses-material-design: yes please\n',
+        ['flutter.uses-material-design', 'to be a bool'],
+      ),
+      'license_not_a_string': (
+        'flutter:\n  licenses:\n    - 7\n',
+        ['flutter.licenses', 'element at index 0 was a int'],
+      ),
+      'fonts_not_maps': (
+        'flutter:\n  fonts:\n    - F\n',
+        ['flutter.fonts', 'to contain maps'],
+      ),
+    };
+    late PubInputsWorkspace ws;
+
+    setUpAll(() async {
+      ws = await PubInputsFixture(
+        hosted: [
+          for (final entry in refused.entries)
+            HostedPackage(
+              entry.key,
+              pubspec: _pubspec(entry.key, entry.value.$1),
+            ),
+        ],
+      ).materialize();
+    });
+
+    for (final entry in refused.entries) {
+      test(
+        '${entry.key} fails the fetch, naming the package and entry',
+        () async {
+          final result = await ws.loadSpoke(entry.key);
+          expect(result.succeeded, isFalse, reason: 'built from it:\n$result');
+          expect(refusedAtFetch(result), isTrue, reason: '$result');
+          expect(
+            namesPackage(result.output, entry.key),
+            isTrue,
+            reason: '$result',
+          );
+          for (final mention in entry.value.$2) {
+            expect(result.output, contains(mention), reason: '$result');
+          }
+        },
+      );
+    }
+  });
+
+  group('the forms of the flutter block flutter build accepts', () {
+    late PubInputsWorkspace ws;
+
+    setUpAll(() async {
+      ws = await PubInputsFixture(
+        hosted: [
+          HostedPackage(
+            'odd_but_valid',
+            pubspec: _pubspec(
+              'odd_but_valid',
+              'flutter:\n'
+                  '  assets:\n'
+                  '    - a.txt\n'
+                  '    - {}\n'
+                  '    - path: b.txt\n'
+                  '      flavors: [x]\n'
+                  '      platforms: [ios, web]\n'
+                  '  shaders:\n'
+                  '  fonts:\n'
+                  '    - family: F\n'
+                  '      fonts:\n'
+                  '        - asset: f.ttf\n'
+                  '          weight: 900\n'
+                  '          style: italic\n'
+                  '    - family: G\n',
+            ),
+            files: {'a.txt': 'a', 'b.txt': 'b', 'f.ttf': 'f'},
+          ),
+        ],
+      ).materialize();
+    });
+
+    test('builds, with the files it lists', () async {
+      final result = await ws.loadSpoke('odd_but_valid');
+      expect(result.succeeded, isTrue, reason: '$result');
+    });
+  });
+
   group('the flutter block in YAML flow style', () {
     late PubInputsWorkspace ws;
 

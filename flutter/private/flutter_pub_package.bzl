@@ -54,7 +54,7 @@ load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url")
 load("//flutter/private:asset_variants.bzl", "variant_scale")
 load("//flutter/private:cmake_link_libraries.bzl", "parse_cmake_link_libraries")
 load("//flutter/private:flutter_pub_index.bzl", "MEMBER_DART", "MEMBER_FILE", "MEMBER_FLUTTER", "MEMBER_OVERLAY", "library_label", "read_index", "sibling_path", "source_repo")
-load("//flutter/private:flutter_pubspec.bzl", "flutter_assets_block", "flutter_licenses_block", "flutter_plugin_block")
+load("//flutter/private:flutter_pubspec.bzl", "flutter_assets_block", "flutter_licenses_block", "flutter_manifest_errors", "flutter_plugin_block")
 load("//flutter/private:pinned.bzl", "pinned")
 load("//flutter/private:swiftpm_dependencies.bzl", "find_unsupported_swiftpm_dependencies")
 
@@ -1913,6 +1913,11 @@ def _flutter_pub_package_impl(ctx):
     pubspec_dependencies = pubspec.dependencies
     language_version = derive_language_version(pubspec.sdk_constraint)
     plugin_block = flutter_plugin_block(pubspec.fields)
+    manifest_errors = flutter_manifest_errors(pubspec.fields)
+    if manifest_errors:
+        fail((
+            "package {}: its pubspec.yaml has `flutter:` fonts, assets or shaders that `flutter build` refuses:\n  {}"
+        ).format(ctx.attr.package_name, "\n  ".join(manifest_errors)))
     asset_block = flutter_assets_block(pubspec.fields)
     license_file = find_pub_license_file(ctx)
     additional_licenses = _build_additional_licenses(ctx, ctx.attr.package_name, flutter_licenses_block(pubspec.fields))

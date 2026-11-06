@@ -12,6 +12,7 @@ load(
     "flutter_assets_block",
     "flutter_block",
     "flutter_licenses_block",
+    "flutter_manifest_errors",
     "flutter_plugin_block",
 )
 
@@ -395,8 +396,6 @@ def _licenses_listed_test_impl(ctx):
         flutter_licenses_block(_pubspec_with_licenses(["THIRD_PARTY.txt", "licenses/other"])),
     )
 
-    # An item that is not a string is taken as its text, as flutter_tools does.
-    asserts.equals(env, ["7"], flutter_licenses_block(_pubspec_with_licenses([7])))
     return unittest.end(env)
 
 _licenses_listed_test = unittest.make(_licenses_listed_test_impl)
@@ -409,6 +408,137 @@ def _licenses_absent_test_impl(ctx):
     return unittest.end(env)
 
 _licenses_absent_test = unittest.make(_licenses_absent_test_impl)
+
+# ---------------------------------------------------------------------------
+# flutter_manifest_errors: what flutter_tools' manifest validation refuses
+# ---------------------------------------------------------------------------
+
+def _flutter(**section):
+    return {"flutter": section}
+
+# One input per refusal in flutter_manifest.dart's `_validate` for `assets`,
+# `shaders` and `fonts`, with a phrase flutter_tools' message has.
+_REFUSED = [
+    ("assets not a list", _flutter(assets = "a.txt"), 'Expected "assets" to be a list'),
+    ("shaders not a list", _flutter(shaders = {"path": "a.frag"}), 'Expected "shaders" to be a list'),
+    ("null asset entry", _flutter(assets = [None]), "null or empty uri"),
+    ("empty asset entry", _flutter(assets = [""]), "null or empty uri"),
+    ("number asset entry", _flutter(assets = [7]), "unexpected shape"),
+    ("list asset entry", _flutter(assets = [["a"]]), "unexpected shape"),
+    ("bool shader entry", _flutter(shaders = [True]), "unexpected shape"),
+    ("asset map without path", _flutter(assets = [{"flavors": ["x"]}]), 'containing a "path" entry'),
+    ("asset map with a non-string path", _flutter(assets = [{"path": 3}]), 'containing a "path" entry'),
+    ("shader map without path", _flutter(shaders = [{"platforms": ["ios"]}]), 'containing a "path" entry'),
+    ("flavors not a list", _flutter(assets = [{"path": "a", "flavors": "x"}]), 'In flavors section of asset "a"'),
+    ("flavor not a string", _flutter(assets = [{"path": "a", "flavors": [1]}]), "element at index 0 was a int"),
+    ("platforms not a list", _flutter(assets = [{"path": "a", "platforms": "ios"}]), 'In platforms section of asset "a"'),
+    ("platform not a string", _flutter(shaders = [{"path": "a", "platforms": [None]}]), "element at index 0 was a Null"),
+    ("unknown platform", _flutter(assets = [{"path": "a", "platforms": ["ios", "fuchsia"]}]), 'Invalid platform(s): "fuchsia"'),
+    ("transformers not a list", _flutter(assets = [{"path": "a", "transformers": {"package": "t"}}]), "transformers list to be a list of Map"),
+    ("transformer not a map", _flutter(assets = [{"path": "a", "transformers": ["t"]}]), "element at index 0 was a String"),
+    ("transformer without package", _flutter(assets = [{"path": "a", "transformers": [{"args": []}]}]), 'Expected "package" to be a String'),
+    ("transformer with an empty package", _flutter(assets = [{"path": "a", "transformers": [{"package": ""}]}]), 'Expected "package" to be a String'),
+    ("transformer args not a list", _flutter(assets = [{"path": "a", "transformers": [{"package": "t", "args": "x"}]}]), 'In args section of transformer using package "t"'),
+    ("transformer arg not a string", _flutter(assets = [{"path": "a", "transformers": [{"package": "t", "args": [1]}]}]), "element at index 0 was a int"),
+    ("fonts not a list", _flutter(fonts = {"family": "F"}), 'Expected "fonts" to be a list'),
+    ("fonts null", _flutter(fonts = None), 'Expected "fonts" to be a list'),
+    ("fonts starting with a non-map", _flutter(fonts = ["F"]), "to contain maps"),
+    ("a later family that is not a map", _flutter(fonts = [{"family": "F"}, "G"]), 'Unexpected child "G" found under "fonts"'),
+    ("a family key flutter does not know", _flutter(fonts = [{"family": "F", "style": "italic"}]), 'Unexpected child "style" found under "fonts"'),
+    ("a family that is not a string", _flutter(fonts = [{"family": 3}]), "Font family must either be null or a String"),
+    ("a family's fonts not a list", _flutter(fonts = [{"family": "F", "fonts": "f.ttf"}]), 'Expected "fonts" to either be null or a list'),
+    ("a font that is not a map", _flutter(fonts = [{"family": "F", "fonts": ["f.ttf"]}]), 'Expected "fonts" to be a list of maps'),
+    ("a font asset that is not a string", _flutter(fonts = [{"family": "F", "fonts": [{"asset": 3}]}]), "Expected font asset 3"),
+    ("a font asset that is null", _flutter(fonts = [{"family": "F", "fonts": [{"asset": None}]}]), "Expected font asset null"),
+    ("a weight that is not a CSS weight", _flutter(fonts = [{"family": "F", "fonts": [{"asset": "f", "weight": 450}]}]), "Invalid value 450"),
+    ("a weight that is a string", _flutter(fonts = [{"family": "F", "fonts": [{"asset": "f", "weight": "bold"}]}]), "for font -> weight"),
+    ("a style that is not normal or italic", _flutter(fonts = [{"family": "F", "fonts": [{"asset": "f", "style": "oblique"}]}]), "for font -> style"),
+    ("a font key flutter does not know", _flutter(fonts = [{"family": "F", "fonts": [{"asset": "f", "size": 1}]}]), "Unexpected key size"),
+    ("uses-material-design a string", _flutter(**{"uses-material-design": "yes"}), 'Expected "uses-material-design" to be a bool'),
+    ("uses-material-design null", _flutter(**{"uses-material-design": None}), 'Expected "uses-material-design" to be a bool'),
+    ("licenses a string", _flutter(licenses = "LICENSE"), 'Expected "licenses" to be a list of files'),
+    ("licenses null", _flutter(licenses = None), 'Expected "licenses" to be a list of files'),
+    ("a license that is not a string", _flutter(licenses = ["LICENSE", 7]), "element at index 1 was a int"),
+    ("a key under flutter flutter does not know", _flutter(colour = "red"), 'Unexpected child "colour" found under "flutter"'),
+    ("disable-swift-package-manager", _flutter(**{"disable-swift-package-manager": True}), "has moved"),
+    ("flutter that is not a map", {"flutter": ["assets"]}, 'Expected "flutter" section to be an object or null'),
+    ("asset uri with a scheme that starts with a digit", _flutter(assets = ["1a:b"]), "invalid uri: 1a:b"),
+    ("asset uri with an empty scheme", _flutter(assets = [":a"]), "invalid uri"),
+    ("asset uri with an illegal scheme character", _flutter(assets = ["a b:c"]), "invalid uri"),
+    ("asset uri with a bad port", _flutter(assets = ["http://h:xx/"]), "invalid uri"),
+    ("asset uri with an unclosed host bracket", _flutter(shaders = ["http://[::1/"]), "invalid uri"),
+    ("asset uri with two userinfo separators", _flutter(assets = ["//a@b@c/"]), "invalid uri"),
+]
+
+def _assets_refused_test_impl(ctx):
+    env = unittest.begin(ctx)
+    for name, fields, mention in _REFUSED:
+        errors = flutter_manifest_errors(fields)
+        asserts.true(env, len(errors) > 0, "{} should be refused".format(name))
+        asserts.true(
+            env,
+            any([mention in e for e in errors]),
+            "{}: expected an error with {}, got {}".format(name, repr(mention), errors),
+        )
+    return unittest.end(env)
+
+_assets_refused_test = unittest.make(_assets_refused_test_impl)
+
+def _assets_error_places_the_entry_test_impl(ctx):
+    env = unittest.begin(ctx)
+    errors = flutter_manifest_errors(_flutter(assets = ["ok.txt", {"path": "b", "platforms": ["beos"]}]))
+    asserts.equals(env, 1, len(errors))
+    asserts.true(env, errors[0].startswith("flutter.assets[1]: "), errors[0])
+    errors = flutter_manifest_errors(_flutter(fonts = [{"family": "F", "fonts": [{"asset": "a"}, {"asset": "b", "weight": 1}]}]))
+    asserts.true(env, errors[0].startswith("flutter.fonts[0]: fonts[1]: "), errors[0])
+    return unittest.end(env)
+
+_assets_error_places_the_entry_test = unittest.make(_assets_error_places_the_entry_test_impl)
+
+# Every form flutter_tools accepts, including the odd ones.
+_ACCEPTED = [
+    ("no flutter block", {"name": "p"}),
+    ("a flutter block that is null", {"flutter": None}),
+    ("empty sections", _flutter(assets = None, shaders = None, fonts = [])),
+    ("string assets", _flutter(assets = ["a.txt", "dir/"], shaders = ["s.frag"])),
+    # buildifier: disable=attr-licenses
+    ("every key flutter knows", _flutter(**{
+        "uses-material-design": True,
+        "licenses": ["LICENSE"],
+        "generate": True,
+        "config": {"x": 1},
+        "default-flavor": "f",
+        "module": {"androidX": True},
+        "plugin": {"platforms": {}},
+        "deferred-components": [],
+    })),
+    ("uris Dart parses", _flutter(
+        assets = ["a b", "%zz", "a:b", "a/b:c", "assets/a?b#c", "x://", "http://h:80/x", "//[::1]:80/", "//u:p@h/", "é.png"],
+    )),
+    ("an empty map asset", _flutter(assets = [{}], shaders = [{}])),
+    ("map assets with every key", _flutter(assets = [{
+        "path": "a",
+        "flavors": ["x"],
+        "platforms": ["android", "ios", "web", "windows", "linux", "macos"],
+        "transformers": [{"package": "t"}, {"package": "u", "args": ["--x"]}],
+    }], shaders = [{"path": "s", "flavors": [], "platforms": ["ios"]}])),
+    ("a family with no fonts", _flutter(fonts = [{"family": "F"}, {"family": "G", "fonts": None}])),
+    ("a family that is null", _flutter(fonts = [{"fonts": [{"asset": "f"}]}, {"family": None}])),
+    ("a font with no asset", _flutter(fonts = [{"family": "F", "fonts": [{"weight": 400}]}])),
+    ("every weight and style", _flutter(fonts = [{"family": "F", "fonts": [
+        {"asset": "f%d" % w, "weight": w, "style": style}
+        for w in [100, 200, 300, 400, 500, 600, 700, 800, 900]
+        for style in ["normal", "italic"]
+    ]}])),
+]
+
+def _assets_accepted_test_impl(ctx):
+    env = unittest.begin(ctx)
+    for name, fields in _ACCEPTED:
+        asserts.equals(env, [], flutter_manifest_errors(fields), name)
+    return unittest.end(env)
+
+_assets_accepted_test = unittest.make(_assets_accepted_test_impl)
 
 def flutter_pubspec_test_suite(name):
     unittest.suite(
@@ -429,4 +559,7 @@ def flutter_pubspec_test_suite(name):
         _asset_transformers_test,
         _licenses_listed_test,
         _licenses_absent_test,
+        _assets_refused_test,
+        _assets_error_places_the_entry_test,
+        _assets_accepted_test,
     )

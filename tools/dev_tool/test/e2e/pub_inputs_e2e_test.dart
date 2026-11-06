@@ -120,7 +120,8 @@ void main() {
 
   group('a plugin overlay', () {
     String template(String marker) =>
-        'filegroup(name = "{PKG}", srcs = [])\nfilegroup(name = "$marker")\n';
+        'filegroup(\n    name = "{PKG}",\n    srcs = [],\n{LICENSE}\n)\n'
+        'filegroup(name = "$marker")\n';
 
     final rungs = {
       'the bare package directory': '',

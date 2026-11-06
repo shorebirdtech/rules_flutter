@@ -310,7 +310,8 @@ void main() {
 
   group('a plugin overlay', () {
     String template(String marker) =>
-        'filegroup(name = "{PKG}", srcs = [])\nfilegroup(name = "$marker")\n';
+        'filegroup(\n    name = "{PKG}",\n    srcs = [],\n{LICENSE}\n)\n'
+        'filegroup(name = "$marker")\n';
 
     // Where, in the overlay root, a template may sit. A package at 1.0.0
     // matches each; a more specific one wins over a less specific one.

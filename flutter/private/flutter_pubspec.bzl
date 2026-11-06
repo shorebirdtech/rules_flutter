@@ -215,6 +215,284 @@ def flutter_assets_block(fields):
         uses_material_design = umd_raw if type(umd_raw) == "bool" else False,
     )
 
+# ---------------------------------------------------------------------------
+# What `flutter build` refuses in fonts / assets / shaders
+# ---------------------------------------------------------------------------
+#
+# flutter_tools validates a pubspec's `flutter:` block (`_validate` in
+# flutter_manifest.dart) and refuses a manifest that fails. The projections
+# above read leniently; this is the check that makes a package flutter_tools
+# would refuse fail the fetch instead of losing the entry. Its messages follow
+# flutter_tools', each placed by where the entry is in the pubspec.
+
+_FONT_WEIGHTS = [100, 200, 300, 400, 500, 600, 700, 800, 900]
+_PLATFORMS = ["android", "ios", "web", "windows", "linux", "macos"]
+_DART_TYPES = {
+    "string": "String",
+    "int": "int",
+    "float": "double",
+    "bool": "bool",
+    "list": "YamlList",
+    "dict": "YamlMap",
+    "NoneType": "Null",
+}
+
+def _dart_type(v):
+    return _DART_TYPES[type(v)]
+
+def _show(v):
+    # A YAML value as text: `null`, `true`, a collection as JSON.
+    if v == None:
+        return "null"
+    if type(v) in ["list", "dict"]:
+        return json.encode(v)
+    if type(v) == "bool":
+        return "true" if v else "false"
+    return str(v)
+
+def _list_of_errors(value, context, alias, is_item):
+    # flutter_tools' `_parseList<T>`: a list whose items all are a T.
+    if type(value) != "list":
+        return ["Expected {} to be a list of {}, but got {} ({}).".format(context, alias, _show(value), _dart_type(value))]
+    return [
+        "Expected {} to be a list of {}, but element at index {} was a {}.".format(context, alias, i, _dart_type(item))
+        for i, item in enumerate(value)
+        if not is_item(item)
+    ]
+
+def _is_string(v):
+    return type(v) == "string"
+
+def _is_map(v):
+    return type(v) == "dict"
+
+def _transformer_errors(entry):
+    package = entry.get("package")
+    if type(package) != "string" or not package:
+        return ['Expected "package" to be a String. Found {} instead.'.format(_dart_type(package))]
+    args = entry.get("args")
+    if args == None:
+        return []
+    return [
+        'In args section of transformer using package "{}": {}'.format(package, e)
+        for e in _list_of_errors(args, "args", "String", _is_string)
+    ]
+
+_ALPHA = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+_SCHEME_CHARS = _ALPHA + "0123456789+-."
+
+def _parses_as_uri(text):
+    # Whether Dart's `Uri.parse` accepts `text`. It accepts nearly anything (a
+    # space, a bare `%`, non-ASCII); what it throws on is a malformed scheme,
+    # port or host, which this checks, and not the finer shape of an IPv6
+    # address.
+    rest = text
+    first_segment_end = len(text)
+    for i in range(len(text)):
+        if text[i] in "/?#":
+            first_segment_end = i
+            break
+    colon = text.find(":", 0, first_segment_end)
+    if colon >= 0:
+        scheme = text[:colon]
+        if not scheme or scheme[0] not in _ALPHA:
+            return False
+        for c in scheme.elems():
+            if c not in _SCHEME_CHARS:
+                return False
+        rest = text[colon + 1:]
+    if not rest.startswith("//"):
+        return True
+    authority = rest[2:]
+    for i in range(len(authority)):
+        if authority[i] in "/?#":
+            authority = authority[:i]
+            break
+    if authority.count("@") > 1:
+        return False
+    host = authority[authority.rfind("@") + 1:]
+    if host.startswith("["):
+        close = host.find("]")
+        if close < 0:
+            return False
+        port = host[close + 1:]
+        if port and not port.startswith(":"):
+            return False
+        port = port[1:]
+    elif "]" in host:
+        return False
+    else:
+        port = host[host.rfind(":") + 1:] if ":" in host else ""
+    port = port[1:] if port.startswith("+") else port
+    return not port or port.isdigit()
+
+def _asset_entry_errors(entry):
+    if entry == None or entry == "":
+        return ["Asset manifest contains a null or empty uri."]
+    if type(entry) == "string":
+        return [] if _parses_as_uri(entry) else ["Asset manifest contains invalid uri: {}.".format(entry)]
+    if type(entry) != "dict":
+        return ["Assets entry had unexpected shape. Expected a string or an object. Got {} instead.".format(_dart_type(entry))]
+    if not entry:
+        return []
+    path = entry.get("path")
+    if type(path) != "string":
+        return [(
+            "Asset manifest entry is malformed. Expected asset entry to be either a string or a map " +
+            'containing a "path" entry. Got {} instead.'
+        ).format(_dart_type(path))]
+    sections = []
+    flavors = entry.get("flavors")
+    if flavors != None:
+        sections.append(("flavors", _list_of_errors(flavors, "flavors", "String", _is_string)))
+    platforms = entry.get("platforms")
+    if platforms != None:
+        errors = _list_of_errors(platforms, "platforms", "String", _is_string)
+        if not errors:
+            invalid = []
+            for platform in platforms:
+                if platform not in _PLATFORMS and platform not in invalid:
+                    invalid.append(platform)
+            if invalid:
+                errors = ['Invalid platform(s): "{}". Supported platforms are: "{}".'.format(", ".join(invalid), ", ".join(_PLATFORMS))]
+        sections.append(("platforms", errors))
+    transformers = entry.get("transformers")
+    if transformers != None:
+        errors = _list_of_errors(transformers, "transformers list", "Map", _is_map)
+        if not errors:
+            errors = [e for item in transformers for e in _transformer_errors(item)]
+        sections.append(("transformers", errors))
+    return [
+        'In {} section of asset "{}": {}'.format(section, path, e)
+        for section, errors in sections
+        for e in errors
+    ]
+
+def _assets_errors(section, raw):
+    # `_validateAssets`: `assets` and `shaders` are checked alike.
+    if raw == None:
+        return []
+    if type(raw) != "list":
+        return ['flutter.{}: Expected "{}" to be a list, but got {} ({}).'.format(section, section, _show(raw), _dart_type(raw))]
+    return [
+        "flutter.{}[{}]: {}".format(section, i, e)
+        for i, entry in enumerate(raw)
+        for e in _asset_entry_errors(entry)
+    ]
+
+def _font_family_errors(family):
+    if type(family) != "dict":
+        return ['Unexpected child "{}" found under "fonts". Expected a map.'.format(_show(family))]
+    errors = [
+        'Unexpected child "{}" found under "fonts".'.format(key)
+        for key in family
+        if key != "family" and key != "fonts"
+    ]
+    if family.get("family") != None and type(family["family"]) != "string":
+        errors.append("Font family must either be null or a String.")
+    files = family.get("fonts")
+    if files == None:
+        return errors
+    if type(files) != "list":
+        errors.append('Expected "fonts" to either be null or a list.')
+        return errors
+    for i, font in enumerate(files):
+        where = "fonts[{}]: ".format(i)
+        if type(font) != "dict":
+            errors.append(where + 'Expected "fonts" to be a list of maps.')
+            continue
+        for key, value in font.items():
+            shown = "{} (({}))".format(_show(value), _dart_type(value))
+            if key == "asset":
+                if type(value) != "string":
+                    errors.append(where + "Expected font asset {} to be a string.".format(shown))
+            elif key == "weight":
+                if type(value) != "int" or value not in _FONT_WEIGHTS:
+                    errors.append(where + "Invalid value {} for font -> weight.".format(shown))
+            elif key == "style":
+                if value != "normal" and value != "italic":
+                    errors.append(where + "Invalid value {} for font -> style.".format(shown))
+            else:
+                errors.append(where + "Unexpected key {} under font.".format(key + " (" + _dart_type(value) + ")"))
+    return errors
+
+def _fonts_errors(flutter):
+    if "fonts" not in flutter:
+        return []
+    raw = flutter["fonts"]
+    if type(raw) != "list":
+        return ['flutter.fonts: Expected "fonts" to be a list, but got {} ({}).'.format(_show(raw), _dart_type(raw))]
+    if not raw:
+        return []
+    if type(raw[0]) != "dict":
+        return ['flutter.fonts: Expected "fonts" to contain maps, but the first element is {} ({}).'.format(_show(raw[0]), _dart_type(raw[0]))]
+    return [
+        "flutter.fonts[{}]: {}".format(i, e)
+        for i, family in enumerate(raw)
+        for e in _font_family_errors(family)
+    ]
+
+_FLUTTER_KEYS = [
+    "uses-material-design",
+    "assets",
+    "shaders",
+    "fonts",
+    "licenses",
+    "module",
+    "plugin",
+    "generate",
+    "config",
+    "deferred-components",
+    "default-flavor",
+]
+
+def _flutter_keys_errors(flutter):
+    errors = []
+    for key, value in flutter.items():
+        if key == "uses-material-design":
+            if type(value) != "bool":
+                errors.append('flutter.{}: Expected "{}" to be a bool, but got {} ({}).'.format(key, key, _show(value), _dart_type(value)))
+        elif key == "licenses":
+            for e in _list_of_errors(value, '"licenses"', "files", _is_string):
+                errors.append("flutter.licenses: " + e)
+        elif key == "disable-swift-package-manager":
+            errors.append(
+                'flutter.{}: The "{}" configuration has moved. Set `config: enable-swift-package-manager: false` under `flutter:`.'.format(key, key),
+            )
+        elif key not in _FLUTTER_KEYS:
+            errors.append('flutter.{}: Unexpected child "{}" found under "flutter".'.format(key, key))
+    return errors
+
+def flutter_manifest_errors(fields):
+    """The entries of a pubspec's `flutter:` block that flutter_tools refuses.
+
+    `flutter build` reads a pubspec with `FlutterManifest`, which refuses a
+    manifest whose `flutter:` block has a key it does not know, or whose
+    `uses-material-design`, `licenses`, `assets`, `shaders` or `fonts` are
+    shaped wrongly. This finds the same entries, so that rules_flutter does
+    not build a package that flutter_tools would not. (For a dependency
+    flutter_tools reports the error and skips the package; failing is the
+    safer reading of the same fact.)
+
+    Args:
+        fields: A pubspec's `fields`, as `read_pubspec` returns them.
+
+    Returns:
+        A list of strings, one per refusal, each leading with where the entry
+        is (`flutter.assets[2]`) and then saying what flutter_tools says. Empty
+        when flutter_tools accepts them.
+    """
+    raw = fields.get("flutter")
+    if raw != None and type(raw) != "dict":
+        return ['flutter: Expected "flutter" section to be an object or null, but got {}.'.format(_show(raw))]
+    flutter = flutter_block(fields)
+    return (
+        _flutter_keys_errors(flutter) +
+        _assets_errors("assets", flutter.get("assets")) +
+        _assets_errors("shaders", flutter.get("shaders")) +
+        _fonts_errors(flutter)
+    )
+
 def flutter_licenses_block(fields):
     """Project `flutter.licenses`, the licence files a package adds to `NOTICES`.
 
@@ -222,9 +500,9 @@ def flutter_licenses_block(fields):
         fields: A pubspec's `fields`, as `read_pubspec` returns them.
 
     Returns:
-        The paths, relative to the package, in the order listed. Each item is
-        taken as a string, as flutter_tools does (`flutter_manifest.dart`);
-        a `licenses:` that is not a list names none.
+        The paths, relative to the package, in the order listed. A `licenses:`
+        that is not a list of strings names none (`flutter_manifest_errors`
+        refuses it before this is asked).
     """
     raw = flutter_block(fields).get("licenses")
     if type(raw) != "list":
