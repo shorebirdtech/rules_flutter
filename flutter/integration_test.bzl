@@ -81,7 +81,7 @@ def _find_test_config(name, src):
         lambda path: bool(native.glob([path], allow_empty = True)),
     )
 
-def _golden_service(name, deps, srcs, test_config):
+def _golden_service(name, deps, srcs, test_config, application = None, package_name = None):
     """The `flutter_test` that compares the test's goldens on the host.
 
     The host runner has no `dart:ui`, which comparing two pictures needs, so a
@@ -96,9 +96,22 @@ def _golden_service(name, deps, srcs, test_config):
 
     With one, the service runs the config before it compares, as `flutter test`
     does in its comparator's bootstrap, so a comparator or tolerance the config
-    sets applies. That service is built with the config, the test's `deps` (which
-    must provide what the config imports) and the `srcs` it may import, and
-    shared by the tests of the package that name all of the same.
+    sets applies. Like `flutter test`'s, that service is compiled in the app's
+    package, so the config imports the app's libraries as `package:<app>/…`:
+    the `application`'s, or for a test that has none, the `package_name` whose
+    sources are among `srcs`. It is built with the config, the test's `deps`
+    and the `srcs` it may import, and shared by the tests of the package that
+    name all of the same.
+
+    Args:
+        name: The test's name.
+        deps: The test's `deps`.
+        srcs: The test's `srcs`.
+        test_config: The test's `flutter_test_config.dart`, or None.
+        application: The application the test runs, whose package the service
+            is compiled in.
+        package_name: The package the service is compiled in, for a test with
+            no `application`.
 
     Returns:
         The label of the service.
@@ -121,8 +134,10 @@ def _golden_service(name, deps, srcs, test_config):
     # with different `deps` or `srcs` cannot share one that compiles with only
     # one of them.
     config = native.package_relative_label(test_config)
+    package = {"application": application} if application else {"package_name": package_name}
     built_with = [str(native.package_relative_label(d)) for d in sorted(deps)] + \
-                 [str(native.package_relative_label(f)) for f in sorted(srcs)]
+                 [str(native.package_relative_label(f)) for f in sorted(srcs)] + \
+                 [str(native.package_relative_label(application)) if application else package_name]
     service = "__golden_service_%s_%d" % (
         "".join([c if c.isalnum() else "_" for c in config.name.elems()]),
         abs(hash(str(config) + "|" + "|".join(built_with))),
@@ -133,11 +148,11 @@ def _golden_service(name, deps, srcs, test_config):
             main = str(Label("//flutter/private/goldens:service.dart")),
             srcs = srcs + [str(Label("//flutter/private/goldens:comparator.dart"))],
             test_config = test_config,
-            package_name = "rules_flutter_golden_service",
             deps = deps,
             tags = ["manual"],
             testonly = True,
             visibility = ["//visibility:private"],
+            **package
         )
     return ":" + service
 
@@ -267,7 +282,7 @@ def flutter_macos_integration_test(
         name = name,
         app = ":" + app,
         src = src,
-        golden_service = _golden_service(name, deps, srcs, test_config),
+        golden_service = _golden_service(name, deps, srcs, test_config, application = application),
         env = env,
         data = data,
         include_tags = include_tags,
@@ -373,7 +388,7 @@ def flutter_windows_integration_test(
         name = name,
         app = ":" + app,
         src = src,
-        golden_service = _golden_service(name, deps, srcs, test_config),
+        golden_service = _golden_service(name, deps, srcs, test_config, application = application),
         env = env,
         data = data,
         include_tags = include_tags,
@@ -480,7 +495,7 @@ def flutter_linux_integration_test(
         name = name,
         app = ":" + app,
         src = src,
-        golden_service = _golden_service(name, deps, srcs, test_config),
+        golden_service = _golden_service(name, deps, srcs, test_config, application = application),
         env = env,
         data = data,
         include_tags = include_tags,
@@ -611,7 +626,8 @@ def flutter_web_integration_test(
         name = name,
         app = ":" + app,
         src = src,
-        golden_service = _golden_service(name, deps, srcs, test_config),
+        # The app's own sources are among `srcs`, in `package_name`.
+        golden_service = _golden_service(name, deps, srcs, test_config, package_name = package_name),
         env = env,
         data = data,
         include_tags = include_tags,
@@ -742,7 +758,7 @@ def flutter_android_integration_test(
         name = name,
         app = ":" + app,
         src = src,
-        golden_service = _golden_service(name, deps, srcs, test_config),
+        golden_service = _golden_service(name, deps, srcs, test_config, application = application),
         runner = runner,
         abi = abi,
         env = env,
@@ -856,7 +872,7 @@ def flutter_ios_simulator_integration_test(
         name = name,
         app = ":" + app,
         src = src,
-        golden_service = _golden_service(name, deps, srcs, test_config),
+        golden_service = _golden_service(name, deps, srcs, test_config, application = application),
         # The simulator runs the architecture of the Mac it is on.
         sim_cpu = select({
             "@platforms//cpu:arm64": "sim_arm64",

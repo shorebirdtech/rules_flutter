@@ -2,13 +2,16 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:integration_test_example/golden_tolerance.dart';
 
-/// A config whose comparator tolerates any difference between a picture and its
-/// golden, as a project's own does with a looser threshold.
+/// A config whose comparator tolerates a difference between a picture and its
+/// golden when the app's own [goldensTolerateDifferences] says to, as a
+/// project's does with a looser threshold.
 ///
 /// It runs in the app and in the golden service, as `flutter test` runs a
-/// config in each program of a run; only the comparator that compares (the
-/// service's) is replaced.
+/// config in each program of a run, and like `flutter test`'s it is compiled in
+/// the app's package, so it imports the app's libraries by `package:` URI. Only
+/// the comparator that compares (the service's) is replaced.
 Future<void> testExecutable(FutureOr<void> Function() testMain) async {
   final installed = goldenFileComparator;
   if (installed is LocalFileComparator) {
@@ -30,7 +33,8 @@ class _TolerantComparator extends GoldenFileComparator {
       // ignore: avoid_catching_errors
     } on FlutterError {
       // A picture that differs from its golden: the pixels, not a missing file.
-      return true;
+      if (goldensTolerateDifferences) return true;
+      rethrow;
     }
   }
 

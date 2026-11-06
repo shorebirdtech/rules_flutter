@@ -61,6 +61,7 @@ dart_analysis_test(
 flutter_application(
     name = "app_flutter",
     package_name = "integration_test_example",
+    srcs = glob(["lib/**/*.dart"]),
     main = "lib/main.dart",
     deps = ["@deps//:flutter"],
 )
@@ -447,7 +448,8 @@ flutter_macos_integration_test(
 # A golden test whose directory has a `flutter_test_config.dart`, which the
 # golden service runs as `flutter test` runs a config for its comparator: an
 # orange swatch passes against the blue golden only because the config's
-# comparator tolerates the difference.
+# comparator tolerates the difference, by a threshold it imports from the app's
+# own package.
 flutter_macos_integration_test(
     name = "macos_golden_config_test",
     src = "integration_test/tolerant/golden_tolerant_test.dart",
@@ -455,9 +457,7 @@ flutter_macos_integration_test(
     application = ":app_flutter",
     bundle_id = "com.example.integrationtest",
     data = _TOLERANT_FILES,
-    # The config imports `package:flutter`, which the golden service built with
-    # it takes from here.
-    deps = ["@deps//:flutter"] + _TEST_DEPS,
+    deps = _TEST_DEPS,
 )
 
 # The same swatch in another colour against the same golden: `manual`, since it
@@ -851,7 +851,8 @@ flutter_web_integration_test(
 # A golden test whose directory has a `flutter_test_config.dart`, which the
 # golden service runs as `flutter test` runs a config for its comparator: an
 # orange swatch passes against the blue golden only because the config's
-# comparator tolerates the difference.
+# comparator tolerates the difference, by a threshold it imports from the app's
+# own package.
 flutter_web_integration_test(
     name = "web_golden_config_test",
     package_name = "integration_test_example",
