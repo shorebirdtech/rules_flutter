@@ -39,7 +39,7 @@ may be using the others.
   `xcode-select` or `DEVELOPER_DIR`.
 - **Chrome.** Pass `--web-run-headless` so the page stays visible to itself: a
   hidden or covered browser window draws no frames.
-- **Linux.** Screenshots use `scrot` and need a display (`DISPLAY` set, or
+- **Linux.** Screenshots are read from the X display by the tool itself and need a display (`DISPLAY` set, or
   Xvfb).
 
 ## Timing
@@ -62,7 +62,7 @@ may be using the others.
 | Device | With |
 |---|---|
 | macOS | The app's window, through ScreenCaptureKit. Needs Screen Recording permission for the terminal running the tool. |
-| Linux | `scrot` |
+| Linux | the X display, read over the X11 protocol |
 | Windows | DXGI desktop duplication |
 | Android phone | `adb screencap` |
 | Android emulator | the emulator's own framebuffer capture |

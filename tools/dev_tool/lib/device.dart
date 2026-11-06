@@ -73,6 +73,7 @@ import 'vm_service_client.dart';
 import 'teardown.dart';
 import 'web_module_server.dart';
 import 'web_options.dart';
+import 'x11_screenshot.dart';
 
 export 'app_log.dart' show AppLogLine, AppLogStream, LogPage;
 export 'build_mode.dart' show BuildMode;
@@ -894,14 +895,15 @@ class MacOSDevice extends Device {
 
 /// Linux desktop device.
 class LinuxDevice extends Device {
-  final ProcessRunSync _runProcess;
+  final X11Capture _captureX11;
   final ProcessStarter? _injectedStart;
 
-  LinuxDevice({
-    ProcessRunSync? runProcess,
-    ProcessStarter? startProcess,
-  }) : _runProcess = runProcess ?? Process.run,
-       _injectedStart = startProcess;
+  LinuxDevice({X11Capture? captureX11, ProcessStarter? startProcess})
+    : _captureX11 =
+          captureX11 ??
+          ((outputPath, {required environment}) =>
+              captureX11Screen(outputPath, environment: environment)),
+      _injectedStart = startProcess;
 
   /// The whole environment the app starts in, or null for this process's.
   ///
@@ -1000,12 +1002,24 @@ class LinuxDevice extends Device {
     if (vmClient != null) {
       return vmClient.screenshot(outputPath);
     }
-    final result = await _runProcess('scrot', [outputPath]);
-    if (result.exitCode != 0) {
-      throw StateError('scrot failed: ${result.stderr}');
-    }
+    // The display the app draws on: the integration runtime's own, or the
+    // desktop's. The tool speaks to it itself, so the host needs no
+    // screenshot program.
+    return deadline.within(
+      'capturing the X display',
+      () => _captureX11(
+        outputPath,
+        environment: environment ?? Platform.environment,
+      ),
+    );
   }
 }
+
+/// Writes a PNG of the X display `environment['DISPLAY']` names.
+typedef X11Capture = Future<void> Function(
+  String outputPath, {
+  required Map<String, String> environment,
+});
 
 /// Windows desktop device.
 class WindowsDevice extends Device {

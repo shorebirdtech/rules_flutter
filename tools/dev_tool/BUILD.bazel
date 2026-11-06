@@ -387,6 +387,7 @@ _UNIT_TESTS = {
         "deps": ["@dev_tool_deps//:vm_service"],
     },
     "wasm_pipeline_assembler_test": {},
+    "x11_screenshot_test": {"deps": _PATH_DEP},
 }
 
 [dart_test(

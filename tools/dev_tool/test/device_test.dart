@@ -2603,10 +2603,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         runProcess: (exe, args) async => ProcessResult(0, 0, '', ''),
         startProcess: start,
       ),
-      'LinuxDevice': (start) => LinuxDevice(
-        runProcess: (exe, args) async => ProcessResult(0, 0, '', ''),
-        startProcess: start,
-      ),
+      'LinuxDevice': (start) => LinuxDevice(startProcess: start),
       // Staged inside `bundleRoot` so the tearDown takes it: these tests never
       // reach `stop()`, and the default staging directory lands in the system
       // temp root.
@@ -3357,22 +3354,52 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
   });
 
   group('LinuxDevice.screenshot', () {
-    test('uses scrot when no vmClient', () async {
-      final calls = <(String, List<String>)>[];
+    test('captures the X display itself when no vmClient', () async {
+      final calls = <(String, Map<String, String>)>[];
 
       final device = LinuxDevice(
-        runProcess: (exe, args) async {
-          calls.add((exe, args));
-          return ProcessResult(0, 0, '', '');
+        captureX11: (outputPath, {required environment}) async {
+          calls.add((outputPath, environment));
         },
-      );
+      )..environment = {'DISPLAY': ':42'};
 
       final instance = AppInstance(process: FakeProcess());
       await device.screenshot(instance, '/tmp/linux.png');
 
       expect(calls, hasLength(1));
-      expect(calls[0].$1, 'scrot');
-      expect(calls[0].$2, ['/tmp/linux.png']);
+      expect(calls[0].$1, '/tmp/linux.png');
+      expect(calls[0].$2, {'DISPLAY': ':42'});
+    });
+
+    test(
+      'captures the display of this process without an environment',
+      () async {
+        Map<String, String>? seen;
+        final device = LinuxDevice(
+          captureX11: (outputPath, {required environment}) async {
+            seen = environment;
+          },
+        );
+
+        await device.screenshot(
+          AppInstance(process: FakeProcess()),
+          '/tmp/l.png',
+        );
+
+        expect(seen, Platform.environment);
+      },
+    );
+
+    test('a capture that fails is the error of the screenshot', () async {
+      final device = LinuxDevice(
+        captureX11: (outputPath, {required environment}) async =>
+            throw StateError('DISPLAY is not set'),
+      );
+
+      await expectLater(
+        device.screenshot(AppInstance(process: FakeProcess()), '/tmp/l.png'),
+        throwsA(isA<StateError>()),
+      );
     });
   });
 

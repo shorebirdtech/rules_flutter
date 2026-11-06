@@ -47,10 +47,7 @@ void main() {
             posix: true,
           ),
           'Linux': (
-            build: (start) => LinuxDevice(
-              runProcess: (exe, args) async => ProcessResult(0, 0, '', ''),
-              startProcess: start,
-            ),
+            build: (start) => LinuxDevice(startProcess: start),
             posix: true,
           ),
           'Windows': (
