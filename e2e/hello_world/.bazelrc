@@ -41,6 +41,11 @@ common --@@rules_python+//python/config_settings:bootstrap_impl=script
 # says otherwise, as the dev tool does for the device it launches on.
 common --@rules_android//flags:android_platforms=@rules_android//:arm64-v8a
 
+# No core library desugaring, as a Flutter app built with Gradle has none
+# (README, "Android"). rules_android turns it on by default and packs the
+# whole, unshrunk desugar_jdk_libs runtime into every APK.
+common --@rules_android//flags:desugar_java8_libs=false
+
 try-import %workspace%/.bazelrc.user
 
 # `dart analyze` and the `dart format` check run as an aspect over every Dart

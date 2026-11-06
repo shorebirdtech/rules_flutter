@@ -12,7 +12,7 @@
 /// - Both are release builds for both ABIs, though the test is not built with
 ///   `-c opt`: AOT `libapp.so` for arm64-v8a and x86_64, no kernel snapshot, a
 ///   manifest that is not debuggable, and dex shrunk by R8 (the bundle carries
-///   R8's mapping).
+///   R8's mapping) with no core library desugaring runtime in it.
 library;
 
 // This script's diagnostics are its product: it reports what it found in
@@ -332,7 +332,8 @@ void main() {
   }
   extracted
     ..checkNativeLibrariesUncompressed()
-    ..checkNoMultiplatformMetadata();
+    ..checkNoMultiplatformMetadata()
+    ..checkNoCoreLibraryDesugaring();
   final bundleMetadata = [
     for (final entry in zipEntries(File(aab).readAsBytesSync()))
       if (RegExp('^base/root/[A-Za-z0-9]+Main/default/').hasMatch(entry.name))

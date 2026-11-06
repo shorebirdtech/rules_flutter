@@ -1013,6 +1013,14 @@ With no `--@rules_android//flags:android_platforms`, rules_android builds for `-
 
 To build an app for fixed ABIs whatever the command line says, wrap it in [`flutter_android_build`](#flutter_android_build), as a test of the APK for one ABI, or for both, does.
 
+**Core library desugaring.** rules_android turns core library desugaring on for every `android_binary` unless told otherwise: calls to `java.time`, `java.util.stream` and the other Java APIs newer than the app's minimum SDK are rewritten onto a backport (desugar_jdk_libs, the `j$.*` classes), and the whole backport goes into the APK and the App Bundle, about 2.6 MB of dex, unshrunk even when R8 shrinks the rest. A Flutter app built with Gradle has none of it, because core library desugaring is off until the app sets `isCoreLibraryDesugaringEnabled`, and the Flutter embedding and the androidx libraries it uses do not need it at minimum SDK 24. Turn it off in your `.bazelrc`:
+
+```bazelrc
+common --@rules_android//flags:desugar_java8_libs=false
+```
+
+It is a build-wide flag of rules_android's, so only your project can set it; `flutter_android_app` cannot. Leave it on if your own Android code, or a plugin's, calls one of those APIs: a plugin that does says in its setup to enable `isCoreLibraryDesugaringEnabled`.
+
 | Attribute | Description |
 |---|---|
 | `application` | A `flutter_application` target. Required. |

@@ -236,6 +236,24 @@ class Apk {
     );
   }
 
+  /// Checks that the dex files define none of the `j$.*` classes of the core
+  /// library desugaring runtime (desugar_jdk_libs), which a Gradle-built
+  /// Flutter app ships only when the app turns
+  /// `isCoreLibraryDesugaringEnabled` on.
+  void checkNoCoreLibraryDesugaring() {
+    final desugared = [
+      for (final descriptor in definedClasses())
+        if (descriptor.startsWith(r'Lj$/')) descriptor,
+    ]..sort();
+    check.expect(
+      r'no core library desugaring runtime (j$.*) in the dex files',
+      condition: desugared.isEmpty,
+      detail:
+          '${desugared.length} classes, such as '
+          '${desugared.take(5).join(', ')}',
+    );
+  }
+
   /// Checks that the dex files define every class in [required], keyed by
   /// what ships it.
   void checkDefinedClasses(Map<String, String> required) {
