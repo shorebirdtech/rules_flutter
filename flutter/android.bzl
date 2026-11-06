@@ -49,6 +49,11 @@ Two tiers of API:
             manifest = ":my_manifest",
             deps = [":my_native_libs", ":my_engine", ":my_runner"],
         )
+
+    rules_android runs R8 only for an `android_binary` with `proguard_specs`.
+    `flutter_android_app` gives a release build
+    `@rules_flutter//flutter:android_proguard_rules.pro`, as `flutter build
+    --release` shrinks; give your own binary the same to match it.
 """
 
 load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
@@ -512,6 +517,7 @@ def flutter_android_app(
         build_name = None,
         build_number = None,
         manifest_values = None,
+        proguard_specs = None,
         **kwargs):
     """Builds a Flutter Android APK from a flutter_application target.
 
@@ -655,6 +661,17 @@ def flutter_android_app(
             naming them here is an error. `versionCode` and `versionName`
             are allowed while `build_number` and `build_name` are unset.
             Other keys pass through. A dict, not a `select()`.
+        proguard_specs: The R8 configuration of the APK. By default a
+            release build (`-c opt` without
+            `--@rules_flutter//flutter:profile`) is shrunk with R8 as
+            `flutter build apk --release` shrinks it:
+            `@rules_flutter//flutter:android_proguard_rules.pro` (the Android
+            Gradle plugin's proguard-android-optimize.txt and Flutter's
+            rules), then `android/app/proguard-rules.pro` when `flutter
+            create`'s directory has one; debug and profile builds are not
+            shrunk. A list (or `select()`) replaces that whole default, in
+            every compilation mode; `[]` turns R8 off. Resources are shrunk
+            whenever R8 runs, unless `shrink_resources = False` is passed.
         pub_hub_name: Name of the `flutter.pub(name = ...)` hub providing
             plugin spokes. The macro checks the Maven artifacts of the pub
             plugins `application` depends on against
@@ -775,6 +792,7 @@ def flutter_android_app(
     # 7. Resolve manifests (main + debug variant), resources, and Kotlin
     # sources.
     base_manifest = manifest
+    app_proguard_rules = []
     binary_deps = [
         "__%s_native_libs" % name,
         "__%s_engine" % name,
@@ -816,6 +834,14 @@ def flutter_android_app(
                 allow_empty = True,
             )
             resources = list(resources) + discovered_resources
+
+            # The app's own R8 rules, where `flutter create` leaves room for
+            # them and the Flutter Gradle plugin looks. `allow_empty`: most
+            # apps have none.
+            app_proguard_rules = native.glob(
+                ["android/app/proguard-rules.pro"],
+                allow_empty = True,
+            )
 
             # Discover and compile the runner from flutter create output:
             # Gradle's main source directories for Kotlin and Java. Not the
@@ -932,7 +958,18 @@ def flutter_android_app(
     )
     actual_manifest = "__%s_manifest_with_library_permissions" % name
 
-    # 9. Final android_binary.
+    # 9. R8 in release, as the Flutter Gradle plugin turns on `minifyEnabled`
+    # and `shrinkResources` for the release build type only. rules_android runs
+    # R8 exactly when `proguard_specs` is non-empty, and shrinks resources only
+    # then.
+    if proguard_specs == None:
+        proguard_specs = select({
+            Label("//flutter:release"): [Label("//flutter:android_proguard_rules.pro")] + app_proguard_rules,
+            "//conditions:default": [],
+        })
+    kwargs.setdefault("shrink_resources", True)
+
+    # 10. Final android_binary.
     _android_binary(
         name = name,
         manifest = actual_manifest,
@@ -941,6 +978,7 @@ def flutter_android_app(
         assets = ["__%s_flutter_assets" % name],
         assets_dir = "assets",
         deps = binary_deps + deps,
+        proguard_specs = proguard_specs,
         tags = tags,
         testonly = testonly,
         **kwargs

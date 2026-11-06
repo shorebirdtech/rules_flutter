@@ -951,6 +951,7 @@ To build an app for fixed ABIs whatever the command line says, wrap it in [`flut
 | `profile_manifest` | The same for profile builds. `None` (default) discovers `android/app/src/profile/AndroidManifest.xml`. |
 | `permissions` | Permission names added to the manifest in every compilation mode, for example `["android.permission.INTERNET"]`. See [Release builds and permissions](#release-builds-and-permissions). |
 | `multidex` | Defaults to `"native"`. |
+| `proguard_specs` | The R8 configuration. By default a release build (`-c opt` without `--@rules_flutter//flutter:profile`) is shrunk with R8, resources too, as `flutter build apk --release` shrinks it: [`@rules_flutter//flutter:android_proguard_rules.pro`](flutter/android_proguard_rules.pro) (the Android Gradle plugin's `proguard-android-optimize.txt` and Flutter's own rules), then `android/app/proguard-rules.pro` if you have one. Debug and profile builds are not shrunk. A list replaces the whole default in every compilation mode; `[]` turns R8 off. |
 
 <details>
 <summary>Composable rules</summary>

@@ -308,12 +308,14 @@ flutter_android_app(
 
 # The same runner under a second application id, around an application that
 # uses one plugin: once without R8, which dexes each library by rules_android's
-# aspect, and once with it, which shrinks the whole classpath.
+# aspect, and once with it, which shrinks the whole classpath. A release build
+# runs R8 unless `proguard_specs` says otherwise.
 flutter_android_app(
     name = "package_info_only_android",
     package_name = "com.example.package_info_only",
     application = ":package_info_only_app",
     namespace = "com.example.plugin_example",
+    proguard_specs = [],
 )
 
 flutter_android_app(

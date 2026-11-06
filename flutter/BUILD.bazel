@@ -53,6 +53,14 @@ config_setting(
     visibility = ["//visibility:public"],
 )
 
+# The release R8 configuration of `flutter_android_app`: the Android Gradle
+# plugin's proguard-android-optimize.txt and Flutter's own rules. Public for an
+# `android_binary` assembled from the Tier 2 rules.
+exports_files(
+    ["android_proguard_rules.pro"],
+    visibility = ["//visibility:public"],
+)
+
 # The cores an optimizing dart2wasm (`-O1` and up) reserves, and the threads
 # its Binaryen wasm-opt may use. Fewer lets more compiles run at once on a
 # machine where CPUs are scarce; more makes a single compile finish sooner:
