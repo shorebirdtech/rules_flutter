@@ -1,7 +1,7 @@
 load("@bazel_tools//tools/res:winsdk_toolchain.bzl", "windows_resource_compiler_toolchain")
 load("//flutter:defs.bzl", "flutter_application")
 load("//flutter:windows.bzl", "flutter_windows_app")
-load("//flutter/tests:windows_resources_test.bzl", "windows_resources_test_suite")
+load("//flutter/tests:windows_resources_test.bzl", "windows_resources_test_suite", "windows_runner_title_test")
 
 # A `flutter create` runner's layout, with stand-in files: the analysis tests
 # read what `flutter_windows_app` makes of it and never compile it.
@@ -49,4 +49,9 @@ windows_resources_test_suite(
     ],
     rc = "flutter/tests/windows_resources_fixture/windows/runner/Runner.rc",
     target = ":__created_resources",
+)
+
+windows_runner_title_test(
+    name = "created_title_test",
+    target = ":__created_runner",
 )

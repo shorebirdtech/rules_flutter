@@ -1,5 +1,5 @@
 load("//flutter:windows.bzl", "flutter_windows_app")
-load("//flutter/tests:windows_resources_test.bzl", "windows_resources_test_suite")
+load("//flutter/tests:windows_resources_test.bzl", "windows_resources_test_suite", "windows_runner_title_test")
 
 # An app with no `windows/runner/`: the built-in runner's resource script,
 # naming the app. The build name is a `select()` whose `None` keeps the default;
@@ -29,4 +29,10 @@ windows_resources_test_suite(
     ],
     rc = "flutter/private/runners/windows/Runner.rc",
     target = ":__builtin_resources",
+)
+
+windows_runner_title_test(
+    name = "builtin_title_test",
+    target = ":__builtin_runner",
+    title = "Built In",
 )

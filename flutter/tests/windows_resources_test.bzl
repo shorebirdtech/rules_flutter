@@ -101,6 +101,55 @@ _no_compiler_test = analysistest.make(
     config_settings = _platform("//flutter/platforms:linux_x64"),
 )
 
+# -- The built-in runner's window title ---------------------------------------
+
+def _title_impl(ctx):
+    env = analysistest.begin(ctx)
+    compiles = [
+        a
+        for a in analysistest.target_actions(env)
+        if a.mnemonic == "CppCompile" and [arg for arg in a.argv if arg.replace("\\", "/").endswith("/main.cpp")]
+    ]
+    asserts.equals(env, 1, len(compiles), "expected one compile of main.cpp")
+    if not compiles:
+        return analysistest.end(env)
+    names = [arg for arg in compiles[0].argv if "RUNNER_APP_NAME" in arg]
+    if ctx.attr.title:
+        asserts.equals(env, 1, len(names), "RUNNER_APP_NAME defines: %s" % names)
+        if names:
+            asserts.true(
+                env,
+                names[0].endswith("RUNNER_APP_NAME=\"%s\"" % ctx.attr.title),
+                "the window title is %s, not %r" % (names[0], ctx.attr.title),
+            )
+    else:
+        asserts.equals(env, [], names, "an app's own runner names its own title")
+    return analysistest.end(env)
+
+# A Windows host is the only one that resolves a C++ toolchain for Windows, so
+# the runner's compile analyses there.
+_title_test = analysistest.make(
+    _title_impl,
+    attrs = {"title": attr.string()},
+    config_settings = _WITH_RC,
+)
+
+def windows_runner_title_test(name, target, title = ""):
+    """Declares a test of the window title a `flutter_windows_app`'s runner gets.
+
+    Args:
+        name: The test name.
+        target: The app's runner target.
+        title: The title the built-in runner is compiled with; empty for an
+            app's own runner, which is compiled with none.
+    """
+    _title_test(
+        name = name,
+        target_under_test = target,
+        title = title,
+        target_compatible_with = ["@platforms//os:windows"],
+    )
+
 def windows_resources_test_suite(name, target, rc, defines, inputs):
     """Declares the tests of one `flutter_windows_app`'s resources.
 

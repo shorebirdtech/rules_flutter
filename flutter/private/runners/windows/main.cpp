@@ -28,10 +28,12 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   project.set_dart_entrypoint_arguments(std::move(command_line_arguments));
 
+  // `flutter create` writes the project's name in as the title; this runner
+  // is built for any app, so the build defines it as RUNNER_APP_NAME.
   FlutterWindow window(project);
   Win32Window::Point origin(10, 10);
   Win32Window::Size size(1280, 720);
-  if (!window.Create(L"hello_world", origin, size)) {
+  if (!window.Create(L"" RUNNER_APP_NAME, origin, size)) {
     return EXIT_FAILURE;
   }
   window.SetQuitOnClose(true);

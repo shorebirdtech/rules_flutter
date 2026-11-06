@@ -277,6 +277,7 @@ def flutter_windows_app(
         hdrs = runner_hdrs if runner_hdrs else [],
         resources = resources,
         manifest = manifest,
+        app_name = None if runner_srcs else (app_name or name),
         **(common | version)
     )
 

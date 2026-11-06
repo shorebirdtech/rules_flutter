@@ -50,10 +50,14 @@ def _flutter_windows_runner_lib_impl(ctx):
             registrant_hdrs.append(f)
 
     # Use custom sources if provided, otherwise use built-in flutter create-style runner.
+    defines = windows_version_defines(ctx)
     if ctx.attr.srcs:
         runner_srcs = ctx.files.srcs
         runner_hdrs = ctx.files.hdrs
     else:
+        # `flutter create` writes the project's name into `main.cpp` as the
+        # window's title; the built-in runner takes it as a define.
+        defines.append("RUNNER_APP_NAME=\"%s\"" % (ctx.attr.app_name or ctx.label.name))
         runner_srcs = [f for f in ctx.files._runner_sources if f.path.endswith((".cc", ".cpp", ".c"))]
         runner_hdrs = ctx.files.hdrs + [f for f in ctx.files._runner_sources if f.path.endswith(".h")]
         runner_hdrs = runner_hdrs + [f for f in ctx.files._runner_hdrs if f.path.endswith(".h")]
@@ -90,7 +94,7 @@ def _flutter_windows_runner_lib_impl(ctx):
         plugin_hdrs = plugin_hdrs,
         plugin_include_dirs = plugin_include_dirs,
         plugin_linkopts = plugin_link_flags(plugin_entries, "Windows"),
-        defines = windows_version_defines(ctx),
+        defines = defines,
         linking_contexts = [r[CcInfo].linking_context for r in ctx.attr.resources] +
                            _manifest_linking_contexts(ctx),
     )
@@ -290,6 +294,11 @@ flutter_windows_runner_lib = rule(
             doc = "An application manifest to embed in the executable, " +
                   "`windows/runner/runner.exe.manifest` in a `flutter create` tree.",
             allow_single_file = [".manifest"],
+        ),
+        "app_name": attr.string(
+            doc = "The built-in runner's window title, the name `flutter " +
+                  "create` writes into `main.cpp`. Defaults to the target's " +
+                  "name. Unused with `srcs`, whose `main.cpp` names its own.",
         ),
         "_runner_sources": attr.label(
             default = Label("//flutter/private/runners:windows_runner_srcs"),
