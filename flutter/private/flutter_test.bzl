@@ -56,7 +56,7 @@ cannot write there.
 
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo", "DartKernelSdkInfo")
-load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "KERNEL_TOOL_ATTR", "TRACK_CREATION_LOCATIONS_ATTR", "collect_modules", "collect_packages", "collect_transitive_srcs", "dart_analyzable_info_with_packages", "dart_entry_kernel_action", "dart_import_check_aspect", "dart_link_kernel_action", "dart_package_info", "derive_lib_root", "import_check_validation", "module_defines_transition", "runfiles_path", "track_creation_locations")
+load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "KERNEL_TOOL_ATTR", "TRACK_CREATION_LOCATIONS_ATTR", "collect_modules", "collect_packages", "collect_transitive_srcs", "dart_analyzable_info_with_packages", "dart_entry_kernel_action", "dart_import_check_aspect", "dart_link_kernel_action", "dart_package_info", "derive_lib_root", "executable_defines", "executable_defines_config", "import_check_validation", "runfiles_path", "track_creation_locations")
 load("//flutter:providers.bzl", "FlutterInfo")
 load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "compile_package_config", "synthesize_app_package")
 load(
@@ -68,7 +68,6 @@ load(
     "detect_target_platform",
     "flutter_build_assets",
     "flutter_compile_shaders",
-    "merge_dart_defines",
 )
 load("//flutter/private:exec_groups.bzl", "FLUTTER_EXEC_TOOLS", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
 load("//flutter/private:flutter_compile.bzl", "flutter_kernel_compile_action")
@@ -614,7 +613,6 @@ def _link_modules(ctx, bootstrap, own_srcs, packages, native_assets_manifest, ke
         # `synthesize_app_package` appends the test's own package last.
         own_package = packages[-1],
         output = entry_dill,
-        defines = merge_dart_defines(ctx),
         native_assets_yaml = native_assets_manifest,
         track_creation_locations = track_creation_locations(ctx),
     )
@@ -650,7 +648,7 @@ def _compile_whole_program(ctx, tools, bootstrap, own_srcs, packages, native_ass
         package_config = pc.config_file,
         output = kernel_dill,
         aot = False,
-        defines = merge_dart_defines(ctx),
+        defines = executable_defines(ctx),
         # Widgets know where they were built, as under `flutter test`: the
         # inspector and the "relevant error-causing widget" of a failure read
         # it. Set by `_track_widget_creation`, as the modules' is.
@@ -658,6 +656,10 @@ def _compile_whole_program(ctx, tools, bootstrap, own_srcs, packages, native_ass
         target = "flutter",
         native_assets_manifest = native_assets_manifest,
     )
+
+# The environment the test and its `deps`' modules compile in: its `defines`,
+# then the extra_dart_defines flag.
+_ENVIRONMENT = executable_defines_config()
 
 # flutter_test takes the compilation attrs plus the asset-bundle attrs.
 # Material widgets implicitly require `shaders/ink_sparkle.frag` and the
@@ -750,6 +752,7 @@ _TEST_ATTRS["env"] = attr.string_dict(
           "literal — no Make-variable or $(location) expansion. The " +
           "FLUTTER_TEST_* keys the rule sets itself cannot be overridden.",
 )
+_TEST_ATTRS.update(_ENVIRONMENT.attrs)
 _TEST_ATTRS.update(PLATFORM_CONSTRAINT_ATTRS)
 _TEST_ATTRS.update(KERNEL_TOOL_ATTR)
 _TEST_ATTRS.update(TRACK_CREATION_LOCATIONS_ATTR)
@@ -780,13 +783,13 @@ _TEST_ATTRS["deps"] = attr.label_list(
           "`MaterialIcons-Regular.otf` for Material widgets.",
     providers = [DartInfo],
     aspects = [flutter_module_aspect, dart_import_check_aspect],
-    cfg = module_defines_transition,
+    cfg = _ENVIRONMENT.cfg,
 )
 
 _TEST_ATTRS["code_assets"] = attr.label_list(
     doc = CODE_ASSETS_DOC,
     providers = [DartCodeAssetInfo],
-    cfg = module_defines_transition,
+    cfg = _ENVIRONMENT.cfg,
 )
 
 _TEST_ATTRS["_modular_kernel"] = attr.label(
