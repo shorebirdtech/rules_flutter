@@ -109,27 +109,17 @@ Two consequences worth keeping in mind:
   `flutter_windows_application.bzl` already compiles the Win32 runner from C++,
   so Windows users need it regardless, and the macOS helper makes the same
   bargain with Xcode.
-- **Linux is the odd one out.** macOS and Windows bundle a native helper;
-  Linux shells out to `scrot` from `PATH`, so capture fails on a host that
-  lacks it. That is the same hermeticity gap as the `zip` dependency below,
-  and it is unfixed.
+- **Linux needs no helper.** The dev tool reads the X display itself over
+  the X11 protocol (`lib/x11_screenshot.dart`: connect to `DISPLAY`, open it
+  with the `Xauthority` cookie, `GetImage` of the root window, encode a PNG),
+  so a host with no `scrot` captures all the same. Its unit test serves a
+  fake X server on a loopback socket; it has not been run against a real X
+  server by the suite.
 
 **Upstream ask**: rules_python's bootstrap should read
 `RUNFILES_MANIFEST_FILE` rather than only deriving a directory from it. That
 is the general fix for any `py_binary` spawned from another binary's runfiles
 on Windows.
-
-### Two root tests shell out to host binaries
-
-`//tools/dev_tool:native_libs_fingerprint_test` runs `zip`, resolved from
-`PATH`. macOS ships it, and so does GitHub's `ubuntu-latest` runner image, so
-this is invisible in both places the suite normally runs — but a plain Ubuntu
-cloud image ships only `unzip`, and the test then fails with
-`ProcessException: No such file or directory`. `tools/vm/create_linux_vm.dart`
-installs `zip` so our own Linux VMs match CI.
-
-The verdict therefore depends on the host image. Making it hermetic means a
-`zip` from the build graph, not a PATH lookup.
 
 ### Language versions: unset, with pubspecs at the pinned SDK
 
@@ -646,7 +636,7 @@ When re-running to reproduce, use `--nocache_test_results` and read the
 | Device | Debug mode | Profile and release |
 |--------|------------------------|---------------------------------|
 | macOS | bundled ScreenCaptureKit helper (always) | same |
-| Linux | `scrot` (always) | same |
+| Linux | the tool's own X11 `GetImage` of the display (always) | same |
 | Windows | bundled `dxcam` DXGI helper (always) | same |
 | Android (physical) | `adb screencap` (always) | `adb screencap` |
 | Android (emulator) | `adb emu screenrecord screenshot` (always) | same |
@@ -654,7 +644,7 @@ When re-running to reproduce, use `--nocache_test_results` and read the
 | iOS device | `devicectl device capture screenshot` (always; Xcode 27+) | same |
 | Chrome/Web | CDP `Page.captureScreenshot` (always) | N/A (web is always debug) |
 
-Note: `_flutter.screenshot` captures only the Flutter widget tree (no OS chrome); the platform tools capture the full screen or window. The three desktop rows name the helper each device's `captureScreen` actually resolves out of runfiles (`tools/{macos,windows}_screenshot/screenshot`, and plain `scrot` on Linux). Windows must use DXGI, not GDI, which captures a Flutter surface as black (§ 4).
+Note: `_flutter.screenshot` captures only the Flutter widget tree (no OS chrome); the platform tools capture the full screen or window. The three desktop rows name the helper each device's `captureScreen` actually resolves out of runfiles (`tools/{macos,windows}_screenshot/screenshot`, and the in-process X11 capture on Linux). Windows must use DXGI, not GDI, which captures a Flutter surface as black (§ 4).
 
 Every cell says "always": at the pinned Flutter, **no** device can do `_flutter.screenshot`. Impeller cannot encode a compressed screenshot, and there is no engine screenshot on web at all. They all declare `supportsFlutterScreenshot => false`, so the control channel's `screenshot/flutter` endpoint answers `501` naming `screenshot/native` instead of passing back an engine error that reads as transient.
 
@@ -1713,8 +1703,10 @@ paints nothing.
   `LIBGL_ALWAYS_SOFTWARE` and tries DRI3 — unavailable under Xvfb.
   `GALLIUM_DRIVER=llvmpipe` is what actually selects software rendering; without
   it the window appears and stays empty.
-- `scrot` refuses to replace an existing file unless given `--overwrite`, so a
-  polled screenshot silently keeps reporting the first frame it ever captured.
+- `scrot` (which `verify_linux_app.dart` still uses on the VM, next to
+  `xdotool`) refuses to replace an existing file unless given `--overwrite`, so
+  a polled screenshot silently keeps reporting the first frame it ever
+  captured.
 
 ### Windows visual verification (GCP VM)
 
