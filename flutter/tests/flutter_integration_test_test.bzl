@@ -273,8 +273,19 @@ def _android_runner_impl(ctx):
     return analysistest.end(env)
 
 def _on_host(host):
-    """The configuration of a build whose tests run on a host: the platform in `//flutter/platforms`."""
-    return {"//command_line_option:extra_execution_platforms": [str(Label("//flutter/platforms:" + host))]}
+    """The configuration of a build whose tests run on a host: the platform in `//flutter/platforms`.
+
+    The host is the target platform as well as the first execution platform, as
+    in a build on that host. An execution platform alone would leave the test
+    built for the machine running the analysis: on Windows, a binary built for
+    Windows takes Bazel's launcher, whose maker would then be built from source
+    for `host`, with a C++ toolchain no Windows machine has for Linux.
+    """
+    platform = str(Label("//flutter/platforms:" + host))
+    return {
+        "//command_line_option:extra_execution_platforms": [platform],
+        "//command_line_option:platforms": [platform],
+    }
 
 def _android_runner_test(host, adb):
     return analysistest.make(
