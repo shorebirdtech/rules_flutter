@@ -13,6 +13,7 @@ load("//flutter:providers.bzl", "FlutterIntegrationRunnerInfo", "FlutterLinuxRun
 load("//flutter/private:dbg_transition.bzl", "DBG_SETTINGS", "dbg_transition")
 load("//flutter/private:exec_groups.bzl", "PORTABLE_EXEC_GROUPS", "portable_tools")
 load("//flutter/private:flutter_linux_runtime.bzl", "linux_runtime_check")
+load("//flutter/private:test_tags.bzl", "tag_selectors")
 
 _ANDROID_PLATFORMS = str(Label("@rules_android//flags:android_platforms"))
 
@@ -302,12 +303,6 @@ def integration_test_impl(ctx, family, inherited_environment = []):
     # starts (it has no `dart:ui`), which is told the test's source: goldens are
     # relative to its directory.
     service = ctx.attr.golden_service
-    if bool(service) != bool(ctx.file.src):
-        fail((
-            "%s: `src` (the test's source, which goldens are relative to) and " +
-            "`golden_service` (the `flutter_test` that compares them) go together; " +
-            "only %s is given."
-        ) % (ctx.label, "`golden_service`" if service else "`src`"))
     goldens = None
     if service:
         goldens = {
@@ -324,6 +319,10 @@ def integration_test_impl(ctx, family, inherited_environment = []):
         "testDisplayName": str(ctx.label),
         "env": ctx.attr.env,
         "goldens": goldens,
+        # Read by the host runner for the library's `@Tags`.
+        "source": runfiles_path(ctx.file.src, workspace),
+        "includeTags": tag_selectors(ctx, "include_tags", "integration test"),
+        "excludeTags": tag_selectors(ctx, "exclude_tags", "integration test"),
     }))
 
     tool = ctx.attr._runner
@@ -335,7 +334,7 @@ def integration_test_impl(ctx, family, inherited_environment = []):
     )
 
     runfiles = ctx.runfiles(
-        files = [config] + app_files + ctx.files.data,
+        files = [config, ctx.file.src] + app_files + ctx.files.data,
         transitive_files = runner.runfiles,
     ).merge(tool[DefaultInfo].default_runfiles).merge(app[DefaultInfo].default_runfiles)
     for data in ctx.attr.data:
@@ -380,11 +379,18 @@ def _test_attrs(default_runner, cfg = dbg_transition):
             allow_files = True,
         ),
         "src": attr.label(
-            doc = "The test's source file, which the golden files are relative to the directory of. With `golden_service`, which it goes with.",
+            doc = "The test's source file: its library `@Tags` select cases, and golden files are relative to its directory.",
             allow_single_file = [".dart"],
+            mandatory = True,
+        ),
+        "include_tags": attr.string_list(
+            doc = "Tag selectors a case must match to run, as `flutter test --tags` takes them and as `dart_test.yaml`'s `include_tags` does: each entry is one boolean selector (`golden`, `a && !b`), and a case must match every entry. Tags come from `@Tags` on the test library and `tags:` on a `testWidgets`. These are `package:test` tags, not Bazel's `tags`. A target none of whose cases match fails. `--test_env=DART_TEST_TAGS=...` narrows further for one run.",
+        ),
+        "exclude_tags": attr.string_list(
+            doc = "Tag selectors that drop a case, as `flutter test --exclude-tags` takes them and as `dart_test.yaml`'s `exclude_tags` does: a case matching any entry does not run. `package:test` tags, not Bazel's `tags`. A target none of whose cases remain fails. `--test_env=DART_TEST_EXCLUDE_TAGS=...` drops more for one run.",
         ),
         "golden_service": attr.label(
-            doc = "A `flutter_test` running `@rules_flutter//flutter/private/goldens:service.dart`, which compares the test's goldens for the host runner: comparing needs `dart:ui`, which the runner has not. The macros declare one. With `src`, which it goes with; without them every golden fails, saying there is no comparator.",
+            doc = "A `flutter_test` running `@rules_flutter//flutter/private/goldens:service.dart`, which compares the test's goldens for the host runner: comparing needs `dart:ui`, which the runner has not. The macros declare one. Without it every golden fails, saying there is no comparator.",
             executable = True,
             cfg = "target",
             providers = [RunEnvironmentInfo],
@@ -406,7 +412,8 @@ flutter_desktop_integration_test = rule(
     doc = """Runs the desktop app `app` (`flutter_macos_app`, `flutter_windows_app` or `flutter_linux_app`) on the host and reports the integration test suite it runs.
 
 The app's program is an integration test (see `flutter_integration_bootstrap`),
-so each `testWidgets` is a test case: `--test_filter` and `shard_count` select
+so each `testWidgets` is a test case: `--test_filter`, `shard_count`, and tags
+(`include_tags`, `exclude_tags`, `--test_env=DART_TEST_TAGS=...`; not Bazel's `tags`) select
 among them, each is reported as it finishes, and the JUnit file names each. A
 suite that registers no test fails, as does an app that exits during a test, with
 the reason the device gives for its exit.

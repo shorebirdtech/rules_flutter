@@ -1708,6 +1708,7 @@ flutter_macos_integration_test(
 `bazel test :app_test` builds the application with the test as its program, in debug mode whatever `-c` says (the suite is driven through the VM service a debug build serves, and `flutter test` forces debug for an integration test too), launches it on the host's own desktop, and drives the suite over that VM service, as `flutter test integration_test/app_test.dart -d macos` does. `integration_test` is in your `pubspec.yaml`'s `dev_dependencies`, as `sdk: flutter`. The app's own `main` is unchanged and carries no test code: the test is a program of its own, a variant of the application (see [flutter_application_variant](#flutter_application_variant)).
 
 - **Per-test results.** Each test case is reported as it finishes, and the JUnit report names each one. `--test_filter` selects test cases by name, a regular expression matched against each full name, and `shard_count` divides them among shards.
+- **Tags.** `@Tags` on `src` (the test file, which every integration test rule requires) and `tags:` on a `testWidgets` select cases as under `flutter test --tags`, on every platform: the host reads them, so an app that cannot be given an environment is selected the same way. Per run, `bazel test //... --test_env=DART_TEST_TAGS=golden` (and `DART_TEST_EXCLUDE_TAGS`); fixed, `include_tags` and `exclude_tags`, which work as for `flutter_test`, with a target whose fixed selection matches nothing failing and a run that narrows one to nothing passing. Bazel's `tags` choose targets, these choose cases.
 - **A failing test fails the target**, and the JUnit report names the failing case. So does an app that exits during a test, with the reason the device gives: `The macOS app exited with code 3 …`. A suite that registers no test fails, since a program that declared nothing has not been tested.
 - **One target per test file**, as `flutter test` launches the app once per file. `srcs` lists the files the test imports by relative path. A `flutter_test_config.dart` beside the test is found by the same search `flutter_test` runs, or is named with `test_config`.
 - **`deps` must bring `integration_test` and `flutter_test`**: analysis fails, naming the package and the `@<hub>//:<package>` target to add, if they are missing.
@@ -1737,7 +1738,7 @@ flutter_windows_integration_test(
 
 - **Runs on a Windows host** (`target_compatible_with`); a Mac or Linux host skips it. The app is built as for `flutter_windows_app`, whose arguments (`app_name`) the macro passes on, and the runner is `windows/runner/` when the package has one, else the built-in template.
 - **The window is real.** The app's window is created on the desktop of the session the test runs in, and the test reads and taps what it draws. Windows that overlap keep drawing, so two tests at once do not hang each other (measured with two windows at one origin), and there is no lock. A session with no visible desktop, such as an SSH logon, still runs the test: the window exists and is not on screen, so a screenshot needs the interactive session.
-- **Per-test results, `--test_filter`, `shard_count`, `env`, `data`, goldens and the failures** (a failing case, an app that exits, a suite that registers nothing) are as on macOS; an app that exits says `The Windows app exited with code 3 …`. `bazel run :app_windows_test -- --update-goldens` writes the goldens, the Windows one in `goldens/windows/`.
+- **Per-test results, `--test_filter`, tags, `shard_count`, `env`, `data`, goldens and the failures** (a failing case, an app that exits, a suite that registers nothing) are as on macOS; an app that exits says `The Windows app exited with code 3 …`. `bazel run :app_windows_test -- --update-goldens` writes the goldens, the Windows one in `goldens/windows/`.
 - **Use a short output base.** Windows limits a path to 260 characters and a Flutter bundle is deep: `bazel --output_base=C:/b test ...`.
 
 The macro is Tier 1. Tier 2 is `flutter_integration_bootstrap`, `flutter_application_variant`, `flutter_windows_app`, `flutter_desktop_integration_test` and `flutter_desktop_runner`, which the macro composes as `__<name>_bootstrap`, `__<name>_program` and `__<name>_app`.
@@ -1763,13 +1764,13 @@ flutter_linux_integration_test(
 - **Runs on a Linux host** (`target_compatible_with`), x86_64 or arm64; a Mac or Windows host skips it.
 - **Nothing of the host's but its C and C++ runtime.** The X server (`Xvfb`), GTK, Mesa's software OpenGL and the fonts come from a pinned runtime: a closure of Debian 13 packages, pinned by path and `sha256` for each architecture and fetched only when a Linux integration test is analysed. The host needs no desktop, no GTK and no X server, and its display, libraries and GTK modules are not used; a test runs the same on a workstation, over SSH and in CI. The host's glibc and libstdc++ must be at least Ubuntu 24.04's (glibc 2.39): the build checks every file of the runtime against that and fails, naming the file, on one that asks for more.
 - **Each test has a screen of its own**, so tests run at once without a lock and never draw on your desktop.
-- **Per-test results, `--test_filter`, `shard_count`, `env`, `data`, goldens and the failures** are as on macOS; an app that exits says `The Linux app exited with code 3 …`. `bazel run :app_linux_test -- --update-goldens` writes the goldens, the Linux one in `goldens/linux/`.
+- **Per-test results, `--test_filter`, tags, `shard_count`, `env`, `data`, goldens and the failures** are as on macOS; an app that exits says `The Linux app exited with code 3 …`. `bazel run :app_linux_test -- --update-goldens` writes the goldens, the Linux one in `goldens/linux/`.
 
 The macro is Tier 1. Tier 2 is `flutter_integration_bootstrap`, `flutter_application_variant`, `flutter_linux_app`, `flutter_desktop_integration_test` and `flutter_desktop_runner`, whose `linux_runtime` is the runtime (`@flutter_linux_runtime_amd64//:runtime` or `_arm64`, a `flutter_linux_runtime`). `bazel run @rules_flutter//tools/update_linux_runtime -- <snapshot>` re-pins the runtime at a snapshot.debian.org timestamp.
 
 #### Web integration tests
 
-`flutter_web_integration_test` runs the same test file in headless Chrome. `flutter test` refuses web devices (flutter/flutter#66264), and `flutter drive -d chrome` reports only pass or fail; this reports each `testWidgets` as a case, as the other platforms do, with `--test_filter` and `shard_count`.
+`flutter_web_integration_test` runs the same test file in headless Chrome. `flutter test` refuses web devices (flutter/flutter#66264), and `flutter drive -d chrome` reports only pass or fail; this reports each `testWidgets` as a case, as the other platforms do, with `--test_filter`, tags and `shard_count`.
 
 ```starlark
 load("@rules_flutter//flutter:integration_test.bzl", "flutter_web_integration_test")
@@ -1826,7 +1827,7 @@ bazel test :app_android_test --test_env=ANDROID_SERIAL=<serial>
 - **`integration_test`'s Android library links into the app**, and its Gradle build asks for `androidx.test:runner`, `androidx.test:rules`, `androidx.test.espresso:espresso-core` and `com.google.guava:guava`. Name a version of each in the `rules_android_maven` install of your `MODULE.bazel` (Gradle's `1.2+`, `1.2+` and `3.3+` are ranges; analysis names whatever is missing, and `bazel run @deps//android:maven_artifacts` prints the block). Only the tests' apps link it: your own app does not.
 - **The app stays installed**, as `flutter test` leaves it. `adb uninstall <package_name>` removes it.
 - **`env` is refused**: an app started by the device cannot be handed an environment. Pass `defines` to the application instead.
-- Results, `--test_filter`, `shard_count`, and the failures (a failing case, an app that exits, a suite that registers nothing) are as on the other platforms.
+- Results, `--test_filter`, tags, `shard_count`, and the failures (a failing case, an app that exits, a suite that registers nothing) are as on the other platforms.
 
 The macro is Tier 1. Tier 2 is `flutter_integration_bootstrap`, `flutter_application_variant`, `flutter_android_app`, `flutter_android_app_integration_test` and `flutter_android_device_runner`, which the macro composes as `__<name>_bootstrap`, `__<name>_program`, `__<name>_app` and, when you name no `runner`, `__<name>_runner`.
 
@@ -1853,7 +1854,7 @@ flutter_ios_simulator_integration_test(
 - **Needs Xcode and an iOS runtime** (`xcodebuild -downloadPlatform iOS`): a host with none fails the test saying so. It is a failure, not a skip. `DEVELOPER_DIR` reaches the test, so the Xcode you selected for the build is the one `xcrun` uses.
 - **The app is built for the Mac's own simulator CPU** (`sim_arm64` on Apple silicon, `x86_64` on Intel), in debug mode whatever `-c` says.
 - **`env` is refused**: an app started by the simulator cannot be handed an environment. Pass `defines` to the application instead.
-- Results, `--test_filter`, `shard_count`, and the failures (a failing case, an app that exits, a suite that registers nothing) are as on the other platforms. The test is `macos`-only (`target_compatible_with`), scheduled with two cores (`cpus` of the runner), and runs outside Bazel's sandbox and never remotely.
+- Results, `--test_filter`, tags, `shard_count`, and the failures (a failing case, an app that exits, a suite that registers nothing) are as on the other platforms. The test is `macos`-only (`target_compatible_with`), scheduled with two cores (`cpus` of the runner), and runs outside Bazel's sandbox and never remotely.
 
 The macro is Tier 1. Tier 2 is `flutter_integration_bootstrap`, `flutter_application_variant`, `flutter_ios_app`, `flutter_ios_app_integration_test` and `flutter_ios_simulator_runner`, which the macro composes as `__<name>_bootstrap`, `__<name>_program` and `__<name>_app`.
 

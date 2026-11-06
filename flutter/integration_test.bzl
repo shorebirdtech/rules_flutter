@@ -148,6 +148,8 @@ def flutter_macos_integration_test(
         test_config = None,
         env = {},
         data = [],
+        include_tags = [],
+        exclude_tags = [],
         size = "medium",
         runner = None,
         tags = [],
@@ -184,6 +186,15 @@ def flutter_macos_integration_test(
             `matchesGoldenFile('goldens/x.png')` reads `goldens/x.png` from the
             directory of `src`, compared on the host. `bazel run :<name> --
             --update-goldens` writes them.
+        include_tags: `package:test` tag selectors a case must match to run (`@Tags` on
+            `src` and `tags:` on a `testWidgets` give a case its tags), as
+            `dart_test.yaml`'s `include_tags`: one boolean selector per entry, and a case
+            must match every entry. Not Bazel's `tags`, which choose targets. A target
+            none of whose cases match fails; `--test_env=DART_TEST_TAGS=...` narrows
+            further for one run.
+        exclude_tags: Tag selectors that drop a case, as `dart_test.yaml`'s `exclude_tags`:
+            a case matching any entry does not run. `--test_env=DART_TEST_EXCLUDE_TAGS=...`
+            drops more for one run.
         size: The test size. `medium`: a window is launched and drawn.
         runner: A `flutter_desktop_runner`, to run the test with something other than
             the host's own desktop.
@@ -221,6 +232,8 @@ def flutter_macos_integration_test(
         golden_service = _golden_service(name, deps),
         env = env,
         data = data,
+        include_tags = include_tags,
+        exclude_tags = exclude_tags,
         size = size,
         tags = tags,
         timeout = timeout,
@@ -240,6 +253,8 @@ def flutter_windows_integration_test(
         test_config = None,
         env = {},
         data = [],
+        include_tags = [],
+        exclude_tags = [],
         size = "medium",
         runner = None,
         tags = [],
@@ -276,6 +291,15 @@ def flutter_windows_integration_test(
             `matchesGoldenFile('goldens/x.png')` reads `goldens/x.png` from the
             directory of `src`, compared on the host. `bazel run :<name> --
             --update-goldens` writes them.
+        include_tags: `package:test` tag selectors a case must match to run (`@Tags` on
+            `src` and `tags:` on a `testWidgets` give a case its tags), as
+            `dart_test.yaml`'s `include_tags`: one boolean selector per entry, and a case
+            must match every entry. Not Bazel's `tags`, which choose targets. A target
+            none of whose cases match fails; `--test_env=DART_TEST_TAGS=...` narrows
+            further for one run.
+        exclude_tags: Tag selectors that drop a case, as `dart_test.yaml`'s `exclude_tags`:
+            a case matching any entry does not run. `--test_env=DART_TEST_EXCLUDE_TAGS=...`
+            drops more for one run.
         size: The test size. `medium`: a window is launched and drawn.
         runner: A `flutter_desktop_runner`, to run the test with something other than
             the host's own desktop.
@@ -314,6 +338,8 @@ def flutter_windows_integration_test(
         golden_service = _golden_service(name, deps),
         env = env,
         data = data,
+        include_tags = include_tags,
+        exclude_tags = exclude_tags,
         size = size,
         tags = tags,
         timeout = timeout,
@@ -333,6 +359,8 @@ def flutter_linux_integration_test(
         test_config = None,
         env = {},
         data = [],
+        include_tags = [],
+        exclude_tags = [],
         size = "medium",
         runner = None,
         tags = [],
@@ -370,6 +398,15 @@ def flutter_linux_integration_test(
             `matchesGoldenFile('goldens/x.png')` reads `goldens/x.png` from the
             directory of `src`, compared on the host. `bazel run :<name> --
             --update-goldens` writes them.
+        include_tags: `package:test` tag selectors a case must match to run (`@Tags` on
+            `src` and `tags:` on a `testWidgets` give a case its tags), as
+            `dart_test.yaml`'s `include_tags`: one boolean selector per entry, and a case
+            must match every entry. Not Bazel's `tags`, which choose targets. A target
+            none of whose cases match fails; `--test_env=DART_TEST_TAGS=...` narrows
+            further for one run.
+        exclude_tags: Tag selectors that drop a case, as `dart_test.yaml`'s `exclude_tags`:
+            a case matching any entry does not run. `--test_env=DART_TEST_EXCLUDE_TAGS=...`
+            drops more for one run.
         size: The test size. `medium`: a window is launched and drawn.
         runner: A `flutter_desktop_runner`, to run the test with a runtime other
             than the pinned one of the host's architecture.
@@ -408,6 +445,8 @@ def flutter_linux_integration_test(
         golden_service = _golden_service(name, deps),
         env = env,
         data = data,
+        include_tags = include_tags,
+        exclude_tags = exclude_tags,
         size = size,
         tags = tags,
         timeout = timeout,
@@ -427,6 +466,8 @@ def flutter_web_integration_test(
         test_config = None,
         env = {},
         data = [],
+        include_tags = [],
+        exclude_tags = [],
         size = "medium",
         runner = None,
         tags = [],
@@ -469,6 +510,15 @@ def flutter_web_integration_test(
             `matchesGoldenFile('goldens/x.png')` reads `goldens/x.png` from the
             directory of `src`, compared on the host. `bazel run :<name> --
             --update-goldens` writes them.
+        include_tags: `package:test` tag selectors a case must match to run (`@Tags` on
+            `src` and `tags:` on a `testWidgets` give a case its tags), as
+            `dart_test.yaml`'s `include_tags`: one boolean selector per entry, and a case
+            must match every entry. Not Bazel's `tags`, which choose targets. A target
+            none of whose cases match fails; `--test_env=DART_TEST_TAGS=...` narrows
+            further for one run.
+        exclude_tags: Tag selectors that drop a case, as `dart_test.yaml`'s `exclude_tags`:
+            a case matching any entry does not run. `--test_env=DART_TEST_EXCLUDE_TAGS=...`
+            drops more for one run.
         size: The test size. `medium`: a browser is launched and the app drawn.
         runner: A `flutter_chrome_runner`, to run the test in a browser other than
             the pinned one.
@@ -526,6 +576,8 @@ def flutter_web_integration_test(
         golden_service = _golden_service(name, deps),
         env = env,
         data = data,
+        include_tags = include_tags,
+        exclude_tags = exclude_tags,
         size = size,
         tags = tags,
         timeout = timeout,
@@ -546,6 +598,8 @@ def flutter_android_integration_test(
         test_config = None,
         env = {},
         data = [],
+        include_tags = [],
+        exclude_tags = [],
         size = "large",
         runner = None,
         abi = "arm64-v8a",
@@ -594,6 +648,15 @@ def flutter_android_integration_test(
             `matchesGoldenFile('goldens/x.png')` reads `goldens/x.png` from the
             directory of `src`, compared on the host. `bazel run :<name> --
             --update-goldens` writes them.
+        include_tags: `package:test` tag selectors a case must match to run (`@Tags` on
+            `src` and `tags:` on a `testWidgets` give a case its tags), as
+            `dart_test.yaml`'s `include_tags`: one boolean selector per entry, and a case
+            must match every entry. Not Bazel's `tags`, which choose targets. A target
+            none of whose cases match fails; `--test_env=DART_TEST_TAGS=...` narrows
+            further for one run.
+        exclude_tags: Tag selectors that drop a case, as `dart_test.yaml`'s `exclude_tags`:
+            a case matching any entry does not run. `--test_env=DART_TEST_EXCLUDE_TAGS=...`
+            drops more for one run.
         size: The test size. `large`: an APK is built, installed and started.
         runner: A `flutter_android_device_runner`. By default one that drives the
             device with the `adb` of `@androidsdk`, the Android SDK rules_android
@@ -646,6 +709,8 @@ def flutter_android_integration_test(
         abi = abi,
         env = env,
         data = data,
+        include_tags = include_tags,
+        exclude_tags = exclude_tags,
         size = size,
         tags = tags,
         timeout = timeout,
@@ -665,6 +730,8 @@ def flutter_ios_simulator_integration_test(
         test_config = None,
         env = {},
         data = [],
+        include_tags = [],
+        exclude_tags = [],
         size = "large",
         runner = None,
         tags = [],
@@ -705,6 +772,15 @@ def flutter_ios_simulator_integration_test(
             `matchesGoldenFile('goldens/x.png')` reads `goldens/x.png` from the
             directory of `src`, compared on the host. `bazel run :<name> --
             --update-goldens` writes them.
+        include_tags: `package:test` tag selectors a case must match to run (`@Tags` on
+            `src` and `tags:` on a `testWidgets` give a case its tags), as
+            `dart_test.yaml`'s `include_tags`: one boolean selector per entry, and a case
+            must match every entry. Not Bazel's `tags`, which choose targets. A target
+            none of whose cases match fails; `--test_env=DART_TEST_TAGS=...` narrows
+            further for one run.
+        exclude_tags: Tag selectors that drop a case, as `dart_test.yaml`'s `exclude_tags`:
+            a case matching any entry does not run. `--test_env=DART_TEST_EXCLUDE_TAGS=...`
+            drops more for one run.
         size: The test size. `large`: an app is built, a simulator booted and the
             app installed.
         runner: A `flutter_ios_simulator_runner`, to run on another device type or
@@ -750,6 +826,8 @@ def flutter_ios_simulator_integration_test(
         }),
         env = env,
         data = data,
+        include_tags = include_tags,
+        exclude_tags = exclude_tags,
         size = size,
         tags = tags,
         timeout = timeout,

@@ -673,6 +673,50 @@ outcome_test(
     undeclared_outputs = _FAILURE_PICTURES,
 )
 
+# -- Tag selection in a browser ----------------------------------------------
+
+# `manual`, since the outcome tests below run it with a selection.
+flutter_web_integration_test(
+    name = "web_tags",
+    package_name = "integration_test_example",
+    src = "integration_test/tags_test.dart",
+    srcs = glob(["lib/**/*.dart"]),
+    tags = ["manual"],
+    target_compatible_with = _WEB_HOSTS,
+    deps = ["@deps//:flutter"] + _TEST_DEPS,
+)
+
+flutter_web_integration_test(
+    name = "web_tags_fixed_empty",
+    package_name = "integration_test_example",
+    src = "integration_test/tags_test.dart",
+    srcs = glob(["lib/**/*.dart"]),
+    include_tags = ["no_such_tag"],
+    tags = ["manual"],
+    target_compatible_with = _WEB_HOSTS,
+    deps = ["@deps//:flutter"] + _TEST_DEPS,
+)
+
+# `DART_TEST_TAGS` selects the tagged case of a test in a browser too.
+outcome_test(
+    name = "web_tags_run_test",
+    cases = ["a golden case"],
+    expect = "pass",
+    failing_cases_given = True,
+    run_env = {"DART_TEST_TAGS": "golden"},
+    target_compatible_with = _WEB_HOSTS,
+    test = ":web_tags",
+)
+
+# A target whose own selection keeps nothing is broken.
+outcome_test(
+    name = "web_tags_fixed_empty_test",
+    expect = "fail",
+    output_contains = ["No tests match the requested tag selectors"],
+    target_compatible_with = _WEB_HOSTS,
+    test = ":web_tags_fixed_empty",
+)
+
 # -- Android ---------------------------------------------------------------
 
 # The same app on an attached phone or a running emulator, which is a

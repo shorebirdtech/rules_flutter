@@ -332,6 +332,11 @@ void main() {
       'TEST_SHARD_STATUS_FILE': '/shard',
       'XML_OUTPUT_FILE': '/report.xml',
       'COVERAGE_OUTPUT_FILE': '/coverage',
+      // A tag selection for the test's cases: the service's one case carries
+      // no tag, so it would be selected away and every golden would fail with
+      // no comparator.
+      'DART_TEST_TAGS': 'golden',
+      'DART_TEST_EXCLUDE_TAGS': 'slow',
     };
 
     test('is the host\'s, so the service finds the runfiles, where failures '

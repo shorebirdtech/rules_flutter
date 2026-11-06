@@ -41,10 +41,17 @@ _no_attributes_no_keys_test = analysistest.make(_no_attributes_no_keys_impl)
 
 def _empty_entry_fails_impl(ctx):
     env = analysistest.begin(ctx)
-    asserts.expect_failure(env, "include_tags entry \"\" is empty or spans lines")
+    asserts.expect_failure(env, "include_tags entry \"\" is empty, spans lines or holds a comma")
     return analysistest.end(env)
 
 _empty_entry_fails_test = analysistest.make(_empty_entry_fails_impl, expect_failure = True)
+
+def _comma_entry_fails_impl(ctx):
+    env = analysistest.begin(ctx)
+    asserts.expect_failure(env, "include_tags entry \"a,b\" is empty, spans lines or holds a comma")
+    return analysistest.end(env)
+
+_comma_entry_fails_test = analysistest.make(_comma_entry_fails_impl, expect_failure = True)
 
 def _binary_has_no_tag_keys_impl(ctx):
     env = analysistest.begin(ctx)
@@ -87,6 +94,11 @@ def flutter_test_tags_test_suite(name):
         target_under_test = "//flutter/tests/test_tags_fixture:empty_entry",
         target_compatible_with = macos,
     )
+    _comma_entry_fails_test(
+        name = name + "_comma_entry_fails",
+        target_under_test = "//flutter/tests/test_tags_fixture:comma_entry",
+        target_compatible_with = macos,
+    )
     _binary_has_no_tag_keys_test(
         name = name + "_binary_has_no_tag_keys",
         target_under_test = "//flutter/tests/tester_binary_fixture:tester_binary",
@@ -97,5 +109,6 @@ def flutter_test_tags_test_suite(name):
         name + "_selectors_are_newline_joined",
         name + "_no_attributes_no_keys",
         name + "_empty_entry_fails",
+        name + "_comma_entry_fails",
         name + "_binary_has_no_tag_keys",
     ])

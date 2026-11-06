@@ -13,6 +13,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_rule_tools/remote_suite.dart';
+import 'package:flutter_rule_tools/suite_annotations.dart';
 import 'package:path/path.dart' as p;
 import 'package:rules_flutter_macos_gui_session/macos_gui_session.dart';
 
@@ -299,6 +300,8 @@ Future<Future<void> Function()> _prepareMacOs(
 /// other way, the app stopped and what the host gave given back, and ends with
 /// 143. By default that is SIGTERM and SIGINT.
 ///
+/// [readSource] reads the test source at a resolved path (by default, the file).
+///
 /// The goldens the app asks about are compared by the golden service the config
 /// names, started by [startGoldenService] (by default as a process) when the
 /// first is asked, and written instead of compared when [updateGoldens].
@@ -312,15 +315,35 @@ Future<int> runIntegrationTest(
   Stream<void>? terminated,
   bool updateGoldens = false,
   GoldenServiceLauncher? startGoldenService,
+  String Function(String path)? readSource,
 }) async {
   final sink = out ?? stdout;
   final errors = err ?? stderr;
   final TestSelection selection;
   try {
-    selection = TestSelection.fromEnvironment(environment);
+    selection = TestSelection.fromEnvironment(
+      environment,
+      fixedTags: TagSelection.fromAttribute(
+        config.includeTags,
+        config.excludeTags,
+      ),
+    );
   } on FormatException catch (e) {
     errors.writeln('integration_test: ${e.message}');
     return 64;
+  }
+  // The library's `@Tags`, which give every case its tags: read before the
+  // app is launched, since a test whose annotations cannot be read cannot be
+  // selected from.
+  final Set<String> libraryTags;
+  try {
+    libraryTags = readLibraryTags(config, resolve, readSource);
+  } on FormatException catch (e) {
+    errors.writeln(
+      'integration_test: cannot read the annotations of '
+      '${config.testDisplayName}: ${e.message}',
+    );
+    return 1;
   }
   // Touched before the run, as Bazel asks: it is how a runner says it supports
   // sharding at all, and Bazel 9 fails a sharded test whose runner never does.
@@ -345,6 +368,7 @@ Future<int> runIntegrationTest(
         choice: choice,
         environment: environment,
         selection: selection,
+        libraryTags: libraryTags,
         out: sink,
         err: errors,
         teardown: teardown,
@@ -432,6 +456,7 @@ Future<int> _drive(
   required DeviceChoice choice,
   required Map<String, String> environment,
   required TestSelection selection,
+  required Set<String> libraryTags,
   required StringSink out,
   required StringSink err,
   required _Teardown teardown,
@@ -494,6 +519,7 @@ Future<int> _drive(
           suitePath: config.testDisplayName,
           timeout: suiteTimeout(bazelTimeout),
           logPrefix: 'integration_test',
+          libraryTags: libraryTags,
           out: out,
           err: err,
         ).run(
@@ -545,3 +571,23 @@ GoldenComparator _goldenComparator(
 
 GoldenServiceLauncher _startProcess(String executable) =>
     (environment) => startGoldenServiceProcess(executable, environment);
+
+/// The library `@Tags` of [config]'s test source, read through [resolve] with
+/// [readSource] (by default, the file).
+///
+/// Throws [FormatException] when the source cannot be read or its annotations
+/// cannot be parsed.
+Set<String> readLibraryTags(
+  IntegrationRunnerConfig config,
+  String Function(String runfilesPath) resolve,
+  String Function(String path)? readSource,
+) {
+  final path = resolve(config.source);
+  final String contents;
+  try {
+    contents = (readSource ?? (p) => File(p).readAsStringSync())(path);
+  } on FileSystemException catch (e) {
+    throw FormatException('${e.message}: $path');
+  }
+  return libraryTags(config.testDisplayName, contents);
+}

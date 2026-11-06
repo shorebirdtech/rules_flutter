@@ -43,6 +43,7 @@ stub_runner(
 
 flutter_desktop_integration_test(
     name = "desktop_test",
+    src = "test/a_test.dart",
     app = "//flutter/tests/variant_fixture/app",
     env = {"FIXTURE_KEY": "fixture value"},
     tags = ["manual"],
@@ -62,17 +63,32 @@ flutter_desktop_integration_test(
     tags = ["manual"],
 )
 
-# A comparator with no test source to compare for.
+# A test given tag selectors.
 flutter_desktop_integration_test(
-    name = "desktop_test_with_goldens_and_no_source",
+    name = "desktop_test_with_tags",
+    src = "test/a_test.dart",
     app = "//flutter/tests/variant_fixture/app",
-    golden_service = ":golden_service",
+    exclude_tags = ["flaky"],
+    include_tags = [
+        "a",
+        "b || c",
+    ],
+    tags = ["manual"],
+)
+
+# A test given an empty tag selector.
+flutter_desktop_integration_test(
+    name = "desktop_test_with_an_empty_tag",
+    src = "test/a_test.dart",
+    app = "//flutter/tests/variant_fixture/app",
+    include_tags = [""],
     tags = ["manual"],
 )
 
 # A test given a runner of another family.
 flutter_desktop_integration_test(
     name = "desktop_test_on_a_web_runner",
+    src = "test/a_test.dart",
     app = "//flutter/tests/variant_fixture/app",
     runner = ":web_runner",
     tags = ["manual"],
@@ -120,6 +136,7 @@ flutter_web_bundle(
 
 flutter_web_bundle_integration_test(
     name = "web_test",
+    src = "test/a_test.dart",
     app = ":web_app",
     runner = ":chrome_runner",
     tags = ["manual"],
@@ -154,6 +171,7 @@ flutter_android_device_runner(
 
 flutter_android_app_integration_test(
     name = "android_test",
+    src = "test/a_test.dart",
     app = "//flutter/tests/variant_fixture/app",
     runner = ":android_runner",
     tags = ["manual"],
@@ -162,6 +180,7 @@ flutter_android_app_integration_test(
 # An environment, which an app on a device cannot be given.
 flutter_android_app_integration_test(
     name = "android_test_with_env",
+    src = "test/a_test.dart",
     app = "//flutter/tests/variant_fixture/app",
     env = {"FIXTURE_KEY": "fixture value"},
     runner = ":android_runner",
@@ -171,6 +190,7 @@ flutter_android_app_integration_test(
 # A runner of another family.
 flutter_android_app_integration_test(
     name = "android_test_on_a_desktop_runner",
+    src = "test/a_test.dart",
     app = "//flutter/tests/variant_fixture/app",
     runner = "//flutter/integration_test:desktop",
     tags = ["manual"],
@@ -203,6 +223,7 @@ flutter_ios_simulator_runner(
 
 flutter_ios_app_integration_test(
     name = "ios_test",
+    src = "test/a_test.dart",
     app = "//flutter/tests/variant_fixture/app",
     runner = ":ios_runner",
     tags = ["manual"],
@@ -211,6 +232,7 @@ flutter_ios_app_integration_test(
 # An environment, which an app on a simulator cannot be given.
 flutter_ios_app_integration_test(
     name = "ios_test_with_env",
+    src = "test/a_test.dart",
     app = "//flutter/tests/variant_fixture/app",
     env = {"FIXTURE_KEY": "fixture value"},
     runner = ":ios_runner",
@@ -220,6 +242,7 @@ flutter_ios_app_integration_test(
 # A runner of another family.
 flutter_ios_app_integration_test(
     name = "ios_test_on_a_desktop_runner",
+    src = "test/a_test.dart",
     app = "//flutter/tests/variant_fixture/app",
     runner = "//flutter/integration_test:desktop",
     tags = ["manual"],

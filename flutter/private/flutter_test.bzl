@@ -73,6 +73,7 @@ load("//flutter/private:exec_groups.bzl", "FLUTTER_EXEC_TOOLS", "PORTABLE", "POR
 load("//flutter/private:flutter_compile.bzl", "flutter_kernel_compile_action")
 load("//flutter/private:flutter_module.bzl", "flutter_module_aspect")
 load("//flutter/private:flutter_native_assets.bzl", "CODE_ASSETS_DOC", "collect_bundled_code_asset_files", "resolve_native_assets", "write_native_assets_manifest")
+load("//flutter/private:test_tags.bzl", "tag_selectors")
 
 # The target's Flutter SDK, whose `flutter_tester` runs the test.
 _FLUTTER_TOOLCHAIN = "@rules_flutter//flutter:toolchain_type"
@@ -302,7 +303,7 @@ def _flutter_test_impl(ctx):
         ("FLUTTER_TEST_INCLUDE_TAGS", "include_tags"),
         ("FLUTTER_TEST_EXCLUDE_TAGS", "exclude_tags"),
     ]:
-        selectors = _tag_selectors(ctx, attr_name)
+        selectors = tag_selectors(ctx, attr_name, "flutter_test")
         if selectors:
             env[key] = "\n".join(selectors)
     _add_user_env(ctx, "flutter_test", env)
@@ -324,24 +325,6 @@ def _flutter_test_impl(ctx):
         testing.TestEnvironment(env),
         instrumented_files_info,
     ] + program.providers
-
-def _tag_selectors(ctx, attr_name):
-    """The entries of the `include_tags` or `exclude_tags` attribute.
-
-    The runner joins them with newlines, so an entry may not span lines; an
-    empty one selects nothing and is a mistake in the BUILD file. Whether an
-    entry is a selector `package:test` can parse is only known to the runner,
-    which says so when the test runs.
-    """
-    entries = getattr(ctx.attr, attr_name)
-    for entry in entries:
-        if not entry.strip() or "\n" in entry:
-            fail("flutter_test {label}: {attr} entry {entry} is empty or spans lines".format(
-                label = ctx.label,
-                attr = attr_name,
-                entry = repr(entry),
-            ))
-    return entries
 
 def _add_user_env(ctx, kind, env):
     """Merges the target's `env` into `env`, never over the rule's own keys.

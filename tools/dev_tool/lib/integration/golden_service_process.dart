@@ -14,10 +14,14 @@ import 'dart:io';
 import 'golden_comparator.dart';
 
 /// What Bazel hands a test about its own run, which the golden service is not:
-/// its selection of cases, its shard, and where it reports. A service that took
-/// them would select none of its own one case, or write over the report.
+/// its selection of cases (`--test_filter`, and the `DART_TEST_TAGS` and
+/// `DART_TEST_EXCLUDE_TAGS` a run narrows by tag with), its shard, and where it
+/// reports. A service that took them would select none of its own one case, or
+/// write over the report.
 const _belongsToTheTest = [
   'TESTBRIDGE_TEST_ONLY',
+  'DART_TEST_TAGS',
+  'DART_TEST_EXCLUDE_TAGS',
   'TEST_TOTAL_SHARDS',
   'TEST_SHARD_INDEX',
   'TEST_SHARD_STATUS_FILE',

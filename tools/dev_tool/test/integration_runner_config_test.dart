@@ -15,6 +15,7 @@ Map<String, Object?> _valid() => {
   'launcher': {'chrome': '_main/chrome'},
   'testDisplayName': '//pkg:app_test',
   'env': {'A': 'b'},
+  'source': '_main/pkg/t_test.dart',
 };
 
 String _with(
@@ -35,6 +36,47 @@ void main() {
     expect(config.launcher, {'chrome': '_main/chrome'});
     expect(config.testDisplayName, '//pkg:app_test');
     expect(config.env, {'A': 'b'});
+    expect(config.source, '_main/pkg/t_test.dart');
+    expect(config.includeTags, isEmpty);
+    expect(config.excludeTags, isEmpty);
+  });
+
+  test('tag selectors are read as given', () {
+    final config = IntegrationRunnerConfig.parse(
+      _with({
+        'includeTags': ['a', 'b || c'],
+        'excludeTags': ['flaky'],
+      }),
+    );
+
+    expect(config.includeTags, ['a', 'b || c']);
+    expect(config.excludeTags, ['flaky']);
+  });
+
+  test('a source that is missing or empty, or tags that are not lists of '
+      'strings, name their key', () {
+    for (final (config, key) in [
+      (_with({}, without: ['source']), 'source'),
+      (_with({'source': ''}), 'source'),
+      (_with({'includeTags': 'a'}), 'includeTags'),
+      (
+        _with({
+          'excludeTags': [1],
+        }),
+        'excludeTags',
+      ),
+    ]) {
+      expect(
+        () => IntegrationRunnerConfig.parse(config),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            contains('"$key"'),
+          ),
+        ),
+      );
+    }
   });
 
   test('a test without a golden comparator has none, and one with it names '

@@ -230,12 +230,40 @@ def _goldens_rule_impl(ctx):
 
 _goldens_rule_test = analysistest.make(_goldens_rule_impl)
 
-def _goldens_without_source_impl(ctx):
+def _tags_rule_impl(ctx):
+    """A test's source and tag selectors reach the runner's config."""
     env = analysistest.begin(ctx)
-    asserts.expect_failure(env, "`src` (the test's source, which goldens are relative to) and `golden_service`")
+    config = written_json(env, ".integration_config.json")
+    if config == None:
+        return analysistest.end(env)
+
+    asserts.equals(env, "_main/flutter/tests/integration_fixture/test/a_test.dart", config["source"], "the runner reads the test's source for its library tags")
+    asserts.equals(env, ["a", "b || c"], config["includeTags"])
+    asserts.equals(env, ["flaky"], config["excludeTags"])
+    runfiles = [f.short_path for f in analysistest.target_under_test(env)[DefaultInfo].default_runfiles.files.to_list()]
+    asserts.true(env, "flutter/tests/integration_fixture/test/a_test.dart" in runfiles, "and the source is in the runfiles: %s" % runfiles[:5])
     return analysistest.end(env)
 
-_goldens_without_source_test = analysistest.make(_goldens_without_source_impl, expect_failure = True)
+_tags_rule_test = analysistest.make(_tags_rule_impl)
+
+def _no_tags_rule_impl(ctx):
+    env = analysistest.begin(ctx)
+    config = written_json(env, ".integration_config.json")
+    if config == None:
+        return analysistest.end(env)
+
+    asserts.equals(env, [], config["includeTags"])
+    asserts.equals(env, [], config["excludeTags"])
+    return analysistest.end(env)
+
+_no_tags_rule_test = analysistest.make(_no_tags_rule_impl)
+
+def _empty_tag_impl(ctx):
+    env = analysistest.begin(ctx)
+    asserts.expect_failure(env, "include_tags entry \"\" is empty, spans lines or holds a comma")
+    return analysistest.end(env)
+
+_empty_tag_test = analysistest.make(_empty_tag_impl, expect_failure = True)
 
 # -- The Chrome runner -------------------------------------------------------
 
@@ -557,7 +585,9 @@ def flutter_integration_test_test_suite(name):
     _test_rule_test(name = name + "_test_rule", target_under_test = _FIXTURE + "desktop_test")
     _wrong_family_test(name = name + "_wrong_family", target_under_test = _FIXTURE + "desktop_test_on_a_web_runner")
     _goldens_rule_test(name = name + "_goldens_rule", target_under_test = _FIXTURE + "desktop_test_with_goldens")
-    _goldens_without_source_test(name = name + "_goldens_without_source", target_under_test = _FIXTURE + "desktop_test_with_goldens_and_no_source")
+    _tags_rule_test(name = name + "_tags_rule", target_under_test = _FIXTURE + "desktop_test_with_tags")
+    _no_tags_rule_test(name = name + "_no_tags_rule", target_under_test = _FIXTURE + "desktop_test")
+    _empty_tag_test(name = name + "_empty_tag", target_under_test = _FIXTURE + "desktop_test_with_an_empty_tag")
     _missing_package_test(name = name + "_missing_package", target_under_test = _FIXTURE + "program_missing_a_package")
     _has_package_test(name = name + "_has_package", target_under_test = _FIXTURE + "program_with_its_packages")
     native.test_suite(
@@ -586,7 +616,9 @@ def flutter_integration_test_test_suite(name):
             ":" + name + "_test_rule",
             ":" + name + "_wrong_family",
             ":" + name + "_goldens_rule",
-            ":" + name + "_goldens_without_source",
+            ":" + name + "_tags_rule",
+            ":" + name + "_no_tags_rule",
+            ":" + name + "_empty_tag",
             ":" + name + "_missing_package",
             ":" + name + "_has_package",
         ],

@@ -61,6 +61,9 @@ class IntegrationRunnerConfig {
     required this.launcher,
     required this.testDisplayName,
     required this.env,
+    required this.source,
+    this.includeTags = const [],
+    this.excludeTags = const [],
     this.goldens,
   });
 
@@ -125,6 +128,17 @@ class IntegrationRunnerConfig {
       );
     }
 
+    List<String> tagSelectors(String key) {
+      final value = config[key];
+      if (value == null) return const [];
+      if (value is! List || value.any((v) => v is! String)) {
+        throw FormatException(
+          '$where: "$key" must be a list of strings, got ${json.encode(value)}',
+        );
+      }
+      return value.cast<String>();
+    }
+
     GoldenServiceConfig? goldens;
     final goldenConfig = config['goldens'];
     if (goldenConfig != null) {
@@ -164,6 +178,9 @@ class IntegrationRunnerConfig {
       launcher: launcher,
       testDisplayName: string('testDisplayName'),
       env: env.cast<String, String>(),
+      source: string('source'),
+      includeTags: tagSelectors('includeTags'),
+      excludeTags: tagSelectors('excludeTags'),
       goldens: goldens,
     );
   }
@@ -185,6 +202,17 @@ class IntegrationRunnerConfig {
   /// What the test was given in `env`, which the runner's own environment
   /// already carries.
   final Map<String, String> env;
+
+  /// The runfiles path of the test's source, which the runner reads for the
+  /// library annotations (`@Tags`) that give every case its tags.
+  final String source;
+
+  /// The target's `include_tags`: tag selectors a case must match, one
+  /// boolean selector per entry.
+  final List<String> includeTags;
+
+  /// The target's `exclude_tags`: tag selectors that drop a case.
+  final List<String> excludeTags;
 
   /// How the goldens of the test are compared, or null when it has no golden
   /// comparator: a golden it asks for then fails, saying so.

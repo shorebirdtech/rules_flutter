@@ -57,6 +57,7 @@ const _linuxRuntime = {
 };
 
 final _config = IntegrationRunnerConfig(
+  source: '_main/pkg/app_test.dart',
   family: IntegrationFamily.desktop,
   appArtifacts: const ['_main/app.zip'],
   launcher: const {},
@@ -80,9 +81,12 @@ void main() {
     Map<String, String> environment = const {},
     Future<Future<void> Function()> Function()? prepare,
     Stream<void> terminated = const Stream.empty(),
+    IntegrationRunnerConfig? config,
+    String source = 'void main() {}',
   }) => runIntegrationTest(
-    _config,
+    config ?? _config,
     resolve: (path) => '/runfiles/$path',
+    readSource: (_) => source,
     choice: DeviceChoice(
       device,
       prepare ?? () async => () async {},
@@ -180,6 +184,64 @@ void main() {
     expect(err.toString(), contains('not a regular expression'));
   });
 
+  test(
+    'a DART_TEST_TAGS that is not a tag selector is a usage error',
+    () async {
+      final device = _FakeDevice(() async => appRunning());
+
+      final result = await run(
+        device,
+        environment: {'DART_TEST_TAGS': 'golden &&'},
+      );
+
+      expect(result, 64);
+      expect(err.toString(), contains('DART_TEST_TAGS "golden &&"'));
+      expect(err.toString(), contains('is not a tag selector'));
+    },
+  );
+
+  test('an include_tags entry that is not a tag selector is a usage '
+      'error', () async {
+    final device = _FakeDevice(() async => appRunning());
+
+    final result = await run(
+      device,
+      config: IntegrationRunnerConfig(
+        source: '_main/pkg/app_test.dart',
+        family: IntegrationFamily.desktop,
+        appArtifacts: const ['_main/app.zip'],
+        launcher: const {},
+        testDisplayName: '//pkg:app_test',
+        env: const {},
+        includeTags: const ['a &&'],
+      ),
+    );
+
+    expect(result, 64);
+    expect(err.toString(), contains('include_tags entry "a &&"'));
+  });
+
+  test('annotations that cannot be read fail the run before the app is '
+      'launched, naming the test', () async {
+    var launched = false;
+    final device = _FakeDevice(() async {
+      launched = true;
+      return appRunning();
+    });
+
+    final result = await run(
+      device,
+      source: "@Tags([1])\nlibrary;\nvoid main() {}\n",
+    );
+
+    expect(result, 1);
+    expect(
+      err.toString(),
+      contains('cannot read the annotations of //pkg:app_test'),
+    );
+    expect(launched, isFalse);
+  });
+
   test('an app whose suite never registers fails at the ceiling, naming the '
       'extension it waited for', () async {
     // No isolate ever registers the extension: the wait is bounded by the
@@ -198,6 +260,7 @@ void main() {
 
   group('the device of a web config', () {
     final webConfig = IntegrationRunnerConfig(
+      source: '_main/pkg/app_test.dart',
       family: IntegrationFamily.web,
       appArtifacts: const ['_main/app_web'],
       launcher: const {'chrome': 'chrome+/chrome-headless-shell'},
@@ -224,6 +287,7 @@ void main() {
     test('on Linux runs the browser with the runner\'s runtime and without '
         'its sandbox', () async {
       final linuxConfig = IntegrationRunnerConfig(
+        source: '_main/pkg/app_test.dart',
         family: IntegrationFamily.web,
         appArtifacts: const ['_main/app_web'],
         launcher: const {
@@ -261,6 +325,7 @@ void main() {
 
     test('a config that names no browser is refused, naming the key', () async {
       final unnamed = IntegrationRunnerConfig(
+        source: '_main/pkg/app_test.dart',
         family: IntegrationFamily.web,
         appArtifacts: const ['_main/app_web'],
         launcher: const {},
@@ -329,6 +394,7 @@ void main() {
         'shown on with the runtime\'s libraries', () async {
       final server = FakeProcess();
       final linuxConfig = IntegrationRunnerConfig(
+        source: '_main/pkg/app_test.dart',
         family: IntegrationFamily.desktop,
         appArtifacts: const ['_main/app'],
         launcher: const {'linuxRuntime': _linuxRuntime},
@@ -396,6 +462,7 @@ void main() {
     tearDown(() => scratch.deleteSync(recursive: true));
 
     final androidConfig = IntegrationRunnerConfig(
+      source: '_main/pkg/app_test.dart',
       family: IntegrationFamily.android,
       appArtifacts: const ['_main/app.apk'],
       launcher: const {'adb': 'androidsdk/platform-tools/adb'},
@@ -528,6 +595,7 @@ void main() {
 
   group('the device of an iOS simulator config', () {
     final iosConfig = IntegrationRunnerConfig(
+      source: '_main/pkg/app_test.dart',
       family: IntegrationFamily.iosSimulator,
       appArtifacts: const ['_main/app.ipa'],
       launcher: const {'deviceType': 'iPhone 16', 'runtime': ''},
@@ -591,6 +659,7 @@ void main() {
 
     test('a config that names no device type is refused, naming the key', () {
       final unnamed = IntegrationRunnerConfig(
+        source: '_main/pkg/app_test.dart',
         family: IntegrationFamily.iosSimulator,
         appArtifacts: const ['_main/app.ipa'],
         launcher: const {'runtime': ''},

@@ -33,3 +33,13 @@ flutter_test(
     visibility = ["//flutter/tests:__pkg__"],
     deps = ["//flutter/tests/dart_asset_fixture:fake_test_api"],
 )
+
+flutter_test(
+    name = "comma_entry",
+    package_name = "comma_entry",
+    include_tags = ["a,b"],
+    main = "main.dart",
+    tags = ["manual"],
+    visibility = ["//flutter/tests:__pkg__"],
+    deps = ["//flutter/tests/dart_asset_fixture:fake_test_api"],
+)
