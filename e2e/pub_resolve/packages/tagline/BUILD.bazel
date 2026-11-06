@@ -1,0 +1,11 @@
+load("@rules_dart//dart:defs.bzl", "dart_library")
+
+# The target is not named after the package: `flutter.pub(resolve = ...)` in
+# MODULE.bazel states which target builds it, and nothing is found by name.
+dart_library(
+    name = "tagline_lib",
+    package_name = "tagline",
+    srcs = glob(["lib/**/*.dart"]),
+    # The hub's repository aliases this target.
+    visibility = ["//visibility:public"],
+)

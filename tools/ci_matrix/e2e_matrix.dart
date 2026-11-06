@@ -248,6 +248,17 @@ const e2eWorkspaces = <E2eWorkspace>[
     skips: {Os.macos: _webElsewhere, Os.windows: _webElsewhere},
   ),
   E2eWorkspace(
+    'pub_resolve',
+    runs: {
+      Os.linux:
+          'a monorepo\'s path pub packages, and a fork of a hosted one, built '
+          'from the workspace targets `flutter.pub(resolve = ...)` maps: '
+          'platform-neutral, so one run, on the cheapest runner; with the '
+          'render check in the pinned headless Chrome',
+    },
+    skips: {Os.macos: _webElsewhere, Os.windows: _webElsewhere},
+  ),
+  E2eWorkspace(
     'android_example',
     runs: {
       Os.linux:

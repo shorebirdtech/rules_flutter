@@ -41,6 +41,7 @@
 /e2e/integration_test/ export-ignore
 /e2e/ios_example/ export-ignore
 /e2e/linux_example/ export-ignore
+/e2e/pub_resolve/ export-ignore
 /e2e/macos_example/ export-ignore
 /e2e/multi_window_example/ export-ignore
 /e2e/plugin_example/ export-ignore
