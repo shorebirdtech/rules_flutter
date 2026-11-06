@@ -922,6 +922,7 @@ Android build (§ "The Android SDK/NDK variables must be exported too") and
 | `:ios_red_twin_test` | a failing integration test fails its target on a simulator, the JUnit report names the failing case, and the simulator is deleted though the test failed. It wraps `:ios_red` (`manual`) |
 | `:macos_golden_test`, `:web_golden_test`, `:android_golden_test`, `:ios_golden_test` | `matchesGoldenFile` in an integration test compares with the golden committed for the platform (`integration_test/goldens/<platform>/swatch.png`) and passes: the app sends the picture to the host runner, which compares it with the comparator every `flutter_test` here uses |
 | `:web_golden_mid_frame_test` | a golden taken in a browser while the engine is still drawing the frames before it is the widget's own 64×64 picture, not the whole page: a slow picture holds the frames up so the last waits behind the other when `matchesGoldenFile` captures |
+| `:web_golden_live_frames_test` | the same while the app draws frames no `pump` asked for (the `fullyLive` frame policy, behind the swatch a background slow to draw): no frame is drawn while `matchesGoldenFile` captures |
 | `:macos_golden_mismatch_twin_test` and the `web_`, `android_` and `ios_` ones | a golden that does not match fails its target, the failure names the golden file (`Golden "goldens/<platform>/swatch.png": Pixel test failed, 100.00%, 4096px diff detected.`), and the four pictures of the failure are left in the test's undeclared outputs (`bazel-testlogs/<target>/test.outputs/failures/swatch_*.png`), where `flutter_test` leaves them. They wrap `:<platform>_golden_mismatch` (`manual`: the same swatch in another colour against the same golden) in `outcome_test`, whose `undeclared_outputs` checks the pictures |
 
 The golden tests draw a flat, text-free square at a fixed logical size, so the
@@ -1779,7 +1780,8 @@ supplied them. Run them on an x86_64 VM (`n2-standard-16`) and an arm64 one
 bazel test //:linux_pass_test //:linux_filter_test //:linux_red_twin_test \
   //:linux_crash_test //:linux_golden_test //:linux_golden_mismatch_twin_test \
   //:web_pass_test //:web_filter_test //:web_red_twin_test //:web_golden_test \
-  //:web_golden_mid_frame_test //:web_golden_mismatch_twin_test
+  //:web_golden_mid_frame_test //:web_golden_live_frames_test \
+  //:web_golden_mismatch_twin_test
 ```
 
 and web_example's `:render_test`. The first run fetches the runtime (about 160

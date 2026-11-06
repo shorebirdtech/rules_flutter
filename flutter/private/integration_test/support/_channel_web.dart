@@ -80,17 +80,62 @@ void initializeBinding() {
 /// page with the widget in its corner (flutter/flutter#185034). A busy machine
 /// leaves a frame waiting after any `pumpAndSettle`.
 ///
-/// So [runAsync] first encodes a one-pixel image the same way. The engine's
-/// worker answers in the order it was asked, and a waiting frame starts as soon
-/// as the one before it is drawn, so once that image comes back every frame
-/// handed to the engine has made its resize, and none can make one in the
-/// middle of the picture.
+/// A frame that starts while the picture is taken makes the same resize: one
+/// the app draws of its own accord, as it does under
+/// [LiveTestWidgetsFlutterBindingFramePolicy.fullyLive] or while a tap's
+/// pointer fades.
+///
+/// So no frame is drawn while [runAsync] runs: one the engine asks for then is
+/// drawn once it returns. And [runAsync] first encodes a one-pixel image the
+/// way the picture is encoded. The engine's worker answers in the order it was
+/// asked, and a waiting frame starts as soon as the one before it is drawn, so
+/// once that image comes back every frame handed to the engine has made its
+/// resize, and none can make one in the middle of the picture.
+///
+/// This is what the automated binding of `flutter test` gives code in
+/// [runAsync]: no frame is drawn until the test pumps one.
 class _PageBinding extends IntegrationTestWidgetsFlutterBinding {
+  /// Whether frames wait for [runAsync] to return.
+  var _holding = false;
+
+  /// Whether the engine asked for a frame while frames waited.
+  var _held = false;
+
+  /// Whether the frame begun is one that waits, so its draw does too.
+  var _holdingThisFrame = false;
+
+  @override
+  void handleBeginFrame(Duration? rawTimeStamp) {
+    if (_holding) {
+      _held = _holdingThisFrame = true;
+      return;
+    }
+    super.handleBeginFrame(rawTimeStamp);
+  }
+
+  @override
+  void handleDrawFrame() {
+    if (_holdingThisFrame) {
+      _holdingThisFrame = false;
+      return;
+    }
+    super.handleDrawFrame();
+  }
+
   @override
   Future<T?> runAsync<T>(Future<T> Function() callback) =>
       super.runAsync(() async {
-        await _engineCaughtUp();
-        return callback();
+        _holding = true;
+        try {
+          await _engineCaughtUp();
+          return await callback();
+        } finally {
+          _holding = false;
+          if (_held) {
+            _held = false;
+            platformDispatcher.scheduleFrame();
+          }
+        }
       });
 }
 

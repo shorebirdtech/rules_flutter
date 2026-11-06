@@ -509,6 +509,19 @@ flutter_web_integration_test(
     deps = ["@deps//:flutter"] + _TEST_DEPS,
 )
 
+# The swatch captured while the app draws frames that no `pump` asked for, as
+# it does under the `fullyLive` frame policy: the picture is still the
+# swatch's own.
+flutter_web_integration_test(
+    name = "web_golden_live_frames_test",
+    package_name = "integration_test_example",
+    src = "integration_test/golden_live_frames_test.dart",
+    srcs = glob(["lib/**/*.dart"]) + _GOLDEN_SRCS,
+    data = _GOLDENS,
+    target_compatible_with = _WEB_HOSTS,
+    deps = ["@deps//:flutter"] + _TEST_DEPS,
+)
+
 # `manual`, since it is meant to fail: the red twin below runs it.
 flutter_web_integration_test(
     name = "web_golden_mismatch",
