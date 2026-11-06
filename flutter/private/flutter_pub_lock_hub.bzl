@@ -11,6 +11,10 @@ plugins it links against.
 application depends on (`flutter_android_plugin_libs`), not those of every
 package of the lock, and passes that rule `@<hub>//android:maven_requirements`.
 
+A lock with `flutter_test` also gets a `goldens/BUILD.bazel`: the golden service
+the integration tests of the hub share (`flutter/private/goldens/service.dart`,
+a `flutter_test` built against the hub's `flutter_test`).
+
 Loaded lazily — Bazel only parses `android/BUILD.bazel` when an Android build
 asks for it. Non-Android workspaces (mac-only, web-only) don't pay the
 `@rules_android` / `@rules_kotlin` cost.
@@ -40,6 +44,32 @@ alias(
             repo = library_repo(spoke_prefix, pkg) if pkg in built else source_repo(spoke_prefix, pkg),
         ))
     ctx.file("BUILD.bazel", "\n\n".join(aliases) + "\n")
+
+    if "flutter_test" in ctx.attr.packages:
+        ctx.file(
+            "goldens/BUILD.bazel",
+            """\
+load("{flutter_test_bzl}", "flutter_test")
+
+# Compares the goldens of an integration test for its host runner, which has no
+# `dart:ui`: started by the runner, told which test it compares for. It needs
+# only `package:flutter_test`, so the integration tests of this hub share it.
+flutter_test(
+    name = "service",
+    main = "{service}",
+    srcs = ["{comparator}"],
+    package_name = "rules_flutter_golden_service",
+    deps = ["//:flutter_test"],
+    tags = ["manual"],
+    testonly = True,
+    visibility = ["//visibility:public"],
+)
+""".format(
+                flutter_test_bzl = str(Label("//flutter/private:flutter_test.bzl")),
+                service = str(Label("//flutter/private/goldens:service.dart")),
+                comparator = str(Label("//flutter/private/goldens:comparator.dart")),
+            ),
+        )
 
     ctx.file(
         "android/BUILD.bazel",
@@ -86,5 +116,6 @@ flutter_pub_lock_hub = repository_rule(
     doc = "Creates a Flutter pub hub repo with both the standard top-level package aliases " +
           "and an `android/` package: the Maven requirements the `flutter_android_app` Tier-1 " +
           "macro's `flutter_android_plugin_libs` checks the plugins an app links against, " +
-          "and the `maven_artifacts` report.",
+          "and the `maven_artifacts` report; with `flutter_test`, a `goldens/` package: the " +
+          "golden service the integration test macros share.",
 )

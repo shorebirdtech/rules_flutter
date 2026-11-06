@@ -12,8 +12,8 @@ pub-managed `@deps`, the same arrangement `agent_extensions/agent.dart` uses.
 """
 
 # `service.dart` and the comparator it imports are named by the `flutter_test`
-# each integration test macro declares in the user's package, so they are
-# visible from any package. Not for use outside the macros.
+# the `flutter.pub()` hub declares as its golden service, so they are visible
+# from any package. Not for use outside it.
 exports_files(
     [
         "comparator.dart",

@@ -44,7 +44,6 @@ load("//flutter/private:flutter_application_variant.bzl", _flutter_application_v
 load("//flutter/private:flutter_integration_bootstrap.bzl", _flutter_integration_bootstrap = "flutter_integration_bootstrap")
 load("//flutter/private:flutter_integration_test.bzl", _flutter_android_app_integration_test = "flutter_android_app_integration_test", _flutter_android_device_runner = "flutter_android_device_runner", _flutter_chrome_runner = "flutter_chrome_runner", _flutter_desktop_integration_test = "flutter_desktop_integration_test", _flutter_desktop_runner = "flutter_desktop_runner", _flutter_ios_app_integration_test = "flutter_ios_app_integration_test", _flutter_ios_simulator_runner = "flutter_ios_simulator_runner", _flutter_web_bundle_integration_test = "flutter_web_bundle_integration_test")
 load("//flutter/private:flutter_linux_runtime.bzl", _flutter_linux_runtime = "flutter_linux_runtime")
-load("//flutter/private:flutter_test.bzl", _flutter_test = "flutter_test")
 load("//flutter/private:test_config.bzl", "find_test_config")
 
 flutter_application_variant = _flutter_application_variant
@@ -82,29 +81,27 @@ def _find_test_config(name, src):
     )
 
 def _golden_service(name, deps):
-    """Declares the `flutter_test` that compares the test's goldens on the host.
+    """The `flutter_test` that compares the test's goldens on the host.
 
     The host runner has no `dart:ui`, which comparing two pictures needs, so a
     `flutter_test` of the rule's own (`flutter/private/goldens/service.dart`)
     does it, as `flutter test` runs a `flutter_tester` to compare for the tool.
-    It needs `package:flutter_test` and nothing else, and takes that of `deps`:
-    the one that is `flutter_test`.
+    It needs `package:flutter_test` and nothing else, so it is one per pub hub,
+    `@<hub>//goldens:service`, which every integration test of the hub shares:
+    the test it compares for is named to it when it is started. The hub is the
+    one of the `flutter_test` among `deps`.
 
     Returns:
-        The label of the service. It is the macro's own, named `__<name>_goldens`.
+        The label of the service.
     """
-    service = "__%s_goldens" % name
-    _flutter_test(
-        name = service,
-        main = str(Label("//flutter/private/goldens:service.dart")),
-        srcs = [str(Label("//flutter/private/goldens:comparator.dart"))],
-        package_name = "rules_flutter_golden_service",
-        deps = [d for d in deps if native.package_relative_label(d).name == "flutter_test"],
-        tags = ["manual"],
-        testonly = True,
-        visibility = ["//visibility:private"],
-    )
-    return ":" + service
+    for dep in deps:
+        label = native.package_relative_label(dep)
+        if label.name == "flutter_test":
+            return "@@%s//goldens:service" % label.repo_name
+    fail((
+        "%s: `deps` has no `flutter_test` (`@<hub>//:flutter_test`), which an " +
+        "integration test needs to run its suite and compare its goldens."
+    ) % native.package_relative_label(":" + name))
 
 def _program(name, src, application, deps, srcs, test_config):
     """Declares the bootstrap and the variant that is the test's program.
