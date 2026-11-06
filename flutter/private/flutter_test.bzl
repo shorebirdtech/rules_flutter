@@ -709,7 +709,7 @@ _TEST_ATTRS = {
         "require_sksl_shaders",
         "_shader_compile_tool",
         "_kernel_filter_tool",
-        "license",
+        "license_file",
         "additional_licenses",
         "tree_shake_icons",
         "_asset_bundle_tool",

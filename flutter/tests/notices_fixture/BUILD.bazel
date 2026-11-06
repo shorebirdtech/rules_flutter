@@ -1,0 +1,32 @@
+load("@rules_dart//dart:defs.bzl", "dart_library")
+load("//flutter:defs.bzl", "flutter_library")
+
+package(default_visibility = ["//flutter/tests:__pkg__"])
+
+exports_files(["APP_LICENSE"])
+
+# A pure-Dart package and a Flutter one, each naming its licence; the Flutter
+# one depends on the Dart one. A third names none.
+dart_library(
+    name = "notices_dart",
+    package_name = "notices_dart",
+    srcs = ["lib/dart_pkg.dart"],
+    license_file = "DART_LICENSE",
+    tags = ["manual"],
+)
+
+flutter_library(
+    name = "notices_flutter",
+    package_name = "notices_flutter",
+    srcs = ["lib/flutter_pkg.dart"],
+    license_file = "FLUTTER_LICENSE",
+    tags = ["manual"],
+    deps = [":notices_dart"],
+)
+
+flutter_library(
+    name = "notices_bare",
+    package_name = "notices_bare",
+    srcs = ["lib/bare_pkg.dart"],
+    tags = ["manual"],
+)

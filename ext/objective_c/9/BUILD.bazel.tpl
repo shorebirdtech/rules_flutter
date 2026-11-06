@@ -11,7 +11,7 @@
 #     `DynamicLibrary.open("objective_c.dylib")` at runtime.
 #
 # Hand-curated translation of the package's `dart build hooks` output.
-# Placeholders (HUB_NAME, PKG, VERSION, LANGUAGE_VERSION, DEPS — written
+# Placeholders (HUB_NAME, PKG, VERSION, LANGUAGE_VERSION, DEPS, LICENSE — written
 # in braces below, and deliberately not in this comment, because
 # substitution rewrites comment text too) are injected by
 # `flutter_pub_package`'s `_resolve_overlay`. We don't read the version
@@ -43,6 +43,7 @@ flutter_plugin(
         "//conditions:default": [],
     }),
     package_name = "{PKG}",
+    {LICENSE}
     platforms = [],
     visibility = ["//visibility:public"],
     deps = [

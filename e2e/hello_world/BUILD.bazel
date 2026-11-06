@@ -79,7 +79,10 @@ flutter_application(
     name = "licences_app",
     package_name = "hello_world",
     main = "lib/licences_main.dart",
-    deps = ["@deps//:flutter"],
+    deps = [
+        "@deps//:cupertino_icons",
+        "@deps//:flutter",
+    ],
 )
 
 flutter_macos_app(
@@ -94,7 +97,10 @@ flutter_web_app(
     name = "licences_web",
     package_name = "hello_world",
     main = "lib/licences_main.dart",
-    deps = ["@deps//:flutter"],
+    deps = [
+        "@deps//:cupertino_icons",
+        "@deps//:flutter",
+    ],
 )
 
 # -- macOS desktop app --------------------------------------------------------
@@ -254,6 +260,20 @@ flutter_test(
         "@deps//:flutter_localized_locales",
         "@deps//:flutter_test",
         "@rules_flutter//flutter:material_icons",
+    ],
+)
+
+# The NOTICES.Z a test bundles names the packages the test depends on, the
+# engine's included.
+flutter_test(
+    name = "licences_test",
+    package_name = "hello_world",
+    main = "test/licences_test.dart",
+    deps = [
+        "@deps//:cupertino_icons",
+        "@deps//:flutter",
+        "@deps//:flutter_localized_locales",
+        "@deps//:flutter_test",
     ],
 )
 

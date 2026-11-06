@@ -44,6 +44,7 @@ load(":manifest_merge_test.bzl", "manifest_merge_test_suite")
 load(":native_assets_test.bzl", "bridge_probe", "native_assets_test_suite")
 load(":native_hot_patch_test.bzl", "native_hot_patch_test_suite")
 load(":native_sources_test.bzl", "native_sources_test_suite")
+load(":notices_test.bzl", "notices_test_suite")
 load(":path_mapping_test.bzl", "path_mapping_test_suite")
 load(":pinned_test.bzl", "pinned_test_suite")
 load(":platform_bundle_test.bzl", "platform_bundle_test_suite")
@@ -177,6 +178,8 @@ dev_config_test_suite(name = "dev_config_test")
 app_defines_test_suite(name = "app_defines_test")
 
 app_flavor_test_suite(name = "app_flavor_test")
+
+notices_test_suite(name = "notices_test")
 
 flutter_test_flavor_test_suite(name = "flutter_test_flavor_test")
 

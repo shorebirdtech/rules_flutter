@@ -3,6 +3,7 @@
 ///
 ///     notices_test <bundle> [--web] [--subdir=D] [--own-license=PATH
 ///                  --package=NAME] [--additional=PATH]...
+///                  [--fixtures=PATH] [--absent=NAME]...
 ///
 /// The framework loads `NOTICES` on the web (as the UTF-8 text it is) and
 /// `NOTICES.Z` (gzip) everywhere else, and splits the text into entries as
@@ -11,6 +12,11 @@
 /// `flutter: licenses:` lists as they are, and lists the engine's licences
 /// under `sky_engine`. The engine's text is not compared (it changes with the
 /// Flutter version); that it is there is.
+///
+/// `--fixtures` is the text the entries made only of `fx_` packages make: each
+/// package of the program's closure is named by its `NOTICES` or `LICENSE`, one
+/// text shared by two packages is one entry, and the lock's other packages
+/// (`--absent`) are not listed.
 library;
 
 import 'dart:convert';
@@ -102,6 +108,27 @@ void main(List<String> args) {
     problems.add(
       'the file does not end with the additional licences as listed',
     );
+  }
+
+  final fixtures = options('fixtures');
+  if (fixtures.isNotEmpty) {
+    final wanted = File(resolve(fixtures.single)).readAsStringSync();
+    final found = [
+      for (final e in entries.sublist(0, merged))
+        if (e.names.isNotEmpty && e.names.every((n) => n.startsWith('fx_')))
+          '${e.names.join('\n')}\n\n${e.text}',
+    ].join(separator);
+    if (found != wanted) {
+      problems.add(
+        'the fixture entries are not the expected ones.\n'
+        '--- expected\n$wanted\n--- found\n$found',
+      );
+    }
+  }
+  for (final name in options('absent')) {
+    if (entries.any((e) => e.names.contains(name))) {
+      problems.add('$name is listed, but the program does not depend on it');
+    }
   }
 
   final own = options('own-license');

@@ -44,7 +44,7 @@ whichever rule asks for it.
 """
 
 load("@rules_dart//dart/pub:pub_graph.bzl", "write_pubspec_dependencies")
-load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version", "fetch_pub_archive")
+load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version", "fetch_pub_archive", "find_pub_license_file")
 load("@rules_dart//dart/pub:pubspec.bzl", "read_pubspec")
 load("//flutter/private:android_plugin_maven.bzl", "MAVEN_DEPS_FILE", "gradle_statements", "parse_gradle_maven_dependencies")
 load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url")
@@ -970,7 +970,18 @@ def _format_version_attr(version):
     """
     return '    version = "{}",\n'.format(version) if version else ""
 
-def make_dart_member_build_content(name, language_version, code_assets, has_unreplaced_hook, version = ""):
+def _format_license_file_attr(license_file):
+    """Format the `license_file` attribute line of a member, or nothing.
+
+    Args:
+        license_file: The package-relative name `find_pub_license_file` found, or "".
+
+    Returns:
+        A BUILD attribute line, or "".
+    """
+    return '    license_file = "{}",\n'.format(license_file) if license_file else ""
+
+def make_dart_member_build_content(name, language_version, code_assets, has_unreplaced_hook, version = "", license_file = ""):
     """Generate BUILD content for the source repository of a pure-Dart pub package.
 
     A package with nothing of Flutter's in its pubspec is rules_dart's own
@@ -984,6 +995,7 @@ def make_dart_member_build_content(name, language_version, code_assets, has_unre
             package's build hook output.
         has_unreplaced_hook: Path of a build hook nothing replaces, or "".
         version: The resolved package version, or "".
+        license_file: The package's `NOTICES` or `LICENSE` (`find_pub_license_file`), or "".
 
     Returns:
         BUILD.bazel content as a string.
@@ -996,13 +1008,14 @@ pub_package_member(
     srcs = glob(["lib/**/*.dart"], allow_empty = True),
 {resources}    package_name = "{name}",
     language_version = "{language_version}",
-{version}{asset_attrs}    visibility = ["//visibility:public"],
+{version}{license}{asset_attrs}    visibility = ["//visibility:public"],
 )
 """.format(
         name = name,
         resources = _RESOURCES_GLOB_BLOCK,
         language_version = language_version,
         version = _format_version_attr(version),
+        license = _format_license_file_attr(license_file),
         asset_attrs = _format_code_asset_attrs(code_assets, has_unreplaced_hook),
     )
 
@@ -1032,7 +1045,8 @@ def make_flutter_member_build_content(
         additional_licenses = [],
         pkg_asset_flavors = {},
         pkg_shader_flavors = {},
-        has_android_lib = False):
+        has_android_lib = False,
+        license_file = ""):
     """Generate BUILD content for the source repository of a Flutter pub package.
 
     Emits the package's `flutter_pub_member`, a plugin when
@@ -1056,6 +1070,7 @@ def make_flutter_member_build_content(
 
     Args:
         name: Target name (also the `package_name`).
+        license_file: The package's `NOTICES` or `LICENSE` (`find_pub_license_file`), or "".
         has_android_lib: Whether the package has an `android/` sub-package
             that defines `:lib`, which the member lists under `exports`,
             selected on Android.
@@ -1252,12 +1267,13 @@ flutter_pub_member(
     srcs = glob(["lib/**/*.dart"], allow_empty = True),
 {resources}    package_name = "{name}",
 {plugin_platforms_json_attr}    language_version = "{language_version}",
-{version}{android_lib_arg}{apple_libs_arg}{linux_libs_arg}{windows_libs_arg}{apple_privacy_files_arg}{asset_attrs}{pub_attrs}    visibility = ["//visibility:public"],
+{version}{license}{android_lib_arg}{apple_libs_arg}{linux_libs_arg}{windows_libs_arg}{apple_privacy_files_arg}{asset_attrs}{pub_attrs}    visibility = ["//visibility:public"],
 )
 {extra_targets}
 """.format(
         name = name,
         version = _format_version_attr(version),
+        license = _format_license_file_attr(license_file),
         asset_attrs = _format_code_asset_attrs(code_assets, has_unreplaced_hook),
         resources = _RESOURCES_GLOB_BLOCK,
         language_version = language_version,
@@ -1557,6 +1573,10 @@ def _detect_unreplaced_hook(ctx):
 _LANGUAGE_VERSION_PLACEHOLDER = "{LANGUAGE_VERSION}"
 _DEPS_PLACEHOLDER = "{DEPS}"
 
+# Where an overlay states its package's licence: the `license_file` attribute
+# line the generated spokes carry, or nothing for a package with none.
+_LICENSE_PLACEHOLDER = "{LICENSE}"
+
 # The prefix a spoke label takes in an overlay template before substitution.
 # Finding one means the template names a sibling package by hand.
 _HUB_DEP_PREFIX = "@{HUB_NAME}__"
@@ -1639,7 +1659,7 @@ def render_overlay_deps(dep_labels):
     """
     return "\n        ".join(['"%s",' % label for label in dep_labels])
 
-def apply_overlay_substitutions(content, hub_name, package_name, version, language_version, deps):
+def apply_overlay_substitutions(content, hub_name, package_name, version, language_version, deps, license_file = ""):
     """Fill an overlay template's placeholders.
 
     Args:
@@ -1652,10 +1672,16 @@ def apply_overlay_substitutions(content, hub_name, package_name, version, langua
         deps: Rendered list body for `{DEPS}` (see `render_overlay_deps`),
             derived from the same pubspec-and-lock intersection a generated
             spoke uses.
+        license_file: The package's `NOTICES` or `LICENSE` (`find_pub_license_file`)
+            for `{LICENSE}`, which becomes its `license_file` line, or nothing.
 
     Returns:
         The substituted content.
     """
+    if license_file:
+        content = content.replace(_LICENSE_PLACEHOLDER, 'license_file = "{}",'.format(license_file))
+    else:
+        content = content.replace("    " + _LICENSE_PLACEHOLDER + "\n", "").replace(_LICENSE_PLACEHOLDER, "")
     return content.replace(
         "{HUB_NAME}",
         hub_name,
@@ -1673,7 +1699,7 @@ def apply_overlay_substitutions(content, hub_name, package_name, version, langua
         deps,
     )
 
-def _resolve_overlay_template(ctx, overlay_root_label, package_name, version, language_version, dep_labels, relpath, guard_hub_deps = False):
+def _resolve_overlay_template(ctx, overlay_root_label, package_name, version, language_version, dep_labels, relpath, guard_hub_deps = False, license_file = ""):
     """Look up an overlay template at `<root>/<package>/<version-ladder>/<relpath>`.
 
     Walks the version-specificity ladder
@@ -1687,7 +1713,9 @@ def _resolve_overlay_template(ctx, overlay_root_label, package_name, version, la
     which `{DEPS}` expands into. `guard_hub_deps` rejects a template that
     hand-writes those labels instead — see `find_hardcoded_hub_dep`. Only the
     top-level BUILD sets it: `{DEPS}` is a Dart dependency list, so it is not
-    the right substitute for a sibling label in an `android/` sub-package.
+    the right substitute for a sibling label in an `android/` sub-package. It
+    also requires `{LICENSE}`, the package's licence, which a template that
+    leaves it out would drop from every program's `NOTICES`.
 
     Currently called for two relpaths:
 
@@ -1751,6 +1779,15 @@ def _resolve_overlay_template(ctx, overlay_root_label, package_name, version, la
                     dep = hardcoded_dep,
                     placeholder = _DEPS_PLACEHOLDER,
                 ))
+            if guard_hub_deps and _LICENSE_PLACEHOLDER not in content:
+                fail((
+                    "overlay template {tpl} does not write {placeholder}.\n" +
+                    "A package's licence is a fact of its files, which the spoke " +
+                    "finds; an overlay replaces generated content wholesale, so " +
+                    "without the placeholder the package's licence is missing " +
+                    "from the `NOTICES` of every program that uses it.\n" +
+                    "Write {placeholder} on its own line among the target's attributes."
+                ).format(tpl = str(tpl), placeholder = _LICENSE_PLACEHOLDER))
             hardcoded = find_hardcoded_language_version(content)
             if hardcoded:
                 fail((
@@ -1774,10 +1811,11 @@ def _resolve_overlay_template(ctx, overlay_root_label, package_name, version, la
                 version = version,
                 language_version = language_version,
                 deps = render_overlay_deps(dep_labels()),
+                license_file = license_file,
             )
     return ""
 
-def _resolve_overlay(ctx, overlay_root_label, package_name, version, language_version, dep_labels):
+def _resolve_overlay(ctx, overlay_root_label, package_name, version, language_version, dep_labels, license_file):
     """Resolve the top-level BUILD.bazel.tpl overlay.
 
     Equivalent to `_resolve_overlay_template(..., "BUILD.bazel.tpl")`.
@@ -1794,6 +1832,7 @@ def _resolve_overlay(ctx, overlay_root_label, package_name, version, language_ve
         dep_labels,
         "BUILD.bazel.tpl",
         guard_hub_deps = True,
+        license_file = license_file,
     )
 
 # Where the Flutter source's `packages/` is extracted before the one package
@@ -1861,6 +1900,7 @@ def _flutter_pub_package_impl(ctx):
     language_version = derive_language_version(pubspec.sdk_constraint)
     plugin_block = flutter_plugin_block(pubspec.fields)
     asset_block = flutter_assets_block(pubspec.fields)
+    license_file = find_pub_license_file(ctx)
     additional_licenses = _build_additional_licenses(ctx, ctx.attr.package_name, flutter_licenses_block(pubspec.fields))
     for asset in asset_block.assets:
         if asset.transformers:
@@ -1926,6 +1966,7 @@ def _flutter_pub_package_impl(ctx):
             ctx.attr.version,
             language_version,
             dep_labels,
+            license_file,
         )
         if overlay_content:
             # Look up the matching `android/BUILD.bazel.tpl` from the same
@@ -2079,6 +2120,7 @@ def _flutter_pub_package_impl(ctx):
             name = ctx.attr.package_name,
             language_version = language_version,
             version = ctx.attr.version,
+            license_file = license_file,
             code_assets = ctx.attr.code_assets,
             has_unreplaced_hook = unreplaced_hook,
             plugin_platforms_json = plugin_platforms_json,
@@ -2113,6 +2155,7 @@ def _flutter_pub_package_impl(ctx):
             name = ctx.attr.package_name,
             language_version = language_version,
             version = ctx.attr.version,
+            license_file = license_file,
             code_assets = ctx.attr.code_assets,
             has_unreplaced_hook = unreplaced_hook,
             fonts_json_str = fonts_json_str,
@@ -2139,6 +2182,7 @@ def _flutter_pub_package_impl(ctx):
             code_assets = ctx.attr.code_assets,
             has_unreplaced_hook = unreplaced_hook,
             version = ctx.attr.version,
+            license_file = license_file,
         )
         android_src_dir = ""
         android_java_package = ""

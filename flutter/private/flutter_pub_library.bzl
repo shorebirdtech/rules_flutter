@@ -57,6 +57,7 @@ def _flutter_pub_member_impl(ctx):
             code_assets = ctx.attr.code_assets,
             version = ctx.attr.version,
             link_hook = ctx.file.link_hook,
+            license_file = ctx.file.license_file,
             has_unreplaced_hook = ctx.attr.has_unreplaced_hook,
         ),
         FlutterPubMemberInfo(

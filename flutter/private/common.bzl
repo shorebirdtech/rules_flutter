@@ -16,7 +16,7 @@ load("//flutter/private:flutter_info.bzl", "dedup_plugins")
 load("//flutter/private:flutter_library.bzl", "aggregate_pub_contributions", "package_relative", "ships_in")
 load("//flutter/private:flutter_shader_compile.bzl", "flutter_shader_compile_action")
 load("//flutter/private:native_sources.bzl", "native_sources_aspect")
-load("//flutter/private:notices.bzl", "NOTICES_ATTRS", "additional_licenses_of", "flutter_notices_action", "notices_asset_key")
+load("//flutter/private:notices.bzl", "NOTICES_ATTRS", "additional_licenses_of", "flutter_notices_action", "notices_asset_key", "package_licenses_of")
 load("//flutter/private:plugin_registrant.bzl", "generate_dart_plugin_registrant", "generate_dev_plugin_registrants")
 load("//flutter/private:validation.bzl", "validate_dart_defines")
 
@@ -819,12 +819,12 @@ def flutter_build_assets(ctx, tools, output_dir, deps, target_platform, compiled
     # them from. `inputs` has the program's own; a package's reach this when
     # the closure's licences are collected too.
     web = target_platform == "web"
-    own_package = [(inputs.package_name, inputs.license)] if inputs.license else []
+    own_package = [(inputs.package_name, inputs.license_file)] if inputs.license_file else []
     own_additional = [(inputs.package_name, inputs.additional_licenses)] if inputs.additional_licenses else []
     notices = flutter_notices_action(
         ctx = ctx,
         tools = tools,
-        packages = own_package,
+        packages = package_licenses_of(deps, own_package),
         additional = additional_licenses_of(deps, own_additional),
         engine_license = ctx.file._engine_license,
         web = web,
@@ -1263,7 +1263,7 @@ def flutter_program_inputs(ctx):
     Returns:
         A struct. `label` is the target whose package the program is in (its
         library root, and the key of each asset); `main`, `srcs`, `assets`,
-        `shaders`, `shader_includes`, `license` and `additional_licenses` are Files
+        `shaders`, `shader_includes`, `license_file` and `additional_licenses` are Files
         (`unchecked_srcs`, among `srcs`, are not checked against `deps`); `deps`,
         `native_deps` and `code_assets` are Targets; the rest, `flavor`
         among them, are as the attributes of `flutter_application` of the same
@@ -1283,7 +1283,7 @@ def flutter_program_inputs(ctx):
         shaders = list(getattr(ctx.files, "shaders", [])),
         shader_includes = list(getattr(ctx.files, "shader_includes", [])),
         require_sksl_shaders = getattr(ctx.attr, "require_sksl_shaders", False),
-        license = getattr(ctx.file, "license", None),
+        license_file = getattr(ctx.file, "license_file", None),
         additional_licenses = list(getattr(ctx.files, "additional_licenses", [])),
         tree_shake_icons = getattr(ctx.attr, "tree_shake_icons", False),
         native_deps = list(getattr(ctx.attr, "native_deps", [])),
@@ -1445,7 +1445,7 @@ FLUTTER_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | {
               "otherwise the build fails, as `flutter build` does. Only applies to release builds.",
         default = True,
     ),
-    "license": attr.label(
+    "license_file": attr.label(
         doc = "The program's own licence: the `NOTICES` or `LICENSE` file at the root of its " +
               "package, which `flutter build` reads from the app's package root. It is listed " +
               "in `NOTICES.Z` under `package_name`, with the engine's licences and the " +
@@ -1480,7 +1480,7 @@ FLUTTER_PROGRAM_ATTR_NAMES = [
     "extra_gen_snapshot_options",
     "flavor",
     "language_version",
-    "license",
+    "license_file",
     "link_hook_assets",
     "main",
     "min_os_version",

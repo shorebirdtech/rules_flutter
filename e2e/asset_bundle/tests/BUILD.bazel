@@ -10,7 +10,10 @@ dart_library(
     visibility = ["//visibility:public"],
 )
 
-exports_files(glob(["expected/*.json"]) + [
+exports_files(glob([
+    "expected/*.json",
+    "expected/*.txt",
+]) + [
     "bundle_test.dart",
     "notices_test.dart",
 ])
@@ -330,4 +333,30 @@ notices_test(
     name = "notices_end_with_the_licences_a_pub_package_lists_test",
     additional = ["//registry:fx_extra/1.0.0/THIRD_PARTY.txt"],
     bundle = "//:app_with_fx_extra_bundle",
+)
+
+# Property: the licence of every package a program depends on is an entry named
+# by the package: a `NOTICES` over a `LICENSE`, one text under two names as one
+# entry, nothing for a package with no file, and nothing for a package of the
+# lock the program does not depend on.
+notices_test(
+    name = "notices_list_the_licence_of_every_package_test",
+    absent = [
+        "fx_dev_only",
+        "fx_nolicence",
+    ],
+    bundle = "//:app_with_licence_fixtures_bundle",
+    fixtures = "//tests:expected/notices_fixtures.txt",
+)
+
+notices_test(
+    name = "notices_list_the_licence_of_every_package_web_test",
+    absent = [
+        "fx_dev_only",
+        "fx_nolicence",
+    ],
+    bundle = "//:web_with_licence_fixtures_bundle",
+    fixtures = "//tests:expected/notices_fixtures.txt",
+    subdir = "assets",
+    web = True,
 )

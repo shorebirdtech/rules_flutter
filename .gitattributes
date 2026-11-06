@@ -47,3 +47,8 @@
 /e2e/plugin_example/ export-ignore
 /e2e/web_example/ export-ignore
 /e2e/windows_example/ export-ignore
+
+# Licence fixtures are compared byte for byte: a checkout must not rewrite their line endings.
+/e2e/asset_bundle/registry/fx_*/*/LICENSE -text
+/e2e/asset_bundle/registry/fx_*/*/NOTICES -text
+/e2e/asset_bundle/tests/expected/notices_fixtures.txt -text

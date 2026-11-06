@@ -615,6 +615,44 @@ overlay_without_a_language_version_is_left_alone_test = unittest.make(
     _overlay_without_a_language_version_is_left_alone_test_impl,
 )
 
+def _members_state_their_license_file_test_impl(ctx):
+    """Both member kinds name the package's licence, and say nothing without one."""
+    env = unittest.begin(ctx)
+
+    dart = make_dart_member_build_content("meta", "3.4", [], "", license_file = "LICENSE")
+    asserts.true(env, '\n    license_file = "LICENSE",' in dart, dart)
+    flutter = make_flutter_member_build_content("cupertino_icons", "3.4", [], "", license_file = "NOTICES")
+    asserts.true(env, '\n    license_file = "NOTICES",' in flutter, flutter)
+
+    asserts.false(env, "license_file" in make_dart_member_build_content("meta", "3.4", [], ""))
+    asserts.false(env, "license_file" in make_flutter_member_build_content("cupertino_icons", "3.4", [], ""))
+
+    return unittest.end(env)
+
+members_state_their_license_file_test = unittest.make(_members_state_their_license_file_test_impl)
+
+def _overlay_substitutes_the_license_test_impl(ctx):
+    """An overlay's `{LICENSE}` becomes the attribute line, or its line goes."""
+    env = unittest.begin(ctx)
+
+    template = 'flutter_plugin(\n    name = "{PKG}",\n    {LICENSE}\n    visibility = [],\n)'
+    args = dict(hub_name = "hub", package_name = "jni", version = "1.0.0", language_version = "3.4", deps = "")
+
+    asserts.equals(
+        env,
+        'flutter_plugin(\n    name = "jni",\n    license_file = "LICENSE",\n    visibility = [],\n)',
+        apply_overlay_substitutions(template, license_file = "LICENSE", **args),
+    )
+    asserts.equals(
+        env,
+        'flutter_plugin(\n    name = "jni",\n    visibility = [],\n)',
+        apply_overlay_substitutions(template, **args),
+    )
+
+    return unittest.end(env)
+
+overlay_substitutes_the_license_test = unittest.make(_overlay_substitutes_the_license_test_impl)
+
 def _overlay_substitutes_the_dependencies_test_impl(ctx):
     """An overlay names its dependencies by placeholder, never by hand.
 
@@ -938,6 +976,8 @@ def flutter_pub_package_test_suite(name):
         overlay_substitutes_the_language_version_test,
         overlay_without_a_language_version_is_left_alone_test,
         overlay_substitutes_the_dependencies_test,
+        overlay_substitutes_the_license_test,
+        members_state_their_license_file_test,
         hardcoded_overlay_dependency_is_rejected_test,
         parse_gradle_android_namespace_test,
         parse_android_manifest_package_test,

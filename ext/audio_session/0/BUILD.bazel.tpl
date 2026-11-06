@@ -10,7 +10,7 @@
 # explicit `sdk_frameworks`, which rules_apple's own examples use
 # uniformly. This overlay supplies it.
 #
-# Placeholders (HUB_NAME, PKG, VERSION, LANGUAGE_VERSION, DEPS — written in
+# Placeholders (HUB_NAME, PKG, VERSION, LANGUAGE_VERSION, DEPS, LICENSE — written in
 # braces below, and deliberately not in this comment, because substitution
 # rewrites comment text too) are injected by `flutter_pub_package`'s
 # `_resolve_overlay_template`. The overlay sits under `0/`, so any 0.x
@@ -36,6 +36,7 @@ flutter_plugin(
     }),
     language_version = "{LANGUAGE_VERSION}",
     package_name = "{PKG}",
+    {LICENSE}
     plugin_platforms_json = "{\"android\":{\"package\":\"com.ryanheise.audio_session\",\"pluginClass\":\"AudioSessionPlugin\"},\"ios\":{\"pluginClass\":\"AudioSessionPlugin\"},\"macos\":{\"pluginClass\":\"AudioSessionPlugin\"},\"web\":{\"fileName\":\"audio_session_web.dart\",\"pluginClass\":\"AudioSessionWeb\"}}",
     visibility = ["//visibility:public"],
     deps = [

@@ -11,7 +11,7 @@ load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
 load("//flutter/private:asset_variants.bzl", "variant_scale")
 load("//flutter/private:exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
 load("//flutter/private:flutter_library.bzl", "aggregate_pub_contributions", "package_relative")
-load("//flutter/private:notices.bzl", "NOTICES_ATTRS", "additional_licenses_of", "flutter_notices_action", "notices_asset_key")
+load("//flutter/private:notices.bzl", "NOTICES_ATTRS", "additional_licenses_of", "flutter_notices_action", "notices_asset_key", "package_licenses_of")
 load("//flutter/private:path_mapping.bzl", "file_ref", "json_config_args")
 
 _TOOL = Label("//flutter/private/tools:generate_asset_manifest.dart")
@@ -208,7 +208,7 @@ def _flutter_asset_bundle_impl(ctx):
     notices = flutter_notices_action(
         ctx = ctx,
         tools = tools,
-        packages = [],
+        packages = package_licenses_of(ctx.attr.deps),
         additional = additional_licenses_of(ctx.attr.deps),
         engine_license = ctx.file._engine_license,
         web = False,

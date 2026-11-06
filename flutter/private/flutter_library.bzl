@@ -68,6 +68,12 @@ def own_asset_contributions(ctx, package_name):
         for f in ctx.files.assets
     ]
 
+LICENSE_FILE_ATTR = attr.label(
+    doc = "The package's licence: the `NOTICES` or `LICENSE` file at its root, as `flutter build` reads it. " +
+          "An application that depends on the package lists it in its `NOTICES`, under the package's name.",
+    allow_single_file = True,
+)
+
 ADDITIONAL_LICENSES_ATTR = attr.label_list(
     doc = "Licence files beyond the package's `LICENSE`: what its pubspec's `flutter: licenses:` lists. " +
           "An application that depends on the package appends them to its `NOTICES` as they are.",
@@ -331,7 +337,7 @@ def flutter_package_record(ctx, package_name, lib_root):
 
     Args:
       ctx: The rule context. Reads `language_version`, `code_assets`,
-        `version`, `has_unreplaced_hook` and `link_hook`.
+        `version`, `has_unreplaced_hook`, `link_hook` and `license_file`.
       package_name: The Dart package name.
       lib_root: The package root (parent of `lib/`).
 
@@ -347,6 +353,7 @@ def flutter_package_record(ctx, package_name, lib_root):
         version = ctx.attr.version,
         has_unreplaced_hook = ctx.attr.has_unreplaced_hook,
         link_hook = ctx.file.link_hook,
+        license_file = ctx.file.license_file,
     )
 
 def flutter_analyzable_info(ctx, package):
@@ -541,6 +548,7 @@ flutter_library = rule(
             doc = "Map of asset File label -> package-relative path (mirrors `flutter.assets` in pubspec.yaml). Bundled at `packages/<package_name>/<path>` (or bare `<path>` when `package_name` is empty); also included in AssetManifest.",
             allow_files = True,
         ),
+        "license_file": LICENSE_FILE_ATTR,
         "additional_licenses": ADDITIONAL_LICENSES_ATTR,
         "pkg_asset_platforms": PKG_ASSET_PLATFORMS_ATTR,
         "pkg_shader_platforms": PKG_SHADER_PLATFORMS_ATTR,

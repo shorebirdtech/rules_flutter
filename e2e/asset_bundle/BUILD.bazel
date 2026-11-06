@@ -206,7 +206,7 @@ tree_of(
 bundled_app(
     name = "app_with_licences",
     additional_licenses = ["licenses/THIRD_PARTY.txt"],
-    license = "licenses/LICENSE",
+    license_file = "licenses/LICENSE",
 )
 
 flutter_web_app(
@@ -214,7 +214,7 @@ flutter_web_app(
     package_name = "asset_bundle",
     additional_licenses = ["licenses/THIRD_PARTY.txt"],
     js_fallback = False,
-    license = "licenses/LICENSE",
+    license_file = "licenses/LICENSE",
     deps = ["@deps//:flutter"],
 )
 
@@ -222,6 +222,38 @@ tree_of(
     name = "web_with_licences_bundle",
     src = ":web_with_licences",
     visibility = ["//visibility:public"],
+)
+
+# Packages of every kind of licence file: pure Dart and Flutter, one text shared
+# by two, `NOTICES` beside a `LICENSE`, none. `@fx_dev_only` is in the hub and
+# no program depends on it.
+bundled_app(
+    name = "app_with_licence_fixtures",
+    deps = [
+        "@fx_licence_dart",
+        "@fx_licence_shared",
+        "@fx_nolicence",
+        "@fx_notices",
+    ],
+)
+
+tree_of(
+    name = "web_with_licence_fixtures_bundle",
+    src = ":web_with_licence_fixtures",
+    visibility = ["//visibility:public"],
+)
+
+flutter_web_app(
+    name = "web_with_licence_fixtures",
+    package_name = "asset_bundle",
+    js_fallback = False,
+    deps = [
+        "@deps//:flutter",
+        "@fx_licence_dart",
+        "@fx_licence_shared",
+        "@fx_nolicence",
+        "@fx_notices",
+    ],
 )
 
 exports_files([

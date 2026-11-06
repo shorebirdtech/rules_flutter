@@ -1345,7 +1345,7 @@ _WEB_RELEVANT_KEYS = (
     "require_sksl_shaders",
     "_shader_compile_tool",
     "tree_shake_icons",
-    "license",
+    "license_file",
     "additional_licenses",
     "_asset_bundle_tool",
     "_notices_tool",

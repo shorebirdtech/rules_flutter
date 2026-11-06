@@ -17,6 +17,18 @@ void main() {
     if (kIsWeb) {
       final text = await rootBundle.loadString('NOTICES', cache: false);
       expect(text, contains('skia'));
+
+      // An entry names the packages it covers on its first lines: the app's
+      // own package:flutter is one, beside the engine's.
+      final entries = text.split('\n${'-' * 80}\n');
+      final named = [
+        for (final e in entries) ...e.split('\n\n').first.split('\n'),
+      ];
+      expect(
+        named,
+        contains('flutter'),
+        reason: 'an entry for package:flutter',
+      );
     } else {
       final bytes = (await rootBundle.load('NOTICES.Z')).buffer.asUint8List();
       expect(bytes.length, greaterThan(1000));

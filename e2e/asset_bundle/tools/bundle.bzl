@@ -124,7 +124,7 @@ tree_of = rule(
     attrs = {"src": attr.label(mandatory = True)},
 )
 
-def notices_test(name, bundle, web = False, subdir = "", own_license = None, package = None, additional = [], **kwargs):
+def notices_test(name, bundle, web = False, subdir = "", own_license = None, package = None, additional = [], fixtures = None, absent = [], **kwargs):
     """Checks the `NOTICES` asset of the tree `bundle` builds.
 
     Args:
@@ -136,6 +136,8 @@ def notices_test(name, bundle, web = False, subdir = "", own_license = None, pac
         package: The application's package name, when `own_license` is set.
         additional: The files the application lists in `additional_licenses`,
             which the asset ends with in this order.
+        fixtures: The expected text of the entries that only `fx_` packages name.
+        absent: Package names that must not be listed.
         **kwargs: More attributes of the test.
     """
     args = ["$(rlocationpath %s)" % bundle]
@@ -150,6 +152,10 @@ def notices_test(name, bundle, web = False, subdir = "", own_license = None, pac
     for f in additional:
         args.append("--additional=$(rlocationpath %s)" % f)
         data.append(f)
+    if fixtures:
+        args.append("--fixtures=$(rlocationpath %s)" % fixtures)
+        data.append(fixtures)
+    args += ["--absent=" + n for n in absent]
     dart_test(
         name = name,
         args = args,

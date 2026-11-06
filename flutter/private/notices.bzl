@@ -8,7 +8,8 @@ through the cache. Merging and compressing the engine's 1.3 MB of licences is
 the costly part of bundling.
 """
 
-load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
+load("@rules_dart//dart:providers.bzl", "DartInfo")
+load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "collect_packages", "package_license_file")
 load("//flutter:providers.bzl", "FlutterInfo")
 load("//flutter/private:exec_groups.bzl", "PORTABLE")
 load("//flutter/private:path_mapping.bzl", "file_ref", "json_config_args")
@@ -41,6 +42,30 @@ def notices_asset_key(web):
         `NOTICES` for the web, `NOTICES.Z` otherwise.
     """
     return "NOTICES" if web else "NOTICES.Z"
+
+def package_licenses_of(deps, own = []):
+    """The licence file of each package in the closure of `deps`, by package name.
+
+    The closure is the program's own, not the lock's: a package only a
+    dependency of something else (a dev dependency of the project, say) is not
+    shipped and is not listed. The records come from `collect_packages`, which
+    keeps for one package the record that names a licence, and fails when two
+    name different ones.
+
+    Args:
+        deps: Targets; those with `DartInfo` contribute.
+        own: `(package name, File)` of the program itself, if it has a licence.
+
+    Returns:
+        A list of `(package name, File)` sorted by name, then the program's own.
+    """
+    records = collect_packages([dep for dep in deps if DartInfo in dep])
+    listed = {}
+    for record in records:
+        f = package_license_file(record)
+        if f:
+            listed[record.package_name] = f
+    return [(name, listed[name]) for name in sorted(listed)] + own
 
 def additional_licenses_of(deps, own = []):
     """The `flutter: licenses:` files of the packages `deps` reach, in the order they are appended.

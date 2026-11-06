@@ -17,7 +17,7 @@ not neutral: `package_config.json` reads a missing `languageVersion` as the
 current SDK's.
 """
 
-load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version")
+load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version", "find_pub_license_file")
 load("@rules_dart//dart/pub:pubspec.bzl", "read_pubspec")
 load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url")
 load("//flutter/private:flutter_pub_index.bzl", "library_label", "read_index")
@@ -25,7 +25,7 @@ load("//flutter/private:pinned.bzl", "pinned")
 
 _PACKAGE = "flutter"
 
-def make_flutter_framework_build_content(deps, language_version):
+def make_flutter_framework_build_content(deps, language_version, license_file = ""):
     """Generate BUILD content for the framework spoke.
 
     The package uses flutter_library (not dart_library) so that its shader
@@ -44,6 +44,7 @@ def make_flutter_framework_build_content(deps, language_version):
         deps: Fully-qualified Bazel label strings for sibling spokes.
         language_version: Dart language version string (e.g. `"3.11"`), as
             derived from the package's `environment.sdk`.
+        license_file: The package's `NOTICES` or `LICENSE` (`find_pub_license_file`), or "".
 
     Returns:
         BUILD.bazel content as a string.
@@ -68,12 +69,13 @@ flutter_library(
 {deps}    package_name = "{name}",
     language_version = "{language_version}",
     web_compiler_independent = True,
-    visibility = ["//visibility:public"],
+{license}    visibility = ["//visibility:public"],
 )
 """.format(
         name = _PACKAGE,
         deps = deps_block,
         language_version = language_version,
+        license = '    license_file = "{}",\n'.format(license_file) if license_file else "",
     )
 
 def _flutter_framework_package_impl(repository_ctx):
@@ -112,6 +114,7 @@ def _flutter_framework_package_impl(repository_ctx):
     repository_ctx.file("BUILD.bazel", make_flutter_framework_build_content(
         deps = dep_labels,
         language_version = language_version,
+        license_file = find_pub_license_file(repository_ctx),
     ))
 
 flutter_framework_package = repository_rule(

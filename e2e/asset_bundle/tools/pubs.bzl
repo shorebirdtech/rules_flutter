@@ -20,12 +20,17 @@ _HUB = "fixture"
 
 # The packages under `//registry`, with the version of each.
 PACKAGES = {
+    "fx_dev_only": "1.0.0",
     "fx_dirs": "1.0.0",
     "fx_extra": "1.0.0",
     "fx_flavors": "1.0.0",
     "fx_font_borrower": "1.0.0",
     "fx_font_owner": "1.0.0",
+    "fx_licence_dart": "1.0.0",
+    "fx_licence_shared": "1.0.0",
     "fx_names": "1.0.0",
+    "fx_nolicence": "1.0.0",
+    "fx_notices": "1.0.0",
     "fx_platforms": "1.0.0",
     "fx_shader_flavors": "1.0.0",
     "fx_shaders": "1.0.0",
