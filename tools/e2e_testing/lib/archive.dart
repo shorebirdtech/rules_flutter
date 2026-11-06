@@ -46,8 +46,21 @@ class ExtractedArchive {
     String prefix = 'archive_test',
     bool preserveSignature = false,
     Extractor extractor = Extractor.unzip,
+  }) => ExtractedArchive.fromPath(
+    requireRunfile(workspacePath, what: 'Archive'),
+    prefix: prefix,
+    preserveSignature: preserveSignature,
+    extractor: extractor,
+  );
+
+  /// Extracts the archive at [archive], a path the test made or found, as
+  /// [ExtractedArchive.fromRunfiles] does.
+  factory ExtractedArchive.fromPath(
+    String archive, {
+    String prefix = 'archive_test',
+    bool preserveSignature = false,
+    Extractor extractor = Extractor.unzip,
   }) {
-    final archive = requireRunfile(workspacePath, what: 'Archive');
     final dir = Directory.systemTemp.createTempSync(prefix);
     final result = switch (preserveSignature ? Extractor.ditto : extractor) {
       Extractor.ditto => Process.runSync('ditto', [

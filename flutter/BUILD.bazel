@@ -53,11 +53,17 @@ config_setting(
     visibility = ["//visibility:public"],
 )
 
-# The release R8 configuration of `flutter_android_app`: the Android Gradle
-# plugin's proguard-android-optimize.txt and Flutter's own rules. Public for an
-# `android_binary` assembled from the Tier 2 rules.
+# The release R8 configuration of `flutter_android_app` (the Android Gradle
+# plugin's proguard-android-optimize.txt and Flutter's own rules), and the
+# bundletool BundleConfig of its App Bundle (AGP's defaults: split by ABI,
+# density and language; native libraries and dex stored uncompressed, the
+# libraries 16 KB-aligned). Public for an `android_binary` or
+# `android_application` assembled from the Tier 2 rules.
 exports_files(
-    ["android_proguard_rules.pro"],
+    [
+        "android_bundle_config.pb.json",
+        "android_proguard_rules.pro",
+    ],
     visibility = ["//visibility:public"],
 )
 
@@ -140,6 +146,7 @@ bzl_library(
         "//flutter/private:flutter_android_application",
         "//flutter/private:flutter_android_build",
         "//flutter/private:flutter_android_manifest_merge",
+        "//flutter/private:flutter_android_release",
         "@bazel_skylib//rules:expand_template",
         "@bazel_skylib//rules:write_file",
     ],

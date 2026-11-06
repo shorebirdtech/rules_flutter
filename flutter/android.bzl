@@ -13,7 +13,13 @@ Two tiers of API:
             name = "my_app_android",
             application = ":my_app",
             package_name = "com.example.myapp",
+            app_bundle = "my_app_bundle",
         )
+
+        # `bazel run :my_app_release` signs the App Bundle and an APK with
+        # the upload key in android/key.properties, as `flutter build
+        # appbundle` and `flutter build apk` do.
+        flutter_android_release(name = "my_app_release", app_bundle = ":my_app_bundle")
 
     Prerequisites: run `flutter create --platforms=android .` in your package to
     generate the conventional `android/app/src/main/` directory with
@@ -30,6 +36,7 @@ Two tiers of API:
             "flutter_android_engine",
             "flutter_android_manifest_gen",
             "flutter_android_manifest_merge",
+            "flutter_android_release",
             "flutter_android_runner_lib_gen")
 
         flutter_android_bundle(name = "my_bundle", application = ":my_app")
@@ -50,6 +57,19 @@ Two tiers of API:
             deps = [":my_native_libs", ":my_engine", ":my_runner"],
         )
 
+    The App Bundle is rules_android's `android_application` from the same
+    arguments, with rules_flutter's bundle configuration:
+
+        android_application(
+            name = "my_bundle",
+            bundle_config_file = "@rules_flutter//flutter:android_bundle_config.pb.json",
+            manifest = ":my_manifest",
+            manifest_values = {"applicationId": "com.example.myapp"},
+            deps = [":my_native_libs", ":my_engine", ":my_runner"],
+        )
+
+        flutter_android_release(name = "my_release", app_bundle = ":my_bundle")
+
     rules_android runs R8 only for an `android_binary` with `proguard_specs`.
     `flutter_android_app` gives a release build
     `@rules_flutter//flutter:android_proguard_rules.pro`, as `flutter build
@@ -58,7 +78,7 @@ Two tiers of API:
 
 load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
-load("@rules_android//android:rules.bzl", _android_binary = "android_binary", _android_library = "android_library")
+load("@rules_android//android:rules.bzl", _android_application = "android_application", _android_binary = "android_binary", _android_library = "android_library")
 load("@rules_cc//cc:cc_library.bzl", _cc_library = "cc_library")
 load("@rules_java//java:java_import.bzl", _java_import = "java_import")
 load("@rules_kotlin//kotlin:android.bzl", _kt_android_library = "kt_android_library")
@@ -70,6 +90,7 @@ load("//flutter/private:flutter_android_manifest_merge.bzl", _flutter_android_ma
 load("//flutter/private:flutter_android_plugin_library.bzl", _flutter_android_plugin_library = "flutter_android_plugin_library")
 load("//flutter/private:flutter_android_plugin_libs.bzl", _flutter_android_plugin_libs = "flutter_android_plugin_libs")
 load("//flutter/private:flutter_android_registrant.bzl", _flutter_android_registrant = "flutter_android_registrant")
+load("//flutter/private:flutter_android_release.bzl", _flutter_android_release = "flutter_android_release")
 
 # Re-export constants for user BUILD files.
 ANDROID_MIN_SDK_VERSION = _ANDROID_MIN_SDK_VERSION
@@ -139,6 +160,13 @@ def flutter_android_bundle(name, **kwargs):
 # Builds targets for given Android platforms, whatever the command line asked
 # for: a test of an APK for one ABI, or several, in a plain `bazel test //...`.
 flutter_android_build = _flutter_android_build
+
+# Signs an App Bundle (an `android_application`, such as
+# `flutter_android_app`'s `app_bundle`) and a universal APK made from it with
+# the app's upload key, when `bazel run`. Builds the bundle in release mode for
+# every ABI. The key is read at run time from Flutter's `key.properties` and
+# never reaches the build graph. See flutter/private/flutter_android_release.bzl.
+flutter_android_release = _flutter_android_release
 
 # Merges a variant AndroidManifest.xml overlay (e.g. flutter create's
 # android/app/src/debug/AndroidManifest.xml) into a base manifest — the
@@ -518,6 +546,8 @@ def flutter_android_app(
         build_number = None,
         manifest_values = None,
         proguard_specs = None,
+        app_bundle = None,
+        bundle_config = Label("//flutter:android_bundle_config.pb.json"),
         **kwargs):
     """Builds a Flutter Android APK from a flutter_application target.
 
@@ -672,6 +702,21 @@ def flutter_android_app(
             shrunk. A list (or `select()`) replaces that whole default, in
             every compilation mode; `[]` turns R8 off. Resources are shrunk
             whenever R8 runs, unless `shrink_resources = False` is passed.
+        app_bundle: When set, also declare an App Bundle of this app named
+            `app_bundle`: rules_android's `android_application`, from the same
+            arguments as the APK. Its output is the unsigned
+            `<app_bundle>_unsigned.aab`, for the ABIs and compilation mode of
+            the build like the APK's. `bazel run` of it installs it on a
+            device with bundletool, signed with the debug key; rules_android
+            0.8.0 needs a patch for that (see the README's Android section).
+            Hand it to `flutter_android_release` to sign a release. rules_android also
+            declares `<app_bundle>_base`, the bundle's own `android_binary`.
+        bundle_config: The bundletool `BundleConfig` (`.pb.json`) of
+            `app_bundle`. The default,
+            `@rules_flutter//flutter:android_bundle_config.pb.json`, is the
+            Android Gradle plugin's: split by ABI, screen density and
+            language, with native libraries and dex stored uncompressed and
+            the libraries 16 KB-aligned. Setting it replaces the default.
         pub_hub_name: Name of the `flutter.pub(name = ...)` hub providing
             plugin spokes. The macro checks the Maven artifacts of the pub
             plugins `application` depends on against
@@ -969,9 +1014,10 @@ def flutter_android_app(
         })
     kwargs.setdefault("shrink_resources", True)
 
-    # 10. Final android_binary.
-    _android_binary(
-        name = name,
+    # 10. Final android_binary, and the App Bundle beside it. rules_android's
+    # `android_application` declares an `android_binary` of its own,
+    # `<app_bundle>_base`, from the same arguments: it cannot take this one.
+    binary_args = dict(
         manifest = actual_manifest,
         manifest_values = manifest_values,
         resource_files = resources if resources else None,
@@ -983,3 +1029,10 @@ def flutter_android_app(
         testonly = testonly,
         **kwargs
     )
+    _android_binary(name = name, **binary_args)
+    if app_bundle:
+        _android_application(
+            name = app_bundle,
+            bundle_config_file = bundle_config,
+            **binary_args
+        )

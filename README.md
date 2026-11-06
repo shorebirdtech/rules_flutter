@@ -952,6 +952,61 @@ To build an app for fixed ABIs whatever the command line says, wrap it in [`flut
 | `permissions` | Permission names added to the manifest in every compilation mode, for example `["android.permission.INTERNET"]`. See [Release builds and permissions](#release-builds-and-permissions). |
 | `multidex` | Defaults to `"native"`. |
 | `proguard_specs` | The R8 configuration. By default a release build (`-c opt` without `--@rules_flutter//flutter:profile`) is shrunk with R8, resources too, as `flutter build apk --release` shrinks it: [`@rules_flutter//flutter:android_proguard_rules.pro`](flutter/android_proguard_rules.pro) (the Android Gradle plugin's `proguard-android-optimize.txt` and Flutter's own rules), then `android/app/proguard-rules.pro` if you have one. Debug and profile builds are not shrunk. A list replaces the whole default in every compilation mode; `[]` turns R8 off. |
+| `app_bundle` | Also declare an App Bundle of the app under this name. See [Release: App Bundle and signing](#release-app-bundle-and-signing). |
+| `bundle_config` | The bundletool `BundleConfig` of `app_bundle`. Defaults to [`@rules_flutter//flutter:android_bundle_config.pb.json`](flutter/android_bundle_config.pb.json), the Android Gradle plugin's: split by ABI, screen density and language, native libraries and dex stored uncompressed, the libraries 16 KB-aligned. |
+
+#### Release: App Bundle and signing
+
+`flutter build appbundle` and `flutter build apk --release` have one counterpart: an App Bundle declared by `flutter_android_app`, and a [`flutter_android_release`](#flutter_android_release) target that signs it with your upload key.
+
+```starlark
+load("@rules_flutter//flutter:android.bzl", "flutter_android_app", "flutter_android_release")
+
+flutter_android_app(
+    name = "app",
+    application = ":app_flutter",
+    package_name = "com.example.myapp",
+    build_name = "1.2.3",
+    build_number = 7,
+    app_bundle = "app_bundle",
+)
+
+flutter_android_release(
+    name = "app_release",
+    app_bundle = ":app_bundle",
+)
+```
+
+```sh
+# First time only: make the upload keystore android/key.properties describes.
+bazel run //:app_release -- create-key
+
+# Each release: build, sign and check the bundle and a universal APK.
+bazel run //:app_release
+# -> build/app/outputs/bundle/release/app-release.aab
+# -> build/app/outputs/flutter-apk/app-release.apk
+```
+
+- `:app_bundle` is rules_android's `android_application`, built from the same arguments as `:app`. `bazel build //:app_bundle` makes `app_bundle_unsigned.aab` for the ABIs and compilation mode of the command line, like the APK. rules_android also declares `app_bundle_base`, the bundle's own `android_binary`; no BUILD file needs to name it.
+- `bazel run //:app_release` builds the bundle in release mode (`-c opt`, not profile) for arm64-v8a and x86_64, whatever the command line says, as `flutter build appbundle` builds every ABI. Its `android_platforms` attribute changes the ABIs. armeabi-v7a is not supported.
+- Signing happens when the program runs, not in a build action. The keystore and its passwords never reach Bazel: no attribute, action input, command line or cache entry holds them. rules_android has no release signing of its own, by design.
+- The key comes from `android/key.properties` under the target's package, the file Flutter's deployment guide has you write:
+
+  ```properties
+  storePassword=...
+  keyPassword=...
+  keyAlias=upload
+  storeFile=/Users/me/keys/upload-keystore.jks
+  ```
+
+  A relative `storeFile` is relative to `android/app/`, as in Gradle. Never commit the file or the keystore (`flutter create`'s `android/.gitignore` already ignores `key.properties` and `*.jks`). On CI, write the file from your secret store before `bazel run`. `--key-properties=<path>` reads another file, and `--output-dir=<dir>` writes `app-release.aab` and `app-release.apk` there instead.
+- `create-key` makes the keystore `storeFile` names (PKCS12, RSA 2048, valid 10000 days, the values in Flutter's guide), with the JDK Bazel already has, so you need no Java installed. It refuses to replace an existing keystore. Back up the keystore and its password: a lost upload key can be reset through Play Console, but only by asking.
+- With Play App Signing, the bundle you upload is signed with the upload key, and Google signs the APKs it serves with the app signing key it keeps. `app-release.apk` is for distribution outside Play; it is bundletool's universal APK of the same bundle, signed with the same key, so it will not update a copy installed from Play. Unlike Gradle's APK, its native libraries are stored compressed.
+- Raise `build_number` for each upload: Play refuses a version code it has seen.
+
+`bazel run //:app_bundle` installs the bundle on the device `ANDROID_SERIAL` names, through bundletool and signed with the debug key, as rules_android intends. rules_android 0.8.0 needs [`rules_android_bundle_run.patch`](e2e/android_example/patches/rules_android_bundle_run.patch) in your `single_version_override` of rules_android for that: without it the command fails to find the JDK, aapt2, the Kotlin runtime and adb. `flutter_android_release` does not need the patch.
+
+A release bundle should also carry R8's mapping (`BUNDLE-METADATA/com.android.tools.build.obfuscation/proguard.map`), from which Play deobfuscates the Java and Kotlin frames of crash reports, as a Gradle-built bundle does. rules_android 0.8.0 leaves it out; [`rules_android_r8_mapping.patch`](e2e/android_example/patches/rules_android_r8_mapping.patch) from the same directory puts it in.
 
 <details>
 <summary>Composable rules</summary>
@@ -1801,6 +1856,34 @@ The rule forwards the files of `targets`, so a test names them in `data` and fin
 |---|---|
 | `android_platforms` | The platforms to build `targets` for, such as `@rules_android//:arm64-v8a` and `@rules_android//:x86_64`. Your `MODULE.bazel` needs a `bazel_dep` on `rules_android` to name them in a BUILD file. Required. |
 | `targets` | The targets to build, such as a `flutter_android_app`. Required. |
+
+### flutter_android_release
+
+Signs an App Bundle and a universal APK made from it with your upload key when you `bazel run` it. See [Release: App Bundle and signing](#release-app-bundle-and-signing).
+
+```starlark
+load("@rules_flutter//flutter:android.bzl", "flutter_android_release")
+
+flutter_android_release(
+    name = "app_release",
+    app_bundle = ":app_bundle",
+)
+```
+
+| Attribute | Description |
+|---|---|
+| `app_bundle` | An `android_application`: `flutter_android_app`'s `app_bundle`, or your own built from the composable rules with `bundle_config_file = "@rules_flutter//flutter:android_bundle_config.pb.json"`. Built in release mode for `android_platforms`. Required. |
+| `android_platforms` | The ABIs of the release build. Defaults to `@rules_android//:arm64-v8a` and `@rules_android//:x86_64`. |
+| `key_properties` | Where `key.properties` is, relative to the target's package in the source tree. A path, not a label, so the file never enters the build. Defaults to `android/key.properties`. |
+
+Commands, after `--`:
+
+| Command | Flags |
+|---|---|
+| `sign` (the default) | `--key-properties=<path>`, `--output-dir=<dir>` |
+| `create-key` | `--key-properties=<path>`, `--dname=<X.500 name>` (default `CN=Upload Key`) |
+
+Relative paths in flags are relative to the directory you ran `bazel run` from. The Java runtime (`--java_runtime_version`) must be a full JDK, such as `remotejdk_25`, since signing uses its `jarsigner` and `keytool`.
 
 ### flutter_profile_build
 

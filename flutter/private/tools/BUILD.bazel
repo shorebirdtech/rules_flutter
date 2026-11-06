@@ -12,6 +12,7 @@ load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_library", "dart_test")
 # by nothing** — the test is what carries it, not this list.
 exports_files(
     [
+        "android_release.dart",
         "assemble_directory.dart",
         "generate_asset_manifest.dart",
         "bundle_app.dart",
@@ -31,6 +32,16 @@ exports_files(
         "print_report.dart",
     ],
     visibility = ["//flutter:__subpackages__"],
+)
+
+# The program behind `flutter_android_release`: signs an App Bundle with the
+# user's key at run time, so the key never enters the build graph.
+dart_binary(
+    name = "android_release",
+    compile_mode = "exe",
+    main = "android_release.dart",
+    visibility = ["//flutter:__subpackages__"],
+    deps = ["@rules_dart//dart/runfiles"],
 )
 
 dart_binary(
@@ -98,6 +109,10 @@ _UNIT_TESTS = {
     "assemble_directory_test": (
         "assemble_directory.dart",
         ["@dev_tool_deps//:path"],
+    ),
+    "android_release_test": (
+        "android_release.dart",
+        ["@rules_dart//dart/runfiles"],
     ),
     "validate_android_elf_test": ("validate_android_elf.dart", []),
     "bundle_app_test": ("bundle_app.dart", []),

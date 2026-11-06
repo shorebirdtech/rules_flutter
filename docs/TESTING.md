@@ -1618,6 +1618,45 @@ An on-disk sweep outside bazel is *not* a substitute: diffing every `*.pkgsrcs` 
 against its source root flags every target you simply have not rebuilt yet, which is
 legitimate staleness rather than this bug.
 
+### Android release (manual)
+
+`verify_android_release_test` checks what `flutter_android_release` signs; this checks that it runs. With the phone attached and `ANDROID_SERIAL` set to it, in `e2e/android_example`, with a scratch key outside the repository (never commit one):
+
+```sh
+K=$(mktemp -d)
+printf 'storePassword=throwaway123\nkeyPassword=throwaway123\nkeyAlias=upload\nstoreFile=%s/upload.jks\n' "$K" > "$K/key.properties"
+bazel run :app_release -- create-key --key-properties="$K/key.properties"
+bazel run :app_release -- --key-properties="$K/key.properties" --output-dir="$K/out"
+
+# The bundle, as Play would serve this phone: split APKs signed with the key.
+JAVA=$(bazel info output_base)/external/rules_java++toolchains+remotejdk25_macos_aarch64/bin/java
+BT=bazel-bin/app_release.runfiles/rules_android+/tools/android/bundletool_deploy.jar
+ADB=$ANDROID_HOME/platform-tools/adb
+$ADB uninstall com.example.flutterapp
+$JAVA -jar $BT build-apks --bundle="$K/out/app-release.aab" --output="$K/out/device.apks" \
+    --connected-device --device-id=$ANDROID_SERIAL --adb=$ADB \
+    --aapt2=$ANDROID_HOME/build-tools/<version>/aapt2 \
+    --ks="$K/upload.jks" --ks-pass=pass:throwaway123 --ks-key-alias=upload
+$JAVA -jar $BT install-apks --apks="$K/out/device.apks" --adb=$ADB --device-id=$ANDROID_SERIAL
+$ADB shell am start -W -n com.example.flutterapp/.MainActivity
+$ADB exec-out screencap -p > /tmp/release_aab.png
+
+# The universal APK.
+$ADB uninstall com.example.flutterapp
+$ADB install "$K/out/app-release.apk"
+$ADB shell am start -W -n com.example.flutterapp/.MainActivity
+$ADB exec-out screencap -p > /tmp/release_apk.png
+
+# rules_android's own path: the debug-signed bundle through bundletool.
+$ADB uninstall com.example.flutterapp
+bazel run -c opt :app_bundle
+$ADB shell am start -W -n com.example.flutterapp/.MainActivity
+$ADB exec-out screencap -p > /tmp/bundle_run.png
+$ADB uninstall com.example.flutterapp
+```
+
+Each screenshot shows "Hello from Flutter Android!", `native add(19, 23) = 42` and `shared counter = 2`. Uninstall at the end: an app signed with the scratch key blocks the debug-signed installs of the other device tests.
+
 ### Linux visual verification (GCP VM)
 
 Cross-compile a Linux debug bundle from macOS, deploy to a GCP VM, and verify the Flutter UI renders.
@@ -1866,6 +1905,7 @@ script's own package requires ≥ 3.13.
 | Web support | web_example `//...` (a WASM-only bundle, an `Int64List` app that keeps the dart2js fallback through a per-compiler `select()`, and `:render_test`, the render check in headless Chrome) + `web_smoke_e2e_test.dart` (render) + `web_per_compiler_e2e_test.dart` (both programs of a per-compiler app, in Chrome) + `plugin_example_e2e_test.dart` (plugins on web) + `native_libs_reload_e2e_test.dart`'s web group if the change touches `native_modules` or the web reload arms |
 | FFI / native deps / native assets | ffi_example (incl. manual iOS-sim + macOS runtime tests), ffi_plugin_example |
 | Plugins | plugin_example, ffi_plugin_example |
+| Android release (`flutter_android_release`, `flutter_android_app`'s `app_bundle`/`bundle_config`/`proguard_specs`, `flutter/android_proguard_rules.pro`, `flutter/android_bundle_config.pb.json`, `release_transition.bzl`, `android_release.dart`, `rules_android_bundle_run.patch`, `rules_android_r8_mapping.patch`) | Root `//...` (`android_release_test`), android_example `//...` (`verify_android_release_test` signs with a key it makes), plugin_example `//...` for an R8 change, **and** "Android release (manual)" in § 4: both signed installs render on the phone |
 | Android ABI selection (`flutter_android_engine`, `flutter_android_bundle`, `flutter_android_build`, `AndroidDevice` ABI in `device.dart`) | Root `//...`, android_example, hello_world and plugin_example `//...` (force-run `verify_android_apk_test`), dev_tool unit **and** `flutter_bazel run` on the attached phone (arm64-v8a) and on an x86_64 emulator, which must each launch the app |
 | Toolchain / SDK, or any action's inputs from the Dart SDK | smoke, hello_world, and `//flutter/tests:sdk_inputs_test` with `//flutter/tests/sdk_sets:sdk_sets_test` (see § "SDK inputs") |
 | Reading a pubspec (`flutter_pubspec.bzl`, a `read_pubspec` call in `flutter_pub_package.bzl` or `flutter_framework_package.bzl`) | Root `//flutter/tests:flutter_pubspec_test` and `:flutter_framework_package_test` (the projection of `fields`, on dict inputs), hello_world and plugin_example `//...`, **and** `dart run tools/dev_tool/tool/e2e.dart test/e2e/pubspec_reading_e2e_test.dart test/e2e/framework_pubspec_e2e_test.dart test/e2e/pub_inputs_e2e_test.dart test/e2e/pub_inputs_properties_e2e_test.dart test/e2e/pub_cycle_e2e_test.dart test/e2e/sdk_source_e2e_test.dart` (what the repository rules do with the pubspecs they read, which no Starlark unit test can run) |

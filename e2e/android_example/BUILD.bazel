@@ -11,6 +11,7 @@ load(
     "flutter_android_bundle",
     "flutter_android_engine",
     "flutter_android_manifest_gen",
+    "flutter_android_release",
     "flutter_android_runner_lib_gen",
 )
 load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_library")
@@ -122,6 +123,7 @@ flutter_application(
 flutter_android_app(
     name = "app",
     package_name = "com.example.flutterapp",
+    app_bundle = "app_bundle",
     application = ":app_flutter",
     # `flutter create` grants INTERNET in the debug variant manifest only —
     # a *debugging* requirement for the Dart VM service, not the app's
@@ -132,6 +134,14 @@ flutter_android_app(
     # compilation mode. Verified from inside the built APK by
     # :verify_android_permissions_test.
     permissions = ["android.permission.INTERNET"],
+)
+
+# `bazel run :app_release` signs `:app_bundle` and a universal APK made from
+# it with the upload key android/key.properties names: release mode, both
+# ABIs. `:verify_android_release_test` signs with a key it makes itself.
+flutter_android_release(
+    name = "app_release",
+    app_bundle = ":app_bundle",
 )
 
 # The same flutter create runner shipped under a second application id. Its
@@ -431,6 +441,39 @@ dart_test(
     env = {"ZIPPER_RUNFILE": "$(rlocationpath @bazel_tools//tools/zip:zipper)"},
     main = "test/verify_android_permissions_test.dart",
     deps = ["@rules_flutter//tools/e2e_testing"],
+)
+
+# Runs `:app_release` as `bazel run` would, with a keystore of its own, and
+# checks what it signs with the SDK's own tools. The bundle is built through
+# the rule's release transition, so this is a release build for both ABIs in a
+# plain `bazel test`.
+filegroup(
+    name = "app_release_config",
+    srcs = [":app_release"],
+    output_group = "android_release_config",
+)
+
+dart_test(
+    name = "verify_android_release_test",
+    data = [
+        ":app_release",
+        ":app_release_config",
+        "@androidsdk//:apksigner",
+        "@androidsdk//:zipalign",
+        "@bazel_tools//tools/zip:zipper",
+    ],
+    env = {
+        "APKSIGNER_RUNFILE": "$(rlocationpath @androidsdk//:apksigner)",
+        "RELEASE_CONFIG_RUNFILE": "$(rlocationpath :app_release_config)",
+        "RELEASE_RUNFILE": "$(rlocationpath :app_release)",
+        "ZIPALIGN_RUNFILE": "$(rlocationpath @androidsdk//:zipalign)",
+        "ZIPPER_RUNFILE": "$(rlocationpath @bazel_tools//tools/zip:zipper)",
+    },
+    main = "test/verify_android_release_test.dart",
+    deps = [
+        "@rules_dart//dart/runfiles",
+        "@rules_flutter//tools/e2e_testing",
+    ],
 )
 
 dart_test(
