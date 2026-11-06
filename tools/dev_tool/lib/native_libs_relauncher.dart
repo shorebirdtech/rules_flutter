@@ -42,10 +42,11 @@ class Relauncher {
   /// failed.
   ///
   /// For a platform whose launch artifact costs far more than the libraries in
-  /// it: an APK is dexed, linked, zipped and signed, and a restart that finds
-  /// its libraries unchanged needs none of that. Null here means the artifact
-  /// *is* the cheap thing (a macOS bundle is a directory of what the build
-  /// wrote anyway), so [rebuild] runs first and its bundle is read.
+  /// it: an APK is dexed, linked, zipped and signed, a macOS debug bundle's
+  /// `App.framework` is the whole program's kernel, and a restart that finds
+  /// its libraries unchanged needs none of that. Null for a device with no
+  /// such way to read them (`Device.launchBundleParts`), so [rebuild] runs
+  /// first and its bundle is read.
   ///
   /// The fingerprints it returns must be the form the `liveFingerprint` was
   /// taken in, since they are compared. [rebuild] still runs before a

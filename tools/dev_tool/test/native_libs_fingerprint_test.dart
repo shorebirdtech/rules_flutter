@@ -323,6 +323,23 @@ void main() {
       expect(fp.keys, ['libdartjni.so']);
     });
 
+    // A macOS restart reads the linker inputs below the bundle, which include
+    // the engine framework's binary: about 100 MB, hashed on every restart,
+    // for a file only an engine bump moves.
+    test('leaves out the Apple engine framework binaries', () async {
+      final fp = await nativeLibsFingerprintOfBuiltFiles([
+        built('mac', 'libadd.dylib', [1]).path,
+        built(
+          'mac',
+          '_solib_darwin_arm64/_engine/FlutterMacOS.framework/FlutterMacOS',
+          [2],
+        ).path,
+        built('ios', '_solib/_engine/Flutter.framework/Flutter', [3]).path,
+        built('mac', 'vendor/FlutterMacOS', [4]).path,
+      ]);
+      expect(fp.keys, ['libadd.dylib', 'vendor/FlutterMacOS']);
+    });
+
     test(
       'skips what is not a file: a tree artifact the build listed',
       () async {

@@ -137,6 +137,78 @@ void main() {
       },
       timeout: const Timeout(Duration(minutes: 8)),
     );
+
+    // Finding out that no native library moved must not cost a build of the
+    // bundle: its App.framework holds the app's kernel, so building it
+    // recompiles the whole program for every Dart edit and re-signs the app,
+    // while the restart compiles the same edit itself in a fraction of that.
+    test(
+      'a Dart-only edit builds nothing of the bundle and keeps the process',
+      () async {
+        final ws = await editableWorkspace('ffi_example');
+        final main = ws.file('lib/main.dart');
+        final original = main.readAsStringSync();
+        const marker = r"debugPrint('$marker (sqlite3 $sqliteVersion)');";
+        expect(original, contains(marker), reason: 'fixture marker');
+
+        final dt = await startDevTool(
+          workspace: ws.root,
+          target: ':ffi_macos',
+          device: 'macos',
+        );
+        await dt.waitForEvent(
+          'app.started',
+          timeout: const Duration(minutes: 6),
+        );
+        final appId = dt.appId!;
+        await dt.waitForHttpControl();
+        // An edit inside the assembler's own build window is compiled into its
+        // baseline, so nothing is edited before the pipeline is up.
+        await dt.waitForStderr('frontend_server_ready');
+
+        main.writeAsStringSync(
+          original.replaceFirst(
+            marker,
+            r"debugPrint('$marker (sqlite3 $sqliteVersion) v2');",
+          ),
+        );
+        final seen = dt.stderrLines.length;
+        final restart = await dt.httpCommand('app.restart', {'appId': appId});
+        final result = restart['result'] as Map<String, dynamic>?;
+        expect(result, isNotNull, reason: 'app.restart: ${restart['error']}');
+        expect(
+          result!['relaunched'],
+          isNot(isTrue),
+          reason: 'no native library moved, so the process must stay: $result',
+        );
+
+        // The restart ran the edited `main()`.
+        await dt.waitForAppLog(RegExp(r'\(sqlite3 [^)]*\) v2'));
+
+        final builds = [
+          for (final line in dt.stderrLines.skip(seen))
+            if (line.contains('"message":"bazel_command"') &&
+                line.contains('"args":["build"'))
+              line,
+        ];
+        expect(
+          builds,
+          isNotEmpty,
+          reason:
+              'the restart reads the native libraries, which is a build; if '
+              'it logged none, this test is not looking at the right records',
+        );
+        for (final build in builds) {
+          expect(
+            build,
+            contains('flutter_macos_bundle_parts'),
+            reason: 'a restart built more than the bundle parts: $build',
+          );
+        }
+        await dt.sendCommand(1, 'daemon.shutdown');
+      },
+      timeout: const Timeout(Duration(minutes: 8)),
+    );
   }, skip: !Platform.isMacOS ? 'macOS only' : null);
 }
 

@@ -77,18 +77,24 @@ Future<Map<String, String>> nativeLibsFingerprintOfFiles(
 /// in its configuration's output tree (`libextra.lo`,
 /// `external/aar+/jni/arm64-v8a/libaar.so`).
 ///
-/// The companion to [nativeLibsFingerprint] for an Android app whose APK is not
-/// built. A restart asks only whether the native code moved, and the APK is
-/// packaged from files the build makes first: the `.a`/`.lo` archives and
-/// objects of every `cc_library` listed on the binary (which it links into a
-/// library of its own), the shared libraries those bring, the application's
+/// The companion to [nativeLibsFingerprint] for an app whose launch artifact
+/// is not built. A restart asks only whether the native code moved, and the
+/// APK is packaged from files the build makes first: the `.a`/`.lo` archives
+/// and objects of every `cc_library` listed on the binary (which it links into
+/// a library of its own), the shared libraries those bring, the application's
 /// own libraries, and the `jni/` libraries of every AAR. A change to any of
 /// them is a change to what the APK carries, so a changed library cannot
 /// slip past the check by being something other than the application's.
 ///
+/// A macOS app reads the same way: what its bundle's native code is made from,
+/// the application's loose libraries and the linker inputs of everything the
+/// runner links.
+///
 /// [files] is whatever a build listed: anything that is not a regular file (a
 /// tree artifact) is skipped, and so are `libapp.so` and `libflutter.so`, the
-/// Dart snapshot and the engine, which no edit to the app's native code moves.
+/// Dart snapshot and the engine, and the binary of an Apple engine framework
+/// (`FlutterMacOS.framework/FlutterMacOS`), which no edit to the app's native
+/// code moves.
 /// The content token is of the bytes, so the same file built in another
 /// configuration has the same one.
 Future<Map<String, String>> nativeLibsFingerprintOfBuiltFiles(
@@ -101,7 +107,11 @@ Future<Map<String, String>> nativeLibsFingerprintOfBuiltFiles(
   final tokens = <String, Set<String>>{};
   for (final path in files) {
     final key = _inOutputTree.firstMatch(path)?.group(1) ?? path;
-    if (_flutterLibraries.contains(key.split('/').last)) continue;
+    final segments = key.split('/');
+    if (_flutterLibraries.contains(segments.last) ||
+        _isFlutterFrameworkBinary(segments)) {
+      continue;
+    }
     final file = File(path);
     if (!file.existsSync()) continue;
     (tokens[key] ??= {}).add('fnv:${await _fnv1a64(file)}');
@@ -142,6 +152,13 @@ const _flutterFrameworks = {'App', 'Flutter', 'FlutterMacOS'};
 /// Android's equivalents: `libapp.so` is the AOT Dart snapshot and
 /// `libflutter.so` the engine.
 const _flutterLibraries = {'libapp.so', 'libflutter.so'};
+
+/// Whether [segments] name the binary of one of [_flutterFrameworks], directly
+/// inside its `.framework` directory.
+bool _isFlutterFrameworkBinary(List<String> segments) =>
+    segments.length >= 2 &&
+    _flutterFrameworks.contains(segments.last) &&
+    segments[segments.length - 2] == '${segments.last}.framework';
 
 bool _isNativeLib(String path) {
   final segments = path.split('/');

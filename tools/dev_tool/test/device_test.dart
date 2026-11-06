@@ -197,10 +197,10 @@ void main() {
       ]);
     });
 
-    // An APK is dexed, linked, zipped and signed; a restart needs only the
-    // libraries and assets that go into it, so Android says where to read them
-    // without the APK, and a platform whose launch artifact is the bundle says
-    // nothing.
+    // An APK is dexed, linked, zipped and signed, and a macOS debug bundle's
+    // App.framework is the whole program's kernel; a restart needs only the
+    // libraries and assets that go into them, so each says where to read
+    // those without building the artifact.
     test('AndroidDevice names the bundle parts a restart reads', () {
       final parts = AndroidDevice(abi: 'x86_64').launchBundleParts;
       expect(parts, isNotNull);
@@ -209,9 +209,12 @@ void main() {
       expect(parts.nativeLibsGroup, 'flutter_android_native_libs');
     });
 
-    test('a device whose launch artifact is the bundle names no parts', () {
-      expect(MacOSDevice().launchBundleParts, isNull);
-      expect(IOSSimulatorDevice(udid: 'TEST').launchBundleParts, isNull);
+    test('MacOSDevice names the bundle parts a restart reads', () {
+      final parts = MacOSDevice().launchBundleParts;
+      expect(parts, isNotNull);
+      expect(parts!.aspect, contains('macos_bundle_parts.bzl'));
+      expect(parts.assetsGroup, 'flutter_macos_bundle_parts');
+      expect(parts.nativeLibsGroup, 'flutter_macos_native_libs');
     });
 
     test('AndroidDevice does not guess an ABI it has not been told', () {

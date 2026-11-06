@@ -37,59 +37,14 @@ artifacts, and building the group only has to find them, not make them.
 load("@rules_android//providers:providers.bzl", "AndroidNativeLibsInfo")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("//flutter:providers.bzl", "FlutterApplicationInfo")
+load("//flutter/private:bundle_parts.bzl", "own_libraries", "parts_of_dependencies", "parts_result")
 
 BUNDLE_PARTS_OUTPUT_GROUP = "flutter_android_bundle_parts"
 NATIVE_LIBS_OUTPUT_GROUP = "flutter_android_native_libs"
 
-_PartsInfo = provider(
-    doc = "Every bundle's assets and native library inputs at or below this node.",
-    fields = {
-        "assets": "depset[File]",
-        "native_libs": "depset[File]",
-    },
-)
-
-def _dependencies(rule_attr):
-    """The collected parts of every dependency, whatever attribute shape holds it."""
-    deps = []
-    for name in dir(rule_attr):
-        value = getattr(rule_attr, name)
-        if type(value) == "list":
-            items = value
-        elif type(value) == "dict":
-            items = list(value.keys()) + list(value.values())
-        else:
-            items = [value]
-        for item in items:
-            if type(item) == "Target" and _PartsInfo in item:
-                deps.append(item[_PartsInfo])
-    return deps
-
-def _own_libraries(cc_info, owner):
-    """The files the linker is given for `owner`'s own libraries."""
-    files = []
-    for linker_input in cc_info.linking_context.linker_inputs.to_list():
-        if linker_input.owner != owner:
-            continue
-        for library in linker_input.libraries:
-            for file in [
-                library.static_library,
-                library.pic_static_library,
-                library.dynamic_library,
-            ] + list(library.objects or []) + list(library.pic_objects or []):
-                if file:
-                    files.append(file)
-    return files
-
 def _flutter_android_bundle_parts_aspect_impl(target, ctx):
     if ctx.configuration.is_tool_configuration():
-        return [
-            _PartsInfo(assets = depset(), native_libs = depset()),
-            OutputGroupInfo(**{
-                BUNDLE_PARTS_OUTPUT_GROUP: depset(),
-                NATIVE_LIBS_OUTPUT_GROUP: depset(),
-            }),
-        ]
+        return parts_result([], [], [], BUNDLE_PARTS_OUTPUT_GROUP, NATIVE_LIBS_OUTPUT_GROUP)
     assets = []
     native_libs = []
 
@@ -104,20 +59,17 @@ def _flutter_android_bundle_parts_aspect_impl(target, ctx):
     # What `android_binary` links and packages: cc dependencies' own libraries,
     # and the libraries AARs and Android libraries carry (already transitive).
     if CcInfo in target:
-        native_libs.append(depset(_own_libraries(target[CcInfo], target.label)))
+        native_libs.append(depset(own_libraries(target[CcInfo], target.label)))
     if AndroidNativeLibsInfo in target:
         native_libs.append(target[AndroidNativeLibsInfo].native_libs)
 
-    below = _dependencies(ctx.rule.attr)
-    assets_all = depset(transitive = assets + [d.assets for d in below])
-    native_all = depset(transitive = native_libs + [d.native_libs for d in below])
-    return [
-        _PartsInfo(assets = assets_all, native_libs = native_all),
-        OutputGroupInfo(**{
-            BUNDLE_PARTS_OUTPUT_GROUP: assets_all,
-            NATIVE_LIBS_OUTPUT_GROUP: native_all,
-        }),
-    ]
+    return parts_result(
+        assets,
+        native_libs,
+        parts_of_dependencies(ctx.rule.attr),
+        BUNDLE_PARTS_OUTPUT_GROUP,
+        NATIVE_LIBS_OUTPUT_GROUP,
+    )
 
 flutter_android_bundle_parts_aspect = aspect(
     implementation = _flutter_android_bundle_parts_aspect_impl,

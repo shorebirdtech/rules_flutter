@@ -559,8 +559,10 @@ abstract class Device {
   /// bundle and building it is the way to read it.
   ///
   /// For a platform whose artifact is packaged from the bundle at a cost a
-  /// restart should not pay: an APK is dexed, linked, zipped and signed, none
-  /// of it needed to learn that only Dart changed.
+  /// restart should not pay: an APK is dexed, linked, zipped and signed, and a
+  /// macOS debug bundle carries the app's kernel in `App.framework`, so
+  /// building it recompiles the whole program on every Dart edit. None of it
+  /// is needed to learn that only Dart changed.
   LaunchBundleParts? get launchBundleParts => null;
 
   /// Learn whatever [buildArgs] depends on that only the device can say.
@@ -656,6 +658,13 @@ class MacOSDevice extends Device {
 
   @override
   NativePatchDelivery? get nativePatchDelivery => const MacOSPatchDelivery();
+
+  @override
+  LaunchBundleParts? get launchBundleParts => const LaunchBundleParts(
+    aspect: macosBundlePartsAspect,
+    assetsGroup: macosBundlePartsOutputGroup,
+    nativeLibsGroup: macosNativeLibsOutputGroup,
+  );
 
   @override
   String get name => 'macOS';
