@@ -40,12 +40,15 @@ typedef Variant = ({String asset, double? dpr});
 String storedPath(String asset) => Uri(pathSegments: asset.split('/')).path;
 
 /// The expectation in [file]: asset key to variants, restricted to the entries
-/// declared for [platform] (an entry without `platforms` is for all), with
+/// declared for [platform] (an entry without `platforms` is for all) and for
+/// [flavor] (an entry without `flavors` is for all builds; one with them is
+/// for a build of one of them, and never for a build without a flavor), with
 /// [prefix] in front of every key and path.
 Map<String, List<Variant>> readExpectation(
   File file, {
   String prefix = '',
   String? platform,
+  String? flavor,
 }) {
   final json = jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
   final out = <String, List<Variant>>{};
@@ -53,6 +56,8 @@ Map<String, List<Variant>> readExpectation(
     final value = entry.value as Map<String, dynamic>;
     final platforms = (value['platforms'] as List?)?.cast<String>();
     if (platforms != null && !platforms.contains(platform)) continue;
+    final flavors = (value['flavors'] as List?)?.cast<String>();
+    if (flavors != null && !flavors.contains(flavor)) continue;
     out['$prefix${entry.key}'] = [
       for (final v in (value['variants'] as List).cast<Map<String, dynamic>>())
         (

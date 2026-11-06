@@ -96,6 +96,20 @@ def _defines_impl(ctx):
 
 _defines_test = analysistest.make(_defines_impl, config_settings = _DBG)
 
+def _flavor_impl(ctx):
+    """A variant of a flavored application is that flavor: `appFlavor` in the app, and in the dev loop's replay."""
+    env = analysistest.begin(ctx)
+    kernel = _kernel(env)
+    if kernel == None:
+        return analysistest.end(env)
+    asserts.true(env, "-DFLUTTER_APP_FLAVOR=paid" in kernel.argv, "the application's flavor reaches the variant's compile: %s" % kernel.argv)
+    config = written_json(env, "_dev_config.json")
+    if config != None:
+        asserts.equals(env, ["FLUTTER_APP_FLAVOR=paid"], config["dartDefines"])
+    return analysistest.end(env)
+
+_flavor_test = analysistest.make(_flavor_impl, config_settings = _DBG)
+
 # -- The application's package -------------------------------------------------
 
 def _package_impl(ctx):
@@ -253,6 +267,10 @@ def flutter_application_variant_test_suite(name):
         expected = ["variant_base_plugin"],
     )
     _defines_test(name = name + "_defines", target_under_test = elsewhere)
+    _flavor_test(
+        name = name + "_flavor",
+        target_under_test = "//flutter/tests/variant_fixture/other:flavored",
+    )
     _package_test(name = name + "_package", target_under_test = elsewhere)
     _in_package_main_test(name = name + "_in_package_main", target_under_test = in_package)
     _assets_test(name = name + "_assets", target_under_test = elsewhere)
@@ -273,6 +291,7 @@ def flutter_application_variant_test_suite(name):
             ":" + name + "_plugins_in_variant",
             ":" + name + "_plugins_in_application",
             ":" + name + "_defines",
+            ":" + name + "_flavor",
             ":" + name + "_package",
             ":" + name + "_in_package_main",
             ":" + name + "_assets",

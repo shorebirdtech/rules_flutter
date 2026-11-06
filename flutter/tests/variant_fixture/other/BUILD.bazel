@@ -36,3 +36,11 @@ flutter_application_variant(
     tags = ["manual"],
     unchecked_srcs = [":generated_main"],
 )
+
+# A variant of a flavored application.
+flutter_application_variant(
+    name = "flavored",
+    application = "//flutter/tests/variant_fixture/app:flavored_app",
+    main = "variant_main.dart",
+    tags = ["manual"],
+)

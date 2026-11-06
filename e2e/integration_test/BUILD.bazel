@@ -41,6 +41,15 @@ flutter_application(
     deps = ["@deps//:flutter"],
 )
 
+# The same app as a flavor's target.
+flutter_application(
+    name = "app_flutter_paid",
+    package_name = "integration_test_example",
+    flavor = "paid",
+    main = "lib/main.dart",
+    deps = ["@deps//:flutter"],
+)
+
 _TEST_DEPS = [
     "@deps//:flutter_test",
     "@deps//:integration_test",
@@ -212,6 +221,24 @@ flutter_macos_integration_test(
 flutter_macos_integration_test(
     name = "macos_pass_test",
     src = "integration_test/counter_test.dart",
+    application = ":app_flutter",
+    bundle_id = "com.example.integrationtest",
+    deps = _TEST_DEPS,
+)
+
+# `appFlavor` is the flavor of the application the test is run as, and null
+# when it has none.
+flutter_macos_integration_test(
+    name = "macos_flavor_test",
+    src = "integration_test/flavor_paid_test.dart",
+    application = ":app_flutter_paid",
+    bundle_id = "com.example.integrationtest",
+    deps = _TEST_DEPS,
+)
+
+flutter_macos_integration_test(
+    name = "macos_no_flavor_test",
+    src = "integration_test/flavor_none_test.dart",
     application = ":app_flutter",
     bundle_id = "com.example.integrationtest",
     deps = _TEST_DEPS,
@@ -572,6 +599,26 @@ flutter_web_integration_test(
     name = "web_pass_test",
     package_name = "integration_test_example",
     src = "integration_test/counter_test.dart",
+    srcs = glob(["lib/**/*.dart"]),
+    target_compatible_with = _WEB_HOSTS,
+    deps = ["@deps//:flutter"] + _TEST_DEPS,
+)
+
+# `appFlavor` in a browser: the web app's `flavor`, and null without one.
+flutter_web_integration_test(
+    name = "web_flavor_test",
+    package_name = "integration_test_example",
+    src = "integration_test/flavor_paid_test.dart",
+    srcs = glob(["lib/**/*.dart"]),
+    flavor = "paid",
+    target_compatible_with = _WEB_HOSTS,
+    deps = ["@deps//:flutter"] + _TEST_DEPS,
+)
+
+flutter_web_integration_test(
+    name = "web_no_flavor_test",
+    package_name = "integration_test_example",
+    src = "integration_test/flavor_none_test.dart",
     srcs = glob(["lib/**/*.dart"]),
     target_compatible_with = _WEB_HOSTS,
     deps = ["@deps//:flutter"] + _TEST_DEPS,

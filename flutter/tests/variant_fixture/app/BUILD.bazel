@@ -23,3 +23,12 @@ flutter_application_variant(
     main = "lib/variant_main.dart",
     tags = ["manual"],
 )
+
+# The application of a flavor's target.
+flutter_application(
+    name = "flavored_app",
+    package_name = "variant_app",
+    flavor = "paid",
+    main = "lib/main.dart",
+    tags = ["manual"],
+)

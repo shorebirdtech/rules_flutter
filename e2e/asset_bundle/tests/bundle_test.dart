@@ -1,7 +1,8 @@
 /// Checks one built `flutter_assets/` tree against an expectation file.
 ///
 ///     bundle_test <bundle> <expectation.json> [--prefix=P] [--platform=OS]
-///                 [--subdir=D] [--allow-extra] [--unlisted=PATH]...
+///                 [--flavor=F] [--subdir=D] [--allow-extra]
+///                 [--unlisted=PATH]...
 ///
 /// `<bundle>` and `<expectation.json>` are runfiles paths
 /// (`$(rlocationpath ...)`). Exits non-zero, listing every difference, when the
@@ -36,6 +37,7 @@ void main(List<String> args) {
     File(resolve(positional[1])),
     prefix: option('prefix') ?? '',
     platform: option('platform'),
+    flavor: option('flavor'),
   );
   final problems = compare(
     bundle,

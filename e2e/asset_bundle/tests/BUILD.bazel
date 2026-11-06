@@ -130,15 +130,52 @@ bundle_test(
     }.items()
 ]
 
-# Property: a pub package's asset entry with `flavors:` is bundled only for a
-# build of one of those flavors; this workspace builds none, so such entries
-# (a file or a directory) ship nowhere, as with `flutter build` without
-# `--flavor`.
+# Property: a pub package's asset entry with `flavors:` (a file or a directory)
+# is bundled only for a build of one of those flavors, and in no build without
+# one, as with `flutter build`. The application's `flavor` is the build's.
 bundle_test(
     name = "pub_package_flavor_restricted_assets_are_not_bundled_without_a_flavor_test",
     bundle = "//:app_with_fx_flavors_bundle",
     expected = "//tests:expected/fx_flavors.json",
     prefix = "packages/fx_flavors/",
+)
+
+[
+    bundle_test(
+        name = "pub_package_flavor_restricted_assets_ship_in_a_build_of_that_flavor_%s_test" % flavor,
+        bundle = "//:app_with_fx_flavors_%s_bundle" % flavor,
+        expected = "//tests:expected/fx_flavors.json",
+        flavor = flavor,
+        prefix = "packages/fx_flavors/",
+    )
+    for flavor in [
+        "paid",
+        "premium",
+        "free",
+        "other",
+    ]
+]
+
+# Property: the platform and the flavor are independent filters.
+bundle_test(
+    name = "pub_package_flavor_restricted_assets_ship_in_a_flavored_android_build_test",
+    bundle = "//:app_with_fx_flavors_paid_android_bundle",
+    expected = "//tests:expected/fx_flavors.json",
+    flavor = "paid",
+    platform = "android",
+    prefix = "packages/fx_flavors/",
+)
+
+# Property: web selects `flavors:` entries like the other platforms (which
+# `flutter build web` does not: it has no `--flavor`).
+bundle_test(
+    name = "pub_package_flavor_restricted_assets_ship_in_a_flavored_web_build_test",
+    bundle = "//:web_with_fx_flavors_paid_bundle",
+    expected = "//tests:expected/fx_flavors.json",
+    flavor = "paid",
+    platform = "web",
+    prefix = "packages/fx_flavors/",
+    subdir = "assets",
 )
 
 # -- Names -----------------------------------------------------------------------
@@ -207,14 +244,27 @@ two_files_one_key_test(
 ]
 
 # Property: a pub package's shader entry with `flavors:` is bundled only for a
-# build of one of those flavors; this workspace builds none, so such shaders
-# ship nowhere, as with `flutter build` without `--flavor`.
+# build of one of those flavors, and in no build without one.
 bundle_test(
     name = "pub_package_flavor_restricted_shaders_are_not_bundled_without_a_flavor_test",
     bundle = "//:app_with_fx_shader_flavors_bundle",
     expected = "//tests:expected/fx_shader_flavors.json",
     prefix = "packages/fx_shader_flavors/",
 )
+
+[
+    bundle_test(
+        name = "pub_package_flavor_restricted_shaders_ship_in_a_build_of_that_flavor_%s_test" % flavor,
+        bundle = "//:app_with_fx_shader_flavors_%s_bundle" % flavor,
+        expected = "//tests:expected/fx_shader_flavors.json",
+        flavor = flavor,
+        prefix = "packages/fx_shader_flavors/",
+    )
+    for flavor in [
+        "paid",
+        "free",
+    ]
+]
 
 # Property: a pub package's font named `packages/<other>/<path>` is the file of
 # the package `<other>`, at that key, though `<other>` does not list it; only

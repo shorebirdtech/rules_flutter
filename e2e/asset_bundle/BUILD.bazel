@@ -106,6 +106,60 @@ tree_of(
     visibility = ["//visibility:public"],
 )
 
+# -- The same packages, bundled for each flavor ------------------------------------
+
+[
+    bundled_app(
+        name = "app_with_fx_flavors_" + flavor,
+        flavor = flavor,
+        deps = ["@fx_flavors"],
+    )
+    for flavor in [
+        "paid",
+        "premium",
+        "free",
+        "other",
+    ]
+]
+
+[
+    bundled_app(
+        name = "app_with_fx_shader_flavors_" + flavor,
+        flavor = flavor,
+        deps = ["@fx_shader_flavors"],
+    )
+    for flavor in [
+        "paid",
+        "free",
+    ]
+]
+
+# The platform and the flavor are independent filters: one Android build.
+bundled_app(
+    name = "app_with_fx_flavors_paid_android",
+    flavor = "paid",
+    platform = ":android_arm64",
+    deps = ["@fx_flavors"],
+)
+
+# Web selects flavored assets like the other platforms.
+flutter_web_app(
+    name = "web_with_fx_flavors_paid",
+    package_name = "asset_bundle",
+    flavor = "paid",
+    js_fallback = False,
+    deps = [
+        "@deps//:flutter",
+        "@fx_flavors",
+    ],
+)
+
+tree_of(
+    name = "web_with_fx_flavors_paid_bundle",
+    src = ":web_with_fx_flavors_paid",
+    visibility = ["//visibility:public"],
+)
+
 # A package whose font is a file of another package it depends on.
 bundled_app(
     name = "app_with_font_of_other_package",

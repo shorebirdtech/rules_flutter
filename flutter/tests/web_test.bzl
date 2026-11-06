@@ -1932,6 +1932,16 @@ def _setup_web_fixtures():
         tags = ["manual"],
     )
 
+    # The same app as a flavor's target.
+    flutter_web_bundle(
+        name = "_web_flavor_fixture",
+        package_name = "web_fixture",
+        main = "lib/web_fixture_main.dart",
+        defines = ["from.attr=1"],
+        flavor = "paid",
+        tags = ["manual"],
+    )
+
     # The same app with no JavaScript build beside the WASM one.
     flutter_web_bundle(
         name = "_web_wasm_only_fixture",
@@ -2413,6 +2423,21 @@ _icon_scan_front_end_test = analysistest.make(
     },
 )
 
+def _flavor_defines_test_impl(ctx):
+    """A web bundle's `flavor` is `FLUTTER_APP_FLAVOR` in every compile and in the dev loop's replay."""
+    env = analysistest.begin(ctx)
+    _assert_argv(env, _action(env, "FlutterDart2Wasm"), present = ["-DFLUTTER_APP_FLAVOR=paid", "-Dfrom.attr=1"])
+    _assert_dart2js(env, True, present = ["-DFLUTTER_APP_FLAVOR=paid"])
+    config = written_json(env, "_dev_config.json")
+    if config != None:
+        asserts.equals(env, ["from.attr=1", "FLUTTER_APP_FLAVOR=paid"], config["dartDefines"])
+    return analysistest.end(env)
+
+_flavor_defines_test = analysistest.make(
+    _flavor_defines_test_impl,
+    config_settings = {"//command_line_option:compilation_mode": "dbg"},
+)
+
 def web_test_suite(name):
     """Instantiate the web-bundle fixtures and the analysis tests over them.
 
@@ -2421,6 +2446,10 @@ def web_test_suite(name):
     """
     _setup_web_fixtures()
 
+    _flavor_defines_test(
+        name = name + "_flavor_defines",
+        target_under_test = ":_web_flavor_fixture",
+    )
     _dbg_web_defines_test(
         name = name + "_dbg_defines",
         js_fallback = True,

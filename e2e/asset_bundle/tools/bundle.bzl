@@ -70,7 +70,7 @@ def bundled_app(name, assets = [], deps = [], package_name = "asset_bundle", pla
         visibility = ["//visibility:public"],
     )
 
-def bundle_test(name, bundle, expected, prefix = "", platform = "", subdir = "", allow_extra = False, unlisted = [], **kwargs):
+def bundle_test(name, bundle, expected, prefix = "", platform = "", flavor = "", subdir = "", allow_extra = False, unlisted = [], **kwargs):
     """Checks the tree `bundle` builds against the assets `flutter build` would bundle.
 
     Args:
@@ -82,6 +82,8 @@ def bundle_test(name, bundle, expected, prefix = "", platform = "", subdir = "",
             `packages/<name>/` of a library's assets.
         platform: The `platforms:` value the bundle is built for, for the
             entries of `expected` that restrict it.
+        flavor: The flavor the bundle is built for, for the entries of
+            `expected` that name flavors; none when empty.
         subdir: Where the `flutter_assets/` tree sits in `bundle`, for a bundle
             that holds more than that.
         allow_extra: Whether the bundle may hold more than `expected` lists.
@@ -93,6 +95,8 @@ def bundle_test(name, bundle, expected, prefix = "", platform = "", subdir = "",
         args.append("--prefix=" + prefix)
     if platform:
         args.append("--platform=" + platform)
+    if flavor:
+        args.append("--flavor=" + flavor)
     if subdir:
         args.append("--subdir=" + subdir)
     if allow_extra:
