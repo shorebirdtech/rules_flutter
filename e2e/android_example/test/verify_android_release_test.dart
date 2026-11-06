@@ -27,6 +27,7 @@ import 'package:rules_flutter_e2e_testing/apk.dart';
 import 'package:rules_flutter_e2e_testing/apk_contents.dart';
 import 'package:rules_flutter_e2e_testing/archive.dart';
 import 'package:rules_flutter_e2e_testing/bundle_check.dart';
+import 'package:rules_flutter_e2e_testing/zip_entries.dart';
 import 'package:runfiles/runfiles.dart';
 
 const _password = 'release-test-password';
@@ -329,7 +330,21 @@ void main() {
       '${extracted.path}/lib/$abi/libapp.so',
     );
   }
-  extracted.checkNativeLibrariesUncompressed();
+  extracted
+    ..checkNativeLibrariesUncompressed()
+    ..checkNoMultiplatformMetadata();
+  final bundleMetadata = [
+    for (final entry in zipEntries(File(aab).readAsBytesSync()))
+      if (RegExp('^base/root/[A-Za-z0-9]+Main/default/').hasMatch(entry.name))
+        entry.name,
+  ];
+  _check.expect(
+    'no Kotlin Multiplatform metadata in the bundle',
+    condition: bundleMetadata.isEmpty,
+    detail:
+        '${bundleMetadata.length} entries, such as '
+        '${bundleMetadata.take(5).join(', ')}',
+  );
   final root = manifestElements(extracted.manifest.readAsBytesSync());
   final debuggable = [
     for (final e in root)

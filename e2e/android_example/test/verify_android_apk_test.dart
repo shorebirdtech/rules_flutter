@@ -79,6 +79,7 @@ void main() {
     ..checkNativeLibraries()
     // --- Packaging, as AGP packages a Flutter app ---
     ..checkNativeLibrariesUncompressed()
+    ..checkNoMultiplatformMetadata()
     // --- Engine runtime class checks ---
     ..checkDefinedClasses(_requiredDexClasses)
     ..finish('\nAll Android APK verification checks passed.');

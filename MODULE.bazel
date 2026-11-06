@@ -165,6 +165,31 @@ maven.artifact(
     group = "com.google.guava",
     version = "1.0",
 )
+
+# A Kotlin Multiplatform library publishes a common artifact whose jar holds
+# only klib metadata (`commonMain/default/linkdata/...`, no classes), and
+# Gradle module metadata that sends a JVM or Android build to its `-jvm`
+# variant instead. Gradle never sees the common jar; Coursier, which reads
+# only the POM, resolves both, and the common jar's metadata would ship in
+# every APK as Java resources. Each common artifact the Flutter embedding's
+# dependencies (and rules_android's) pull in resolves to its `-jvm` variant
+# here, as Gradle resolves it. The overrides apply to every module's install
+# of this name.
+[
+    maven.override(
+        name = "rules_android_maven",
+        coordinates = coordinates,
+        target = "@rules_android_maven//:" + target,
+    )
+    for coordinates, target in [
+        ("androidx.annotation:annotation", "androidx_annotation_annotation_jvm"),
+        ("androidx.collection:collection", "androidx_collection_collection_jvm"),
+        ("androidx.lifecycle:lifecycle-common", "androidx_lifecycle_lifecycle_common_jvm"),
+        ("org.jetbrains.kotlinx:kotlinx-coroutines-core", "org_jetbrains_kotlinx_kotlinx_coroutines_core_jvm"),
+        ("org.jetbrains.kotlinx:kotlinx-serialization-core", "org_jetbrains_kotlinx_kotlinx_serialization_core_jvm"),
+    ]
+]
+
 use_repo(maven, "rules_android_maven")
 
 # Dev tool pub dependencies (args, vm_service, watcher, path).

@@ -178,6 +178,24 @@ class Apk {
     );
   }
 
+  /// Checks that no Kotlin Multiplatform metadata is packaged: the
+  /// `<sourceSet>/default/linkdata/...` klib files that make up the
+  /// common artifact of a multiplatform library (`androidx.collection`,
+  /// `kotlinx-coroutines-core`). Gradle resolves such a library to its JVM or
+  /// Android variant and never packages the common one.
+  void checkNoMultiplatformMetadata() {
+    final metadata = [
+      for (final entry in zipEntries(File(apkFile).readAsBytesSync()))
+        if (_klibMetadata.hasMatch(entry.name)) entry.name,
+    ];
+    check.expect(
+      'no Kotlin Multiplatform metadata',
+      condition: metadata.isEmpty,
+      detail:
+          '${metadata.length} entries, such as ${metadata.take(5).join(', ')}',
+    );
+  }
+
   /// Checks that the dex files define every class in [required], keyed by
   /// what ships it.
   void checkDefinedClasses(Map<String, String> required) {
@@ -220,5 +238,7 @@ class Apk {
   /// Removes the extraction.
   void dispose() => archive.dispose();
 }
+
+final _klibMetadata = RegExp('^[A-Za-z0-9]+Main/default/');
 
 String _basename(String path) => path.split(RegExp(r'[\\/]')).last;
