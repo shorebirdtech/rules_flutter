@@ -197,12 +197,13 @@ maven.install(
         # The Flutter engine's androidx runtime artifacts are inherited from
         # rules_flutter's maven.install of the same name; declare only the
         # artifacts this workspace's plugins pull in.
+        "androidx.annotation:annotation:1.10.0",
         "androidx.browser:browser:1.9.0",
         "androidx.core:core:1.17.0",
         # What the Gradle builds of this workspace's pub plugins declare
         # (shared_preferences_android); the build names any that are missing.
-        "androidx.datastore:datastore-preferences:1.1.7",
-        "androidx.datastore:datastore:1.1.7",
+        "androidx.datastore:datastore-preferences:1.2.1",
+        "androidx.datastore:datastore:1.2.1",
         "androidx.media:media:1.7.0",
         "androidx.preference:preference:1.2.1",
         "androidx.privacysandbox.tools:tools:1.0.0-alpha06",
