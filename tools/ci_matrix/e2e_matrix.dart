@@ -205,7 +205,9 @@ const e2eWorkspaces = <E2eWorkspace>[
       Os.linux:
           'the web bundle\'s variants (wasm with JS fallback, wasm-only, '
           'subpath, PWA and service worker, browser allow-list, compiler flags, '
-          'profile): platform-neutral, so one run, on the cheapest runner',
+          'profile): platform-neutral, so one run, on the cheapest runner; '
+          'and the render check, the app in the pinned headless Chrome with '
+          'the pinned Linux runtime\'s libraries',
     },
     skips: {Os.macos: _webElsewhere, Os.windows: _webElsewhere},
   ),
@@ -254,9 +256,10 @@ const e2eWorkspaces = <E2eWorkspace>[
     },
     skips: {Os.linux: _appleOnly, Os.windows: _appleOnly},
   ),
-  // Its tests launch the app in a window, which needs a desktop session that
-  // CI never runs a test in (docs/TESTING.md, "What CI covers"): CI builds it,
-  // and the tests run by hand.
+  // Most of its tests launch the app in a window, which needs a desktop
+  // session that CI never runs a test in, or on a device (docs/TESTING.md,
+  // "What CI covers"): CI builds it, and the tests run by hand. web_example's
+  // `:render_test` runs a web integration test on Linux in CI.
   E2eWorkspace(
     'integration_test',
     runs: {
@@ -264,11 +267,14 @@ const e2eWorkspaces = <E2eWorkspace>[
           'the integration test rules building: the bootstrap, the variant of '
           'the application, the macOS, web, Android and iOS app and the test, '
           'for each case',
+      Os.linux:
+          'the Linux apps and tests building, with the pinned Linux runtime '
+          'fetched and every file of it, and of the Chrome that loads it, '
+          'checked against the oldest supported host',
       Os.windows:
           'the Windows and Android apps and tests building, the Android '
           'runner with the SDK\'s `adb.exe`',
     },
-    skips: {Os.linux: _appleOnly},
     command: 'build',
   ),
   E2eWorkspace(
