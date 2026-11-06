@@ -8,7 +8,7 @@ naming the lock, the package and the fix.
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_lock")
-load("//flutter/private:pub_resolve.bzl", "path_package_dir", "resolve_errors")
+load("//flutter/private:pub_resolve.bzl", "path_package_dir", "resolve_errors", "resolved_targets")
 
 _LOCK = Label("//apps/greeter:pubspec.lock")
 
@@ -168,6 +168,48 @@ def _a_mapped_path_entry_may_point_anywhere_test_impl(ctx):
 
     return unittest.end(env)
 
+def _map(lock, hub, resolve):
+    return struct(lock = Label(lock), hub = hub, resolve = {k: Label(v) for k, v in resolve.items()})
+
+def _a_package_mapped_to_one_target_is_one_mapping_test_impl(ctx):
+    """Two tags may map a package to the same target: it is one repository."""
+    env = unittest.begin(ctx)
+
+    r = resolved_targets([
+        _map("//a:pubspec.lock", "a", {"intl": "//third_party/intl", "x": "//x"}),
+        _map("//b:pubspec.lock", "b", {"intl": "//third_party/intl"}),
+    ])
+    asserts.equals(env, [], r.errors)
+    asserts.equals(env, ["intl", "x"], sorted(r.targets.keys()))
+    asserts.equals(env, "a", r.targets["intl"].hub)
+
+    return unittest.end(env)
+
+a_package_mapped_to_one_target_is_one_mapping_test = unittest.make(_a_package_mapped_to_one_target_is_one_mapping_test_impl)
+
+def _a_package_mapped_to_two_targets_is_refused_test_impl(ctx):
+    env = unittest.begin(ctx)
+
+    r = resolved_targets([
+        _map("//apps/a:pubspec.lock", "a", {"intl": "//third_party/intl"}),
+        _map("//apps/b:pubspec.lock", "b", {"intl": "//other/intl"}),
+    ])
+    asserts.equals(env, 1, len(r.errors))
+    _mentions(env, r.errors[0], [
+        "\"intl\" is mapped to different targets",
+        "//third_party/intl:intl",
+        "//other/intl:intl",
+        "//apps/a:pubspec.lock",
+        "//apps/b:pubspec.lock",
+        "hub \"a\"",
+        "hub \"b\"",
+        "one copy of each package",
+    ])
+
+    return unittest.end(env)
+
+a_package_mapped_to_two_targets_is_refused_test = unittest.make(_a_package_mapped_to_two_targets_is_refused_test_impl)
+
 def _every_mistake_is_reported_test_impl(ctx):
     env = unittest.begin(ctx)
 
@@ -205,4 +247,6 @@ def pub_resolve_test_suite(name):
         _unmapped_hosted_entries_need_nothing_test,
         _a_mapped_path_entry_may_point_anywhere_test,
         _every_mistake_is_reported_test,
+        a_package_mapped_to_one_target_is_one_mapping_test,
+        a_package_mapped_to_two_targets_is_refused_test,
     )

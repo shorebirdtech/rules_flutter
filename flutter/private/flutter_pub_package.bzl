@@ -537,7 +537,7 @@ def _maven_dep_dicts(parsed):
 def _write_maven_deps(ctx, deps, errors):
     """Record the Maven dependencies the Android check of the hub reads.
 
-    Written for every spoke, so the hub's `@<hub>-android_maven` repo can read
+    Written for every spoke, so `@flutter_pub_android_maven` can read
     all of them: empty for a package that is not an Android plugin with
     sources. For a plugin whose `android/BUILD.bazel` an overlay supplies,
     the dependencies its Gradle build declares and no errors. At the root of
@@ -668,9 +668,9 @@ def _font_label(ctx, path):
     other, rest = parts[1], parts[2]
     if other == ctx.attr.package_name:
         return ":" + rest
-    if other not in read_index(ctx, ctx.attr.hub_name).built:
+    if other not in read_index(ctx).built:
         fail("package {}: the font file {} names the package {}, which the lock does not build.".format(ctx.attr.package_name, repr(path), other))
-    file = sibling_path(ctx, source_repo(ctx.attr.hub_name, other), "pubspec.yaml").dirname.get_child(rest)
+    file = sibling_path(ctx, source_repo(other), "pubspec.yaml").dirname.get_child(rest)
     if not file.exists:
         fail("package {}: the font file {} names {} of the package {}, which has no such file.".format(ctx.attr.package_name, repr(path), repr(rest), other))
     link = "_fonts_of_other_packages/{}/{}".format(other, rest)
@@ -1294,7 +1294,6 @@ flutter_pub_member(
 def make_android_subpackage_build_content(
         android_src_dir,
         java_package,
-        hub_name = "",
         maven_deps = [],
         android_manifest = "",
         consumer_proguard_specs = [],
@@ -1341,9 +1340,6 @@ def make_android_subpackage_build_content(
             pubspec.yaml. Used as `custom_package` on the
             `kt_android_library` so the generated `R` and `BuildConfig`
             classes land in the package the plugin's sources expect.
-        hub_name: The pub hub the spoke belongs to; its
-            `@<hub>-android_maven` repo lists what `@rules_android_maven`
-            resolved.
         maven_deps: The plugin's Maven dependencies as declared in its
             `build.gradle*`: dicts with `kind` (`"deps"`, `"compile_only"`,
             `"runtime"`), `coordinate` (`group:artifact`), `version` (string
@@ -1478,10 +1474,10 @@ write_file(
     runtime_deps_arg = ""
     if maven_deps:
         maven_loads = (
-            'load("@{hub}-android_maven//:resolved.bzl", "RESOLVED")\n' +
+            'load("@flutter_pub_android_maven//:resolved.bzl", "RESOLVED")\n' +
             'load("@rules_android//android:rules.bzl", "android_library")\n' +
             'load("@rules_flutter//flutter/private:android_plugin_maven.bzl", "maven_labels")\n'
-        ).format(hub = hub_name)
+        )
         maven_call = """
 # The artifacts this plugin's Gradle build declares that @rules_android_maven
 # has. An application that links the plugin fails, naming every one it lacks
@@ -1580,9 +1576,39 @@ _DEPS_PLACEHOLDER = "{DEPS}"
 # line the generated spokes carry, or nothing for a package with none.
 _LICENSE_PLACEHOLDER = "{LICENSE}"
 
-# The prefix a spoke label takes in an overlay template before substitution.
-# Finding one means the template names a sibling package by hand.
-_HUB_DEP_PREFIX = "@{HUB_NAME}__"
+# The prefixes a repository label of another package takes in an overlay
+# template. Finding one means the template names a sibling package by hand.
+_HUB_DEP_PREFIXES = ["@flutter_pub__", "@flutter_pub_lib__"]
+
+# The placeholder that named the hub, when each hub had repositories of its own.
+# There is one repository per package for the whole build now.
+_REMOVED_HUB_PLACEHOLDER = "{HUB_NAME}"
+
+def removed_hub_placeholder_error(tpl):
+    """The error for an overlay template that still writes `{HUB_NAME}`.
+
+    Args:
+        tpl: The template's path, for the message.
+
+    Returns:
+        The message.
+    """
+    return (
+        "overlay template {tpl} writes `{HUB_NAME}`, which is gone: " +
+        "packages are one repository per build, not one per hub. " +
+        "Name dependencies with `{DEPS}`."
+    ).replace("{tpl}", tpl)
+
+def has_removed_hub_placeholder(content):
+    """Whether an overlay template writes the removed `{HUB_NAME}` placeholder.
+
+    Args:
+        content: Raw template text.
+
+    Returns:
+        True when it does.
+    """
+    return _REMOVED_HUB_PLACEHOLDER in content
 
 def find_hardcoded_language_version(content):
     """Return the literal language version an overlay spells out, or `""`.
@@ -1639,9 +1665,13 @@ def find_hardcoded_hub_dep(content):
         content: Raw template text, before substitution.
 
     Returns:
-        The offending label (e.g. `"@{HUB_NAME}__ffi//:ffi"`), or `""`.
+        The offending label (e.g. `"@flutter_pub__ffi//:ffi"`), or `""`.
     """
-    idx = content.find(_HUB_DEP_PREFIX)
+    idx = -1
+    for prefix in _HUB_DEP_PREFIXES:
+        found = content.find(prefix)
+        if found != -1 and (idx == -1 or found < idx):
+            idx = found
     if idx == -1:
         return ""
     end = content.find('"', idx)
@@ -1662,12 +1692,11 @@ def render_overlay_deps(dep_labels):
     """
     return "\n        ".join(['"%s",' % label for label in dep_labels])
 
-def apply_overlay_substitutions(content, hub_name, package_name, version, language_version, deps, license_file = ""):
+def apply_overlay_substitutions(content, package_name, version, language_version, deps, license_file = ""):
     """Fill an overlay template's placeholders.
 
     Args:
         content: Raw template text.
-        hub_name: Value for `{HUB_NAME}`.
         package_name: Value for `{PKG}`.
         version: Value for `{VERSION}`.
         language_version: Value for `{LANGUAGE_VERSION}`, derived from the
@@ -1686,9 +1715,6 @@ def apply_overlay_substitutions(content, hub_name, package_name, version, langua
     else:
         content = content.replace("    " + _LICENSE_PLACEHOLDER + "\n", "").replace(_LICENSE_PLACEHOLDER, "")
     return content.replace(
-        "{HUB_NAME}",
-        hub_name,
-    ).replace(
         "{PKG}",
         package_name,
     ).replace(
@@ -1707,7 +1733,7 @@ def _resolve_overlay_template(ctx, overlay_root_label, package_name, version, la
 
     Walks the version-specificity ladder
     `<major>.<minor>.<patch>/`, `<major>.<minor>/`, `<major>/`, bare
-    `<package>/`, and returns the templated content (with `{HUB_NAME}`,
+    `<package>/`, and returns the templated content (with
     `{PKG}`, `{VERSION}`, `{LANGUAGE_VERSION}` and `{DEPS}` substitutions
     applied) on first match. Returns empty string when no template is found.
 
@@ -1762,6 +1788,8 @@ def _resolve_overlay_template(ctx, overlay_root_label, package_name, version, la
         ctx.watch(tpl)
         if tpl.exists:
             content = ctx.read(tpl)
+            if has_removed_hub_placeholder(content):
+                fail(removed_hub_placeholder_error(str(tpl)))
             hardcoded_dep = find_hardcoded_hub_dep(content) if guard_hub_deps else ""
             if hardcoded_dep:
                 fail((
@@ -1809,7 +1837,6 @@ def _resolve_overlay_template(ctx, overlay_root_label, package_name, version, la
                 ))
             return apply_overlay_substitutions(
                 content = content,
-                hub_name = ctx.attr.hub_name,
                 package_name = package_name,
                 version = version,
                 language_version = language_version,
@@ -1945,9 +1972,9 @@ def _flutter_pub_package_impl(ctx):
     # packages the pubspec names that the lock lists. Worked out only for a
     # package an overlay builds: the lock's index is read for no other.
     def dep_labels():
-        index = read_index(ctx, ctx.attr.hub_name)
+        index = read_index(ctx)
         labels = [
-            library_label(ctx.attr.hub_name, index, dep)
+            library_label(index, dep)
             for dep in sorted(pubspec_dependencies)
             if dep in index.built or dep in index.other
         ]
@@ -2244,7 +2271,6 @@ def _flutter_pub_package_impl(ctx):
         ctx.file("android/BUILD.bazel", make_android_subpackage_build_content(
             android_src_dir = android_src_dir,
             java_package = android_java_package,
-            hub_name = ctx.attr.hub_name,
             maven_deps = maven_deps,
             android_manifest = android_manifest,
             consumer_proguard_specs = android_consumer_proguard_specs,
@@ -2292,10 +2318,6 @@ flutter_pub_package = repository_rule(
             doc = "The Flutter version whose pinned source tarball holds this package as `packages/<package_name>`, for a Flutter SDK package " +
                   "(`source: sdk` in the lock). When empty, the package is downloaded from a pub registry.",
             default = "",
-        ),
-        "hub_name": attr.string(
-            doc = "Name of the hub repo (for constructing cross-spoke dep labels).",
-            mandatory = True,
         ),
         "code_assets": attr.string_list(
             doc = "Labels of `dart_code_asset` targets standing in for this " +

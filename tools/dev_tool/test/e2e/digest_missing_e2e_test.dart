@@ -238,7 +238,6 @@ void main() {
           ProbeRepo('gen_l10n_blank', 'flutter_gen_l10n_repo', {
             'flutter_version': str(fakeFlutterVersion),
             'sha256': str(''),
-            'hub_name': str('probe_hub'),
           }),
         ),
         add(
@@ -246,7 +245,6 @@ void main() {
           ProbeRepo('sdk_package_blank', 'flutter_framework_package', {
             'flutter_version': str(fakeFlutterVersion),
             'sha256': str(''),
-            'hub_name': str('probe_hub'),
           }),
         ),
         add(
@@ -256,7 +254,6 @@ void main() {
             'version': str('0.0.0'),
             'sha256': str(''),
             'flutter_source_version': str(fakeFlutterVersion),
-            'hub_name': str('probe_hub'),
           }),
         ),
         // A hosted pub package is served from file://, so an unpinned fetch
@@ -268,7 +265,6 @@ void main() {
             'version': str('1.0.0'),
             'sha256': str(''),
             'base_url': str(pubBase),
-            'hub_name': str('probe_hub'),
           }),
         ),
       ],
@@ -349,20 +345,20 @@ void main() {
   );
 
   test(
-    'pub_unset: a hosted pub package declared without a digest is not a '
-    'declaration Bazel accepts',
+    'pub_unset: a hosted pub package declared without a digest is refused at '
+    'the fetch, naming the package',
     () async {
-      // The digest is mandatory, so leaving it out cannot reach a fetch at
-      // all: Bazel refuses the repository where it is declared, naming the
-      // attribute. (Declared beside the others, it would refuse every fetch
-      // in the workspace, so it has a workspace of its own.)
+      // The digest has no default a download could trust: an unset one is the
+      // empty string, which Bazel's downloader reads as "do not check", so the
+      // fetch refuses it before it downloads. (Declared beside the others, it
+      // would be one more repository of the shared workspace; it has one of its
+      // own.)
       final unset = await probe(
         repos: [
           ProbeRepo('pub_unset', 'flutter_pub_package', {
             'package_name': str('sample'),
             'version': str('1.0.0'),
             'base_url': str(pubBase),
-            'hub_name': str('probe_hub'),
           }),
         ],
       );
@@ -370,8 +366,8 @@ void main() {
       expect(result.succeeded, isFalse, reason: '$result');
       expect(
         result.output,
-        allOf(contains('mandatory'), contains('sha256')),
-        reason: 'the refusal should say the attribute is mandatory\n$result',
+        allOf(contains('No sha256 is pinned'), contains('"sample"')),
+        reason: 'the refusal should name the package\n$result',
       );
     },
   );

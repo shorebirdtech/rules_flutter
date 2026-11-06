@@ -7,21 +7,21 @@ and that an overlay cannot be part of a cycle.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
-load("//flutter/private:flutter_pub_index.bzl", "index_repo", "library_label", "library_repo", "source_repo")
+load("//flutter/private:flutter_pub_index.bzl", "INDEX_REPO", "library_label", "library_repo", "source_repo")
 load("//flutter/private:flutter_pub_library_repo.bzl", "make_alias_build_content", "make_library_build_content", "overlay_in_cycle_error")
 
 def _repositories_are_named_by_their_part_test_impl(ctx):
     env = unittest.begin(ctx)
 
-    asserts.equals(env, "hub__dio", source_repo("hub", "dio"))
-    asserts.equals(env, "hub_lib__dio", library_repo("hub", "dio"))
-    asserts.equals(env, "hub_index", index_repo("hub"))
+    asserts.equals(env, "flutter_pub__dio", source_repo("dio"))
+    asserts.equals(env, "flutter_pub_lib__dio", library_repo("dio"))
+    asserts.equals(env, "flutter_pub_index", INDEX_REPO)
 
     # A built package is depended on through its library; the lock's other
     # entries (package:flutter, a stub) are their own.
     index = struct(built = {"dio": True}, other = {"flutter": True})
-    asserts.equals(env, "@hub_lib__dio//:dio", library_label("hub", index, "dio"))
-    asserts.equals(env, "@hub__flutter//:flutter", library_label("hub", index, "flutter"))
+    asserts.equals(env, "@flutter_pub_lib__dio//:dio", library_label(index, "dio"))
+    asserts.equals(env, "@flutter_pub__flutter//:flutter", library_label(index, "flutter"))
 
     return unittest.end(env)
 
@@ -32,19 +32,19 @@ def _a_cycle_is_one_library_over_its_members_test_impl(ctx):
 
     flutter = make_library_build_content(
         name = "dio",
-        members = ["@hub__dio//:dio", "@hub__dio_web_adapter//:dio_web_adapter"],
-        deps = ["@hub_lib__path//:path"],
+        members = ["@flutter_pub__dio//:dio", "@flutter_pub__dio_web_adapter//:dio_web_adapter"],
+        deps = ["@flutter_pub_lib__path//:path"],
         flutter = True,
     )
     asserts.true(env, 'load("@rules_flutter//flutter/private:flutter_pub_library.bzl", "flutter_pub_library")' in flutter, flutter)
     asserts.true(env, '\nflutter_pub_library(\n    name = "dio",' in flutter, flutter)
-    asserts.true(env, '    members = ["@hub__dio//:dio", "@hub__dio_web_adapter//:dio_web_adapter"],' in flutter, flutter)
-    asserts.true(env, '    deps = ["@hub_lib__path//:path"],' in flutter, flutter)
+    asserts.true(env, '    members = ["@flutter_pub__dio//:dio", "@flutter_pub__dio_web_adapter//:dio_web_adapter"],' in flutter, flutter)
+    asserts.true(env, '    deps = ["@flutter_pub_lib__path//:path"],' in flutter, flutter)
 
     # A cycle with nothing of Flutter's is rules_dart's own library.
     dart = make_library_build_content(
         name = "path",
-        members = ["@hub__path//:path"],
+        members = ["@flutter_pub__path//:path"],
         deps = [],
         flutter = False,
     )
@@ -66,19 +66,19 @@ def _a_library_exports_its_members_android_libraries_on_android_test_impl(ctx):
 
     content = make_library_build_content(
         name = "dio",
-        members = ["@hub__dio//:dio"],
+        members = ["@flutter_pub__dio//:dio"],
         deps = [],
         flutter = True,
-        android_libs = ["@hub__dio//android:lib"],
+        android_libs = ["@flutter_pub__dio//android:lib"],
     )
     asserts.true(
         env,
-        '    exports = select({\n        "@platforms//os:android": ["@hub__dio//android:lib"],\n        "//conditions:default": [],\n    }),\n' in content,
+        '    exports = select({\n        "@platforms//os:android": ["@flutter_pub__dio//android:lib"],\n        "//conditions:default": [],\n    }),\n' in content,
         content,
     )
 
     # No Android library, no attribute: nothing loads an `android/` package.
-    asserts.false(env, "exports" in make_library_build_content("dio", ["@hub__dio//:dio"], [], True), "exports without a library")
+    asserts.false(env, "exports" in make_library_build_content("dio", ["@flutter_pub__dio//:dio"], [], True), "exports without a library")
 
     return unittest.end(env)
 
@@ -90,17 +90,17 @@ def _package_test_carries_the_runner_test_impl(ctx):
 
     content = make_library_build_content(
         name = "test",
-        members = ["@hub__test//:test"],
-        deps = ["@hub_lib__test_api//:test_api"],
+        members = ["@flutter_pub__test//:test"],
+        deps = ["@flutter_pub_lib__test_api//:test_api"],
         flutter = False,
     )
     asserts.true(env, '\npub_test_runner(\n    name = "test",' in content, content)
     asserts.true(env, '    library = ":test_library",' in content, content)
     asserts.true(env, '\npub_library(\n    name = "test_library",' in content, content)
-    asserts.true(env, '    members = ["@hub__test//:test"],' in content, content)
+    asserts.true(env, '    members = ["@flutter_pub__test//:test"],' in content, content)
 
     # Any other package is its library alone.
-    asserts.false(env, "pub_test_runner" in make_library_build_content("test_api", ["@hub__test_api//:test_api"], [], False))
+    asserts.false(env, "pub_test_runner" in make_library_build_content("test_api", ["@flutter_pub__test_api//:test_api"], [], False))
 
     return unittest.end(env)
 
@@ -109,9 +109,9 @@ package_test_carries_the_runner_test = unittest.make(_package_test_carries_the_r
 def _the_others_of_a_cycle_alias_its_library_test_impl(ctx):
     env = unittest.begin(ctx)
 
-    content = make_alias_build_content("dio_web_adapter", "@hub_lib__dio//:dio")
+    content = make_alias_build_content("dio_web_adapter", "@flutter_pub_lib__dio//:dio")
     asserts.true(env, 'name = "dio_web_adapter",' in content, content)
-    asserts.true(env, 'actual = "@hub_lib__dio//:dio",' in content, content)
+    asserts.true(env, 'actual = "@flutter_pub_lib__dio//:dio",' in content, content)
 
     return unittest.end(env)
 

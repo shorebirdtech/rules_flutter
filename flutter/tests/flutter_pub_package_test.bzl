@@ -18,11 +18,13 @@ load(
     "find_hardcoded_hub_dep",
     "find_hardcoded_language_version",
     "flavor_restrictions",
+    "has_removed_hub_placeholder",
     "make_android_subpackage_build_content",
     "make_dart_member_build_content",
     "make_flutter_member_build_content",
     "parse_android_manifest_package",
     "parse_gradle_android_namespace",
+    "removed_hub_placeholder_error",
     "render_overlay_deps",
 )
 
@@ -214,7 +216,6 @@ def _no_resources_subpackage_test_impl(ctx):
     content = make_android_subpackage_build_content(
         android_src_dir = "android/src/main",
         java_package = "io.flutter.plugins.urllauncher",
-        hub_name = "deps",
         maven_deps = [
             {"kind": "deps", "coordinate": "androidx.browser:browser", "version": "1.8.0", "line": ""},
             {"kind": "compile_only", "coordinate": "androidx.annotation:annotation", "version": None, "line": ""},
@@ -225,9 +226,9 @@ def _no_resources_subpackage_test_impl(ctx):
     )
 
     asserts.false(env, "resource_files" in content, content)
-    asserts.false(env, "check()" in content, "the spoke runs no hub-wide check:\n" + content)
+    asserts.false(env, "check()" in content, "the spoke runs no build-wide check:\n" + content)
     for needle in [
-        'load("@deps-android_maven//:resolved.bzl", "RESOLVED")',
+        'load("@flutter_pub_android_maven//:resolved.bzl", "RESOLVED")',
         'load("@rules_flutter//flutter/private:android_plugin_maven.bzl", "maven_labels")',
         "_maven = maven_labels(",
         ", RESOLVED)",
@@ -535,8 +536,7 @@ def _overlay_substitutes_the_language_version_test_impl(ctx):
     env = unittest.begin(ctx)
 
     rendered = apply_overlay_substitutions(
-        content = 'flutter_plugin(name = "{PKG}", language_version = "{LANGUAGE_VERSION}", v = "{VERSION}", h = "{HUB_NAME}")',
-        hub_name = "hub",
+        content = 'flutter_plugin(name = "{PKG}", language_version = "{LANGUAGE_VERSION}", v = "{VERSION}", h = "x")',
         package_name = "objective_c",
         version = "9.3.0",
         language_version = "3.10",
@@ -545,7 +545,7 @@ def _overlay_substitutes_the_language_version_test_impl(ctx):
 
     asserts.equals(
         env,
-        'flutter_plugin(name = "objective_c", language_version = "3.10", v = "9.3.0", h = "hub")',
+        'flutter_plugin(name = "objective_c", language_version = "3.10", v = "9.3.0", h = "x")',
         rendered,
     )
 
@@ -557,7 +557,6 @@ def _overlay_without_a_language_version_is_left_alone_test_impl(ctx):
 
     rendered = apply_overlay_substitutions(
         content = 'cc_library(name = "{PKG}")',
-        hub_name = "hub",
         package_name = "jni",
         version = "1.0.0",
         language_version = "3.3",
@@ -636,7 +635,7 @@ def _overlay_substitutes_the_license_test_impl(ctx):
     env = unittest.begin(ctx)
 
     template = 'flutter_plugin(\n    name = "{PKG}",\n    {LICENSE}\n    visibility = [],\n)'
-    args = dict(hub_name = "hub", package_name = "jni", version = "1.0.0", language_version = "3.4", deps = "")
+    args = dict(package_name = "jni", version = "1.0.0", language_version = "3.4", deps = "")
 
     asserts.equals(
         env,
@@ -665,19 +664,18 @@ def _overlay_substitutes_the_dependencies_test_impl(ctx):
 
     rendered = apply_overlay_substitutions(
         content = "flutter_plugin(\n    deps = [\n        {DEPS}\n    ],\n)",
-        hub_name = "hub",
         package_name = "objective_c",
         version = "9.6.0",
         language_version = "3.10",
         deps = render_overlay_deps([
-            "@hub__ffi//:ffi",
-            "@hub__meta//:meta",
+            "@flutter_pub__ffi//:ffi",
+            "@flutter_pub__meta//:meta",
         ]),
     )
 
     asserts.equals(
         env,
-        'flutter_plugin(\n    deps = [\n        "@hub__ffi//:ffi",\n        "@hub__meta//:meta",\n    ],\n)',
+        'flutter_plugin(\n    deps = [\n        "@flutter_pub__ffi//:ffi",\n        "@flutter_pub__meta//:meta",\n    ],\n)',
         rendered,
     )
 
@@ -694,25 +692,30 @@ def _hardcoded_overlay_dependency_is_rejected_test_impl(ctx):
     9.5.0 dropped `native_toolchain_c` from its `dependencies`, so the lock
     stopped carrying it and the hub stopped creating the spoke, while
     `ext/objective_c/9/` — one directory for the whole major — kept asking
-    for `@<hub>__native_toolchain_c`. The build died on an unknown repo
+    for `@<hub>__native_toolchain_c` (a repository per hub, as it was then). The build died on an unknown repo
     naming neither `objective_c` nor the overlay that referenced it.
     """
     env = unittest.begin(ctx)
 
     asserts.equals(
         env,
-        "@{HUB_NAME}__native_toolchain_c//:native_toolchain_c",
+        "@flutter_pub__native_toolchain_c//:native_toolchain_c",
         find_hardcoded_hub_dep(
-            '    deps = [\n        "@{HUB_NAME}__native_toolchain_c//:native_toolchain_c",\n    ],',
+            '    deps = [\n        "@flutter_pub__native_toolchain_c//:native_toolchain_c",\n    ],',
         ),
+    )
+    asserts.equals(
+        env,
+        "@flutter_pub_lib__ffi//:ffi",
+        find_hardcoded_hub_dep('    deps = ["@flutter_pub_lib__ffi//:ffi"],'),
     )
 
     # The placeholder is the one accepted spelling.
     asserts.equals(env, "", find_hardcoded_hub_dep("    deps = [\n        {DEPS}\n    ],"))
 
-    # Naming {HUB_NAME} outside a spoke label — a doc comment, say — is not
-    # the thing being prohibited.
-    asserts.equals(env, "", find_hardcoded_hub_dep("# {HUB_NAME} is substituted here."))
+    # Naming a repository outside a label — a doc comment, say — is not the
+    # thing being prohibited.
+    asserts.equals(env, "", find_hardcoded_hub_dep("# the flutter_pub repositories are named here."))
 
     # A label pointing at another repo entirely stays allowed: only sibling
     # spokes are derivable from the pubspec.
@@ -967,6 +970,20 @@ flavor_variants_inherit_the_entry_flavors_test = unittest.make(
     _flavor_variants_inherit_the_entry_flavors_test_impl,
 )
 
+def _removed_hub_placeholder_is_refused_test_impl(ctx):
+    """`{HUB_NAME}` is gone: a spoke is one repository for the whole build."""
+    env = unittest.begin(ctx)
+
+    asserts.true(env, has_removed_hub_placeholder('    deps = ["@{HUB_NAME}__x//:x"],'))
+    asserts.false(env, has_removed_hub_placeholder("    deps = [\n        {DEPS}\n    ],"))
+    message = removed_hub_placeholder_error("ext/x/1/BUILD.bazel.tpl")
+    for fragment in ["ext/x/1/BUILD.bazel.tpl", "{HUB_NAME}", "is gone", "{DEPS}"]:
+        asserts.true(env, fragment in message, fragment + " not in " + message)
+
+    return unittest.end(env)
+
+removed_hub_placeholder_is_refused_test = unittest.make(_removed_hub_placeholder_is_refused_test_impl)
+
 def flutter_pub_package_test_suite(name):
     unittest.suite(
         name,
@@ -979,6 +996,7 @@ def flutter_pub_package_test_suite(name):
         overlay_substitutes_the_license_test,
         members_state_their_license_file_test,
         hardcoded_overlay_dependency_is_rejected_test,
+        removed_hub_placeholder_is_refused_test,
         parse_gradle_android_namespace_test,
         parse_android_manifest_package_test,
         record_android_subpackage_test,

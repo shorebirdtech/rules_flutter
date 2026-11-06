@@ -27,7 +27,7 @@ import 'package:test/test.dart';
 import 'dev_tool_e2e_harness.dart';
 import 'editable_workspace.dart';
 
-/// The name of the hub. Spokes are `pubhub__<package>`.
+/// The name of the hub. Spokes are `flutter_pub__<package>`, the build's.
 const pubHub = 'pubhub';
 
 /// A package archive as pub.dev would serve it: [files] relative to the
@@ -168,7 +168,7 @@ class PubInputsWorkspace {
   Future<BazelResult> query(String label) => bazel(['query', label]);
 
   /// A package's spoke repository, as a label's repository part.
-  static String spoke(String package) => '@${pubHub}__$package';
+  static String spoke(String package) => '@flutter_pub__$package';
 
   /// Load the spoke of [package] the way a build of anything that depends on
   /// it would.
@@ -183,7 +183,7 @@ class PubInputsWorkspace {
     final matches = external
         .listSync()
         .whereType<Directory>()
-        .where((d) => p.basename(d.path).endsWith('+${pubHub}__$package'))
+        .where((d) => p.basename(d.path).endsWith('+flutter_pub__$package'))
         .toList();
     expect(
       matches,
@@ -383,7 +383,7 @@ flutter.pub(
     lock = "//$lockPackage:pubspec.lock",
 ${resolve.isEmpty ? '' : '    resolve = {${resolve.entries.map((e) => '${jsonEncode(e.key)}: ${jsonEncode(e.value)}').join(', ')}},'}
 )
-use_repo(flutter, "$pubHub"${spokeNames.map((n) => ', "${pubHub}__$n"').join()})
+use_repo(flutter, "$pubHub"${spokeNames.map((n) => ', "flutter_pub__$n"').join()})
 ''';
 
     // `generatedWorkspace` writes exactly the files it is given, so the
@@ -503,12 +503,12 @@ Future<String> _sha256(File file) async {
 /// repository, label or path that merely contains it.
 ///
 /// Bazel prefixes every failure of a fetch with the repository's name, which
-/// holds the package's (`pubhub__<package>`), so "the message contains the
+/// holds the package's (`flutter_pub__<package>`), so "the message contains the
 /// package" is true of every failure and says nothing. What counts is the
 /// package being named by the text that explains the failure.
 bool namesPackage(String text, String name) {
   final withoutRepository = text.replaceAll(
-    RegExp('[A-Za-z0-9_+@.]*${pubHub}__${RegExp.escape(name)}'),
+    RegExp('[A-Za-z0-9_+@.]*flutter_pub(_lib)?__${RegExp.escape(name)}'),
     '',
   );
   return RegExp(

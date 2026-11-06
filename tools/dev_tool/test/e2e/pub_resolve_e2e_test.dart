@@ -335,7 +335,7 @@ void main() {
       expect(replacements, hasLength(1), reason: '$replacements\n$deps');
       expect(
         deps.stdout,
-        isNot(contains('pubhub_lib__forkme')),
+        isNot(contains('flutter_pub_lib__forkme')),
         reason: 'the locked package was built\n$deps',
       );
     });

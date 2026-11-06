@@ -27,7 +27,7 @@ def _flutter_spoke_declares_its_language_version_test_impl(ctx):
     env = unittest.begin(ctx)
 
     content = make_flutter_framework_build_content(
-        deps = ["@hub__meta//:meta"],
+        deps = ["@flutter_pub__meta//:meta"],
         language_version = "3.11",
     )
 
@@ -37,7 +37,7 @@ def _flutter_spoke_declares_its_language_version_test_impl(ctx):
     # The shader channel is what makes this spoke a flutter_library rather
     # than a dart_library; adding a language version must not disturb it.
     asserts.true(env, 'shaders = glob(["lib/src/material/shaders/*.frag"])' in content, content)
-    asserts.true(env, '"@hub__meta//:meta",' in content, content)
+    asserts.true(env, '"@flutter_pub__meta//:meta",' in content, content)
 
     # An SDK package is the same under every web compiler.
     asserts.true(env, "\n    web_compiler_independent = True," in content, content)

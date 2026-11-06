@@ -51,7 +51,7 @@ package(default_visibility = ["//flutter/tests:__subpackages__"])
 flutter_android_maven_requirements(
     name = "maven",
     data = json.encode({
-        "hub": "deps",
+        "repo": "flutter_pub_android_maven",
         "resolved": {"g:installed": "1.0"},
         "packages": [
             {

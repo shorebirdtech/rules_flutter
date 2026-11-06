@@ -62,7 +62,7 @@ void main() {
     test('a plain package loads', () async {
       final result = await ws.loadSpoke('plain');
       expect(result.succeeded, isTrue, reason: '$result');
-      expect(result.stdout, contains('@pubhub__plain//:plain'));
+      expect(result.stdout, contains('@flutter_pub__plain//:plain'));
     });
 
     for (final kind in ['asset', 'font']) {
@@ -74,7 +74,7 @@ void main() {
             final build = await ws.bazel([
               'query',
               '--output=build',
-              '@pubhub__$package//:$package',
+              '@flutter_pub__$package//:$package',
             ]);
             expect(build.succeeded, isTrue, reason: '$build');
             expect(
@@ -175,7 +175,9 @@ void main() {
             reason: 'the overlay at ${rung.key} was not used:\n$result',
           );
         }
-        final android = await ws.query('@pubhub__android_ladder//android:all');
+        final android = await ws.query(
+          '@flutter_pub__android_ladder//android:all',
+        );
         expect(
           android.stdout,
           contains('//android:android_overlay'),

@@ -40,7 +40,6 @@ void main() {
         'version': str('0.0.0'),
         'sha256': str(digest),
         'flutter_source_version': str(fakeFlutterVersion),
-        'hub_name': str('probe_hub'),
       });
 
   setUpAll(() async {

@@ -105,7 +105,7 @@ void main() {
           ),
         ],
       ).materialize();
-      final fetched = await ws.bazel(['fetch', '--repo=@pubhub__linked']);
+      final fetched = await ws.bazel(['fetch', '--repo=@flutter_pub__linked']);
       expect(fetched.succeeded, isTrue, reason: '$fetched');
       spoke = await ws.spokeDirectory('linked');
     });

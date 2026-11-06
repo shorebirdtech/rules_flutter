@@ -247,7 +247,7 @@ void main() {
       final build = await ws.bazel([
         'query',
         '--output=build',
-        '@pubhub__flow_assets//:flow_assets',
+        '@flutter_pub__flow_assets//:flow_assets',
       ]);
       expect(build.succeeded, isTrue, reason: '$build');
       for (final file in ['assets/a.txt', 'assets/b.txt', 'fonts/f.ttf']) {

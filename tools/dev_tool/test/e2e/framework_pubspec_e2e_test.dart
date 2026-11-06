@@ -107,7 +107,6 @@ class _Release {
         name = ${str(repo)},
         flutter_version = ${str(version)},
         sha256 = ${str(sha256Hex(tarball))},
-        hub_name = ${str(_hub)},
     )
 """;
 }
@@ -156,7 +155,7 @@ load("@rules_flutter//flutter/private:flutter_pub_index.bzl", "flutter_pub_index
 
 def _impl(_):
     flutter_pub_index(
-        name = ${str('${_hub}_index')},
+        name = 'flutter_pub_index',
         built = [${_locked.map(str).join(', ')}],
         other = [],
     )
@@ -164,7 +163,7 @@ ${releases.values.map((r) => r.declaration).join()}
 probe = module_extension(implementation = _impl)
 """,
       extensionRepos: [
-        '${_hub}_index',
+        'flutter_pub_index',
         for (final r in releases.values) r.repo,
       ],
     );

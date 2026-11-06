@@ -43,7 +43,8 @@ void expectRefused(
   expect(
     result.succeeded,
     isFalse,
-    reason: 'rules_flutter built @pubhub__$package from $what without a word',
+    reason:
+        'rules_flutter built @flutter_pub__$package from $what without a word',
   );
   expect(
     refusedAtFetch(result),
@@ -132,7 +133,7 @@ void main() {
               final build = await ws.bazel([
                 'query',
                 '--output=build',
-                '@pubhub__$package//:$package',
+                '@flutter_pub__$package//:$package',
               ]);
               expect(
                 build.output,
@@ -416,7 +417,9 @@ void main() {
       final ws = await workspaceWith(
         files: {'overlays/android_ladder/BUILD.bazel.tpl': template('top')},
       );
-      final before = await ws.query('@pubhub__android_ladder//android:all');
+      final before = await ws.query(
+        '@flutter_pub__android_ladder//android:all',
+      );
       expect(before.succeeded, isFalse, reason: '$before');
 
       write(
@@ -425,7 +428,9 @@ void main() {
         'filegroup(name = "android_added")\n',
       );
 
-      final after = await ws.query('@pubhub__android_ladder//android:all');
+      final after = await ws.query(
+        '@flutter_pub__android_ladder//android:all',
+      );
       expect(
         after.stdout,
         contains('//android:android_added'),

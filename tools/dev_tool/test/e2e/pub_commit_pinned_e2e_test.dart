@@ -188,7 +188,7 @@ void main() {
       ).materialize();
       final deps = await ws.bazel(['cquery', '--output=label', 'deps(//:app)']);
       expect(deps.succeeded, isTrue, reason: '$deps');
-      expect(deps.stdout, contains('pubhub_lib__gdep'), reason: '$deps');
+      expect(deps.stdout, contains('flutter_pub_lib__gdep'), reason: '$deps');
     });
   });
 

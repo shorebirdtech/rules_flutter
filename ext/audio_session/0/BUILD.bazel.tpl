@@ -10,7 +10,7 @@
 # explicit `sdk_frameworks`, which rules_apple's own examples use
 # uniformly. This overlay supplies it.
 #
-# Placeholders (HUB_NAME, PKG, VERSION, LANGUAGE_VERSION, DEPS, LICENSE — written in
+# Placeholders (PKG, VERSION, LANGUAGE_VERSION, DEPS, LICENSE — written in
 # braces below, and deliberately not in this comment, because substitution
 # rewrites comment text too) are injected by `flutter_pub_package`'s
 # `_resolve_overlay_template`. The overlay sits under `0/`, so any 0.x

@@ -107,3 +107,46 @@ def resolve_errors(lock, hub, lock_pkgs, resolve):
                 ),
             )
     return errors
+
+def resolved_targets(maps):
+    """The packages mapped to workspace targets, over every `flutter.pub()` tag.
+
+    A mapped package is that target for the whole build: there is one
+    repository per package, however many locks list it. The same package
+    mapped to two different targets cannot be one repository.
+
+    Args:
+        maps: One `struct(lock, hub, resolve)` per tag: the lock's `Label`, the
+            hub's name, and the tag's `resolve` (package name to target `Label`).
+
+    Returns:
+        `struct(targets, errors)`: `targets`, a dict of package name to
+        `struct(target, lock, hub)` for the first tag that mapped it; `errors`,
+        the messages, in a stable order.
+    """
+    mapped = {}
+    for m in maps:
+        for name, target in m.resolve.items():
+            mapped.setdefault(name, []).append(struct(target = str(target), lock = str(m.lock), hub = m.hub))
+    targets = {}
+    errors = []
+    for name in sorted(mapped.keys()):
+        mappings = mapped[name]
+        targets[name] = mappings[0]
+        if len({x.target: True for x in mappings}) > 1:
+            errors.append((
+                "Package \"{name}\" is mapped to different targets:\n" +
+                "{lines}\n" +
+                "rules_flutter builds one copy of each package; map it to one target."
+            ).format(
+                name = name,
+                lines = "\n".join([
+                    "  - {target} (by the `resolve` of the flutter.pub() for {lock}, hub \"{hub}\")".format(
+                        target = x.target,
+                        lock = x.lock,
+                        hub = x.hub,
+                    )
+                    for x in mappings
+                ]),
+            ))
+    return struct(targets = targets, errors = errors)

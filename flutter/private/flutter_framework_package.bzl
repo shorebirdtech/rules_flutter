@@ -103,13 +103,13 @@ def _flutter_framework_package_impl(repository_ctx):
     # file (same pattern as pub_lock_package). A pubspec with no
     # `environment.sdk` gets pub's default language version, which is what pub
     # writes for such a package.
-    index = read_index(repository_ctx, repository_ctx.attr.hub_name)
+    index = read_index(repository_ctx)
     pubspec = read_pubspec(repository_ctx, _PACKAGE, repository_ctx.attr.flutter_version)
     bazel_deps = sorted([d for d in pubspec.dependencies if d in index.built or d in index.other])
     language_version = pubspec.language_version
 
     # Build dep labels pointing to the libraries of the packages' repos.
-    dep_labels = [library_label(repository_ctx.attr.hub_name, index, dep) for dep in bazel_deps]
+    dep_labels = [library_label(index, dep) for dep in bazel_deps]
 
     repository_ctx.file("BUILD.bazel", make_flutter_framework_build_content(
         deps = dep_labels,
@@ -130,10 +130,6 @@ flutter_framework_package = repository_rule(
                   "Guaranteed non-empty by the caller: extensions.bzl reads " +
                   "it through `flutter_source_sha256()`, which refuses a " +
                   "version with no recorded checksum.",
-            mandatory = True,
-        ),
-        "hub_name": attr.string(
-            doc = "Name of the hub repo: the prefix of the hub's repositories, whose index lists the lock's packages.",
             mandatory = True,
         ),
     },

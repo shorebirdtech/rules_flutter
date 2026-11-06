@@ -55,7 +55,7 @@ applies is a loud failure, where a rewrite would quietly drift.
 """
 
 load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url")
-load("//flutter/private:flutter_pub_index.bzl", "library_repo")
+load("//flutter/private:flutter_pub_index.bzl", "library_label", "read_index")
 load("//flutter/private:pinned.bzl", "pinned")
 
 # The exact closure of `src/localizations/gen_l10n.dart` once the six import
@@ -114,8 +114,9 @@ def _flutter_gen_l10n_repo_impl(repository_ctx):
         repository_ctx.patch(repository_ctx.path(patch), strip = 1)
 
     srcs = "\n".join(['        "%s",' % s for s in _SUBSET_SRCS])
+    index = read_index(repository_ctx)
     deps = "\n".join([
-        '        "@%s//:%s",' % (library_repo(repository_ctx.attr.hub_name, d), d)
+        '        "%s",' % library_label(index, d)
         for d in _SUBSET_DEPS
     ])
 
@@ -152,10 +153,6 @@ flutter_gen_l10n_repo = repository_rule(
                   "Flutter version. Guaranteed non-empty by the caller: " +
                   "extensions.bzl reads it through `flutter_source_sha256()`, " +
                   "which refuses a version with no recorded checksum.",
-            mandatory = True,
-        ),
-        "hub_name": attr.string(
-            doc = "Pub hub supplying the generator's seven dependencies.",
             mandatory = True,
         ),
         "_patches": attr.label_list(

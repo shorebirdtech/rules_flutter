@@ -98,7 +98,6 @@ void main() {
           'version': str('1.0.0'),
           'sha256': str(d),
           'base_url': str(pubBase),
-          'hub_name': str('probe_hub'),
         });
     ProbeRepo profile(String name, String d) =>
         ProbeRepo(name, 'flutter_profile_repo', {
@@ -163,7 +162,6 @@ void main() {
           'version': str('0.0.0'),
           'sha256': str(sha256Hex(flutterSource)),
           'flutter_source_version': str(fakeFlutterVersion),
-          'hub_name': str('probe_hub'),
         }),
         // A digest that is a SHA-256 but not these bytes'.
         ProbeRepo('sky_wrong', 'flutter_sky_engine_repo', {

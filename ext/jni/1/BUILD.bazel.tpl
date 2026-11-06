@@ -16,7 +16,7 @@
 # directory in via `sourceSets { main { java { srcDirs '../java/...' } } }`.
 # The `android/` sub-package overlay consumes it via :jni_java_support_srcs.
 #
-# Placeholders (HUB_NAME, PKG, VERSION, LANGUAGE_VERSION, DEPS, LICENSE — written in
+# Placeholders (PKG, VERSION, LANGUAGE_VERSION, DEPS, LICENSE — written in
 # braces below, and deliberately not in this comment, because substitution
 # rewrites comment text too) are injected by `flutter_pub_package`'s
 # `_resolve_overlay_template`.

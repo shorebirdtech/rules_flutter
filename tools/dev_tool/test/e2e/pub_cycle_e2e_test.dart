@@ -184,7 +184,13 @@ void main() {
         files: {
           'checks.bzl': _checks,
           'overlays/BUILD.bazel': '',
-          'overlays/overlaid/BUILD.bazel.tpl': 'filegroup(name = "{PKG}", srcs = [], visibility = ["//visibility:public"])\n',
+          'overlays/overlaid/BUILD.bazel.tpl':
+              'filegroup(\n'
+              '    name = "{PKG}",\n'
+              '    srcs = [],\n'
+              '    {LICENSE}\n'
+              '    visibility = ["//visibility:public"],\n'
+              ')\n',
           'BUILD.bazel':
               'load(":checks.bzl", "package_check")\n'
               '${_check('pair_via_a', '@pubhub//:pair_a', versions: {'pair_a': '1.0.0', 'pair_b': '1.0.0'}, assets: ['packages/pair_a/assets/a.txt', 'packages/pair_b/assets/b.txt'])}'
@@ -236,14 +242,14 @@ void main() {
       // cycle, and the cycle's library exports it on Android, which is how an
       // app that depends on the library links it. A member with no Android
       // code has no Android package.
-      final plugin = await ws.query('@pubhub__loop_plugin//android:lib');
+      final plugin = await ws.query('@flutter_pub__loop_plugin//android:lib');
       expect(plugin.succeeded, isTrue, reason: '$plugin');
-      final helper = await ws.query('@pubhub__loop_helper//android:lib');
+      final helper = await ws.query('@flutter_pub__loop_helper//android:lib');
       expect(helper.succeeded, isFalse, reason: '$helper');
       final exports = await ws.query('deps(@pubhub//:loop_helper, 2)');
       expect(
         exports.stdout,
-        contains('pubhub__loop_plugin//android:lib'),
+        contains('flutter_pub__loop_plugin//android:lib'),
         reason: '$exports',
       );
     });

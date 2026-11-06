@@ -220,7 +220,7 @@ def _check_names_only_what_the_linked_plugins_need_test_impl(ctx):
     """
     env = unittest.begin(ctx)
     data = {
-        "hub": "deps",
+        "repo": "flutter_pub_android_maven",
         "resolved": {"g:have": "1.0"},
         "packages": [
             _pkg("a", "1.0", [_dep("g:needed_by_a", "2.0"), _dep("g:have", "1.0")]),
@@ -307,7 +307,7 @@ def _failure_message_test_impl(ctx):
         _pkg("b", "3.4", [_dep("g:old", "1.2"), _dep("g:gone", None)]),
     ])
     problems = maven_problems(req, {"g:old": "1.1"})
-    message = format_maven_failure("deps", problems, {
+    message = format_maven_failure("flutter_pub_android_maven", problems, {
         "package:c 5.0": ["implementation(libs.x)", "kapt(\"a:b:1\")"],
         "package:d 1.0": ["api(project(\":p\"))"],
     })
@@ -315,13 +315,13 @@ def _failure_message_test_impl(ctx):
         '"g:gone:<version>",  # declared by package:b 3.4; missing',
         '"g:old:1.2",  # declared by package:a 1.2, package:b 3.4; resolves 1.1',
         "REPIN=1 bazel run @rules_android_maven//:pin",
-        "bazel run @deps//android:maven_artifacts",
+        "bazel run @flutter_pub_android_maven//:maven_artifacts",
         "    package:c 5.0\n        implementation(libs.x)\n        kapt(\"a:b:1\")",
         "    package:d 1.0\n        api(project(\":p\"))",
         "android/BUILD.bazel.tpl",
     ]:
         asserts.true(env, needle in message, needle + " missing from:\n" + message)
-    asserts.equals(env, "", format_maven_failure("deps", [], {}))
+    asserts.equals(env, "", format_maven_failure("flutter_pub_android_maven", [], {}))
     return unittest.end(env)
 
 failure_message_test = unittest.make(_failure_message_test_impl)
@@ -331,11 +331,11 @@ def _report_test_impl(ctx):
     req = merge_plugin_requirements([
         _pkg("a", "1.2", [_dep("g:old", "1.2"), _dep("g:fine", "1.0")]),
     ])
-    report = format_artifacts_report("deps", req, maven_problems(req, {"g:old": "1.1", "g:fine": "1.0"}))
+    report = format_artifacts_report("flutter_pub_android_maven", req, maven_problems(req, {"g:old": "1.1", "g:fine": "1.0"}))
     asserts.true(env, "1 of 2 are missing or too low" in report, report)
     asserts.true(env, '        "g:fine:1.0",  # declared by package:a 1.2\n' in report, report)
     asserts.true(env, '        "g:old:1.2",  # declared by package:a 1.2; resolves 1.1\n' in report, report)
-    ok = format_artifacts_report("deps", req, [])
+    ok = format_artifacts_report("flutter_pub_android_maven", req, [])
     asserts.true(env, "All 2 are provided" in ok, ok)
     return unittest.end(env)
 

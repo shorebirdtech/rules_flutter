@@ -20,16 +20,18 @@ load("//flutter/private:flutter_chrome_for_testing.bzl", "flutter_chrome_for_tes
 load("//flutter/private:flutter_framework_package.bzl", "flutter_framework_package")
 load("//flutter/private:flutter_gen_l10n_repo.bzl", "flutter_gen_l10n_repo")
 load("//flutter/private:flutter_linux_runtime_repo.bzl", "flutter_linux_runtime_repo")
-load("//flutter/private:flutter_pub_index.bzl", "flutter_pub_index", "index_repo", "library_repo", "source_repo")
+load("//flutter/private:flutter_pub_goldens.bzl", "flutter_pub_goldens")
+load("//flutter/private:flutter_pub_index.bzl", "ANDROID_MAVEN_REPO", "GOLDENS_REPO", "INDEX_REPO", "SPOKE_PREFIX", "flutter_pub_index", "library_repo", "source_repo")
 load("//flutter/private:flutter_pub_library_repo.bzl", "flutter_pub_library_repo")
 load("//flutter/private:flutter_pub_lock_hub.bzl", "flutter_pub_lock_hub")
 load("//flutter/private:flutter_pub_package.bzl", "flutter_pub_package")
 load("//flutter/private:flutter_resolved_package.bzl", "flutter_resolved_package")
 load("//flutter/private:flutter_unsupported_package.bzl", "flutter_unsupported_package", "unsupported_package_message")
 load("//flutter/private:linux_runtime_pins.bzl", "LINUX_RUNTIME")
-load("//flutter/private:lock_entry_kind.bzl", "ENGINE_PROVIDED", "FLUTTER_FRAMEWORK", "FLUTTER_SOURCE", "GIT", "HOSTED", "lock_entry_kind")
+load("//flutter/private:lock_entry_kind.bzl", "ENGINE_PROVIDED", "FLUTTER_FRAMEWORK", "FLUTTER_SOURCE", "GIT", "HOSTED", "UNSUPPORTED", "lock_entry_kind")
 load("//flutter/private:pub_lock_sdks.bzl", "parse_lock_sdk_constraints", "version_below_lower_bound")
-load("//flutter/private:pub_resolve.bzl", "resolve_errors")
+load("//flutter/private:pub_reconcile.bzl", "reconcile_package", "unsupported_locks")
+load("//flutter/private:pub_resolve.bzl", "resolve_errors", "resolved_targets")
 load("//flutter/private:toolchain_version.bzl", "select_flutter_version")
 load("//flutter/private:versions.bzl", "CHROME_FOR_TESTING", "flutter_source_sha256")
 load(":repositories.bzl", "flutter_register_toolchains")
@@ -46,7 +48,16 @@ Overriding the default is only permitted in the root module.
 
 _flutter_pub = tag_class(attrs = {
     "name": attr.string(
-        doc = "Repository name for the resolved packages hub.",
+        doc = """\
+Repository name for the resolved packages hub: `@<name>//:<package>` for each
+package of the lock. Several tags may share a name, in this or other modules;
+the hub then holds the packages of all their locks, each aliased once.
+
+Every package is one repository for the whole build, however many hubs list it,
+so a name starting with `flutter_pub` is reserved. The locks that list a package
+must agree on it: the same source and, for a hosted package, the same version and
+digest (for a git package, the same commit).
+""",
         mandatory = True,
     ),
     "lock": attr.label(
@@ -58,9 +69,11 @@ _flutter_pub = tag_class(attrs = {
         doc = """\
 Lock packages, each mapped to the target that builds it: a `flutter_library`,
 `flutter_plugin` or `dart_library` whose `package_name` is the pub package's
-name (a target that declares another name fails analysis, naming both). The
-hub's `@<name>//:<package>` is that target, and a hosted package that depends
-on the package gets it too.
+name (a target that declares another name fails analysis, naming both). Every
+hub's `@<hub>//:<package>` for it is that target, and a hosted package that
+depends on the package gets it too, for the whole build: another lock's entry
+for the package is not fetched, and a package mapped to different targets by two
+tags fails.
 
 Every `path` package of the lock must be mapped, to a target in the Bazel
 package at the path the lock gives, relative to the lock, in this repository.
@@ -86,7 +99,8 @@ flutter.pub(
     "ignore_hooks": attr.string_list(
         doc = "Pub package names whose `hook/build.dart` is knowingly " +
               "irrelevant to this build (its native code is never reached). " +
-              "Suppresses the unreplaced-hook error for them. This is a " +
+              "Suppresses the unreplaced-hook error for them, for the whole " +
+              "build: the names of every tag are one set. This is a " +
               "declaration you make deliberately; it is never a default.",
         default = [],
     ),
@@ -148,7 +162,6 @@ def _toolchain_extension(module_ctx):
             name = name + "_gen_l10n",
             flutter_version = selected,
             sha256 = flutter_source_sha256(selected),
-            hub_name = "dev_tool_deps",
         )
         selected_versions[name] = selected
 
@@ -188,9 +201,20 @@ def _toolchain_extension(module_ctx):
             user_overlay_roots.extend(tag.roots)
 
     # Handle flutter.pub() tags — resolve pubspec.lock with Flutter SDK support.
+    # Every tag of every module is read first, because a package is one
+    # repository for the whole build: the locks that list it must agree on it
+    # (`reconcile_package`), and a package any tag maps with `resolve` is that
+    # target for every hub.
+    tags = []
     for mod in module_ctx.modules:
         for pub_tag in mod.tags.pub:
             hub_name = pub_tag.name
+            if hub_name == SPOKE_PREFIX or hub_name.startswith(SPOKE_PREFIX + "_"):
+                fail((
+                    "flutter.pub(name = \"{}\") is reserved: hubs may not be named " +
+                    "`{}` or start with `{}_`, which name the repositories " +
+                    "shared by every hub."
+                ).format(hub_name, SPOKE_PREFIX, SPOKE_PREFIX))
             lock_content = module_ctx.read(pub_tag.lock)
             lock_pkgs = parse_pubspec_lock(lock_content, str(pub_tag.lock))
 
@@ -198,7 +222,6 @@ def _toolchain_extension(module_ctx):
             resolve_problems = resolve_errors(pub_tag.lock, hub_name, lock_pkgs, pub_tag.resolve)
             if resolve_problems:
                 fail("\n\n".join(resolve_problems))
-            ignore_hooks = {pkg_name: True for pkg_name in pub_tag.ignore_hooks}
 
             # Determine the Flutter version to use for SDK packages.
             # Use the default toolchain version; fail if no toolchain is registered.
@@ -225,215 +248,10 @@ def _toolchain_extension(module_ctx):
                     constraint = flutter_constraint,
                     version = flutter_version,
                 ))
+            tags.append(struct(tag = pub_tag, packages = lock_pkgs))
 
-            # Classify packages by who builds them (`lock_entry_kind`).
-            built = {}  # hosted and Flutter-source packages: a source and a library repository
-            hosted = {}
-            flutter_source = {}
-            from_repository = {}  # `source: git` entries
-            framework = {}
-            resolved = {}  # mapped to a workspace target: one repository, whatever the lock says
-            unsupported = {}
-            all_package_names = []
-            for name, info in lock_pkgs.items():
-                source = info.get("source", "unknown")
-                kind = lock_entry_kind(name, source)
-                if name in pub_tag.resolve:
-                    all_package_names.append(name)
-                    resolved[name] = info
-                    continue
-                if kind == ENGINE_PROVIDED:
-                    continue
-                all_package_names.append(name)
-                if kind == HOSTED:
-                    hosted[name] = info
-                    built[name] = info
-                elif kind == FLUTTER_SOURCE:
-                    flutter_source[name] = info
-                    built[name] = info
-                elif kind == GIT:
-                    from_repository[name] = info
-                    built[name] = info
-                elif kind == FLUTTER_FRAMEWORK:
-                    framework[name] = info
-                else:
-                    # A source rules_flutter has never heard of (a `path`
-                    # package is always mapped, above). The hub still loads, so
-                    # an app that only lists it builds. Its target fails when
-                    # something depends on it.
-                    unsupported[name] = unsupported_package_message(
-                        lock = str(pub_tag.lock),
-                        package = name,
-                        source = source,
-                    )
-
-            # What every repository of the hub plans against, stated once
-            # rather than on each of them: the lock records each repository's
-            # attributes, so the package list on every repository would grow
-            # it by the square of the package count.
-            flutter_pub_index(
-                name = index_repo(hub_name),
-                built = sorted(built.keys()),
-                other = sorted([n for n in all_package_names if n not in built]),
-            )
-
-            for name, message in unsupported.items():
-                flutter_unsupported_package(
-                    name = source_repo(hub_name, name),
-                    package_name = name,
-                    message = message,
-                )
-
-            # A mapped package is one repository, the workspace target the user
-            # mapped it to, so it sits among the index's `other` packages
-            # whatever the lock lists it from: a hosted package that depends on
-            # it reaches the target, the hub's label for it is the same
-            # repository, and the locked package is not fetched.
-            for name in resolved:
-                flutter_resolved_package(
-                    name = source_repo(hub_name, name),
-                    package_name = name,
-                    actual = str(pub_tag.resolve[name]),
-                    lock = str(pub_tag.lock),
-                )
-
-            # Create a source repo and a library repo for each built package
-            # (a hosted one, below, or a Flutter SDK one, after it).
-            # flutter.pub() routes every hosted package through
-            # flutter_pub_package — the `flutter pub get` analog — so plugins
-            # surface their `flutter.plugin.platforms` metadata via
-            # FlutterInfo. Pure-Dart packages are still rules_dart's own
-            # member kind; the rule branches internally on whether the
-            # pubspec declares anything of Flutter's. The library repo is the
-            # package's dependency cycle (usually just itself) as one target:
-            # pub allows packages to depend on each other, Bazel does not.
-            # Non-Flutter modules using `pub.pub()` keep using rules_dart's
-            # `pub_lock_package` directly.
-            for name, info in hosted.items():
-                desc = info.get("description", {})
-                version = info.get("version", "")
-                sha256 = desc.get("sha256", "") if type(desc) == "dict" else ""
-
-                # An empty digest means "do not check" to Bazel's downloader,
-                # so a lock entry without one is refused here, where the lock
-                # can be named, rather than fetched on trust.
-                check_pub_archive_sha256(name, version, sha256, str(pub_tag.lock))
-                flutter_pub_library_repo(
-                    name = library_repo(hub_name, name),
-                    package_name = name,
-                    hub_name = hub_name,
-                )
-                flutter_pub_package(
-                    name = source_repo(hub_name, name),
-                    package_name = name,
-                    version = version,
-                    sha256 = sha256,
-                    base_url = desc.get("url", "https://pub.dev") if type(desc) == "dict" else "https://pub.dev",
-                    hub_name = hub_name,
-                    overlay_roots = user_overlay_roots + ["@rules_flutter//ext:BUILD.bazel"],
-                    # rules_dart's curated registry is the single source of
-                    # truth for which pub package a Bazel-built native library
-                    # stands in for, and at which versions. Consulting it here
-                    # is what makes a Flutter app depending on, say, `drift`
-                    # get `sqlite3`'s library without naming it: the asset
-                    # lands on the package that owns it, so it propagates
-                    # through the Dart graph exactly as pub's own would.
-                    code_assets = curated_code_assets(name, version),
-                    ignore_hook = name in ignore_hooks,
-                )
-
-            # A repository package is fetched at the commit the lock records,
-            # laid out as pub lays it out (`fetch_pub_git`), and built as a
-            # hosted package is. The lock is checked here, where it can be
-            # named: an entry that pins no commit would be whatever the server
-            # holds on the day of the fetch.
-            for name, info in from_repository.items():
-                desc = info.get("description", {})
-                version = info.get("version", "")
-                url = desc.get("url", "") if type(desc) == "dict" else ""
-                if not url:
-                    fail("The git package \"%s\" %s (in %s) has no `description.url`. Run `dart pub get` to rewrite the lock." % (name, version, pub_tag.lock))
-                resolved_ref = desc.get("resolved-ref", "")
-                check_pub_git_resolved_ref(name, version, resolved_ref, str(pub_tag.lock))
-                flutter_pub_library_repo(
-                    name = library_repo(hub_name, name),
-                    package_name = name,
-                    hub_name = hub_name,
-                )
-                flutter_pub_package(
-                    name = source_repo(hub_name, name),
-                    package_name = name,
-                    version = version,
-                    git_url = url,
-                    resolved_ref = resolved_ref,
-                    git_path = desc.get("path", "."),
-                    # A relative url is resolved against the lock's directory;
-                    # any other leaves the lock out, so editing the lock does
-                    # not refetch the package.
-                    lock = pub_tag.lock if is_relative_git_url(url) else None,
-                    hub_name = hub_name,
-                    overlay_roots = user_overlay_roots + ["@rules_flutter//ext:BUILD.bazel"],
-                    code_assets = curated_code_assets(name, version),
-                    ignore_hook = name in ignore_hooks,
-                )
-
-            # Create the repos of the Flutter SDK packages. Each pins the same
-            # framework source tarball, so the checksum is read once here for
-            # all of them. `package:flutter` has a rule of its own (its shaders
-            # are declared in no pubspec); every other `sdk: flutter` package
-            # is built from `packages/<name>` of that source exactly as a
-            # hosted package is built from its archive, `ext/` overlays
-            # (keyed `<package>/0.0.0`) and library repository included.
-            sdk_source_sha256 = flutter_source_sha256(flutter_version)
-            for name in framework.keys():
-                flutter_framework_package(
-                    name = source_repo(hub_name, name),
-                    flutter_version = flutter_version,
-                    sha256 = sdk_source_sha256,
-                    hub_name = hub_name,
-                )
-            for name, info in flutter_source.items():
-                flutter_pub_library_repo(
-                    name = library_repo(hub_name, name),
-                    package_name = name,
-                    hub_name = hub_name,
-                )
-                flutter_pub_package(
-                    name = source_repo(hub_name, name),
-                    package_name = name,
-                    version = info.get("version", ""),
-                    sha256 = sdk_source_sha256,
-                    flutter_source_version = flutter_version,
-                    hub_name = hub_name,
-                    overlay_roots = user_overlay_roots + ["@rules_flutter//ext:BUILD.bazel"],
-                )
-
-            # The hub's Android Maven data: what every built spoke's Gradle
-            # build declares, against what `@rules_android_maven` resolved. An
-            # Android app's `flutter_android_plugin_libs` checks the part its
-            # plugins need, and a spoke's `android/` package reads what
-            # resolved, so only Android builds fetch it. The dash keeps its
-            # name from any `<hub>__<pkg>` spoke.
-            flutter_android_maven(
-                name = hub_name + "-android_maven",
-                hub_name = hub_name,
-                spokes = [
-                    "@{}//:{}".format(source_repo(hub_name, name), MAVEN_DEPS_FILE)
-                    for name in sorted(built.keys())
-                ],
-            )
-
-            # Create the hub repo with aliases for all packages and its
-            # `android/` package, which hands an Android app the Maven data its
-            # check reads. flutter.pub() always uses `flutter_pub_lock_hub`
-            # (not rules_dart's plain `pub_lock_hub`) for that package.
-            # Non-Flutter pub.pub() consumers keep using rules_dart's plain hub.
-            flutter_pub_lock_hub(
-                name = hub_name,
-                hub_name = hub_name,
-                packages = sorted(all_package_names),
-                built_packages = sorted(built.keys()),
-            )
+    if tags:
+        _declare_pub_packages(tags, selected_versions[_DEFAULT_NAME], user_overlay_roots)
 
     # Don't declare root_module_direct_deps: flutter_register_toolchains creates
     # many repos (iOS, Android, web, desktop, cross-compile per platform) and
@@ -444,6 +262,246 @@ def _toolchain_extension(module_ctx):
     # their own use_repo lists (rules_python does the same) is the right
     # tradeoff for an extension with this many optional outputs.
     return module_ctx.extension_metadata(reproducible = True)
+
+def _hosted_entry(tag, name, info):
+    desc = info.get("description", {})
+    version = info.get("version", "")
+    sha256 = desc.get("sha256", "") if type(desc) == "dict" else ""
+
+    # An empty digest means "do not check" to Bazel's downloader, so a lock
+    # entry without one is refused here, where the lock can be named, rather
+    # than fetched on trust.
+    check_pub_archive_sha256(name, version, sha256, str(tag.lock))
+    return dict(
+        kind = HOSTED,
+        version = version,
+        sha256 = sha256,
+        url = desc.get("url", "https://pub.dev") if type(desc) == "dict" else "https://pub.dev",
+    )
+
+def _git_entry(tag, name, info):
+    # A repository package is fetched at the commit the lock records, laid out
+    # as pub lays it out (`fetch_pub_git`), and built as a hosted package is.
+    # The lock is checked here, where it can be named: an entry that pins no
+    # commit would be whatever the server holds on the day of the fetch.
+    desc = info.get("description", {})
+    version = info.get("version", "")
+    url = desc.get("url", "") if type(desc) == "dict" else ""
+    if not url:
+        fail("The git package \"%s\" %s (in %s) has no `description.url`. Run `dart pub get` to rewrite the lock." % (name, version, tag.lock))
+    resolved_ref = desc.get("resolved-ref", "")
+    check_pub_git_resolved_ref(name, version, resolved_ref, str(tag.lock))
+    return dict(
+        kind = GIT,
+        version = version,
+        git_url = url,
+        resolved_ref = resolved_ref,
+        git_path = desc.get("path", "."),
+        # A relative url is resolved against the lock's directory; any other
+        # leaves the lock out, so editing the lock does not refetch the package.
+        git_lock = str(tag.lock) if is_relative_git_url(url) else "",
+        lock = tag.lock if is_relative_git_url(url) else None,
+    )
+
+def _declare_pub_packages(tags, flutter_version, user_overlay_roots):
+    """Declares the repositories of every `flutter.pub()` tag: one per package.
+
+    Args:
+        tags: One `struct(tag, packages)` per tag, `packages` being its parsed lock.
+        flutter_version: The default toolchain's Flutter version, which builds
+            the SDK packages.
+        user_overlay_roots: The overlay roots every package is built with.
+    """
+    ignore_hooks = {}
+    for t in tags:
+        for pkg_name in t.tag.ignore_hooks:
+            ignore_hooks[pkg_name] = True
+
+    mapped = resolved_targets([struct(lock = t.tag.lock, hub = t.tag.name, resolve = t.tag.resolve) for t in tags])
+    if mapped.errors:
+        fail("\n\n".join(mapped.errors))
+
+    # Every lock's entry for each package, classified by who builds it
+    # (`lock_entry_kind`). A mapped package is a workspace target whatever the
+    # locks say, so it is not compared, fetched or version-checked.
+    entries = {}
+    hub_packages = {}
+    for t in tags:
+        tag = t.tag
+        hub = hub_packages.setdefault(tag.name, {})
+        for name, info in t.packages.items():
+            source = info.get("source", "unknown")
+            kind = lock_entry_kind(name, source)
+            if name in mapped.targets:
+                hub[name] = True
+                continue
+            if kind == ENGINE_PROVIDED:
+                continue
+            hub[name] = True
+            if kind == HOSTED:
+                fields = _hosted_entry(tag, name, info)
+            elif kind == GIT:
+                fields = _git_entry(tag, name, info)
+            elif kind == FLUTTER_SOURCE:
+                fields = dict(kind = kind, version = info.get("version", ""))
+            elif kind == FLUTTER_FRAMEWORK:
+                fields = dict(kind = kind)
+            else:
+                # A source rules_flutter has never heard of (a `path` package
+                # is always mapped, above). The hub still loads, so an app that
+                # only lists it builds. Its target fails when something
+                # depends on it.
+                fields = dict(kind = UNSUPPORTED, source = source)
+            entries.setdefault(name, []).append(struct(
+                hub = tag.name,
+                lock_label = str(tag.lock),
+                **fields
+            ))
+
+    chosen = {}
+    problems = []
+    for name in sorted(entries.keys()):
+        result = reconcile_package(name, entries[name])
+        problems.extend(result.errors)
+        chosen[name] = result.entry
+    if problems:
+        fail("\n\n".join(problems))
+
+    built = {name: e for name, e in chosen.items() if e.kind in [HOSTED, GIT, FLUTTER_SOURCE]}
+    other = sorted(
+        [name for name in chosen if name not in built] +
+        [name for name in mapped.targets if name not in chosen],
+    )
+
+    # What every repository plans against, stated once rather than on each of
+    # them: the lock records each repository's attributes, so the package list
+    # on every repository would grow it by the square of the package count.
+    flutter_pub_index(
+        name = INDEX_REPO,
+        built = sorted(built.keys()),
+        other = other,
+    )
+
+    for name, target in mapped.targets.items():
+        # A mapped package is one repository, the workspace target the user
+        # mapped it to, so it sits among the index's `other` packages whatever
+        # the locks list it from: a hosted package that depends on it reaches
+        # the target, every hub's label for it is the same repository, and the
+        # locked package is not fetched.
+        flutter_resolved_package(
+            name = source_repo(name),
+            package_name = name,
+            actual = target.target,
+            lock = target.lock,
+        )
+
+    overlay_roots = user_overlay_roots + ["@rules_flutter//ext:BUILD.bazel"]
+
+    # Create a source repo and a library repo for each built package. They are
+    # all routed through flutter_pub_package — the `flutter pub get` analog —
+    # so plugins surface their `flutter.plugin.platforms` metadata via
+    # FlutterInfo. Pure-Dart packages are still rules_dart's own member kind;
+    # the rule branches internally on whether the pubspec declares anything of
+    # Flutter's. The library repo is the package's dependency cycle (usually
+    # just itself) as one target: pub allows packages to depend on each other,
+    # Bazel does not. Non-Flutter modules using `pub.pub()` keep using
+    # rules_dart's `pub_lock_package` directly.
+    #
+    # Each Flutter SDK package other than `package:flutter` is built from
+    # `packages/<name>` of the one pinned Flutter source exactly as a hosted
+    # package is built from its archive, `ext/` overlays (keyed
+    # `<package>/0.0.0`) and library repository included. `package:flutter` has
+    # a rule of its own (its shaders are declared in no pubspec).
+    sdk_source_sha256 = flutter_source_sha256(flutter_version)
+    for name, e in sorted(chosen.items()):
+        if e.kind == UNSUPPORTED:
+            flutter_unsupported_package(
+                name = source_repo(name),
+                package_name = name,
+                message = unsupported_package_message(
+                    lock = unsupported_locks(entries[name]),
+                    package = name,
+                    source = e.source,
+                ),
+            )
+        elif e.kind == FLUTTER_FRAMEWORK:
+            flutter_framework_package(
+                name = source_repo(name),
+                flutter_version = flutter_version,
+                sha256 = sdk_source_sha256,
+            )
+        elif e.kind == HOSTED:
+            flutter_pub_library_repo(name = library_repo(name), package_name = name)
+            flutter_pub_package(
+                name = source_repo(name),
+                package_name = name,
+                version = e.version,
+                sha256 = e.sha256,
+                base_url = e.url,
+                overlay_roots = overlay_roots,
+                # rules_dart's curated registry is the single source of truth
+                # for which pub package a Bazel-built native library stands in
+                # for, and at which versions. Consulting it here is what makes a
+                # Flutter app depending on, say, `drift` get `sqlite3`'s
+                # library without naming it: the asset lands on the package
+                # that owns it, so it propagates through the Dart graph exactly
+                # as pub's own would.
+                code_assets = curated_code_assets(name, e.version),
+                ignore_hook = name in ignore_hooks,
+            )
+        elif e.kind == GIT:
+            flutter_pub_library_repo(name = library_repo(name), package_name = name)
+            flutter_pub_package(
+                name = source_repo(name),
+                package_name = name,
+                version = e.version,
+                git_url = e.git_url,
+                resolved_ref = e.resolved_ref,
+                git_path = e.git_path,
+                lock = e.lock,
+                overlay_roots = overlay_roots,
+                code_assets = curated_code_assets(name, e.version),
+                ignore_hook = name in ignore_hooks,
+            )
+        elif e.kind == FLUTTER_SOURCE:
+            flutter_pub_library_repo(name = library_repo(name), package_name = name)
+            flutter_pub_package(
+                name = source_repo(name),
+                package_name = name,
+                version = e.version,
+                sha256 = sdk_source_sha256,
+                flutter_source_version = flutter_version,
+                overlay_roots = overlay_roots,
+            )
+
+    # The build's Android Maven data: what every built spoke's Gradle build
+    # declares, against what `@rules_android_maven` resolved. An Android app's
+    # `flutter_android_plugin_libs` checks the part its plugins need, and a
+    # spoke's `android/` package reads what resolved, so only Android builds
+    # fetch it.
+    flutter_android_maven(
+        name = ANDROID_MAVEN_REPO,
+        spokes = [
+            "@{}//:{}".format(source_repo(name), MAVEN_DEPS_FILE)
+            for name in sorted(built.keys())
+        ],
+    )
+
+    if "flutter_test" in built:
+        flutter_pub_goldens(name = GOLDENS_REPO)
+
+    # One hub repo per name, with aliases for the packages of its lock(s). Two
+    # tags of one name are one hub holding both locks' packages. flutter.pub()
+    # always uses `flutter_pub_lock_hub` (not rules_dart's plain `pub_lock_hub`)
+    # for its `android/` and `goldens/` packages. Non-Flutter pub.pub()
+    # consumers keep using rules_dart's plain hub.
+    for hub_name, packages in sorted(hub_packages.items()):
+        flutter_pub_lock_hub(
+            name = hub_name,
+            hub_name = hub_name,
+            packages = sorted(packages.keys()),
+            built_packages = sorted([n for n in packages if n in built]),
+        )
 
 flutter = module_extension(
     implementation = _toolchain_extension,

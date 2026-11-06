@@ -1,4 +1,4 @@
-"""The library repository of a built package of a `flutter.pub()` hub.
+"""The library repository of a built package of `flutter.pub()`.
 
 A package's files are in its source repository (`flutter_pub_package`); this
 one decides what it is built with. It reads the pubspec dependencies of every
@@ -135,9 +135,8 @@ def overlay_in_cycle_error(package, cycle):
     )
 
 def _flutter_pub_library_repo_impl(ctx):
-    hub = ctx.attr.hub_name
     package = ctx.attr.package_name
-    index = read_index(ctx, hub)
+    index = read_index(ctx)
 
     # Every package this one reaches through built packages. The lock's other
     # entries (`package:flutter`, entries nothing supplies) are leaves:
@@ -145,19 +144,19 @@ def _flutter_pub_library_repo_impl(ctx):
     # that depends on them.
     graph = dependency_graph(
         package,
-        lambda p: [d for d in read_pubspec_dependencies(ctx, source_repo(hub, p)) if d in index.built or d in index.other],
+        lambda p: [d for d in read_pubspec_dependencies(ctx, source_repo(p)) if d in index.built or d in index.other],
         follow = index.built,
     )
     cycle = dependency_cycle(graph, package)
     if cycle.owner != package:
         ctx.file("BUILD.bazel", make_alias_build_content(
             package,
-            "@{}//:{}".format(library_repo(hub, cycle.owner), cycle.owner),
+            "@{}//:{}".format(library_repo(cycle.owner), cycle.owner),
         ))
         return ctx.repo_metadata(reproducible = True)
 
     members = {
-        member: json.decode(read_sibling_file(ctx, source_repo(hub, member), MEMBER_FILE))
+        member: json.decode(read_sibling_file(ctx, source_repo(member), MEMBER_FILE))
         for member in cycle.packages
     }
     overlays = [m for m, info in members.items() if info["kind"] == MEMBER_OVERLAY]
@@ -168,20 +167,20 @@ def _flutter_pub_library_repo_impl(ctx):
         # on, in the one target the overlay writes.
         ctx.file("BUILD.bazel", make_alias_build_content(
             package,
-            "@{}//:{}".format(source_repo(hub, package), package),
+            "@{}//:{}".format(source_repo(package), package),
         ))
         return ctx.repo_metadata(reproducible = True)
 
-    deps = [library_label(hub, index, dep) for dep in cycle.deps]
+    deps = [library_label(index, dep) for dep in cycle.deps]
     if [m for m in members.values() if m["material_icons"]]:
         deps.append(_MATERIAL_ICONS)
 
     ctx.file("BUILD.bazel", make_library_build_content(
         name = package,
-        members = ["@{}//:{}".format(source_repo(hub, m), m) for m in cycle.packages],
+        members = ["@{}//:{}".format(source_repo(m), m) for m in cycle.packages],
         deps = sorted(deps),
         flutter = bool([m for m in members.values() if m["kind"] == MEMBER_FLUTTER]),
-        android_libs = ["@{}//android:lib".format(source_repo(hub, m)) for m in cycle.packages if members[m].get("android_lib")],
+        android_libs = ["@{}//android:lib".format(source_repo(m)) for m in cycle.packages if members[m].get("android_lib")],
     ))
     return ctx.repo_metadata(reproducible = True)
 
@@ -189,7 +188,6 @@ flutter_pub_library_repo = repository_rule(
     implementation = _flutter_pub_library_repo_impl,
     attrs = {
         "package_name": attr.string(mandatory = True, doc = "The built package."),
-        "hub_name": attr.string(mandatory = True, doc = "The hub's name: the prefix of its source, library and index repositories."),
     },
     doc = "Plans a built package's library: its dependency cycle, built as one target.",
 )
