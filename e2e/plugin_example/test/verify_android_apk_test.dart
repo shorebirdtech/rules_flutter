@@ -13,9 +13,13 @@ library;
 // channel rather than a stray debugging statement.
 // ignore_for_file: avoid_print
 
+import 'dart:io';
+
 import 'package:rules_flutter_e2e_testing/apk.dart';
 import 'package:rules_flutter_e2e_testing/bundle_check.dart';
 import 'package:rules_flutter_e2e_testing/elf.dart';
+import 'package:rules_flutter_e2e_testing/runfiles_paths.dart';
+import 'package:rules_flutter_e2e_testing/zip_entries.dart';
 
 /// Classes the plugin closure requires at runtime, keyed by what ships them.
 /// One representative class per source — if the class is not *defined* in
@@ -92,7 +96,40 @@ void main() {
     }
   }
 
+  _verifyDatastoreVariant(check);
+
   check.finish('\nAll plugin_example APK verification checks passed.');
+}
+
+/// Checks that the app's classes, before R8 renames them, come from
+/// androidx.datastore's Android variant, as Gradle resolves it, and not from
+/// its JVM variant. datastore-core is a Kotlin Multiplatform library, and the
+/// POM of datastore-preferences-core-jvm names datastore-core-jvm, whose
+/// atomicMoveTo calls java.nio.file.Files.move unguarded: an API 26 class that
+/// an app at minSdk 24 without core library desugaring cannot load. The
+/// Android variant checks the API level and falls back to File.renameTo.
+void _verifyDatastoreVariant(BundleCheck check) {
+  final names = {
+    for (final entry in zipEntries(
+      File(
+        requireRunfile('plugin_android_deploy.jar', what: 'deploy jar'),
+      ).readAsBytesSync(),
+    ))
+      entry.name,
+  };
+  check
+    ..expect(
+      "the app has datastore-core's Android variant",
+      condition: names.contains(
+        'androidx/datastore/core/FileMoves_androidKt.class',
+      ),
+    )
+    ..expect(
+      "the app has no class of datastore-core's JVM variant",
+      condition: !names.contains(
+        'androidx/datastore/core/FileMoves_jvmKt.class',
+      ),
+    );
 }
 
 /// Verifies a single APK built for [abis], ABI directory names. [mustBeDebug]
