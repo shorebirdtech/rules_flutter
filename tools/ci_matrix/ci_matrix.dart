@@ -31,17 +31,16 @@ void main() {
       ..writeln(problems.map((p) => '  $p').join('\n'));
     exit(1);
   }
-  final targetIssues = targetProblems(
-    e2eWorkspaces,
-    (workspace) => File('$repo/e2e/$workspace/BUILD.bazel').readAsStringSync(),
-  );
+  String buildFile(String workspace) =>
+      File('$repo/e2e/$workspace/BUILD.bazel').readAsStringSync();
+  final targetIssues = targetProblems(e2eWorkspaces, buildFile);
   if (targetIssues.isNotEmpty) {
     stderr
-      ..writeln('ci_matrix: the e2e matrix names targets that are not there:')
+      ..writeln('ci_matrix: the e2e matrix selects tests that are not there:')
       ..writeln(targetIssues.map((p) => '  $p').join('\n'));
     exit(1);
   }
   stdout.writeln(
-    'matrix=${jsonEncode({'include': matrixInclude(e2eWorkspaces)})}',
+    'matrix=${jsonEncode({'include': matrixInclude(e2eWorkspaces, buildFile)})}',
   );
 }

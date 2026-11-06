@@ -36,7 +36,7 @@ class E2eWorkspace {
     this.skips = const {},
     this.command = 'test',
     this.commands = const {},
-    this.targets = const {},
+    this.testsNamed = const {},
   });
 
   /// The directory under `e2e/`, with `/` separators.
@@ -58,18 +58,36 @@ class E2eWorkspace {
   /// that only builds on most systems can test on one.
   final Map<Os, String> commands;
 
-  /// The target patterns each system runs the command on, where they are not
-  /// `//...`: a workspace whose `//...` holds tests that need hardware or a
-  /// desktop session names the ones a runner can run. Explicit labels, which
-  /// [targetProblems] holds to the workspace's BUILD file.
-  final Map<Os, List<String>> targets;
+  /// The name prefixes that select what each system runs the command on, where
+  /// that is not `//...`: a workspace whose `//...` holds tests that need
+  /// hardware or a desktop session runs the ones a runner can run. Every
+  /// `<prefix>...test` target of the workspace root package is run, so a test
+  /// added under a prefix is picked up without touching the table.
+  /// [targetProblems] holds each prefix to matching something.
+  final Map<Os, List<String>> testsNamed;
 
   /// The Bazel command CI runs in the workspace on [os].
   String commandOn(Os os) => commands[os] ?? command;
 
-  /// The target patterns CI runs [commandOn] on in the workspace on [os].
-  List<String> targetsOn(Os os) => targets[os] ?? const ['//...'];
+  /// The target patterns CI runs [commandOn] on in the workspace on [os], given
+  /// the text of the workspace's `BUILD.bazel`.
+  List<String> targetsOn(Os os, String buildFile) {
+    final prefixes = testsNamed[os];
+    if (prefixes == null) return const ['//...'];
+    final names = {
+      for (final prefix in prefixes) ...testsFor(buildFile, prefix),
+    }.toList()..sort();
+    return [for (final name in names) '//:$name'];
+  }
 }
+
+/// The names of the `*_test` targets in [buildFile] that start with [prefix].
+List<String> testsFor(String buildFile, String prefix) => [
+  for (final match in RegExp(
+    r'name\s*=\s*"(' + RegExp.escape(prefix) + r'[\w.-]*_test)"',
+  ).allMatches(buildFile))
+    match.group(1)!,
+];
 
 const _appleOnly =
     'every test is target_compatible_with macOS: it builds Apple bundles, '
@@ -295,22 +313,8 @@ const e2eWorkspaces = <E2eWorkspace>[
     },
     command: 'build',
     commands: {Os.linux: 'test'},
-    targets: {
-      Os.linux: [
-        '//:linux_pass_test',
-        '//:linux_filter_test',
-        '//:linux_red_twin_test',
-        '//:linux_crash_test',
-        '//:linux_golden_test',
-        '//:linux_golden_mismatch_twin_test',
-        '//:web_licences_test',
-        '//:web_pass_test',
-        '//:web_filter_test',
-        '//:web_red_twin_test',
-        '//:web_golden_test',
-        '//:web_golden_mid_frame_test',
-        '//:web_golden_mismatch_twin_test',
-      ],
+    testsNamed: {
+      Os.linux: ['linux_', 'web_'],
     },
   ),
   E2eWorkspace(
@@ -466,8 +470,12 @@ List<String> matrixProblems(
 }
 
 /// The jobs of [table] as the `include` list of a GitHub Actions matrix, in
-/// table order, one per workspace and system it runs on.
-List<Map<String, String>> matrixInclude(List<E2eWorkspace> table) => [
+/// table order, one per workspace and system it runs on. [buildFile] returns
+/// the text of `e2e/<workspace>/BUILD.bazel`.
+List<Map<String, String>> matrixInclude(
+  List<E2eWorkspace> table,
+  String Function(String workspace) buildFile,
+) => [
   for (final workspace in table)
     for (final os in Os.values)
       if (workspace.runs.containsKey(os))
@@ -475,44 +483,33 @@ List<Map<String, String>> matrixInclude(List<E2eWorkspace> table) => [
           'workspace': workspace.name,
           'os': os.runner,
           'command': workspace.commandOn(os),
-          'targets': workspace.targetsOn(os).join(' '),
+          'targets': workspace
+              .targetsOn(os, buildFile(workspace.name))
+              .join(' '),
         },
 ];
 
-/// What is wrong with the explicit target patterns of [table]: a `//:name` that
-/// names no target in its workspace's BUILD file. [buildFile] returns the text
-/// of `e2e/<workspace>/BUILD.bazel`.
+/// What is wrong with the test selections of [table]: a prefix that matches no
+/// `*_test` target in its workspace's BUILD file, or no prefix at all.
+/// [buildFile] returns the text of `e2e/<workspace>/BUILD.bazel`.
 List<String> targetProblems(
   List<E2eWorkspace> table,
   String Function(String workspace) buildFile,
 ) {
   final problems = <String>[];
   for (final workspace in table) {
-    for (final MapEntry(key: os, value: patterns)
-        in workspace.targets.entries) {
-      for (final pattern in patterns) {
-        final name = RegExp(r'^//:([\w.-]+)$').firstMatch(pattern)?.group(1);
-        if (name == null) {
-          if (pattern != '//...') {
-            problems.add(
-              '${workspace.name} on ${os.name}: $pattern is not `//...` or a '
-              '`//:target` of the workspace root package',
-            );
-          }
-          continue;
-        }
-        if (!RegExp('name\\s*=\\s*"${RegExp.escape(name)}"')
-            .hasMatch(buildFile(workspace.name))) {
+    for (final MapEntry(key: os, value: prefixes)
+        in workspace.testsNamed.entries) {
+      if (prefixes.isEmpty) {
+        problems.add('${workspace.name} on ${os.name} selects no tests');
+      }
+      for (final prefix in prefixes) {
+        if (testsFor(buildFile(workspace.name), prefix).isEmpty) {
           problems.add(
-            '${workspace.name} on ${os.name}: $pattern is in no target of '
+            '${workspace.name} on ${os.name}: no `$prefix...test` target in '
             'e2e/${workspace.name}/BUILD.bazel',
           );
         }
-      }
-    }
-    for (final os in workspace.targets.keys) {
-      if (workspace.targets[os]!.isEmpty) {
-        problems.add('${workspace.name} on ${os.name} has no target patterns');
       }
     }
   }

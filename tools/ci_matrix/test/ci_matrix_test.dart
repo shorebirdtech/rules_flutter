@@ -128,7 +128,7 @@ void main() {
             skips: {Os.linux: 'why'},
             command: 'build',
           ),
-        ]),
+        ], (_) => ''),
         [
           {
             'workspace': 'x',
@@ -146,7 +146,7 @@ void main() {
       );
     });
 
-    test('gives a system its own command and target patterns', () {
+    test('gives a system its own command and the tests it names', () {
       expect(
         matrixInclude([
           const E2eWorkspace(
@@ -155,11 +155,11 @@ void main() {
             skips: {Os.windows: 'why'},
             command: 'build',
             commands: {Os.linux: 'test'},
-            targets: {
-              Os.linux: ['//:one', '//:two'],
+            testsNamed: {
+              Os.linux: ['one_', 'two_'],
             },
           ),
-        ]),
+        ], (_) => 'a(name = "two_b_test")\na(name = "one_a_test")\n'),
         [
           {
             'workspace': 'x',
@@ -171,7 +171,7 @@ void main() {
             'workspace': 'x',
             'os': 'ubuntu-latest',
             'command': 'test',
-            'targets': '//:one //:two',
+            'targets': '//:one_a_test //:two_b_test',
           },
         ],
       );
@@ -179,62 +179,93 @@ void main() {
   });
 
   group('targetProblems', () {
-    const build = 'foo(\n    name = "one",\n)\nbar(name="two")\n';
+    const build =
+        'foo(\n    name = "web_one_test",\n)\n'
+        'bar(name="web_two_test")\n'
+        'bar(name="web_helper")\n'
+        'bar(name="linux_one_test")\n'
+        'bar(name="other_web_test")\n';
     String file(String _) => build;
+    const web = E2eWorkspace(
+      'x',
+      runs: {Os.linux: 'a'},
+      testsNamed: {
+        Os.linux: ['web_'],
+      },
+    );
 
-    test('accepts labels the BUILD file defines', () {
+    test('selects the tests with the prefix, sorted', () {
+      expect(web.targetsOn(Os.linux, build), [
+        '//:web_one_test',
+        '//:web_two_test',
+      ]);
+    });
+
+    test('picks up a test added to the BUILD file', () {
       expect(
-        targetProblems([
-          const E2eWorkspace(
-            'x',
-            targets: {
-              Os.linux: ['//:one', '//:two'],
-            },
-          ),
-        ], file),
-        isEmpty,
+        web.targetsOn(Os.linux, '$build\nbaz(name = "web_x_test")\n'),
+        ['//:web_one_test', '//:web_two_test', '//:web_x_test'],
       );
     });
 
-    test('names a label no target defines', () {
+    test('joins several prefixes into one sorted list', () {
+      const both = E2eWorkspace(
+        'x',
+        testsNamed: {
+          Os.linux: ['web_', 'linux_'],
+        },
+      );
+      expect(both.targetsOn(Os.linux, build), [
+        '//:linux_one_test',
+        '//:web_one_test',
+        '//:web_two_test',
+      ]);
+    });
+
+    test('runs everything where nothing is named', () {
+      expect(web.targetsOn(Os.macos, build), ['//...']);
+    });
+
+    test('accepts prefixes that match a test', () {
+      expect(targetProblems([web], file), isEmpty);
+    });
+
+    test('names a prefix that matches no test', () {
       expect(
         targetProblems([
           const E2eWorkspace(
             'x',
-            targets: {
-              Os.linux: ['//:one', '//:gone'],
+            testsNamed: {
+              Os.linux: ['web_', 'gone_', 'other_'],
             },
           ),
         ], file),
-        [contains('//:gone is in no target of e2e/x/BUILD.bazel')],
+        [
+          contains('no `gone_...test` target in e2e/x/BUILD.bazel'),
+        ],
       );
     });
 
-    test('does not take a prefix of a name for the name', () {
+    test('does not count a target that is not a test', () {
       expect(
         targetProblems([
           const E2eWorkspace(
             'x',
-            targets: {
-              Os.linux: ['//:on'],
+            testsNamed: {
+              Os.linux: ['web_helper'],
             },
           ),
         ], file),
-        [contains('//:on is in no target')],
+        [contains('no `web_helper...test` target')],
       );
     });
 
-    test('rejects a pattern it cannot check', () {
+    test('rejects an empty selection', () {
       expect(
         targetProblems([
-          const E2eWorkspace(
-            'x',
-            targets: {
-              Os.linux: ['//sub:one'],
-            },
-          ),
+          const E2eWorkspace('x', testsNamed: {Os.linux: []}),
         ], file),
-        [contains('is not `//...` or a `//:target`')],
+        [contains('selects no tests')],
       );
     });
   });

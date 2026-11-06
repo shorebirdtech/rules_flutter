@@ -1028,9 +1028,12 @@ fourth thing to do when none applies.
 - `bazel test //...` in every e2e workspace (`build //...` where it has no test
   targets, or its tests need a desktop session or a device), on each operating
   system where it exercises something no other job does. A system can have its
-  own command and target patterns in the table: `integration_test` builds on
-  macOS and Windows, and on Linux tests the `:linux_*` and `:web_*` targets,
-  which need no desktop.
+  own command and tests in the table: `integration_test` builds on macOS and
+  Windows, and on Linux tests the `:linux_*` and `:web_*` targets, which need
+  no desktop. The table names the prefixes (`testsNamed`), not the targets: the
+  plan reads every `<prefix>...test` target from the workspace's `BUILD.bazel`,
+  so a new `web_*_test` runs in CI without a table edit, and a prefix that
+  matches nothing fails the plan.
 
 The last is a matrix of one job per workspace and system, named `E2E
 (<workspace>, <runner>)`. It is generated: the `Plan E2E jobs` job runs
