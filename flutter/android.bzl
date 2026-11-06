@@ -80,6 +80,7 @@ load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@rules_android//android:rules.bzl", _android_application = "android_application", _android_binary = "android_binary", _android_library = "android_library")
 load("@rules_cc//cc:cc_library.bzl", _cc_library = "cc_library")
+load("@rules_dart//dart:defs.bzl", "dart_binary")
 load("@rules_java//java:java_import.bzl", _java_import = "java_import")
 load("@rules_kotlin//kotlin:android.bzl", _kt_android_library = "kt_android_library")
 load("//flutter/private:app_version.bzl", "manifest_values_conflict", "version_arg")
@@ -88,7 +89,7 @@ load("//flutter/private:flutter_android_application.bzl", _flutter_android_bundl
 load("//flutter/private:flutter_android_build.bzl", _flutter_android_build = "flutter_android_build")
 load("//flutter/private:flutter_android_manifest_merge.bzl", _flutter_android_manifest_merge = "flutter_android_manifest_merge")
 load("//flutter/private:flutter_android_plugin_library.bzl", _flutter_android_plugin_library = "flutter_android_plugin_library")
-load("//flutter/private:flutter_android_plugin_libs.bzl", _flutter_android_plugin_libs = "flutter_android_plugin_libs")
+load("//flutter/private:flutter_android_plugin_libs.bzl", _flutter_android_maven_report = "flutter_android_maven_report", _flutter_android_plugin_libs = "flutter_android_plugin_libs")
 load("//flutter/private:flutter_android_registrant.bzl", _flutter_android_registrant = "flutter_android_registrant")
 load("//flutter/private:flutter_android_release.bzl", _flutter_android_release = "flutter_android_release")
 
@@ -222,6 +223,39 @@ flutter_android_plugin_library = _flutter_android_plugin_library
 # and checks the Maven artifacts their Gradle builds declare. Wired
 # automatically by flutter_android_app; expose for Tier-2 control.
 flutter_android_plugin_libs = _flutter_android_plugin_libs
+
+def flutter_android_maven_artifacts(name, application, maven, **kwargs):
+    """A program that prints the Maven artifacts an application's plugins need.
+
+    `bazel run` of it prints the lines to paste into
+    `maven.install(name = "rules_android_maven", artifacts = [...])` for the
+    plugins `application` depends on and no others, marking those the install
+    lacks or has too low. `flutter_android_app` declares one as
+    `<name>_maven_artifacts`; declare this one for Tier-2 wiring.
+
+    Args:
+        name: The target name.
+        application: The `flutter_application` whose plugins to report on.
+        maven: The pub hub's `@<hub>//android:maven_requirements`.
+        **kwargs: Passed to both targets the macro declares (`tags`,
+            `testonly`, `visibility`).
+    """
+    _flutter_android_maven_report(
+        name = "__%s_report" % name,
+        app_label = str(native.package_relative_label(application)).removeprefix("@@"),
+        application = application,
+        maven = maven,
+        **dict(kwargs, visibility = ["//visibility:private"])
+    )
+    dart_binary(
+        name = name,
+        args = ["$(rlocationpath :__%s_report)" % name],
+        compile_mode = "exe",
+        data = [":__%s_report" % name],
+        deps = [Label("@rules_dart//dart/runfiles")],
+        main = Label("//flutter/private/tools:print_report.dart"),
+        **kwargs
+    )
 
 # Registrant rule that emits GeneratedPluginRegistrant.java from a
 # flutter_application's transitive FlutterInfo. Wired automatically by
@@ -723,6 +757,9 @@ def flutter_android_app(
             `@<pub_hub_name>//android:maven_requirements`. Defaults to
             `"deps"`, matching the convention in repo MODULE.bazel files. Set
             to `None` to opt out (e.g. for a workspace with no pub plugins).
+            Otherwise the macro also declares `<name>_maven_artifacts`:
+            `bazel run` of it prints the Maven artifacts for the plugins
+            `application` depends on, to paste into `maven.install`.
         **kwargs: Passed through to android_binary, except `testonly`, which
             every target the macro declares has, since one that depends on a
             `testonly` application would otherwise fail analysis.
@@ -807,13 +844,23 @@ def flutter_android_app(
     # plugin's `kt_android_library`. The libraries of the plugins the
     # application depends on are linked once, for the registrant and the
     # APK alike.
+    maven = "@%s//android:maven_requirements" % pub_hub_name if pub_hub_name else None
     _flutter_android_plugin_libs(
         name = "__%s_plugin_libs" % name,
         deps = application,
-        maven = "@%s//android:maven_requirements" % pub_hub_name if pub_hub_name else None,
+        maven = maven,
+        report = "//%s:%s_maven_artifacts" % (native.package_name(), name) if maven else None,
         tags = tags,
         testonly = testonly,
     )
+    if maven:
+        flutter_android_maven_artifacts(
+            name = "%s_maven_artifacts" % name,
+            application = application,
+            maven = maven,
+            tags = tags,
+            testonly = testonly,
+        )
     _flutter_android_registrant(
         name = "__%s_registrant_src" % name,
         application = application,

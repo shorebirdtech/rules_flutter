@@ -8,7 +8,7 @@ installed, and `plugin_ok` one that is.
 
 load("//flutter:android.bzl", "flutter_android_plugin_libs")
 load("//flutter:defs.bzl", "flutter_application")
-load("//flutter/private:flutter_android_plugin_libs.bzl", "flutter_android_maven_requirements")
+load("//flutter/private:flutter_android_plugin_libs.bzl", "flutter_android_maven_report", "flutter_android_maven_requirements")
 
 package(default_visibility = ["//flutter/tests:__subpackages__"])
 
@@ -29,8 +29,16 @@ package(default_visibility = ["//flutter/tests:__subpackages__"])
         flutter_android_plugin_libs(
             name = "checked_libs_of_" + n,
             maven = ":maven",
+            report = "//app:%s_maven_artifacts" % n,
             tags = ["manual"],
             deps = ":app_uses_" + n,
+        ),
+        flutter_android_maven_report(
+            name = "report_of_" + n,
+            app_label = "//app:" + n,
+            application = ":app_uses_" + n,
+            maven = ":maven",
+            tags = ["manual"],
         ),
     ]
     for n in [

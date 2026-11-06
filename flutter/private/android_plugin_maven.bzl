@@ -17,7 +17,9 @@ This file holds the pieces:
   reads to check the plugins that application links (and those only),
   `resolved.bzl`, which a plugin's `android/` package
   loads to depend on the artifacts that exist, and a `maven_artifacts` target
-  that prints the complete block for the root module's `maven.install`.
+  that prints the complete block of every plugin of the lock for the root
+  module's `maven.install`. An application's own `<name>_maven_artifacts`
+  (`flutter_android_maven_artifacts`) prints the part its plugins need.
 
 Only an Android build that links a plugin reads any of this, so only such a
 build fetches it.
@@ -617,7 +619,7 @@ def maven_problems(requirements, resolved):
         })
     return problems
 
-def maven_check_message(data, linked):
+def maven_check_message(data, linked, report = None):
     """What an application that links `linked` plugins fails with, or "".
 
     Args:
@@ -627,6 +629,8 @@ def maven_check_message(data, linked):
         linked: The names of the packages whose Android libraries the
             application links. A package the hub records no requirements for
             needs nothing.
+        report: The label of the application's `maven_artifacts` target, which
+            the message points to. None points to the hub's own.
 
     Returns:
         The failure message naming only what those packages need, or the empty
@@ -640,7 +644,26 @@ def maven_check_message(data, linked):
         for p in packages
         if p["errors"]
     }
-    return format_maven_failure(data["hub"], problems, errors)
+    return format_maven_failure(data["hub"], problems, errors, report)
+
+def maven_app_report(data, linked, app):
+    """The text an application's `maven_artifacts` target prints.
+
+    Args:
+        data: The decoded `maven_requirements.json` of the hub, as for
+            `maven_check_message`.
+        linked: The names of the packages whose Android libraries the
+            application links.
+        app: The label of the application, for the header.
+
+    Returns:
+        The artifacts those packages declare, as `format_artifacts_report`
+        writes them, marking those `@rules_android_maven` lacks.
+    """
+    packages = [p for p in data["packages"] if p["package"] in linked]
+    requirements = merge_plugin_requirements(packages)
+    problems = maven_problems(requirements, data["resolved"])
+    return format_artifacts_report(data["hub"], requirements, problems, app)
 
 def _artifact_line(coordinate, version, declared_by, note):
     return '"%s:%s",  # declared by %s%s' % (
@@ -650,7 +673,7 @@ def _artifact_line(coordinate, version, declared_by, note):
         "; " + note if note else "",
     )
 
-def format_maven_failure(hub, problems, errors):
+def format_maven_failure(hub, problems, errors, report = None):
     """The message `check()` fails with.
 
     Args:
@@ -658,6 +681,8 @@ def format_maven_failure(hub, problems, errors):
         problems: The result of `maven_problems`.
         errors: Dict of `package:<name> <version>` to the Gradle lines that
             could not be read.
+        report: The label of the application's `maven_artifacts` target. None
+            points to the hub's, which covers every plugin of the lock.
 
     Returns:
         The message, listing every problem at once.
@@ -678,9 +703,13 @@ def format_maven_failure(hub, problems, errors):
             '`maven.install(name = "rules_android_maven", artifacts = [...])` ' +
             "and regenerate that install's lock file:\n\n" +
             "    REPIN=1 bazel run @rules_android_maven//:pin\n\n" +
-            "`bazel run @{hub}//android:maven_artifacts` prints the complete " +
-            "block for every plugin of the lock."
-        ).format(hub = hub, lines = "\n    ".join(lines)))
+            "`bazel run {report}` prints the complete block for {scope}."
+        ).format(
+            hub = hub,
+            lines = "\n    ".join(lines),
+            report = report or "@%s//android:maven_artifacts" % hub,
+            scope = "the plugins this app links" if report else "every plugin of the lock",
+        ))
     if errors:
         groups = []
         for pkg in sorted(errors.keys()):
@@ -698,13 +727,15 @@ def format_maven_failure(hub, problems, errors):
         ).format(groups = "\n".join(groups)))
     return "\n\n".join(parts)
 
-def format_artifacts_report(hub, requirements, problems):
+def format_artifacts_report(hub, requirements, problems, app = None):
     """The text `bazel run @<hub>//android:maven_artifacts` prints.
 
     Args:
         hub: The pub hub's name.
         requirements: The result of `merge_plugin_requirements`.
         problems: The result of `maven_problems`.
+        app: The label of the application whose plugins `requirements` cover.
+            None means every plugin of the hub.
 
     Returns:
         A block ready to paste into `artifacts = [...]`, with a header saying
@@ -720,7 +751,10 @@ def format_artifacts_report(hub, requirements, problems):
             req["declared_by"],
             reasons.get(coordinate, ""),
         ))
-    out = ["# Maven artifacts the Android plugins of @%s declare." % hub]
+    if app:
+        out = ["# Maven artifacts the Android plugins that %s links declare." % app]
+    else:
+        out = ["# Maven artifacts the Android plugins of @%s declare." % hub]
     if not lines:
         out.append("# None.")
     elif problems:

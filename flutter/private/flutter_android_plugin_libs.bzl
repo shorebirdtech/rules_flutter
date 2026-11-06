@@ -20,7 +20,7 @@ load("@rules_java//java/common:java_common.bzl", "java_common")
 load("@rules_java//java/common:java_info.bzl", "JavaInfo")
 load("@rules_java//java/common:proguard_spec_info.bzl", "ProguardSpecInfo")
 load("//flutter:providers.bzl", "FlutterApplicationInfo")
-load("//flutter/private:android_plugin_maven.bzl", "maven_check_message")
+load("//flutter/private:android_plugin_maven.bzl", "maven_app_report", "maven_check_message")
 
 FlutterAndroidMavenInfo = provider(
     doc = "What a pub hub's Android plugins declare in their Gradle builds, and what `@rules_android_maven` resolved.",
@@ -134,6 +134,7 @@ def _flutter_android_plugin_libs_impl(ctx):
         message = maven_check_message(
             ctx.attr.maven[FlutterAndroidMavenInfo].data,
             {entry.package: True for entry in entries},
+            ctx.attr.report or None,
         )
         if message:
             fail(message)
@@ -156,6 +157,55 @@ flutter_android_plugin_libs = rule(
             doc = "The pub hub's Android Maven requirements (`@<hub>//android:maven_requirements`), to check those of the linked plugins against `@rules_android_maven`. Leave unset when no linked plugin comes from a pub hub.",
             providers = [FlutterAndroidMavenInfo],
         ),
+        "report": attr.string(
+            doc = "The label of the application's `maven_artifacts` target, which a failure message points to in place of the hub's.",
+        ),
     },
     doc = "Links the Android libraries of the plugins an application depends on, as a library exporting them would, and fails when `@rules_android_maven` lacks what their Gradle builds declare.",
+)
+
+# A plugin's Android library is among an application's `android_libs` only in
+# an Android configuration, so the report reads the application as one. The
+# plugins are the same for every ABI.
+def _android_transition_impl(_settings, _attr):
+    return {"//command_line_option:platforms": [str(Label("@rules_android//:arm64-v8a"))]}
+
+_android_transition = transition(
+    implementation = _android_transition_impl,
+    inputs = [],
+    outputs = ["//command_line_option:platforms"],
+)
+
+def _flutter_android_maven_report_impl(ctx):
+    # A target reached through a transition on `platforms` arrives as a list
+    # of one.
+    entries = ctx.attr.application[0][FlutterApplicationInfo].android_libs.to_list()
+    out = ctx.actions.declare_file(ctx.label.name + ".txt")
+    ctx.actions.write(out, maven_app_report(
+        ctx.attr.maven[FlutterAndroidMavenInfo].data,
+        {entry.package: True for entry in entries},
+        ctx.attr.app_label,
+    ))
+    return [DefaultInfo(files = depset([out]))]
+
+flutter_android_maven_report = rule(
+    implementation = _flutter_android_maven_report_impl,
+    attrs = {
+        "application": attr.label(
+            doc = "The `flutter_application` whose plugins to report on, built for Android.",
+            cfg = _android_transition,
+            mandatory = True,
+            providers = [FlutterApplicationInfo],
+        ),
+        "maven": attr.label(
+            doc = "The pub hub's Android Maven requirements (`@<hub>//android:maven_requirements`).",
+            mandatory = True,
+            providers = [FlutterAndroidMavenInfo],
+        ),
+        "app_label": attr.string(
+            doc = "How the report's header names the application.",
+            mandatory = True,
+        ),
+    },
+    doc = "Writes the Maven artifacts the plugins an application links declare, as lines to paste into `maven.install`, marking those `@rules_android_maven` lacks. Unlike `flutter_android_plugin_libs` it never fails for what is missing: it is how to find out.",
 )

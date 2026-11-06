@@ -30,9 +30,15 @@ exports_files(
         # its neighbours this one is a `dart_binary` main (below), and rules
         # reach it through that target rather than by file label.
         "flutter_test_runner.dart",
-        "print_report.dart",
     ],
     visibility = ["//flutter:__subpackages__"],
+)
+
+# The `main` of the `dart_binary` that `flutter_android_maven_artifacts`
+# declares in the user's package, so it is visible to every package.
+exports_files(
+    ["print_report.dart"],
+    visibility = ["//visibility:public"],
 )
 
 # The program behind `flutter_android_release`: signs an App Bundle with the
