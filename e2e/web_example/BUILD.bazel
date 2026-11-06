@@ -387,9 +387,9 @@ dart_test(
 # The app run in headless Chrome with an integration test as its program, which
 # reads text back out of the widget tree and out of a widget fed by the asset
 # bundle: a bundle that boots and paints nothing, or cannot resolve its assets,
-# fails here. This is docs/TESTING.md § 5's render check. Only macOS runs it
-# until the Linux prerequisites of a browser (the host's libraries, the sandbox)
-# are settled and tested there; Bazel reports it skipped elsewhere.
+# fails here. This is docs/TESTING.md § 5's render check. macOS and Linux run it
+# (on Linux the browser loads the pinned runtime's libraries); Windows is not
+# verified, and Bazel reports it skipped there.
 # =============================================================================
 
 flutter_web_integration_test(
@@ -399,7 +399,11 @@ flutter_web_integration_test(
     srcs = glob(["lib/**/*.dart"]),
     # A first-party asset, which the second case reads.
     assets = glob(["assets/**"]),
-    target_compatible_with = ["@platforms//os:macos"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:macos": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     deps = [
         "@deps//:flutter",
         "@deps//:flutter_test",

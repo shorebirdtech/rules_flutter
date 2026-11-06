@@ -242,6 +242,7 @@ _UNIT_TESTS = {
         "deps": ["@dev_tool_deps//:vm_service"] + _PATH_DEP,
     },
     "key_press_test": {},
+    "linux_runtime_test": {"fakes": True},
     "test_simulator_test": {},
     "suite_connectors_test": {
         "cdp_page": True,

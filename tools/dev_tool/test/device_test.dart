@@ -3412,6 +3412,21 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
 
       expect(app.killed, isFalse);
     });
+
+    test('an app given an environment runs in it, with the engine switches '
+        'of the launch, and nothing else of the host\'s', () {
+      final device = LinuxDevice()
+        ..environment = const {'DISPLAY': ':4', 'HOME': '/h'}
+        ..startPaused = true;
+
+      final env = device.launchEnvironment;
+
+      expect(env['DISPLAY'], ':4');
+      expect(env['HOME'], '/h');
+      expect(env['FLUTTER_VM_SERVICE_PORT'], '0');
+      expect(env['FLUTTER_ENGINE_SWITCH_1'], 'start-paused=true');
+      expect(env.keys, isNot(contains('PATH')));
+    });
   });
 
   group('WindowsDevice.launch staging', () {

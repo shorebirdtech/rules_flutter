@@ -9,8 +9,10 @@ device of the family, and the test rule refuses a runner of another.
 
 load("@rules_android//providers:providers.bzl", "AndroidSdkInfo")
 load("@rules_dart//dart:utils.bzl", "runfiles_path")
-load("//flutter:providers.bzl", "FlutterIntegrationRunnerInfo")
+load("//flutter:providers.bzl", "FlutterIntegrationRunnerInfo", "FlutterLinuxRuntimeInfo")
 load("//flutter/private:dbg_transition.bzl", "DBG_SETTINGS", "dbg_transition")
+load("//flutter/private:exec_groups.bzl", "PORTABLE_EXEC_GROUPS", "portable_tools")
+load("//flutter/private:flutter_linux_runtime.bzl", "linux_runtime_check")
 
 _ANDROID_PLATFORMS = str(Label("@rules_android//flags:android_platforms"))
 
@@ -68,40 +70,83 @@ _EXECUTION_REQUIREMENTS = {
     "no-sandbox": "1",
 }
 
-def _flutter_desktop_runner_impl(_ctx):
+def _linux_runtime_launcher(ctx):
+    """What a runner's `linux_runtime` adds to its launcher config and runfiles."""
+    runtime = ctx.attr.linux_runtime
+    if not runtime:
+        return {}, depset()
+    info = runtime[FlutterLinuxRuntimeInfo]
+    return {"linuxRuntime": info.config}, info.files
+
+_LINUX_RUNTIME_ATTR = attr.label(
+    doc = "On a Linux host, the runtime the test runs with in place of the host's libraries: a `flutter_linux_runtime`, such as `@flutter_linux_runtime_amd64//:runtime`. Without one a Linux test fails, saying so.",
+    providers = [FlutterLinuxRuntimeInfo],
+)
+
+def _flutter_desktop_runner_impl(ctx):
+    launcher, runfiles = _linux_runtime_launcher(ctx)
     return [FlutterIntegrationRunnerInfo(
         family = DESKTOP,
-        launcher_config = struct(),
-        runfiles = depset(),
+        launcher_config = struct(**launcher),
+        runfiles = runfiles,
         execution_requirements = dict(_EXECUTION_REQUIREMENTS),
         target_compatible_with = [],
     )]
 
 flutter_desktop_runner = rule(
     implementation = _flutter_desktop_runner_impl,
-    doc = """Runs a desktop integration test on the host's own desktop.
+    attrs = {
+        "linux_runtime": _LINUX_RUNTIME_ATTR,
+    },
+    doc = """Runs a desktop integration test on the host's own desktop, or on Linux on an X server of the test's own.
 
-The test needs a desktop session. On macOS that is an unlocked screen and an
-awake display; the runner checks both before it launches the app and fails,
-saying which, when either is not so. It holds the display awake for the run
-and takes a lock on the screen (`macos-gui`), because a window that is covered
-stops producing frames, so two tests share the screen one after the other.
+On macOS the test needs a desktop session: an unlocked screen and an awake
+display. The runner checks both before it launches the app and fails, saying
+which, when either is not so. It holds the display awake for the run and takes a
+lock on the screen (`macos-gui`), because a window that is covered stops
+producing frames, so two tests share the screen one after the other.
 
 On Windows the app's window is created on the desktop of the session the test
-runs in, which needs no check and no lock: windows that overlap keep drawing.""",
+runs in, which needs no check and no lock: windows that overlap keep drawing.
+
+On Linux the app draws on an X server the test starts for itself, never the
+host's display, with the GTK, software OpenGL and fonts of `linux_runtime`
+rather than the host's: the test needs no desktop session and no library of the
+host's but its C and C++ runtime, and tests do not share a screen.""",
 )
 
 def _flutter_chrome_runner_impl(ctx):
     chrome = ctx.file.chrome
-    return [DefaultInfo(files = depset([chrome])), FlutterIntegrationRunnerInfo(
-        family = WEB,
-        launcher_config = struct(chrome = runfiles_path(chrome, ctx.workspace_name)),
-        # The browser and what it needs beside itself: `chrome` is the file to
-        # run and its `data` the libraries and resources it loads.
-        runfiles = depset([chrome], transitive = [ctx.attr.chrome[DefaultInfo].default_runfiles.files]),
-        execution_requirements = dict(_EXECUTION_REQUIREMENTS),
-        target_compatible_with = [],
-    )]
+    chrome_files = depset([chrome], transitive = [ctx.attr.chrome[DefaultInfo].default_runfiles.files])
+    launcher, runtime_files = _linux_runtime_launcher(ctx)
+    validation = []
+    if ctx.attr.linux_runtime:
+        # The browser loads the runtime's libraries, so it is held to what the
+        # runtime is: nothing more of the host than its floor, and nothing the
+        # runtime lacks.
+        info = ctx.attr.linux_runtime[FlutterLinuxRuntimeInfo]
+        validation.append(linux_runtime_check(
+            ctx,
+            portable_tools(ctx),
+            ctx.file._linux_runtime_tool,
+            ctx.label.name,
+            checked = chrome_files,
+            providers = info.libraries,
+            floor = info.floor,
+        ))
+    return [
+        DefaultInfo(files = depset([chrome])),
+        FlutterIntegrationRunnerInfo(
+            family = WEB,
+            launcher_config = struct(chrome = runfiles_path(chrome, ctx.workspace_name), **launcher),
+            # The browser and what it needs beside itself: `chrome` is the file to
+            # run and its `data` the libraries and resources it loads.
+            runfiles = depset(transitive = [chrome_files, runtime_files]),
+            execution_requirements = dict(_EXECUTION_REQUIREMENTS),
+            target_compatible_with = [],
+        ),
+        OutputGroupInfo(_validation = depset(validation)),
+    ]
 
 flutter_chrome_runner = rule(
     implementation = _flutter_chrome_runner_impl,
@@ -111,14 +156,26 @@ flutter_chrome_runner = rule(
             mandatory = True,
             allow_single_file = True,
         ),
+        "linux_runtime": _LINUX_RUNTIME_ATTR,
+        "_linux_runtime_tool": attr.label(
+            default = "//flutter/private/tools:linux_runtime.dart",
+            allow_single_file = True,
+        ),
     },
+    exec_groups = PORTABLE_EXEC_GROUPS,
     doc = """Runs a web integration test in a headless Chrome of the runner's own.
 
 `chrome` is the executable the test launches, on a profile of its own that is
 deleted when the test ends; the browser is the one the runner names rather than
 one found on the host, so the page is drawn by the same browser everywhere the
 test runs. The default runner, `@rules_flutter//flutter/integration_test:chrome`,
-is a pinned Chrome for Testing headless shell for the host.""",
+is a pinned Chrome for Testing headless shell for the host.
+
+On Linux the browser loads the libraries of `linux_runtime` rather than the
+host's, and the build checks that it needs none the runtime lacks. It runs
+without its sandbox, as upstream's headless Chrome does: the sandbox needs the
+host set up for it (unprivileged user namespaces, which Ubuntu denies by
+default since 23.10, or Chrome's set-user-ID helper).""",
 )
 
 # The families whose app cannot be handed an environment, and what to call
@@ -346,7 +403,7 @@ flutter_desktop_integration_test = rule(
     implementation = _flutter_desktop_integration_test_impl,
     attrs = _test_attrs("//flutter/integration_test:desktop"),
     test = True,
-    doc = """Runs the desktop app `app` (`flutter_macos_app` or `flutter_windows_app`) on the host and reports the integration test suite it runs.
+    doc = """Runs the desktop app `app` (`flutter_macos_app`, `flutter_windows_app` or `flutter_linux_app`) on the host and reports the integration test suite it runs.
 
 The app's program is an integration test (see `flutter_integration_bootstrap`),
 so each `testWidgets` is a test case: `--test_filter` and `shard_count` select
@@ -356,7 +413,9 @@ the reason the device gives for its exit.
 
 The test is built in debug mode, runs outside Bazel's sandbox and never remotely.
 A macOS app needs an unlocked, awake desktop session; a Windows app (`flutter_windows_app`)
-needs a Windows session that can create a window.""",
+needs a Windows session that can create a window; a Linux app (`flutter_linux_app`)
+draws on an X server the test starts for itself, with the runner's
+`linux_runtime` in place of the host's libraries, and needs no desktop session.""",
 )
 
 def _flutter_web_bundle_integration_test_impl(ctx):

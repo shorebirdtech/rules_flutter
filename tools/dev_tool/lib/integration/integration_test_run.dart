@@ -25,6 +25,7 @@ import 'golden_comparator.dart';
 import 'golden_requests.dart';
 import 'golden_service_process.dart';
 import 'integration_runner_config.dart';
+import 'linux_runtime.dart';
 import 'suite_connectors.dart';
 import 'test_simulator.dart';
 
@@ -58,6 +59,8 @@ class DeviceChoice {
 /// tools (`adb` to list the attached devices, `simctl` to make a simulator),
 /// [lockDirectory] is where a device's lock is kept, and [processId] is the run
 /// a simulator is named for, unless a test of this says otherwise.
+/// [startIsolated] starts a Linux test's X server, unless a test of this says
+/// otherwise.
 ///
 /// Throws a [StateError] for a device no runner has been written for, or one
 /// the host does not have: the run fails, saying so, rather than falling back
@@ -71,6 +74,7 @@ Future<DeviceChoice> chooseDevice(
   Directory? lockDirectory,
   int? processId,
   void Function(String message)? log,
+  IsolatedProcessStarter? startIsolated,
 }) async {
   switch (config.family) {
     case IntegrationFamily.desktop when os == 'macos':
@@ -91,10 +95,45 @@ Future<DeviceChoice> chooseDevice(
         () async => () async {},
         vmServiceConnector(),
       );
+    case IntegrationFamily.desktop when os == 'linux':
+      // The app draws on an X server of the test's own, with the runtime's
+      // GTK and software OpenGL: never the host's display or libraries. No
+      // lock and no session probe: each test has a screen to itself.
+      final runtime = _linuxRuntime(config, resolve);
+      final device = LinuxDevice();
+      return DeviceChoice(device, () async {
+        final cache = _cacheDir(environment);
+        final display = await runtime.startDisplay(
+          host: environment,
+          cacheDir: cache,
+          start: startIsolated ?? startIsolatedProcess,
+        );
+        device.environment = runtime.environment(
+          host: environment,
+          cacheDir: cache,
+          display: display.number,
+        );
+        return display.stop;
+      }, vmServiceConnector());
     case IntegrationFamily.desktop:
       throw StateError(
-        'integration tests run on macOS and Windows desktops; this host is $os, '
-        'which has no runner.',
+        'integration tests run on macOS, Windows and Linux desktops; this host '
+        'is $os, which has no runner.',
+      );
+    case IntegrationFamily.web when os == 'linux':
+      final runtime = _linuxRuntime(config, resolve);
+      final browserEnvironment = runtime.environment(
+        host: environment,
+        cacheDir: _cacheDir(environment),
+      );
+      return DeviceChoice(
+        WebDevice(
+          chromePath: resolve(config.chromePath),
+          startProcess: (exe, args) =>
+              startIsolatedProcess(exe, args, browserEnvironment),
+        )..webOptions = _linuxHeadlessWebOptions,
+        () async => () async {},
+        chromePageConnector(),
       );
     case IntegrationFamily.web:
       return DeviceChoice(
@@ -183,6 +222,46 @@ const headlessWebOptions = WebOptions(
   browser: BrowserLaunchOptions(headless: true),
   enableExpressionEvaluation: false,
 );
+
+/// [headlessWebOptions] on a Linux host, where the browser runs without its
+/// sandbox, as upstream's headless Chrome always does. The sandbox needs the
+/// host set up for it: unprivileged user namespaces, which Ubuntu since 23.10
+/// denies to programs AppArmor has no profile for ("No usable sandbox!", on
+/// Ubuntu 24.04), or Chrome's set-user-ID helper installed by root. The page
+/// is the test's own.
+const _linuxHeadlessWebOptions = WebOptions(
+  server: WebServerOptions(crossOriginIsolation: true),
+  browser: BrowserLaunchOptions(
+    headless: true,
+    browserFlags: ['--no-sandbox'],
+  ),
+  enableExpressionEvaluation: false,
+);
+
+/// The Linux runtime the runner of [config] carries. Throws a [StateError]
+/// for a runner that carries none: a Linux test runs with nothing of the
+/// host's but its C and C++ runtime.
+LinuxRuntime _linuxRuntime(
+  IntegrationRunnerConfig config,
+  String Function(String runfilesPath) resolve,
+) {
+  final runtime = config.linuxRuntime;
+  if (runtime == null) {
+    throw StateError(
+      'the runner has no Linux runtime, which a Linux test runs its app or '
+      'browser with: give the runner rule `linux_runtime` (the default '
+      'runners of @rules_flutter//flutter/integration_test do).',
+    );
+  }
+  return LinuxRuntime.fromConfig(runtime, resolve);
+}
+
+/// Where fontconfig keeps its cache for this test: under the test's own
+/// temporary directory, which Bazel removes.
+String _cacheDir(Map<String, String> environment) {
+  final base = environment['TEST_TMPDIR'] ?? Directory.systemTemp.path;
+  return '$base/linux_runtime_cache';
+}
 
 /// The lock on the screen and the held-awake session a macOS window needs.
 Future<Future<void> Function()> _prepareMacOs(

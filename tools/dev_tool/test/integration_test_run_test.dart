@@ -49,6 +49,13 @@ class _FakeDevice extends Device {
   Future<String?> whyAppExited(AppInstance instance) async => exitedBecause;
 }
 
+const _linuxRuntime = {
+  'root': 'rt/root',
+  'triple': 'x86_64-linux-gnu',
+  'xvfb': 'rt/runtime/Xvfb',
+  'fontsConf': 'rt/fonts.conf',
+};
+
 final _config = IntegrationRunnerConfig(
   family: IntegrationFamily.desktop,
   appArtifacts: const ['_main/app.zip'],
@@ -202,7 +209,7 @@ void main() {
         'the runfiles', () async {
       final choice = await chooseDevice(
         webConfig,
-        os: 'linux',
+        os: 'macos',
         resolve: (path) => '/runfiles/$path',
       );
 
@@ -211,6 +218,44 @@ void main() {
       expect(
         (await device.requiredHostTools()).single.candidates,
         ['/runfiles/chrome+/chrome-headless-shell'],
+      );
+    });
+
+    test('on Linux runs the browser with the runner\'s runtime and without '
+        'its sandbox', () async {
+      final linuxConfig = IntegrationRunnerConfig(
+        family: IntegrationFamily.web,
+        appArtifacts: const ['_main/app_web'],
+        launcher: const {
+          'chrome': 'chrome+/chrome-headless-shell',
+          'linuxRuntime': _linuxRuntime,
+        },
+        testDisplayName: '//pkg:web_test',
+        env: const {},
+      );
+      final choice = await chooseDevice(
+        linuxConfig,
+        os: 'linux',
+        resolve: (path) => '/runfiles/$path',
+        environment: const {'DISPLAY': ':0', 'TEST_TMPDIR': '/tmp/t'},
+      );
+
+      final device = choice.device as WebDevice;
+      expect(device.webOptions!.browser.headless, isTrue);
+      expect(device.webOptions!.browser.browserFlags, ['--no-sandbox']);
+    });
+
+    test('on Linux is refused when the runner has no runtime, naming the '
+        'attribute', () async {
+      await expectLater(
+        chooseDevice(webConfig, os: 'linux', resolve: (p) => p),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            contains('linux_runtime'),
+          ),
+        ),
       );
     });
 
@@ -224,7 +269,7 @@ void main() {
       );
 
       await expectLater(
-        chooseDevice(unnamed, os: 'linux', resolve: (p) => p),
+        chooseDevice(unnamed, os: 'macos', resolve: (p) => p),
         throwsA(
           isA<FormatException>().having(
             (e) => e.message,
@@ -263,12 +308,67 @@ void main() {
     test('is refused on a host with no runner, naming the hosts that have '
         'one', () async {
       await expectLater(
+        chooseDevice(_config, os: 'fuchsia', resolve: (path) => path),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            allOf(
+              contains('macOS'),
+              contains('Windows'),
+              contains('Linux'),
+              contains('fuchsia'),
+            ),
+          ),
+        ),
+      );
+    });
+
+    test('on Linux is an X server of the test\'s own, started when the host '
+        'prepares and stopped when the run gives it back, which the app is '
+        'shown on with the runtime\'s libraries', () async {
+      final server = FakeProcess();
+      final linuxConfig = IntegrationRunnerConfig(
+        family: IntegrationFamily.desktop,
+        appArtifacts: const ['_main/app'],
+        launcher: const {'linuxRuntime': _linuxRuntime},
+        testDisplayName: '//pkg:linux_test',
+        env: const {},
+      );
+      final choice = await chooseDevice(
+        linuxConfig,
+        os: 'linux',
+        resolve: (path) => '/runfiles/$path',
+        environment: const {'DISPLAY': ':0', 'TEST_TMPDIR': '/tmp/t'},
+        startIsolated: (exe, args, env) async => server,
+      );
+      final device = choice.device as LinuxDevice;
+      expect(device.environment, isNull, reason: 'no display before prepare');
+
+      final preparing = choice.prepare();
+      await server.outputAttached;
+      server.emitStdout('5');
+      final give = await preparing;
+
+      expect(device.environment!['DISPLAY'], ':5');
+      expect(
+        device.environment!['LD_LIBRARY_PATH'],
+        '/runfiles/rt/root/usr/lib/x86_64-linux-gnu',
+      );
+      expect(server.killed, isFalse);
+      await give();
+      expect(server.killed, isTrue);
+    });
+
+    test('on Linux is refused when the runner has no runtime, naming the '
+        'attribute', () async {
+      await expectLater(
         chooseDevice(_config, os: 'linux', resolve: (path) => path),
         throwsA(
           isA<StateError>().having(
             (e) => e.message,
             'message',
-            allOf(contains('macOS'), contains('Windows'), contains('linux')),
+            contains('linux_runtime'),
           ),
         ),
       );

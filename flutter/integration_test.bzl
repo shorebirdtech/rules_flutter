@@ -12,6 +12,7 @@ the variant, the platform's app rule and the test.
 
 - `flutter_macos_integration_test`
 - `flutter_windows_integration_test`
+- `flutter_linux_integration_test`
 - `flutter_web_integration_test`
 - `flutter_android_integration_test`
 - `flutter_ios_simulator_integration_test`
@@ -22,9 +23,11 @@ Tier 2, the composable rules:
 - `flutter_application_variant`: a `flutter_application` rebuilt with another
   `main`, plus extra `srcs`, `deps` and `defines`.
 - `flutter_desktop_integration_test`: runs a desktop app on the host's desktop.
-- `flutter_desktop_runner`: where it runs.
+- `flutter_desktop_runner`: where it runs, and on Linux the runtime it runs with.
 - `flutter_web_bundle_integration_test`: runs a web bundle in a headless Chrome.
 - `flutter_chrome_runner`: a headless Chrome of its own, where a web test runs.
+- `flutter_linux_runtime`: on Linux, the X server, GTK, Mesa and libraries a
+  runner runs the app or browser with, from pinned Debian packages.
 - `flutter_android_app_integration_test`: runs an Android app on an attached device.
 - `flutter_android_device_runner`: which `adb` drives that device.
 - `flutter_ios_app_integration_test`: runs an iOS app on a simulator of its own.
@@ -33,12 +36,14 @@ Tier 2, the composable rules:
 
 load("//flutter:android.bzl", "flutter_android_app")
 load("//flutter:ios.bzl", "flutter_ios_app")
+load("//flutter:linux.bzl", "flutter_linux_app")
 load("//flutter:macos.bzl", "flutter_macos_app")
 load("//flutter:web.bzl", "flutter_web_app")
 load("//flutter:windows.bzl", "flutter_windows_app")
 load("//flutter/private:flutter_application_variant.bzl", _flutter_application_variant = "flutter_application_variant")
 load("//flutter/private:flutter_integration_bootstrap.bzl", _flutter_integration_bootstrap = "flutter_integration_bootstrap")
 load("//flutter/private:flutter_integration_test.bzl", _flutter_android_app_integration_test = "flutter_android_app_integration_test", _flutter_android_device_runner = "flutter_android_device_runner", _flutter_chrome_runner = "flutter_chrome_runner", _flutter_desktop_integration_test = "flutter_desktop_integration_test", _flutter_desktop_runner = "flutter_desktop_runner", _flutter_ios_app_integration_test = "flutter_ios_app_integration_test", _flutter_ios_simulator_runner = "flutter_ios_simulator_runner", _flutter_web_bundle_integration_test = "flutter_web_bundle_integration_test")
+load("//flutter/private:flutter_linux_runtime.bzl", _flutter_linux_runtime = "flutter_linux_runtime")
 load("//flutter/private:flutter_test.bzl", _flutter_test = "flutter_test")
 load("//flutter/private:test_config.bzl", "find_test_config")
 
@@ -47,6 +52,7 @@ flutter_integration_bootstrap = _flutter_integration_bootstrap
 flutter_desktop_integration_test = _flutter_desktop_integration_test
 flutter_desktop_runner = _flutter_desktop_runner
 flutter_chrome_runner = _flutter_chrome_runner
+flutter_linux_runtime = _flutter_linux_runtime
 flutter_web_bundle_integration_test = _flutter_web_bundle_integration_test
 flutter_android_app_integration_test = _flutter_android_app_integration_test
 flutter_android_device_runner = _flutter_android_device_runner
@@ -318,6 +324,100 @@ def flutter_windows_integration_test(
         flaky = flaky,
         visibility = visibility,
         target_compatible_with = ["@platforms//os:windows"],
+        **test_kwargs
+    )
+
+def flutter_linux_integration_test(
+        name,
+        src,
+        application,
+        deps = [],
+        srcs = [],
+        test_config = None,
+        env = {},
+        data = [],
+        size = "medium",
+        runner = None,
+        tags = [],
+        timeout = None,
+        shard_count = None,
+        flaky = None,
+        visibility = None,
+        **linux_app_kwargs):
+    """Runs a `package:integration_test` file on Linux: the application with the test as its program.
+
+    The app is built in debug mode and drawn on an X server the test starts for
+    itself, with the GTK, software OpenGL and fonts of a pinned runtime rather
+    than the host's, so the test needs no desktop session and runs the same on a
+    workstation, over SSH and in CI. Tests do not share a screen. One target per
+    test file, as upstream launches the app once per file.
+
+    Intermediate targets `__<name>_bootstrap`, `__<name>_program` and
+    `__<name>_app` are this macro's: do not name them.
+
+    Args:
+        name: The test's name.
+        src: The test file. Its `main` declares the tests, as for `flutter create`:
+            `IntegrationTestWidgetsFlutterBinding.ensureInitialized()` and
+            `testWidgets`, calling the app's own `main()`.
+        application: The `flutter_application` the test runs. It may be in another
+            package.
+        deps: What the test imports beyond the application's own `deps`. It must
+            bring `integration_test` and `flutter_test` (`@<hub>//:integration_test`
+            and `@<hub>//:flutter_test`), which analysis fails without, naming them.
+        srcs: Dart files `src` imports by relative path.
+        test_config: The suite's `flutter_test_config.dart`. By default the one
+            `flutter_test` would find for `src`, in this package.
+        env: Environment variables for the runner and the app.
+        data: Files the test reads at run time, and its golden files:
+            `matchesGoldenFile('goldens/x.png')` reads `goldens/x.png` from the
+            directory of `src`, compared on the host. `bazel run :<name> --
+            --update-goldens` writes them.
+        size: The test size. `medium`: a window is launched and drawn.
+        runner: A `flutter_desktop_runner`, to run the test with a runtime other
+            than the pinned one of the host's architecture.
+        tags: Tags of the test.
+        timeout: The test's `timeout`.
+        shard_count: The test's `shard_count`: the tests of the file are divided
+            among the shards.
+        flaky: The test's `flaky`.
+        visibility: The test's visibility.
+        **linux_app_kwargs: Passed to `flutter_linux_app`: `app_name`, `gtk_app_id`,
+            and the rest.
+    """
+    if test_config == None:
+        test_config = _find_test_config(name, src)
+    program = _program(name, src, application, deps, srcs, test_config)
+
+    app = "__%s_app" % name
+    flutter_linux_app(
+        name = app,
+        application = program,
+        tags = ["manual"],
+        testonly = True,
+        visibility = ["//visibility:private"],
+        # An app is for Linux, so is its test: another host skips both.
+        target_compatible_with = ["@platforms//os:linux"],
+        **linux_app_kwargs
+    )
+
+    test_kwargs = {}
+    if runner != None:
+        test_kwargs["runner"] = runner
+    _flutter_desktop_integration_test(
+        name = name,
+        app = ":" + app,
+        src = src,
+        golden_service = _golden_service(name, deps),
+        env = env,
+        data = data,
+        size = size,
+        tags = tags,
+        timeout = timeout,
+        shard_count = shard_count,
+        flaky = flaky,
+        visibility = visibility,
+        target_compatible_with = ["@platforms//os:linux"],
         **test_kwargs
     )
 

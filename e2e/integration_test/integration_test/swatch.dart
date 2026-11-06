@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 /// The golden of the swatch on this platform. A golden is a function of the
 /// platform that rendered it, so each platform keeps its own beside the test:
 /// `goldens/macOS/swatch.png`, `goldens/windows/swatch.png`,
-/// `goldens/web/swatch.png`.
+/// `goldens/linux/swatch.png`, `goldens/web/swatch.png`.
 String get goldenPath =>
     'goldens/${kIsWeb ? 'web' : defaultTargetPlatform.name}/swatch.png';
 

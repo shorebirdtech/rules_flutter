@@ -1,6 +1,6 @@
 load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_analysis_test", "dart_binary")
 load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_library")
-load("@rules_flutter//flutter:integration_test.bzl", "flutter_android_integration_test", "flutter_ios_simulator_integration_test", "flutter_macos_integration_test", "flutter_web_integration_test", "flutter_windows_integration_test")
+load("@rules_flutter//flutter:integration_test.bzl", "flutter_android_integration_test", "flutter_ios_simulator_integration_test", "flutter_linux_integration_test", "flutter_macos_integration_test", "flutter_web_integration_test", "flutter_windows_integration_test")
 load(":test_outcome.bzl", "outcome_test")
 
 exports_files(["pubspec.lock"])
@@ -298,11 +298,127 @@ outcome_test(
     undeclared_outputs = _FAILURE_PICTURES,
 )
 
+# -- Linux -----------------------------------------------------------------
+
+# The same app on an X server each test starts for itself, with the GTK,
+# software OpenGL and fonts of the pinned runtime rather than the host's: they
+# need no desktop session and run the same over SSH and in CI.
+
+# The two tests of `:macos_pass_test`, in a window: each is reported.
+flutter_linux_integration_test(
+    name = "linux_pass_test",
+    src = "integration_test/counter_test.dart",
+    application = ":app_flutter",
+    deps = _TEST_DEPS,
+)
+
+# `--test_filter` selects among the tests of one file in a window too.
+outcome_test(
+    name = "linux_filter_test",
+    cases = ["counter increments when tapped"],
+    expect = "pass",
+    failing_cases_given = True,
+    target_compatible_with = ["@platforms//os:linux"],
+    test = ":linux_pass_test",
+    test_filter = "increments",
+)
+
+# `manual`, since it is meant to fail: the red twin below runs it.
+flutter_linux_integration_test(
+    name = "linux_red",
+    src = "integration_test/failing_test.dart",
+    application = ":app_flutter",
+    tags = ["manual"],
+    deps = _TEST_DEPS,
+)
+
+# A failing integration test fails its target on Linux, and its JUnit report
+# names the failing case.
+outcome_test(
+    name = "linux_red_twin_test",
+    cases = ["counter reads 99 after one tap"],
+    expect = "fail",
+    failing_cases = ["counter reads 99 after one tap"],
+    failing_cases_given = True,
+    output_contains = ["Expected: exactly one matching"],
+    target_compatible_with = ["@platforms//os:linux"],
+    test = ":linux_red",
+)
+
+# The app ends during a test, with status 3.
+flutter_linux_integration_test(
+    name = "linux_crash",
+    src = "integration_test/crash_test.dart",
+    application = ":app_flutter",
+    tags = ["manual"],
+    deps = _TEST_DEPS,
+)
+
+# An app that dies during a test fails its target on Linux, and the failure
+# says how the app ended. (`tearDownAll` cannot run in an app that is gone.)
+outcome_test(
+    name = "linux_crash_test",
+    cases = [
+        "app exits during the test",
+        "(tearDownAll)",
+    ],
+    expect = "fail",
+    failing_cases = [
+        "app exits during the test",
+        "(tearDownAll)",
+    ],
+    failing_cases_given = True,
+    output_contains = ["exited with code 3"],
+    target_compatible_with = ["@platforms//os:linux"],
+    test = ":linux_crash",
+)
+
+# The swatch in a window, against `goldens/linux/swatch.png`: the golden is
+# compared on the host, where the app's `matchesGoldenFile` sends the picture.
+# Regenerated with `bazel run //:linux_golden_test -- --update-goldens`.
+flutter_linux_integration_test(
+    name = "linux_golden_test",
+    src = "integration_test/golden_test.dart",
+    srcs = _GOLDEN_SRCS,
+    application = ":app_flutter",
+    data = _GOLDENS,
+    deps = _TEST_DEPS,
+)
+
+# `manual`, since it is meant to fail: the red twin below runs it.
+flutter_linux_integration_test(
+    name = "linux_golden_mismatch",
+    src = "integration_test/golden_mismatch_test.dart",
+    srcs = _GOLDEN_SRCS,
+    application = ":app_flutter",
+    data = _GOLDENS,
+    tags = ["manual"],
+    deps = _TEST_DEPS,
+)
+
+outcome_test(
+    name = "linux_golden_mismatch_twin_test",
+    cases = ["an orange swatch matches the blue golden"],
+    expect = "fail",
+    failing_cases = ["an orange swatch matches the blue golden"],
+    failing_cases_given = True,
+    output_contains = _MISMATCH_SAYS,
+    target_compatible_with = ["@platforms//os:linux"],
+    test = ":linux_golden_mismatch",
+    undeclared_outputs = _FAILURE_PICTURES,
+)
+
 # -- Web -------------------------------------------------------------------
 
-# The same app in headless Chrome. Only macOS runs these until the Linux
-# prerequisites of a browser (the host's libraries, the sandbox) are settled and
-# tested there; Bazel reports the test skipped elsewhere.
+# The same app in headless Chrome, on macOS and on Linux, where the browser loads
+# the pinned runtime's libraries. Windows runs the browser too, but these are
+# not registered for a Windows host (see the Android tests below); Bazel reports
+# them skipped there.
+_WEB_HOSTS = select({
+    "@platforms//os:linux": [],
+    "@platforms//os:macos": [],
+    "//conditions:default": ["@platforms//:incompatible"],
+})
 
 # The two tests of `:macos_pass_test`, in a browser: each is reported.
 flutter_web_integration_test(
@@ -310,7 +426,7 @@ flutter_web_integration_test(
     package_name = "integration_test_example",
     src = "integration_test/counter_test.dart",
     srcs = glob(["lib/**/*.dart"]),
-    target_compatible_with = ["@platforms//os:macos"],
+    target_compatible_with = _WEB_HOSTS,
     deps = ["@deps//:flutter"] + _TEST_DEPS,
 )
 
@@ -320,7 +436,7 @@ outcome_test(
     cases = ["counter increments when tapped"],
     expect = "pass",
     failing_cases_given = True,
-    target_compatible_with = ["@platforms//os:macos"],
+    target_compatible_with = _WEB_HOSTS,
     test = ":web_pass_test",
     test_filter = "increments",
 )
@@ -332,7 +448,7 @@ flutter_web_integration_test(
     src = "integration_test/failing_test.dart",
     srcs = glob(["lib/**/*.dart"]),
     tags = ["manual"],
-    target_compatible_with = ["@platforms//os:macos"],
+    target_compatible_with = _WEB_HOSTS,
     deps = ["@deps//:flutter"] + _TEST_DEPS,
 )
 
@@ -345,7 +461,7 @@ outcome_test(
     failing_cases = ["counter reads 99 after one tap"],
     failing_cases_given = True,
     output_contains = ["Expected: exactly one matching"],
-    target_compatible_with = ["@platforms//os:macos"],
+    target_compatible_with = _WEB_HOSTS,
     test = ":web_red",
 )
 
@@ -357,7 +473,7 @@ flutter_web_integration_test(
     src = "integration_test/golden_test.dart",
     srcs = glob(["lib/**/*.dart"]) + _GOLDEN_SRCS,
     data = _GOLDENS,
-    target_compatible_with = ["@platforms//os:macos"],
+    target_compatible_with = _WEB_HOSTS,
     deps = ["@deps//:flutter"] + _TEST_DEPS,
 )
 
@@ -369,7 +485,7 @@ flutter_web_integration_test(
     src = "integration_test/golden_mid_frame_test.dart",
     srcs = glob(["lib/**/*.dart"]) + _GOLDEN_SRCS,
     data = _GOLDENS,
-    target_compatible_with = ["@platforms//os:macos"],
+    target_compatible_with = _WEB_HOSTS,
     deps = ["@deps//:flutter"] + _TEST_DEPS,
 )
 
@@ -381,7 +497,7 @@ flutter_web_integration_test(
     srcs = glob(["lib/**/*.dart"]) + _GOLDEN_SRCS,
     data = _GOLDENS,
     tags = ["manual"],
-    target_compatible_with = ["@platforms//os:macos"],
+    target_compatible_with = _WEB_HOSTS,
     deps = ["@deps//:flutter"] + _TEST_DEPS,
 )
 
@@ -392,7 +508,7 @@ outcome_test(
     failing_cases = ["an orange swatch matches the blue golden"],
     failing_cases_given = True,
     output_contains = _MISMATCH_SAYS,
-    target_compatible_with = ["@platforms//os:macos"],
+    target_compatible_with = _WEB_HOSTS,
     test = ":web_golden_mismatch",
     undeclared_outputs = _FAILURE_PICTURES,
 )

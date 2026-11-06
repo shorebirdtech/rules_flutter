@@ -903,20 +903,30 @@ class LinuxDevice extends Device {
   }) : _runProcess = runProcess ?? Process.run,
        _injectedStart = startProcess;
 
+  /// The whole environment the app starts in, or null for this process's.
+  ///
+  /// Set by an integration test, whose app runs with the libraries of a pinned
+  /// runtime and on a display of the test's own: nothing of the host's
+  /// environment is added to it.
+  Map<String, String>? environment;
+
   Future<Process> _startProcess(String exe, List<String> args) =>
       (_injectedStart ?? _defaultStart)(exe, args);
 
-  /// Start the app with the engine switches this launch asked for.
+  /// What the app starts with: [environment], or this process's, with the
+  /// engine switches this launch asked for.
   ///
-  /// An instance method because the switches depend on [startPaused], which is
-  /// set on the device after it is constructed. The
-  /// injected [_startProcess] bypasses this entirely, which is why the
-  /// environment it builds lives in [desktopLaunchEnvironment] where a test
-  /// can reach it.
+  /// A getter because the switches depend on [startPaused], which is set on
+  /// the device after it is constructed. The injected [_startProcess] bypasses
+  /// it, which is why a test reads it here.
+  Map<String, String> get launchEnvironment =>
+      desktopLaunchEnvironment(startPaused: startPaused, base: environment);
+
   Future<Process> _defaultStart(String exe, List<String> args) => Process.start(
     exe,
     args,
-    environment: desktopLaunchEnvironment(startPaused: startPaused),
+    environment: launchEnvironment,
+    includeParentEnvironment: environment == null,
   );
 
   @override

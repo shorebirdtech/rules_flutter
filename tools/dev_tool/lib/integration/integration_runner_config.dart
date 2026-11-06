@@ -14,7 +14,8 @@ enum IntegrationFamily {
   /// Headless Chrome on the host.
   web('web'),
 
-  /// The host's own desktop: macOS, Linux or Windows.
+  /// The host's own desktop: macOS or Windows, or on Linux an X server of the
+  /// test's own.
   desktop('desktop'),
 
   /// A simulator the runner creates.
@@ -214,6 +215,21 @@ class IntegrationRunnerConfig {
   /// not a string at all.
   String get simulatorRuntime =>
       _launcherString('runtime', 'the simulator\'s runtime', required: false);
+
+  /// The Linux runtime the runner carries (`flutter_linux_runtime`'s runfiles
+  /// paths), or null when it carries none, as off Linux. A [FormatException]
+  /// names the key when it is not an object.
+  Map<String, Object?>? get linuxRuntime {
+    final value = launcher['linuxRuntime'];
+    if (value == null) return null;
+    if (value is! Map<String, Object?>) {
+      throw FormatException(
+        'the config: "launcher.linuxRuntime" must be an object, got '
+        '${json.encode(value)}',
+      );
+    }
+    return value;
+  }
 
   String _launcherString(String key, String what, {required bool required}) {
     final value = launcher[key];

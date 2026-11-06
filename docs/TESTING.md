@@ -880,10 +880,12 @@ cd e2e/_overlay_tests/native_assets_synthetic && bazel test //...   # macOS-only
 ### `e2e/integration_test`
 
 The integration test rules (`flutter/integration_test.bzl`) on a real app, in the
-host's own desktop session (macOS or Windows), in a browser, on an Android device and
-on an iOS simulator. Its Windows tests are run on a Windows host, by hand or on the
-GCP VM (§ "Windows integration tests (GCP VM)"); on a Mac or Linux host they are
-skipped. Its macOS tests
+host's own desktop session (macOS or Windows), on an X server of the test's own
+(Linux), in a browser, on an Android device and on an iOS simulator. Its Windows
+tests are run on a Windows host, by hand or on the GCP VM (§ "Windows integration
+tests (GCP VM)"); on a Mac or Linux host they are skipped. Its Linux tests need no
+desktop: on a Linux host they run as they are, and on the GCP VM of § "Linux
+integration tests (GCP VM)". Its macOS tests
 launch a window, so run it on a Mac with an unlocked screen and an awake display
 (§ "macOS permission prerequisites", "The display must be awake"); the runner holds
 the display awake itself and fails, saying which, when the screen is locked or the
@@ -904,6 +906,11 @@ Android build (§ "The Android SDK/NDK variables must be exported too") and
 | `:windows_crash_test` | an app that `exit(3)`s mid-test fails its target, and the output says `The Windows app exited with code 3` |
 | `:windows_filter_test` | `--test_filter` runs one of the two cases of `:windows_pass_test` and no other |
 | `:windows_golden_test`, `:windows_golden_mismatch_twin_test` | `matchesGoldenFile` compares with `goldens/windows/swatch.png` and passes; a golden that does not match fails, naming the file, and leaves the four pictures of the failure in the undeclared outputs, as on the other platforms |
+| `:linux_pass_test` | the same two tests in a Linux app's window on an X server the test started, with the pinned Linux runtime's GTK, Mesa and fonts, each reported |
+| `:linux_red_twin_test` | a failing integration test fails its target on Linux, and the JUnit report names the failing case. It wraps `:linux_red` (`manual`) in `outcome_test` |
+| `:linux_crash_test` | an app that `exit(3)`s mid-test fails its target, and the output says `The Linux app exited with code 3` |
+| `:linux_filter_test` | `--test_filter` runs one of the two cases of `:linux_pass_test` and no other |
+| `:linux_golden_test`, `:linux_golden_mismatch_twin_test` | `matchesGoldenFile` compares with `goldens/linux/swatch.png` and passes; a golden that does not match fails, naming the file, and leaves the four pictures of the failure in the undeclared outputs |
 | `:web_pass_test` | the same two tests in headless Chrome (a pinned Chrome for Testing shell), each reported: the suite is driven over the browser's DevTools protocol |
 | `:web_red_twin_test` | a failing integration test fails its target in a browser too, and the JUnit report names the failing case. It wraps `:web_red` (`manual`) in `outcome_test` |
 | `:web_filter_test` | `--test_filter` runs one of the two cases of `:web_pass_test` and no other |
@@ -936,7 +943,7 @@ as the orange swatch (the file's `shasum` changes), `bazel test
 what is committed (`git status` shows nothing) and `bazel test
 //:macos_golden_test` passes.
 
-The web tests run in a headless browser and need no desktop session, but only macOS runs them for now (they are skipped elsewhere): the Linux prerequisites of a browser, the host's libraries and a sandbox the host allows, are not verified.
+The web tests run in a headless browser and need no desktop session. macOS and Linux run them; on Linux the browser loads the pinned Linux runtime's libraries and runs without its sandbox. Windows skips them: they are not verified there.
 
 The Android tests run on the device `ANDROID_SERIAL` names, else the only one
 attached, and fail saying so with none, or several and none named: the Pixel and
@@ -1047,8 +1054,8 @@ quietly never running. A new workspace needs an entry; `bazel run
 | `ffi_example` | macOS, Linux, Windows | native libraries in each platform's bundle | |
 | `cross_compile_example` | macOS (`build`) | the Mac-to-Linux cross toolchain | Linux: a native build is `hello_world`'s; Windows: no such pair |
 | `macos_example`, `ios_example`, `multi_window_example`, `_overlay_tests/native_assets_synthetic` | macOS | Apple-only features | Linux, Windows: Apple-only |
-| `integration_test` | macOS, Windows (`build`) | the integration test rules building the app and test of each case, the Android and iOS apps included on macOS; on Windows the Windows and Android ones, the Android runner with the SDK's `adb.exe`: its tests need a GUI session or a device, which CI never runs a test in | Linux: macOS-only |
-| `dual_hub`, `ffi_plugin_example`, `web_example`, `android_example`, `_overlay_tests/link_hooks` | Linux | their platform-neutral subject, once, on the cheapest runner | macOS, Windows: the same again |
+| `integration_test` | macOS, Linux, Windows (`build`) | the integration test rules building the app and test of each case, the Android and iOS apps included on macOS; on Linux the Linux and web ones, with the pinned Linux runtime fetched and every file of it and of the Chrome that loads it checked against the oldest supported host; on Windows the Windows and Android ones, the Android runner with the SDK's `adb.exe`: most of its tests need a GUI session or a device, which CI never runs a test in | |
+| `dual_hub`, `ffi_plugin_example`, `web_example`, `android_example`, `_overlay_tests/link_hooks` | Linux | their platform-neutral subject, once, on the cheapest runner; web_example's `:render_test` runs the app in the pinned headless Chrome with the pinned Linux runtime | macOS, Windows: the same again |
 | `android_example` | Windows (also) | an Android build on a Windows host: `gen_snapshot.exe`, engine-strip path separators, rules_android JVMs without an up-front heap commit (the committed patch) | |
 | `asset_bundle` | macOS | the `flutter_assets/` tree of every platform against `flutter build`'s, once | Linux, Windows: no other host can analyse its iOS targets |
 | `linux_example` | Linux | Tier-2 Linux rules | macOS, Windows: Linux-only |
@@ -1711,6 +1718,39 @@ runner's, `hello_world`. The console is
 **When to run:** After any change to the integration test rules or the runner for Windows
 (`flutter_windows_integration_test`, `WindowsDevice`, `tools/dev_tool/lib/integration/`).
 
+### Linux integration tests (GCP VM)
+
+`e2e/integration_test`'s Linux and web targets need no desktop and no library of
+the host's beyond glibc and libstdc++, so they run on a stock Ubuntu 24.04 VM with
+none of the packages the visual verification installs: create it with only `gcc`,
+`g++`, `git`, `unzip`, `zip` and `curl`, and check that `ldconfig -p` lists no
+`libgtk-3`, `libnss3` or `libEGL`, which is what makes a pass mean the runtime
+supplied them. Run them on an x86_64 VM (`n2-standard-16`) and an arm64 one
+(`t2a-standard-8`), as each architecture has its own runtime and Chrome.
+
+- **The Android SDK and NDK** on x86_64, as for Windows: the workspace registers
+  the NDK toolchain, so every target in it fails analysis without `ANDROID_HOME`
+  and `ANDROID_NDK_HOME`. Google publishes neither for an arm64 Linux host, so on
+  arm64 copy the Linux and web targets into a scratch workspace that declares
+  only `rules_flutter`, `rules_dart` and the `flutter` extension.
+- **rules_dart's checkout**, shipped beside the tree and named with
+  `--override_module`, as on Windows.
+
+```sh
+bazel test //:linux_pass_test //:linux_filter_test //:linux_red_twin_test \
+  //:linux_crash_test //:linux_golden_test //:linux_golden_mismatch_twin_test \
+  //:web_pass_test //:web_filter_test //:web_red_twin_test //:web_golden_test \
+  //:web_golden_mid_frame_test //:web_golden_mismatch_twin_test
+```
+
+and web_example's `:render_test`. The first run fetches the runtime (about 160
+Debian packages, 350 MB unpacked) and checks it (`FlutterLinuxRuntimeCheck`).
+
+**When to run:** After any change to the integration test rules or the runner for
+Linux (`flutter_linux_integration_test`, `LinuxDevice`,
+`tools/dev_tool/lib/integration/`), to the runtime (`flutter_linux_runtime*.bzl`,
+`flutter/private/tools/linux_runtime.dart`), or to its pins.
+
 ### Profile mode on Linux and Windows (GCP VM)
 
 `gen_snapshot` cannot cross-compile AOT between desktop OSes, so a profile (or
@@ -1767,7 +1807,7 @@ suite. There is no browser-test toolchain in this repo and no `npx` step.
 
 | Check | Where | What it proves |
 |-------|-------|----------------|
-| Render, as a test | `e2e/web_example`, `bazel test :render_test` (macOS) | The app run in a pinned headless Chrome (Chrome for Testing) with an integration test as its program (`flutter_web_integration_test`, `integration_test/render_test.dart`). Three cases, each its own entry in Bazel's report: the screen's text read back out of the widget tree (the engine booted and the framework built the tree), the text of a widget fed by `assets/message.txt` (the asset bundle resolved: a bundle that boots and paints but cannot resolve its assets, or left one out, shows an empty label), and a tap that reaches the app. This is the check that used to be run by hand; it needs no flags and no dev tool, and fails on a blank page. It is skipped where the browser is not verified (Linux, Windows). |
+| Render, as a test | `e2e/web_example`, `bazel test :render_test` (macOS, Linux) | The app run in a pinned headless Chrome (Chrome for Testing) with an integration test as its program (`flutter_web_integration_test`, `integration_test/render_test.dart`). Three cases, each its own entry in Bazel's report: the screen's text read back out of the widget tree (the engine booted and the framework built the tree), the text of a widget fed by `assets/message.txt` (the asset bundle resolved: a bundle that boots and paints but cannot resolve its assets, or left one out, shows an empty label), and a tap that reaches the app. This is the check that used to be run by hand; it needs no flags and no dev tool, and fails on a blank page. It is skipped where the browser is not verified (Windows). |
 | Render | `web_smoke_e2e_test.dart` | Reads text back out of a keyed widget over the agent surface. Answering proves the framework built the tree *and* resolved the asset bundle behind it — a bundle that boots, answers the VM service and paints nothing fails here. |
 | Plugins on web | `plugin_example_e2e_test.dart` (`Web e2e`) | The four `plugin_example_results` strings on web, where each plugin takes a different path than on desktop (`package_info_plus` reads a generated JS manifest, `path_provider` has no web implementation, `url_launcher` goes through `window.open`). |
 | Templating / defines | `custom_boot/test/verify_templating_test.dart` | Substitution outcomes in the built bytes: web defines resolved, kept placeholders survived, `buildConfig` emitted, no `{{` left. |
@@ -1815,6 +1855,7 @@ script's own package requires ≥ 3.13.
 | Linux runner / bundle (`flutter/private/*linux*`) | linux_example, cross_compile_example, GCP VM visual test |
 | Windows runner / bundle (`flutter/private/*windows*`) | windows_example (on Windows), GCP VM visual test |
 | Windows integration tests (`flutter_windows_integration_test`, `WindowsDevice`) | `e2e/integration_test`'s Windows targets on the GCP VM (§ Windows integration tests), windows_example `//...` on Windows, and the platform-neutral integration row |
+| Linux integration tests and the Linux runtime (`flutter_linux_integration_test`, `LinuxDevice`, `flutter_linux_runtime*`, `linux_runtime_pins.bzl`, `tools/update_linux_runtime`) | `e2e/integration_test`'s `:linux_*` and `:web_*` targets and web_example's `:render_test` on the x86_64 and arm64 GCP VMs (§ Linux integration tests), linux_example `//...` on Linux, and the platform-neutral integration row |
 | Desktop engine selection (debug/profile/release) | cross_compile_example `bazel build :cross_linux` + verify on VM |
 | Profile mode (`flutter:profile` selects, profile engine repos) | Root `//...`, macOS and a device by hand, hello_world `//...` on Linux and Windows (CI does this), and the profile run on the Linux and Windows VMs (§ Profile mode on Linux and Windows) |
 | Integration tests (`flutter/integration_test.bzl`, `flutter/private/flutter_integration_*.bzl`, `flutter/private/integration_test/support/`, `tools/dev_tool/lib/integration/`, `bin/integration_test_runner.dart`) | `e2e/integration_test` `//...` on each platform the change touches (macOS, with an unlocked screen, for macOS desktop; the Windows VM for Windows; macOS for web; an attached device and `ANDROID_SERIAL` for Android), dev_tool unit, plus the platform's row; for web, `e2e/web_example` `:render_test` and the Web support row |

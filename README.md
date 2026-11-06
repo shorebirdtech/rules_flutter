@@ -1598,7 +1598,7 @@ Build it for the machine it runs on. `bazel run` does that, and a rule that runs
 
 `package:integration_test` tests run in the real app, on a device or in a browser, and each `testWidgets` is reported as a test case. The test is the `integration_test/app_test.dart` that `flutter create` users write, unchanged: `IntegrationTestWidgetsFlutterBinding.ensureInitialized()`, then `testWidgets` that call the app's own `main()`. The rules are in `@rules_flutter//flutter:integration_test.bzl`.
 
-macOS, Windows, the web (headless Chrome), Android devices and the iOS simulator are the platforms so far; Windows is [below](#windows-integration-tests), the web [after it](#web-integration-tests), Android [after that](#android-integration-tests) and iOS [last](#ios-simulator-integration-tests).
+macOS, Windows, Linux, the web (headless Chrome), Android devices and the iOS simulator are the platforms so far; Windows is [below](#windows-integration-tests), Linux [after it](#linux-integration-tests), the web [next](#web-integration-tests), Android [after that](#android-integration-tests) and iOS [last](#ios-simulator-integration-tests).
 
 ```starlark
 load("@rules_flutter//flutter:defs.bzl", "flutter_application")
@@ -1661,6 +1661,31 @@ flutter_windows_integration_test(
 
 The macro is Tier 1. Tier 2 is `flutter_integration_bootstrap`, `flutter_application_variant`, `flutter_windows_app`, `flutter_desktop_integration_test` and `flutter_desktop_runner`, which the macro composes as `__<name>_bootstrap`, `__<name>_program` and `__<name>_app`.
 
+#### Linux integration tests
+
+`flutter_linux_integration_test` runs the same test file on Linux: the application with the test as its program is built as a Linux bundle in debug mode, started on an X server the test starts for itself, and its suite driven over its VM service, as `flutter test integration_test/app_test.dart -d linux` does. It is the Windows macro, passing `flutter_linux_app`'s arguments (`app_name`, `gtk_app_id`).
+
+```starlark
+load("@rules_flutter//flutter:integration_test.bzl", "flutter_linux_integration_test")
+
+flutter_linux_integration_test(
+    name = "app_linux_test",
+    src = "integration_test/app_test.dart",
+    application = ":app_flutter",
+    deps = [
+        "@deps//:flutter_test",
+        "@deps//:integration_test",
+    ],
+)
+```
+
+- **Runs on a Linux host** (`target_compatible_with`), x86_64 or arm64; a Mac or Windows host skips it.
+- **Nothing of the host's but its C and C++ runtime.** The X server (`Xvfb`), GTK, Mesa's software OpenGL and the fonts come from a pinned runtime: a closure of Debian 13 packages, pinned by path and `sha256` for each architecture and fetched only when a Linux integration test is analysed. The host needs no desktop, no GTK and no X server, and its display, libraries and GTK modules are not used; a test runs the same on a workstation, over SSH and in CI. The host's glibc and libstdc++ must be at least Ubuntu 24.04's (glibc 2.39): the build checks every file of the runtime against that and fails, naming the file, on one that asks for more.
+- **Each test has a screen of its own**, so tests run at once without a lock and never draw on your desktop.
+- **Per-test results, `--test_filter`, `shard_count`, `env`, `data`, goldens and the failures** are as on macOS; an app that exits says `The Linux app exited with code 3 …`. `bazel run :app_linux_test -- --update-goldens` writes the goldens, the Linux one in `goldens/linux/`.
+
+The macro is Tier 1. Tier 2 is `flutter_integration_bootstrap`, `flutter_application_variant`, `flutter_linux_app`, `flutter_desktop_integration_test` and `flutter_desktop_runner`, whose `linux_runtime` is the runtime (`@flutter_linux_runtime_amd64//:runtime` or `_arm64`, a `flutter_linux_runtime`). `bazel run @rules_flutter//tools/update_linux_runtime -- <snapshot>` re-pins the runtime at a snapshot.debian.org timestamp.
+
 #### Web integration tests
 
 `flutter_web_integration_test` runs the same test file in headless Chrome. `flutter test` refuses web devices (flutter/flutter#66264), and `flutter drive -d chrome` reports only pass or fail; this reports each `testWidgets` as a case, as the other platforms do, with `--test_filter` and `shard_count`.
@@ -1684,10 +1709,10 @@ flutter_web_integration_test(
 
 A web app is its own program and takes the sources and `deps` the test compiles, not an `application` (`flutter_web_app` has none): the macro's `package_name`, `srcs`, `deps` and the rest (`assets`, `web_dir`, `base_href`, and the other `flutter_web_app` arguments) are `flutter_web_app`'s. The test's program is that app with the test as its `main`, built in debug mode whatever `-c` says, served from a directory of its own on the loopback and opened in a headless Chrome.
 
-- **The browser is pinned.** It is Chrome for Testing's headless shell (`@rules_flutter//flutter/integration_test:chrome`), downloaded by version and `sha256` for macOS (arm64, x64), Linux x64 and Windows x64, so the page is drawn by the same browser wherever the test runs. Only the host's own is fetched, and only when a web integration test is analysed. A host with no pinned shell skips the test (`@platforms//:incompatible`); it is never run in another browser. `runner` takes a `flutter_chrome_runner` of your own. `bazel run @rules_flutter//tools/update_chrome_for_testing` prints a newer pin.
+- **The browser is pinned.** It is Chrome for Testing's headless shell (`@rules_flutter//flutter/integration_test:chrome`), downloaded by version and `sha256` for macOS (arm64, x64), Linux (x64, arm64) and Windows x64, so the page is drawn by the same browser wherever the test runs. Only the host's own is fetched, and only when a web integration test is analysed. A host with no pinned shell skips the test (`@platforms//:incompatible`); it is never run in another browser. `runner` takes a `flutter_chrome_runner` of your own. `bazel run @rules_flutter//tools/update_chrome_for_testing` prints a newer pin.
 - **The suite is driven over the browser's DevTools protocol**, which a web bundle has in place of a VM service: the page publishes a hook the host calls, and calls a binding the host added, so there is no port to open and no server of the page's own. The browser's profile is deleted when the test ends, and the browser is killed.
 - **A page that is lost fails the target, saying why**: the browser exiting (`Chrome exited with code 139`), the page crashing, or the connection closing; a page that never starts the suite fails at the test's timeout, naming the bootstrap it never reached.
-- **Linux and Windows are not verified yet.** On Linux the shell needs the host's libraries (NSS and the X11 client libraries), and a sandbox the host allows; a missing library fails the launch with the browser's own message. Windows is not run at all.
+- **On Linux the browser loads the pinned Linux runtime's libraries** (see Linux integration tests), never the host's, and the build checks that it needs none the runtime lacks. It runs without its sandbox, as upstream's headless Chrome does: the sandbox needs unprivileged user namespaces, which Ubuntu denies by default since 23.10, or Chrome's set-user-ID helper installed by root. Windows is not verified yet.
 
 The macro is Tier 1. Tier 2 is `flutter_integration_bootstrap` (with `src_import = "relative"`: a web compile mounts no file-system root to name the test under), `flutter_web_app` or `flutter_web_bundle`, `flutter_web_bundle_integration_test` and `flutter_chrome_runner`, which the macro composes as `__<name>_bootstrap` and `__<name>_app`.
 
