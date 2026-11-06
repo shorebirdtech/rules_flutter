@@ -54,23 +54,36 @@ Future<void> waitForSsh(
   final deadline = DateTime.now().add(timeout);
   stderr.writeln('Waiting for $vmName to accept SSH ...');
   while (DateTime.now().isBefore(deadline)) {
-    try {
-      await gcloud([
-        'compute',
-        'ssh',
-        vmName,
-        '--command',
-        'echo ready',
-        '--ssh-flag=-o',
-        '--ssh-flag=ConnectTimeout=5',
-        '--ssh-flag=-o',
-        '--ssh-flag=StrictHostKeyChecking=no',
-      ], quiet: true);
+    // Each attempt is bounded: a Windows VM's sshd can accept and
+    // authenticate a connection while sysprep is still running and then never
+    // run the command, and ssh's ConnectTimeout does not cover that, so one
+    // attempt would otherwise wait forever.
+    final attempt = await Process.start('gcloud', [
+      'compute',
+      'ssh',
+      vmName,
+      '--command',
+      'echo ready',
+      '--ssh-flag=-o',
+      '--ssh-flag=ConnectTimeout=5',
+      '--ssh-flag=-o',
+      '--ssh-flag=StrictHostKeyChecking=no',
+    ]);
+    final output = attempt.stdout.transform(systemEncoding.decoder).join();
+    final drained = attempt.stderr.drain<void>();
+    final exitCode = await attempt.exitCode.timeout(
+      const Duration(minutes: 1),
+      onTimeout: () {
+        attempt.kill();
+        return -1;
+      },
+    );
+    if (exitCode == 0 && (await output).contains('ready')) {
+      await drained;
       stderr.writeln('$vmName is ready.');
       return;
-    } catch (_) {
-      await Future<void>.delayed(const Duration(seconds: 10));
     }
+    await Future<void>.delayed(const Duration(seconds: 10));
   }
   throw Exception('Timeout waiting for $vmName SSH');
 }
