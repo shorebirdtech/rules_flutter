@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -27,6 +26,8 @@ class _TolerantComparator extends GoldenFileComparator {
   Future<bool> compare(Uint8List imageBytes, Uri golden) async {
     try {
       return await _compares.compare(imageBytes, golden);
+      // `FlutterError` is how the comparator reports a difference.
+      // ignore: avoid_catching_errors
     } on FlutterError {
       // A picture that differs from its golden: the pixels, not a missing file.
       return true;

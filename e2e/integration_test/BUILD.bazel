@@ -32,6 +32,30 @@ dart_analysis_test(
     targets = [":app_lib"],
 )
 
+# The test files, as a library for the same reason: the tests' programs are
+# bundles, which the analyzer does not look into.
+flutter_library(
+    name = "test_files_lib",
+    package_name = "integration_test_example",
+    testonly = True,
+    srcs = glob([
+        "integration_test/**/*.dart",
+        "test/**/*.dart",
+    ]),
+    deps = [
+        ":app_lib",
+        "@deps//:flutter",
+        "@deps//:flutter_test",
+        "@deps//:integration_test",
+    ],
+)
+
+dart_analysis_test(
+    name = "test_files_analysis",
+    testonly = True,
+    targets = [":test_files_lib"],
+)
+
 # The counter app. Each integration test runs it as the application with the
 # test as its program.
 flutter_application(

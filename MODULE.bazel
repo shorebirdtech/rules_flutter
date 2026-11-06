@@ -189,3 +189,11 @@ flutter.pub(
     lock = "//flutter/private/gen_l10n:pubspec.lock",
 )
 use_repo(flutter, "gen_l10n_deps")
+
+# The packages the integration-test support library imports, for the analysis
+# of that library (//flutter/tests/integration_support_analysis).
+flutter.pub(
+    name = "integration_support_deps",
+    lock = "//flutter/tests/integration_support_analysis:pubspec.lock",
+)
+use_repo(flutter, "integration_support_deps")

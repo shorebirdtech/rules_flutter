@@ -1,0 +1,27 @@
+load("//flutter:defs.bzl", "flutter_library")
+
+exports_files(["pubspec.lock"])
+
+# The integration-test support library, as a library so the analysis aspect
+# reaches it. `flutter_integration_bootstrap` stages these files into each
+# program as that program's own sources, which no analysis of a program checks,
+# and they import packages of the user's pub hub, so they cannot be a library
+# where they sit. This one resolves those packages from a hub of this repository.
+flutter_library(
+    name = "support",
+    package_name = "integration_support_analysis",
+    srcs = [
+        "//flutter/private/integration_test/support:_channel.dart",
+        "//flutter/private/integration_test/support:_channel_io.dart",
+        "//flutter/private/integration_test/support:_channel_web.dart",
+        "//flutter/private/integration_test/support:_golden.dart",
+        "//flutter/private/integration_test/support:integration_suite.dart",
+    ],
+    deps = [
+        "@integration_support_deps//:flutter_test",
+        "@integration_support_deps//:integration_test",
+        "@integration_support_deps//:stack_trace",
+        "@integration_support_deps//:stream_channel",
+        "@integration_support_deps//:test_api",
+    ],
+)

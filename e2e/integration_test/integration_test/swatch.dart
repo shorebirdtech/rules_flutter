@@ -8,10 +8,10 @@ import 'package:flutter/material.dart';
 String get goldenPath =>
     'goldens/${kIsWeb ? 'web' : defaultTargetPlatform.name}/swatch.png';
 
-/// What the swatch tests draw: a flat, text-free square of a fixed logical size,
-/// so what is compared depends on no font and no window size. `matchesGoldenFile`
-/// captures it at one device pixel per logical pixel, so the same picture
-/// is made on a phone, a Retina display and a browser.
+/// What the swatch tests draw: a flat, text-free square of a fixed logical
+/// size, so what is compared depends on no font and no window size.
+/// `matchesGoldenFile` captures it at one device pixel per logical pixel, so
+/// the same picture is made on a phone, a Retina display and a browser.
 Widget swatch(Color color) => Directionality(
   textDirection: TextDirection.ltr,
   child: Center(

@@ -1,0 +1,14 @@
+name: integration_support_analysis
+publish_to: none
+environment:
+  sdk: ^3.13.0
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_test:
+    sdk: flutter
+  integration_test:
+    sdk: flutter
+  stack_trace: ^1.12.0
+  stream_channel: ^2.1.0
+  test_api: any
