@@ -2,11 +2,15 @@
 ///
 /// Usage:
 ///   dart run tools/vm/run_e2e.dart <vm-name> [--windows] \
-///       [--folders=.,e2e/hello_world] [--keep-going]
+///       [--folders=.,e2e/hello_world] [--keep-going] \
+///       [--rules-dart=../rules_dart]
 ///
-/// Transfers the committed working tree (`git archive HEAD`) to the VM, clones
-/// the `rules_dart` sibling it depends on, extracts, then runs `bazel test
-/// //...` in each folder, mirroring `.github/workflows/ci.yaml`. Exit code 4
+/// Transfers the committed working tree to the VM, extracts it, then runs
+/// `bazel test //...` in each folder, mirroring `.github/workflows/ci.yaml`.
+/// With `--rules-dart`, that checkout's committed HEAD goes over too and every
+/// folder builds against it (`--override_module`, for rules_dart and, in the
+/// root, its `overhead`), as a local `.bazelrc.user` does; without it, the
+/// pinned release. Exit code 4
 /// ("no test targets") counts as a pass. Prints a per-folder PASS/FAIL summary
 /// and exits non-zero if any folder failed.
 ///
@@ -67,6 +71,9 @@ Future<void> main(List<String> args) async {
   final foldersArg = args
       .firstWhere((a) => a.startsWith('--folders='), orElse: () => '')
       .replaceFirst('--folders=', '');
+  final rulesDartArg = args
+      .firstWhere((a) => a.startsWith('--rules-dart='), orElse: () => '')
+      .replaceFirst('--rules-dart=', '');
   final folders = foldersArg.isEmpty
       ? _ciFolders
       : foldersArg.split(',').map((s) => s.trim()).toList();
@@ -109,6 +116,23 @@ Future<void> main(List<String> args) async {
     environment: {'COPYFILE_DISABLE': '1'},
   );
 
+  // The rules_dart checkout to build against, as a bundle of its HEAD: git on
+  // the VM checks it out with its own path handling, and the bundle carries
+  // commits the remote may not have yet.
+  String? rulesDartBundle;
+  if (rulesDartArg.isNotEmpty) {
+    rulesDartBundle = '${Directory.systemTemp.path}/rules_dart_src.bundle';
+    _warnIfDirty(rulesDartArg);
+    _run('git', [
+      '-C',
+      rulesDartArg,
+      'bundle',
+      'create',
+      rulesDartBundle,
+      'HEAD',
+    ]);
+  }
+
   // 2. Wait for the toolchain, then transfer + extract + clone rules_dart.
   await _waitForToolchain(vmName, isWindows: isWindows);
   print('Transferring source tree to $vmName ...');
@@ -128,12 +152,15 @@ Future<void> main(List<String> args) async {
       '"C:\\Program Files\\Git\\usr\\bin\\tar.exe" '
       '-xzf /c/rf_src.tgz -C /c/rf/rules_flutter',
     );
-    await sshExec(vmName, 'rmdir /s /q C:\\rules_dart');
-    await sshRun(
-      vmName,
-      'git clone --depth 1 https://github.com/aran/rules_dart.git '
-      'C:\\rules_dart',
-    );
+    if (rulesDartBundle != null) {
+      await scpToVm(vmName, rulesDartBundle, 'C:/rules_dart.bundle');
+      await sshExec(vmName, 'rmdir /s /q C:\\rules_dart');
+      // autocrlf off: the build must see the committed bytes.
+      await sshRun(
+        vmName,
+        'git -c core.autocrlf=false clone C:\\rules_dart.bundle C:\\rules_dart',
+      );
+    }
   } else {
     await scpToVm(vmName, tgz, '~/rules_flutter_src.tgz', compress: true);
     await sshRun(
@@ -141,12 +168,14 @@ Future<void> main(List<String> args) async {
       "bash -lc 'rm -rf ~/rf && mkdir -p ~/rf/rules_flutter && "
       "tar xzf ~/rules_flutter_src.tgz -C ~/rf/rules_flutter'",
     );
-    await sshRun(
-      vmName,
-      "bash -lc 'rm -rf ~/rules_dart && "
-      "git clone --depth 1 https://github.com/aran/rules_dart.git "
-      "~/rules_dart'",
-    );
+    if (rulesDartBundle != null) {
+      await scpToVm(vmName, rulesDartBundle, '~/rules_dart.bundle');
+      await sshRun(
+        vmName,
+        "bash -lc 'rm -rf ~/rules_dart && "
+        "git clone ~/rules_dart.bundle ~/rules_dart'",
+      );
+    }
   }
 
   // 3. Run each folder.
@@ -158,6 +187,7 @@ Future<void> main(List<String> args) async {
       folder,
       index: results.length,
       isWindows: isWindows,
+      overrideRulesDart: rulesDartBundle != null,
     );
     results.add(result);
     stdout.writeln(
@@ -196,7 +226,16 @@ Future<_FolderResult> _runFolder(
   String folder, {
   required int index,
   required bool isWindows,
+  required bool overrideRulesDart,
 }) async {
+  // The overrides a local `.bazelrc.user` carries, on the command line. The
+  // lock stays as committed; only the root depends on overhead.
+  final rulesDart = isWindows ? 'C:/rules_dart' : '\$HOME/rules_dart';
+  final overrides = overrideRulesDart
+      ? '--override_module=rules_dart=$rulesDart '
+            '${folder == '.' ? '--override_module=overhead=$rulesDart/overhead ' : ''}'
+            '--lockfile_mode=off '
+      : '';
   final String command;
   if (isWindows) {
     final winFolder = folder == '.'
@@ -207,7 +246,7 @@ Future<_FolderResult> _runFolder(
     command =
         'cmd /v:on /c "cd /d $winFolder && '
         'bazel --output_base=$_winOutputRoot/$index '
-        'test --test_output=errors //... & '
+        'test --test_output=errors $overrides//... & '
         'echo RF_EXIT=!errorlevel!"';
   } else {
     final dir = folder == '.'
@@ -215,7 +254,7 @@ Future<_FolderResult> _runFolder(
         : '\$HOME/rf/rules_flutter/$folder';
     command =
         "bash -lc 'cd $dir && "
-        "bazel test --test_output=errors //...; echo RF_EXIT=\$?'";
+        "bazel test --test_output=errors $overrides//...; echo RF_EXIT=\$?'";
   }
 
   final ProcessResult result;
