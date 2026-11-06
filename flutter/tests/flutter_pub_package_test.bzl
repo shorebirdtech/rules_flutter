@@ -17,6 +17,7 @@ load(
     "apply_overlay_substitutions",
     "find_hardcoded_hub_dep",
     "find_hardcoded_language_version",
+    "flavor_restrictions",
     "make_android_subpackage_build_content",
     "make_dart_member_build_content",
     "make_flutter_member_build_content",
@@ -795,6 +796,139 @@ platform_restricted_shaders_are_stated_in_the_spoke_test = unittest.make(
     _platform_restricted_shaders_are_stated_in_the_spoke_test_impl,
 )
 
+def _flavor_restricted_assets_are_stated_in_the_spoke_test_impl(ctx):
+    """An asset a `flavors:` entry restricts is stated with its flavors."""
+    env = unittest.begin(ctx)
+
+    content = make_flutter_member_build_content(
+        name = "restricted",
+        language_version = "3.4",
+        code_assets = [],
+        has_unreplaced_hook = "",
+        fonts_json_str = "",
+        font_files = {},
+        pkg_assets = {":assets/a.txt": "assets/a.txt", ":assets/b.txt": "assets/b.txt"},
+        pkg_shaders = {},
+        pkg_asset_flavors = {"assets/a.txt": ["paid", "premium"]},
+    )
+
+    asserts.true(env, "pkg_asset_flavors" in content, content)
+    asserts.true(env, '"assets/a.txt": ["paid", "premium"]' in content, content)
+    asserts.false(env, '"assets/b.txt": [' in content, content)
+
+    return unittest.end(env)
+
+flavor_restricted_assets_are_stated_in_the_spoke_test = unittest.make(
+    _flavor_restricted_assets_are_stated_in_the_spoke_test_impl,
+)
+
+def _flavor_restricted_shaders_are_stated_in_the_spoke_test_impl(ctx):
+    """A shader a `flavors:` entry restricts is stated with its flavors."""
+    env = unittest.begin(ctx)
+
+    content = make_flutter_member_build_content(
+        name = "restricted",
+        language_version = "3.4",
+        code_assets = [],
+        has_unreplaced_hook = "",
+        fonts_json_str = "",
+        font_files = {},
+        pkg_assets = {},
+        pkg_shaders = {":shaders/a.frag": "shaders/a.frag", ":shaders/b.frag": "shaders/b.frag"},
+        pkg_shader_flavors = {"shaders/a.frag": ["paid", "premium"]},
+    )
+
+    asserts.true(env, "pkg_shader_flavors" in content, content)
+    asserts.true(env, '"shaders/a.frag": ["paid", "premium"]' in content, content)
+    asserts.false(env, '"shaders/b.frag": [' in content, content)
+
+    return unittest.end(env)
+
+flavor_restricted_shaders_are_stated_in_the_spoke_test = unittest.make(
+    _flavor_restricted_shaders_are_stated_in_the_spoke_test_impl,
+)
+
+def _flavor_conflict_message_test_impl(ctx):
+    """One file under entries with different flavor sets is refused, naming both entries."""
+    env = unittest.begin(ctx)
+
+    tracker = flavor_restrictions("pkg")
+    asserts.equals(env, None, tracker.add("assets/a.txt", "assets/a.txt", []))
+    error = tracker.add("assets/a.txt", "assets/a.txt", ["free"])
+
+    asserts.equals(
+        env,
+        "package pkg: Multiple assets entries include the file \"assets/a.txt\", " +
+        "but they specify different lists of flavors.\n" +
+        "An entry with the path \"assets/a.txt\" does not specify any flavors.\n" +
+        "An entry with the path \"assets/a.txt\" specifies the flavor(s): \"free\".",
+        error,
+    )
+
+    return unittest.end(env)
+
+flavor_conflict_message_test = unittest.make(_flavor_conflict_message_test_impl)
+
+def _flavor_conflict_through_a_directory_entry_test_impl(ctx):
+    """A conflict that involves a directory entry also suggests separate directories."""
+    env = unittest.begin(ctx)
+
+    tracker = flavor_restrictions("pkg")
+    asserts.equals(env, None, tracker.add("assets/a.txt", "assets/", ["paid", "free"]))
+    error = tracker.add("assets/a.txt", "assets/a.txt", ["paid"])
+
+    asserts.true(env, "specifies the flavor(s): \"free\", \"paid\"." in error, error)
+    asserts.true(env, "specifies the flavor(s): \"paid\"." in error, error)
+    asserts.true(env, error.endswith("\n\nConsider organizing assets with different flavors into different directories."), error)
+
+    return unittest.end(env)
+
+flavor_conflict_through_a_directory_entry_test = unittest.make(
+    _flavor_conflict_through_a_directory_entry_test_impl,
+)
+
+def _flavor_order_and_other_files_do_not_conflict_test_impl(ctx):
+    """The same flavors in another order, or different flavors on different files, are fine."""
+    env = unittest.begin(ctx)
+
+    tracker = flavor_restrictions("pkg")
+    asserts.equals(env, None, tracker.add("assets/a.txt", "assets/a.txt", ["paid", "free"]))
+    asserts.equals(env, None, tracker.add("assets/a.txt", "assets/", ["free", "paid"]))
+    asserts.equals(env, None, tracker.add("assets/b.txt", "assets/b.txt", ["other"]))
+    asserts.equals(env, None, tracker.add("assets/c.txt", "assets/c.txt", []))
+
+    # Only the files that are restricted are reported, with their flavors sorted.
+    asserts.equals(
+        env,
+        {"assets/a.txt": ["free", "paid"], "assets/b.txt": ["other"]},
+        tracker.flavors(),
+    )
+
+    return unittest.end(env)
+
+flavor_order_and_other_files_do_not_conflict_test = unittest.make(
+    _flavor_order_and_other_files_do_not_conflict_test_impl,
+)
+
+def _flavor_variants_inherit_the_entry_flavors_test_impl(ctx):
+    """A resolution variant is recorded with its entry's flavors and is not checked."""
+    env = unittest.begin(ctx)
+
+    tracker = flavor_restrictions("pkg")
+    asserts.equals(env, None, tracker.add("assets/a.png", "assets/a.png", ["paid"]))
+    asserts.equals(env, None, tracker.add("assets/2.0x/a.png", "assets/a.png", ["paid"], main = False))
+    asserts.equals(
+        env,
+        {"assets/a.png": ["paid"], "assets/2.0x/a.png": ["paid"]},
+        tracker.flavors(),
+    )
+
+    return unittest.end(env)
+
+flavor_variants_inherit_the_entry_flavors_test = unittest.make(
+    _flavor_variants_inherit_the_entry_flavors_test_impl,
+)
+
 def flutter_pub_package_test_suite(name):
     unittest.suite(
         name,
@@ -818,4 +952,10 @@ def flutter_pub_package_test_suite(name):
         desktop_plugin_libraries_carry_their_link_libraries_test,
         platform_restricted_assets_are_stated_in_the_spoke_test,
         platform_restricted_shaders_are_stated_in_the_spoke_test,
+        flavor_restricted_assets_are_stated_in_the_spoke_test,
+        flavor_restricted_shaders_are_stated_in_the_spoke_test,
+        flavor_conflict_message_test,
+        flavor_conflict_through_a_directory_entry_test,
+        flavor_order_and_other_files_do_not_conflict_test,
+        flavor_variants_inherit_the_entry_flavors_test,
     )
