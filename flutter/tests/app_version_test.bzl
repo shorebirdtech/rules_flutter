@@ -10,6 +10,7 @@ Instantiated from `flutter/tests/app_version/BUILD.bazel`, beside its fixtures.
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("@rules_apple//apple:providers.bzl", "AppleBundleVersionInfo")
 load("//flutter:android.bzl", "flutter_android_manifest_merge")
+load("//flutter:defs.bzl", "flutter_application")
 load("//flutter:ios.bzl", "flutter_apple_bundle_version")
 load("//flutter:web.bzl", "flutter_web_bundle")
 load(
@@ -266,6 +267,68 @@ def app_version_test_suite(name):
         "apple_invalid",
         target_under_test = ":_apple_invalid",
         messages = ["_apple_invalid: build_name = \"1.0-beta\" is not a valid CFBundleShortVersionString"],
+    )
+
+    # An app takes the version of the application it is built over; setting
+    # the same one is fine, a different one is an error.
+    flutter_application(
+        name = "_versioned_application",
+        package_name = "app_version",
+        main = "main.dart",
+        build_name = "2.1",
+        build_number = "42",
+        tags = ["manual"],
+    )
+    flutter_apple_bundle_version(
+        name = "_apple_from_application",
+        application = ":_versioned_application",
+        tags = ["manual"],
+    )
+    add(
+        _apple_bundle_version_test,
+        "apple_from_application",
+        target_under_test = ":_apple_from_application",
+        build_version = "42",
+        short_version_string = "2.1.0",
+    )
+    flutter_apple_bundle_version(
+        name = "_apple_same_as_application",
+        application = ":_versioned_application",
+        build_name = "2.1",
+        tags = ["manual"],
+    )
+    add(
+        _apple_bundle_version_test,
+        "apple_same_as_application",
+        target_under_test = ":_apple_same_as_application",
+        build_version = "42",
+        short_version_string = "2.1.0",
+    )
+    flutter_apple_bundle_version(
+        name = "_apple_differs_from_application",
+        application = ":_versioned_application",
+        build_number = "43",
+        tags = ["manual"],
+    )
+    add(
+        _expect_failure_test,
+        "apple_differs_from_application",
+        target_under_test = ":_apple_differs_from_application",
+        messages = ["build_number = \"43\", and the application ", "_versioned_application it is built over has build_number = \"42\""],
+    )
+    flutter_android_manifest_merge(
+        name = "_android_from_application",
+        application = ":_versioned_application",
+        base = "AndroidManifest.xml",
+        set_version = True,
+        tags = ["manual"],
+    )
+    add(
+        _android_version_args_test,
+        "android_from_application",
+        target_under_test = ":_android_from_application",
+        expected = {"--version-code": "42", "--version-name": "2.1"},
+        absent = ["--default-version-code", "--default-version-name"],
     )
 
     # Android.

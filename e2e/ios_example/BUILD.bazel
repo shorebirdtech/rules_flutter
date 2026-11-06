@@ -38,6 +38,11 @@ flutter_application(
     # configuration no bare build produces. asset_reload_e2e_test edits
     # assets/message.txt on the simulator and asserts the change arrives.
     assets = glob(["assets/**"]),
+    # Not the default, and the same as `:app`'s, whose bundle and program must
+    # agree. Two numbers, which become three in the bundle as `flutter build`
+    # pads them.
+    build_name = "2.3",
+    build_number = "42",
     main = "lib/main.dart",
     min_os_version = IOS_MINIMUM_OS_VERSION,
     deps = [

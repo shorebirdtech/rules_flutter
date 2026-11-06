@@ -394,9 +394,13 @@ def flutter_ios_app(
             --build-name`: numbers separated by periods, padded to three
             as `flutter build` pads them (`2.1` is `2.1.0`). Defaults to
             `1.0.0`. May be a `select()`, whose `None` is the default.
+            Unset, the `application`'s `build_name`. Set, the
+            `application` must set the same.
         build_number: CFBundleVersion, as `flutter build --build-number`:
             numbers separated by periods. Defaults to `1`. May be a
             `select()`.
+            Unset, the `application`'s `build_number`. Set, the
+            `application` must set the same.
         launch_storyboard: Override launch storyboard. Defaults to
             ios/Runner/Base.lproj/LaunchScreen.storyboard.
         entitlements: Override entitlements wiring. By default the macro
@@ -686,6 +690,7 @@ def flutter_ios_app(
     if not version:
         _flutter_apple_bundle_version(
             name = "__%s_version" % name,
+            application = application,
             build_name = version_arg(build_name),
             build_number = version_arg(build_number),
             tags = tags,

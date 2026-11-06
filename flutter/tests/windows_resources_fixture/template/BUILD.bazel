@@ -1,5 +1,15 @@
+load("//flutter:defs.bzl", "flutter_application")
 load("//flutter:windows.bzl", "flutter_windows_app")
 load("//flutter/tests:windows_resources_test.bzl", "windows_resources_test_suite", "windows_runner_title_test")
+
+# The application's build number is the app's.
+flutter_application(
+    name = "app",
+    package_name = "windows_resources_fixture",
+    build_number = "9",
+    main = "//flutter/tests/windows_resources_fixture:main.dart",
+    tags = ["manual"],
+)
 
 # An app with no `windows/runner/`: the built-in runner's resource script,
 # naming the app. The build name is a `select()` whose `None` keeps the default;
@@ -7,7 +17,7 @@ load("//flutter/tests:windows_resources_test.bzl", "windows_resources_test_suite
 flutter_windows_app(
     name = "builtin",
     app_name = "Built In",
-    application = "//flutter/tests/windows_resources_fixture:app",
+    application = ":app",
     build_name = select({"//conditions:default": None}),
     build_number = select({"//conditions:default": "9"}),
     tags = ["manual"],

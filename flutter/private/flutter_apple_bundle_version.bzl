@@ -2,9 +2,11 @@
 
 load("@rules_apple//apple:providers.bzl", "apple_provider")
 load("//flutter/private:app_version.bzl", "apple_version")
+load("//flutter/private:application_version.bzl", "APPLICATION_VERSION_ATTR", "application_version")
 
 def _impl(ctx):
-    version = apple_version(ctx.attr.build_name, ctx.attr.build_number)
+    given = application_version(ctx.label, ctx.attr.application, ctx.attr.build_name, ctx.attr.build_number)
+    version = apple_version(given.build_name, given.build_number)
     if version.error:
         fail("%s: %s" % (ctx.label, version.error))
 
@@ -22,7 +24,7 @@ def _impl(ctx):
 
 flutter_apple_bundle_version = rule(
     implementation = _impl,
-    attrs = {
+    attrs = APPLICATION_VERSION_ATTR | {
         "build_name": attr.string(
             doc = "CFBundleShortVersionString, as `flutter build --build-name`: " +
                   "numbers separated by periods, padded to three (`2.1` is " +

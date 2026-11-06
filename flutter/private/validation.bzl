@@ -1,5 +1,7 @@
 """Shared validation and sanitization helpers for Flutter rules."""
 
+load("//flutter/private:sdk_defines.bzl", "VERSION_DEFINE_KEYS")
+
 def validate_bundle_id(bundle_id):
     """Validate that a bundle_id is a well-formed reverse-DNS identifier.
 
@@ -372,11 +374,14 @@ def is_valid_web_compiler_renderer(compiler, renderer):
 # compilation mode (see flutter_compile_kernel and the web compile actions),
 # flutter.dart_plugin_registrant names the generated registrant library the
 # engine invokes before main(), and FLUTTER_APP_FLAVOR is what `appFlavor`
-# reads, set from the target's `flavor`. User-supplied values would silently
-# corrupt mode semantics, break plugin registration or disagree with the
-# target's flavor, so they are rejected up front — matching flutter_tools' own
-# --dart-define policy.
-RESERVED_DART_DEFINE_KEYS = ("dart.vm.profile", "dart.vm.product", "flutter.dart_plugin_registrant", "FLUTTER_APP_FLAVOR")
+# reads, set from the target's `flavor`, and FLUTTER_BUILD_NAME,
+# FLUTTER_BUILD_NUMBER and the FlutterVersion keys (`VERSION_DEFINE_KEYS`) are
+# what `appBuildName` and `FlutterVersion` read, set from the target's
+# `build_name` and `build_number` and the toolchain's release. User-supplied
+# values would silently corrupt mode semantics, break plugin registration or
+# disagree with the target, so they are rejected up front — matching
+# flutter_tools' own --dart-define policy.
+RESERVED_DART_DEFINE_KEYS = ("dart.vm.profile", "dart.vm.product", "flutter.dart_plugin_registrant", "FLUTTER_APP_FLAVOR") + VERSION_DEFINE_KEYS
 
 def validate_dart_defines(defines, what):
     """Validate a list of Dart environment defines (KEY=VALUE strings).
@@ -392,7 +397,9 @@ def validate_dart_defines(defines, what):
                 ("Invalid Dart define %r in %s: defines must be non-empty " +
                  "and must not set the reserved keys %s (the build sets " +
                  "these itself: the dart.vm.* keys from the compilation mode, " +
-                 "FLUTTER_APP_FLAVOR from `flavor`, and " +
+                 "FLUTTER_APP_FLAVOR from `flavor`, FLUTTER_BUILD_NAME and " +
+                 "FLUTTER_BUILD_NUMBER from `build_name` and `build_number`, the " +
+                 "FlutterVersion ones from the Flutter release, and " +
                  "flutter.dart_plugin_registrant for the plugin registrant)") % (define, what, ", ".join(RESERVED_DART_DEFINE_KEYS)),
             )
 

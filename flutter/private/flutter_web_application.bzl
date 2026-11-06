@@ -82,6 +82,7 @@ load(
 )
 load("//flutter/private:path_mapping.bzl", "file_ref", "json_config_args")
 load("//flutter/private:plugin_registrant.bzl", "generate_dart_plugin_registrant")
+load("//flutter/private:sdk_defines.bzl", "version_dart_defines")
 load(
     "//flutter/private:validation.bzl",
     "escape_html",
@@ -384,8 +385,13 @@ def _flutter_web_bundle_impl(ctx):
 
     # Merged once for all compile actions below (dart2wasm, dart2js, icon
     # tree-shake kernel) and the dev-config emission: the user's defines and
-    # the flavor's. There is no `build_info` on web to keep the flavor out of.
-    user_defines = merge_dart_defines(ctx) + flavor_dart_defines(ctx.attr.flavor)
+    # the flavor's, the app's version and the SDK's. There is no `build_info`
+    # on web to keep the flavor out of.
+    user_defines = merge_dart_defines(ctx) + flavor_dart_defines(ctx.attr.flavor) + version_dart_defines(
+        tools.version,
+        ctx.attr.build_name,
+        ctx.attr.build_number,
+    )
 
     # The build mode drives the mode defines of every compile action below,
     # the same way the native kernel path switches on COMPILATION_MODE.

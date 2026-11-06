@@ -3,11 +3,18 @@ load("//flutter:defs.bzl", "flutter_application")
 load("//flutter:windows.bzl", "flutter_windows_app")
 load("//flutter/tests:windows_resources_test.bzl", "windows_resources_test_suite", "windows_runner_title_test")
 
+exports_files(
+    ["main.dart"],
+    visibility = ["//flutter/tests/windows_resources_fixture:__subpackages__"],
+)
+
 # A `flutter create` runner's layout, with stand-in files: the analysis tests
 # read what `flutter_windows_app` makes of it and never compile it.
 flutter_application(
     name = "app",
     package_name = "windows_resources_fixture",
+    build_name = "2.3.4",
+    build_number = "7",
     main = "main.dart",
     tags = ["manual"],
     visibility = ["//flutter/tests/windows_resources_fixture:__subpackages__"],

@@ -15,22 +15,25 @@ load("@rules_cc//cc:find_cc_toolchain.bzl", "CC_TOOLCHAIN_TYPE", "find_cc_toolch
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("//flutter/private:app_version.bzl", "windows_version")
+load("//flutter/private:application_version.bzl", "APPLICATION_VERSION_ATTR", "application_version")
 
 WINDOWS_RESOURCE_COMPILER_TOOLCHAIN_TYPE = "@bazel_tools//tools/res:toolchain_type"
 
 def windows_version_defines(ctx):
     """The `FLUTTER_VERSION*` defines `flutter create`'s `Runner.rc` reads.
 
-    From the rule's `build_name` and `build_number`, as `flutter build
+    From the rule's `build_name` and `build_number`, or its application's, as `flutter build
     windows` defines them for its CMake build.
 
     Args:
-        ctx: The context of a rule with `build_name` and `build_number`.
+        ctx: The context of a rule with `build_name` and `build_number`, and
+            an `application` attribute (`APPLICATION_VERSION_ATTR`) that may be unset.
 
     Returns:
         A list of `NAME=value` defines.
     """
-    version = windows_version(ctx.attr.build_name, ctx.attr.build_number)
+    given = application_version(ctx.label, ctx.attr.application, ctx.attr.build_name, ctx.attr.build_number)
+    version = windows_version(given.build_name, given.build_number)
     if version.error:
         fail("%s: %s" % (ctx.label, version.error))
     return [
@@ -41,8 +44,9 @@ def windows_version_defines(ctx):
         "FLUTTER_VERSION_BUILD=%d" % version.build,
     ]
 
-# `build_name` and `build_number`, for a rule that defines the version.
-WINDOWS_VERSION_ATTRS = {
+# `build_name` and `build_number`, for a rule that defines the version, and the
+# `application` it takes them from when it sets none.
+WINDOWS_VERSION_ATTRS = APPLICATION_VERSION_ATTR | {
     "build_name": attr.string(
         doc = "The version, `MAJOR.MINOR.PATCH`, as `flutter build --build-name` " +
               "takes it. Empty is `flutter create`'s `1.0.0`.",

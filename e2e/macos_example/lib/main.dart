@@ -2,7 +2,8 @@ import 'dart:ffi';
 
 import 'package:add_plugin/add_plugin.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show appFlavor;
+import 'package:flutter/services.dart'
+    show FlutterVersion, appBuildName, appBuildNumber, appFlavor;
 
 /// `sub` from `libsub.dylib`, which the build produces in a subdirectory of
 /// its package (`vendor/lib/`) rather than at the package root. Opened by bare
@@ -24,6 +25,14 @@ void main() {
   // The flavor of the target that was built: `paid` for `:macos_example_paid`,
   // null for the others.
   debugPrint('macos_example flavor=$appFlavor');
+
+  // What the build told the program about itself: the target's `build_name`
+  // and `build_number`, and the Flutter release that compiled it. They are
+  // compile-time defines, so a hot restart must report them unchanged.
+  debugPrint(
+    'macos_example_version name=$appBuildName number=$appBuildNumber '
+    'flutter=${FlutterVersion.version} dart=${FlutterVersion.dartVersion}',
+  );
 
   runApp(MyApp(result: result, difference: difference));
 }

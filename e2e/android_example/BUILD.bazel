@@ -85,6 +85,10 @@ flutter_application(
     name = "app_flutter",
     package_name = "android_example",
     srcs = glob(["lib/**/*.dart"]),
+    # Not the default: every app built over this has it as its version, and
+    # `:second_app` states it too, which has to agree.
+    build_name = "2.3.4",
+    build_number = "42",
     code_assets = [
         ":count_a_combined",
         ":count_b_combined",

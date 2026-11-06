@@ -57,7 +57,11 @@ def windows_version_test_suite(name):
 def _platform(label):
     return {"//command_line_option:platforms": str(Label(label))}
 
+# Debug, since a resource script takes its version from the application it is
+# built over, and so analyses it: a release build of a Windows application is
+# AOT, which only a Windows host can make.
 _WITH_RC = _platform("//flutter/platforms:windows_x64") | {
+    "//command_line_option:compilation_mode": "dbg",
     "//command_line_option:extra_toolchains": [str(Label("//flutter/tests/windows_resources_fixture:fake_rc"))],
 }
 
@@ -98,7 +102,11 @@ def _no_compiler_impl(ctx):
 _no_compiler_test = analysistest.make(
     _no_compiler_impl,
     expect_failure = True,
-    config_settings = _platform("//flutter/platforms:linux_x64"),
+    config_settings = _platform("//flutter/platforms:linux_x64") | {
+        # The application it takes its version from is analysed too, and a
+        # release build of it is AOT, which only a Linux host can make.
+        "//command_line_option:compilation_mode": "dbg",
+    },
 )
 
 # -- The built-in runner's window title ---------------------------------------

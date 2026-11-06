@@ -44,6 +44,7 @@ silently mis-merge a variant manifest it does not fully understand.
 load("@rules_android//providers:providers.bzl", "StarlarkAndroidResourcesInfo")
 load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
 load("//flutter/private:app_version.bzl", "android_version")
+load("//flutter/private:application_version.bzl", "APPLICATION_VERSION_ATTR", "application_version")
 load("//flutter/private:exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
 
 _TOOL = Label("//flutter/private/tools:merge_android_manifests.dart")
@@ -82,18 +83,19 @@ def _flutter_android_manifest_merge_impl(ctx):
     if ctx.attr.namespace:
         args.add("--namespace", ctx.attr.namespace)
     if ctx.attr.set_version:
-        version = android_version(ctx.attr.build_name, ctx.attr.build_number)
+        given = application_version(ctx.label, ctx.attr.application, ctx.attr.build_name, ctx.attr.build_number)
+        version = android_version(given.build_name, given.build_number)
         if version.error:
             fail("%s: %s" % (ctx.label, version.error))
 
         # A value the app gives conflicts with one the manifest declares; a
         # default gives way to it.
         args.add(
-            "--version-code" if ctx.attr.build_number else "--default-version-code",
+            "--version-code" if given.build_number else "--default-version-code",
             version.version_code,
         )
         args.add(
-            "--version-name" if ctx.attr.build_name else "--default-version-name",
+            "--version-name" if given.build_name else "--default-version-name",
             version.version_name,
         )
     if ctx.attr.uncompressed_native_libs:
@@ -118,7 +120,7 @@ def _flutter_android_manifest_merge_impl(ctx):
 
 flutter_android_manifest_merge = rule(
     implementation = _flutter_android_manifest_merge_impl,
-    attrs = {
+    attrs = APPLICATION_VERSION_ATTR | {
         "base": attr.label(
             doc = "The main AndroidManifest.xml (already preprocessed for " +
                   "Gradle variables) the overlay merges into.",

@@ -2,6 +2,10 @@
 
 Each version entry maps a Flutter SDK version string to a struct containing:
 - engine_revision: The engine commit hash (used in artifact URLs)
+- framework_revision: The commit hash of the release tag, which `FlutterVersion`
+  reports (shortened) as the framework revision
+- dart_version: The version of the Dart SDK the engine bundles (its
+  `dart-sdk/version` file; checked against the downloaded SDK)
 - material_fonts_url: GCS path of the Material icon font bundle
 - source_sha256: sha256 of the GitHub source tarball for the release tag
 
@@ -28,41 +32,57 @@ load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url")
 FLUTTER_VERSIONS = {
     "3.41.2": struct(
         engine_revision = "6c0baaebf70e0148f485f27d5616b3d3382da7bf",
+        framework_revision = "90673a4eef275d1a6692c26ac80d6d746d41a73a",
+        dart_version = "3.11.0",
         material_fonts_url = "flutter_infra_release/flutter/fonts/3012db47f3130e62f7cc0beabff968a33cbec8d8/fonts.zip",
         source_sha256 = "ca7d0c690e0a84d6f0f0b602623f711a4cb97e5b17d2cea1053071900ccb6367",
     ),
     "3.41.6": struct(
         engine_revision = "425cfb54d01a9472b3e81d9e76fd63a4a44cfbcb",
+        framework_revision = "db50e20168db8fee486b9abf32fc912de3bc5b6a",
+        dart_version = "3.11.4",
         material_fonts_url = "flutter_infra_release/flutter/fonts/3012db47f3130e62f7cc0beabff968a33cbec8d8/fonts.zip",
         source_sha256 = "145b0a160dcbf6fb68e6f57913a0b55229aacac82cef7618ab830cfca540aa53",
     ),
     "3.41.7": struct(
         engine_revision = "59aa584fdf100e6c78c785d8a5b565d1de4b48ab",
+        framework_revision = "cc0734ac716fbb8b90f3f9db8020958b1553afa7",
+        dart_version = "3.11.5",
         material_fonts_url = "flutter_infra_release/flutter/fonts/3012db47f3130e62f7cc0beabff968a33cbec8d8/fonts.zip",
         source_sha256 = "b58a1389c2e7cec8157f0276c7af93fe8318920e5529f99071ae3474ebd33379",
     ),
     "3.44.0": struct(
         engine_revision = "4c525dac5ebe5971c5708ef73558ed8edcf4a362",
+        framework_revision = "559ffa3f75e7402d65a8def9c28389a9b2e6fe42",
+        dart_version = "3.12.0",
         material_fonts_url = "flutter_infra_release/flutter/fonts/3012db47f3130e62f7cc0beabff968a33cbec8d8/fonts.zip",
         source_sha256 = "87077fbe19e0cc09ddceb48ff6443aa248995f6073603d7eb2cedc1e027b3e5e",
     ),
     "3.44.1": struct(
         engine_revision = "c416acfeb8126e097f758c664aaa3da929e27da0",
+        framework_revision = "924134a44c189315be2148659913dda1671cbe99",
+        dart_version = "3.12.1",
         material_fonts_url = "flutter_infra_release/flutter/fonts/3012db47f3130e62f7cc0beabff968a33cbec8d8/fonts.zip",
         source_sha256 = "0fc2d964725844cb5fae234426192820fd8306e1ae702296f3c0d3a20962cdbd",
     ),
     "3.47.2": struct(
         engine_revision = "a804b261645ef8c13eb3d5c44a5c2fb0340c5539",
+        framework_revision = "d3b14c876900e553bc736ca19295fc09e3853e8e",
+        dart_version = "3.13.2",
         material_fonts_url = "flutter_infra_release/flutter/fonts/3012db47f3130e62f7cc0beabff968a33cbec8d8/fonts.zip",
         source_sha256 = "b7399d4310fa0dcdf468f6c80955271a97ea72b167e25b8fa994e22850e33ada",
     ),
     "3.47.5": struct(
         engine_revision = "af7e796e161ae0bb1ff0758c71a7105418bd9ded",
+        framework_revision = "6a19cca56475dbfba1478ee68d7bd0c2ef891da1",
+        dart_version = "3.13.4",
         material_fonts_url = "flutter_infra_release/flutter/fonts/3012db47f3130e62f7cc0beabff968a33cbec8d8/fonts.zip",
         source_sha256 = "74ce8acd5d374704bcfb89dc667298053423e86eac7c00075663428f41913139",
     ),
     "3.47.6": struct(
         engine_revision = "692136cb6582dbfc5af3fb33c2515a069f2f66d0",
+        framework_revision = "5fc346839b5d0eef006ed8404392afb4dfae428d",
+        dart_version = "3.13.5",
         material_fonts_url = "flutter_infra_release/flutter/fonts/3012db47f3130e62f7cc0beabff968a33cbec8d8/fonts.zip",
         # sha256 of the GitHub source tarball. Required: every
         # fetch of the framework source is pinned against it.
@@ -70,6 +90,8 @@ FLUTTER_VERSIONS = {
     ),
     "3.47.7": struct(
         engine_revision = "deb287481e3ce9468f3434937ced4240a70539ca",
+        framework_revision = "abaf9c523780a608bd46686fd5e53740a07077f8",
+        dart_version = "3.13.5",
         material_fonts_url = "flutter_infra_release/flutter/fonts/3012db47f3130e62f7cc0beabff968a33cbec8d8/fonts.zip",
         # sha256 of the GitHub source tarball. Required: every
         # fetch of the framework source is pinned against it.
@@ -77,6 +99,8 @@ FLUTTER_VERSIONS = {
     ),
     "3.47.8": struct(
         engine_revision = "cf636b1dfb818dd6a3ff16e390e93b1a036969c8",
+        framework_revision = "737ba8f885dc774b53b442759999a312c9461e4e",
+        dart_version = "3.13.7",
         material_fonts_url = "flutter_infra_release/flutter/fonts/3012db47f3130e62f7cc0beabff968a33cbec8d8/fonts.zip",
         # sha256 of the GitHub source tarball. Required: every
         # fetch of the framework source is pinned against it.
@@ -84,6 +108,8 @@ FLUTTER_VERSIONS = {
     ),
     "3.47.9": struct(
         engine_revision = "89c39edfdfae2949f6806e4a315c0c08522238b7",
+        framework_revision = "c197ca5199e9ee5661e865596c9c07294dfab51c",
+        dart_version = "3.13.7",
         material_fonts_url = "flutter_infra_release/flutter/fonts/3012db47f3130e62f7cc0beabff968a33cbec8d8/fonts.zip",
         # sha256 of the GitHub source tarball. Required: every
         # fetch of the framework source is pinned against it.

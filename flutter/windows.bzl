@@ -181,9 +181,13 @@ def flutter_windows_app(
         build_name: The version, `MAJOR.MINOR.PATCH`, as `flutter build
             --build-name` takes it. The executable's version information
             carries it. Defaults to `1.0.0`. May be a `select()`.
+            Unset, the `application`'s `build_name`. Set, the
+            `application` must set the same.
         build_number: The build number, as `flutter build --build-number`
             takes it: the fourth of the executable's version numbers.
             Defaults to `1`. May be a `select()`.
+            Unset, the `application`'s `build_number`. Set, the
+            `application` must set the same.
         **kwargs: Passed through to flutter_windows_bundle, except `testonly`,
             which every target the macro declares has, since one that depends on a
             `testonly` application would otherwise fail analysis.
@@ -263,6 +267,7 @@ def flutter_windows_app(
             name = "__%s_resources" % name,
             rc = rc[0],
             srcs = rc_srcs,
+            application = application,
             defines = rc_defines,
             **(common | version)
         )

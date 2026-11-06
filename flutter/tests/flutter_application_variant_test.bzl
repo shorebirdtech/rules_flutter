@@ -9,6 +9,7 @@ plugin, a define) and a variant whose `main` is in the application's own
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("//flutter:providers.bzl", "FlutterApplicationInfo")
 load(":action_content.bzl", "action_config", "package_entry", "written_json")
+load(":version_defines_test.bzl", "pinned_version_defines")
 
 _APP = "//flutter/tests/variant_fixture/app:app"
 _PACKAGE = "variant_app"
@@ -91,7 +92,7 @@ def _defines_impl(ctx):
     asserts.true(env, "-DVARIANT=1" in kernel.argv, "the variant's define reaches the compiler: %s" % kernel.argv)
     config = written_json(env, "_dev_config.json")
     if config != None:
-        asserts.equals(env, ["VARIANT=1"], config["dartDefines"])
+        asserts.equals(env, ["VARIANT=1"] + pinned_version_defines(), config["dartDefines"])
     return analysistest.end(env)
 
 _defines_test = analysistest.make(_defines_impl, config_settings = _DBG)
@@ -105,7 +106,7 @@ def _flavor_impl(ctx):
     asserts.true(env, "-DFLUTTER_APP_FLAVOR=paid" in kernel.argv, "the application's flavor reaches the variant's compile: %s" % kernel.argv)
     config = written_json(env, "_dev_config.json")
     if config != None:
-        asserts.equals(env, ["FLUTTER_APP_FLAVOR=paid"], config["dartDefines"])
+        asserts.equals(env, ["FLUTTER_APP_FLAVOR=paid"] + pinned_version_defines(), config["dartDefines"])
     return analysistest.end(env)
 
 _flavor_test = analysistest.make(_flavor_impl, config_settings = _DBG)

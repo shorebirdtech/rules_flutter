@@ -18,6 +18,7 @@ load("//flutter/private:flutter_shader_compile.bzl", "flutter_shader_compile_act
 load("//flutter/private:native_sources.bzl", "native_sources_aspect")
 load("//flutter/private:notices.bzl", "NOTICES_ATTRS", "additional_licenses_of", "flutter_notices_action", "notices_asset_key", "package_licenses_of")
 load("//flutter/private:plugin_registrant.bzl", "generate_dart_plugin_registrant", "generate_dev_plugin_registrants")
+load("//flutter/private:sdk_defines.bzl", "version_dart_defines")
 load("//flutter/private:validation.bzl", "validate_dart_defines")
 
 def make_web_wrapper_main_content(original_import, registrant_import = None, agent_imports = None):
@@ -444,11 +445,15 @@ def flutter_compile_kernel(ctx, tools, aot = None, platform_dill = None, target_
         extra_frontend_flags.append("--track-widget-creation")
 
     # Merge defines with mode-specific Dart VM flags. program_defines (the
-    # user's attr + extra_dart_defines flag, and the flavor's) is surfaced in
-    # the return struct so dev-config writers can replay it on the dev tool's
+    # user's attr + extra_dart_defines flag, the flavor's, and the ones that
+    # describe the app and the SDK) is surfaced in the return struct so dev-config writers can replay it on the dev tool's
     # frontend_server; no mode keys are in it.
     user_defines = merge_dart_defines(ctx, inputs.defines)
-    program_defines = user_defines + flavor_dart_defines(inputs.flavor)
+    program_defines = user_defines + flavor_dart_defines(inputs.flavor) + version_dart_defines(
+        tools.version,
+        inputs.build_name,
+        inputs.build_number,
+    )
     all_defines = list(program_defines)
     if mode == "profile":
         all_defines.append("dart.vm.profile=true")
@@ -1277,6 +1282,8 @@ def flutter_program_inputs(ctx):
         deps = getattr(ctx.attr, "deps", []),
         defines = list(getattr(ctx.attr, "defines", [])),
         flavor = getattr(ctx.attr, "flavor", ""),
+        build_name = getattr(ctx.attr, "build_name", ""),
+        build_number = getattr(ctx.attr, "build_number", ""),
         package_name = getattr(ctx.attr, "package_name", ""),
         language_version = getattr(ctx.attr, "language_version", ""),
         assets = list(getattr(ctx.files, "assets", [])),
@@ -1362,6 +1369,18 @@ KERNEL_COMPILE_ATTRS = {
     "deps": flutter_deps_attr(),
     "defines": attr.string_list(
         doc = "Dart environment defines (-D flags).",
+    ),
+    "build_name": attr.string(
+        doc = "The app's version name, as `flutter build --build-name`: " +
+              "`appBuildName` (`package:flutter/services.dart`) reads it. " +
+              "Unset is `flutter create`'s `1.0.0`. The platform apps built over " +
+              "this application take their bundle's version from it, unless " +
+              "they set their own `build_name`, which must then be this one.",
+    ),
+    "build_number": attr.string(
+        doc = "The app's build number, as `flutter build --build-number`: " +
+              "`appBuildNumber` (`package:flutter/services.dart`) reads it. " +
+              "Unset is `flutter create`'s `1`.",
     ),
     "flavor": attr.string(
         doc = "The app's flavor, as `flutter build --flavor`: `appFlavor` " +
@@ -1475,6 +1494,8 @@ FLUTTER_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | {
 FLUTTER_PROGRAM_ATTR_NAMES = [
     "additional_licenses",
     "assets",
+    "build_name",
+    "build_number",
     "defines",
     "deps",
     "extra_gen_snapshot_options",

@@ -366,6 +366,31 @@ flutter_test(
     ],
 )
 
+# `FlutterVersion` and `appBuildName` are set, in both kernel modes. The
+# expected values are the pinned release's (`flutter.toolchain` in
+# MODULE.bazel): change them with it. See test/flutter_version_test.dart.
+flutter_test(
+    name = "flutter_version_test",
+    package_name = "hello_world",
+    build_name = "2.3.4",
+    build_number = "7",
+    env = {
+        "EXPECTED_FLUTTER_VERSION": "3.47.9",
+        "EXPECTED_FLUTTER_FRAMEWORK_REVISION": "c197ca5199",
+        "EXPECTED_FLUTTER_ENGINE_REVISION": "89c39edfdf",
+    },
+    main = "test/flutter_version_test.dart",
+    deps = [
+        "@deps//:flutter",
+        "@deps//:flutter_test",
+    ],
+)
+
+build_variant_tests(
+    name = "flutter_version_builds",
+    test = ":flutter_version_test",
+)
+
 build_variant_tests(
     name = "flavor_builds",
     test = ":flavor_test",

@@ -56,6 +56,7 @@ cannot write there.
 
 load("@bazel_skylib//lib:structs.bzl", "structs")
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
+load("@flutter_version_pin//:version.bzl", "FLUTTER_VERSION")
 load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo", "DartKernelSdkInfo")
 load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "KERNEL_TOOL_ATTR", "TRACK_CREATION_LOCATIONS_ATTR", "collect_modules", "collect_packages", "collect_transitive_srcs", "dart_analyzable_info_with_packages", "dart_entry_kernel_action", "dart_import_check_aspect", "dart_link_kernel_action", "dart_package_info", "derive_lib_root", "executable_defines", "executable_defines_config", "import_check_validation", "runfiles_path", "track_creation_locations")
 load("//flutter:providers.bzl", "FlutterApplicationInputsInfo", "FlutterInfo")
@@ -77,6 +78,7 @@ load("//flutter/private:exec_groups.bzl", "FLUTTER_EXEC_TOOLS", "PORTABLE", "POR
 load("//flutter/private:flutter_compile.bzl", "flutter_kernel_compile_action")
 load("//flutter/private:flutter_module.bzl", "flutter_module_aspect")
 load("//flutter/private:flutter_native_assets.bzl", "CODE_ASSETS_DOC", "collect_bundled_code_asset_files", "resolve_native_assets", "write_native_assets_manifest")
+load("//flutter/private:sdk_defines.bzl", "version_dart_defines")
 load("//flutter/private:test_tags.bzl", "tag_selectors")
 
 # The target's Flutter SDK, whose `flutter_tester` runs the test.
@@ -247,6 +249,13 @@ def _flutter_test_impl(ctx):
     # The flutter_tester that runs the test: the target's, as everything the
     # test runs is. The compiles are `portable`.
     runner_tools = ctx.toolchains[_FLUTTER_TOOLCHAIN].flutter_sdk_info
+    if runner_tools.version != ctx.attr._flutter_version:
+        fail((
+            "%s: the test's modules were compiled for Flutter %s, which the " +
+            "repository the flutter extension pins, and the resolved toolchain is Flutter %s. " +
+            "`FlutterVersion` would report one release while the tests run on another: " +
+            "register the toolchain of the default `flutter.toolchain()`."
+        ) % (ctx.label, ctx.attr._flutter_version, runner_tools.version))
 
     is_macos = ctx.target_platform_has_constraint(
         ctx.attr._macos_constraint[platform_common.ConstraintValueInfo],
@@ -739,14 +748,18 @@ def _compile_whole_program(ctx, tools, deps, bootstrap, own_srcs, packages, nati
         native_assets_manifest = native_assets_manifest,
     )
 
-def _app_flavor_defines(attrs):
-    """The define `appFlavor` reads for the test's `flavor`; none for no flavor."""
-    return flavor_dart_defines(attrs.flavor)
+def _implied_defines(attrs):
+    """What `flutter test` adds to the compile: the test's flavor, its version and the SDK's."""
+    return flavor_dart_defines(attrs.flavor) + version_dart_defines(
+        attrs._flutter_version,
+        attrs.build_name,
+        attrs.build_number,
+    )
 
 # The environment the test and its `deps`' modules compile in: its `defines`,
-# then the flavor's, then the extra_dart_defines flag. A `defines` entry that
-# sets the flavor's key too is refused.
-_ENVIRONMENT = executable_defines_config(_app_flavor_defines)
+# then the flavor's, the version's and the SDK's, then the extra_dart_defines
+# flag. A `defines` entry that sets one of those keys too is refused.
+_ENVIRONMENT = executable_defines_config(_implied_defines)
 
 # flutter_test takes the compilation attrs plus the asset-bundle attrs.
 # Material widgets implicitly require `shaders/ink_sparkle.frag` and the
@@ -763,6 +776,8 @@ _TEST_ATTRS = {
         "deps",
         "defines",
         "flavor",
+        "build_name",
+        "build_number",
         "language_version",
         "_extra_dart_defines",
         "package_name",
@@ -844,6 +859,10 @@ _TEST_ATTRS["env"] = attr.string_dict(
           "FLUTTER_TEST_* keys the rule sets itself cannot be overridden.",
 )
 _TEST_ATTRS.update(_ENVIRONMENT.attrs)
+
+# The release `FlutterVersion` reports. Read by the transition that sets the
+# modules' environment, which cannot see the toolchain.
+_TEST_ATTRS["_flutter_version"] = attr.string(default = FLUTTER_VERSION)
 
 # Which cases of the suite run: `package:test`'s tag selectors, as the
 # `include_tags` and `exclude_tags` keys of `dart_test.yaml`. They choose cases

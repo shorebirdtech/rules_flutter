@@ -16,6 +16,10 @@ exports_files(["pubspec.lock"])
 flutter_application(
     name = "app_flutter",
     package_name = "windows_example",
+    # Not the default, and the same as `:app`'s, whose bundle and program must
+    # agree.
+    build_name = "2.3.4",
+    build_number = "56",
     main = "lib/main.dart",
     deps = [
         "@deps//:flutter",

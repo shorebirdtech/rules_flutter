@@ -721,9 +721,13 @@ def flutter_android_app(
             registered. Pub plugins arrive through the hub instead.
         build_name: versionName, as `flutter build --build-name`. Defaults to
             `1.0.0`. May be a `select()`, whose `None` is the default.
+            Unset, the `application`'s `build_name`. Set, the
+            `application` must set the same.
         build_number: versionCode, as `flutter build --build-number`: a
             whole number from 1 to 2100000000, Google Play's limit. Defaults
-            to `1`. May be a `select()`. A manifest that declares
+            to `1`. May be a `select()`.
+            Unset, the `application`'s `build_number`. Set, the
+            `application` must set the same. A manifest that declares
             `android:versionCode` or `android:versionName` itself keeps it
             while the matching argument is unset, and is an error once it
             is set.
@@ -1053,6 +1057,7 @@ def flutter_android_app(
         namespace = namespace,
         set_version = True,
         uncompressed_native_libs = True,
+        application = application,
         build_name = version_arg(build_name),
         build_number = version_arg(build_number),
         tags = tags,

@@ -17,6 +17,7 @@ load("//flutter/private:flutter_linux_sysroot_repo.bzl", "flutter_linux_sysroot_
 load("//flutter/private:flutter_macos_engine_repo.bzl", "flutter_macos_engine_repo")
 load("//flutter/private:flutter_profile_repo.bzl", "flutter_profile_repo")
 load("//flutter/private:flutter_sky_engine_repo.bzl", "flutter_sky_engine_repo")
+load("//flutter/private:flutter_version_pin_repo.bzl", "flutter_version_pin_repo")
 load("//flutter/private:flutter_web_sdk_repo.bzl", "flutter_web_sdk_repo")
 load("//flutter/private:libraries_spec.bzl", "flutter_libraries_spec")
 load("//flutter/private:pinned.bzl", "pinned")
@@ -55,6 +56,16 @@ def _flutter_engine_artifacts_impl(repository_ctx):
         stripPrefix = "dart-sdk",
         output = "dart-sdk",
     )
+
+    # `FLUTTER_DART_VERSION` is read from versions.bzl; the SDK it describes
+    # is this one.
+    dart_version = repository_ctx.read("dart-sdk/version").strip()
+    if dart_version != meta.dart_version:
+        fail((
+            "Flutter {flutter} bundles Dart {actual}, and versions.bzl records {recorded}. " +
+            "Set dart_version in its entry: programs built with this release " +
+            "report it as FlutterVersion.dartVersion."
+        ).format(flutter = flutter_version, actual = dart_version, recorded = meta.dart_version))
 
     _write_flutter_libraries_spec(repository_ctx)
 
@@ -400,6 +411,12 @@ def flutter_register_toolchains(name, **kwargs):
         flutter_version = flutter_version,
         engine_revision = meta.engine_revision,
         sha256 = flutter_source_sha256(flutter_version),
+    )
+
+    # The release, for rules that cannot ask a toolchain.
+    flutter_version_pin_repo(
+        name = name + "_version_pin",
+        flutter_version = flutter_version,
     )
 
     # Host platform repos.

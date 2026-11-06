@@ -41,6 +41,14 @@ import 'package:rules_flutter_e2e_testing/macos_windows.dart';
 const _nativeMarker = 'macos_example_native';
 const _expectedNative = '$_nativeMarker sum=7 difference=3';
 
+// The version `:app_flutter` declares, and the Flutter release that compiled
+// it, as the program reads them from its compile-time defines.
+const _versionMarker = 'macos_example_version';
+final _expectedVersion = RegExp(
+  '$_versionMarker name=2\\.3\\.4 number=42 '
+  r'flutter=\d+\.\d+\.\d+ dart=\d+\.\d+\.\d+$',
+);
+
 Future<void> main() async {
   final bundle = MacosBundle.fromRunfiles(
     'app.zip',
@@ -88,6 +96,13 @@ Future<void> main() async {
         ) ??
         '';
 
+    final version =
+        await launched.waitForLine(
+          _versionMarker,
+          timeout: const Duration(seconds: 10),
+        ) ??
+        '';
+
     await launched.stop();
 
     // Evaluate results.
@@ -106,6 +121,15 @@ Future<void> main() async {
       stderr.writeln(
         'FAIL: expected the app to print "$_expectedNative" — a bundled '
         'native library did not load or did not answer',
+      );
+      launched.dumpOutput();
+      exit(1);
+    }
+    print('Version: ${version.isEmpty ? "no report" : version}');
+    if (!_expectedVersion.hasMatch(version)) {
+      stderr.writeln(
+        'FAIL: expected the app to print a line matching $_expectedVersion: '
+        'the build did not describe the app and the SDK to the program',
       );
       launched.dumpOutput();
       exit(1);

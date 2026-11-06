@@ -23,6 +23,7 @@ load(
     "service_worker_version_for",
 )
 load(":action_content.bzl", "action_config", "action_config_text", "written_json", "written_text")
+load(":version_defines_test.bzl", "pinned_version_defines")
 
 def _html_title_escaping_test_impl(ctx):
     """Test that HTML special characters in titles are properly escaped."""
@@ -582,7 +583,7 @@ def _dev_config_test_impl(ctx):
 
     # Replayed as -D on the resident frontend server, so a reload recompiles
     # under the same environment the initial build used.
-    asserts.equals(env, ["from.attr=1"], config["dartDefines"])
+    asserts.equals(env, ["from.attr=1"] + pinned_version_defines(), config["dartDefines"])
 
     # The dev loop asserts native nullability through its own bootstrap rather
     # than a compiler flag, so the value has to travel to it explicitly or a
@@ -2430,7 +2431,7 @@ def _flavor_defines_test_impl(ctx):
     _assert_dart2js(env, True, present = ["-DFLUTTER_APP_FLAVOR=paid"])
     config = written_json(env, "_dev_config.json")
     if config != None:
-        asserts.equals(env, ["from.attr=1", "FLUTTER_APP_FLAVOR=paid"], config["dartDefines"])
+        asserts.equals(env, ["from.attr=1", "FLUTTER_APP_FLAVOR=paid"] + pinned_version_defines(), config["dartDefines"])
     return analysistest.end(env)
 
 _flavor_defines_test = analysistest.make(

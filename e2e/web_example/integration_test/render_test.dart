@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:web_example/main.dart' as app;
@@ -32,6 +33,25 @@ void main() {
       find.byKey(const ValueKey('e2e_asset_label')),
     );
     expect(label.data, 'web asset v1');
+  });
+
+  testWidgets('the build described the app and the SDK to the program', (
+    tester,
+  ) async {
+    // Compile-time defines `flutter build web` adds: the app's version, which
+    // is `flutter create`'s here (this target sets none), and the Flutter
+    // release that compiled it. Null means the build left them out.
+    expect(appBuildName, '1.0.0');
+    expect(appBuildNumber, '1');
+    expect(FlutterVersion.version, matches(RegExp(r'^\d+\.\d+\.\d+$')));
+    expect(FlutterVersion.channel, 'stable');
+    expect(FlutterVersion.gitUrl, 'https://github.com/flutter/flutter.git');
+    expect(
+      FlutterVersion.frameworkRevision,
+      matches(RegExp(r'^[0-9a-f]{10}$')),
+    );
+    expect(FlutterVersion.engineRevision, matches(RegExp(r'^[0-9a-f]{10}$')));
+    expect(FlutterVersion.dartVersion, matches(RegExp(r'^\d+\.\d+\.\d+')));
   });
 
   testWidgets('a tap reaches the app', (tester) async {

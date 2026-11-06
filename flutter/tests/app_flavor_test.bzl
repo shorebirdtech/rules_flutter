@@ -12,6 +12,7 @@ load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("//flutter:defs.bzl", "flutter_application")
 load("//flutter/private:flutter_kernel_target.bzl", "flutter_kernel_target")
 load(":action_content.bzl", "written_json")
+load(":version_defines_test.bzl", "pinned_version_defines")
 
 _DBG = {"//command_line_option:compilation_mode": "dbg"}
 _BUILD_INFO = "-Drules_flutter.build_info="
@@ -57,7 +58,7 @@ def _dev_loop_impl(ctx):
     if config != None:
         asserts.equals(
             env,
-            ["USER=1", "FLUTTER_APP_FLAVOR=paid"],
+            ["USER=1", "FLUTTER_APP_FLAVOR=paid"] + pinned_version_defines(),
             config["dartDefines"],
             "the dev tool replays the flavor on every reload and restart",
         )

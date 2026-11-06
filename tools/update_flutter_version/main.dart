@@ -67,6 +67,24 @@ Future<void> main(List<String> args) async {
   final engineRev = (gitResult.stdout as String).trim();
   print('Engine revision: $engineRev');
 
+  // The release tag's commit: the framework revision `FlutterVersion` reports.
+  final frameworkResult = Process.runSync(
+    'git',
+    ['rev-parse', '$version^{commit}'],
+    workingDirectory: flutterRepo,
+  );
+  if (frameworkResult.exitCode != 0) {
+    stderr.writeln('ERROR: Could not resolve tag $version in $flutterRepo');
+    exit(1);
+  }
+  final frameworkRev = (frameworkResult.stdout as String).trim();
+  print('Framework revision: $frameworkRev');
+
+  // The Dart SDK the release bundles, which Flutter publishes with each
+  // stable release and which `FlutterVersion.dartVersion` reports.
+  final dartVersion = await _releasedDartVersion(version, frameworkRev);
+  print('Dart version: $dartVersion');
+
   // Get material fonts URL from the Flutter repo.
   final materialFontsResult = Process.runSync(
     'git',
@@ -220,6 +238,8 @@ Future<void> main(List<String> args) async {
   print('');
   print('    "$version": struct(');
   print('        engine_revision = "$engineRev",');
+  print('        framework_revision = "$frameworkRev",');
+  print('        dart_version = "$dartVersion",');
   print('        material_fonts_url = "$materialFontsUrl",');
   print('        # sha256 of the GitHub source tarball. Required: every');
   print('        # fetch of the framework source is pinned against it.');
@@ -240,6 +260,44 @@ Future<void> main(List<String> args) async {
   );
   _printChecksum(checksums, 'material_fonts.zip');
   print('    },');
+}
+
+/// The Dart SDK version Flutter published for the stable release [version],
+/// from its release listing, checked against the release's commit.
+Future<String> _releasedDartVersion(String version, String frameworkRev) async {
+  final client = HttpClient();
+  try {
+    final request = await client.getUrl(
+      Uri.parse(
+        'https://storage.googleapis.com/flutter_infra_release/releases/releases_macos.json',
+      ),
+    );
+    final response = await request.close();
+    if (response.statusCode != 200) {
+      await response.drain<void>();
+      stderr.writeln('ERROR: releases_macos.json: HTTP ${response.statusCode}');
+      exit(1);
+    }
+    final listing =
+        jsonDecode(await utf8.decodeStream(response)) as Map<String, dynamic>;
+    for (final release in listing['releases'] as List<dynamic>) {
+      release as Map<String, dynamic>;
+      if (release['version'] == version && release['channel'] == 'stable') {
+        if (release['hash'] != frameworkRev) {
+          stderr.writeln(
+            'ERROR: the release listing has $version at ${release['hash']}, '
+            'and the local tag is at $frameworkRev.',
+          );
+          exit(1);
+        }
+        return release['dart_sdk_version'] as String;
+      }
+    }
+    stderr.writeln('ERROR: $version is not a stable release in the listing.');
+    exit(1);
+  } finally {
+    client.close();
+  }
 }
 
 void _printChecksum(Map<String, String> checksums, String artifact) {

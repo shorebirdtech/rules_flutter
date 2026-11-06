@@ -56,7 +56,9 @@ class NativeCompilerConfig implements CompilerConfig {
   /// The frontend_server is persistent, so launch-time defines apply to
   /// every subsequent recompile — keeping String.fromEnvironment stable
   /// across hot reload/restart. Sourced from the dev config's dartDefines: the
-  /// user's defines and the flavor's `FLUTTER_APP_FLAVOR`.
+  /// user's defines, the flavor's `FLUTTER_APP_FLAVOR`, and the ones that
+  /// describe the app and the SDK (`FLUTTER_BUILD_NAME`, `FLUTTER_VERSION`,
+  /// ...).
   final List<String> dartDefines;
 
   /// `file://` URI of the generated plugin registrant, or empty when the

@@ -115,6 +115,11 @@ flutter_application(
     # deliver. asset_reload_e2e_test edits assets/message.txt while the app
     # runs and asserts the change reaches the UI.
     assets = glob(["assets/**"]),
+    # Not the default: the program reports it as `appBuildName` and
+    # `appBuildNumber` (see lib/main.dart), and every app built over it has it
+    # as its bundle's version.
+    build_name = "2.3.4",
+    build_number = "42",
     main = "lib/main.dart",
     native_deps = [":sub"],
     deps = _APP_DEPS,
