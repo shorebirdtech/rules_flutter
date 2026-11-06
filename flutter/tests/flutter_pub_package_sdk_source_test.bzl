@@ -16,6 +16,7 @@ load(
     "ENGINE_PROVIDED",
     "FLUTTER_FRAMEWORK",
     "FLUTTER_SOURCE",
+    "GIT",
     "HOSTED",
     "PATH",
     "UNSUPPORTED",
@@ -70,14 +71,14 @@ def _the_two_exceptions_keep_their_own_kinds_test_impl(ctx):
 
     return unittest.end(env)
 
-def _git_entries_and_unknown_sources_are_unsupported_test_impl(ctx):
-    """A git package, or a source rules_flutter has never heard of, is unsupported.
+def _unknown_sources_are_unsupported_test_impl(ctx):
+    """A source rules_flutter has never heard of is unsupported.
 
     Even one whose name an `sdk` package has: the source is what decides.
     """
     env = unittest.begin(ctx)
 
-    for source in ["git", "something_new"]:
+    for source in ["something_new"]:
         asserts.equals(env, UNSUPPORTED, lock_entry_kind("some_package", source), source)
         asserts.equals(env, UNSUPPORTED, lock_entry_kind("integration_test", source), source)
 
@@ -90,6 +91,16 @@ def _path_entries_are_path_test_impl(ctx):
     asserts.equals(env, PATH, lock_entry_kind("some_package", "path"))
     asserts.equals(env, PATH, lock_entry_kind("integration_test", "path"))
     asserts.equals(env, PATH, lock_entry_kind("flutter", "path"))
+
+    return unittest.end(env)
+
+def _git_entries_are_git_test_impl(ctx):
+    """A `git` entry is fetched from its repository, whatever its name."""
+    env = unittest.begin(ctx)
+
+    asserts.equals(env, GIT, lock_entry_kind("some_package", "git"))
+    asserts.equals(env, GIT, lock_entry_kind("integration_test", "git"))
+    asserts.equals(env, GIT, lock_entry_kind("flutter", "git"))
 
     return unittest.end(env)
 
@@ -111,11 +122,14 @@ _fuchsia_remote_debug_protocol_is_not_special_cased_test = unittest.make(
 _the_two_exceptions_keep_their_own_kinds_test = unittest.make(
     _the_two_exceptions_keep_their_own_kinds_test_impl,
 )
-_git_entries_and_unknown_sources_are_unsupported_test = unittest.make(
-    _git_entries_and_unknown_sources_are_unsupported_test_impl,
+_unknown_sources_are_unsupported_test = unittest.make(
+    _unknown_sources_are_unsupported_test_impl,
 )
 _path_entries_are_path_test = unittest.make(
     _path_entries_are_path_test_impl,
+)
+_git_entries_are_git_test = unittest.make(
+    _git_entries_are_git_test_impl,
 )
 _hosted_entries_are_hosted_test = unittest.make(
     _hosted_entries_are_hosted_test_impl,
@@ -127,7 +141,8 @@ def flutter_pub_package_sdk_source_test_suite(name):
         _sdk_entries_are_built_from_the_flutter_source_test,
         _fuchsia_remote_debug_protocol_is_not_special_cased_test,
         _the_two_exceptions_keep_their_own_kinds_test,
-        _git_entries_and_unknown_sources_are_unsupported_test,
+        _unknown_sources_are_unsupported_test,
         _path_entries_are_path_test,
+        _git_entries_are_git_test,
         _hosted_entries_are_hosted_test,
     )

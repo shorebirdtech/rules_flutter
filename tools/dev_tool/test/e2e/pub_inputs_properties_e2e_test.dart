@@ -231,7 +231,7 @@ void main() {
     });
   });
 
-  group('a lock entry rules_flutter has no repository for (git)', () {
+  group('a lock entry rules_flutter has no repository for (an unknown source)', () {
     late PubInputsWorkspace ws;
     setUpAll(() async {
       ws = await PubInputsFixture(hosted: [HostedPackage('good')])
@@ -243,16 +243,13 @@ void main() {
     // see `pub_resolve_e2e_test.dart`.) (An `sdk: flutter` entry, whatever its
     // name, is built from the Flutter source; see `sdk_source_e2e_test.dart`.)
     final entries = {
-      'from_git': (
-        'git',
-        '  from_git:\n'
+      'from_elsewhere': (
+        'elsewhere',
+        '  from_elsewhere:\n'
             '    dependency: "direct main"\n'
             '    description:\n'
-            '      path: "."\n'
-            '      ref: main\n'
-            '      resolved-ref: 0123456789012345678901234567890123456789\n'
-            '      url: "https://example.invalid/from_git.git"\n'
-            '    source: git\n'
+            '      url: "https://example.invalid/from_elsewhere"\n'
+            '    source: elsewhere\n'
             '    version: "1.0.0"\n',
       ),
     };

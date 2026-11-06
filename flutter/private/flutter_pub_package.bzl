@@ -1,6 +1,6 @@
 """flutter_pub_package — the `flutter pub get` analog for a single hosted
-Flutter pub.dev package, or a Flutter SDK package built from the pinned
-Flutter source.
+Flutter pub.dev package, a git package at its locked commit, or a Flutter SDK
+package built from the pinned Flutter source.
 
 For each such package in a Flutter app's pubspec.lock this rule:
   1. Downloads the same `pub.dev/api/packages/<name>/versions/<version>.tar.gz`
@@ -10,7 +10,10 @@ For each such package in a Flutter app's pubspec.lock this rule:
      `integration_test`, `flutter_driver`, ...) has no archive: with
      `flutter_source_version` set, its tree is `packages/<name>` of the
      toolchain's pinned Flutter source tarball, checked against that
-     tarball's recorded digest. Everything after this step is the same.
+     tarball's recorded digest. A git package (`source: git`) is fetched at the
+     lock's `resolved-ref` by rules_dart's `fetch_pub_git`, which lays out its
+     directory of the repository exactly as pub does. Everything after this
+     step is the same.
   2. Reads the package's pubspec.yaml, as pub does (rules_dart's `read_pubspec`).
   3. Projects `flutter.plugin.platforms` via `flutter_plugin_block`.
   4. Scans the extracted package tree for per-platform Apple source layouts
@@ -44,7 +47,7 @@ whichever rule asks for it.
 """
 
 load("@rules_dart//dart/pub:pub_graph.bzl", "write_pubspec_dependencies")
-load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version", "fetch_pub_archive", "find_pub_license_file")
+load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version", "fetch_pub_archive", "fetch_pub_git", "find_pub_license_file")
 load("@rules_dart//dart/pub:pubspec.bzl", "read_pubspec")
 load("//flutter/private:android_plugin_maven.bzl", "MAVEN_DEPS_FILE", "gradle_statements", "parse_gradle_maven_dependencies")
 load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url")
@@ -1881,6 +1884,17 @@ def _flutter_pub_package_impl(ctx):
             flutter_version = ctx.attr.flutter_source_version,
             sha256 = ctx.attr.sha256,
         )
+    elif ctx.attr.git_url:
+        # The lock's commit, laid out as pub lays it out, whichever rule asks.
+        fetch_pub_git(
+            ctx,
+            package_name = ctx.attr.package_name,
+            version = ctx.attr.version,
+            url = ctx.attr.git_url,
+            resolved_ref = ctx.attr.resolved_ref,
+            path = ctx.attr.git_path,
+            lock = ctx.attr.lock,
+        )
     else:
         # Downloads, verifies and extracts the archive the way every pub-backed
         # repository does, so a package is laid out the same whichever rule asks.
@@ -2246,8 +2260,24 @@ flutter_pub_package = repository_rule(
             mandatory = True,
         ),
         "sha256": attr.string(
-            doc = "SHA256 hash of the archive fetched: the package's, as pubspec.lock records it, or, with `flutter_source_version`, the Flutter source tarball's (`flutter_source_sha256`). Mandatory: nothing is fetched without one.",
-            mandatory = True,
+            doc = "SHA256 hash of the archive fetched: the package's, as pubspec.lock records it, or, with `flutter_source_version`, the Flutter source tarball's (`flutter_source_sha256`). Mandatory for both: nothing is downloaded without one. Unused for a git package.",
+            default = "",
+        ),
+        "git_url": attr.string(
+            doc = "A git package's repository: `description.url` in the lock. When set, the package is fetched from it at `resolved_ref` instead of downloaded.",
+            default = "",
+        ),
+        "resolved_ref": attr.string(
+            doc = "A git package's locked commit: `description.resolved-ref`, a full commit id.",
+            default = "",
+        ),
+        "git_path": attr.string(
+            doc = "A git package's directory in the repository: `description.path`.",
+            default = ".",
+        ),
+        "lock": attr.label(
+            doc = "The lock, against whose directory a relative `git_url` is resolved, as pub resolves it. Read only for a relative `git_url`.",
+            allow_single_file = True,
         ),
         "base_url": attr.string(
             doc = "Base URL for the pub repository. Ignored with `flutter_source_version`.",

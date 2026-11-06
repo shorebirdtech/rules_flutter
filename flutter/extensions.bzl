@@ -13,7 +13,7 @@ effectively overriding the default named toolchain due to toolchain resolution p
 """
 
 load("@rules_dart//dart/ext:registry.bzl", "curated_code_assets")
-load("@rules_dart//dart/pub:pub_lock_package.bzl", "check_pub_archive_sha256")
+load("@rules_dart//dart/pub:pub_lock_package.bzl", "check_pub_archive_sha256", "check_pub_git_resolved_ref", "is_relative_git_url")
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_lock")
 load("//flutter/private:android_plugin_maven.bzl", "MAVEN_DEPS_FILE", "flutter_android_maven")
 load("//flutter/private:flutter_chrome_for_testing.bzl", "flutter_chrome_for_testing")
@@ -27,7 +27,7 @@ load("//flutter/private:flutter_pub_package.bzl", "flutter_pub_package")
 load("//flutter/private:flutter_resolved_package.bzl", "flutter_resolved_package")
 load("//flutter/private:flutter_unsupported_package.bzl", "flutter_unsupported_package", "unsupported_package_message")
 load("//flutter/private:linux_runtime_pins.bzl", "LINUX_RUNTIME")
-load("//flutter/private:lock_entry_kind.bzl", "ENGINE_PROVIDED", "FLUTTER_FRAMEWORK", "FLUTTER_SOURCE", "HOSTED", "lock_entry_kind")
+load("//flutter/private:lock_entry_kind.bzl", "ENGINE_PROVIDED", "FLUTTER_FRAMEWORK", "FLUTTER_SOURCE", "GIT", "HOSTED", "lock_entry_kind")
 load("//flutter/private:pub_lock_sdks.bzl", "parse_lock_sdk_constraints", "version_below_lower_bound")
 load("//flutter/private:pub_resolve.bzl", "resolve_errors")
 load("//flutter/private:versions.bzl", "CHROME_FOR_TESTING", "flutter_source_sha256")
@@ -247,6 +247,7 @@ def _toolchain_extension(module_ctx):
             built = {}  # hosted and Flutter-source packages: a source and a library repository
             hosted = {}
             flutter_source = {}
+            from_repository = {}  # `source: git` entries
             framework = {}
             resolved = {}  # mapped to a workspace target: one repository, whatever the lock says
             unsupported = {}
@@ -267,13 +268,16 @@ def _toolchain_extension(module_ctx):
                 elif kind == FLUTTER_SOURCE:
                     flutter_source[name] = info
                     built[name] = info
+                elif kind == GIT:
+                    from_repository[name] = info
+                    built[name] = info
                 elif kind == FLUTTER_FRAMEWORK:
                     framework[name] = info
                 else:
-                    # A git package, or a source rules_flutter has never heard
-                    # of (a `path` package is always mapped, above). The hub
-                    # still loads, so an app that only lists it builds. Its
-                    # target fails when something depends on it.
+                    # A source rules_flutter has never heard of (a `path`
+                    # package is always mapped, above). The hub still loads, so
+                    # an app that only lists it builds. Its target fails when
+                    # something depends on it.
                     unsupported[name] = unsupported_package_message(
                         lock = str(pub_tag.lock),
                         package = name,
@@ -351,6 +355,41 @@ def _toolchain_extension(module_ctx):
                     # get `sqlite3`'s library without naming it: the asset
                     # lands on the package that owns it, so it propagates
                     # through the Dart graph exactly as pub's own would.
+                    code_assets = curated_code_assets(name, version),
+                    ignore_hook = name in ignore_hooks,
+                )
+
+            # A repository package is fetched at the commit the lock records,
+            # laid out as pub lays it out (`fetch_pub_git`), and built as a
+            # hosted package is. The lock is checked here, where it can be
+            # named: an entry that pins no commit would be whatever the server
+            # holds on the day of the fetch.
+            for name, info in from_repository.items():
+                desc = info.get("description", {})
+                version = info.get("version", "")
+                url = desc.get("url", "") if type(desc) == "dict" else ""
+                if not url:
+                    fail("The git package \"%s\" %s (in %s) has no `description.url`. Run `dart pub get` to rewrite the lock." % (name, version, pub_tag.lock))
+                resolved_ref = desc.get("resolved-ref", "")
+                check_pub_git_resolved_ref(name, version, resolved_ref, str(pub_tag.lock))
+                flutter_pub_library_repo(
+                    name = library_repo(hub_name, name),
+                    package_name = name,
+                    hub_name = hub_name,
+                )
+                flutter_pub_package(
+                    name = source_repo(hub_name, name),
+                    package_name = name,
+                    version = version,
+                    git_url = url,
+                    resolved_ref = resolved_ref,
+                    git_path = desc.get("path", "."),
+                    # A relative url is resolved against the lock's directory;
+                    # any other leaves the lock out, so editing the lock does
+                    # not refetch the package.
+                    lock = pub_tag.lock if is_relative_git_url(url) else None,
+                    hub_name = hub_name,
+                    overlay_roots = user_overlay_roots + ["@rules_flutter//ext:BUILD.bazel"],
                     code_assets = curated_code_assets(name, version),
                     ignore_hook = name in ignore_hooks,
                 )

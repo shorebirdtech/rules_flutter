@@ -7,7 +7,9 @@ only the ones the app names: `integration_test` brings `flutter_driver`, which
 brings `fuchsia_remote_debug_protocol`. A list of package names would be wrong
 the day a Flutter release adds one, so the only names this file knows are the
 two `sdk` packages that are not built like the rest. A `path` package is the
-user's own, built by the target `flutter.pub(resolve = ...)` names for it.
+user's own, built by the target `flutter.pub(resolve = ...)` names for it. A
+`git` package is fetched at the commit the lock records and built like a hosted
+one.
 """
 
 # A package fetched from a pub registry.
@@ -27,7 +29,11 @@ FLUTTER_SOURCE = "flutter_source"
 # A `path` package: a target in the workspace, named by `flutter.pub(resolve = ...)`.
 PATH = "path"
 
-# A git package, or a source rules_flutter has never heard of.
+# A package fetched from a git repository at the lock's `resolved-ref`, built
+# by the pub-package writer as a hosted package is built from its archive.
+GIT = "git"
+
+# A source rules_flutter has never heard of.
 UNSUPPORTED = "unsupported"
 
 def lock_entry_kind(name, source):
@@ -39,7 +45,7 @@ def lock_entry_kind(name, source):
 
     Returns:
         One of `HOSTED`, `FLUTTER_FRAMEWORK`, `ENGINE_PROVIDED`,
-        `FLUTTER_SOURCE`, `PATH`, `UNSUPPORTED`.
+        `FLUTTER_SOURCE`, `PATH`, `GIT`, `UNSUPPORTED`.
     """
     if source == "hosted":
         return HOSTED
@@ -51,4 +57,6 @@ def lock_entry_kind(name, source):
         return FLUTTER_SOURCE
     if source == "path":
         return PATH
+    if source == "git":
+        return GIT
     return UNSUPPORTED

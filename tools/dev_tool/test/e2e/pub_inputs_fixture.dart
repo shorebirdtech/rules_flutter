@@ -61,6 +61,45 @@ class HostedPackage {
       'name: $name\nversion: $version\nenvironment:\n  sdk: ^3.0.0\n';
 }
 
+/// A package a lock takes from a repository (`source: git`): its [files] go in
+/// the repository's first commit, at [path], and the lock names that commit.
+/// Packages with the same [repository] share one, so a monorepo's packages are
+/// each locked at their own directory of it.
+class GitPackage {
+  GitPackage(
+    this.name, {
+    this.version = '1.0.0',
+    this.path = '.',
+    String? repository,
+    String? pubspec,
+    Map<String, String> files = const {},
+    this.laterFiles = const {},
+    this.resolvedRef,
+  }) : repository = repository ?? name,
+       files = {
+         'pubspec.yaml': pubspec ?? HostedPackage.defaultPubspec(name, version),
+         'lib/$name.dart': 'int value = 1;\n',
+         ...files,
+       };
+
+  final String name;
+  final String version;
+
+  /// The package's directory in the repository, as the lock's `description.path`.
+  final String path;
+  final String repository;
+
+  /// Relative to [path].
+  final Map<String, String> files;
+
+  /// Repository-relative files of a second commit, so the lock names a commit
+  /// that is no longer the tip.
+  final Map<String, String> laterFiles;
+
+  /// What the lock says instead of the first commit's id.
+  final String? resolvedRef;
+}
+
 /// What `bazel` said.
 class BazelResult {
   BazelResult(this.exitCode, this.stdout, this.stderr);
@@ -177,6 +216,7 @@ class PubInputsFixture {
     this.spokes = const [],
     this.resolve = const {},
     this.lockPackage = '',
+    this.git = const [],
   });
 
   /// The hosted packages: archives are made and listed in the lock.
@@ -199,6 +239,9 @@ class PubInputsFixture {
   /// The packages' files go in [files], their lock entries in
   /// [extraLockEntries].
   final Map<String, String> resolve;
+
+  /// The packages the lock takes from repositories made on the spot.
+  final List<GitPackage> git;
 
   /// The Bazel package of `pubspec.lock`, so a monorepo's lock sits at
   /// `apps/app/pubspec.lock`; empty for the root.
@@ -277,6 +320,24 @@ class PubInputsFixture {
       }
     }
 
+    final repositories = await _makeRepositories(git, server);
+    final gitEntries = StringBuffer();
+    for (final package in git) {
+      final repository = repositories[package.repository]!;
+      gitEntries
+        ..writeln('  ${package.name}:')
+        ..writeln('    dependency: "direct main"')
+        ..writeln('    description:')
+        ..writeln('      path: "${package.path}"')
+        ..writeln('      ref: main')
+        ..writeln(
+          '      resolved-ref: "${package.resolvedRef ?? repository.first}"',
+        )
+        ..writeln('      url: "${repository.directory}"')
+        ..writeln('    source: git')
+        ..writeln('    version: "${package.version}"');
+    }
+
     final serverUrl = 'file://${server.path}';
     final repo = e2eWorkspace('..');
     final root = File(p.join(repo, 'MODULE.bazel')).readAsStringSync();
@@ -298,6 +359,7 @@ class PubInputsFixture {
 
     final spokeNames = {
       for (final package in hosted) package.name,
+      for (final package in git) package.name,
       ...spokes,
     }.toList()..sort();
     final module =
@@ -343,12 +405,90 @@ use_repo(flutter, "$pubHub"${spokeNames.map((n) => ', "${pubHub}__$n"').join()})
       p.posix.join(lockPackage, 'pubspec.lock'): renderLock(
         hosted,
         serverUrl,
-        extraEntries: extraLockEntries,
+        extraEntries: extraLockEntries + gitEntries.toString(),
       ),
       ...files,
     });
     return PubInputsWorkspace._(ws, serverUrl, hosted, lockPackage);
   }
+}
+
+/// A repository made for [GitPackage]s: where it is, and its first commit.
+typedef _Repository = ({String directory, String first});
+
+/// The environment git runs in: none of the host's configuration (a
+/// `commit.gpgsign` there would otherwise try to sign the fixture's commits),
+/// and fixed authors.
+Map<String, String> _gitEnvironment(Directory home) => {
+  'HOME': home.path,
+  'XDG_CONFIG_HOME': home.path,
+  'PATH': Platform.environment['PATH'] ?? '',
+  'GIT_CONFIG_NOSYSTEM': '1',
+  'GIT_CONFIG_GLOBAL': '/dev/null',
+  'GIT_AUTHOR_NAME': 'fixture',
+  'GIT_AUTHOR_EMAIL': 'fixture@example.invalid',
+  'GIT_COMMITTER_NAME': 'fixture',
+  'GIT_COMMITTER_EMAIL': 'fixture@example.invalid',
+};
+
+/// One repository per distinct [GitPackage.repository], under [root]: the
+/// packages' files in a first commit, their later files in a second.
+Future<Map<String, _Repository>> _makeRepositories(
+  List<GitPackage> packages,
+  Directory root,
+) async {
+  final home = Directory(p.join(root.path, 'home'))..createSync();
+  final environment = _gitEnvironment(home);
+  Future<String> run(Directory dir, List<String> args) async {
+    final result = await Process.run(
+      'git',
+      args,
+      workingDirectory: dir.path,
+      environment: environment,
+      includeParentEnvironment: false,
+    );
+    expect(result.exitCode, 0, reason: 'git $args: ${result.stderr}');
+    return (result.stdout as String).trim();
+  }
+
+  void write(Directory dir, String path, String content) {
+    final file = File(p.join(dir.path, path));
+    file.parent.createSync(recursive: true);
+    file.writeAsStringSync(content);
+  }
+
+  final made = <String, _Repository>{};
+  final names = {for (final package in packages) package.repository};
+  for (final name in names) {
+    final dir = Directory(p.join(root.path, 'repositories', name))
+      ..createSync(recursive: true);
+    await run(dir, ['init', '-q', '--initial-branch=main']);
+    final members = packages.where((package) => package.repository == name);
+    for (final package in members) {
+      for (final file in package.files.entries) {
+        write(dir, p.posix.join(package.path, file.key), file.value);
+      }
+    }
+    await run(dir, ['add', '-A']);
+    await run(dir, ['commit', '-q', '--no-verify', '-m', 'first']);
+    final first = await run(dir, ['rev-parse', 'HEAD']);
+    for (final package in members) {
+      for (final file in package.laterFiles.entries) {
+        write(dir, file.key, file.value);
+      }
+    }
+    await run(dir, ['add', '-A']);
+    await run(dir, [
+      'commit',
+      '-q',
+      '--no-verify',
+      '--allow-empty',
+      '-m',
+      'later',
+    ]);
+    made[name] = (directory: dir.path, first: first);
+  }
+  return made;
 }
 
 /// The SHA-256 of [file], hex, the way `pubspec.lock` records it.
