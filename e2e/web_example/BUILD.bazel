@@ -25,6 +25,20 @@ flutter_web_app(
     ],
 )
 
+# A flavor is a target: the same app as a flavor's web app. `appFlavor` is
+# `paid` in it, and stays so through the dev loop's reload and restart.
+flutter_web_app(
+    name = "web_example_paid",
+    package_name = "web_example",
+    app_name = "Web Example Paid",
+    assets = glob(["assets/**"]),
+    flavor = "paid",
+    deps = [
+        "@deps//:flutter",
+        "@rules_flutter//flutter:material_icons",
+    ],
+)
+
 # Variant with a non-default base_href, exercising substitution of the
 # user-provided web/index.html.
 flutter_web_app(
@@ -157,6 +171,11 @@ build_test(
 build_test(
     name = "dev_boot_build_test",
     targets = [":app_dev_boot"],
+)
+
+build_test(
+    name = "flavor_build_test",
+    targets = [":web_example_paid"],
 )
 
 build_test(

@@ -200,7 +200,7 @@ The Flutter SDK packages a lock lists with `source: sdk` build too. `package:flu
 
 #### Pub packages' assets
 
-A package's `flutter: assets:` are bundled at `packages/<package>/<path>`, as `flutter build` bundles them. A listed image ships its resolution variants from the `<number>x/` directories beside it. A listed directory (a trailing slash) ships the files directly in it, and nothing from the directories below it. An entry with `platforms:` ships only in builds for those platforms, and an entry with `flavors:` ships only in a build of one of those flavors, which rules_flutter has none of, so such an entry ships nowhere. A package's `flutter: shaders:` entries follow the same two rules. A name with a space or a non-ASCII character is stored percent-encoded, the form the engine asks for, and listed in the manifest as written.
+A package's `flutter: assets:` are bundled at `packages/<package>/<path>`, as `flutter build` bundles them. A listed image ships its resolution variants from the `<number>x/` directories beside it. A listed directory (a trailing slash) ships the files directly in it, and nothing from the directories below it. An entry with `platforms:` ships only in builds for those platforms, and an entry with `flavors:` ships only in a build of one of those flavors (an application's `flavor`), and in no build without one. Two entries that give one file different flavors fail the build, as `flutter build` does. A package's `flutter: shaders:` entries follow the same rules. A name with a space or a non-ASCII character is stored percent-encoded, the form the engine asks for, and listed in the manifest as written.
 
 #### Plugins' Maven dependencies
 
@@ -440,6 +440,47 @@ flutter_android_app(
 ```
 
 On iOS and macOS, rules_apple's `apple_bundle_version` can instead read the version from `bazel build --embed_label=...`; pass it as `version`.
+
+### Flavors
+
+A flavor is a target. Give `flutter_application` (or `flutter_web_app`) a `flavor`, and declare one application per flavor, with the platform target of each beside it:
+
+```starlark
+flutter_application(
+    name = "app_paid",
+    package_name = "my_app",
+    main = "lib/main.dart",
+    flavor = "paid",
+    deps = [...],
+)
+
+flutter_macos_app(
+    name = "macos_paid",
+    application = ":app_paid",
+    bundle_id = "com.example.myapp.paid",   # per-flavor app id: an ordinary attribute
+    app_name = "My App Paid",
+)
+
+flutter_web_app(
+    name = "web_paid",
+    package_name = "my_app",
+    flavor = "paid",
+    deps = [...],
+)
+```
+
+What `flavor` does, as `flutter build --flavor` does it:
+
+- `appFlavor` (`package:flutter/services.dart`) is `'paid'` in the app. Without `flavor` it is `null`.
+- A pub package's `flutter: assets:` or `flutter: shaders:` entry with `flavors: [paid, ...]` is bundled in builds of that flavor, and in no build of another flavor or of none.
+- `flutter_bazel run //:macos_paid` runs the paid flavor. There is no `--flavor` flag: the flavor is part of the target, and hot reload and hot restart keep it.
+
+What it does not do. Everything else that differs between flavors, the app id, name, icons, Info.plist, Android manifest and resources, window title, differs because the flavor's platform target sets it. Those are the attributes of the platform macros: `package_name`, `app_name`, `manifest` and `resources` for `flutter_android_app`; `bundle_id`, `app_name`, `info_plist`, `app_icons`, `resources` and `entitlements` for `flutter_ios_app` and `flutter_macos_app`; `app_name`, `gtk_app_id` and `window_title` for `flutter_linux_app`; `app_name` for `flutter_windows_app`; `app_name` and `web_dir` for `flutter_web_app`. rules_flutter adds no Gradle product flavors, Xcode schemes or CMake variables, and has no `default-flavor`: set `flavor` on the target.
+
+- The app's own assets come from the target's `assets`, not its pubspec, so a flavor's own assets go in that flavor's target. A library's flavor-only assets go in a small library that only that flavor's application depends on.
+- `FLUTTER_APP_FLAVOR` cannot be set by hand: it is refused in `defines` and `--dart-define`, as `flutter build` refuses it.
+- Web bundles a flavor's `flavors:` assets and shaders like the other platforms. `flutter build web` has no `--flavor` and bundles none, so this is a deliberate difference.
+- `flutter_test` has no `flavor` yet: a test sees no `appFlavor` and no `flavors:` entry.
 
 ### macOS
 

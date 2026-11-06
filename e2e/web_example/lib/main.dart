@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show appFlavor;
 
 void main() {
+  // The flavor of the target that was built: `paid` for `:web_example_paid`,
+  // null for the others.
+  debugPrint('web_example flavor=$appFlavor');
   runApp(const MyApp());
 }
 

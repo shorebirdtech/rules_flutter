@@ -2,6 +2,7 @@ import 'dart:ffi';
 
 import 'package:add_plugin/add_plugin.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show appFlavor;
 
 /// `sub` from `libsub.dylib`, which the build produces in a subdirectory of
 /// its package (`vendor/lib/`) rather than at the package root. Opened by bare
@@ -19,6 +20,10 @@ void main() {
   // verify_macos_app_test reads this line off the app's stdout: the proof that
   // both bundled native libraries loaded and answered.
   debugPrint('macos_example_native sum=$result difference=$difference');
+
+  // The flavor of the target that was built: `paid` for `:macos_example_paid`,
+  // null for the others.
+  debugPrint('macos_example flavor=$appFlavor');
 
   runApp(MyApp(result: result, difference: difference));
 }

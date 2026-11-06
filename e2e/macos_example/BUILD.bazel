@@ -120,6 +120,27 @@ flutter_application(
     deps = _APP_DEPS,
 )
 
+# A flavor is a target: the same app as a flavor's application, and its macOS
+# app with the flavor's own bundle id and name. `appFlavor` is `paid` in it, and
+# stays so through hot reload and restart.
+flutter_application(
+    name = "app_paid",
+    package_name = "macos_example",
+    assets = glob(["assets/**"]),
+    flavor = "paid",
+    main = "lib/main.dart",
+    native_deps = [":sub"],
+    deps = _APP_DEPS,
+)
+
+flutter_macos_app(
+    name = "macos_example_paid",
+    app_name = "Flutter App Paid",
+    application = ":app_paid",
+    bundle_id = "com.example.flutterapp.paid",
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
 # An app whose `main` sits outside the package's `lib/` — the shape
 # `flutter run -t test_driver/app.dart` runs. It has no `package:` URI, so the
 # build and the dev loop both name it under the app scheme; hot reload of it,
@@ -389,6 +410,12 @@ build_test(
         ":app",
         ":app_second",
     ],
+)
+
+build_test(
+    name = "macos_flavor_app_build_test",
+    target_compatible_with = ["@platforms//os:macos"],
+    targets = [":macos_example_paid"],
 )
 
 build_test(
