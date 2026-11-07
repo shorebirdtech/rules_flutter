@@ -191,7 +191,7 @@ def _android_abi_table_complete_test_impl(ctx):
     """The ABI table covers exactly the supported cross-compile ABIs."""
     env = unittest.begin(ctx)
 
-    asserts.equals(env, ["arm64-v8a", "x86_64"], sorted(ANDROID_ABIS.keys()))
+    asserts.equals(env, ["arm64-v8a", "armeabi-v7a", "x86_64"], sorted(ANDROID_ABIS.keys()))
 
     return unittest.end(env)
 

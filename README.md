@@ -1000,12 +1000,16 @@ bazel build //:my_app_android \
 bazel build //:my_app_android \
     --@rules_android//flags:android_platforms=@rules_android//:x86_64
 
-# one APK for both
+# 32-bit ARM phones
 bazel build //:my_app_android \
-    --@rules_android//flags:android_platforms=@rules_android//:arm64-v8a,@rules_android//:x86_64
+    --@rules_android//flags:android_platforms=@rules_android//:armeabi-v7a
+
+# one APK for all three, as `flutter build apk`'s default
+bazel build //:my_app_android \
+    --@rules_android//flags:android_platforms=@rules_android//:armeabi-v7a,@rules_android//:arm64-v8a,@rules_android//:x86_64
 ```
 
-The platforms are rules_android's own, `@rules_android//:arm64-v8a` and `@rules_android//:x86_64`, and are named for their ABI because rules_android packages a platform's native libraries into `lib/<platform name>/`. Write them as shown: the flag's value is read by rules_android, which resolves the label from its own repository, so a platform of your own repository, or `@rules_flutter//...`, is not found. The engine of each ABI comes with rules_flutter; nothing of it goes in your `use_repo`.
+The platforms are rules_android's own, `@rules_android//:armeabi-v7a`, `@rules_android//:arm64-v8a` and `@rules_android//:x86_64`, and are named for their ABI because rules_android packages a platform's native libraries into `lib/<platform name>/`. Write them as shown: the flag's value is read by rules_android, which resolves the label from its own repository, so a platform of your own repository, or `@rules_flutter//...`, is not found. The engine of each ABI comes with rules_flutter; nothing of it goes in your `use_repo`.
 
 The flag is rules_android's Starlark flag, which rules_android reads first. The short `--android_platforms` also works: rules_android aliases it to that flag (`flag_alias`), and Bazel's native option of the same name is what rules_android falls back to while it exists. The long form names `@rules_android` on the command line, so your root `MODULE.bazel` needs `bazel_dep(name = "rules_android", version = "0.8.0")`.
 
@@ -1014,7 +1018,7 @@ Put the platforms you usually build for in your `.bazelrc`, with a config for th
 ```bazelrc
 common --@rules_android//flags:android_platforms=@rules_android//:arm64-v8a
 common:android-emulator --@rules_android//flags:android_platforms=@rules_android//:x86_64
-common:android-fat --@rules_android//flags:android_platforms=@rules_android//:arm64-v8a,@rules_android//:x86_64
+common:android-fat --@rules_android//flags:android_platforms=@rules_android//:armeabi-v7a,@rules_android//:arm64-v8a,@rules_android//:x86_64
 ```
 
 With no `--@rules_android//flags:android_platforms`, rules_android builds for `--platforms`, your machine's, and the engine and the bundle are incompatible with it: building the app fails with "incompatible", naming the platform that did not satisfy the constraint. `bazel build //...` on such a platform skips them, and whatever depends on them, with nothing to tag. `flutter_bazel run -d <android device>` asks the device its ABI and passes the matching platform itself.
@@ -1082,7 +1086,7 @@ bazel run //:app_release
 ```
 
 - `:app_bundle` is rules_android's `android_application`, built from the same arguments as `:app`. `bazel build //:app_bundle` makes `app_bundle_unsigned.aab` for the ABIs and compilation mode of the command line, like the APK. rules_android also declares `app_bundle_base`, the bundle's own `android_binary`; no BUILD file needs to name it.
-- `bazel run //:app_release` builds the bundle in release mode (`-c opt`, not profile) for arm64-v8a and x86_64, whatever the command line says, as `flutter build appbundle` builds every ABI. Its `android_platforms` attribute changes the ABIs. armeabi-v7a is not supported.
+- `bazel run //:app_release` builds the bundle in release mode (`-c opt`, not profile) for armeabi-v7a, arm64-v8a and x86_64, whatever the command line says, as `flutter build appbundle` builds every ABI. Its `android_platforms` attribute changes the ABIs.
 - Signing happens when the program runs, not in a build action. The keystore and its passwords never reach Bazel: no attribute, action input, command line or cache entry holds them. rules_android has no release signing of its own, by design.
 - The key comes from `android/key.properties` under the target's package, the file Flutter's deployment guide has you write:
 
@@ -1932,7 +1936,7 @@ bazel test :app_android_test --test_env=ANDROID_SERIAL=<serial>
 
 - **A device is a precondition.** The test runs on the device `ANDROID_SERIAL` names, else the only one attached; with none, or several and none named, it fails, naming `adb devices` and the variable that picks one. It is a failure, not a skip: a skipped test reads as a pass. Two tests on one device take turns on a lock (`/tmp/rules_flutter-locks/android-<serial>.lock`), which the operating system releases if a test dies.
 - **`adb` is the SDK's own**, the `@androidsdk` repository rules_android resolves from `ANDROID_HOME`, which your `MODULE.bazel` already declares for building an APK, not one found on `PATH`, and the file the SDK has for the host the test runs on (`adb.exe` on Windows). The `aapt2` that reads the APK's package and launch activity is the one of that same SDK. `runner` takes a `flutter_android_device_runner(sdk = ...)` of your own, an `android_sdk` target.
-- **`abi`** (`arm64-v8a` by default, or `x86_64`) is the ABI the app is built for, whatever `--@rules_android//flags:android_platforms` says: it has to be the one the device runs (an Apple-silicon emulator runs `arm64-v8a`).
+- **`abi`** (`arm64-v8a` by default, or `x86_64` or `armeabi-v7a`) is the ABI the app is built for, whatever `--@rules_android//flags:android_platforms` says: it has to be the one the device runs (an Apple-silicon emulator runs `arm64-v8a`).
 - **`integration_test`'s Android library links into the app**, and its Gradle build asks for `androidx.test:runner`, `androidx.test:rules`, `androidx.test.espresso:espresso-core` and `com.google.guava:guava`. Name a version of each in the `rules_android_maven` install of your `MODULE.bazel` (Gradle's `1.2+`, `1.2+` and `3.3+` are ranges; analysis names whatever is missing, and `bazel run @<hub>//android:maven_artifacts` prints the block). Only the tests' apps link it: your own app does not.
 - **The app stays installed**, as `flutter test` leaves it. `adb uninstall <package_name>` removes it.
 - **`env` is refused**: an app started by the device cannot be handed an environment. Pass `defines` to the application instead.
@@ -1989,7 +1993,7 @@ The rule forwards the files of `targets`, so a test names them in `data` and fin
 
 | Attribute | Description |
 |---|---|
-| `android_platforms` | The platforms to build `targets` for, such as `@rules_android//:arm64-v8a` and `@rules_android//:x86_64`. Your `MODULE.bazel` needs a `bazel_dep` on `rules_android` to name them in a BUILD file. Required. |
+| `android_platforms` | The platforms to build `targets` for, such as `@rules_android//:armeabi-v7a`, `@rules_android//:arm64-v8a` and `@rules_android//:x86_64`. Your `MODULE.bazel` needs a `bazel_dep` on `rules_android` to name them in a BUILD file. Required. |
 | `targets` | The targets to build, such as a `flutter_android_app`. Required. |
 
 ### flutter_android_release
@@ -2008,7 +2012,7 @@ flutter_android_release(
 | Attribute | Description |
 |---|---|
 | `app_bundle` | An `android_application`: `flutter_android_app`'s `app_bundle`, or your own built from the composable rules with `bundle_config_file = "@rules_flutter//flutter:android_bundle_config.pb.json"`. Built in release mode for `android_platforms`. Required. |
-| `android_platforms` | The ABIs of the release build. Defaults to `@rules_android//:arm64-v8a` and `@rules_android//:x86_64`. |
+| `android_platforms` | The ABIs of the release build. Defaults to `@rules_android//:armeabi-v7a`, `@rules_android//:arm64-v8a` and `@rules_android//:x86_64`. |
 | `key_properties` | Where `key.properties` is, relative to the target's package in the source tree. A path, not a label, so the file never enters the build. Defaults to `android/key.properties`. |
 
 Commands, after `--`:

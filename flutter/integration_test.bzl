@@ -716,7 +716,8 @@ def flutter_android_integration_test(
             device with the `adb` of `@androidsdk`, the Android SDK rules_android
             resolves from `ANDROID_HOME`.
         abi: The ABI the app is built for, which the device must run: `arm64-v8a`
-            for a phone or an Apple-silicon emulator, `x86_64` for an Intel one.
+            for a phone or an Apple-silicon emulator, `x86_64` for an Intel one,
+            `armeabi-v7a` for a 32-bit ARM device.
         tags: Tags of the test.
         timeout: The test's `timeout`.
         shard_count: The test's `shard_count`: the tests of the file are divided

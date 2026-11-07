@@ -3,8 +3,8 @@
 # Use these with --platforms to target specific platforms:
 #   bazel build //my_app --platforms=@rules_flutter//flutter/platforms:linux_x64
 #
-# For Android use rules_android's, `@rules_android//:arm64-v8a` and
-# `@rules_android//:x86_64`, with --@rules_android//flags:android_platforms: they are named for the
+# For Android use rules_android's, `@rules_android//:armeabi-v7a`,
+# `@rules_android//:arm64-v8a` and `@rules_android//:x86_64`, with --@rules_android//flags:android_platforms: they are named for the
 # ABI directory rules_android packages a platform's native libraries into.
 
 platform(

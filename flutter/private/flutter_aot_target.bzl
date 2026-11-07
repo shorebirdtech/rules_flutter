@@ -75,6 +75,7 @@ def _flutter_aot_target_impl(ctx):
             extra_flags = options.flags,
             file_flags = options.file_flags,
             debug_info = options.debug_info,
+            target_arch = flutter_sdk_info.target_arch,
         )
 
     return [

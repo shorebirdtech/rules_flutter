@@ -135,6 +135,7 @@ _flutter_android_release = rule(
                   "every ABI rules_flutter builds, as `flutter build appbundle` " +
                   "includes every ABI.",
             default = [
+                Label("@rules_android//:armeabi-v7a"),
                 Label("@rules_android//:arm64-v8a"),
                 Label("@rules_android//:x86_64"),
             ],

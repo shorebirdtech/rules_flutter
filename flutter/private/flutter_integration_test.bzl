@@ -456,7 +456,7 @@ flutter_android_app_integration_test = rule(
         "abi": attr.string(
             doc = "The ABI the app is built for, which the device must run: the platform of `--@rules_android//flags:android_platforms` the app is built under, whatever the command line says.",
             default = "arm64-v8a",
-            values = ["arm64-v8a", "x86_64"],
+            values = ["armeabi-v7a", "arm64-v8a", "x86_64"],
         ),
     },
     test = True,

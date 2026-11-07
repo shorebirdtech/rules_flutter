@@ -41,7 +41,7 @@ APK for that ABI, several build one APK for all of them.""",
             allow_empty = False,
             providers = [platform_common.PlatformInfo],
             doc = """The platforms to build `targets` for, such as
-`@rules_android//:arm64-v8a` and `:x86_64`. Each is
+`@rules_android//:armeabi-v7a`, `:arm64-v8a` and `:x86_64`. Each is
 named for its ABI, which is the directory rules_android packages its native
 libraries into.""",
         ),

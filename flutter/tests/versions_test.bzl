@@ -107,7 +107,7 @@ def _downloaded_artifact_paths():
             paths.append(desktop_engine_artifact_path(os, arch, mode))
     for mode in modes:
         paths.append(ios_engine_artifact_path(mode))
-    for android_arch in ["arm64", "x64"]:
+    for android_arch in ["arm", "arm64", "x64"]:
         for mode in modes:
             paths.append(android_engine_artifact_path(android_arch, mode))
         for mode in ["profile", "release"]:

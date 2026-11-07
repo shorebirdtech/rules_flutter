@@ -64,6 +64,12 @@ HOST_PLATFORMS = {
 # For each (host, target) pair, a toolchain is registered that runs on the
 # host and produces output for the target.
 TARGET_PLATFORMS = {
+    "android-arm": struct(
+        compatible_with = [
+            "@platforms//os:android",
+            "@platforms//cpu:armv7",
+        ],
+    ),
     "android-arm64": struct(
         compatible_with = [
             "@platforms//os:android",
@@ -104,10 +110,10 @@ DESKTOP_CROSS_PAIRS = {
 # toolchain, and an Android AOT compile picks another execution platform
 # rather than fail on one that cannot run its compiler.
 CROSS_COMPILATION_PAIRS = {
-    "darwin-arm64": ["android-arm64", "android-x64", "ios-arm64"],
-    "darwin-x64": ["android-arm64", "android-x64", "ios-arm64"],
-    "linux-x64": ["android-arm64", "android-x64"],
-    "windows-x64": ["android-arm64", "android-x64"],
+    "darwin-arm64": ["android-arm", "android-arm64", "android-x64", "ios-arm64"],
+    "darwin-x64": ["android-arm", "android-arm64", "android-x64", "ios-arm64"],
+    "linux-x64": ["android-arm", "android-arm64", "android-x64"],
+    "windows-x64": ["android-arm", "android-arm64", "android-x64"],
 }
 
 # The platforms a desktop engine is published for, as targets: one engine

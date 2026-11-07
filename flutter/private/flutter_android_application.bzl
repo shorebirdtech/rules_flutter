@@ -52,7 +52,7 @@ for, and takes its ABI from that platform, so the application behind it (its
 AOT compile and any FFI/native deps) is built for the same one. Every native
 library is validated to be an ELF shared object with the ABI's machine type
 before the APK is packaged; a host-format binary is a hard build error. A
-bundle built for a platform that is not Android arm64 or x86_64 fails with the
+bundle built for a platform that is not Android arm, arm64 or x86_64 fails with the
 flag to pass.
 """
 
@@ -69,18 +69,20 @@ def _android_abi(ctx):
         ctx: Rule context.
 
     Returns:
-        "arm64-v8a" or "x86_64".
+        "armeabi-v7a", "arm64-v8a" or "x86_64".
     """
     if ctx.target_platform_has_constraint(ctx.attr._android_constraint[platform_common.ConstraintValueInfo]):
         if ctx.target_platform_has_constraint(ctx.attr._arm64_constraint[platform_common.ConstraintValueInfo]):
             return "arm64-v8a"
         if ctx.target_platform_has_constraint(ctx.attr._x86_64_constraint[platform_common.ConstraintValueInfo]):
             return "x86_64"
+        if ctx.target_platform_has_constraint(ctx.attr._armv7_constraint[platform_common.ConstraintValueInfo]):
+            return "armeabi-v7a"
     fail((
-        "{label} is built for the platform {platform}, which is not Android arm64 or " +
+        "{label} is built for the platform {platform}, which is not Android arm, arm64 or " +
         "x86_64. An Android app is built for the platforms of --@rules_android//flags:android_platforms: pass " +
         "--@rules_android//flags:android_platforms=@rules_android//:arm64-v8a (and " +
-        ":x86_64 for a second ABI), or build it through flutter_android_build."
+        ":armeabi-v7a or :x86_64 for a second ABI), or build it through flutter_android_build."
     ).format(label = ctx.label, platform = ctx.fragments.platform.platform))
 
 def _symlink_to_jni(ctx, src, abi, basename):
@@ -289,6 +291,7 @@ Set to False if you only build release APKs and do not need mobile-install.""",
         "_android_constraint": attr.label(default = "@platforms//os:android"),
         "_arm64_constraint": attr.label(default = "@platforms//cpu:aarch64"),
         "_x86_64_constraint": attr.label(default = "@platforms//cpu:x86_64"),
+        "_armv7_constraint": attr.label(default = "@platforms//cpu:armv7"),
     } | ASSEMBLE_DIRECTORY_ATTRS,
     # Packaging copies and checks what the application built, the same bytes on
     # any host.
@@ -306,7 +309,7 @@ the application behind it is built for the same platform, so the AOT compile
 and all native deps target Android with no further flag. An APK for several
 ABIs therefore carries `libapp.so` of each. Native libraries are validated to
 be ELF for the platform's ABI at packaging time. Building it for a platform
-that is not Android arm64 or x86_64 fails, naming the flag to pass.
+that is not Android arm, arm64 or x86_64 fails, naming the flag to pass.
 
 By default, outputs are also structured for `bazel mobile-install` compatibility.
 Use the wrapping android_binary target with `bazel mobile-install` for fast

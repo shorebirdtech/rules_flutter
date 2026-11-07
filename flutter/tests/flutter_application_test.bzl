@@ -119,6 +119,15 @@ def _android_x64_build_args_test_impl(ctx):
     )
     return unittest.end(env)
 
+def _android_armv7_build_args_test_impl(ctx):
+    env = unittest.begin(ctx)
+    asserts.equals(
+        env,
+        ["--@rules_android//flags:android_platforms=@rules_android//:armeabi-v7a"],
+        launch_build_args("android", is_simulator = False, is_arm64 = False, is_x86_64 = False, is_armv7 = True),
+    )
+    return unittest.end(env)
+
 def _desktop_build_args_test_impl(ctx):
     """Desktop needs no flag: the app is already in the top-level configuration.
 
@@ -192,6 +201,7 @@ _t8_test = unittest.make(_android_arm64_build_args_test_impl)
 _t9_test = unittest.make(_android_x64_build_args_test_impl)
 _t10_test = unittest.make(_desktop_build_args_test_impl)
 _t11_test = unittest.make(_dev_registrant_covers_every_platform_test_impl)
+_t12_test = unittest.make(_android_armv7_build_args_test_impl)
 
 def flutter_application_test_suite(name):
     unittest.suite(
@@ -208,4 +218,5 @@ def flutter_application_test_suite(name):
         _t9_test,
         _t10_test,
         _t11_test,
+        _t12_test,
     )

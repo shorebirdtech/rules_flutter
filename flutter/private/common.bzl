@@ -931,6 +931,10 @@ def compute_android_jni_path(target_name, abi, basename):
 # mapping each ABI to the Bazel platform Android rules transition to and the
 # ELF e_machine value native libraries packaged for that ABI must carry.
 ANDROID_ABIS = {
+    "armeabi-v7a": struct(
+        platform = Label("@rules_android//:armeabi-v7a"),
+        elf_machine = 40,  # EM_ARM
+    ),
     "arm64-v8a": struct(
         platform = Label("@rules_android//:arm64-v8a"),
         elf_machine = 183,  # EM_AARCH64
@@ -945,7 +949,7 @@ def android_platform_for_abi(abi):
     """The Bazel platform label Android rules build for, given an ABI.
 
     Args:
-        abi: Android ABI string ("arm64-v8a" or "x86_64").
+        abi: Android ABI string ("armeabi-v7a", "arm64-v8a" or "x86_64").
 
     Returns:
         A Label for the platform under //flutter/platforms.
@@ -961,7 +965,7 @@ def android_elf_machine_for_abi(abi):
     """The ELF e_machine value native libraries must have for an ABI.
 
     Args:
-        abi: Android ABI string ("arm64-v8a" or "x86_64").
+        abi: Android ABI string ("armeabi-v7a", "arm64-v8a" or "x86_64").
 
     Returns:
         The e_machine value as an int (e.g. 183 for EM_AARCH64).
@@ -1073,9 +1077,12 @@ PLATFORM_CONSTRAINT_ATTRS = {
     "_x86_64_constraint": attr.label(
         default = "@platforms//cpu:x86_64",
     ),
+    "_armv7_constraint": attr.label(
+        default = "@platforms//cpu:armv7",
+    ),
 }
 
-def launch_build_args(target_platform, is_simulator, is_arm64, is_x86_64):
+def launch_build_args(target_platform, is_simulator, is_arm64, is_x86_64, is_armv7 = False):
     """The bazel flags the *launch target's* build needs to produce this app.
 
     MIRRORS `Device.buildArgs` in `tools/dev_tool/lib/device.dart`. The dev
@@ -1105,6 +1112,7 @@ def launch_build_args(target_platform, is_simulator, is_arm64, is_x86_64):
             that question is answerable; ignored off Apple.
         is_arm64: True when the target platform has the arm64 CPU constraint.
         is_x86_64: True when it has the x86_64 CPU constraint.
+        is_armv7: True when it has the 32-bit ARM (armv7) CPU constraint.
 
     Returns:
         list[str] of bazel flags. Empty on desktop.
@@ -1119,12 +1127,14 @@ def launch_build_args(target_platform, is_simulator, is_arm64, is_x86_64):
             abi = "arm64-v8a"
         elif is_x86_64:
             abi = "x86_64"
+        elif is_armv7:
+            abi = "armeabi-v7a"
         else:
             fail(
-                "flutter_application: the Android target platform has neither an arm64 nor " +
-                "an x86_64 CPU constraint, so the `--@rules_android//flags:android_platforms` flag a dev-loop rebuild " +
-                "needs cannot be named. rules_android ships @rules_android//:arm64-v8a " +
-                "and @rules_android//:x86_64.",
+                "flutter_application: the Android target platform has no armv7, arm64 or " +
+                "x86_64 CPU constraint, so the `--@rules_android//flags:android_platforms` flag a dev-loop rebuild " +
+                "needs cannot be named. rules_android ships @rules_android//:armeabi-v7a, " +
+                "@rules_android//:arm64-v8a and @rules_android//:x86_64.",
             )
         return ["--@rules_android//flags:android_platforms=@rules_android//:" + abi]
 

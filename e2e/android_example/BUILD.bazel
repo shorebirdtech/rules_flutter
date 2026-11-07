@@ -141,8 +141,8 @@ flutter_android_app(
 )
 
 # `bazel run :app_release` signs `:app_bundle` and the APK of the same build
-# with the upload key android/key.properties names: release mode, both
-# ABIs. `:verify_android_release_test` signs with a key it makes itself.
+# with the upload key android/key.properties names: release mode, every
+# default ABI (armeabi-v7a, arm64-v8a and x86_64). `:verify_android_release_test` signs with a key it makes itself.
 flutter_android_release(
     name = "app_release",
     app_bundle = ":app_bundle",

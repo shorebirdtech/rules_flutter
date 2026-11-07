@@ -80,7 +80,7 @@ e2e_copies(
 
 flutter = use_extension("//flutter:extensions.bzl", "flutter")
 flutter.toolchain(flutter_version = "3.47.9")
-use_repo(flutter, "flutter_android_engine_arm64", "flutter_android_engine_x64", "flutter_chrome_for_testing_linux64", "flutter_chrome_for_testing_linux_arm64", "flutter_chrome_for_testing_mac_arm64", "flutter_chrome_for_testing_mac_x64", "flutter_chrome_for_testing_win64", "flutter_dev_root", "flutter_ios_engine", "flutter_ios_engine_profile", "flutter_linux_runtime_amd64", "flutter_linux_runtime_arm64", "flutter_macos_engine", "flutter_sdks", "flutter_sky_engine", "flutter_toolchains", "flutter_version_pin", "flutter_web_sdk")
+use_repo(flutter, "flutter_android_engine_arm", "flutter_android_engine_arm64", "flutter_android_engine_x64", "flutter_chrome_for_testing_linux64", "flutter_chrome_for_testing_linux_arm64", "flutter_chrome_for_testing_mac_arm64", "flutter_chrome_for_testing_mac_x64", "flutter_chrome_for_testing_win64", "flutter_dev_root", "flutter_ios_engine", "flutter_ios_engine_profile", "flutter_linux_runtime_amd64", "flutter_linux_runtime_arm64", "flutter_macos_engine", "flutter_sdks", "flutter_sky_engine", "flutter_toolchains", "flutter_version_pin", "flutter_web_sdk")
 
 flutter_pub = use_extension("//flutter:extensions.bzl", "flutter_pub")
 use_repo(flutter_pub, "flutter_gen_l10n", "flutter_pub_android_maven")

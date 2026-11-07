@@ -138,7 +138,12 @@ def _flutter_aot_action(
         progress_message = "AOT compiling Flutter %s %s" % (snapshot_kind, ctx.label),
     )
 
-def flutter_aot_elf_action(ctx, gen_snapshot, kernel_dill, output, strip = True, extra_flags = [], file_flags = [], debug_info = None):
+# What flutter_tools gives gen_snapshot for a 32-bit ARM snapshot
+# (`base/build.dart`): softfp, as Android armv7 devices have no hard-float ABI,
+# and no integer division instruction, which not every 32-bit device has.
+_ARM_FLAGS = ["--no-sim-use-hardfp", "--no-use-integer-division"]
+
+def flutter_aot_elf_action(ctx, gen_snapshot, kernel_dill, output, strip = True, extra_flags = [], file_flags = [], debug_info = None, target_arch = ""):
     """AOT compile to ELF shared library. Used for Android, Linux, Windows.
 
     Args:
@@ -153,8 +158,11 @@ def flutter_aot_elf_action(ctx, gen_snapshot, kernel_dill, output, strip = True,
             as `--save-obfuscation-map`; the Files are outputs of the action.
         debug_info: Optional File the split debug info is saved to
             (`--save-debugging-info`), with DWARF stack traces turned on.
+        target_arch: The CPU the snapshot is for (`FlutterSdkInfo.target_arch`);
+            `arm` adds the flags a 32-bit ARM snapshot needs.
     """
-    _flutter_aot_action(ctx, gen_snapshot, kernel_dill, output, "app-aot-elf", "--elf", strip, extra_flags, file_flags, debug_info, mnemonic = "FlutterAotElf")
+    flags = (_ARM_FLAGS if target_arch == "arm" else []) + list(extra_flags)
+    _flutter_aot_action(ctx, gen_snapshot, kernel_dill, output, "app-aot-elf", "--elf", strip, flags, file_flags, debug_info, mnemonic = "FlutterAotElf")
 
 def flutter_aot_macho_action(
         ctx,

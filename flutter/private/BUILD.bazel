@@ -24,6 +24,15 @@ config_setting(
 # android_binary builds its dependencies once for each of --@rules_android//flags:android_platforms,
 # and a dependency picks what it packages by the platform it is built for.
 config_setting(
+    name = "android_arm",
+    constraint_values = [
+        "@platforms//os:android",
+        "@platforms//cpu:armv7",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
     name = "android_arm64",
     constraint_values = [
         "@platforms//os:android",

@@ -134,13 +134,14 @@ _ANDROIDX_EMBEDDING_DEPS = [
 # -- Composable rules (Tier 2) ------------------------------------------------
 
 def _android_only():
-    """`target_compatible_with` for a target built only for Android arm64 or x86_64.
+    """`target_compatible_with` for a target built only for Android arm, arm64 or x86_64.
 
     A target that takes its ABI from the platform it is built for has nothing to
     build on any other, so a wildcard on a non-Android platform skips it rather
     than failing on it. Its dependents are skipped with it.
     """
     return select({
+        "@rules_flutter//flutter/private:android_arm": [],
         "@rules_flutter//flutter/private:android_arm64": [],
         "@rules_flutter//flutter/private:android_x64": [],
         "//conditions:default": [Label("@platforms//:incompatible")],
@@ -276,15 +277,16 @@ flutter_android_registrant = _flutter_android_registrant
 # `bazel query` and the tooling built on it load them all; a build resolves
 # only the one it takes.
 _ENGINE_FOR_CPU = {
+    "@rules_flutter//flutter/private:android_arm": [Label("@flutter_android_engine_arm//:stripped")],
     "@rules_flutter//flutter/private:android_arm64": [Label("@flutter_android_engine_arm64//:stripped")],
     "@rules_flutter//flutter/private:android_x64": [Label("@flutter_android_engine_x64//:stripped")],
 }
 
 _NO_ENGINE_FOR_PLATFORM = (
-    "flutter_android_engine is built for a platform that is not Android arm64 " +
+    "flutter_android_engine is built for a platform that is not Android arm, arm64 " +
     "or x86_64. An Android app is built for the platforms of --@rules_android//flags:android_platforms: " +
     "pass --@rules_android//flags:android_platforms=@rules_android//:arm64-v8a " +
-    "(and :x86_64 for a second ABI), or build it through flutter_android_build."
+    "(and :armeabi-v7a or :x86_64 for a second ABI), or build it through flutter_android_build."
 )
 
 def flutter_android_engine(name, neverlink = False, **kwargs):
@@ -293,7 +295,7 @@ def flutter_android_engine(name, neverlink = False, **kwargs):
     The engine is the one of the platform the target is built for. An
     `android_binary` builds its dependencies once for each platform of
     `--@rules_android//flags:android_platforms`, so an APK for several ABIs carries the engine of
-    each, and a target built for neither Android arm64 nor x86_64 fails. The
+    each, and a target built for none of Android arm, arm64 and x86_64 fails. The
     engine repositories are rules_flutter's: nothing goes in your `use_repo`.
 
     Auto-selects the engine of the build mode:
@@ -604,7 +606,8 @@ def flutter_android_app(
     APK for all of them (`flutter build apk`'s fat APK). The Flutter engine, the
     app's `libapp.so`, the AARs' native libraries and any C++ deps are each
     packaged for every ABI. Name the platforms rules_android ships,
-    `@rules_android//:arm64-v8a` and `@rules_android//:x86_64`:
+    `@rules_android//:armeabi-v7a`, `@rules_android//:arm64-v8a` and
+    `@rules_android//:x86_64`:
 
         bazel build //:my_app_android --@rules_android//flags:android_platforms=@rules_android//:arm64-v8a
 

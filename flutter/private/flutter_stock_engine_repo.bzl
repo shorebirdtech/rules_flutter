@@ -186,7 +186,7 @@ def stock_engine_packages(name, provenance):
                 else:
                     repo = "{}_cross_{}_{}".format(name, host, target) + ("_profile" if mode == "profile" else "")
                     label = "@{}//:{}".format(repo, gen_snapshot_binary_name(host))
-                add("{}/{}".format(target, mode), _gen_snapshot(host, mode, "arm64" if cpu == "arm64" else "x86_64", label, provenance))
+                add("{}/{}".format(target, mode), _gen_snapshot(host, mode, {"arm": "arm", "arm64": "arm64"}.get(cpu, "x86_64"), label, provenance))
     return packages
 
 def _flutter_stock_engine_repo_impl(repository_ctx):

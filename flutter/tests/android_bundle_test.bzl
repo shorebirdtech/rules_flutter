@@ -75,6 +75,12 @@ _arm64_test = analysistest.make(
     config_settings = _platform("@rules_android//:arm64-v8a") | _RELEASE,
 )
 
+_armv7_test = analysistest.make(
+    _libraries_impl,
+    attrs = _ATTRS,
+    config_settings = _platform("@rules_android//:armeabi-v7a") | _RELEASE,
+)
+
 _x86_64_test = analysistest.make(
     _libraries_impl,
     attrs = _ATTRS,
@@ -83,7 +89,7 @@ _x86_64_test = analysistest.make(
 
 def _not_android_impl(ctx):
     env = analysistest.begin(ctx)
-    asserts.expect_failure(env, "which is not Android arm64 or x86_64")
+    asserts.expect_failure(env, "which is not Android arm, arm64 or x86_64")
     asserts.expect_failure(env, "--@rules_android//flags:android_platforms")
     return analysistest.end(env)
 
@@ -107,6 +113,14 @@ def android_bundle_test_suite(name):
         libraries = ["libapp.so", "libcombined.so"],
         target_compatible_with = ["@platforms//os:macos"],
     )
+    _armv7_test(
+        name = name + "_armv7",
+        target_under_test = _BUNDLE,
+        abi = "armeabi-v7a",
+        elf_machine = 40,
+        libraries = ["libapp.so", "libcombined.so"],
+        target_compatible_with = ["@platforms//os:macos"],
+    )
     _x86_64_test(
         name = name + "_x86_64",
         target_under_test = _BUNDLE,
@@ -122,5 +136,5 @@ def android_bundle_test_suite(name):
     )
     native.test_suite(
         name = name,
-        tests = [name + "_arm64", name + "_x86_64", name + "_not_android"],
+        tests = [name + "_arm64", name + "_armv7", name + "_x86_64", name + "_not_android"],
     )

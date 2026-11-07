@@ -9,10 +9,11 @@
 ///   signed by the test's key alone and passes `bundletool validate`; the APK
 ///   verifies with the SDK's `apksigner` (v2) against the same certificate and
 ///   is 16 KB-aligned, its native libraries stored uncompressed.
-/// - Both are release builds for both ABIs, though the test is not built with
-///   `-c opt`: AOT `libapp.so` for arm64-v8a and x86_64, no kernel snapshot, a
-///   manifest that is not debuggable, and dex shrunk by R8 (the bundle carries
-///   R8's mapping) with no core library desugaring runtime in it.
+/// - Both are release builds for all three default ABIs, though the test is not
+///   built with `-c opt`: AOT `libapp.so` for armeabi-v7a, arm64-v8a and
+///   x86_64, no kernel snapshot, a manifest that is not debuggable, and dex
+///   shrunk by R8 (the bundle carries R8's mapping) with no core library
+///   desugaring runtime in it.
 library;
 
 // This script's diagnostics are its product: it reports what it found in
@@ -32,7 +33,9 @@ import 'package:runfiles/runfiles.dart';
 
 const _password = 'release-test-password';
 const _alias = 'upload';
-const _abis = ['arm64-v8a', 'x86_64'];
+// The ABIs `flutter build apk` and `flutter build appbundle` build for by
+// default.
+const _abis = ['armeabi-v7a', 'arm64-v8a', 'x86_64'];
 
 final _runfiles = Runfiles.create();
 final _check = BundleCheck();
@@ -234,7 +237,7 @@ void main() {
     extractor: Extractor.zipper,
   );
   for (final abi in _abis) {
-    for (final lib in ['libapp.so', 'libflutter.so']) {
+    for (final lib in ['libapp.so', 'libflutter.so', 'libadd.so']) {
       _check.exists(
         '$abi $lib in the bundle',
         '${bundle.path}/base/lib/$abi/$lib',
@@ -325,10 +328,12 @@ void main() {
     detail: 'ABIs ${extracted.abis}',
   );
   for (final abi in _abis) {
-    _check.exists(
-      '$abi libapp.so in the APK',
-      '${extracted.path}/lib/$abi/libapp.so',
-    );
+    for (final lib in ['libapp.so', 'libflutter.so', 'libadd.so']) {
+      _check.exists(
+        '$abi $lib in the APK',
+        '${extracted.path}/lib/$abi/$lib',
+      );
+    }
   }
   extracted
     ..checkNativeLibrariesUncompressed()

@@ -170,6 +170,9 @@ def flutter_application_build(ctx, inputs):
             is_x86_64 = ctx.target_platform_has_constraint(
                 ctx.attr._x86_64_constraint[platform_common.ConstraintValueInfo],
             ),
+            is_armv7 = ctx.target_platform_has_constraint(
+                ctx.attr._armv7_constraint[platform_common.ConstraintValueInfo],
+            ),
         ),
     )
     kernel_dill = compilation.kernel_dill
@@ -212,6 +215,7 @@ def flutter_application_build(ctx, inputs):
                 extra_flags = options.flags,
                 file_flags = options.file_flags,
                 debug_info = debug_info_output,
+                target_arch = flutter_sdk_info.target_arch,
             )
 
     # Collect native shared libraries from native_deps + transitive plugin deps.
