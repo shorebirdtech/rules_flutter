@@ -254,6 +254,10 @@ _UNIT_TESTS = {
     },
     "key_press_test": {},
     "linux_runtime_test": {"fakes": True},
+    "test_emulator_test": {
+        "fakes": True,
+        "deps": _PATH_DEP,
+    },
     "test_simulator_test": {},
     "suite_connectors_test": {
         "cdp_page": True,

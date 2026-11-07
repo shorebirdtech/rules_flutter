@@ -1995,7 +1995,7 @@ The macro is Tier 1. Tier 2 is `flutter_integration_bootstrap` (with `src_import
 
 #### Android integration tests
 
-`flutter_android_integration_test` runs the same test file on an attached phone or a running emulator: the app is built in debug mode for the device's ABI, installed, started, and its suite driven through the VM service forwarded from the device, as `flutter test integration_test/app_test.dart -d <device>` does.
+`flutter_android_integration_test` runs the same test file on an Android emulator the test boots for itself, or on an attached phone: the app is built in debug mode for the device's ABI, installed, started, and its suite driven through the VM service forwarded from the device, as `flutter test integration_test/app_test.dart -d <device>` does.
 
 ```starlark
 load("@rules_flutter//flutter:integration_test.bzl", "flutter_android_integration_test")
@@ -2013,18 +2013,24 @@ flutter_android_integration_test(
 ```
 
 ```sh
-bazel test :app_android_test --test_env=ANDROID_SERIAL=<serial>
+bazel test :app_android_test        # on an emulator of its own
+bazel test :app_android_test \
+    --@rules_flutter//flutter/integration_test:android_device=attached \
+    --test_env=ANDROID_SERIAL=<serial>  # on your phone
 ```
 
-- **A device is a precondition.** The test runs on the device `ANDROID_SERIAL` names, else the only one attached; with none, or several and none named, it fails, naming `adb devices` and the variable that picks one. It is a failure, not a skip: a skipped test reads as a pass. Two tests on one device take turns on a lock (`/tmp/rules_flutter-locks/android-<serial>.lock`), which the operating system releases if a test dies.
-- **`adb` is the SDK's own**, the `@androidsdk` repository rules_android resolves from `ANDROID_HOME`, which your `MODULE.bazel` already declares for building an APK, not one found on `PATH`, and the file the SDK has for the host the test runs on (`adb.exe` on Windows). The `aapt2` that reads the APK's package and launch activity is the one of that same SDK. `runner` takes a `flutter_android_device_runner(sdk = ...)` of your own, an `android_sdk` target.
-- **`abi`** (`arm64-v8a` by default, or `x86_64` or `armeabi-v7a`) is the ABI the app is built for, whatever `--@rules_android//flags:android_platforms` says: it has to be the one the device runs (an Apple-silicon emulator runs `arm64-v8a`).
+- **By default the device is an emulator of the test's own.** The emulator (36.2.12) and the system image it boots (Android 15, API 35, AOSP's Automated Test Device image) are pinned by sha256 and downloaded by Bazel for the host, about 1 GB: macOS on Apple silicon boots the arm64-v8a image, Linux on x86_64 the x86_64 one, and the app is built for it. A build that runs no Android test on the emulator downloads nothing of it. Each test makes a device in its own temporary directory, boots it from a cold start with fresh data and no window (15 to 30 s on an Apple-silicon Mac, depending on its load), runs, and shuts it down however it ends; a test needs nothing attached, booted or installed, and leaves nothing behind. On other hosts (Windows, Intel Macs, Linux on arm64) the test is skipped; run it on an attached device there.
+- **The emulator needs the host's hypervisor**: Hypervisor.framework on macOS, KVM on Linux (`/dev/kvm` readable and writable by the user; a cloud VM needs nested virtualisation). Without it the test fails before anything boots, saying so and how to enable it. On Linux the emulator loads the X client libraries it links from the pinned Linux runtime of [Linux integration tests](#linux-integration-tests), not the host's.
+- **Tests on emulators run side by side.** Each takes a pair of the ports `adb` knows emulators by (5554 to 5585, passing over those of emulators already running, so 16 at once) under a lock (`/tmp/rules_flutter-locks/android-emulator-<port>.lock`), and Bazel schedules each with three cores, the device's two and one for the emulator. The emulator answers to an `adb` server of the test's own that looks at no USB or network device, so a phone that is attached is never touched. An emulator that a SIGKILL left behind is shut down by the next test that takes its ports. The emulator's output and the device's whole log are kept with the test's outputs (`emulator.log`, `logcat.txt` in `bazel-testlogs/<test>/test.outputs/`).
+- **On an attached device** (`--@rules_flutter//flutter/integration_test:android_device=attached`), the test runs on the device `ANDROID_SERIAL` names, else the only one attached; with none, or several and none named, it fails, naming `adb devices` and the variable that picks one. It is a failure, not a skip: a skipped test reads as a pass. Two tests on one device take turns on a lock (`/tmp/rules_flutter-locks/android-<serial>.lock`), which the operating system releases if a test dies. The app is built for arm64-v8a. `ANDROID_SERIAL` given to a test that runs on the emulator fails it, naming the flag.
+- **`adb` is the SDK's own**, the `@androidsdk` repository rules_android resolves from `ANDROID_HOME`, which your `MODULE.bazel` already declares for building an APK, not one found on `PATH`, and the file the SDK has for the host the test runs on (`adb.exe` on Windows). The `aapt2` that reads the APK's package and launch activity is the one of that same SDK. `runner` takes a runner of your own: `flutter_android_emulator_runner(sdk = ..., emulator = ..., system_image = ...)`, whose `system_image` can be another `flutter_android_system_image` (another API level, say) and whose `cores` and `memory_mb` size the device, or `flutter_android_device_runner(sdk = ...)`.
+- **`abi`** (by default the emulator image's, or `arm64-v8a` on an attached device; `x86_64` and `armeabi-v7a` otherwise) is the ABI the app is built for, whatever `--@rules_android//flags:android_platforms` says: it has to be the one the device runs. An emulator runner whose image runs another fails analysis, naming both.
 - **`integration_test`'s Android library links into the app**, and its Gradle build asks for `androidx.test:runner`, `androidx.test:rules`, `androidx.test.espresso:espresso-core` and `com.google.guava:guava`. Name a version of each in the `rules_android_maven` install of your `MODULE.bazel` (Gradle's `1.2+`, `1.2+` and `3.3+` are ranges; analysis names whatever is missing, and `bazel run @<hub>//android:maven_artifacts` prints the block). Only the tests' apps link it: your own app does not.
-- **The app stays installed**, as `flutter test` leaves it. `adb uninstall <package_name>` removes it.
+- **The app stays installed** on an attached device, as `flutter test` leaves it. `adb uninstall <package_name>` removes it.
 - **`env` is refused**: an app started by the device cannot be handed an environment. Pass `defines` to the application instead.
 - Results, `--test_filter`, tags, `shard_count`, and the failures (a failing case, an app that exits, a suite that registers nothing) are as on the other platforms.
 
-The macro is Tier 1. Tier 2 is `flutter_integration_bootstrap`, `flutter_application_variant`, `flutter_android_app`, `flutter_android_app_integration_test` and `flutter_android_device_runner`, which the macro composes as `__<name>_bootstrap`, `__<name>_program`, `__<name>_app` and, when you name no `runner`, `__<name>_runner`.
+The macro is Tier 1. Tier 2 is `flutter_integration_bootstrap`, `flutter_application_variant`, `flutter_android_app`, `flutter_android_app_integration_test`, `flutter_android_emulator_runner`, `flutter_android_system_image` and `flutter_android_device_runner`, which the macro composes as `__<name>_bootstrap`, `__<name>_program`, `__<name>_app` and, when you name no `runner`, `__<name>_emulator` and `__<name>_device`, of which the flag picks one.
 
 #### iOS simulator integration tests
 

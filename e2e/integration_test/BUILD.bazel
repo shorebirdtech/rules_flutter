@@ -493,7 +493,7 @@ outcome_test(
 # display device, they pass from its console session and from an SSH logon. Run
 # them by hand or on the VM of docs/TESTING.md, "Windows integration tests", by
 # name: they need the console session. `build //...` works from a Windows host:
-# the Android tests below take the `adb` their SDK has for it, `adb.exe`.
+# the Android tests below are skipped there, having no emulator pinned for it.
 
 # The two tests of `:macos_pass_test`, in a window: each is reported.
 flutter_windows_integration_test(
@@ -958,18 +958,18 @@ outcome_test(
 
 # -- Android ---------------------------------------------------------------
 
-# The same app on an attached phone or a running emulator, which is a
-# precondition: with none attached, or several and no `ANDROID_SERIAL`, the
-# tests fail saying so, as `flutter test -d` does. Run them by name with the
-# device named, e.g.
+# The same app on an Android emulator each test boots for itself, of the
+# emulator and system image pinned for the host (macOS on Apple silicon, Linux
+# on x86_64, with its hypervisor; skipped on other hosts), built for the image's
+# ABI. The same tests run on an attached phone with
 #
 #     bazel test //:android_pass_test //:android_filter_test //:android_red_twin_test \
+#         --@rules_flutter//flutter/integration_test:android_device=attached \
 #         --test_env=ANDROID_SERIAL=<serial>
 #
-# The app is built for `abi` (arm64-v8a, the default, is a phone or an
-# Apple-silicon emulator) and needs `androidx.test` and Espresso in this
-# workspace's `rules_android_maven` install, which `integration_test`'s Android
-# library links.
+# The app needs `androidx.test` and Espresso in this workspace's
+# `rules_android_maven` install, which `integration_test`'s Android library
+# links.
 
 # The two tests of `:macos_pass_test`, on a device: each is reported.
 flutter_android_integration_test(

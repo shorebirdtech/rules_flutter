@@ -379,6 +379,59 @@ def _android_wrong_family_impl(ctx):
 
 _android_wrong_family_test = analysistest.make(_android_wrong_family_impl, expect_failure = True)
 
+def _emulator_runner_impl(ctx):
+    """The emulator runner names the emulator, its image and what the device is, brings them and the SDK's adb, and asks for the cores the emulator takes."""
+    env = analysistest.begin(ctx)
+    runner = analysistest.target_under_test(env)[FlutterIntegrationRunnerInfo]
+    asserts.equals(env, "android", runner.family)
+    fixture = "_main/flutter/tests/integration_fixture/"
+    asserts.equals(env, fixture + "fake_sdk/platform-tools/adb", runner.launcher_config.adb)
+    emulator = runner.launcher_config.emulator
+    asserts.equals(env, fixture + "fake_emulator/emulator/emulator", emulator.executable)
+    asserts.equals(env, fixture + "fake_image/source.properties", emulator.systemImage)
+    asserts.equals(env, "x86_64", emulator.abi)
+    asserts.equals(env, 35, emulator.apiLevel)
+    asserts.equals(env, "aosp_atd", emulator.tag)
+    asserts.equals(env, 2, emulator.cores)
+    asserts.equals(env, 2048, emulator.memoryMb)
+    asserts.equals(
+        env,
+        ["adb", "emulator", "qemu-system", "source.properties", "system.img"],
+        sorted([f.basename for f in runner.runfiles.to_list()]),
+        "the adb, the emulator with what it carries, and the image",
+    )
+    asserts.equals(env, "1", runner.execution_requirements.get("no-remote"))
+    asserts.equals(env, "1", runner.execution_requirements.get("no-sandbox"))
+    asserts.true(env, "cpu:3" in runner.execution_requirements, "the device's two cores and one for the emulator's own work")
+    return analysistest.end(env)
+
+_emulator_runner_test = analysistest.make(_emulator_runner_impl, config_settings = _on_host("macos_arm64"))
+
+def _android_emulator_rule_impl(ctx):
+    """An Android test on an emulator tells the host runner which emulator and image, as the runner says."""
+    env = analysistest.begin(ctx)
+    config = written_json(env, ".integration_config.json")
+    if config == None:
+        return analysistest.end(env)
+    emulator = config["launcher"]["emulator"]
+    asserts.equals(env, "x86_64", emulator["abi"])
+    asserts.true(env, emulator["executable"].endswith("fake_emulator/emulator/emulator"))
+    asserts.true(env, emulator["systemImage"].endswith("fake_image/source.properties"))
+    requirements = analysistest.target_under_test(env)[testing.ExecutionInfo].requirements
+    asserts.true(env, "cpu:3" in requirements, "the test is scheduled with the emulator's cores")
+    return analysistest.end(env)
+
+_android_emulator_rule_test = analysistest.make(_android_emulator_rule_impl, config_settings = _on_host("macos_arm64"))
+
+def _android_emulator_abi_impl(ctx):
+    """An app built for an ABI the emulator's image does not run fails analysis, naming both."""
+    env = analysistest.begin(ctx)
+    asserts.expect_failure(env, "the app is built for arm64-v8a, and the runner")
+    asserts.expect_failure(env, "boots an emulator of x86_64, which cannot install it")
+    return analysistest.end(env)
+
+_android_emulator_abi_test = analysistest.make(_android_emulator_abi_impl, expect_failure = True)
+
 BuiltAsInfo = provider(
     doc = "How a probe was built.",
     fields = ["mode", "profile", "platforms"],
@@ -580,6 +633,9 @@ def flutter_integration_test_test_suite(name):
             name = name + "_android_runner_" + host,
             target_under_test = _FIXTURE + "android_runner",
         )
+    _emulator_runner_test(name = name + "_emulator_runner", target_under_test = _FIXTURE + "emulator_runner")
+    _android_emulator_rule_test(name = name + "_android_emulator_rule", target_under_test = _FIXTURE + "android_emulator_test")
+    _android_emulator_abi_test(name = name + "_android_emulator_abi", target_under_test = _FIXTURE + "android_emulator_test_of_another_abi")
     for abi in ["arm64-v8a", "x86_64"]:
         _android_transition_test(
             name = name + "_android_transition_" + abi.replace("-", "_"),

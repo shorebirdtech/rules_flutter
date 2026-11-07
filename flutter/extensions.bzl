@@ -17,6 +17,7 @@ effectively overriding the default named toolchain due to toolchain resolution p
 
 load("//flutter/private:constants.bzl", "ANDROID_ABI_FOR_ARCH")
 load("//flutter/private:engine_labels.bzl", "android_arches")
+load("//flutter/private:flutter_android_emulator_repo.bzl", "flutter_android_emulator_repo", "flutter_android_system_image_repo")
 load("//flutter/private:flutter_chrome_for_testing.bzl", "flutter_chrome_for_testing")
 load("//flutter/private:flutter_dev_root_repo.bzl", "flutter_dev_root_repo")
 load("//flutter/private:flutter_face_repo.bzl", "IOS_ENGINE_EXTRA", "IOS_ENGINE_TARGETS", "MACOS_ENGINE_EXTRA", "MACOS_ENGINE_TARGETS", "WEB_SDK_TARGETS", "android_engine_face_extra", "flutter_face_repo")
@@ -28,7 +29,7 @@ load("//flutter/private:linux_runtime_pins.bzl", "LINUX_RUNTIME")
 load("//flutter/private:pub_extension.bzl", "DEFAULT_SDK_NAME", "framework_json", "pub_from_lock_tag", "pub_plugin_overlays_tag")
 load("//flutter/private:toolchain_version.bzl", "select_flutter_version")
 load("//flutter/private:toolchains_repo.bzl", "flutter_toolchains_repo", "sdk_repo_name")
-load("//flutter/private:versions.bzl", "CHROME_FOR_TESTING", "FLUTTER_VERSIONS", "flutter_source_sha256", "require_supported_flutter_version")
+load("//flutter/private:versions.bzl", "ANDROID_EMULATOR", "ANDROID_SYSTEM_IMAGE", "CHROME_FOR_TESTING", "FLUTTER_VERSIONS", "flutter_source_sha256", "require_supported_flutter_version")
 load(":repositories.bzl", "flutter_register_toolchains")
 
 flutter_toolchain = tag_class(attrs = {
@@ -270,6 +271,26 @@ def _toolchain_extension(module_ctx):
             platform = platform,
             version = CHROME_FOR_TESTING.version,
             sha256 = sha256,
+        )
+
+    # The emulator Android integration tests run on by default, one repository
+    # per host it is pinned for, and the system image it boots, one per ABI.
+    # Fetched only when an emulator runner selects the host's own.
+    for host, sha256 in ANDROID_EMULATOR.sha256.items():
+        flutter_android_emulator_repo(
+            name = "flutter_android_emulator_" + host,
+            build_id = ANDROID_EMULATOR.build_id,
+            host = host,
+            sha256 = sha256,
+        )
+    for abi, sha256 in ANDROID_SYSTEM_IMAGE.sha256.items():
+        flutter_android_system_image_repo(
+            name = "flutter_android_system_image_" + abi.replace("-", "_"),
+            abi = abi,
+            api_level = ANDROID_SYSTEM_IMAGE.api_level,
+            revision = ANDROID_SYSTEM_IMAGE.revision,
+            sha256 = sha256,
+            tag = ANDROID_SYSTEM_IMAGE.tag,
         )
 
     # The X server, GTK, Mesa and libraries a Linux integration test runs with,

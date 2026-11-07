@@ -334,8 +334,8 @@ const e2eWorkspaces = <E2eWorkspace>[
           'Linux runtime, which is fetched with every file of it, and of the '
           'Chrome that loads it, checked against the oldest supported host',
       Os.windows:
-          'the Windows and Android apps and tests building, the Android '
-          'runner with the SDK\'s `adb.exe`',
+          'the Windows app and tests building (the Android tests, on an '
+          'emulator pinned for macOS and Linux only, are skipped there)',
     },
     command: 'build',
     commands: {Os.linux: 'test'},

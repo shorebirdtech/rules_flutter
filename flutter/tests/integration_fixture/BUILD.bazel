@@ -1,4 +1,4 @@
-load("//flutter:integration_test.bzl", "flutter_android_app_integration_test", "flutter_android_device_runner", "flutter_application_variant", "flutter_chrome_runner", "flutter_desktop_integration_test", "flutter_integration_bootstrap", "flutter_ios_app_integration_test", "flutter_ios_simulator_runner", "flutter_web_bundle_integration_test")
+load("//flutter:integration_test.bzl", "flutter_android_app_integration_test", "flutter_android_device_runner", "flutter_android_emulator_runner", "flutter_android_system_image", "flutter_application_variant", "flutter_chrome_runner", "flutter_desktop_integration_test", "flutter_integration_bootstrap", "flutter_ios_app_integration_test", "flutter_ios_simulator_runner", "flutter_web_bundle_integration_test")
 load("//flutter:web.bzl", "flutter_web_bundle")
 load("//flutter/tests:fake_android_sdk.bzl", "fake_android_sdk")
 load("//flutter/tests:flutter_integration_test_test.bzl", "android_probe_targets", "stub_golden_service", "stub_runner")
@@ -193,6 +193,66 @@ flutter_android_app_integration_test(
     src = "test/a_test.dart",
     app = "//flutter/tests/variant_fixture/app",
     runner = "//flutter/integration_test:desktop",
+    tags = ["manual"],
+)
+
+# An emulator, shaped as the pinned one's repository: the launcher, carrying
+# the rest of the emulator.
+filegroup(
+    name = "fake_emulator",
+    srcs = ["fake_emulator/emulator/emulator"],
+    data = glob(["fake_emulator/**"]),
+    tags = ["manual"],
+)
+
+flutter_android_system_image(
+    name = "fake_x86_64_image",
+    abi = "x86_64",
+    api_level = 35,
+    files = ["fake_image/system.img"],
+    properties = "fake_image/source.properties",
+    tag = "aosp_atd",
+    tags = ["manual"],
+)
+
+flutter_android_emulator_runner(
+    name = "emulator_runner",
+    emulator = ":fake_emulator",
+    sdk = ":fake_android_sdk",
+    system_image = ":fake_x86_64_image",
+    tags = ["manual"],
+)
+
+flutter_android_app_integration_test(
+    name = "android_emulator_test",
+    src = "test/a_test.dart",
+    abi = "x86_64",
+    app = "//flutter/tests/variant_fixture/app",
+    runner = ":emulator_runner",
+    tags = ["manual"],
+)
+
+# An app of an ABI the emulator's image does not run.
+flutter_android_app_integration_test(
+    name = "android_emulator_test_of_another_abi",
+    src = "test/a_test.dart",
+    abi = "arm64-v8a",
+    app = "//flutter/tests/variant_fixture/app",
+    runner = ":emulator_runner",
+    tags = ["manual"],
+)
+
+# The pinned emulator and system image of the host, which the default runner
+# of an Android test boots.
+flutter_android_emulator_runner(
+    name = "pinned_emulator_runner",
+    emulator = "//flutter/integration_test:android_emulator",
+    linux_runtime = select({
+        "//flutter/integration_test:linux_x64": "@flutter_linux_runtime_amd64//:runtime",
+        "//conditions:default": None,
+    }),
+    sdk = ":fake_android_sdk",
+    system_image = "//flutter/integration_test:android_system_image",
     tags = ["manual"],
 )
 

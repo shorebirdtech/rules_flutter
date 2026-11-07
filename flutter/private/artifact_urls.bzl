@@ -25,6 +25,11 @@ of this file:
   * **Chrome for Testing** — the browser web integration tests run in, hosted by
     the Chrome for Testing project, keyed by *Chrome version* and host
     platform; unrelated to the Flutter version.
+
+  * **The Android emulator and its system images** — what Android integration
+    tests run on by default, from Google's Android SDK repository, keyed by the
+    emulator's build and host, and by the image's API level, tag, ABI and
+    revision; unrelated to the Flutter version.
 """
 
 _GCS_BASE = "https://storage.googleapis.com/flutter_infra_release/flutter"
@@ -46,6 +51,37 @@ def chrome_for_testing_url(version, platform):
         `chrome-headless-shell-<platform>/` directory.
     """
     return _CHROME_FOR_TESTING_TEMPLATE.format(version = version, platform = platform)
+
+_ANDROID_REPOSITORY = "https://dl.google.com/android/repository/"
+
+def android_emulator_url(build_id, host):
+    """Constructs the download URL for the Android emulator of a host.
+
+    Args:
+        build_id: The emulator's build (e.g. "16740729").
+        host: The SDK repository's name for the host: `darwin_aarch64`,
+            `linux_x64`.
+
+    Returns:
+        The full HTTPS URL of the archive, which extracts to one `emulator/`
+        directory.
+    """
+    return "{}emulator-{}-{}.zip".format(_ANDROID_REPOSITORY, host, build_id)
+
+def android_system_image_url(api_level, tag, abi, revision):
+    """Constructs the download URL for an Android emulator system image.
+
+    Args:
+        api_level: The Android API level (e.g. 35).
+        tag: The image's tag (e.g. "aosp_atd").
+        abi: The image's ABI: `arm64-v8a` or `x86_64`.
+        revision: The image's revision (e.g. "r01").
+
+    Returns:
+        The full HTTPS URL of the archive, which extracts to one `<abi>/`
+        directory.
+    """
+    return "{}sys-img/{}/{}-{}_{}.zip".format(_ANDROID_REPOSITORY, tag, abi, api_level, revision)
 
 def flutter_source_tarball_url(flutter_version):
     """Constructs the download URL for the Flutter framework source tarball.

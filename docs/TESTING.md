@@ -885,11 +885,11 @@ integration tests (GCP VM)". Its macOS tests
 launch a window, so run it on a Mac with an unlocked screen and an awake display
 (§ "macOS permission prerequisites", "The display must be awake"); the runner holds
 the display awake itself and fails, saying which, when the screen is locked or the
-display asleep. The Android tests need a device attached (below), the iOS ones Xcode with an iOS
-runtime installed. `bazel test //...`
-there runs, with `ANDROID_HOME` and `ANDROID_NDK_HOME` exported as for any
-Android build (§ "The Android SDK/NDK variables must be exported too") and
-`--test_env=ANDROID_SERIAL=<serial>` when more than one device is attached:
+display asleep. The Android tests boot an emulator each (below), which needs the
+host's hypervisor and nothing attached; the iOS ones need Xcode with an iOS
+runtime installed. `bazel test //...` there runs, with `ANDROID_HOME` and
+`ANDROID_NDK_HOME` exported as for any Android build (§ "The Android SDK/NDK
+variables must be exported too"):
 
 | Target | Property |
 |---|---|
@@ -911,8 +911,8 @@ Android build (§ "The Android SDK/NDK variables must be exported too") and
 | `:web_pass_test` | the same two tests in headless Chrome (a pinned Chrome for Testing shell), each reported: the suite is driven over the browser's DevTools protocol |
 | `:web_red_twin_test` | a failing integration test fails its target in a browser too, and the JUnit report names the failing case. It wraps `:web_red` (`manual`) in `outcome_test` |
 | `:web_filter_test` | `--test_filter` runs one of the two cases of `:web_pass_test` and no other |
-| `:android_pass_test` | the same two tests on an attached Android device (`abi = "arm64-v8a"`), each reported: the suite is driven through the VM service `adb forward`ed from the device |
-| `:android_red_twin_test` | a failing integration test fails its target on a device, and the JUnit report names the failing case. It wraps `:android_red` (`manual`) in `outcome_test` |
+| `:android_pass_test` | the same two tests on an Android emulator the test boots for itself (the pinned emulator and image of the host, the app built for the image's ABI), each reported: the suite is driven through the VM service `adb forward`ed from the device |
+| `:android_red_twin_test` | a failing integration test fails its target on an emulator, and the JUnit report names the failing case. It wraps `:android_red` (`manual`) in `outcome_test` |
 | `:android_filter_test` | `--test_filter` runs one of the two cases of `:android_pass_test` and no other |
 | `:ios_pass_test` | the same two tests on an iOS simulator the test makes for itself, each reported |
 | `:ios_filter_test` | `--test_filter` runs one of the two cases of `:ios_pass_test` and no other, and `xcrun simctl list` shows no `rules_flutter-*` simulator of that test afterwards (`outcome_test`'s `leaves_no_simulator`) |
@@ -943,17 +943,26 @@ what is committed (`git status` shows nothing) and `bazel test
 
 The web tests run in a headless browser and need no desktop session. macOS and Linux run them; on Linux the browser loads the pinned Linux runtime's libraries and runs without its sandbox. Windows skips them: they are not verified there.
 
-The Android tests run on the device `ANDROID_SERIAL` names, else the only one
-attached, and fail saying so with none, or several and none named: the Pixel and
-an emulator attached together need `--test_env=ANDROID_SERIAL=...`. They install
-the app (`com.example.integration_test_example`) and leave it installed, as
-`flutter test` does: `adb uninstall com.example.integration_test_example` after.
+The Android tests each boot an emulator of their own (the pinned emulator and
+AOSP test image of the host: arm64-v8a on an Apple-silicon Mac, x86_64 on Linux
+with KVM), from a cold start in 15 to 30 s, on a pair of the emulator ports
+5554 to 5585 under a lock, with an `adb` server of the test's own that sees no USB
+device: an attached phone is neither needed nor touched. The emulator is shut
+down and its `adb` server stopped however the test ends; `pgrep -fl qemu-system`
+shows none afterwards. Its output and the device's log are in
+`bazel-testlogs/<test>/test.outputs/` (`emulator.log`, `logcat.txt`). Run them
+once more on the phone after a change to the Android runner, which builds the
+app for arm64-v8a and installs it on the attached device (left installed, as
+`flutter test` leaves it: `adb uninstall com.example.integration_test_example`
+after):
+
+    bazel test //:android_pass_test //:android_filter_test //:android_red_twin_test \
+        --@rules_flutter//flutter/integration_test:android_device=attached \
+        --test_env=ANDROID_SERIAL=<serial>
+
 Their app links `integration_test`'s Android library, so this workspace's
 `rules_android_maven` install pins `androidx.test:runner`, `:rules` and
-`espresso-core` (the plugin's own build asks for `1.2+`, `1.2+` and `3.3+`). The
-`x86_64` build (`abi = "x86_64"`) needs an x86_64 emulator, which this machine
-has none of: only the transition is tested for that ABI
-(`//flutter/tests:flutter_integration_test_test`).
+`espresso-core` (the plugin's own build asks for `1.2+`, `1.2+` and `3.3+`).
 
 The iOS tests need nothing booted or attached: each makes a simulator
 (`rules_flutter-<test>-<pid>-<start>`, an iPhone 16 on the newest iOS runtime;
@@ -1063,7 +1072,7 @@ finds a gap before a push.
 | `ffi_example` | macOS, Linux, Windows | native libraries in each platform's bundle | |
 | `cross_compile_example` | macOS (`build`) | the Mac-to-Linux cross toolchain | Linux: a native build is `hello_world`'s; Windows: no such pair |
 | `macos_example`, `ios_example`, `multi_window_example`, `_overlay_tests/native_assets_synthetic` | macOS | Apple-only features | Linux, Windows: Apple-only |
-| `integration_test` | macOS, Windows (`build`), Linux (`test` of the `:linux_*` and `:web_*` targets) | the integration test rules building the app and test of each case, the Android and iOS apps included on macOS; on Linux those tests running headless on the pinned Linux runtime, fetched with every file of it and of the Chrome that loads it checked against the oldest supported host; on Windows the Windows and Android ones, the Android runner with the SDK's `adb.exe`: most of its tests need a GUI session or a device, which CI never runs a test in | |
+| `integration_test` | macOS, Windows (`build`), Linux (`test` of the `:linux_*` and `:web_*` targets) | the integration test rules building the app and test of each case, the Android and iOS apps included on macOS; on Linux those tests running headless on the pinned Linux runtime, fetched with every file of it and of the Chrome that loads it checked against the oldest supported host; on Windows the Windows ones (the Android tests, which run on an emulator pinned for macOS and Linux only, are skipped there): most of its tests need a GUI session or a hypervisor, which CI never runs a test in | |
 | `pub_resolve` | Linux | a monorepo's path pub packages and a fork of a hosted one, built from the workspace targets the lock maps (platform-neutral); its `:render_test` runs the app in the pinned headless Chrome with the pinned Linux runtime | macOS, Windows: the same again |
 | `dual_hub`, `ffi_plugin_example`, `web_example`, `android_example`, `_overlay_tests/link_hooks` | Linux | their platform-neutral subject, once, on the cheapest runner; web_example's `:render_test` runs the app in the pinned headless Chrome with the pinned Linux runtime | macOS, Windows: the same again |
 | `android_example` | Windows (also) | an Android build on a Windows host: `gen_snapshot.exe`, engine-strip path separators, rules_android JVMs without an up-front heap commit (the committed patch) | |
@@ -1929,7 +1938,7 @@ script's own package requires ≥ 3.13.
 | Linux integration tests and the Linux runtime (`flutter_linux_integration_test`, `LinuxDevice`, `flutter_linux_runtime*`, `linux_runtime_pins.bzl`, `tools/update_linux_runtime`) | `e2e/integration_test`'s `:linux_*` and `:web_*` targets and web_example's `:render_test` on the x86_64 and arm64 GCP VMs (§ Linux integration tests), linux_example `//...` on Linux, and the platform-neutral integration row |
 | Desktop engine selection (debug/profile/release) | cross_compile_example `bazel build :cross_linux` + verify on VM |
 | Profile mode (`flutter:profile` selects, profile engine repos) | Root `//...`, macOS and a device by hand, hello_world `//...` on Linux and Windows (CI does this), and the profile run on the Linux and Windows VMs (§ Profile mode on Linux and Windows) |
-| Integration tests (`flutter/integration_test.bzl`, `flutter/private/flutter_integration_*.bzl`, `flutter/private/integration_test/support/`, `tools/dev_tool/lib/integration/`, `bin/integration_test_runner.dart`) | `e2e/integration_test` `//...` on each platform the change touches (macOS, with an unlocked screen, for macOS desktop; the Windows VM for Windows; macOS for web; an attached device and `ANDROID_SERIAL` for Android), dev_tool unit, plus the platform's row; for web, `e2e/web_example` `:render_test` and the Web support row |
+| Integration tests (`flutter/integration_test.bzl`, `flutter/private/flutter_integration_*.bzl`, `flutter/private/integration_test/support/`, `tools/dev_tool/lib/integration/`, `bin/integration_test_runner.dart`) | `e2e/integration_test` `//...` on each platform the change touches (macOS, with an unlocked screen, for macOS desktop; the Windows VM for Windows; macOS for web; for Android, the emulator tests on macOS, and on the attached phone with `--@rules_flutter//flutter/integration_test:android_device=attached` and `ANDROID_SERIAL` when the Android runner changed), dev_tool unit, plus the platform's row; for web, `e2e/web_example` `:render_test` and the Web support row |
 | The `flutter_test` runner and its suite protocol (`flutter/private/tools/flutter_test_runner.dart`, `flutter/private/tools/lib/`: tag selection, `--test_filter`, shards, the no-tests failure) | Root `//...`, `e2e/integration_test` `//...` (its `tags_*` and `no_tests_test` outcome tests, and `web_*`), dev_tool unit |
 | `flutter_application_variant` (`flutter/private/flutter_application_variant.bzl`, `flutter_program_inputs` in `common.bzl`) | Root `//...`, macos_example `//...` and `dart run tools/dev_tool/tool/e2e.dart test/e2e/main_outside_lib_e2e_test.dart --plain-name="macOS"`, which reloads and restarts a variant; plus the macOS manual runtime test |
 | Dart compilation / AOT | hello_world, ffi_example, macos_example |

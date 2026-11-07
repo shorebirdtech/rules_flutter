@@ -263,6 +263,15 @@ build_test(
     targets = ["//flutter/integration_test:chrome"],
 )
 
+# The pinned Android emulator and system image of this host download, verify
+# and unpack, and a runner of them analyses; on Linux, the check that the
+# emulator needs no library the pinned runtime lacks runs. Builds nothing on a
+# host with no pinned emulator, where the runner is incompatible.
+build_test(
+    name = "emulator_runner_build_test",
+    targets = ["//flutter/tests/integration_fixture:pinned_emulator_runner"],
+)
+
 unbuilt_native_code_test_suite(name = "unbuilt_native_code_test")
 
 validation_test_suite(name = "validation_test")

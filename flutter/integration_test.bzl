@@ -28,8 +28,12 @@ Tier 2, the composable rules:
 - `flutter_chrome_runner`: a headless Chrome of its own, where a web test runs.
 - `flutter_linux_runtime`: on Linux, the X server, GTK, Mesa and libraries a
   runner runs the app or browser with, from pinned Debian packages.
-- `flutter_android_app_integration_test`: runs an Android app on an attached device.
-- `flutter_android_device_runner`: which `adb` drives that device.
+- `flutter_android_app_integration_test`: runs an Android app on an emulator or
+  an attached device.
+- `flutter_android_emulator_runner`: an emulator of the test's own, of a pinned
+  emulator and system image.
+- `flutter_android_system_image`: a system image that emulator boots.
+- `flutter_android_device_runner`: an attached device, and which `adb` drives it.
 - `flutter_ios_app_integration_test`: runs an iOS app on a simulator of its own.
 - `flutter_ios_simulator_runner`: which simulator that is.
 """
@@ -40,9 +44,10 @@ load("//flutter:linux.bzl", "flutter_linux_app")
 load("//flutter:macos.bzl", "flutter_macos_app")
 load("//flutter:web.bzl", "flutter_web_app")
 load("//flutter:windows.bzl", "flutter_windows_app")
+load("//flutter/private:flutter_android_emulator.bzl", _flutter_android_system_image = "flutter_android_system_image")
 load("//flutter/private:flutter_application_variant.bzl", _flutter_application_variant = "flutter_application_variant")
 load("//flutter/private:flutter_integration_bootstrap.bzl", _flutter_integration_bootstrap = "flutter_integration_bootstrap")
-load("//flutter/private:flutter_integration_test.bzl", _flutter_android_app_integration_test = "flutter_android_app_integration_test", _flutter_android_device_runner = "flutter_android_device_runner", _flutter_chrome_runner = "flutter_chrome_runner", _flutter_desktop_integration_test = "flutter_desktop_integration_test", _flutter_desktop_runner = "flutter_desktop_runner", _flutter_ios_app_integration_test = "flutter_ios_app_integration_test", _flutter_ios_simulator_runner = "flutter_ios_simulator_runner", _flutter_web_bundle_integration_test = "flutter_web_bundle_integration_test")
+load("//flutter/private:flutter_integration_test.bzl", _flutter_android_app_integration_test = "flutter_android_app_integration_test", _flutter_android_device_runner = "flutter_android_device_runner", _flutter_android_emulator_runner = "flutter_android_emulator_runner", _flutter_chrome_runner = "flutter_chrome_runner", _flutter_desktop_integration_test = "flutter_desktop_integration_test", _flutter_desktop_runner = "flutter_desktop_runner", _flutter_ios_app_integration_test = "flutter_ios_app_integration_test", _flutter_ios_simulator_runner = "flutter_ios_simulator_runner", _flutter_web_bundle_integration_test = "flutter_web_bundle_integration_test")
 load("//flutter/private:flutter_linux_runtime.bzl", _flutter_linux_runtime = "flutter_linux_runtime")
 load("//flutter/private:flutter_test.bzl", _flutter_test = "flutter_test")
 load("//flutter/private:test_config.bzl", "find_test_config")
@@ -56,6 +61,8 @@ flutter_linux_runtime = _flutter_linux_runtime
 flutter_web_bundle_integration_test = _flutter_web_bundle_integration_test
 flutter_android_app_integration_test = _flutter_android_app_integration_test
 flutter_android_device_runner = _flutter_android_device_runner
+flutter_android_emulator_runner = _flutter_android_emulator_runner
+flutter_android_system_image = _flutter_android_system_image
 flutter_ios_app_integration_test = _flutter_ios_app_integration_test
 flutter_ios_simulator_runner = _flutter_ios_simulator_runner
 
@@ -656,7 +663,7 @@ def flutter_android_integration_test(
         exclude_tags = [],
         size = "large",
         runner = None,
-        abi = "arm64-v8a",
+        abi = None,
         tags = [],
         timeout = None,
         shard_count = None,
@@ -666,12 +673,21 @@ def flutter_android_integration_test(
         **android_app_kwargs):
     """Runs a `package:integration_test` file on an Android device: the application with the test as its program.
 
-    The app is built in debug mode for `abi`, installed on the attached phone or
-    running emulator (`ANDROID_SERIAL` names one when several are attached),
-    started, and its suite driven through its VM service. A device is a
-    precondition: with none attached, or several and none named, the test fails
-    naming `adb devices`. The app stays installed afterwards. One target per
-    test file, as upstream launches the app once per file.
+    The app is built in debug mode for `abi`, installed on the device, started,
+    and its suite driven through its VM service. One target per test file, as
+    upstream launches the app once per file.
+
+    Without a `runner`, the device is an emulator the test boots for itself
+    (`flutter_android_emulator_runner`), of the emulator and system image pinned
+    for the host (macOS on Apple silicon, Linux on x86_64; on other hosts the
+    test is skipped), and the app is built for the image's ABI. It needs the
+    host's hypervisor, and nothing attached or installed. With
+    `--@rules_flutter//flutter/integration_test:android_device=attached` it is
+    instead the attached phone or running emulator
+    (`flutter_android_device_runner`; `--test_env=ANDROID_SERIAL=<serial>` names
+    one when several are attached), and the app is built for arm64-v8a: with
+    none attached, or several and none named, the test fails naming
+    `adb devices`. The app stays installed on an attached device afterwards.
 
     Android's `integration_test` library needs `androidx.test:runner`,
     `androidx.test:rules`, `androidx.test.espresso:espresso-core` and
@@ -679,7 +695,8 @@ def flutter_android_integration_test(
     `rules_android_maven`; analysis names the ones that are missing.
 
     Intermediate targets `__<name>_bootstrap`, `__<name>_program`, `__<name>_app`
-    and, without a `runner`, `__<name>_runner` are this macro's: do not name them.
+    and, without a `runner`, `__<name>_emulator` and `__<name>_device` are this
+    macro's: do not name them.
 
     Args:
         name: The test's name.
@@ -712,13 +729,17 @@ def flutter_android_integration_test(
             a case matching any entry does not run. `--test_env=DART_TEST_EXCLUDE_TAGS=...`
             drops more for one run.
         size: The test size. `large`: an APK is built, installed and started.
-        runner: A `flutter_android_device_runner`. By default one that drives the
-            device with the `adb` of `@androidsdk`, the Android SDK rules_android
-            resolves from `ANDROID_HOME`.
+        runner: A `flutter_android_emulator_runner` or a
+            `flutter_android_device_runner`. By default the emulator of the host,
+            or the attached device under
+            `--@rules_flutter//flutter/integration_test:android_device=attached`,
+            either driven with the `adb` of `@androidsdk`, the Android SDK
+            rules_android resolves from `ANDROID_HOME`.
         abi: The ABI the app is built for, which the device must run: `arm64-v8a`
             for a phone or an Apple-silicon emulator, `x86_64` for an emulator
-            on an x86_64 Linux or Windows host, `armeabi-v7a` for a 32-bit ARM
-            device.
+            on an x86_64 host, `armeabi-v7a` for a 32-bit ARM device. By
+            default the ABI of the default runner's device: the host's emulator
+            image's, or arm64-v8a for an attached device.
         tags: Tags of the test.
         timeout: The test's `timeout`.
         shard_count: The test's `shard_count`: the tests of the file are divided
@@ -747,14 +768,39 @@ def flutter_android_integration_test(
     )
 
     if runner == None:
-        runner = ":__%s_runner" % name
+        # Both are declared and only the one the flag selects is analysed, so
+        # a test on an attached device fetches no emulator. The SDK is that of
+        # the workspace the test is declared in: the `@androidsdk` of the one
+        # SDK this workspace builds its APKs with.
+        _flutter_android_emulator_runner(
+            name = "__%s_emulator" % name,
+            sdk = "@androidsdk//:sdk",
+            emulator = Label("//flutter/integration_test:android_emulator"),
+            system_image = Label("//flutter/integration_test:android_system_image"),
+            # On Linux the emulator loads the X client libraries it links from
+            # the pinned runtime, as a Linux test's app does.
+            linux_runtime = select({
+                Label("//flutter/integration_test:linux_x64"): Label("@flutter_linux_runtime_amd64//:runtime"),
+                "//conditions:default": None,
+            }),
+            **private
+        )
         _flutter_android_device_runner(
-            name = "__%s_runner" % name,
-            # The SDK of the workspace the test is declared in: the
-            # `@androidsdk` of the one SDK this workspace builds its APKs with.
+            name = "__%s_device" % name,
             sdk = "@androidsdk//:sdk",
             **private
         )
+        runner = select({
+            Label("//flutter/integration_test:android_on_attached_device"): ":__%s_device" % name,
+            "//conditions:default": ":__%s_emulator" % name,
+        })
+        if abi == None:
+            abi = select({
+                Label("//flutter/integration_test:android_on_x86_64_emulator"): "x86_64",
+                "//conditions:default": "arm64-v8a",
+            })
+    if abi == None:
+        abi = "arm64-v8a"
 
     _flutter_android_app_integration_test(
         name = name,

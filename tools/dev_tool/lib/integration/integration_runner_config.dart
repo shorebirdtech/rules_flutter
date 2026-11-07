@@ -8,6 +8,8 @@ library;
 
 import 'dart:convert';
 
+import 'test_emulator.dart' show EmulatorSettings;
+
 /// The kind of device an integration test runs on. One test rule per family,
 /// as one runner per family.
 enum IntegrationFamily {
@@ -257,6 +259,21 @@ class IntegrationRunnerConfig {
       );
     }
     return value;
+  }
+
+  /// The emulator an Android test boots for itself (the launcher's `emulator`),
+  /// or null for a test that runs on an attached device. A [FormatException]
+  /// names the key that is missing or of the wrong kind.
+  EmulatorSettings? get emulator {
+    final value = launcher['emulator'];
+    if (value == null) return null;
+    if (value is! Map<String, Object?>) {
+      throw FormatException(
+        'the config: "launcher.emulator" must be an object, got '
+        '${json.encode(value)}',
+      );
+    }
+    return EmulatorSettings.fromConfig(value);
   }
 
   String _launcherString(String key, String what, {required bool required}) {

@@ -12,6 +12,7 @@ load("@rules_dart//dart:utils.bzl", "runfiles_path")
 load("//flutter:providers.bzl", "FlutterIntegrationRunnerInfo", "FlutterLinuxRuntimeInfo")
 load("//flutter/private:dbg_transition.bzl", "DBG_SETTINGS", "dbg_transition")
 load("//flutter/private:exec_groups.bzl", "PORTABLE_EXEC_GROUPS", "portable_tools")
+load("//flutter/private:flutter_android_emulator.bzl", "FlutterAndroidSystemImageInfo")
 load("//flutter/private:flutter_linux_runtime.bzl", "linux_runtime_check")
 load("//flutter/private:test_tags.bzl", "tag_selectors")
 
@@ -213,6 +214,110 @@ instead of installing over each other.
 
 `adb` is the SDK's own, never one found on `PATH`, and the one the SDK has for the
 host the test runs on (`adb.exe` on Windows).""",
+)
+
+def _flutter_android_emulator_runner_impl(ctx):
+    adb = ctx.attr.sdk[AndroidSdkInfo].adb.executable
+    image = ctx.attr.system_image[FlutterAndroidSystemImageInfo]
+    emulator = ctx.file.emulator
+    emulator_files = depset([emulator], transitive = [ctx.attr.emulator[DefaultInfo].default_runfiles.files])
+    launcher, runtime_files = _linux_runtime_launcher(ctx)
+    validation = []
+    if ctx.attr.linux_runtime:
+        # The emulator loads the runtime's libraries (the X client libraries it
+        # links), so it is held to what the runtime is, as a browser is.
+        info = ctx.attr.linux_runtime[FlutterLinuxRuntimeInfo]
+        validation.append(linux_runtime_check(
+            ctx,
+            portable_tools(ctx),
+            ctx.file._linux_runtime_tool,
+            ctx.label.name,
+            checked = emulator_files,
+            providers = info.libraries,
+            floor = info.floor,
+        ))
+    workspace = ctx.workspace_name
+    return [
+        DefaultInfo(files = depset([emulator])),
+        OutputGroupInfo(_validation = depset(validation)),
+        FlutterIntegrationRunnerInfo(
+            family = ANDROID,
+            launcher_config = struct(
+                adb = runfiles_path(adb, workspace),
+                emulator = struct(
+                    executable = runfiles_path(emulator, workspace),
+                    systemImage = runfiles_path(image.properties, workspace),
+                    abi = image.abi,
+                    apiLevel = image.api_level,
+                    tag = image.tag,
+                    cores = ctx.attr.cores,
+                    memoryMb = ctx.attr.memory_mb,
+                ),
+                **launcher
+            ),
+            runfiles = depset([adb], transitive = [emulator_files, image.files, runtime_files]),
+            # What the emulator takes of the machine, so that Bazel schedules the
+            # test with it: its virtual cores, and the host's work of drawing
+            # its screen and serving its devices.
+            execution_requirements = dict(_EXECUTION_REQUIREMENTS) | {"cpu:%d" % (ctx.attr.cores + 1): ""},
+            target_compatible_with = [],
+        ),
+    ]
+
+flutter_android_emulator_runner = rule(
+    implementation = _flutter_android_emulator_runner_impl,
+    attrs = {
+        "cores": attr.int(
+            doc = "The emulated device's CPU cores. The test is scheduled with one core more, for the emulator's own work on the host.",
+            default = 2,
+        ),
+        "emulator": attr.label(
+            doc = "The Android emulator: a target whose one file is the `emulator` launcher, carrying the rest of the emulator as `data`, such as `@rules_flutter//flutter/integration_test:android_emulator`, the pinned emulator of the host.",
+            mandatory = True,
+            allow_single_file = True,
+        ),
+        "linux_runtime": _LINUX_RUNTIME_ATTR,
+        "_linux_runtime_tool": attr.label(
+            default = "//flutter/private/tools:linux_runtime.dart",
+            allow_single_file = True,
+        ),
+        "memory_mb": attr.int(
+            doc = "The emulated device's memory, in MB.",
+            default = 2048,
+        ),
+        "sdk": attr.label(
+            doc = "The Android SDK, an `android_sdk` target such as `@androidsdk//:sdk`. Its `adb` drives the emulator, and its build tools read the app's package.",
+            mandatory = True,
+            cfg = "exec",
+            providers = [AndroidSdkInfo],
+        ),
+        "system_image": attr.label(
+            doc = "The system image the emulator boots, a `flutter_android_system_image`, such as `@rules_flutter//flutter/integration_test:android_system_image`, the pinned AOSP test image of the host's ABI. A test's `abi` must be the image's.",
+            mandatory = True,
+            providers = [FlutterAndroidSystemImageInfo],
+        ),
+    },
+    exec_groups = PORTABLE_EXEC_GROUPS,
+    doc = """Runs an Android integration test on an emulator the test boots for itself.
+
+Each test makes a device (an AVD) of `system_image` in its own temporary
+directory, boots it with `emulator` with no window, from a cold start with fresh
+data, installs and drives the app as on any device, and shuts the emulator down
+however the test ends, a Bazel timeout included. The emulator answers to an `adb`
+server of the test's own, which sees no USB or network device, so the test
+touches no phone attached to the host and an attached phone is no obstacle.
+Each test takes a pair of the emulator ports `adb` knows (5554 to 5585, passing
+over those of emulators already running) and holds a lock on them for its run,
+so up to 16 tests boot emulators side by side. An emulator that a SIGKILL left
+behind is shut down by the next Android emulator test to take its ports. The
+emulator's log and the device's (`emulator.log`, `logcat.txt`) are among the
+test's outputs.
+
+The emulator needs the host's hypervisor: Hypervisor.framework on macOS, KVM
+(`/dev/kvm`, readable and writable by the user) on Linux. Without it the test
+fails, saying how to enable it, before anything is booted. On Linux the emulator
+loads the X client libraries it links from `linux_runtime` rather than the
+host's, and the build checks that it needs none the runtime lacks.""",
 )
 
 def _flutter_ios_simulator_runner_impl(ctx):
@@ -439,6 +544,13 @@ browser's profile is deleted when the test ends.""",
 )
 
 def _flutter_android_app_integration_test_impl(ctx):
+    emulator = getattr(ctx.attr.runner[FlutterIntegrationRunnerInfo].launcher_config, "emulator", None)
+    if emulator and emulator.abi != ctx.attr.abi:
+        fail((
+            "%s: the app is built for %s, and the runner %s boots an emulator " +
+            "of %s, which cannot install it. Build the app for the image's ABI " +
+            "(`abi = \"%s\"`), or give the runner an image of %s."
+        ) % (ctx.label, ctx.attr.abi, ctx.attr.runner.label, emulator.abi, emulator.abi, ctx.attr.abi))
     return integration_test_impl(ctx, ANDROID, inherited_environment = ["ANDROID_SERIAL"])
 
 flutter_android_app_integration_test = rule(

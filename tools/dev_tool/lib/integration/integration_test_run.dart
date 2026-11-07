@@ -28,6 +28,7 @@ import 'golden_service_process.dart';
 import 'integration_runner_config.dart';
 import 'linux_runtime.dart';
 import 'suite_connectors.dart';
+import 'test_emulator.dart';
 import 'test_simulator.dart';
 
 /// What the run needs of its host beyond the device: the locks and the
@@ -143,6 +144,18 @@ Future<DeviceChoice> chooseDevice(
         () async => () async {},
         chromePageConnector(),
       );
+    case IntegrationFamily.android when config.emulator != null:
+      return _emulatorChoice(
+        config,
+        config.emulator!.resolved(resolve),
+        os: os,
+        resolve: resolve,
+        environment: environment,
+        run: run,
+        lockDirectory: lockDirectory,
+        log: log,
+        startIsolated: startIsolated,
+      );
     case IntegrationFamily.android:
       final adb = resolve(config.adbPath);
       final serial = await chooseAndroidSerial(
@@ -186,6 +199,144 @@ Future<DeviceChoice> chooseDevice(
         'iOS simulators run on macOS; this host is $os, which has none.',
       );
   }
+}
+
+/// An emulator of the test's own: its ports are taken now, which names the
+/// device, and it is booted when the run takes what it needs of the host.
+Future<DeviceChoice> _emulatorChoice(
+  IntegrationRunnerConfig config,
+  EmulatorSettings settings, {
+  required String os,
+  required String Function(String runfilesPath) resolve,
+  required Map<String, String> environment,
+  required ProcessRunSync? run,
+  required Directory? lockDirectory,
+  required void Function(String message)? log,
+  required IsolatedProcessStarter? startIsolated,
+}) async {
+  final requested = environment['ANDROID_SERIAL'];
+  if (requested != null && requested.isNotEmpty) {
+    throw StateError(
+      'ANDROID_SERIAL is $requested, but this test runs on an emulator it '
+      'boots for itself, never on an attached device. To run it on $requested, '
+      'build it for an attached device: '
+      '`--@rules_flutter//flutter/integration_test:android_device=attached`.',
+    );
+  }
+  final adb = resolve(config.adbPath);
+  final ps = run ?? Process.run;
+  final say = log ?? (_) {};
+  final scratch = EmulatorScratch(
+    p.join(
+      environment['TEST_TMPDIR'] ?? Directory.systemTemp.path,
+      'android_emulator',
+    ),
+  );
+  final runEnv = run == null
+      ? runIsolatedProcess
+      : (String exe, List<String> args, Map<String, String> _) =>
+            run(exe, args);
+
+  final ports = await EmulatorPorts.take(
+    lockDirectory: lockDirectory ?? DeviceLock.defaultDirectory,
+    isFree: loopbackPortIsFree,
+    reclaim: (record) => reclaimEmulator(
+      record,
+      adb: adb,
+      adbEnvironment: adbEnvironment(
+        host: environment,
+        scratch: scratch,
+        server: record.server,
+      ),
+      ps: ps,
+      run: runEnv,
+    ),
+    log: say,
+  );
+  final adbEnv = adbEnvironment(
+    host: environment,
+    scratch: scratch,
+    server: ports.server,
+  );
+  final device = AndroidDevice(
+    deviceId: ports.serial,
+    adbPath: adb,
+    aapt2Path: _aapt2OfSdkOf(adb),
+    runProcess:
+        run ??
+        (exe, args) => Process.run(
+          exe,
+          args,
+          environment: adbEnv,
+          includeParentEnvironment: false,
+        ),
+    startProcess: (exe, args) => Process.start(
+      exe,
+      args,
+      environment: adbEnv,
+      includeParentEnvironment: false,
+    ),
+  )..expectsVmService = true;
+
+  return DeviceChoice(device, () async {
+    // The emulator's own output and the device's log, which the test's
+    // outputs keep: an app that ends without a reason the launch can read left
+    // its reason there.
+    final outputs = environment['TEST_UNDECLARED_OUTPUTS_DIR'];
+    IOSink? output;
+    try {
+      final base = os == 'linux'
+          ? _linuxRuntime(config, resolve).environment(
+              host: environment,
+              cacheDir: _cacheDir(environment),
+            )
+          : const <String, String>{};
+      final emulatorEnv = emulatorEnvironment(
+        base: base,
+        scratch: scratch,
+        server: ports.server,
+      );
+      layOutEmulator(scratch, settings);
+      await checkAcceleration(
+        emulator: settings.executable,
+        environment: emulatorEnv,
+        os: os,
+        run: runEnv,
+      );
+      output = outputs == null
+          ? null
+          : File(p.join(outputs, 'emulator.log')).openWrite();
+      final emulator = await TestEmulator.boot(
+        output: output,
+        settings: settings,
+        ports: ports,
+        scratch: scratch,
+        adb: adb,
+        environment: emulatorEnv,
+        adbEnv: adbEnv,
+        run: runEnv,
+        start: startIsolated ?? startIsolatedProcess,
+        ps: ps,
+        log: say,
+      );
+      final log = output;
+      return () async {
+        try {
+          await emulator.stop(
+            logcat: outputs == null ? null : p.join(outputs, 'logcat.txt'),
+          );
+        } finally {
+          await log?.close();
+          await ports.release();
+          Directory(scratch.root).deleteSync(recursive: true);
+        }
+      };
+    } catch (_) {
+      await output?.close();
+      await ports.release();
+      rethrow;
+    }
+  }, vmServiceConnector());
 }
 
 /// The `aapt2` of the Android SDK that [adb] belongs to.

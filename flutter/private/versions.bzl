@@ -764,3 +764,36 @@ CHROME_FOR_TESTING = struct(
         "win64": "1ff4540855478ba0848e03f1ef8d455f77d058b38285df91bc34273788a73446",
     },
 )
+
+# The Android emulator Android integration tests run on by default, one archive
+# per host it is pinned for, from Google's Android SDK repository. Independent
+# of the Flutter version. A host not listed has no pinned emulator, and an
+# Android integration test that runs on the emulator is skipped there. Fetched
+# only when a test's emulator runner is analysed.
+#
+# Not 37.x: emulator 37.2.13 drops adb's connection when the device sends a
+# packet over about 128 KB, as a Flutter app's VM service does when a test
+# connects to it, so a third or more of test runs failed; 36.2.12 carries them.
+ANDROID_EMULATOR = struct(
+    version = "36.2.12",
+    build_id = "14214601",
+    # Host (the SDK repository's name for it) to the sha256 of its archive.
+    sha256 = {
+        "darwin_aarch64": "933743d94124a55213b106dc3369525b57b29cf4cd560993fc3143e70e1423a5",
+        "linux_x64": "55e7ce272dd27413855c81b4629c107a1553d07a2f77fa55a6049fdca22f4221",
+    },
+)
+
+# The system image that emulator boots: AOSP's Automated Test Device image, which
+# leaves out the apps and services a test never uses. One per ABI, and a host
+# boots its own CPU's, which its hypervisor runs at native speed.
+ANDROID_SYSTEM_IMAGE = struct(
+    api_level = 35,
+    tag = "aosp_atd",
+    revision = "r01",
+    # ABI to the sha256 of its archive.
+    sha256 = {
+        "arm64-v8a": "2e966d4573b252d7e4ab30b8069a5ed9945c973a270f97faea626171ce0169b3",
+        "x86_64": "2dffbc565912b97dd17d935b68002b248872e0c83473139856bb31634db249dc",
+    },
+)

@@ -24,7 +24,9 @@ That is `//tools/download_guard` (the sources) and the fetch tests in
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load(
     "//flutter/private:artifact_urls.bzl",
+    "android_emulator_url",
     "android_engine_artifact_path",
+    "android_system_image_url",
     "chrome_for_testing_url",
     "cpp_client_wrapper_artifact_path",
     "dart_sdk_artifact_path",
@@ -53,6 +55,8 @@ load(
 )
 load(
     "//flutter/private:versions.bzl",
+    "ANDROID_EMULATOR",
+    "ANDROID_SYSTEM_IMAGE",
     "ARTIFACT_CHECKSUMS",
     "CHROME_FOR_TESTING",
     "FLUTTER_VERSIONS",
@@ -218,8 +222,37 @@ _t0_test = unittest.make(_every_derived_download_has_a_digest_test_impl)
 _t1_test = unittest.make(_no_stray_or_blank_table_entries_test_impl)
 _t2_test = unittest.make(_source_tarball_and_sysroot_digests_test_impl)
 _t3_test = unittest.make(_every_version_has_a_table_test_impl)
+
+def _android_emulator_digests_test_impl(ctx):
+    # What Android integration tests run on by default: the emulator of each
+    # host it is pinned for and the system image of each ABI, fetched only when
+    # a test runs on the emulator, and pinned like everything else.
+    env = unittest.begin(ctx)
+    asserts.equals(env, ["darwin_aarch64", "linux_x64"], sorted(ANDROID_EMULATOR.sha256.keys()))
+    asserts.equals(env, ["arm64-v8a", "x86_64"], sorted(ANDROID_SYSTEM_IMAGE.sha256.keys()))
+    for host, digest in ANDROID_EMULATOR.sha256.items():
+        asserts.true(
+            env,
+            _is_sha256(digest),
+            "ANDROID_EMULATOR.sha256[{}] is not 64 lowercase hex characters; a fetch of {} would be unverified.".format(
+                host,
+                android_emulator_url(ANDROID_EMULATOR.build_id, host),
+            ),
+        )
+    for abi, digest in ANDROID_SYSTEM_IMAGE.sha256.items():
+        asserts.true(
+            env,
+            _is_sha256(digest),
+            "ANDROID_SYSTEM_IMAGE.sha256[{}] is not 64 lowercase hex characters; a fetch of {} would be unverified.".format(
+                abi,
+                android_system_image_url(ANDROID_SYSTEM_IMAGE.api_level, ANDROID_SYSTEM_IMAGE.tag, abi, ANDROID_SYSTEM_IMAGE.revision),
+            ),
+        )
+    return unittest.end(env)
+
 _t4_test = unittest.make(_chrome_for_testing_digests_test_impl)
 _t5_test = unittest.make(_linux_runtime_digests_test_impl)
+_t6_test = unittest.make(_android_emulator_digests_test_impl)
 
 def download_digests_test_suite(name):
-    unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test)
+    unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test, _t6_test)
