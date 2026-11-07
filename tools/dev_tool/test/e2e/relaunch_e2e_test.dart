@@ -35,6 +35,11 @@ const _platforms = <_Platform>[
     target: ':ffi_ios',
     partsGroup: 'flutter_ios_bundle_parts',
   ),
+  (
+    device: 'linux',
+    target: ':ffi_linux',
+    partsGroup: 'flutter_linux_bundle_parts',
+  ),
 ];
 
 void main() {
@@ -228,8 +233,15 @@ void main() {
         },
         timeout: const Timeout(Duration(minutes: 8)),
       );
-    }, skip: !Platform.isMacOS ? 'macOS only' : null);
+    }, skip: _hostSkip(platform));
   }
+}
+
+/// Why [platform] cannot run on this host, or null when it can: macOS runs the
+/// Apple devices and Linux runs the Linux one.
+String? _hostSkip(_Platform platform) {
+  final runs = platform.device == 'linux' ? Platform.isLinux : Platform.isMacOS;
+  return runs ? null : '${platform.device} runs on a different host OS';
 }
 
 /// The sqlite3 version the app rendered, read out of the widget-tree dump so
