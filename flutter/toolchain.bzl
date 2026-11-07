@@ -18,6 +18,16 @@ def _flutter_toolchain_impl(ctx):
     sdk_files = host.dart_sdk
     tool_files = depset(transitive = [sdk_files.all, kernel_debug.files])
 
+    # Where each piece came from, for the record an app of a custom SDK keeps.
+    slice_labels = {
+        "host_tools": str(ctx.attr.host_tools.label),
+        "platform_kernel": str((ctx.attr.platform_kernel_release or ctx.attr.platform_kernel_debug).label),
+    }
+    if ctx.attr.engine:
+        slice_labels["engine"] = str(ctx.attr.engine.label)
+    if ctx.attr.gen_snapshot:
+        slice_labels["gen_snapshot"] = str(ctx.attr.gen_snapshot.label)
+
     flutter_sdk_info = FlutterSdkInfo(
         version = ctx.attr.version,
         engine_revision = ctx.attr.engine_revision,
@@ -32,6 +42,8 @@ def _flutter_toolchain_impl(ctx):
         platform_kernel_dill = kernel_debug.platform_dill,
         platform_kernel_dill_product = kernel_release.platform_dill if kernel_release else None,
         patched_sdk = ctx.attr.platform_kernel_debug,
+        framework_json = ctx.file.framework_json,
+        slice_labels = slice_labels,
         icu_data = host.icu_data,
         const_finder = host.const_finder,
         font_subset = host.font_subset,
@@ -116,6 +128,10 @@ flutter_toolchain = rule(
         ),
         "material_icons_font": attr.label(
             doc = "MaterialIcons-Regular.otf font file from the material_fonts artifact.",
+            allow_single_file = True,
+        ),
+        "framework_json": attr.label(
+            doc = "The `flutter_framework.json` of the SDK's framework, when it is not the release's.",
             allow_single_file = True,
         ),
         "target_os": attr.string(

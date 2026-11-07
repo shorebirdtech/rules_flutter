@@ -388,6 +388,26 @@ void main() {
         '}\n',
       );
     });
+
+    test('the framework entry leaves out what names the machine', () {
+      final file = File('${dir.path}/flutter_framework.json')
+        ..writeAsStringSync(
+          jsonEncode({
+            'version': '3.50.0-1.0.pre',
+            'commit': 'abc',
+            'dirty': true,
+            'origin': 'local',
+            'path': '/Users/someone/src/flutter',
+            'root': '/Users/someone/src/flutter',
+          }),
+        );
+      expect(frameworkRecord(file.path), {
+        'version': '3.50.0-1.0.pre',
+        'commit': 'abc',
+        'dirty': true,
+        'origin': 'local',
+      });
+    });
   });
 
   group('command line', () {

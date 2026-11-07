@@ -39,6 +39,7 @@
 ///       --engine-platform-dill=<path> --engine-platform-dill-label=<label>
 ///       --dart-platform-dill=<path> --dart-platform-dill-label=<label>
 ///       --dartaotruntime=<path> --dartaotruntime-label=<label>
+///       [--framework=<flutter_framework.json>]
 ///       --record-in=<path> --record-out=<path>
 ///
 /// `--gen-snapshot` is required for `profile` and `release` and must be absent
@@ -376,6 +377,22 @@ Map<String, Object?> _sorted(Map<String, Object?> value) {
   };
 }
 
+/// The framework entry of the record: the `flutter_framework.json` at [path]
+/// less what names the machine it was read on (a `path` key, and any value that
+/// is an absolute path), since the record travels with the app.
+Map<String, Object?> frameworkRecord(String path) {
+  final Object? decoded = jsonDecode(File(path).readAsStringSync());
+  if (decoded is! Map<String, Object?>) {
+    throw SdkCheckFailure('$path is not a JSON object.');
+  }
+  return {
+    for (final entry in decoded.entries)
+      if (entry.key != 'path' &&
+          !(entry.value is String && (entry.value as String).startsWith('/')))
+        entry.key: entry.value,
+  };
+}
+
 /// The text written to `--record-out`.
 String encodeRecord(Map<String, Object?> record) =>
     '${const JsonEncoder.withIndent('  ').convert(record)}\n';
@@ -392,6 +409,7 @@ const _flagNames = {
   'dart-platform-dill-label',
   'dartaotruntime',
   'dartaotruntime-label',
+  'framework',
   'record-in',
   'record-out',
 };
@@ -438,6 +456,11 @@ int run(List<String> args, {StringSink? err}) {
     );
     if (recordIn is! Map<String, Object?>) {
       throw SdkCheckFailure('${need('record-in')} is not a JSON object.');
+    }
+
+    final frameworkPath = flags['framework'];
+    if (frameworkPath != null) {
+      recordIn['framework'] = frameworkRecord(frameworkPath);
     }
 
     final record = check(

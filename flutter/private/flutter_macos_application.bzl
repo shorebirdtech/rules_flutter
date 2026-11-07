@@ -22,7 +22,7 @@ load("@bazel_skylib//lib:dicts.bzl", "dicts")
 # reaches the bundle's `dsyms` output group. See `flutter_ios_application.bzl`.
 # buildifier: disable=bzl-visibility
 load("@rules_apple//apple/internal:framework_import_support.bzl", "framework_import_support")
-load("//flutter:providers.bzl", "FlutterApplicationInfo")
+load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterSdkRecordInfo")
 load("//flutter/private:apple_xcode.bzl", "XCODE_TOOL_ATTRS", "XCODE_TOOL_FRAGMENTS", "XCODE_TOOL_TOOLCHAINS", "declare_dsym", "split_and_strip_aot_binary")
 load("//flutter/private:assemble_directory.bzl", "ASSEMBLE_DIRECTORY_ATTRS", "assemble_directory")
 load("//flutter/private:exec_groups.bzl", "PORTABLE_EXEC_GROUPS", "portable_tools")
@@ -118,6 +118,23 @@ def _flutter_macos_framework_impl(ctx):
 
     steps.append(("tree", "App.framework/Resources/flutter_assets", flutter_assets))
 
+    # The engine must hold the app's CPU, and an app of a custom SDK keeps the
+    # record of the checked pieces it was built from.
+    sdk_record = ctx.attr._sdk_record[FlutterSdkRecordInfo]
+    arch = apple_support.target_arch_from_rule_ctx(ctx)
+    if sdk_record.engine_cpus and arch not in sdk_record.engine_cpus:
+        fail(("%s: the engine %s contains %s, and this build is for %s. " +
+              "Build the engine for %s, or build for %s.") % (
+            ctx.label,
+            sdk_record.engine_label,
+            ", ".join(sdk_record.engine_cpus),
+            arch,
+            arch,
+            ", ".join(sdk_record.engine_cpus),
+        ))
+    if sdk_record.record:
+        steps.append(("file", "App.framework/Resources/flutter_assets/flutter_sdk.json", sdk_record.record))
+
     info_plist = ctx.actions.declare_file(ctx.label.name + "_framework_inputs/Info.plist")
     ctx.actions.write(info_plist, _APP_FRAMEWORK_INFO_PLIST)
     steps.append(("file", "App.framework/Resources/Info.plist", info_plist))
@@ -165,6 +182,10 @@ flutter_macos_framework = rule(
                 doc = "A flutter_application target providing FlutterApplicationInfo.",
                 mandatory = True,
                 providers = [FlutterApplicationInfo],
+            ),
+            "_sdk_record": attr.label(
+                default = "//flutter/private:sdk_record",
+                providers = [FlutterSdkRecordInfo],
             ),
         },
     ),

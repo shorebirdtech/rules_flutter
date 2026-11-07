@@ -1,4 +1,6 @@
 load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_library", "dart_test")
+load("//flutter/private:flutter_sdk_record.bzl", "flutter_sdk_record")
+load(":sdk_record_mode.bzl", "record_in_mode")
 
 # The scripts build actions run directly, handed to those actions as raw
 # sources — a rule's `_tool` attr resolves the file label and passes its path to
@@ -256,3 +258,43 @@ dart_binary(
         "@rules_dart//dart/runfiles",
     ],
 ) for suffix in [""]]
+
+# The check over the stock artifacts of this host, in each build mode: the
+# pinned release passes it, with the hash its Dart has. (macOS only: the
+# engine slice is the host's own.)
+[flutter_sdk_record(
+    name = "stock_record_%s_check" % mode,
+    always = True,
+    mode = mode,
+    tags = ["manual"],
+) for mode in [
+    "debug",
+    "profile",
+    "release",
+]]
+
+[record_in_mode(
+    name = "stock_record_%s" % mode,
+    mode = mode,
+    record = ":stock_record_%s_check" % mode,
+    tags = ["manual"],
+) for mode in [
+    "debug",
+    "profile",
+    "release",
+]]
+
+dart_test(
+    name = "sdk_record_stock_test",
+    data = [":stock_record_%s" % mode for mode in [
+        "debug",
+        "profile",
+        "release",
+    ]],
+    main = "test/sdk_record_stock_test.dart",
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = [
+        "@dev_tool_deps//:test",
+        "@rules_dart//dart/runfiles",
+    ],
+)

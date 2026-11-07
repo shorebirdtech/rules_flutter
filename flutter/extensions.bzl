@@ -238,7 +238,11 @@ def _register_sdk(sdk):
     name = sdk.name
     if sdk.engine == None:
         # The release engine, with the artifact repositories it is made of.
-        flutter_register_toolchains(name = name, flutter_version = sdk.version)
+        flutter_register_toolchains(
+            name = name,
+            flutter_version = sdk.version,
+            framework_json = str(_framework_json(sdk.framework)) if sdk.framework else "",
+        )
         return "@{}_stock_engine".format(name)
 
     # An engine of the root module's choosing: the toolchains are written
@@ -259,6 +263,7 @@ def _register_sdk(sdk):
         engine_revision = version_meta.engine_revision if version_meta else "",
         material_fonts = "@{}//:material-fonts/MaterialIcons-Regular.otf".format(fonts),
         sysroot_prefix = _DEFAULT_NAME,
+        framework_json = str(_framework_json(sdk.framework)) if sdk.framework else "",
     )
     return _label_prefix(sdk.engine)
 

@@ -28,6 +28,9 @@ FlutterSdkInfo = provider(
         "kernel_release": "FlutterPlatformKernelInfo or None: The release (product) platform kernel slice. None in debug mode.",
         "engine": "FlutterEngineInfo or None: The engine slice `engine_library` is the target of.",
         "gen_snapshot_info": "FlutterGenSnapshotInfo or None: The gen_snapshot slice `gen_snapshot` is the binary of.",
+        "framework_json": "File or None: The `flutter_framework.json` of the SDK's framework when it is not the release's.",
+        "slice_labels": "dict[str, str]: The label of each slice the toolchain was assembled from, by role " +
+                        "(`host_tools`, `platform_kernel`, `engine`, `gen_snapshot`).",
         "icu_data": "File: `icudtl.dat` — ICU data file required by the engine.",
         "tool_files": "depset[File]: Every file of the bundled Dart SDK and of the patched SDK, " +
                       "for running any SDK command (`dart pub`). An action that runs one tool " +
@@ -51,6 +54,16 @@ FlutterSdkInfo = provider(
         "target_os": "str: Cross-compilation target OS, or empty for native.",
         "target_arch": "str: Cross-compilation target architecture, or empty for native.",
         "linux_sysroot": "Target or None: Chromium sysroot filegroup for hermetic Linux GTK3 builds. None on non-Linux platforms.",
+    },
+)
+
+FlutterSdkRecordInfo = provider(
+    doc = "What an app records of the SDK it was built with: the record file, which is " +
+          "written only when the framework or the engine is not the release's.",
+    fields = {
+        "record": "File or None: `flutter_sdk.json`, bundled into the app's `flutter_assets`.",
+        "engine_label": "str: The label of the engine slice the app links, or empty.",
+        "engine_cpus": "list[str]: The CPUs that engine contains, or empty where the app has none to check.",
     },
 )
 
