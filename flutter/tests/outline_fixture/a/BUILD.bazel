@@ -1,0 +1,14 @@
+load("@rules_dart//dart:defs.bzl", "dart_library")
+load("//flutter/tests/outline_fixture:outline_cutoff.bzl", "variant_source")
+
+variant_source(
+    name = "a_src",
+    out = "lib/a.dart",
+)
+
+dart_library(
+    name = "a",
+    package_name = "outline_a",
+    srcs = [":a_src"],
+    visibility = ["//flutter/tests/outline_fixture:__subpackages__"],
+)

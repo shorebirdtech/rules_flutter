@@ -1,0 +1,46 @@
+load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
+load("@rules_dart//dart:defs.bzl", "dart_test")
+load(":outline_cutoff.bzl", "VARIANTS", "outline_cutoff_modules", "reads_outline_test")
+
+# Early cutoff of Flutter's per-library kernel modules: a library whose
+# function bodies change keeps the outline its dependents compile against, so
+# they are not compiled again. See `outline_cutoff_modules`.
+
+# Which version of library `a` the fixture is built from.
+string_flag(
+    name = "variant",
+    build_setting_default = "base",
+    values = VARIANTS,
+)
+
+[
+    config_setting(
+        name = variant,
+        flag_values = {":variant": variant},
+        visibility = ["//flutter/tests/outline_fixture:__subpackages__"],
+    )
+    for variant in VARIANTS
+]
+
+outline_cutoff_modules(
+    name = "modules",
+    dependency = "//flutter/tests/outline_fixture/a",
+    dependent = "//flutter/tests/outline_fixture/b",
+)
+
+reads_outline_test(
+    name = "reads_outline_test",
+    target_under_test = "//flutter/tests/outline_fixture/b",
+)
+
+dart_test(
+    name = "outline_cutoff_test",
+    size = "medium",
+    args = ["$(rlocationpath :modules)"],
+    data = [":modules"],
+    main = "outline_cutoff_test.dart",
+    deps = [
+        "@dev_tool_deps//:test",
+        "@rules_dart//dart/runfiles",
+    ],
+)

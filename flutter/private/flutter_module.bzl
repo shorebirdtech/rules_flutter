@@ -19,7 +19,7 @@ _DELETE_TOSTRING = [
     "--delete-tostring-package-uri=package:flutter",
 ]
 
-def flutter_kernel_sdk_info(sdk, libraries_spec = None, extra_defines = []):
+def flutter_kernel_sdk_info(sdk, libraries_spec = None, extra_defines = [], outline_tool = None):
     """The `DartKernelSdkInfo` of one Flutter SDK's platform.
 
     A runtime per build mode, as flutter_tools compiles for each
@@ -41,6 +41,10 @@ def flutter_kernel_sdk_info(sdk, libraries_spec = None, extra_defines = []):
         modules (a module's constants are folded when it is compiled, so what
         describes the SDK to the program cannot wait for the link). A
         whole-program compile adds the SDK's to its own environment instead.
+      outline_tool: The executable (a `FilesToRunProvider`) that writes a
+        module's outline, which its dependents compile against so an edit
+        inside a function body does not compile them again; None to compile
+        them against the full kernels.
 
     Returns:
       The `DartKernelSdkInfo`. It has a `release` runtime only where `sdk`
@@ -75,6 +79,7 @@ def flutter_kernel_sdk_info(sdk, libraries_spec = None, extra_defines = []):
         libraries_target = "flutter",
         # The compilers read the files named above and nothing else of the SDK.
         tool_files = depset(),
+        outline_tool = outline_tool,
     )
 
 def _flutter_kernel_sdk_impl(ctx):
@@ -101,11 +106,15 @@ def _flutter_kernel_sdk_impl(ctx):
         toolchain = "@rules_flutter//flutter:toolchain_type",
         progress_message = "Deriving Flutter's libraries.json for %s" % ctx.label,
     )
-    return [flutter_kernel_sdk_info(sdk, libraries_spec, list(sdk.sdk_defines))]
+    outline_tool = ctx.attr.outline_tool[DefaultInfo].files_to_run if ctx.attr.outline_tool else None
+    return [flutter_kernel_sdk_info(sdk, libraries_spec, list(sdk.sdk_defines), outline_tool)]
 
 flutter_kernel_sdk = rule(
     implementation = _flutter_kernel_sdk_impl,
     attrs = {
+        # Built for the platform this target is configured for: the host the
+        # modules compile on, since the aspect builds it in that exec group.
+        "outline_tool": attr.label(executable = True, cfg = "target"),
         "_libraries_spec_tool": attr.label(
             default = "//flutter/private/tools:libraries_spec.dart",
             allow_single_file = True,

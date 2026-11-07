@@ -1,0 +1,9 @@
+load("@rules_dart//dart:defs.bzl", "dart_library")
+
+dart_library(
+    name = "b",
+    package_name = "outline_b",
+    srcs = ["lib/b.dart"],
+    visibility = ["//flutter/tests/outline_fixture:__subpackages__"],
+    deps = ["//flutter/tests/outline_fixture/a"],
+)

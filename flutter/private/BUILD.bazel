@@ -148,6 +148,11 @@ flutter_web_sdk_record(
 # The Flutter SDK as `flutter_module_aspect` compiles kernel modules against it.
 flutter_kernel_sdk(
     name = "flutter_kernel_sdk",
+    # Unset when the flag is off, so the SDK source it builds from is not fetched.
+    outline_tool = select({
+        "@rules_dart//dart:outline_kernel_on": "@rules_dart//dart:kernel_outline",
+        "//conditions:default": None,
+    }),
     visibility = ["//visibility:public"],
 )
 
