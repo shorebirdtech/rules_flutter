@@ -34,23 +34,14 @@ android_dbg_transition = transition(
 
 _IOS_MULTI_CPUS = "//command_line_option:ios_multi_cpus"
 
-def ios_simulator_dbg_settings(sim_cpu):
-    """The configuration an iOS simulator test's app is built in.
+# The configuration an iOS simulator test's app is built in: debug mode, for
+# the arm64 simulator. rules_flutter supports Apple-silicon Macs only, whose
+# simulator runs arm64 apps; there is no x86_64 iOS toolchain. The dev tool's
+# own build says the same (`--ios_multi_cpus=sim_arm64`).
+IOS_SIMULATOR_DBG_SETTINGS = DBG_SETTINGS | {_IOS_MULTI_CPUS: ["sim_arm64"]}
 
-    Debug mode, and the simulator CPU of this host: the simulator runs the
-    architecture of the Mac it is on, which the dev tool's own build says the
-    same way (`--ios_multi_cpus=sim_arm64`).
-
-    Args:
-        sim_cpu: `sim_arm64` or `x86_64`.
-
-    Returns:
-        The settings the transition sets.
-    """
-    return DBG_SETTINGS | {_IOS_MULTI_CPUS: [sim_cpu]}
-
-def _ios_simulator_dbg_transition_impl(_settings, attr):
-    return ios_simulator_dbg_settings(attr.sim_cpu)
+def _ios_simulator_dbg_transition_impl(_settings, _attr):
+    return IOS_SIMULATOR_DBG_SETTINGS
 
 ios_simulator_dbg_transition = transition(
     implementation = _ios_simulator_dbg_transition_impl,
@@ -480,16 +471,20 @@ analysis says which are missing.""",
 )
 
 def _flutter_ios_app_integration_test_impl(ctx):
+    if (ctx.target_platform_has_constraint(ctx.attr._x86_64_constraint[platform_common.ConstraintValueInfo]) and
+        ctx.target_platform_has_constraint(ctx.attr._macos_constraint[platform_common.ConstraintValueInfo])):
+        fail((
+            "%s: rules_flutter supports Apple Silicon hosts only. An Intel " +
+            "Mac's simulator runs x86_64 apps, and rules_flutter builds iOS " +
+            "for arm64 alone."
+        ) % ctx.label)
     return integration_test_impl(ctx, IOS_SIMULATOR, inherited_environment = ["DEVELOPER_DIR"])
 
 flutter_ios_app_integration_test = rule(
     implementation = _flutter_ios_app_integration_test_impl,
     attrs = _test_attrs("//flutter/integration_test:ios_simulator", cfg = ios_simulator_dbg_transition) | {
-        "sim_cpu": attr.string(
-            doc = "The CPU the app is built for, which the simulator runs: `sim_arm64` on an Apple-silicon Mac, `x86_64` on an Intel one.",
-            default = "sim_arm64",
-            values = ["sim_arm64", "x86_64"],
-        ),
+        "_macos_constraint": attr.label(default = "@platforms//os:macos"),
+        "_x86_64_constraint": attr.label(default = "@platforms//cpu:x86_64"),
     },
     test = True,
     doc = """Runs the iOS app `app` (`flutter_ios_app`) on a simulator made for the test and reports the integration test suite it runs.
@@ -500,8 +495,8 @@ among them, each is reported as it finishes, and the JUnit file names each. A
 suite that registers no test fails, as does an app that exits during a test, with
 the reason the device gives for its exit.
 
-The app is built in debug mode for `sim_cpu`, whatever the command line says, and
-the test runs outside Bazel's sandbox and never remotely. An app on a simulator
+The app is built in debug mode for the arm64 simulator, whatever the command line
+says, and the test runs outside Bazel's sandbox and never remotely. An app on a simulator
 cannot be handed an environment, so a non-empty `env` fails analysis; its
 `defines` are the program's.""",
 )

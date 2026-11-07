@@ -1,6 +1,19 @@
 load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
 load(":flutter_module.bzl", "flutter_kernel_sdk")
 load(":flutter_sdk_record.bzl", "flutter_sdk_record")
+load(":unsupported_toolchain.bzl", "flutter_unsupported_toolchain")
+
+# Resolved for an x86_64 iOS simulator build (toolchains_repo.bzl).
+flutter_unsupported_toolchain(
+    name = "ios_x86_64_unsupported",
+    message = "rules_flutter builds iOS for arm64 only: devices, and the Apple " +
+              "Silicon simulator (--ios_multi_cpus=sim_arm64). An x86_64 " +
+              "simulator, which an Intel Mac runs, is not supported: " +
+              "rules_flutter supports Apple Silicon hosts only.",
+    # Analysed only through toolchain resolution: built on its own, it fails.
+    tags = ["manual"],
+    visibility = ["//visibility:public"],
+)
 
 # Compilation mode config_settings for select() in macros.
 # compilation_mode is preserved across platform transitions (e.g. iOS).

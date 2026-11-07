@@ -716,8 +716,9 @@ def flutter_android_integration_test(
             device with the `adb` of `@androidsdk`, the Android SDK rules_android
             resolves from `ANDROID_HOME`.
         abi: The ABI the app is built for, which the device must run: `arm64-v8a`
-            for a phone or an Apple-silicon emulator, `x86_64` for an Intel one,
-            `armeabi-v7a` for a 32-bit ARM device.
+            for a phone or an Apple-silicon emulator, `x86_64` for an emulator
+            on an x86_64 Linux or Windows host, `armeabi-v7a` for a 32-bit ARM
+            device.
         tags: Tags of the test.
         timeout: The test's `timeout`.
         shard_count: The test's `shard_count`: the tests of the file are divided
@@ -874,11 +875,6 @@ def flutter_ios_simulator_integration_test(
         app = ":" + app,
         src = src,
         golden_service = _golden_service(name, deps, srcs, test_config, application = application),
-        # The simulator runs the architecture of the Mac it is on.
-        sim_cpu = select({
-            "@platforms//cpu:arm64": "sim_arm64",
-            "//conditions:default": "x86_64",
-        }),
         env = env,
         data = data,
         include_tags = include_tags,

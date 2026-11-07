@@ -67,6 +67,7 @@ load(":toolchain_test.bzl", "toolchain_test_suite")
 load(":toolchain_version_test.bzl", "toolchain_version_test_suite")
 load(":toolchains_repo_test.bzl", "toolchains_repo_test_suite")
 load(":unbuilt_native_code_test.bzl", "unbuilt_native_code_test_suite")
+load(":unsupported_target_test.bzl", "unsupported_target_test_suite")
 load(":validation_test.bzl", "validation_test_suite")
 load(":version_defines_test.bzl", "version_defines_test_suite")
 load(":versions_test.bzl", "versions_test_suite")
@@ -267,3 +268,5 @@ flutter_test_runfiles_test_suite(name = "flutter_test_runfiles_test")
 flutter_test_tags_test_suite(name = "flutter_test_tags_test")
 
 sdk_inputs_test_suite(name = "sdk_inputs_test")
+
+unsupported_target_test_suite(name = "unsupported_target_test")

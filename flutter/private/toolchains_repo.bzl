@@ -246,6 +246,19 @@ toolchain(
                     HOST_PLATFORMS[host_platform].compatible_with,
                     HOST_PLATFORMS[target_platform].compatible_with,
                 )
+
+    # An x86_64 iOS simulator, which an Intel Mac runs: no SDK builds for it,
+    # and this toolchain fails the build saying so rather than leave it to
+    # "no matching toolchains".
+    content += """
+toolchain(
+    name = "ios_x86_64_unsupported_toolchain",
+    target_compatible_with = {compatible_with},
+    toolchain = "@rules_flutter//flutter/private:ios_x86_64_unsupported",
+    toolchain_type = "@rules_flutter//flutter:toolchain_type",
+    visibility = ["//visibility:public"],
+)
+""".format(compatible_with = ["@platforms//os:ios", "@platforms//cpu:x86_64"])
     return content
 
 def _flutter_toolchains_repo_impl(repository_ctx):

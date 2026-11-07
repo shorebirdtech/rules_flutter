@@ -7,7 +7,7 @@ load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("//flutter:providers.bzl", "FlutterIntegrationRunnerInfo")
 load("//flutter/private:flutter_integration_bootstrap.bzl", "make_integration_bootstrap_content")
-load("//flutter/private:flutter_integration_test.bzl", "android_dbg_transition", "ios_simulator_dbg_settings")
+load("//flutter/private:flutter_integration_test.bzl", "IOS_SIMULATOR_DBG_SETTINGS", "android_dbg_transition")
 load(":action_content.bzl", "written_json", "written_text")
 
 _FIXTURE = "//flutter/tests/integration_fixture:"
@@ -510,14 +510,28 @@ def _ios_wrong_family_impl(ctx):
 
 _ios_wrong_family_test = analysistest.make(_ios_wrong_family_impl, expect_failure = True)
 
+def _ios_intel_host_impl(ctx):
+    """An iOS test on an Intel Mac fails analysis, saying only Apple Silicon hosts are supported."""
+    env = analysistest.begin(ctx)
+    asserts.expect_failure(env, "rules_flutter supports Apple Silicon hosts only")
+    return analysistest.end(env)
+
+_ios_intel_host_test = analysistest.make(
+    _ios_intel_host_impl,
+    expect_failure = True,
+    config_settings = {
+        "//command_line_option:platforms": str(Label("//flutter/platforms:macos_x64")),
+        "//command_line_option:host_platform": str(Label("//flutter/platforms:macos_x64")),
+    },
+)
+
 def _ios_settings_impl(ctx):
-    """An iOS test's app is built in debug mode, for the simulator CPU the test names, whatever the command line says."""
+    """An iOS test's app is built in debug mode, for the arm64 simulator, whatever the command line says."""
     env = unittest.begin(ctx)
-    for cpu in ["sim_arm64", "x86_64"]:
-        settings = ios_simulator_dbg_settings(cpu)
-        asserts.equals(env, "dbg", settings["//command_line_option:compilation_mode"])
-        asserts.equals(env, False, settings[str(Label("//flutter:profile"))])
-        asserts.equals(env, [cpu], settings["//command_line_option:ios_multi_cpus"])
+    settings = IOS_SIMULATOR_DBG_SETTINGS
+    asserts.equals(env, "dbg", settings["//command_line_option:compilation_mode"])
+    asserts.equals(env, False, settings[str(Label("//flutter:profile"))])
+    asserts.equals(env, ["sim_arm64"], settings["//command_line_option:ios_multi_cpus"])
     return unittest.end(env)
 
 _ios_settings_test = unittest.make(_ios_settings_impl)
@@ -578,6 +592,7 @@ def flutter_integration_test_test_suite(name):
     _ios_env_test(name = name + "_ios_env", target_under_test = _FIXTURE + "ios_test_with_env")
     _ios_wrong_family_test(name = name + "_ios_wrong_family", target_under_test = _FIXTURE + "ios_test_on_a_desktop_runner")
     _ios_settings_test(name = name + "_ios_settings")
+    _ios_intel_host_test(name = name + "_ios_intel_host", target_under_test = _FIXTURE + "ios_test")
     _relative_test(name = name + "_relative", target_under_test = _FIXTURE + "bootstrap_relative")
     _bootstrap_missing_package_test(name = name + "_bootstrap_missing_package", target_under_test = _FIXTURE + "bootstrap_missing_a_package")
     _web_unchecked_test(name = name + "_web_unchecked", target_under_test = _FIXTURE + "web_unchecked")
@@ -609,6 +624,7 @@ def flutter_integration_test_test_suite(name):
             ":" + name + "_ios_env",
             ":" + name + "_ios_wrong_family",
             ":" + name + "_ios_settings",
+            ":" + name + "_ios_intel_host",
             ":" + name + "_relative",
             ":" + name + "_bootstrap_missing_package",
             ":" + name + "_web_rule",

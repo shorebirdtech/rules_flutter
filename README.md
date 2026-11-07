@@ -34,7 +34,7 @@ If `flutter build` works for you, here is what Bazel adds:
 |---|---|
 | All | Bazel 9 or newer. The rules download Flutter 3.47.9 themselves. |
 | macOS | Xcode, for `rules_apple` and `rules_swift`. |
-| iOS | Xcode. The simulator needs no signing identity. A physical device does; see [Running on an iOS device](#running-on-an-ios-device). `flutter_bazel` screenshots, of a simulator or a device, need Xcode 27 or later, whose `devicectl` lists and captures screens and knows simulators (measured with Xcode 27.2, `devicectl` 651.32; earlier Xcodes were not tried). |
+| iOS | A Mac with Apple silicon, and Xcode. rules_flutter builds iOS for arm64 only, so an Intel Mac's x86_64 simulator is not supported. The simulator needs no signing identity. A physical device does; see [Running on an iOS device](#running-on-an-ios-device). `flutter_bazel` screenshots, of a simulator or a device, need Xcode 27 or later, whose `devicectl` lists and captures screens and knows simulators (measured with Xcode 27.2, `devicectl` 651.32; earlier Xcodes were not tried). |
 | Android | The Android SDK and NDK, with `ANDROID_HOME` and `ANDROID_NDK_HOME` set. See [Android](#android). |
 | Linux | A C++ toolchain. From macOS, an LLVM cross-toolchain. |
 | Windows | MSVC for native builds. From macOS or Linux, a C++ cross-toolchain, debug builds only. |
@@ -2047,7 +2047,7 @@ flutter_ios_simulator_integration_test(
 
 - **The simulator is the test's own.** It is created as `rules_flutter-<test>-<pid>` (an iPhone 16 on the newest installed iOS runtime), booted, and shut down and deleted when the test ends, however it ends: a failing test, a crash of the app, a Bazel timeout. It shares nothing with another test or with the simulators you use, so tests need no lock, and `shard_count` shards each get one. `runner` takes a `flutter_ios_simulator_runner(device_type = ..., runtime = ...)` for another device type or runtime (names `xcrun simctl list devicetypes` and `runtimes` list).
 - **Needs Xcode and an iOS runtime** (`xcodebuild -downloadPlatform iOS`): a host with none fails the test saying so. It is a failure, not a skip. `DEVELOPER_DIR` reaches the test, so the Xcode you selected for the build is the one `xcrun` uses.
-- **The app is built for the Mac's own simulator CPU** (`sim_arm64` on Apple silicon, `x86_64` on Intel), in debug mode whatever `-c` says.
+- **The app is built for the arm64 simulator** (`sim_arm64`), in debug mode whatever `-c` says. rules_flutter supports Apple Silicon hosts only: on an Intel Mac the test fails at analysis, saying so.
 - **`env` is refused**: an app started by the simulator cannot be handed an environment. Pass `defines` to the application instead.
 - Results, `--test_filter`, tags, `shard_count`, and the failures (a failing case, an app that exits, a suite that registers nothing) are as on the other platforms. The test is `macos`-only (`target_compatible_with`), scheduled with two cores (`cpus` of the runner), and runs outside Bazel's sandbox and never remotely.
 
