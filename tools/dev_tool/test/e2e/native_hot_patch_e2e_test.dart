@@ -1,4 +1,4 @@
-@Tags(['e2e'])
+@Tags(['e2e', 'macos'])
 /// A native edit delivered into a running app by a hot reload, end to end.
 ///
 /// `ffi_example`'s `mul` is declared with `flutter_native_library.hot_patch`:

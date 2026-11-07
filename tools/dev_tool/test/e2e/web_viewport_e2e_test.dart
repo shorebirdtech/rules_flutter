@@ -1,4 +1,4 @@
-@Tags(['e2e'])
+@Tags(['e2e', 'web'])
 /// `--web-viewport` against a real Chrome: the capture has the size asked for,
 /// keeps it across a hot restart, and `app.setViewport` changes it.
 ///

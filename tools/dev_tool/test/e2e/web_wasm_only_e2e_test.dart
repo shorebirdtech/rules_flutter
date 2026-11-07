@@ -1,4 +1,4 @@
-@Tags(['e2e'])
+@Tags(['e2e', 'web'])
 /// A web app that ships WebAssembly only (`js_fallback = False`) is developed
 /// under dart2wasm, with no flag asked for.
 ///

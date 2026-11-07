@@ -24,3 +24,14 @@ tags:
   # `data`. Bazel supplies it; a bare `dart test` does not, so CI excludes this
   # tag there and the coverage comes from the Bazel target instead.
   runfiles:
+  # One tag per platform whose cases need a device or desktop of their own.
+  # A case with no such device fails its run (a skip reports green), so a bench
+  # that lacks one deselects the platform instead: `--exclude-tags android`.
+  # A case this host's OS cannot run at all (a Windows case on a Mac) still
+  # skips; that is a fact about the host, not a missing device.
+  android:
+  ios_sim:
+  macos:
+  linux:
+  windows:
+  web:

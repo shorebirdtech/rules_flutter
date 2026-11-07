@@ -83,144 +83,149 @@ void _desktop({
   required String title,
   required bool runs,
 }) {
-  group('$platform desktop', () {
-    test(
-      'native capture works, the engine one does not, and reload lands',
-      () async {
-        final ws = await editableWorkspace(workspace);
-        final main = ws.file('lib/main.dart');
-        final original = main.readAsStringSync();
-        expect(
-          original,
-          contains("const Text('$title')"),
-          reason:
-              'this test edits the app bar title, so it has to be there to '
-              'start with — $workspace/lib/main.dart changed shape',
-        );
+  group(
+    '$platform desktop',
+    () {
+      test(
+        'native capture works, the engine one does not, and reload lands',
+        () async {
+          final ws = await editableWorkspace(workspace);
+          final main = ws.file('lib/main.dart');
+          final original = main.readAsStringSync();
+          expect(
+            original,
+            contains("const Text('$title')"),
+            reason:
+                'this test edits the app bar title, so it has to be there to '
+                'start with — $workspace/lib/main.dart changed shape',
+          );
 
-        final dt = await startDevTool(
-          workspace: ws.root,
-          target: ':app',
-          device: device,
-        );
-        // The dev tool builds the app itself, so this wait covers a Bazel
-        // build, not just a launch. The harness's 120s default is a launch
-        // budget: a cold Windows build of the runner (MSVC, and the Flutter
-        // Windows engine to fetch) runs well past it, and the timeout then
-        // reports "app.started never arrived", which sounds like the app
-        // failed rather than that it was still compiling.
-        await dt.waitForEvent(
-          'app.started',
-          timeout: const Duration(minutes: 15),
-        );
-        final appId = dt.appId!;
-        expect(await dt.waitForHttpControl(), isNotNull);
+          final dt = await startDevTool(
+            workspace: ws.root,
+            target: ':app',
+            device: device,
+          );
+          // The dev tool builds the app itself, so this wait covers a Bazel
+          // build, not just a launch. The harness's 120s default is a launch
+          // budget: a cold Windows build of the runner (MSVC, and the Flutter
+          // Windows engine to fetch) runs well past it, and the timeout then
+          // reports "app.started never arrived", which sounds like the app
+          // failed rather than that it was still compiling.
+          await dt.waitForEvent(
+            'app.started',
+            timeout: const Duration(minutes: 15),
+          );
+          final appId = dt.appId!;
+          expect(await dt.waitForHttpControl(), isNotNull);
 
-        // 1. The endpoint that has to keep working.
-        final native = await dt.nativeScreenshotWhenOnScreen(appId);
-        expect(
-          native.sublist(0, 4),
-          [0x89, 0x50, 0x4E, 0x47],
-          reason: 'screenshot/native must return a PNG on $platform',
-        );
+          // 1. The endpoint that has to keep working.
+          final native = await dt.nativeScreenshotWhenOnScreen(appId);
+          expect(
+            native.sublist(0, 4),
+            [0x89, 0x50, 0x4E, 0x47],
+            reason: 'screenshot/native must return a PNG on $platform',
+          );
 
-        // 2. The endpoint that has to refuse, and say where to go instead.
-        final refusal = await dt.httpFlutterScreenshotReply(appId);
-        expect(
-          refusal.statusCode,
-          HttpStatus.notImplemented,
-          reason:
-              'screenshot/flutter must refuse with 501 on $platform, not pass '
-              'an engine error back as a 500: ${refusal.body}',
-        );
-        expect(refusal.body, contains('screenshot/native'));
+          // 2. The endpoint that has to refuse, and say where to go instead.
+          final refusal = await dt.httpFlutterScreenshotReply(appId);
+          expect(
+            refusal.statusCode,
+            HttpStatus.notImplemented,
+            reason:
+                'screenshot/flutter must refuse with 501 on $platform, not pass '
+                'an engine error back as a 500: ${refusal.body}',
+          );
+          expect(refusal.body, contains('screenshot/native'));
 
-        // 3. The refusal has to be true, not merely declared. Straight to the
-        //    VM service, so the dev tool is not in the path at all.
-        final debugPort = await dt.waitForEvent('app.debugPort');
-        final wsUri = (debugPort['params'] as Map)['wsUri'] as String;
-        final engineError = await _flutterScreenshotError(wsUri);
-        expect(
-          engineError,
-          isNotNull,
-          reason:
-              '_flutter.screenshot SUCCEEDED on $platform. Impeller can encode '
-              'a compressed screenshot now, or this app is not on Impeller — '
-              'either way Device.supportsFlutterScreenshot should stop '
-              'reporting false, and .bazelrc/README/TESTING.md say it does.',
-        );
-        // Printed rather than kept for a failure message: what the engine
-        // says is the measurement this test exists to produce, and it differs
-        // per platform.
-        // ignore: avoid_print
-        print('$platform raw _flutter.screenshot: $engineError');
+          // 3. The refusal has to be true, not merely declared. Straight to the
+          //    VM service, so the dev tool is not in the path at all.
+          final debugPort = await dt.waitForEvent('app.debugPort');
+          final wsUri = (debugPort['params'] as Map)['wsUri'] as String;
+          final engineError = await _flutterScreenshotError(wsUri);
+          expect(
+            engineError,
+            isNotNull,
+            reason:
+                '_flutter.screenshot SUCCEEDED on $platform. Impeller can encode '
+                'a compressed screenshot now, or this app is not on Impeller — '
+                'either way Device.supportsFlutterScreenshot should stop '
+                'reporting false, and .bazelrc/README/TESTING.md say it does.',
+          );
+          // Printed rather than kept for a failure message: what the engine
+          // says is the measurement this test exists to produce, and it differs
+          // per platform.
+          // ignore: avoid_print
+          print('$platform raw _flutter.screenshot: $engineError');
 
-        // 4. Hot reload, read off the running tree rather than an image.
-        //
-        // `app.waitFor` before each read, not a bare `getText`: the agent
-        // answers as soon as the extensions are up, which is before the first
-        // frame has necessarily built the tree, and a `getText` that lands in
-        // that window returns an error whose `result` is absent — surfacing as
-        // a bare `null` against the expected string, naming nothing.
-        final ready = await dt.httpCommand('app.waitFor', {
-          'appId': appId,
-          'type': 'AppBar',
-        });
-        expect(ready['error'], isNull, reason: 'app.waitFor(AppBar): $ready');
+          // 4. Hot reload, read off the running tree rather than an image.
+          //
+          // `app.waitFor` before each read, not a bare `getText`: the agent
+          // answers as soon as the extensions are up, which is before the first
+          // frame has necessarily built the tree, and a `getText` that lands in
+          // that window returns an error whose `result` is absent — surfacing as
+          // a bare `null` against the expected string, naming nothing.
+          final ready = await dt.httpCommand('app.waitFor', {
+            'appId': appId,
+            'type': 'AppBar',
+          });
+          expect(ready['error'], isNull, reason: 'app.waitFor(AppBar): $ready');
 
-        final before = await dt.httpCommand('app.getText', {
-          'appId': appId,
-          'type': 'AppBar',
-        });
-        expect(
-          before['result']?['text'],
-          title,
-          reason: 'reading the app bar before any edit: $before',
-        );
+          final before = await dt.httpCommand('app.getText', {
+            'appId': appId,
+            'type': 'AppBar',
+          });
+          expect(
+            before['result']?['text'],
+            title,
+            reason: 'reading the app bar before any edit: $before',
+          );
 
-        main.writeAsStringSync(
-          original.replaceFirst(
-            "const Text('$title')",
-            "const Text('$title RELOADED')",
-          ),
-        );
-        final reload = await dt.sendCommand(
-          1,
-          'app.hotReload',
-          params: {'appId': appId},
-        );
-        expect(
-          reload['result']?['error'],
-          isNull,
-          reason: 'app.hotReload on $platform: $reload',
-        );
+          main.writeAsStringSync(
+            original.replaceFirst(
+              "const Text('$title')",
+              "const Text('$title RELOADED')",
+            ),
+          );
+          final reload = await dt.sendCommand(
+            1,
+            'app.hotReload',
+            params: {'appId': appId},
+          );
+          expect(
+            reload['result']?['error'],
+            isNull,
+            reason: 'app.hotReload on $platform: $reload',
+          );
 
-        // Waiting for the new text *is* the assertion that the reload landed
-        // in the running app; the `getText` below only reports what it found.
-        final repainted = await dt.httpCommand('app.waitFor', {
-          'appId': appId,
-          'text': '$title RELOADED',
-        });
-        expect(
-          repainted['error'],
-          isNull,
-          reason:
-              'the reload answered but "$title RELOADED" never appeared in the '
-              'running app, which is the failure mode a smoke assertion '
-              'misses: $repainted',
-        );
+          // Waiting for the new text *is* the assertion that the reload landed
+          // in the running app; the `getText` below only reports what it found.
+          final repainted = await dt.httpCommand('app.waitFor', {
+            'appId': appId,
+            'text': '$title RELOADED',
+          });
+          expect(
+            repainted['error'],
+            isNull,
+            reason:
+                'the reload answered but "$title RELOADED" never appeared in the '
+                'running app, which is the failure mode a smoke assertion '
+                'misses: $repainted',
+          );
 
-        final after = await dt.httpCommand('app.getText', {
-          'appId': appId,
-          'type': 'AppBar',
-        });
-        expect(after['result']?['text'], '$title RELOADED', reason: '$after');
+          final after = await dt.httpCommand('app.getText', {
+            'appId': appId,
+            'type': 'AppBar',
+          });
+          expect(after['result']?['text'], '$title RELOADED', reason: '$after');
 
-        await dt.sendCommand(2, 'app.stop', params: {'appId': appId});
-      },
-      timeout: const Timeout(Duration(minutes: 20)),
-    );
-  }, skip: runs ? null : 'runs on $platform only');
+          await dt.sendCommand(2, 'app.stop', params: {'appId': appId});
+        },
+        timeout: const Timeout(Duration(minutes: 20)),
+      );
+    },
+    skip: runs ? null : 'runs on $platform only',
+    tags: device,
+  );
 }
 
 /// The error `_flutter.screenshot` fails with, or null if it succeeded.

@@ -1,4 +1,4 @@
-@Tags(['e2e'])
+@Tags(['e2e', 'web'])
 /// A web app whose code differs by compiler runs the right program under each.
 ///
 /// `//int64:int64_app` has one `lib/main.dart` and two `package:int64_ids`,

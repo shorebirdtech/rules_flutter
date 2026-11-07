@@ -122,6 +122,7 @@ void main() {
       ),
       skip: !Platform.isMacOS ? 'macOS only' : null,
       timeout: const Timeout(Duration(minutes: 10)),
+      tags: 'macos',
     );
 
     test(
@@ -132,6 +133,7 @@ void main() {
         device: 'chrome',
       ),
       timeout: const Timeout(Duration(minutes: 10)),
+      tags: 'web',
     );
   });
 }

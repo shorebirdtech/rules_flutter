@@ -1491,19 +1491,17 @@ class AdbEntry {
 
 /// What asking the host which Android device to run against actually found.
 ///
-/// Three outcomes, because there are three, and collapsing them is the defect
-/// this type exists to prevent. `adb devices` returning an empty list is an
-/// environmental fact about a machine with nothing plugged in, and skipping is
-/// the right answer. `adb` failing to run, exiting non-zero, printing
-/// something unrecognisable, or listing only devices in a state nothing can be
-/// run against are all *tooling* failures — the detector is broken, or the
-/// device needs attention — and reporting those as "no device attached" hides
-/// a fixable problem behind an unfixable-looking one.
+/// Three outcomes, because there are three, and collapsing them hides which
+/// fix is needed. `adb devices` returning an empty list means a machine with
+/// nothing plugged in: boot an emulator. `adb` failing to run, exiting
+/// non-zero, printing something unrecognisable, or listing only devices in a
+/// state nothing can be run against are *tooling* failures — the detector is
+/// broken, or the device needs attention — and reporting those as "no device
+/// attached" hides a fixable problem behind an unfixable-looking one.
 ///
-/// Collapsed into a nullable string, a missing `adb`, a broken `adb`, an
-/// unauthorized phone and an empty bench all produce the same skip and the same
-/// green run: a whole platform's worth of e2e coverage can stop running and
-/// nothing says so.
+/// None of them skips: [require] fails the test for every outcome but a found
+/// device, so a platform's coverage cannot stop running unnoticed. A bench
+/// without Android deselects it with `--exclude-tags android`.
 sealed class AndroidDeviceProbe {
   const AndroidDeviceProbe();
 
@@ -1525,7 +1523,7 @@ sealed class AndroidDeviceProbe {
       result = Process.runSync(adb, ['devices']);
     } on Object catch (error) {
       // Deliberately caught rather than propagated: `main()` evaluates this at
-      // load time to build a group's `skip:`, and a throw there takes down the
+      // load time, and a throw there takes down the
       // macOS, iOS and web groups declared in the same file. The error is
       // carried as data instead of discarded.
       return AndroidProbeFailed(
@@ -1582,7 +1580,7 @@ sealed class AndroidDeviceProbe {
 
     // An explicit $ANDROID_SERIAL is the user naming a device, which makes
     // every other attached device irrelevant and its own absence an error.
-    // Silently running something else — or silently skipping — would be
+    // Silently running something else would be
     // ignoring an instruction that was given.
     final requested = env['ANDROID_SERIAL'];
     if (requested != null && requested.isNotEmpty) {
@@ -1630,15 +1628,21 @@ sealed class AndroidDeviceProbe {
     );
   }
 
-  /// Why the `Android e2e` group should be skipped, or null when it must run.
+  /// The device a test runs against, or a failure saying what to do.
   ///
-  /// Only [NoAndroidDevice] answers this. A failed probe deliberately does not
-  /// skip: the group runs, and the test fails carrying [AndroidProbeFailed]'s
-  /// explanation, because a broken detector reporting itself as an absent
-  /// device is exactly what must not happen quietly.
-  String? get skipReason => switch (this) {
-    NoAndroidDevice(:final reason) => reason,
-    _ => null,
+  /// Every outcome but [AndroidDeviceFound] fails the test: a run that was
+  /// asked for Android and had no device must not report green. A bench that
+  /// has no Android setup opts out with `--exclude-tags android`, which drops
+  /// the Android cases before they run, so this is never reached for them.
+  AndroidDeviceFound require() => switch (this) {
+    final AndroidDeviceFound found => found,
+    NoAndroidDevice(:final reason) => throw TestFailure(
+      '$reason\nOr exclude the Android cases: --exclude-tags android.',
+    ),
+    AndroidProbeFailed(:final reason) => throw TestFailure(
+      'Android device detection failed: $reason\n'
+      'Or exclude the Android cases: --exclude-tags android.',
+    ),
   };
 }
 
@@ -1654,14 +1658,15 @@ final class AndroidDeviceFound extends AndroidDeviceProbe {
   const AndroidDeviceFound(this.serial, this.adb);
 }
 
-/// `adb` ran, was understood, and listed nothing. The legitimate skip.
+/// `adb` ran, was understood, and listed nothing. An empty bench: the run
+/// fails, naming how to provide a device or how to exclude Android.
 final class NoAndroidDevice extends AndroidDeviceProbe {
   final String reason;
   const NoAndroidDevice(this.reason);
 }
 
 /// `adb` could not be run, failed, could not be understood, or listed only
-/// devices nothing can run on. A tooling failure, never a skip.
+/// devices nothing can run on. A tooling failure.
 final class AndroidProbeFailed extends AndroidDeviceProbe {
   final String reason;
   const AndroidProbeFailed(this.reason);

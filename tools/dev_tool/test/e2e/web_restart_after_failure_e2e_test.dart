@@ -1,4 +1,4 @@
-@Tags(['e2e'])
+@Tags(['e2e', 'web'])
 library;
 
 import 'package:test/test.dart';

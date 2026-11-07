@@ -53,144 +53,164 @@ void main() {
     return reply['result']?['text'] as String?;
   }
 
-  group('app.pressKey on macOS (framework route)', () {
-    test(
-      'types, deletes, moves the caret through Cocoa selectors, and submits',
-      () async {
-        final dt = await startDevTool(
-          workspace: e2eWorkspace('hello_world'),
-          target: ':hello_world_macos',
-          device: 'macos',
-        );
-        await dt.waitForEvent('app.started');
-        await dt.waitForHttpControl();
-        final appId = dt.appId!;
-        expect(dt.commands, contains('app.pressKey'));
+  group(
+    'app.pressKey on macOS (framework route)',
+    () {
+      test(
+        'types, deletes, moves the caret through Cocoa selectors, and submits',
+        () async {
+          final dt = await startDevTool(
+            workspace: e2eWorkspace('hello_world'),
+            target: ':hello_world_macos',
+            device: 'macos',
+          );
+          await dt.waitForEvent('app.started');
+          await dt.waitForHttpControl();
+          final appId = dt.appId!;
+          expect(dt.commands, contains('app.pressKey'));
 
-        final ready = await dt.httpCommand('app.waitFor', {
-          'appId': appId,
-          'key': 'agent_test_field',
-          'timeoutMs': '15000',
-        });
-        expect(ready['error'], isNull, reason: '$ready');
-
-        // An unknown key is refused by name before anything is sent.
-        final ctrl = await dt.httpCommand('app.pressKey', {
-          'appId': appId,
-          'key': 'Ctrl+K',
-        });
-        expect(ctrl['error'], contains('Unknown key "Ctrl"'));
-        expect(ctrl['error'], contains('Did you mean "Control"?'));
-
-        final tap = await dt.httpCommand('app.tap', {
-          'appId': appId,
-          'key': 'agent_test_field',
-        });
-        expect(tap['error'], isNull, reason: '$tap');
-
-        for (final key in const ['a', 'b', 'c', 'd']) {
-          final typed = await press(dt, appId, key, route: 'framework');
-          expect(typed['textInput'], {'inserted': key}, reason: '$typed');
-        }
-        // Backspace, ArrowLeft and ArrowDown are left unhandled by the
-        // framework on macOS so the input method can have them; the reply
-        // shows they went on as the selectors AppKit would send.
-        final backspace = await press(
-          dt,
-          appId,
-          'Backspace',
-          route: 'framework',
-        );
-        expect(backspace['handled'], isFalse, reason: '$backspace');
-        expect(backspace['textInput'], reason: '$backspace', {
-          'selectors': ['deleteBackward:'],
-        });
-        for (var i = 0; i < 2; i++) {
-          final left = await press(dt, appId, 'ArrowLeft', route: 'framework');
-          expect(left['textInput'], {
-            'selectors': ['moveLeft:'],
+          final ready = await dt.httpCommand('app.waitFor', {
+            'appId': appId,
+            'key': 'agent_test_field',
+            'timeoutMs': '15000',
           });
-        }
-        await press(dt, appId, 'X', route: 'framework');
-        final down = await press(dt, appId, 'ArrowDown', route: 'framework');
-        expect(down['textInput'], {
-          'selectors': ['moveDown:'],
-        });
-        await press(dt, appId, 'Y', route: 'framework');
+          expect(ready['error'], isNull, reason: '$ready');
 
-        // "abcd", Backspace -> "abc", two lefts -> after "a", "X" -> "aXbc",
-        // ArrowDown on the last line -> the end, "Y" -> "aXbcY". A caret
-        // that did not move would give "abcXY".
-        expect(await textOf(dt, appId, 'agent_test_echo'), 'echo: aXbcY');
+          // An unknown key is refused by name before anything is sent.
+          final ctrl = await dt.httpCommand('app.pressKey', {
+            'appId': appId,
+            'key': 'Ctrl+K',
+          });
+          expect(ctrl['error'], contains('Unknown key "Ctrl"'));
+          expect(ctrl['error'], contains('Did you mean "Control"?'));
 
-        final enter = await press(dt, appId, 'Enter', route: 'framework');
-        expect(enter['textInput'], {'action': 'TextInputAction.done'});
-        expect(
-          await textOf(dt, appId, 'agent_test_echo'),
-          'echo: aXbcY | submitted: aXbcY',
-          reason: 'Enter reaches onSubmitted',
-        );
+          final tap = await dt.httpCommand('app.tap', {
+            'appId': appId,
+            'key': 'agent_test_field',
+          });
+          expect(tap['error'], isNull, reason: '$tap');
 
-        // A shortcut the framework handles never reaches the input method.
-        await dt.httpCommand('app.tap', {
-          'appId': appId,
-          'key': 'agent_test_field',
-        });
-        final selectAll = await press(dt, appId, 'Meta+A', route: 'framework');
-        expect(selectAll['handled'], isTrue, reason: '$selectAll');
-        final z = await press(dt, appId, 'z', route: 'framework');
-        expect(z['textInput'], {'inserted': 'z'}, reason: '$z');
-        expect(
-          await textOf(dt, appId, 'agent_test_echo'),
-          'echo: z | submitted: aXbcY',
-          reason: 'Meta+A selected everything, and typing replaced it',
-        );
+          for (final key in const ['a', 'b', 'c', 'd']) {
+            final typed = await press(dt, appId, key, route: 'framework');
+            expect(typed['textInput'], {'inserted': key}, reason: '$typed');
+          }
+          // Backspace, ArrowLeft and ArrowDown are left unhandled by the
+          // framework on macOS so the input method can have them; the reply
+          // shows they went on as the selectors AppKit would send.
+          final backspace = await press(
+            dt,
+            appId,
+            'Backspace',
+            route: 'framework',
+          );
+          expect(backspace['handled'], isFalse, reason: '$backspace');
+          expect(backspace['textInput'], reason: '$backspace', {
+            'selectors': ['deleteBackward:'],
+          });
+          for (var i = 0; i < 2; i++) {
+            final left = await press(
+              dt,
+              appId,
+              'ArrowLeft',
+              route: 'framework',
+            );
+            expect(left['textInput'], {
+              'selectors': ['moveLeft:'],
+            });
+          }
+          await press(dt, appId, 'X', route: 'framework');
+          final down = await press(dt, appId, 'ArrowDown', route: 'framework');
+          expect(down['textInput'], {
+            'selectors': ['moveDown:'],
+          });
+          await press(dt, appId, 'Y', route: 'framework');
 
-        // The apostrophe, the one key whose physical and logical debug names
-        // disagree: pairing them by name pressed ⌘" instead, and the app's
-        // ⌘' shortcut (bound by `LogicalKeyboardKey.quoteSingle`) never fired.
-        //
-        // Pressed with the window counted as not focused, as when another app
-        // comes to the front: the framework then parks the field's focus, and
-        // a key would reach neither the field nor the shortcut above it. A key
-        // press only ever reaches the focused window, so the key makes the app
-        // active again and says so. The real window can be covered in the
-        // meantime by whatever else is on this screen, and the engine then
-        // reports "hidden" over the simulated "inactive"; either way the
-        // focus was parked and the key has to bring it back.
-        final away = await dt.httpCommand('app.setWindowActive', {
-          'appId': appId,
-          'active': 'false',
-        });
-        expect(away['error'], isNull, reason: '$away');
-        final quote = await press(dt, appId, 'Meta+Quote', route: 'framework');
-        expect(quote['handled'], isTrue, reason: '$quote');
-        expect(
-          quote['activated'],
-          matches(RegExp(r'"(inactive|hidden)"')),
-          reason: '$quote',
-        );
-        expect(
-          await textOf(dt, appId, 'agent_test_echo'),
-          "echo: z | submitted: aXbcY | shortcut: ⌘'",
-          reason:
-              "Meta+Quote reaches a shortcut bound to ⌘', and types nothing",
-        );
+          // "abcd", Backspace -> "abc", two lefts -> after "a", "X" -> "aXbc",
+          // ArrowDown on the last line -> the end, "Y" -> "aXbcY". A caret
+          // that did not move would give "abcXY".
+          expect(await textOf(dt, appId, 'agent_test_echo'), 'echo: aXbcY');
 
-        // The echo line is a `Text.rich`. `getText` read it above; `waitFor`
-        // by the same string has to find it too.
-        final found = await dt.httpCommand('app.waitFor', {
-          'appId': appId,
-          'text': "echo: z | submitted: aXbcY | shortcut: ⌘'",
-          'timeoutMs': '5000',
-        });
-        expect(found['error'], isNull, reason: 'waitFor a Text.rich: $found');
+          final enter = await press(dt, appId, 'Enter', route: 'framework');
+          expect(enter['textInput'], {'action': 'TextInputAction.done'});
+          expect(
+            await textOf(dt, appId, 'agent_test_echo'),
+            'echo: aXbcY | submitted: aXbcY',
+            reason: 'Enter reaches onSubmitted',
+          );
 
-        await dt.sendCommand(1, 'daemon.shutdown');
-      },
-      timeout: const Timeout(Duration(minutes: 5)),
-    );
-  }, skip: !Platform.isMacOS ? 'macOS only' : null);
+          // A shortcut the framework handles never reaches the input method.
+          await dt.httpCommand('app.tap', {
+            'appId': appId,
+            'key': 'agent_test_field',
+          });
+          final selectAll = await press(
+            dt,
+            appId,
+            'Meta+A',
+            route: 'framework',
+          );
+          expect(selectAll['handled'], isTrue, reason: '$selectAll');
+          final z = await press(dt, appId, 'z', route: 'framework');
+          expect(z['textInput'], {'inserted': 'z'}, reason: '$z');
+          expect(
+            await textOf(dt, appId, 'agent_test_echo'),
+            'echo: z | submitted: aXbcY',
+            reason: 'Meta+A selected everything, and typing replaced it',
+          );
+
+          // The apostrophe, the one key whose physical and logical debug names
+          // disagree: pairing them by name pressed ⌘" instead, and the app's
+          // ⌘' shortcut (bound by `LogicalKeyboardKey.quoteSingle`) never fired.
+          //
+          // Pressed with the window counted as not focused, as when another app
+          // comes to the front: the framework then parks the field's focus, and
+          // a key would reach neither the field nor the shortcut above it. A key
+          // press only ever reaches the focused window, so the key makes the app
+          // active again and says so. The real window can be covered in the
+          // meantime by whatever else is on this screen, and the engine then
+          // reports "hidden" over the simulated "inactive"; either way the
+          // focus was parked and the key has to bring it back.
+          final away = await dt.httpCommand('app.setWindowActive', {
+            'appId': appId,
+            'active': 'false',
+          });
+          expect(away['error'], isNull, reason: '$away');
+          final quote = await press(
+            dt,
+            appId,
+            'Meta+Quote',
+            route: 'framework',
+          );
+          expect(quote['handled'], isTrue, reason: '$quote');
+          expect(
+            quote['activated'],
+            matches(RegExp(r'"(inactive|hidden)"')),
+            reason: '$quote',
+          );
+          expect(
+            await textOf(dt, appId, 'agent_test_echo'),
+            "echo: z | submitted: aXbcY | shortcut: ⌘'",
+            reason:
+                "Meta+Quote reaches a shortcut bound to ⌘', and types nothing",
+          );
+
+          // The echo line is a `Text.rich`. `getText` read it above; `waitFor`
+          // by the same string has to find it too.
+          final found = await dt.httpCommand('app.waitFor', {
+            'appId': appId,
+            'text': "echo: z | submitted: aXbcY | shortcut: ⌘'",
+            'timeoutMs': '5000',
+          });
+          expect(found['error'], isNull, reason: 'waitFor a Text.rich: $found');
+
+          await dt.sendCommand(1, 'daemon.shutdown');
+        },
+        timeout: const Timeout(Duration(minutes: 5)),
+      );
+    },
+    skip: !Platform.isMacOS ? 'macOS only' : null,
+    tags: 'macos',
+  );
 
   group('app.pressKey in Chrome (browser route)', () {
     test(
@@ -341,5 +361,5 @@ void main() {
       },
       timeout: const Timeout(Duration(minutes: 6)),
     );
-  });
+  }, tags: 'web');
 }

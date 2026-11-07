@@ -1,4 +1,4 @@
-@Tags(['e2e'])
+@Tags(['e2e', 'ios_sim'])
 import 'dart:io';
 
 import 'package:test/test.dart';

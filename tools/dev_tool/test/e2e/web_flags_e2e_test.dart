@@ -1,4 +1,4 @@
-@Tags(['e2e'])
+@Tags(['e2e', 'web'])
 /// The web dev-loop flags, proved against a real run.
 ///
 /// Every assertion here is on something outside the tool: a socket bound on

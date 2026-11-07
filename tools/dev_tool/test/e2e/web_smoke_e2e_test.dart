@@ -1,4 +1,4 @@
-@Tags(['e2e'])
+@Tags(['e2e', 'web'])
 /// The CI web smoke test: one `-c dbg` Chrome run, driven through the shipped
 /// binary, asserted down to a VM service that answers.
 ///

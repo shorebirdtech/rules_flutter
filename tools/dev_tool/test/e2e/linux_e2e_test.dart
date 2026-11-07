@@ -1,4 +1,4 @@
-@Tags(['e2e'])
+@Tags(['e2e', 'linux'])
 /// A Linux app run under the dev tool: a hot reload and a hot restart land in
 /// the window, and the native screenshot reads the X display.
 ///

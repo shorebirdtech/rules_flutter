@@ -689,15 +689,27 @@ void main() {
         stubAdb(stdout: 'List of devices attached\nemulator-5554\tdevice\n'),
       );
       expect(probe, isA<AndroidDeviceFound>());
-      expect((probe as AndroidDeviceFound).serial, 'emulator-5554');
-      expect(probe.skipReason, isNull);
+      expect(probe.require().serial, 'emulator-5554');
     });
 
-    // The one legitimate skip: adb worked, and there is nothing plugged in.
-    test('an empty bench skips, and the reason says the list was empty', () {
+    // adb worked and there is nothing plugged in. Not a skip: a run that
+    // selected Android must say so, and how to provide a device or opt out.
+    test('an empty bench fails, saying how to provide or exclude Android', () {
       final probe = detect(stubAdb(stdout: 'List of devices attached\n'));
       expect(probe, isA<NoAndroidDevice>());
-      expect(probe.skipReason, contains('no Android device attached'));
+      expect(
+        probe.require,
+        throwsA(
+          isA<TestFailure>().having(
+            (e) => e.message,
+            'message',
+            allOf(
+              contains('no Android device attached'),
+              contains('--exclude-tags android'),
+            ),
+          ),
+        ),
+      );
     });
 
     // Each of the next four cases has to be told apart from the empty bench
@@ -709,11 +721,9 @@ void main() {
       expect(probe, isA<AndroidProbeFailed>());
       expect((probe as AndroidProbeFailed).reason, contains(missing));
       expect(
-        probe.skipReason,
-        isNull,
-        reason:
-            'a broken detector must not present itself as an empty '
-            'bench — the group has to run so the failure is reported',
+        probe.require,
+        throwsA(isA<TestFailure>()),
+        reason: 'a broken detector fails the run, naming what it could not do',
       );
     });
 
@@ -729,7 +739,7 @@ void main() {
         (probe as AndroidProbeFailed).reason,
         allOf(contains('exited 1'), contains('cannot connect to daemon')),
       );
-      expect(probe.skipReason, isNull);
+      expect(probe.require, throwsA(isA<TestFailure>()));
     });
 
     test(
@@ -745,7 +755,7 @@ void main() {
           (probe as AndroidProbeFailed).reason,
           allOf(contains('58051JEBF01271'), contains('unauthorized')),
         );
-        expect(probe.skipReason, isNull);
+        expect(probe.require, throwsA(isA<TestFailure>()));
       },
     );
 
@@ -832,7 +842,7 @@ void main() {
           (probe as AndroidProbeFailed).reason,
           allOf(contains('emulator-5554'), contains('58051JEBF01271')),
         );
-        expect(probe.skipReason, isNull);
+        expect(probe.require, throwsA(isA<TestFailure>()));
       });
 
       test('its being listed unusable fails, naming the state', () {

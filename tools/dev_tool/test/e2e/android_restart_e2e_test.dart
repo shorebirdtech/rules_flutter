@@ -1,4 +1,4 @@
-@Tags(['e2e'])
+@Tags(['e2e', 'android'])
 /// What a hot restart of an Android app builds, and when it replaces the process.
 ///
 /// Packaging an APK (dex, resources, zip, sign) was most of a restart's cost:
@@ -34,13 +34,7 @@ void main() {
       EditableWorkspace ws, {
       String target = ':app',
     }) async {
-      final probe = android;
-      if (probe is! AndroidDeviceFound) {
-        fail(
-          'Android device detection failed: '
-          '${(probe as AndroidProbeFailed).reason}',
-        );
-      }
+      final probe = android.require();
       print('e2e: Android device ${probe.serial} (via ${probe.adb})');
       final dt = await startDevTool(
         workspace: ws.root,
@@ -301,13 +295,7 @@ void main() {
     // paused never draws one. The launch must not wait on it: the VM service is
     // announced, and held at PauseStart, until a debugger resumes it.
     test('an app started paused is found and held, not waited on', () async {
-      final probe = android;
-      if (probe is! AndroidDeviceFound) {
-        fail(
-          'Android device detection failed: '
-          '${(probe as AndroidProbeFailed).reason}',
-        );
-      }
+      final probe = android.require();
       final ws = await editableWorkspace('android_example');
       final dt = await startDevTool(
         workspace: ws.root,
@@ -332,5 +320,5 @@ void main() {
       await dt.waitForAppLog('android_example shared=');
       await dt.sendCommand(1, 'daemon.shutdown');
     }, timeout: const Timeout(Duration(minutes: 15)));
-  }, skip: android.skipReason);
+  });
 }

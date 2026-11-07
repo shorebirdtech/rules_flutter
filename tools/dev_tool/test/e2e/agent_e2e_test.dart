@@ -1285,6 +1285,7 @@ void main() {
       );
     },
     skip: !Platform.isMacOS ? 'macOS only' : null,
+    tags: 'macos',
   );
 
   /// The same surface on `-d chrome`.
@@ -1421,5 +1422,5 @@ void main() {
       },
       timeout: const Timeout(Duration(minutes: 6)),
     );
-  });
+  }, tags: 'web');
 }

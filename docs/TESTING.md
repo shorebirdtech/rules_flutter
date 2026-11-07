@@ -348,6 +348,22 @@ dart run tools/dev_tool/tool/e2e.dart --plain-name="macOS"
 dart run tools/dev_tool/tool/e2e.dart test/e2e/agent_e2e_test.dart
 ```
 
+**A case whose device is missing fails; it does not skip.** The full sweep
+drives every platform, so a bench without one fails that platform's cases,
+naming what is missing and how to provide it: an Android case with no device
+in `adb devices` says to boot an emulator or authorize a phone, and an iOS
+case with no booted simulator says so. A bench that lacks a platform leaves it
+out by tag, which drops those cases before they run:
+```sh
+dart run tools/dev_tool/tool/e2e.dart --exclude-tags android
+dart run tools/dev_tool/tool/e2e.dart --exclude-tags android,ios_sim
+```
+The tags are `android`, `ios_sim`, `macos`, `linux`, `windows` and `web`,
+declared in `tools/dev_tool/dart_test.yaml`; every case that needs one of those
+devices carries it. A case that this host's OS cannot run at all (a Windows
+case on a Mac) is still skipped, and the runner lists it before its verdict. A
+green run therefore means every platform you did not exclude ran.
+
 **Give the suite the workspace to itself.** Every case builds and launches a real
 app with deadlines in minutes, and a `bazel` in this workspace takes the same
 lock the suite's builds need. Running anything else here while it goes — a

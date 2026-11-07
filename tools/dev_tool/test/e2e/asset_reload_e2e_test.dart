@@ -126,6 +126,7 @@ void main() {
         );
       },
       timeout: const Timeout(Duration(minutes: 5)),
+      tags: 'macos',
     );
 
     test(
@@ -234,6 +235,7 @@ void main() {
         );
       },
       timeout: const Timeout(Duration(minutes: 6)),
+      tags: 'web',
     );
 
     /// The same edit, for an app that is not at the workspace root and a
@@ -369,6 +371,7 @@ void main() {
         expect(await shown('e2e_app_asset_label'), 'nested app v2');
       },
       timeout: const Timeout(Duration(minutes: 6)),
+      tags: 'web',
     );
 
     /// The same edit, on the platform where the tracked tree can diverge from
@@ -462,6 +465,7 @@ void main() {
       },
       timeout: const Timeout(Duration(minutes: 8)),
       skip: !Platform.isMacOS ? 'macOS only (needs Xcode Simulator)' : null,
+      tags: 'ios_sim',
     );
   });
 }

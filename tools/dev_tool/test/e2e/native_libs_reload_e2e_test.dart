@@ -207,7 +207,7 @@ void main() {
       // same edit was not delivered either.
       await _expectRendered(dt, appId, 'RELOADED:name');
     }, timeout: const Timeout(Duration(minutes: 15)));
-  });
+  }, tags: 'macos');
 
   group('native module rebuilt under a web hot reload', () {
     test('delivered when the contract holds, withheld when it moves', () async {
@@ -307,7 +307,7 @@ void main() {
       );
       await _expectRendered(dt, appId, 'RELOADED:name');
     }, timeout: const Timeout(Duration(minutes: 15)));
-  });
+  }, tags: 'web');
 }
 
 /// Send [method] and require a result rather than a transport error.

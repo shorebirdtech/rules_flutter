@@ -80,7 +80,7 @@ void main() {
       },
       skip: !Platform.isMacOS ? 'macOS only' : null,
     );
-  });
+  }, tags: 'macos');
 
   group('iOS Simulator', () {
     const bundleId = 'com.rulesflutter.ios.example';
@@ -196,5 +196,5 @@ void main() {
       },
       skip: !Platform.isMacOS ? 'macOS only (needs Xcode Simulator)' : null,
     );
-  });
+  }, tags: 'ios_sim');
 }
