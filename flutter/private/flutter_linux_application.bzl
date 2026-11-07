@@ -119,12 +119,15 @@ def gtk3_sysroot_link_inputs(sysroot_files, lib_dir):
         # Unlike `-L` it is consulted *only* for dependencies of shared
         # libraries, never for `-l`, so it cannot shadow the C runtime.
         #
-        # `--allow-shlib-undefined`: the runner calls GTK, GLib and GObject
-        # directly, and what those need in turn is resolved on the machine
-        # that runs the app. The sysroot does not hold all of it (libpcre
-        # sits in `lib/<triple>`, outside this directory), so without the flag
-        # GNU ld goes looking on the build host and the link succeeds only
-        # where the host happens to carry the same libraries.
+        # `--allow-shlib-undefined`: the sysroot's GTK libraries are link
+        # stubs, so they can't satisfy each other's undefined symbols: libffi's
+        # `ffi_type_*` are `BAD`-section entries, and libpcre sits in
+        # `lib/<triple>`, outside this directory. gold doesn't check those
+        # symbols but GNU ld does, and rules_cc falls back to GNU ld on hosts
+        # with neither lld nor gold, such as Ubuntu 26.04. The runner's own
+        # undefined symbols are still errors. Adding `lib/<triple>` to
+        # `-rpath-link` doesn't help: the stubs still fail, and it pulls in the
+        # sysroot's glibc, which fails on `GLIBC_PRIVATE`.
         link_flags = ["-Wl,-rpath-link," + lib_dir, "-Wl,--allow-shlib-undefined"],
     )
 
