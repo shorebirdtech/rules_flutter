@@ -175,6 +175,13 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.0.0"
+  kotlin_only_plugin:
+    dependency: "direct main"
+    description:
+      path: "path_packages/kotlin_only_plugin"
+      relative: true
+    source: path
+    version: "0.0.1"
   leak_tracker:
     dependency: transitive
     description:
@@ -343,6 +350,13 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "5.0.6"
+  pub_only_tool:
+    dependency: "direct dev"
+    description:
+      path: "path_packages/pub_only_tool"
+      relative: true
+    source: path
+    version: "0.0.1"
   pub_semver:
     dependency: transitive
     description:

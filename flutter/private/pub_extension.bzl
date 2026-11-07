@@ -25,11 +25,11 @@ load("//flutter/private:flutter_pub_lock_hub.bzl", "flutter_pub_lock_hub")
 load("//flutter/private:flutter_pub_package.bzl", "flutter_pub_package")
 load("//flutter/private:flutter_resolved_package.bzl", "flutter_resolved_package")
 load("//flutter/private:flutter_sdks_repo.bzl", "SDKS_FILE", "decode_sdks")
-load("//flutter/private:flutter_unsupported_package.bzl", "flutter_unsupported_package", "unsupported_package_message")
-load("//flutter/private:lock_entry_kind.bzl", "ENGINE_PROVIDED", "FLUTTER_FRAMEWORK", "FLUTTER_SOURCE", "GIT", "HOSTED", "UNSUPPORTED", "lock_entry_kind")
+load("//flutter/private:flutter_unsupported_package.bzl", "flutter_unsupported_package", "ignored_package_message", "unsupported_package_message")
+load("//flutter/private:lock_entry_kind.bzl", "ENGINE_PROVIDED", "FLUTTER_FRAMEWORK", "FLUTTER_SOURCE", "GIT", "HOSTED", "IGNORED", "LOCAL", "PATH", "UNSUPPORTED", "lock_entry_kind")
 load("//flutter/private:pub_lock_sdks.bzl", "parse_lock_sdk_constraints")
 load("//flutter/private:pub_reconcile.bzl", "pub_command", "reconcile_package", "sdk_pin_errors", "unsupported_locks", "version_conflict_fix")
-load("//flutter/private:pub_resolve.bzl", "resolve_errors", "resolved_targets")
+load("//flutter/private:pub_resolve.bzl", "path_package_directory", "resolve_errors", "resolve_failure", "resolved_targets")
 load("//flutter/private:versions.bzl", "flutter_sdk_exact_pins", "flutter_source_sha256")
 
 # The name of the SDK every build has: the default `flutter.toolchain`.
@@ -71,15 +71,16 @@ depends on the package gets it too, for the whole build: another lock's entry
 for the package is not fetched, and a package mapped to different targets by two
 tags fails.
 
-Every `path` package of the lock must be mapped. Usually the target is in the
-Bazel package at the path the lock gives, but where the path points is pub's
-concern only: a package pub reads from a sibling checkout can be mapped to a
-target of the module Bazel takes it from. Only the package name the target
-declares is checked, at analysis. A hosted, git or sdk package may be mapped, to
-replace it for the whole graph
-with a fork or a patched copy, from any repository; the locked package is then
-not fetched, and its version is not checked. Naming a package the lock does
-not list is an error.
+Every `path` package of the lock must be named in exactly one of `resolve`,
+`build_from_pubspec` and `ignored`. Map a `path` package here when a target
+builds it: a package of this repository with its own BUILD file, generated
+code, or a package pub reads from a sibling checkout and Bazel takes from a
+`bazel_dep`. Where the lock's path points is pub's concern only. Only the
+package name the target declares is checked, at analysis. A hosted, git or sdk
+package may be mapped, to replace it for the whole graph with a fork or a
+patched copy, from any repository; the locked package is then not fetched, and
+its version is not checked. Naming a package the lock does not list is an
+error.
 
 ```starlark
 flutter_pub.from_lock(
@@ -92,6 +93,62 @@ flutter_pub.from_lock(
     },
 )
 ```
+""",
+        default = {},
+    ),
+    "build_from_pubspec": attr.string_list(
+        doc = """\
+`path` packages of the lock that have no Bazel build, to build from their
+directory exactly as a package from pub.dev or git is built: its Dart library,
+its fonts, assets and shaders, and its plugin code for Android (Kotlin and Java
+from `android/src/main`, with the namespace, manifest, resources, Maven
+dependencies and ProGuard files its Gradle build declares), iOS, macOS, Linux
+and Windows. This is what `flutter build` does with every `path` package. The
+package's facts are read from its pubspec and Gradle files, not restated in
+Bazel.
+
+The directory is the lock's `path`, relative to the lock's directory, as pub
+reads it; it may be outside this repository. Bazel links its `pubspec.yaml`,
+`lib/`, `hook/`, license files, platform directories and the directories its
+pubspec lists assets, fonts and shaders from, and fetches the package again when
+any of them changes; tool output such as `build/`, `.dart_tool/` and
+`android/.gradle/` is not read. A directory that holds a Bazel build (a `BUILD`,
+`BUILD.bazel`, `MODULE.bazel`, `REPO.bazel` or `WORKSPACE` file) is refused: map
+it with `resolve` instead. A directory whose code is generated, or built by
+Bazel another way (a Rust library behind an FFI plugin, say), needs `resolve`
+too: its pubspec does not say how to build it.
+
+```starlark
+flutter_pub.from_lock(
+    name = "deps",
+    lock = "//:pubspec.lock",
+    build_from_pubspec = ["keyboard_android"],
+)
+```
+
+Naming a package the lock does not list, or lists from another source, is an
+error. Two locks that build one package from different directories fail.
+""",
+        default = [],
+    ),
+    "ignored": attr.string_dict(
+        doc = """\
+`path` packages of the lock that no Bazel build may contain, each with the
+reason: a package only a tool run outside Bazel uses, say. The hub still has a
+label for the package, so the lock loads; any target that depends on it fails
+at analysis with ``package `<package>` (in <lock>) is ignored: <reason>``. Nothing that does
+not depend on it is affected.
+
+```starlark
+flutter_pub.from_lock(
+    name = "deps",
+    lock = "//:pubspec.lock",
+    ignored = {"release_tool": "run with `dart run` outside Bazel"},
+)
+```
+
+Naming a package the lock does not list, or lists from another source, is an
+error.
 """,
         default = {},
     ),
@@ -239,15 +296,20 @@ def pub_extension(module_ctx):
             lock_pkgs = parse_pubspec_lock(lock_content, str(pub_tag.lock))
 
             # Before anything else is checked, so a wrong map is not masked.
-            resolve_problems = resolve_errors(pub_tag.lock, hub_name, lock_pkgs, pub_tag.resolve)
+            resolve_problems = resolve_errors(pub_tag.lock, lock_pkgs, pub_tag.resolve, pub_tag.build_from_pubspec, pub_tag.ignored)
             if resolve_problems:
-                fail("\n\n".join(resolve_problems))
+                fail(resolve_failure(hub_name, pub_tag.lock, resolve_problems))
 
             # The lock is checked against each SDK's framework by that SDK's own
             # `package:flutter` spoke, which only the SDK a build selects
             # fetches.
             flutter_constraint = parse_lock_sdk_constraints(lock_content).get("flutter", "")
-            tags.append(struct(tag = pub_tag, packages = lock_pkgs, flutter_constraint = flutter_constraint))
+
+            # A `path` entry's path is relative to the lock's directory, as pub
+            # reads it: the real one, for a lock of a module whose repository
+            # links to its source (`local_path_override`).
+            lock_dir = str(module_ctx.path(pub_tag.lock).realpath.dirname)
+            tags.append(struct(tag = pub_tag, packages = lock_pkgs, flutter_constraint = flutter_constraint, lock_dir = lock_dir))
 
     if tags:
         _declare_pub_packages(tags, sdks, user_overlay_roots)
@@ -292,6 +354,18 @@ def _git_entry(tag, name, info):
         # leaves the lock out, so editing the lock does not refetch the package.
         git_lock = str(tag.lock) if is_relative_git_url(url) else "",
         lock = tag.lock if is_relative_git_url(url) else None,
+    )
+
+def _path_entry(t, name, info):
+    """A `path` package the tag builds from its pubspec or ignores (a mapped one never gets here)."""
+    if name in t.tag.ignored:
+        return dict(kind = IGNORED, reason = t.tag.ignored[name])
+    desc = info.get("description", {})
+    path = desc.get("path", "") if type(desc) == "dict" else ""
+    return dict(
+        kind = LOCAL,
+        version = info.get("version", ""),
+        directory = path_package_directory(t.lock_dir, path),
     )
 
 def _hub_listing(hub_packages, package):
@@ -342,9 +416,10 @@ def _declare_pub_packages(tags, sdks, user_overlay_roots):
                 fields = dict(kind = kind, version = info.get("version", ""))
             elif kind == FLUTTER_FRAMEWORK:
                 fields = dict(kind = kind)
+            elif kind == PATH:
+                fields = _path_entry(t, name, info)
             else:
-                # A source rules_flutter has never heard of (a `path` package
-                # is always mapped, above). The hub still loads, so an app that
+                # A source rules_flutter has never heard of. The hub still loads, so an app that
                 # only lists it builds. Its target fails when something
                 # depends on it.
                 fields = dict(kind = UNSUPPORTED, source = source)
@@ -377,7 +452,7 @@ def _declare_pub_packages(tags, sdks, user_overlay_roots):
         if pin_problems:
             fail("\n\n".join(pin_problems))
 
-    built = {name: e for name, e in chosen.items() if e.kind in [HOSTED, GIT, FLUTTER_SOURCE]}
+    built = {name: e for name, e in chosen.items() if e.kind in [HOSTED, GIT, LOCAL, FLUTTER_SOURCE]}
     other = sorted(
         [name for name in chosen if name not in built] +
         [name for name in mapped.targets if name not in chosen],
@@ -398,7 +473,7 @@ def _declare_pub_packages(tags, sdks, user_overlay_roots):
         built = sorted(built.keys()),
         other = other,
         sdk_packages = sdk_packages,
-        versions = {n: e.version for n, e in chosen.items() if e.kind in [HOSTED, GIT] and e.version},
+        versions = {n: e.version for n, e in chosen.items() if e.kind in [HOSTED, GIT, LOCAL] and e.version},
         locks = sorted({str(t.tag.lock): True for t in tags}.keys()),
         flutter_constraints = {str(t.tag.lock): t.flutter_constraint for t in tags if t.flutter_constraint},
     )
@@ -459,6 +534,12 @@ def _declare_pub_packages(tags, sdks, user_overlay_roots):
                     source = e.source,
                 ),
             )
+        elif e.kind == IGNORED:
+            flutter_unsupported_package(
+                name = source_repo(name),
+                package_name = name,
+                message = ignored_package_message(name, [x for x in entries[name] if x.kind == IGNORED]),
+            )
         elif e.kind == FLUTTER_FRAMEWORK:
             for prefix, sdk in reps.items():
                 flutter_framework_package(
@@ -500,6 +581,19 @@ def _declare_pub_packages(tags, sdks, user_overlay_roots):
                 resolved_ref = e.resolved_ref,
                 git_path = e.git_path,
                 lock = e.lock,
+                overlay_roots = overlay_roots,
+                code_assets = curated_code_assets(name, e.version),
+                ignore_hook = name in ignore_hooks,
+            )
+        elif e.kind == LOCAL:
+            # The directory pub reads, built from its pubspec as a hosted
+            # package is built from its archive.
+            flutter_pub_library_repo(name = library_repo(name), package_name = name)
+            flutter_pub_package(
+                name = source_repo(name),
+                package_name = name,
+                version = e.version,
+                directory = e.directory,
                 overlay_roots = overlay_roots,
                 code_assets = curated_code_assets(name, e.version),
                 ignore_hook = name in ignore_hooks,

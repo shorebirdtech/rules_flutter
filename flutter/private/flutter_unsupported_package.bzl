@@ -1,7 +1,8 @@
 """Spoke for a lock entry rules_flutter has no repository for.
 
 A `pubspec.lock` lists packages from sources rules_flutter cannot provide:
-sources it has never heard of. (Hosted, git and `sdk: flutter` packages it
+sources it has never heard of, and `path` packages the user declared with
+`flutter_pub.from_lock(ignored = ...)`, which no Bazel build may contain. (Hosted, git and `sdk: flutter` packages it
 builds, and `path` packages are the user's own targets; see
 `lock_entry_kind.bzl`.) A hub that failed to load over such an entry would break
 every app that merely lists it, even though nothing in Bazel uses it.
@@ -45,6 +46,25 @@ def unsupported_package_message(lock, package, source):
         lock,
         advice,
     )
+
+def ignored_package_message(package, ignorings):
+    """What a build that reaches a package `flutter_pub.from_lock(ignored = ...)` names fails with.
+
+    Args:
+        package: The package name.
+        ignorings: `struct(lock_label, reason)` for each lock that ignores it.
+
+    Returns:
+        The message, rules_dart's `pub.from_lock`'s: what each lock says, then
+        what to do.
+    """
+    said = sorted({
+        "package `{}` (in {}) is ignored: {}.".format(package, i.lock_label, i.reason): True
+        for i in ignorings
+    }.keys())
+    return ("flutter_pub.from_lock(): {} Something depends on it; remove that dependency, or " +
+            "build the package: name it in `resolve` or `build_from_pubspec` instead of " +
+            "`ignored`.").format("\n".join(said))
 
 def _flutter_unsupported_package_impl(repository_ctx):
     package = repository_ctx.attr.package_name

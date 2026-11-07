@@ -8,7 +8,8 @@ that must fail then, naming the lock, the package and the fix.
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_lock")
-load("//flutter/private:pub_resolve.bzl", "path_package_dir", "resolve_errors", "resolved_targets")
+load("//flutter/private:flutter_unsupported_package.bzl", "ignored_package_message")
+load("//flutter/private:pub_resolve.bzl", "path_package_dir", "path_package_directory", "resolve_errors", "resolve_failure", "resolved_targets")
 
 _LOCK = Label("//apps/greeter:pubspec.lock")
 
@@ -26,8 +27,8 @@ def _path_entry(name, path, relative = "true", version = "1.0.0"):
 def _lock(entries):
     return "packages:\n" + "".join(entries) + "sdks:\n  dart: \">=3.0.0 <4.0.0\"\n"
 
-def _errors(entries, resolve, lock = _LOCK):
-    return resolve_errors(lock, "deps", parse_pubspec_lock(_lock(entries), str(lock)), resolve)
+def _errors(entries, resolve, lock = _LOCK, build_from_pubspec = [], ignored = {}):
+    return resolve_errors(lock, parse_pubspec_lock(_lock(entries), str(lock)), resolve, build_from_pubspec, ignored)
 
 def _mentions(env, text, fragments):
     for fragment in fragments:
@@ -71,13 +72,116 @@ def _an_unmapped_path_package_is_refused_test_impl(ctx):
     errors = _errors([_path_entry("greeting", "../../packages/greeting")], {})
     asserts.equals(env, 1, len(errors))
     _mentions(env, errors[0], [
-        "pubspec.lock",
-        "\"greeting\"",
-        "path \"../../packages/greeting\"",
-        "flutter_pub.from_lock(name = \"deps\")",
-        "resolve",
-        "\"greeting\": \"//packages/greeting:<target>\"",
+        "it lists `greeting` as a `path` package. Name each in exactly one of:",
+        "resolve = {\"greeting\": \"//packages/greeting:<target>\"}",
+        "build_from_pubspec = [\"greeting\"]",
+        "ignored = {\"greeting\": \"<why>\"}",
     ])
+
+    # The tag and the lock head the problems.
+    _mentions(env, resolve_failure("deps", _LOCK, errors), [
+        "flutter_pub.from_lock(name = \"deps\", lock = \"@@//apps/greeter:pubspec.lock\"):\n  - it lists",
+    ])
+
+    # The suggested target first: most `path` packages have one.
+    asserts.true(env, errors[0].index("resolve =") < errors[0].index("build_from_pubspec ="))
+    asserts.true(env, errors[0].index("build_from_pubspec =") < errors[0].index("ignored ="))
+
+    return unittest.end(env)
+
+def _a_path_package_built_from_its_pubspec_or_ignored_is_named_test_impl(ctx):
+    env = unittest.begin(ctx)
+
+    asserts.equals(env, [], _errors(
+        [
+            _path_entry("keyboard_android", "../keyboard_android"),
+            _path_entry("release_tool", "tools/release", relative = "false"),
+            _path_entry("greeting", "../../packages/greeting"),
+        ],
+        {"greeting": Label("//packages/greeting")},
+        build_from_pubspec = ["keyboard_android"],
+        ignored = {"release_tool": "run with dart run outside Bazel"},
+    ))
+
+    return unittest.end(env)
+
+def _a_package_named_two_ways_is_refused_test_impl(ctx):
+    env = unittest.begin(ctx)
+
+    errors = _errors(
+        [_path_entry("greeting", "../../packages/greeting")],
+        {"greeting": Label("//packages/greeting")},
+        build_from_pubspec = ["greeting"],
+        ignored = {"greeting": "why"},
+    )
+    asserts.equals(env, 1, len(errors))
+    _mentions(env, errors[0], ["`greeting` is named in `resolve` and `build_from_pubspec` and `ignored`; name it in one."])
+
+    return unittest.end(env)
+
+def _only_path_packages_are_built_from_their_pubspec_or_ignored_test_impl(ctx):
+    env = unittest.begin(ctx)
+
+    hosted = """\
+  meta:
+    dependency: "direct main"
+    description:
+      name: meta
+      sha256: "00"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.0.0"
+"""
+    for attrs in [dict(build_from_pubspec = ["meta"]), dict(ignored = {"meta": "why"})]:
+        errors = _errors([hosted], {}, **attrs)
+        asserts.equals(env, 1, len(errors))
+        attr = attrs.keys()[0]
+        _mentions(env, errors[0], ["`%s` names `meta`, which the lock does not list as `path`: it takes only path packages." % attr])
+
+    for attrs in [dict(build_from_pubspec = ["ghost"]), dict(ignored = {"ghost": "why"})]:
+        errors = _errors([], {}, **attrs)
+        asserts.equals(env, 1, len(errors))
+        _mentions(env, errors[0], ["`%s` names `ghost`, which the lock does not list. Remove it." % attrs.keys()[0]])
+
+    return unittest.end(env)
+
+def _a_path_resolves_against_the_lock_directory_test_impl(ctx):
+    env = unittest.begin(ctx)
+
+    asserts.equals(env, "/repo/keyboard_android", path_package_directory("/repo/keyboard", "../keyboard_android"))
+    asserts.equals(env, "/repo/keyboard/pkgs/a", path_package_directory("/repo/keyboard", "./pkgs/x/../a"))
+    asserts.equals(env, "/repo/a", path_package_directory("/repo/keyboard", "..\\a"))
+    asserts.equals(env, "/elsewhere/a", path_package_directory("/repo/keyboard", "/elsewhere/a"))
+    asserts.equals(env, "C:/src/a", path_package_directory("C:/src/app", "../a"))
+    asserts.equals(env, "C:/a", path_package_directory("C:/src/app", "../../../a"))
+    asserts.equals(env, "D:/a", path_package_directory("C:/src/app", "D:\\a"))
+    asserts.equals(env, "/a", path_package_directory("/repo", "../../a"))
+
+    return unittest.end(env)
+
+def _an_ignored_package_fails_with_its_reason_test_impl(ctx):
+    env = unittest.begin(ctx)
+
+    asserts.equals(
+        env,
+        "flutter_pub.from_lock(): package `release_tool` (in //:pubspec.lock) is ignored: run with dart run " +
+        "outside Bazel. Something depends on it; remove that dependency, or build the package: name it in " +
+        "`resolve` or `build_from_pubspec` instead of `ignored`.",
+        ignored_package_message("release_tool", [struct(lock_label = "//:pubspec.lock", reason = "run with dart run outside Bazel")]),
+    )
+
+    # Every lock that ignores it, each with its reason, once.
+    asserts.equals(
+        env,
+        "flutter_pub.from_lock(): package `t` (in //a:pubspec.lock) is ignored: one.\n" +
+        "package `t` (in //b:pubspec.lock) is ignored: two. Something depends on it; remove that " +
+        "dependency, or build the package: name it in `resolve` or `build_from_pubspec` instead of `ignored`.",
+        ignored_package_message("t", [
+            struct(lock_label = "//b:pubspec.lock", reason = "two"),
+            struct(lock_label = "//a:pubspec.lock", reason = "one"),
+            struct(lock_label = "//a:pubspec.lock", reason = "one"),
+        ]),
+    )
 
     return unittest.end(env)
 
@@ -86,7 +190,7 @@ def _a_mapped_name_the_lock_lacks_is_refused_test_impl(ctx):
 
     errors = _errors([], {"ghost": Label("//packages/ghost")})
     asserts.equals(env, 1, len(errors))
-    _mentions(env, errors[0], ["\"ghost\"", "does not list it", "pubspec.lock", "flutter_pub.from_lock(name = \"deps\")", "resolve"])
+    _mentions(env, errors[0], ["`resolve` maps `ghost`, which the lock does not list. Remove it."])
 
     return unittest.end(env)
 
@@ -220,10 +324,9 @@ def _every_mistake_is_reported_test_impl(ctx):
         ],
         {"ghost": Label("//packages/ghost")},
     )
-    asserts.equals(env, 3, len(errors))
-    _mentions(env, errors[0], ["\"alpha\""])
-    _mentions(env, errors[1], ["\"beta\""])
-    _mentions(env, errors[2], ["\"ghost\""])
+    asserts.equals(env, 2, len(errors))
+    _mentions(env, errors[0], ["`ghost`"])
+    _mentions(env, errors[1], ["`alpha`, `beta` as `path` packages", "\"alpha\": \"//packages/alpha:<target>\", \"beta\": \"//packages/beta:<target>\""])
 
     return unittest.end(env)
 
@@ -235,6 +338,11 @@ _hosted_git_and_sdk_entries_may_be_mapped_test = unittest.make(_hosted_git_and_s
 _unmapped_hosted_entries_need_nothing_test = unittest.make(_unmapped_hosted_entries_need_nothing_test_impl)
 _a_mapped_path_entry_may_point_anywhere_test = unittest.make(_a_mapped_path_entry_may_point_anywhere_test_impl)
 _every_mistake_is_reported_test = unittest.make(_every_mistake_is_reported_test_impl)
+_a_path_package_built_from_its_pubspec_or_ignored_is_named_test = unittest.make(_a_path_package_built_from_its_pubspec_or_ignored_is_named_test_impl)
+_a_package_named_two_ways_is_refused_test = unittest.make(_a_package_named_two_ways_is_refused_test_impl)
+_only_path_packages_are_built_from_their_pubspec_or_ignored_test = unittest.make(_only_path_packages_are_built_from_their_pubspec_or_ignored_test_impl)
+_a_path_resolves_against_the_lock_directory_test = unittest.make(_a_path_resolves_against_the_lock_directory_test_impl)
+_an_ignored_package_fails_with_its_reason_test = unittest.make(_an_ignored_package_fails_with_its_reason_test_impl)
 
 def pub_resolve_test_suite(name):
     unittest.suite(
@@ -247,6 +355,11 @@ def pub_resolve_test_suite(name):
         _unmapped_hosted_entries_need_nothing_test,
         _a_mapped_path_entry_may_point_anywhere_test,
         _every_mistake_is_reported_test,
+        _a_path_package_built_from_its_pubspec_or_ignored_is_named_test,
+        _a_package_named_two_ways_is_refused_test,
+        _only_path_packages_are_built_from_their_pubspec_or_ignored_test,
+        _a_path_resolves_against_the_lock_directory_test,
+        _an_ignored_package_fails_with_its_reason_test,
         a_package_mapped_to_one_target_is_one_mapping_test,
         a_package_mapped_to_two_targets_is_refused_test,
     )

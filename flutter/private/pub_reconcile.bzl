@@ -14,12 +14,14 @@ An entry is a `struct` the extension makes of one lock entry:
 * `version`, `sha256`, `url` (the registry's), for a hosted package;
 * `git_url`, `resolved_ref`, `git_path`, `git_lock` (the lock's label when the
   url is relative to it, else `""`), for a git package;
+* `directory` (absolute), for a `path` package built from its pubspec;
+* `reason`, for an ignored `path` package;
 * `hub`, `lock_label`, `on_version_conflict`: the tag it came from;
 * `lock_dir`: the lock's directory within its repository (its Bazel package).
 """
 
 load("@rules_dart//dart/pub:defs.bzl", "parse_semver")
-load("//flutter/private:lock_entry_kind.bzl", "GIT", "HOSTED", "UNSUPPORTED")
+load("//flutter/private:lock_entry_kind.bzl", "GIT", "HOSTED", "IGNORED", "LOCAL", "UNSUPPORTED")
 
 def pub_command(verb, lock_dir, packages = []):
     """The command that re-resolves the lock in `lock_dir` with the pinned toolchain.
@@ -63,6 +65,10 @@ def _describe(entry):
         return "hosted {} ({})".format(entry.version, _where(entry))
     if entry.kind == GIT:
         return "git {} at {} ({})".format(entry.git_url, entry.resolved_ref, _where(entry))
+    if entry.kind == LOCAL:
+        return "built from its pubspec at {} ({})".format(entry.directory, _where(entry))
+    if entry.kind == IGNORED:
+        return "ignored ({})".format(_where(entry))
     return "{} ({})".format(entry.kind, _where(entry))
 
 def _kinds_error(name, entries):
@@ -203,6 +209,19 @@ def _git_errors(name, entries):
         )]
     return []
 
+def _local_errors(name, entries):
+    if len({e.directory: True for e in entries}) > 1:
+        return [(
+            "Package \"{name}\" is built from its pubspec in different directories across flutter_pub.from_lock() locks:\n" +
+            "{lines}\n" +
+            "rules_flutter builds one copy of each package. Make the locks agree, or map " +
+            "it to one target with `resolve`."
+        ).format(
+            name = name,
+            lines = "\n".join(["  - " + _describe(e) for e in entries]),
+        )]
+    return []
+
 def reconcile_package(name, entries):
     """Decides which of a package's lock entries the build uses.
 
@@ -227,6 +246,8 @@ def reconcile_package(name, entries):
             return struct(entry = None if picked.errors else picked.entry, errors = picked.errors, behind = picked.behind)
     elif kind == GIT:
         errors = _git_errors(name, entries)
+    elif kind == LOCAL:
+        errors = _local_errors(name, entries)
     if errors:
         return struct(entry = None, errors = errors, behind = [])
     return struct(entry = entries[0], errors = [], behind = [])

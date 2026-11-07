@@ -1,9 +1,11 @@
-"""Mapping a lock's packages to the workspace targets that stand for them.
+"""Saying how each `path` package of a lock is built, or that it is not.
 
 `flutter_pub.from_lock(resolve = {name: label})` names, for a package of the
-lock, the target in the user's repository that builds it. A `path:` dependency's
-files are already in the repository, so every `path` entry of the lock must be
-mapped. A hosted, git or sdk entry may be mapped too, to replace the locked
+lock, the target that builds it. Every `path` entry of the lock must be named in
+exactly one of three attributes: `resolve`, the target that builds it;
+`build_from_pubspec`, to build its directory from its pubspec as a hosted
+package is built; or `ignored`, with the reason no Bazel build may contain it.
+A hosted, git or sdk entry may be mapped too, to replace the locked
 package for the whole graph with a fork or a patched copy: the hub's label for
 the package is the target, so a hosted package that depends on it gets it, and
 the locked package is not fetched.
@@ -50,63 +52,115 @@ def path_package_dir(lock_package, path):
 def _is_true(value):
     return value in ["true", "True"]
 
-def _target(dir):
-    return "//{}:<target>".format(dir)
-
-def _path_package_errors(lock, hub, name, info, resolve):
-    """The mistakes in one `path` entry's mapping."""
+def _suggested_target(lock, info):
+    """The target `resolve` most likely maps a `path` entry to: the Bazel package at its path."""
     description = info.get("description", {})
-    path = description.get("path", "") if type(description) == "dict" else ""
-    relative = type(description) == "dict" and _is_true(description.get("relative", ""))
-    resolved = path_package_dir(lock.package, path)
+    if type(description) != "dict" or not _is_true(description.get("relative", "")):
+        return "//..."
+    resolved = path_package_dir(lock.package, description.get("path", ""))
+    return "//{}:<target>".format(resolved.dir) if resolved.dir != None else "//..."
 
-    if name not in resolve:
-        if relative and resolved.dir != None:
-            suggestion = '    resolve = {{"{name}": "{target}"}},'.format(name = name, target = _target(resolved.dir))
-        else:
-            suggestion = '    resolve = {{"{name}": "//<package>:<target>"}},'.format(name = name)
-        return [
-            ("{lock} lists \"{name}\" from path \"{path}\", which flutter_pub.from_lock(name = \"{hub}\") maps to no target. " +
-             "Add the target that builds it to resolve:\n{suggestion}").format(
-                lock = str(lock),
-                name = name,
-                path = path,
-                hub = hub,
-                suggestion = suggestion,
-            ),
-        ]
+def _quoted(names):
+    return ", ".join(["`%s`" % n for n in names])
 
-    return []
+def resolve_errors(lock, lock_pkgs, resolve, build_from_pubspec = [], ignored = {}):
+    """Everything wrong with how one `flutter_pub.from_lock()` names the lock's packages.
 
-def resolve_errors(lock, hub, lock_pkgs, resolve):
-    """Everything wrong with how `flutter_pub.from_lock(resolve = ...)` maps the lock's packages.
+    The texts are rules_dart's `pub.from_lock`'s, which takes the same three
+    attributes.
 
     Args:
         lock: The lock's `Label`.
-        hub: The hub's name, for messages.
         lock_pkgs: The lock's packages, from `parse_pubspec_lock`.
         resolve: The tag's `resolve`: package name to the target's `Label`.
+        build_from_pubspec: The tag's `build_from_pubspec`: package names.
+        ignored: The tag's `ignored`: package name to the reason.
 
     Returns:
-        The messages, in a stable order; empty when the map is valid.
+        One line per problem, in a stable order; empty when every name is
+        valid. The caller heads them with the tag (`resolve_failure`).
     """
-    errors = []
-    for name in sorted(lock_pkgs.keys()):
-        info = lock_pkgs[name]
-        if info.get("source", "unknown") == "path":
-            errors.extend(_path_package_errors(lock, hub, name, info, resolve))
+    problems = []
+    chosen = {}
+    for attr, names in [("resolve", resolve.keys()), ("build_from_pubspec", build_from_pubspec), ("ignored", ignored.keys())]:
+        stale = sorted([n for n in names if n not in lock_pkgs])
+        if stale:
+            problems.append("  - `%s` %s %s, which the lock does not list. Remove %s." % (
+                attr,
+                "maps" if attr == "resolve" else "names",
+                _quoted(stale),
+                "them" if len(stale) > 1 else "it",
+            ))
+        if attr != "resolve":
+            not_path = sorted([n for n in names if n in lock_pkgs and lock_pkgs[n].get("source") != "path"])
+            if not_path:
+                problems.append(
+                    "  - `%s` names %s, which the lock does not list as `path`: it takes only path packages." % (attr, _quoted(not_path)),
+                )
+        for name in names:
+            chosen.setdefault(name, []).append(attr)
+    for name in sorted(chosen.keys()):
+        if len(chosen[name]) > 1:
+            problems.append("  - `%s` is named in %s; name it in one." % (
+                name,
+                " and ".join(["`%s`" % a for a in chosen[name]]),
+            ))
+    unnamed = sorted([n for n, info in lock_pkgs.items() if info.get("source") == "path" and n not in chosen])
+    if unnamed:
+        problems.append(
+            ("  - it lists %s as %s. Name each in exactly one of:\n" +
+             "      resolve = {%s}  (a target of yours builds it)\n" +
+             "      build_from_pubspec = [%s]  (build it from its directory, as a hosted package)\n" +
+             "      ignored = {%s}  (nothing builds it; depending on it fails with the reason)") % (
+                _quoted(unnamed),
+                "`path` packages" if len(unnamed) > 1 else "a `path` package",
+                ", ".join(['"%s": "%s"' % (n, _suggested_target(lock, lock_pkgs[n])) for n in unnamed]),
+                ", ".join(['"%s"' % n for n in unnamed]),
+                ", ".join(['"%s": "<why>"' % n for n in unnamed]),
+            ),
+        )
+    return problems
 
-    for name in sorted(resolve.keys()):
-        if name not in lock_pkgs:
-            errors.append(
-                ("flutter_pub.from_lock(name = \"{hub}\") maps \"{name}\" in resolve, but {lock} does not list it. " +
-                 "Remove it from resolve, or re-resolve the lock: bazel run @rules_flutter//flutter/pub -- get").format(
-                    hub = hub,
-                    name = name,
-                    lock = str(lock),
-                ),
-            )
-    return errors
+def resolve_failure(hub, lock, problems):
+    """The one message for a tag's `resolve_errors`.
+
+    Args:
+        hub: The tag's `name`.
+        lock: The lock's `Label`.
+        problems: What `resolve_errors` returned.
+
+    Returns:
+        The message.
+    """
+    return "flutter_pub.from_lock(name = \"%s\", lock = \"%s\"):\n%s" % (hub, lock, "\n".join(problems))
+
+def path_package_directory(lock_dir, path):
+    """The directory a `path` lock entry names, as pub reads it.
+
+    Args:
+        lock_dir: The absolute directory of the lock, `/`-separated.
+        path: The entry's `description.path`: relative to the lock's
+            directory, or absolute.
+
+    Returns:
+        The absolute directory, `/`-separated, without `.` or `..` segments.
+    """
+    path = path.replace("\\", "/")
+    absolute = path.startswith("/") or (len(path) > 1 and path[1] == ":")
+    full = path if absolute else lock_dir.replace("\\", "/") + "/" + path
+    head = "/" if full.startswith("/") else ""
+    segments = []
+    for segment in full.split("/"):
+        if segment == "" or segment == ".":
+            continue
+        if segment == "..":
+            # Above the root is the root, as the system has it, and a drive
+            # letter is a root.
+            if segments and not (len(segments) == 1 and segments[0].endswith(":")):
+                segments.pop()
+            continue
+        segments.append(segment)
+    return head + "/".join(segments)
 
 def resolved_targets(maps):
     """The packages mapped to workspace targets, over every `flutter_pub.from_lock()` tag.

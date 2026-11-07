@@ -103,9 +103,25 @@ void main() {
     }
   }
 
-  _verifyDatastoreVariant(check);
-
-  check.finish('\nAll plugin_example APK verification checks passed.');
+  // The app's classes before R8 renames them.
+  final deployJar = {
+    for (final entry in zipEntries(
+      File(
+        requireRunfile('plugin_android_deploy.jar', what: 'deploy jar'),
+      ).readAsBytesSync(),
+    ))
+      entry.name,
+  };
+  _verifyDatastoreVariant(check, deployJar);
+  check
+    ..expect(
+      'the app has the plugin class of kotlin_only_plugin, a `path` package '
+      'built from its pubspec',
+      condition: deployJar.contains(
+        'com/example/kotlin_only_plugin/KotlinOnlyPlugin.class',
+      ),
+    )
+    ..finish('\nAll plugin_example APK verification checks passed.');
 }
 
 /// Checks that the app's classes, before R8 renames them, come from
@@ -115,15 +131,7 @@ void main() {
 /// atomicMoveTo calls java.nio.file.Files.move unguarded: an API 26 class that
 /// an app at minSdk 24 without core library desugaring cannot load. The
 /// Android variant checks the API level and falls back to File.renameTo.
-void _verifyDatastoreVariant(BundleCheck check) {
-  final names = {
-    for (final entry in zipEntries(
-      File(
-        requireRunfile('plugin_android_deploy.jar', what: 'deploy jar'),
-      ).readAsBytesSync(),
-    ))
-      entry.name,
-  };
+void _verifyDatastoreVariant(BundleCheck check, Set<String> names) {
   check
     ..expect(
       "the app has datastore-core's Android variant",

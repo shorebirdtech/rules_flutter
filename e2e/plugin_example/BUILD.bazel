@@ -3,7 +3,7 @@ load("@rules_apple//apple:ios.bzl", "ios_application")
 load("@rules_apple//apple:macos.bzl", "macos_application")
 load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
 load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_analysis_test", "dart_test")
-load("@rules_flutter//flutter:android.bzl", "flutter_android_app", "flutter_android_build")
+load("@rules_flutter//flutter:android.bzl", "flutter_android_app", "flutter_android_build", "flutter_android_registrant")
 load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_library")
 load(
     "@rules_flutter//flutter:ios.bzl",
@@ -37,6 +37,7 @@ load("@rules_flutter//flutter:windows.bzl", "flutter_windows_app")
 load("@rules_flutter//tools/e2e_testing:device_profile.bzl", "device_profile")
 load(":android_apk.bzl", "android_apk")
 load(":desktop_link_libraries_test.bzl", "desktop_link_libraries_test")
+load(":ignored_package_test.bzl", "ignored_package_test")
 
 exports_files(["pubspec.lock"])
 
@@ -48,6 +49,7 @@ flutter_application(
         "//greeting_plugin",
         "@deps//:audio_session",
         "@deps//:flutter",
+        "@deps//:kotlin_only_plugin",
         "@deps//:package_info_plus",
         "@deps//:path_provider",
         "@deps//:record_android",
@@ -533,6 +535,38 @@ dart_test(
     main = "test/verify_android_plugin_scope_test.dart",
     tags = ["android"],
     deps = ["@rules_flutter//tools/e2e_testing"],
+)
+
+# `kotlin_only_plugin` is a `path` package with no Bazel build: only Kotlin and a
+# Gradle build. MODULE.bazel names it in `build_from_pubspec`, so it is built
+# from its pubspec as a plugin from pub.dev is. The app's Android registrant
+# registers its class (here), and the APK carries it (verify_android_apk_test).
+flutter_android_registrant(
+    name = "plugin_android_registrant",
+    application = ":plugin_app",
+)
+
+dart_test(
+    name = "verify_android_registrant_test",
+    data = [":plugin_android_registrant"],
+    main = "test/verify_android_registrant_test.dart",
+    deps = ["@rules_flutter//tools/e2e_testing"],
+)
+
+# `pub_only_tool` is a `path` package MODULE.bazel names in `ignored`: a library
+# that depends on it fails analysis, giving the reason. `manual`, so `//...`
+# never builds it; the test analyses it.
+flutter_library(
+    name = "depends_on_ignored_package",
+    srcs = [],
+    tags = ["manual"],
+    deps = ["@deps//:pub_only_tool"],
+)
+
+ignored_package_test(
+    name = "ignored_package_test",
+    message = "package `pub_only_tool` (in @@//:pubspec.lock) is ignored: it is a tool run with `dart run` outside Bazel. Something depends on it",
+    target_under_test = ":depends_on_ignored_package",
 )
 
 # An app's `<name>_maven_artifacts` reports the Maven artifacts of the plugins

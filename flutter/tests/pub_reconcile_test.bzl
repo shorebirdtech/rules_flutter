@@ -6,7 +6,7 @@ when the module is read, naming both locks and what to do.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
-load("//flutter/private:lock_entry_kind.bzl", "FLUTTER_SOURCE", "GIT", "HOSTED", "UNSUPPORTED")
+load("//flutter/private:lock_entry_kind.bzl", "FLUTTER_SOURCE", "GIT", "HOSTED", "IGNORED", "LOCAL", "UNSUPPORTED")
 load("//flutter/private:pub_reconcile.bzl", "pub_command", "reconcile_package", "sdk_pin_errors", "unsupported_locks", "version_conflict_fix")
 
 def _dir(lock):
@@ -17,6 +17,9 @@ def _hosted(version, hub = "deps", lock = "//app:pubspec.lock", sha256 = "aa", u
 
 def _git(ref, hub = "deps", lock = "//app:pubspec.lock", url = "https://github.com/x/foo.git", path = ".", git_lock = ""):
     return struct(kind = GIT, version = "1.0.0", git_url = url, resolved_ref = ref, git_path = path, git_lock = git_lock, hub = hub, lock_label = lock)
+
+def _local(directory, hub = "deps", lock = "//app:pubspec.lock"):
+    return struct(kind = LOCAL, version = "1.0.0", directory = directory, hub = hub, lock_label = lock)
 
 def _mentions(env, text, fragments):
     for fragment in fragments:
@@ -262,6 +265,34 @@ def _a_lock_cannot_move_a_package_past_an_sdk_pin_test_impl(ctx):
 
 a_lock_cannot_move_a_package_past_an_sdk_pin_test = unittest.make(_a_lock_cannot_move_a_package_past_an_sdk_pin_test_impl)
 
+def _one_directory_is_one_package_test_impl(ctx):
+    env = unittest.begin(ctx)
+
+    r = reconcile_package("kb", [_local("/src/kb"), _local("/src/kb", hub = "b", lock = "//b:pubspec.lock")])
+    asserts.equals(env, [], r.errors)
+    asserts.equals(env, "/src/kb", r.entry.directory)
+
+    return unittest.end(env)
+
+one_directory_is_one_package_test = unittest.make(_one_directory_is_one_package_test_impl)
+
+def _two_directories_are_refused_test_impl(ctx):
+    env = unittest.begin(ctx)
+
+    r = reconcile_package("kb", [_local("/src/kb"), _local("/other/kb", hub = "b", lock = "//b:pubspec.lock")])
+    asserts.equals(env, None, r.entry)
+    asserts.equals(env, 1, len(r.errors))
+    _mentions(env, r.errors[0], ["\"kb\"", "/src/kb", "/other/kb", "//app:pubspec.lock", "//b:pubspec.lock", "different directories"])
+
+    # Built in one lock and ignored in another is two sources.
+    r = reconcile_package("kb", [_local("/src/kb"), struct(kind = IGNORED, reason = "why", hub = "b", lock_label = "//b:pubspec.lock")])
+    asserts.equals(env, 1, len(r.errors))
+    _mentions(env, r.errors[0], ["different sources", "built from its pubspec at /src/kb", "ignored (hub \"b\", //b:pubspec.lock)"])
+
+    return unittest.end(env)
+
+two_directories_are_refused_test = unittest.make(_two_directories_are_refused_test_impl)
+
 def pub_reconcile_test_suite(name):
     unittest.suite(
         name,
@@ -278,4 +309,6 @@ def pub_reconcile_test_suite(name):
         unsupported_entries_name_every_lock_test,
         sdk_pins_hold_test,
         a_lock_cannot_move_a_package_past_an_sdk_pin_test,
+        one_directory_is_one_package_test,
+        two_directories_are_refused_test,
     )

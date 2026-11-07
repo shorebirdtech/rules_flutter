@@ -99,6 +99,11 @@ flutter.toolchain(flutter_version = "3.47.9")
 flutter_pub = use_extension("@rules_flutter//flutter/pub:extensions.bzl", "pub")
 flutter_pub.from_lock(
     name = "deps",
+    # A Kotlin-only Android plugin with no Bazel build, built from its pubspec
+    # as a plugin from pub.dev is.
+    build_from_pubspec = ["kotlin_only_plugin"],
+    # A tool's package: anything that depends on it fails, giving this reason.
+    ignored = {"pub_only_tool": "it is a tool run with `dart run` outside Bazel"},
     lock = "//:pubspec.lock",
 )
 

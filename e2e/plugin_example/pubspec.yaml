@@ -14,7 +14,15 @@ dependencies:
   # umbrella): regression case for a plugin that ships android/ resources
   # (R.drawable.ic_mic) and declares no Gradle dependencies at all.
   record_android: 1.5.1
+  # A `path` package with no Bazel build, which the lock's
+  # `build_from_pubspec` builds from its pubspec.
+  kotlin_only_plugin:
+    path: path_packages/kotlin_only_plugin
 dev_dependencies:
+  # A `path` package only a tool run outside Bazel uses, which the lock's
+  # `ignored` keeps out of every Bazel build.
+  pub_only_tool:
+    path: path_packages/pub_only_tool
   very_good_analysis: ^10.3.0
   integration_test:
     sdk: flutter

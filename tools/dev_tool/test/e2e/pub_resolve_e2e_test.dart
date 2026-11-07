@@ -103,7 +103,12 @@ void main() {
       final cases = <String, ({PubInputsFixture fixture, List<String> says})>{
         'a path package mapped to no target': (
           fixture: greetingFixture(resolve: {}),
-          says: ['"greeting"', 'path "../../packages/greeting"', 'resolve'],
+          says: [
+            'it lists `greeting` as a `path` package',
+            '"greeting": "//packages/greeting:<target>"',
+            'build_from_pubspec',
+            'ignored',
+          ],
         ),
         'a mapped name the lock does not list': (
           fixture: greetingFixture(
@@ -112,7 +117,7 @@ void main() {
               'ghost': '//packages/ghost',
             },
           ),
-          says: ['"ghost"', 'does not list it'],
+          says: ['`resolve` maps `ghost`, which the lock does not list'],
         ),
       };
 

@@ -266,7 +266,17 @@ class PubInputsFixture {
     this.http = false,
     this.legacyPubExtension = false,
     this.rulesDartPubLocks = const [],
+    this.buildFromPubspec = const [],
+    this.ignored = const {},
   });
+
+  /// `flutter_pub.from_lock(build_from_pubspec = [...])`: `path` packages
+  /// built from their directory.
+  final List<String> buildFromPubspec;
+
+  /// `flutter_pub.from_lock(ignored = {...})`: `path` packages to the reason
+  /// no Bazel build may contain them.
+  final Map<String, String> ignored;
 
   /// Lock packages (`''` for the root, or `other`) that rules_dart's own `pub`
   /// extension also reads, as `pub.from_lock()` tags of one hub. Locks that
@@ -357,8 +367,10 @@ class PubInputsFixture {
     String name,
     String lockPackage,
     Map<String, String> resolve,
-    String? onVersionConflict,
-  ) {
+    String? onVersionConflict, {
+    List<String> buildFromPubspec = const [],
+    Map<String, String> ignored = const {},
+  }) {
     final resolved = resolve.entries
         .map((e) => '${jsonEncode(e.key)}: ${jsonEncode(e.value)}')
         .join(', ');
@@ -367,6 +379,9 @@ class PubInputsFixture {
       '    name = "$name",',
       '    lock = "//$lockPackage:pubspec.lock",',
       if (resolve.isNotEmpty) '    resolve = {$resolved},',
+      if (buildFromPubspec.isNotEmpty)
+        '    build_from_pubspec = ${jsonEncode(buildFromPubspec)},',
+      if (ignored.isNotEmpty) '    ignored = ${jsonEncode(ignored)},',
       if (onVersionConflict != null)
         '    on_version_conflict = "$onVersionConflict",',
       ')',
@@ -495,7 +510,7 @@ flutter.toolchain(flutter_version = "$flutterVersion")
 
 flutter_pub = ${legacyPubExtension ? 'use_extension("@rules_flutter//flutter:extensions.bzl", "flutter_pub")' : 'use_extension("@rules_flutter//flutter/pub:extensions.bzl", "pub")'}
 ${overlayRoots.isEmpty ? '' : 'flutter_pub.plugin_overlays(roots = ${jsonEncode(overlayRoots)})'}
-${_tag(pubHub, lockPackage, resolve, onVersionConflict)}
+${_tag(pubHub, lockPackage, resolve, onVersionConflict, buildFromPubspec: buildFromPubspec, ignored: ignored)}
 ${otherHubs.map((h) => _tag(h.name, h.lockPackage, h.resolve, h.onVersionConflict)).join('\n')}
 ${rulesDartPubLocks.isEmpty ? '' : _rulesDartPubTags(rulesDartPubLocks)}
 use_repo(flutter_pub, ${{pubHub, for (final h in otherHubs) h.name}.map((n) => '"$n"').join(', ')}${spokeNames.map((n) => ', "flutter_pub__$n"').join()})

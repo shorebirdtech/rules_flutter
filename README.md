@@ -215,7 +215,7 @@ A package's `flutter: assets:` are bundled at `packages/<package>/<path>`, as `f
 
 #### Packages in your workspace (`path:` dependencies, forks)
 
-A `path:` dependency in `pubspec.yaml` is a package whose files are in your repository, and `pubspec.lock` lists it with `source: path`. You build those files with a target of your own, and `resolve` tells the hub which one builds which package:
+A `path:` dependency in `pubspec.yaml` is a package whose files are in your repository, and `pubspec.lock` lists it with `source: path`. Usually you build those files with a target of your own, and `resolve` tells the hub which one builds which package:
 
 ```starlark
 flutter_pub.from_lock(
@@ -229,13 +229,29 @@ flutter_pub.from_lock(
 ```
 
 - The target is a `flutter_library`, a `flutter_plugin` or a `dart_library`. Its name is free; its `package_name` must be the pub package's name, or analysis fails naming the target, the key and the name it declares. For a package with assets, fonts or shaders that is also what bundles them at `packages/<package>/<path>`, as `flutter build` does. The target must be `//visibility:public`, because the hub's repository forwards to it.
-- Every `path` package of the lock must be mapped. Usually that is the target in the Bazel package at the path (`../../packages/greeting` from `apps/greeter` is `//packages/greeting`), but where the path points is pub's concern only: a package pub reads from a sibling checkout can be mapped to a target of the module Bazel takes it from (`"ui_kit": "@ui_kit"`). A `path` package with no entry fails as soon as Bazel reads the lock, naming the lock and the package, with the line to add.
+- Every `path` package of the lock must be named in exactly one of `resolve`, `build_from_pubspec` and `ignored` (below). Usually it is mapped to the target in the Bazel package at the path (`../../packages/greeting` from `apps/greeter` is `//packages/greeting`), but where the path points is pub's concern only: a package pub reads from a sibling checkout can be mapped to a target of the module Bazel takes it from (`"ui_kit": "@ui_kit"`). A `path` package named nowhere fails as soon as Bazel reads the lock, naming the lock and the package, with the lines to add.
 - A hosted, git or `sdk` package may be mapped as well, from any repository, to replace it for the whole graph with a fork or a patched copy. The hub's `@deps//:<package>` is then your target, a hosted package that depends on it gets it too, and the locked package is never fetched. The lock's version is not checked against your target. Naming a package the lock does not list is an error.
 - Depend on a mapped package as `@deps//:greeting`, or by its label.
 - If your target depends back on a hosted package that depends on it, the build fails with Bazel's cycle error: pub allows the cycle, and Bazel does not.
 - One lock serves one repository: the package's `BUILD.bazel` names one hub's labels (`@deps//:intl`), so two apps with two locks cannot share a package this way. Use one lock for the monorepo, resolved from a pub workspace or from one app.
 - The members of a pub workspace (`workspace:` in the root `pubspec.yaml`) are not in the lock. Depend on them by label.
 - A lock below the repository root is resolved with `bazel run @rules_flutter//flutter/pub -- get --directory=apps/greeter`.
+
+A `path` package with no Bazel build, such as the `<plugin>_android` package of a federated plugin, which is only Kotlin and a Gradle build, is named in `build_from_pubspec`. rules_flutter builds its directory exactly as it builds a package from pub.dev or git, and as `flutter build` builds every `path` package: its Dart library, assets, fonts and shaders, and its Android, iOS, macOS, Linux and Windows plugin code, with the plugin class, namespace, manifest, Maven dependencies and ProGuard files read from its pubspec and Gradle files. Depend on it as `@deps//:<package>`.
+
+```starlark
+flutter_pub.from_lock(
+    name = "deps",
+    lock = "//:pubspec.lock",
+    build_from_pubspec = ["keyboard_android"],
+    ignored = {"release_tool": "run with `dart run` outside Bazel"},
+)
+```
+
+- The directory is the lock's path, relative to the lock's directory, and may be outside the repository. Bazel reads `pubspec.yaml`, `lib/`, `hook/`, the license, the platform directories and the directories the pubspec lists assets, fonts and shaders from, and sees edits to them. Tool output (`build/`, `.dart_tool/`, `android/.gradle/`, `android/build/`) is left out and does not make Bazel fetch the package again.
+- A directory that holds a `BUILD`, `BUILD.bazel`, `MODULE.bazel`, `REPO.bazel` or `WORKSPACE` file is refused: it has a Bazel build, so map it with `resolve`. So is a package whose code is generated, or built by Bazel another way (the Rust behind a flutter_rust_bridge `rust_builder`): its pubspec does not say how to build it, so map it to the target that does.
+
+A `path` package that no Bazel build may contain, such as a tool run with `dart run` outside Bazel, is named in `ignored` with the reason. The lock loads, and a target that depends on `@deps//:<package>` fails at analysis with ``package `<package>` (in <lock>) is ignored: <reason>``.
 
 #### Plugins' Maven dependencies
 
@@ -395,7 +411,7 @@ bazel run @rules_flutter//flutter/pub -- get --directory tools/my_tool
 
 ### Several locks in one build
 
-Every package is one repository for the whole build, however many `flutter_pub.from_lock` tags list it: a hub (`@deps//:flutter`) is the set of aliases its own lock names. A build has one version of each package, the highest any lock records, and nothing is built below the version its lock records. By default a lock that is behind another on a package fails when the module is read, naming both locks and the fix, `bazel run @rules_flutter//flutter/pub -- upgrade --directory=<the lock's directory> <package>` from the workspace root. Only builds that use a hub fail: the toolchain comes from the other extension, so the fix runs. A lock whose constraints do not allow the higher version sets `on_version_conflict = "upgrade"` on its `flutter_pub.from_lock`, and its packages are built at it. The locks must otherwise agree: a package from different sources, registries or digests, or git commits, always fails. `resolve` and `ignore_hooks` apply to the whole build. rules_flutter's own tools are a lock of this kind (`on_version_conflict = "upgrade"`), so a release that moves them can put your lock behind: re-resolve it with the command above.
+Every package is one repository for the whole build, however many `flutter_pub.from_lock` tags list it: a hub (`@deps//:flutter`) is the set of aliases its own lock names. A build has one version of each package, the highest any lock records, and nothing is built below the version its lock records. By default a lock that is behind another on a package fails when the module is read, naming both locks and the fix, `bazel run @rules_flutter//flutter/pub -- upgrade --directory=<the lock's directory> <package>` from the workspace root. Only builds that use a hub fail: the toolchain comes from the other extension, so the fix runs. A lock whose constraints do not allow the higher version sets `on_version_conflict = "upgrade"` on its `flutter_pub.from_lock`, and its packages are built at it. The locks must otherwise agree: a package from different sources, registries or digests, or git commits, or `build_from_pubspec` directories, always fails. `resolve` and `ignore_hooks` apply to the whole build. rules_flutter's own tools are a lock of this kind (`on_version_conflict = "upgrade"`), so a release that moves them can put your lock behind: re-resolve it with the command above.
 
 ### Packages with build hooks
 
