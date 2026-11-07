@@ -33,6 +33,24 @@ const _remoteHotPatchBuildEvents = [
 ];
 
 void main() {
+  group('userBazelFlags', () {
+    test('passes each --config as --config=<name>, before the build args', () {
+      expect(userBazelFlags(configs: ['a', 'b'], buildArgs: ['--jobs=4']), [
+        '--config=a',
+        '--config=b',
+        '--jobs=4',
+      ]);
+    });
+
+    test('reaches the build argv, next to -c', () {
+      final flags = userBazelFlags(configs: ['a', 'b'], buildArgs: []);
+      expect(
+        bazelBuildArgs('//app', compilationMode: 'dbg', extraArgs: flags),
+        containsAllInOrder(['-c', 'dbg', '--config=a', '--config=b']),
+      );
+    });
+  });
+
   group('aspectOutputsFromBuildEvents', () {
     const aspect =
         '@rules_flutter//flutter:native_hot_patch.bzl%'

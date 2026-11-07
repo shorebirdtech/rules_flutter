@@ -263,6 +263,21 @@ List<String> dartDefineFlags(List<String> dartDefines) => [
     '--@rules_flutter//flutter:extra_dart_defines=$define',
 ];
 
+/// Maps `--config` values to the `--config=<name>` flags every bazel
+/// invocation of a run must carry. Bazel reads the named config out of the
+/// workspace's own `.bazelrc` files; this tool never parses them.
+List<String> bazelConfigFlags(List<String> configs) => [
+  for (final config in configs) '--config=$config',
+];
+
+/// Every bazel flag the user typed for the build: their `--config`s, then
+/// their `--build-arg`s. The configs come first so an explicit `--build-arg`
+/// overrides what a config sets, as it would on a bazel command line.
+List<String> userBazelFlags({
+  required List<String> configs,
+  required List<String> buildArgs,
+}) => [...bazelConfigFlags(configs), ...buildArgs];
+
 /// Requests the build outputs this tool reads off disk.
 ///
 /// Bazel materializes an output when it belongs to a target named on the

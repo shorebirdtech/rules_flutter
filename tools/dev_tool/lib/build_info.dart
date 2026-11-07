@@ -266,8 +266,8 @@ String resolveAssetsDir({
       '(${appliedArgs.join(' ')}).\n'
       'Reachable from $target: '
       '${candidates.where((f) => f.endsWith('flutter_assets')).join(', ')}\n'
-      'If the run passed extra --build-arg values, attach needs the same '
-      'ones — they change the configuration and cannot be recovered from the '
+      'If the run passed --config or --build-arg values, attach needs the '
+      'same ones — they change the configuration and cannot be recovered from the '
       'app.',
     );
   }

@@ -52,7 +52,21 @@ class RunCommand {
       help: 'Bazel target to build and run.',
       mandatory: true,
     )
-    ..addOption('config', abbr: 'c', help: 'Bazel config to use.')
+    ..addOption(
+      'compilation_mode',
+      abbr: 'c',
+      help:
+          "Bazel's compilation mode (`-c`): dbg, opt or fastbuild. "
+          '`--hot` builds dbg and `--profile` builds opt; naming another is '
+          'refused.',
+    )
+    ..addMultiOption(
+      'config',
+      help:
+          'Bazel config from the workspace .bazelrc, passed as '
+          '--config=<name> to every bazel command of the run, reloads '
+          'included. Repeat for several.',
+    )
     ..addMultiOption(
       'build-arg',
       // A bazel flag's value can hold a comma (`--copt=-Wl,-rpath`), and the

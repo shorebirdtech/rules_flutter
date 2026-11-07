@@ -84,7 +84,7 @@ class RunPlan {
   /// back off the running app instead of being told a second time.
   final List<String> extraArgs;
 
-  /// The user's raw `--build-arg` values.
+  /// The user's raw `--config` and `--build-arg` values, as bazel flags.
   ///
   /// Kept apart from [extraArgs] because the dev-loop builds need them without
   /// the device flags: a bare build of the flutter_application resolves in the
@@ -239,7 +239,7 @@ class RunPlan {
   /// I/O — `bazel info`, toolchain resolution, device preflight — which a test
   /// of a three-way conditional has no business standing up.
   static String? compilationModeFor(ArgResults results) {
-    final config = results['config'] as String?;
+    final config = results['compilation_mode'] as String?;
     final profileMode = results['profile'] as bool;
     final hotReloadEnabled = results['hot'] as bool;
 
@@ -259,7 +259,7 @@ class RunPlan {
     // Only an explicit `-c` can contradict anything. `wasParsed` is what
     // separates one from the default, and so is what makes refusing possible
     // at all rather than silently substituting.
-    if (results.wasParsed('config') && config != required) {
+    if (results.wasParsed('compilation_mode') && config != required) {
       throw DevToolException(
         '`-c $config` contradicts $asked: $why, which only `-c $required` '
         'produces.\n'
@@ -361,8 +361,12 @@ class RunPlan {
     // With the flags the run will build with, because the fetch analyses the
     // target: see [resolveToolchainPaths]. The profile flag is among them, so
     // the toolchain is resolved in the configuration the build will use.
+    final userBuildArgs = userBazelFlags(
+      configs: results['config'] as List<String>,
+      buildArgs: results['build-arg'] as List<String>,
+    );
     final extraArgs = [
-      ...(results['build-arg'] as List<String>),
+      ...userBuildArgs,
       ...defineFlags,
       ...devices.first.buildArgs,
       ...modeBuildFlags(profileMode: profileMode),
@@ -495,7 +499,7 @@ class RunPlan {
     return RunPlan._(
       target: target,
       extraArgs: extraArgs,
-      userBuildArgs: results['build-arg'] as List<String>,
+      userBuildArgs: userBuildArgs,
       compilationMode: compilationMode,
       devices: devices,
       workspace: workspace,

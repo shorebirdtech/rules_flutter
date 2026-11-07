@@ -56,6 +56,8 @@ void main() {
     bool withVmService = true,
     bool shuttingDown = false,
     bool extensionRegistered = true,
+    List<String> userBuildArgs = const [],
+    List<List<String>>? bazelCalls,
   }) async {
     final logger = Logger('test.native_pipeline_assembler');
     final host = SessionHost(
@@ -65,8 +67,14 @@ void main() {
       // a test has no runfiles to find: what [_noWorkspace] relies on is the
       // spawn itself refusing the directory.
       bazel: Bazel.uninterruptible(
-        spawn: (args, {required workingDirectory}) =>
-            Process.start('bazel', args, workingDirectory: workingDirectory),
+        spawn: (args, {required workingDirectory}) {
+          bazelCalls?.add(args);
+          return Process.start(
+            'bazel',
+            args,
+            workingDirectory: workingDirectory,
+          );
+        },
         because: 'this test starts it straight from PATH',
       ),
     );
@@ -108,6 +116,7 @@ void main() {
       workspace: _noWorkspace,
       target: '//:app',
       configDevice: _StubDevice(),
+      userBuildArgs: userBuildArgs,
       host: host,
       pipeline: pipeline,
       logger: logger,
@@ -117,6 +126,25 @@ void main() {
   }
 
   group('NativePipelineAssembler', () {
+    // `--config` reaches the pipeline as flags in `userBuildArgs`, so the dev
+    // build's cquery sees the configuration the initial build used.
+    test('asks bazel about the dev build with the user\'s configs', () async {
+      final calls = <List<String>>[];
+      await assembleAgainst(
+        buildInfo: buildInfoJson(),
+        userBuildArgs: userBazelFlags(
+          configs: ['a', 'b'],
+          buildArgs: ['--jobs=4'],
+        ),
+        bazelCalls: calls,
+      );
+      expect(calls, isNotEmpty);
+      expect(
+        calls.first,
+        containsAllInOrder(['cquery', '--config=a', '--config=b', '--jobs=4']),
+      );
+    });
+
     test('reads the app’s build record before it builds anything', () async {
       // A release app cannot be reloaded, and the app is the only thing that
       // knows it is one. Reported here means reported before the dev build —

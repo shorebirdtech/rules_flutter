@@ -236,6 +236,41 @@ void main() {
     });
   });
 
+  // `-c` stays the compilation mode under its new long name, and `--config` is
+  // a bazel config that rides with every other bazel flag of the run.
+  group('--compilation_mode and --config', () {
+    test('--compilation_mode is what -c is', () {
+      expect(
+        RunPlan.compilationModeFor(
+          parse(['--no-hot', '--compilation_mode', 'opt']),
+        ),
+        'opt',
+      );
+      expect(
+        RunPlan.compilationModeFor(parse(['--no-hot', '-c', 'opt'])),
+        'opt',
+      );
+    });
+
+    test('--compilation_mode contradicting hot reload is refused', () {
+      expect(
+        () => RunPlan.compilationModeFor(parse(['--compilation_mode', 'opt'])),
+        throwsA(isA<DevToolException>()),
+      );
+    });
+
+    test('--config is not a compilation mode', () {
+      final results = parse(['--no-hot', '--config', 'ci']);
+      expect(RunPlan.compilationModeFor(results), isNull);
+      expect(results['config'], ['ci']);
+    });
+
+    test('--config repeats and defaults empty', () {
+      expect(parse([])['config'], isEmpty);
+      expect(parse(['--config', 'a', '--config=b'])['config'], ['a', 'b']);
+    });
+  });
+
   group('watchEnabledFor', () {
     test('terminal mode watches, machine mode does not', () {
       expect(RunPlan.watchEnabledFor(parse([]), isMachine: false), isTrue);

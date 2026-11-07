@@ -65,6 +65,13 @@ class AttachCommand {
     // the pipeline builds its dev config with those. A flag here could only
     // repeat them, or contradict the binary that is running.
     ..addMultiOption(
+      'config',
+      help:
+          'Bazel config from the workspace .bazelrc, matching the ones the '
+          'run used; passed as --config=<name> to every bazel command. Like '
+          '--build-arg, it is not recorded in the app.',
+    )
+    ..addMultiOption(
       'build-arg',
       // A bazel flag's value can hold a comma (`--copt=-Wl,-rpath`), and the
       // option repeats, so a comma never separates two of them.
@@ -104,7 +111,10 @@ class AttachCommand {
   Future<void> execute() async {
     final debugUrls = _results['debug-url'] as List<String>;
     final target = _results['target'] as String;
-    final userBuildArgs = _results['build-arg'] as List<String>;
+    final userBuildArgs = userBazelFlags(
+      configs: _results['config'] as List<String>,
+      buildArgs: _results['build-arg'] as List<String>,
+    );
     final isMachine = _results['machine'] as bool;
     final devToolsEnabled = _results['devtools'] as bool;
     final httpChannelEnabled = _results['http-control-channel'] as bool;

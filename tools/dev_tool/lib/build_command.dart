@@ -16,9 +16,15 @@ class BuildCommand {
       mandatory: true,
     )
     ..addOption(
-      'config',
+      'compilation_mode',
       abbr: 'c',
-      help: 'Bazel config to use (e.g. release).',
+      help: "Bazel's compilation mode (`-c`): dbg, opt or fastbuild.",
+    )
+    ..addMultiOption(
+      'config',
+      help:
+          'Bazel config from the workspace .bazelrc, passed as '
+          '--config=<name> to every bazel command. Repeat for several.',
     )
     ..addMultiOption(
       'build-arg',
@@ -85,9 +91,12 @@ class BuildCommand {
 
   Future<void> _build(Bazel bazel) async {
     final target = _results['target'] as String;
-    final config = _results['config'] as String?;
+    final compilationMode = _results['compilation_mode'] as String?;
     final extraArgs = [
-      ...(_results['build-arg'] as List<String>),
+      ...userBazelFlags(
+        configs: _results['config'] as List<String>,
+        buildArgs: _results['build-arg'] as List<String>,
+      ),
       ...dartDefineFlags(_results['dart-define'] as List<String>),
     ];
     final workspace = await bazel.findWorkspaceRoot();
@@ -97,7 +106,7 @@ class BuildCommand {
     final result = await bazel.build(
       target,
       workspace: workspace,
-      compilationMode: config,
+      compilationMode: compilationMode,
       extraArgs: extraArgs,
     );
 

@@ -2504,7 +2504,8 @@ bazel run @rules_flutter//tools/dev_tool:flutter_bazel -- run -t //:my_app_macos
 |---|---|
 | `-t`, `--target` | The Bazel target to build and run. Required. |
 | `-d`, `--device` | Where to run it. Repeat for several devices at once. See below. |
-| `-c`, `--config` | A Bazel config to build with. |
+| `-c`, `--compilation_mode` | Bazel's compilation mode: `dbg`, `opt` or `fastbuild`. A hot reload run builds `dbg` and a profile run `opt`; naming another with those is refused. |
+| `--config` | A config from your workspace's `.bazelrc`, passed to Bazel as `--config=<name>` on every Bazel command of the run, reloads included. Repeatable. |
 | `--build-arg` | An extra argument for `bazel build`. Repeatable. |
 | `--dart-define KEY=VALUE` | A Dart define, forwarded to the build and replayed on reload and restart. Repeatable. |
 | `--no-hot` | Run without hot reload. |
