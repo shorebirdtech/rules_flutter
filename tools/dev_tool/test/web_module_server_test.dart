@@ -523,7 +523,7 @@ void main() {
 
     test('names the module whose metadata is not JSON', () {
       // Swallowed, this costs that module its library list and
-      // `$dartReloadModifiedModules` skips it — the edit reloads, the screen
+      // the DWDS client skips it — the edit reloads, the screen
       // does not change. DWDS then chokes on the same bytes with no module
       // named.
       final dir = tempDir();
@@ -706,7 +706,7 @@ void main() {
     // the same emptiness is quieter and no less wrong: a recompile only happens
     // once something is known to have changed, so nothing coming back means
     // the invalidated libraries never reached the compiler —
-    // `reloaded_sources.json` lists nothing, `$dartReloadModifiedModules`
+    // `reloaded_sources.json` lists nothing, the DWDS client
     // reloads nothing, and the reload reports success over an unchanged page.
     test('ends a reload whose recompile produced no modules', () {
       final dir = tempDir();
@@ -772,7 +772,6 @@ void main() {
           'main_module.bootstrap.js',
           'ddc_module_loader.js',
           'stack_trace_mapper.js',
-          'reloaded_sources.json',
         ]),
       );
 

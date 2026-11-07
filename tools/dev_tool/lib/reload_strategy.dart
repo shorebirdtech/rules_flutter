@@ -355,13 +355,16 @@ enum _DeviceResult { applied, refused, timedOut }
 ///
 /// Flow for hot reload:
 ///   1. Update module server with new DDC output
-///   2. DWDS VM service `reloadSources` → `$dartReloadModifiedModules` in browser
+///   2. DWDS VM service `reloadSources` → `$dartHotReloadStartDwds` in the
+///      browser, which loads the modules `reloaded_sources.json` names
 ///   3. `ext.flutter.reassemble` → widget rebuild with preserved state
 ///
 /// Flow for hot restart:
 ///   1. Update module server with new DDC output
-///   2. DWDS's `hotRestart` service → `$dartHotRestartDwds` in the browser,
-///      which swaps the new modules in and starts a fresh isolate
+///   2. DWDS's `hotRestart` service → `$dartHotRestartBeginDwds` in the
+///      browser, which loads the modules through the bootstrap's
+///      `$dartReloadModifiedModules`, then `$dartHotRestartEndDwds`, which
+///      starts a fresh isolate
 ///
 /// The page survives both. That is what separates this from
 /// [WasmReloadStrategy], which navigates — upstream reserves `Page.reload` for
@@ -534,14 +537,14 @@ class DwdsReloadStrategy implements ReloadStrategy {
         return const StrategyUnsupported('no isolate found in the browser');
       }
 
-      // Trigger DWDS hot reload: reloadSources → $dartReloadModifiedModules.
+      // Trigger DWDS hot reload: reloadSources → $dartHotReloadStartDwds.
       final report = await vmService!.reloadSources(isolateId);
       if (report.success != true) {
         return const StrategyRejected('the browser refused the new sources');
       }
 
       // Trigger Flutter widget rebuild to pick up the new code. On the modern
-      // DDC hot-reload path the `$dartReloadModifiedModules` invoked by
+      // DDC hot-reload path the `$dartHotReloadStartDwds` invoked by
       // reloadSources above already rebuilds the tree, so this is the second
       // of two rather than the only one.
       try {
@@ -637,7 +640,15 @@ class DwdsReloadStrategy implements ReloadStrategy {
     // that gap is tracked separately, and closing it needs the connection's
     // lifetime, not another null check.
     final service = _vmService!;
+    final client = _clientFor(sessions);
+    if (client == null) {
+      return const StrategyRejected(
+        'no session holds the connection to the page, so nothing could see '
+        'the restarted app draw',
+      );
+    }
 
+    final spent = Stopwatch()..start();
     try {
       await service.callMethod(_hotRestartMethod).timeout(restartTimeout);
     } on TimeoutException {
@@ -659,6 +670,24 @@ class DwdsReloadStrategy implements ReloadStrategy {
     // other place this is cleared. Left set, it names the isolate DWDS just
     // replaced and the next hot reload calls reloadSources on a dead one.
     _isolateId = null;
+
+    // DWDS answers `hotRestart` once the page has started the new `main`, not
+    // once it has reached `runApp`: from 27.1.2 it starts the isolate before
+    // `$dartHotRestartEndDwds` runs `main`, and the generated entrypoint
+    // awaits `bootstrapEngine` before calling the app's own. A command sent
+    // on the answer would find the agent extensions registered and no
+    // binding behind them. Native answers a restart after the new isolate's
+    // first frame (`VmServiceClient.hotRestart`), and so does this.
+    final left = restartTimeout - spent.elapsed;
+    final drew = await client.waitForFirstFrame(
+      timeout: left.isNegative ? Duration.zero : left,
+    );
+    if (!drew) {
+      return StrategyRejected(
+        'the page restarted, but the restarted app drew no frame within '
+        '${restartTimeout.inSeconds}s',
+      );
+    }
     return const StrategyApplied(1);
   }
 

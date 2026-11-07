@@ -215,49 +215,46 @@ $_simpleLoaderScript
       });
     }
 
-    let currentUri = _currentScript.src;
-    let reloadedSources = _currentDirectory + 'reloaded_sources.json';
-
+    // The first phase of a hot restart: `dartDevEmbedder.hotRestartBegin`
+    // calls this with the module descriptors the DWDS client fetched from the
+    // server, and awaits the descriptors whose scripts it requested. The
+    // second phase, `hotRestartEnd`, runs `main`.
     if (!window.\$dartReloadModifiedModules) {
-      window.\$dartReloadModifiedModules = (function(appName, callback) {
-        const xhttp = new XMLHttpRequest();
-        xhttp.withCredentials = true;
-        xhttp.onreadystatechange = function() {
-          if (this.readyState == 4 && this.status == 200 || this.status == 304) {
-            const scripts = JSON.parse(this.responseText);
-            let numToLoad = 0;
-            let numLoaded = 0;
-            for (let i = 0; i < scripts.length; i++) {
-              const script = scripts[i];
-              const module = script.module;
-              if (module == null) continue;
-              const src = script.src;
-              const oldSrc = window.\$dartLoader.moduleIdToUrl.get(module);
-
-              window.\$dartLoader.urlToModuleId.delete(oldSrc);
-              window.\$dartLoader.moduleIdToUrl.set(module, src);
-              window.\$dartLoader.urlToModuleId.set(src, module);
-
-              numToLoad++;
-
-              let el = document.getElementById(module);
-              if (el) el.remove();
-              el = window.\$dartCreateScript();
-              el.src = policy.createScriptURL(src);
-              el.async = false;
-              el.defer = true;
-              el.id = module;
-              el.onload = function() {
-                numLoaded++;
-                if (numToLoad == numLoaded) callback();
-              };
-              document.head.appendChild(el);
-            }
-            if (numToLoad == 0) callback();
+      window.\$dartReloadModifiedModules = (function(filesToReload, appName) {
+        return new Promise(function(resolve) {
+          function callback() {
+            resolve(filesToReload);
           }
-        };
-        xhttp.open("GET", reloadedSources, true);
-        xhttp.send();
+          let numToLoad = 0;
+          let numLoaded = 0;
+          for (let i = 0; i < filesToReload.length; i++) {
+            const file = filesToReload[i];
+            const module = file.module;
+            if (module == null) continue;
+            const src = file.src;
+            const oldSrc = window.\$dartLoader.moduleIdToUrl.get(module);
+
+            window.\$dartLoader.urlToModuleId.delete(oldSrc);
+            window.\$dartLoader.moduleIdToUrl.set(module, src);
+            window.\$dartLoader.urlToModuleId.set(src, module);
+
+            numToLoad++;
+
+            let el = document.getElementById(module);
+            if (el) el.remove();
+            el = window.\$dartCreateScript();
+            el.src = policy.createScriptURL(src);
+            el.async = false;
+            el.defer = true;
+            el.id = module;
+            el.onload = function() {
+              numLoaded++;
+              if (numToLoad == numLoaded) callback();
+            };
+            document.head.appendChild(el);
+          }
+          if (numToLoad == 0) callback();
+        });
       });
     }
   };
