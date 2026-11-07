@@ -6,7 +6,7 @@ channel the other Flutter SDK packages are built through.
 
 The fidelity claim under test: pub writes a `languageVersion` for every
 Flutter SDK package, derived from that package's own `environment.sdk`.
-Measured against a real `flutter pub get` (Flutter 3.41.6, whose
+Measured against a real `flutter pub get` (Flutter 3.47.6, whose
 `packages/flutter/pubspec.yaml` declares `^3.9.0-0`): pub wrote
 `"languageVersion": "3.9"` for `flutter`, `flutter_test`, `sky_engine`,
 `flutter_localizations` and `flutter_web_plugins` alike. A spoke that

@@ -79,7 +79,7 @@ fake_checkout(name = "fake_checkout")
 
 fake_checkout(
     name = "fake_checkout_mismatched",
-    gen_snapshot_flutter_version = "3.41.7",
+    gen_snapshot_flutter_version = "3.47.5",
 )
 
 checkout_framework = use_repo_rule("@rules_flutter//flutter:local_sdk.bzl", "flutter_checkout_framework")

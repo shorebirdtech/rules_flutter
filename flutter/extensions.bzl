@@ -26,7 +26,7 @@ load("//flutter/private:linux_runtime_pins.bzl", "LINUX_RUNTIME")
 load("//flutter/private:pub_extension.bzl", "DEFAULT_SDK_NAME", "framework_json", "pub_from_lock_tag", "pub_plugin_overlays_tag")
 load("//flutter/private:toolchain_version.bzl", "select_flutter_version")
 load("//flutter/private:toolchains_repo.bzl", "flutter_toolchains_repo", "sdk_repo_name")
-load("//flutter/private:versions.bzl", "CHROME_FOR_TESTING", "FLUTTER_VERSIONS", "flutter_source_sha256")
+load("//flutter/private:versions.bzl", "CHROME_FOR_TESTING", "FLUTTER_VERSIONS", "flutter_source_sha256", "require_supported_flutter_version")
 load(":repositories.bzl", "flutter_register_toolchains")
 
 flutter_toolchain = tag_class(attrs = {
@@ -107,6 +107,8 @@ def _declared_sdks(module_ctx):
                 "supplies the half of the SDK that is not given."
             ).format(name))
         selected = select_flutter_version(root_versions.get(name), versions) if versions else None
+        if selected:
+            require_supported_flutter_version(selected)
         fonts_sha256 = [t.material_fonts_sha256 for t in name_tags if t.material_fonts_sha256]
         sdks[name] = struct(
             name = name,

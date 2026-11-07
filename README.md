@@ -32,7 +32,7 @@ If `flutter build` works for you, here is what Bazel adds:
 
 | Platform | What you need |
 |---|---|
-| All | Bazel 9 or newer. The rules download Flutter 3.47.9 themselves. |
+| All | Bazel 9 or newer. The rules download Flutter 3.47.9 themselves; the supported releases are 3.47.x, and any other `flutter_version` fails naming the supported ones. |
 | macOS | Xcode, for `rules_apple` and `rules_swift`. |
 | iOS | A Mac with Apple silicon, and Xcode. rules_flutter builds iOS for arm64 only, so an Intel Mac's x86_64 simulator is not supported. The simulator needs no signing identity. A physical device does; see [Running on an iOS device](#running-on-an-ios-device). `flutter_bazel` screenshots, of a simulator or a device, need Xcode 27 or later, whose `devicectl` lists and captures screens and knows simulators (measured with Xcode 27.2, `devicectl` 651.32; earlier Xcodes were not tried). |
 | Android | The Android SDK and NDK, with `ANDROID_HOME` and `ANDROID_NDK_HOME` set. See [Android](#android). |
@@ -374,7 +374,7 @@ bazel run @rules_flutter//flutter/pub -- add qr
 
 Arguments pass through to `dart pub` unchanged, and the command runs at your workspace root, so the lock lands where `flutter_pub.from_lock` reads it.
 
-The version of Flutter that resolves the lock matters, and a mismatch is easy to miss. Pub treats the running Dart and Flutter versions as constraints, so an older installation quietly picks older packages, and the lock it writes is still valid. For example, resolving `e2e/plugin_example` with Flutter 3.41.6 pins `meta 1.17.0`, while the pinned 3.44.1 toolchain pins `meta 1.18.0`. Nothing downstream can tell the difference.
+The version of Flutter that resolves the lock matters, and a mismatch is easy to miss. Pub treats the running Dart and Flutter versions as constraints, so an older installation quietly picks older packages, and the lock it writes is still valid. Nothing downstream can tell the difference.
 
 The fetched toolchain contains engine artifacts and a Dart SDK but no `bin/flutter`, so this target runs `dart pub` with `FLUTTER_ROOT` pointed at a tree assembled from the same Flutter release. That tree is fetched the first time you run the target. Because it is `dart pub` rather than `flutter pub`, it writes `pubspec.lock` and `.dart_tool/package_config.json` and does not write `.flutter-plugins-dependencies`. rules_flutter generates plugin registrants from the build graph, so nothing needs that file.
 

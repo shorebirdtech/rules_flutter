@@ -14,7 +14,7 @@ def parse_flutter_version(v):
         if not x.isdigit():
             fail((
                 "Invalid Flutter version '{}': expected numeric components " +
-                "separated by dots (e.g. '3.41.2'), but got non-numeric component '{}'."
+                "separated by dots (e.g. '3.47.2'), but got non-numeric component '{}'."
             ).format(v, x))
         result.append(int(x))
     return result

@@ -8,12 +8,12 @@ def _root_wins_test_impl(ctx):
 
     # A consumer pinning an older release than rules_flutter's own tag gets it.
     asserts.equals(env, "3.47.8", select_flutter_version("3.47.8", ["3.47.8", "3.47.9"]))
-    asserts.equals(env, "3.47.9", select_flutter_version("3.47.9", ["3.41.2", "3.47.9"]))
+    asserts.equals(env, "3.47.9", select_flutter_version("3.47.9", ["3.47.2", "3.47.9"]))
     return unittest.end(env)
 
 def _without_root_the_highest_wins_test_impl(ctx):
     env = unittest.begin(ctx)
-    asserts.equals(env, "3.47.9", select_flutter_version(None, ["3.41.2", "3.47.9", "3.47.8"]))
+    asserts.equals(env, "3.47.9", select_flutter_version(None, ["3.47.2", "3.47.9", "3.47.8"]))
     asserts.equals(env, "3.47.10", select_flutter_version(None, ["3.47.9", "3.47.10"]))
     return unittest.end(env)
 

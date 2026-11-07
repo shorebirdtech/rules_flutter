@@ -79,7 +79,7 @@ def version_below_lower_bound(version, constraint):
     with no `>=` term, yields False rather than a guess.
 
     Args:
-        version: A version string such as `"3.44.1"`.
+        version: A version string such as `"3.47.6"`.
         constraint: A pub constraint string such as `">=3.18.0 <4.0.0"`.
 
     Returns:

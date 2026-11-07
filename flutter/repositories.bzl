@@ -128,7 +128,7 @@ flutter_engine_artifacts = repository_rule(
     doc = "Downloads the Flutter host tools (Dart SDK, flutter_tester, impellerc, font-subset) for a given host platform.",
     attrs = {
         "flutter_version": attr.string(
-            doc = "The Flutter SDK version (e.g. `3.41.2`). Must be listed in versions.bzl.",
+            doc = "The Flutter SDK version (e.g. `3.47.2`). Must be listed in versions.bzl.",
             mandatory = True,
             values = FLUTTER_VERSIONS.keys(),
         ),

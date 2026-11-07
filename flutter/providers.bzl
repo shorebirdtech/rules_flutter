@@ -3,7 +3,7 @@
 FlutterSdkInfo = provider(
     doc = "Information about the Flutter engine provided by the toolchain.",
     fields = {
-        "version": "str: The Flutter SDK version string (e.g. `3.41.2`).",
+        "version": "str: The Flutter SDK version string, as `flutter --version` reports it.",
         "engine_revision": "str: The engine commit hash.",
         "dart": "File: The `dart` executable from the Flutter-bundled Dart SDK.",
         "dartaotruntime": "File: The `dartaotruntime` executable for running AOT snapshots.",
@@ -76,7 +76,7 @@ FlutterExecToolsInfo = provider(
           "`@rules_flutter//flutter:exec_tools_toolchain_type` toolchain, which " +
           "constrains only the execution platform.",
     fields = {
-        "version": "str: The Flutter SDK version string (e.g. `3.41.2`).",
+        "version": "str: The Flutter SDK version string, as `flutter --version` reports it.",
         "engine_revision": "str: The engine commit hash.",
         "host_os": "str: The OS these tools run on (`macos`, `linux`, `windows`).",
         "host_arch": "str: The CPU these tools run on (`arm64`, `x64`).",
