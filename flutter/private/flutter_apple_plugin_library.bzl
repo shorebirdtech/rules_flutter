@@ -86,6 +86,7 @@ def flutter_apple_plugin_library(
         sdk_frameworks = [],
         sdk_dylibs = [],
         clang_module = False,
+        swift_language_mode = None,
         visibility = None,
         tags = None,
         **kwargs):
@@ -156,6 +157,9 @@ def flutter_apple_plugin_library(
             module named `module_name` itself, as a C-family target of a
             Swift package is, rather than a Swift module that re-exports one
             (the default, which a plugin's registrant imports).
+        swift_language_mode: `"6"` to compile the Swift sources in Swift 6
+            mode, as SwiftPM compiles a target of a `swift-tools-version:
+            6.0` package; Swift 5 (the default) otherwise.
         visibility: Target visibility.
         tags: Bazel tags. Defaults to `["manual"]` so the spoke target
             is only built when something depends on it.
@@ -310,8 +314,15 @@ def flutter_apple_plugin_library(
         )
         swift_files = [":" + placeholder_target]
 
+    if swift_language_mode not in (None, "5", "6"):
+        fail("flutter_apple_plugin_library: swift_language_mode must be \"5\" or \"6\", got %r" % swift_language_mode)
+    features = list(kwargs.pop("features", []))
+    if swift_language_mode == "6":
+        features.append("swift.enable_v6")
+
     swift_library(
         name = name,
+        features = features,
         srcs = swift_files,
         module_name = module_name,
         copts = copts + swift_copts + extra_copts,

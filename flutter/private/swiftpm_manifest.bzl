@@ -500,6 +500,27 @@ def _remote_products(target, packages, platform, problems):
             problems.append("its target `{}` depends on `{}` of the registry package `{}`, and rules_flutter builds only packages from source repositories (`.package(url:)`)".format(target.get("name"), product, info.identity))
     return found
 
+_SWIFT_LANGUAGE_MODES = ("5", "6")
+
+def _swift_language_mode(dump, target_mode):
+    """The Swift language mode SwiftPM compiles a target's Swift in.
+
+    The target's `swiftLanguageMode` setting, else the newest of the package's
+    `swiftLanguageModes` (`swiftLanguageVersions`), else the mode of its
+    tools version: 6 from `swift-tools-version: 6.0`, 5 before.
+    """
+    if target_mode:
+        return target_mode
+    declared = dump.get("swiftLanguageVersions") or []
+    if declared:
+        return sorted(declared, key = _version_key)[-1]
+    tools = (dump.get("toolsVersion") or {}).get("_version", "5.0.0")
+    return "6" if _version_key(tools)[0] >= 6 else "5"
+
+def _version_key(version):
+    """`"5.10.1"` as `[5, 10, 1]`, for comparing."""
+    return [int(p) if p.isdigit() else 0 for p in version.split(".")]
+
 def _target_build(dump, target, deps, platform, manifest_dir, problems):
     """How one regular target of the package is built; None after a problem."""
     name = target.get("name")
@@ -521,6 +542,7 @@ def _target_build(dump, target, deps, platform, manifest_dir, problems):
     public_headers = within(target.get("publicHeadersPath") or "include", "the public header path")
 
     settings = {attr: {c: [] for c in CONFIGURATIONS} for attr in _SETTING_ATTRS}
+    target_mode = None
 
     # SwiftPM searches a target's public header directory for its own sources too.
     includes = [public_headers]
@@ -558,6 +580,8 @@ def _target_build(dump, target, deps, platform, manifest_dir, problems):
             settings["sdk_dylibs"][configuration].append(_setting_value(kind, "linkedLibrary"))
         elif "enableUpcomingFeature" in kind:
             settings["swift_copts"][configuration].extend(["-enable-upcoming-feature", _setting_value(kind, "enableUpcomingFeature")])
+        elif "swiftLanguageMode" in kind or "swiftLanguageVersion" in kind:
+            target_mode = _setting_value(kind, "swiftLanguageMode") or _setting_value(kind, "swiftLanguageVersion")
         elif "enableExperimentalFeature" in kind:
             settings["swift_copts"][configuration].extend(["-enable-experimental-feature", _setting_value(kind, "enableExperimentalFeature")])
         else:
@@ -570,6 +594,9 @@ def _target_build(dump, target, deps, platform, manifest_dir, problems):
         settings["cxxopts"][""].append("-std=" + dump["cxxLanguageStandard"])
 
     remote_products = _remote_products(target, _package_dependencies(dump), platform, problems)
+    swift_language_mode = _swift_language_mode(dump, target_mode)
+    if swift_language_mode not in _SWIFT_LANGUAGE_MODES:
+        problems.append("its target `{}` is Swift {}, and rules_flutter compiles Swift 5 and 6".format(name, swift_language_mode))
 
     if len(problems) > count:
         return None
@@ -577,6 +604,7 @@ def _target_build(dump, target, deps, platform, manifest_dir, problems):
         name = name,
         deps = deps,
         remote_products = remote_products,
+        swift_language_mode = swift_language_mode,
         dir = target_dir,
         sources = sources,
         exclude = exclude,
@@ -611,6 +639,7 @@ def swift_package_targets(dump, package_name, platform, manifest_dir):
         that is the plugin's module; and `targets`, the targets to build,
         each after those it depends on. A target is a struct: `name`;
         `deps`, the names of the package's targets it depends on;
+        `swift_language_mode`, `"5"` or `"6"`;
         `remote_products`, the `(identity, product)` of each product of a
         remote package (`.package(url:)`) it depends on; `dir`, its
         source directory; `sources`, the files and directories its sources

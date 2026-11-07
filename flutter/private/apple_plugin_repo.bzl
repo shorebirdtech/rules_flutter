@@ -163,6 +163,7 @@ flutter_apple_plugin_library(
     deps = {deps},
     module_name = "{module}",
     clang_module = {clang_module},
+    swift_language_mode = {swift_language_mode},
     platform = "{platform}",
     visibility = ["//visibility:public"],
 )
@@ -170,6 +171,7 @@ flutter_apple_plugin_library(
         name = _target_label(package, platform, target.name, main),
         module = package if target.name == main else target.name,
         clang_module = target.name != main,
+        swift_language_mode = repr(target.swift_language_mode),
         deps = repr([":" + _target_label(package, platform, d, main) for d in target.deps] + products),
         platform = platform,
         srcs = repr(srcs),

@@ -30,6 +30,27 @@ def _define_reaches_the_compile_impl(ctx):
 
 _define_reaches_the_compile_test = analysistest.make(_define_reaches_the_compile_impl)
 
+def _swift_version(env):
+    compiles = [a for a in analysistest.target_actions(env) if a.mnemonic == "SwiftCompile"]
+    asserts.equals(env, 1, len(compiles), [a.mnemonic for a in analysistest.target_actions(env)])
+    argv = compiles[0].argv
+    versions = [argv[i + 1] for i in range(len(argv) - 1) if argv[i] == "-swift-version"]
+    return versions
+
+def _swift_6_impl(ctx):
+    env = analysistest.begin(ctx)
+    asserts.equals(env, ["6"], _swift_version(env))
+    return analysistest.end(env)
+
+_swift_6_test = analysistest.make(_swift_6_impl)
+
+def _swift_5_impl(ctx):
+    env = analysistest.begin(ctx)
+    asserts.equals(env, ["5"], _swift_version(env))
+    return analysistest.end(env)
+
+_swift_5_test = analysistest.make(_swift_5_impl)
+
 def apple_plugin_settings_test_suite(name):
     """The tests, and the fixture targets they analyse.
 
@@ -51,9 +72,32 @@ def apple_plugin_settings_test_suite(name):
         target_compatible_with = macos,
     )
 
+    # A Swift package target in Swift 6 mode (`swift-tools-version: 6.0`) is
+    # compiled so; the default is Swift 5.
+    for mode in ("5", "6"):
+        flutter_apple_plugin_library(
+            name = "{}_swift_{}_apple_macos".format(name, mode),
+            srcs = ["apple_plugin_fixture/Sources/fixture_swift/FixtureSwift.swift"],
+            module_name = "fixture_swift_" + mode,
+            platform = "macos",
+            swift_language_mode = mode if mode == "6" else None,
+        )
+    _swift_5_test(
+        name = name + "_swift_5",
+        target_under_test = ":{}_swift_5_apple_macos".format(name),
+        target_compatible_with = macos,
+    )
+    _swift_6_test(
+        name = name + "_swift_6",
+        target_under_test = ":{}_swift_6_apple_macos".format(name),
+        target_compatible_with = macos,
+    )
+
     native.test_suite(
         name = name,
         tests = [
             name + "_define_reaches_the_compile",
+            name + "_swift_5",
+            name + "_swift_6",
         ],
     )

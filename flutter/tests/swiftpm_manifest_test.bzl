@@ -431,6 +431,33 @@ def _remote_products_test_impl(ctx):
 
 remote_products_test = unittest.make(_remote_products_test_impl)
 
+def _swift_language_mode_test_impl(ctx):
+    env = unittest.begin(ctx)
+
+    def mode(target_settings = [], **kwargs):
+        built = swift_package_targets(_dump([_target(settings = target_settings)], **kwargs), "foo", "ios", "ios/foo")
+        asserts.equals(env, [], built.problems)
+        return built.targets[0].swift_language_mode
+
+    # The tools version's mode, the package's newest declared mode, and the
+    # target's own, in that order of precedence.
+    asserts.equals(env, "5", mode(toolsVersion = {"_version": "5.9.0"}))
+    asserts.equals(env, "6", mode(toolsVersion = {"_version": "6.0.0"}))
+    asserts.equals(env, "5", mode(toolsVersion = {"_version": "6.1.0"}, swiftLanguageVersions = ["5"]))
+    asserts.equals(env, "6", mode(toolsVersion = {"_version": "5.9.0"}, swiftLanguageVersions = ["5", "6"]))
+    asserts.equals(env, "5", mode(
+        [{"kind": {"swiftLanguageMode": {"_0": "5"}}, "tool": "swift"}],
+        toolsVersion = {"_version": "6.0.0"},
+    ))
+
+    # Swift 4.2 is not one rules_swift compiles.
+    asserts.equals(env, [
+        "its target `foo` is Swift 4.2, and rules_flutter compiles Swift 5 and 6",
+    ], swift_package_targets(_dump([_target()], swiftLanguageVersions = ["4.2"]), "foo", "ios", "ios/foo").problems)
+    return unittest.end(env)
+
+swift_language_mode_test = unittest.make(_swift_language_mode_test_impl)
+
 def _swift_package_target_problems_test_impl(ctx):
     env = unittest.begin(ctx)
 
@@ -492,5 +519,6 @@ def swiftpm_manifest_test_suite(name):
         swift_package_target_test,
         swift_package_targets_test,
         remote_products_test,
+        swift_language_mode_test,
         swift_package_target_problems_test,
     )
