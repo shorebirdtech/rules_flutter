@@ -41,6 +41,14 @@ import 'package:test/test.dart';
 
 const _sdkFlag = '--@rules_flutter//flutter:sdk=';
 
+/// Why a case cannot run here, for the ones that build Apple targets.
+final String? _appleOnly = Platform.isMacOS ? null : 'builds Apple targets';
+
+/// The stand-in checkout's host build: on a Mac `host_<mode>_arm64`, on an
+/// x86_64 Linux machine `host_<mode>`, which also holds the Linux engine.
+String _host(String mode) =>
+    Platform.isLinux ? 'host_$mode' : 'host_${mode}_arm64';
+
 /// The stock Dart's snapshot hash, which the stand-in's engine and
 /// gen_snapshot carry.
 const _snapshotHash = '0451907c2eaa8467e848c0067bfe8ed4';
@@ -161,107 +169,157 @@ void main() {
       final record = (await _record('local', mode[1] as List<String>))!;
       _expectRecordOfTheCheckout(record);
       expect(_outDirs(record), contains('host_${mode[0]}_arm64'));
-    });
+    }, skip: _appleOnly);
   }
 
-  test('the iOS simulator app records the simulator out dir', () async {
-    final record = (await _record(
-      'local',
-      const ['-c', 'dbg'],
-      target: '//:ios_simulator',
-    ))!;
-    _expectRecordOfTheCheckout(record);
-    expect(
-      _outDirs(record),
-      containsAll(['ios_debug_sim_arm64', 'host_debug_arm64']),
-    );
-  });
+  test(
+    'the iOS simulator app records the simulator out dir',
+    skip: _appleOnly,
+    () async {
+      final record = (await _record(
+        'local',
+        const ['-c', 'dbg'],
+        target: '//:ios_simulator',
+      ))!;
+      _expectRecordOfTheCheckout(record);
+      expect(
+        _outDirs(record),
+        containsAll(['ios_debug_sim_arm64', 'host_debug_arm64']),
+      );
+    },
+  );
 
-  test('the iOS device framework records the release out dir', () async {
-    final record = (await _record(
-      'local',
-      const [_iosDevice],
-      target: '//:ios_device_framework',
-    ))!;
-    _expectRecordOfTheCheckout(record);
-    expect(
-      _outDirs(record),
-      containsAll(['ios_release', 'host_release_arm64']),
-    );
-  });
+  test(
+    'the iOS device framework records the release out dir',
+    skip: _appleOnly,
+    () async {
+      final record = (await _record(
+        'local',
+        const [_iosDevice],
+        target: '//:ios_device_framework',
+      ))!;
+      _expectRecordOfTheCheckout(record);
+      expect(
+        _outDirs(record),
+        containsAll(['ios_release', 'host_release_arm64']),
+      );
+    },
+  );
 
   for (final abi in [
     ['arm64-v8a', 'arm64'],
     ['x86_64', 'x64'],
     ['armeabi-v7a', ''],
   ]) {
-    test('the ${abi[0]} APK records the ${abi[1]} out dir', () async {
+    test(
+      'the ${abi[0]} APK records the ${abi[1]} out dir',
+      skip: _appleOnly,
+      () async {
+        final record = (await _record(
+          'local',
+          [_abiFlag(abi[0])],
+          target: '//:android_app',
+        ))!;
+        _expectRecordOfTheCheckout(record);
+        expect(
+          _outDirs(record),
+          contains('android_release${abi[1].isEmpty ? '' : '_${abi[1]}'}'),
+        );
+      },
+    );
+  }
+
+  test(
+    'the debug APK is built from the debug out dir',
+    skip: _appleOnly,
+    () async {
       final record = (await _record(
         'local',
-        [_abiFlag(abi[0])],
+        const ['-c', 'dbg'],
         target: '//:android_app',
       ))!;
       _expectRecordOfTheCheckout(record);
-      expect(
-        _outDirs(record),
-        contains('android_release${abi[1].isEmpty ? '' : '_${abi[1]}'}'),
-      );
-    });
-  }
+      expect(_outDirs(record), contains('android_debug_arm64'));
+    },
+  );
 
-  test('the debug APK is built from the debug out dir', () async {
-    final record = (await _record(
-      'local',
-      const ['-c', 'dbg'],
-      target: '//:android_app',
-    ))!;
-    _expectRecordOfTheCheckout(record);
-    expect(_outDirs(record), contains('android_debug_arm64'));
-  });
-
-  test('an APK for every ABI carries the engine of each', () async {
-    const flags = [_allAbis];
-    final build = await _bazel([
-      'build',
-      '//:android_app',
-      '${_sdkFlag}local',
-      ...flags,
-    ]);
-    expect(build.exitCode, 0, reason: '${build.stderr}');
-    final files = await _bazel([
-      'cquery',
-      '//:android_app',
-      '${_sdkFlag}local',
-      ...flags,
-      '--output=files',
-    ]);
-    final apk = (files.stdout as String)
-        .split('\n')
-        .firstWhere((l) => RegExp(r'(?<!_unsigned)\.apk$').hasMatch(l));
-    final listing = await Process.run('unzip', [
-      '-Z1',
-      p.join(_workspace, apk),
-    ]);
-    final entries = '${listing.stdout}'.split('\n');
-    for (final abi in ['armeabi-v7a', 'arm64-v8a', 'x86_64']) {
-      expect(entries, contains('lib/$abi/libflutter.so'));
-      expect(entries, contains('lib/$abi/libapp.so'));
-    }
-  });
+  test(
+    'an APK for every ABI carries the engine of each',
+    skip: _appleOnly,
+    () async {
+      const flags = [_allAbis];
+      final build = await _bazel([
+        'build',
+        '//:android_app',
+        '${_sdkFlag}local',
+        ...flags,
+      ]);
+      expect(build.exitCode, 0, reason: '${build.stderr}');
+      final files = await _bazel([
+        'cquery',
+        '//:android_app',
+        '${_sdkFlag}local',
+        ...flags,
+        '--output=files',
+      ]);
+      final apk = (files.stdout as String)
+          .split('\n')
+          .firstWhere((l) => RegExp(r'(?<!_unsigned)\.apk$').hasMatch(l));
+      final listing = await Process.run('unzip', [
+        '-Z1',
+        p.join(_workspace, apk),
+      ]);
+      final entries = '${listing.stdout}'.split('\n');
+      for (final abi in ['armeabi-v7a', 'arm64-v8a', 'x86_64']) {
+        expect(entries, contains('lib/$abi/libflutter.so'));
+        expect(entries, contains('lib/$abi/libapp.so'));
+      }
+    },
+  );
 
   test('the Linux bundle is built from the Linux out dir', () async {
+    // Cross-built from a Mac (`linux_debug`), or built on a Linux machine from
+    // its own host build.
     final record = (await _record(
       'local',
       const [_linuxPlatform, '-c', 'dbg'],
       target: '//:linux_app',
     ))!;
     _expectRecordOfTheCheckout(record);
-    expect(_outDirs(record), containsAll(['linux_debug', 'host_debug_arm64']));
+    expect(
+      _outDirs(record),
+      containsAll([
+        if (Platform.isLinux)
+          'host_debug'
+        else ...[
+          'linux_debug',
+          'host_debug_arm64',
+        ],
+      ]),
+    );
     expect(
       (record['engine'] as Map).keys,
       contains(endsWith('//linux-x64/debug:engine')),
     );
   });
+
+  test(
+    'a Linux machine builds its release bundle with its own gen_snapshot',
+    () async {
+      final record = (await _record(
+        'local',
+        const [],
+        target: '//:linux_app',
+      ))!;
+      _expectRecordOfTheCheckout(record);
+      expect(_outDirs(record), containsAll(['host_release']));
+      expect(
+        (record['engine'] as Map).keys,
+        contains(endsWith('//linux-x64/release:gen_snapshot_linux-x64')),
+      );
+    },
+    skip: Platform.isLinux ? null : 'a Linux machine only',
+  );
 
   test('the Windows and Linux arm64 engines are the checkout\'s too', () async {
     final build = await _bazel([
@@ -273,24 +331,28 @@ void main() {
     expect(build.exitCode, 0, reason: '${build.stderr}');
   });
 
-  test('a desktop gen_snapshot is the machine\'s own, and says so', () async {
-    final build = await _bazel([
-      'build',
-      '@local_engine//linux-x64/release:gen_snapshot_linux-x64',
-    ]);
-    expect(build.exitCode, isNot(0));
-    expect(
-      '${build.stderr}',
-      contains(
-        'runs on a linux-x64 machine, and the engine out dirs are read on',
-      ),
-    );
-  });
+  test(
+    'a desktop gen_snapshot is the machine\'s own, and says so',
+    skip: Platform.isMacOS ? null : 'a Mac cannot run the Linux one',
+    () async {
+      final build = await _bazel([
+        'build',
+        '@local_engine//linux-x64/release:gen_snapshot_linux-x64',
+      ]);
+      expect(build.exitCode, isNot(0));
+      expect(
+        '${build.stderr}',
+        contains(
+          'runs on a linux-x64 machine, and the engine out dirs are read on',
+        ),
+      );
+    },
+  );
 
   test('the web app is built from the web SDK and records it', () async {
     final record = (await _record('local', const [], target: '//:web_app'))!;
     _expectRecordOfTheCheckout(record, hasSnapshotHash: false);
-    expect(_outDirs(record), containsAll(['wasm_release', 'host_debug_arm64']));
+    expect(_outDirs(record), containsAll(['wasm_release', _host('debug')]));
 
     // The renderer comes from the web SDK, as the CDN has none for this engine.
     final files = await _bazel([
@@ -416,15 +478,20 @@ void main() {
   });
 
   test('the release SDK records nothing', () async {
-    expect(await _record('flutter', const []), isNull);
-    expect(
-      await _record('flutter', const ['-c', 'dbg'], target: '//:ios_simulator'),
-      isNull,
-    );
-    expect(
-      await _record('flutter', const [], target: '//:android_app'),
-      isNull,
-    );
+    if (Platform.isMacOS) {
+      expect(await _record('flutter', const []), isNull);
+      expect(
+        await _record('flutter', const [
+          '-c',
+          'dbg',
+        ], target: '//:ios_simulator'),
+        isNull,
+      );
+      expect(
+        await _record('flutter', const [], target: '//:android_app'),
+        isNull,
+      );
+    }
     expect(await _record('flutter', const [], target: '//:web_app'), isNull);
     expect(
       await _record(
@@ -456,7 +523,7 @@ void main() {
     // message is not lost to whichever fails first.
     final build = await _bazel([
       'build',
-      '//:app',
+      Platform.isMacOS ? '//:app' : '//:linux_app',
       '${_sdkFlag}mismatched',
       '--keep_going',
     ]);
@@ -473,6 +540,7 @@ void main() {
   ]) {
     test(
       'a gen_snapshot of another Dart is refused for the ${target[1]}',
+      skip: _appleOnly,
       () async {
         final build = await _bazel([
           'build',
@@ -492,13 +560,14 @@ void main() {
   test(
     'an unset checkout loads, and a build that selects it says what to set',
     () async {
+      final app = Platform.isMacOS ? '//:app' : '//:linux_app';
       final query = await _bazel([
         'query',
-        'deps(//:app)',
+        'deps($app)',
         '--output=label_kind',
       ]);
       expect(query.exitCode, 0, reason: '${query.stderr}');
-      final build = await _bazel(['build', '//:app', '${_sdkFlag}env']);
+      final build = await _bazel(['build', app, '${_sdkFlag}env']);
       expect(build.exitCode, isNot(0));
       expect('${build.stderr}', contains('FLUTTER_CHECKOUT is not set'));
     },

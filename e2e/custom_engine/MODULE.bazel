@@ -175,6 +175,7 @@ use_repo(
     "flutter_dev_root_src",
     "flutter_ios_engine",
     "flutter_ios_engine_profile",
+    "flutter_linux-x64",
     "flutter_macos_engine",
     "flutter_stock_android_engine_arm",
     "flutter_stock_android_engine_arm64",

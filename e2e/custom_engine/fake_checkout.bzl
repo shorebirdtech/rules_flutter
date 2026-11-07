@@ -23,7 +23,7 @@ kernel format, the web's version of the same mismatch.
 """
 
 # buildifier: disable=bzl-visibility
-load("@rules_flutter//flutter/private:artifact_urls.bzl", "engine_artifact_url", "host_artifacts_path")
+load("@rules_flutter//flutter/private:artifact_urls.bzl", "desktop_engine_artifact_path", "engine_artifact_url", "host_artifacts_path")
 
 # buildifier: disable=bzl-visibility
 load("@rules_flutter//flutter/private:versions.bzl", "ARTIFACT_CHECKSUMS", "FLUTTER_VERSIONS")
@@ -31,9 +31,9 @@ load("@rules_flutter//flutter/private:versions.bzl", "ARTIFACT_CHECKSUMS", "FLUT
 _RELEASE = "3.47.9"
 _OUT = "checkout/engine/src/out/"
 
-def _args_gn(mode, revision):
+def _args_gn(mode, revision, cpu = "arm64"):
     return "\n".join([
-        'target_cpu = "arm64"',
+        'target_cpu = "{}"'.format(cpu),
         'flutter_runtime_mode = "{}"'.format(mode),
         "flutter_prebuilt_dart_sdk = false",
         'engine_version = "{}"'.format(revision),
@@ -96,9 +96,18 @@ def _fake_checkout_impl(rctx):
         rctx.symlink(source, destination)
 
     meta = FLUTTER_VERSIONS[_RELEASE]
-    dart_sdk = path("@flutter_darwin-arm64//:dart-sdk/bin/dart").dirname.dirname
-    host_tools = path("@flutter_darwin-arm64//:host-tools/icudtl.dat").dirname
-    font_tools = path("@flutter_darwin-arm64//:font-subset-tools/font-subset").dirname
+
+    # The machine's own build is `host_<mode>`: `host_<mode>_arm64` on a Mac,
+    # and on an x86_64 Linux machine `host_<mode>`, which also holds the Linux
+    # engine. Only these two hosts have a stand-in.
+    on_linux = rctx.os.name == "linux"
+    if on_linux and rctx.os.arch not in ["amd64", "x86_64"]:
+        fail("the stand-in checkout is made on an arm64 Mac or an x86_64 Linux machine, not on {} {}".format(rctx.os.name, rctx.os.arch))
+    host = "linux-x64" if on_linux else "darwin-arm64"
+    suffix = "" if on_linux else "_arm64"
+    dart_sdk = path("@flutter_{}//:dart-sdk/bin/dart".format(host)).dirname.dirname
+    host_tools = path("@flutter_{}//:host-tools/icudtl.dat".format(host)).dirname
+    font_tools = path("@flutter_{}//:font-subset-tools/font-subset".format(host)).dirname
     kernel_debug = path("@flutter_stock_engine//kernel/debug:flutter_patched_sdk/platform_strong.dill").dirname
     kernel_release = path("@flutter_stock_engine//kernel/release:flutter_patched_sdk_product/platform_strong.dill").dirname
     dev_root = path("@flutter_dev_root_src//:bin/cache/flutter.version.json").dirname.dirname.dirname
@@ -112,11 +121,13 @@ def _fake_checkout_impl(rctx):
     rctx.file("checkout/CHECKOUT", "A stand-in for a flutter/flutter checkout.\n")
 
     # The release gen_snapshot, or another release's.
-    release_gen = path("@flutter_darwin-arm64//:host-tools-release/gen_snapshot")
+    release_gen = path("@flutter_desktop_engine_linux-x64_release//:engine/gen_snapshot") if on_linux else path("@flutter_darwin-arm64//:host-tools-release/gen_snapshot")
     other = rctx.attr.gen_snapshot_flutter_version
     if other:
         other_meta = FLUTTER_VERSIONS[other]
-        archive = host_artifacts_path("darwin-arm64", mode = "release")
+
+        # A Linux machine's release gen_snapshot ships in the GTK engine archive.
+        archive = desktop_engine_artifact_path("linux", "x64", "release") if on_linux else host_artifacts_path(host, mode = "release")
         rctx.download_and_extract(
             url = engine_artifact_url(other_meta.engine_revision, archive),
             sha256 = ARTIFACT_CHECKSUMS[other][archive],
@@ -129,11 +140,12 @@ def _fake_checkout_impl(rctx):
         # another VM: write another hash into it, as another VM's build would.
         rctx.execute(["chmod", "u+w", release_gen])
         rctx.execute(["perl", "-pi", "-e", "s/0451907c2eaa8467/9f3c1e0d2eaa8467/g", release_gen])
-    profile_gen = path("@flutter_darwin-arm64_profile//:host-tools/gen_snapshot")
+    profile_gen = path("@flutter_desktop_engine_linux-x64_profile//:engine/gen_snapshot") if on_linux else path("@flutter_darwin-arm64_profile//:host-tools/gen_snapshot")
 
-    # host_debug_arm64: the host tools, the debug platform kernel and the debug engine.
-    debug = _OUT + "host_debug_arm64/"
-    rctx.file(debug + "args.gn", _args_gn("debug", meta.engine_revision))
+    # host_debug: the host tools, the debug platform kernel and the debug engine.
+    cpu = "x64" if on_linux else "arm64"
+    debug = _OUT + "host_debug{}/".format(suffix)
+    rctx.file(debug + "args.gn", _args_gn("debug", meta.engine_revision, cpu))
     link(dart_sdk, debug + "dart-sdk")
     for name in ["flutter_tester", "icudtl.dat", "impellerc", "shader_lib"]:
         link(host_tools.get_child(name), debug + name)
@@ -144,31 +156,42 @@ def _fake_checkout_impl(rctx):
     link(kernel_debug, debug + "flutter_patched_sdk")
 
     # An out dir holds the product platform kernel under the same name.
-    release = _OUT + "host_release_arm64/"
-    rctx.file(release + "args.gn", _args_gn("release", meta.engine_revision))
+    release = _OUT + "host_release{}/".format(suffix)
+    rctx.file(release + "args.gn", _args_gn("release", meta.engine_revision, cpu))
     link(kernel_release, release + "flutter_patched_sdk")
-    link(release_gen, release + "gen_snapshot_arm64")
-    profile = _OUT + "host_profile_arm64/"
-    rctx.file(profile + "args.gn", _args_gn("profile", meta.engine_revision))
-    link(profile_gen, profile + "gen_snapshot_arm64")
+    link(release_gen, release + "gen_snapshot" + suffix)
+    profile = _OUT + "host_profile{}/".format(suffix)
+    rctx.file(profile + "args.gn", _args_gn("profile", meta.engine_revision, cpu))
+    link(profile_gen, profile + "gen_snapshot" + suffix)
 
     for mode, out in [("debug", debug), ("profile", profile), ("release", release)]:
-        framework = path("@flutter_desktop_engine_darwin-x64_{}//:engine/FlutterMacOS.framework/Versions/A/FlutterMacOS".format(mode)).dirname.dirname.dirname
-        link(framework, out + "FlutterMacOS.xcframework/macos-arm64_x86_64/FlutterMacOS.framework")
+        if on_linux:
+            # The host build holds the Linux engine, as `ninja -C out/host_<mode>` leaves it.
+            library = path("@flutter_desktop_engine_linux-x64_{}//:engine/libflutter_linux_gtk.so".format(mode))
+            link(library, out + "libflutter_linux_gtk.so")
+            link(library.dirname.get_child("flutter_linux"), out + "flutter_linux")
+        else:
+            framework = path("@flutter_desktop_engine_darwin-x64_{}//:engine/FlutterMacOS.framework/Versions/A/FlutterMacOS".format(mode)).dirname.dirname.dirname
+            link(framework, out + "FlutterMacOS.xcframework/macos-arm64_x86_64/FlutterMacOS.framework")
 
-    _mobile_out_dirs(rctx, path, link, meta.engine_revision, other_gen = rctx.path("other_dart/gen_snapshot") if other else None)
-    _desktop_out_dirs(rctx, path, link, meta.engine_revision)
+    # The iOS and Android out dirs are laid out from Apple-host gen_snapshots.
+    if not on_linux:
+        _mobile_out_dirs(rctx, path, link, meta.engine_revision, other_gen = rctx.path("other_dart/gen_snapshot") if other else None)
+    _desktop_out_dirs(rctx, path, link, meta.engine_revision, on_linux)
     _web_out_dir(rctx, path, link, meta.engine_revision, rctx.attr.web_kernel_format_mismatch)
 
     rctx.file("BUILD.bazel", 'exports_files(glob(["checkout/CHECKOUT"]))\n')
 
-def _desktop_out_dirs(rctx, path, link, revision):
+def _desktop_out_dirs(rctx, path, link, revision, on_linux):
     """The Linux and Windows out dirs: the official engines, laid out as ninja leaves them.
 
     A Mac cannot build either, so these stand for engines built on their own
     OS and read here for a cross build: `linux_<mode>[_arm64]` and `win_<mode>`.
     """
     for arch, suffix in [("x64", ""), ("arm64", "_arm64")]:
+        # An x86_64 Linux machine's own engine is its host build.
+        if on_linux and arch == "x64":
+            continue
         for mode in ["debug", "profile", "release"]:
             repo = "@flutter_desktop_engine_linux-{}_{}".format(arch, mode)
             library = path(repo + "//:engine/libflutter_linux_gtk.so")
