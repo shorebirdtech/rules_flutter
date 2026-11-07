@@ -154,7 +154,7 @@ flutter_android_plugin_libs = rule(
             providers = [FlutterApplicationInfo],
         ),
         "maven": attr.label(
-            doc = "The pub hub's Android Maven requirements (`@<hub>//android:maven_requirements`), to check those of the linked plugins against `@rules_android_maven`. Leave unset when no linked plugin comes from a pub hub.",
+            doc = "The build's Android Maven requirements (`@flutter_pub_android_maven//:requirements`, or any hub's `//android:maven_requirements`), to check those of the linked plugins against `@rules_android_maven`. Leave unset when no linked plugin comes from `flutter.pub`.",
             providers = [FlutterAndroidMavenInfo],
         ),
         "report": attr.string(
@@ -198,7 +198,7 @@ flutter_android_maven_report = rule(
             providers = [FlutterApplicationInfo],
         ),
         "maven": attr.label(
-            doc = "The pub hub's Android Maven requirements (`@<hub>//android:maven_requirements`).",
+            doc = "The build's Android Maven requirements (`@flutter_pub_android_maven//:requirements`).",
             mandatory = True,
             providers = [FlutterAndroidMavenInfo],
         ),

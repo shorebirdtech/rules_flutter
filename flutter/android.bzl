@@ -240,7 +240,9 @@ def flutter_android_maven_artifacts(name, application, maven, **kwargs):
     Args:
         name: The target name.
         application: The `flutter_application` whose plugins to report on.
-        maven: The pub hub's `@<hub>//android:maven_requirements`.
+        maven: The build's Maven requirements, `@flutter_pub_android_maven//:requirements`
+            (or the `android/maven_requirements` of any `flutter.pub` hub, which
+            aliases it).
         **kwargs: Passed to both targets the macro declares (`tags`,
             `testonly`, `visibility`).
     """
@@ -583,7 +585,6 @@ def flutter_android_app(
         permissions = [],
         resources = [],
         deps = [],
-        pub_hub_name = "deps",
         namespace = None,
         build_name = None,
         build_number = None,
@@ -764,15 +765,6 @@ def flutter_android_app(
             Android Gradle plugin's: split by ABI, screen density and
             language, with native libraries and dex stored uncompressed and
             the libraries 16 KB-aligned. Setting it replaces the default.
-        pub_hub_name: Name of the `flutter.pub(name = ...)` hub providing
-            plugin spokes. The macro checks the Maven artifacts of the pub
-            plugins `application` depends on against
-            `@<pub_hub_name>//android:maven_requirements`. Defaults to
-            `"deps"`, matching the convention in repo MODULE.bazel files. Set
-            to `None` to opt out (e.g. for a workspace with no pub plugins).
-            Otherwise the macro also declares `<name>_maven_artifacts`:
-            `bazel run` of it prints the Maven artifacts for the plugins
-            `application` depends on, to paste into `maven.install`.
         **kwargs: Passed through to android_binary, except `testonly`, which
             every target the macro declares has, since one that depends on a
             `testonly` application would otherwise fail analysis.
@@ -857,23 +849,23 @@ def flutter_android_app(
     # plugin's `kt_android_library`. The libraries of the plugins the
     # application depends on are linked once, for the registrant and the
     # APK alike.
-    maven = "@%s//android:maven_requirements" % pub_hub_name if pub_hub_name else None
+    # The Maven data of every pub package of the build, whichever hub lists it.
+    maven = Label("@flutter_pub_android_maven//:requirements")
     _flutter_android_plugin_libs(
         name = "__%s_plugin_libs" % name,
         deps = application,
         maven = maven,
-        report = "//%s:%s_maven_artifacts" % (native.package_name(), name) if maven else None,
+        report = "//%s:%s_maven_artifacts" % (native.package_name(), name),
         tags = tags,
         testonly = testonly,
     )
-    if maven:
-        flutter_android_maven_artifacts(
-            name = "%s_maven_artifacts" % name,
-            application = application,
-            maven = maven,
-            tags = tags,
-            testonly = testonly,
-        )
+    flutter_android_maven_artifacts(
+        name = "%s_maven_artifacts" % name,
+        application = application,
+        maven = maven,
+        tags = tags,
+        testonly = testonly,
+    )
     _flutter_android_registrant(
         name = "__%s_registrant_src" % name,
         application = application,
