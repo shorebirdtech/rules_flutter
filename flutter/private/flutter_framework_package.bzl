@@ -17,7 +17,7 @@ not neutral: `package_config.json` reads a missing `languageVersion` as the
 current SDK's.
 """
 
-load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version", "find_pub_license_file")
+load("@rules_dart//dart/pub:pub_lock_package.bzl", "find_pub_license_file")
 load("@rules_dart//dart/pub:pubspec.bzl", "read_pubspec")
 load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url")
 load("//flutter/private:flutter_pub_index.bzl", "library_label", "read_index")
@@ -106,7 +106,7 @@ def _flutter_framework_package_impl(repository_ctx):
     index = read_index(repository_ctx, repository_ctx.attr.hub_name)
     pubspec = read_pubspec(repository_ctx, _PACKAGE, repository_ctx.attr.flutter_version)
     bazel_deps = sorted([d for d in pubspec.dependencies if d in index.built or d in index.other])
-    language_version = derive_language_version(pubspec.sdk_constraint)
+    language_version = pubspec.language_version
 
     # Build dep labels pointing to the libraries of the packages' repos.
     dep_labels = [library_label(repository_ctx.attr.hub_name, index, dep) for dep in bazel_deps]

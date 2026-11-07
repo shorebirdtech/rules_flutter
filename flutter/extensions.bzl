@@ -192,7 +192,7 @@ def _toolchain_extension(module_ctx):
         for pub_tag in mod.tags.pub:
             hub_name = pub_tag.name
             lock_content = module_ctx.read(pub_tag.lock)
-            lock_pkgs = parse_pubspec_lock(lock_content)
+            lock_pkgs = parse_pubspec_lock(lock_content, str(pub_tag.lock))
 
             # Before anything else is checked, so a wrong map is not masked.
             resolve_problems = resolve_errors(pub_tag.lock, hub_name, lock_pkgs, pub_tag.resolve)

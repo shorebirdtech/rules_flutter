@@ -47,7 +47,7 @@ whichever rule asks for it.
 """
 
 load("@rules_dart//dart/pub:pub_graph.bzl", "write_pubspec_dependencies")
-load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version", "fetch_pub_archive", "fetch_pub_git", "find_pub_license_file")
+load("@rules_dart//dart/pub:pub_lock_package.bzl", "fetch_pub_archive", "fetch_pub_git", "find_pub_license_file")
 load("@rules_dart//dart/pub:pubspec.bzl", "read_pubspec")
 load("//flutter/private:android_plugin_maven.bzl", "MAVEN_DEPS_FILE", "gradle_statements", "parse_gradle_maven_dependencies")
 load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url")
@@ -1911,7 +1911,7 @@ def _flutter_pub_package_impl(ctx):
     # the wrong type) fails the fetch, naming the package.
     pubspec = read_pubspec(ctx, ctx.attr.package_name, ctx.attr.version)
     pubspec_dependencies = pubspec.dependencies
-    language_version = derive_language_version(pubspec.sdk_constraint)
+    language_version = pubspec.language_version
     plugin_block = flutter_plugin_block(pubspec.fields)
     manifest_errors = flutter_manifest_errors(pubspec.fields)
     if manifest_errors:

@@ -16,25 +16,11 @@ language version instead — silently more permissive than pub.
 What the repository rule reads out of the pubspec (the constraint, the runtime
 dependencies) is tested where the rule runs, against a pubspec read the way pub
 reads it: `tools/dev_tool/test/e2e/framework_pubspec_e2e_test.dart`. What is
-tested here is the derivation from the constraint and the generated BUILD file.
+tested here is the generated BUILD file; rules_dart's pubspec reader derives the language version.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
-load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version")
 load("//flutter/private:flutter_framework_package.bzl", "make_flutter_framework_build_content")
-
-def _derives_the_language_version_from_the_sdk_constraint_test_impl(ctx):
-    """`^3.11.0-0` yields `3.11` — the prerelease suffix is not a language version.
-
-    Every Flutter SDK package pins a `-0` prerelease floor so that a beta of
-    the same triple satisfies it. Pub drops the suffix before formatting;
-    ground-truthed above against a real lockfile-and-`pub get` pair.
-    """
-    env = unittest.begin(ctx)
-
-    asserts.equals(env, "3.11", derive_language_version("^3.11.0-0"))
-
-    return unittest.end(env)
 
 def _flutter_spoke_declares_its_language_version_test_impl(ctx):
     """`package:flutter` builds a flutter_library carrying the derived version."""
@@ -58,9 +44,6 @@ def _flutter_spoke_declares_its_language_version_test_impl(ctx):
 
     return unittest.end(env)
 
-_derives_the_language_version_from_the_sdk_constraint_test = unittest.make(
-    _derives_the_language_version_from_the_sdk_constraint_test_impl,
-)
 _flutter_spoke_declares_its_language_version_test = unittest.make(
     _flutter_spoke_declares_its_language_version_test_impl,
 )
@@ -68,6 +51,5 @@ _flutter_spoke_declares_its_language_version_test = unittest.make(
 def flutter_framework_package_test_suite(name):
     unittest.suite(
         name,
-        _derives_the_language_version_from_the_sdk_constraint_test,
         _flutter_spoke_declares_its_language_version_test,
     )
