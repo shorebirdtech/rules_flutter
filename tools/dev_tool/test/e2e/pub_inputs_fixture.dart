@@ -99,6 +99,9 @@ class GitPackage {
   final String? resolvedRef;
 }
 
+/// How long one `bazel` command of a fixture may run before it is killed.
+const _bazelDeadline = Duration(minutes: 4);
+
 /// What `bazel` said.
 class BazelResult {
   BazelResult(this.exitCode, this.stdout, this.stderr);
@@ -113,9 +116,15 @@ class BazelResult {
   /// Everything Bazel printed, in one string for matching.
   String get output => '$stdout\n$stderr';
 
+  /// How the command ended: its status, or that it was still running at the
+  /// deadline, which the status alone would show as a bare null.
+  String get _ending => exitCode == null
+      ? 'killed, still running at the ${_bazelDeadline.inMinutes}-minute '
+            'deadline'
+      : 'exit=$exitCode';
+
   @override
-  String toString() =>
-      'exit=$exitCode\n--- stdout\n$stdout\n--- stderr\n$stderr';
+  String toString() => '$_ending\n--- stdout\n$stdout\n--- stderr\n$stderr';
 }
 
 /// The workspace a [PubInputsFixture] materialised.
@@ -165,7 +174,7 @@ class PubInputsWorkspace {
     final err = process.stderr.transform(utf8.decoder).join();
     int? code;
     try {
-      code = await process.exitCode.timeout(const Duration(minutes: 4));
+      code = await process.exitCode.timeout(_bazelDeadline);
     } on TimeoutException {
       process.kill();
     }
