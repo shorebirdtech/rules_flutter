@@ -56,7 +56,7 @@ use_repo(flutter, "deps", "flutter_toolchains")
 register_toolchains("@flutter_toolchains//:all")
 ```
 
-`flutter.toolchain` downloads the Flutter SDK and engine. `flutter.pub` reads your `pubspec.lock` and creates a repository, here named `deps`, with one target per package: `@deps//:flutter`, `@deps//:flutter_test`, `@deps//:collection`, and so on. See [Pub packages](#pub-packages).
+`flutter.toolchain` downloads the Flutter SDK and engine. Your root module's `flutter_version` is the one built with, whatever version rules_flutter or another dependency declares; without one, the highest version a dependency declares is used. `flutter.pub` reads your `pubspec.lock` and creates a repository, here named `deps`, with one target per package: `@deps//:flutter`, `@deps//:flutter_test`, `@deps//:collection`, and so on. See [Pub packages](#pub-packages).
 
 Some platforms need one more repository from the same extension. Add it to `use_repo` when you build for that platform:
 

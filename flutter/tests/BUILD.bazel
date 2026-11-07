@@ -60,6 +60,7 @@ load(":shared_code_asset_test.bzl", "shared_code_asset_test_suite")
 load(":swiftpm_dependencies_test.bzl", "swiftpm_dependencies_test_suite")
 load(":tester_binary_test.bzl", "tester_binary_test_suite")
 load(":toolchain_test.bzl", "toolchain_test_suite")
+load(":toolchain_version_test.bzl", "toolchain_version_test_suite")
 load(":toolchains_repo_test.bzl", "toolchains_repo_test_suite")
 load(":validation_test.bzl", "validation_test_suite")
 load(":version_defines_test.bzl", "version_defines_test_suite")
@@ -126,6 +127,8 @@ flutter_framework_package_test_suite(name = "flutter_framework_package_test")
 flutter_pub_package_sdk_source_test_suite(name = "flutter_pub_package_sdk_source_test")
 
 pub_resolve_test_suite(name = "pub_resolve_test")
+
+toolchain_version_test_suite(name = "toolchain_version_test")
 
 flutter_pub_package_test_suite(name = "flutter_pub_package_test")
 

@@ -30,30 +30,11 @@ load("//flutter/private:linux_runtime_pins.bzl", "LINUX_RUNTIME")
 load("//flutter/private:lock_entry_kind.bzl", "ENGINE_PROVIDED", "FLUTTER_FRAMEWORK", "FLUTTER_SOURCE", "GIT", "HOSTED", "lock_entry_kind")
 load("//flutter/private:pub_lock_sdks.bzl", "parse_lock_sdk_constraints", "version_below_lower_bound")
 load("//flutter/private:pub_resolve.bzl", "resolve_errors")
+load("//flutter/private:toolchain_version.bzl", "select_flutter_version")
 load("//flutter/private:versions.bzl", "CHROME_FOR_TESTING", "flutter_source_sha256")
 load(":repositories.bzl", "flutter_register_toolchains")
 
 _DEFAULT_NAME = "flutter"
-
-def _parse_version(v):
-    """Splits a version string into a list of ints for comparison."""
-    parts = v.split(".")
-    result = []
-    for x in parts:
-        if not x.isdigit():
-            # Parenthesised before `.format`: without them it binds to the last
-            # fragment of the concatenation alone, so this printed a literal
-            # `{}` for the version and then substituted the version into the
-            # slot meant for the offending component — which was never shown.
-            fail(
-                (
-                    "Invalid Flutter version '{}': expected numeric " +
-                    "components separated by dots (e.g. '3.41.2'), but got " +
-                    "non-numeric component '{}'."
-                ).format(v, x),
-            )
-        result.append(int(x))
-    return result
 
 flutter_toolchain = tag_class(attrs = {
     "name": attr.string(doc = """\
@@ -127,6 +108,10 @@ _flutter_plugin_overlays = tag_class(attrs = {
 })
 
 def _toolchain_extension(module_ctx):
+    # The root module chooses each toolchain's Flutter version, as it chooses
+    # every toolchain: its own tag wins. A name the root does not declare takes
+    # the highest version the other modules ask for.
+    root_versions = {}
     registrations = {}
     selected_versions = {}
     for mod in module_ctx.modules:
@@ -136,21 +121,19 @@ def _toolchain_extension(module_ctx):
                 Only the root module may override the default name for the Flutter toolchain.
                 This prevents conflicting registrations in the global namespace of external repos.
                 """)
+            if mod.is_root:
+                if toolchain.name in root_versions and root_versions[toolchain.name] != toolchain.flutter_version:
+                    fail("The root module declares the Flutter toolchain {} twice, with versions {} and {}.".format(
+                        toolchain.name,
+                        root_versions[toolchain.name],
+                        toolchain.flutter_version,
+                    ))
+                root_versions[toolchain.name] = toolchain.flutter_version
             if toolchain.name not in registrations.keys():
                 registrations[toolchain.name] = []
             registrations[toolchain.name].append(toolchain.flutter_version)
     for name, versions in registrations.items():
-        unique_versions = {v: True for v in versions}.keys()
-        if len(unique_versions) > 1:
-            selected = versions[0]
-            for v in versions[1:]:
-                if _parse_version(v) > _parse_version(selected):
-                    selected = v
-
-            # buildifier: disable=print
-            print("NOTE: Flutter toolchain {} has multiple versions {}, selected {}".format(name, list(unique_versions), selected))
-        else:
-            selected = versions[0]
+        selected = select_flutter_version(root_versions.get(name), versions)
 
         flutter_register_toolchains(
             name = name,

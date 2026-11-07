@@ -224,6 +224,7 @@ bzl_library(
         "//flutter/private:lock_entry_kind",
         "//flutter/private:pub_lock_sdks",
         "//flutter/private:pub_resolve",
+        "//flutter/private:toolchain_version",
     ],
 )
 
