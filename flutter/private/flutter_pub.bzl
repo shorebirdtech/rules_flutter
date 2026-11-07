@@ -1,8 +1,8 @@
 """`@rules_flutter//flutter:pub` — `dart pub`, run from the pinned toolchain.
 
-`flutter.pub()` reads a checked-in `pubspec.lock` and turns every entry into a
-repository. Nothing in the build writes that file, and the fetched toolchain
-carries engine artifacts plus a Dart SDK — no `bin/flutter`, no `pub`
+`flutter_pub.from_lock()` reads a checked-in `pubspec.lock` and turns every
+entry into a repository. Nothing in the build writes that file, and the fetched
+toolchain carries engine artifacts plus a Dart SDK — no `bin/flutter`, no `pub`
 executable — so regenerating the lock has meant installing Flutter separately
 and hoping its version matches the one Bazel pins. It usually does not, and the
 mismatch is silent: pub's solver treats the running Dart SDK's version and the
@@ -19,8 +19,8 @@ Flutter tag the toolchain pins:
 
 Arguments pass through to `dart pub` unchanged and the command runs in
 `BUILD_WORKSPACE_DIRECTORY`, so `pubspec.lock` lands in the source tree where
-`flutter.pub()` reads it. This is `dart pub`, not `flutter pub`: it writes
-`pubspec.lock` and `.dart_tool/package_config.json` and does not produce
+`flutter_pub.from_lock()` reads it. This is `dart pub`, not `flutter pub`: it
+writes `pubspec.lock` and `.dart_tool/package_config.json` and does not produce
 `.flutter-plugins-dependencies` — rules_flutter generates plugin registrants
 from the build graph instead, so that file has no consumer here.
 """

@@ -3,8 +3,9 @@
 Compares the goldens of an integration test for its host runner, which has no
 `dart:ui`: started by the runner, told which test it compares for. It needs only
 `package:flutter_test`, of which the build has one copy
-(`flutter_pub_lib__flutter_test`), so one service serves every `flutter.pub()`
-hub that lists `flutter_test`. A hub's `goldens/` package aliases it.
+(`flutter_pub_lib__flutter_test`), so one service serves every
+`flutter_pub.from_lock()` hub that lists `flutter_test`. A hub's `goldens/`
+package aliases it.
 
 Made only when some lock lists `flutter_test`. Loaded lazily: it is parsed when
 an integration test asks for it.

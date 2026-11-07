@@ -241,8 +241,8 @@ def flutter_android_maven_artifacts(name, application, maven, **kwargs):
         name: The target name.
         application: The `flutter_application` whose plugins to report on.
         maven: The build's Maven requirements, `@flutter_pub_android_maven//:requirements`
-            (or the `android/maven_requirements` of any `flutter.pub` hub, which
-            aliases it).
+            (or the `android/maven_requirements` of any `flutter_pub.from_lock`
+            hub, which aliases it).
         **kwargs: Passed to both targets the macro declares (`tags`,
             `testonly`, `visibility`).
     """

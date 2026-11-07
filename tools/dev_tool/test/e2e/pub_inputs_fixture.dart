@@ -1,13 +1,12 @@
-/// A throwaway Bazel workspace around a `flutter.pub()` hub whose packages the
-/// test writes, served from `file://` so no network is involved.
+/// A throwaway Bazel workspace around a `flutter_pub.from_lock()` hub whose
+/// packages the test writes, served from `file://` so no network is involved.
 ///
-/// The hub is the real one: `flutter.pub()` in the module extension, one
-/// `flutter_pub_package` repository per hosted package and per `sdk: flutter`
-/// entry but `flutter` (whose `flutter_framework_package` is its own). A test
-/// chooses what the lock holds and what each archive contains, then asks Bazel
-/// to load a package of a spoke
-/// ([PubInputsWorkspace.query]); the answer is whatever rules_flutter does
-/// with that input.
+/// The hub is the real one: `flutter_pub.from_lock()` in the module extension,
+/// one `flutter_pub_package` repository per hosted package and per
+/// `sdk: flutter` entry but `flutter` (whose `flutter_framework_package` is its
+/// own). A test chooses what the lock holds and what each archive contains,
+/// then asks Bazel to load a package of a spoke ([PubInputsWorkspace.query]);
+/// the answer is whatever rules_flutter does with that input.
 ///
 /// Spokes are fetched lazily, so one workspace can hold many packages that
 /// are each good or bad on its own, and a bad one fails only the query that
@@ -140,19 +139,28 @@ class PubInputsWorkspace {
   String get root => _ws.root;
   File file(String relative) => _ws.file(relative);
 
-  /// Run `bazel <args>` in the workspace.
-  Future<BazelResult> bazel(List<String> args) async {
+  /// Run `bazel <args>` in the workspace, with [environment] added to the
+  /// client's (which `bazel run` hands the program it runs).
+  Future<BazelResult> bazel(
+    List<String> args, {
+    Map<String, String> environment = const {},
+  }) async {
     final command = args.first;
-    final process = await Process.start('bazel', [
-      command,
-      // `info` takes none of the build options.
-      if (command != 'info') ...[
-        '--noshow_progress',
-        '--curses=no',
-        '--color=no',
+    final process = await Process.start(
+      'bazel',
+      [
+        command,
+        // `info` takes none of the build options.
+        if (command != 'info') ...[
+          '--noshow_progress',
+          '--curses=no',
+          '--color=no',
+        ],
+        ...args.skip(1),
       ],
-      ...args.skip(1),
-    ], workingDirectory: root);
+      workingDirectory: root,
+      environment: environment,
+    );
     final out = process.stdout.transform(utf8.decoder).join();
     final err = process.stderr.transform(utf8.decoder).join();
     int? code;
@@ -206,8 +214,8 @@ class PubInputsWorkspace {
   );
 }
 
-/// A second `flutter.pub()` tag of a [PubInputsFixture]: its own lock, over
-/// packages served by the same `file://` registry.
+/// A second `flutter_pub.from_lock()` tag of a [PubInputsFixture]: its own
+/// lock, over packages served by the same `file://` registry.
 class FixtureHub {
   FixtureHub({
     required this.name,
@@ -246,9 +254,17 @@ class PubInputsFixture {
     this.git = const [],
     this.otherHubs = const [],
     this.onVersionConflict,
+    this.http = false,
   });
 
-  /// More `flutter.pub()` tags beside the main one, each with a lock of its own.
+  /// Whether the registry is served over HTTP, as pub's hosted API, rather
+  /// than from `file://`: `dart pub` itself only resolves against HTTP, so a
+  /// test that runs it needs this. Each package's API entry carries the
+  /// default pubspec of its name and version (no dependencies).
+  final bool http;
+
+  /// More `flutter_pub.from_lock()` tags beside the main one, each with a lock
+  /// of its own.
   final List<FixtureHub> otherHubs;
 
   /// The main tag's `on_version_conflict`; the default (`error`) when null.
@@ -261,17 +277,18 @@ class PubInputsFixture {
   /// sources that are not hosted.
   final String extraLockEntries;
 
-  /// Extra workspace files, by path relative to the root.
+  /// Extra workspace files, by path relative to the root; `{{SERVER}}` stands
+  /// for the registry's URL.
   final Map<String, String> files;
 
-  /// Labels for `flutter.plugin_overlays(roots = [...])`.
+  /// Labels for `flutter_pub.plugin_overlays(roots = [...])`.
   final List<String> overlayRoots;
 
   /// Spoke names to `use_repo` beyond the hosted packages' own.
   final List<String> spokes;
 
-  /// `flutter.pub(resolve = {...})`: package name to the label of its target.
-  /// The packages' files go in [files], their lock entries in
+  /// `flutter_pub.from_lock(resolve = {...})`: package name to the label of its
+  /// target. The packages' files go in [files], their lock entries in
   /// [extraLockEntries].
   final Map<String, String> resolve;
 
@@ -307,7 +324,7 @@ class PubInputsFixture {
     return out.toString();
   }
 
-  /// One `flutter.pub(...)` tag of the module.
+  /// One `flutter_pub.from_lock(...)` tag of the module.
   static String _tag(
     String name,
     String lockPackage,
@@ -318,7 +335,7 @@ class PubInputsFixture {
         .map((e) => '${jsonEncode(e.key)}: ${jsonEncode(e.value)}')
         .join(', ');
     return [
-      'flutter.pub(',
+      'flutter_pub.from_lock(',
       '    name = "$name",',
       '    lock = "//$lockPackage:pubspec.lock",',
       if (resolve.isNotEmpty) '    resolve = {$resolved},',
@@ -398,7 +415,17 @@ class PubInputsFixture {
         ..writeln('    version: "${package.version}"');
     }
 
-    final serverUrl = 'file://${server.path}';
+    final String serverUrl;
+    if (http) {
+      final registry = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => registry.close(force: true));
+      serverUrl = 'http://${registry.address.host}:${registry.port}';
+      registry.listen(
+        (request) => _serveRegistry(request, server, archived, serverUrl),
+      );
+    } else {
+      serverUrl = 'file://${server.path}';
+    }
     final repo = e2eWorkspace('..');
     final root = File(p.join(repo, 'MODULE.bazel')).readAsStringSync();
     String pinned(String pattern) {
@@ -437,10 +464,12 @@ local_path_override(
 
 flutter = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter")
 flutter.toolchain(flutter_version = "$flutterVersion")
-${overlayRoots.isEmpty ? '' : 'flutter.plugin_overlays(roots = ${jsonEncode(overlayRoots)})'}
+
+flutter_pub = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter_pub")
+${overlayRoots.isEmpty ? '' : 'flutter_pub.plugin_overlays(roots = ${jsonEncode(overlayRoots)})'}
 ${_tag(pubHub, lockPackage, resolve, onVersionConflict)}
 ${otherHubs.map((h) => _tag(h.name, h.lockPackage, h.resolve, h.onVersionConflict)).join('\n')}
-use_repo(flutter, ${{pubHub, for (final h in otherHubs) h.name}.map((n) => '"$n"').join(', ')}${spokeNames.map((n) => ', "flutter_pub__$n"').join()})
+use_repo(flutter_pub, ${{pubHub, for (final h in otherHubs) h.name}.map((n) => '"$n"').join(', ')}${spokeNames.map((n) => ', "flutter_pub__$n"').join()})
 ''';
 
     // `generatedWorkspace` writes exactly the files it is given, so the
@@ -475,10 +504,66 @@ use_repo(flutter, ${{pubHub, for (final h in otherHubs) h.name}.map((n) => '"$n"
           ),
         ),
       },
-      ...files,
+      for (final entry in files.entries)
+        entry.key: entry.value.replaceAll('{{SERVER}}', serverUrl),
     });
     return PubInputsWorkspace._(ws, serverUrl, hosted, lockPackage);
   }
+}
+
+/// Answers [request] as a pub registry at [url] would: a package's versions
+/// from `/api/packages/<name>`, an archive from where the lock's hosted
+/// entries point (`/packages/<name>/versions/<version>.tar.gz`, under
+/// [directory]).
+Future<void> _serveRegistry(
+  HttpRequest request,
+  Directory directory,
+  Set<HostedPackage> packages,
+  String url,
+) async {
+  final response = request.response;
+  final segments = request.uri.pathSegments;
+  if (segments.length == 3 &&
+      segments[0] == 'api' &&
+      segments[1] == 'packages') {
+    final versions = [
+      for (final package in packages)
+        if (package.name == segments[2])
+          {
+            'version': package.version,
+            'pubspec': {
+              'name': package.name,
+              'version': package.version,
+              'environment': {'sdk': '^3.0.0'},
+            },
+            'archive_url':
+                '$url/packages/${package.name}/versions/${package.version}.tar.gz',
+            'archive_sha256': PubInputsFixture._digests[package],
+          },
+    ];
+    if (versions.isNotEmpty) {
+      response.headers.contentType = ContentType(
+        'application',
+        'vnd.pub.v2+json',
+      );
+      response.write(
+        jsonEncode({
+          'name': segments[2],
+          'latest': versions.last,
+          'versions': versions,
+        }),
+      );
+      await response.close();
+      return;
+    }
+  }
+  final file = File(p.joinAll([directory.path, ...segments]));
+  if (segments.isNotEmpty && segments[0] == 'packages' && file.existsSync()) {
+    await response.addStream(file.openRead());
+  } else {
+    response.statusCode = HttpStatus.notFound;
+  }
+  await response.close();
 }
 
 /// A repository made for [GitPackage]s: where it is, and its first commit.

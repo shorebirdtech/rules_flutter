@@ -64,7 +64,7 @@ def plugin_link_flags(entries, platform):
             "CMakeLists.txt `target_link_libraries` call for the plugin's " +
             "own library; the rest needs CMake:\n\n{groups}\n\n" +
             "Provide a plugin overlay for each package " +
-            "(flutter.plugin_overlays in MODULE.bazel): " +
+            "(flutter_pub.plugin_overlays in MODULE.bazel): " +
             "<root>/<package>/BUILD.bazel.tpl, declaring the plugin's " +
             "`flutter_{lower}_plugin_library` with the `linkopts` its " +
             "sources need."

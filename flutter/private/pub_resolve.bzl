@@ -1,12 +1,12 @@
 """Mapping a lock's packages to the workspace targets that stand for them.
 
-`flutter.pub(resolve = {name: label})` names, for a package of the lock, the
-target in the user's repository that builds it. A `path:` dependency's files are
-already in the repository, so every `path` entry of the lock must be mapped. A
-hosted, git or sdk entry may be mapped too, to replace the locked package for
-the whole graph with a fork or a patched copy: the hub's label for the package
-is the target, so a hosted package that depends on it gets it, and the locked
-package is not fetched.
+`flutter_pub.from_lock(resolve = {name: label})` names, for a package of the
+lock, the target in the user's repository that builds it. A `path:` dependency's
+files are already in the repository, so every `path` entry of the lock must be
+mapped. A hosted, git or sdk entry may be mapped too, to replace the locked
+package for the whole graph with a fork or a patched copy: the hub's label for
+the package is the target, so a hosted package that depends on it gets it, and
+the locked package is not fetched.
 
 Where a `path` entry points is pub's concern only: the map already says where
 Bazel gets the package, which may be another module (a sibling checkout pub
@@ -66,7 +66,7 @@ def _path_package_errors(lock, hub, name, info, resolve):
         else:
             suggestion = '    resolve = {{"{name}": "//<package>:<target>"}},'.format(name = name)
         return [
-            ("{lock} lists \"{name}\" from path \"{path}\", which flutter.pub(name = \"{hub}\") maps to no target. " +
+            ("{lock} lists \"{name}\" from path \"{path}\", which flutter_pub.from_lock(name = \"{hub}\") maps to no target. " +
              "Add the target that builds it to resolve:\n{suggestion}").format(
                 lock = str(lock),
                 name = name,
@@ -79,7 +79,7 @@ def _path_package_errors(lock, hub, name, info, resolve):
     return []
 
 def resolve_errors(lock, hub, lock_pkgs, resolve):
-    """Everything wrong with how `flutter.pub(resolve = ...)` maps the lock's packages.
+    """Everything wrong with how `flutter_pub.from_lock(resolve = ...)` maps the lock's packages.
 
     Args:
         lock: The lock's `Label`.
@@ -99,7 +99,7 @@ def resolve_errors(lock, hub, lock_pkgs, resolve):
     for name in sorted(resolve.keys()):
         if name not in lock_pkgs:
             errors.append(
-                ("flutter.pub(name = \"{hub}\") maps \"{name}\" in resolve, but {lock} does not list it. " +
+                ("flutter_pub.from_lock(name = \"{hub}\") maps \"{name}\" in resolve, but {lock} does not list it. " +
                  "Remove it from resolve, or re-resolve the lock: bazel run @rules_flutter//flutter:pub -- get").format(
                     hub = hub,
                     name = name,
@@ -109,7 +109,7 @@ def resolve_errors(lock, hub, lock_pkgs, resolve):
     return errors
 
 def resolved_targets(maps):
-    """The packages mapped to workspace targets, over every `flutter.pub()` tag.
+    """The packages mapped to workspace targets, over every `flutter_pub.from_lock()` tag.
 
     A mapped package is that target for the whole build: there is one
     repository per package, however many locks list it. The same package
@@ -141,7 +141,7 @@ def resolved_targets(maps):
             ).format(
                 name = name,
                 lines = "\n".join([
-                    "  - {target} (by the `resolve` of the flutter.pub() for {lock}, hub \"{hub}\")".format(
+                    "  - {target} (by the `resolve` of the flutter_pub.from_lock() for {lock}, hub \"{hub}\")".format(
                         target = x.target,
                         lock = x.lock,
                         hub = x.hub,

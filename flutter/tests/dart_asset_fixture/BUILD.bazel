@@ -62,8 +62,8 @@ flutter_library(
 )
 
 # The other half of the contract: a package that ships a build hook nothing
-# replaces, as `flutter.pub()` records when it finds `hook/build.dart` and the
-# curated registry has no entry for that package at that version. Using
+# replaces, as `flutter_pub.from_lock()` records when it finds `hook/build.dart`
+# and the curated registry has no entry for that package at that version. Using
 # `flutter_library` rather than `dart_library` is deliberate — what is under
 # test is that rules_flutter's own package rule carries the flag onto
 # `DartPackageInfo` and up through `transitive_packages`.

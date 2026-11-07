@@ -1,13 +1,13 @@
 """A `FLUTTER_ROOT`-shaped repository, for resolving pubspec.lock hermetically.
 
-Bazel *consumes* `pubspec.lock` (`flutter.pub()` reads it and creates one repo
-per package) but nothing in the build produces it. The toolchain rules_flutter
-downloads is engine artifacts plus a Dart SDK — there is no `bin/flutter` and
-no `pub` executable in it — so regenerating the lock after editing
-`pubspec.yaml` has meant reaching for a separately installed Flutter on `PATH`,
-at whatever version that happens to be. A lock resolved by a different SDK than
-the one that compiles it is a silent hazard: an older resolver caps packages at
-older versions, and nothing afterwards can tell.
+Bazel *consumes* `pubspec.lock` (`flutter_pub.from_lock()` reads it and creates
+one repo per package) but nothing in the build produces it. The toolchain
+rules_flutter downloads is engine artifacts plus a Dart SDK — there is no
+`bin/flutter` and no `pub` executable in it — so regenerating the lock after
+editing `pubspec.yaml` has meant reaching for a separately installed Flutter on
+`PATH`, at whatever version that happens to be. A lock resolved by a different
+SDK than the one that compiles it is a silent hazard: an older resolver caps
+packages at older versions, and nothing afterwards can tell.
 
 The Dart SDK inside the toolchain has `dart pub`, and pub can resolve
 `sdk: flutter` dependencies against any directory named by `FLUTTER_ROOT`. It

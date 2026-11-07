@@ -1,9 +1,9 @@
 """Unit tests for mapping a lock's packages to workspace targets.
 
-`flutter.pub(resolve = {...})` names the target that builds each `path` package
-of the lock, and may name the target that replaces any other. These pure checks
-run when the lock is read, so every case here is a mistake that must fail then,
-naming the lock, the package and the fix.
+`flutter_pub.from_lock(resolve = {...})` names the target that builds each
+`path` package of the lock, and may name the target that replaces any other.
+These pure checks run when the lock is read, so every case here is a mistake
+that must fail then, naming the lock, the package and the fix.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
@@ -74,7 +74,7 @@ def _an_unmapped_path_package_is_refused_test_impl(ctx):
         "pubspec.lock",
         "\"greeting\"",
         "path \"../../packages/greeting\"",
-        "flutter.pub(name = \"deps\")",
+        "flutter_pub.from_lock(name = \"deps\")",
         "resolve",
         "\"greeting\": \"//packages/greeting:<target>\"",
     ])
@@ -86,7 +86,7 @@ def _a_mapped_name_the_lock_lacks_is_refused_test_impl(ctx):
 
     errors = _errors([], {"ghost": Label("//packages/ghost")})
     asserts.equals(env, 1, len(errors))
-    _mentions(env, errors[0], ["\"ghost\"", "does not list it", "pubspec.lock", "flutter.pub(name = \"deps\")", "resolve"])
+    _mentions(env, errors[0], ["\"ghost\"", "does not list it", "pubspec.lock", "flutter_pub.from_lock(name = \"deps\")", "resolve"])
 
     return unittest.end(env)
 

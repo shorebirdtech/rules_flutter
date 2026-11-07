@@ -1,4 +1,4 @@
-"""Hub repo rule for `flutter.pub()` locks.
+"""Hub repo rule for `flutter_pub.from_lock()` locks.
 
 Mirrors `rules_dart//dart/pub:pub_lock_hub.bzl`'s top-level alias structure:
 `@<hub>//:pkg` aliases the package's library, `@flutter_pub_lib__<pkg>//:<pkg>`
@@ -21,8 +21,8 @@ asks for it. Non-Android workspaces (mac-only, web-only) don't pay the
 `@rules_android` / `@rules_kotlin` cost.
 
 This rule is the rules_flutter sibling of rules_dart's `pub_lock_hub`; the two
-never run for the same hub. `flutter.pub()` always invokes this one. `pub.pub()`
-(in non-Flutter modules) keeps using `pub_lock_hub`.
+never run for the same hub. `flutter_pub.from_lock()` always invokes this one.
+`pub.pub()` (in non-Flutter modules) keeps using `pub_lock_hub`.
 """
 
 load("//flutter/private:flutter_pub_index.bzl", "ANDROID_MAVEN_REPO", "GOLDENS_REPO", "library_repo", "source_repo")
@@ -105,7 +105,7 @@ flutter_pub_lock_hub = repository_rule(
     implementation = _flutter_pub_lock_hub_impl,
     attrs = {
         "hub_name": attr.string(
-            doc = "The hub's name, as the user gave `flutter.pub(name = ...)`.",
+            doc = "The hub's name, as the user gave `flutter_pub.from_lock(name = ...)`.",
             mandatory = True,
         ),
         "packages": attr.string_list(
@@ -125,7 +125,7 @@ flutter_pub_lock_hub = repository_rule(
             default = [],
         ),
     },
-    doc = "Creates a `flutter.pub()` hub repo: the top-level package aliases, an `android/` " +
+    doc = "Creates a `flutter_pub.from_lock()` hub repo: the top-level package aliases, an `android/` " +
           "package aliasing the build's Maven requirements, and, with `flutter_test`, a " +
           "`goldens/` package aliasing the golden service the integration test macros share.",
 )

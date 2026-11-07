@@ -1,12 +1,12 @@
 /// Pub inputs that rules_flutter honours today, and keeps honouring.
 ///
 /// The counterpart of `pub_inputs_red_e2e_test.dart`: the same generated
-/// `flutter.pub()` hub over `file://` packages, asked the questions whose
-/// answer is already right. They pin what a fix of the red tests must not
+/// `flutter_pub.from_lock()` hub over `file://` packages, asked the questions
+/// whose answer is already right. They pin what a fix of the red tests must not
 /// disturb, and they are the controls that show the red tests fail for the
-/// reason they name: an overlay present at the first fetch is used, so the
-/// ones added later failing is about being added later; a file name with a
-/// space builds, so the ones with a quote failing is about the quote.
+/// reason they name: an overlay present at the first fetch is used, so the ones
+/// added later failing is about being added later; a file name with a space
+/// builds, so the ones with a quote failing is about the quote.
 @Tags(['e2e'])
 library;
 

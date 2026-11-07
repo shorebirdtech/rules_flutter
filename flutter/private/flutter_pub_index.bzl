@@ -1,10 +1,10 @@
-"""How the repositories `flutter.pub()` makes find each other.
+"""How the repositories `flutter_pub.from_lock()` makes find each other.
 
 There is one repository per package for the whole build, however many hubs
-(`flutter.pub(name = ...)`) list it. A built package (a hosted package, or a
-Flutter SDK package other than `package:flutter`, which `flutter_pub_package`
-builds from the pinned Flutter source) is two repositories, made by the one
-module extension:
+(`flutter_pub.from_lock(name = ...)`) list it. A built package (a hosted
+package, or a Flutter SDK package other than `package:flutter`, which
+`flutter_pub_package` builds from the pinned Flutter source) is two
+repositories, made by the one module extension:
 
 * its source repository, `flutter_pub__<package>` (`flutter_pub_package`): the
   package's files, its `flutter_pub_member` (or rules_dart's
@@ -15,8 +15,8 @@ module extension:
   cycle's first package by name, which the others alias.
 
 `package:flutter` (`flutter_framework_package`), the stub for a lock entry
-nothing supplies, and a package `flutter.pub(resolve = ...)` maps to a workspace
-target (`flutter_resolved_package`) are each one repository named
+nothing supplies, and a package `flutter_pub.from_lock(resolve = ...)` maps to a
+workspace target (`flutter_resolved_package`) are each one repository named
 `flutter_pub__<package>`, which is its own library.
 
 Library repositories read what source repositories record (their pubspec
@@ -199,5 +199,5 @@ flutter_pub_index = repository_rule(
         "locks": attr.string_list(doc = "The locks' labels, for messages."),
         "flutter_constraints": attr.string_dict(doc = "The `sdks: flutter` constraint of each lock, by its label."),
     },
-    doc = "The packages the repositories of every `flutter.pub()` lock plan against.",
+    doc = "The packages the repositories of every `flutter_pub.from_lock()` lock plan against.",
 )

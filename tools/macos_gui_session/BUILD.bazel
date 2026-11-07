@@ -8,8 +8,8 @@ dart_library(
     name = "macos_gui_session",
     package_name = "rules_flutter_macos_gui_session",
     srcs = glob(["lib/**/*.dart"]),
-    # Public because `flutter.pub(resolve = ...)` in MODULE.bazel maps the dev
-    # tool's lock entry for this package to it, and the hub's repository
+    # Public because `flutter_pub.from_lock(resolve = ...)` in MODULE.bazel maps
+    # the dev tool's lock entry for this package to it, and the hub's repository
     # aliases it from outside this repository's packages.
     visibility = ["//visibility:public"],
 )

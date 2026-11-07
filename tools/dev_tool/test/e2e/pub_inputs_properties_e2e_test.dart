@@ -19,7 +19,7 @@
 ///  3. **Running pub through Bazel leaves the user's HOME alone.**
 ///
 /// The workspaces are generated (`pub_inputs_fixture.dart`): a real
-/// `flutter.pub()` hub over packages served from `file://`.
+/// `flutter_pub.from_lock()` hub over packages served from `file://`.
 @Tags(['e2e'])
 library;
 

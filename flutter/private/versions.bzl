@@ -121,8 +121,9 @@ FLUTTER_VERSIONS = {
 # version, per Flutter version and SDK package (the `dependencies:` of
 # `packages/*/pubspec.yaml`, `flutter_tools` aside). pub resolves any app that
 # uses an SDK package to those versions, so a build with one copy of each
-# package must not move a package past one: `flutter.pub` fails when a lock
-# would. `bazel run //tools/update_flutter_version -- <version>` prints the entry.
+# package must not move a package past one: `flutter_pub.from_lock` fails when a
+# lock would. `bazel run //tools/update_flutter_version -- <version>` prints the
+# entry.
 FLUTTER_SDK_EXACT_PINS = {
     "3.41.2": {
         "flutter": {

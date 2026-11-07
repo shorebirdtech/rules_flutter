@@ -8,8 +8,8 @@
 /// member keeps what is its own: its assets bundle under `packages/<name>/`,
 /// its plugin registers once.
 ///
-/// The generated workspace is the real `flutter.pub()` hub over `file://`
-/// packages (`pub_inputs_fixture.dart`); the checks are analysis-time
+/// The generated workspace is the real `flutter_pub.from_lock()` hub over
+/// `file://` packages (`pub_inputs_fixture.dart`); the checks are analysis-time
 /// assertions over the providers a target carries, so building a check is the
 /// test, and a Bazel dependency cycle shows as its own failure.
 @Tags(['e2e'])

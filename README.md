@@ -47,18 +47,21 @@ bazel_dep(name = "rules_flutter", version = "<latest from registry.bazel.build/m
 
 flutter = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter")
 flutter.toolchain(flutter_version = "3.47.9")
-flutter.pub(
+use_repo(flutter, "flutter_toolchains")
+
+register_toolchains("@flutter_toolchains//:all")
+
+flutter_pub = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter_pub")
+flutter_pub.from_lock(
     name = "deps",
     lock = "//:pubspec.lock",
 )
-use_repo(flutter, "deps", "flutter_toolchains")
-
-register_toolchains("@flutter_toolchains//:all")
+use_repo(flutter_pub, "deps")
 ```
 
-`flutter.toolchain` downloads the Flutter SDK and engine. Your root module's `flutter_version` is the one built with, whatever version rules_flutter or another dependency declares; without one, the highest version a dependency declares is used. `flutter.pub` reads your `pubspec.lock` and creates a repository, here named `deps`, with one target per package: `@deps//:flutter`, `@deps//:flutter_test`, `@deps//:collection`, and so on. See [Pub packages](#pub-packages).
+`flutter.toolchain` downloads the Flutter SDK and engine. Your root module's `flutter_version` is the one built with, whatever version rules_flutter or another dependency declares; without one, the highest version a dependency declares is used. `flutter_pub.from_lock` reads your `pubspec.lock` and creates a repository, here named `deps`, with one target per package: `@deps//:flutter`, `@deps//:flutter_test`, `@deps//:collection`, and so on. See [Pub packages](#pub-packages). The two are separate extensions so that a lock `flutter_pub` refuses leaves the toolchain working, and with it the command that fixes the lock.
 
-Some platforms need one more repository from the same extension. Add it to `use_repo` when you build for that platform:
+Some platforms need one more repository from the `flutter` extension. Add it to `use_repo(flutter, ...)` when you build for that platform:
 
 | Platform | Add to `use_repo` |
 |---|---|
@@ -178,7 +181,7 @@ To check a profile build from a test without those flags on the command line, wr
 
 ### Pub packages
 
-`flutter.pub` turns `pubspec.lock` into Bazel targets. Every package in the lock gets a target in the hub repository (a package you map with `resolve` is your target, see "Packages in your workspace" below): `@deps//:collection`, `@deps//:url_launcher`, `@deps//:flutter_test`. List them in `deps` like any other target:
+`flutter_pub.from_lock` turns `pubspec.lock` into Bazel targets. Every package in the lock gets a target in the hub repository (a package you map with `resolve` is your target, see "Packages in your workspace" below): `@deps//:collection`, `@deps//:url_launcher`, `@deps//:flutter_test`. List them in `deps` like any other target:
 
 ```starlark
 flutter_application(
@@ -215,7 +218,7 @@ A package's `flutter: assets:` are bundled at `packages/<package>/<path>`, as `f
 A `path:` dependency in `pubspec.yaml` is a package whose files are in your repository, and `pubspec.lock` lists it with `source: path`. You build those files with a target of your own, and `resolve` tells the hub which one builds which package:
 
 ```starlark
-flutter.pub(
+flutter_pub.from_lock(
     name = "deps",
     lock = "//apps/greeter:pubspec.lock",
     resolve = {
@@ -258,11 +261,11 @@ Add those lines to `artifacts = [...]` and re-pin the install's lock file:
 REPIN=1 bazel run @rules_android_maven//:pin
 ```
 
-To get the block for an app before building it, `bazel run //:my_app_maven_artifacts` (`<name>_maven_artifacts` for a `flutter_android_app` named `my_app`; `flutter_android_maven_artifacts` declares the same for a hand-wired app) prints the lines for the plugins that app depends on, and no others, marking the entries that are missing or too low. It works while the build is failing for lack of them, which is when to run it. `bazel run @flutter_pub_android_maven//:maven_artifacts` (declare it with `use_repo(flutter, "flutter_pub_android_maven")`, or use any hub's `@<hub>//android:maven_artifacts`, which aliases it) prints the block for every plugin of the build instead: use it to seed `maven.install` before any app exists, or for a workspace with several apps that share one install. Only Android builds read any of this; a web or desktop build never fetches it.
+To get the block for an app before building it, `bazel run //:my_app_maven_artifacts` (`<name>_maven_artifacts` for a `flutter_android_app` named `my_app`; `flutter_android_maven_artifacts` declares the same for a hand-wired app) prints the lines for the plugins that app depends on, and no others, marking the entries that are missing or too low. It works while the build is failing for lack of them, which is when to run it. `bazel run @flutter_pub_android_maven//:maven_artifacts` (declare it with `use_repo(flutter_pub, "flutter_pub_android_maven")`, or use any hub's `@<hub>//android:maven_artifacts`, which aliases it) prints the block for every plugin of the build instead: use it to seed `maven.install` before any app exists, or for a workspace with several apps that share one install. Only Android builds read any of this; a web or desktop build never fetches it.
 
 Coursier, which resolves the install, is stricter than Gradle about exact version ranges. For example, `androidx.preference:preference:1.2.1`, which `shared_preferences_android` needs, depends on `androidx.fragment:fragment` as `[1.3.6]`, an exact version, while other artifacts want a higher one. Gradle lets the higher version win; Coursier alone reports a conflict. rules_flutter's own `maven.install` passes Coursier `--reconciliation *:*:relaxed` through `additional_coursier_options`, which makes it pick the highest version too. rules_jvm_external concatenates those options across every module that declares an install of the name, so your `maven.install(name = "rules_android_maven")` inherits them and needs no `force_version` entries for such ranges. Do not set `resolver = "gradle"` or `"maven"` to get this: the Gradle resolver selects the JVM or desktop variant of Kotlin Multiplatform libraries (for example `androidx.lifecycle:lifecycle-runtime-desktop`) in place of the Android one, and the Maven resolver reports the same hard-range conflict.
 
-A dependency written any other way (a version catalog entry such as `libs.foo`, `project(...)`, `platform(...)`, `files(...)`, Groovy map notation, a trailing `{ exclude ... }` block, `kapt`, `ksp`, `annotationProcessor`, `coreLibraryDesugaring`, or a `debugImplementation`-style variant configuration) is listed in the same message as a line rules_flutter cannot translate. For such a package, supply a plugin overlay with `flutter.plugin_overlays`: a `BUILD.bazel.tpl` for the package and an `android/BUILD.bazel.tpl` that declares its Android library and the `@rules_android_maven` labels it needs. The `android/` template is used only beside the top-level one, and the top-level template's `flutter_plugin` must list that library under `exports`, as above, for an app to link it.
+A dependency written any other way (a version catalog entry such as `libs.foo`, `project(...)`, `platform(...)`, `files(...)`, Groovy map notation, a trailing `{ exclude ... }` block, `kapt`, `ksp`, `annotationProcessor`, `coreLibraryDesugaring`, or a `debugImplementation`-style variant configuration) is listed in the same message as a line rules_flutter cannot translate. For such a package, supply a plugin overlay with `flutter_pub.plugin_overlays`: a `BUILD.bazel.tpl` for the package and an `android/BUILD.bazel.tpl` that declares its Android library and the `@rules_android_maven` labels it needs. The `android/` template is used only beside the top-level one, and the top-level template's `flutter_plugin` must list that library under `exports`, as above, for an app to link it.
 
 Permissions a plugin declares in its own manifest, such as `record_android`'s `RECORD_AUDIO`, reach the app's manifest as they do under Gradle. You don't need `--merge_android_manifest_permissions`.
 
@@ -275,7 +278,7 @@ A plugin's C++ sources are compiled into your Linux or Windows app, so the app m
 - A list variable (`${wmf_libs}`) is read when the file sets it once, outside any block, to literal values before the call: `set(wmf_libs mf.lib mfplat.lib)`. Its values are read as above.
 - Anything else needs CMake to evaluate it: any other variable, a generator expression, an imported target such as `PkgConfig::LIBSECRET`, a target the plugin defines or fetches, a path, or a call inside an `if()` block.
 
-For a plugin with something of the last kind, the Windows or Linux app fails when it is built, listing each line and its package. Other platforms are unaffected. Supply a plugin overlay with `flutter.plugin_overlays`: a `BUILD.bazel.tpl` for the package that declares its `flutter_windows_plugin_library` or `flutter_linux_plugin_library` with the flags its sources need in `linkopts`.
+For a plugin with something of the last kind, the Windows or Linux app fails when it is built, listing each line and its package. Other platforms are unaffected. Supply a plugin overlay with `flutter_pub.plugin_overlays`: a `BUILD.bazel.tpl` for the package that declares its `flutter_windows_plugin_library` or `flutter_linux_plugin_library` with the flags its sources need in `linkopts`.
 
 ### Regenerating pubspec.lock
 
@@ -287,7 +290,7 @@ bazel run @rules_flutter//flutter:pub -- upgrade
 bazel run @rules_flutter//flutter:pub -- add qr
 ```
 
-Arguments pass through to `dart pub` unchanged, and the command runs at your workspace root, so the lock lands where `flutter.pub` reads it.
+Arguments pass through to `dart pub` unchanged, and the command runs at your workspace root, so the lock lands where `flutter_pub.from_lock` reads it.
 
 The version of Flutter that resolves the lock matters, and a mismatch is easy to miss. Pub treats the running Dart and Flutter versions as constraints, so an older installation quietly picks older packages, and the lock it writes is still valid. For example, resolving `e2e/plugin_example` with Flutter 3.41.6 pins `meta 1.17.0`, while the pinned 3.44.1 toolchain pins `meta 1.18.0`. Nothing downstream can tell the difference.
 
@@ -301,15 +304,15 @@ bazel run @rules_flutter//flutter:pub -- get --directory tools/my_tool
 
 ### Several locks in one build
 
-Every package is one repository for the whole build, however many `flutter.pub` tags list it: a hub (`@deps//:flutter`) is the set of aliases its own lock names. A build has one version of each package, the highest any lock records, and nothing is built below the version its lock records. By default a lock that is behind another on a package fails when the module is read, naming both locks and the fix, `bazel run @rules_flutter//flutter:pub -- upgrade <package>` in the lock's directory. A lock whose constraints do not allow the higher version sets `on_version_conflict = "upgrade"` on its `flutter.pub`, and its packages are built at it. The locks must otherwise agree: a package from different sources, registries or digests, or git commits, always fails. `resolve` and `ignore_hooks` apply to the whole build. rules_flutter's own tools are a lock of this kind (`on_version_conflict = "upgrade"`), so a release that moves them can put your lock behind: re-resolve it with the command above.
+Every package is one repository for the whole build, however many `flutter_pub.from_lock` tags list it: a hub (`@deps//:flutter`) is the set of aliases its own lock names. A build has one version of each package, the highest any lock records, and nothing is built below the version its lock records. By default a lock that is behind another on a package fails when the module is read, naming both locks and the fix, `bazel run @rules_flutter//flutter:pub -- upgrade --directory=<the lock's directory> <package>` from the workspace root. Only builds that use a hub fail: the toolchain comes from the other extension, so the fix runs. A lock whose constraints do not allow the higher version sets `on_version_conflict = "upgrade"` on its `flutter_pub.from_lock`, and its packages are built at it. The locks must otherwise agree: a package from different sources, registries or digests, or git commits, always fails. `resolve` and `ignore_hooks` apply to the whole build. rules_flutter's own tools are a lock of this kind (`on_version_conflict = "upgrade"`), so a release that moves them can put your lock behind: re-resolve it with the command above.
 
 ### Packages with build hooks
 
 Some pub packages compile native code through a Dart `hook/build.dart` (Dart Native Assets). Bazel does not run those hooks. Instead:
 
-- **Curated replacements.** rules_dart keeps a registry of Bazel-native equivalents (`@rules_dart//dart/ext:registry.bzl`). Where one exists, such as `sqlite3`, `flutter.pub` attaches it automatically. An app that depends on `drift` gets `libsqlite3` without naming it.
-- **Overlays.** For a package with a hook and no curated entry, you can write a `BUILD.bazel.tpl` that reproduces what the hook builds. rules_flutter bundles overlays under `ext/`, and you can add your own with `flutter.plugin_overlays(roots = [...])`. Authoring one is described in [docs/TESTING.md](docs/TESTING.md) under "Native Assets overlay authoring".
-- **Ignoring a hook.** If a package's native code is never reached in your app, say so: `flutter.pub(ignore_hooks = ["<package>"])`.
+- **Curated replacements.** rules_dart keeps a registry of Bazel-native equivalents (`@rules_dart//dart/ext:registry.bzl`). Where one exists, such as `sqlite3`, `flutter_pub.from_lock` attaches it automatically. An app that depends on `drift` gets `libsqlite3` without naming it.
+- **Overlays.** For a package with a hook and no curated entry, you can write a `BUILD.bazel.tpl` that reproduces what the hook builds. rules_flutter bundles overlays under `ext/`, and you can add your own with `flutter_pub.plugin_overlays(roots = [...])`. Authoring one is described in [docs/TESTING.md](docs/TESTING.md) under "Native Assets overlay authoring".
+- **Ignoring a hook.** If a package's native code is never reached in your app, say so: `flutter_pub.from_lock(ignore_hooks = ["<package>"])`.
 
 A hook that nothing replaces is an error when `flutter_application` reaches it. The alternative would be a build that succeeds and then fails at runtime on an unresolved `@Native` symbol.
 
@@ -899,7 +902,8 @@ Add these to `MODULE.bazel`:
 bazel_dep(name = "rules_android", version = "0.8.0")
 bazel_dep(name = "rules_android_ndk", version = "0.1.5")
 
-use_repo(flutter, "deps", "flutter_toolchains")
+use_repo(flutter, "flutter_toolchains")
+use_repo(flutter_pub, "deps")
 
 # The NDK CC toolchain, used for native and FFI deps built for Android and
 # to strip the engine's native libraries, as a Gradle build does.

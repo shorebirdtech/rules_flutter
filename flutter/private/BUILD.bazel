@@ -247,6 +247,12 @@ bzl_library(
 )
 
 bzl_library(
+    name = "flutter_sdks_repo",
+    srcs = ["flutter_sdks_repo.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+)
+
+bzl_library(
     name = "flutter_material_fonts_repo",
     srcs = ["flutter_material_fonts_repo.bzl"],
     visibility = ["//flutter:__subpackages__"],

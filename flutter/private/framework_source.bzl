@@ -95,10 +95,15 @@ def link_framework_package(ctx, package_name):
     for child in package_dir.readdir():
         ctx.symlink(child, child.basename)
 
-def _resolve_command(sdk, default_sdk, verb):
-    if sdk == default_sdk:
-        return "bazel run @rules_flutter//flutter:pub -- " + verb
-    return "bazel run --@rules_flutter//flutter:sdk={} @rules_flutter//flutter:pub -- {}".format(sdk, verb)
+def _resolve_commands(sdk, default_sdk, verb, locks):
+    """One command per lock, each run from the root of the workspace that holds the lock."""
+    flag = "" if sdk == default_sdk else "--@rules_flutter//flutter:sdk={} ".format(sdk)
+    commands = []
+    for lock in locks:
+        lock_dir = Label(lock).package
+        args = verb + (" --directory=" + lock_dir if lock_dir else "")
+        commands.append("bazel run {}@rules_flutter//flutter:pub -- {}".format(flag, args))
+    return "\n    ".join(commands)
 
 def check_lock_floor(index, sdk, framework_version, default_sdk = "flutter"):
     """Fails when the lock needs a newer Flutter than the SDK's framework.
@@ -118,14 +123,15 @@ def check_lock_floor(index, sdk, framework_version, default_sdk = "flutter"):
             fail((
                 "{lock} was resolved against a newer Flutter than the \"{sdk}\" SDK has: the lock " +
                 "requires flutter {constraint}, and the SDK's framework is {version}.\n" +
-                "Either use a newer framework or re-resolve against this SDK:\n" +
+                "Either use a newer framework or re-resolve against this SDK, from the " +
+                "root of the workspace that holds the lock:\n" +
                 "    {command}"
             ).format(
                 lock = lock,
                 sdk = sdk,
                 constraint = constraint,
                 version = framework_version,
-                command = _resolve_command(sdk, default_sdk, "get"),
+                command = _resolve_commands(sdk, default_sdk, "get", [lock]),
             ))
 
 def check_dependency_constraints(index, sdk, package, pubspec_fields, default_sdk = "flutter"):
@@ -162,9 +168,10 @@ def check_dependency_constraints(index, sdk, package, pubspec_fields, default_sd
     if problems:
         fail((
             "The lock does not fit the \"{sdk}\" Flutter SDK's framework:\n{problems}\n" +
-            "Re-resolve the lock against this SDK:\n    {command}"
+            "Re-resolve the locks against this SDK, from the root of the workspace that " +
+            "holds each:\n    {command}"
         ).format(
             sdk = sdk,
             problems = "\n".join(problems),
-            command = _resolve_command(sdk, default_sdk, "get"),
+            command = _resolve_commands(sdk, default_sdk, "get", index.locks),
         ))

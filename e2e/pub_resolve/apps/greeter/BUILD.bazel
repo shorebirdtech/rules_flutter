@@ -6,8 +6,9 @@ load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
 exports_files(["pubspec.lock"])
 
 # The app depends on `@deps//:greeting`, the hub's name for the path package
-# `flutter.pub(resolve = ...)` maps to //packages/greeting. Going through the hub
-# is what checks the lock against that package's pubspec.yaml on every build.
+# `flutter_pub.from_lock(resolve = ...)` maps to //packages/greeting. Going
+# through the hub is what checks the lock against that package's pubspec.yaml on
+# every build.
 _DEPS = [
     "@deps//:flutter",
     "@deps//:greeting",

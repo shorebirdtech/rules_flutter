@@ -1,4 +1,4 @@
-"""Spoke for a package `flutter.pub(resolve = ...)` maps to a workspace target.
+"""Spoke for a package `flutter_pub.from_lock(resolve = ...)` maps to a workspace target.
 
 The package's files are in the user's repository, built there by a
 `flutter_library`, `flutter_plugin` or `dart_library`. This repository holds one
@@ -41,5 +41,5 @@ flutter_resolved_package = repository_rule(
         "actual": attr.string(mandatory = True, doc = "The canonical label of the target that builds the package."),
         "lock": attr.string(mandatory = True, doc = "The lock's label, for messages."),
     },
-    doc = "A hub spoke that stands for a lock's package with the workspace target `flutter.pub(resolve = ...)` maps it to.",
+    doc = "A hub spoke that stands for a lock's package with the workspace target `flutter_pub.from_lock(resolve = ...)` maps it to.",
 )

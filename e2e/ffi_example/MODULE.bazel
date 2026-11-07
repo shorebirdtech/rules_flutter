@@ -18,11 +18,16 @@ local_path_override(
 
 flutter = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter")
 flutter.toolchain(flutter_version = "3.47.9")
-flutter.pub(
+
+flutter_pub = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter_pub")
+flutter_pub.from_lock(
     name = "deps",
     lock = "//:pubspec.lock",
 )
-use_repo(flutter, "deps", "flutter_ios_engine", "flutter_macos_engine", "flutter_toolchains")
+
+use_repo(flutter, "flutter_ios_engine", "flutter_macos_engine", "flutter_toolchains")
+
+use_repo(flutter_pub, "deps")
 
 register_toolchains("@flutter_toolchains//:all")
 

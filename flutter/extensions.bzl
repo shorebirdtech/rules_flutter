@@ -1,7 +1,10 @@
 """Extensions for bzlmod.
 
-Installs a Flutter toolchain and optionally resolves pub dependencies
-(including Flutter SDK packages like package:flutter).
+`flutter` installs the Flutter SDKs and their toolchains. `flutter_pub` resolves
+pub dependencies (including Flutter SDK packages like package:flutter) from
+`pubspec.lock` files; it is its own extension so that a lock it refuses breaks
+only the builds that use its repositories, never the toolchains, and
+`bazel run @rules_flutter//flutter:pub`, which fixes the lock, still runs.
 
 Every module can define a toolchain version under the default name, "flutter".
 The latest of those versions will be selected (the rest discarded),
@@ -30,6 +33,7 @@ load("//flutter/private:flutter_pub_lock_hub.bzl", "flutter_pub_lock_hub")
 load("//flutter/private:flutter_pub_package.bzl", "flutter_pub_package")
 load("//flutter/private:flutter_resolved_package.bzl", "flutter_resolved_package")
 load("//flutter/private:flutter_sdk_toolchains_repo.bzl", "flutter_sdk_toolchains_repo")
+load("//flutter/private:flutter_sdks_repo.bzl", "SDKS_FILE", "decode_sdks", "encode_sdks", "flutter_sdks_repo")
 load("//flutter/private:flutter_unsupported_package.bzl", "flutter_unsupported_package", "unsupported_package_message")
 load("//flutter/private:linux_runtime_pins.bzl", "LINUX_RUNTIME")
 load("//flutter/private:lock_entry_kind.bzl", "ENGINE_PROVIDED", "FLUTTER_FRAMEWORK", "FLUTTER_SOURCE", "GIT", "HOSTED", "UNSUPPORTED", "lock_entry_kind")
@@ -42,6 +46,9 @@ load("//flutter/private:versions.bzl", "CHROME_FOR_TESTING", "FLUTTER_VERSIONS",
 load(":repositories.bzl", "flutter_register_toolchains")
 
 _DEFAULT_NAME = "flutter"
+
+# The SDKs the `flutter` extension declared, as `flutter_sdks_repo` writes them.
+_SDKS = Label("@flutter_sdks//:" + SDKS_FILE)
 
 flutter_toolchain = tag_class(attrs = {
     "name": attr.string(doc = """\
@@ -108,7 +115,7 @@ not fetched, and its version is not checked. Naming a package the lock does
 not list is an error.
 
 ```starlark
-flutter.pub(
+flutter_pub.from_lock(
     name = "deps",
     lock = "//apps/greeter:pubspec.lock",
     resolve = {
@@ -123,13 +130,14 @@ flutter.pub(
     ),
     "on_version_conflict": attr.string(
         doc = """\
-What to do when another `flutter.pub` lock brings a higher version of a package
-this lock lists. A build has one version of each package, the highest any lock
-records, and nothing is built below the version its lock records.
+What to do when another `flutter_pub.from_lock` lock brings a higher version of
+a package this lock lists. A build has one version of each package, the highest
+any lock records, and nothing is built below the version its lock records.
 
 `"error"` (the default) fails when the module is read, naming both locks and the
-fix (`bazel run @rules_flutter//flutter:pub -- upgrade <package>` in this lock's
-directory). `"upgrade"` accepts the higher version: this lock's packages are
+fix (`bazel run @rules_flutter//flutter:pub -- upgrade --directory=<this lock's
+directory> <package>`, from the workspace root), which runs while the locks
+disagree. `"upgrade"` accepts the higher version: this lock's packages are
 built at it. Use it for a lock whose constraints do not allow the version the
 other brings, or for a tool's own lock, which must not stop a consumer.
 
@@ -166,6 +174,7 @@ _flutter_plugin_overlays = tag_class(attrs = {
 
 def _declared_sdks(module_ctx):
     """The SDKs the modules declare: a struct for each, by name."""
+
     # The root module chooses each toolchain's Flutter version, as it chooses
     # every toolchain: its own tag wins. A name the root does not declare takes
     # the highest version the other modules ask for.
@@ -302,18 +311,34 @@ def _framework_key(sdk):
         return "source " + str(sdk.framework)
     return "release " + sdk.version
 
+def _moved_to_flutter_pub(module_ctx):
+    """Fails naming each module that still declares pub tags on `flutter`."""
+    stale = [
+        mod.name
+        for mod in module_ctx.modules
+        if mod.tags.pub or mod.tags.plugin_overlays
+    ]
+    if stale:
+        fail(("`flutter.pub(...)` and `flutter.plugin_overlays(...)` moved to their own extension. " +
+              "In the MODULE.bazel of {modules}:\n" +
+              "    flutter_pub = use_extension(\"@rules_flutter//flutter:extensions.bzl\", \"flutter_pub\")\n" +
+              "    flutter_pub.from_lock(...)        # was flutter.pub(...), same attributes\n" +
+              "    flutter_pub.plugin_overlays(...)  # was flutter.plugin_overlays(...)\n" +
+              "    use_repo(flutter_pub, \"deps\")     # the hubs leave use_repo(flutter, ...)").format(
+            modules = ", ".join(sorted(stale)),
+        ))
+
 def _toolchain_extension(module_ctx):
+    _moved_to_flutter_pub(module_ctx)
     sdks = _declared_sdks(module_ctx)
-    selected_versions = {}
     engine_prefixes = {}
     for name in sorted(sdks.keys()):
         sdk = sdks[name]
         engine_prefixes[name] = _register_sdk(sdk)
 
-        # The SDK's dev root, for `@rules_flutter//flutter:pub`, and the
-        # gen-l10n generator, carved out of its flutter_tools. Declared
+        # The SDK's dev root, for `@rules_flutter//flutter:pub`. Declared
         # unconditionally because bzlmod repositories are lazy: a workspace
-        # that never references them never fetches the tarball.
+        # that never references it never fetches the tarball.
         released = sdk.version and not sdk.framework
         flutter_dev_root_repo(
             name = name + "_dev_root_src",
@@ -322,13 +347,6 @@ def _toolchain_extension(module_ctx):
             engine_revision = FLUTTER_VERSIONS[sdk.version].engine_revision if released else "",
             sha256 = flutter_source_sha256(sdk.version) if released else "",
         )
-        flutter_gen_l10n_repo(
-            name = name + "_gen_l10n_src",
-            flutter_version = sdk.version or "",
-            framework_json = _framework_json(sdk.framework) if sdk.framework else None,
-            sha256 = flutter_source_sha256(sdk.version) if released else "",
-        )
-        selected_versions[name] = sdk.version
 
     # The repositories rules_flutter and its users name by fixed names, each
     # an alias into the selected SDK's own.
@@ -343,10 +361,11 @@ def _toolchain_extension(module_ctx):
         sdks = {name: "@{}_dev_root_src".format(name) for name in sdks},
         targets = {"dev_root": "{prefix}//:dev_root", "version_manifest": "{prefix}//:version_manifest"},
     )
-    flutter_face_repo(
-        name = "flutter_gen_l10n",
-        sdks = {name: "@{}_gen_l10n_src".format(name) for name in sdks},
-        targets = {"gen_l10n": "{prefix}//:gen_l10n"},
+
+    # What `flutter_pub` needs of the SDKs: it cannot see the toolchain tags.
+    flutter_sdks_repo(
+        name = "flutter_sdks",
+        sdks = encode_sdks(sdks),
     )
 
     # Every SDK's toolchains, chosen among by `--@rules_flutter//flutter:sdk`.
@@ -379,29 +398,68 @@ def _toolchain_extension(module_ctx):
             floor = LINUX_RUNTIME.floor,
         )
 
-    # Collect user-supplied overlay roots from `flutter.plugin_overlays(...)`
-    # tags. They're applied to every flutter_pub_package invocation in
-    # the order seen, then the bundled `@rules_flutter//ext` root. This
-    # makes any pub plugin user-fixable locally — drop a
-    # `<workspace>/plugin_overlays/<pkg>/<major>/BUILD.bazel.tpl` and
+    # Don't declare root_module_direct_deps: flutter_register_toolchains creates
+    # many repos (iOS, Android, web, desktop, cross-compile per platform) and
+    # each user workspace only needs a subset — a macOS-only app doesn't want
+    # Android engine repos forced into its use_repo. Declaring a strict subset
+    # makes `bazel mod tidy` strip out repos the user actually needs; declaring
+    # the full set makes tidy force repos they don't. Letting users maintain
+    # their own use_repo lists (rules_python does the same) is the right
+    # tradeoff for an extension with this many optional outputs.
+    return module_ctx.extension_metadata(reproducible = True)
+
+def _pub_extension(module_ctx):
+    # The SDKs, as the `flutter` extension declared them. Read from its
+    # repository so that extension never reads a lock: a problem with the
+    # locks fails this extension's repositories alone, and the toolchains,
+    # with the `@rules_flutter//flutter:pub` runner that fixes the locks, still
+    # work.
+    sdks = decode_sdks(module_ctx.read(_SDKS))
+
+    # The gen-l10n generator of each SDK, carved out of its flutter_tools, and
+    # the fixed name that follows the selected SDK. Here, not in `flutter`,
+    # because its dependencies are packages of the locks (rules_flutter's own
+    # lock among them). Declared unconditionally because bzlmod repositories
+    # are lazy: a workspace that never references them never fetches the
+    # tarball.
+    for name in sorted(sdks.keys()):
+        sdk = sdks[name]
+        released = sdk.version and not sdk.framework
+        flutter_gen_l10n_repo(
+            name = name + "_gen_l10n_src",
+            flutter_version = sdk.version or "",
+            framework_json = _framework_json(sdk.framework) if sdk.framework else None,
+            sha256 = flutter_source_sha256(sdk.version) if released else "",
+        )
+    flutter_face_repo(
+        name = "flutter_gen_l10n",
+        sdks = {name: "@{}_gen_l10n_src".format(name) for name in sdks},
+        targets = {"gen_l10n": "{prefix}//:gen_l10n"},
+    )
+
+    # Collect user-supplied overlay roots from
+    # `flutter_pub.plugin_overlays(...)` tags. They're applied to every
+    # flutter_pub_package invocation in the order seen, then the bundled
+    # `@rules_flutter//ext` root. This makes any pub plugin user-fixable locally
+    # — drop a `<workspace>/plugin_overlays/<pkg>/<major>/BUILD.bazel.tpl` and
     # register the root in MODULE.bazel; the next build picks it up.
     user_overlay_roots = []
     for mod in module_ctx.modules:
         for tag in mod.tags.plugin_overlays:
             user_overlay_roots.extend(tag.roots)
 
-    # Handle flutter.pub() tags — resolve pubspec.lock with Flutter SDK support.
-    # Every tag of every module is read first, because a package is one
-    # repository for the whole build: the locks that list it must agree on it
-    # (`reconcile_package`), and a package any tag maps with `resolve` is that
-    # target for every hub.
+    # Handle flutter_pub.from_lock() tags — resolve pubspec.lock with Flutter
+    # SDK support. Every tag of every module is read first, because a package is
+    # one repository for the whole build: the locks that list it must agree on
+    # it (`reconcile_package`), and a package any tag maps with `resolve` is
+    # that target for every hub.
     tags = []
     for mod in module_ctx.modules:
-        for pub_tag in mod.tags.pub:
+        for pub_tag in mod.tags.from_lock:
             hub_name = pub_tag.name
             if hub_name == SPOKE_PREFIX or hub_name.startswith(SPOKE_PREFIX + "_") or hub_name.startswith(SPOKE_PREFIX + "-"):
                 fail((
-                    "flutter.pub(name = \"{}\") is reserved: hubs may not be named " +
+                    "flutter_pub.from_lock(name = \"{}\") is reserved: hubs may not be named " +
                     "`{}` or start with `{}_` or `{}-`, which name the repositories " +
                     "shared by every hub."
                 ).format(hub_name, SPOKE_PREFIX, SPOKE_PREFIX, SPOKE_PREFIX))
@@ -413,25 +471,15 @@ def _toolchain_extension(module_ctx):
             if resolve_problems:
                 fail("\n\n".join(resolve_problems))
 
-            # The default SDK must exist; the lock is checked against each SDK's
-            # framework by that SDK's own `package:flutter` spoke, which only
-            # the SDK a build selects fetches.
-            if not selected_versions.keys():
-                fail("flutter.pub() requires a flutter.toolchain() to be registered.")
+            # The lock is checked against each SDK's framework by that SDK's own
+            # `package:flutter` spoke, which only the SDK a build selects
+            # fetches.
             flutter_constraint = parse_lock_sdk_constraints(lock_content).get("flutter", "")
             tags.append(struct(tag = pub_tag, packages = lock_pkgs, flutter_constraint = flutter_constraint))
 
     if tags:
         _declare_pub_packages(tags, sdks, user_overlay_roots)
 
-    # Don't declare root_module_direct_deps: flutter_register_toolchains creates
-    # many repos (iOS, Android, web, desktop, cross-compile per platform) and
-    # each user workspace only needs a subset — a macOS-only app doesn't want
-    # Android engine repos forced into its use_repo. Declaring a strict subset
-    # makes `bazel mod tidy` strip out repos the user actually needs; declaring
-    # the full set makes tidy force repos they don't. Letting users maintain
-    # their own use_repo lists (rules_python does the same) is the right
-    # tradeoff for an extension with this many optional outputs.
     return module_ctx.extension_metadata(reproducible = True)
 
 def _hosted_entry(tag, name, info):
@@ -479,7 +527,7 @@ def _hub_listing(hub_packages, package):
     return [h for h in sorted(hub_packages.keys()) if package in hub_packages[h]][0]
 
 def _declare_pub_packages(tags, sdks, user_overlay_roots):
-    """Declares the repositories of every `flutter.pub()` tag: one per package.
+    """Declares the repositories of every `flutter_pub.from_lock()` tag: one per package.
 
     Args:
         tags: One `struct(tag, packages)` per tag, `packages` being its parsed lock.
@@ -531,6 +579,7 @@ def _declare_pub_packages(tags, sdks, user_overlay_roots):
             entries.setdefault(name, []).append(struct(
                 hub = tag.name,
                 lock_label = str(tag.lock),
+                lock_dir = tag.lock.package,
                 on_version_conflict = tag.on_version_conflict,
                 **fields
             ))
@@ -709,10 +758,11 @@ def _declare_pub_packages(tags, sdks, user_overlay_roots):
         flutter_pub_goldens(name = GOLDENS_REPO)
 
     # One hub repo per name, with aliases for the packages of its lock(s). Two
-    # tags of one name are one hub holding both locks' packages. flutter.pub()
-    # always uses `flutter_pub_lock_hub` (not rules_dart's plain `pub_lock_hub`)
-    # for its `android/` and `goldens/` packages. Non-Flutter pub.pub()
-    # consumers keep using rules_dart's plain hub.
+    # tags of one name are one hub holding both locks' packages.
+    # flutter_pub.from_lock() always uses `flutter_pub_lock_hub` (not
+    # rules_dart's plain `pub_lock_hub`) for its `android/` and `goldens/`
+    # packages. Non-Flutter pub.pub() consumers keep using rules_dart's plain
+    # hub.
     for hub_name, packages in sorted(hub_packages.items()):
         flutter_pub_lock_hub(
             name = hub_name,
@@ -727,10 +777,27 @@ flutter = module_extension(
     implementation = _toolchain_extension,
     tag_classes = {
         "toolchain": flutter_toolchain,
+        # Moved to `flutter_pub`. Declared here only so a module still using
+        # them gets the migration, not Bazel's bare "does not generate
+        # repository" error.
         "pub": _flutter_pub,
         "plugin_overlays": _flutter_plugin_overlays,
     },
     os_dependent = False,
     arch_dependent = False,
-    doc = "Installs a Flutter SDK toolchain and optionally resolves pub dependencies including Flutter SDK packages.",
+    doc = "Installs the Flutter SDKs and their toolchains.",
+)
+
+flutter_pub = module_extension(
+    implementation = _pub_extension,
+    tag_classes = {
+        "from_lock": _flutter_pub,
+        "plugin_overlays": _flutter_plugin_overlays,
+    },
+    os_dependent = False,
+    arch_dependent = False,
+    doc = "Resolves pub dependencies, including Flutter SDK packages, from " +
+          "`pubspec.lock` files. Separate from `flutter`, so that a lock it " +
+          "refuses leaves the toolchains working, and with them `bazel run " +
+          "@rules_flutter//flutter:pub`, which fixes the lock.",
 )

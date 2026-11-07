@@ -1,12 +1,13 @@
-"""Repositories for the fixture packages, as `flutter.pub` would make them.
+"""Repositories for the fixture packages, as `flutter_pub.from_lock` makes them.
 
-Each package is the repositories `flutter.pub` makes of a built package: its source and its
-library, and the one index over the packages. `MODULE.bazel` names the library
-of each, which is what an application depends on.
+Each package is the repositories `flutter_pub.from_lock` makes of a built
+package: its source and its library, and the one index over the packages.
+`MODULE.bazel` names the library of each, which is what an application depends
+on.
 """
 
-# The repository rules `flutter.pub` makes a package's repositories with, loaded
-# to make our own: there is no public name for them.
+# The repository rules `flutter_pub.from_lock` makes a package's repositories
+# with, loaded to make our own: there is no public name for them.
 # buildifier: disable=bzl-visibility
 load("@rules_flutter//flutter/private:flutter_pub_index.bzl", "INDEX_REPO", "flutter_pub_index", "library_repo", "source_repo")
 

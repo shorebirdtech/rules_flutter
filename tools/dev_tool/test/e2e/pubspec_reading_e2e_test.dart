@@ -12,7 +12,7 @@
 ///     Android library and its files exactly as the block style does.
 ///
 /// The workspaces are generated (`pub_inputs_fixture.dart`): a real
-/// `flutter.pub()` hub over packages served from `file://`.
+/// `flutter_pub.from_lock()` hub over packages served from `file://`.
 @Tags(['e2e'])
 library;
 

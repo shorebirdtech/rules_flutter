@@ -1,4 +1,4 @@
-"""Unit tests for reconciling a package that several `flutter.pub()` locks list.
+"""Unit tests for reconciling a package that several `flutter_pub.from_lock()` locks list.
 
 There is one repository per package for the whole build, so locks that list the
 same package must agree on it. Every case here is a disagreement that must fail
@@ -9,8 +9,11 @@ load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("//flutter/private:lock_entry_kind.bzl", "FLUTTER_SOURCE", "GIT", "HOSTED", "UNSUPPORTED")
 load("//flutter/private:pub_reconcile.bzl", "reconcile_package", "sdk_pin_errors", "unsupported_locks")
 
+def _dir(lock):
+    return lock.split("//")[1].split(":")[0]
+
 def _hosted(version, hub = "deps", lock = "//app:pubspec.lock", sha256 = "aa", url = "https://pub.dev", on_version_conflict = "error"):
-    return struct(kind = HOSTED, version = version, sha256 = sha256, url = url, hub = hub, lock_label = lock, on_version_conflict = on_version_conflict)
+    return struct(kind = HOSTED, version = version, sha256 = sha256, url = url, hub = hub, lock_label = lock, lock_dir = _dir(lock), on_version_conflict = on_version_conflict)
 
 def _git(ref, hub = "deps", lock = "//app:pubspec.lock", url = "https://github.com/x/foo.git", path = ".", git_lock = ""):
     return struct(kind = GIT, version = "1.0.0", git_url = url, resolved_ref = ref, git_path = path, git_lock = git_lock, hub = hub, lock_label = lock)
@@ -64,9 +67,23 @@ def _a_lower_version_at_error_is_refused_test_impl(ctx):
         "1.19.0 (hub \"dev_tool_deps\", @rules_flutter//:pubspec.lock, on_version_conflict = \"upgrade\")",
         "the highest a lock records",
         "//app:pubspec.lock pins a lower one",
-        "bazel run @rules_flutter//flutter:pub -- upgrade meta",
+        "from the root of the workspace that holds it",
+        "\n       bazel run @rules_flutter//flutter:pub -- upgrade --directory=app meta\n",
         "on_version_conflict = \"upgrade\"",
         "constraints forbid 1.19.0",
+    ])
+
+    # A lock at the workspace root needs no directory; two locks behind get a
+    # command each.
+    r = reconcile_package("meta", [
+        _hosted("1.18.0", lock = "//:pubspec.lock"),
+        _hosted("1.18.0", hub = "b", lock = "//b/c:pubspec.lock"),
+        _hosted("1.19.0", hub = "tools", lock = "//tools:pubspec.lock"),
+    ])
+    _mentions(env, r.errors[0], [
+        "\n       bazel run @rules_flutter//flutter:pub -- upgrade meta\n",
+        "\n       bazel run @rules_flutter//flutter:pub -- upgrade --directory=b/c meta\n",
+        "holds each",
     ])
 
     return unittest.end(env)

@@ -1,5 +1,5 @@
 /// A lock's packages are built from workspace targets the user maps with
-/// `flutter.pub(resolve = {...})`.
+/// `flutter_pub.from_lock(resolve = {...})`.
 ///
 /// **The properties:**
 ///

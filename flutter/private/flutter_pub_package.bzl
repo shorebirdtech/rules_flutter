@@ -38,12 +38,12 @@ about itself. Its *library*, the target other packages depend on, is made by
 `flutter_pub_library_repo` over the members of the package's dependency cycle,
 which is why a member has no dependencies of its own.
 
-This is the rules_flutter sibling of rules_dart's `pub_lock_package`. The
-two rules never run for the same package: `flutter.pub()` always invokes
-this one for hosted pub packages; `pub.pub()` (in non-Flutter modules)
-keeps using `pub_lock_package`. Both fetch and lay out the archive with
-rules_dart's `fetch_pub_archive`, so one package version is the same tree
-whichever rule asks for it.
+This is the rules_flutter sibling of rules_dart's `pub_lock_package`. The two
+rules never run for the same package: `flutter_pub.from_lock()` always invokes
+this one for hosted pub packages; `pub.pub()` (in non-Flutter modules) keeps
+using `pub_lock_package`. Both fetch and lay out the archive with rules_dart's
+`fetch_pub_archive`, so one package version is the same tree whichever rule asks
+for it.
 """
 
 load("@rules_dart//dart/pub:pub_graph.bzl", "write_pubspec_dependencies")
@@ -424,7 +424,7 @@ def _detect_android_native_build(ctx):
     into a shared library the APK must carry — e.g. package:jni's
     libdartjni.so. rules_flutter has no generic translation for those
     builds; packages that need one ship a curated overlay (bundled under
-    `@rules_flutter//ext/` or user-supplied via `flutter.plugin_overlays`).
+    `@rules_flutter//ext/` or user-supplied via `flutter_pub.plugin_overlays`).
     Detection lets the generated android/ sub-package fail loudly instead
     of silently producing an APK missing the library.
     """
@@ -445,7 +445,7 @@ def _make_android_native_build_unsupported_content(package_name, version):
         "Gradle's externalNativeBuild, which rules_flutter cannot " +
         "translate automatically. An APK built without that library would " +
         "crash at plugin registration, so this is a hard error. Provide a " +
-        "plugin overlay for {pkg} (flutter.plugin_overlays in MODULE.bazel) " +
+        "plugin overlay for {pkg} (flutter_pub.plugin_overlays in MODULE.bazel) " +
         "that compiles the package's native sources with cc_shared_library " +
         "and ships them through flutter_plugin.native_deps — see " +
         "@rules_flutter//ext/jni for the canonical example."

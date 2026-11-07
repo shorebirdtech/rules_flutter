@@ -99,14 +99,14 @@ def check_unreplaced_hooks(label, deps):
     native function" with nothing pointing at the cause.
 
     Checked at the application rather than when the spoke repo is generated.
-    `flutter.pub()` materialises the whole lock file, so failing at generation
-    would fail over packages nothing depends on, and on platforms where the
-    hook is irrelevant. Only a package an application actually reaches is a
-    problem, and only here is the depending target known.
+    `flutter_pub.from_lock()` materialises the whole lock file, so failing at
+    generation would fail over packages nothing depends on, and on platforms
+    where the hook is irrelevant. Only a package an application actually reaches
+    is a problem, and only here is the depending target known.
 
     rules_dart applies the same rule at `dart_binary`. The two differ in the
     remediation they suggest: a Flutter user fixes this through
-    `flutter.pub()`, not `pub.from_lock()`.
+    `flutter_pub.from_lock()`, not `pub.from_lock()`.
 
     Args:
       label: The consuming target's label, for the message.
@@ -137,9 +137,9 @@ def check_unreplaced_hooks(label, deps):
         "Bazel cannot run:\n%s\n\n" +
         "Their `@Native` bindings will not resolve at runtime. Either:\n" +
         "  - add a `dart_code_asset` to the owning package's `code_assets` " +
-        "(for a pub package, that means a `flutter.plugin_overlays` entry, " +
+        "(for a pub package, that means a `flutter_pub.plugin_overlays` entry, " +
         "or a curated entry upstream in rules_dart), or\n" +
-        "  - list the package in `flutter.pub(ignore_hooks = [...])` if its " +
+        "  - list the package in `flutter_pub.from_lock(ignore_hooks = [...])` if its " +
         "native code is genuinely unused here."
     ) % (
         label,

@@ -1,8 +1,8 @@
 """A pub registry served from the packages under `//registry`.
 
-`flutter.pub` resolves hosted packages from the URLs in a lock file, which
-cannot name a directory of this checkout. This serves the directory instead,
-as a `file:` URL, in the layout pub.dev has
+`flutter_pub.from_lock` resolves hosted packages from the URLs in a lock file,
+which cannot name a directory of this checkout. This serves the directory
+instead, as a `file:` URL, in the layout pub.dev has
 (`packages/<name>/versions/<version>.tar.gz`), so the spokes that fetch it run
 the same repository rule, `flutter_pub_package`, that a pub.dev package does.
 """

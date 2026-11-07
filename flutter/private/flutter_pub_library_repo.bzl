@@ -1,4 +1,4 @@
-"""The library repository of a built package of `flutter.pub()`.
+"""The library repository of a built package of `flutter_pub.from_lock()`.
 
 A package's files are in its source repository (`flutter_pub_package`); this
 one decides what it is built with. It reads the pubspec dependencies of every

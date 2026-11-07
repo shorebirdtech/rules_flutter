@@ -1,5 +1,5 @@
-/// Several `flutter.pub()` locks share one repository per package, so they must
-/// agree on what a package is.
+/// Several `flutter_pub.from_lock()` locks share one repository per package, so
+/// they must agree on what a package is.
 ///
 /// **The properties:**
 ///
@@ -8,8 +8,9 @@
 ///     either hub's name exists.
 ///  2. A lock behind another on a package fails when the module is read, at
 ///     `on_version_conflict = "error"`, naming both locks, both versions, the
-///     package and the command that fixes it. At `"upgrade"` it builds the
-///     higher version.
+///     package and the command that fixes it. That command runs while the
+///     conflict stands (the toolchain it needs is another extension's), and
+///     after it the hub analyses. At `"upgrade"` it builds the higher version.
 ///  3. Locks that disagree on where a package comes from, or on the digest of
 ///     one version, fail naming both.
 ///  4. A package mapped with `resolve` is that target for every hub and the
@@ -112,6 +113,66 @@ void main() {
         ),
         reason: '$result',
       );
+    },
+  );
+
+  test(
+    'the command a version conflict names runs while the conflict stands, '
+    'and fixes it',
+    () async {
+      final ws = await PubInputsFixture(
+        http: true,
+        lockPackage: 'app',
+        hosted: [HostedPackage('vplain', version: '1.0.0')],
+        files: {
+          'app/pubspec.yaml':
+              'name: app\n'
+              'environment:\n'
+              '  sdk: ^3.0.0\n'
+              'dependencies:\n'
+              '  vplain:\n'
+              '    hosted: "{{SERVER}}"\n'
+              '    version: ^1.0.0\n',
+        },
+        otherHubs: [
+          _other([HostedPackage('vplain', version: '1.1.0')]),
+        ],
+      ).materialize();
+
+      final conflict = await ws.query('@pubhub//:vplain');
+      expect(conflict.succeeded, isFalse, reason: '$conflict');
+      final commands = RegExp(
+        r'^\s*bazel run (\S+) -- (.+)$',
+        multiLine: true,
+      ).allMatches(conflict.output).toList();
+      expect(commands, hasLength(1), reason: '$conflict');
+      final command = commands.single;
+
+      // The cache is the test's own, so the packages of its registry do not
+      // land in the developer's.
+      final cache = Directory.systemTemp.createTempSync('pub_cache_');
+      addTearDown(() => cache.deleteSync(recursive: true));
+      final fixed = await ws.bazel(
+        [
+          'run',
+          command.group(1)!,
+          '--',
+          ...command.group(2)!.trim().split(RegExp(r'\s+')),
+        ],
+        environment: {'PUB_CACHE': cache.path},
+      );
+      expect(fixed.succeeded, isTrue, reason: '$fixed');
+      expect(
+        ws.file('app/pubspec.lock').readAsStringSync(),
+        contains('version: "1.1.0"'),
+      );
+
+      final analysed = await ws.bazel([
+        'build',
+        '--nobuild',
+        '@pubhub//:vplain',
+      ]);
+      expect(analysed.succeeded, isTrue, reason: '$analysed');
     },
   );
 

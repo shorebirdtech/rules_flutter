@@ -721,7 +721,7 @@ def format_maven_failure(repo, problems, errors, report = None):
             "These Gradle dependency lines cannot be translated. Each must " +
             "be a single 'group:artifact:version' string in implementation, " +
             "api, compileOnly or runtimeOnly:\n\n{groups}\n\n" +
-            "Provide a plugin overlay for each package (flutter.plugin_overlays " +
+            "Provide a plugin overlay for each package (flutter_pub.plugin_overlays " +
             "in MODULE.bazel): <root>/<package>/BUILD.bazel.tpl for the Dart " +
             "side and <root>/<package>/android/BUILD.bazel.tpl, which " +
             "declares the plugin's Android library with its " +

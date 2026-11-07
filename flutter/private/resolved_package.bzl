@@ -1,4 +1,4 @@
-"""The target a `flutter.pub(resolve = ...)` package's label is.
+"""The target a `flutter_pub.from_lock(resolve = ...)` package's label is.
 
 The hub's label for a mapped package reaches the user's target through this
 rule instead of an `alias`, so that it can check what an alias cannot: the
@@ -28,7 +28,7 @@ def _resolved_package_impl(ctx):
 
     declared = [p.package_name for p in target[DartInfo].packages]
     if package_name not in declared:
-        fail("{target} stands in for the pub package \"{package}\" (flutter.pub(resolve = ...) in {lock}), but it declares {declared}. Set its package_name to \"{package}\".".format(
+        fail("{target} stands in for the pub package \"{package}\" (flutter_pub.from_lock(resolve = ...) in {lock}), but it declares {declared}. Set its package_name to \"{package}\".".format(
             target = target.label,
             package = package_name,
             lock = ctx.attr.lock,

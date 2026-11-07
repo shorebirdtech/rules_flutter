@@ -1,4 +1,4 @@
-"""Reconciling a package that several `flutter.pub()` locks list.
+"""Reconciling a package that several `flutter_pub.from_lock()` locks list.
 
 There is one repository per package for the whole build, so when more than one
 lock lists a package they must agree on what it is. `reconcile_package` decides,
@@ -14,11 +14,32 @@ An entry is a `struct` the extension makes of one lock entry:
 * `version`, `sha256`, `url` (the registry's), for a hosted package;
 * `git_url`, `resolved_ref`, `git_path`, `git_lock` (the lock's label when the
   url is relative to it, else `""`), for a git package;
-* `hub`, `lock_label`, `on_version_conflict`: the tag it came from.
+* `hub`, `lock_label`, `on_version_conflict`: the tag it came from;
+* `lock_dir`: the lock's directory within its repository (its Bazel package).
 """
 
 load("@rules_dart//dart/pub:defs.bzl", "parse_semver")
 load("//flutter/private:lock_entry_kind.bzl", "GIT", "HOSTED", "UNSUPPORTED")
+
+def pub_upgrade_command(lock_dir, packages = []):
+    """The command that re-resolves the lock in `lock_dir` with the pinned toolchain.
+
+    It is run from the root of the workspace that holds the lock, and it runs
+    while the locks disagree: the runner needs the toolchain, which the
+    `flutter` extension makes, and no repository of `flutter_pub`.
+
+    Args:
+        lock_dir: The lock's directory relative to the workspace root; empty
+            for the root.
+        packages: The packages to move forward; empty for all of them.
+
+    Returns:
+        The command line.
+    """
+    args = ["upgrade"]
+    if lock_dir:
+        args.append("--directory=" + lock_dir)
+    return " ".join(["bazel run @rules_flutter//flutter:pub --"] + args + packages)
 
 def _where(entry):
     return "hub \"{}\", {}".format(entry.hub, entry.lock_label)
@@ -32,7 +53,7 @@ def _describe(entry):
 
 def _kinds_error(name, entries):
     return (
-        "Package \"{name}\" comes from different sources across flutter.pub() locks:\n" +
+        "Package \"{name}\" comes from different sources across flutter_pub.from_lock() locks:\n" +
         "{lines}\n" +
         "rules_flutter builds one copy of each package. Make the locks agree, or map " +
         "it to one target with `resolve`."
@@ -46,7 +67,7 @@ def _registry_and_digest_errors(name, entries):
     for e in entries[1:]:
         if e.url != first.url:
             return [(
-                "Package \"{name}\" comes from different registries across flutter.pub() locks:\n" +
+                "Package \"{name}\" comes from different registries across flutter_pub.from_lock() locks:\n" +
                 "  - {a} ({a_where})\n" +
                 "  - {b} ({b_where})\n" +
                 "rules_flutter builds one copy of each package. Make the locks agree."
@@ -56,7 +77,7 @@ def _registry_and_digest_errors(name, entries):
         other = by_version.setdefault(e.version, e)
         if e.sha256 != other.sha256:
             return [(
-                "Package \"{name}\" {version} has different digests across flutter.pub() locks:\n" +
+                "Package \"{name}\" {version} has different digests across flutter_pub.from_lock() locks:\n" +
                 "  - {a} ({a_where})\n" +
                 "  - {b} ({b_where})\n" +
                 "One version of a package is one archive. Re-resolve the locks."
@@ -67,16 +88,16 @@ def _version_error(name, entries, winner):
     behind = [e for e in entries if e.version != winner.version and e.on_version_conflict == "error"]
     if not behind:
         return []
-    locks = sorted({e.lock_label: True for e in behind}.keys())
+    dirs = {e.lock_label: e.lock_dir for e in behind}
+    locks = sorted(dirs.keys())
     return [(
-        "Package \"{name}\" has conflicting versions across flutter.pub() locks:\n" +
+        "Package \"{name}\" has conflicting versions across flutter_pub.from_lock() locks:\n" +
         "{lines}\n\n" +
         "rules_flutter builds one version of each package, the highest a lock records.\n" +
         "{locks} pin{s} a lower one. To resolve:\n\n" +
         "  1. (Preferred) Re-resolve {those} so the package moves forward, with the\n" +
-        "     toolchain that builds {them}:\n" +
-        "       bazel run @rules_flutter//flutter:pub -- upgrade {name}\n" +
-        "     in the directory of {each}.\n\n" +
+        "     toolchain that builds {them}, from the root of the workspace that holds {it}:\n" +
+        "{commands}\n\n" +
         "  2. If {their} constraints forbid {version}, set on_version_conflict = \"upgrade\"\n" +
         "     on {that}: {its} packages are then built at the higher version."
     ).format(
@@ -89,9 +110,10 @@ def _version_error(name, entries, winner):
         s = "s" if len(locks) == 1 else "",
         those = "that lock" if len(locks) == 1 else "those locks",
         them = "it" if len(locks) == 1 else "them",
-        each = "that lock" if len(locks) == 1 else "each of them",
+        it = "it" if len(locks) == 1 else "each",
+        commands = "\n".join(["       " + pub_upgrade_command(dirs[lock], [name]) for lock in locks]),
         their = "its" if len(locks) == 1 else "their",
-        that = "that flutter.pub()" if len(locks) == 1 else "those flutter.pub() tags",
+        that = "that flutter_pub.from_lock()" if len(locks) == 1 else "those flutter_pub.from_lock() tags",
         its = "its" if len(locks) == 1 else "their",
         version = winner.version,
     )]
@@ -128,7 +150,7 @@ def _git_errors(name, entries):
     keys = {_git_key(e): True for e in entries}
     if len(keys) > 1:
         return [(
-            "Package \"{name}\" is pinned to different git sources across flutter.pub() locks:\n" +
+            "Package \"{name}\" is pinned to different git sources across flutter_pub.from_lock() locks:\n" +
             "{lines}\n" +
             "rules_flutter builds one copy of each package. Make the locks agree."
         ).format(
