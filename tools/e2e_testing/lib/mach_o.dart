@@ -100,4 +100,28 @@ extension MachOInspection on MachO {
         match.group(1)!,
     };
   }
+
+  /// The binary's install name (`LC_ID_DYLIB`), which a binary that links the
+  /// dylib records and the dynamic linker looks it up by.
+  ///
+  /// Throws a [StateError] if `otool` cannot read the file or it has no single
+  /// install name.
+  String installName() {
+    final result = Process.runSync('otool', ['-D', path]);
+    if (result.exitCode != 0) {
+      throw StateError('otool -D $path failed: ${result.stderr}');
+    }
+    // The first line names the file, and each architecture adds one more.
+    final names = result.stdout
+        .toString()
+        .split('\n')
+        .skip(1)
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty)
+        .toSet();
+    if (names.length != 1) {
+      throw StateError('$path has no single install name: $names');
+    }
+    return names.single;
+  }
 }

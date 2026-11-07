@@ -59,6 +59,27 @@ void checkAppBinaryKeepsSymbols(BundleCheck check, String path) {
   );
 }
 
+/// Checks that the `App` binary at [path] has the install name `flutter build`
+/// gives it, `@rpath/App.framework/App`.
+///
+/// A host app that links `App.framework` records the install name and the
+/// dynamic linker resolves it through the app's rpaths; a build-tree path
+/// there fails at launch.
+void checkAppInstallName(BundleCheck check, String path) {
+  final String name;
+  try {
+    name = MachO(path).installName();
+  } on StateError catch (e) {
+    check.fail('cannot read the install name of $path: $e');
+    return;
+  }
+  check.expect(
+    'App binary install name is @rpath/App.framework/App',
+    condition: name == '@rpath/App.framework/App',
+    detail: 'it is $name',
+  );
+}
+
 /// The one `App.framework/App` among the test's runfiles, whatever the target
 /// that produced it.
 ///

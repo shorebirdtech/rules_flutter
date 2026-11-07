@@ -75,6 +75,29 @@ int exported(int x) { return local_helper(x) + 1; }
     });
   });
 
+  group('checkAppInstallName', () {
+    test('fails a dylib installed under its build path', () {
+      final check = recorder();
+      checkAppInstallName(check, unstripped);
+      expect(check.failures, hasLength(1), reason: '${check.failures}');
+    });
+
+    test('passes a dylib installed under @rpath/App.framework/App', () {
+      final rpathed = '${tmp.path}/rpathed.dylib';
+      run('clang', [
+        '-dynamiclib',
+        '-install_name',
+        '@rpath/App.framework/App',
+        '-o',
+        rpathed,
+        '${tmp.path}/lib.c',
+      ]);
+      final check = recorder();
+      checkAppInstallName(check, rpathed);
+      expect(check.failures, isEmpty, reason: '${check.failures}');
+    });
+  });
+
   group('checkDsymMatches', () {
     test('passes the dSYM made from the binary, also once it is stripped', () {
       final stripped = '${tmp.path}/stripped_for_dsym.dylib';

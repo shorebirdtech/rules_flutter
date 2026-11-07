@@ -552,6 +552,45 @@ flutter_ios_framework_gen(
 ]
 
 # =============================================================================
+# The install name of App.framework/App
+#
+# A host app that links the framework records its install name, so it must be
+# `@rpath/App.framework/App` as `flutter build ios` makes it: the AOT snapshot
+# of every release mode, and the debug stub for a device and the simulator.
+# =============================================================================
+
+[
+    apple_release_build(
+        name = "install_name_framework_%s" % variant,
+        compilation_mode = mode,
+        ios_device = device,
+        targets = [":release_framework"],
+    )
+    for variant, mode, device in (
+        ("fastbuild", "fastbuild", True),
+        ("opt", "opt", True),
+        ("dbg_device", "dbg", True),
+        ("dbg_simulator", "dbg", False),
+    )
+]
+
+[
+    dart_test(
+        name = "verify_ios_app_install_name_%s_test" % variant,
+        data = [":install_name_framework_%s" % variant],
+        main = "test/verify_ios_app_install_name_test.dart",
+        target_compatible_with = ["@platforms//os:macos"],
+        deps = ["@rules_flutter//tools/e2e_testing"],
+    )
+    for variant in (
+        "fastbuild",
+        "opt",
+        "dbg_device",
+        "dbg_simulator",
+    )
+]
+
+# =============================================================================
 # The build as a whole
 # =============================================================================
 

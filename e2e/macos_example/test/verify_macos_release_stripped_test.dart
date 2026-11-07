@@ -23,7 +23,11 @@ void main() {
       bundle.check,
       '${bundle.frameworks}/App.framework/App',
     );
-    bundle.finish('The App binary is stripped.');
+    checkAppInstallName(
+      bundle.check,
+      '${bundle.frameworks}/App.framework/App',
+    );
+    bundle.finish('The App binary is stripped and has the install name.');
   } finally {
     bundle.dispose();
   }

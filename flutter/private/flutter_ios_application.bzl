@@ -198,11 +198,12 @@ def _flutter_ios_framework_impl(ctx):
         sdk = "iphoneos" if is_device else "iphonesimulator"
 
         # Create a stub dylib — rules_apple's framework processor requires a
-        # binary file. bundle_only=True prevents linking so it's never loaded.
+        # binary file. Its install name is `flutter build ios`'s, so a host app
+        # that links the framework resolves it through its rpaths.
         run_xcode_tool(
             ctx,
-            command = 'echo "" | xcrun -sdk "$1" clang -shared -o "$2" -x c - && xcrun vtool -set-build-version "$3" "$4" "$4" -replace -output "$2" "$2"',
-            arguments = [ctx.actions.args().add_all([sdk, framework_binary, vtool_platform, minimum_os_version])],
+            command = 'echo "" | xcrun -sdk "$1" clang -shared -install_name "$5" -o "$2" -x c - && xcrun vtool -set-build-version "$3" "$4" "$4" -replace -output "$2" "$2"',
+            arguments = [ctx.actions.args().add_all([sdk, framework_binary, vtool_platform, minimum_os_version, "@rpath/App.framework/App"])],
             outputs = [framework_binary],
             mnemonic = "FlutterIOSStubDylib",
             execution_requirements = PATH_MAPPING,
