@@ -1684,14 +1684,19 @@ bazel run :app_release -- --key-properties="$K/key.properties" --output-dir="$K/
 
 # The bundle, as Play would serve this phone: split APKs signed with the key.
 JAVA=$(bazel info output_base)/external/rules_java++toolchains+remotejdk25_macos_aarch64/bin/java
-BT=bazel-bin/app_release.runfiles/rules_android+/tools/android/bundletool_deploy.jar
+# bundletool with the Kotlin runtime its install-apks needs, from the runfiles
+# of the bundle's own `bazel run`.
+bazel build :app_bundle
+BT_CP=$(jq -r '.bundletoolClasspath | map("bazel-bin/app_bundle.runfiles/" + .) | join(":")' \
+    bazel-bin/app_bundle.android_bundle_install.json)
+bt() { "$JAVA" -cp "$BT_CP" com.android.tools.build.bundletool.BundleToolMain "$@"; }
 ADB=$ANDROID_HOME/platform-tools/adb
 $ADB uninstall com.example.flutterapp
-$JAVA -jar $BT build-apks --bundle="$K/out/app-release.aab" --output="$K/out/device.apks" \
+bt build-apks --bundle="$K/out/app-release.aab" --output="$K/out/device.apks" \
     --connected-device --device-id=$ANDROID_SERIAL --adb=$ADB \
     --aapt2=$ANDROID_HOME/build-tools/<version>/aapt2 \
     --ks="$K/upload.jks" --ks-pass=pass:throwaway123 --ks-key-alias=upload
-$JAVA -jar $BT install-apks --apks="$K/out/device.apks" --adb=$ADB --device-id=$ANDROID_SERIAL
+bt install-apks --apks="$K/out/device.apks" --adb=$ADB --device-id=$ANDROID_SERIAL
 $ADB shell am start -W -n com.example.flutterapp/.MainActivity
 $ADB exec-out screencap -p > /tmp/release_aab.png
 
@@ -1701,7 +1706,7 @@ $ADB install "$K/out/app-release.apk"
 $ADB shell am start -W -n com.example.flutterapp/.MainActivity
 $ADB exec-out screencap -p > /tmp/release_apk.png
 
-# rules_android's own path: the debug-signed bundle through bundletool.
+# `bazel run` of the bundle: debug-signed, installed through bundletool.
 $ADB uninstall com.example.flutterapp
 bazel run -c opt :app_bundle
 $ADB shell am start -W -n com.example.flutterapp/.MainActivity
@@ -1977,7 +1982,7 @@ script's own package requires ≥ 3.13.
 | Web support | web_example `//...` (a WASM-only bundle, an `Int64List` app that keeps the dart2js fallback through a per-compiler `select()`, and `:render_test`, the render check in headless Chrome) + `web_smoke_e2e_test.dart` (render) + `web_per_compiler_e2e_test.dart` (both programs of a per-compiler app, in Chrome) + `plugin_example_e2e_test.dart` (plugins on web) + `native_libs_reload_e2e_test.dart`'s web group if the change touches `native_modules` or the web reload arms |
 | FFI / native deps / native assets | ffi_example (incl. manual iOS-sim + macOS runtime tests), ffi_plugin_example |
 | Plugins | plugin_example, ffi_plugin_example |
-| Android release (`flutter_android_release`, `flutter_android_app`'s `app_bundle`/`bundle_config`/`proguard_specs`, `flutter/android_proguard_rules.pro`, `flutter/android_bundle_config.pb.json`, `release_transition.bzl`, `android_release.dart`, `rules_android_bundle_run.patch`) | Root `//...` (`android_release_test`), android_example `//...` (`verify_android_release_test` signs with a key it makes), plugin_example `//...` for an R8 change, **and** "Android release (manual)" in § 4: both signed installs render on the phone |
+| Android release (`flutter_android_release`, `flutter_android_app`'s `app_bundle`/`bundle_config`/`proguard_specs`, `flutter/android_proguard_rules.pro`, `flutter/android_bundle_config.pb.json`, `release_transition.bzl`, `android_release.dart`, `flutter_android_bundle_install.bzl`, `android_bundle_install.dart`) | Root `//...` (`android_release_test`), android_example `//...` (`verify_android_release_test` signs with a key it makes), plugin_example `//...` for an R8 change, **and** "Android release (manual)" in § 4: both signed installs render on the phone |
 | Android ABI selection (`flutter_android_engine`, `flutter_android_bundle`, `flutter_android_build`, `AndroidDevice` ABI in `device.dart`) | Root `//...`, android_example, hello_world and plugin_example `//...` (force-run `verify_android_apk_test`), dev_tool unit **and** `flutter_bazel run` on the attached phone (arm64-v8a) and on an x86_64 emulator, which must each launch the app |
 | Toolchain / SDK, or any action's inputs from the Dart SDK | smoke, hello_world, and `//flutter/tests:sdk_inputs_test` with `//flutter/tests/sdk_sets:sdk_sets_test` (see § "SDK inputs") |
 | Reconciling several locks, or which extension makes which repository (`pub_reconcile.bzl`, the `flutter` extension in `flutter/extensions.bzl` and the `pub` extension in `flutter/pub/extensions.bzl`) | Root `//flutter/tests:pub_reconcile_test`, `dart run tools/dev_tool/tool/e2e.dart test/e2e/pub_versions_e2e_test.dart` (its fix-command case shows `bazel run @rules_flutter//flutter/pub` running while the locks disagree, which needs every repository the runner reaches to come from `flutter`), `e2e/dual_hub` `//...`, and `bazel run @overhead//locks` |

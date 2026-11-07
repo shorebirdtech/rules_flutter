@@ -91,6 +91,7 @@ load("//flutter/private:app_version.bzl", "manifest_values_conflict", "version_a
 load("//flutter/private:constants.bzl", _ANDROID_MIN_SDK_VERSION = "ANDROID_MIN_SDK_VERSION", _ANDROID_TARGET_SDK_VERSION = "ANDROID_TARGET_SDK_VERSION")
 load("//flutter/private:flutter_android_application.bzl", _flutter_android_bundle = "flutter_android_bundle")
 load("//flutter/private:flutter_android_build.bzl", _flutter_android_build = "flutter_android_build")
+load("//flutter/private:flutter_android_bundle_install.bzl", _flutter_android_app_bundle = "flutter_android_app_bundle")
 load("//flutter/private:flutter_android_manifest_merge.bzl", _flutter_android_manifest_merge = "flutter_android_manifest_merge")
 load("//flutter/private:flutter_android_plugin_library.bzl", _flutter_android_plugin_library = "flutter_android_plugin_library")
 load("//flutter/private:flutter_android_plugin_libs.bzl", _flutter_android_maven_report = "flutter_android_maven_report", _flutter_android_plugin_libs = "flutter_android_plugin_libs")
@@ -754,14 +755,12 @@ def flutter_android_app(
             every compilation mode; `[]` turns R8 off. Resources are shrunk
             whenever R8 runs, unless `shrink_resources = False` is passed.
         app_bundle: When set, also declare an App Bundle of this app named
-            `app_bundle`: rules_android's `android_application`, from the same
-            arguments as the APK. Its output is the unsigned
+            `app_bundle`, built by rules_android's `android_application` from
+            the same arguments as the APK. Its output is the unsigned
             `<app_bundle>_unsigned.aab`, for the ABIs and compilation mode of
-            the build like the APK's. `bazel run` of it installs it on a
-            device with bundletool, signed with the debug key; rules_android
-            0.8.1 needs a patch for that (see the README's Android section).
-            Hand it to `flutter_android_release` to sign a release. rules_android also
-            declares `<app_bundle>_base`, the bundle's own `android_binary`.
+            the build like the APK's. `bazel run` of it installs it on the
+            device `ANDROID_SERIAL` names with bundletool, signed with the
+            debug key. Hand it to `flutter_android_release` to sign a release.
         bundle_config: The bundletool `BundleConfig` (`.pb.json`) of
             `app_bundle`. The default,
             `@rules_flutter//flutter:android_bundle_config.pb.json`, is the
@@ -1097,8 +1096,19 @@ def flutter_android_app(
     )
     _android_binary(name = name, **binary_args)
     if app_bundle:
+        # The bundle is rules_android's; `app_bundle` forwards it and gives
+        # `bazel run` rules_flutter's install program, which takes every tool
+        # from the build.
+        bundle = "__%s_aab" % app_bundle
         _android_application(
-            name = app_bundle,
+            name = bundle,
             bundle_config_file = bundle_config,
             **binary_args
+        )
+        _flutter_android_app_bundle(
+            name = app_bundle,
+            bundle = bundle,
+            tags = tags,
+            testonly = testonly,
+            visibility = kwargs.get("visibility"),
         )

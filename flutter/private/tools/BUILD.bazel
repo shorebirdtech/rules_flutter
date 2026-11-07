@@ -55,6 +55,16 @@ dart_binary(
     deps = ["@rules_dart//dart/runfiles"],
 )
 
+# The program behind `bazel run` of `flutter_android_app`'s App Bundle:
+# installs it on a device with bundletool.
+dart_binary(
+    name = "android_bundle_install",
+    compile_mode = "exe",
+    main = "android_bundle_install.dart",
+    visibility = ["//flutter:__subpackages__"],
+    deps = ["@rules_dart//dart/runfiles"],
+)
+
 # The pub runner: `dart compile exe` builds it from these two files, which
 # import only the Dart libraries, so that it depends on no pub repository (a
 # lock conflict there must not stop the command that fixes the lock). They are
@@ -140,6 +150,10 @@ _UNIT_TESTS = {
     "assemble_directory_test": (
         "assemble_directory.dart",
         ["@dev_tool_deps//:path"],
+    ),
+    "android_bundle_install_test": (
+        "android_bundle_install.dart",
+        ["@rules_dart//dart/runfiles"],
     ),
     "android_release_test": (
         "android_release.dart",

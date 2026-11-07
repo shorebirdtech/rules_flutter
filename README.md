@@ -1194,7 +1194,7 @@ bazel run //:app_release
 # -> build/app/outputs/flutter-apk/app-release.apk
 ```
 
-- `:app_bundle` is rules_android's `android_application`, built from the same arguments as `:app`. `bazel build //:app_bundle` makes `app_bundle_unsigned.aab` for the ABIs and compilation mode of the command line, like the APK. rules_android also declares `app_bundle_base`, the bundle's own `android_binary`; no BUILD file needs to name it.
+- `:app_bundle` is built by rules_android's `android_application`, from the same arguments as `:app`. `bazel build //:app_bundle` makes `app_bundle_unsigned.aab` for the ABIs and compilation mode of the command line, like the APK.
 - `bazel run //:app_release` builds the bundle in release mode (`-c opt`, not profile) for armeabi-v7a, arm64-v8a and x86_64, whatever the command line says, as `flutter build appbundle` builds every ABI. Its `android_platforms` attribute changes the ABIs.
 - Signing happens when the program runs, not in a build action. The keystore and its passwords never reach Bazel: no attribute, action input, command line or cache entry holds them. rules_android has no release signing of its own, by design.
 - The key comes from `android/key.properties` under the target's package, the file Flutter's deployment guide has you write:
@@ -1211,7 +1211,7 @@ bazel run //:app_release
 - With Play App Signing, the bundle you upload is signed with the upload key, and Google signs the APKs it serves with the app signing key it keeps. `app-release.apk` is for distribution outside Play; it is the APK of the same release build, signed with the same key (by the Android SDK's `apksigner`, which `flutter_android_release` takes from `@androidsdk`), so it will not update a copy installed from Play. As in Gradle's, its native libraries are stored uncompressed and 16 KB-aligned.
 - Raise `build_number` for each upload: Play refuses a version code it has seen.
 
-`bazel run //:app_bundle` installs the bundle on the device `ANDROID_SERIAL` names, through bundletool and signed with the debug key, as rules_android intends. rules_android 0.8.1 needs [`rules_android_bundle_run.patch`](e2e/android_example/patches/rules_android_bundle_run.patch) in your `single_version_override` of rules_android for that: without it the command fails to find the JDK, aapt2, the Kotlin runtime and adb. `flutter_android_release` does not need the patch.
+`bazel run //:app_bundle` installs the bundle on the device `ANDROID_SERIAL` names (or the only one connected), through bundletool and signed with the debug key. The JDK, bundletool, `aapt2` and `adb` all come from the build, so nothing needs to be on your PATH.
 
 A release bundle carries R8's mapping (`BUNDLE-METADATA/com.android.tools.build.obfuscation/proguard.map`), from which Play deobfuscates the Java and Kotlin frames of crash reports, as a Gradle-built bundle does.
 

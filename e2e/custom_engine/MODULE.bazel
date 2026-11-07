@@ -51,15 +51,6 @@ single_version_override(
         # exhaust that on a 16 GB machine. The patch keeps every cap and drops
         # the initial sizes. Drop it once a rules_android release does.
         "//patches:rules_android_no_initial_heap.patch",
-        # `bazel run` of an `android_application` (an App Bundle) installs it
-        # on a device through bundletool, and fails three ways: the script
-        # looks for the JDK at its execution path, which the runfiles tree
-        # does not have; it gives bundletool no aapt2, which the bundletool
-        # jar rules_android builds does not embed; and that jar lacks the
-        # Kotlin runtime its install command needs. It also finds adb on
-        # PATH, where the SDK's adb need not be. The patch fixes all four.
-        # Drop it once a rules_android release does.
-        "//patches:rules_android_bundle_run.patch",
     ],
 )
 
