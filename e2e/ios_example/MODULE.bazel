@@ -24,6 +24,7 @@ flutter_pub.from_lock(
     name = "deps",
     # A path package with no Bazel build, built from its pubspec.
     build_from_pubspec = [
+        "ffi_dynamic_plugin",
         "resource_plugin",
         "script_phase_plugin",
         "swift6_plugin",

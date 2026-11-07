@@ -27,6 +27,9 @@
 /// `swift6_plugin` (a path package) is `swift-tools-version: 6.0` and its
 /// source does not compile in the Swift 5 language mode: the app carries it.
 ///
+/// `ffi_dynamic_plugin` (a path package) is an FFI plugin whose product is
+/// `.dynamic`: the app carries its C function.
+///
 /// `resource_plugin` (a path package) has a resource, `greeting.txt`, which
 /// SwiftPM bundles as `resource_plugin_resource_plugin.bundle`: the app
 /// carries the bundle and the file in it. Its Objective-C target
@@ -82,6 +85,7 @@ void main() {
       ('script_phase_plugin', 'ScriptPhasePlugin'),
       ('resource_plugin_objc', 'ResourcePluginObjC'),
       ('swift6_plugin', 'Swift6Plugin'),
+      ('ffi_dynamic_plugin', 'ffi_dynamic_plugin_add'),
     ]) {
       check.expect(
         'a binary in the bundle carries the target $target',

@@ -1,3 +1,4 @@
+import 'package:ffi_dynamic_plugin/ffi_dynamic_plugin.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_qjs_next/flutter_qjs.dart';
@@ -27,6 +28,9 @@ import 'package:video_player_avfoundation/video_player_avfoundation.dart';
 ///   from `SWIFTPM_MODULE_BUNDLE`: `from the objc bundle`.
 /// * swift6_plugin, whose source compiles only in the Swift 6 language mode,
 ///   answers `Swift 6 language mode`.
+/// * ffi_dynamic_plugin, an FFI plugin whose Swift package product is
+///   `.dynamic`, adds 3 and 4 in C through `DynamicLibrary.process()`: `7`,
+///   or the error when its code is not in the app.
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final quickjs = getJavascriptRuntime().evaluate('6 * 7').stringResult;
@@ -51,13 +55,14 @@ Future<void> main() async {
   final resource = await _answer(resourcePluginGreeting);
   final resourceObjc = await _answer(resourcePluginObjcGreeting);
   final swift6 = await _answer(swift6PluginMode);
+  final ffiDynamic = await _answer(() async => '${ffiDynamicPluginAdd(3, 4)}');
   runApp(
     Center(
       child: Text(
         'quickjs: $quickjs\nvideo_player: $videoPlayer\nfirebase: $firebase\n'
         'midi: $midi\nscript_phase: $scriptPhase\nresource: $resource\n'
         'resource_objc: $resourceObjc\n'
-        'swift6: $swift6',
+        'swift6: $swift6\nffi_dynamic: $ffiDynamic',
         textDirection: TextDirection.ltr,
       ),
     ),

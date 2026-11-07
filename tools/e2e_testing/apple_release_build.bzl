@@ -10,7 +10,9 @@ load("@build_bazel_rules_apple//apple:providers.bzl", "AppleFrameworkImportInfo"
 
 def _transition_impl(settings, attr):
     ios_multi_cpus = settings["//command_line_option:ios_multi_cpus"]
+    features = settings["//command_line_option:features"]
     return {
+        "//command_line_option:features": features if attr.sign else features + ["disable_legacy_signing"],
         "//command_line_option:apple_generate_dsym": attr.generate_dsym,
         "//command_line_option:compilation_mode": attr.compilation_mode,
         "//command_line_option:ios_multi_cpus": ["arm64"] if attr.ios_device else ios_multi_cpus,
@@ -18,8 +20,12 @@ def _transition_impl(settings, attr):
 
 _transition = transition(
     implementation = _transition_impl,
-    inputs = ["//command_line_option:ios_multi_cpus"],
+    inputs = [
+        "//command_line_option:features",
+        "//command_line_option:ios_multi_cpus",
+    ],
     outputs = [
+        "//command_line_option:features",
         "//command_line_option:apple_generate_dsym",
         "//command_line_option:compilation_mode",
         "//command_line_option:ios_multi_cpus",
@@ -54,6 +60,11 @@ files.""",
         "generate_dsym": attr.bool(
             default = False,
             doc = "Build with `--apple_generate_dsym` and forward the `dsyms` output group.",
+        ),
+        "sign": attr.bool(
+            default = True,
+            doc = "Sign the bundle. False builds it with `--features=disable_legacy_signing`, " +
+                  "so no signing identity is needed.",
         ),
         "ios_device": attr.bool(
             default = False,

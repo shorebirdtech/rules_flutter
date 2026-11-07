@@ -18,6 +18,9 @@ dependencies:
   # An iOS plugin whose Swift package is in the Swift 6 language mode.
   swift6_plugin:
     path: path_packages/swift6_plugin
+  # An FFI plugin whose Swift package product is dynamic.
+  ffi_dynamic_plugin:
+    path: path_packages/ffi_dynamic_plugin
   video_player_avfoundation: 2.12.3
 dev_dependencies:
   very_good_analysis: ^10.3.0

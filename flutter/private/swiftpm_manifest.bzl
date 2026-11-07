@@ -655,7 +655,8 @@ def swift_package_targets(dump, package_name, platform, manifest_dir):
         A struct with `problems`, what keeps rules_flutter from building the
         package as the manifest says (a list of strings, empty when there is
         nothing), and, when there are none: `main`, the name of the target
-        that is the plugin's module; and `targets`, the targets to build,
+        that is the plugin's module; `dynamic`, whether the product is
+        `.dynamic`; and `targets`, the targets to build,
         each after those it depends on. A target is a struct: `name`;
         `deps`, the names of the package's targets it depends on;
         `swift_language_mode`, `"5"` or `"6"`; `resources`, structs with
@@ -685,6 +686,7 @@ def swift_package_targets(dump, package_name, platform, manifest_dir):
         ])
     targets = {t.get("name"): t for t in dump.get("targets", [])}
     product_targets = products[0].get("targets", [])
+    dynamic = "dynamic" in products[0]["type"]["library"]
     for name in product_targets:
         if name not in targets:
             return struct(problems = ["its `{}` product names `{}`, no target of the package".format(product_name, name)])
@@ -735,7 +737,7 @@ def swift_package_targets(dump, package_name, platform, manifest_dir):
             built.append(build)
     if problems:
         return struct(problems = problems)
-    return struct(problems = [], main = main, targets = built)
+    return struct(problems = [], main = main, targets = built, dynamic = dynamic)
 
 def swift_package_message(package, version, platform, manifest, problems):
     """Why the `platform` build of an app linking `package` stops at its Package.swift.

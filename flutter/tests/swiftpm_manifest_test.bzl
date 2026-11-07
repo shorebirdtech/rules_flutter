@@ -383,6 +383,16 @@ def _swift_package_targets_test_impl(ctx):
         _target(name = "a", dependencies = [{"byName": ["shared", None]}]),
         _target(name = "shared"),
     ])))
+
+    # A `.dynamic` product (flutter_zxing's) is one Flutter embeds as a
+    # framework, whose symbols Dart looks up; any other product is not.
+    for kind, dynamic in [("automatic", False), ("static", False), ("dynamic", True)]:
+        built = swift_package_targets(_dump(
+            [_target()],
+            products = [{"name": "foo", "targets": ["foo"], "type": {"library": [kind]}}],
+        ), "foo", "ios", "ios/foo")
+        asserts.equals(env, [], built.problems)
+        asserts.equals(env, dynamic, built.dynamic)
     return unittest.end(env)
 
 swift_package_targets_test = unittest.make(_swift_package_targets_test_impl)

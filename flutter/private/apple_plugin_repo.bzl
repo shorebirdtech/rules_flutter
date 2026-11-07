@@ -271,12 +271,18 @@ apple_resource_bundle(
     )
     return struct(build = build, srcs = srcs, data = [":" + bundle], includes = includes, clang_copts = clang_copts)
 
-def _swift_package_library(ctx, package, platform, target, main, manifest_dir, products):
+def _swift_package_library(ctx, package, platform, target, main, manifest_dir, products, dynamic):
     """A `flutter_apple_plugin_library` of `target` (`swift_package_targets`).
 
     The plugin's module is named after the plugin, as its registrant imports
     it; each other target is a module named after itself, a Clang module
     when it has no Swift sources, as SwiftPM builds it.
+
+    A `.dynamic` product is a framework in `flutter build`, whose global
+    symbols all stay for Dart to look up. It is linked into the app here, so
+    the plugin's module is wrapped, when `dynamic`, in
+    `flutter_apple_kept_symbols`, which keeps the global symbols of the
+    package's code through a release link's dead-code removal.
     """
     srcs = []
     for source in target.sources:
@@ -303,6 +309,11 @@ def _swift_package_library(ctx, package, platform, target, main, manifest_dir, p
     label = _target_label(package, platform, target.name, main)
     resources = _resource_bundle(ctx, label, target)
 
+    # The plugin's module of a `.dynamic` product is wrapped: the library is
+    # `<label>_unkept`, and `<label>` is what keeps its symbols.
+    kept = dynamic and target.name == main
+    library = label + "_unkept" if kept else label
+
     # Linked SDK frameworks and libraries go to the link of whatever binary
     # links the plugin, configuration by configuration.
     linkopts = {
@@ -313,9 +324,13 @@ def _swift_package_library(ctx, package, platform, target, main, manifest_dir, p
         )
         for c in CONFIGURATIONS
     }
+    kept_build = _KEPT_SYMBOLS.format(
+        name = label,
+        library = library,
+    ) if kept else ""
     return resources.build + """
 flutter_apple_plugin_library(
-    name = "{name}",
+    name = "{library}",
     srcs = glob({srcs}, exclude = {exclude}, allow_empty = True) + {resource_srcs},
     data = {data},
     public_hdrs = glob({public_hdrs}, exclude = {exclude}, allow_empty = True),
@@ -334,7 +349,7 @@ flutter_apple_plugin_library(
     visibility = ["//visibility:public"],
 )
 """.format(
-        name = label,
+        library = library,
         resource_srcs = repr(resources.srcs),
         resource_copts = repr(resources.clang_copts),
         data = repr(resources.data),
@@ -355,7 +370,15 @@ flutter_apple_plugin_library(
         conlyopts = _configured(target.conlyopts, shell_quote_copt),
         swift_copts = _configured(target.swift_copts, _make_variables_escaped),
         linkopts = _configured(linkopts, _make_variables_escaped),
-    )
+    ) + kept_build
+
+_KEPT_SYMBOLS = """
+flutter_apple_kept_symbols(
+    name = "{name}",
+    deps = [":{library}"],
+    visibility = ["//visibility:public"],
+)
+"""
 
 def _legacy_library(name, platform, layout):
     """A `flutter_apple_plugin_library` of a plugin without a `Package.swift`."""
@@ -495,11 +518,12 @@ def _apple_plugin_repo_impl(ctx):
             continue
         for target in built.targets:
             products = [swift_product_label(identity, product) for identity, product in target.remote_products]
-            targets.append(_swift_package_library(ctx, package, platform, target, built.main, manifest_dir, products))
+            targets.append(_swift_package_library(ctx, package, platform, target, built.main, manifest_dir, products, built.dynamic))
 
     ctx.file("BUILD.bazel", """\
 load("@build_bazel_rules_apple//apple:resources.bzl", "apple_resource_bundle")
 load("@rules_flutter//flutter:macos.bzl", "flutter_apple_plugin_library")
+load("@rules_flutter//flutter/private:flutter_apple_kept_symbols.bzl", "flutter_apple_kept_symbols")
 load("@rules_flutter//flutter/private:unbuilt_native_code.bzl", "flutter_unbuilt_plugin_library")
 {targets}{manifests}""".format(
         targets = "".join(targets),
