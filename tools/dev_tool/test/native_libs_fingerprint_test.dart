@@ -336,6 +336,12 @@ void main() {
         ).path,
         built('ios', '_solib/_engine/Flutter.framework/Flutter', [3]).path,
         built('mac', 'vendor/FlutterMacOS', [4]).path,
+        built(
+          'ios',
+          '_solib_/_U_S_S_C_U_Uapp_Uengine___Udebug_SFlutter.xcframework_'
+              'Sios-arm64_Ux86_U64-simulator_SFlutter.framework/Flutter',
+          [5],
+        ).path,
       ]);
       expect(fp.keys, ['libadd.dylib', 'vendor/FlutterMacOS']);
     });

@@ -155,10 +155,18 @@ const _flutterLibraries = {'libapp.so', 'libflutter.so'};
 
 /// Whether [segments] name the binary of one of [_flutterFrameworks], directly
 /// inside its `.framework` directory.
-bool _isFlutterFrameworkBinary(List<String> segments) =>
-    segments.length >= 2 &&
-    _flutterFrameworks.contains(segments.last) &&
-    segments[segments.length - 2] == '${segments.last}.framework';
+///
+/// A framework the linker reaches through `_solib_*` has its directory path
+/// flattened into one segment (`/` becomes `_S`), which still ends with the
+/// framework's own directory name.
+bool _isFlutterFrameworkBinary(List<String> segments) {
+  if (segments.length < 2 || !_flutterFrameworks.contains(segments.last)) {
+    return false;
+  }
+  final directory = segments[segments.length - 2];
+  final framework = '${segments.last}.framework';
+  return directory == framework || directory.endsWith('_S$framework');
+}
 
 bool _isNativeLib(String path) {
   final segments = path.split('/');
