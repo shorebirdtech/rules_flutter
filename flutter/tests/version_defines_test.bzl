@@ -137,7 +137,10 @@ def _test_compile_impl(ctx):
     for action in compiles:
         # `-D<define>` to frontend_server, `--define <define>` to the kernel tool.
         got = [a.removeprefix("-D") for a in action.argv if _is_version_define(a)]
-        asserts.equals(env, pinned_version_defines("1.0.0", "1"), got, "version defines of %s: %s" % (ctx.attr.mnemonic, action.argv))
+
+        # The SDK's come with the kernel SDK's runtime and the app's from the
+        # configuration, so the order is not the one `flutter_tools` writes.
+        asserts.equals(env, sorted(pinned_version_defines("1.0.0", "1")), sorted(got), "version defines of %s: %s" % (ctx.attr.mnemonic, action.argv))
     return analysistest.end(env)
 
 _test_compile_attrs = {"mnemonic": attr.string(mandatory = True)}

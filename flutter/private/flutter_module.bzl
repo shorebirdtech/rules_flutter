@@ -19,7 +19,7 @@ _DELETE_TOSTRING = [
     "--delete-tostring-package-uri=package:flutter",
 ]
 
-def flutter_kernel_sdk_info(sdk, libraries_spec = None):
+def flutter_kernel_sdk_info(sdk, libraries_spec = None, extra_defines = []):
     """The `DartKernelSdkInfo` of one Flutter SDK's platform.
 
     A runtime per build mode, as flutter_tools compiles for each
@@ -37,6 +37,10 @@ def flutter_kernel_sdk_info(sdk, libraries_spec = None):
       libraries_spec: The `libraries.json` naming the `dart:` libraries a
         Flutter program can import, which modules compile against; None for
         a whole-program compile, which reads the platform dill instead.
+      extra_defines: Declarations every compile against this SDK carries, for
+        modules (a module's constants are folded when it is compiled, so what
+        describes the SDK to the program cannot wait for the link). A
+        whole-program compile adds the SDK's to its own environment instead.
 
     Returns:
       The `DartKernelSdkInfo`. It has a `release` runtime only where `sdk`
@@ -45,18 +49,18 @@ def flutter_kernel_sdk_info(sdk, libraries_spec = None):
     runtimes = {
         "debug": dart_kernel_runtime(
             sdk.platform_kernel_dill,
-            defines = ["dart.vm.profile=false", "dart.vm.product=false"],
+            defines = ["dart.vm.profile=false", "dart.vm.product=false"] + extra_defines,
         ),
         "profile": dart_kernel_runtime(
             sdk.platform_kernel_dill,
-            defines = ["dart.vm.profile=true", "dart.vm.product=false"],
+            defines = ["dart.vm.profile=true", "dart.vm.product=false"] + extra_defines,
             flags = _DELETE_TOSTRING,
         ),
     }
     if sdk.platform_kernel_dill_product:
         runtimes["release"] = dart_kernel_runtime(
             sdk.platform_kernel_dill_product,
-            defines = ["dart.vm.profile=false", "dart.vm.product=true"],
+            defines = ["dart.vm.profile=false", "dart.vm.product=true"] + extra_defines,
             flags = _DELETE_TOSTRING,
         )
     return DartKernelSdkInfo(
@@ -97,7 +101,7 @@ def _flutter_kernel_sdk_impl(ctx):
         toolchain = "@rules_flutter//flutter:toolchain_type",
         progress_message = "Deriving Flutter's libraries.json for %s" % ctx.label,
     )
-    return [flutter_kernel_sdk_info(sdk, libraries_spec)]
+    return [flutter_kernel_sdk_info(sdk, libraries_spec, list(sdk.sdk_defines))]
 
 flutter_kernel_sdk = rule(
     implementation = _flutter_kernel_sdk_impl,
