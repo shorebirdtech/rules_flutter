@@ -140,8 +140,8 @@ def widget_creation_flag_test_suite(name):
         "release_default_does_not": (_untracked_release_test, "_tracking_default_app"),
         "profile_default_tracks": (_tracked_profile_test, "_tracking_default_app"),
         "profile_opted_out_does_not": (_untracked_profile_test, "_tracking_off_app"),
-        "flutter_test_modular_tracks": (_test_tracks_modular_test, "_tracking_flutter_test"),
-        "flutter_test_whole_program_tracks": (_test_tracks_whole_program_test, "_tracking_flutter_test"),
+        "flutter_test_modular_tracks": (_test_tracks_modular_test, "_tracking_flutter_test.program"),
+        "flutter_test_whole_program_tracks": (_test_tracks_whole_program_test, "_tracking_flutter_test.program"),
     }
     tests = []
     for case, (rule, target) in cases.items():

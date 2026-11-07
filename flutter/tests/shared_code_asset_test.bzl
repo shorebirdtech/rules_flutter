@@ -387,7 +387,7 @@ def shared_code_asset_test_suite(name):
 
     _test_layout_test(
         name = name + "_test_on_its_host",
-        target_under_test = "//flutter/tests/shared_code_asset_fixture/test:shared_test",
+        target_under_test = "//flutter/tests/shared_code_asset_fixture/test:shared_test.program",
         target_compatible_with = ["@platforms//os:macos"],
     )
     tests.append(name + "_test_on_its_host")

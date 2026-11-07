@@ -3,7 +3,7 @@ load("@rules_apple//apple:ios.bzl", "ios_application")
 load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
 load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_test")
 load("@rules_flutter//flutter:android.bzl", "flutter_android_app")
-load("@rules_flutter//flutter:defs.bzl", "flutter_aot_target", "flutter_application", "flutter_asset_bundle", "flutter_kernel_target", "flutter_library", "flutter_profile_build", "flutter_test", "flutter_tester_binary")
+load("@rules_flutter//flutter:defs.bzl", "flutter_aot_target", "flutter_application", "flutter_asset_bundle", "flutter_kernel_target", "flutter_library", "flutter_profile_build", "flutter_program_test", "flutter_suite_program", "flutter_test", "flutter_tester_binary")
 load(
     "@rules_flutter//flutter:ios.bzl",
     "IOS_DEFAULT_LAUNCH_STORYBOARD",
@@ -539,6 +539,30 @@ flutter_test(
     deps = [
         "@deps//:flutter_test",
     ],
+)
+
+# The Tier-2 pair: `flutter_suite_program` compiles and `flutter_program_test`
+# runs the program it provides, as it would run one compiled by another rule.
+# Through the pair: the suite protocol, a golden compared against a declared PNG
+# (`data` on the program) and `@Tags` selection (`exclude_tags` drops the case
+# that fails). Regenerate the golden with
+# `bazel run //:program_pair_test -- --update-goldens`.
+flutter_suite_program(
+    name = "program_pair_program",
+    package_name = "hello_world",
+    testonly = True,
+    data = glob(["test/goldens/**"]),
+    main = "test/program_pair_test.dart",
+    deps = [
+        "@deps//:flutter",
+        "@deps//:flutter_test",
+    ],
+)
+
+flutter_program_test(
+    name = "program_pair_test",
+    exclude_tags = ["slow"],
+    program = ":program_pair_program",
 )
 
 # Smoke test: pure dart:ui resolution. Verifies the rule still produces a

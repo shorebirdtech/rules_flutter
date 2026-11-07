@@ -8,6 +8,7 @@ patched SDK, which are the compile's tools. They are about a thousand files and
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
+load("//flutter:providers.bzl", "FlutterTestProgramInfo")
 
 _WHOLE_PROGRAM = {str(Label("@rules_dart//dart:modular_kernel")): False}
 _KERNEL_LISTS_OFF = {str(Label("@rules_dart//dart:kernel_lists")): False}
@@ -49,9 +50,6 @@ def _link_args(env):
     links = [a for a in analysistest.target_actions(env) if a.mnemonic == "DartLinkKernel"]
     return links[0].argv if links else []
 
-def _env(target):
-    return target[RunEnvironmentInfo].environment if RunEnvironmentInfo in target else {}
-
 def _runs_a_kernel_list_impl(ctx):
     env = analysistest.begin(ctx)
     target = analysistest.target_under_test(env)
@@ -65,8 +63,7 @@ def _runs_a_kernel_list_impl(ctx):
     # among them.
     dills = _dills(target)
     asserts.true(env, any([p.endswith(".entry.dill") for p in dills]), "no entry kernel in the runfiles: %s" % dills)
-    if RunEnvironmentInfo in target:
-        asserts.equals(env, "1", _env(target).get("FLUTTER_TEST_KERNEL_LIST"), "the runner is not told the program is a list")
+    asserts.true(env, target[FlutterTestProgramInfo].kernel_list, "the program is not described as a list")
     return analysistest.end(env)
 
 def _runs_a_joined_kernel_impl(ctx):
@@ -76,7 +73,7 @@ def _runs_a_joined_kernel_impl(ctx):
     asserts.true(env, "--entry" in argv, "the link action does not join the kernels: %s" % argv)
     asserts.false(env, "--list-short-path" in argv, "the link action writes a kernel list")
     asserts.equals(env, 1, len(_dills(target)), "the runfiles hold more than the joined kernel: %s" % _dills(target))
-    asserts.false(env, "FLUTTER_TEST_KERNEL_LIST" in _env(target), "the runner is told the program is a list")
+    asserts.false(env, target[FlutterTestProgramInfo].kernel_list, "the program is described as a list")
     return analysistest.end(env)
 
 _runs_a_kernel_list_test = analysistest.make(
@@ -118,7 +115,8 @@ def flutter_test_runfiles_test_suite(name):
             test = "%s_%s" % (kind, mode)
             rule(
                 name = test,
-                target_under_test = target,
+                # The link is the program's.
+                target_under_test = target + ".program" if kind == "flutter_test" else target,
                 target_compatible_with = ["@platforms//os:macos"],
             )
             tests.append(test)

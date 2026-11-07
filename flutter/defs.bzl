@@ -16,7 +16,9 @@ rules that compile Dart code, bundle assets, and run tests.
     dependency. Wire into `flutter_application` via `deps`.
 - `flutter_plugin`: Declares a Flutter plugin with optional Dart registration
     class and/or native shared library dependencies.
-- `flutter_test`: Runs Flutter widget tests using the flutter_tester runtime.
+- `flutter_test`: Runs Flutter widget tests using the flutter_tester runtime. It
+    declares a `flutter_suite_program` (compiles the test, returns
+    `FlutterTestProgramInfo`) and a `flutter_program_test` (runs any such program).
 - `flutter_application_variant` (`@rules_flutter//flutter:integration_test.bzl`): A
     `flutter_application` rebuilt with another `main`, for a test driver or an
     integration test's program.
@@ -62,7 +64,8 @@ load("//flutter/private:flutter_library.bzl", _flutter_library = "flutter_librar
 load("//flutter/private:flutter_native_library.bzl", _flutter_native_library = "flutter_native_library")
 load("//flutter/private:flutter_plugin.bzl", _flutter_plugin = "flutter_plugin")
 load("//flutter/private:flutter_profile_build.bzl", _flutter_profile_build = "flutter_profile_build")
-load("//flutter/private:flutter_test.bzl", _flutter_test = "flutter_test", _flutter_tester_binary = "flutter_tester_binary")
+load("//flutter/private:flutter_program_test.bzl", _flutter_program_test = "flutter_program_test")
+load("//flutter/private:flutter_test.bzl", _flutter_suite_program = "flutter_suite_program", _flutter_test = "flutter_test", _flutter_tester_binary = "flutter_tester_binary")
 load("//flutter/private:test_config.bzl", "find_test_config")
 
 flutter_aot_target = _flutter_aot_target
@@ -128,4 +131,6 @@ def flutter_test(name, main, test_config = None, **kwargs):
             )
     _flutter_test(name = name, main = main, test_config = test_config, **kwargs)
 
+flutter_program_test = _flutter_program_test
+flutter_suite_program = _flutter_suite_program
 flutter_tester_binary = _flutter_tester_binary

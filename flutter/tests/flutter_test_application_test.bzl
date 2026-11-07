@@ -97,16 +97,16 @@ def flutter_test_application_test_suite(name):
 
     _compiled_in_application_test(
         name = name + "_compiled_in_application",
-        target_under_test = ":_fta_test",
+        target_under_test = ":_fta_test.program",
     )
     _refused_test(
         name = name + "_other_package",
-        target_under_test = ":_fta_other_package",
+        target_under_test = ":_fta_other_package.program",
         message = "is not the package of `application`",
     )
     _refused_test(
         name = name + "_no_package",
-        target_under_test = ":_fta_no_package",
+        target_under_test = ":_fta_no_package.program",
         message = "`package_name` is required",
     )
     native.test_suite(

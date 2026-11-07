@@ -1,0 +1,111 @@
+load("@bazel_skylib//rules:diff_test.bzl", "diff_test")
+load("@bazel_skylib//rules:write_file.bzl", "write_file")
+load("//flutter:defs.bzl", "flutter_test")
+
+# `flutter_test` is a macro over `flutter_suite_program` and
+# `flutter_program_test`. These queries are what a user's `kind(...)` sees:
+# the test `suite` is still a `flutter_test` and is the one that is a test, so
+# `bazel query 'kind(flutter_test, ...)'`, unanchored, finds exactly the tests, and
+# the attributes only a test has (`size`, `shard_count`) are on it alone.
+flutter_test(
+    name = "suite",
+    package_name = "suite",
+    size = "large",
+    env = {"A": "b"},
+    main = "main.dart",
+    shard_count = 2,
+    tags = [
+        "manual",
+        "paired",
+    ],
+    deps = ["//flutter/tests/dart_asset_fixture:fake_test_api"],
+)
+
+genquery(
+    name = "tests",
+    expression = "kind(flutter_test, set(//flutter/tests/test_pair_fixture:suite //flutter/tests/test_pair_fixture:suite.program))",
+    opts = ["--output=label_kind"],
+    scope = [":suite"],
+)
+
+genquery(
+    name = "programs",
+    expression = "kind('flutter_suite_program rule', set(//flutter/tests/test_pair_fixture:suite //flutter/tests/test_pair_fixture:suite.program))",
+    opts = ["--output=label_kind"],
+    scope = [":suite"],
+)
+
+genquery(
+    name = "large",
+    expression = "attr(size, large, set(//flutter/tests/test_pair_fixture:suite //flutter/tests/test_pair_fixture:suite.program))",
+    opts = ["--output=label"],
+    scope = [":suite"],
+)
+
+genquery(
+    name = "paired_tags",
+    expression = "attr(tags, paired, set(//flutter/tests/test_pair_fixture:suite //flutter/tests/test_pair_fixture:suite.program))",
+    opts = ["--output=label"],
+    scope = [":suite"],
+)
+
+write_file(
+    name = "expected_tests",
+    out = "expected_tests.txt",
+    content = [
+        "flutter_test rule //flutter/tests/test_pair_fixture:suite",
+        "",
+    ],
+)
+
+write_file(
+    name = "expected_programs",
+    out = "expected_programs.txt",
+    content = [
+        "flutter_suite_program rule //flutter/tests/test_pair_fixture:suite.program",
+        "",
+    ],
+)
+
+write_file(
+    name = "expected_large",
+    out = "expected_large.txt",
+    content = [
+        "//flutter/tests/test_pair_fixture:suite",
+        "",
+    ],
+)
+
+write_file(
+    name = "expected_paired_tags",
+    out = "expected_paired_tags.txt",
+    content = [
+        "//flutter/tests/test_pair_fixture:suite",
+        "//flutter/tests/test_pair_fixture:suite.program",
+        "",
+    ],
+)
+
+diff_test(
+    name = "kind_test",
+    file1 = ":tests",
+    file2 = ":expected_tests",
+)
+
+diff_test(
+    name = "program_kind_test",
+    file1 = ":programs",
+    file2 = ":expected_programs",
+)
+
+diff_test(
+    name = "run_attributes_on_the_test_only_test",
+    file1 = ":large",
+    file2 = ":expected_large",
+)
+
+diff_test(
+    name = "shared_attributes_on_both_test",
+    file1 = ":paired_tags",
+    file2 = ":expected_paired_tags",
+)

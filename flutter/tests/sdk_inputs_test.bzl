@@ -226,12 +226,12 @@ def sdk_inputs_test_suite(name):
         "plist_merge": (":_plist_supplement_under_test", _takes_only_what_it_reads_test, ["FlutterPlistMerge"]),
         "manifest_merge": (":_manifest_merge_under_test", _takes_only_what_it_reads_test, ["FlutterManifestMerge"]),
         "flutter_test_modular": (
-            "//flutter/tests/code_asset_fixture/test:wrapped_code_asset_test",
+            "//flutter/tests/code_asset_fixture/test:wrapped_code_asset_test.program",
             _takes_only_what_it_reads_test,
             ["DartModule", "DartEntryKernel"],
         ),
         "flutter_test_whole_program": (
-            "//flutter/tests/code_asset_fixture/test:wrapped_code_asset_test",
+            "//flutter/tests/code_asset_fixture/test:wrapped_code_asset_test.program",
             _takes_only_what_it_reads_whole_program_test,
             ["DartKernel"],
         ),

@@ -1,7 +1,9 @@
-"""Flutter test runner rule.
+"""Flutter test rules: `flutter_suite_program` compiles, `flutter_test` declares a test.
 
-Compiles a Flutter test entry point to a kernel `.dill` and runs it under
-`flutter_tester`, the headless Flutter engine. Tests interact with the test
+`flutter_suite_program` compiles a Flutter test entry point to a kernel `.dill`
+(`FlutterTestProgramInfo`), and `flutter_program_test`
+(`flutter_program_test.bzl`) runs a program under `flutter_tester`, the
+headless Flutter engine. `flutter_test` is the macro that declares both. Tests interact with the test
 runner via the same `package:test_api/backend.dart` `RemoteListener`
 protocol that `flutter test` uses, so widget tests that initialize
 `TestWidgetsFlutterBinding` (every `testWidgets`, every golden, the live
@@ -80,8 +82,8 @@ load("//flutter/private:exec_groups.bzl", "FLUTTER_EXEC_TOOLS", "PORTABLE", "POR
 load("//flutter/private:flutter_compile.bzl", "flutter_kernel_compile")
 load("//flutter/private:flutter_module.bzl", "flutter_module_aspect")
 load("//flutter/private:flutter_native_assets.bzl", "CODE_ASSETS_DOC", "collect_bundled_code_asset_files", "resolve_native_assets", "write_native_assets_manifest")
+load("//flutter/private:flutter_program_test.bzl", "add_user_env", "program_environment", "track_widget_creation", _flutter_test_rule = "flutter_test")
 load("//flutter/private:sdk_defines.bzl", "app_version_dart_defines")
-load("//flutter/private:test_tags.bzl", "tag_selectors")
 
 # The target's Flutter SDK, whose `flutter_tester` runs the test.
 _FLUTTER_TOOLCHAIN = "@rules_flutter//flutter:toolchain_type"
@@ -247,7 +249,7 @@ def _can_bootstrap(deps):
 def _has_flutter_test(deps):
     return _exposes_package(deps, ["flutter_test"])
 
-def _flutter_test_impl(ctx):
+def _flutter_suite_program_impl(ctx):
     # The flutter_tester that runs the test: the target's, as everything the
     # test runs is. The compiles are `portable`.
     runner_tools = ctx.toolchains[_FLUTTER_TOOLCHAIN].flutter_sdk_info
@@ -271,7 +273,7 @@ def _flutter_test_impl(ctx):
     target_arch = _target_arch(ctx)
     if runner_tools.flutter_tester == None:
         fail((
-            "flutter_test {label}: Flutter ships no flutter_tester for " +
+            "flutter_suite_program {label}: Flutter ships no flutter_tester for " +
             "{os}, the target platform; build the test for a desktop " +
             "platform with `--platforms` or a platform transition."
         ).format(label = ctx.label, os = target_platform))
@@ -281,87 +283,20 @@ def _flutter_test_impl(ctx):
     # Windows has no such tree by default, only a manifest, so a test there
     # finds its libraries by name on PATH, as a `flutter_tester_binary` does.
     layout = "library_path" if target_platform == "windows" else "runfiles"
-    program = _program(ctx, "flutter_test", runner_tools, target_platform, target_arch, layout)
-
-    # Symlink the prebuilt runner as the test executable.
-    tool = ctx.attr._tool
-    ext = ".exe" if target_platform == "windows" else ""
-    executable = ctx.actions.declare_file(ctx.label.name + ext)
-    ctx.actions.symlink(
-        output = executable,
-        target_file = tool[DefaultInfo].files_to_run.executable,
-        is_executable = True,
-    )
-
-    env = _program_environment(program.info, ctx.workspace_name) | {
-        "FLUTTER_TEST_COVERAGE_LIBRARIES": "\n".join(program.info.coverage_libraries),
-        # The test's source in the runfiles, which the runner reads for the
-        # library annotations (`@Tags`) the way `flutter test` does.
-        # FLUTTER_TEST_PATH stays the display path.
-        "FLUTTER_TEST_SOURCE": runfiles_path(program.info.source, ctx.workspace_name),
-    }
-    for key, attr_name in [
-        ("FLUTTER_TEST_INCLUDE_TAGS", "include_tags"),
-        ("FLUTTER_TEST_EXCLUDE_TAGS", "exclude_tags"),
-    ]:
-        selectors = tag_selectors(ctx, attr_name, "flutter_test")
-        if selectors:
-            env[key] = "\n".join(selectors)
-    _add_user_env(ctx, "flutter_test", env)
-
-    instrumented_files_info = coverage_common.instrumented_files_info(
-        ctx,
-        source_attributes = ["srcs", "main"],
-        dependency_attributes = ["deps"],
-    )
+    program = _program(ctx, "flutter_suite_program", runner_tools, target_platform, target_arch, layout)
 
     return [
         DefaultInfo(
-            executable = executable,
-            runfiles = program.info.runfiles.merge(tool[DefaultInfo].default_runfiles),
+            files = depset([program.info.kernel, program.info.assets], transitive = [program.info.kernels]),
+            runfiles = program.info.runfiles,
         ),
-        testing.TestEnvironment(env),
-        instrumented_files_info,
+        program.info,
+        coverage_common.instrumented_files_info(
+            ctx,
+            source_attributes = ["srcs", "main"],
+            dependency_attributes = ["deps"],
+        ),
     ] + program.providers
-
-def _program_environment(info, workspace_name):
-    """The runner's start-up variables for a program: runfiles-relative paths.
-
-    Args:
-      info: The `FlutterTestProgramInfo` to run.
-      workspace_name: The main repository's name, which runfiles paths start with.
-
-    Returns:
-      dict: environment variable to value.
-    """
-    env = {
-        "FLUTTER_TEST_TESTER": runfiles_path(info.tester, workspace_name),
-        "FLUTTER_TEST_ICU": runfiles_path(info.icu_data, workspace_name),
-        "FLUTTER_TEST_DILL": runfiles_path(info.kernel, workspace_name),
-        "FLUTTER_TEST_ASSETS": runfiles_path(info.assets, workspace_name),
-        "FLUTTER_TEST_PATH": info.display_path,
-        "FLUTTER_TEST_IMPELLER": "1" if info.enable_impeller else "",
-    }
-    if info.kernel_list:
-        # flutter_tester takes one kernel file: the runner joins the list.
-        env["FLUTTER_TEST_KERNEL_LIST"] = "1"
-    if info.native_files:
-        env["FLUTTER_TEST_NATIVE_FILES"] = "\n".join(info.native_files)
-    return env
-
-def _add_user_env(ctx, kind, env):
-    """Merges the target's `env` into `env`, never over the rule's own keys.
-
-    Those are the runner's start-up contract, and a target that quietly
-    replaced one would fail far from the cause.
-    """
-    for key, value in ctx.attr.env.items():
-        if key in env:
-            fail((
-                "{kind} {name}: env key {key} is set by the rule itself " +
-                "and cannot be overridden."
-            ).format(kind = kind, name = ctx.label.name, key = key))
-        env[key] = value
 
 def _target_arch(ctx):
     """The target platform's CPU in Native Assets' naming, or "" if neither."""
@@ -758,7 +693,7 @@ def _compile_whole_program(ctx, tools, deps, bootstrap, own_srcs, packages, nati
         defines = executable_defines(ctx) + list(tools.sdk_defines),
         # Widgets know where they were built, as under `flutter test`: the
         # inspector and the "relevant error-causing widget" of a failure read
-        # it. Set by `_track_widget_creation`, as the modules' is.
+        # it. Set by `track_widget_creation`, as the modules' is.
         track_widget_creation = track_creation_locations(ctx),
         native_assets_manifest = native_assets_manifest,
     )
@@ -786,7 +721,7 @@ _ENVIRONMENT = executable_defines_config(_implied_defines)
 # flutter_tester via `--flutter-assets-dir`. Platform-runner-specific
 # attrs (engines, plugin libs) are intentionally omitted — flutter_tester
 # is a self-contained host engine.
-_TEST_ATTRS = {
+_PROGRAM_ATTRS = {
     k: v
     for k, v in FLUTTER_APPLICATION_ATTRS.items()
     if k in (
@@ -831,25 +766,14 @@ _TEST_ATTRS = {
 # tree but is not a declared input fails as "non-existent file" rather than
 # being read behind Bazel's back — which is what keeps a cached pass honest.
 # The usual spelling is `data = glob(["test/goldens/**"])`.
-_TEST_ATTRS["data"] = attr.label_list(
+_PROGRAM_ATTRS["data"] = attr.label_list(
     allow_files = True,
     doc = "Runtime data deps. Available in test runfiles. Use for " +
           "fixtures, goldens, and FFI dylibs. Golden PNGs must be listed " +
           "here or the comparator cannot see them.",
 )
 
-# Standard `env` attr — extra variables for the test process.
-#
-# Values are used **literally**: there is no `$(location)` or Make-variable
-# expansion, so a path here has to be one the test itself can resolve (through
-# runfiles, or relative to its working directory). Half-expanding would be
-# worse than not expanding, because the unexpanded form still looks like a
-# path.
-#
-# The `FLUTTER_TEST_*` keys the rule sets are the runner's start-up
-# contract; supplying one is rejected in the implementation rather than
-# silently honoured or silently dropped.
-_TEST_ATTRS["test_config"] = attr.label(
+_PROGRAM_ATTRS["test_config"] = attr.label(
     doc = "The suite's `flutter_test_config.dart`: its " +
           "`testExecutable(FutureOr<void> Function() testMain)` runs the " +
           "suite, as under `flutter test`. `flutter_test` finds it itself, " +
@@ -858,7 +782,7 @@ _TEST_ATTRS["test_config"] = attr.label(
     allow_single_file = [".dart"],
 )
 
-_TEST_ATTRS["enable_impeller"] = attr.bool(
+_PROGRAM_ATTRS["enable_impeller"] = attr.bool(
     doc = "Render with Impeller in flutter_tester, as `flutter test " +
           "--enable-impeller` does, instead of software Skia. A test that " +
           "draws an Impeller-only shader, or a golden meant to match an " +
@@ -871,62 +795,17 @@ _TEST_ATTRS["enable_impeller"] = attr.bool(
     default = False,
 )
 
-_TEST_ATTRS["env"] = attr.string_dict(
-    doc = "Extra environment variables for the test process. Values are " +
-          "literal — no Make-variable or $(location) expansion. The " +
-          "FLUTTER_TEST_* keys the rule sets itself cannot be overridden.",
-)
-_TEST_ATTRS.update(_ENVIRONMENT.attrs)
+_PROGRAM_ATTRS.update(_ENVIRONMENT.attrs)
 
-# Which cases of the suite run: `package:test`'s tag selectors, as the
-# `include_tags` and `exclude_tags` keys of `dart_test.yaml`. They choose cases
-# inside this target, unlike Bazel's `tags` and `--test_tag_filters`, which
-# choose targets.
-_TEST_ATTRS["include_tags"] = attr.string_list(
-    doc = "Tag selectors a case must match to run, as `flutter test --tags` " +
-          "takes them and as `dart_test.yaml`'s `include_tags` does: each " +
-          "entry is one boolean selector (`golden`, `a && !b`), and a case " +
-          "must match every entry. Tags come from `@Tags` on the test " +
-          "library and `tags:` on `group` and `test`. These are " +
-          "`package:test` tags, not Bazel's `tags`. A target none of whose " +
-          "cases match fails. `--test_env=DART_TEST_TAGS=...` narrows " +
-          "further for one run.",
-)
-
-_TEST_ATTRS["exclude_tags"] = attr.string_list(
-    doc = "Tag selectors that drop a case, as `flutter test " +
-          "--exclude-tags` takes them and as `dart_test.yaml`'s " +
-          "`exclude_tags` does: a case matching any entry does not run. " +
-          "`package:test` tags, not Bazel's `tags`. A target none of whose " +
-          "cases remain fails. `--test_env=DART_TEST_EXCLUDE_TAGS=...` " +
-          "drops more for one run.",
-)
-_TEST_ATTRS.update(PLATFORM_CONSTRAINT_ATTRS)
-_TEST_ATTRS.update(KERNEL_TOOL_ATTR)
-_TEST_ATTRS.update(KERNEL_LISTS_ATTR)
-_TEST_ATTRS.update(TRACK_CREATION_LOCATIONS_ATTR)
-
-_TRACK_CREATION_LOCATIONS = str(Label("@rules_dart//dart:track_creation_locations"))
-
-def _track_widget_creation_impl(_settings, _attr):
-    return {_TRACK_CREATION_LOCATIONS: True}
-
-# Widgets record where they were created, as under `flutter test`, whose
-# `--track-widget-creation` is on by default and applies to any JIT build,
-# which a test always is. rules_dart's flag of the same transform reaches every
-# kernel module of `deps` and the entry compile alike, which a tracked class's
-# constructors need to agree on, so the test sets it for itself and all it
-# depends on rather than passing the front-end flag to its own compile only.
-_track_widget_creation = transition(
-    implementation = _track_widget_creation_impl,
-    inputs = [],
-    outputs = [_TRACK_CREATION_LOCATIONS],
-)
+_PROGRAM_ATTRS.update(PLATFORM_CONSTRAINT_ATTRS)
+_PROGRAM_ATTRS.update(KERNEL_TOOL_ATTR)
+_PROGRAM_ATTRS.update(KERNEL_LISTS_ATTR)
+_PROGRAM_ATTRS.update(TRACK_CREATION_LOCATIONS_ATTR)
 
 # Each library in `deps` is compiled into a kernel module by the aspect, and its
 # imports checked by another, with the test's own `defines` (the transition) so a dependency's
 # `bool.fromEnvironment` const agrees with the test's.
-_TEST_ATTRS["deps"] = attr.label_list(
+_PROGRAM_ATTRS["deps"] = attr.label_list(
     doc = "`dart_library` or `flutter_library` dependencies. List " +
           "`@rules_flutter//flutter:material_icons` to bundle " +
           "`MaterialIcons-Regular.otf` for Material widgets.",
@@ -938,7 +817,7 @@ _TEST_ATTRS["deps"] = attr.label_list(
 # The application a test may be compiled in. Built in the test's environment,
 # as `deps` are, so the libraries of its program, which the aspect compiles to
 # modules, are the ones the test's own compile and link agree with.
-_TEST_ATTRS["application"] = attr.label(
+_PROGRAM_ATTRS["application"] = attr.label(
     doc = "A `flutter_application` (or `flutter_application_variant`) " +
           "whose package the test is compiled in, as `flutter test` compiles " +
           "a test in the package it is in: its `package_name`, sources, " +
@@ -953,7 +832,7 @@ _TEST_ATTRS["application"] = attr.label(
     cfg = _ENVIRONMENT.cfg,
 )
 
-_TEST_ATTRS["package_name"] = attr.string(
+_PROGRAM_ATTRS["package_name"] = attr.string(
     doc = "The Dart package the test is compiled in (`pubspec.yaml`'s " +
           "`name:`), so `package:<name>/…` resolves against `srcs` in this " +
           "package's `lib/`. A test beside the library it covers *is* that " +
@@ -962,29 +841,23 @@ _TEST_ATTRS["package_name"] = attr.string(
           "target. Required, unless `application` names the package.",
 )
 
-_TEST_ATTRS["code_assets"] = attr.label_list(
+_PROGRAM_ATTRS["code_assets"] = attr.label_list(
     doc = CODE_ASSETS_DOC,
     providers = [DartCodeAssetInfo],
     cfg = _ENVIRONMENT.cfg,
 )
 
-_TEST_ATTRS["_modular_kernel"] = attr.label(
+_PROGRAM_ATTRS["_modular_kernel"] = attr.label(
     default = Label("@rules_dart//dart:modular_kernel"),
     providers = [BuildSettingInfo],
 )
 
 # Built for the host the test's entry kernel compiles on: rules_dart compiles
 # and links it in `portable`.
-_TEST_ATTRS["_kernel_sdk"] = attr.label(
+_PROGRAM_ATTRS["_kernel_sdk"] = attr.label(
     default = Label("//flutter/private:flutter_kernel_sdk"),
     providers = [DartKernelSdkInfo],
     cfg = config.exec(PORTABLE),
-)
-
-# Built for the target, where the test runs.
-_TEST_ATTRS["_tool"] = attr.label(
-    default = Label("//flutter/private/tools:flutter_test_runner"),
-    cfg = "target",
 )
 
 # The golden-file comparator the generated bootstrap installs. Implicit rather
@@ -992,7 +865,7 @@ _TEST_ATTRS["_tool"] = attr.label(
 # Flutter tests at all, not a choice any BUILD file makes — and because the
 # alternative to installing one is Flutter's `TrivialComparator`, which reports
 # every golden assertion as passing without comparing anything.
-_TEST_ATTRS["_golden_comparator_src"] = attr.label(
+_PROGRAM_ATTRS["_golden_comparator_src"] = attr.label(
     doc = "Golden-file comparator staged into the generated bootstrap. " +
           "Compiled into the test only when its deps expose package:flutter_test.",
     default = Label("//flutter/private/goldens:comparator.dart"),
@@ -1005,34 +878,35 @@ _TEST_ATTRS["_golden_comparator_src"] = attr.label(
 # `flutter_test` lists, because needing it is a property of analyzing Flutter
 # Dart, not a choice any BUILD file makes — and it reaches only
 # `dart_analyzable_info`, so no compile action's inputs change.
-_TEST_ATTRS["_sky_engine"] = attr.label(
+_PROGRAM_ATTRS["_sky_engine"] = attr.label(
     default = Label("@flutter_sky_engine//:sky_engine"),
     providers = [DartInfo],
 )
 
-flutter_test = rule(
-    implementation = _flutter_test_impl,
-    attrs = _TEST_ATTRS,
-    cfg = _track_widget_creation,
-    test = True,
-    # The compiles are `portable`. The run is placed by Bazel's default `test`
-    # group, as any test rule's is: on a host matching the target, which
-    # everything the test runs is built for.
+flutter_suite_program = rule(
+    implementation = _flutter_suite_program_impl,
+    attrs = _PROGRAM_ATTRS,
+    cfg = track_widget_creation,
+    # The compiles are `portable`.
     toolchains = [_FLUTTER_TOOLCHAIN] + COPY_TO_DIRECTORY_TOOLCHAINS,
     exec_groups = PORTABLE_EXEC_GROUPS,
-    doc = """Compiles a Flutter widget test, then runs it under flutter_tester \
-via the package:test_api RemoteListener protocol.
+    provides = [FlutterTestProgramInfo],
+    doc = """Compiles a Flutter test into a program, and does not run it. Returns \
+`FlutterTestProgramInfo`, which `flutter_program_test` runs.
 
-Its `deps`, native code assets included, the runner and flutter_tester are \
-built for the target platform, and like any Bazel test it runs where Bazel's \
-default test toolchain places it: on an execution platform matching that \
-platform. Run it elsewhere by building it for another platform: \
-`--platforms`, or a platform transition around the one test. A test whose \
-result depends on the host (a golden image, anything that measures rendered \
-text) can be pinned with the common `exec_group_compatible_with` attribute, \
-e.g. `exec_group_compatible_with = {"test": ["@platforms//os:macos"]}`. \
-`exec_compatible_with` does not pin the test: it constrains only the rule's \
-default group. The compiles run in the `portable` group.""",
+This is the compile half of `flutter_test`: from `main`, `srcs` and `deps` it \
+generates the bootstrap that speaks the `package:test_api` `RemoteListener` \
+protocol, installs the golden-file comparator, compiles the test's own files \
+against its dependencies' kernel modules, and bundles the assets, shaders, \
+code assets and Native Assets manifest the test needs. `flutter_test` is this \
+rule and `flutter_program_test` over it. Use the two directly to run a program \
+of your own compile with `flutter_program_test`, or to put a program between \
+the two.
+
+Its `deps`, native code assets included, and flutter_tester are built for the \
+target platform. The compiles run in the `portable` group. `data`, \
+goldens included, is part of the program's runfiles. Declare it `testonly`: \
+`flutter_test` does.""",
 )
 
 # A `flutter_tester_binary` runs where it is started: under `bazel run`, here;
@@ -1060,8 +934,8 @@ def _flutter_tester_binary_impl(ctx):
         ctx.target_platform_has_constraint(ctx.attr._android_constraint[platform_common.ConstraintValueInfo]),
     )
     program = _program(ctx, "flutter_tester_binary", runner_tools, target_os, _target_arch(ctx), "library_path")
-    env = _program_environment(program.info, ctx.workspace_name)
-    _add_user_env(ctx, "flutter_tester_binary", env)
+    env = program_environment(program.info, ctx.workspace_name)
+    add_user_env(ctx, "flutter_tester_binary", env)
 
     # The executable is the prebuilt runner under the binary's name, as for
     # `flutter_test`, so it runs on every host and starts no shell. A build
@@ -1088,13 +962,19 @@ def _flutter_tester_binary_impl(ctx):
                 tool[DefaultInfo].default_runfiles,
             ]),
         ),
+        program.info,
     ] + program.providers
 
 _BINARY_ATTRS = {
     k: v
-    for k, v in _TEST_ATTRS.items()
-    if k not in ["_tool", "include_tags", "exclude_tags"]
+    for k, v in _PROGRAM_ATTRS.items()
 }
+
+_BINARY_ATTRS["env"] = attr.string_dict(
+    doc = "Extra environment variables for the program. Values are " +
+          "literal — no Make-variable or $(location) expansion. The " +
+          "FLUTTER_TEST_* keys the rule sets itself cannot be overridden.",
+)
 
 _BINARY_ATTRS["test_config"] = attr.label(
     doc = "A `flutter_test_config.dart` whose " +
@@ -1113,7 +993,7 @@ _BINARY_ATTRS["_tool"] = attr.label(
 flutter_tester_binary = rule(
     implementation = _flutter_tester_binary_impl,
     attrs = _BINARY_ATTRS,
-    cfg = _track_widget_creation,
+    cfg = track_widget_creation,
     executable = True,
     toolchains = COPY_TO_DIRECTORY_TOOLCHAINS,
     exec_groups = PORTABLE_EXEC_GROUPS | {
@@ -1137,3 +1017,70 @@ Build it for the host it runs on: `bazel run` does, and a rule that runs it in \
 an action takes it as an executable attribute with `cfg = "exec"`, as a \
 `genrule` takes its `tools`.""",
 )
+
+# What the test target takes of the attributes `flutter_test` is given: the
+# ones only a run has. Everything else is for the compile, except what both take.
+_RUN_ATTRS = [
+    "args",
+    "env",
+    "exclude_tags",
+    "flaky",
+    "include_tags",
+    "local",
+    "shard_count",
+    "size",
+    "timeout",
+]
+
+# What both targets take: `data` is the program's runfiles and the test's own
+# (where `args` can name it), and the rest place the pair alike. The program is
+# as visible as the test, so that it can be built, analyzed and depended on
+# wherever the test can.
+_SHARED_ATTRS = [
+    "compatible_with",
+    "data",
+    "deprecation",
+    "exec_compatible_with",
+    "exec_properties",
+    "features",
+    "restricted_to",
+    "tags",
+    "target_compatible_with",
+    "visibility",
+]
+
+def flutter_test(name, **kwargs):
+    """Compiles a Flutter widget test, then runs it under flutter_tester.
+
+    Tier 1 of the test rules: declares a `flutter_suite_program` named
+    `<name>.program` that compiles the test, and the
+    test `<name>` that runs it, whose kind is `flutter_test`. Every attribute
+    of either rule, and of a Bazel test, can be given here: the compile's
+    (`main`, `srcs`, `deps`, `package_name`, `application`, `defines`,
+    `flavor`, `assets`, `enable_impeller`, `test_config`, ...) go to the
+    program, the run's (`include_tags`, `exclude_tags`, `env`, `size`,
+    `timeout`, `shard_count`, `args`, ...) to the test, and `data`, `tags`,
+    `visibility` and the platform constraints to both.
+
+    Args:
+        name: Test name.
+        **kwargs: The attributes of `flutter_suite_program` and
+            `flutter_program_test`, and the common ones of a test.
+    """
+    program = {"testonly": True}
+    test = {"program": ":" + name + ".program"}
+    for key, value in kwargs.items():
+        if key in _RUN_ATTRS:
+            test[key] = value
+        elif key in _SHARED_ATTRS:
+            test[key] = value
+            program[key] = value
+        elif key == "exec_group_compatible_with":
+            # A group is the test's, or the compile's.
+            for group, constraints in value.items():
+                target = test if group == "test" else program
+                target.setdefault(key, {})[group] = constraints
+        elif key != "testonly":
+            program[key] = value
+    flutter_suite_program(name = name + ".program", **program)
+    _flutter_test_rule(name = name, **test)

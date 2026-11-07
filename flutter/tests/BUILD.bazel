@@ -27,6 +27,7 @@ load(":flutter_info_test.bzl", "flutter_info_test_suite")
 load(":flutter_integration_test_test.bzl", "flutter_integration_test_test_suite")
 load(":flutter_library_test.bzl", "flutter_library_test_suite")
 load(":flutter_plugin_test.bzl", "flutter_plugin_test_suite")
+load(":flutter_program_test_test.bzl", "flutter_program_test_test_suite")
 load(":flutter_pub_library_repo_test.bzl", "flutter_pub_library_repo_test_suite")
 load(":flutter_pub_package_sdk_source_test.bzl", "flutter_pub_package_sdk_source_test_suite")
 load(":flutter_pub_package_test.bzl", "flutter_pub_package_test_suite")
@@ -279,6 +280,8 @@ validation_test_suite(name = "validation_test")
 path_mapping_test_suite(name = "path_mapping_test")
 
 tester_binary_test_suite(name = "tester_binary_test")
+
+flutter_program_test_test_suite(name = "flutter_program_test_test")
 
 flutter_test_runfiles_test_suite(name = "flutter_test_runfiles_test")
 

@@ -230,9 +230,9 @@ FlutterIntegrationRunnerInfo = provider(
 )
 
 FlutterTestProgramInfo = provider(
-    doc = """A compiled Flutter test program: what `flutter_tester` runs, with everything the runner needs beside it. Returned by `flutter_test_program`, and by any rule that compiles a test of its own; `flutter_program_test` runs the program.
+    doc = """A compiled Flutter test program: what `flutter_tester` runs, with everything the runner needs beside it. Returned by `flutter_suite_program`, and by any rule that compiles a test of its own; `flutter_program_test` runs the program.
 
-The kernel's entry point speaks the `package:test_api` `RemoteListener` protocol over the WebSocket named by `FLUTTER_TEST_HARNESS_PORT`, as the bootstrap `flutter_test_program` generates does.""",
+The kernel's entry point speaks the `package:test_api` `RemoteListener` protocol over the WebSocket named by `FLUTTER_TEST_HARNESS_PORT`, as the bootstrap `flutter_suite_program` generates does.""",
     fields = {
         "kernel": "File: the kernel flutter_tester is started with: one `.dill`, or, when `kernel_list` is true, a list of the kernels in `kernels`, which the runner joins into one when it starts flutter_tester.",
         "kernel_list": "bool: whether `kernel` is a list of kernels rather than a kernel.",

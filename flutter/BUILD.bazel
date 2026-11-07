@@ -122,6 +122,7 @@ bzl_library(
         "//flutter/private:flutter_library",
         "//flutter/private:flutter_plugin",
         "//flutter/private:flutter_profile_build",
+        "//flutter/private:flutter_program_test",
         "//flutter/private:flutter_test",
     ],
 )

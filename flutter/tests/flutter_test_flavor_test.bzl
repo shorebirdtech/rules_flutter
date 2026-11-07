@@ -70,29 +70,29 @@ def flutter_test_flavor_test_suite(name):
         )
     _modular_compile_test(
         name = name + "_modular",
-        target_under_test = ":_flavor_test_paid",
+        target_under_test = ":_flavor_test_paid.program",
         mnemonic = "DartEntryKernel",
         expected = [_DEFINE],
     )
     _whole_program_compile_test(
         name = name + "_whole_program",
-        target_under_test = ":_flavor_test_paid",
+        target_under_test = ":_flavor_test_paid.program",
         mnemonic = "DartKernel",
         expected = [_DEFINE],
     )
     _modular_compile_test(
         name = name + "_none",
-        target_under_test = ":_flavor_test_none",
+        target_under_test = ":_flavor_test_none.program",
         mnemonic = "DartEntryKernel",
     )
     _assets_test(
         name = name + "_assets_paid",
-        target_under_test = ":_flavor_test_paid",
+        target_under_test = ":_flavor_test_paid.program",
         expected = ["packages/flavor_test_lib/assets/all.txt", "packages/flavor_test_lib/assets/paid.txt"],
     )
     _assets_test(
         name = name + "_assets_none",
-        target_under_test = ":_flavor_test_none",
+        target_under_test = ":_flavor_test_none.program",
         expected = ["packages/flavor_test_lib/assets/all.txt"],
     )
     native.test_suite(

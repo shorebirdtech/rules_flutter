@@ -192,7 +192,7 @@ def language_version_test_suite(name):
     )
     _flutter_test_test(
         name = name + "_flutter_test",
-        target_under_test = ":_lv_flutter_test",
+        target_under_test = ":_lv_flutter_test.program",
     )
     _web_test(
         name = name + "_web",

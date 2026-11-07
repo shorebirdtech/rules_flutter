@@ -844,6 +844,16 @@ bzl_library(
 )
 
 bzl_library(
+    name = "flutter_program_test",
+    srcs = ["flutter_program_test.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+    deps = [
+        ":test_tags",
+        "//flutter:providers",
+    ],
+)
+
+bzl_library(
     name = "flutter_test",
     srcs = ["flutter_test.bzl"],
     visibility = ["//flutter:__subpackages__"],
@@ -852,7 +862,7 @@ bzl_library(
         ":exec_groups",
         ":flutter_compile",
         ":flutter_module",
-        ":test_tags",
+        ":flutter_program_test",
         "//flutter:providers",
         "@bazel_skylib//rules:common_settings",
     ],

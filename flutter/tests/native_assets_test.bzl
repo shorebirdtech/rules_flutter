@@ -424,7 +424,7 @@ def native_assets_test_suite(name):
     # A test loads the libraries `deps` builds for its target.
     _test_host_assets_test(
         name = name + "_test_host_is_target",
-        target_under_test = "//flutter/tests/dart_asset_fixture/code_asset_test:code_asset_flutter_test",
+        target_under_test = "//flutter/tests/dart_asset_fixture/code_asset_test:code_asset_flutter_test.program",
         target_compatible_with = ["@platforms//os:macos"],
     )
 
