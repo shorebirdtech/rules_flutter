@@ -27,66 +27,115 @@ Future<void> main() async {
   ) as Map<String, Object?>;
 
   final report = Directory.systemTemp.createTempSync('test_outcome');
-  final xml = File('${report.path}/report.xml');
-  final output = StringBuffer();
+  final int status;
   try {
-    final environment = <String, String>{
-      ...Platform.environment,
-      ...(config['env']! as Map<String, Object?>).cast<String, String>(),
-      'XML_OUTPUT_FILE': xml.path,
-    };
-    final filter = config['testFilter'] as String?;
-    if (filter == null) {
-      environment.remove('TESTBRIDGE_TEST_ONLY');
-    } else {
-      environment['TESTBRIDGE_TEST_ONLY'] = filter;
-    }
-    environment.addAll(
-      (config['runEnv'] as Map<String, Object?>? ?? const {})
-          .cast<String, String>(),
-    );
-
-    final process = await Process.start(
-      runfiles.rlocation(config['executable']! as String),
-      const [],
-      environment: environment,
-    );
-    final pumps = [
-      process.stdout.transform(utf8.decoder).forEach((text) {
-        output.write(text);
-        stdout.write(text);
-      }),
-      process.stderr.transform(utf8.decoder).forEach((text) {
-        output.write(text);
-        stderr.write(text);
-      }),
-    ];
-    final exitCode = await process.exitCode;
-    await Future.wait(pumps);
-
-    final problems = _check(
-      config,
-      exitCode: exitCode,
-      xml: xml.existsSync() ? xml.readAsStringSync() : null,
-      output: output.toString(),
-    )..addAll(_undeclaredOutputsMissing(config));
-    final named = config['noSimulatorNamed'] as String?;
-    // The runner names its simulator for its own process: another run of the
-    // same test, at the same time, has simulators of its own.
-    if (named != null) {
-      problems.addAll(await _simulatorsLeft('$named${process.pid}'));
-    }
-    if (problems.isEmpty) {
-      stdout.writeln('test_outcome: the test ended as it should have.');
-      return;
-    }
-    stderr
-      ..writeln('test_outcome: the test did not end as it should have:')
-      ..writeln(problems.map((p) => '  - $p').join('\n'));
-    exit(1);
+    status = await _run(config, runfiles, File('${report.path}/report.xml'));
   } finally {
     report.deleteSync(recursive: true);
   }
+  // Flushed first: `exit` does not wait for what is still buffered.
+  await Future.wait([stdout.flush(), stderr.flush()]);
+  exit(status);
+}
+
+/// Runs the wrapped test of [config], its JUnit report going to [xml], and
+/// returns the status this target ends with.
+Future<int> _run(
+  Map<String, Object?> config,
+  Runfiles runfiles,
+  File xml,
+) async {
+  final output = StringBuffer();
+  final environment = <String, String>{
+    ...Platform.environment,
+    ...(config['env']! as Map<String, Object?>).cast<String, String>(),
+    'XML_OUTPUT_FILE': xml.path,
+  };
+  final filter = config['testFilter'] as String?;
+  if (filter == null) {
+    environment.remove('TESTBRIDGE_TEST_ONLY');
+  } else {
+    environment['TESTBRIDGE_TEST_ONLY'] = filter;
+  }
+  environment.addAll(
+    (config['runEnv'] as Map<String, Object?>? ?? const {})
+        .cast<String, String>(),
+  );
+
+  // Bazel ends a test that runs out of time with a SIGTERM to its process
+  // group, and SIGKILLs the group as soon as this process has exited. So this
+  // process outlives the wrapped test rather than dying of the signal: the test
+  // gets the signal too, and what it says about where it was, and its own
+  // teardown (an iOS test deletes its simulator), happen while this is here to
+  // pass them on.
+  Process? started;
+  final signals = <ProcessSignal>[];
+  final watches = [
+    if (!Platform.isWindows)
+      for (final signal in [ProcessSignal.sigterm, ProcessSignal.sigint])
+        signal.watch().listen((signal) {
+          signals.add(signal);
+          // Passed on, since a test run by hand is not signalled as a group.
+          started?.kill(signal);
+        }),
+  ];
+  final process = started = await Process.start(
+    runfiles.rlocation(config['executable']! as String),
+    const [],
+    environment: environment,
+  );
+  // A signal that came while the test was being started.
+  signals.forEach(process.kill);
+  final pumps = [
+    process.stdout.transform(utf8.decoder).forEach((text) {
+      output.write(text);
+      stdout.write(text);
+    }),
+    process.stderr.transform(utf8.decoder).forEach((text) {
+      output.write(text);
+      stderr.write(text);
+    }),
+  ];
+  final exitCode = await process.exitCode;
+  await Future.wait(pumps);
+  for (final watch in watches) {
+    await watch.cancel();
+  }
+
+  final named = config['noSimulatorNamed'] as String?;
+  // The runner names its simulator for its own process: another run of the
+  // same test, at the same time, has simulators of its own.
+  final simulatorsLeft = named == null
+      ? const <String>[]
+      : await _simulatorsLeft('$named${process.pid}');
+  if (signals.isNotEmpty) {
+    stderr.writeln(
+      'test_outcome: the test was told to end (${signals.first}) and exited '
+      'with $exitCode; what it said is above.',
+    );
+    if (simulatorsLeft.isNotEmpty) {
+      stderr.writeln(simulatorsLeft.map((p) => '  - $p').join('\n'));
+    }
+    return signals.first == ProcessSignal.sigint ? 130 : 143;
+  }
+
+  final problems =
+      _check(
+          config,
+          exitCode: exitCode,
+          xml: xml.existsSync() ? xml.readAsStringSync() : null,
+          output: output.toString(),
+        )
+        ..addAll(_undeclaredOutputsMissing(config))
+        ..addAll(simulatorsLeft);
+  if (problems.isEmpty) {
+    stdout.writeln('test_outcome: the test ended as it should have.');
+    return 0;
+  }
+  stderr
+    ..writeln('test_outcome: the test did not end as it should have:')
+    ..writeln(problems.map((p) => '  - $p').join('\n'));
+  return 1;
 }
 
 /// What differs between how the test ended and [config]'s expectation.
