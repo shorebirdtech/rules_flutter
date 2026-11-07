@@ -4,7 +4,7 @@ load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("//flutter/private:flutter_desktop_plugin_info.bzl", "plugin_link_flags")
 
 def _entry(package, linkopts = [], link_errors = []):
-    return struct(package = package, linkopts = linkopts, link_errors = link_errors)
+    return struct(package = package, linkopts = linkopts, link_errors = link_errors, unbuilt_native_code = "")
 
 def _flags_test_impl(ctx):
     env = unittest.begin(ctx)

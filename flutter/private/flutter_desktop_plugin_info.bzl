@@ -9,6 +9,8 @@ plus the runner machinery in flutter_linux_application.bzl /
 flutter_windows_application.bzl.
 """
 
+load("//flutter/private:unbuilt_native_code.bzl", "fail_on_unbuilt_native_code")
+
 FlutterLinuxPluginInfo = provider(
     doc = "Source bundle for a Flutter plugin's Linux C++ implementation.",
     fields = {
@@ -36,15 +38,17 @@ def plugin_link_flags(entries, platform):
 
     Args:
         entries: The `linux_plugin_libraries` or `windows_plugin_libraries` of
-            the application: structs with `linkopts`, `link_errors` and
-            `package`.
+            the application: structs with `linkopts`, `link_errors`,
+            `unbuilt_native_code` and `package`.
         platform: "Linux" or "Windows", for the failure message.
 
     Returns:
         The flags, in plugin order, without duplicates. Fails, listing every
         plugin, when a plugin declares link libraries that could not be
-        translated.
+        translated, and before that when its CMake build makes a library
+        rules_flutter does not (`unbuilt_native_code`).
     """
+    fail_on_unbuilt_native_code(entries)
     flags = []
     errors = {}
     for entry in entries:

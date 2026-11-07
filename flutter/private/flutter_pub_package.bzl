@@ -51,13 +51,21 @@ load("@rules_dart//dart/pub:pub_lock_package.bzl", "fetch_pub_archive", "fetch_p
 load("@rules_dart//dart/pub:pubspec.bzl", "read_pubspec")
 load("//flutter/private:android_plugin_maven.bzl", "MAVEN_DEPS_FILE", "gradle_statements", "parse_gradle_maven_dependencies")
 load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url")
-load("//flutter/private:framework_source.bzl", "check_dependency_constraints", "link_framework_package", "unset_message", "write_unset_stub")
 load("//flutter/private:asset_variants.bzl", "variant_scale")
 load("//flutter/private:cmake_link_libraries.bzl", "parse_cmake_link_libraries")
 load("//flutter/private:flutter_pub_index.bzl", "MEMBER_DART", "MEMBER_FILE", "MEMBER_FLUTTER", "MEMBER_OVERLAY", "library_label", "owner_prefix", "read_index", "sibling_path", "source_repo")
 load("//flutter/private:flutter_pubspec.bzl", "flutter_assets_block", "flutter_licenses_block", "flutter_manifest_errors", "flutter_plugin_block")
+load("//flutter/private:framework_source.bzl", "check_dependency_constraints", "link_framework_package", "unset_message", "write_unset_stub")
 load("//flutter/private:pinned.bzl", "pinned")
 load("//flutter/private:swiftpm_dependencies.bzl", "find_unsupported_swiftpm_dependencies")
+load(
+    "//flutter/private:unbuilt_native_code.bzl",
+    "cmake_native_build",
+    "ffi_plugin_native_build",
+    "gradle_native_build",
+    "podspec_native_build",
+    "unbuilt_native_code_message",
+)
 
 # Apple source extensions we sweep into the per-platform plugin library.
 _APPLE_SRC_EXTENSIONS = ("swift", "m", "mm", "h")
@@ -416,41 +424,76 @@ def _detect_android_manifest(ctx):
         return "android/src/main/AndroidManifest.xml"
     return ""
 
-def _detect_android_native_build(ctx):
-    """True when the plugin's Gradle build compiles native code with the NDK.
+def _podspec(ctx, directory):
+    """The podspec in `directory`: `<package>.podspec`, else the only one there, else None."""
+    named = ctx.path("{}/{}.podspec".format(directory, ctx.attr.package_name))
+    if named.exists:
+        return named
+    d = ctx.path(directory)
+    if not d.exists:
+        return None
+    found = [f for f in d.readdir() if f.basename.endswith(".podspec")]
+    return found[0] if len(found) == 1 else None
 
-    Gradle-built Flutter plugins declare `externalNativeBuild` in
-    `android/build.gradle*` to compile C/C++ sources (CMake / ndk-build)
-    into a shared library the APK must carry — e.g. package:jni's
-    libdartjni.so. rules_flutter has no generic translation for those
-    builds; packages that need one ship a curated overlay (bundled under
-    `@rules_flutter//ext/` or user-supplied via `flutter_pub.plugin_overlays`).
-    Detection lets the generated android/ sub-package fail loudly instead
-    of silently producing an APK missing the library.
+def _platform_native_build(ctx, platform, info):
+    """What builds the plugin's native code for `platform` that rules_flutter does not run, or "".
+
+    Reads the platform's build file (see `unbuilt_native_code.bzl`) and the
+    platform's `ffiPlugin` in the pubspec.
     """
-    script = _android_gradle_script(ctx)
-    return bool(script) and "externalNativeBuild" in ctx.read(script)
+    ffi_plugin = info.get("ffiPlugin", False) == True
+    if platform == "android":
+        script = _android_gradle_script(ctx)
+        path = "android/" + script.basename if script else ""
+        mechanism = gradle_native_build(ctx.read(script), path) if script else ""
+        build = "its Gradle build ({})".format(path) if script else "its Gradle build"
+    elif platform in ("ios", "macos"):
+        directory = "darwin" if info.get("sharedDarwinSource", False) == True else platform
+        podspec = _podspec(ctx, directory)
+        path = "{}/{}".format(directory, podspec.basename) if podspec else ""
+        mechanism = podspec_native_build(ctx.read(podspec), path) if podspec else ""
+        build = "its podspec ({})".format(path) if podspec else "its podspec"
+    else:
+        path = platform + "/CMakeLists.txt"
+        cmake = ctx.path(path)
+        mechanism = cmake_native_build(ctx.read(cmake), path) if cmake.exists else ""
+        build = "its CMake build ({})".format(path)
+    if not mechanism and ffi_plugin:
+        mechanism = ffi_plugin_native_build(build)
+    return mechanism
 
-def _make_android_native_build_unsupported_content(package_name, version):
-    """Generate an `android/BUILD.bazel` that fails at load time.
+def _detect_unbuilt_native_code(ctx, plugin_block):
+    """The plugin's native code rules_flutter does not build, per platform.
 
-    Emitted for plugins whose Gradle build compiles native code for Android
-    (externalNativeBuild) when no overlay provides a Bazel translation.
+    Returns:
+        A dict of platform (`android`, `ios`, `macos`, `linux`, `windows`) to
+        the message its build fails with, for each platform the pubspec
+        declares whose build makes a library rules_flutter cannot.
+    """
+    out = {}
+    for platform in ("android", "ios", "macos", "linux", "windows"):
+        info = plugin_block.platforms.get(platform)
+        if info == None:
+            continue
+        mechanism = _platform_native_build(ctx, platform, info)
+        if mechanism:
+            out[platform] = unbuilt_native_code_message(
+                ctx.attr.package_name,
+                ctx.attr.version,
+                platform,
+                mechanism,
+            )
+    return out
+
+def make_android_native_build_content(message):
+    """An `android/BUILD.bazel` that fails at load time with `message`.
+
+    Written for a plugin whose Android native code rules_flutter does not
+    build (see `unbuilt_native_code.bzl`) when no overlay builds the package.
     An Android build that links the plugin loads this file through its
-    member's `exports` and fails with a clear message; non-Android
-    platforms never load it and are unaffected.
+    member's `exports` and fails; other platforms never load it.
     """
-    message = (
-        "package:{pkg} {version} compiles native code for Android via " +
-        "Gradle's externalNativeBuild, which rules_flutter cannot " +
-        "translate automatically. An APK built without that library would " +
-        "crash at plugin registration, so this is a hard error. Provide a " +
-        "plugin overlay for {pkg} (flutter_pub.plugin_overlays in MODULE.bazel) " +
-        "that compiles the package's native sources with cc_shared_library " +
-        "and ships them through flutter_plugin.native_deps — see " +
-        "@rules_flutter//ext/jni for the canonical example."
-    ).format(pkg = package_name, version = version)
-    return 'fail("' + message + '")\n'
+    return "fail({})\n".format(repr(message))
 
 def _parse_consumer_proguard_files(content):
     """Extract `consumerProguardFiles` paths from a Gradle build script.
@@ -1051,6 +1094,7 @@ def make_flutter_member_build_content(
         pkg_asset_flavors = {},
         pkg_shader_flavors = {},
         has_android_lib = False,
+        unbuilt_native_code = {},
         license_file = ""):
     """Generate BUILD content for the source repository of a Flutter pub package.
 
@@ -1114,6 +1158,11 @@ def make_flutter_member_build_content(
             `linux/CMakeLists.txt`, or None.
         windows_link: Same, for `windows/CMakeLists.txt`.
         additional_licenses: Labels of the files `flutter: licenses:` lists.
+        unbuilt_native_code: Dict of `ios`, `macos`, `linux` or `windows` to
+            the message the build of that platform fails with: the plugin's
+            native code there is made by a build rules_flutter does not run
+            (`unbuilt_native_code.bzl`). That platform's library is a
+            `flutter_unbuilt_plugin_library` instead of compiled sources.
 
     Returns:
         BUILD.bazel content as a string.
@@ -1126,6 +1175,8 @@ def make_flutter_member_build_content(
 
     if apple_macos_srcs_dirs or apple_ios_srcs_dirs:
         extra_loads.append('load("@rules_flutter//flutter:macos.bzl", "flutter_apple_plugin_library")')
+    if unbuilt_native_code:
+        extra_loads.append('load("@rules_flutter//flutter/private:unbuilt_native_code.bzl", "flutter_unbuilt_plugin_library")')
     if linux_src_dir:
         extra_loads.append('load("@rules_flutter//flutter:linux.bzl", "flutter_linux_plugin_library")')
     if windows_src_dir:
@@ -1202,9 +1253,26 @@ flutter_windows_plugin_library(
             link_attrs = _format_link_attrs(windows_link) if windows_link else "",
         ))
 
-    if apple_macos_srcs_dirs or apple_ios_srcs_dirs:
-        macos_branch = '            ":{name}_apple_macos",'.format(name = name) if apple_macos_srcs_dirs else ""
-        ios_branch = '            ":{name}_apple_ios",'.format(name = name) if apple_ios_srcs_dirs else ""
+    # The library each platform with unbuilt native code has in its place.
+    unbuilt_names = {
+        "ios": name + "_apple_ios",
+        "linux": name + "_linux",
+        "macos": name + "_apple_macos",
+        "windows": name + "_windows",
+    }
+    for platform in sorted(unbuilt_native_code.keys()):
+        extra_targets.append("""
+flutter_unbuilt_plugin_library(
+    name = "{name}",
+    message = {message},
+    visibility = ["//visibility:public"],
+)""".format(name = unbuilt_names[platform], message = repr(unbuilt_native_code[platform])))
+
+    has_macos_lib = bool(apple_macos_srcs_dirs) or "macos" in unbuilt_native_code
+    has_ios_lib = bool(apple_ios_srcs_dirs) or "ios" in unbuilt_native_code
+    if has_macos_lib or has_ios_lib:
+        macos_branch = '            ":{name}_apple_macos",'.format(name = name) if has_macos_lib else ""
+        ios_branch = '            ":{name}_apple_ios",'.format(name = name) if has_ios_lib else ""
         apple_libs_arg = """    apple_libs = select({{
         "@platforms//os:macos": [
 {macos_branch}
@@ -1219,10 +1287,10 @@ flutter_windows_plugin_library(
             ios_branch = ios_branch,
         )
 
-    if linux_src_dir:
+    if linux_src_dir or "linux" in unbuilt_native_code:
         linux_libs_arg = '    linux_libs = [":{name}_linux"],\n'.format(name = name)
 
-    if windows_src_dir:
+    if windows_src_dir or "windows" in unbuilt_native_code:
         windows_libs_arg = '    windows_libs = [":{name}_windows"],\n'.format(name = name)
 
     # Android sources travel through a sibling `android/` sub-package, whose
@@ -2083,7 +2151,12 @@ def _flutter_pub_package_impl(ctx):
         apple_macos_privacy_manifests = []
         apple_ios_privacy_manifests = []
 
-        if macos_info and macos_info.get("pluginClass", ""):
+        # A platform whose library the plugin's own build makes by means
+        # rules_flutter does not run gets a stand-in for its library that
+        # fails that platform's build; its sources are not compiled.
+        unbuilt_native_code = _detect_unbuilt_native_code(ctx, plugin_block)
+
+        if macos_info and macos_info.get("pluginClass", "") and "macos" not in unbuilt_native_code:
             _fail_on_swiftpm_dependencies(
                 ctx,
                 ctx.attr.package_name,
@@ -2106,7 +2179,7 @@ def _flutter_pub_package_impl(ctx):
                 apple_macos_srcs_dirs,
             )
 
-        if ios_info and ios_info.get("pluginClass", ""):
+        if ios_info and ios_info.get("pluginClass", "") and "ios" not in unbuilt_native_code:
             _fail_on_swiftpm_dependencies(
                 ctx,
                 ctx.attr.package_name,
@@ -2134,9 +2207,9 @@ def _flutter_pub_package_impl(ctx):
         # directory is the canonical location.
         linux_src_dir = ""
         windows_src_dir = ""
-        if linux_info and linux_info.get("pluginClass", ""):
+        if linux_info and linux_info.get("pluginClass", "") and "linux" not in unbuilt_native_code:
             linux_src_dir = _detect_desktop_source_dir(ctx, "linux")
-        if windows_info and windows_info.get("pluginClass", ""):
+        if windows_info and windows_info.get("pluginClass", "") and "windows" not in unbuilt_native_code:
             windows_src_dir = _detect_desktop_source_dir(ctx, "windows")
         linux_link = _read_desktop_link_libraries(ctx, "linux") if linux_src_dir else None
         windows_link = _read_desktop_link_libraries(ctx, "windows") if windows_src_dir else None
@@ -2149,10 +2222,8 @@ def _flutter_pub_package_impl(ctx):
         android_manifest = ""
         android_consumer_proguard_specs = []
         android_has_resources = False
-        android_native_build = False
-        if android_info:
-            android_native_build = _detect_android_native_build(ctx)
-        if android_info and android_info.get("pluginClass", ""):
+        android_native_build = unbuilt_native_code.get("android", "")
+        if android_info and android_info.get("pluginClass", "") and not android_native_build:
             android_src_dir = _detect_android_source_dir(ctx)
             android_has_resources = _detect_android_resources(ctx)
 
@@ -2204,6 +2275,11 @@ def _flutter_pub_package_impl(ctx):
             linux_link = linux_link,
             windows_link = windows_link,
             has_android_lib = bool(android_src_dir or android_has_resources or android_native_build),
+            unbuilt_native_code = {
+                platform: message
+                for platform, message in unbuilt_native_code.items()
+                if platform != "android"
+            },
         )
     elif has_asset_contributions or uses_material_icons or additional_licenses:
         # No plugin block, but the pubspec has flutter.fonts/assets/shaders (or
@@ -2234,7 +2310,7 @@ def _flutter_pub_package_impl(ctx):
         android_manifest = ""
         android_consumer_proguard_specs = []
         android_has_resources = False
-        android_native_build = False
+        android_native_build = ""
     else:
         build_content = make_dart_member_build_content(
             name = ctx.attr.package_name,
@@ -2250,7 +2326,7 @@ def _flutter_pub_package_impl(ctx):
         android_manifest = ""
         android_consumer_proguard_specs = []
         android_has_resources = False
-        android_native_build = False
+        android_native_build = ""
 
     ctx.file("BUILD.bazel", build_content)
     is_flutter_member = plugin_block.present or has_asset_contributions or uses_material_icons or bool(additional_licenses)
@@ -2277,10 +2353,7 @@ def _flutter_pub_package_impl(ctx):
         maven_deps = _maven_dep_dicts(android_gradle_maven)
         maven_errors = android_gradle_maven.errors
     if android_native_build:
-        ctx.file("android/BUILD.bazel", _make_android_native_build_unsupported_content(
-            ctx.attr.package_name,
-            ctx.attr.version,
-        ))
+        ctx.file("android/BUILD.bazel", make_android_native_build_content(android_native_build))
     elif android_src_dir or android_has_resources:
         ctx.file("android/BUILD.bazel", make_android_subpackage_build_content(
             android_src_dir = android_src_dir,

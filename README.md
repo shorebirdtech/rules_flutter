@@ -280,6 +280,21 @@ A plugin's C++ sources are compiled into your Linux or Windows app, so the app m
 
 For a plugin with something of the last kind, the Windows or Linux app fails when it is built, listing each line and its package. Other platforms are unaffected. Supply a plugin overlay with `flutter_pub.plugin_overlays`: a `BUILD.bazel.tpl` for the package that declares its `flutter_windows_plugin_library` or `flutter_linux_plugin_library` with the flags its sources need in `linkopts`.
 
+### Plugins whose own build makes a native library
+
+Some plugins make a library with their platform's build system rather than from sources rules_flutter compiles. rules_flutter does not run Gradle, CocoaPods or CMake, so it cannot make that library. It recognises these cases from the plugin's own files:
+
+- Gradle's `externalNativeBuild` (CMake or ndk-build) in `android/build.gradle(.kts)`, as `package:jni` uses.
+- cargokit, which `flutter_rust_bridge` plugins use to build a Rust crate with cargo: `apply from: ".../cargokit/gradle/plugin.gradle"` in the Gradle script, a podspec script phase running `cargokit/build_pod.sh`, or `apply_cargokit()` in a `CMakeLists.txt`.
+- Any other CocoaPods script phase (`s.script_phase`) in the plugin's podspec.
+- A `CMakeLists.txt` that sets `<plugin>_bundled_libraries`, Flutter's way of shipping a library the plugin's CMake build makes or downloads.
+- `ffiPlugin: true` for the platform in the pubspec, which tells Flutter to build the plugin's native sources into a library that Dart opens.
+
+An app built without the library would fail at run time when the plugin loads it, so the build for that platform fails instead, naming the package, the platform and the mechanism. Builds for the plugin's other platforms are unaffected. To build the app, build the library with Bazel (a `rust_shared_library` of `rules_rust` for a Rust crate, a `cc_shared_library` for C or C++) and give the package a target that lists it in `native_deps`, in either of two ways:
+
+- A plugin overlay (`flutter_pub.plugin_overlays`): a `BUILD.bazel.tpl` for the package whose `flutter_plugin` lists the library. `@rules_flutter//ext/jni` does this for `package:jni`.
+- A `flutter_plugin` of your own, which `flutter_pub.from_lock(resolve = {"<package>": "//your:target"})` puts in place of the package (see "Packages in your workspace").
+
 ### Regenerating pubspec.lock
 
 Bazel reads `pubspec.lock` and never writes it. To regenerate it, use the Flutter toolchain the rules pin rather than a Flutter installed on your machine:

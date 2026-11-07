@@ -1175,7 +1175,7 @@ The dev_tool screenshot is the dispositive end-to-end gate per platform: if Nati
 
 An Android app links the plugins it depends on, and those only (`flutter_android_plugin_libs`). `:verify_android_plugin_scope_test` checks it on real APKs: `package_info_only_android` depends on `package_info_plus` alone, though the lock lists six other Android plugins, and its release APK, built once without R8 (each library dexed by rules_android's own aspect, which only follows `deps`, `exports` and `runtime_deps`, hence the `exports` the generated libraries and plugins list their Android libraries under) and once with it, defines no class of the others and declares no `RECORD_AUDIO`. `//flutter/tests:android_plugin_libs_test` checks the link and the per-app Maven check at analysis. `android_example`'s `:testonly_app_build_test` builds a `testonly` `flutter_android_app`.
 
-### Android plugin native source builds (externalNativeBuild)
+### Plugin native code their own build makes (externalNativeBuild, cargokit, ffiPlugin)
 
 Some pub packages compile C/C++ for Android via Gradle's
 `externalNativeBuild` (CMake/ndk-build) — e.g. `package:jni`, whose
@@ -1198,6 +1198,18 @@ for arbitrary Gradle native builds; instead:
    `flutter_pub.plugin_overlays` — never a silently incomplete APK.
    Non-Android platforms are unaffected (the check lives in the spoke's
    `android/` sub-package, loaded only by an Android build of an app that depends on the package: the package's `flutter_pub_member` lists its `:lib` under `exports` in a `select()` on Android).
+
+The same check covers every platform and the other ways a plugin's own
+build makes a library (`flutter/private/unbuilt_native_code.bzl`): cargokit
+in the Gradle script, the podspec or the `CMakeLists.txt`; any other podspec
+script phase; a non-empty `<plugin>_bundled_libraries`; and `ffiPlugin: true`
+for the platform. On iOS and macOS the platform's library is a
+`flutter_unbuilt_plugin_library`, on which `flutter_apple_plugins_aggregator`
+fails; on Linux and Windows the runner fails in `plugin_link_flags`.
+`//flutter/tests:unbuilt_native_code_test` reads the build files of
+`super_native_extensions` 0.9.1, `rhttp` 0.18.0 and `webcrypto` 0.6.0, and
+checks that the macOS build of an app with such a plugin fails while its iOS
+build does not.
 
 ### Curated code assets (no authoring needed)
 

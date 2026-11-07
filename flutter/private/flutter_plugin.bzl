@@ -28,6 +28,7 @@ load("//flutter/private:flutter_desktop_plugin_info.bzl", "FlutterLinuxPluginInf
 load("//flutter/private:flutter_info.bzl", "LINK_HOOK_ATTR", "flutter_info")
 load("//flutter/private:flutter_library.bzl", "ADDITIONAL_LICENSES_ATTR", "LICENSE_FILE_ATTR", "PKG_ASSET_FLAVORS_ATTR", "PKG_ASSET_PLATFORMS_ATTR", "PKG_SHADER_FLAVORS_ATTR", "PKG_SHADER_PLATFORMS_ATTR", "SKY_ENGINE_ATTR", "build_pub_contributions", "flutter_analyzable_info", "flutter_package_record", "own_additional_licenses", "own_asset_contributions")
 load("//flutter/private:native_sources.bzl", "collect_native_source_pairs", "native_sources_aspect")
+load("//flutter/private:unbuilt_native_code.bzl", "FlutterUnbuiltNativeCodeInfo")
 
 def build_plugin_struct(name, plugin_platforms):
     """Build a plugin metadata struct from per-platform metadata.
@@ -40,6 +41,23 @@ def build_plugin_struct(name, plugin_platforms):
         A struct with name and platforms dict.
     """
     return struct(name = name, platforms = plugin_platforms)
+
+def _unbuilt_native_code(lib):
+    """The message of a library standing in for unbuilt native code, or ""."""
+    return lib[FlutterUnbuiltNativeCodeInfo].message if FlutterUnbuiltNativeCodeInfo in lib else ""
+
+def _unbuilt_desktop_entry(lib, package_name):
+    """A Linux or Windows plugin library entry with nothing to compile, whose runner fails on its message."""
+    return struct(
+        label = lib.label,
+        srcs = depset(),
+        hdrs = depset(),
+        include_dirs = depset(),
+        linkopts = (),
+        link_errors = (),
+        unbuilt_native_code = _unbuilt_native_code(lib),
+        package = package_name,
+    )
 
 def plugin_contributions(ctx, package_name, declares_plugin):
     """What a plugin-shaped target adds to `FlutterInfo`, beyond its dependencies'.
@@ -117,6 +135,7 @@ def plugin_contributions(ctx, package_name, declares_plugin):
             label = lib.label,
             cc_info = lib[CcInfo] if CcInfo in lib else None,
             swift_info = lib[SwiftInfo] if SwiftInfo in lib else None,
+            unbuilt_native_code = _unbuilt_native_code(lib),
             package = package_name,
         ))
 
@@ -124,6 +143,9 @@ def plugin_contributions(ctx, package_name, declares_plugin):
     # corresponding runner can fold them into its compile.
     extra_linux_plugin_libraries = []
     for lib in ctx.attr.linux_libs:
+        if FlutterUnbuiltNativeCodeInfo in lib:
+            extra_linux_plugin_libraries.append(_unbuilt_desktop_entry(lib, package_name))
+            continue
         if FlutterLinuxPluginInfo not in lib:
             fail("flutter_plugin: linux_libs entry %s must provide FlutterLinuxPluginInfo (use flutter_linux_plugin_library)." % lib.label)
         info = lib[FlutterLinuxPluginInfo]
@@ -134,11 +156,15 @@ def plugin_contributions(ctx, package_name, declares_plugin):
             include_dirs = info.include_dirs,
             linkopts = info.linkopts,
             link_errors = info.link_errors,
+            unbuilt_native_code = "",
             package = package_name,
         ))
 
     extra_windows_plugin_libraries = []
     for lib in ctx.attr.windows_libs:
+        if FlutterUnbuiltNativeCodeInfo in lib:
+            extra_windows_plugin_libraries.append(_unbuilt_desktop_entry(lib, package_name))
+            continue
         if FlutterWindowsPluginInfo not in lib:
             fail("flutter_plugin: windows_libs entry %s must provide FlutterWindowsPluginInfo (use flutter_windows_plugin_library)." % lib.label)
         info = lib[FlutterWindowsPluginInfo]
@@ -149,6 +175,7 @@ def plugin_contributions(ctx, package_name, declares_plugin):
             include_dirs = info.include_dirs,
             linkopts = info.linkopts,
             link_errors = info.link_errors,
+            unbuilt_native_code = "",
             package = package_name,
         ))
 
@@ -334,16 +361,16 @@ PLUGIN_PACKAGE_ATTRS = {
         providers = [JavaInfo],
     ),
     "apple_libs": attr.label_list(
-        doc = "Per-platform Apple swift_library targets (typically `flutter_apple_plugin_library`s) carrying the plugin's macOS / iOS native code. Each label's name must contain `macos` or `ios` so the runner aggregator can route it. Set this via `select()` on the target platform so only one platform's swift_library analyzes per build — both with the same module name in the same configuration would conflict on the produced `<module>.swiftmodule` output.",
-        providers = [CcInfo],
+        doc = "Per-platform Apple swift_library targets (typically `flutter_apple_plugin_library`s) carrying the plugin's macOS / iOS native code. Each label's name must contain `macos` or `ios` so the runner aggregator can route it. Set this via `select()` on the target platform so only one platform's swift_library analyzes per build — both with the same module name in the same configuration would conflict on the produced `<module>.swiftmodule` output. A generated pub package may name a `flutter_unbuilt_plugin_library` instead, which fails the build of that platform (see `unbuilt_native_code.bzl`).",
+        providers = [[CcInfo], [FlutterUnbuiltNativeCodeInfo]],
     ),
     "linux_libs": attr.label_list(
-        doc = "Linux plugin source bundles (`flutter_linux_plugin_library`). Propagated through `FlutterInfo.linux_plugin_libraries` so the Linux runner folds them into its `cc_common.compile()` pass.",
-        providers = [FlutterLinuxPluginInfo],
+        doc = "Linux plugin source bundles (`flutter_linux_plugin_library`). Propagated through `FlutterInfo.linux_plugin_libraries` so the Linux runner folds them into its `cc_common.compile()` pass. A generated pub package may name a `flutter_unbuilt_plugin_library` instead, which fails the Linux runner.",
+        providers = [[FlutterLinuxPluginInfo], [FlutterUnbuiltNativeCodeInfo]],
     ),
     "windows_libs": attr.label_list(
-        doc = "Windows plugin source bundles (`flutter_windows_plugin_library`). Propagated through `FlutterInfo.windows_plugin_libraries` so the Windows runner folds them into its `cc_common.compile()` pass.",
-        providers = [FlutterWindowsPluginInfo],
+        doc = "Windows plugin source bundles (`flutter_windows_plugin_library`). Propagated through `FlutterInfo.windows_plugin_libraries` so the Windows runner folds them into its `cc_common.compile()` pass. A generated pub package may name a `flutter_unbuilt_plugin_library` instead, which fails the Windows runner.",
+        providers = [[FlutterWindowsPluginInfo], [FlutterUnbuiltNativeCodeInfo]],
     ),
     "native_assets": attr.label_list(
         doc = "Native Assets `CodeAsset` declarations (each a `flutter_native_asset` target). Propagated through `FlutterInfo.native_assets` and aggregated by `flutter_application` into the `--native-assets` manifest. Declare per-platform asset sets with `select()`: this is what routes each asset to the applications built for its platform, and listing two targets with the same `asset_id` in one configuration fails analysis.",

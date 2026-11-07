@@ -19,16 +19,25 @@ The runner_lib_gen swift_library has the aggregator target in its `deps`.
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load("@rules_swift//swift:swift.bzl", "SwiftInfo")
 load("//flutter:providers.bzl", "FlutterApplicationInfo")
+load("//flutter/private:unbuilt_native_code.bzl", "fail_on_unbuilt_native_code")
 
 def _flutter_apple_plugins_aggregator_impl(ctx):
     flutter_info = ctx.attr.application[FlutterApplicationInfo]
     target_platform = ctx.attr.platform
 
+    entries = [
+        entry
+        for entry in flutter_info.apple_plugin_libraries.to_list()
+        if entry.platform == target_platform
+    ]
+
+    # A plugin whose library for this platform its podspec builds by other
+    # means (cargokit, a script phase, `ffiPlugin`) would link without it.
+    fail_on_unbuilt_native_code(entries)
+
     cc_infos = []
     swift_infos = []
-    for entry in flutter_info.apple_plugin_libraries.to_list():
-        if entry.platform != target_platform:
-            continue
+    for entry in entries:
         if entry.cc_info:
             cc_infos.append(entry.cc_info)
         if entry.swift_info:
