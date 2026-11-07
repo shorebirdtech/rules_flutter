@@ -1,0 +1,12 @@
+load("@rules_flutter//flutter:defs.bzl", "flutter_library")
+
+# Code of the app's own package, built from a BUILD file under its `lib/`: its
+# name is derived as the app's, `nested_assets`. Its asset is the app's, keyed
+# `lib/widgets/banner.txt` as the app's pubspec would list it.
+flutter_library(
+    name = "widgets",
+    srcs = ["banner.dart"],
+    assets = ["banner.txt"],
+    visibility = ["//nested_assets:__pkg__"],
+    deps = ["@deps//:flutter"],
+)

@@ -1,0 +1,17 @@
+load("//tools:bundle.bzl", "bundled_app")
+
+# An application whose own package is split over BUILD files under its `lib/`:
+# one library left unnamed (its derived name is the application's) and one
+# naming the application's package. Their assets, fonts and shaders are the
+# application's own, so they are keyed as the application's pubspec would list
+# them, with no `packages/own/` in front.
+bundled_app(
+    name = "app",
+    package_name = "own",
+    assets = ["assets/a.txt"],
+    main = "//apps/own/lib:main.dart",
+    deps = [
+        "//apps/own/lib:own",
+        "//apps/own/lib/widgets",
+    ],
+)

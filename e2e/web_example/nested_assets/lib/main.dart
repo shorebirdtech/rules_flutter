@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:nested_assets/widgets/banner.dart';
 import 'package:ui_kit/ui_kit.dart';
 
-/// An app below the workspace root, showing two assets re-read on every build:
-/// its own, and the one in the library it depends on.
+/// An app below the workspace root, showing three assets re-read on every
+/// build: its own, one of a library of its own package, and the one in the
+/// library it depends on.
 ///
 /// `asset_reload_e2e_test` edits each file on disk and asserts the label
 /// changes after a hot reload. Neither asset's key says where its file is in
@@ -30,6 +32,10 @@ class NestedAssetsApp extends StatelessWidget {
               _AssetLabel(
                 assetKey: 'assets/message.txt',
                 labelKey: ValueKey('e2e_app_asset_label'),
+              ),
+              _AssetLabel(
+                assetKey: bannerKey,
+                labelKey: ValueKey('e2e_own_lib_asset_label'),
               ),
               _AssetLabel(
                 assetKey: greetingKey,

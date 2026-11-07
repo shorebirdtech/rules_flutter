@@ -47,23 +47,25 @@ def _flutter_pub_member_impl(ctx):
                  "the non-Dart remainder of `lib/`; Dart sources belong in " +
                  "`srcs`.") % (ctx.label, f.short_path),
             )
+    member = dart_package_member_info(
+        label = ctx.label,
+        package_name = package_name,
+        language_version = ctx.attr.language_version,
+        srcs = ctx.files.srcs,
+        resources = ctx.files.resources,
+        code_assets = ctx.attr.code_assets,
+        version = ctx.attr.version,
+        link_hook = ctx.file.link_hook,
+        license_file = ctx.file.license_file,
+        has_unreplaced_hook = ctx.attr.has_unreplaced_hook,
+    )
     return [
-        dart_package_member_info(
-            label = ctx.label,
-            package_name = package_name,
-            language_version = ctx.attr.language_version,
-            srcs = ctx.files.srcs,
-            resources = ctx.files.resources,
-            code_assets = ctx.attr.code_assets,
-            version = ctx.attr.version,
-            link_hook = ctx.file.link_hook,
-            license_file = ctx.file.license_file,
-            has_unreplaced_hook = ctx.attr.has_unreplaced_hook,
-        ),
+        member,
         FlutterPubMemberInfo(
             contributions = plugin_contributions(
                 ctx,
                 package_name,
+                member.package.lib_root,
                 declares_plugin = bool(ctx.attr.plugin_platforms_json or ctx.attr.platforms),
             ),
         ),

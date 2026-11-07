@@ -1,0 +1,3 @@
+# The root of the Dart package `split`, whose code is built from a BUILD file
+# under its `lib/`. This one only lends that library a file of the package.
+exports_files(["assets/s.txt"])

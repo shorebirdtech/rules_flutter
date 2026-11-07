@@ -38,9 +38,11 @@ def _flutter_material_icons_impl(ctx):
     # fully immutable — mutable fields propagate to the struct's mutability.
     contribution = struct(
         package_name = "",
+        package_root = None,
         family = "MaterialIcons",
         fonts = (struct(
-            bundle_path = _MATERIAL_ICONS_BUNDLE_PATH,
+            asset_path = _MATERIAL_ICONS_BUNDLE_PATH,
+            of_other_package = False,
             file = material_font,
             weight = None,
             style = None,

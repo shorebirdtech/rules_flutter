@@ -75,6 +75,29 @@ bundle_test(
     prefix = "packages/ext_assets/",
 )
 
+# Property: an asset's path is its path from the root of its Dart package (the
+# directory above `lib/`), as the package's pubspec lists it, not from the
+# BUILD file that names it. A library built from a BUILD file inside `lib/`
+# keys its files `packages/<name>/lib/...`, and may name any file of its
+# package.
+bundle_test(
+    name = "library_inside_lib_keys_assets_by_path_from_its_package_root_test",
+    bundle = "//:app_with_split_lib_bundle",
+    expected = "//tests:expected/split.json",
+    prefix = "packages/split/",
+)
+
+# Property: the assets, fonts and shaders of a library of the application's
+# own package are the application's, keyed with no `packages/<name>/` in front,
+# as `flutter build` keys what the application's own pubspec lists. That holds
+# for a library naming the application's package and for one whose derived
+# name is it, and the font family is the bare one too.
+bundle_test(
+    name = "app_own_package_libraries_key_assets_without_a_package_prefix_test",
+    bundle = "//apps/own:app_bundle",
+    expected = "//tests:expected/own.json",
+)
+
 # -- Variants --------------------------------------------------------------------
 
 # Property: a file is a resolution variant of the file of the same name one

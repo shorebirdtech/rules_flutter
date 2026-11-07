@@ -13,7 +13,7 @@ load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "app_main_location", 
 load("//flutter/private:flutter_asset_bundle.bzl", "flutter_asset_bundle_action")
 load("//flutter/private:flutter_compile.bzl", "flutter_kernel_compile")
 load("//flutter/private:flutter_info.bzl", "dedup_plugins")
-load("//flutter/private:flutter_library.bzl", "aggregate_pub_contributions", "package_relative", "ships_in")
+load("//flutter/private:flutter_library.bzl", "aggregate_pub_contributions", "asset_key", "package_root_of", "path_in_package", "ships_in")
 load("//flutter/private:flutter_shader_compile.bzl", "flutter_shader_compile_action")
 load("//flutter/private:native_sources.bzl", "native_sources_aspect")
 load("//flutter/private:notices.bzl", "NOTICES_ATTRS", "additional_licenses_of", "flutter_notices_action", "notices_asset_key", "package_licenses_of")
@@ -549,9 +549,9 @@ def _shader_jobs(ctx, deps, target_platform, inputs):
 
     User shaders keep their path in the target's package ("shaders/my_effect.frag"),
     SDK shaders go under "shaders/<basename>" (Flutter's convention), and a
-    package's under "packages/<pkg>/<path>" (bare "<path>" when it has no
-    package name). Two shaders claiming one bundle path fail here: one would
-    otherwise overwrite the other.
+    package's are keyed as `asset_key` says: bare "<path>" for the program's
+    own package, "packages/<pkg>/<path>" for any other. Two shaders claiming
+    one bundle path fail here: one would otherwise overwrite the other.
 
     A package's shader that its `platforms:` entry restricts to other platforms
     than `target_platform` is no job, as flutter_tools leaves it out of a build
@@ -560,8 +560,9 @@ def _shader_jobs(ctx, deps, target_platform, inputs):
     never for a build without one, `tester` included.
     """
     jobs = []
+    program_root = package_root_of(inputs)
     for shader in inputs.shaders:
-        jobs.append(struct(bundle_path = package_relative(inputs, shader), file = shader, includes = inputs.shader_includes, listed = True))
+        jobs.append(struct(bundle_path = path_in_package(inputs.label, program_root, shader), file = shader, includes = inputs.shader_includes, listed = True))
     for shader in collect_sdk_shader_srcs(deps):
         jobs.append(struct(bundle_path = "shaders/" + shader.basename, file = shader, includes = [], listed = False))
     for dep in deps:
@@ -569,9 +570,8 @@ def _shader_jobs(ctx, deps, target_platform, inputs):
             for entry in dep[FlutterInfo].pub_shaders.to_list():
                 if not ships_in(entry, target_platform, inputs.flavor):
                     continue
-                prefix = "packages/{}/".format(entry.package_name) if entry.package_name else ""
                 jobs.append(struct(
-                    bundle_path = prefix + entry.shader_path,
+                    bundle_path = asset_key(entry, entry.shader_path, program_root),
                     file = entry.file,
                     includes = entry.includes,
                     listed = True,
@@ -627,10 +627,11 @@ def shader_sources(ctx, deps, target_platform, inputs = None):
 def asset_roots(ctx, deps, inputs = None):
     """The workspace directories the first-party assets come from, for the dev tool.
 
-    `{bundle path prefix: workspace-relative directory}`: `""` for this
-    target's own package, `packages/<name>/` for each library among `deps`
-    with assets in this workspace. An asset is bundled under its path in its
-    package, which says nothing of where in the workspace the package is; this
+    `{bundle path prefix: workspace-relative directory}`: `""` for the
+    program's own package, whose assets are bare whichever target lists them,
+    and `packages/<name>/` for each other package among `deps` with assets in
+    this workspace. An asset is bundled under its path from its package's
+    root, which says nothing of where in the workspace the package is; this
     does, so the dev tool can watch the files and find one added later.
 
     Args:
@@ -638,27 +639,25 @@ def asset_roots(ctx, deps, inputs = None):
         deps: The dependencies whose packages' assets are bundled: the ones
             `flutter_build_assets` was given.
         inputs: The program whose assets these are, as `flutter_build_assets`
-            was given it; its `label` says which package is "this target's own".
+            was given it; its `label` says which package is its own.
 
     Returns:
         The dict above.
     """
     if inputs == None:
         inputs = flutter_program_inputs(ctx)
-    roots = {"": inputs.label.package or "."}
+    program_root = package_root_of(inputs)
+    roots = {"": program_root or "."}
     for dep in deps:
         if FlutterInfo not in dep:
             continue
         for entry in dep[FlutterInfo].pub_assets.to_list():
             f = entry.file
-            if not entry.package_name or not f.is_source or f.short_path.startswith("../"):
+            if not entry.package_name or entry.package_root == program_root:
                 continue
-
-            # The package directory is what precedes the asset's path in it.
-            if f.short_path == entry.asset_path:
-                roots["packages/%s/" % entry.package_name] = "."
-            elif f.short_path.endswith("/" + entry.asset_path):
-                roots["packages/%s/" % entry.package_name] = f.short_path[:-len(entry.asset_path) - 1]
+            if not f.is_source or f.short_path.startswith("../"):
+                continue
+            roots["packages/%s/" % entry.package_name] = entry.package_root or "."
     return roots
 
 def flutter_compile_shaders(ctx, tools, target_platform, deps, inputs = None):
@@ -763,8 +762,10 @@ def flutter_build_assets(ctx, tools, output_dir, deps, target_platform, compiled
         optional_code_points: Code points every subset icon font keeps if it
             has a glyph for them, whether or not the app uses them.
         inputs: The program whose assets are bundled, from
-            `flutter_program_inputs`; `ctx`'s own when None. Its assets are
-            keyed by their path in the package of `inputs.label`.
+            `flutter_program_inputs`; `ctx`'s own when None. Its package,
+            the one `inputs.label` is in, is the program's own: its assets,
+            and those of every library of that package, are keyed by their
+            path from the package root, with no `packages/<name>/`.
 
     Returns:
         The flutter_assets/ tree artifact File.
@@ -775,7 +776,7 @@ def flutter_build_assets(ctx, tools, output_dir, deps, target_platform, compiled
     # Walk pub-package font/asset contributions from FlutterInfo.
     # MaterialIcons is no longer special-cased here — apps depend on
     # `@rules_flutter//flutter:material_icons` to get it via this same path.
-    fonts, pub_copies, unlisted_copies = aggregate_pub_contributions(deps, target_platform, inputs.flavor)
+    fonts, pub_copies, unlisted_copies = aggregate_pub_contributions(deps, target_platform, inputs.flavor, package_root_of(inputs))
     extra_asset_copies = compiled_shaders.listed + pub_copies
     unlisted_copies = compiled_shaders.unlisted + unlisted_copies
 

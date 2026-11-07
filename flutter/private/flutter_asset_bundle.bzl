@@ -10,7 +10,7 @@ Produces a `flutter_assets/` tree artifact containing:
 load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
 load("//flutter/private:asset_variants.bzl", "variant_scale")
 load("//flutter/private:exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
-load("//flutter/private:flutter_library.bzl", "aggregate_pub_contributions", "package_relative")
+load("//flutter/private:flutter_library.bzl", "aggregate_pub_contributions", "package_root_of", "path_in_package")
 load("//flutter/private:notices.bzl", "NOTICES_ATTRS", "additional_licenses_of", "flutter_notices_action", "notices_asset_key", "package_licenses_of")
 load("//flutter/private:path_mapping.bzl", "file_ref", "json_config_args")
 
@@ -96,7 +96,8 @@ def flutter_asset_bundle_action(
             from source, and to start `const_finder`'s snapshot: the `run` set
             of the SDK (`DartSdkFilesInfo.run`).
         assets: list of File objects of the target's package to include in the
-            bundle, each under its path in that package (`assets/a.png`).
+            bundle, each under its path from that package's root
+            (`assets/a.png`).
         fonts: list of font declaration dicts (FontManifest.json schema).
         output_dir: The already-declared directory (tree artifact) File to
             write the bundle into. Declared by the caller rather than here
@@ -139,7 +140,9 @@ def flutter_asset_bundle_action(
     # reached twice (a package behind two dependencies) is one claim.
     claims = {}
     listed = {}
-    claimed = [(package_relative(owner or ctx, f), f, True) for f in assets]
+    owner = owner or ctx
+    owner_root = package_root_of(owner)
+    claimed = [(path_in_package(owner.label, owner_root, f), f, True) for f in assets]
     claimed += [(key, f, True) for key, f in extra_asset_copies]
     claimed += [(key, f, False) for key, f in unlisted_asset_copies]
     for key, f, in_manifest in claimed:
@@ -203,7 +206,7 @@ def _flutter_asset_bundle_impl(ctx):
     # Walk pub-package font/asset contributions from FlutterInfo. To get
     # MaterialIcons in the bundle, list `@rules_flutter//flutter:material_icons`
     # in deps — the same channel cupertino_icons et al. arrive through.
-    fonts, extra_asset_copies, unlisted_asset_copies = aggregate_pub_contributions(ctx.attr.deps, flavor = ctx.attr.flavor)
+    fonts, extra_asset_copies, unlisted_asset_copies = aggregate_pub_contributions(ctx.attr.deps, flavor = ctx.attr.flavor, program_root = package_root_of(ctx))
 
     notices = flutter_notices_action(
         ctx = ctx,

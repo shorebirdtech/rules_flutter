@@ -41,7 +41,7 @@ app_bundle = rule(
     },
 )
 
-def bundled_app(name, assets = [], deps = [], package_name = "asset_bundle", platform = None, **kwargs):
+def bundled_app(name, assets = [], deps = [], package_name = "asset_bundle", main = "lib/main.dart", platform = None, **kwargs):
     """A trivial application and, as `<name>_bundle`, the asset tree it builds.
 
     What the applications of this workspace differ in is where they sit, which
@@ -52,13 +52,14 @@ def bundled_app(name, assets = [], deps = [], package_name = "asset_bundle", pla
         assets: Its own asset files.
         deps: Libraries beside `@deps//:flutter`.
         package_name: The application's Dart package name.
+        main: Its entry point.
         platform: The platform to build the bundle for.
         **kwargs: More attributes of the application.
     """
     flutter_application(
         name = name,
         assets = assets,
-        main = "lib/main.dart",
+        main = main,
         package_name = package_name,
         deps = ["@deps//:flutter"] + deps,
         **kwargs

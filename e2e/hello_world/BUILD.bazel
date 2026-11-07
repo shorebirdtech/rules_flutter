@@ -263,6 +263,19 @@ flutter_test(
     ],
 )
 
+# A dependency's assets are loaded under `packages/<name>/`; its own test
+# (`//asset_keys:own_asset_keys_test`) loads them bare.
+flutter_test(
+    name = "dependency_asset_keys_test",
+    package_name = "hello_world",
+    main = "test/dependency_asset_keys_test.dart",
+    deps = [
+        "//asset_keys",
+        "@deps//:flutter",
+        "@deps//:flutter_test",
+    ],
+)
+
 # The NOTICES.Z a test bundles names the packages the test depends on, the
 # engine's included.
 flutter_test(

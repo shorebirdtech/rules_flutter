@@ -48,6 +48,11 @@ void main(List<String> args) {
         if (a.startsWith('--unlisted=')) a.substring('--unlisted='.length),
     ],
   );
+  final fonts = readExpectedFonts(
+    File(resolve(positional[1])),
+    prefix: option('prefix') ?? '',
+  );
+  if (fonts != null) problems.addAll(compareFonts(bundle, fonts));
   if (problems.isNotEmpty) {
     stderr.writeln(
       'The bundle differs from what `flutter build` produces:\n'

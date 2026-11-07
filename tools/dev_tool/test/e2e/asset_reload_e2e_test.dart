@@ -238,24 +238,28 @@ void main() {
       tags: 'web',
     );
 
-    /// The same edit, for an app that is not at the workspace root and a
-    /// library that is not either.
+    /// The same edit, for an app that is not at the workspace root, a library
+    /// of the app's own package and a library of another, neither at the root
+    /// either.
     ///
     /// An asset's key is its path in its package (`assets/message.txt`,
-    /// `packages/ui_kit/assets/greeting.txt`), which says nothing of where in
-    /// the workspace the file is. The build hands the dev tool a map from key
+    /// `lib/widgets/banner.txt` for the app's own library, with no package in
+    /// front, `packages/ui_kit/assets/greeting.txt`), which says nothing of
+    /// where in the workspace the file is. The build hands the dev tool a map from key
     /// prefix to workspace directory (`assetRoots` of `_dev_config.json`); with
     /// it wrong, no file is found behind either key, nothing is watched, and
     /// an edit is "no changes" — the reload reports success and shows the old
     /// text. Unit tests cover the lookup; this covers the map the build writes.
     test(
-      'an edited asset of an app and of a library below the workspace root '
+      'an edited asset of an app and of libraries below the workspace root '
       'reaches the running browser app',
       () async {
         final ws = await editableWorkspace('web_example');
         final appAsset = ws.file('nested_assets/assets/message.txt');
+        final ownLibAsset = ws.file('nested_assets/lib/widgets/banner.txt');
         final libAsset = ws.file('nested_assets/ui_kit/assets/greeting.txt');
         expect(appAsset.readAsStringSync().trim(), 'nested app v1');
+        expect(ownLibAsset.readAsStringSync().trim(), 'own lib v1');
         expect(libAsset.readAsStringSync().trim(), 'ui kit v1');
 
         final dt = await startDevTool(
@@ -301,6 +305,7 @@ void main() {
         }
 
         expect(await served('assets/message.txt'), 'nested app v1');
+        expect(await served('lib/widgets/banner.txt'), 'own lib v1');
         expect(
           await served('packages/ui_kit/assets/greeting.txt'),
           'ui kit v1',
@@ -360,15 +365,22 @@ void main() {
           'e2e_app_asset_label',
         );
         await editAndReload(
+          ownLibAsset,
+          'own lib v2',
+          'lib/widgets/banner.txt',
+          'e2e_own_lib_asset_label',
+        );
+        await editAndReload(
           libAsset,
           'ui kit v2',
           'packages/ui_kit/assets/greeting.txt',
           'e2e_lib_asset_label',
         );
 
-        // The first edit's text is still shown: the second reload rebuilt a
-        // bundle that has both edits, not only the last.
+        // The earlier edits' text is still shown: each reload rebuilt a
+        // bundle that has every edit, not only the last.
         expect(await shown('e2e_app_asset_label'), 'nested app v2');
+        expect(await shown('e2e_own_lib_asset_label'), 'own lib v2');
       },
       timeout: const Timeout(Duration(minutes: 6)),
       tags: 'web',

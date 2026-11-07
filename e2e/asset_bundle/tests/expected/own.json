@@ -1,0 +1,56 @@
+{
+  "assets": {
+    "assets/a.txt": {
+      "variants": [
+        {
+          "asset": "assets/a.txt"
+        }
+      ]
+    },
+    "lib/r.txt": {
+      "variants": [
+        {
+          "asset": "lib/r.txt"
+        }
+      ]
+    },
+    "lib/widgets/w.txt": {
+      "variants": [
+        {
+          "asset": "lib/widgets/w.txt"
+        }
+      ]
+    },
+    "lib/widgets/pa.txt": {
+      "variants": [
+        {
+          "asset": "lib/widgets/pa.txt"
+        }
+      ]
+    },
+    "lib/widgets/f.ttf": {
+      "variants": [
+        {
+          "asset": "lib/widgets/f.ttf"
+        }
+      ]
+    },
+    "lib/widgets/s.frag": {
+      "variants": [
+        {
+          "asset": "lib/widgets/s.frag"
+        }
+      ]
+    }
+  },
+  "fonts": [
+    {
+      "family": "OwnFont",
+      "fonts": [
+        {
+          "asset": "lib/widgets/f.ttf"
+        }
+      ]
+    }
+  ]
+}

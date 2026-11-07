@@ -69,6 +69,36 @@ Map<String, List<Variant>> readExpectation(
   return out;
 }
 
+/// The font manifest the expectation in [file] states, with [prefix] in
+/// front of every family and font path; null when it states none, for a
+/// bundle whose fonts are not what is checked.
+List<Object?>? readExpectedFonts(File file, {String prefix = ''}) {
+  final json = jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
+  final fonts = json['fonts'] as List?;
+  if (fonts == null) return null;
+  return [
+    for (final family in fonts.cast<Map<String, dynamic>>())
+      {
+        'family': '$prefix${family['family']}',
+        'fonts': [
+          for (final font
+              in (family['fonts'] as List).cast<Map<String, dynamic>>())
+            {...font, 'asset': '$prefix${font['asset']}'},
+        ],
+      },
+  ];
+}
+
+/// The ways the `FontManifest.json` of the bundle at [dir] differs from
+/// [expected]; empty when it is the one `flutter build` writes.
+List<String> compareFonts(Directory dir, List<Object?> expected) {
+  final got = File('${dir.path}/FontManifest.json').readAsStringSync();
+  final want = jsonEncode(expected);
+  return jsonEncode(jsonDecode(got)) == want
+      ? const []
+      : ['FontManifest.json is $got, want $want'];
+}
+
 /// What the bundle at [dir] says it holds: the manifest, and the files that
 /// are not infrastructure.
 ({Map<String, List<Variant>> manifest, Set<String> files}) readBundle(

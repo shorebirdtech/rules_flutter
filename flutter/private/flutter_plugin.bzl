@@ -59,7 +59,7 @@ def _unbuilt_desktop_entry(lib, package_name):
         package = package_name,
     )
 
-def plugin_contributions(ctx, package_name, declares_plugin):
+def plugin_contributions(ctx, package_name, package_root, declares_plugin):
     """What a plugin-shaped target adds to `FlutterInfo`, beyond its dependencies'.
 
     Shared by `flutter_plugin` and by the member of a generated pub package
@@ -69,6 +69,7 @@ def plugin_contributions(ctx, package_name, declares_plugin):
     Args:
       ctx: The rule context: the attributes of `flutter_plugin` other than `deps`.
       package_name: The Dart package name.
+      package_root: Its package root, from `derive_lib_root`.
       declares_plugin: Whether the target is a plugin to register. A pub
         package without a `flutter.plugin` block is not one, though it
         contributes assets and fonts.
@@ -209,10 +210,10 @@ def plugin_contributions(ctx, package_name, declares_plugin):
 
     # Pub-package asset contributions (fonts/assets/shaders from the parsed
     # flutter:-block, applicable to plugins that also ship icon fonts or
-    # bundled assets — same shape as flutter_library), under the Dart package
-    # name.
+    # bundled assets — same shape as flutter_library), of the Dart package.
     extra_pub_fonts, extra_pub_assets, extra_pub_shaders = build_pub_contributions(
         package_name,
+        package_root,
         ctx.attr.fonts_json,
         ctx.attr.font_files,
         ctx.attr.pkg_assets,
@@ -223,7 +224,7 @@ def plugin_contributions(ctx, package_name, declares_plugin):
         ctx.attr.pkg_asset_flavors,
         ctx.attr.pkg_shader_flavors,
     )
-    extra_pub_assets.extend(own_asset_contributions(ctx, package_name))
+    extra_pub_assets.extend(own_asset_contributions(ctx, package_name, package_root))
 
     # `resources` names the non-Dart remainder of `lib/`; a Dart source there
     # is a mis-filed `srcs` entry, and identical paths with identical
@@ -280,7 +281,7 @@ def _flutter_plugin_impl(ctx):
         flutter_analyzable_info(ctx, package),
         flutter_info(
             deps = ctx.attr.deps,
-            **plugin_contributions(ctx, package_name, True)
+            **plugin_contributions(ctx, package_name, lib_root, True)
         ),
     ]
 
@@ -298,7 +299,7 @@ PLUGIN_PACKAGE_ATTRS = {
         allow_files = True,
     ),
     "assets": attr.label_list(
-        doc = "Asset files to include, bundled at `packages/<package_name>/<path>` (the path in this target's package).",
+        doc = "Asset files to include: any file of this target's Dart package, keyed as `flutter_library.assets` is.",
         allow_files = True,
     ),
     "package_name": attr.string(

@@ -1,0 +1,18 @@
+{
+  "assets": {
+    "assets/s.txt": {
+      "variants": [
+        {
+          "asset": "assets/s.txt"
+        }
+      ]
+    },
+    "lib/src/deep/d.txt": {
+      "variants": [
+        {
+          "asset": "lib/src/deep/d.txt"
+        }
+      ]
+    }
+  }
+}

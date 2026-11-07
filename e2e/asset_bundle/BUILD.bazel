@@ -42,6 +42,12 @@ bundled_app(
     deps = ["//libs/team/deep_lib"],
 )
 
+# A library built from a BUILD file inside its package's `lib/`.
+bundled_app(
+    name = "app_with_split_lib",
+    deps = ["//split/lib/src/deep"],
+)
+
 bundled_app(
     name = "app_with_external_lib",
     deps = ["@ext_assets"],

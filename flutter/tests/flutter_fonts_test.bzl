@@ -7,7 +7,7 @@ as a missing font does for `flutter build`.
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("//flutter:providers.bzl", "FlutterInfo")
-load("//flutter/private:flutter_library.bzl", "aggregate_pub_contributions")
+load("//flutter/private:flutter_library.bzl", "aggregate_pub_contributions", "package_root_of")
 
 def _font_mismatch_fails_test_impl(ctx):
     env = analysistest.begin(ctx)
@@ -23,23 +23,28 @@ font_mismatch_fails_test = analysistest.make(
 def _fonts_bundled_test_impl(ctx):
     env = analysistest.begin(ctx)
     target = analysistest.target_under_test(env)
-    manifest = aggregate_pub_contributions([target])[0]
+    program_root = package_root_of(target) if ctx.attr.own_package else None
+    manifest, copies, _ = aggregate_pub_contributions([target], program_root = program_root)
     asserts.equals(env, json.decode(ctx.attr.manifest), manifest)
+    font_keys = [font["asset"] for family in manifest for font in family["fonts"]]
     files = {
-        font.bundle_path: font.file.short_path.removeprefix(ctx.label.package + "/")
-        for entry in target[FlutterInfo].pub_fonts.to_list()
-        for font in entry.fonts
+        key: f.short_path.removeprefix(ctx.label.package + "/")
+        for key, f in copies
+        if key in font_keys
     }
     asserts.equals(env, ctx.attr.files, files)
     return analysistest.end(env)
 
 # `manifest` is the JSON of the library's FontManifest entries; `files` maps
-# each font's bundle path to its file, relative to this test's package.
+# each font's bundle path to its file, relative to this test's package. Both
+# are as a program of another package bundles them, or with `own_package` as
+# a program of the library's own package does.
 fonts_bundled_test = analysistest.make(
     _fonts_bundled_test_impl,
     attrs = {
         "files": attr.string_dict(mandatory = True),
         "manifest": attr.string(mandatory = True),
+        "own_package": attr.bool(),
     },
 )
 
