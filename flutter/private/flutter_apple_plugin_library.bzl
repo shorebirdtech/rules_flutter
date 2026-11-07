@@ -25,28 +25,40 @@ load("@rules_cc//cc:objc_library.bzl", "objc_library")
 load("@rules_swift//swift:swift.bzl", "swift_library")
 load(":apple_engine.bzl", "IOS_ENGINE_XCFRAMEWORK", "MACOS_ENGINE_FRAMEWORK")
 
-def _split_srcs(srcs):
-    """Split srcs into (swift_files, objc_files, public_headers, private_headers).
+_CLANG_SOURCE_EXTENSIONS = ("m", "mm", "c", "cc", "cpp", "cxx", "c++", "s", "S")
+_HEADER_EXTENSIONS = ("h", "hh", "hpp", "hxx", "h++", "inc")
 
-    Returns lists by extension so we can route ObjC through objc_library
-    while keeping Swift on swift_library. Headers are public, part of the
-    plugin's module, unless the sources follow SwiftPM's layout, where only
-    the headers under an `include/` directory (`publicHeadersPath`'s
-    default) are: the rest are the target's own, compiled with its sources
-    but not importable, and a private header that does not stand on its
-    own (one that uses `NS_ENUM` without importing Foundation) would fail
-    the module's build.
+def _extension(path):
+    name = path.rsplit("/", 1)[-1]
+    return name.rsplit(".", 1)[-1] if "." in name else ""
+
+def _split_srcs(srcs, public_hdrs):
+    """Split srcs into (swift_files, clang_files, public_headers, private_headers).
+
+    Returns lists by extension so we can route C, C++ and Objective-C through
+    objc_library while keeping Swift on swift_library. With `public_hdrs`,
+    those are the module's public headers and the other headers are private.
+    Otherwise headers are public, part of the plugin's module, unless the
+    sources follow SwiftPM's layout, where only the headers under an
+    `include/` directory (`publicHeadersPath`'s default) are: the rest are
+    the target's own, compiled with its sources but not importable, and a
+    private header that does not stand on its own (one that uses `NS_ENUM`
+    without importing Foundation) would fail the module's build.
     """
     swift_files = []
     objc_files = []
     headers = []
     for f in srcs:
-        if f.endswith(".swift"):
+        ext = _extension(f)
+        if ext == "swift":
             swift_files.append(f)
-        elif f.endswith(".m") or f.endswith(".mm"):
+        elif ext in _CLANG_SOURCE_EXTENSIONS:
             objc_files.append(f)
-        elif f.endswith(".h"):
+        elif ext in _HEADER_EXTENSIONS:
             headers.append(f)
+    if public_hdrs != None:
+        public = {h: True for h in public_hdrs}
+        return swift_files, objc_files, list(public_hdrs), [h for h in headers if h not in public]
     public = [h for h in headers if _under_include_dir(h)]
     if not public:
         return swift_files, objc_files, headers, []
@@ -63,6 +75,12 @@ def flutter_apple_plugin_library(
         platform = "macos",
         deps = [],
         copts = [],
+        clang_copts = [],
+        cxxopts = [],
+        conlyopts = [],
+        swift_copts = [],
+        linkopts = [],
+        public_hdrs = None,
         includes = [],
         sdk_frameworks = [],
         sdk_dylibs = [],
@@ -71,8 +89,9 @@ def flutter_apple_plugin_library(
         **kwargs):
     """Build a Flutter plugin's Apple sources into a swift_library.
 
-    Auto-routes `.m`/`.mm` files through an internal `objc_library` and
-    feeds it into the `swift_library` as a dep. Bridging-header support:
+    Auto-routes C, C++ and Objective-C sources (`.m`, `.mm`, `.c`, `.cpp`
+    and the like) through an internal `objc_library` and feeds it into the
+    `swift_library` as a dep. Bridging-header support:
     when `<module_name>-Bridging-Header.h` is present in `srcs`, it's
     passed via the swift_library's `swiftc_inputs` and a `-import-
     objc-header` copt.
@@ -80,16 +99,33 @@ def flutter_apple_plugin_library(
     Args:
         name: Target name. Pass to runner deps (or via the aspect-based
             aggregator that discovers them automatically).
-        srcs: Swift, ObjC, and header source files. When some headers are
-            under an `include/` directory, as in SwiftPM's layout, only
-            those are the module's public headers; the others are private
-            to the ObjC compile, as SwiftPM treats them.
+        srcs: Swift, C, C++, Objective-C and header source files. When some
+            headers are under an `include/` directory, as in SwiftPM's
+            layout, and `public_hdrs` is not given, only those are the
+            module's public headers; the others are private to the ObjC
+            compile, as SwiftPM treats them.
         module_name: Swift module name. Defaults to `name`.
         platform: `"macos"` or `"ios"`. Picks the Flutter framework dep.
         deps: Additional swift_library / cc_library deps (other plugins).
         copts: Additional compile options, for both the Swift and the ObjC
             compile: a define a plugin's `Package.swift` sets is `-DNAME`,
             which Clang reads as `NAME=1` and Swift as a condition.
+        clang_copts: Compile options for the C, C++ and Objective-C sources
+            only: a `Package.swift`'s C and C++ defines and its C
+            `unsafeFlags`. Split as a shell would, as `objc_library.copts`.
+        cxxopts: Compile options for the C++ and Objective-C++ sources only:
+            the package's C++ language standard, its C++ `unsafeFlags`.
+        conlyopts: Compile options for the C sources only: the package's C
+            language standard.
+        swift_copts: Compile options for the Swift sources only: a
+            `Package.swift`'s Swift defines (`-DNAME`) and its Swift
+            `unsafeFlags`.
+        linkopts: Options for the link of any binary that links the plugin:
+            a `Package.swift`'s linker `unsafeFlags`.
+        public_hdrs: The headers of the plugin's module, which the
+            `publicHeadersPath` of a `Package.swift` target holds; the other
+            headers in `srcs` are private to its compile. Without it, see
+            `srcs`.
         includes: Header search paths forwarded to the inner
             `objc_library`. Mirrors `objc_library.includes` semantics —
             each entry becomes `-I <package>/<entry>` for both the
@@ -99,19 +135,17 @@ def flutter_apple_plugin_library(
             `Sources/<pkg>/include/<pkg>/Foo.h`, `.m` does bare-basename
             `#import "Foo.h"`); without the include path the .m's import
             fails with `'Foo.h' file not found`.
-        sdk_frameworks: Apple SDK frameworks to link (e.g. `["AVFoundation"]`).
-            Forwarded to the inner `objc_library`. Required when the plugin's
-            ObjC sources `#import <Foo/Bar.h>` against an Apple SDK
+        sdk_frameworks: Apple SDK frameworks to link (e.g. `["AVFoundation"]`),
+            as a `Package.swift`'s `linkedFramework` does. Required when the
+            plugin's ObjC sources `#import <Foo/Bar.h>` against an Apple SDK
             framework — Clang's `enable_modules` auto-link metadata
-            (`LC_LINKER_OPTION`) is stripped by Apple's `libtool` static-archive
-            step, so explicit declaration is the only reliable path. Nothing
-            reads `Package.swift`'s `linkerSettings.linkedFramework`; list the
-            frameworks here (typically via an `ext/<pkg>/<major>/BUILD.bazel.tpl`
-            overlay).
+            (`LC_LINKER_OPTION`) is stripped by Apple's `libtool`
+            static-archive step, so explicit declaration is the only
+            reliable path. A plugin built from its `Package.swift` gets its
+            `linkerSettings` without this; an overlay lists them here.
         sdk_dylibs: Apple SDK dynamic libraries to link (e.g. `["c++"]`,
-            `["sqlite3"]`). Forwarded to the inner `objc_library`. Same
-            rationale as `sdk_frameworks`; `Package.swift`'s
-            `linkerSettings.linkedLibrary` is not read, so list them here.
+            `["sqlite3"]`), as a `Package.swift`'s `linkedLibrary` does. Same
+            rationale as `sdk_frameworks`.
         visibility: Target visibility.
         tags: Bazel tags. Defaults to `["manual"]` so the spoke target
             is only built when something depends on it.
@@ -133,7 +167,7 @@ def flutter_apple_plugin_library(
     # outputs. Constrain each to its OS so only one is reachable per build.
     target_compatible_with = ["@platforms//os:%s" % platform]
 
-    swift_files, objc_files, headers, private_headers = _split_srcs(srcs)
+    swift_files, objc_files, headers, private_headers = _split_srcs(srcs, public_hdrs)
 
     # The Flutter framework is loaded at runtime (extracted via
     # flutter_macos_engine / flutter_ios_engine elsewhere). For
@@ -182,7 +216,14 @@ def flutter_apple_plugin_library(
             sdk_dylibs = sdk_dylibs,
             module_name = objc_module_name,
             enable_modules = True,
-            copts = copts,
+            copts = copts + clang_copts,
+            cxxopts = cxxopts,
+            conlyopts = conlyopts,
+            # Every object of the plugin is in the app, as Xcode links a
+            # Swift package's objects and CocoaPods its framework: code that
+            # only Dart reaches, through `DynamicLibrary.process()`, has no
+            # reference from the app's link to pull it in.
+            alwayslink = True,
             deps = [":" + framework_target],
             tags = tags,
             target_compatible_with = target_compatible_with,
@@ -191,7 +232,7 @@ def flutter_apple_plugin_library(
         swift_deps.append(":" + objc_target)
 
     bridging_header = None
-    extra_copts = list(copts)
+    extra_copts = []
     for h in headers + private_headers:
         if h.endswith("%s-Bridging-Header.h" % module_name):
             bridging_header = h
@@ -223,11 +264,16 @@ def flutter_apple_plugin_library(
         )
         swift_files = [":" + placeholder_target]
 
+    # The SDK frameworks and libraries are the plugin's to link whatever its
+    # sources are in; a Swift-only plugin has no objc_library to carry them.
+    sdk_linkopts = ["-Wl,-framework," + f for f in sdk_frameworks] + ["-l" + d for d in sdk_dylibs]
+
     swift_library(
         name = name,
         srcs = swift_files,
         module_name = module_name,
-        copts = extra_copts,
+        copts = copts + swift_copts + extra_copts,
+        linkopts = sdk_linkopts + linkopts,
         deps = swift_deps,
         swiftc_inputs = [bridging_header] if bridging_header else [],
         tags = tags,
