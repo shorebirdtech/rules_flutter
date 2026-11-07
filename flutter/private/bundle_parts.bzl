@@ -85,3 +85,18 @@ def parts_result(assets, native_libs, below, assets_group, native_libs_group):
             native_libs_group: native_all,
         }),
     ]
+
+def runner_binary(runner):
+    """The runner executable a desktop bundle copies in, as its bundling picks it.
+
+    Args:
+        runner: the bundle's `runner` target, which is a compiled executable
+            (with its sources and headers listed beside it, which are not it).
+
+    Returns:
+        The first file of the target that is not a source or a header, or None.
+    """
+    for file in runner[DefaultInfo].files.to_list():
+        if not file.path.endswith(".h") and not file.path.endswith(".cc"):
+            return file
+    return None

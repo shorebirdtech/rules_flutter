@@ -556,14 +556,14 @@ abstract class Device {
   List<String> get buildArgs => const [];
 
   /// How a restart reads the launch bundle's native libraries and assets
-  /// without building the launch artifact, or null when the artifact is the
-  /// bundle and building it is the way to read it.
+  /// without building the launch artifact, or null for a device with no
+  /// artifact to avoid building (the web).
   ///
-  /// For a platform whose artifact is packaged from the bundle at a cost a
-  /// restart should not pay: an APK is dexed, linked, zipped and signed, and a
-  /// macOS debug bundle carries the app's kernel in `App.framework`, so
-  /// building it recompiles the whole program on every Dart edit. None of it
-  /// is needed to learn that only Dart changed.
+  /// A restart should not pay for the artifact: an APK is dexed, linked, zipped
+  /// and signed, and an Apple debug bundle's `App.framework` and a desktop
+  /// debug bundle carry the app's kernel, so building one recompiles the whole
+  /// program on every Dart edit. None of it is needed to learn that only Dart
+  /// changed.
   LaunchBundleParts? get launchBundleParts => null;
 
   /// Learn whatever [buildArgs] depends on that only the device can say.
@@ -973,6 +973,13 @@ class LinuxDevice extends Device {
   );
 
   @override
+  LaunchBundleParts? get launchBundleParts => const LaunchBundleParts(
+    aspect: linuxBundlePartsAspect,
+    assetsGroup: linuxBundlePartsOutputGroup,
+    nativeLibsGroup: linuxNativeLibsOutputGroup,
+  );
+
+  @override
   String get name => 'Linux';
 
   @override
@@ -1104,6 +1111,13 @@ class WindowsDevice extends Device {
 
   @override
   bool get usesWindowsPaths => true;
+
+  @override
+  LaunchBundleParts? get launchBundleParts => const LaunchBundleParts(
+    aspect: windowsBundlePartsAspect,
+    assetsGroup: windowsBundlePartsOutputGroup,
+    nativeLibsGroup: windowsNativeLibsOutputGroup,
+  );
 
   @override
   String get name => 'Windows';
@@ -2891,6 +2905,13 @@ class IOSSimulatorDevice extends Device {
       IOSSimulatorPatchDelivery(run: _runProcess);
 
   @override
+  LaunchBundleParts? get launchBundleParts => const LaunchBundleParts(
+    aspect: iosBundlePartsAspect,
+    assetsGroup: iosBundlePartsOutputGroup,
+    nativeLibsGroup: iosNativeLibsOutputGroup,
+  );
+
+  @override
   String get name => 'iOS Simulator ($udid)';
 
   @override
@@ -3512,6 +3533,13 @@ class IOSDevice extends Device {
       run: _runProcess,
     );
   }
+
+  @override
+  LaunchBundleParts? get launchBundleParts => const LaunchBundleParts(
+    aspect: iosBundlePartsAspect,
+    assetsGroup: iosBundlePartsOutputGroup,
+    nativeLibsGroup: iosNativeLibsOutputGroup,
+  );
 
   @override
   String get name => 'iOS (${udid ?? 'auto-detect'})';

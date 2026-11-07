@@ -217,6 +217,32 @@ void main() {
       expect(parts.nativeLibsGroup, 'flutter_macos_native_libs');
     });
 
+    // An iOS debug App.framework, a Linux or Windows debug bundle's kernel and
+    // an iOS app's signing are all rebuilt by every Dart edit, so a restart
+    // reads the parts of each the way it does a macOS bundle's.
+    for (final (label, device, file, platform) in [
+      ('IOSSimulatorDevice', IOSSimulatorDevice(udid: 'TEST'), 'ios', 'ios'),
+      ('IOSDevice', IOSDevice(udid: 'TEST'), 'ios', 'ios'),
+      ('LinuxDevice', LinuxDevice(), 'linux', 'linux'),
+      ('WindowsDevice', WindowsDevice(), 'windows', 'windows'),
+    ]) {
+      test('$label names the bundle parts a restart reads', () {
+        final parts = device.launchBundleParts;
+        expect(parts, isNotNull);
+        expect(
+          parts!.aspect,
+          '@rules_flutter//flutter:${file}_bundle_parts.bzl%'
+          'flutter_${file}_bundle_parts_aspect',
+        );
+        expect(parts.assetsGroup, 'flutter_${platform}_bundle_parts');
+        expect(parts.nativeLibsGroup, 'flutter_${platform}_native_libs');
+      });
+    }
+
+    test('a web device names no parts: it has no bundle to read', () {
+      expect(WebDevice().launchBundleParts, isNull);
+    });
+
     test('AndroidDevice does not guess an ABI it has not been told', () {
       expect(() => AndroidDevice().buildArgs, throwsStateError);
     });
