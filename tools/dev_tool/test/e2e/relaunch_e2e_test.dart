@@ -40,6 +40,11 @@ const _platforms = <_Platform>[
     target: ':ffi_linux',
     partsGroup: 'flutter_linux_bundle_parts',
   ),
+  (
+    device: 'windows',
+    target: ':ffi_windows',
+    partsGroup: 'flutter_windows_bundle_parts',
+  ),
 ];
 
 void main() {
@@ -161,6 +166,85 @@ void main() {
         timeout: const Timeout(Duration(minutes: 8)),
       );
 
+      // A header is not a library: it reaches the bundle only through the
+      // library built from the source that includes it, so the check has to
+      // follow the build rather than the files an edit touched.
+      test(
+        'an edit to a header a library includes relaunches',
+        () async {
+          final ws = await editableWorkspace('ffi_example');
+          final header = ws.file('native/add.h');
+          final source = ws.file('native/add.c');
+          expect(
+            source.readAsStringSync(),
+            contains('return a + b;'),
+            reason: 'fixture marker',
+          );
+          // `add`'s result reads a constant its header defines, so that the
+          // header is the only thing the later edit touches.
+          header.writeAsStringSync(
+            header.readAsStringSync().replaceFirst(
+              '#include <stdint.h>',
+              '#include <stdint.h>\n#define ADD_BIAS 0',
+            ),
+          );
+          source.writeAsStringSync(
+            source.readAsStringSync().replaceFirst(
+              'return a + b;',
+              'return a + b + ADD_BIAS;',
+            ),
+          );
+
+          final dt = await startDevTool(
+            workspace: ws.root,
+            target: platform.target,
+            device: platform.device,
+          );
+          await dt.waitForEvent(
+            'app.started',
+            timeout: const Duration(minutes: 6),
+          );
+          final appId = dt.appId!;
+          await dt.waitForHttpControl();
+          // An edit inside the assembler's own build window is compiled into its
+          // baseline, so nothing is edited before the pipeline is up.
+          await dt.waitForStderr('frontend_server_ready');
+
+          header.writeAsStringSync(
+            header.readAsStringSync().replaceFirst(
+              '#define ADD_BIAS 0',
+              '#define ADD_BIAS 1',
+            ),
+          );
+          final restart = await dt.httpCommand('app.restart', {'appId': appId});
+          final result = restart['result'] as Map<String, dynamic>?;
+          expect(result, isNotNull, reason: 'app.restart: ${restart['error']}');
+          expect(
+            result!['relaunched'],
+            isTrue,
+            reason: 'an edited header changed the library it builds: $result',
+          );
+
+          final tree = await dt.httpCommand('app.dumpWidgetTree', {
+            'appId': appId,
+          });
+          final rendered = await dt.httpCommand('app.waitFor', {
+            'appId': appId,
+            'text': '3 + 4 = 8\n3 × 4 = 12\nsqlite3 ${_sqliteVersion(tree)}',
+            'timeoutMs': '15000',
+          });
+          expect(
+            rendered['error'],
+            isNull,
+            reason:
+                'the relaunched app should run the library rebuilt from the '
+                'edited header: ${rendered['error']}',
+          );
+          await dt.sendCommand(1, 'daemon.shutdown');
+        },
+        timeout: const Timeout(Duration(minutes: 8)),
+      );
+
       // Finding out that no native library moved must not cost a build of the
       // bundle: its App.framework holds the app's kernel, so building it
       // recompiles the whole program for every Dart edit and re-signs the app,
@@ -238,9 +322,13 @@ void main() {
 }
 
 /// Why [platform] cannot run on this host, or null when it can: macOS runs the
-/// Apple devices and Linux runs the Linux one.
+/// Apple devices, Linux the Linux one and Windows the Windows one.
 String? _hostSkip(_Platform platform) {
-  final runs = platform.device == 'linux' ? Platform.isLinux : Platform.isMacOS;
+  final runs = switch (platform.device) {
+    'linux' => Platform.isLinux,
+    'windows' => Platform.isWindows,
+    _ => Platform.isMacOS,
+  };
   return runs ? null : '${platform.device} runs on a different host OS';
 }
 
