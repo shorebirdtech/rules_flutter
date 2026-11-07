@@ -295,6 +295,73 @@ An app built without the library would fail at run time when the plugin loads it
 - A plugin overlay (`flutter_pub.plugin_overlays`): a `BUILD.bazel.tpl` for the package whose `flutter_plugin` lists the library. `@rules_flutter//ext/jni` does this for `package:jni`.
 - A `flutter_plugin` of your own, which `flutter_pub.from_lock(resolve = {"<package>": "//your:target"})` puts in place of the package (see "Packages in your workspace").
 
+### Apple plugins that set build settings
+
+rules_flutter compiles an Apple plugin's sources itself; it does not evaluate the plugin's `Package.swift`. A manifest can set preprocessor macros and compiler flags (`.define` and `.unsafeFlags` in `cSettings`, `cxxSettings` or `swiftSettings`), and can compute them. `permission_handler_apple` reads your app's `Info.plist` and turns on a permission's code only when the plist declares its usage description: `NSCameraUsageDescription` sets `PERMISSION_CAMERA=1`. Built without its defines, the plugin compiles and reports every permission as denied, even one the user granted.
+
+So an iOS or macOS app that links such a plugin fails at analysis, as for a plugin whose own build makes its library (above), listing each setting and the manifest that sets it. Other platforms, and Dart tests on the Mac, are unaffected. `geolocator_apple` is the exception: rules_flutter bundles an overlay for it that builds it as `flutter build` does without the `BYPASS_PERMISSION_LOCATION_ALWAYS` environment variable.
+
+Supply the settings your app needs with a plugin overlay. Point `flutter_pub.plugin_overlays` at a directory, and write the package's `BUILD.bazel.tpl` under its major version. For `permission_handler_apple` 9.x in an app that asks for the camera and notifications:
+
+```starlark
+# MODULE.bazel
+flutter_pub.plugin_overlays(roots = ["//overlays:BUILD.bazel"])  # an empty overlays/BUILD.bazel
+```
+
+```starlark
+# overlays/permission_handler_apple/9/BUILD.bazel.tpl
+load("@rules_flutter//flutter:defs.bzl", "flutter_plugin")
+load("@rules_flutter//flutter:ios.bzl", "flutter_apple_plugin_library")
+
+flutter_plugin(
+    name = "{PKG}",
+    srcs = glob(["lib/**/*.dart"], allow_empty = True),
+    apple_libs = select({
+        "@platforms//os:ios": [":{PKG}_apple_ios"],
+        "//conditions:default": [],
+    }),
+    apple_privacy_files = select({
+        "@platforms//os:ios": ["ios/{PKG}/Sources/{PKG}/PrivacyInfo.xcprivacy"],
+        "//conditions:default": [],
+    }),
+    language_version = "{LANGUAGE_VERSION}",
+    package_name = "{PKG}",
+    {LICENSE}
+    plugin_platforms_json = "{\"ios\":{\"pluginClass\":\"PermissionHandlerPlugin\"}}",
+    visibility = ["//visibility:public"],
+    deps = [
+        {DEPS}
+    ],
+)
+
+_SRC = "ios/{PKG}/Sources/{PKG}"
+
+flutter_apple_plugin_library(
+    name = "{PKG}_apple_ios",
+    srcs = glob([_SRC + "/**/*.m", _SRC + "/**/*.h"]),
+    # One define per permission whose usage description Info.plist declares.
+    copts = [
+        "-DPERMISSION_CAMERA",
+        "-DPERMISSION_NOTIFICATIONS",
+    ],
+    # The manifest's headerSearchPath settings.
+    includes = [
+        _SRC,
+        _SRC + "/strategies",
+        _SRC + "/util",
+        _SRC + "/include/{PKG}",
+    ],
+    module_name = "{PKG}",
+    platform = "ios",
+    sdk_frameworks = ["AVFoundation", "CoreTelephony", "UserNotifications"],
+    visibility = ["//visibility:public"],
+)
+```
+
+- `copts` reaches both the Objective-C and the Swift compile, so write a define as `-DNAME`, which Clang reads as `NAME=1`. Swift warns about a define with a value and drops the value.
+- `sdk_frameworks` lists the frameworks the enabled code links. A permission you turn on can need another (`Photos`, `Contacts`, `EventKit`, `CoreLocation`...); a missing one fails the link, naming the symbol.
+- The overlay replaces everything rules_flutter would generate for the package, and serves every version under its major-version directory. Check it when you upgrade the plugin.
+
 ### Regenerating pubspec.lock
 
 Bazel reads `pubspec.lock` and never writes it. To regenerate it, use the Flutter toolchain the rules pin rather than a Flutter installed on your machine:

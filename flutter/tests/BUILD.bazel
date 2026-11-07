@@ -8,6 +8,7 @@ load(":app_defines_test.bzl", "app_defines_test_suite")
 load(":app_entrypoint_test.bzl", "app_entrypoint_test_suite")
 load(":app_flavor_test.bzl", "app_flavor_test_suite")
 load(":apple_engine_test.bzl", "apple_engine_test_suite")
+load(":apple_plugin_settings_test.bzl", "apple_plugin_settings_test_suite")
 load(":apple_version_check_test.bzl", "apple_version_check_test_suite")
 load(":artifact_urls_test.bzl", "artifact_urls_test_suite")
 load(":asset_bundle_test.bzl", "asset_bundle_test_suite")
@@ -60,7 +61,7 @@ load(":pub_resolve_test.bzl", "pub_resolve_test_suite")
 load(":sdk_inputs_test.bzl", "sdk_inputs_test_suite")
 load(":shader_compile_test.bzl", "shader_compile_test_suite")
 load(":shared_code_asset_test.bzl", "shared_code_asset_test_suite")
-load(":swiftpm_dependencies_test.bzl", "swiftpm_dependencies_test_suite")
+load(":swiftpm_manifest_test.bzl", "swiftpm_manifest_test_suite")
 load(":tester_binary_test.bzl", "tester_binary_test_suite")
 load(":toolchain_test.bzl", "toolchain_test_suite")
 load(":toolchain_version_test.bzl", "toolchain_version_test_suite")
@@ -114,7 +115,7 @@ android_plugin_libs_test_suite(name = "android_plugin_libs_test")
 
 android_plugin_maven_test_suite(name = "android_plugin_maven_test")
 
-swiftpm_dependencies_test_suite(name = "swiftpm_dependencies_test")
+swiftpm_manifest_test_suite(name = "swiftpm_manifest_test")
 
 cmake_link_libraries_test_suite(name = "cmake_link_libraries_test")
 
@@ -225,6 +226,8 @@ native_sources_test_suite(name = "native_sources_test")
 code_asset_native_library_test_suite(name = "code_asset_native_library_test")
 
 apple_engine_test_suite(name = "apple_engine_test")
+
+apple_plugin_settings_test_suite(name = "apple_plugin_settings_test")
 
 apple_version_check_test_suite(name = "apple_version_check_test")
 

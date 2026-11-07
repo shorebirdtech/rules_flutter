@@ -57,7 +57,7 @@ load("//flutter/private:flutter_pub_index.bzl", "MEMBER_DART", "MEMBER_FILE", "M
 load("//flutter/private:flutter_pubspec.bzl", "flutter_assets_block", "flutter_licenses_block", "flutter_manifest_errors", "flutter_plugin_block")
 load("//flutter/private:framework_source.bzl", "check_dependency_constraints", "link_framework_package", "unset_message", "write_unset_stub")
 load("//flutter/private:pinned.bzl", "pinned")
-load("//flutter/private:swiftpm_dependencies.bzl", "find_unsupported_swiftpm_dependencies")
+load("//flutter/private:swiftpm_manifest.bzl", "build_settings_message", "find_swiftpm_build_settings", "find_unsupported_swiftpm_dependencies")
 load(
     "//flutter/private:unbuilt_native_code.bzl",
     "cmake_native_build",
@@ -139,14 +139,23 @@ def _detect_apple_source_dirs(ctx, package_name, platform, shared_darwin_source)
 
     return candidates
 
-def _fail_on_swiftpm_dependencies(ctx, package_name, platform, shared_darwin_source):
-    """Fails when a plugin's SwiftPM package depends on other Swift packages.
+def _apple_manifests(ctx, platform, shared_darwin_source):
+    """The `Package.swift` files of a plugin's Apple side for `platform`.
 
-    Reads each `<platform>/<dir>/Package.swift` (and `darwin/<dir>/` for a
-    shared darwin plugin). rules_flutter compiles the plugin's own sources and
-    does not resolve other Swift packages, so a remote dependency would leave
-    the app without code the plugin needs.
+    Each `<platform>/<dir>/Package.swift`, and `darwin/<dir>/` for a shared
+    darwin plugin.
+
+    Args:
+        ctx: The repository context, with the plugin extracted at its root.
+        platform: `"macos"` or `"ios"`.
+        shared_darwin_source: Whether the plugin's pubspec sets
+            `sharedDarwinSource` for `platform`.
+
+    Returns:
+        A list of structs with `path` (relative to the plugin's root),
+        `dir` (the directory holding it) and `content`.
     """
+    manifests = []
     roots = [platform] + (["darwin"] if shared_darwin_source else [])
     for root in roots:
         root_path = ctx.path(root)
@@ -156,23 +165,61 @@ def _fail_on_swiftpm_dependencies(ctx, package_name, platform, shared_darwin_sou
             manifest = entry.get_child("Package.swift")
             if not entry.is_dir or not manifest.exists:
                 continue
-            unsupported = find_unsupported_swiftpm_dependencies(
-                ctx.read(manifest),
-                "%s/%s" % (root, entry.basename),
-            )
-            if unsupported:
-                fail((
-                    "package:{pkg} ({plat}) declares Swift package dependencies in " +
-                    "{root}/{dir}/Package.swift that rules_flutter does not yet " +
-                    "resolve (SwiftPM dependencies of plugins are not supported):\n" +
-                    "{deps}"
-                ).format(
-                    pkg = package_name,
-                    plat = platform,
-                    root = root,
-                    dir = entry.basename,
-                    deps = "\n".join(["  - " + d for d in unsupported]),
-                ))
+            directory = "%s/%s" % (root, entry.basename)
+            manifests.append(struct(
+                path = directory + "/Package.swift",
+                dir = directory,
+                content = ctx.read(manifest),
+            ))
+    return manifests
+
+def _fail_on_swiftpm_dependencies(package_name, platform, manifests):
+    """Fails when a plugin's SwiftPM package depends on other Swift packages.
+
+    rules_flutter compiles the plugin's own sources and does not resolve other
+    Swift packages, so a remote dependency would leave the app without code
+    the plugin needs.
+
+    Args:
+        package_name: The plugin's package name, for the message.
+        platform: `"macos"` or `"ios"`, for the message.
+        manifests: The plugin's manifests for `platform` (`_apple_manifests`).
+    """
+    for manifest in manifests:
+        unsupported = find_unsupported_swiftpm_dependencies(manifest.content, manifest.dir)
+        if unsupported:
+            fail((
+                "package:{pkg} ({plat}) declares Swift package dependencies in " +
+                "{manifest} that rules_flutter does not yet " +
+                "resolve (SwiftPM dependencies of plugins are not supported):\n" +
+                "{deps}"
+            ).format(
+                pkg = package_name,
+                plat = platform,
+                manifest = manifest.path,
+                deps = "\n".join(["  - " + d for d in unsupported]),
+            ))
+
+def _apple_build_settings(manifests):
+    """The build settings the plugin's manifests set, which rules_flutter does not supply.
+
+    Args:
+        manifests: The plugin's manifests for one platform (`_apple_manifests`).
+
+    Returns:
+        None when there are none; otherwise a struct with `manifest` (the
+        manifests that set them, comma-separated) and `settings`.
+    """
+    paths = []
+    settings = []
+    for manifest in manifests:
+        found = find_swiftpm_build_settings(manifest.content)
+        if found:
+            paths.append(manifest.path)
+            settings.extend(found)
+    if not settings:
+        return None
+    return struct(manifest = ", ".join(paths), settings = settings)
 
 def _detect_apple_include_dirs(ctx, source_dirs, package_name):
     """Collect SwiftPM-canonical public-header directories for the given Apple sources.
@@ -468,7 +515,10 @@ def _detect_unbuilt_native_code(ctx, plugin_block):
     Returns:
         A dict of platform (`android`, `ios`, `macos`, `linux`, `windows`) to
         the message its build fails with, for each platform the pubspec
-        declares whose build makes a library rules_flutter cannot.
+        declares whose build makes a library rules_flutter cannot, or
+        (iOS and macOS) whose Package.swift sets build settings rules_flutter
+        does not supply. Fails the fetch when that Package.swift depends on
+        other Swift packages.
     """
     out = {}
     for platform in ("android", "ios", "macos", "linux", "windows"):
@@ -483,6 +533,21 @@ def _detect_unbuilt_native_code(ctx, plugin_block):
                 platform,
                 mechanism,
             )
+        elif platform in ("ios", "macos") and info.get("pluginClass", ""):
+            # The sources are compiled, so the plugin's Package.swift says
+            # what else that compile needs: other Swift packages, which fail
+            # the fetch, and build settings, which fail this platform's build.
+            manifests = _apple_manifests(ctx, platform, info.get("sharedDarwinSource", False) == True)
+            _fail_on_swiftpm_dependencies(ctx.attr.package_name, platform, manifests)
+            settings = _apple_build_settings(manifests)
+            if settings:
+                out[platform] = build_settings_message(
+                    ctx.attr.package_name,
+                    ctx.attr.version,
+                    platform,
+                    settings.manifest,
+                    settings.settings,
+                )
     return out
 
 def make_android_native_build_content(message):
@@ -1161,7 +1226,9 @@ def make_flutter_member_build_content(
         unbuilt_native_code: Dict of `ios`, `macos`, `linux` or `windows` to
             the message the build of that platform fails with: the plugin's
             native code there is made by a build rules_flutter does not run
-            (`unbuilt_native_code.bzl`). That platform's library is a
+            (`unbuilt_native_code.bzl`), or its Package.swift sets build
+            settings rules_flutter does not supply (`swiftpm_manifest.bzl`).
+            That platform's library is a
             `flutter_unbuilt_plugin_library` instead of compiled sources.
 
     Returns:
@@ -2152,17 +2219,13 @@ def _flutter_pub_package_impl(ctx):
         apple_ios_privacy_manifests = []
 
         # A platform whose library the plugin's own build makes by means
-        # rules_flutter does not run gets a stand-in for its library that
-        # fails that platform's build; its sources are not compiled.
+        # rules_flutter does not run, or whose Package.swift sets build
+        # settings rules_flutter does not supply, gets a stand-in for its
+        # library that fails that platform's build; its sources are not
+        # compiled.
         unbuilt_native_code = _detect_unbuilt_native_code(ctx, plugin_block)
 
         if macos_info and macos_info.get("pluginClass", "") and "macos" not in unbuilt_native_code:
-            _fail_on_swiftpm_dependencies(
-                ctx,
-                ctx.attr.package_name,
-                "macos",
-                macos_shared_darwin,
-            )
             apple_macos_srcs_dirs = _detect_apple_source_dirs(
                 ctx,
                 ctx.attr.package_name,
@@ -2180,12 +2243,6 @@ def _flutter_pub_package_impl(ctx):
             )
 
         if ios_info and ios_info.get("pluginClass", "") and "ios" not in unbuilt_native_code:
-            _fail_on_swiftpm_dependencies(
-                ctx,
-                ctx.attr.package_name,
-                "ios",
-                ios_shared_darwin,
-            )
             apple_ios_srcs_dirs = _detect_apple_source_dirs(
                 ctx,
                 ctx.attr.package_name,

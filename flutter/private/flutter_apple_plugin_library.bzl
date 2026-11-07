@@ -26,10 +26,16 @@ load("@rules_swift//swift:swift.bzl", "swift_library")
 load(":apple_engine.bzl", "IOS_ENGINE_XCFRAMEWORK", "MACOS_ENGINE_FRAMEWORK")
 
 def _split_srcs(srcs):
-    """Split srcs into (swift_files, objc_files, headers).
+    """Split srcs into (swift_files, objc_files, public_headers, private_headers).
 
     Returns lists by extension so we can route ObjC through objc_library
-    while keeping Swift on swift_library.
+    while keeping Swift on swift_library. Headers are public, part of the
+    plugin's module, unless the sources follow SwiftPM's layout, where only
+    the headers under an `include/` directory (`publicHeadersPath`'s
+    default) are: the rest are the target's own, compiled with its sources
+    but not importable, and a private header that does not stand on its
+    own (one that uses `NS_ENUM` without importing Foundation) would fail
+    the module's build.
     """
     swift_files = []
     objc_files = []
@@ -41,7 +47,14 @@ def _split_srcs(srcs):
             objc_files.append(f)
         elif f.endswith(".h"):
             headers.append(f)
-    return swift_files, objc_files, headers
+    public = [h for h in headers if _under_include_dir(h)]
+    if not public:
+        return swift_files, objc_files, headers, []
+    private = [h for h in headers if not _under_include_dir(h)]
+    return swift_files, objc_files, public, private
+
+def _under_include_dir(path):
+    return path.startswith("include/") or "/include/" in path
 
 def flutter_apple_plugin_library(
         name,
@@ -67,11 +80,16 @@ def flutter_apple_plugin_library(
     Args:
         name: Target name. Pass to runner deps (or via the aspect-based
             aggregator that discovers them automatically).
-        srcs: Swift, ObjC, and header source files.
+        srcs: Swift, ObjC, and header source files. When some headers are
+            under an `include/` directory, as in SwiftPM's layout, only
+            those are the module's public headers; the others are private
+            to the ObjC compile, as SwiftPM treats them.
         module_name: Swift module name. Defaults to `name`.
         platform: `"macos"` or `"ios"`. Picks the Flutter framework dep.
         deps: Additional swift_library / cc_library deps (other plugins).
-        copts: Additional Swift compile options.
+        copts: Additional compile options, for both the Swift and the ObjC
+            compile: a define a plugin's `Package.swift` sets is `-DNAME`,
+            which Clang reads as `NAME=1` and Swift as a condition.
         includes: Header search paths forwarded to the inner
             `objc_library`. Mirrors `objc_library.includes` semantics —
             each entry becomes `-I <package>/<entry>` for both the
@@ -115,7 +133,7 @@ def flutter_apple_plugin_library(
     # outputs. Constrain each to its OS so only one is reachable per build.
     target_compatible_with = ["@platforms//os:%s" % platform]
 
-    swift_files, objc_files, headers = _split_srcs(srcs)
+    swift_files, objc_files, headers, private_headers = _split_srcs(srcs)
 
     # The Flutter framework is loaded at runtime (extracted via
     # flutter_macos_engine / flutter_ios_engine elsewhere). For
@@ -157,7 +175,7 @@ def flutter_apple_plugin_library(
         objc_module_name = "%s_objc" % module_name
         objc_library(
             name = objc_target,
-            srcs = objc_files,
+            srcs = objc_files + private_headers,
             hdrs = headers,
             includes = includes,
             sdk_frameworks = sdk_frameworks,
@@ -174,7 +192,7 @@ def flutter_apple_plugin_library(
 
     bridging_header = None
     extra_copts = list(copts)
-    for h in headers:
+    for h in headers + private_headers:
         if h.endswith("%s-Bridging-Header.h" % module_name):
             bridging_header = h
             extra_copts.extend([
