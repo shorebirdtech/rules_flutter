@@ -1,3 +1,7 @@
+# Text files are LF in every checkout, Windows included: generated files,
+# formatters and lock checks compare bytes.
+* text=auto eol=lf
+
 # Exclude development-only files from release archives.
 #
 # Every pattern is anchored with a leading `/`. Without one, `git archive`
