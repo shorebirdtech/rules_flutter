@@ -1965,53 +1965,39 @@ Two tests hold that, and neither replaces the other:
 A tool that needs another file is a missing entry in the action's set, found
 by the second test, not a reason to take the whole SDK.
 
-### Dual-hub package skew (manual)
+### Dual-hub package sharing
 
 `e2e/dual_hub` runs two pub hubs over two lock files that agree on `path`
-(1.9.1) and disagree on `clock` (1.1.2 in `//hub_a`, 1.1.3 in `//hub_b`). Both
-locks state the same SDK constraint, so the spokes derive the same
+(1.9.1) and differ on `clock` (1.1.2 in `//hub_a`, 1.1.3 in `//hub_b`). Both
+locks state the same SDK constraint, so the packages derive the same
 `language_version` and the package version is the only thing that differs.
 
-`bazel test //...` there covers the agreeing half — `:agreeing_bin` collects
-`path` from both hubs and must build. It is a binary because the check runs
-wherever a package_config is assembled — `collect_packages` (`dart_binary`,
-`dart_test`, `package_config`, `dart_web_application`,
-`dart_analysis_options`, the codegen `library_deps` path) and directly on a
-library's transitive packages in `dart_analyze` and `dart_fix`. `dart_library`
-itself never reaches it: it accumulates records into depsets and never dedups,
-so a `build_test` over a bare library proves nothing. The analysis aspect
-visiting the library *does* fire it.
+`flutter.pub` builds one repository per package for the whole build, at the
+highest version any lock records. `hub_a` is behind on `clock` and says
+`on_version_conflict = "upgrade"`, so both hubs' `:clock` is the 1.1.3 library.
+`bazel test //...` there covers:
 
-The disagreeing half is `manual` because its contract is to fail analysis,
-which no target in `bazel test //...` can have:
+- `:bins_test` builds `:agreeing_bin` (`path` from both hubs) and
+  `:upgraded_bin` (`clock` from both). They are binaries because the
+  duplicate-record check runs wherever a package_config is assembled
+  (`collect_packages`: `dart_binary`, `dart_test`, `package_config`,
+  `dart_web_application`, `dart_analysis_options`, the codegen `library_deps`
+  path) and `dart_library` itself never dedups, so a `build_test` over a bare
+  library proves nothing.
+- `:shared_libraries_test` proves the sharing, which a build cannot (two
+  repositories at one version build too): a `genquery` of the libraries the
+  hubs' `:clock` and `:path` alias, compared with `shared_libraries.golden`,
+  one line each for `flutter_pub_lib__clock` and `flutter_pub_lib__path`. Two
+  repositories would print four lines and fail.
 
-```sh
-cd e2e/dual_hub
-bazel build :disagreeing_bin   # must FAIL
-```
+A lock behind another at the default `on_version_conflict = "error"` fails when
+the module is read, so every command of a workspace holding one would fail:
+that case, and the others that fail the module (sources, digests, two `resolve`
+maps), is `tools/dev_tool/test/e2e/pub_versions_e2e_test.dart`, over generated
+workspaces.
 
-The build must fail, naming both hubs and both versions:
-
-```
-Error in fail: Package "clock" is supplied more than once with different versions:
-  - 1.1.2 (../rules_flutter++flutter+hub_a__clock)
-  - 1.1.3 (../rules_flutter++flutter+hub_b__clock)
-```
-
-A build that succeeds instead, emitting a `package_config.json` that names
-exactly one `clock` with no diagnostic, is the silent substitution this
-workspace exists to catch: the binary compiles against one version's source tree
-while the other lock pins the other.
-
-`:disagreeing_bin` stays `manual`: a target whose contract is to fail analysis
-cannot sit in `bazel test //...`. `:agreeing_bin` is the automated half and
-must keep passing — two records for `path` at the same 1.9.1 agree, so the
-guard lets them merge.
-
-The root workspace already has the ingredients — `dev_tool_deps` and
-`gen_l10n_deps` share eleven package names and disagree on `clock` and `meta` —
-but no target reaches both, so nothing there observes it. Do not add one: the
-edge that would make it observable is the bug.
+The root workspace has the same shape: `dev_tool_deps` (the tools' one lock) at
+`"upgrade"` beside whatever a lock of a consumer adds.
 
 ### `flutter_test` build modes
 

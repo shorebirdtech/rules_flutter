@@ -2765,7 +2765,7 @@ The `e2e/` directory holds working workspaces, each with its own tests:
 | `e2e/web_example` | WASM-with-JavaScript-fallback, WASM-only and JavaScript web builds with `web_assets`, and a WASM-only app dart2js cannot compile. |
 | `e2e/cross_compile_example` | A Linux bundle cross-compiled from macOS. |
 | `e2e/multi_window_example` | Multi-window macOS and multi-scene iOS with `FlutterEngineGroup`. |
-| `e2e/dual_hub` | Two pub hubs in one workspace that disagree on a package version. |
+| `e2e/dual_hub` | Two pub hubs in one workspace that differ on a package version: one repository per package, at the higher version. |
 
 [docs/TESTING.md](docs/TESTING.md) describes how the repository itself is tested, including the manual checks that need a display or a device.
 
