@@ -22,13 +22,14 @@ Output bundle structure:
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
-load("//flutter:providers.bzl", "FlutterApplicationInfo")
+load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterSdkRecordInfo")
 load("//flutter/private:cc_runner_compile.bzl", "compile_and_link_runner")
 load("//flutter/private:common.bzl", "compute_desktop_bundle_copies")
 load("//flutter/private:engine_helpers.bzl", "find_engine_header_dir")
 load("//flutter/private:exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
 load("//flutter/private:flutter_desktop_plugin_info.bzl", "plugin_link_flags")
 load("//flutter/private:flutter_windows_resources.bzl", "WINDOWS_VERSION_ATTRS", "windows_version_defines")
+load("//flutter/private:mobile_engine_check.bzl", "check_desktop_engine")
 load("//flutter/private:path_mapping.bzl", "file_ref", "json_config_args")
 load("//flutter/private:plugin_registrant.bzl", "registrant_include_dirs")
 
@@ -379,6 +380,14 @@ def _flutter_windows_bundle_impl(ctx):
     elif app_info.aot_output:
         extra_inputs.append(app_info.aot_output)
 
+    # The engine must hold the app's CPU, and an app of a custom SDK keeps the
+    # record of the checked pieces it was built from.
+    sdk_record = ctx.attr._sdk_record[FlutterSdkRecordInfo]
+    check_desktop_engine(ctx.label, sdk_record, flutter_sdk_info.target_arch or flutter_sdk_info.host_tools.host_arch)
+    if sdk_record.record:
+        copies.append({"src": file_ref(refs, sdk_record.record), "dst": "data/flutter_assets/flutter_sdk.json"})
+        extra_inputs.append(sdk_record.record)
+
     # Get the runner executable from the runner target.
     runner_files = ctx.attr.runner[DefaultInfo].files.to_list()
     runner_binary = None
@@ -441,6 +450,10 @@ flutter_windows_bundle_rule = rule(
         "_bundle_tool": attr.label(
             default = Label("//flutter/private/tools:bundle_app.dart"),
             allow_single_file = True,
+        ),
+        "_sdk_record": attr.label(
+            default = Label("//flutter/private:sdk_record"),
+            providers = [FlutterSdkRecordInfo],
         ),
     },
     toolchains = [

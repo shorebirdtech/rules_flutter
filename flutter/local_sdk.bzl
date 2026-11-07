@@ -36,11 +36,13 @@ When the out dirs of a slot are ambiguous (both `host_debug_arm64` and
 """
 
 load("//flutter/private:engine_labels.bzl", "contract_slices", "native_target")
-load("//flutter/private:engine_out_dirs.bzl", "dict_text", "effective_cpu", "first_existing", "link_into", "out_dir_provenance", "parse_args_gn", "parse_out_dir_name", "select_out_dir")
+load("//flutter/private:engine_out_dirs.bzl", "dict_text", "effective_cpu", "first_existing", "link_files_into", "link_into", "machine_of", "out_dir_provenance", "parse_args_gn", "parse_out_dir_name", "select_out_dir")
 load("//flutter/private:framework_source.bzl", "FRAMEWORK_JSON")
+load("//flutter/private:out_dir_desktop.bzl", "desktop_slices")
 load("//flutter/private:out_dir_mobile.bzl", "mobile_slices")
+load("//flutter/private:out_dir_web.bzl", "web_slices")
 
-_ENGINE_LOAD = 'load("@rules_flutter//flutter:engine.bzl", "flutter_android_engine_slice", "flutter_gen_snapshot", "flutter_host_tools", "flutter_ios_engine_slice", "flutter_macos_engine_slice", "flutter_missing_slice", "flutter_platform_kernel")\n'
+_ENGINE_LOAD = 'load("@rules_flutter//flutter:engine.bzl", "flutter_android_engine_slice", "flutter_gen_snapshot", "flutter_host_tools", "flutter_ios_engine_slice", "flutter_linux_engine_slice", "flutter_macos_engine_slice", "flutter_missing_slice", "flutter_platform_kernel", "flutter_web_sdk", "flutter_windows_engine_slice")\n'
 
 def _unset_message(env):
     return (
@@ -169,15 +171,16 @@ def _engine_out_dirs_impl(repository_ctx):
     root_exports = ""
     root_build = ""
 
-    os_name = repository_ctx.os.name.lower()
-    arch = "arm64" if repository_ctx.os.arch in ["aarch64", "arm64"] else "x64"
-    cpu = "arm64" if arch == "arm64" else "x64"
-    host = "darwin-" + arch
+    machine = machine_of(repository_ctx)
     if not checkout:
         default_reason = _unset_message(path_env)
-    elif not os_name.startswith("mac"):
-        default_reason = "The engine out dirs serve macOS, iOS and Android apps built on a Mac so far; this host is " + os_name + "."
+    elif machine == None:
+        default_reason = "The engine out dirs are read on macOS, Linux and Windows machines; this one is {} on {}.".format(repository_ctx.os.name, repository_ctx.os.arch)
     else:
+        arch = machine.arch
+        cpu = arch
+        host = machine.key
+        os_label = {"macos": "macOS", "linux": "Linux", "windows": "Windows"}[machine.os]
         src = repository_ctx.path(checkout).get_child("engine").get_child("src")
         out_root = src.get_child("out")
         if not out_root.exists:
@@ -212,25 +215,35 @@ def _engine_out_dirs_impl(repository_ctx):
 
         def advice(mode):
             return (
-                "Found: {found}. Build one in the checkout (engine/src/flutter/tools/gn --runtime-mode {mode} " +
-                "--mac-cpu {cpu}, then ninja -C out/host_{mode}_{cpu}), or build in a mode that exists."
-            ).format(found = found, mode = mode, cpu = cpu)
+                "Found: {found}. Build one in the checkout (engine/src/flutter/tools/gn --runtime-mode {mode}{cpu_flag}, " +
+                "then ninja -C out/host_{mode}{suffix}), or build in a mode that exists."
+            ).format(
+                found = found,
+                mode = mode,
+                cpu_flag = {"macos": " --mac-cpu ", "windows": " --windows-cpu "}.get(machine.os, " --linux-cpu ") + cpu,
+                suffix = "" if cpu == "x64" else "_" + cpu,
+            )
 
+        # The host out dirs, which are the machine's own build: where Flutter
+        # builds the host tools, the product platform kernel and, on a Mac, the
+        # macOS engine.
         chosen = {}
         for mode in ["debug", "profile", "release"]:
-            pick = select_out_dir(candidates, ["host", "mac"], mode, cpu, pins)
+            pick = select_out_dir(candidates, ["host", machine.os_prefix], mode, cpu, pins)
             if pick.name:
                 chosen[mode] = pick.name
             else:
-                message = "The engine out dirs under {out} have no {mode} engine for macOS on {cpu}: {error}. {advice}".format(
+                message = "The engine out dirs under {out} have no {mode} engine for {os} on {cpu}: {error}. {advice}".format(
                     out = out_root,
                     mode = mode,
+                    os = os_label,
                     cpu = cpu,
                     error = pick.error,
                     advice = advice(mode),
                 )
-                reasons[("macos/" + mode, "engine")] = message
-                reasons[(native_target(host) + "/" + mode, "gen_snapshot_" + host)] = message
+                if machine.os == "macos":
+                    reasons[("macos/" + mode, "engine")] = message
+                    reasons[(native_target(host) + "/" + mode, "gen_snapshot_" + host)] = message
                 if mode == "release":
                     reasons[("kernel/release", "platform")] = message
                 if mode == "debug":
@@ -243,18 +256,18 @@ def _engine_out_dirs_impl(repository_ctx):
             tools = src.get_child("out").get_child(chosen["debug"])
             args = args_of[chosen["debug"]]
             prebuilt = args.get("flutter_prebuilt_dart_sdk") == "true"
-            prebuilt_host = "macos-" + arch
+            prebuilt_host = machine.prebuilt
             dart_sdk = src.get_child("flutter").get_child("prebuilts").get_child(prebuilt_host).get_child("dart-sdk") if prebuilt else tools.get_child("dart-sdk")
             files = {
                 "dart-sdk": dart_sdk,
-                "host-tools/flutter_tester": tools.get_child("flutter_tester"),
+                "host-tools/flutter_tester" + machine.exe: tools.get_child("flutter_tester" + machine.exe),
                 "host-tools/icudtl.dat": tools.get_child("icudtl.dat"),
                 "host-tools/vm_isolate_snapshot.bin": tools.get_child("gen").get_child("flutter").get_child("lib").get_child("snapshot").get_child("vm_isolate_snapshot.bin"),
                 "host-tools/isolate_snapshot.bin": tools.get_child("gen").get_child("flutter").get_child("lib").get_child("snapshot").get_child("isolate_snapshot.bin"),
-                "host-tools/impellerc": tools.get_child("impellerc"),
+                "host-tools/impellerc" + machine.exe: tools.get_child("impellerc" + machine.exe),
                 "host-tools/shader_lib": tools.get_child("shader_lib"),
                 "host-tools/const_finder.dart.snapshot": tools.get_child("gen").get_child("const_finder.dart.snapshot"),
-                "host-tools/font-subset": tools.get_child("font-subset"),
+                "host-tools/font-subset" + machine.exe: tools.get_child("font-subset" + machine.exe),
             }
             absent = [dest for dest, source in files.items() if not source.exists]
             if absent:
@@ -287,32 +300,32 @@ filegroup(
                 provided[("host/" + host, "tools")] = """
 flutter_host_tools(
     name = "tools",
-    host_os = "macos",
+    host_os = "{os}",
     host_arch = "{arch}",
     dart_sdk = "//:dart_sdk",
-    dart = "//:dart-sdk/bin/dart",
-    dartaotruntime = "//:dart-sdk/bin/dartaotruntime",
+    dart = "//:dart-sdk/bin/dart{exe}",
+    dartaotruntime = "//:dart-sdk/bin/dartaotruntime{exe}",
     frontend_server = "//:dart-sdk/bin/snapshots/frontend_server_aot.dart.snapshot",
     kernel_worker = "//:dart-sdk/bin/snapshots/kernel_worker_aot.dart.snapshot",
     dart_libraries_json = "//:dart-sdk/lib/libraries.json",
     dart_platform_dill = "//:dart-sdk/lib/_internal/vm_platform_strong.dill",
-    flutter_tester = "//:host-tools/flutter_tester",
+    flutter_tester = "//:host-tools/flutter_tester{exe}",
     icu_data = "//:host-tools/icudtl.dat",
     vm_isolate_snapshot = "//:host-tools/vm_isolate_snapshot.bin",
     isolate_snapshot = "//:host-tools/isolate_snapshot.bin",
-    impellerc = "//:host-tools/impellerc",
+    impellerc = "//:host-tools/impellerc{exe}",
     shader_lib = "//:shader_lib_files",
     shader_include_dir = "host-tools/shader_lib",
     const_finder = "//:host-tools/const_finder.dart.snapshot",
-    font_subset = "//:host-tools/font-subset",
+    font_subset = "//:host-tools/font-subset{exe}",
     provenance = {prov},
     visibility = ["//visibility:public"],
 )
-""".format(arch = arch, prov = prov)
+""".format(os = machine.os, arch = arch, prov = prov, exe = machine.exe)
 
             patched = tools.get_child("flutter_patched_sdk")
             if patched.exists:
-                link_into(repository_ctx, patched, "kernel/debug/flutter_patched_sdk")
+                link_files_into(repository_ctx, patched, "kernel/debug/flutter_patched_sdk")
                 provided[("kernel/debug", "platform")] = _kernel_stanza("flutter_patched_sdk", dict_text(out_dir_provenance(chosen["debug"], args)))
             else:
                 reasons[("kernel/debug", "platform")] = "The host debug out dir {} has no flutter_patched_sdk.".format(tools)
@@ -322,13 +335,13 @@ flutter_host_tools(
             release_out = src.get_child("out").get_child(chosen["release"])
             patched = release_out.get_child("flutter_patched_sdk")
             if patched.exists:
-                link_into(repository_ctx, patched, "kernel/release/flutter_patched_sdk_product")
+                link_files_into(repository_ctx, patched, "kernel/release/flutter_patched_sdk_product")
                 provided[("kernel/release", "platform")] = _kernel_stanza("flutter_patched_sdk_product", dict_text(out_dir_provenance(chosen["release"], args_of[chosen["release"]])))
             else:
                 reasons[("kernel/release", "platform")] = "The host release out dir {} has no flutter_patched_sdk.".format(release_out)
 
         # The macOS engine, and the gen_snapshot of the AOT modes, of each mode's out dir.
-        for mode, name in chosen.items():
+        for mode, name in (chosen.items() if machine.os == "macos" else []):
             out = src.get_child("out").get_child(name)
             args = args_of[name]
             xcframework = out.get_child("FlutterMacOS.xcframework")
@@ -377,9 +390,31 @@ flutter_gen_snapshot(
 """.format(host = host, cpu = "arm64" if cpu == "arm64" else "x86_64", mode = mode, prov = dict_text(out_dir_provenance(name, args)))
 
         # The iOS and Android engines, and their gen_snapshots.
-        mobile = mobile_slices(repository_ctx, out_root, candidates, args_of, pins, found, cpu)
+        mobile = mobile_slices(repository_ctx, out_root, candidates, args_of, pins, found, machine)
         provided.update(mobile.provided)
         reasons.update(mobile.reasons)
+
+        # The Linux and Windows engines, of the out dirs built for them.
+        desktop = desktop_slices(repository_ctx, out_root, candidates, args_of, pins, found, machine)
+        provided.update(desktop.provided)
+        reasons.update(desktop.reasons)
+
+        # The web SDK, beside the Dart SDK of the host tools.
+        web = web_slices(repository_ctx, out_root, candidates, args_of, pins, found, ("host/" + host, "tools") in provided)
+        provided.update(web.provided)
+        reasons.update(web.reasons)
+        root_build += web.root_build
+
+        # A Mac builds the Apple platforms.
+        if machine.os != "macos":
+            apple = "The engine out dirs are read on a {} machine; macOS and iOS engines are built on a Mac.".format(os_label)
+            for mode in ["debug", "profile", "release"]:
+                reasons[("macos/" + mode, "engine")] = apple
+                reasons[("ios/" + mode, "engine")] = apple
+            for target in ["macos-arm64", "macos-x64", "ios-arm64"]:
+                for mode in ["profile", "release"]:
+                    for darwin_host in ["darwin-arm64", "darwin-x64"]:
+                        reasons[(target + "/" + mode, "gen_snapshot_" + darwin_host)] = apple
 
     # Every slice of the contract is a target: the ones the out dirs provide,
     # and for the rest a missing slice that says why.
@@ -393,7 +428,7 @@ flutter_gen_snapshot(
                 content += provided[key]
             else:
                 content += _missing(target, reasons.get(key) or default_reason or (
-                    "The engine out dirs provide the macOS, iOS and Android slices so far; {} is not one of them.".format(package + ":" + target)
+                    "The engine out dirs have no out dir that provides {}.".format(package + ":" + target)
                 ))
         repository_ctx.file(package + "/BUILD.bazel", content)
 
@@ -416,7 +451,7 @@ flutter_platform_kernel(
 
 flutter_engine_out_dirs = repository_rule(
     _engine_out_dirs_impl,
-    doc = "An engine source (the contract of `@rules_flutter//flutter:engine.bzl`) over the out dirs of a checkout whose path an environment variable gives. macOS, iOS and Android slices so far; the others are missing slices that say so.",
+    doc = "An engine source (the contract of `@rules_flutter//flutter:engine.bzl`) over the out dirs of a checkout whose path an environment variable gives: the host tools, the platform kernels, the engines of macOS, iOS, Android, Linux and Windows, their gen_snapshots, and the web SDK. A slice no out dir provides is a missing slice that says why.",
     attrs = {
         "path_env": attr.string(
             doc = "The environment variable holding the checkout's path. Set it with `--repo_env`.",

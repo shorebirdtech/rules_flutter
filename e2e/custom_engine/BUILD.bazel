@@ -1,7 +1,10 @@
 load("@rules_flutter//flutter:android.bzl", "flutter_android_app")
-load("@rules_flutter//flutter:defs.bzl", "flutter_application")
+load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_test")
+load("@rules_flutter//flutter:integration_test.bzl", "flutter_web_integration_test")
 load("@rules_flutter//flutter:ios.bzl", "IOS_MINIMUM_OS_VERSION", "flutter_ios_app", "flutter_ios_framework_gen", "flutter_ios_simulator_build")
+load("@rules_flutter//flutter:linux.bzl", "flutter_linux_app")
 load("@rules_flutter//flutter:macos.bzl", "flutter_macos_app")
+load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
 load("@rules_flutter//tools/e2e_testing:apple_release_build.bzl", "apple_release_build")
 
 exports_files(["pubspec.lock"])
@@ -73,4 +76,51 @@ flutter_android_app(
     name = "android_app",
     package_name = "com.example.customengine",
     application = ":android_flutter",
+)
+
+# A Linux bundle, cross-compiled from the Mac: build it with
+# `--platforms=@rules_flutter//flutter/platforms:linux_x64 -c dbg` (no AOT
+# compiler cross-compiles between desktop OSes).
+flutter_linux_app(
+    name = "linux_app",
+    application = ":app_flutter",
+    tags = ["manual"],
+)
+
+# The web bundle, and the render check that runs it in the pinned headless
+# Chrome. Built with the release by default, with the stand-in checkout's web
+# SDK under --@rules_flutter//flutter:sdk=local.
+flutter_web_app(
+    name = "web_app",
+    package_name = "custom_engine",
+    app_name = "Custom Engine",
+    tags = ["manual"],
+    deps = ["@deps//:flutter"],
+)
+
+flutter_web_integration_test(
+    name = "web_render_test",
+    package_name = "custom_engine",
+    src = "integration_test/render_test.dart",
+    srcs = ["lib/main.dart"],
+    tags = ["manual"],
+    deps = [
+        "@deps//:flutter",
+        "@deps//:flutter_test",
+        "@deps//:integration_test",
+    ],
+)
+
+# A widget test, run by the flutter_tester of the selected SDK, with its modules
+# compiled against that SDK's platform kernel.
+flutter_test(
+    name = "widget_test",
+    package_name = "custom_engine",
+    srcs = ["lib/main.dart"],
+    main = "test/widget_test.dart",
+    tags = ["manual"],
+    deps = [
+        "@deps//:flutter",
+        "@deps//:flutter_test",
+    ],
 )

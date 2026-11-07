@@ -81,6 +81,21 @@ alias(
 )
 """
 
+# The web SDK of the selected SDK: `web_sdk` is its tree, `sdk` its slice, and
+# each file a web application names is where the release's web SDK
+# repository had it.
+WEB_SDK_TARGETS = {
+    "web_sdk": "{prefix}//web:files",
+    "sdk": "{prefix}//web:sdk",
+    "web-sdk/kernel/dart2wasm_platform.dill": "{prefix}//web:dart2wasm_platform.dill",
+    "web-sdk/kernel/dart2js_platform.dill": "{prefix}//web:dart2js_platform.dill",
+    "web-sdk/kernel/ddc_outline.dill": "{prefix}//web:ddc_outline.dill",
+    "web-sdk/libraries.json": "{prefix}//web:libraries.json",
+    "web-sdk/kernel/ddcLibraryBundle-canvaskit/dart_sdk.js": "{prefix}//web:ddc_dart_sdk.js",
+    "dart-sdk/lib/dev_compiler/ddc/ddc_module_loader.js": "{prefix}//web:ddc_module_loader.js",
+    "dart-sdk/lib/dev_compiler/web/dart_stack_trace_mapper.js": "{prefix}//web:dart_stack_trace_mapper.js",
+}
+
 # The iOS engine of each build mode. `Flutter_xcframework` is what rules_apple
 # imports as Flutter.xcframework, so it follows the mode itself: the simulator
 # engine under `-c dbg`, the device engines otherwise.

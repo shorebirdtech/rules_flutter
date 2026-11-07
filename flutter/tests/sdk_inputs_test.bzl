@@ -70,7 +70,7 @@ def _split(path):
     segments = path.split("/")
     if "external" not in segments:
         return None, None, None
-    if any([s.endswith("flutter_web_sdk") for s in segments]):
+    if any([s.endswith("flutter_web_sdk") or s.endswith("stock_web_sdk") for s in segments]):
         return None, None, "/".join(segments[segments.index("external") + 2:])
     if "dart-sdk" in segments:
         return "/".join(segments[segments.index("dart-sdk") + 1:]), None, None

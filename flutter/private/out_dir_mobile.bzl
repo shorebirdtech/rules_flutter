@@ -20,7 +20,7 @@ follow `android_arches()`.
 load("//flutter/private:constants.bzl", "ANDROID_ABI_FOR_ARCH")
 load("//flutter/private:engine_labels.bzl", "ENGINE_MODES", "android_arches", "android_engine_cpu")
 load("//flutter/private:engine_out_dirs.bzl", "dict_text", "first_existing", "link_into", "out_dir_provenance", "select_out_dir")
-load("//flutter/private:toolchains_repo.bzl", "CROSS_COMPILATION_PAIRS")
+load("//flutter/private:toolchains_repo.bzl", "CROSS_COMPILATION_PAIRS", "HOST_PLATFORMS")
 
 # The directories flutter_tools searches for a gen_snapshot (`_genSnapshotPath`)
 # that a macOS host can run, with the CPUs of the hosts each binary runs on.
@@ -34,57 +34,64 @@ _GEN_SNAPSHOT_DIRS = [
     ("clang_arm64", ["arm64"]),
 ]
 
-_HOST_ARCH = {"darwin-arm64": "arm64", "darwin-x64": "x64"}
+def _gen_snapshot_for(out, names, host_arch, machine):
+    """The gen_snapshot of `out` that runs on a host of CPU `host_arch`, or None.
 
-def _gen_snapshot_for(out, names, host_arch, machine_arch):
-    """The gen_snapshot of `out` that runs on a host of CPU `host_arch`, or None."""
+    `universal` is the Mac build's lipo of both Mac CPUs, so only a Mac has one.
+    """
     for directory, runs_on in _GEN_SNAPSHOT_DIRS:
-        if host_arch not in (runs_on or [machine_arch]):
+        if directory == "universal" and machine.os != "macos":
+            continue
+        if host_arch not in (runs_on or [machine.arch]):
             continue
         base = out if directory == "." else out.get_child(directory)
-        found = first_existing([base.get_child(name) for name in names])
+        found = first_existing([base.get_child(name + machine.exe) for name in names])
         if found:
             return found
     return None
 
-def _gen_snapshot_stanza(host, cpu, mode, provenance):
+def _gen_snapshot_stanza(host, cpu, mode, provenance, exe):
     return """
 flutter_gen_snapshot(
     name = "gen_snapshot_{host}",
-    binary = ":bin/{host}/gen_snapshot",
+    binary = ":bin/{host}/gen_snapshot{exe}",
     target_cpu = "{cpu}",
     mode = "{mode}",
     provenance = {provenance},
     visibility = ["//visibility:public"],
 )
-""".format(host = host, cpu = cpu, mode = mode, provenance = dict_text(provenance))
+""".format(host = host, cpu = cpu, mode = mode, provenance = dict_text(provenance), exe = exe)
 
-def _gen_snapshots(repository_ctx, result, package, out, args, name, names, target_cpu, mode, machine_arch):
+def _gen_snapshots(repository_ctx, result, package, out, args, name, names, target_cpu, mode, machine):
     """Slices for the gen_snapshot of one AOT out dir, on every host that has one."""
     for host, targets in CROSS_COMPILATION_PAIRS.items():
         if package.split("/")[0] not in targets:
             continue
         slice_key = (package, "gen_snapshot_" + host)
-        if host not in _HOST_ARCH:
-            result.reasons[slice_key] = "The engine out dirs are read on a Mac, which runs gen_snapshot for macOS hosts; {} is not one.".format(host)
+        host_meta = HOST_PLATFORMS[host]
+        if host_meta.os != machine.os:
+            result.reasons[slice_key] = (
+                "The engine out dirs are read on a {machine} machine, which runs the gen_snapshot of {machine} hosts only; {host} is not one."
+            ).format(machine = machine.os, host = host)
             continue
-        found = _gen_snapshot_for(out, names, _HOST_ARCH[host], machine_arch)
+        found = _gen_snapshot_for(out, names, host_meta.arch, machine)
         if found == None:
             result.reasons[slice_key] = (
-                "The out dir {out} has no {names} that runs on {host}: looked in ., universal and " +
-                "clang_{arch}. A universal one comes from ninja -C {build} flutter/lib/snapshot:generate_snapshot_bins."
+                "The out dir {out} has no {names} that runs on {host}: looked in ., {universal}clang_{arch}. " +
+                "{advice}"
             ).format(
                 out = out,
-                names = " or ".join(names),
+                names = " or ".join([n + machine.exe for n in names]),
                 host = host,
-                arch = _HOST_ARCH[host],
-                build = "out/" + name,
+                arch = host_meta.arch,
+                universal = "universal and " if machine.os == "macos" else "",
+                advice = "A universal one comes from ninja -C {} flutter/lib/snapshot:generate_snapshot_bins.".format("out/" + name) if machine.os == "macos" else "",
             )
             continue
 
         # One link per host: the same file may serve both Mac CPUs.
-        link_into(repository_ctx, found, "{}/bin/{}/gen_snapshot".format(package, host))
-        result.provided[slice_key] = _gen_snapshot_stanza(host, target_cpu, mode, out_dir_provenance(name, args))
+        link_into(repository_ctx, found, "{}/bin/{}/gen_snapshot{}".format(package, host, machine.exe))
+        result.provided[slice_key] = _gen_snapshot_stanza(host, target_cpu, mode, out_dir_provenance(name, args), machine.exe)
 
 def _slice_cpus(slice_name):
     """The CPUs of an xcframework platform directory, from its name."""
@@ -95,7 +102,7 @@ def _ios_slices(repository_ctx, result, ctx):
     for mode in ENGINE_MODES:
         package = "ios/" + mode
         sim = mode == "debug"
-        cpu = ctx.machine_arch if sim else "arm64"
+        cpu = ctx.machine.arch if sim else "arm64"
         what = "the iOS simulator on {}".format(cpu) if sim else "iOS devices"
         pick = select_out_dir(ctx.candidates, ["ios"], mode, cpu, ctx.pins, sim = sim)
         if not pick.name:
@@ -155,7 +162,7 @@ flutter_ios_engine_slice(
                 provenance = dict_text(out_dir_provenance(pick.name, args)),
             )
         if mode != "debug":
-            _gen_snapshots(repository_ctx, result, "ios-arm64/" + mode, out, args, pick.name, ["gen_snapshot_arm64"], "arm64", mode, ctx.machine_arch)
+            _gen_snapshots(repository_ctx, result, "ios-arm64/" + mode, out, args, pick.name, ["gen_snapshot_arm64"], "arm64", mode, ctx.machine)
 
 def _android_slices(repository_ctx, result, ctx):
     for arch in android_arches():
@@ -193,7 +200,7 @@ flutter_android_engine_slice(
 )
 """.format(mode = mode, cpu = cpu, abi = abi, provenance = dict_text(out_dir_provenance(pick.name, args)))
             if mode != "debug":
-                _gen_snapshots(repository_ctx, result, package, out, args, pick.name, ["gen_snapshot"], cpu, mode, ctx.machine_arch)
+                _gen_snapshots(repository_ctx, result, package, out, args, pick.name, ["gen_snapshot"], cpu, mode, ctx.machine)
 
 def _all_hosts_missing(result, package, message):
     for host, targets in CROSS_COMPILATION_PAIRS.items():
@@ -218,7 +225,7 @@ def _android_advice(mode, arch):
     out = "android_" + mode + ("" if arch == "arm" else "_" + arch)
     return "engine/src/flutter/tools/gn --android --android-cpu={arch} --runtime-mode {mode}, then ninja -C out/{out} flutter/shell/platform/android:android_jar".format(arch = arch, mode = mode, out = out)
 
-def mobile_slices(repository_ctx, out_root, candidates, args_of, pins, found, machine_arch):
+def mobile_slices(repository_ctx, out_root, candidates, args_of, pins, found, machine):
     """The iOS and Android slices the out dirs provide, and why the others are missing.
 
     Args:
@@ -228,7 +235,7 @@ def mobile_slices(repository_ctx, out_root, candidates, args_of, pins, found, ma
         args_of: Each out dir's `args.gn`, by directory name.
         pins: Out dir names the user chose, or empty.
         found: A description of the out dirs found, for messages.
-        machine_arch: The CPU of the machine reading the out dirs (`arm64`, `x64`).
+        machine: The machine reading the out dirs (`engine_out_dirs.machine_of`).
 
     Returns:
         `struct(provided, reasons)`: BUILD text by `(package, target)` of the
@@ -241,7 +248,7 @@ def mobile_slices(repository_ctx, out_root, candidates, args_of, pins, found, ma
         args_of = args_of,
         pins = pins,
         found = found,
-        machine_arch = machine_arch,
+        machine = machine,
     )
     _ios_slices(repository_ctx, result, ctx)
     _android_slices(repository_ctx, result, ctx)

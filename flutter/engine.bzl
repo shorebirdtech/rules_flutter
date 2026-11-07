@@ -265,3 +265,43 @@ flutter_gen_snapshot = rule(
     },
     doc = "A gen_snapshot for one target and mode.",
 )
+
+FlutterWebSdkInfo = provider(
+    doc = "The Flutter web SDK of an engine: the platform kernels the web compilers read, the renderer " +
+          "artifacts and the bootstrap script.",
+    fields = {
+        "files": "depset[File]: The `flutter_web_sdk` tree (`kernel/`, `canvaskit/`, `flutter_js/`, `libraries.json`) and " +
+                 "the Dart SDK's `lib` its `libraries.json` includes.",
+        "dart2js_platform_dill": "File: `kernel/dart2js_platform.dill`.",
+        "dart2wasm_platform_dill": "File: `kernel/dart2wasm_platform.dill`.",
+        "ddc_outline_dill": "File: `kernel/ddc_outline.dill`.",
+        "has_canvaskit": "bool: Whether the SDK holds the renderers (`canvaskit/`), which a web app of an engine " +
+                         "that is not the release's loads from itself rather than from the CDN.",
+        "provenance": "dict[str, str]: Where the files came from.",
+    },
+)
+
+def _flutter_web_sdk_impl(ctx):
+    files = depset(ctx.files.files)
+    info = FlutterWebSdkInfo(
+        files = files,
+        dart2js_platform_dill = ctx.file.dart2js_platform_dill,
+        dart2wasm_platform_dill = ctx.file.dart2wasm_platform_dill,
+        ddc_outline_dill = ctx.file.ddc_outline_dill,
+        has_canvaskit = ctx.attr.has_canvaskit,
+        provenance = ctx.attr.provenance,
+    )
+    return [info, DefaultInfo(files = files)]
+
+flutter_web_sdk = rule(
+    implementation = _flutter_web_sdk_impl,
+    attrs = {
+        "files": attr.label(doc = "The web SDK tree, as a filegroup.", mandatory = True, allow_files = True),
+        "dart2js_platform_dill": _file("`kernel/dart2js_platform.dill`."),
+        "dart2wasm_platform_dill": _file("`kernel/dart2wasm_platform.dill`."),
+        "ddc_outline_dill": _file("`kernel/ddc_outline.dill`."),
+        "has_canvaskit": attr.bool(doc = "Whether `canvaskit/` holds the renderers.", default = True),
+        "provenance": attr.string_dict(doc = "Where the files came from."),
+    },
+    doc = "The web SDK of an engine source.",
+)

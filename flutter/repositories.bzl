@@ -257,7 +257,7 @@ def flutter_register_toolchains(name, flutter_version, framework_json = "", fram
 
     # Web SDK repo (lazy — only downloaded when web targets are built).
     flutter_web_sdk_repo(
-        name = name + "_web_sdk",
+        name = name + "_stock_web_sdk",
         engine_revision = meta.engine_revision,
         sha256 = checksums.get("flutter-web-sdk.zip", ""),
         dart_sdk_sha256s = {h: checksums.get(dart_sdk_artifact_path(h), "") for h in HOST_PLATFORMS},

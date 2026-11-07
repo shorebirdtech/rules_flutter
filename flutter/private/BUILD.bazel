@@ -1,6 +1,6 @@
 load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
 load(":flutter_module.bzl", "flutter_kernel_sdk")
-load(":flutter_sdk_record.bzl", "flutter_sdk_record")
+load(":flutter_sdk_record.bzl", "flutter_sdk_record", "flutter_web_sdk_record")
 load(":unsupported_toolchain.bzl", "flutter_unsupported_toolchain")
 
 # Resolved for an x86_64 iOS simulator build (toolchains_repo.bzl).
@@ -126,6 +126,14 @@ flutter_sdk_record(
         "//conditions:default": "release",
     }),
     visibility = ["//flutter:__subpackages__"],
+)
+
+# The same for a web app: the web SDK's platform kernels against the Dart SDK
+# whose compilers read them.
+flutter_web_sdk_record(
+    name = "web_sdk_record",
+    visibility = ["//flutter:__subpackages__"],
+    web_sdk = "@flutter_web_sdk//:sdk",
 )
 
 # The Flutter SDK as `flutter_module_aspect` compiles kernel modules against it.
@@ -786,6 +794,7 @@ bzl_library(
         ":artifact_urls",
         ":engine_helpers",
         ":engine_labels",
+        ":out_dir_web",
         ":pinned",
         ":toolchains_repo",
     ],
@@ -911,6 +920,24 @@ bzl_library(
         ":engine_out_dirs",
         ":toolchains_repo",
     ],
+)
+
+bzl_library(
+    name = "out_dir_desktop",
+    srcs = ["out_dir_desktop.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+    deps = [
+        ":engine_labels",
+        ":engine_out_dirs",
+        ":toolchains_repo",
+    ],
+)
+
+bzl_library(
+    name = "out_dir_web",
+    srcs = ["out_dir_web.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+    deps = [":engine_out_dirs"],
 )
 
 bzl_library(

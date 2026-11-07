@@ -95,7 +95,7 @@ def out_dir_names(os_names, mode, cpu, sim = False):
     for os in os_names:
         for unopt in ["", "_unopt"]:
             # `tools/gn` leaves out the CPU that is a platform's default.
-            suffix = "" if (os == "android" and cpu == "arm") or (os == "ios" and sim and cpu == "x64") else "_" + cpu
+            suffix = "" if cpu == _DEFAULT_CPU[os] or (os == "ios" and sim and cpu == "x64") else "_" + cpu
             names.append("{}_{}{}{}{}".format(os, mode, "_sim" if sim else "", unopt, suffix))
     return names
 
@@ -190,3 +190,57 @@ def link_into(repository_ctx, source, destination):
         repository_ctx.watch_tree(source)
     else:
         repository_ctx.watch(source)
+
+def link_files_into(repository_ctx, source, destination):
+    """Links a directory's files into a real directory of the repository.
+
+    For a directory a program is handed with a trailing slash (a platform
+    kernel's `--sdk-root`). On Windows a symlinked directory is a junction, and
+    Dart's `FileSystemEntity.type` finds nothing at a junction's path with a
+    trailing slash, so the front end reports its SDK root missing.
+
+    Args:
+        repository_ctx: The repository context.
+        source: A directory in the checkout.
+        destination: The directory in the repository.
+    """
+    pending = [(source, destination)]
+    for _ in range(64):
+        if not pending:
+            break
+        directory, target = pending.pop()
+        for entry in directory.readdir():
+            if entry.is_dir:
+                pending.append((entry, target + "/" + entry.basename))
+            else:
+                repository_ctx.symlink(entry, target + "/" + entry.basename)
+    repository_ctx.watch_tree(source)
+
+# The machines whose out dirs can be read. `prebuilt` is the directory name
+# `flutter/prebuilts` uses for the machine's Dart SDK; `os_prefix` is the
+# machine's OS in an out dir name (`mac_release_arm64`).
+_MACHINES = {
+    ("mac", "arm64"): struct(key = "darwin-arm64", os = "macos", arch = "arm64", exe = "", prebuilt = "macos-arm64", os_prefix = "mac"),
+    ("mac", "x64"): struct(key = "darwin-x64", os = "macos", arch = "x64", exe = "", prebuilt = "macos-x64", os_prefix = "mac"),
+    ("linux", "arm64"): struct(key = "linux-arm64", os = "linux", arch = "arm64", exe = "", prebuilt = "linux-arm64", os_prefix = "linux"),
+    ("linux", "x64"): struct(key = "linux-x64", os = "linux", arch = "x64", exe = "", prebuilt = "linux-x64", os_prefix = "linux"),
+    ("windows", "x64"): struct(key = "windows-x64", os = "windows", arch = "x64", exe = ".exe", prebuilt = "windows-x64", os_prefix = "win"),
+}
+
+def machine_of(repository_ctx):
+    """The machine that reads the out dirs, which is the host their `host_*` directories were built for.
+
+    Args:
+        repository_ctx: The repository context.
+
+    Returns:
+        `struct(key, os, arch, exe, prebuilt, os_prefix)`: the `HOST_PLATFORMS`
+        key, the OS (`macos`, `linux`, `windows`), the CPU (`arm64`, `x64`),
+        the executable suffix, the name of its directory under
+        `flutter/prebuilts`, and its OS's prefix in an out dir name. None for a
+        machine the out dirs are not read on.
+    """
+    name = repository_ctx.os.name.lower()
+    os = "mac" if name.startswith("mac") else ("windows" if name.startswith("windows") else ("linux" if name.startswith("linux") else ""))
+    arch = "arm64" if repository_ctx.os.arch in ["aarch64", "arm64"] else "x64"
+    return _MACHINES.get((os, arch))

@@ -45,6 +45,16 @@
 ///
 /// `--gen-snapshot` is required for `profile` and `release` and must be absent
 /// for `debug`.
+///
+/// A web SDK has no engine binary and no gen_snapshot, so `--mode=web` checks
+/// the kernel alone: the platform dills of the web SDK (each
+/// `--web-platform-dill=<path> --web-platform-dill-label=<label>`, repeated)
+/// against the Dart SDK's `--dart-platform-dill` and each other.
+///   dart sdk_check.dart --mode=web
+///       --web-platform-dill=<path> --web-platform-dill-label=<label> ...
+///       --dart-platform-dill=<path> --dart-platform-dill-label=<label>
+///       [--framework=<flutter_framework.json>]
+///       --record-in=<path> --record-out=<path>
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -345,19 +355,27 @@ class _Scan {
   String get detail => _describeHashes(hashes);
 }
 
+/// The ways two kernel headers differ, or none when they are of one Dart.
+List<String> _kernelDifferences(KernelHeader a, KernelHeader b) => [
+  if (a.format != b.format) 'kernel format ${a.format} vs ${b.format}',
+  if (a.sdkHash != b.sdkHash &&
+      a.sdkHash != disabledSdkHash &&
+      b.sdkHash != disabledSdkHash)
+    'SDK hash ${a.sdkHash} vs ${b.sdkHash}',
+];
+
+/// The header two matching headers share: the real SDK hash when one has it.
+KernelHeader _agreedKernel(KernelHeader a, KernelHeader b) => KernelHeader(
+  a.format,
+  a.sdkHash != disabledSdkHash ? a.sdkHash : b.sdkHash,
+);
+
 /// Checks the kernel headers of the two platform dills and returns the header
 /// to record.
 KernelHeader _checkKernel(String mode, Artifact engineDill, Artifact dartDill) {
   final engine = readKernelHeader(engineDill);
   final dart = readKernelHeader(dartDill);
-  final differences = <String>[
-    if (engine.format != dart.format)
-      'kernel format ${engine.format} vs ${dart.format}',
-    if (engine.sdkHash != dart.sdkHash &&
-        engine.sdkHash != disabledSdkHash &&
-        dart.sdkHash != disabledSdkHash)
-      'SDK hash ${engine.sdkHash} vs ${dart.sdkHash}',
-  ];
+  final differences = _kernelDifferences(engine, dart);
   if (differences.isNotEmpty) {
     throw SdkCheckFailure(
       'The Flutter SDK does not match itself for $mode:\n'
@@ -369,10 +387,36 @@ KernelHeader _checkKernel(String mode, Artifact engineDill, Artifact dartDill) {
       'of one checkout.',
     );
   }
-  final sdkHash = engine.sdkHash != disabledSdkHash
-      ? engine.sdkHash
-      : dart.sdkHash;
-  return KernelHeader(engine.format, sdkHash);
+  return _agreedKernel(engine, dart);
+}
+
+/// Checks that the web SDK's platform dills (what dart2js, dart2wasm and DDC
+/// compile against) are of the kernel format and the Dart revision of the Dart
+/// SDK whose compilers read them, and of each other, and returns the header to
+/// record. The web has no engine binary or gen_snapshot: the platform dills are
+/// the one thing the web SDK and the compilers must agree on.
+KernelHeader _checkWebKernel(
+  List<Artifact> webDills,
+  Artifact dartDill,
+) {
+  final dart = readKernelHeader(dartDill);
+  var agreed = dart;
+  for (final dill in webDills) {
+    final header = readKernelHeader(dill);
+    final differences = _kernelDifferences(header, agreed);
+    if (differences.isNotEmpty) {
+      throw SdkCheckFailure(
+        'The Flutter SDK does not match itself for web:\n'
+        '${_entry('web SDK', dill, header.toString())}\n'
+        '${_entry('Dart SDK', dartDill, dart.toString())}\n'
+        'The web SDK\'s platform dills and the Dart SDK come from different '
+        'Dart revisions (${differences.join('; ')}), so the compilers would '
+        'reject them. Use the web SDK and the Dart SDK of one checkout.',
+      );
+    }
+    agreed = _agreedKernel(header, agreed);
+  }
+  return agreed;
 }
 
 /// The one value [a] and [b] share, or a [SdkCheckFailure] built by
@@ -482,6 +526,23 @@ Map<String, Object?> check({
   });
 }
 
+/// The check of a web SDK: [record] plus `kernel` (`format`, `sdk_hash`). It
+/// has no `snapshot_hash`, as no web build links an engine binary.
+Map<String, Object?> checkWeb({
+  required List<Artifact> webPlatformDills,
+  required Artifact dartPlatformDill,
+  required Map<String, Object?> record,
+}) {
+  if (webPlatformDills.isEmpty) {
+    throw SdkCheckFailure('A web check needs the web SDK\'s platform dills.');
+  }
+  final kernel = _checkWebKernel(webPlatformDills, dartPlatformDill);
+  return _sorted({
+    ...record,
+    'kernel': {'format': kernel.format, 'sdk_hash': kernel.sdkHash},
+  });
+}
+
 SdkCheckFailure _runtimeMismatch(String mode, _Scan engine, _Scan runtime) =>
     SdkCheckFailure(
       'The Dart SDK does not match the Flutter engine for $mode:\n'
@@ -549,21 +610,47 @@ const _flagNames = {
   'dart-platform-dill-label',
   'dartaotruntime',
   'dartaotruntime-label',
+  'web-platform-dill',
+  'web-platform-dill-label',
   'framework',
   'record-in',
   'record-out',
 };
 
+/// The flags a web check repeats, one pair for each platform dill. Their
+/// values are kept as `<name>#<index>`.
+const _repeatedFlags = {'web-platform-dill', 'web-platform-dill-label'};
+
 Map<String, String> _parseFlags(List<String> args) {
   final flags = <String, String>{};
+  final repeats = <String, int>{};
   for (final arg in args) {
     final match = RegExp(r'^--([a-z-]+)=(.*)$', dotAll: true).firstMatch(arg);
     if (match == null || !_flagNames.contains(match.group(1))) {
       throw SdkCheckFailure('Unknown argument: $arg');
     }
-    flags[match.group(1)!] = match.group(2)!;
+    final name = match.group(1)!;
+    if (_repeatedFlags.contains(name)) {
+      final index = repeats[name] = (repeats[name] ?? -1) + 1;
+      flags['$name#$index'] = match.group(2)!;
+    } else {
+      flags[name] = match.group(2)!;
+    }
   }
   return flags;
+}
+
+/// The web platform dills of a web check, each with its label.
+List<Artifact> _webDills(Map<String, String> flags) {
+  final dills = <Artifact>[];
+  for (var i = 0; flags.containsKey('web-platform-dill#$i'); i++) {
+    final label = flags['web-platform-dill-label#$i'];
+    if (label == null || label.isEmpty) {
+      throw SdkCheckFailure('Missing --web-platform-dill-label for dill $i.');
+    }
+    dills.add(Artifact(label, flags['web-platform-dill#$i']!));
+  }
+  return dills;
 }
 
 /// Runs the tool over [args] (the command line), prints failures to [err] and
@@ -601,6 +688,16 @@ int run(List<String> args, {StringSink? err}) {
     final frameworkPath = flags['framework'];
     if (frameworkPath != null) {
       recordIn['framework'] = frameworkRecord(frameworkPath);
+    }
+
+    if (need('mode') == 'web') {
+      final record = checkWeb(
+        webPlatformDills: _webDills(flags),
+        dartPlatformDill: artifact('dart-platform-dill'),
+        record: recordIn,
+      );
+      File(need('record-out')).writeAsStringSync(encodeRecord(record));
+      return 0;
     }
 
     final record = check(

@@ -21,6 +21,7 @@ bazel_dep(name = "rules_android", version = "0.8.0")
 bazel_dep(name = "rules_android_ndk", version = "0.1.5")
 bazel_dep(name = "rules_kotlin", version = "2.4.20")
 bazel_dep(name = "rules_java", version = "9.9.0")
+bazel_dep(name = "llvm", version = "0.8.26")
 
 local_path_override(
     module_name = "rules_flutter",
@@ -162,6 +163,15 @@ use_repo(
     "flutter_desktop_engine_darwin-x64_debug",
     "flutter_desktop_engine_darwin-x64_profile",
     "flutter_desktop_engine_darwin-x64_release",
+    "flutter_desktop_engine_linux-arm64_debug",
+    "flutter_desktop_engine_linux-arm64_profile",
+    "flutter_desktop_engine_linux-arm64_release",
+    "flutter_desktop_engine_linux-x64_debug",
+    "flutter_desktop_engine_linux-x64_profile",
+    "flutter_desktop_engine_linux-x64_release",
+    "flutter_desktop_engine_windows-x64_debug",
+    "flutter_desktop_engine_windows-x64_profile",
+    "flutter_desktop_engine_windows-x64_release",
     "flutter_dev_root_src",
     "flutter_ios_engine",
     "flutter_ios_engine_profile",
@@ -171,7 +181,9 @@ use_repo(
     "flutter_stock_android_engine_x64",
     "flutter_stock_engine",
     "flutter_stock_ios_engine",
+    "flutter_stock_web_sdk",
     "flutter_toolchains",
+    "flutter_web_sdk",
 )
 
 flutter_pub = use_extension("@rules_flutter//flutter/pub:extensions.bzl", "pub")
@@ -182,6 +194,25 @@ flutter_pub.from_lock(
 use_repo(flutter_pub, "deps")
 
 register_toolchains("@flutter_toolchains//:all")
+
+# The Linux bundle is cross-compiled from the Mac, as in e2e/cross_compile_example.
+register_toolchains(
+    "@llvm//toolchain:macos_aarch64_to_linux_x86_64",
+    "@llvm//toolchain:macos_x86_64_to_linux_x86_64",
+    "@llvm//toolchain:linux_aarch64_to_linux_x86_64",
+    "@llvm//toolchain:linux_x86_64_to_linux_x86_64",
+)
+
+llvm_tc = use_extension("@llvm//extensions:toolchain.bzl", "toolchain", dev_dependency = True)
+llvm_tc.exec(
+    arch = "aarch64",
+    os = "linux",
+)
+llvm_tc.target(
+    arch = "aarch64",
+    os = "linux",
+)
+use_repo(llvm_tc, "llvm_toolchains")
 
 # Override rules_android's Go SDK (0.7.1 pins 1.22.4, but its deps need >= 1.23).
 bazel_dep(name = "rules_go", version = "0.64.2")
@@ -365,6 +396,7 @@ fake_checkout(name = "fake_checkout")
 fake_checkout(
     name = "fake_checkout_mismatched",
     gen_snapshot_flutter_version = "3.47.5",
+    web_kernel_format_mismatch = True,
 )
 
 checkout_framework = use_repo_rule("@rules_flutter//flutter:local_sdk.bzl", "flutter_checkout_framework")

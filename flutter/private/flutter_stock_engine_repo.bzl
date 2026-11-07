@@ -21,11 +21,12 @@ load("//flutter/private:artifact_urls.bzl", "engine_artifact_url")
 load("//flutter/private:constants.bzl", "ANDROID_ABI_FOR_ARCH")
 load("//flutter/private:engine_helpers.bzl", "dart_binary_name", "dartaotruntime_binary_name", "gen_snapshot_binary_name")
 load("//flutter/private:engine_labels.bzl", "ENGINE_MODES", "android_arches", "android_engine_cpu", "desktop_engine_dir", "native_target")
+load("//flutter/private:out_dir_web.bzl", "WEB_TREE_FILES")
 load("//flutter/private:pinned.bzl", "pinned")
 load("//flutter/private:toolchains_repo.bzl", "CROSS_COMPILATION_PAIRS", "DESKTOP_ENGINE_PLATFORMS", "HOST_PLATFORMS")
 load("//flutter/private:versions.bzl", "FLUTTER_VERSIONS")
 
-_LOAD = 'load("@rules_flutter//flutter:engine.bzl", "flutter_android_engine_slice", "flutter_gen_snapshot", "flutter_host_tools", "flutter_ios_engine_slice", "flutter_linux_engine_slice", "flutter_macos_engine_slice", "flutter_platform_kernel", "flutter_windows_engine_slice")\n\n'
+_LOAD = 'load("@rules_flutter//flutter:engine.bzl", "flutter_android_engine_slice", "flutter_gen_snapshot", "flutter_host_tools", "flutter_ios_engine_slice", "flutter_linux_engine_slice", "flutter_macos_engine_slice", "flutter_platform_kernel", "flutter_web_sdk", "flutter_windows_engine_slice")\n\n'
 
 _ENGINE_RULES = {
     "macos": "flutter_macos_engine_slice",
@@ -187,6 +188,35 @@ def _gen_snapshot(host, mode, cpu, label, provenance):
 )
 """.format(host = host, label = label, cpu = cpu, mode = mode, provenance = _dict(provenance))
 
+def _web_sdk(name, provenance):
+    """The web SDK slice, over the release's web SDK repository and its Dart SDK for the files `libraries.json` includes."""
+    repo = "@{}_stock_web_sdk//:".format(name)
+    text = """alias(
+    name = "files",
+    actual = "{repo}web_sdk",
+    visibility = ["//visibility:public"],
+)
+""".format(repo = repo)
+    for target, path in sorted(WEB_TREE_FILES.items()):
+        text += """
+alias(
+    name = "{target}",
+    actual = "{repo}{path}",
+    visibility = ["//visibility:public"],
+)
+""".format(target = target, repo = repo, path = path)
+    return text + """
+flutter_web_sdk(
+    name = "sdk",
+    files = ":files",
+    dart2js_platform_dill = ":dart2js_platform.dill",
+    dart2wasm_platform_dill = ":dart2wasm_platform.dill",
+    ddc_outline_dill = ":ddc_outline.dill",
+    provenance = {provenance},
+    visibility = ["//visibility:public"],
+)
+""".format(provenance = _dict(provenance))
+
 def stock_engine_packages(name, provenance):
     """The packages of the stock engine source: each BUILD file's slice targets.
 
@@ -253,6 +283,8 @@ def stock_engine_packages(name, provenance):
                     repo = "{}_cross_{}_{}".format(name, host, target) + ("_profile" if mode == "profile" else "")
                     label = "@{}//:{}".format(repo, gen_snapshot_binary_name(host))
                 add("{}/{}".format(target, mode), _gen_snapshot(host, mode, {"arm": "arm", "arm64": "arm64"}.get(cpu, "x86_64"), label, provenance))
+
+    add("web", _web_sdk(name, provenance))
 
     # The mobile engines. Only the iOS engine of the device and the simulator
     # is one repository for all hosts.

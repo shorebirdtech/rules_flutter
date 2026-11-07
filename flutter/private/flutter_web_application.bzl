@@ -34,7 +34,7 @@ from, and `deps` is split the same way.
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_dart//dart:providers.bzl", "DartInfo")
 load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "dart_analyzable_info_with_packages", "dart_package_info", "derive_lib_root", "generate_dev_package_config", "import_check_validation")
-load("//flutter:providers.bzl", "FlutterInfo", "FlutterNativeLibraryInfo")
+load("//flutter:providers.bzl", "FlutterInfo", "FlutterNativeLibraryInfo", "FlutterSdkRecordInfo")
 load(
     "//flutter/private:app_entrypoint.bzl",
     "APP_SCHEME",
@@ -83,7 +83,6 @@ load(
 load("//flutter/private:path_mapping.bzl", "file_ref", "json_config_args")
 load("//flutter/private:plugin_registrant.bzl", "generate_dart_plugin_registrant")
 load("//flutter/private:sdk_defines.bzl", "program_version_dart_defines")
-load("//flutter/private:sdk_origin.bzl", "require_release_engine")
 load(
     "//flutter/private:validation.bzl",
     "escape_html",
@@ -383,7 +382,11 @@ def _flutter_web_bundle_impl(ctx):
     # dev tool at: it runs them on this machine.
     flutter_sdk_info = ctx.toolchains["@rules_flutter//flutter:toolchain_type"].flutter_sdk_info
     tools = portable_tools(ctx)
-    require_release_engine(ctx.label, flutter_sdk_info.sdk, flutter_sdk_info.host_tools, "web")
+    sdk_record = ctx.attr._sdk_record[FlutterSdkRecordInfo]
+
+    # A web app of an engine that is not the release's loads its renderer from the web SDK it was
+    # checked against: the CDN has none for it.
+    use_local_canvaskit = ctx.attr.use_local_canvaskit or sdk_record.record != None
 
     # Merged once for all compile actions below (dart2wasm, dart2js, icon
     # tree-shake kernel) and the dev-config emission: the user's defines and
@@ -832,7 +835,7 @@ def _flutter_web_bundle_impl(ctx):
     build_config = _build_config_js(
         flutter_sdk_info.engine_revision,
         builds,
-        ctx.attr.use_local_canvaskit,
+        use_local_canvaskit,
     )
 
     # Always supplied, in both states: a user bootstrap copied from upstream
@@ -979,6 +982,12 @@ def _flutter_web_bundle_impl(ctx):
 
     # Copy flutter.js from the web SDK.
     engine_inputs = []
+
+    # An app of a custom SDK keeps the record of the checked pieces it was
+    # built from, beside its assets.
+    if sdk_record.record:
+        _reserve(reserved, copies, refs, sdk_record.record, "assets/flutter_sdk.json")
+        engine_inputs.append(sdk_record.record)
     if flutter_js_file:
         _reserve(reserved, copies, refs, flutter_js_file, "flutter.js")
         engine_inputs.append(flutter_js_file)
@@ -998,7 +1007,7 @@ def _flutter_web_bundle_impl(ctx):
     # the renderers never fetch them, so they stay out of the deployable and
     # ride the `symbols` output group, linked into this target's own output
     # tree where a crash symbolizer can find them.
-    ships_renderer = ctx.attr.use_local_canvaskit or is_debug
+    ships_renderer = use_local_canvaskit or is_debug
     renderers = [b["renderer"] for b in builds]
     if is_debug:
         renderers.append("canvaskit")
@@ -1789,6 +1798,10 @@ build knows which served file is a native module.
         ),
         "_web_sdk": attr.label(
             default = Label("@flutter_web_sdk//:web_sdk"),
+        ),
+        "_sdk_record": attr.label(
+            default = Label("//flutter/private:web_sdk_record"),
+            providers = [FlutterSdkRecordInfo],
         ),
         "_bundle_tool": attr.label(
             default = Label("//flutter/private/tools:bundle_app.dart"),

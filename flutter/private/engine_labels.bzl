@@ -28,6 +28,21 @@ _NATIVE_TARGET = {
     "windows-x64": "windows-x64",
 }
 
+# The targets of the web slice's package (`//web`) besides the `flutter_web_sdk`
+# slice `sdk`: the files a web application names, each an alias or a link into
+# the web SDK's tree. `@flutter_web_sdk` follows the selected SDK with an alias
+# to each.
+WEB_SLICE_FILES = {
+    "files": "The whole web SDK tree: the `flutter_web_sdk` directory and the Dart SDK's `lib` it includes.",
+    "dart2wasm_platform.dill": "`kernel/dart2wasm_platform.dill`.",
+    "dart2js_platform.dill": "`kernel/dart2js_platform.dill`.",
+    "ddc_outline.dill": "`kernel/ddc_outline.dill`.",
+    "libraries.json": "The web SDK's `libraries.json`.",
+    "ddc_dart_sdk.js": "`kernel/ddcLibraryBundle-canvaskit/dart_sdk.js`.",
+    "ddc_module_loader.js": "The Dart SDK's `lib/dev_compiler/ddc/ddc_module_loader.js`.",
+    "dart_stack_trace_mapper.js": "The Dart SDK's `lib/dev_compiler/web/dart_stack_trace_mapper.js`.",
+}
+
 def host_tools_label(engine, host):
     """The label of the host tools slice.
 
@@ -195,6 +210,7 @@ def contract_slices():
                 packages = slices.setdefault("{}/{}".format(engine_dir(target), mode), [])
                 if "engine" not in packages:
                     packages.append("engine")
+    slices["web"] = ["sdk"] + sorted(WEB_SLICE_FILES.keys())
     for host in HOST_PLATFORMS:
         target = native_target(host)
         for mode in ["profile", "release"]:

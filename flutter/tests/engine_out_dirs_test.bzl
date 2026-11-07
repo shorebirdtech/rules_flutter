@@ -139,10 +139,47 @@ def _mobile_slots_test_impl(ctx):
     )
     return unittest.end(env)
 
+def _desktop_slots_test_impl(ctx):
+    env = unittest.begin(ctx)
+
+    # Linux and Windows out dirs: the CPU is named when it is not x64.
+    asserts.equals(env, ("linux", "debug", False, False, "x64"), _shape("linux_debug"))
+    asserts.equals(env, ("linux", "release", False, True, "arm64"), _shape("linux_release_unopt_arm64"))
+    asserts.equals(env, ("win", "profile", False, False, "x64"), _shape("win_profile"))
+
+    # A Linux engine is a `linux_*` out dir for its CPU, or the host build on
+    # a Linux machine of that CPU; a Mac's `host_*` is not a Linux build.
+    linux = _candidates("linux_debug", "linux_debug_arm64", "linux_release_arm64", "host_debug_arm64")
+    asserts.equals(env, "linux_debug", select_out_dir(linux, ["linux"], "debug", "x64", []).name)
+    asserts.equals(env, "linux_debug_arm64", select_out_dir(linux, ["linux"], "debug", "arm64", []).name)
+    asserts.equals(env, "host_debug_arm64", select_out_dir(_candidates("host_debug_arm64"), ["linux", "host"], "debug", "arm64", []).name)
+
+    # On a Linux machine of that CPU both are Linux builds: the user chooses.
+    both = select_out_dir(linux, ["linux", "host"], "debug", "arm64", [])
+    asserts.equals(env, None, both.name)
+    asserts.true(env, both.error.startswith("2 out dirs fit debug on arm64: "))
+
+    # A mode with no out dir is not served by another mode's; the message
+    # names the x64 out dirs without a CPU, as `tools/gn` does.
+    missing = select_out_dir(linux, ["linux"], "release", "x64", [])
+    asserts.equals(env, None, missing.name)
+    asserts.equals(env, "no out dir linux_release, linux_release_unopt found for release on x64", missing.error)
+
+    # The web SDK is the one `wasm_release` out dir.
+    web = _candidates("wasm_release", "host_debug_arm64")
+    asserts.equals(env, "wasm_release", select_out_dir(web, ["wasm"], "release", "wasm", []).name)
+    asserts.equals(
+        env,
+        "no out dir wasm_release, wasm_release_unopt found for release on wasm",
+        select_out_dir(_candidates("host_debug"), ["wasm"], "release", "wasm", []).error,
+    )
+    return unittest.end(env)
+
 _names_test = unittest.make(_names_test_impl)
 _args_gn_test = unittest.make(_args_gn_test_impl)
 _slots_test = unittest.make(_slots_test_impl)
 _mobile_slots_test = unittest.make(_mobile_slots_test_impl)
+_desktop_slots_test = unittest.make(_desktop_slots_test_impl)
 
 def engine_out_dirs_test_suite(name):
-    unittest.suite(name, _names_test, _args_gn_test, _slots_test, _mobile_slots_test)
+    unittest.suite(name, _names_test, _args_gn_test, _slots_test, _mobile_slots_test, _desktop_slots_test)

@@ -607,4 +607,90 @@ void main() {
       expect(message, contains('not a zip archive'));
     });
   });
+
+  group('web', () {
+    Map<String, Object?> webOf({
+      List<Artifact>? webDills,
+      Artifact? dartDill,
+      Map<String, Object?> record = const {},
+    }) => checkWeb(
+      webPlatformDills:
+          webDills ??
+          [
+            dill('dart2js.dill', sdkHash: 'abcdef0123'),
+            dill('dart2wasm.dill', sdkHash: 'abcdef0123'),
+          ],
+      dartPlatformDill: dartDill ?? dill('dart.dill'),
+      record: record,
+    );
+
+    test(
+      'platform dills of the Dart SDK pass and the real hash is recorded',
+      () {
+        final record = webOf(record: {'sdk': 'local'});
+        expect(record['kernel'], {'format': 138, 'sdk_hash': 'abcdef0123'});
+        expect(record.containsKey('snapshot_hash'), isFalse);
+        expect(record['sdk'], 'local');
+      },
+    );
+
+    test('a web dill of another kernel format fails, naming both', () {
+      final message = failureOf(
+        () => webOf(webDills: [dill('dart2js.dill', format: 140)]),
+      );
+      expect(message, contains('does not match itself for web'));
+      expect(message, contains('//label:dart2js.dill'));
+      expect(message, contains('//label:dart.dill'));
+      expect(message, contains('kernel format 140 vs 138'));
+    });
+
+    test('a web dill of another Dart revision fails', () {
+      final message = failureOf(
+        () => webOf(
+          webDills: [dill('dart2js.dill', sdkHash: 'abcdef0123')],
+          dartDill: dill('dart.dill', sdkHash: '9999999999'),
+        ),
+      );
+      expect(message, contains('SDK hash abcdef0123 vs 9999999999'));
+    });
+
+    test(
+      'web dills of different Dart revisions fail even beside a disabled hash',
+      () {
+        final message = failureOf(
+          () => webOf(
+            webDills: [
+              dill('dart2js.dill', sdkHash: 'abcdef0123'),
+              dill('dart2wasm.dill', sdkHash: '0123456789'),
+            ],
+          ),
+        );
+        expect(message, contains('//label:dart2wasm.dill'));
+        expect(message, contains('SDK hash 0123456789 vs abcdef0123'));
+      },
+    );
+
+    test('the command line takes any number of dills', () {
+      final dartDill = dill('d.dill');
+      final first = dill('a.dill', sdkHash: 'abcdef0123');
+      final second = dill('b.dill', sdkHash: 'abcdef0123');
+      final recordIn = File('${dir.path}/in.json')
+        ..writeAsStringSync('{"sdk": "local"}');
+      final out = '${dir.path}/out.json';
+      final code = run([
+        '--mode=web',
+        '--web-platform-dill=${first.path}',
+        '--web-platform-dill-label=${first.label}',
+        '--web-platform-dill=${second.path}',
+        '--web-platform-dill-label=${second.label}',
+        '--dart-platform-dill=${dartDill.path}',
+        '--dart-platform-dill-label=${dartDill.label}',
+        '--record-in=${recordIn.path}',
+        '--record-out=$out',
+      ]);
+      expect(code, 0);
+      final record = jsonDecode(File(out).readAsStringSync()) as Map;
+      expect(record['kernel'], {'format': 138, 'sdk_hash': 'abcdef0123'});
+    });
+  });
 }

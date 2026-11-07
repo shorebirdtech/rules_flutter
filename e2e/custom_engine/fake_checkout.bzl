@@ -11,9 +11,15 @@ The iOS and Android out dirs are laid out the same way: `ios_debug_sim_arm64`
 and the gen_snapshot of the AOT modes in `universal/`, where a Mac build puts the
 one that runs on both Mac CPUs).
 
+The Linux and Windows out dirs (`linux_<mode>[_arm64]`, `win_<mode>`) are laid out
+the same way, as engines built on their own OS and read here for a cross build,
+and `wasm_release` holds the web SDK as `flutter_web_sdk/`.
+
 With `gen_snapshot_flutter_version` set, the release gen_snapshot is that of
-another Flutter release (another Dart): the mismatch the check exists to refuse.
-Every platform's AOT gen_snapshot is replaced by it.
+another Flutter release (another Dart), with its VM snapshot hash changed: the mismatch the check exists to refuse.
+Every platform's AOT gen_snapshot is replaced by it. With
+`web_kernel_format_mismatch` the web SDK's dart2js platform dill is of another
+kernel format, the web's version of the same mismatch.
 """
 
 # buildifier: disable=bzl-visibility
@@ -117,6 +123,12 @@ def _fake_checkout_impl(rctx):
             output = "other_dart",
         )
         release_gen = rctx.path("other_dart/gen_snapshot")
+
+        # The patch releases of one Dart share a VM snapshot hash, so another
+        # release's gen_snapshot would pass the check that exists to refuse
+        # another VM: write another hash into it, as another VM's build would.
+        rctx.execute(["chmod", "u+w", release_gen])
+        rctx.execute(["perl", "-pi", "-e", "s/0451907c2eaa8467/9f3c1e0d2eaa8467/g", release_gen])
     profile_gen = path("@flutter_darwin-arm64_profile//:host-tools/gen_snapshot")
 
     # host_debug_arm64: the host tools, the debug platform kernel and the debug engine.
@@ -145,8 +157,75 @@ def _fake_checkout_impl(rctx):
         link(framework, out + "FlutterMacOS.xcframework/macos-arm64_x86_64/FlutterMacOS.framework")
 
     _mobile_out_dirs(rctx, path, link, meta.engine_revision, other_gen = rctx.path("other_dart/gen_snapshot") if other else None)
+    _desktop_out_dirs(rctx, path, link, meta.engine_revision)
+    _web_out_dir(rctx, path, link, meta.engine_revision, rctx.attr.web_kernel_format_mismatch)
 
     rctx.file("BUILD.bazel", 'exports_files(glob(["checkout/CHECKOUT"]))\n')
+
+def _desktop_out_dirs(rctx, path, link, revision):
+    """The Linux and Windows out dirs: the official engines, laid out as ninja leaves them.
+
+    A Mac cannot build either, so these stand for engines built on their own
+    OS and read here for a cross build: `linux_<mode>[_arm64]` and `win_<mode>`.
+    """
+    for arch, suffix in [("x64", ""), ("arm64", "_arm64")]:
+        for mode in ["debug", "profile", "release"]:
+            repo = "@flutter_desktop_engine_linux-{}_{}".format(arch, mode)
+            library = path(repo + "//:engine/libflutter_linux_gtk.so")
+            out = _OUT + "linux_{}{}/".format(mode, suffix)
+            rctx.file(out + "args.gn", _mobile_args_gn("linux", mode, arch, revision))
+            link(library, out + "libflutter_linux_gtk.so")
+            link(library.dirname.get_child("flutter_linux"), out + "flutter_linux")
+
+    for mode in ["debug", "profile", "release"]:
+        repo = "@flutter_desktop_engine_windows-x64_" + mode
+        engine = path(repo + "//:engine/flutter_windows.dll").dirname
+        out = _OUT + "win_{}/".format(mode)
+        rctx.file(out + "args.gn", _mobile_args_gn("win", mode, "x64", revision))
+        for name in [
+            "flutter_windows.dll",
+            "flutter_windows.dll.lib",
+            "flutter_export.h",
+            "flutter_windows.h",
+            "flutter_messenger.h",
+            "flutter_plugin_registrar.h",
+            "flutter_texture_registrar.h",
+        ]:
+            link(engine.get_child(name), out + name)
+        link(engine.dirname.get_child("cpp-client-wrapper").get_child("cpp_client_wrapper"), out + "cpp_client_wrapper")
+
+def _web_out_dir(rctx, path, link, revision, mismatched):
+    """`wasm_release`: the official web SDK as `flutter_web_sdk/`, where `tools/gn --web` builds it."""
+    out = _OUT + "wasm_release/"
+    rctx.file(out + "args.gn", "\n".join([
+        'target_os = "wasm"',
+        'target_cpu = "wasm"',
+        'flutter_runtime_mode = "release"',
+        'engine_version = "{}"'.format(revision),
+        'content_hash = "stock-artifacts"',
+        'dart_version = "stock-artifacts"',
+        "",
+    ]))
+    web_sdk = path("@flutter_stock_web_sdk//:web-sdk/libraries.json").dirname
+    if not mismatched:
+        link(web_sdk, out + "flutter_web_sdk")
+        return
+
+    # Another kernel format in the dart2js platform dill, as another Dart's
+    # build would write: the tree is the official one but for that file.
+    tree = out + "flutter_web_sdk/"
+    for entry in web_sdk.readdir():
+        if entry.basename != "kernel":
+            link(entry, tree + entry.basename)
+    for entry in web_sdk.get_child("kernel").readdir():
+        if entry.basename != "dart2js_platform.dill":
+            link(entry, tree + "kernel/" + entry.basename)
+    patched = rctx.path(tree + "kernel/dart2js_platform.dill")
+    rctx.execute(["cp", web_sdk.get_child("kernel").get_child("dart2js_platform.dill"), patched])
+    rctx.execute(["chmod", "u+w", patched])
+
+    # The kernel format is the four bytes after the magic: 138 -> 139.
+    rctx.execute(["sh", "-c", "printf '\\000\\000\\000\\213' | dd of=\"$1\" bs=1 seek=4 conv=notrunc 2>/dev/null", "sh", patched])
 
 def _mobile_out_dirs(rctx, path, link, revision, other_gen):
     """The iOS and Android out dirs: the official engines, laid out as ninja leaves them."""
@@ -199,6 +278,9 @@ fake_checkout = repository_rule(
     attrs = {
         "gen_snapshot_flutter_version": attr.string(
             doc = "A Flutter release whose gen_snapshot replaces the release's: another Dart.",
+        ),
+        "web_kernel_format_mismatch": attr.bool(
+            doc = "Write another kernel format into the web SDK's dart2js platform dill: a web SDK of another Dart.",
         ),
     },
 )

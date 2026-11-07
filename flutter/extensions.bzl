@@ -19,7 +19,7 @@ load("//flutter/private:constants.bzl", "ANDROID_ABI_FOR_ARCH")
 load("//flutter/private:engine_labels.bzl", "android_arches")
 load("//flutter/private:flutter_chrome_for_testing.bzl", "flutter_chrome_for_testing")
 load("//flutter/private:flutter_dev_root_repo.bzl", "flutter_dev_root_repo")
-load("//flutter/private:flutter_face_repo.bzl", "IOS_ENGINE_EXTRA", "IOS_ENGINE_TARGETS", "MACOS_ENGINE_EXTRA", "MACOS_ENGINE_TARGETS", "android_engine_face_extra", "flutter_face_repo")
+load("//flutter/private:flutter_face_repo.bzl", "IOS_ENGINE_EXTRA", "IOS_ENGINE_TARGETS", "MACOS_ENGINE_EXTRA", "MACOS_ENGINE_TARGETS", "WEB_SDK_TARGETS", "android_engine_face_extra", "flutter_face_repo")
 load("//flutter/private:flutter_linux_runtime_repo.bzl", "flutter_linux_runtime_repo")
 load("//flutter/private:flutter_material_fonts_repo.bzl", "flutter_material_fonts_repo")
 load("//flutter/private:flutter_sdk_toolchains_repo.bzl", "flutter_sdk_toolchains_repo")
@@ -229,6 +229,11 @@ def _toolchain_extension(module_ctx):
         sdks = engine_prefixes,
         targets = IOS_ENGINE_TARGETS,
         extra = IOS_ENGINE_EXTRA,
+    )
+    flutter_face_repo(
+        name = "flutter_web_sdk",
+        sdks = engine_prefixes,
+        targets = WEB_SDK_TARGETS,
     )
     for arch in android_arches():
         flutter_face_repo(

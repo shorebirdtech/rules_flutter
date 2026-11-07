@@ -20,6 +20,15 @@
 ///     dirs for each ABI it carries, and records the first ABI's.
 ///  7. The iOS device framework and the Android APK refuse a gen_snapshot of
 ///     another Dart, as the macOS app does.
+///  8. A Linux bundle, cross-built from the Mac, is built from the checkout's
+///     `linux_debug` out dir and records it; the Windows and Linux arm64
+///     engines are slices too, and a desktop gen_snapshot is the machine's own.
+///  9. The web app is built from the checkout's `wasm_release` web SDK with its
+///     renderer, records it (the kernel check, no snapshot hash), passes the
+///     web render check, and refuses a web SDK of another Dart.
+/// 10. A `flutter_test` runs under the checkout's SDK: its modules compile
+///     against the checkout's platform kernel and are told the checkout's
+///     framework and engine.
 @Tags(['e2e'])
 @Timeout(Duration(minutes: 30))
 library;
@@ -99,9 +108,19 @@ Set<Object?> _outDirs(Map<String, Object?> record) =>
     (record['engine'] as Map).values.map((e) => (e as Map)['out_dir']).toSet();
 
 /// What every record must be: the checkout's, with no path of this machine.
-void _expectRecordOfTheCheckout(Map<String, Object?> record) {
+///
+/// A web app links no engine binary or gen_snapshot, so its record has no
+/// snapshot hash: the web SDK's kernel is what it checks.
+void _expectRecordOfTheCheckout(
+  Map<String, Object?> record, {
+  bool hasSnapshotHash = true,
+}) {
   expect(record['sdk'], 'local');
-  expect(record['snapshot_hash'], _snapshotHash);
+  if (hasSnapshotHash) {
+    expect(record['snapshot_hash'], _snapshotHash);
+  } else {
+    expect(record, isNot(contains('snapshot_hash')));
+  }
   expect(record['framework'], containsPair('origin', 'local'));
   expect(
     jsonEncode(record),
@@ -114,6 +133,10 @@ void _expectRecordOfTheCheckout(Map<String, Object?> record) {
     reason: 'no absolute path in the record',
   );
 }
+
+/// The Linux platform a Mac cross-builds a (debug) bundle for.
+const _linuxPlatform =
+    '--platforms=@rules_flutter//flutter/platforms:linux_x64';
 
 /// The iOS device platform: the framework is built outside an application's
 /// own platform transition here, so the platform is named.
@@ -226,6 +249,143 @@ void main() {
     }
   });
 
+  test('the Linux bundle is built from the Linux out dir', () async {
+    final record = (await _record(
+      'local',
+      const [_linuxPlatform, '-c', 'dbg'],
+      target: '//:linux_app',
+    ))!;
+    _expectRecordOfTheCheckout(record);
+    expect(_outDirs(record), containsAll(['linux_debug', 'host_debug_arm64']));
+    expect(
+      (record['engine'] as Map).keys,
+      contains(endsWith('//linux-x64/debug:engine')),
+    );
+  });
+
+  test('the Windows and Linux arm64 engines are the checkout\'s too', () async {
+    final build = await _bazel([
+      'build',
+      '@local_engine//windows-x64/debug:engine',
+      '@local_engine//windows-x64/release:engine',
+      '@local_engine//linux-arm64/release:engine',
+    ]);
+    expect(build.exitCode, 0, reason: '${build.stderr}');
+  });
+
+  test('a desktop gen_snapshot is the machine\'s own, and says so', () async {
+    final build = await _bazel([
+      'build',
+      '@local_engine//linux-x64/release:gen_snapshot_linux-x64',
+    ]);
+    expect(build.exitCode, isNot(0));
+    expect(
+      '${build.stderr}',
+      contains(
+        'runs on a linux-x64 machine, and the engine out dirs are read on',
+      ),
+    );
+  });
+
+  test('the web app is built from the web SDK and records it', () async {
+    final record = (await _record('local', const [], target: '//:web_app'))!;
+    _expectRecordOfTheCheckout(record, hasSnapshotHash: false);
+    expect(_outDirs(record), containsAll(['wasm_release', 'host_debug_arm64']));
+
+    // The renderer comes from the web SDK, as the CDN has none for this engine.
+    final files = await _bazel([
+      'cquery',
+      '//:web_app',
+      '${_sdkFlag}local',
+      '--output=files',
+    ]);
+    final bundle = (files.stdout as String)
+        .split('\n')
+        .firstWhere((l) => l.endsWith('_web'));
+    final root = p.join(_workspace, bundle);
+    expect(
+      File(p.join(root, 'canvaskit', 'canvaskit.wasm')).existsSync(),
+      isTrue,
+    );
+    expect(
+      File(p.join(root, 'flutter_bootstrap.js')).readAsStringSync(),
+      contains('"useLocalCanvasKit":true'),
+    );
+  });
+
+  test('the web compilers read the checkout\'s platform kernels', () async {
+    final aquery = await _bazel([
+      'aquery',
+      'mnemonic("FlutterDart2JS|FlutterDart2Wasm", //:web_app)',
+      '${_sdkFlag}local',
+      '--output=text',
+    ]);
+    expect(aquery.exitCode, 0, reason: '${aquery.stderr}');
+    final dills = RegExp(
+      r'[\w+./-]*(?:dart2js|dart2wasm)_platform\.dill',
+    ).allMatches('${aquery.stdout}').map((m) => m.group(0)!).toSet();
+    expect(dills, isNotEmpty);
+    expect(dills, everyElement(contains('local_engine')));
+  });
+
+  test('the web render check passes against the checkout\'s web SDK', () async {
+    final test = await _bazel([
+      'test',
+      '//:web_render_test',
+      '${_sdkFlag}local',
+      '--test_output=errors',
+    ]);
+    expect(test.exitCode, 0, reason: '${test.stdout}${test.stderr}');
+  });
+
+  test('a flutter_test runs under the checkout\'s SDK', () async {
+    final test = await _bazel([
+      'test',
+      '//:widget_test',
+      '${_sdkFlag}local',
+      '--test_output=errors',
+    ]);
+    expect(test.exitCode, 0, reason: '${test.stdout}${test.stderr}');
+
+    // Its modules and its entrypoint compile against the checkout's platform
+    // kernel, not the release's.
+    final aquery = await _bazel([
+      'aquery',
+      'mnemonic("DartEntryKernel|DartModule", //:widget_test)',
+      '${_sdkFlag}local',
+      '--output=text',
+    ]);
+    final dills = RegExp(
+      r'[\w+./-]*platform_strong\.dill',
+    ).allMatches('${aquery.stdout}').map((m) => m.group(0)!).toSet();
+    expect(dills, isNotEmpty);
+    expect(dills, everyElement(contains('local_engine')));
+  });
+
+  test('a flutter_test is told which SDK it runs under', () async {
+    Future<String> defines(String sdk) async {
+      final aquery = await _bazel([
+        'aquery',
+        'mnemonic("DartEntryKernel", //:widget_test)',
+        '$_sdkFlag$sdk',
+        '--output=text',
+      ]);
+      expect(aquery.exitCode, 0, reason: '${aquery.stderr}');
+      return RegExp(
+        r'FLUTTER_[A-Z_]+=[^ ,\x27"]*',
+      ).allMatches('${aquery.stdout}').map((m) => m.group(0)).toSet().join(' ');
+    }
+
+    expect(
+      await defines('local'),
+      matches(RegExp(r'FLUTTER_FRAMEWORK_REVISION=( |$)')),
+    );
+    expect(
+      await defines('flutter'),
+      isNot(matches(RegExp(r'FLUTTER_FRAMEWORK_REVISION=( |$)'))),
+    );
+  });
+
   test('the program is told what the selected SDK is', () async {
     Future<String> kernelDefines(String sdk) async {
       final aquery = await _bazel([
@@ -265,10 +425,41 @@ void main() {
       await _record('flutter', const [], target: '//:android_app'),
       isNull,
     );
+    expect(await _record('flutter', const [], target: '//:web_app'), isNull);
+    expect(
+      await _record(
+        'flutter',
+        const [_linuxPlatform, '-c', 'dbg'],
+        target: '//:linux_app',
+      ),
+      isNull,
+    );
+  });
+
+  test('a web SDK of another Dart is refused, naming both', () async {
+    final build = await _bazel([
+      'build',
+      '//:web_app',
+      '${_sdkFlag}mismatched',
+      '--keep_going',
+    ]);
+    expect(build.exitCode, isNot(0));
+    final err = '${build.stderr}';
+    expect(err, contains('does not match itself for web'));
+    expect(err, contains('dart2js_platform.dill'));
+    expect(err, contains('kernel format 139'));
+    expect(err, contains('kernel format 138'));
   });
 
   test('a gen_snapshot of another Dart is refused', () async {
-    final build = await _bazel(['build', '//:app', '${_sdkFlag}mismatched']);
+    // The check and the AOT compile both fail: keep going, so the check's
+    // message is not lost to whichever fails first.
+    final build = await _bazel([
+      'build',
+      '//:app',
+      '${_sdkFlag}mismatched',
+      '--keep_going',
+    ]);
     expect(build.exitCode, isNot(0));
     final err = '${build.stderr}';
     expect(err, contains('does not match itself for release'));
@@ -287,6 +478,7 @@ void main() {
           'build',
           target[0],
           '${_sdkFlag}mismatched',
+          '--keep_going',
         ]);
         expect(build.exitCode, isNot(0));
         final err = '${build.stderr}';

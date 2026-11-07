@@ -39,6 +39,26 @@ def check_ios_engine(label, sdk_record, arch, is_device):
         arch,
     ))
 
+def check_desktop_engine(label, sdk_record, arch):
+    """Fails when a Linux or Windows engine was not built for the CPU of the app.
+
+    Args:
+        label: The target being built.
+        sdk_record: The `FlutterSdkRecordInfo` of the SDK.
+        arch: The CPU of the build (`arm64`, `x64`).
+    """
+    cpu = "arm64" if arch == "arm64" else "x86_64"
+    if sdk_record.engine_cpus and cpu not in sdk_record.engine_cpus:
+        fail(("%s: the engine %s contains %s, and this build is for %s. " +
+              "Build the engine for %s, or build for %s.") % (
+            label,
+            sdk_record.engine_label,
+            ", ".join(sdk_record.engine_cpus),
+            cpu,
+            cpu,
+            ", ".join(sdk_record.engine_cpus),
+        ))
+
 def check_android_engine(label, sdk_record, abi):
     """Fails when the Android engine was not built for the CPU of the app's ABI.
 
