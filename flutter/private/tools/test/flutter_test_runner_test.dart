@@ -10,6 +10,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:kernel_list/kernel_list.dart';
 import 'package:runfiles/runfiles.dart';
 import 'package:test/test.dart';
 
@@ -413,6 +414,117 @@ void main() {
       expect(
         runner.parseRunfilesManifest(['a/b /x/y', 'c /z w', 'bad']),
         {'a/b': '/x/y', 'c': '/z w'},
+      );
+    });
+  });
+
+  group('the program flutter_tester runs', () {
+    late Directory tmp;
+    late Runfiles r;
+    setUp(() {
+      tmp = Directory.systemTemp.createTempSync('runner_program');
+      r = Runfiles.fromState(directory: tmp.path, manifest: null);
+    });
+    tearDown(() => tmp.deleteSync(recursive: true));
+
+    File write(String name, String content) => File('${tmp.path}/$name')
+      ..createSync(recursive: true)
+      ..writeAsStringSync(content);
+
+    test('is the kernel itself when it is not a list', () {
+      write('t/test.dill', 'KERNEL');
+
+      final program = runner.joinProgram(r, 't/test.dill', isList: false);
+
+      expect(File(program.path).readAsStringSync(), 'KERNEL');
+      program.close();
+      expect(File('${tmp.path}/t/test.dill').existsSync(), isTrue);
+    });
+
+    test('joins the kernels of a list, in order', () {
+      write('t/entry.dill', 'ENTRY|');
+      write('m/a.dill', 'A|');
+      write('m/b.dill', 'B');
+      write('t/test.dill', '#@dill\nentry.dill\n../m/a.dill\n../m/b.dill\n');
+
+      final program = runner.joinProgram(
+        r,
+        't/test.dill',
+        isList: true,
+        temporaryDirectory: tmp.path,
+      );
+
+      expect(File(program.path).readAsStringSync(), 'ENTRY|A|B');
+      program.close();
+    });
+
+    test('a list naming a kernel that is not there fails, naming the flag '
+        'that turns lists off', () {
+      write('t/test.dill', '#@dill\nentry.dill\n');
+
+      expect(
+        () => runner.joinProgram(r, 't/test.dill', isList: true),
+        throwsA(
+          isA<KernelListException>().having(
+            (e) => runner.joinFailure(e),
+            'message',
+            allOf(
+              contains('flutter_test runner: cannot join the test'),
+              contains('--@rules_dart//dart:kernel_lists=false'),
+              contains('entry.dill'),
+            ),
+          ),
+        ),
+      );
+    });
+  });
+
+  group('waiting for flutter_tester to connect', () {
+    const bound = Duration(milliseconds: 50);
+
+    test(
+      'times out when it neither connects nor exits, and says how long',
+      () async {
+        final outcome = await runner.awaitDialBack(
+          connected: Completer<HttpRequest>().future,
+          exited: Completer<int>().future,
+          bound: bound,
+        );
+
+        expect(outcome, isA<runner.DialBackTimedOut>());
+        expect(
+          runner.dialBackFailure(outcome, bound),
+          allOf(
+            contains('did not connect'),
+            contains('50 ms'),
+            contains('killing'),
+          ),
+        );
+      },
+    );
+
+    test('reports its exit code when it exits first', () async {
+      final outcome = await runner.awaitDialBack(
+        connected: Completer<HttpRequest>().future,
+        exited: Future.value(7),
+        bound: bound,
+      );
+
+      expect(outcome, isA<runner.TesterExited>());
+      expect(
+        runner.dialBackFailure(outcome, bound),
+        contains('exited with code 7'),
+      );
+    });
+
+    test('is bounded by the Bazel timeout when that is shorter', () {
+      expect(
+        runner.dialBackBound(const Duration(seconds: 20)),
+        const Duration(seconds: 20),
+      );
+      expect(
+        runner.dialBackBound(const Duration(minutes: 5)),
+        const Duration(minutes: 2),
       );
     });
   });

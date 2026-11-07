@@ -97,6 +97,7 @@ dart_binary(
     visibility = ["//flutter:__subpackages__"],
     deps = [
         ":remote_suite",
+        "@rules_dart//dart/kernel_list",
         "@rules_dart//dart/runfiles",
     ],
 )
@@ -140,6 +141,7 @@ _UNIT_TESTS = {
         "flutter_test_runner.dart",
         [
             ":remote_suite",
+            "@rules_dart//dart/kernel_list",
             "@rules_dart//dart/runfiles",
         ],
     ),

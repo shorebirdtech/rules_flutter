@@ -34,6 +34,7 @@ import 'dart:io';
 
 import 'package:flutter_rule_tools/remote_suite.dart';
 import 'package:flutter_rule_tools/suite_annotations.dart';
+import 'package:kernel_list/kernel_list.dart';
 import 'package:runfiles/runfiles.dart';
 
 /// The runfiles of the program started as [executable], or null.
@@ -142,6 +143,33 @@ List<String> nativeLibraryDirectories(
   return directories.toList();
 }
 
+/// The program flutter_tester runs, from the runfiles path [key] of the test's
+/// kernel: that kernel, or, when [isList], the kernels a kernel list there
+/// names, joined into one because flutter_tester takes a single file. The
+/// join is in memory on Linux and a file under [temporaryDirectory] (by
+/// default the system's) elsewhere. Close it when the run is over.
+///
+/// Throws a [KernelListException] when the list or a kernel it names cannot be
+/// found or joined.
+///
+/// Public, like [testCeiling], because the test reaches it directly.
+JoinedKernel joinProgram(
+  Runfiles runfiles,
+  String key, {
+  required bool isList,
+  String? temporaryDirectory,
+}) => joinKernels(
+  isList ? kernelsInRunfiles(runfiles, key) : [runfiles.rlocation(key)],
+  temporaryDirectory: temporaryDirectory,
+);
+
+/// What the runner says when [joinProgram] fails. The exception's own text
+/// names the flag that builds joined kernels instead.
+///
+/// Public, like [testCeiling], because the test reaches it directly.
+String joinFailure(KernelListException e) =>
+    'flutter_test runner: cannot join the test\'s kernels: $e';
+
 void main(List<String> args) async {
   // A flutter_test is handed its settings by Bazel's test environment. A
   // flutter_tester_binary carries them in its own runfiles, because the
@@ -196,7 +224,6 @@ void main(List<String> args) async {
 
   final tester = r.rlocation(testerKey);
   final icu = r.rlocation(icuKey);
-  final dill = r.rlocation(dillKey);
   final assetsDir = assetsKey == null ? null : r.rlocation(assetsKey);
   final nativeFiles = settings['FLUTTER_TEST_NATIVE_FILES'];
   final Map<String, String> loader;
@@ -259,23 +286,42 @@ void main(List<String> args) async {
     return;
   }
 
-  exitCode = await _runOnce(
-    tester: tester,
-    icu: icu,
-    dill: dill,
-    assetsDir: assetsDir,
-    testPath: testPath,
-    coverageOutput: coverageOutput,
-    coverageLibraries: coverageLibraries,
-    updateGoldens: updateGoldens,
-    selection: selection,
-    metadata: annotations.handshakeMetadata(
-      Platform.environment['TEST_TIMEOUT'],
-    ),
-    xmlOutput: Platform.environment['XML_OUTPUT_FILE'],
-    impeller: settings['FLUTTER_TEST_IMPELLER'] == '1',
-    loader: {...launched, ...loader},
-  );
+  final JoinedKernel program;
+  try {
+    program = joinProgram(
+      r,
+      dillKey,
+      isList: settings['FLUTTER_TEST_KERNEL_LIST'] == '1',
+      temporaryDirectory: Platform.environment['TEST_TMPDIR'],
+    );
+  } on KernelListException catch (e) {
+    stderr.writeln(joinFailure(e));
+    exitCode = 1;
+    return;
+  }
+  // flutter_tester has read the program by the time it connects; the memory or
+  // file is released when the run is over, however it ended.
+  try {
+    exitCode = await _runOnce(
+      tester: tester,
+      icu: icu,
+      dill: program.path,
+      assetsDir: assetsDir,
+      testPath: testPath,
+      coverageOutput: coverageOutput,
+      coverageLibraries: coverageLibraries,
+      updateGoldens: updateGoldens,
+      selection: selection,
+      metadata: annotations.handshakeMetadata(
+        Platform.environment['TEST_TIMEOUT'],
+      ),
+      xmlOutput: Platform.environment['XML_OUTPUT_FILE'],
+      impeller: settings['FLUTTER_TEST_IMPELLER'] == '1',
+      loader: {...launched, ...loader},
+    );
+  } finally {
+    program.close();
+  }
 }
 
 /// The selection this run applies, from [settings].
@@ -619,21 +665,22 @@ class _Harness {
     }
 
     // Wait for the bootstrap to dial back.
-    switch (await _awaitDialBack()) {
-      case _TesterExited(:final exitCode):
-        stderr.writeln(
-          'flutter_test: flutter_tester exited with code $exitCode before '
-          'connecting to the harness.',
-        );
+    final bound = dialBackBound(
+      testCeiling(Platform.environment['TEST_TIMEOUT']),
+    );
+    final dialBack = await awaitDialBack(
+      connected: _server.first,
+      exited: _process!.exitCode,
+      bound: bound,
+    );
+    switch (dialBack) {
+      case TesterExited(:final exitCode):
+        stderr.writeln(dialBackFailure(dialBack, bound));
         return exitCode == 0 ? 1 : exitCode;
-      case _DialBackTimedOut():
-        stderr.writeln(
-          'flutter_test: flutter_tester did not connect to the harness within '
-          '${_dialBackBound.inMinutes} minutes and is still running; killing '
-          'it.',
-        );
+      case DialBackTimedOut():
+        stderr.writeln(dialBackFailure(dialBack, bound));
         return 1;
-      case _BootstrapConnected(:final request):
+      case BootstrapConnected(:final request):
         _ws = await WebSocketTransformer.upgrade(request);
     }
 
@@ -720,51 +767,85 @@ class _Harness {
     }
     return 0;
   }
+}
 
-  /// How long flutter_tester gets to open its socket back to us.
-  static const _dialBackBound = Duration(minutes: 2);
+/// How long flutter_tester gets to open its socket back to us: two minutes,
+/// or less where Bazel's own [ceiling] is shorter, so that a flutter_tester
+/// that hangs while starting is named here and not killed by Bazel's clock
+/// with no reason given.
+///
+/// Public, like [testCeiling], because the test reaches it directly.
+Duration dialBackBound(Duration ceiling) {
+  const bound = Duration(minutes: 2);
+  return ceiling < bound ? ceiling : bound;
+}
 
-  /// Waits for the bootstrap's dial-back, reporting which of the three
-  /// possible outcomes happened.
-  ///
-  /// The distinction is load-bearing rather than tidiness. A single nullable
-  /// `HttpRequest?` collapses "flutter_tester died" and "flutter_tester is
-  /// alive and silent" into one `null`, and only the first of those has an
-  /// exit code worth awaiting — awaiting it on the second blocks forever, and
-  /// a paused coverage run then reaches Bazel's outer test timeout with no
-  /// diagnostic of its own.
-  Future<_DialBack> _awaitDialBack() async {
-    final outcome = await Future.any([
-      _server.first.then<_DialBack?>(_BootstrapConnected.new),
-      _process!.exitCode.then<_DialBack?>(_TesterExited.new),
-    ]).timeout(_dialBackBound, onTimeout: () => null);
-    return outcome ?? const _DialBackTimedOut();
-  }
+/// Waits for the bootstrap's dial-back, reporting which of the three possible
+/// outcomes happened: it [connected], flutter_tester [exited], or neither
+/// within [bound].
+///
+/// The distinction is load-bearing rather than tidiness. A single nullable
+/// `HttpRequest?` collapses "flutter_tester died" and "flutter_tester is
+/// alive and silent" into one `null`, and only the first of those has an exit
+/// code worth awaiting — awaiting it on the second blocks forever, and a
+/// paused coverage run then reaches Bazel's outer test timeout with no
+/// diagnostic of its own.
+///
+/// Public, like [testCeiling], because the test reaches it directly.
+Future<DialBack> awaitDialBack({
+  required Future<HttpRequest> connected,
+  required Future<int> exited,
+  required Duration bound,
+}) async {
+  final outcome = await Future.any([
+    connected.then<DialBack?>(BootstrapConnected.new),
+    exited.then<DialBack?>(TesterExited.new),
+  ]).timeout(bound, onTimeout: () => null);
+  return outcome ?? const DialBackTimedOut();
+}
+
+/// What the runner says of a dial-back that did not happen.
+///
+/// Public, like [testCeiling], because the test reaches it directly.
+String dialBackFailure(DialBack outcome, Duration bound) => switch (outcome) {
+  TesterExited(:final exitCode) =>
+    'flutter_test: flutter_tester exited with code $exitCode before '
+        'connecting to the harness.',
+  DialBackTimedOut() =>
+    'flutter_test: flutter_tester did not connect to the harness within '
+        '${_describe(bound)} and is still running; killing it.',
+  BootstrapConnected() => throw ArgumentError.value(outcome, 'outcome'),
+};
+
+String _describe(Duration d) {
+  if (d.inMilliseconds < 1000) return '${d.inMilliseconds} ms';
+  if (d.inSeconds < 120) return '${d.inSeconds} seconds';
+  return '${d.inMinutes} minutes';
 }
 
 /// The outcome of waiting for flutter_tester's bootstrap to connect back.
-sealed class _DialBack {
-  const _DialBack();
+sealed class DialBack {
+  const DialBack();
 }
 
 /// The bootstrap connected; [request] is the HTTP request to upgrade.
-final class _BootstrapConnected extends _DialBack {
-  const _BootstrapConnected(this.request);
+final class BootstrapConnected extends DialBack {
+  const BootstrapConnected(this.request);
 
   final HttpRequest request;
 }
 
 /// flutter_tester exited before connecting, with [exitCode].
-final class _TesterExited extends _DialBack {
-  const _TesterExited(this.exitCode);
+final class TesterExited extends DialBack {
+  const TesterExited(this.exitCode);
 
   final int exitCode;
 }
 
 /// Nothing happened within the bound: flutter_tester is alive and has not
 /// connected. There is no exit code to wait for.
-final class _DialBackTimedOut extends _DialBack {
-  const _DialBackTimedOut();
+final class DialBackTimedOut extends DialBack {
+  const DialBackTimedOut();
 }
 
 // ---------------------------------------------------------------------------

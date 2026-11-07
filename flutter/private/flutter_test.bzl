@@ -18,8 +18,11 @@ Wire-up:
      module (`flutter_module_aspect`, rules_dart's per-library compile over the
      debug Flutter platform), with the test's `defines`. The test's own files
      are compiled against those modules, the bootstrap compiled as the entry
-     point, and all of it linked into the one `.dill` flutter_tester loads.
-     A test therefore recompiles only its own files, and a change to a shared
+     point, and all of it listed in a kernel list, which the runner joins into the
+     one kernel flutter_tester loads when it starts it (in memory on Linux, a
+     temporary file elsewhere), so no test stores a copy of its libraries.
+     With `--@rules_dart//dart:kernel_lists=false` the build joins them into
+     one `.dill` instead. A test therefore recompiles only its own files, and a change to a shared
      library recompiles that library's module and those downstream of it once,
      not every test that reaches it. With
      `--@rules_dart//dart:modular_kernel=false` the test instead compiles its
@@ -58,7 +61,7 @@ load("@bazel_skylib//lib:structs.bzl", "structs")
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@flutter_version_pin//:version.bzl", "FLUTTER_VERSION")
 load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo", "DartKernelSdkInfo")
-load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "KERNEL_TOOL_ATTR", "TRACK_CREATION_LOCATIONS_ATTR", "collect_modules", "collect_packages", "collect_transitive_srcs", "dart_analyzable_info_with_packages", "dart_entry_kernel_action", "dart_import_check_aspect", "dart_link_kernel_action", "dart_package_info", "derive_lib_root", "executable_defines", "executable_defines_config", "import_check_validation", "runfiles_path", "track_creation_locations")
+load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "KERNEL_LISTS_ATTR", "KERNEL_TOOL_ATTR", "TRACK_CREATION_LOCATIONS_ATTR", "collect_modules", "collect_packages", "collect_transitive_srcs", "dart_analyzable_info_with_packages", "dart_entry_kernel_action", "dart_import_check_aspect", "dart_link_kernel_action", "dart_package_info", "derive_lib_root", "executable_defines", "executable_defines_config", "import_check_validation", "kernel_lists", "runfiles_path", "track_creation_locations")
 load("//flutter:providers.bzl", "FlutterApplicationInputsInfo", "FlutterInfo")
 load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "compile_package_config", "synthesize_app_package")
 load("//flutter/private:application_libraries.bzl", "application_libraries", "application_libraries_aspect")
@@ -562,8 +565,13 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
     if staged_comparator:
         own_srcs.append(staged_comparator)
     kernel_dill = ctx.actions.declare_file(ctx.label.name + ".dill")
+
+    # With `--@rules_dart//dart:kernel_lists`, `kernel_dill` is a list of the
+    # kernels the program is made of, and these are the files it names.
+    listed_kernels = depset()
+    kernel_list = modular and kernel_lists(ctx)
     if modular:
-        _link_modules(ctx, deps, bootstrap, own_srcs, packages, native_assets_manifest, kernel_dill)
+        listed_kernels = _link_modules(ctx, deps, bootstrap, own_srcs, packages, native_assets_manifest, kernel_dill, kernel_list)
     else:
         _compile_whole_program(ctx, portable_tools(ctx), deps, bootstrap, own_srcs, packages, native_assets_manifest, kernel_dill)
 
@@ -600,6 +608,9 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
         "FLUTTER_TEST_PATH": ctx.file.main.short_path,
         "FLUTTER_TEST_IMPELLER": "1" if ctx.attr.enable_impeller else "",
     }
+    if kernel_list:
+        # flutter_tester takes one kernel file: the runner joins the list.
+        env["FLUTTER_TEST_KERNEL_LIST"] = "1"
     if native_files:
         env["FLUTTER_TEST_NATIVE_FILES"] = "\n".join(native_files)
 
@@ -616,6 +627,7 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
             runner_tools.icu_data,
             flutter_assets,
         ] + ctx.files.data + bundled_code_assets,
+        transitive_files = listed_kernels,
     )
 
     # Merge the runfiles of any `data` targets so cc_library / cc_binary
@@ -685,12 +697,18 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
         ),
     ])
 
-def _link_modules(ctx, deps, bootstrap, own_srcs, packages, native_assets_manifest, kernel_dill):
+def _link_modules(ctx, deps, bootstrap, own_srcs, packages, native_assets_manifest, kernel_dill, kernel_list):
     """Compiles the test's own files against its deps' modules, and links them.
 
     Every library in `deps` arrives compiled, once per configuration, as a
     kernel module; only the test's own files are compiled here, against them,
-    and the two are linked into the program flutter_tester runs.
+    and the two are linked into the program flutter_tester runs: one joined
+    kernel, or, as `kernel_list`, a list of the kernels that the runner joins
+    when it starts flutter_tester, which takes a single file.
+
+    Returns:
+      A depset of the kernels `kernel_dill` lists, for the runfiles; empty for
+      a joined kernel.
     """
     entry_dill = ctx.actions.declare_file(ctx.label.name + ".entry.dill")
     linked = dart_entry_kernel_action(
@@ -707,7 +725,7 @@ def _link_modules(ctx, deps, bootstrap, own_srcs, packages, native_assets_manife
         native_assets_yaml = native_assets_manifest,
         track_creation_locations = track_creation_locations(ctx),
     )
-    dart_link_kernel_action(ctx, ctx.executable._kernel_tool, entry_dill, linked, kernel_dill)
+    return dart_link_kernel_action(ctx, ctx.executable._kernel_tool, entry_dill, linked, kernel_dill, kernel_list = kernel_list)
 
 def _compile_whole_program(ctx, tools, deps, bootstrap, own_srcs, packages, native_assets_manifest, kernel_dill):
     """Compiles the bootstrap and everything it reaches from source, as `flutter_application` does.
@@ -889,6 +907,7 @@ _TEST_ATTRS["exclude_tags"] = attr.string_list(
 )
 _TEST_ATTRS.update(PLATFORM_CONSTRAINT_ATTRS)
 _TEST_ATTRS.update(KERNEL_TOOL_ATTR)
+_TEST_ATTRS.update(KERNEL_LISTS_ATTR)
 _TEST_ATTRS.update(TRACK_CREATION_LOCATIONS_ATTR)
 
 _TRACK_CREATION_LOCATIONS = str(Label("@rules_dart//dart:track_creation_locations"))
