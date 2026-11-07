@@ -260,16 +260,27 @@ void main() {
         },
       );
 
+      test('a 32-bit ARM device builds for armeabi-v7a', () async {
+        final (_, device) = await resolved('armeabi-v7a,armeabi');
+        expect(device.buildArgs, [
+          '--@rules_android//flags:android_platforms=@rules_android//:armeabi-v7a',
+        ]);
+      });
+
       test(
         'a device that runs no ABI we build for is refused by name',
         () async {
           expect(
-            resolved('armeabi-v7a,armeabi'),
+            resolved('armeabi,mips'),
             throwsA(
               isA<StateError>().having(
                 (e) => e.message,
                 'message',
-                allOf(contains('armeabi-v7a, armeabi'), contains('arm64-v8a')),
+                allOf(
+                  contains('armeabi, mips'),
+                  contains('armeabi-v7a'),
+                  contains('arm64-v8a'),
+                ),
               ),
             ),
           );

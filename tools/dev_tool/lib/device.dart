@@ -1387,8 +1387,8 @@ Future<({String packageName, String? activityName})> extractPackageInfo(
   );
 }
 
-/// The ABIs rules_flutter builds an Android app for, most preferred first.
-const androidBuildableAbis = ['arm64-v8a', 'x86_64'];
+/// The ABIs rules_flutter builds an Android app for.
+const androidBuildableAbis = ['arm64-v8a', 'x86_64', 'armeabi-v7a'];
 
 /// The ABI to build for, given a device's `ro.product.cpu.abilist` (a
 /// comma-separated list, the device's own ABI first).
@@ -1407,7 +1407,7 @@ String androidAbiFromAbiList(String abiList, {required String deviceName}) {
   }
   throw StateError(
     '$deviceName runs ${abis.isEmpty ? 'no ABI it reported' : abis.join(', ')}, '
-    'and rules_flutter builds Android apps for ${androidBuildableAbis.join(' and ')}.',
+    'and rules_flutter builds Android apps for ${androidBuildableAbis.join(', ')}.',
   );
 }
 
@@ -1507,7 +1507,8 @@ class AndroidDevice extends Device {
     return outputs.first;
   }
 
-  /// The Android ABI this device runs apps as: `arm64-v8a` or `x86_64`.
+  /// The Android ABI this device runs apps as: `arm64-v8a`, `x86_64` or
+  /// `armeabi-v7a`.
   ///
   /// The platform the app is built for, so that its engine, `libapp.so` and
   /// native libraries are the ones this device loads. Known once
