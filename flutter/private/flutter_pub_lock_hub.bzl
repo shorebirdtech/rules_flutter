@@ -29,8 +29,31 @@ load("//flutter/private:flutter_pub_index.bzl", "ANDROID_MAVEN_REPO", "GOLDENS_R
 
 def _flutter_pub_lock_hub_impl(ctx):
     built = {pkg: True for pkg in ctx.attr.built_packages}
+    sdk_packages = {pkg: True for pkg in ctx.attr.sdk_packages}
     aliases = []
     for pkg in ctx.attr.packages:
+        if pkg in sdk_packages and len({p: True for p in ctx.attr.sdk_prefixes.values()}) > 1:
+            # A Flutter SDK package is the package of the selected SDK's
+            # framework: `--@rules_flutter//flutter:sdk` chooses among them.
+            branches = "".join([
+                '        "@flutter_toolchains//:sdk_{sdk}": "@{repo}//:{pkg}",\n'.format(
+                    sdk = sdk,
+                    pkg = pkg,
+                    repo = library_repo(pkg, prefix) if pkg in built else source_repo(pkg, prefix),
+                )
+                for sdk, prefix in sorted(ctx.attr.sdk_prefixes.items())
+            ])
+            aliases.append("""\
+alias(
+    name = "{pkg}",
+    actual = select(
+        {{
+{branches}        }},
+        no_match_error = "No Flutter SDK is declared for --@rules_flutter//flutter:sdk. Declared: {declared}.",
+    ),
+    visibility = ["//visibility:public"],
+)""".format(pkg = pkg, branches = branches.replace("        \"@", "            \"@"), declared = ", ".join(sorted(ctx.attr.sdk_prefixes.keys()))))
+            continue
         aliases.append("""\
 alias(
     name = "{pkg}",
@@ -88,6 +111,14 @@ flutter_pub_lock_hub = repository_rule(
         "packages": attr.string_list(
             doc = "The package names of the hub's lock(s) to create aliases for.",
             mandatory = True,
+        ),
+        "sdk_packages": attr.string_list(
+            doc = "The Flutter SDK packages among `packages`, whose alias follows the selected SDK when the SDKs' frameworks differ.",
+            default = [],
+        ),
+        "sdk_prefixes": attr.string_dict(
+            doc = "For each declared SDK, the prefix of the repositories that hold its framework's SDK packages.",
+            default = {},
         ),
         "built_packages": attr.string_list(
             doc = "The built ones among `packages` (hosted, git, and Flutter SDK packages built from the Flutter source): their alias is their library repository's, the others' their one repository's.",

@@ -53,13 +53,34 @@ MEMBER_OVERLAY = "overlay"  # an overlay's whole BUILD file, which `:<package>` 
 
 _INDEX_FILE = "index.json"
 
-def source_repo(package):
-    """The name of the repository holding a package's files."""
-    return "{}__{}".format(SPOKE_PREFIX, package)
+def source_repo(package, prefix = SPOKE_PREFIX):
+    """The name of the repository holding a package's files.
 
-def library_repo(package):
+    Args:
+        package: The package.
+        prefix: What the build's repositories are named by; another framework's
+            Flutter SDK packages have a prefix of their own (`sdk_prefix`).
+
+    Returns:
+        The repository's name.
+    """
+    return "{}__{}".format(prefix, package)
+
+def library_repo(package, prefix = SPOKE_PREFIX):
     """The name of the repository holding a built package's library."""
-    return "{}_lib__{}".format(SPOKE_PREFIX, package)
+    return "{}_lib__{}".format(prefix, package)
+
+def index_repo(prefix = SPOKE_PREFIX):
+    """The name of the index repository of a prefix."""
+    return prefix + "_index"
+
+def sdk_prefix(sdk):
+    """What the Flutter SDK packages of the framework of another SDK are named by.
+
+    The default SDK's framework is the build's own (`SPOKE_PREFIX`). Hubs may not
+    be named with this prefix either.
+    """
+    return "{}-{}".format(SPOKE_PREFIX, sdk)
 
 def _canonical_prefix(ctx):
     """What canonical names of the extension's repositories start with, seen from `ctx`."""
@@ -91,25 +112,46 @@ def read_sibling_file(ctx, repo, path):
     """
     return ctx.read(sibling_path(ctx, repo, path))
 
-def read_index(ctx):
+def read_index(ctx, prefix = SPOKE_PREFIX):
     """The index: which packages the locks list, by who supplies them.
 
     Args:
       ctx: The reading repository's `repository_ctx`.
+      prefix: The prefix of the index to read.
 
     Returns:
-      `struct(built, other)`: `built`, a dict of the names of the built
+      `struct(built, other, sdk_packages, main_prefix, sdk_prefix, via_hub, versions, locks, flutter_constraints)`:
+      `built`, a dict of the names of the built
       packages (hosted ones and Flutter SDK ones built from the Flutter
       source; each has a library repository); `other`, a dict of the names of
       the locks' other entries (`package:flutter`, packages mapped to a
       workspace target, and entries nothing supplies), whose `flutter_pub__<name>`
-      repository is the library.
+      repository is the library; `sdk_packages`, the Flutter SDK packages among
+      them. `main_prefix` names the repositories of every other package and
+      `sdk_prefix` those of the SDK packages: the same unless this is the index
+      of another SDK's framework. `via_hub` says that a package depending on an
+      SDK package reaches it through the main hub's alias, which follows the
+      selected SDK (`sdk_hubs`: a hub that lists each). `versions` is the version the build uses of
+      each package the locks list, `locks` their labels, and
+      `flutter_constraints` the `sdks: flutter` constraint of each.
     """
-    index = json.decode(read_sibling_file(ctx, INDEX_REPO, _INDEX_FILE))
+    index = json.decode(read_sibling_file(ctx, index_repo(prefix), _INDEX_FILE))
     return struct(
         built = {n: True for n in index["built"]},
         other = {n: True for n in index["other"]},
+        sdk_packages = {n: True for n in index.get("sdk_packages", [])},
+        main_prefix = index.get("main_prefix") or prefix,
+        sdk_prefix = index.get("sdk_prefix") or prefix,
+        via_hub = index.get("via_hub", False),
+        sdk_hubs = index.get("sdk_hubs", {}),
+        versions = index.get("versions", {}),
+        locks = index.get("locks", []),
+        flutter_constraints = index.get("flutter_constraints", {}),
     )
+
+def owner_prefix(index, package):
+    """The prefix of the repositories that hold a package: its SDK's framework's, or the build's."""
+    return index.sdk_prefix if package in index.sdk_packages else index.main_prefix
 
 def library_label(index, package):
     """The label of a locked package's library, as another package depends on it.
@@ -121,7 +163,10 @@ def library_label(index, package):
     Returns:
       The label string.
     """
-    repo = library_repo(package) if package in index.built else source_repo(package)
+    if package in index.sdk_packages and index.via_hub:
+        return "@{}//:{}".format(index.sdk_hubs[package], package)
+    owner = owner_prefix(index, package)
+    repo = library_repo(package, owner) if package in index.built else source_repo(package, owner)
     return "@{}//:{}".format(repo, package)
 
 def _flutter_pub_index_impl(ctx):
@@ -129,6 +174,14 @@ def _flutter_pub_index_impl(ctx):
     ctx.file(_INDEX_FILE, json.encode({
         "built": ctx.attr.built,
         "other": ctx.attr.other,
+        "sdk_packages": ctx.attr.sdk_packages,
+        "main_prefix": ctx.attr.main_prefix,
+        "sdk_prefix": ctx.attr.sdk_prefix,
+        "via_hub": ctx.attr.via_hub,
+        "sdk_hubs": ctx.attr.sdk_hubs,
+        "versions": ctx.attr.versions,
+        "locks": ctx.attr.locks,
+        "flutter_constraints": ctx.attr.flutter_constraints,
     }))
     return ctx.repo_metadata(reproducible = True)
 
@@ -137,6 +190,14 @@ flutter_pub_index = repository_rule(
     attrs = {
         "built": attr.string_list(doc = "The locks' built packages, hosted and from the Flutter source: each has a source and a library repository."),
         "other": attr.string_list(doc = "The locks' other entries: `package:flutter`, packages mapped to workspace targets, and entries nothing supplies."),
+        "sdk_packages": attr.string_list(doc = "The Flutter SDK packages among them, `package:flutter` included."),
+        "main_prefix": attr.string(doc = "The prefix of the repositories of the packages that are not SDK ones. Empty for the index's own."),
+        "sdk_prefix": attr.string(doc = "The prefix of the repositories of the SDK packages. Empty for the index's own."),
+        "via_hub": attr.bool(doc = "Whether a dependency on an SDK package reaches it through the main hub's alias."),
+        "sdk_hubs": attr.string_dict(doc = "For each SDK package, a hub that lists it, whose alias follows the selected SDK, for `via_hub`."),
+        "versions": attr.string_dict(doc = "The version the build uses of each package the locks list."),
+        "locks": attr.string_list(doc = "The locks' labels, for messages."),
+        "flutter_constraints": attr.string_dict(doc = "The `sdks: flutter` constraint of each lock, by its label."),
     },
     doc = "The packages the repositories of every `flutter.pub()` lock plan against.",
 )

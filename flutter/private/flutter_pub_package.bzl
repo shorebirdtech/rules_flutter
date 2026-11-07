@@ -51,9 +51,10 @@ load("@rules_dart//dart/pub:pub_lock_package.bzl", "fetch_pub_archive", "fetch_p
 load("@rules_dart//dart/pub:pubspec.bzl", "read_pubspec")
 load("//flutter/private:android_plugin_maven.bzl", "MAVEN_DEPS_FILE", "gradle_statements", "parse_gradle_maven_dependencies")
 load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url")
+load("//flutter/private:framework_source.bzl", "check_dependency_constraints", "link_framework_package", "unset_message", "write_unset_stub")
 load("//flutter/private:asset_variants.bzl", "variant_scale")
 load("//flutter/private:cmake_link_libraries.bzl", "parse_cmake_link_libraries")
-load("//flutter/private:flutter_pub_index.bzl", "MEMBER_DART", "MEMBER_FILE", "MEMBER_FLUTTER", "MEMBER_OVERLAY", "library_label", "read_index", "sibling_path", "source_repo")
+load("//flutter/private:flutter_pub_index.bzl", "MEMBER_DART", "MEMBER_FILE", "MEMBER_FLUTTER", "MEMBER_OVERLAY", "library_label", "owner_prefix", "read_index", "sibling_path", "source_repo")
 load("//flutter/private:flutter_pubspec.bzl", "flutter_assets_block", "flutter_licenses_block", "flutter_manifest_errors", "flutter_plugin_block")
 load("//flutter/private:pinned.bzl", "pinned")
 load("//flutter/private:swiftpm_dependencies.bzl", "find_unsupported_swiftpm_dependencies")
@@ -668,9 +669,10 @@ def _font_label(ctx, path):
     other, rest = parts[1], parts[2]
     if other == ctx.attr.package_name:
         return ":" + rest
-    if other not in read_index(ctx).built:
+    index = read_index(ctx, ctx.attr.prefix)
+    if other not in index.built:
         fail("package {}: the font file {} names the package {}, which the lock does not build.".format(ctx.attr.package_name, repr(path), other))
-    file = sibling_path(ctx, source_repo(other), "pubspec.yaml").dirname.get_child(rest)
+    file = sibling_path(ctx, source_repo(other, owner_prefix(index, other)), "pubspec.yaml").dirname.get_child(rest)
     if not file.exists:
         fail("package {}: the font file {} names {} of the package {}, which has no such file.".format(ctx.attr.package_name, repr(path), repr(rest), other))
     link = "_fonts_of_other_packages/{}/{}".format(other, rest)
@@ -1904,7 +1906,13 @@ def fetch_flutter_source_package(ctx, package_name, flutter_version, sha256):
     ctx.delete(ctx.path(_FLUTTER_PACKAGES_STAGING))
 
 def _flutter_pub_package_impl(ctx):
-    if ctx.attr.flutter_source_version:
+    if ctx.attr.framework_json:
+        unset = unset_message(ctx)
+        if unset:
+            write_unset_stub(ctx, [ctx.attr.package_name], unset, member = True)
+            return ctx.repo_metadata(reproducible = True)
+        link_framework_package(ctx, ctx.attr.package_name)
+    elif ctx.attr.flutter_source_version:
         fetch_flutter_source_package(
             ctx,
             package_name = ctx.attr.package_name,
@@ -1937,6 +1945,12 @@ def _flutter_pub_package_impl(ctx):
     # YAML, a `name` that is not this package's, a dependency or constraint of
     # the wrong type) fails the fetch, naming the package.
     pubspec = read_pubspec(ctx, ctx.attr.package_name, ctx.attr.version)
+    if ctx.attr.framework_json:
+        # What a Flutter SDK package of a framework other than the release
+        # needs of the hosted packages must be what the locks hold. (A
+        # release's are not held to it here: its pins are checked when the
+        # module is read.)
+        check_dependency_constraints(read_index(ctx, ctx.attr.prefix), ctx.attr.sdk, ctx.attr.package_name, pubspec.fields)
     pubspec_dependencies = pubspec.dependencies
     language_version = pubspec.language_version
     plugin_block = flutter_plugin_block(pubspec.fields)
@@ -1972,7 +1986,7 @@ def _flutter_pub_package_impl(ctx):
     # packages the pubspec names that the lock lists. Worked out only for a
     # package an overlay builds: the lock's index is read for no other.
     def dep_labels():
-        index = read_index(ctx)
+        index = read_index(ctx, ctx.attr.prefix)
         labels = [
             library_label(index, dep)
             for dep in sorted(pubspec_dependencies)
@@ -2313,6 +2327,19 @@ flutter_pub_package = repository_rule(
         "base_url": attr.string(
             doc = "Base URL for the pub repository. Ignored with `flutter_source_version`.",
             default = "https://pub.dev",
+        ),
+        "framework_json": attr.label(
+            doc = "The `flutter_framework.json` of a framework source holding this package as `packages/<package_name>`, " +
+                  "for a Flutter SDK package of an SDK whose framework is not the release.",
+            allow_single_file = True,
+        ),
+        "sdk": attr.string(
+            doc = "For a Flutter SDK package, the SDK whose framework it is from, for messages.",
+            default = "flutter",
+        ),
+        "prefix": attr.string(
+            doc = "The prefix of the index the package is planned against: the build's, or another SDK framework's.",
+            default = "flutter_pub",
         ),
         "flutter_source_version": attr.string(
             doc = "The Flutter version whose pinned source tarball holds this package as `packages/<package_name>`, for a Flutter SDK package " +

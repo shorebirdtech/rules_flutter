@@ -25,6 +25,7 @@ exports_files(
         "merge_android_manifests.dart",
         "merge_plists.dart",
         "plist_binary.dart",
+        "sdk_check.dart",
         "strip_native_libs.dart",
         "validate_android_elf.dart",
         "web_template.dart",
@@ -136,6 +137,7 @@ _UNIT_TESTS = {
     "linux_runtime_test": ("linux_runtime.dart", []),
     "generate_asset_manifest_test": ("generate_asset_manifest.dart", []),
     "merge_android_manifests_test": ("merge_android_manifests.dart", []),
+    "sdk_check_test": ("sdk_check.dart", []),
     "strip_native_libs_test": ("strip_native_libs.dart", []),
     "web_template_test": ("web_template.dart", []),
     "flutter_test_runner_test": (

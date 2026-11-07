@@ -19,9 +19,20 @@ def _repositories_are_named_by_their_part_test_impl(ctx):
 
     # A built package is depended on through its library; the lock's other
     # entries (package:flutter, a stub) are their own.
-    index = struct(built = {"dio": True}, other = {"flutter": True})
+    index = struct(built = {"dio": True}, other = {"flutter": True}, sdk_packages = {"flutter": True}, main_prefix = "flutter_pub", sdk_prefix = "flutter_pub", via_hub = False, sdk_hubs = {})
     asserts.equals(env, "@flutter_pub_lib__dio//:dio", library_label(index, "dio"))
     asserts.equals(env, "@flutter_pub__flutter//:flutter", library_label(index, "flutter"))
+
+    # An SDK package of another SDK's framework is in that framework's
+    # repositories; a package of any other kind stays the build's. When the
+    # SDKs' frameworks differ, a package depending on an SDK package reaches the
+    # hub's alias, which follows the selected SDK.
+    other_sdk = struct(built = {"dio": True}, other = {"flutter": True}, sdk_packages = {"flutter": True}, main_prefix = "flutter_pub", sdk_prefix = "flutter_pub-local", via_hub = False, sdk_hubs = {})
+    asserts.equals(env, "@flutter_pub-local__flutter//:flutter", library_label(other_sdk, "flutter"))
+    asserts.equals(env, "@flutter_pub_lib__dio//:dio", library_label(other_sdk, "dio"))
+    through_hub = struct(built = {"dio": True}, other = {"flutter": True}, sdk_packages = {"flutter": True}, main_prefix = "flutter_pub", sdk_prefix = "flutter_pub", via_hub = True, sdk_hubs = {"flutter": "deps"})
+    asserts.equals(env, "@deps//:flutter", library_label(through_hub, "flutter"))
+    asserts.equals(env, "@flutter_pub_lib__dio//:dio", library_label(through_hub, "dio"))
 
     return unittest.end(env)
 

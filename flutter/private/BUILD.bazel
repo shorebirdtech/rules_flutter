@@ -212,6 +212,39 @@ bzl_library(
 )
 
 bzl_library(
+    name = "pub_constraint",
+    srcs = ["pub_constraint.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+)
+
+bzl_library(
+    name = "framework_source",
+    srcs = ["framework_source.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+    deps = [
+        ":pub_constraint",
+        ":pub_lock_sdks",
+    ],
+)
+
+bzl_library(
+    name = "flutter_face_repo",
+    srcs = ["flutter_face_repo.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+)
+
+bzl_library(
+    name = "flutter_material_fonts_repo",
+    srcs = ["flutter_material_fonts_repo.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+    deps = [
+        ":framework_source",
+        ":pinned",
+        ":versions",
+    ],
+)
+
+bzl_library(
     name = "pub_lock_sdks",
     srcs = ["pub_lock_sdks.bzl"],
     visibility = ["//flutter:__subpackages__"],

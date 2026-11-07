@@ -51,6 +51,7 @@ load(":platform_bundle_test.bzl", "platform_bundle_test_suite")
 load(":plist_merge_test.bzl", "plist_merge_test_suite")
 load(":plugin_registrant_test.bzl", "plugin_registrant_test_suite")
 load(":profile_mode_test.bzl", "profile_mode_test_suite")
+load(":pub_constraint_test.bzl", "pub_constraint_test_suite")
 load(":pub_lock_sdks_test.bzl", "pub_lock_sdks_test_suite")
 load(":pub_reconcile_test.bzl", "pub_reconcile_test_suite")
 load(":pub_resolve_test.bzl", "pub_resolve_test_suite")
@@ -193,6 +194,8 @@ notices_test_suite(name = "notices_test")
 flutter_test_flavor_test_suite(name = "flutter_test_flavor_test")
 
 widget_creation_flag_test_suite(name = "widget_creation_flag_test")
+
+pub_constraint_test_suite(name = "pub_constraint_test")
 
 pub_lock_sdks_test_suite(name = "pub_lock_sdks_test")
 

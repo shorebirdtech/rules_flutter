@@ -26,6 +26,7 @@ load("//flutter/private:flutter_aot_compile.bzl", "flutter_aot_elf_action", "flu
 load("//flutter/private:flutter_info.bzl", "dedup_plugins")
 load("//flutter/private:flutter_native_assets.bzl", "CODE_ASSETS_DOC", "collect_bundled_code_asset_files", "resolve_native_assets", "write_native_assets_manifest")
 load("//flutter/private:native_sources.bzl", "collect_native_source_pairs")
+load("//flutter/private:sdk_origin.bzl", "require_release_engine")
 
 def flutter_application_build(ctx, inputs):
     """Builds the program `inputs` describes as the application `ctx` declares.
@@ -84,6 +85,8 @@ def flutter_application_build(ctx, inputs):
         ctx.attr._android_constraint[platform_common.ConstraintValueInfo],
     )
     target_platform = detect_target_platform(is_ios, is_macos, is_linux, is_windows, is_android)
+    if not is_macos:
+        require_release_engine(ctx.label, flutter_sdk_info.sdk, flutter_sdk_info.host_tools, target_platform)
 
     # A pub package that builds its native code with `hook/build.dart` has no
     # library to contribute unless something stands in for the hook. The

@@ -17,34 +17,58 @@ load("@rules_dart//dart/pub:pub_lock_package.bzl", "check_pub_archive_sha256", "
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_lock")
 load("//flutter/private:android_plugin_maven.bzl", "MAVEN_DEPS_FILE", "flutter_android_maven")
 load("//flutter/private:flutter_chrome_for_testing.bzl", "flutter_chrome_for_testing")
+load("//flutter/private:flutter_dev_root_repo.bzl", "flutter_dev_root_repo")
+load("//flutter/private:flutter_face_repo.bzl", "MACOS_ENGINE_EXTRA", "MACOS_ENGINE_TARGETS", "flutter_face_repo")
 load("//flutter/private:flutter_framework_package.bzl", "flutter_framework_package")
 load("//flutter/private:flutter_gen_l10n_repo.bzl", "flutter_gen_l10n_repo")
 load("//flutter/private:flutter_linux_runtime_repo.bzl", "flutter_linux_runtime_repo")
+load("//flutter/private:flutter_material_fonts_repo.bzl", "flutter_material_fonts_repo")
 load("//flutter/private:flutter_pub_goldens.bzl", "flutter_pub_goldens")
-load("//flutter/private:flutter_pub_index.bzl", "ANDROID_MAVEN_REPO", "GOLDENS_REPO", "INDEX_REPO", "SPOKE_PREFIX", "flutter_pub_index", "library_repo", "source_repo")
+load("//flutter/private:flutter_pub_index.bzl", "ANDROID_MAVEN_REPO", "GOLDENS_REPO", "INDEX_REPO", "SPOKE_PREFIX", "flutter_pub_index", "index_repo", "library_repo", "sdk_prefix", "source_repo")
 load("//flutter/private:flutter_pub_library_repo.bzl", "flutter_pub_library_repo")
 load("//flutter/private:flutter_pub_lock_hub.bzl", "flutter_pub_lock_hub")
 load("//flutter/private:flutter_pub_package.bzl", "flutter_pub_package")
 load("//flutter/private:flutter_resolved_package.bzl", "flutter_resolved_package")
+load("//flutter/private:flutter_sdk_toolchains_repo.bzl", "flutter_sdk_toolchains_repo")
 load("//flutter/private:flutter_unsupported_package.bzl", "flutter_unsupported_package", "unsupported_package_message")
 load("//flutter/private:linux_runtime_pins.bzl", "LINUX_RUNTIME")
 load("//flutter/private:lock_entry_kind.bzl", "ENGINE_PROVIDED", "FLUTTER_FRAMEWORK", "FLUTTER_SOURCE", "GIT", "HOSTED", "UNSUPPORTED", "lock_entry_kind")
-load("//flutter/private:pub_lock_sdks.bzl", "parse_lock_sdk_constraints", "version_below_lower_bound")
+load("//flutter/private:pub_lock_sdks.bzl", "parse_lock_sdk_constraints")
 load("//flutter/private:pub_reconcile.bzl", "reconcile_package", "sdk_pin_errors", "unsupported_locks")
 load("//flutter/private:pub_resolve.bzl", "resolve_errors", "resolved_targets")
 load("//flutter/private:toolchain_version.bzl", "select_flutter_version")
-load("//flutter/private:toolchains_repo.bzl", "flutter_toolchains_repo")
-load("//flutter/private:versions.bzl", "CHROME_FOR_TESTING", "flutter_sdk_exact_pins", "flutter_source_sha256")
+load("//flutter/private:toolchains_repo.bzl", "flutter_toolchains_repo", "sdk_repo_name")
+load("//flutter/private:versions.bzl", "CHROME_FOR_TESTING", "FLUTTER_VERSIONS", "flutter_sdk_exact_pins", "flutter_source_sha256")
 load(":repositories.bzl", "flutter_register_toolchains")
 
 _DEFAULT_NAME = "flutter"
 
 flutter_toolchain = tag_class(attrs = {
     "name": attr.string(doc = """\
-Base name for generated repositories, allowing more than one Flutter toolchain to be registered.
-Overriding the default is only permitted in the root module.
+The name of the SDK this declares. `flutter` is the stock release (or the SDK a
+team always builds against, given sources); any other name is another SDK, which
+a build chooses with `--@rules_flutter//flutter:sdk=<name>`. A name other than
+the default is only permitted in the root module.
 """, default = _DEFAULT_NAME),
-    "flutter_version": attr.string(doc = "Version of the Flutter SDK.", mandatory = True),
+    "flutter_version": attr.string(doc = """\
+Version of the Flutter release that supplies whichever half of the SDK is not
+given as `framework` or `engine`. An error when both are given, and required
+when either is not.
+"""),
+    "framework": attr.label(doc = """\
+A repository whose root is a flutter/flutter tree and which holds
+`flutter_framework.json` (the framework contract): the SDK's packages come from
+it instead of the release. Root module only.
+"""),
+    "engine": attr.label(doc = """\
+A repository whose slices are the engine contract's labels (see
+`@rules_flutter//flutter:engine.bzl`): the SDK's engine comes from it instead of
+the release. Root module only.
+"""),
+    "material_fonts_sha256": attr.string(doc = """\
+The checksum of the Material fonts archive a non-release framework expects, when
+its `bin/internal/material_fonts.version` names a revision no pinned release does.
+"""),
 })
 
 _flutter_pub = tag_class(attrs = {
@@ -140,13 +164,13 @@ _flutter_plugin_overlays = tag_class(attrs = {
     ),
 })
 
-def _toolchain_extension(module_ctx):
+def _declared_sdks(module_ctx):
+    """The SDKs the modules declare: a struct for each, by name."""
     # The root module chooses each toolchain's Flutter version, as it chooses
     # every toolchain: its own tag wins. A name the root does not declare takes
     # the highest version the other modules ask for.
+    tags = {}
     root_versions = {}
-    registrations = {}
-    selected_versions = {}
     for mod in module_ctx.modules:
         for toolchain in mod.tags.toolchain:
             if toolchain.name != _DEFAULT_NAME and not mod.is_root:
@@ -154,7 +178,7 @@ def _toolchain_extension(module_ctx):
                 Only the root module may override the default name for the Flutter toolchain.
                 This prevents conflicting registrations in the global namespace of external repos.
                 """)
-            if mod.is_root:
+            if mod.is_root and toolchain.flutter_version:
                 if toolchain.name in root_versions and root_versions[toolchain.name] != toolchain.flutter_version:
                     fail("The root module declares the Flutter toolchain {} twice, with versions {} and {}.".format(
                         toolchain.name,
@@ -162,32 +186,165 @@ def _toolchain_extension(module_ctx):
                         toolchain.flutter_version,
                     ))
                 root_versions[toolchain.name] = toolchain.flutter_version
-            if toolchain.name not in registrations.keys():
-                registrations[toolchain.name] = []
-            registrations[toolchain.name].append(toolchain.flutter_version)
-    for name, versions in registrations.items():
-        selected = select_flutter_version(root_versions.get(name), versions)
+            if (toolchain.framework or toolchain.engine) and not mod.is_root:
+                fail((
+                    "flutter.toolchain(name = \"{}\") in module {} gives a framework or an engine. " +
+                    "Only the root module may: a library module must not impose a fork on its dependents."
+                ).format(toolchain.name, mod.name))
+            tags.setdefault(toolchain.name, []).append(toolchain)
 
-        flutter_register_toolchains(
+    sdks = {}
+    for name, name_tags in tags.items():
+        versions = [t.flutter_version for t in name_tags if t.flutter_version]
+        frameworks = {str(t.framework): t.framework for t in name_tags if t.framework}
+        engines = {str(t.engine): t.engine for t in name_tags if t.engine}
+        if len(frameworks) > 1 or len(engines) > 1:
+            fail("flutter.toolchain(name = \"{}\") is declared with more than one framework or engine.".format(name))
+        framework = frameworks.values()[0] if frameworks else None
+        engine = engines.values()[0] if engines else None
+        if framework and engine and versions:
+            fail((
+                "flutter.toolchain(name = \"{}\") gives a framework and an engine, so its " +
+                "flutter_version = \"{}\" would be unused. Drop it."
+            ).format(name, versions[0]))
+        if not (framework and engine) and not versions:
+            fail((
+                "flutter.toolchain(name = \"{}\") needs flutter_version: the release that " +
+                "supplies the half of the SDK that is not given."
+            ).format(name))
+        selected = select_flutter_version(root_versions.get(name), versions) if versions else None
+        fonts_sha256 = [t.material_fonts_sha256 for t in name_tags if t.material_fonts_sha256]
+        sdks[name] = struct(
             name = name,
-            flutter_version = selected,
+            version = selected,
+            framework = framework,
+            engine = engine,
+            material_fonts_sha256 = fonts_sha256[0] if fonts_sha256 else "",
         )
+    if _DEFAULT_NAME not in sdks:
+        fail("A flutter.toolchain() is required: the default SDK, named \"{}\".".format(_DEFAULT_NAME))
+    return sdks
 
-        # The gen-l10n generator, carved out of the same release's
-        # flutter_tools. Declared unconditionally because bzlmod repositories
-        # are lazy: a workspace that never references `@{name}_gen_l10n` never
-        # fetches the tarball, the same way gen_snapshot repos work.
-        flutter_gen_l10n_repo(
-            name = name + "_gen_l10n",
-            flutter_version = selected,
-            sha256 = flutter_source_sha256(selected),
+def _label_prefix(label):
+    """A label's repository, as a prefix any repository can name it by."""
+    return "@@" + label.repo_name
+
+def _framework_json(framework):
+    """The label of `flutter_framework.json` in a framework source."""
+    return Label("@@{}//:flutter_framework.json".format(framework.repo_name))
+
+def _register_sdk(sdk):
+    """Declares the repositories of one SDK; returns the label prefix of its engine source."""
+    name = sdk.name
+    if sdk.engine == None:
+        # The release engine, with the artifact repositories it is made of.
+        flutter_register_toolchains(name = name, flutter_version = sdk.version)
+        return "@{}_stock_engine".format(name)
+
+    # An engine of the root module's choosing: the toolchains are written
+    # against its slices. The Material fonts come with the framework.
+    version_meta = FLUTTER_VERSIONS[sdk.version] if sdk.version else None
+    fonts = name + "_material_fonts"
+    flutter_material_fonts_repo(
+        name = fonts,
+        flutter_version = sdk.version or "",
+        framework_json = _framework_json(sdk.framework) if sdk.framework else None,
+        sha256 = sdk.material_fonts_sha256,
+    )
+    flutter_sdk_toolchains_repo(
+        name = sdk_repo_name(name),
+        engine = _label_prefix(sdk.engine),
+        sdk = name,
+        version = sdk.version or "",
+        engine_revision = version_meta.engine_revision if version_meta else "",
+        material_fonts = "@{}//:material-fonts/MaterialIcons-Regular.otf".format(fonts),
+        sysroot_prefix = _DEFAULT_NAME,
+    )
+    return _label_prefix(sdk.engine)
+
+def _framework_variants(sdks):
+    """The prefix of the repositories that hold each SDK's framework packages, by SDK name.
+
+    There is one repository per package for the whole build, so the default
+    SDK's framework packages are the build's own (`SPOKE_PREFIX`). Another SDK
+    shares them when it has the same framework (the same release, or the same
+    framework source); otherwise its framework's packages are repositories of
+    their own, one per package, named by `sdk_prefix` of the first SDK to have
+    that framework and shared by every SDK that has it.
+    """
+    key_prefix = {_framework_key(sdks[_DEFAULT_NAME]): SPOKE_PREFIX}
+    prefixes = {_DEFAULT_NAME: SPOKE_PREFIX}
+    for name in sorted(sdks.keys()):
+        key = _framework_key(sdks[name])
+        if key not in key_prefix:
+            key_prefix[key] = sdk_prefix(name)
+        prefixes[name] = key_prefix[key]
+    return prefixes
+
+def _framework_representatives(sdks, prefixes):
+    """For each prefix that holds framework packages, the first SDK whose they are."""
+    reps = {}
+    for name in sorted(sdks.keys(), key = lambda n: (n != _DEFAULT_NAME, n)):
+        reps.setdefault(prefixes[name], sdks[name])
+    return reps
+
+def _framework_key(sdk):
+    """What two SDKs must share for them to share their framework's packages."""
+    if sdk.framework:
+        return "source " + str(sdk.framework)
+    return "release " + sdk.version
+
+def _toolchain_extension(module_ctx):
+    sdks = _declared_sdks(module_ctx)
+    selected_versions = {}
+    engine_prefixes = {}
+    for name in sorted(sdks.keys()):
+        sdk = sdks[name]
+        engine_prefixes[name] = _register_sdk(sdk)
+
+        # The SDK's dev root, for `@rules_flutter//flutter:pub`, and the
+        # gen-l10n generator, carved out of its flutter_tools. Declared
+        # unconditionally because bzlmod repositories are lazy: a workspace
+        # that never references them never fetches the tarball.
+        released = sdk.version and not sdk.framework
+        flutter_dev_root_repo(
+            name = name + "_dev_root_src",
+            flutter_version = sdk.version or "",
+            framework_json = _framework_json(sdk.framework) if sdk.framework else None,
+            engine_revision = FLUTTER_VERSIONS[sdk.version].engine_revision if released else "",
+            sha256 = flutter_source_sha256(sdk.version) if released else "",
         )
-        selected_versions[name] = selected
+        flutter_gen_l10n_repo(
+            name = name + "_gen_l10n_src",
+            flutter_version = sdk.version or "",
+            framework_json = _framework_json(sdk.framework) if sdk.framework else None,
+            sha256 = flutter_source_sha256(sdk.version) if released else "",
+        )
+        selected_versions[name] = sdk.version
+
+    # The repositories rules_flutter and its users name by fixed names, each
+    # an alias into the selected SDK's own.
+    flutter_face_repo(
+        name = "flutter_macos_engine",
+        sdks = engine_prefixes,
+        targets = MACOS_ENGINE_TARGETS,
+        extra = MACOS_ENGINE_EXTRA,
+    )
+    flutter_face_repo(
+        name = "flutter_dev_root",
+        sdks = {name: "@{}_dev_root_src".format(name) for name in sdks},
+        targets = {"dev_root": "{prefix}//:dev_root", "version_manifest": "{prefix}//:version_manifest"},
+    )
+    flutter_face_repo(
+        name = "flutter_gen_l10n",
+        sdks = {name: "@{}_gen_l10n_src".format(name) for name in sdks},
+        targets = {"gen_l10n": "{prefix}//:gen_l10n"},
+    )
 
     # Every SDK's toolchains, chosen among by `--@rules_flutter//flutter:sdk`.
     flutter_toolchains_repo(
         name = "flutter_toolchains",
-        sdks = sorted(registrations.keys()),
+        sdks = sorted(sdks.keys()),
     )
 
     # The browser web integration tests run in, one repository per host it is
@@ -234,12 +391,12 @@ def _toolchain_extension(module_ctx):
     for mod in module_ctx.modules:
         for pub_tag in mod.tags.pub:
             hub_name = pub_tag.name
-            if hub_name == SPOKE_PREFIX or hub_name.startswith(SPOKE_PREFIX + "_"):
+            if hub_name == SPOKE_PREFIX or hub_name.startswith(SPOKE_PREFIX + "_") or hub_name.startswith(SPOKE_PREFIX + "-"):
                 fail((
                     "flutter.pub(name = \"{}\") is reserved: hubs may not be named " +
-                    "`{}` or start with `{}_`, which name the repositories " +
+                    "`{}` or start with `{}_` or `{}-`, which name the repositories " +
                     "shared by every hub."
-                ).format(hub_name, SPOKE_PREFIX, SPOKE_PREFIX))
+                ).format(hub_name, SPOKE_PREFIX, SPOKE_PREFIX, SPOKE_PREFIX))
             lock_content = module_ctx.read(pub_tag.lock)
             lock_pkgs = parse_pubspec_lock(lock_content, str(pub_tag.lock))
 
@@ -248,35 +405,16 @@ def _toolchain_extension(module_ctx):
             if resolve_problems:
                 fail("\n\n".join(resolve_problems))
 
-            # Determine the Flutter version to use for SDK packages.
-            # Use the default toolchain version; fail if no toolchain is registered.
-            flutter_version = selected_versions.get(_DEFAULT_NAME)
-            if not flutter_version:
+            # The default SDK must exist; the lock is checked against each SDK's
+            # framework by that SDK's own `package:flutter` spoke, which only
+            # the SDK a build selects fetches.
+            if not selected_versions.keys():
                 fail("flutter.pub() requires a flutter.toolchain() to be registered.")
-
-            # This is the one moment where the SDK that resolved the lock and
-            # the SDK that will consume it are both in view. Pub does not
-            # record the resolver's version, but it does record the floor its
-            # solution needs; a toolchain below that floor cannot compile what
-            # the lock pins.
             flutter_constraint = parse_lock_sdk_constraints(lock_content).get("flutter", "")
-            if flutter_constraint and version_below_lower_bound(flutter_version, flutter_constraint):
-                fail((
-                    "{lock} was resolved against a newer Flutter than this " +
-                    "build pins: the lock requires flutter {constraint}, and " +
-                    "flutter.toolchain() pins {version}.\n" +
-                    "Either raise flutter.toolchain(flutter_version = ...) or " +
-                    "re-resolve with the pinned toolchain:\n" +
-                    "    bazel run @rules_flutter//flutter:pub -- upgrade"
-                ).format(
-                    lock = str(pub_tag.lock),
-                    constraint = flutter_constraint,
-                    version = flutter_version,
-                ))
-            tags.append(struct(tag = pub_tag, packages = lock_pkgs))
+            tags.append(struct(tag = pub_tag, packages = lock_pkgs, flutter_constraint = flutter_constraint))
 
     if tags:
-        _declare_pub_packages(tags, selected_versions[_DEFAULT_NAME], user_overlay_roots)
+        _declare_pub_packages(tags, sdks, user_overlay_roots)
 
     # Don't declare root_module_direct_deps: flutter_register_toolchains creates
     # many repos (iOS, Android, web, desktop, cross-compile per platform) and
@@ -328,13 +466,18 @@ def _git_entry(tag, name, info):
         lock = tag.lock if is_relative_git_url(url) else None,
     )
 
-def _declare_pub_packages(tags, flutter_version, user_overlay_roots):
+def _hub_listing(hub_packages, package):
+    """A hub that lists a package: its alias follows the selected SDK."""
+    return [h for h in sorted(hub_packages.keys()) if package in hub_packages[h]][0]
+
+def _declare_pub_packages(tags, sdks, user_overlay_roots):
     """Declares the repositories of every `flutter.pub()` tag: one per package.
 
     Args:
         tags: One `struct(tag, packages)` per tag, `packages` being its parsed lock.
-        flutter_version: The default toolchain's Flutter version, which builds
-            the SDK packages.
+        sdks: The declared SDKs, by name. The default SDK's framework builds the
+            build's Flutter SDK packages; another SDK with another framework
+            has packages of its own.
         user_overlay_roots: The overlay roots every package is built with.
     """
     ignore_hooks = {}
@@ -393,9 +536,13 @@ def _declare_pub_packages(tags, flutter_version, user_overlay_roots):
     if problems:
         fail("\n\n".join(problems))
 
-    pin_problems = sdk_pin_errors(flutter_version, flutter_sdk_exact_pins(flutter_version), chosen, entries)
-    if pin_problems:
-        fail("\n\n".join(pin_problems))
+    # A release's packages are held to the pins it records; another framework
+    # has its constraints checked against the locks when its spokes are fetched.
+    default_sdk = sdks[_DEFAULT_NAME]
+    if not default_sdk.framework:
+        pin_problems = sdk_pin_errors(default_sdk.version, flutter_sdk_exact_pins(default_sdk.version), chosen, entries)
+        if pin_problems:
+            fail("\n\n".join(pin_problems))
 
     built = {name: e for name, e in chosen.items() if e.kind in [HOSTED, GIT, FLUTTER_SOURCE]}
     other = sorted(
@@ -406,11 +553,36 @@ def _declare_pub_packages(tags, flutter_version, user_overlay_roots):
     # What every repository plans against, stated once rather than on each of
     # them: the lock records each repository's attributes, so the package list
     # on every repository would grow it by the square of the package count.
-    flutter_pub_index(
-        name = INDEX_REPO,
+    #
+    # The SDKs whose frameworks differ have Flutter SDK packages of their own
+    # (a framework's packages are one repository each, shared by every SDK with
+    # that framework): an index per prefix, over the same locks. Which package a
+    # build uses is chosen by the hubs' aliases, on `--@rules_flutter//flutter:sdk`.
+    sdk_packages = sorted([n for n, e in chosen.items() if e.kind in [FLUTTER_FRAMEWORK, FLUTTER_SOURCE]])
+    prefixes = _framework_variants(sdks)
+    multi = len({p: True for p in prefixes.values()}) > 1
+    index_attrs = dict(
         built = sorted(built.keys()),
         other = other,
+        sdk_packages = sdk_packages,
+        versions = {n: e.version for n, e in chosen.items() if e.kind in [HOSTED, GIT] and e.version},
+        locks = sorted({str(t.tag.lock): True for t in tags}.keys()),
+        flutter_constraints = {str(t.tag.lock): t.flutter_constraint for t in tags if t.flutter_constraint},
     )
+    flutter_pub_index(
+        name = INDEX_REPO,
+        via_hub = multi,
+        sdk_hubs = {n: _hub_listing(hub_packages, n) for n in sdk_packages},
+        **index_attrs
+    )
+    for prefix in sorted({p: True for p in prefixes.values() if p != SPOKE_PREFIX}.keys()):
+        flutter_pub_index(
+            name = index_repo(prefix),
+            main_prefix = SPOKE_PREFIX,
+            sdk_prefix = prefix,
+            via_hub = False,
+            **index_attrs
+        )
 
     for name, target in mapped.targets.items():
         # A mapped package is one repository, the workspace target the user
@@ -442,7 +614,7 @@ def _declare_pub_packages(tags, flutter_version, user_overlay_roots):
     # package is built from its archive, `ext/` overlays (keyed
     # `<package>/0.0.0`) and library repository included. `package:flutter` has
     # a rule of its own (its shaders are declared in no pubspec).
-    sdk_source_sha256 = flutter_source_sha256(flutter_version)
+    reps = _framework_representatives(sdks, prefixes)
     for name, e in sorted(chosen.items()):
         if e.kind == UNSUPPORTED:
             flutter_unsupported_package(
@@ -455,11 +627,15 @@ def _declare_pub_packages(tags, flutter_version, user_overlay_roots):
                 ),
             )
         elif e.kind == FLUTTER_FRAMEWORK:
-            flutter_framework_package(
-                name = source_repo(name),
-                flutter_version = flutter_version,
-                sha256 = sdk_source_sha256,
-            )
+            for prefix, sdk in reps.items():
+                flutter_framework_package(
+                    name = source_repo(name, prefix),
+                    flutter_version = sdk.version or "",
+                    framework_json = _framework_json(sdk.framework) if sdk.framework else None,
+                    sha256 = flutter_source_sha256(sdk.version) if sdk.version and not sdk.framework else "",
+                    sdk = sdk.name,
+                    prefix = prefix,
+                )
         elif e.kind == HOSTED:
             flutter_pub_library_repo(name = library_repo(name), package_name = name)
             flutter_pub_package(
@@ -494,15 +670,19 @@ def _declare_pub_packages(tags, flutter_version, user_overlay_roots):
                 ignore_hook = name in ignore_hooks,
             )
         elif e.kind == FLUTTER_SOURCE:
-            flutter_pub_library_repo(name = library_repo(name), package_name = name)
-            flutter_pub_package(
-                name = source_repo(name),
-                package_name = name,
-                version = e.version,
-                sha256 = sdk_source_sha256,
-                flutter_source_version = flutter_version,
-                overlay_roots = overlay_roots,
-            )
+            for prefix, sdk in reps.items():
+                flutter_pub_library_repo(name = library_repo(name, prefix), package_name = name, prefix = prefix)
+                flutter_pub_package(
+                    name = source_repo(name, prefix),
+                    package_name = name,
+                    version = e.version,
+                    sha256 = flutter_source_sha256(sdk.version) if sdk.version and not sdk.framework else "",
+                    flutter_source_version = sdk.version if not sdk.framework else "",
+                    framework_json = _framework_json(sdk.framework) if sdk.framework else None,
+                    sdk = sdk.name,
+                    prefix = prefix,
+                    overlay_roots = overlay_roots,
+                )
 
     # The build's Android Maven data: what every built spoke's Gradle build
     # declares, against what `@rules_android_maven` resolved. An Android app's
@@ -531,6 +711,8 @@ def _declare_pub_packages(tags, flutter_version, user_overlay_roots):
             hub_name = hub_name,
             packages = sorted(packages.keys()),
             built_packages = sorted([n for n in packages if n in built]),
+            sdk_packages = [n for n in sdk_packages if n in packages],
+            sdk_prefixes = prefixes,
         )
 
 flutter = module_extension(

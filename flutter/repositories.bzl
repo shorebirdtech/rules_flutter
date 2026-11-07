@@ -10,10 +10,8 @@ load("//flutter/private:engine_helpers.bzl", "ENGINE_MODES", "PLATFORM_PREFIX_TO
 load("//flutter/private:flutter_android_engine_repo.bzl", "flutter_android_engine_repo")
 load("//flutter/private:flutter_cross_repo.bzl", "flutter_cross_compilation_repo")
 load("//flutter/private:flutter_desktop_engine_repo.bzl", "flutter_desktop_engine_repo")
-load("//flutter/private:flutter_dev_root_repo.bzl", "flutter_dev_root_repo")
 load("//flutter/private:flutter_ios_engine_repo.bzl", "flutter_ios_engine_repo")
 load("//flutter/private:flutter_linux_sysroot_repo.bzl", "flutter_linux_sysroot_repo")
-load("//flutter/private:flutter_macos_engine_repo.bzl", "flutter_macos_engine_repo")
 load("//flutter/private:flutter_profile_repo.bzl", "flutter_profile_repo")
 load("//flutter/private:flutter_sdk_toolchains_repo.bzl", "flutter_sdk_toolchains_repo")
 load("//flutter/private:flutter_sky_engine_repo.bzl", "flutter_sky_engine_repo")
@@ -22,7 +20,7 @@ load("//flutter/private:flutter_version_pin_repo.bzl", "flutter_version_pin_repo
 load("//flutter/private:flutter_web_sdk_repo.bzl", "flutter_web_sdk_repo")
 load("//flutter/private:pinned.bzl", "pinned")
 load("//flutter/private:toolchains_repo.bzl", "CROSS_COMPILATION_PAIRS", "DESKTOP_CROSS_PAIRS", "DESKTOP_ENGINE_PLATFORMS", "HOST_PLATFORMS", "sdk_repo_name")
-load("//flutter/private:versions.bzl", "ARTIFACT_CHECKSUMS", "FLUTTER_VERSIONS", "LINUX_SYSROOT_CHECKSUMS", "flutter_source_sha256")
+load("//flutter/private:versions.bzl", "ARTIFACT_CHECKSUMS", "FLUTTER_VERSIONS", "LINUX_SYSROOT_CHECKSUMS")
 
 # The profile engine's repository: its flutter.jar, and the stripped copy the
 # Android engine repo's `stripped` aliases in a profile build (see
@@ -176,15 +174,6 @@ def flutter_register_toolchains(name, flutter_version):
     """
     meta = FLUTTER_VERSIONS[flutter_version]
     checksums = ARTIFACT_CHECKSUMS.get(flutter_version, {})
-
-    # FLUTTER_ROOT-shaped tree behind `@rules_flutter//flutter:pub`. Lazily
-    # fetched: nothing in a normal build references it.
-    flutter_dev_root_repo(
-        name = name + "_dev_root",
-        flutter_version = flutter_version,
-        engine_revision = meta.engine_revision,
-        sha256 = flutter_source_sha256(flutter_version),
-    )
 
     # The release, for rules that cannot ask a toolchain.
     flutter_version_pin_repo(
@@ -361,14 +350,6 @@ def flutter_register_toolchains(name, flutter_version):
 
 exports_files(["gen_snapshot_arm64"], visibility = ["//visibility:public"])
 """,
-    )
-
-    # macOS engine alias repo — stable name that delegates to the host
-    # platform's FlutterMacOS.framework; its `engine_library` follows the
-    # build mode.
-    flutter_macos_engine_repo(
-        name = name + "_macos_engine",
-        user_repository_name = name,
     )
 
     # The stock release as an engine source, and the toolchains written

@@ -56,6 +56,7 @@ applies is a loud failure, where a rewrite would quietly drift.
 
 load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url")
 load("//flutter/private:flutter_pub_index.bzl", "library_label", "read_index")
+load("//flutter/private:framework_source.bzl", "framework_root", "read_framework", "unset_message", "write_unset_stub")
 load("//flutter/private:pinned.bzl", "pinned")
 
 # The exact closure of `src/localizations/gen_l10n.dart` once the six import
@@ -101,11 +102,24 @@ _PATCHES = [
 def _flutter_gen_l10n_repo_impl(repository_ctx):
     version = repository_ctx.attr.flutter_version
 
-    repository_ctx.download_and_extract(
-        url = flutter_source_tarball_url(version),
-        sha256 = pinned(version + ".tar.gz", repository_ctx.attr.sha256),
-        stripPrefix = "flutter-{version}/packages/flutter_tools".format(version = version),
-    )
+    if repository_ctx.attr.framework_json:
+        unset = unset_message(repository_ctx)
+        if unset:
+            write_unset_stub(repository_ctx, ["gen_l10n"], unset)
+            return
+
+        # A framework source: the files of the subset, copied (the patches
+        # below rewrite them, which a link would do to the source itself).
+        version = read_framework(repository_ctx)["version"]
+        tools = framework_root(repository_ctx).get_child("packages").get_child("flutter_tools")
+        for src in _SUBSET_SRCS:
+            repository_ctx.file(src, repository_ctx.read(repository_ctx.path(str(tools) + "/" + src)))
+    else:
+        repository_ctx.download_and_extract(
+            url = flutter_source_tarball_url(version),
+            sha256 = pinned(version + ".tar.gz", repository_ctx.attr.sha256),
+            stripPrefix = "flutter-{version}/packages/flutter_tools".format(version = version),
+        )
 
     # `-p1` strips the leading `a/`, leaving the `lib/src/...` paths the
     # stripped tarball already uses. A patch that no longer applies stops the
@@ -144,8 +158,11 @@ flutter_gen_l10n_repo = repository_rule(
     implementation = _flutter_gen_l10n_repo_impl,
     attrs = {
         "flutter_version": attr.string(
-            doc = "Flutter release whose flutter_tools the generator is taken from.",
-            mandatory = True,
+            doc = "Flutter release whose flutter_tools the generator is taken from. Unused with `framework_json`.",
+        ),
+        "framework_json": attr.label(
+            doc = "The `flutter_framework.json` of a framework source whose flutter_tools the generator is taken from.",
+            allow_single_file = True,
         ),
         "sha256": attr.string(
             doc = "Checksum of the Flutter source tarball — an unpinned " +
@@ -153,7 +170,6 @@ flutter_gen_l10n_repo = repository_rule(
                   "Flutter version. Guaranteed non-empty by the caller: " +
                   "extensions.bzl reads it through `flutter_source_sha256()`, " +
                   "which refuses a version with no recorded checksum.",
-            mandatory = True,
         ),
         "_patches": attr.label_list(
             default = _PATCHES,

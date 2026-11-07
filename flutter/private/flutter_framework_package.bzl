@@ -21,6 +21,7 @@ load("@rules_dart//dart/pub:pub_lock_package.bzl", "find_pub_license_file")
 load("@rules_dart//dart/pub:pubspec.bzl", "read_pubspec")
 load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url")
 load("//flutter/private:flutter_pub_index.bzl", "library_label", "read_index")
+load("//flutter/private:framework_source.bzl", "check_dependency_constraints", "check_lock_floor", "link_framework_package", "read_framework", "unset_message", "write_unset_stub")
 load("//flutter/private:pinned.bzl", "pinned")
 
 _PACKAGE = "flutter"
@@ -81,6 +82,45 @@ flutter_library(
 def _flutter_framework_package_impl(repository_ctx):
     flutter_version = repository_ctx.attr.flutter_version
 
+    if repository_ctx.attr.framework_json:
+        unset = unset_message(repository_ctx)
+        if unset:
+            write_unset_stub(repository_ctx, [_PACKAGE], unset)
+            return
+
+        # A framework source of the root module's choosing: its package.
+        flutter_version = read_framework(repository_ctx)["version"]
+        link_framework_package(repository_ctx, _PACKAGE)
+    else:
+        _download_framework(repository_ctx, flutter_version)
+
+    # Discover deps and the language version from the pubspec.yaml, read as
+    # pub reads it, and filter deps to packages available in the lock
+    # file (same pattern as pub_lock_package). A pubspec with no
+    # `environment.sdk` gets pub's default language version, which is what pub
+    # writes for such a package.
+    index = read_index(repository_ctx, repository_ctx.attr.prefix)
+    pubspec = read_pubspec(repository_ctx, _PACKAGE, flutter_version)
+
+    # What the locks were resolved against must fit the SDK this spoke belongs
+    # to. Checked here, where only the selected SDK's spoke is fetched, so a
+    # lock resolved for one SDK does not stop a build of another.
+    check_lock_floor(index, repository_ctx.attr.sdk, flutter_version)
+    if repository_ctx.attr.framework_json:
+        check_dependency_constraints(index, repository_ctx.attr.sdk, _PACKAGE, pubspec.fields)
+    bazel_deps = sorted([d for d in pubspec.dependencies if d in index.built or d in index.other])
+    language_version = pubspec.language_version
+
+    # Build dep labels pointing to the libraries of the packages' repos.
+    dep_labels = [library_label(index, dep) for dep in bazel_deps]
+
+    repository_ctx.file("BUILD.bazel", make_flutter_framework_build_content(
+        deps = dep_labels,
+        language_version = language_version,
+        license_file = find_pub_license_file(repository_ctx),
+    ))
+
+def _download_framework(repository_ctx, flutter_version):
     # Download Flutter SDK source, extracting only the framework package.
     #
     # This same tarball is requested once per SDK package in the lock (by
@@ -98,39 +138,31 @@ def _flutter_framework_package_impl(repository_ctx):
         ),
     )
 
-    # Discover deps and the language version from the downloaded pubspec.yaml,
-    # read as pub reads it, and filter deps to packages available in the lock
-    # file (same pattern as pub_lock_package). A pubspec with no
-    # `environment.sdk` gets pub's default language version, which is what pub
-    # writes for such a package.
-    index = read_index(repository_ctx)
-    pubspec = read_pubspec(repository_ctx, _PACKAGE, repository_ctx.attr.flutter_version)
-    bazel_deps = sorted([d for d in pubspec.dependencies if d in index.built or d in index.other])
-    language_version = pubspec.language_version
-
-    # Build dep labels pointing to the libraries of the packages' repos.
-    dep_labels = [library_label(index, dep) for dep in bazel_deps]
-
-    repository_ctx.file("BUILD.bazel", make_flutter_framework_build_content(
-        deps = dep_labels,
-        language_version = language_version,
-        license_file = find_pub_license_file(repository_ctx),
-    ))
 
 flutter_framework_package = repository_rule(
     implementation = _flutter_framework_package_impl,
     doc = "Downloads package:flutter from the pinned Flutter source and generates its flutter_library target.",
     attrs = {
         "flutter_version": attr.string(
-            doc = "Flutter SDK version tag on GitHub.",
-            mandatory = True,
+            doc = "Flutter SDK version tag on GitHub. Unused with `framework_json`.",
         ),
         "sha256": attr.string(
             doc = "Expected SHA-256 of the Flutter SDK source tarball. " +
                   "Guaranteed non-empty by the caller: extensions.bzl reads " +
                   "it through `flutter_source_sha256()`, which refuses a " +
                   "version with no recorded checksum.",
-            mandatory = True,
+        ),
+        "framework_json": attr.label(
+            doc = "The `flutter_framework.json` of a framework source, in place of the release tarball.",
+            allow_single_file = True,
+        ),
+        "sdk": attr.string(
+            doc = "The SDK whose framework this is, for messages.",
+            default = "flutter",
+        ),
+        "prefix": attr.string(
+            doc = "The prefix of the index the package is planned against.",
+            default = "flutter_pub",
         ),
     },
 )

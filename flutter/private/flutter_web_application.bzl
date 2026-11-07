@@ -83,6 +83,7 @@ load(
 load("//flutter/private:path_mapping.bzl", "file_ref", "json_config_args")
 load("//flutter/private:plugin_registrant.bzl", "generate_dart_plugin_registrant")
 load("//flutter/private:sdk_defines.bzl", "version_dart_defines")
+load("//flutter/private:sdk_origin.bzl", "require_release_engine")
 load(
     "//flutter/private:validation.bzl",
     "escape_html",
@@ -382,6 +383,7 @@ def _flutter_web_bundle_impl(ctx):
     # dev tool at: it runs them on this machine.
     flutter_sdk_info = ctx.toolchains["@rules_flutter//flutter:toolchain_type"].flutter_sdk_info
     tools = portable_tools(ctx)
+    require_release_engine(ctx.label, flutter_sdk_info.sdk, flutter_sdk_info.host_tools, "web")
 
     # Merged once for all compile actions below (dart2wasm, dart2js, icon
     # tree-shake kernel) and the dev-config emission: the user's defines and
