@@ -11,7 +11,10 @@ dependencies.
 
 It also checks the Maven artifacts the linked plugins' Gradle builds declare
 against what `@rules_android_maven` resolved, for those plugins only: an app
-that does not link a plugin never needs its artifacts.
+that does not link a plugin never needs its artifacts. And it checks that a
+device of the ABI can load the native libraries the plugins bring, prebuilt
+ones inside their AARs included: on a 64-bit ABI, that they are aligned for
+16 KB pages.
 """
 
 load("@rules_android//providers:providers.bzl", "AndroidCcLinkParamsInfo", "AndroidLibraryResourceClassJarProvider", "AndroidNativeLibsInfo", "StarlarkAndroidResourcesInfo")
@@ -21,6 +24,8 @@ load("@rules_java//java/common:java_info.bzl", "JavaInfo")
 load("@rules_java//java/common:proguard_spec_info.bzl", "ProguardSpecInfo")
 load("//flutter:providers.bzl", "FlutterApplicationInfo")
 load("//flutter/private:android_plugin_maven.bzl", "maven_app_report", "maven_check_message")
+load("//flutter/private:exec_groups.bzl", "PORTABLE_EXEC_GROUPS", "portable_tools")
+load("//flutter/private:flutter_android_application.bzl", "ANDROID_NATIVE_LIBS_ATTRS", "android_abi", "validate_android_native_libs")
 
 FlutterAndroidMavenInfo = provider(
     doc = "What a pub hub's Android plugins declare in their Gradle builds, and what `@rules_android_maven` resolved.",
@@ -128,6 +133,41 @@ def link_android_libs(libs):
         ))
     return providers
 
+def _shared_libraries(link_params):
+    """The shared libraries an `AndroidCcLinkParamsInfo` brings the APK."""
+    return [
+        lib.resolved_symlink_dynamic_library or lib.dynamic_library
+        for linker_input in link_params.link_params.linking_context.linker_inputs.to_list()
+        for lib in linker_input.libraries
+        if not lib.static_library and not lib.pic_static_library and lib.dynamic_library
+    ]
+
+def _native_libs_validation(ctx, libs):
+    """The validation of the native libraries `libs` bring, or None.
+
+    The libraries an APK packages are those of each ABI's build, so outside an
+    Android configuration there is nothing to check.
+    """
+    abi = android_abi(ctx)
+    if not abi:
+        return None
+    native = []
+    for lib in libs:
+        if AndroidNativeLibsInfo in lib:
+            native.extend(lib[AndroidNativeLibsInfo].native_libs.to_list())
+        if AndroidCcLinkParamsInfo in lib:
+            native.extend(_shared_libraries(lib[AndroidCcLinkParamsInfo]))
+    native = {f: None for f in native}.keys()
+    if not native:
+        return None
+    return validate_android_native_libs(
+        ctx,
+        portable_tools(ctx),
+        abi,
+        native,
+        ctx.label.name + "_native_libs.validated",
+    )
+
 def _flutter_android_plugin_libs_impl(ctx):
     entries = ctx.attr.deps[FlutterApplicationInfo].android_libs.to_list()
     if ctx.attr.maven:
@@ -143,7 +183,11 @@ def _flutter_android_plugin_libs_impl(ctx):
     for entry in entries:
         if entry.lib not in libs:
             libs.append(entry.lib)
-    return [DefaultInfo()] + link_android_libs(libs)
+    validation = _native_libs_validation(ctx, libs)
+    return [
+        DefaultInfo(),
+        OutputGroupInfo(_validation = depset([validation] if validation else [])),
+    ] + link_android_libs(libs)
 
 flutter_android_plugin_libs = rule(
     implementation = _flutter_android_plugin_libs_impl,
@@ -160,7 +204,8 @@ flutter_android_plugin_libs = rule(
         "report": attr.string(
             doc = "The label of the application's `maven_artifacts` target, which a failure message points to in place of the hub's.",
         ),
-    },
+    } | ANDROID_NATIVE_LIBS_ATTRS,
+    exec_groups = PORTABLE_EXEC_GROUPS,
     doc = "Links the Android libraries of the plugins an application depends on, as a library exporting them would, and fails when `@rules_android_maven` lacks what their Gradle builds declare.",
 )
 

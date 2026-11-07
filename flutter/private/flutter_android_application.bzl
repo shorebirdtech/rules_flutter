@@ -63,14 +63,32 @@ load("//flutter/private:common.bzl", "android_elf_machine_for_abi", "compute_and
 load("//flutter/private:exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
 load("//flutter/private:mobile_engine_check.bzl", "check_android_engine")
 
-def _android_abi(ctx):
-    """The ABI of the Android platform this bundle is built for.
+# The ABIs of devices that can have 16 KB pages: Android's 64-bit ones. Every
+# native library packaged for them is checked to be aligned for that.
+_SIXTEEN_KB_ABIS = ["arm64-v8a", "x86_64"]
+_PAGE_SIZE = 16384
+
+# The attributes `android_abi` and `validate_android_native_libs` read.
+ANDROID_NATIVE_LIBS_ATTRS = {
+    "_android_constraint": attr.label(default = "@platforms//os:android"),
+    "_arm64_constraint": attr.label(default = "@platforms//cpu:aarch64"),
+    "_armv7_constraint": attr.label(default = "@platforms//cpu:armv7"),
+    "_validate_tool": attr.label(
+        default = "//flutter/private/tools:validate_android_elf.dart",
+        allow_single_file = True,
+    ),
+    "_x86_64_constraint": attr.label(default = "@platforms//cpu:x86_64"),
+}
+
+def android_abi(ctx):
+    """The ABI of the Android platform the target is built for.
 
     Args:
-        ctx: Rule context.
+        ctx: Rule context, with `ANDROID_NATIVE_LIBS_ATTRS`.
 
     Returns:
-        "armeabi-v7a", "arm64-v8a" or "x86_64".
+        "armeabi-v7a", "arm64-v8a" or "x86_64", or None for a platform that is
+        not Android arm, arm64 or x86_64.
     """
     if ctx.target_platform_has_constraint(ctx.attr._android_constraint[platform_common.ConstraintValueInfo]):
         if ctx.target_platform_has_constraint(ctx.attr._arm64_constraint[platform_common.ConstraintValueInfo]):
@@ -79,12 +97,66 @@ def _android_abi(ctx):
             return "x86_64"
         if ctx.target_platform_has_constraint(ctx.attr._armv7_constraint[platform_common.ConstraintValueInfo]):
             return "armeabi-v7a"
+    return None
+
+def _android_abi(ctx):
+    """The ABI of the Android platform this bundle is built for, or a failure."""
+    abi = android_abi(ctx)
+    if abi:
+        return abi
     fail((
         "{label} is built for the platform {platform}, which is not Android arm, arm64 or " +
         "x86_64. An Android app is built for the platforms of --@rules_android//flags:android_platforms: pass " +
         "--@rules_android//flags:android_platforms=@rules_android//:arm64-v8a (and " +
         ":armeabi-v7a or :x86_64 for a second ABI), or build it through flutter_android_build."
     ).format(label = ctx.label, platform = ctx.fragments.platform.platform))
+
+def validate_android_native_libs(ctx, tools, abi, libs, name):
+    """Checks that a device of `abi` can load `libs`, in a build action.
+
+    Each library must be an ELF shared object of the ABI's machine type and,
+    for a 64-bit ABI, have its segments aligned for 16 KB pages.
+
+    The check is a Dart script run by the exec-tools toolchain's `dart`, so it
+    runs on any host.
+
+    Args:
+        ctx: Rule context, with `ANDROID_NATIVE_LIBS_ATTRS` and the `PORTABLE`
+            exec group.
+        tools: The `FlutterExecToolsInfo` of the host the action runs on.
+        abi: Android ABI string (e.g. "arm64-v8a").
+        libs: `.so` files, and `.zip` files of them (an AAR's native
+            libraries, as rules_android extracts them).
+        name: The name of the stamp file, unique in the package.
+
+    Returns:
+        The validation stamp the build must produce.
+    """
+    validated = ctx.actions.declare_file(name)
+
+    # Every path is an argument, so path mapping can rewrite it.
+    args = ctx.actions.args()
+    args.add(ctx.file._validate_tool)
+    args.add("--abi", abi)
+    args.add("--machine", str(android_elf_machine_for_abi(abi)))
+    if abi in _SIXTEEN_KB_ABIS:
+        args.add("--min-load-align", str(_PAGE_SIZE))
+    args.add("--stamp", validated)
+    args.add_all(libs)
+    ctx.actions.run(
+        executable = tools.dart,
+        arguments = [args],
+        inputs = depset(
+            direct = [ctx.file._validate_tool] + libs,
+            transitive = [tools.sdk_files.run],
+        ),
+        outputs = [validated],
+        mnemonic = "FlutterValidateNativeLibs",
+        exec_group = PORTABLE,
+        execution_requirements = PATH_MAPPING,
+        progress_message = "Validating Android native libs for %s %s" % (abi, ctx.label),
+    )
+    return validated
 
 def _symlink_to_jni(ctx, src, abi, basename):
     """Create a symlink placing a native lib into the jni/<abi>/ tree."""
@@ -110,14 +182,11 @@ def _stage_native_libs(ctx, tools, aot_output, native_libs, abi):
     the Dart snapshot via System.loadLibrary("app")), whatever the file
     `gen_snapshot` wrote is called. The other libraries keep their names.
 
-    Every library is validated to be an ELF shared object with the ABI's
-    machine type before the APK is packaged — a wrong-format library fails the
-    build instead of producing an APK that crashes on device. Two libraries
-    claiming the same packaged filename are a hard error too: the APK could
-    hold only one of them.
-
-    The check is a Dart script run by the exec-tools toolchain's `dart`, so it
-    runs on any host.
+    Every library is validated (`validate_android_native_libs`) before the
+    APK is packaged — a library a device cannot load fails the build instead
+    of producing an APK that crashes on device. Two libraries claiming the
+    same packaged filename are a hard error too: the APK could hold only one
+    of them.
 
     Args:
         ctx: Rule context.
@@ -131,7 +200,6 @@ def _stage_native_libs(ctx, tools, aot_output, native_libs, abi):
         A tuple of the libraries to package and the validation stamp the
         build must produce.
     """
-    expected_machine = android_elf_machine_for_abi(abi)
     entries = ([("libapp.so", aot_output)] if aot_output else []) + [
         (lib.basename, lib)
         for lib in native_libs
@@ -159,26 +227,12 @@ def _stage_native_libs(ctx, tools, aot_output, native_libs, abi):
             ctx.actions.symlink(output = named, target_file = lib)
             libs.append(named)
 
-    # Every path is an argument, so path mapping can rewrite it.
-    validated = ctx.actions.declare_file(ctx.label.name + "_native_libs.validated")
-    args = ctx.actions.args()
-    args.add(ctx.file._validate_tool)
-    args.add("--abi", abi)
-    args.add("--machine", str(expected_machine))
-    args.add("--stamp", validated)
-    args.add_all(libs)
-    ctx.actions.run(
-        executable = tools.dart,
-        arguments = [args],
-        inputs = depset(
-            direct = [ctx.file._validate_tool] + libs,
-            transitive = [tools.sdk_files.run],
-        ),
-        outputs = [validated],
-        mnemonic = "FlutterValidateNativeLibs",
-        exec_group = PORTABLE,
-        execution_requirements = PATH_MAPPING,
-        progress_message = "Validating Flutter native libs for %s %s" % (abi, ctx.label),
+    validated = validate_android_native_libs(
+        ctx,
+        tools,
+        abi,
+        libs,
+        ctx.label.name + "_native_libs.validated",
     )
     return libs, validated
 
@@ -308,19 +362,11 @@ provided for selective fetching.
 Set to False if you only build release APKs and do not need mobile-install.""",
             default = True,
         ),
-        "_validate_tool": attr.label(
-            default = "//flutter/private/tools:validate_android_elf.dart",
-            allow_single_file = True,
-        ),
         "_sdk_record": attr.label(
             default = "//flutter/private:sdk_record",
             providers = [FlutterSdkRecordInfo],
         ),
-        "_android_constraint": attr.label(default = "@platforms//os:android"),
-        "_arm64_constraint": attr.label(default = "@platforms//cpu:aarch64"),
-        "_x86_64_constraint": attr.label(default = "@platforms//cpu:x86_64"),
-        "_armv7_constraint": attr.label(default = "@platforms//cpu:armv7"),
-    } | ASSEMBLE_DIRECTORY_ATTRS,
+    } | ANDROID_NATIVE_LIBS_ATTRS | ASSEMBLE_DIRECTORY_ATTRS,
     # Packaging copies and checks what the application built, the same bytes on
     # any host.
     exec_groups = PORTABLE_EXEC_GROUPS,

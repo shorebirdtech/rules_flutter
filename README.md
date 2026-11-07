@@ -643,6 +643,8 @@ flutter_macos_app(
 )
 ```
 
+**16 KB pages.** Devices with 16 KB memory pages, which Android 15 introduced, refuse a native library whose segments are aligned for 4 KB ones, and the app dies on launch. A Gradle build gets 16 KB alignment from NDK r28 and later. Bazel links an Android app's C/C++ code with the Android C/C++ toolchain, and rules_flutter leaves the alignment to it. rules_android_ndk 0.1.5's toolchain links every arm64 library for 4 KB pages; upstream fixed it in commit `efc0c191`, which no release has yet. Until one does, pin rules_android_ndk to a commit of its main branch with the fix, with the `git_override` the `MODULE.bazel` lines below carry. For arm64-v8a and x86_64 the build checks the native libraries the application and its plugins bring, prebuilt ones inside the plugins' AARs included, and fails naming any that is aligned for 4 KB pages. A 16 KB-aligned library loads on a 4 KB device too.
+
 | Attribute | Description |
 |---|---|
 | `application` | A `flutter_application` target. Required. |
@@ -1008,6 +1010,14 @@ Add these to `MODULE.bazel`:
 ```starlark
 bazel_dep(name = "rules_android", version = "0.8.1")
 bazel_dep(name = "rules_android_ndk", version = "0.1.5")
+
+# rules_android_ndk 0.1.5 links arm64 libraries for 4 KB pages: see "16 KB
+# pages" above.
+git_override(
+    module_name = "rules_android_ndk",
+    commit = "9946c72d5b617115d34dc2efb334f829c558a87b",
+    remote = "https://github.com/bazelbuild/rules_android_ndk.git",
+)
 
 use_repo(flutter, "flutter_toolchains")
 use_repo(flutter_pub, "deps")

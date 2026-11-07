@@ -44,6 +44,15 @@ def _libraries_impl(ctx):
             "validates for %s (machine %d): %s" % (ctx.attr.abi, ctx.attr.elf_machine, argv),
         )
 
+        # A 64-bit ABI's devices can have 16 KB pages, and refuse a library
+        # aligned for 4 KB ones.
+        asserts.equals(
+            env,
+            ctx.attr.sixteen_kb,
+            "--min-load-align" in argv and "16384" in argv,
+            "checks 16 KB alignment: %s" % argv,
+        )
+
         # The validation is a requirement of the build, not an output nobody
         # asks for.
         stamps = getattr(target[OutputGroupInfo], "_validation").to_list()
@@ -67,6 +76,7 @@ _ATTRS = {
     "abi": attr.string(mandatory = True),
     "elf_machine": attr.int(mandatory = True),
     "libraries": attr.string_list(mandatory = True),
+    "sixteen_kb": attr.bool(mandatory = True),
 }
 
 _arm64_test = analysistest.make(
@@ -111,6 +121,7 @@ def android_bundle_test_suite(name):
         abi = "arm64-v8a",
         elf_machine = 183,
         libraries = ["libapp.so", "libcombined.so"],
+        sixteen_kb = True,
         target_compatible_with = ["@platforms//os:macos"],
     )
     _armv7_test(
@@ -119,6 +130,7 @@ def android_bundle_test_suite(name):
         abi = "armeabi-v7a",
         elf_machine = 40,
         libraries = ["libapp.so", "libcombined.so"],
+        sixteen_kb = False,
         target_compatible_with = ["@platforms//os:macos"],
     )
     _x86_64_test(
@@ -127,6 +139,7 @@ def android_bundle_test_suite(name):
         abi = "x86_64",
         elf_machine = 62,
         libraries = ["libapp.so", "libcombined.so"],
+        sixteen_kb = True,
         target_compatible_with = ["@platforms//os:macos"],
     )
     _not_android_test(

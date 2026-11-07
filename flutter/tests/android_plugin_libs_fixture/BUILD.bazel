@@ -3,7 +3,8 @@
 `plugin_a`, `plugin_b` and `plugin_ok`, each in a package of its own, export an
 Android library (a plain `java_library`, which is all the link rule needs of one). The Maven
 requirements say `plugin_a` and `plugin_b` declare an artifact nobody
-installed, and `plugin_ok` one that is.
+installed, and `plugin_ok` one that is. `plugin_native`'s library brings
+prebuilt native libraries, as an AAR's do.
 """
 
 load("//flutter:android.bzl", "flutter_android_plugin_libs")
@@ -47,6 +48,20 @@ package(default_visibility = ["//flutter/tests:__subpackages__"])
         "ok",
     ]
 ]
+
+flutter_application(
+    name = "app_uses_native",
+    package_name = "app_uses_native",
+    main = "main.dart",
+    tags = ["manual"],
+    deps = ["//flutter/tests/android_plugin_libs_fixture/native:plugin_native"],
+)
+
+flutter_android_plugin_libs(
+    name = "libs_of_native",
+    tags = ["manual"],
+    deps = ":app_uses_native",
+)
 
 flutter_android_maven_requirements(
     name = "maven",

@@ -68,6 +68,87 @@ def _report_does_not_fail_impl(ctx):
 
 _report_does_not_fail_test = analysistest.make(_report_does_not_fail_impl)
 
+def _platform(label):
+    return {"//command_line_option:platforms": str(Label(label))}
+
+def _checks_native_libs_impl(ctx):
+    """The plugins' prebuilt native libraries are checked for the ABI, and for 16 KB pages on a 64-bit one."""
+    env = analysistest.begin(ctx)
+    target = analysistest.target_under_test(env)
+    validations = [
+        a
+        for a in analysistest.target_actions(env)
+        if a.mnemonic == "FlutterValidateNativeLibs"
+    ]
+    asserts.equals(env, 1, len(validations), "one validation of the native libraries")
+    if validations:
+        action = validations[0]
+        asserts.true(
+            env,
+            "native_libs.zip" in [f.basename for f in action.inputs.to_list()],
+            "the AAR's native libraries are checked: %s" % action.inputs.to_list(),
+        )
+        argv = action.argv
+        asserts.true(env, ctx.attr.abi in argv, "checks for %s: %s" % (ctx.attr.abi, argv))
+        asserts.equals(
+            env,
+            ctx.attr.sixteen_kb,
+            "--min-load-align" in argv and "16384" in argv,
+            "checks 16 KB alignment: %s" % argv,
+        )
+
+        # The check is a requirement of the build, not an output nobody asks for.
+        stamps = getattr(target[OutputGroupInfo], "_validation").to_list()
+        asserts.true(env, action.outputs.to_list()[0] in stamps, "validation: %s" % stamps)
+    return analysistest.end(env)
+
+_CHECK_ATTRS = {
+    "abi": attr.string(mandatory = True),
+    "sixteen_kb": attr.bool(mandatory = True),
+}
+
+_checks_native_libs_arm64_test = analysistest.make(
+    _checks_native_libs_impl,
+    attrs = _CHECK_ATTRS,
+    config_settings = _platform("@rules_android//:arm64-v8a"),
+)
+
+_checks_native_libs_armv7_test = analysistest.make(
+    _checks_native_libs_impl,
+    attrs = _CHECK_ATTRS,
+    config_settings = _platform("@rules_android//:armeabi-v7a"),
+)
+
+def _java_in_app_configuration_impl(ctx):
+    """The plugins' Java is built in the configuration of the library that links it.
+
+    Read in any other, a plugin's Java graph would be configured twice in an
+    APK, once under the plugins and once under the engine and the app's own
+    libraries, and every library both share compiled and resource-linked twice.
+    """
+    env = analysistest.begin(ctx)
+    target = analysistest.target_under_test(env)
+    validation = [
+        f
+        for f in getattr(target[OutputGroupInfo], "_validation").to_list()
+        if f.basename == target.label.name + "_native_libs.validated"
+    ]
+    asserts.equals(env, 1, len(validation), "its own validation, an output of its configuration")
+    jars = [
+        jar
+        for jar in target[JavaInfo].transitive_runtime_jars.to_list()
+        if jar.basename == "liblib_java.jar"
+    ]
+    asserts.equals(env, 1, len(jars), "the plugin's jar")
+    if validation and jars:
+        asserts.equals(env, validation[0].root.path, jars[0].root.path)
+    return analysistest.end(env)
+
+_java_in_app_configuration_test = analysistest.make(
+    _java_in_app_configuration_impl,
+    config_settings = _platform("@rules_android//:arm64-v8a"),
+)
+
 def android_plugin_libs_test_suite(name):
     """Declares the tests.
 
@@ -94,9 +175,28 @@ def android_plugin_libs_test_suite(name):
         name = name + "_report_does_not_fail",
         target_under_test = _FIXTURE + "report_of_ok",
     )
+    _checks_native_libs_arm64_test(
+        name = name + "_checks_native_libs_arm64",
+        target_under_test = _FIXTURE + "libs_of_native",
+        abi = "arm64-v8a",
+        sixteen_kb = True,
+    )
+    _checks_native_libs_armv7_test(
+        name = name + "_checks_native_libs_armv7",
+        target_under_test = _FIXTURE + "libs_of_native",
+        abi = "armeabi-v7a",
+        sixteen_kb = False,
+    )
+    _java_in_app_configuration_test(
+        name = name + "_java_in_app_configuration",
+        target_under_test = _FIXTURE + "libs_of_native",
+    )
     native.test_suite(
         name = name,
         tests = [
+            name + "_java_in_app_configuration",
+            name + "_checks_native_libs_arm64",
+            name + "_checks_native_libs_armv7",
             name + "_report_names_only_its_plugins",
             name + "_report_does_not_fail",
             name + "_links_only_its_plugins",

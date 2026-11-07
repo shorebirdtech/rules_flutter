@@ -1,0 +1,34 @@
+"""Plugin `plugin_native`, whose Android library brings prebuilt native libraries."""
+
+load("@bazel_skylib//rules:write_file.bzl", "write_file")
+load("@rules_java//java:java_library.bzl", "java_library")
+load("//flutter:defs.bzl", "flutter_plugin")
+load(":aar_like.bzl", "aar_like")
+
+package(default_visibility = ["//flutter/tests:__subpackages__"])
+
+java_library(
+    name = "lib_java",
+    srcs = ["Native.java"],
+)
+
+# Only analysis reads it, so its bytes do not matter.
+write_file(
+    name = "native_libs_zip",
+    out = "native_libs.zip",
+    content = [""],
+)
+
+aar_like(
+    name = "lib_native",
+    lib = ":lib_java",
+    native_libs = ":native_libs.zip",
+)
+
+flutter_plugin(
+    name = "plugin_native",
+    package_name = "plugin_native",
+    srcs = ["lib/plugin_native.dart"],
+    tags = ["manual"],
+    exports = [":lib_native"],
+)
