@@ -521,10 +521,14 @@ Future<int> runIntegrationTest(
   }
 
   final teardown = _Teardown(choice.device, errors);
+  final progress = _Progress();
   final ended = Completer<int>();
   final signals = (terminated ?? _terminationSignals()).listen((_) {
     if (ended.isCompleted) return;
-    errors.writeln('integration_test: the test was terminated, so it ends.');
+    errors.writeln(
+      'integration_test: the test was terminated while $progress, so it '
+      'ends.',
+    );
     // The status is the answer once the run is undone, whichever of this and
     // the run's own end undoes it first.
     ended.complete(143);
@@ -542,6 +546,7 @@ Future<int> runIntegrationTest(
         out: sink,
         err: errors,
         teardown: teardown,
+        progress: progress,
         updateGoldens: updateGoldens,
         startGoldenService: startGoldenService,
       ),
@@ -568,6 +573,26 @@ Stream<void> _terminationSignals() {
     onCancel: () => Future.wait(subscriptions.map((s) => s.cancel())),
   );
   return controller.stream;
+}
+
+/// What a run is doing, and since when: what a run that is terminated says,
+/// since a test that times out has nothing else to show for where its time
+/// went.
+class _Progress {
+  final _run = Stopwatch()..start();
+  final _stage = Stopwatch()..start();
+  var _doing = 'starting';
+
+  /// The run has started [doing], such as `launching the app`.
+  set doing(String doing) {
+    _doing = doing;
+    _stage.reset();
+  }
+
+  @override
+  String toString() =>
+      '$_doing (for ${_stage.elapsed.inSeconds}s, '
+      '${_run.elapsed.inSeconds}s into the run)';
 }
 
 /// What a run has to undo as it ends: the transport and the app it started
@@ -630,6 +655,7 @@ Future<int> _drive(
   required StringSink out,
   required StringSink err,
   required _Teardown teardown,
+  required _Progress progress,
   required bool updateGoldens,
   required GoldenServiceLauncher? startGoldenService,
 }) async {
@@ -638,6 +664,8 @@ Future<int> _drive(
   final device = choice.device;
 
   try {
+    // For an iOS simulator, making it; for an emulator, booting it.
+    progress.doing = 'preparing the device';
     teardown.give = await choice.prepare();
   } on StateError catch (e) {
     err.writeln('integration_test: ${e.message}');
@@ -647,6 +675,7 @@ Future<int> _drive(
   try {
     final AppInstance instance;
     try {
+      progress.doing = 'launching the app';
       await device.preflight();
       final artifact = device.pickArtifact([
         for (final path in config.appArtifacts) resolve(path),
@@ -662,6 +691,7 @@ Future<int> _drive(
 
     final IntegrationSuiteTransport connected;
     try {
+      progress.doing = 'waiting for the app to start its test suite';
       connected = await choice.connect(device, instance, ceiling: ceiling);
     } on SuiteUnreachable catch (e) {
       err.writeln('integration_test: ${e.message}');
@@ -683,6 +713,7 @@ Future<int> _drive(
       log: (message) => err.writeln('integration_test: $message'),
     );
 
+    progress.doing = 'running the suite';
     final outcome =
         await RemoteSuiteDriver(
           connected,

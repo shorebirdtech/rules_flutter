@@ -738,7 +738,35 @@ void main() {
       expect(await result, 143);
       expect(given, isTrue);
       expect(device.abandoned, 1, reason: 'the launch in flight is undone');
-      expect(err.toString(), contains('terminated'));
+      expect(err.toString(), contains('terminated while launching the app'));
+    });
+
+    test('says what the run was doing when it was terminated, which is all a '
+        'timed-out run has to go on', () async {
+      final preparing = Completer<void>();
+      final terminate = StreamController<void>();
+
+      final result = run(
+        _FakeDevice(() async => appRunning()),
+        prepare: () {
+          preparing.complete();
+          return Completer<Future<void> Function()>().future;
+        },
+        terminated: terminate.stream,
+      );
+      await preparing.future;
+      terminate.add(null);
+
+      expect(await result, 143);
+      expect(
+        err.toString(),
+        matches(
+          RegExp(
+            r'terminated while preparing the device \(for 0s, \d+s into the '
+            r'run\)',
+          ),
+        ),
+      );
     });
 
     test(
