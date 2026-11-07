@@ -74,6 +74,7 @@ exports_files(
     [
         "pub.dart",
         "pub_runfiles.dart",
+        "swift_resolve.dart",
     ],
     visibility = ["//flutter:__subpackages__"],
 )
@@ -83,6 +84,7 @@ dart_test(
     srcs = [
         "pub.dart",
         "pub_runfiles.dart",
+        "swift_resolve.dart",
     ],
     main = "test/pub_runfiles_test.dart",
     deps = ["@dev_tool_deps//:test"],

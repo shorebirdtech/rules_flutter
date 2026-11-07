@@ -6,7 +6,7 @@ compilation mode that builds Flutter's release mode (`fastbuild` and `opt`), so
 it needs the bundle built in a mode it names, not the one the command line has.
 """
 
-load("@rules_apple//apple:providers.bzl", "AppleFrameworkImportInfo")
+load("@build_bazel_rules_apple//apple:providers.bzl", "AppleFrameworkImportInfo")
 
 def _transition_impl(settings, attr):
     ios_multi_cpus = settings["//command_line_option:ios_multi_cpus"]

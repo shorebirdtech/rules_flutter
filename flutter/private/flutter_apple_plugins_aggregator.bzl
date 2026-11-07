@@ -16,8 +16,8 @@ rule walks that depset, filters to the target platform, and merges:
 The runner_lib_gen swift_library has the aggregator target in its `deps`.
 """
 
+load("@build_bazel_rules_swift//swift:swift.bzl", "SwiftInfo")
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
-load("@rules_swift//swift:swift.bzl", "SwiftInfo")
 load("//flutter:providers.bzl", "FlutterApplicationInfo")
 load("//flutter/private:unbuilt_native_code.bzl", "fail_on_unbuilt_native_code")
 

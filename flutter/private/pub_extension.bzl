@@ -30,6 +30,7 @@ load("//flutter/private:lock_entry_kind.bzl", "ENGINE_PROVIDED", "FLUTTER_FRAMEW
 load("//flutter/private:pub_lock_sdks.bzl", "parse_lock_sdk_constraints")
 load("//flutter/private:pub_reconcile.bzl", "pub_command", "reconcile_package", "sdk_pin_errors", "unsupported_locks", "version_conflict_fix")
 load("//flutter/private:pub_resolve.bzl", "path_package_directory", "resolve_errors", "resolve_failure", "resolved_targets")
+load("//flutter/private:swift_packages.bzl", "declare_swift_packages")
 load("//flutter/private:versions.bzl", "flutter_sdk_exact_pins", "flutter_source_sha256")
 
 # The name of the SDK every build has: the default `flutter.toolchain`.
@@ -170,6 +171,18 @@ another git commit, always fails.
 """,
         default = "error",
         values = ["error", "upgrade"],
+    ),
+    "swift_package_resolved": attr.label(
+        doc = """\
+The `Package.resolved` that pins the Swift packages this lock's Apple plugins
+depend on (`.package(url:)` in a plugin's `Package.swift`, as the Firebase
+plugins' `firebase-ios-sdk`), as `flutter build` records them through Xcode.
+Each pinned package is built with rules_swift_package_manager, and only by an
+iOS or macOS build of an app that links such a plugin. Write it with
+`bazel run @<name>//swift:resolve`, which resolves every Apple plugin of the
+lock, and commit it. The files of all tags must agree on each package.
+""",
+        allow_single_file = True,
     ),
     "ignore_hooks": attr.string_list(
         doc = "Pub package names whose `hook/build.dart` is knowingly " +
@@ -313,6 +326,7 @@ def pub_extension(module_ctx):
 
     if tags:
         _declare_pub_packages(tags, sdks, user_overlay_roots)
+        declare_swift_packages(module_ctx, [t.tag.swift_package_resolved for t in tags if t.tag.swift_package_resolved])
 
     return module_ctx.extension_metadata(reproducible = True)
 
@@ -396,6 +410,14 @@ def _declare_pub_packages(tags, sdks, user_overlay_roots):
     # locks say, so it is not compared, fetched or version-checked.
     entries = {}
     hub_packages = {}
+
+    # Where each hub's `swift:resolve` writes: the tag's
+    # `swift_package_resolved`, else `Package.resolved` beside its lock.
+    hub_resolved = {}
+    for t in tags:
+        tag = t.tag
+        resolved = tag.swift_package_resolved or tag.lock.same_package_label("Package.resolved")
+        hub_resolved.setdefault(tag.name, resolved)
     for t in tags:
         tag = t.tag
         hub = hub_packages.setdefault(tag.name, {})
@@ -523,6 +545,7 @@ def _declare_pub_packages(tags, sdks, user_overlay_roots):
     # `<package>/0.0.0`) and library repository included. `package:flutter` has
     # a rule of its own (its shaders are declared in no pubspec).
     reps = _framework_representatives(sdks, prefixes)
+    apple_repos = {}
     for name, e in sorted(chosen.items()):
         if e.kind == UNSUPPORTED:
             flutter_unsupported_package(
@@ -553,6 +576,7 @@ def _declare_pub_packages(tags, sdks, user_overlay_roots):
         elif e.kind == HOSTED:
             flutter_pub_library_repo(name = library_repo(name), package_name = name)
             flutter_apple_plugin_repo(name = apple_repo(name), package_name = name, version = e.version)
+            apple_repos[name] = apple_repo(name)
             flutter_pub_package(
                 name = source_repo(name),
                 package_name = name,
@@ -573,6 +597,7 @@ def _declare_pub_packages(tags, sdks, user_overlay_roots):
         elif e.kind == GIT:
             flutter_pub_library_repo(name = library_repo(name), package_name = name)
             flutter_apple_plugin_repo(name = apple_repo(name), package_name = name, version = e.version)
+            apple_repos[name] = apple_repo(name)
             flutter_pub_package(
                 name = source_repo(name),
                 package_name = name,
@@ -589,6 +614,8 @@ def _declare_pub_packages(tags, sdks, user_overlay_roots):
             # The directory pub reads, built from its pubspec as a hosted
             # package is built from its archive.
             flutter_pub_library_repo(name = library_repo(name), package_name = name)
+            flutter_apple_plugin_repo(name = apple_repo(name), package_name = name, version = e.version)
+            apple_repos[name] = apple_repo(name)
             flutter_pub_package(
                 name = source_repo(name),
                 package_name = name,
@@ -602,6 +629,8 @@ def _declare_pub_packages(tags, sdks, user_overlay_roots):
             for prefix, sdk in reps.items():
                 flutter_pub_library_repo(name = library_repo(name, prefix), package_name = name, prefix = prefix)
                 flutter_apple_plugin_repo(name = apple_repo(name, prefix), package_name = name, prefix = prefix, version = e.version)
+                if prefix == SPOKE_PREFIX:
+                    apple_repos[name] = apple_repo(name)
                 flutter_pub_package(
                     name = source_repo(name, prefix),
                     package_name = name,
@@ -644,4 +673,6 @@ def _declare_pub_packages(tags, sdks, user_overlay_roots):
             built_packages = sorted([n for n in packages if n in built]),
             sdk_packages = [n for n in sdk_packages if n in packages],
             sdk_prefixes = prefixes,
+            apple_repos = [apple_repos[n] for n in sorted(packages.keys()) if n in apple_repos],
+            swift_package_resolved = hub_resolved[hub_name],
         )

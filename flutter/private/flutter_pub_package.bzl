@@ -187,11 +187,11 @@ def _apple_manifest_dir(ctx, platform, shared_darwin_source):
     return directory if ctx.path(directory + "/Package.swift").exists else ""
 
 def _fail_on_swiftpm_dependencies(package_name, platform, manifests):
-    """Fails when a plugin's SwiftPM package depends on other Swift packages.
+    """Fails when a plugin's SwiftPM package depends on a directory outside the plugin.
 
-    rules_flutter compiles the plugin's own sources and does not resolve other
-    Swift packages, so a remote dependency would leave the app without code
-    the plugin needs.
+    A remote package is built from the app's `Package.resolved`
+    (`swift_packages.bzl`), and the Flutter framework and sibling plugins
+    from the build, but nothing supplies another directory.
 
     Args:
         package_name: The plugin's package name, for the message.
@@ -199,12 +199,16 @@ def _fail_on_swiftpm_dependencies(package_name, platform, manifests):
         manifests: The plugin's manifests for `platform` (`_apple_manifests`).
     """
     for manifest in manifests:
-        unsupported = find_unsupported_swiftpm_dependencies(manifest.content, manifest.dir)
+        unsupported = [
+            d
+            for d in find_unsupported_swiftpm_dependencies(manifest.content, manifest.dir)
+            if d.startswith("path ")
+        ]
         if unsupported:
             fail((
                 "package:{pkg} ({plat}) declares Swift package dependencies in " +
-                "{manifest} that rules_flutter does not yet " +
-                "resolve (SwiftPM dependencies of plugins are not supported):\n" +
+                "{manifest} on directories outside the plugin, which nothing in " +
+                "the build supplies:\n" +
                 "{deps}"
             ).format(
                 pkg = package_name,
@@ -526,7 +530,7 @@ def _detect_unbuilt_native_code(ctx, plugin_block):
             )
         elif platform in ("ios", "macos") and info.get("pluginClass", ""):
             # The sources are compiled, so the plugin's Package.swift says
-            # what else that compile needs: other Swift packages fail the
+            # what else that compile needs: a directory outside the plugin fails the
             # fetch. (Its settings are the Apple repository's to apply.)
             manifests = _apple_manifests(ctx, platform, info.get("sharedDarwinSource", False) == True)
             _fail_on_swiftpm_dependencies(ctx.attr.package_name, platform, manifests)

@@ -16,6 +16,7 @@ evaluate a manifest.
 """
 
 load(":flutter_pub_index.bzl", "SPOKE_PREFIX", "sibling_path", "source_repo")
+load(":swift_packages.bzl", "SWIFT_PACKAGES_FILE", "SWIFT_PACKAGES_REPO", "swift_product_label")
 load(
     ":swiftpm_manifest.bzl",
     "CONFIGURATIONS",
@@ -113,7 +114,7 @@ def _target_label(package, platform, target, main):
     name = "{}_apple_{}".format(package, platform)
     return name if target == main else "{}__{}".format(name, target)
 
-def _swift_package_library(ctx, package, platform, target, main, manifest_dir):
+def _swift_package_library(ctx, package, platform, target, main, manifest_dir, products):
     """A `flutter_apple_plugin_library` of `target` (`swift_package_targets`).
 
     The plugin's module is named after the plugin, as its registrant imports
@@ -169,7 +170,7 @@ flutter_apple_plugin_library(
         name = _target_label(package, platform, target.name, main),
         module = package if target.name == main else target.name,
         clang_module = target.name != main,
-        deps = repr([":" + _target_label(package, platform, d, main) for d in target.deps]),
+        deps = repr([":" + _target_label(package, platform, d, main) for d in target.deps] + products),
         platform = platform,
         srcs = repr(srcs),
         exclude = repr(exclude),
@@ -215,9 +216,37 @@ flutter_unbuilt_plugin_library(
 )
 """.format(name = name, platform = platform, message = repr(message))
 
+def _swift_packages(ctx):
+    """The pinned Swift packages: `struct(packages, resolved)` (`swift_packages.bzl`)."""
+    data = json.decode(ctx.read(sibling_path(ctx, SWIFT_PACKAGES_REPO, SWIFT_PACKAGES_FILE)))
+    return struct(packages = data["packages"], resolved = data["resolved"])
+
+def _unpinned_message(package, version, platform, manifest, unpinned, resolved):
+    return (
+        "package:{pkg} {version} depends for {platform} on Swift packages that no " +
+        "`Package.resolved` pins ({manifest}):\n    {unpinned}\n" +
+        "rules_flutter builds the Swift packages an Apple plugin depends on at the versions " +
+        "a `Package.resolved` records, as Xcode does for `flutter build`. Run " +
+        "`bazel run @<hub>//swift:resolve`, <hub> being the `name` of your " +
+        "`flutter_pub.from_lock`, and name the file it writes in that tag's " +
+        "`swift_package_resolved`.{read}"
+    ).format(
+        pkg = package,
+        version = version,
+        platform = {"ios": "iOS", "macos": "macOS"}[platform],
+        manifest = manifest,
+        unpinned = "\n    ".join(unpinned),
+        read = " The build reads " + ", ".join(resolved) + "." if resolved else "",
+    )
+
 def _apple_plugin_repo_impl(ctx):
     package = ctx.attr.package_name
     info_path = sibling_path(ctx, source_repo(package, ctx.attr.prefix), APPLE_PLUGIN_FILE)
+    if not info_path.exists:
+        # A package with no Apple library: nothing to build or resolve.
+        ctx.file(SWIFT_MANIFESTS_FILE, json.encode({"package": package, "platforms": {}}))
+        ctx.file("BUILD.bazel", _SWIFT_MANIFESTS_TARGET.format(manifests = "[]"))
+        return ctx.repo_metadata(reproducible = True)
     info = json.decode(ctx.read(info_path))
     plugin_root = info_path.dirname
 
@@ -227,7 +256,16 @@ def _apple_plugin_repo_impl(ctx):
         if plugin_root.get_child(directory).exists:
             ctx.symlink(plugin_root.get_child(directory), directory)
 
+    # What `swift:resolve` resolves: each platform's manifest.
+    manifest_dirs = {
+        platform: layout["manifest_dir"]
+        for platform, layout in info["platforms"].items()
+        if layout["manifest_dir"]
+    }
+    ctx.file(SWIFT_MANIFESTS_FILE, json.encode({"package": package, "platforms": manifest_dirs}))
+
     dumps = {}
+    swift_packages = None
     targets = []
     for platform in sorted(info["platforms"].keys()):
         layout = info["platforms"][platform]
@@ -260,14 +298,63 @@ def _apple_plugin_repo_impl(ctx):
                 manifest,
                 built.problems,
             )))
-        else:
-            for target in built.targets:
-                targets.append(_swift_package_library(ctx, package, platform, target, built.main, manifest_dir))
+            continue
+
+        # The remote packages' products, from the repositories of their pins.
+        remote = [p for t in built.targets for p in t.remote_products]
+        if remote and swift_packages == None:
+            swift_packages = _swift_packages(ctx)
+        unpinned = []
+        for identity, _ in remote:
+            if identity not in swift_packages.packages:
+                location = [d for d in _remote_locations(dumps[manifest_dir]) if d[0] == identity]
+                entry = "{} ({})".format(identity, location[0][1]) if location else identity
+                if entry not in unpinned:
+                    unpinned.append(entry)
+        if unpinned:
+            targets.append(_stand_in(package, platform, _unpinned_message(
+                package,
+                ctx.attr.version,
+                platform,
+                manifest,
+                unpinned,
+                swift_packages.resolved,
+            )))
+            continue
+        for target in built.targets:
+            products = [swift_product_label(identity, product) for identity, product in target.remote_products]
+            targets.append(_swift_package_library(ctx, package, platform, target, built.main, manifest_dir, products))
 
     ctx.file("BUILD.bazel", """\
 load("@rules_flutter//flutter:macos.bzl", "flutter_apple_plugin_library")
 load("@rules_flutter//flutter/private:unbuilt_native_code.bzl", "flutter_unbuilt_plugin_library")
-{targets}""".format(targets = "".join(targets)))
+{targets}{manifests}""".format(
+        targets = "".join(targets),
+        manifests = _SWIFT_MANIFESTS_TARGET.format(manifests = repr(sorted([d + "/Package.swift" for d in {d: None for d in manifest_dirs.values()}]))),
+    ))
+
+    # What `dump-package` evaluates depends on the host's Xcode.
+    return ctx.repo_metadata(reproducible = False)
+
+# The manifests `swift:resolve` reads, and which platform each is.
+SWIFT_MANIFESTS_FILE = "swift_manifests.json"
+
+_SWIFT_MANIFESTS_TARGET = """
+filegroup(
+    name = "swift_manifests",
+    srcs = ["swift_manifests.json"] + {manifests},
+    visibility = ["//visibility:public"],
+)
+"""
+
+def _remote_locations(dump):
+    """`(identity, url)` of each remote package a manifest depends on."""
+    found = []
+    for dep in dump.get("dependencies", []):
+        for entry in dep.get("sourceControl", []):
+            remote = (entry.get("location") or {}).get("remote") or [{}]
+            found.append((entry.get("identity", ""), remote[0].get("urlString", "")))
+    return found
 
 flutter_apple_plugin_repo = repository_rule(
     implementation = _apple_plugin_repo_impl,

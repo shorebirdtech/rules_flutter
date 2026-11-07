@@ -8,8 +8,6 @@ them as the manifest says: `swift package dump-package` evaluates the manifest
 C, C++, Swift and linker settings, each under the platform and configuration
 its condition names.
 
-Two parts of a manifest it cannot honour that way.
-
 Dependencies. A pub plugin whose Apple side is a SwiftPM package lists what it
 needs from other packages in `dependencies:`:
 
@@ -18,11 +16,12 @@ needs from other packages in `dependencies:`:
         .package(path: "../shared"),
     ],
 
-rules_flutter does not resolve other Swift packages. A remote dependency would
-be missing from the build and the app would fail to compile or crash at
-runtime, so `find_unsupported_swiftpm_dependencies` reports each one. A
-dependency on a directory inside the plugin is fine: its sources are part of
-the plugin. A directory outside the plugin is not.
+A remote package's products are the targets of its repository, which the app's
+`Package.resolved` pins (`swift_packages.bzl`). The Flutter framework's package
+and a sibling plugin's are supplied by the build. A dependency on a directory
+inside the plugin is fine: its sources are part of the plugin. Another
+directory outside the plugin is not, and `find_unsupported_swiftpm_dependencies`
+reports it.
 
 Settings a manifest computes. `.define` and `.unsafeFlags` in a target's
 `cSettings`, `cxxSettings` or `swiftSettings` set preprocessor macros and
@@ -449,6 +448,58 @@ def _local_dependencies(target, targets, platform):
                 found.append(value[0])
     return found
 
+def _package_dependencies(dump):
+    """The package's dependencies by the names a `.product(package:)` may use.
+
+    Returns:
+        A dict of name (identity, and the name the manifest gives it) to a
+        struct with `kind` (`sourceControl`, `fileSystem` or `registry`),
+        `identity` and `location`.
+    """
+    found = {}
+    for dep in dump.get("dependencies", []):
+        for kind, entries in dep.items():
+            for entry in entries:
+                location = ""
+                remote = (entry.get("location") or {}).get("remote")
+                if remote:
+                    location = remote[0].get("urlString", "")
+                info = struct(kind = kind, identity = entry.get("identity", ""), location = location or entry.get("path", ""))
+                found[info.identity] = info
+                name = entry.get("nameForTargetDependencyResolutionOnly")
+                if name:
+                    found[name] = info
+                    found[name.lower()] = info
+    return found
+
+def _remote_products(target, packages, platform, problems):
+    """The products of remote packages `target` depends on for `platform`.
+
+    A product of a package on the file system is the Flutter framework or a
+    sibling plugin, which pubspec.yaml makes a dependency of the plugin.
+
+    Returns:
+        A list of `(identity, product)`.
+    """
+    found = []
+    for dep in target.get("dependencies", []):
+        value = dep.get("product")
+        if not value:
+            continue
+        product, package = value[0], value[1]
+        condition = value[-1] if type(value[-1]) == "dict" else None
+        if condition and condition.get("platformNames") and platform not in condition["platformNames"]:
+            continue
+        info = packages.get(package) or packages.get((package or "").lower())
+        if info == None:
+            problems.append("its target `{}` depends on `{}` of the package `{}`, which it does not declare".format(target.get("name"), product, package))
+        elif info.kind == "sourceControl":
+            if (info.identity, product) not in found:
+                found.append((info.identity, product))
+        elif info.kind == "registry":
+            problems.append("its target `{}` depends on `{}` of the registry package `{}`, and rules_flutter builds only packages from source repositories (`.package(url:)`)".format(target.get("name"), product, info.identity))
+    return found
+
 def _target_build(dump, target, deps, platform, manifest_dir, problems):
     """How one regular target of the package is built; None after a problem."""
     name = target.get("name")
@@ -518,11 +569,14 @@ def _target_build(dump, target, deps, platform, manifest_dir, problems):
     if dump.get("cxxLanguageStandard"):
         settings["cxxopts"][""].append("-std=" + dump["cxxLanguageStandard"])
 
+    remote_products = _remote_products(target, _package_dependencies(dump), platform, problems)
+
     if len(problems) > count:
         return None
     return struct(
         name = name,
         deps = deps,
+        remote_products = remote_products,
         dir = target_dir,
         sources = sources,
         exclude = exclude,
@@ -556,7 +610,9 @@ def swift_package_targets(dump, package_name, platform, manifest_dir):
         nothing), and, when there are none: `main`, the name of the target
         that is the plugin's module; and `targets`, the targets to build,
         each after those it depends on. A target is a struct: `name`;
-        `deps`, the names of the package's targets it depends on; `dir`, its
+        `deps`, the names of the package's targets it depends on;
+        `remote_products`, the `(identity, product)` of each product of a
+        remote package (`.package(url:)`) it depends on; `dir`, its
         source directory; `sources`, the files and directories its sources
         are in (its whole directory when the manifest names none);
         `exclude`; `public_headers`, its public header directory;

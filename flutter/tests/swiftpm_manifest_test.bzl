@@ -237,6 +237,13 @@ def _dump(targets, products = None, **kwargs):
             {"name": "foo", "targets": ["foo"], "type": {"library": ["automatic"]}},
         ],
         "targets": targets,
+
+        # The Flutter framework's package, which every plugin's target names.
+        "dependencies": [{"fileSystem": [{
+            "identity": "flutterframework",
+            "nameForTargetDependencyResolutionOnly": "FlutterFramework",
+            "path": "/x/ios/FlutterFramework",
+        }]}],
     }
     result.update(kwargs)
     return result
@@ -380,6 +387,50 @@ def _swift_package_targets_test_impl(ctx):
 
 swift_package_targets_test = unittest.make(_swift_package_targets_test_impl)
 
+def _remote_products_test_impl(ctx):
+    env = unittest.begin(ctx)
+
+    # firebase_core's dependencies, as dump-package prints them: a remote
+    # package, the Flutter framework by path, and a sibling plugin by path.
+    dependencies = [
+        {"sourceControl": [{
+            "identity": "firebase-ios-sdk",
+            "location": {"remote": [{"urlString": "https://github.com/firebase/firebase-ios-sdk"}]},
+        }]},
+        {"fileSystem": [{"identity": "flutterframework", "nameForTargetDependencyResolutionOnly": "FlutterFramework", "path": "/x/ios/FlutterFramework"}]},
+        {"registry": [{"identity": "scope.pkg"}]},
+    ]
+    built = swift_package_targets(_dump(
+        [_target(dependencies = [
+            {"product": ["FirebaseCore", "firebase-ios-sdk", None, None]},
+            {"product": ["FirebaseInstallations", "firebase-ios-sdk", None, None]},
+            {"product": ["FirebaseCore", "firebase-ios-sdk", None, None]},
+            {"product": ["MacOnly", "firebase-ios-sdk", None, {"platformNames": ["macos"]}]},
+            {"product": ["FlutterFramework", "FlutterFramework", None, None]},
+        ])],
+        dependencies = dependencies,
+    ), "foo", "ios", "ios/foo")
+    asserts.equals(env, [], built.problems)
+    asserts.equals(env, [
+        ("firebase-ios-sdk", "FirebaseCore"),
+        ("firebase-ios-sdk", "FirebaseInstallations"),
+    ], built.targets[0].remote_products)
+
+    # A registry package, and a package the manifest does not declare.
+    asserts.equals(env, [
+        "its target `foo` depends on `P` of the registry package `scope.pkg`, and rules_flutter builds only packages from source repositories (`.package(url:)`)",
+        "its target `foo` depends on `Q` of the package `nowhere`, which it does not declare",
+    ], swift_package_targets(_dump(
+        [_target(dependencies = [
+            {"product": ["P", "scope.pkg", None, None]},
+            {"product": ["Q", "nowhere", None, None]},
+        ])],
+        dependencies = dependencies,
+    ), "foo", "ios", "ios/foo").problems)
+    return unittest.end(env)
+
+remote_products_test = unittest.make(_remote_products_test_impl)
+
 def _swift_package_target_problems_test_impl(ctx):
     env = unittest.begin(ctx)
 
@@ -440,5 +491,6 @@ def swiftpm_manifest_test_suite(name):
         shell_quote_copt_test,
         swift_package_target_test,
         swift_package_targets_test,
+        remote_products_test,
         swift_package_target_problems_test,
     )

@@ -99,7 +99,35 @@ alias(
 )
 """.format(maven = ANDROID_MAVEN_REPO),
     )
+
+    # `bazel run @<hub>//swift:resolve`: the lock's Apple plugins' Swift
+    # package dependencies, resolved into the hub's `Package.resolved`.
+    resolved = ctx.attr.swift_package_resolved
+    ctx.file(
+        "swift/BUILD.bazel",
+        """\
+load("@rules_flutter//flutter/private:flutter_swift_resolve.bzl", "flutter_swift_resolve")
+
+flutter_swift_resolve(
+    name = "resolve",
+    hub = {hub},
+    manifests = {manifests},
+    output = {output},
+    visibility = ["//visibility:public"],
+)
+""".format(
+            hub = repr(ctx.attr.hub_name),
+            manifests = repr(["@{}//:swift_manifests".format(r) for r in ctx.attr.apple_repos]),
+            output = repr(_workspace_path(resolved) if resolved else ""),
+        ),
+    )
     return ctx.repo_metadata(reproducible = True)
+
+def _workspace_path(label):
+    """`label`'s path in the main repository, or "" for a label of another."""
+    if label.repo_name:
+        return ""
+    return (label.package + "/" + label.name) if label.package else label.name
 
 flutter_pub_lock_hub = repository_rule(
     implementation = _flutter_pub_lock_hub_impl,
@@ -119,6 +147,13 @@ flutter_pub_lock_hub = repository_rule(
         "sdk_prefixes": attr.string_dict(
             doc = "For each declared SDK, the prefix of the repositories that hold its framework's SDK packages.",
             default = {},
+        ),
+        "apple_repos": attr.string_list(
+            doc = "The Apple repositories of the built packages, whose Swift package manifests `swift:resolve` resolves.",
+            default = [],
+        ),
+        "swift_package_resolved": attr.label(
+            doc = "The `Package.resolved` `swift:resolve` writes: the tag's, or the one beside its lock.",
         ),
         "built_packages": attr.string_list(
             doc = "The built ones among `packages` (hosted, git, and Flutter SDK packages built from the Flutter source): their alias is their library repository's, the others' their one repository's.",

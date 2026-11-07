@@ -23,6 +23,9 @@ flutter_pub = use_extension("@rules_flutter//flutter/pub:extensions.bzl", "pub")
 flutter_pub.from_lock(
     name = "deps",
     lock = "//:pubspec.lock",
+    # The Swift packages the Apple plugins depend on (firebase_core's
+    # firebase-ios-sdk), written by `bazel run @deps//swift:resolve`.
+    swift_package_resolved = "//:Package.resolved",
 )
 
 use_repo(flutter, "flutter_ios_engine", "flutter_toolchains")

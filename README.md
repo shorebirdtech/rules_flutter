@@ -333,6 +333,32 @@ An Apple plugin whose iOS or macOS side is a Swift package (`ios/<plugin>/Packag
 
 Only an iOS or macOS build reads the manifests, and it needs Xcode for it, as any Apple build does. Other platforms, and other hosts, never evaluate a manifest.
 
+#### Swift packages a plugin depends on
+
+A plugin's package can depend on other Swift packages, as the Firebase plugins depend on `firebase-ios-sdk`:
+
+```swift
+.package(url: "https://github.com/firebase/firebase-ios-sdk", exact: "13.1.1"),
+```
+
+`flutter build` resolves those through Xcode and records the versions in a `Package.resolved`. rules_flutter builds them from such a file, with [rules_swift_package_manager](https://github.com/cgrindel/rules_swift_package_manager). Write it, and commit it:
+
+```sh
+bazel run @deps//swift:resolve      # `deps` being your flutter_pub.from_lock's name
+```
+
+It resolves every Apple plugin's package of the lock, for iOS and macOS, as Flutter's generated plugin package does, and writes `Package.resolved` beside `pubspec.lock`. Name it in the tag:
+
+```starlark
+flutter_pub.from_lock(
+    name = "deps",
+    lock = "//:pubspec.lock",
+    swift_package_resolved = "//:Package.resolved",
+)
+```
+
+Run it again after a change to `pubspec.lock` that changes a plugin's Swift dependencies. An iOS or macOS app that links a plugin whose package depends on a package the file does not pin fails at analysis, naming the package and the command. Each pinned package is fetched only when an iOS or macOS build needs it.
+
 Some manifests rules_flutter cannot honour this way, and an iOS or macOS app that links such a plugin fails at analysis, saying why. Other platforms are unaffected.
 
 - A library product of several targets none of which is named after the plugin (Flutter imports the module of that name), a binary target, or a setting rules_flutter does not apply.

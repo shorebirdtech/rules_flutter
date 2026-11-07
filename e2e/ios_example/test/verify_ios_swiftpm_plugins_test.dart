@@ -10,6 +10,11 @@
 /// depends on an Objective-C target, which depends on a target for iOS and one
 /// for macOS: the app carries the code of each target for iOS, and not the
 /// macOS one's.
+///
+/// `firebase_core` 5.1.0's product is its Swift target and an Objective-C
+/// target, and depends on `firebase-ios-sdk`, a remote Swift package that the
+/// workspace's `Package.resolved` pins: the app carries both targets and the
+/// Firebase SDK's code.
 library;
 
 import 'dart:convert';
@@ -51,6 +56,10 @@ void main() {
       ('video_player_avfoundation', 'VideoPlayerPlugin'),
       ('video_player_avfoundation_objc', 'FVPFrameUpdater'),
       ('video_player_avfoundation_ios', 'FVPNativeVideoView'),
+      ('firebase_core', 'FLTFirebaseCorePlugin'),
+      ('firebase_core_objc', 'FLTFirebasePluginRegistry'),
+      ('firebase-ios-sdk FirebaseCore', 'FIRApp'),
+      ('firebase-ios-sdk FirebaseInstallations', 'FIRInstallations'),
     ]) {
       check.expect(
         'a binary in the bundle carries the target $target',

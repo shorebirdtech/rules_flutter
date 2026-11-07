@@ -340,6 +340,7 @@ flutter_application(
     main = "lib/swiftpm_plugins_main.dart",
     min_os_version = IOS_MINIMUM_OS_VERSION,
     deps = [
+        "@deps//:firebase_core",
         "@deps//:flutter",
         "@deps//:flutter_qjs_next",
         "@deps//:video_player_avfoundation",
@@ -493,6 +494,7 @@ flutter_library(
     package_name = "ios_example",
     srcs = glob(["lib/**/*.dart"]),
     deps = [
+        "@deps//:firebase_core",
         "@deps//:flutter",
         "@deps//:flutter_qjs_next",
         "@deps//:video_player_avfoundation",
