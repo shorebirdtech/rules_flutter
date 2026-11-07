@@ -61,7 +61,7 @@ load("@bazel_skylib//lib:structs.bzl", "structs")
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo", "DartKernelSdkInfo")
 load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "KERNEL_LISTS_ATTR", "KERNEL_TOOL_ATTR", "TRACK_CREATION_LOCATIONS_ATTR", "collect_modules", "collect_packages", "collect_transitive_srcs", "dart_analyzable_info_with_packages", "dart_entry_kernel_action", "dart_import_check_aspect", "dart_link_kernel_action", "dart_package_info", "derive_lib_root", "executable_defines", "executable_defines_config", "import_check_validation", "kernel_lists", "runfiles_path", "track_creation_locations")
-load("//flutter:providers.bzl", "FlutterApplicationInputsInfo", "FlutterInfo")
+load("//flutter:providers.bzl", "FlutterApplicationInputsInfo", "FlutterInfo", "FlutterTestProgramInfo")
 load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "synthesize_app_package")
 load("//flutter/private:application_libraries.bzl", "application_libraries", "application_libraries_aspect")
 load(
@@ -293,19 +293,12 @@ def _flutter_test_impl(ctx):
         is_executable = True,
     )
 
-    env = program.env | {
-        # What a coverage run reports, one URI prefix a line: the test's own
-        # package and its own sources, as `flutter test --coverage` reports its
-        # package by default. The rule's generated bootstrap and comparator
-        # are not the user's code.
-        "FLUTTER_TEST_COVERAGE_LIBRARIES": "\n".join(
-            ["package:%s/" % program.inputs.package_name] +
-            [_own_source_uri(f, program.modular) for f in [ctx.file.main] + ctx.files.srcs],
-        ),
+    env = _program_environment(program.info, ctx.workspace_name) | {
+        "FLUTTER_TEST_COVERAGE_LIBRARIES": "\n".join(program.info.coverage_libraries),
         # The test's source in the runfiles, which the runner reads for the
         # library annotations (`@Tags`) the way `flutter test` does.
         # FLUTTER_TEST_PATH stays the display path.
-        "FLUTTER_TEST_SOURCE": runfiles_path(ctx.file.main, ctx.workspace_name),
+        "FLUTTER_TEST_SOURCE": runfiles_path(program.info.source, ctx.workspace_name),
     }
     for key, attr_name in [
         ("FLUTTER_TEST_INCLUDE_TAGS", "include_tags"),
@@ -325,14 +318,36 @@ def _flutter_test_impl(ctx):
     return [
         DefaultInfo(
             executable = executable,
-            runfiles = program.runfiles.merge_all([
-                ctx.runfiles(files = [ctx.file.main]),
-                tool[DefaultInfo].default_runfiles,
-            ]),
+            runfiles = program.info.runfiles.merge(tool[DefaultInfo].default_runfiles),
         ),
         testing.TestEnvironment(env),
         instrumented_files_info,
     ] + program.providers
+
+def _program_environment(info, workspace_name):
+    """The runner's start-up variables for a program: runfiles-relative paths.
+
+    Args:
+      info: The `FlutterTestProgramInfo` to run.
+      workspace_name: The main repository's name, which runfiles paths start with.
+
+    Returns:
+      dict: environment variable to value.
+    """
+    env = {
+        "FLUTTER_TEST_TESTER": runfiles_path(info.tester, workspace_name),
+        "FLUTTER_TEST_ICU": runfiles_path(info.icu_data, workspace_name),
+        "FLUTTER_TEST_DILL": runfiles_path(info.kernel, workspace_name),
+        "FLUTTER_TEST_ASSETS": runfiles_path(info.assets, workspace_name),
+        "FLUTTER_TEST_PATH": info.display_path,
+        "FLUTTER_TEST_IMPELLER": "1" if info.enable_impeller else "",
+    }
+    if info.kernel_list:
+        # flutter_tester takes one kernel file: the runner joins the list.
+        env["FLUTTER_TEST_KERNEL_LIST"] = "1"
+    if info.native_files:
+        env["FLUTTER_TEST_NATIVE_FILES"] = "\n".join(info.native_files)
+    return env
 
 def _add_user_env(ctx, kind, env):
     """Merges the target's `env` into `env`, never over the rule's own keys.
@@ -432,10 +447,8 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
       layout: The native-assets manifest layout (`write_native_assets_manifest`).
 
     Returns:
-      `struct(inputs, env, runfiles, modular, providers)`: the program
-      (`_test_inputs`); the runner's runfiles-relative start-up variables; the
-      runfiles, less the runner's own; whether the kernel was linked from
-      modules; and the providers both rules return.
+      `struct(info, providers)`: the `FlutterTestProgramInfo` of the compiled
+      program, and the other providers both rules return.
     """
     inputs = _test_inputs(ctx, kind)
     deps = inputs.deps
@@ -589,23 +602,6 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
         inputs = inputs,
     )
 
-    # Runfiles-relative paths the runner reads from env at start-up.
-    workspace_name = ctx.workspace_name
-    env = {
-        "FLUTTER_TEST_TESTER": runfiles_path(runner_tools.flutter_tester, workspace_name),
-        "FLUTTER_TEST_ICU": runfiles_path(runner_tools.icu_data, workspace_name),
-        "FLUTTER_TEST_DILL": runfiles_path(kernel_dill, workspace_name),
-        "FLUTTER_TEST_ASSETS": runfiles_path(flutter_assets, workspace_name),
-        # Display path for the suite. Used in package:test report output.
-        "FLUTTER_TEST_PATH": ctx.file.main.short_path,
-        "FLUTTER_TEST_IMPELLER": "1" if ctx.attr.enable_impeller else "",
-    }
-    if kernel_list:
-        # flutter_tester takes one kernel file: the runner joins the list.
-        env["FLUTTER_TEST_KERNEL_LIST"] = "1"
-    if native_files:
-        env["FLUTTER_TEST_NATIVE_FILES"] = "\n".join(native_files)
-
     runfiles = ctx.runfiles(
         # The bundled native-asset libraries ship here, at the runfiles-relative
         # paths the manifest names. Both arms re-declare the library into an
@@ -618,6 +614,7 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
             runner_tools.flutter_tester,
             runner_tools.icu_data,
             flutter_assets,
+            ctx.file.main,
         ] + ctx.files.data + bundled_code_assets,
         transitive_files = listed_kernels,
     )
@@ -630,7 +627,29 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
     for data_target in ctx.attr.data:
         runfiles = runfiles.merge(data_target[DefaultInfo].default_runfiles)
 
-    return struct(inputs = inputs, env = env, runfiles = runfiles, modular = modular, providers = [
+    info = FlutterTestProgramInfo(
+        kernel = kernel_dill,
+        kernel_list = bool(kernel_list),
+        kernels = listed_kernels,
+        assets = flutter_assets,
+        tester = runner_tools.flutter_tester,
+        icu_data = runner_tools.icu_data,
+        # Used in package:test report output.
+        display_path = ctx.file.main.short_path,
+        source = ctx.file.main,
+        # What a coverage run reports, one URI prefix a line: the test's own
+        # package and its own sources, as `flutter test --coverage` reports its
+        # package by default. The rule's generated bootstrap and comparator
+        # are not the user's code.
+        coverage_libraries = ["package:%s/" % inputs.package_name] +
+                             [_own_source_uri(f, modular) for f in [ctx.file.main] + ctx.files.srcs],
+        native_assets_manifest = native_assets_manifest,
+        native_files = native_files,
+        enable_impeller = ctx.attr.enable_impeller,
+        target_os = target_os,
+        runfiles = runfiles,
+    )
+    return struct(info = info, providers = [
         # The test's own files and every library it reaches import only what
         # their `deps` provide, in either compile mode. The generated bootstrap
         # and golden comparator are the rule's, not the user's, and are not
@@ -1041,7 +1060,7 @@ def _flutter_tester_binary_impl(ctx):
         ctx.target_platform_has_constraint(ctx.attr._android_constraint[platform_common.ConstraintValueInfo]),
     )
     program = _program(ctx, "flutter_tester_binary", runner_tools, target_os, _target_arch(ctx), "library_path")
-    env = dict(program.env)
+    env = _program_environment(program.info, ctx.workspace_name)
     _add_user_env(ctx, "flutter_tester_binary", env)
 
     # The executable is the prebuilt runner under the binary's name, as for
@@ -1064,7 +1083,7 @@ def _flutter_tester_binary_impl(ctx):
     return [
         DefaultInfo(
             executable = executable,
-            runfiles = program.runfiles.merge_all([
+            runfiles = program.info.runfiles.merge_all([
                 ctx.runfiles(root_symlinks = {ctx.label.name + ".launch.json": launch}),
                 tool[DefaultInfo].default_runfiles,
             ]),

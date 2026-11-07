@@ -228,3 +228,25 @@ FlutterIntegrationRunnerInfo = provider(
         "target_compatible_with": "list[Label]: the platforms the runner works on, which a macro puts on the test it declares.",
     },
 )
+
+FlutterTestProgramInfo = provider(
+    doc = """A compiled Flutter test program: what `flutter_tester` runs, with everything the runner needs beside it. Returned by `flutter_test_program`, and by any rule that compiles a test of its own; `flutter_program_test` runs the program.
+
+The kernel's entry point speaks the `package:test_api` `RemoteListener` protocol over the WebSocket named by `FLUTTER_TEST_HARNESS_PORT`, as the bootstrap `flutter_test_program` generates does.""",
+    fields = {
+        "kernel": "File: the kernel flutter_tester is started with: one `.dill`, or, when `kernel_list` is true, a list of the kernels in `kernels`, which the runner joins into one when it starts flutter_tester.",
+        "kernel_list": "bool: whether `kernel` is a list of kernels rather than a kernel.",
+        "kernels": "depset[File]: the kernels `kernel` names, when it is a list; empty otherwise.",
+        "assets": "File: the `flutter_assets` directory the test runs with: shaders, fonts and the package assets that `rootBundle` reads.",
+        "tester": "File: the `flutter_tester` that runs the kernel, for the platform the program is built for.",
+        "icu_data": "File: the ICU data `flutter_tester` is given.",
+        "display_path": "string: the suite's path in the runner's reports.",
+        "source": "File: the test library's source, which the runner reads for its `@Tags` annotations.",
+        "coverage_libraries": "list[string]: the URI prefixes a coverage run reports: the test's own package and sources.",
+        "native_assets_manifest": "File: the Native Assets manifest the kernel was compiled with (`dart:ffi` `@Native` resolution).",
+        "native_files": "list[string]: runfiles paths of the native-asset libraries the runner puts on the loader's search path (Windows); empty elsewhere.",
+        "enable_impeller": "bool: whether the test renders with Impeller.",
+        "target_os": "string: the OS the program is built for (`macos`, `linux`, `windows`, ...).",
+        "runfiles": "runfiles: everything the program needs when it runs, less the runner itself: the kernels, `flutter_tester`, the ICU data, the assets, the source, native-asset libraries and `data` (goldens included). Every File above is in it.",
+    },
+)
