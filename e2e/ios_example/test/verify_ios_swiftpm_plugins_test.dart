@@ -5,6 +5,11 @@
 /// report, and, in debug builds only, `DUMP_LEAKS`, which compiles in the leak
 /// report. The simulator build is a debug build, so the app carries the C
 /// code, the version string and the leak report.
+///
+/// `video_player_avfoundation` 2.12.3's product is its Swift target, which
+/// depends on an Objective-C target, which depends on a target for iOS and one
+/// for macOS: the app carries the code of each target for iOS, and not the
+/// macOS one's.
 library;
 
 import 'dart:convert';
@@ -42,6 +47,24 @@ void main() {
         "QuickJS was compiled with Package.swift's debug-only DUMP_LEAKS",
         condition: anyContains('string leakage'),
       );
+    for (final (target, symbol) in [
+      ('video_player_avfoundation', 'VideoPlayerPlugin'),
+      ('video_player_avfoundation_objc', 'FVPFrameUpdater'),
+      ('video_player_avfoundation_ios', 'FVPNativeVideoView'),
+    ]) {
+      check.expect(
+        'a binary in the bundle carries the target $target',
+        condition: binaries.any(
+          (f) => MachO(f.path).hasSymbolContaining(symbol),
+        ),
+      );
+    }
+    check.expect(
+      'no binary carries the macOS-only target',
+      condition: !binaries.any(
+        (f) => MachO(f.path).hasSymbolContaining('FVPCoreVideoDisplayLink'),
+      ),
+    );
     bundle.finish('All Swift package plugin checks passed.');
   } finally {
     bundle.dispose();

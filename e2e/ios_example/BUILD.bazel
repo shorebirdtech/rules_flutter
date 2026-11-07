@@ -330,9 +330,10 @@ flutter_ios_simulator_build_test(
     targets = [":testonly_app"],
 )
 
-# An app over a pub plugin whose Apple side is a Swift package, built as its
+# An app over pub plugins whose Apple side is a Swift package, built as its
 # Package.swift says: `flutter_qjs_next` compiles QuickJS's C sources with
-# defines its manifest sets, one of them for debug builds only.
+# defines its manifest sets, one of them for debug builds only;
+# `video_player_avfoundation` is four targets, one of them iOS-only.
 flutter_application(
     name = "swiftpm_plugins_flutter",
     package_name = "ios_example",
@@ -341,6 +342,7 @@ flutter_application(
     deps = [
         "@deps//:flutter",
         "@deps//:flutter_qjs_next",
+        "@deps//:video_player_avfoundation",
     ],
 )
 
@@ -493,6 +495,7 @@ flutter_library(
     deps = [
         "@deps//:flutter",
         "@deps//:flutter_qjs_next",
+        "@deps//:video_player_avfoundation",
         "@rules_flutter//flutter:material_icons",
     ],
 )

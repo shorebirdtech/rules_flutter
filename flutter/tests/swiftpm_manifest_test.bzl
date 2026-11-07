@@ -9,7 +9,7 @@ load(
     "find_unsupported_swiftpm_dependencies",
     "shell_quote_copt",
     "swift_package_message",
-    "swift_package_target",
+    "swift_package_targets",
 )
 
 def _plain_test_impl(ctx):
@@ -263,7 +263,7 @@ def _swift_package_target_test_impl(ctx):
     # defines in both C and C++ settings, one of them for Debug only, header
     # search paths, a linked library and the package's C++ standard; plus
     # settings for the other platform and the other configuration.
-    target = swift_package_target(_dump([_target(
+    built = swift_package_targets(_dump([_target(
         exclude = ["quickjs/VERSION.txt"],
         path = "Sources/foo",
         publicHeadersPath = "include",
@@ -283,7 +283,11 @@ def _swift_package_target_test_impl(ctx):
             {"kind": {"unsafeFlags": {"_0": ["-weak_framework", "XCTest"]}}, "tool": "linker"},
         ],
     )], cxxLanguageStandard = "c++17", cLanguageStandard = None), "foo", "ios", "ios/foo")
-    asserts.equals(env, [], target.problems)
+    asserts.equals(env, [], built.problems)
+    asserts.equals(env, "foo", built.main)
+    asserts.equals(env, 1, len(built.targets))
+    target = built.targets[0]
+    asserts.equals(env, [], target.deps)
     asserts.equals(env, "ios/foo/Sources/foo", target.dir)
     asserts.equals(env, ["ios/foo/Sources/foo"], target.sources)
     asserts.equals(env, ["ios/foo/Sources/foo/quickjs/VERSION.txt"], target.exclude)
@@ -306,12 +310,13 @@ def _swift_package_target_test_impl(ctx):
     asserts.equals(env, ["-weak_framework", "XCTest"], target.linkopts[""])
 
     # Named sources, and a target at the package's root.
-    target = swift_package_target(_dump([_target(
+    built = swift_package_targets(_dump([_target(
         path = ".",
         sources = ["Sources/foo/Plugin.mm", "Sources/foo/cpp"],
         publicHeadersPath = "Sources/foo",
     )]), "foo", "macos", "darwin/foo")
-    asserts.equals(env, [], target.problems)
+    asserts.equals(env, [], built.problems)
+    target = built.targets[0]
     asserts.equals(env, "darwin/foo", target.dir)
     asserts.equals(env, ["darwin/foo/Sources/foo/Plugin.mm", "darwin/foo/Sources/foo/cpp"], target.sources)
     asserts.equals(env, "darwin/foo/Sources/foo", target.public_headers)
@@ -319,42 +324,88 @@ def _swift_package_target_test_impl(ctx):
 
 swift_package_target_test = unittest.make(_swift_package_target_test_impl)
 
+def _swift_package_targets_test_impl(ctx):
+    env = unittest.begin(ctx)
+
+    def shape(dump, platform = "ios"):
+        built = swift_package_targets(dump, "foo", platform, "ios/foo")
+        asserts.equals(env, [], built.problems)
+        return built.main, [(t.name, t.deps) for t in built.targets]
+
+    # firebase_core's shape: the product is the plugin's module and another
+    # target, which the plugin's module links with it.
+    asserts.equals(env, ("foo", [("foo_objc", []), ("foo", ["foo_objc"])]), shape(_dump(
+        [_target(), _target(name = "foo_objc")],
+        products = [{"name": "foo", "targets": ["foo", "foo_objc"], "type": {"library": ["automatic"]}}],
+    )))
+
+    # video_player_avfoundation's: the plugin's module depends on a target,
+    # which depends on one target per platform; each is built after what it
+    # depends on, and only for its platform.
+    dump = _dump([
+        _target(dependencies = [
+            {"byName": ["foo_objc", None]},
+            {"product": ["FlutterFramework", "FlutterFramework", None, None]},
+        ]),
+        _target(name = "foo_objc", dependencies = [
+            {"target": ["foo_ios", {"platformNames": ["ios"]}]},
+            {"target": ["foo_macos", {"platformNames": ["macos"]}]},
+        ]),
+        _target(name = "foo_ios"),
+        _target(name = "foo_macos"),
+        _target(name = "unused"),
+    ])
+    asserts.equals(env, ("foo", [
+        ("foo_ios", []),
+        ("foo_objc", ["foo_ios"]),
+        ("foo", ["foo_objc"]),
+    ]), shape(dump))
+    asserts.equals(env, ("foo", [
+        ("foo_macos", []),
+        ("foo_objc", ["foo_macos"]),
+        ("foo", ["foo_objc"]),
+    ]), shape(dump, "macos"))
+
+    # Two targets that depend on one target: it is built once.
+    asserts.equals(env, ("foo", [
+        ("shared", []),
+        ("a", ["shared"]),
+        ("foo", ["a", "shared"]),
+    ]), shape(_dump([
+        _target(dependencies = [{"byName": ["a", None]}, {"byName": ["shared", None]}]),
+        _target(name = "a", dependencies = [{"byName": ["shared", None]}]),
+        _target(name = "shared"),
+    ])))
+    return unittest.end(env)
+
+swift_package_targets_test = unittest.make(_swift_package_targets_test_impl)
+
 def _swift_package_target_problems_test_impl(ctx):
     env = unittest.begin(ctx)
 
     def problems(dump, platform = "ios"):
-        return swift_package_target(dump, "foo", platform, "ios/foo").problems
+        return swift_package_targets(dump, "foo", platform, "ios/foo").problems
 
     # Flutter links the product named after the plugin.
     asserts.equals(env, [
         "it has no library product named `foo`, which Flutter links a plugin's package by",
     ], problems(_dump([_target()], products = [{"name": "Foo", "targets": ["foo"], "type": {"library": ["automatic"]}}])))
 
-    # firebase_core's shape: the product is two targets.
+    # A product of several targets, none of them the module Flutter imports.
     asserts.equals(env, [
-        "its `foo` product is the targets `foo`, `foo_objc`, and rules_flutter builds a plugin's package only as one target",
+        "its `foo` product is the targets `a`, `b`, none of them the module `foo` Flutter imports",
     ], problems(_dump(
-        [_target(), _target(name = "foo_objc")],
-        products = [{"name": "foo", "targets": ["foo", "foo_objc"], "type": {"library": ["automatic"]}}],
+        [_target(name = "a"), _target(name = "b")],
+        products = [{"name": "foo", "targets": ["a", "b"], "type": {"library": ["automatic"]}}],
     )))
 
-    # video_player_avfoundation's: the target depends on other targets of the
-    # package, one of them on this platform only.
-    dump = _dump([
-        _target(dependencies = [
-            {"target": ["foo_ios", {"platformNames": ["ios"]}]},
-            {"byName": ["foo_objc", None]},
-        ]),
-        _target(name = "foo_ios"),
-        _target(name = "foo_objc"),
-    ])
+    # A binary target the plugin's module depends on.
     asserts.equals(env, [
-        "its target `foo` depends on its target `foo_ios`, and rules_flutter builds a plugin's package only as one target",
-        "its target `foo` depends on its target `foo_objc`, and rules_flutter builds a plugin's package only as one target",
-    ], problems(dump))
-    asserts.equals(env, [
-        "its target `foo` depends on its target `foo_objc`, and rules_flutter builds a plugin's package only as one target",
-    ], problems(dump, "macos"))
+        "its target `sdk` is a binary target, which rules_flutter does not build",
+    ], problems(_dump([
+        _target(dependencies = [{"byName": ["sdk", None]}]),
+        _target(name = "sdk", type = "binary"),
+    ])))
 
     # A path that leaves the package, and a setting kind with no mapping.
     asserts.equals(env, [
@@ -388,5 +439,6 @@ def swiftpm_manifest_test_suite(name):
         computations_test,
         shell_quote_copt_test,
         swift_package_target_test,
+        swift_package_targets_test,
         swift_package_target_problems_test,
     )

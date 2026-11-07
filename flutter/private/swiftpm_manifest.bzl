@@ -3,7 +3,7 @@
 rules_flutter compiles a plugin's own sources, not a SwiftPM build, and builds
 them as the manifest says: `swift package dump-package` evaluates the manifest
 (the plugin's Apple repository runs it, see `apple_plugin_repo.bzl`), and
-`swift_package_target` turns the plugin's target into the attributes of its
+`swift_package_targets` turns the plugin's targets into the attributes of its
 `flutter_apple_plugin_library`: its sources, its header search paths, and its
 C, C++, Swift and linker settings, each under the platform and configuration
 its condition names.
@@ -429,67 +429,14 @@ def _setting_value(kind, name):
         return value.get("_0")
     return None
 
-def swift_package_target(dump, package_name, platform, manifest_dir):
-    """What a plugin's `Package.swift` says its `platform` library is built from.
+def _local_dependencies(target, targets, platform):
+    """The names of the package's own targets `target` depends on for `platform`.
 
-    Flutter links a plugin's Swift package through its library product named
-    after the plugin, with `-` for `_` (`flutter-qjs-next`). rules_flutter
-    builds that product when it is one target that depends on no other target
-    of the package; the target's sources, header search paths and settings
-    become the plugin's `flutter_apple_plugin_library`.
-
-    Args:
-        dump: The manifest as `swift package dump-package` prints it, decoded.
-        package_name: The plugin's package name.
-        platform: `"ios"` or `"macos"`.
-        manifest_dir: The directory holding the manifest, relative to the
-            plugin's root (`ios/foo`); the paths returned are relative to the
-            plugin's root too.
-
-    Returns:
-        A struct with `problems`, what keeps rules_flutter from building the
-        target as the manifest says (a list of strings, empty when there is
-        nothing), and, when there are none, the target: `name`; `dir`, its
-        source directory; `sources`, the files and directories its sources
-        are in (its whole directory when the manifest names none);
-        `exclude`; `public_headers`, its public header directory;
-        `includes`; and its settings, each a dict from configuration (a
-        `CONFIGURATIONS` entry) to a list: `clang_copts` (C, Objective-C and
-        C++ compiles), `cxxopts` (C++ compiles), `conlyopts` (C compiles),
-        `swift_copts`, `linkopts`, `sdk_frameworks` and `sdk_dylibs`. A copt
-        is as the compiler gets it: `shell_quote_copt` makes it a C-family
-        `copts` entry.
+    A product of another package is the Flutter framework, a sibling plugin
+    (which pubspec.yaml makes a dependency of the plugin) or a remote
+    package, which the fetch refuses: none is the package's own.
     """
-    product_name = package_name.replace("_", "-")
-    products = [
-        p
-        for p in dump.get("products", [])
-        if p.get("name") == product_name and "library" in (p.get("type") or {})
-    ]
-    if not products:
-        return struct(problems = [
-            "it has no library product named `{}`, which Flutter links a plugin's package by".format(product_name),
-        ])
-    targets = {t.get("name"): t for t in dump.get("targets", [])}
-    product_targets = products[0].get("targets", [])
-    if len(product_targets) != 1:
-        return struct(problems = [
-            "its `{}` product is the targets {}, and rules_flutter builds a plugin's package only as one target".format(
-                product_name,
-                ", ".join(["`{}`".format(t) for t in product_targets]),
-            ),
-        ])
-    target = targets.get(product_targets[0])
-    if target == None:
-        return struct(problems = ["its `{}` product names no target of the package".format(product_name)])
-    name = target.get("name")
-    problems = []
-    if target.get("type") != "regular":
-        problems.append("its target `{}` is a {} target, which rules_flutter does not build".format(name, target.get("type")))
-
-    # Dependencies on the package's own targets. A product of another package
-    # is the Flutter framework, a sibling plugin (which pubspec.yaml makes a
-    # dependency of the plugin) or a remote package, which the fetch refuses.
+    found = []
     for dep in target.get("dependencies", []):
         for key in ("byName", "target"):
             value = dep.get(key)
@@ -498,13 +445,18 @@ def swift_package_target(dump, package_name, platform, manifest_dir):
             condition = value[-1] if type(value[-1]) == "dict" else None
             if condition and condition.get("platformNames") and platform not in condition["platformNames"]:
                 continue
-            if value[0] in targets:
-                problems.append("its target `{}` depends on its target `{}`, and rules_flutter builds a plugin's package only as one target".format(name, value[0]))
+            if value[0] in targets and value[0] not in found:
+                found.append(value[0])
+    return found
 
+def _target_build(dump, target, deps, platform, manifest_dir, problems):
+    """How one regular target of the package is built; None after a problem."""
+    name = target.get("name")
+    count = len(problems)
     target_dir = _join(manifest_dir, target.get("path") or ("Sources/" + name))
     if target_dir == None or not (target_dir + "/").startswith(manifest_dir + "/"):
         problems.append("its target `{}` is outside the package".format(name))
-        return struct(problems = problems)
+        return None
 
     def within(path, what):
         joined = _join(target_dir, path)
@@ -566,11 +518,11 @@ def swift_package_target(dump, package_name, platform, manifest_dir):
     if dump.get("cxxLanguageStandard"):
         settings["cxxopts"][""].append("-std=" + dump["cxxLanguageStandard"])
 
-    if problems:
-        return struct(problems = problems)
+    if len(problems) > count:
+        return None
     return struct(
-        problems = [],
         name = name,
+        deps = deps,
         dir = target_dir,
         sources = sources,
         exclude = exclude,
@@ -578,6 +530,106 @@ def swift_package_target(dump, package_name, platform, manifest_dir):
         includes = includes,
         **settings
     )
+
+def swift_package_targets(dump, package_name, platform, manifest_dir):
+    """What a plugin's `Package.swift` says its `platform` library is built from.
+
+    Flutter links a plugin's Swift package through its library product named
+    after the plugin, with `-` for `_` (`flutter-qjs-next`), and imports the
+    module named after the plugin. rules_flutter builds the product's targets
+    and the package's targets they depend on, each a module of its own. The
+    product's target named after the plugin (or its only target) is the
+    plugin's module, and depends on the product's other targets, which the
+    product links with it.
+
+    Args:
+        dump: The manifest as `swift package dump-package` prints it, decoded.
+        package_name: The plugin's package name.
+        platform: `"ios"` or `"macos"`.
+        manifest_dir: The directory holding the manifest, relative to the
+            plugin's root (`ios/foo`); the paths returned are relative to the
+            plugin's root too.
+
+    Returns:
+        A struct with `problems`, what keeps rules_flutter from building the
+        package as the manifest says (a list of strings, empty when there is
+        nothing), and, when there are none: `main`, the name of the target
+        that is the plugin's module; and `targets`, the targets to build,
+        each after those it depends on. A target is a struct: `name`;
+        `deps`, the names of the package's targets it depends on; `dir`, its
+        source directory; `sources`, the files and directories its sources
+        are in (its whole directory when the manifest names none);
+        `exclude`; `public_headers`, its public header directory;
+        `includes`; and its settings, each a dict from configuration (a
+        `CONFIGURATIONS` entry) to a list: `clang_copts` (C, Objective-C and
+        C++ compiles), `cxxopts` (C++ compiles), `conlyopts` (C compiles),
+        `swift_copts`, `linkopts`, `sdk_frameworks` and `sdk_dylibs`. A copt
+        is as the compiler gets it: `shell_quote_copt` makes it a C-family
+        `copts` entry.
+    """
+    product_name = package_name.replace("_", "-")
+    products = [
+        p
+        for p in dump.get("products", [])
+        if p.get("name") == product_name and "library" in (p.get("type") or {})
+    ]
+    if not products:
+        return struct(problems = [
+            "it has no library product named `{}`, which Flutter links a plugin's package by".format(product_name),
+        ])
+    targets = {t.get("name"): t for t in dump.get("targets", [])}
+    product_targets = products[0].get("targets", [])
+    for name in product_targets:
+        if name not in targets:
+            return struct(problems = ["its `{}` product names `{}`, no target of the package".format(product_name, name)])
+    if len(product_targets) == 1:
+        main = product_targets[0]
+    elif package_name in product_targets:
+        main = package_name
+    else:
+        return struct(problems = [
+            "its `{}` product is the targets {}, none of them the module `{}` Flutter imports".format(
+                product_name,
+                ", ".join(["`{}`".format(t) for t in product_targets]),
+                package_name,
+            ),
+        ])
+
+    # The targets to build, each after the targets it depends on: a
+    # depth-first walk from the plugin's module.
+    deps = {}
+    order = []
+    stack = [(main, False)]
+    for _ in range(4 * len(targets) + 4):
+        if not stack:
+            break
+        name, expanded = stack.pop()
+        if expanded:
+            order.append(name)
+            continue
+        if name in deps:
+            continue
+        deps[name] = _local_dependencies(targets[name], targets, platform)
+        if name == main:
+            deps[name] += [t for t in product_targets if t != main and t not in deps[name]]
+        stack.append((name, True))
+        for dep in reversed(deps[name]):
+            if dep not in deps:
+                stack.append((dep, False))
+
+    problems = []
+    built = []
+    for name in order:
+        target = targets[name]
+        if target.get("type") != "regular":
+            problems.append("its target `{}` is a {} target, which rules_flutter does not build".format(name, target.get("type")))
+            continue
+        build = _target_build(dump, target, deps[name], platform, manifest_dir, problems)
+        if build:
+            built.append(build)
+    if problems:
+        return struct(problems = problems)
+    return struct(problems = [], main = main, targets = built)
 
 def swift_package_message(package, version, platform, manifest, problems):
     """Why the `platform` build of an app linking `package` stops at its Package.swift.
@@ -587,7 +639,7 @@ def swift_package_message(package, version, platform, manifest, problems):
         version: Its version.
         platform: `"ios"` or `"macos"`.
         manifest: The manifest, relative to the plugin's root.
-        problems: What `swift_package_target` found.
+        problems: What `swift_package_targets` found.
 
     Returns:
         The message.

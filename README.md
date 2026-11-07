@@ -313,7 +313,7 @@ An app built without the library would fail at run time when the plugin loads it
 
 ### Apple plugins built from their Package.swift
 
-An Apple plugin whose iOS or macOS side is a Swift package (`ios/<plugin>/Package.swift`, or `darwin/<plugin>/Package.swift` with `sharedDarwinSource`) is built as its manifest says, as `flutter build` does with Swift Package Manager. rules_flutter reads the manifest with Xcode's `swift package dump-package` and compiles the target of the plugin's library product (`flutter-qjs-next` for `flutter_qjs_next`):
+An Apple plugin whose iOS or macOS side is a Swift package (`ios/<plugin>/Package.swift`, or `darwin/<plugin>/Package.swift` with `sharedDarwinSource`) is built as its manifest says, as `flutter build` does with Swift Package Manager. rules_flutter reads the manifest with Xcode's `swift package dump-package` and compiles the targets of the plugin's library product (`flutter-qjs-next` for `flutter_qjs_next`) and the targets of the package they depend on on that platform, each a module of its own, as `video_player_avfoundation`'s four targets are. For each target:
 
 - its sources, as the target's `path`, `sources` and `exclude` give them, Swift, Objective-C, C and C++ alike;
 - its public headers (`publicHeadersPath`) and header search paths;
@@ -323,7 +323,7 @@ Only an iOS or macOS build reads the manifests, and it needs Xcode for it, as an
 
 Some manifests rules_flutter cannot honour this way, and an iOS or macOS app that links such a plugin fails at analysis, saying why. Other platforms are unaffected.
 
-- A plugin's library product that is more than one target, or a target that depends on another target of the package (`video_player_avfoundation`, the Firebase plugins), a binary target, or a setting rules_flutter does not apply.
+- A library product of several targets none of which is named after the plugin (Flutter imports the module of that name), a binary target, or a setting rules_flutter does not apply.
 - Settings the manifest can compute from what surrounds the build. A manifest that imports more than `PackageDescription`, or reads its `Context`, and sets `.define` or `.unsafeFlags` can compute them from your app or your environment, and rules_flutter evaluates it where it sees neither. `permission_handler_apple` reads your app's `Info.plist` and turns on a permission's code only when the plist declares its usage description: `NSCameraUsageDescription` sets `PERMISSION_CAMERA=1`. Built without its defines, the plugin compiles and reports every permission as denied, even one the user granted. `geolocator_apple` is the exception: rules_flutter bundles an overlay for it that builds it as `flutter build` does without the `BYPASS_PERMISSION_LOCATION_ALWAYS` environment variable.
 
 Supply the settings your app needs with a plugin overlay. Point `flutter_pub.plugin_overlays` at a directory, and write the package's `BUILD.bazel.tpl` under its major version. For `permission_handler_apple` 9.x in an app that asks for the camera and notifications:

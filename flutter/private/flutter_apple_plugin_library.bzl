@@ -23,7 +23,7 @@ load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@rules_apple//apple:apple.bzl", "apple_dynamic_framework_import", "apple_dynamic_xcframework_import")
 load("@rules_cc//cc:objc_library.bzl", "objc_library")
 load("@rules_swift//swift:swift.bzl", "swift_library")
-load(":apple_engine.bzl", "IOS_ENGINE_XCFRAMEWORK", "MACOS_ENGINE_FRAMEWORK")
+load(":apple_engine.bzl", "IOS_ENGINE_XCFRAMEWORK", "MACOS_ENGINE_FRAMEWORK", "flutter_engine_module_maps")
 
 _CLANG_SOURCE_EXTENSIONS = ("m", "mm", "c", "cc", "cpp", "cxx", "c++", "s", "S")
 _HEADER_EXTENSIONS = ("h", "hh", "hpp", "hxx", "h++", "inc")
@@ -81,9 +81,11 @@ def flutter_apple_plugin_library(
         swift_copts = [],
         linkopts = [],
         public_hdrs = None,
+        textual_hdrs = [],
         includes = [],
         sdk_frameworks = [],
         sdk_dylibs = [],
+        clang_module = False,
         visibility = None,
         tags = None,
         **kwargs):
@@ -106,7 +108,8 @@ def flutter_apple_plugin_library(
             compile, as SwiftPM treats them.
         module_name: Swift module name. Defaults to `name`.
         platform: `"macos"` or `"ios"`. Picks the Flutter framework dep.
-        deps: Additional swift_library / cc_library deps (other plugins).
+        deps: Additional swift_library / cc_library deps: other plugins,
+            other targets of the plugin's package. Both compiles see them.
         copts: Additional compile options, for both the Swift and the ObjC
             compile: a define a plugin's `Package.swift` sets is `-DNAME`,
             which Clang reads as `NAME=1` and Swift as a condition.
@@ -126,6 +129,9 @@ def flutter_apple_plugin_library(
             `publicHeadersPath` of a `Package.swift` target holds; the other
             headers in `srcs` are private to its compile. Without it, see
             `srcs`.
+        textual_hdrs: Headers the C-family sources may include that are
+            not the library's own: those of the other targets of a Swift
+            package, which SwiftPM lets any target include by path.
         includes: Header search paths forwarded to the inner
             `objc_library`. Mirrors `objc_library.includes` semantics —
             each entry becomes `-I <package>/<entry>` for both the
@@ -146,6 +152,10 @@ def flutter_apple_plugin_library(
         sdk_dylibs: Apple SDK dynamic libraries to link (e.g. `["c++"]`,
             `["sqlite3"]`), as a `Package.swift`'s `linkedLibrary` does. Same
             rationale as `sdk_frameworks`.
+        clang_module: Whether a library without Swift sources is a Clang
+            module named `module_name` itself, as a C-family target of a
+            Swift package is, rather than a Swift module that re-exports one
+            (the default, which a plugin's registrant imports).
         visibility: Target visibility.
         tags: Bazel tags. Defaults to `["manual"]` so the spoke target
             is only built when something depends on it.
@@ -196,7 +206,42 @@ def flutter_apple_plugin_library(
 
     swift_deps = [":" + framework_target] + list(deps)
 
+    # The engine's module map, for C-family sources that `@import Flutter`.
+    module_maps_target = "_%s__flutter_module_maps" % name
+    flutter_engine_module_maps(
+        name = module_maps_target,
+        framework = MACOS_ENGINE_FRAMEWORK if platform == "macos" else IOS_ENGINE_XCFRAMEWORK,
+        tags = tags,
+        target_compatible_with = target_compatible_with,
+        visibility = ["//visibility:private"],
+    )
+    clang_deps = [":" + framework_target, ":" + module_maps_target] + list(deps)
+
+    # The SDK frameworks and libraries are the plugin's to link whatever its
+    # sources are in; a Swift-only plugin has no objc_library to carry them.
+    sdk_linkopts = ["-Wl,-framework," + f for f in sdk_frameworks] + ["-l" + d for d in sdk_dylibs]
+
     objc_module_name = ""
+    if clang_module and not swift_files:
+        objc_library(
+            name = name,
+            srcs = objc_files + private_headers,
+            hdrs = headers,
+            textual_hdrs = textual_hdrs,
+            includes = includes,
+            module_name = module_name,
+            enable_modules = True,
+            copts = copts + clang_copts,
+            cxxopts = cxxopts,
+            conlyopts = conlyopts,
+            linkopts = sdk_linkopts + linkopts,
+            alwayslink = True,
+            deps = clang_deps,
+            tags = tags,
+            target_compatible_with = target_compatible_with,
+            visibility = visibility,
+        )
+        return
     if objc_files:
         # Compile ObjC pieces in their own objc_library and feed into the
         # swift_library so `.m`/`.mm` sources are linked into the plugin
@@ -211,6 +256,7 @@ def flutter_apple_plugin_library(
             name = objc_target,
             srcs = objc_files + private_headers,
             hdrs = headers,
+            textual_hdrs = textual_hdrs,
             includes = includes,
             sdk_frameworks = sdk_frameworks,
             sdk_dylibs = sdk_dylibs,
@@ -224,7 +270,7 @@ def flutter_apple_plugin_library(
             # only Dart reaches, through `DynamicLibrary.process()`, has no
             # reference from the app's link to pull it in.
             alwayslink = True,
-            deps = [":" + framework_target],
+            deps = clang_deps,
             tags = tags,
             target_compatible_with = target_compatible_with,
             visibility = ["//visibility:private"],
@@ -263,10 +309,6 @@ def flutter_apple_plugin_library(
             target_compatible_with = target_compatible_with,
         )
         swift_files = [":" + placeholder_target]
-
-    # The SDK frameworks and libraries are the plugin's to link whatever its
-    # sources are in; a Swift-only plugin has no objc_library to carry them.
-    sdk_linkopts = ["-Wl,-framework," + f for f in sdk_frameworks] + ["-l" + d for d in sdk_dylibs]
 
     swift_library(
         name = name,

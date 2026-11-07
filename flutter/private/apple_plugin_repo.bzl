@@ -26,7 +26,7 @@ load(
     "find_swiftpm_build_settings",
     "shell_quote_copt",
     "swift_package_message",
-    "swift_package_target",
+    "swift_package_targets",
 )
 
 # What a plugin's source repository writes for this one.
@@ -108,8 +108,18 @@ def _patterns(ctx, path, extensions):
         return ["{}/**/*.{}".format(path, ext) for ext in extensions]
     return [path]
 
-def _swift_package_library(ctx, name, platform, target):
-    """A `flutter_apple_plugin_library` of `target` (`swift_package_target`)."""
+def _target_label(package, platform, target, main):
+    """The name of a package target's library: the plugin's own for its module."""
+    name = "{}_apple_{}".format(package, platform)
+    return name if target == main else "{}__{}".format(name, target)
+
+def _swift_package_library(ctx, package, platform, target, main, manifest_dir):
+    """A `flutter_apple_plugin_library` of `target` (`swift_package_targets`).
+
+    The plugin's module is named after the plugin, as its registrant imports
+    it; each other target is a module named after itself, a Clang module
+    when it has no Swift sources, as SwiftPM builds it.
+    """
     srcs = []
     for source in target.sources:
         srcs.extend(_patterns(ctx, source, SWIFTPM_SOURCE_EXTENSIONS + SWIFTPM_HEADER_EXTENSIONS))
@@ -120,6 +130,9 @@ def _swift_package_library(ctx, name, platform, target):
     for path in target.exclude:
         exclude.extend([path + "/**"] if ctx.path(path).is_dir else [path])
     srcs = _unique(srcs)
+
+    # SwiftPM lets a target include any header of its package by path.
+    textual_hdrs = _patterns(ctx, manifest_dir, SWIFTPM_HEADER_EXTENSIONS)
     public_hdrs = []
     if ctx.path(target.public_headers).is_dir:
         public_hdrs = _patterns(ctx, target.public_headers, SWIFTPM_HEADER_EXTENSIONS)
@@ -136,25 +149,33 @@ def _swift_package_library(ctx, name, platform, target):
     }
     return """
 flutter_apple_plugin_library(
-    name = "{name}_apple_{platform}",
+    name = "{name}",
     srcs = glob({srcs}, exclude = {exclude}, allow_empty = True),
     public_hdrs = glob({public_hdrs}, exclude = {exclude}, allow_empty = True),
+    textual_hdrs = glob({textual_hdrs}, exclude = {own}, allow_empty = True),
     includes = {includes},
     clang_copts = {clang_copts},
     cxxopts = {cxxopts},
     conlyopts = {conlyopts},
     swift_copts = {swift_copts},
     linkopts = {linkopts},
-    module_name = "{name}",
+    deps = {deps},
+    module_name = "{module}",
+    clang_module = {clang_module},
     platform = "{platform}",
     visibility = ["//visibility:public"],
 )
 """.format(
-        name = name,
+        name = _target_label(package, platform, target.name, main),
+        module = package if target.name == main else target.name,
+        clang_module = target.name != main,
+        deps = repr([":" + _target_label(package, platform, d, main) for d in target.deps]),
         platform = platform,
         srcs = repr(srcs),
         exclude = repr(exclude),
         public_hdrs = repr(public_hdrs),
+        textual_hdrs = repr(textual_hdrs),
+        own = repr([target.dir + "/**"]),
         includes = repr(_unique(target.includes)),
         clang_copts = _configured(target.clang_copts, shell_quote_copt),
         cxxopts = _configured(target.cxxopts, shell_quote_copt),
@@ -230,17 +251,18 @@ def _apple_plugin_repo_impl(ctx):
             continue
         if manifest_dir not in dumps:
             dumps[manifest_dir] = _dump_package(ctx, plugin_root.get_child(manifest_dir))
-        target = swift_package_target(dumps[manifest_dir], package, platform, manifest_dir)
-        if target.problems:
+        built = swift_package_targets(dumps[manifest_dir], package, platform, manifest_dir)
+        if built.problems:
             targets.append(_stand_in(package, platform, swift_package_message(
                 package,
                 ctx.attr.version,
                 platform,
                 manifest,
-                target.problems,
+                built.problems,
             )))
         else:
-            targets.append(_swift_package_library(ctx, package, platform, target))
+            for target in built.targets:
+                targets.append(_swift_package_library(ctx, package, platform, target, built.main, manifest_dir))
 
     ctx.file("BUILD.bazel", """\
 load("@rules_flutter//flutter:macos.bzl", "flutter_apple_plugin_library")
