@@ -477,6 +477,32 @@ void main() {
     );
   });
 
+  test('the checkout\'s packages are linked, never written into', () async {
+    // integration_test has Android plugin code, so its repository writes an
+    // `android/BUILD.bazel`: into a directory of its own, not through a link
+    // into the checkout, which would leave a Bazel package in the user's tree.
+    final load = await _bazel([
+      'build',
+      '--nobuild',
+      '//:web_render_test',
+      '${_sdkFlag}local',
+    ]);
+    expect(load.exitCode, 0, reason: '${load.stderr}');
+    final base = await _bazel(['info', 'output_base']);
+    final external = p.join((base.stdout as String).trim(), 'external');
+    final spoke = Directory(external)
+        .listSync()
+        .whereType<Directory>()
+        .singleWhere((d) => d.path.endsWith('-local__integration_test'));
+    final android = p.join(spoke.path, 'android');
+    expect(
+      FileSystemEntity.isLinkSync(android),
+      isFalse,
+      reason: '$android links into the checkout',
+    );
+    expect(File(p.join(android, 'BUILD.bazel')).existsSync(), isTrue);
+  });
+
   test('the release SDK records nothing', () async {
     if (Platform.isMacOS) {
       expect(await _record('flutter', const []), isNull);

@@ -79,7 +79,11 @@ def link_framework_package(ctx, package_name):
     """Links `packages/<package_name>` of the framework source at the repository root.
 
     The link follows the source, so an edit to a local checkout is seen; the
-    tree is watched so that a new file refetches the repository.
+    tree is watched so that a new file refetches the repository. `android/`
+    is a directory of the repository with its entries linked, because the
+    repository writes its `android/BUILD.bazel` there, and a write through a
+    link to the directory would land in the checkout. A `BUILD` file already
+    in the checkout's `android/` is not linked, for the same reason.
 
     Args:
         ctx: A `repository_ctx` whose rule has a `framework_json` label attribute.
@@ -93,7 +97,12 @@ def link_framework_package(ctx, package_name):
         ).format(name = package_name, source = str(ctx.attr.framework_json)))
     ctx.watch_tree(package_dir)
     for child in package_dir.readdir():
-        ctx.symlink(child, child.basename)
+        if child.basename == "android" and child.is_dir:
+            for entry in child.readdir():
+                if entry.basename not in ("BUILD", "BUILD.bazel"):
+                    ctx.symlink(entry, "android/" + entry.basename)
+        else:
+            ctx.symlink(child, child.basename)
 
 def _resolve_commands(sdk, default_sdk, verb, locks):
     """One command per lock, each run from the root of the workspace that holds the lock."""
