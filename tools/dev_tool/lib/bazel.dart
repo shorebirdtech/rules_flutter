@@ -728,6 +728,15 @@ class Bazel {
             '${detail?.call(result) ?? ''}',
       );
       return result;
+    } on BazelCancelled {
+      // A deliberate stop is not a failure: the run is ending and asked bazel
+      // to end with it.
+      say(
+        'stopped',
+        '$what stopped after ${formatElapsed(clock.elapsed)}: '
+            'the run is shutting down',
+      );
+      rethrow;
     } catch (e) {
       say(
         'failed',

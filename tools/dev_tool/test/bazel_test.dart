@@ -694,6 +694,41 @@ void main() {
         expect(result.outputFiles, ['/ws/bazel-out/darwin/bin/app.zip']);
       });
 
+      test(
+        'a build the run stopped says it stopped, not that it failed',
+        () async {
+          final fake = fakeBazel();
+          final lines = <Map<String, dynamic>>[];
+          final sub = Logger.root.onRecord.listen((r) {
+            final o = r.object;
+            if (o is Map && o['message'] == 'bazel_phase') {
+              lines.add(Map<String, dynamic>.from(o));
+            }
+          });
+          addTearDown(sub.cancel);
+          final build = fake.bazel.build('//:app', workspace: '/ws');
+          final cancelled = expectLater(build, throwsA(isA<BazelCancelled>()));
+          await pumpEventQueue();
+          final process = fake.processes.single;
+          await process.outputAttached;
+
+          final closing = fake.bazel.close();
+          await pumpEventQueue();
+          process.complete(8);
+          await closing;
+          await cancelled;
+
+          expect(lines.single['event'], 'stopped');
+          expect(
+            lines.single['text'],
+            matches(
+              r'^bazel build //:app stopped after \d+ms: '
+              r'the run is shutting down$',
+            ),
+          );
+        },
+      );
+
       // A reload that sits in bazel and one that sits in the query after it are
       // different stalls; each ends with a line that says so, and the query
       // announces itself because it is a second invocation.
