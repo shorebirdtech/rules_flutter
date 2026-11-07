@@ -96,6 +96,24 @@ flutter.pub(
 """,
         default = {},
     ),
+    "on_version_conflict": attr.string(
+        doc = """\
+What to do when another `flutter.pub` lock brings a higher version of a package
+this lock lists. A build has one version of each package, the highest any lock
+records, and nothing is built below the version its lock records.
+
+`"error"` (the default) fails when the module is read, naming both locks and the
+fix (`bazel run @rules_flutter//flutter:pub -- upgrade <package>` in this lock's
+directory). `"upgrade"` accepts the higher version: this lock's packages are
+built at it. Use it for a lock whose constraints do not allow the version the
+other brings, or for a tool's own lock, which must not stop a consumer.
+
+A lock that lists the package from another source, registry or digest, or at
+another git commit, always fails.
+""",
+        default = "error",
+        values = ["error", "upgrade"],
+    ),
     "ignore_hooks": attr.string_list(
         doc = "Pub package names whose `hook/build.dart` is knowingly " +
               "irrelevant to this build (its native code is never reached). " +
@@ -355,6 +373,7 @@ def _declare_pub_packages(tags, flutter_version, user_overlay_roots):
             entries.setdefault(name, []).append(struct(
                 hub = tag.name,
                 lock_label = str(tag.lock),
+                on_version_conflict = tag.on_version_conflict,
                 **fields
             ))
 

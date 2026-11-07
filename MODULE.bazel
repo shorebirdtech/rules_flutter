@@ -210,5 +210,8 @@ use_repo(maven, "rules_android_maven")
 flutter.pub(
     name = "dev_tool_deps",
     lock = "//:pubspec.lock",
+    # A consumer's own locks may be ahead of these tools': it builds the higher
+    # version, and a tool that does not build against it is the tool's bug.
+    on_version_conflict = "upgrade",
 )
 use_repo(flutter, "dev_tool_deps")

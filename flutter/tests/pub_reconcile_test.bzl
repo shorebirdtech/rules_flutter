@@ -9,8 +9,8 @@ load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("//flutter/private:lock_entry_kind.bzl", "FLUTTER_SOURCE", "GIT", "HOSTED", "UNSUPPORTED")
 load("//flutter/private:pub_reconcile.bzl", "reconcile_package", "unsupported_locks")
 
-def _hosted(version, hub = "deps", lock = "//app:pubspec.lock", sha256 = "aa", url = "https://pub.dev"):
-    return struct(kind = HOSTED, version = version, sha256 = sha256, url = url, hub = hub, lock_label = lock)
+def _hosted(version, hub = "deps", lock = "//app:pubspec.lock", sha256 = "aa", url = "https://pub.dev", on_version_conflict = "error"):
+    return struct(kind = HOSTED, version = version, sha256 = sha256, url = url, hub = hub, lock_label = lock, on_version_conflict = on_version_conflict)
 
 def _git(ref, hub = "deps", lock = "//app:pubspec.lock", url = "https://github.com/x/foo.git", path = ".", git_lock = ""):
     return struct(kind = GIT, version = "1.0.0", git_url = url, resolved_ref = ref, git_path = path, git_lock = git_lock, hub = hub, lock_label = lock)
@@ -49,29 +49,65 @@ def _locks_that_agree_share_the_package_test_impl(ctx):
 
 locks_that_agree_share_the_package_test = unittest.make(_locks_that_agree_share_the_package_test_impl)
 
-def _different_versions_are_refused_test_impl(ctx):
+def _a_lower_version_at_error_is_refused_test_impl(ctx):
     env = unittest.begin(ctx)
 
     r = reconcile_package("meta", [
         _hosted("1.18.0"),
-        _hosted("1.19.0", hub = "dev_tool_deps", lock = "@rules_flutter//:pubspec.lock"),
+        _hosted("1.19.0", hub = "dev_tool_deps", lock = "@rules_flutter//:pubspec.lock", on_version_conflict = "upgrade"),
     ])
     asserts.equals(env, None, r.entry)
     asserts.equals(env, 1, len(r.errors))
     _mentions(env, r.errors[0], [
-        "\"meta\" has different versions",
-        "1.18.0",
-        "1.19.0",
-        "hub \"deps\"",
-        "hub \"dev_tool_deps\"",
-        "//app:pubspec.lock",
-        "@rules_flutter//:pubspec.lock",
-        "pub -- upgrade meta",
+        "\"meta\" has conflicting versions",
+        "1.18.0 (hub \"deps\", //app:pubspec.lock, on_version_conflict = \"error\")",
+        "1.19.0 (hub \"dev_tool_deps\", @rules_flutter//:pubspec.lock, on_version_conflict = \"upgrade\")",
+        "the highest a lock records",
+        "//app:pubspec.lock pins a lower one",
+        "bazel run @rules_flutter//flutter:pub -- upgrade meta",
+        "on_version_conflict = \"upgrade\"",
+        "constraints forbid 1.19.0",
     ])
 
     return unittest.end(env)
 
-different_versions_are_refused_test = unittest.make(_different_versions_are_refused_test_impl)
+a_lower_version_at_error_is_refused_test = unittest.make(_a_lower_version_at_error_is_refused_test_impl)
+
+def _the_highest_version_wins_at_upgrade_test_impl(ctx):
+    env = unittest.begin(ctx)
+
+    low = _hosted("1.18.0", on_version_conflict = "upgrade")
+    high = _hosted("1.19.0", hub = "tools", lock = "//tools:pubspec.lock")
+    for entries in [[low, high], [high, low]]:
+        r = reconcile_package("meta", entries)
+        asserts.equals(env, [], r.errors)
+        asserts.equals(env, "1.19.0", r.entry.version)
+
+    # Versions compare as versions, not as text; a release outranks its prerelease.
+    r = reconcile_package("meta", [_hosted("1.9.0", on_version_conflict = "upgrade"), _hosted("1.10.0", hub = "b", lock = "//b:pubspec.lock")])
+    asserts.equals(env, "1.10.0", r.entry.version)
+    r = reconcile_package("meta", [_hosted("2.0.0-dev.1", on_version_conflict = "upgrade"), _hosted("2.0.0", hub = "b", lock = "//b:pubspec.lock")])
+    asserts.equals(env, "2.0.0", r.entry.version)
+
+    return unittest.end(env)
+
+the_highest_version_wins_at_upgrade_test = unittest.make(_the_highest_version_wins_at_upgrade_test_impl)
+
+def _every_lower_lock_at_error_is_named_test_impl(ctx):
+    env = unittest.begin(ctx)
+
+    r = reconcile_package("meta", [
+        _hosted("1.17.0", hub = "a", lock = "//a:pubspec.lock"),
+        _hosted("1.18.0", hub = "b", lock = "//b:pubspec.lock", on_version_conflict = "upgrade"),
+        _hosted("1.19.0", hub = "c", lock = "//c:pubspec.lock"),
+    ])
+    asserts.equals(env, 1, len(r.errors))
+    _mentions(env, r.errors[0], ["//a:pubspec.lock", "pins a lower one"])
+    asserts.false(env, "//b:pubspec.lock pins" in r.errors[0], r.errors[0])
+
+    return unittest.end(env)
+
+every_lower_lock_at_error_is_named_test = unittest.make(_every_lower_lock_at_error_is_named_test_impl)
 
 def _same_version_different_digest_is_refused_test_impl(ctx):
     env = unittest.begin(ctx)
@@ -142,7 +178,9 @@ def pub_reconcile_test_suite(name):
         name,
         one_lock_is_its_own_entry_test,
         locks_that_agree_share_the_package_test,
-        different_versions_are_refused_test,
+        a_lower_version_at_error_is_refused_test,
+        the_highest_version_wins_at_upgrade_test,
+        every_lower_lock_at_error_is_named_test,
         same_version_different_digest_is_refused_test,
         different_registries_are_refused_test,
         different_sources_are_refused_test,

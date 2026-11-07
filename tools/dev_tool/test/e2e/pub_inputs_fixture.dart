@@ -206,6 +206,33 @@ class PubInputsWorkspace {
   );
 }
 
+/// A second `flutter.pub()` tag of a [PubInputsFixture]: its own lock, over
+/// packages served by the same `file://` registry.
+class FixtureHub {
+  FixtureHub({
+    required this.name,
+    required this.lockPackage,
+    this.hosted = const [],
+    this.extraLockEntries = '',
+    this.resolve = const {},
+    this.onVersionConflict,
+  });
+
+  /// The tag's `name`; the fixture's own hub name makes it the same hub.
+  final String name;
+
+  /// The Bazel package of this tag's `pubspec.lock`.
+  final String lockPackage;
+  final List<HostedPackage> hosted;
+
+  /// Raw lock entries; `{{SERVER}}` stands for the registry's `file://` URL.
+  final String extraLockEntries;
+  final Map<String, String> resolve;
+
+  /// The tag's `on_version_conflict`; the default (`error`) when null.
+  final String? onVersionConflict;
+}
+
 /// What goes into a [PubInputsWorkspace].
 class PubInputsFixture {
   PubInputsFixture({
@@ -217,7 +244,15 @@ class PubInputsFixture {
     this.resolve = const {},
     this.lockPackage = '',
     this.git = const [],
+    this.otherHubs = const [],
+    this.onVersionConflict,
   });
+
+  /// More `flutter.pub()` tags beside the main one, each with a lock of its own.
+  final List<FixtureHub> otherHubs;
+
+  /// The main tag's `on_version_conflict`; the default (`error`) when null.
+  final String? onVersionConflict;
 
   /// The hosted packages: archives are made and listed in the lock.
   final List<HostedPackage> hosted;
@@ -272,13 +307,38 @@ class PubInputsFixture {
     return out.toString();
   }
 
+  /// One `flutter.pub(...)` tag of the module.
+  static String _tag(
+    String name,
+    String lockPackage,
+    Map<String, String> resolve,
+    String? onVersionConflict,
+  ) {
+    final resolved = resolve.entries
+        .map((e) => '${jsonEncode(e.key)}: ${jsonEncode(e.value)}')
+        .join(', ');
+    return [
+      'flutter.pub(',
+      '    name = "$name",',
+      '    lock = "//$lockPackage:pubspec.lock",',
+      if (resolve.isNotEmpty) '    resolve = {$resolved},',
+      if (onVersionConflict != null)
+        '    on_version_conflict = "$onVersionConflict",',
+      ')',
+    ].join('\n');
+  }
+
   static final Expando<String> _digests = Expando<String>('sha256');
 
   Future<PubInputsWorkspace> materialize() async {
     final server = await Directory.systemTemp.createTemp('pub_inputs_server_');
     addTearDown(() => server.delete(recursive: true));
 
-    for (final package in hosted) {
+    final archived = <HostedPackage>{
+      ...hosted,
+      for (final hub in otherHubs) ...hub.hosted,
+    };
+    for (final package in archived) {
       final tree = await Directory.systemTemp.createTemp('pub_inputs_tree_');
       try {
         for (final entry in package.files.entries) {
@@ -358,7 +418,7 @@ class PubInputsFixture {
     );
 
     final spokeNames = {
-      for (final package in hosted) package.name,
+      for (final package in archived) package.name,
       for (final package in git) package.name,
       ...spokes,
     }.toList()..sort();
@@ -378,12 +438,9 @@ local_path_override(
 flutter = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter")
 flutter.toolchain(flutter_version = "$flutterVersion")
 ${overlayRoots.isEmpty ? '' : 'flutter.plugin_overlays(roots = ${jsonEncode(overlayRoots)})'}
-flutter.pub(
-    name = "$pubHub",
-    lock = "//$lockPackage:pubspec.lock",
-${resolve.isEmpty ? '' : '    resolve = {${resolve.entries.map((e) => '${jsonEncode(e.key)}: ${jsonEncode(e.value)}').join(', ')}},'}
-)
-use_repo(flutter, "$pubHub"${spokeNames.map((n) => ', "flutter_pub__$n"').join()})
+${_tag(pubHub, lockPackage, resolve, onVersionConflict)}
+${otherHubs.map((h) => _tag(h.name, h.lockPackage, h.resolve, h.onVersionConflict)).join('\n')}
+use_repo(flutter, ${{pubHub, for (final h in otherHubs) h.name}.map((n) => '"$n"').join(', ')}${spokeNames.map((n) => ', "flutter_pub__$n"').join()})
 ''';
 
     // `generatedWorkspace` writes exactly the files it is given, so the
@@ -407,6 +464,17 @@ use_repo(flutter, "$pubHub"${spokeNames.map((n) => ', "flutter_pub__$n"').join()
         serverUrl,
         extraEntries: extraLockEntries + gitEntries.toString(),
       ),
+      for (final hub in otherHubs) ...{
+        p.posix.join(hub.lockPackage, 'BUILD.bazel'): '',
+        p.posix.join(hub.lockPackage, 'pubspec.lock'): renderLock(
+          hub.hosted,
+          serverUrl,
+          extraEntries: hub.extraLockEntries.replaceAll(
+            '{{SERVER}}',
+            serverUrl,
+          ),
+        ),
+      },
       ...files,
     });
     return PubInputsWorkspace._(ws, serverUrl, hosted, lockPackage);

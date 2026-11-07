@@ -299,6 +299,10 @@ A package below the workspace root, such as a `tools/*` package or an app of a m
 bazel run @rules_flutter//flutter:pub -- get --directory tools/my_tool
 ```
 
+### Several locks in one build
+
+Every package is one repository for the whole build, however many `flutter.pub` tags list it: a hub (`@deps//:flutter`) is the set of aliases its own lock names. A build has one version of each package, the highest any lock records, and nothing is built below the version its lock records. By default a lock that is behind another on a package fails when the module is read, naming both locks and the fix, `bazel run @rules_flutter//flutter:pub -- upgrade <package>` in the lock's directory. A lock whose constraints do not allow the higher version sets `on_version_conflict = "upgrade"` on its `flutter.pub`, and its packages are built at it. The locks must otherwise agree: a package from different sources, registries or digests, or git commits, always fails. `resolve` and `ignore_hooks` apply to the whole build. rules_flutter's own tools are a lock of this kind (`on_version_conflict = "upgrade"`), so a release that moves them can put your lock behind: re-resolve it with the command above.
+
 ### Packages with build hooks
 
 Some pub packages compile native code through a Dart `hook/build.dart` (Dart Native Assets). Bazel does not run those hooks. Instead:
