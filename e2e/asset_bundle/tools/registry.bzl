@@ -28,7 +28,15 @@ def _registry_impl(rctx):
         for version in package.readdir():
             archive = "packages/%s/versions/%s.tar.gz" % (package.basename, version.basename)
             rctx.execute(["mkdir", "-p", "packages/%s/versions" % package.basename])
-            result = rctx.execute(["tar", "-czf", archive, "-C", str(version), "."])
+
+            # macOS tar stores a file's extended attributes (a checkout's
+            # `com.apple.provenance`, say) as `._<name>` entries beside it,
+            # which would unpack as files of the package. A pub archive has
+            # none. GNU tar ignores the variable.
+            result = rctx.execute(
+                ["tar", "-czf", archive, "-C", str(version), "."],
+                environment = {"COPYFILE_DISABLE": "1"},
+            )
             if result.return_code != 0:
                 fail("tar %s: %s" % (archive, result.stderr))
             checksums[package.basename] = rctx.download(
