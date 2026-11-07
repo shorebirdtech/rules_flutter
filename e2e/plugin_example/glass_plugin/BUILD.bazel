@@ -30,6 +30,12 @@ flutter_plugin(
     # invert.frag includes premultiplied.glsl.
     shader_includes = glob(["shaders/*.glsl"]),
     visibility = ["//visibility:public"],
+    # Its Kotlin, which every Android app that depends on the plugin links,
+    # as it links a pub plugin's. Only an Android build analyses it.
+    exports = select({
+        "@platforms//os:android": [":glass_plugin_android"],
+        "//conditions:default": [],
+    }),
     deps = ["@deps//:flutter"],
 )
 
@@ -54,13 +60,10 @@ flutter_android_engine(
     tags = ["manual"],
 )
 
-# A workspace plugin's Android code goes to the app by hand: the app's
-# automatic wiring covers only plugins from the pub hub.
 flutter_android_plugin_library(
     name = "glass_plugin_android",
     srcs = glob(["android/src/main/kotlin/**/*.kt"]),
     flutter_engine = ":android_engine",
     java_package = "com.example.glass_plugin",
     manifest = "android/src/main/AndroidManifest.xml",
-    visibility = ["//visibility:public"],
 )

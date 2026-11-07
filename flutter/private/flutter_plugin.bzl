@@ -316,9 +316,8 @@ PLUGIN_PACKAGE_ATTRS = {
         doc = "Java package of the Android `plugin_class`, as " +
               "`flutter.plugin.platforms.android.package` in a pubspec. " +
               "Required when `platforms` lists android with a " +
-              "`plugin_class`. Its Kotlin/Java goes to the app as a " +
-              "`flutter_android_plugin_library` in " +
-              "`flutter_android_app(deps = ...)`.",
+              "`plugin_class`. Its Kotlin/Java is a " +
+              "`flutter_android_plugin_library` listed in `exports`.",
     ),
     "dart_plugin_class": attr.string(
         doc = "Dart-only plugin class name (for Dart-side registration).",

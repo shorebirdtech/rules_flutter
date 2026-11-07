@@ -42,7 +42,6 @@ flutter_android_app(
     package_name = "com.example.glassapp",
     application = ":glass_flutter",
     tags = ["manual"],
-    deps = ["//glass_plugin:glass_plugin_android"],
 )
 
 # skwasm: dart2wasm, the macro's renderer.
