@@ -306,7 +306,7 @@ class DeviceSession {
       // that could still be dialled would be — an RPC in flight when this lands
       // re-dials on its way back and publishes a socket nothing owns. See
       // [VmServiceClient.retire].
-      await vmClient?.retire();
+      await vmClient?.retire(leaveDevFS: device.sharesHostFilesystem);
       await boundedTeardownStep(
         'the DDS to shut down',
         dds?.shutdown() ?? Future.value(),
@@ -322,6 +322,7 @@ class DeviceSession {
       // app replaces the instance, and stopping the one a caller saw earlier
       // would leave the live one running.
       await device.stop(appInstance);
+      if (device.sharesHostFilesystem) await vmClient?.removeAbandonedDevFS();
     }
   }
 

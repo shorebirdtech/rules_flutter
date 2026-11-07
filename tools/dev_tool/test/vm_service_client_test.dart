@@ -104,6 +104,110 @@ void main() {
       },
     );
 
+    group('a devFS left for the caller to delete', () {
+      // The layout the VM makes: `<temp>/<fsName><random>/<fsName>/`.
+      late Directory outer;
+      late FakeDevFS vmDevFS;
+
+      setUp(() async {
+        outer = Directory(p.join(tmp.path, 'flutter_bazelAb12Cd'))
+          ..createSync();
+        vmDevFS = await FakeDevFS.start(
+          Directory(p.join(outer.path, 'flutter_bazel'))..createSync(),
+        );
+        File(p.join(outer.path, 'flutter_bazel', 'app.dill')).writeAsBytesSync([
+          1,
+        ]);
+      });
+
+      tearDown(() => vmDevFS.close());
+
+      Future<(VmServiceClient, FakeVmService)> connectedTo(
+        FakeDevFS fs,
+      ) async {
+        final fake = FakeVmService(
+          isolates: [IsolateRef(id: 'iso-main', name: 'main', number: '1')],
+        )..devFSUri = fs.uri;
+        final client = VmServiceClient(connector: (_) async => fake);
+        await client.connect(fs.serviceUri);
+        return (client, fake);
+      }
+
+      test(
+        'is not deleted by the app, and goes once the app has exited',
+        () async {
+          final (client, fake) = await connectedTo(vmDevFS);
+
+          await client.disconnect(leaveDevFS: true);
+
+          expect(
+            fake.extensionCalls.map((c) => c.method),
+            isNot(contains('_deleteDevFS')),
+            reason:
+                'the running app may hold files open, which Windows refuses',
+          );
+          expect(outer.existsSync(), isTrue, reason: 'nothing is deleted yet');
+
+          await client.removeAbandonedDevFS();
+
+          expect(
+            outer.existsSync(),
+            isFalse,
+            reason: 'the directory the VM made, not only its inner one',
+          );
+        },
+      );
+
+      test('is deleted once, and a second call is a no-op', () async {
+        final (client, _) = await connectedTo(vmDevFS);
+        await client.disconnect(leaveDevFS: true);
+        await client.removeAbandonedDevFS();
+
+        await client.removeAbandonedDevFS();
+      });
+
+      test('is left alone when the VM did not make it', () async {
+        // `devfs` is the setUp one: not `flutter_bazel<random>/flutter_bazel`.
+        final (client, _) = await connectedTo(devFS);
+
+        await client.disconnect(leaveDevFS: true);
+        await client.removeAbandonedDevFS();
+
+        expect(
+          Directory(devFS.root.path).existsSync(),
+          isTrue,
+          reason: 'a directory of unknown shape is never deleted recursively',
+        );
+      });
+
+      test('retire passes the choice on', () async {
+        final (client, fake) = await connectedTo(vmDevFS);
+
+        await client.retire(leaveDevFS: true);
+        await client.removeAbandonedDevFS();
+
+        expect(
+          fake.extensionCalls.map((c) => c.method),
+          isNot(contains('_deleteDevFS')),
+        );
+        expect(outer.existsSync(), isFalse);
+      });
+
+      test(
+        'a client that was not told to leave it still asks the app',
+        () async {
+          final (client, fake) = await connectedTo(vmDevFS);
+
+          await client.disconnect();
+
+          expect(
+            fake.extensionCalls.map((c) => c.method),
+            contains('_deleteDevFS'),
+          );
+        },
+      );
+    });
+
     // After a deliberate teardown the client must stay retired. An in-flight
     // caller coming back to a client with no service would otherwise dial a
     // replacement, publishing a WebSocket nothing owns and nothing will close

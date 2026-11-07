@@ -2231,11 +2231,20 @@ class VmServiceClient {
   /// otherwise publish itself into a client that has been shut down. That
   /// socket is never closed by anyone, and an open socket is what keeps the
   /// process alive after the run has ended.
-  Future<void> disconnect() async {
+  ///
+  /// With [leaveDevFS] the app is not asked to delete its devFS. The caller is
+  /// about to stop the app and has this machine's filesystem in common with it,
+  /// so the directory is [removeAbandonedDevFS]'s to delete once the process
+  /// has exited. Asking the running app does not work on Windows: the engine
+  /// keeps files of the devFS open (its asset bundle is read from there), and
+  /// Windows refuses to delete an open file — `Access is denied` — which left
+  /// the directory behind, since nothing removes it when the app exits.
+  Future<void> disconnect({bool leaveDevFS = false}) async {
     _hungUp = true;
     _connectAttempt++;
     _forgetFlaps();
-    if (_devFSBaseUri != null && _service != null) {
+    if (leaveDevFS) _abandonDevFS();
+    if (!leaveDevFS && _devFSBaseUri != null && _service != null) {
       try {
         await _service!
             .callServiceExtension('_deleteDevFS', args: {'fsName': _devFSName})
@@ -2310,9 +2319,66 @@ class VmServiceClient {
   /// A consumer that asks afterwards gets a [StateError] naming this, the way
   /// one asking after the app was reported [gone] does; `VmServiceAppInstance`
   /// already renders that as a failed apply rather than letting it escape.
-  Future<void> retire() async {
+  ///
+  /// [leaveDevFS] is passed on to [disconnect].
+  Future<void> retire({bool leaveDevFS = false}) async {
     _retired = true;
-    await disconnect();
+    await disconnect(leaveDevFS: leaveDevFS);
+  }
+
+  /// The directory holding a devFS that [disconnect] was told to leave, until
+  /// [removeAbandonedDevFS] has deleted it.
+  Directory? _abandonedDevFS;
+
+  /// Remember where the current devFS lives so it can be deleted later.
+  ///
+  /// The VM creates it as `<temp>/<fsName><random>/<fsName>/` and its own
+  /// delete removes only the inner directory, so the outer one is what goes.
+  /// A path that does not have that shape is not removed: this deletes a
+  /// directory tree, and it must be one the VM made.
+  void _abandonDevFS() {
+    final base = _devFSBaseUri;
+    if (base == null) return;
+    final inner = Directory.fromUri(base);
+    final outer = inner.parent;
+    final innerName = p.basename(inner.path);
+    if (innerName != _devFSName ||
+        !p.basename(outer.path).startsWith(_devFSName)) {
+      _logger.warning({
+        'message': 'devfs_unexpected_layout',
+        'text':
+            'The devFS at ${inner.path} is not inside a directory named '
+            '$_devFSName<random>, which is how the VM creates one, so it is '
+            'not deleted.',
+        'path': inner.path,
+      });
+      return;
+    }
+    _abandonedDevFS = outer;
+  }
+
+  /// Delete the devFS [disconnect] left, now that the app is gone.
+  ///
+  /// Call after the app process has exited: until then it can hold files of
+  /// the devFS open and the delete is refused. A failure is logged with the
+  /// path and the cause, because the directory then stays on this machine.
+  Future<void> removeAbandonedDevFS() async {
+    final dir = _abandonedDevFS;
+    if (dir == null) return;
+    _abandonedDevFS = null;
+    try {
+      if (dir.existsSync()) await dir.delete(recursive: true);
+    } on FileSystemException catch (e, stack) {
+      _logger.warning({
+        'message': 'devfs_cleanup_failed',
+        'text':
+            'Deleting the devFS directory ${dir.path} failed after the app '
+            'exited: $e. The directory is left on this machine.',
+        'path': dir.path,
+        'error': '$e',
+        'stack': '$stack',
+      });
+    }
   }
 
   /// Aggressively close the connection without trying to clean up devFS.

@@ -25,6 +25,8 @@ import 'package:flutter_bazel_dev_tool/native_libs_relauncher.dart';
 import 'package:flutter_bazel_dev_tool/native_libs_watch.dart';
 import 'package:flutter_bazel_dev_tool/outcome_renderer.dart';
 import 'package:flutter_bazel_dev_tool/session.dart';
+import 'package:flutter_bazel_dev_tool/vm_service_client.dart';
+import 'package:vm_service/vm_service.dart' show IsolateRef;
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
@@ -45,6 +47,12 @@ class _RelaunchDevice extends Device {
   String get name => 'fake';
 
   @override
+  bool sharesHostFilesystem = false;
+
+  /// Run inside [stop], once the old process is being stopped.
+  void Function()? onStop;
+
+  @override
   Future<AppInstance> launch(String appPath, {AppLogListener? onLog}) async {
     launches++;
     if (launchError case final error?) throw error;
@@ -54,6 +62,7 @@ class _RelaunchDevice extends Device {
   @override
   Future<void> stop(AppInstance instance) async {
     stops++;
+    onStop?.call();
     await instance.logs.close();
   }
 }
@@ -305,6 +314,81 @@ void main() {
     expect(wire['runningCode'], 'updated');
     expect(wire['message'], contains('libnative.dylib'));
   });
+
+  // Measured on a Windows VM: the engine holds files of the devFS open while
+  // the app runs, so asking the running app to delete it fails with `Access is
+  // denied` and leaves the directory behind for good.
+  test(
+    'the devFS of a replaced process is deleted after it exits, not by it',
+    () async {
+      final h = await _Harness.create();
+      addTearDown(h.dispose);
+      final outer = Directory(p.join(h.tmp.path, 'flutter_bazelAb12Cd'))
+        ..createSync();
+      final devFS = await FakeDevFS.start(
+        Directory(p.join(outer.path, 'flutter_bazel'))..createSync(),
+      );
+      addTearDown(devFS.close);
+      final vm = FakeVmService(
+        isolates: [IsolateRef(id: 'iso-main', name: 'main', number: '1')],
+      )..devFSUri = devFS.uri;
+      final client = VmServiceClient(connector: (_) async => vm);
+      await client.connect(devFS.serviceUri);
+      h.session.vmClient = client;
+      h.device.sharesHostFilesystem = true;
+      bool? presentWhileStopping;
+      h.device.onStop = () => presentWhileStopping = outer.existsSync();
+      final r = await h.relauncher(
+        rebuild: () async {
+          h.changeNativeLib('machine code v2 — longer');
+          return true;
+        },
+      );
+
+      await r.relaunchIfNeeded();
+
+      expect(
+        vm.extensionCalls.map((c) => c.method),
+        isNot(contains('_deleteDevFS')),
+        reason: 'the old process is not asked: it may hold the files open',
+      );
+      expect(
+        presentWhileStopping,
+        isTrue,
+        reason: 'nothing is deleted before the process is stopped',
+      );
+      expect(outer.existsSync(), isFalse);
+    },
+  );
+
+  test(
+    'a device on another filesystem is still asked to delete its devFS',
+    () async {
+      final h = await _Harness.create();
+      addTearDown(h.dispose);
+      final vm = FakeVmService(
+        isolates: [IsolateRef(id: 'iso-main', name: 'main', number: '1')],
+      );
+      final devFS = await FakeDevFS.start(
+        Directory(p.join(h.tmp.path, 'devfs'))..createSync(),
+      );
+      addTearDown(devFS.close);
+      vm.devFSUri = devFS.uri;
+      final client = VmServiceClient(connector: (_) async => vm);
+      await client.connect(devFS.serviceUri);
+      h.session.vmClient = client;
+      final r = await h.relauncher(
+        rebuild: () async {
+          h.changeNativeLib('machine code v2 — longer');
+          return true;
+        },
+      );
+
+      await r.relaunchIfNeeded();
+
+      expect(vm.extensionCalls.map((c) => c.method), contains('_deleteDevFS'));
+    },
+  );
 
   // Measured on an Android emulator short of storage: `adb install -r` refused
   // the rebuilt APK after the old app had been stopped. The run then ended

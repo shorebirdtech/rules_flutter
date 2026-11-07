@@ -528,6 +528,10 @@ abstract class Device {
   /// where they do not.
   bool get usesWindowsPaths => false;
 
+  /// Whether the app runs on this machine's filesystem, so a directory the app
+  /// made (its devFS) can be deleted from here once the app has exited.
+  bool get sharesHostFilesystem => false;
+
   /// Display name for this device.
   String get name;
 
@@ -672,6 +676,9 @@ class MacOSDevice extends Device {
 
   @override
   String get name => 'macOS';
+
+  @override
+  bool get sharesHostFilesystem => true;
 
   final _scratch = _LaunchScratch();
 
@@ -983,6 +990,9 @@ class LinuxDevice extends Device {
   String get name => 'Linux';
 
   @override
+  bool get sharesHostFilesystem => true;
+
+  @override
   List<String> get buildArgs => Platform.isLinux
       ? const []
       : const ['--platforms=@rules_flutter//flutter/platforms:linux_x64'];
@@ -1111,6 +1121,9 @@ class WindowsDevice extends Device {
 
   @override
   bool get usesWindowsPaths => true;
+
+  @override
+  bool get sharesHostFilesystem => true;
 
   @override
   LaunchBundleParts? get launchBundleParts => const LaunchBundleParts(

@@ -169,11 +169,17 @@ class Relauncher {
       // a driver that is mid-restart.
       try {
         await session.relaunch(() async {
-          await session.vmClient?.disconnect();
+          // A device that shares this filesystem is not asked to delete the
+          // devFS it is about to lose: the old process may still hold files
+          // of it open, which Windows refuses to delete. The directory goes
+          // once the process has exited.
+          final local = session.device.sharesHostFilesystem;
+          await session.vmClient?.disconnect(leaveDevFS: local);
           // Stopping closes the old instance's log stream, so the sink
           // attached below is the only live one — the relaunched app's output
           // never doubles up with the previous instance's.
           await session.device.stop(session.appInstance);
+          if (local) await session.vmClient?.removeAbandonedDevFS();
           return session.device.launch(
             appFile,
             onLog: appLogSinkFor(
