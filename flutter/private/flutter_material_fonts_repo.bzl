@@ -8,7 +8,7 @@ with the digest recorded for it; a revision no release names fails, naming it
 and the attribute that pins it (`flutter.toolchain(material_fonts_sha256 = ...)`).
 """
 
-load("//flutter/private:framework_source.bzl", "framework_root")
+load("//flutter/private:framework_source.bzl", "framework_root", "unset_message", "write_unset_stub")
 load("//flutter/private:pinned.bzl", "pinned")
 load("//flutter/private:versions.bzl", "ARTIFACT_CHECKSUMS", "FLUTTER_VERSIONS")
 
@@ -25,6 +25,10 @@ def _known_revisions():
 def _flutter_material_fonts_repo_impl(repository_ctx):
     known = _known_revisions()
     if repository_ctx.attr.framework_json:
+        unset = unset_message(repository_ctx)
+        if unset:
+            write_unset_stub(repository_ctx, ["material-fonts/MaterialIcons-Regular.otf"], unset)
+            return
         version_file = framework_root(repository_ctx).get_child("bin").get_child("internal").get_child("material_fonts.version")
         revision = repository_ctx.read(version_file).strip()
         sha256 = repository_ctx.attr.sha256 or known.get(revision, "")

@@ -1,0 +1,21 @@
+load("@rules_flutter//flutter:defs.bzl", "flutter_application")
+load("@rules_flutter//flutter:macos.bzl", "flutter_macos_app")
+
+exports_files(["pubspec.lock"])
+
+flutter_application(
+    name = "app_flutter",
+    package_name = "custom_engine",
+    main = "lib/main.dart",
+    deps = ["@deps//:flutter"],
+)
+
+# Built with the release by default; with a stand-in checkout's engine and
+# framework under --@rules_flutter//flutter:sdk=local (see MODULE.bazel).
+flutter_macos_app(
+    name = "app",
+    app_name = "Custom Engine",
+    application = ":app_flutter",
+    bundle_id = "com.example.customengine",
+    target_compatible_with = ["@platforms//os:macos"],
+)

@@ -848,3 +848,9 @@ filegroup(
     srcs = glob(["*.bzl"]),
     visibility = ["//tools/download_guard:__pkg__"],
 )
+
+bzl_library(
+    name = "engine_out_dirs",
+    srcs = ["engine_out_dirs.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+)

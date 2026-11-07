@@ -6,6 +6,8 @@ are written against them, so the stock release and any other source are used
 the same way.
 """
 
+load("//flutter/private:toolchains_repo.bzl", "CROSS_COMPILATION_PAIRS", "DESKTOP_ENGINE_PLATFORMS", "HOST_PLATFORMS")
+
 ENGINE_MODES = ["debug", "profile", "release"]
 
 # The slice directory of a desktop engine, by the platform string of its target.
@@ -118,3 +120,31 @@ def mode_select(by_mode, debug = None):
         profile = by_mode["profile"],
         release = by_mode["release"],
     )
+
+def contract_slices():
+    """Every slice of the contract that the toolchains name: package path to its target names.
+
+    A source that serves only some of them defines the rest as missing slices,
+    so that a toolchain which is never used never fails.
+
+    Returns:
+        A dict from package path (`macos/release`) to the list of its slice targets.
+    """
+    slices = {}
+    for host in HOST_PLATFORMS:
+        slices["host/" + host] = ["tools"]
+    slices["kernel/debug"] = ["platform"]
+    slices["kernel/release"] = ["platform"]
+    for platform in DESKTOP_ENGINE_PLATFORMS:
+        directory = desktop_engine_dir(platform)
+        for mode in ENGINE_MODES:
+            slices.setdefault("{}/{}".format(directory, mode), []).append("engine")
+    for host in HOST_PLATFORMS:
+        target = native_target(host)
+        for mode in ["profile", "release"]:
+            slices.setdefault("{}/{}".format(target, mode), []).append("gen_snapshot_" + host)
+    for host, targets in CROSS_COMPILATION_PAIRS.items():
+        for target in targets:
+            for mode in ["profile", "release"]:
+                slices.setdefault("{}/{}".format(target, mode), []).append("gen_snapshot_" + host)
+    return slices

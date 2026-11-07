@@ -1,0 +1,106 @@
+"""Unit tests for reading an engine checkout's out dirs."""
+
+load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
+load("//flutter/private:engine_out_dirs.bzl", "effective_cpu", "parse_args_gn", "parse_out_dir_name", "select_out_dir")
+
+def _shape(name):
+    parsed = parse_out_dir_name(name)
+    if parsed == None:
+        return None
+    return (parsed.os, parsed.mode, parsed.sim, parsed.unopt, parsed.cpu)
+
+def _names_test_impl(ctx):
+    env = unittest.begin(ctx)
+
+    # (os, mode, simulator, unoptimised, cpu)
+    asserts.equals(env, ("host", "debug", False, True, "arm64"), _shape("host_debug_unopt_arm64"))
+    asserts.equals(env, ("host", "release", False, False, "x64"), _shape("host_release"))
+    asserts.equals(env, ("ios", "debug", True, True, "arm64"), _shape("ios_debug_sim_unopt_arm64"))
+    asserts.equals(env, ("ios", "debug", True, False, "x64"), _shape("ios_debug_sim"))
+    asserts.equals(env, ("ios", "release", False, False, "arm64"), _shape("ios_release"))
+    asserts.equals(env, ("android", "release", False, False, "arm64"), _shape("android_release_arm64"))
+
+    # An unoptimised 32-bit ARM Android build is a name the grammar produces;
+    # it is reported as what it is, so that no slot takes it for another.
+    asserts.equals(env, ("android", "debug", False, True, "arm"), _shape("android_debug_unopt"))
+    asserts.equals(env, ("mac", "release", False, False, "arm64"), _shape("mac_release_arm64"))
+    asserts.equals(env, ("wasm", "release", False, False, "wasm"), _shape("wasm_release"))
+
+    # A `--target-dir` or a sanitizer build is not a name `tools/gn` makes.
+    asserts.equals(env, None, _shape("my_build"))
+    asserts.equals(env, None, _shape("host_debug_asan_arm64"))
+    asserts.equals(env, None, _shape("host_jit_release"))
+    asserts.equals(env, None, _shape("host"))
+    asserts.equals(env, None, _shape("flutter"))
+    return unittest.end(env)
+
+def _args_gn_test_impl(ctx):
+    env = unittest.begin(ctx)
+    args = parse_args_gn("""
+# comment
+target_cpu = "arm64"
+flutter_runtime_mode = "debug"
+flutter_prebuilt_dart_sdk = false
+engine_version = "4f1c0d"
+
+""")
+    asserts.equals(env, "arm64", args["target_cpu"])
+    asserts.equals(env, "false", args["flutter_prebuilt_dart_sdk"])
+    asserts.equals(env, "4f1c0d", args["engine_version"])
+
+    # args.gn is the authority on the CPU; the name is the fallback.
+    parsed = parse_out_dir_name("host_debug")
+    asserts.equals(env, "arm64", effective_cpu(parsed, args))
+    asserts.equals(env, "x64", effective_cpu(parsed, {}))
+    return unittest.end(env)
+
+def _candidates(*names):
+    return [parse_out_dir_name(n) for n in names]
+
+def _slots_test_impl(ctx):
+    env = unittest.begin(ctx)
+    host_mac = ["host", "mac"]
+
+    one = select_out_dir(_candidates("host_debug_unopt_arm64", "host_release_arm64"), host_mac, "release", "arm64", [])
+    asserts.equals(env, "host_release_arm64", one.name)
+    asserts.equals(env, None, one.error)
+
+    # A mode with no out dir is not served by another mode's.
+    missing = select_out_dir(_candidates("host_debug_unopt_arm64"), host_mac, "release", "arm64", [])
+    asserts.equals(env, None, missing.name)
+    asserts.equals(
+        env,
+        "no out dir host_release_arm64, host_release_unopt_arm64, mac_release_arm64, mac_release_unopt_arm64 found for release on arm64",
+        missing.error,
+    )
+
+    # The wrong CPU is not served either.
+    wrong_cpu = select_out_dir(_candidates("host_debug_x64", "host_debug"), host_mac, "debug", "arm64", [])
+    asserts.equals(env, None, wrong_cpu.name)
+
+    # Optimised and unoptimised are the user's choice: both present is an
+    # ambiguity, never a preference.
+    both = select_out_dir(_candidates("host_debug_arm64", "host_debug_unopt_arm64"), host_mac, "debug", "arm64", [])
+    asserts.equals(env, None, both.name)
+    asserts.equals(
+        env,
+        "2 out dirs fit debug on arm64: host_debug_arm64, host_debug_unopt_arm64. " +
+        "Pick one with FLUTTER_LOCAL_ENGINES, for example FLUTTER_LOCAL_ENGINES=host_debug_arm64",
+        both.error,
+    )
+
+    # A pin resolves it.
+    pinned = select_out_dir(_candidates("host_debug_arm64", "host_debug_unopt_arm64"), host_mac, "debug", "arm64", ["host_debug_unopt_arm64"])
+    asserts.equals(env, "host_debug_unopt_arm64", pinned.name)
+
+    # A simulator build is not a host build, whatever its mode.
+    sim = select_out_dir(_candidates("ios_debug_sim_arm64"), host_mac, "debug", "arm64", [])
+    asserts.equals(env, None, sim.name)
+    return unittest.end(env)
+
+_names_test = unittest.make(_names_test_impl)
+_args_gn_test = unittest.make(_args_gn_test_impl)
+_slots_test = unittest.make(_slots_test_impl)
+
+def engine_out_dirs_test_suite(name):
+    unittest.suite(name, _names_test, _args_gn_test, _slots_test)

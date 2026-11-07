@@ -1,0 +1,109 @@
+"""E2e test: a macOS app built against a Flutter framework and engine that are not the release's.
+
+The checkout is a stand-in: `fake_checkout.bzl` lays the official artifacts out as
+a flutter/flutter checkout with engine out dirs (`engine/src/out/host_debug_arm64`
+and so on, `args.gn` written to match), so that the adapters, the contract, the
+check and the record are exercised with real, runnable binaries and without an
+engine build. `//tools/dev_tool/test/e2e:custom_engine_e2e_test.dart` drives it.
+"""
+
+module(name = "rules_flutter_custom_engine")
+
+bazel_dep(name = "rules_flutter", version = "0.0.0")
+bazel_dep(name = "rules_dart", version = "0.8.1")
+bazel_dep(name = "bazel_skylib", version = "1.9.2")
+bazel_dep(name = "apple_support", version = "2.9.1")
+bazel_dep(name = "rules_apple", version = "5.2.0")
+bazel_dep(name = "rules_cc", version = "0.2.26")
+bazel_dep(name = "rules_swift", version = "4.1.2")
+bazel_dep(name = "platforms", version = "1.1.0")
+
+local_path_override(
+    module_name = "rules_flutter",
+    path = "../..",
+)
+
+flutter = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter")
+
+# The release: what a build gets when it names no SDK.
+flutter.toolchain(flutter_version = "3.47.9")
+
+# SDKs whose checkout is the stand-in below. Chosen per build with
+# --@rules_flutter//flutter:sdk=<name>.
+flutter.toolchain(
+    name = "local",
+    engine = "@local_engine",
+    framework = "@local_framework",
+)
+
+# The same checkout, but with a gen_snapshot of another Dart: the build must
+# refuse it, naming both.
+flutter.toolchain(
+    name = "mismatched",
+    engine = "@mismatched_engine",
+    framework = "@mismatched_framework",
+)
+
+# A checkout whose path is given the way a developer gives it: with
+# --repo_env=FLUTTER_CHECKOUT. Not set, the repositories still load.
+flutter.toolchain(
+    name = "env",
+    engine = "@env_engine",
+    framework = "@env_framework",
+)
+flutter.pub(
+    name = "deps",
+    lock = "//:pubspec.lock",
+)
+use_repo(
+    flutter,
+    "deps",
+    "flutter_darwin-arm64",
+    "flutter_darwin-arm64_profile",
+    "flutter_desktop_engine_darwin-x64_debug",
+    "flutter_desktop_engine_darwin-x64_profile",
+    "flutter_desktop_engine_darwin-x64_release",
+    "flutter_dev_root_src",
+    "flutter_macos_engine",
+    "flutter_stock_engine",
+    "flutter_toolchains",
+)
+
+register_toolchains("@flutter_toolchains//:all")
+
+fake_checkout = use_repo_rule("//:fake_checkout.bzl", "fake_checkout")
+
+fake_checkout(name = "fake_checkout")
+
+fake_checkout(
+    name = "fake_checkout_mismatched",
+    gen_snapshot_flutter_version = "3.41.7",
+)
+
+checkout_framework = use_repo_rule("@rules_flutter//flutter:local_sdk.bzl", "flutter_checkout_framework")
+
+engine_out_dirs = use_repo_rule("@rules_flutter//flutter:local_sdk.bzl", "flutter_engine_out_dirs")
+
+checkout_framework(
+    name = "local_framework",
+    checkout = "@fake_checkout//:checkout/CHECKOUT",
+)
+
+engine_out_dirs(
+    name = "local_engine",
+    checkout = "@fake_checkout//:checkout/CHECKOUT",
+)
+
+checkout_framework(
+    name = "mismatched_framework",
+    checkout = "@fake_checkout_mismatched//:checkout/CHECKOUT",
+)
+
+engine_out_dirs(
+    name = "mismatched_engine",
+    checkout = "@fake_checkout_mismatched//:checkout/CHECKOUT",
+)
+
+checkout_framework(name = "env_framework")
+
+engine_out_dirs(name = "env_engine")

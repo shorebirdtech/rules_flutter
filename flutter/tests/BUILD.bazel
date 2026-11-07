@@ -16,6 +16,7 @@ load(":common_test.bzl", "common_test_suite")
 load(":desktop_plugin_link_test.bzl", "desktop_plugin_link_test_suite")
 load(":dev_config_test.bzl", "dev_config_test_suite")
 load(":download_digests_test.bzl", "download_digests_test_suite")
+load(":engine_out_dirs_test.bzl", "engine_out_dirs_test_suite")
 load(":engine_targets_test.bzl", "engine_targets_test_suite")
 load(":flutter_application_test.bzl", "flutter_application_test_suite")
 load(":flutter_application_variant_test.bzl", "flutter_application_variant_test_suite")
@@ -194,6 +195,8 @@ notices_test_suite(name = "notices_test")
 flutter_test_flavor_test_suite(name = "flutter_test_flavor_test")
 
 widget_creation_flag_test_suite(name = "widget_creation_flag_test")
+
+engine_out_dirs_test_suite(name = "engine_out_dirs_test")
 
 pub_constraint_test_suite(name = "pub_constraint_test")
 
