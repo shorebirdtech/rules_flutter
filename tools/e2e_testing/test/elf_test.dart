@@ -56,6 +56,7 @@ Uint8List elf64WithSections(List<String> names) {
     Endian.little,
   );
   bytes.setRange(strtabOffset, strtabOffset + strtab.length, strtab);
+  bytes[4] = 2;
   return bytes;
 }
 
@@ -68,6 +69,10 @@ void main() {
       );
       expect(
         ElfImage(elf64(machine: 0x3e)).validate(elfMachineForAbi['x86_64']!),
+        isNull,
+      );
+      expect(
+        ElfImage(elf64(machine: 40)).validate(elfMachineForAbi['armeabi-v7a']!),
         isNull,
       );
     });
@@ -148,13 +153,54 @@ void main() {
         ..setUint32(noteOffset + 20, api, Endian.little);
       bytes
         ..setRange(noteOffset + 12, noteOffset + 19, 'Android'.codeUnits)
-        ..setRange(strtabOffset, strtabOffset + strtab.length, strtab);
+        ..setRange(strtabOffset, strtabOffset + strtab.length, strtab)
+        ..[4] = 2;
       return bytes;
     }
 
     test('reads the level of the note', () {
       expect(ElfImage(elf64WithIdent(24)).androidApiLevel(), 24);
       expect(ElfImage(elf64WithIdent(31)).androidApiLevel(), 31);
+    });
+
+    // The same note in an ELF32 file, as armeabi-v7a libraries are: section
+    // headers are 40 bytes, with 4-byte offsets and sizes.
+    Uint8List elf32WithIdent(int api) {
+      const shentsize = 40;
+      final strtab = [0, ...'.note.android.ident'.codeUnits, 0];
+      final noteOffset = 52 + 3 * shentsize;
+      final strtabOffset = noteOffset + 24;
+      final bytes = Uint8List(strtabOffset + strtab.length);
+      bytes
+        ..setRange(0, 4, [0x7f, 0x45, 0x4c, 0x46])
+        ..[4] = 1;
+      ByteData.sublistView(bytes)
+        ..setUint16(18, 40, Endian.little)
+        ..setUint32(0x20, 52, Endian.little)
+        ..setUint16(0x2e, shentsize, Endian.little)
+        ..setUint16(0x30, 3, Endian.little)
+        ..setUint16(0x32, 2, Endian.little)
+        ..setUint32(52 + shentsize, 1, Endian.little)
+        ..setUint32(52 + shentsize + 0x10, noteOffset, Endian.little)
+        ..setUint32(52 + shentsize + 0x14, 24, Endian.little)
+        ..setUint32(52 + 2 * shentsize + 0x10, strtabOffset, Endian.little)
+        ..setUint32(noteOffset, 8, Endian.little)
+        ..setUint32(noteOffset + 4, 4, Endian.little)
+        ..setUint32(noteOffset + 8, 1, Endian.little)
+        ..setUint32(noteOffset + 20, api, Endian.little);
+      bytes
+        ..setRange(noteOffset + 12, noteOffset + 19, 'Android'.codeUnits)
+        ..setRange(strtabOffset, strtabOffset + strtab.length, strtab);
+      return bytes;
+    }
+
+    test('reads the level of the note in an ELF32 file', () {
+      expect(ElfImage(elf32WithIdent(24)).androidApiLevel(), 24);
+      expect(ElfImage(elf32WithIdent(35)).sectionNames(), [
+        '',
+        '.note.android.ident',
+        '',
+      ]);
     });
 
     test('is null without the note', () {

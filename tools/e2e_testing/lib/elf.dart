@@ -8,6 +8,7 @@ import 'dart:typed_data';
 const elfMachineForAbi = <String, int>{
   'arm64-v8a': 0xb7, // EM_AARCH64
   'x86_64': 0x3e, // EM_X86_64
+  'armeabi-v7a': 0x28, // EM_ARM
 };
 
 /// The bytes of an ELF file, and what its headers say.
@@ -110,7 +111,7 @@ class ElfImage {
     return (min, null);
   }
 
-  /// The section names of a little-endian ELF64 file, or none if it has no
+  /// The section names of a little-endian ELF file, or none if it has no
   /// section headers.
   List<String> sectionNames() => [for (final s in _sections()) s.name];
 
@@ -137,16 +138,22 @@ class ElfImage {
   }
 
   List<({String name, int offset, int size})> _sections() {
-    if (bytes.length < 0x40) return const [];
-    final shoff = _data.getUint64(0x28, Endian.little);
-    final shentsize = _data.getUint16(0x3a, Endian.little);
-    final shnum = _data.getUint16(0x3c, Endian.little);
-    final shstrndx = _data.getUint16(0x3e, Endian.little);
+    // ELF32 (armeabi-v7a) and ELF64 differ in the width of the offsets and in
+    // where the header fields sit.
+    final is64 = bytes.length > 4 && bytes[4] == 2;
+    final headerSize = is64 ? 0x40 : 0x34;
+    if (bytes.length < headerSize) return const [];
+    int word(int offset) => is64
+        ? _data.getUint64(offset, Endian.little)
+        : _data.getUint32(offset, Endian.little);
+    final shoff = word(is64 ? 0x28 : 0x20);
+    final shentsize = _data.getUint16(is64 ? 0x3a : 0x2e, Endian.little);
+    final shnum = _data.getUint16(is64 ? 0x3c : 0x30, Endian.little);
+    final shstrndx = _data.getUint16(is64 ? 0x3e : 0x32, Endian.little);
     if (shoff == 0 || shnum == 0) return const [];
-    final names = _data.getUint64(
-      shoff + shstrndx * shentsize + 0x18,
-      Endian.little,
-    );
+    final offsetField = is64 ? 0x18 : 0x10;
+    final sizeField = is64 ? 0x20 : 0x14;
+    final names = word(shoff + shstrndx * shentsize + offsetField);
     String nameAt(int start) {
       var end = start;
       while (bytes[end] != 0) {
@@ -161,8 +168,8 @@ class ElfImage {
           name: nameAt(
             names + _data.getUint32(shoff + i * shentsize, Endian.little),
           ),
-          offset: _data.getUint64(shoff + i * shentsize + 0x18, Endian.little),
-          size: _data.getUint64(shoff + i * shentsize + 0x20, Endian.little),
+          offset: word(shoff + i * shentsize + offsetField),
+          size: word(shoff + i * shentsize + sizeField),
         ),
     ];
   }
