@@ -3,8 +3,7 @@
 /// action short of a file it reads fails here and not only on a remote
 /// executor.
 ///
-/// Arguments: `kernel_filter=<runfiles path>`,
-/// `generate_asset_manifest=<runfiles path>`, and `<copy>=<runfiles path>` for
+/// Arguments: `generate_asset_manifest=<runfiles path>`, and `<copy>=<runfiles path>` for
 /// each copy BUILD.bazel declares.
 import 'dart:convert';
 import 'dart:io';
@@ -101,15 +100,12 @@ void main(List<String> args) {
 
   tearDownAll(() => work.deleteSync(recursive: true));
 
-  // The app's kernel, compiled as FlutterKernelCompile does, once for the
-  // tests that read it.
+  // The app's kernel, compiled as DartKernel does, once for the tests that
+  // read it.
   Future<String>? compiled;
   Future<String> appKernel() => compiled ??= () async {
     final output = '${work.path}/app.dill';
-    await run(program('kernel_compile', 'dart'), [
-      paths['kernel_filter']!,
-      '--',
-      program('kernel_compile', 'dartaotruntime'),
+    await run(program('kernel_compile', 'dartaotruntime'), [
       sdk('kernel_compile', 'bin/snapshots/frontend_server_aot.dart.snapshot'),
       '--sdk-root',
       '${paths['kernel_compile']}/extra/',
@@ -120,14 +116,13 @@ void main(List<String> args) {
       '--output-dill',
       output,
       '--no-print-incremental-dependencies',
-      '--verbosity=error',
       'package:app/main.dart',
     ]);
     return output;
   }();
 
   group('kernel', () {
-    test('kernel_filter.dart drives the front end', () async {
+    test('the front end compiles a whole program with no tool_files', () async {
       expect(File(await appKernel()).lengthSync(), greaterThan(0));
     });
 

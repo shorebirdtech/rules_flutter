@@ -12,10 +12,9 @@ action's tool:
 
 - a `dart script.dart` step (asset bundle, manifests, bundlers, templates):
   `run`, the launcher and the VM;
-- the kernel compile: `run` for `kernel_filter.dart`, `aot_run` and the
-  front-end snapshot for the front end it starts, and the platform kernel;
 - `dart compile js` and `dart compile wasm`: `dart2js` and `dart2wasm`;
-- a library or entry compile through `DartKernelSdkInfo`: the `kernel` set;
+- a library, entry or whole-program compile through `DartKernelSdkInfo`:
+  the `kernel` set;
 - `gen_snapshot`: none. It is a standalone binary from the engine download.
 """
 
@@ -30,8 +29,6 @@ load(":apple_bundling.bzl", "fake_application")
 
 _WHOLE_PROGRAM = {str(Label("@rules_dart//dart:modular_kernel")): False}
 
-_FRONTEND_SERVER = "bin/snapshots/frontend_server_aot.dart.snapshot"
-
 def _sets(*names):
     files = {}
     for name in names:
@@ -45,7 +42,7 @@ def _sets(*names):
 # not named here runs a Dart script and takes the `run` set.
 _RUN = _sets("run")
 _SDK_FILES = {
-    "FlutterKernelCompile": _sets("run", "aot_run") | {_FRONTEND_SERVER: True},
+    "DartKernel": _sets("kernel"),
     "FlutterAotElf": {},
     "FlutterAotMacho": {},
     "FlutterDart2JS": _sets("dart2js"),
@@ -219,10 +216,10 @@ def sdk_inputs_test_suite(name):
     })
 
     cases = {
-        "app": (":%s_app" % name, _takes_only_what_it_reads_test, ["FlutterKernelCompile", "FlutterAssetBundle", "FlutterShaderCompile"]),
-        "app_opt": (":%s_app" % name, _takes_only_what_it_reads_opt_test, ["FlutterKernelCompile", "FlutterAssetBundle"] + aot),
-        "kernel": (":%s_kernel" % name, _takes_only_what_it_reads_test, ["FlutterKernelCompile"]),
-        "aot": (":%s_aot" % name, _takes_only_what_it_reads_opt_test, ["FlutterKernelCompile"] + aot),
+        "app": (":%s_app" % name, _takes_only_what_it_reads_test, ["DartKernel", "FlutterAssetBundle", "FlutterShaderCompile"]),
+        "app_opt": (":%s_app" % name, _takes_only_what_it_reads_opt_test, ["DartKernel", "FlutterAssetBundle"] + aot),
+        "kernel": (":%s_kernel" % name, _takes_only_what_it_reads_test, ["DartKernel"]),
+        "aot": (":%s_aot" % name, _takes_only_what_it_reads_opt_test, ["DartKernel"] + aot),
         "web": (":%s_web" % name, _takes_only_what_it_reads_test, ["FlutterDart2Wasm", "FlutterDart2JS", "FlutterWebIconKernel", "FlutterAssetBundle", "FlutterWebTemplate", "FlutterWebBundle"]),
         "web_js": (":%s_web_js" % name, _takes_only_what_it_reads_opt_test, ["FlutterDart2JS", "FlutterWebTemplate", "FlutterWebBundle"]),
         "gen_l10n": ("//flutter/tests/gen_l10n_fixture:l10n", _takes_only_what_it_reads_test, ["FlutterGenL10n"]),
@@ -236,7 +233,7 @@ def sdk_inputs_test_suite(name):
         "flutter_test_whole_program": (
             "//flutter/tests/code_asset_fixture/test:wrapped_code_asset_test",
             _takes_only_what_it_reads_whole_program_test,
-            ["FlutterKernelCompile"],
+            ["DartKernel"],
         ),
         "macos_framework": (":%s_macos_framework" % name, _takes_only_what_it_reads_test, ["FlutterMacOSFramework"]),
     }

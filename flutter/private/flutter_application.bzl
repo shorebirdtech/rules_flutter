@@ -176,7 +176,6 @@ def flutter_application_build(ctx, inputs):
         ),
     )
     kernel_dill = compilation.kernel_dill
-    package_config = compilation.package_config
 
     aot_output = None
     aot_object = None
@@ -344,7 +343,6 @@ def flutter_application_build(ctx, inputs):
     # path named by a build that did not write it fails far from its cause.
     default_files = [
         flutter_assets,
-        package_config,
         native_assets_manifest_file,
     ] + bundled_native_libs.values()
     if aot_output:
@@ -476,7 +474,6 @@ def flutter_application_build(ctx, inputs):
             icu_data = flutter_sdk_info.icu_data,
             native_libs = native_libs,
             is_debug = is_debug,
-            package_config = package_config,
             native_assets_manifest = native_assets_manifest_file,
             bundled_code_assets = bundled_code_assets,
             bundled_data_assets = transitive_data_assets,

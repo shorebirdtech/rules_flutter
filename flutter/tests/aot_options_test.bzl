@@ -194,3 +194,41 @@ def aot_file_flags_test_suite(name, rules):
         },
         "file_writing_flags",
     )
+
+def _resolve_dwarf_paths_refused_impl(ctx):
+    env = analysistest.begin(ctx)
+    asserts.expect_failure(env, "cannot hold `--resolve-dwarf-paths`")
+    return analysistest.end(env)
+
+_resolve_dwarf_paths_refused_test = analysistest.make(
+    _resolve_dwarf_paths_refused_impl,
+    expect_failure = True,
+    config_settings = {"//command_line_option:compilation_mode": "opt"},
+)
+
+def aot_resolve_dwarf_paths_test_suite(name, rules):
+    """A fixture per rule and spelling of `--resolve-dwarf-paths`, each refused.
+
+    gen_snapshot converts only `file:` URIs into DWARF paths, and the kernel
+    names its sources by workspace-relative URIs, so the flag would abort the
+    snapshot; the rule says why at analysis instead.
+
+    Args:
+        name: The test_suite name.
+        rules: Which of "application" and "aot_target" to test.
+    """
+    tests = []
+    for rule_name in rules:
+        for suffix, flag in [("dashes", "--resolve-dwarf-paths"), ("underscores", "--resolve_dwarf_paths")]:
+            fixture = "_%s_resolve_dwarf_paths_%s" % (rule_name, suffix)
+            _RULES[rule_name](
+                name = fixture,
+                package_name = _PACKAGE,
+                main = _MAIN,
+                extra_gen_snapshot_options = [flag],
+                tags = ["manual"],
+            )
+            test_name = "%s%s_test" % (name, fixture)
+            _resolve_dwarf_paths_refused_test(name = test_name, target_under_test = ":" + fixture)
+            tests.append(":" + test_name)
+    native.test_suite(name = name, tests = tests)

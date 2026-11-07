@@ -215,11 +215,11 @@ def path_mapping_test_suite(name):
     })
 
     cases = {
-        "app": ("app", _path_mapped_test, ["FlutterKernelCompile", "FlutterAssetBundle", "FlutterShaderCompile"]),
-        "app_opt": ("app", _path_mapped_opt_test, ["FlutterKernelCompile", "FlutterAssetBundle"] + aot),
-        "app_dbg": ("app", _path_mapped_dbg_test, ["FlutterKernelCompile", "FlutterAssetBundle", "FlutterShaderCompile"]),
-        "kernel": ("kernel", _path_mapped_test, ["FlutterKernelCompile"]),
-        "aot": ("aot", _path_mapped_opt_test, ["FlutterKernelCompile"] + aot),
+        "app": ("app", _path_mapped_test, ["DartKernel", "FlutterAssetBundle", "FlutterShaderCompile"]),
+        "app_opt": ("app", _path_mapped_opt_test, ["DartKernel", "FlutterAssetBundle"] + aot),
+        "app_dbg": ("app", _path_mapped_dbg_test, ["DartKernel", "FlutterAssetBundle", "FlutterShaderCompile"]),
+        "kernel": ("kernel", _path_mapped_test, ["DartKernel"]),
+        "aot": ("aot", _path_mapped_opt_test, ["DartKernel"] + aot),
         "web": ("web", _path_mapped_test, ["FlutterWebIconKernel", "FlutterAssetBundle", "FlutterDart2Wasm", "FlutterDart2JS", "FlutterWebTemplate", "FlutterWebBundle"]),
         "web_dbg": ("web", _path_mapped_dbg_test, ["FlutterAssetBundle", "FlutterDart2Wasm", "FlutterDart2JS", "FlutterWebTemplate", "FlutterWebBundle"]),
         "web_js": ("web_js", _path_mapped_opt_test, ["FlutterDart2JS", "FlutterWebTemplate", "FlutterWebBundle"]),

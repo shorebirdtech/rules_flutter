@@ -77,7 +77,7 @@ def flutter_test_flavor_test_suite(name):
     _whole_program_compile_test(
         name = name + "_whole_program",
         target_under_test = ":_flavor_test_paid",
-        mnemonic = "FlutterKernelCompile",
+        mnemonic = "DartKernel",
         expected = [_DEFINE],
     )
     _modular_compile_test(

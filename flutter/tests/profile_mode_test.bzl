@@ -30,8 +30,8 @@ def _action(env, mnemonics):
     asserts.equals(env, 1, len(actions), "expected exactly one of %s" % (mnemonics,))
     return actions[0] if actions else None
 
-def _assert_mode(env, profile):
-    kernel = _action(env, ["FlutterKernelCompile"])
+def _assert_mode(env, profile, application, os):
+    kernel = _action(env, ["DartKernel"])
     aot = _action(env, ["FlutterAotMacho", "FlutterAotElf"])
     if kernel == None or aot == None:
         return
@@ -44,6 +44,16 @@ def _assert_mode(env, profile):
     asserts.equals(env, profile, "dart.vm.profile=true" in argv, "dart.vm.profile define")
     asserts.equals(env, not profile, "dart.vm.product=true" in argv, "dart.vm.product define")
 
+    # Both optimized modes drop the framework's `toString` bodies, as
+    # `flutter build` does.
+    for uri in ["dart:ui", "package:flutter"]:
+        asserts.true(env, "--delete-tostring-package-uri=" + uri in kernel.argv, "toString of %s deleted" % uri)
+
+    # An application knows its OS and compiles for it, as `flutter build`
+    # does; the AOT target does not say which it is for.
+    if application:
+        asserts.true(env, "--target-os " + os in argv, "compiled for the target OS: " + argv)
+
     # The profile gen_snapshot lives in a repo of its own, fetched only for a
     # profile build.
     asserts.equals(
@@ -53,14 +63,21 @@ def _assert_mode(env, profile):
         "gen_snapshot %s should %sbe the profile one" % (aot.argv[0], "" if profile else "not "),
     )
 
+def _target_os(ctx):
+    """The OS the fixture application is built for: the one the test runs on."""
+    for os in ["macos", "linux", "windows"]:
+        if ctx.target_platform_has_constraint(getattr(ctx.attr, "_" + os)[platform_common.ConstraintValueInfo]):
+            return os
+    fail("the target platform is none of macos, linux, windows")
+
 def _profile_test_impl(ctx):
     env = analysistest.begin(ctx)
-    _assert_mode(env, profile = True)
+    _assert_mode(env, profile = True, application = ctx.attr.application, os = _target_os(ctx))
     return analysistest.end(env)
 
 def _release_test_impl(ctx):
     env = analysistest.begin(ctx)
-    _assert_mode(env, profile = False)
+    _assert_mode(env, profile = False, application = ctx.attr.application, os = _target_os(ctx))
     return analysistest.end(env)
 
 def _refused_test_impl(ctx):
@@ -68,8 +85,31 @@ def _refused_test_impl(ctx):
     asserts.expect_failure(env, "needs -c opt")
     return analysistest.end(env)
 
-_profile_test = analysistest.make(_profile_test_impl, config_settings = _PROFILE)
-_release_test = analysistest.make(_release_test_impl, config_settings = _RELEASE)
+_FIXTURE = {
+    "application": attr.bool(mandatory = True),
+    "_linux": attr.label(default = "@platforms//os:linux"),
+    "_macos": attr.label(default = "@platforms//os:macos"),
+    "_windows": attr.label(default = "@platforms//os:windows"),
+}
+
+_profile_test = analysistest.make(_profile_test_impl, attrs = _FIXTURE, config_settings = _PROFILE)
+_release_test = analysistest.make(_release_test_impl, attrs = _FIXTURE, config_settings = _RELEASE)
+
+def _debug_test_impl(ctx):
+    """A debug kernel keeps every `toString`, and is not compiled for an OS."""
+    env = analysistest.begin(ctx)
+    kernel = _action(env, ["DartKernel"])
+    if kernel != None:
+        argv = " ".join(kernel.argv)
+        asserts.false(env, "--delete-tostring-package-uri" in argv, "debug keeps toString: " + argv)
+        asserts.false(env, "--target-os" in argv, "a JIT kernel names no OS: " + argv)
+    return analysistest.end(env)
+
+_debug_test = analysistest.make(
+    _debug_test_impl,
+    attrs = _FIXTURE,
+    config_settings = {"//command_line_option:compilation_mode": "dbg"},
+)
 _refused_dbg_test = analysistest.make(
     _refused_test_impl,
     expect_failure = True,
@@ -138,11 +178,15 @@ def profile_mode_test_suite(name):
         for suffix, rule in [
             ("profile", _profile_test),
             ("release", _release_test),
+            ("debug", _debug_test),
             ("refused_dbg", _refused_dbg_test),
             ("refused_fastbuild", _refused_fastbuild_test),
         ]:
             test_name = "%s%s_%s_test" % (name, fixture, suffix)
-            rule(name = test_name, target_under_test = ":" + fixture)
+            if suffix in ("profile", "release", "debug"):
+                rule(name = test_name, target_under_test = ":" + fixture, application = fixture == "_profile_application")
+            else:
+                rule(name = test_name, target_under_test = ":" + fixture)
             tests.append(":" + test_name)
 
     flutter_profile_build(

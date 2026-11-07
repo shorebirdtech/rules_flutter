@@ -188,7 +188,6 @@ FlutterApplicationInfo = provider(
         "icu_data": "File: The icudtl.dat file.",
         "native_libs": "list[File]: Shared libraries from native_deps (for dart:ffi).",
         "is_debug": "bool: True if built in debug/JIT mode.",
-        "package_config": "File: The package_config.json for the frontend server.",
         "native_assets_manifest": "File or None: The `native_assets.json` manifest passed to the frontend_server via `--native-assets`. Always emitted (empty manifest when there are no Native Assets).",
         "bundled_code_assets": "depset[File]: Native-Assets `CodeAsset` library files (.dylib/.so/.dll) to embed in the platform bundle. Each platform application rule reads this and threads the files into the platform's existing embedding mechanism.",
         "bundled_data_assets": "depset[FlutterDataAssetInfo]: Native-Assets `DataAsset` declarations to bundle under `flutter_assets/packages/<pkg>/<name>`.",

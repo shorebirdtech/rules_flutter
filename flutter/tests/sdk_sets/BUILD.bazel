@@ -16,16 +16,14 @@ dart_binary(
 
 # Each copy holds what the action it is named for declares.
 COPIES = {
-    # FlutterKernelCompile: `dart kernel_filter.dart` starts the front end.
+    # DartKernel, a whole program through `DartKernelSdkInfo`: the front end,
+    # its runtime and the platform, and `tool_files` is empty.
     "kernel_compile": dict(
         fields = [
             "frontend_server",
             "platform_kernel_dill",
         ],
-        sets = [
-            "run",
-            "aot_run",
-        ],
+        sets = ["aot_run"],
     ),
     # DartModule, through `DartKernelSdkInfo`: kernel_worker, its runtime and
     # the platform, and `tool_files` is empty.
@@ -65,7 +63,6 @@ dart_test(
     name = "sdk_sets_test",
     size = "medium",
     args = [
-        "kernel_filter=$(rlocationpath //flutter/private/tools:kernel_filter.dart)",
         "generate_asset_manifest=$(rlocationpath //flutter/private/tools:generate_asset_manifest.dart)",
     ] + [
         "%s=$(rlocationpath :copy_%s)" % (name, name)
@@ -73,7 +70,6 @@ dart_test(
     ],
     data = [
         "//flutter/private/tools:generate_asset_manifest.dart",
-        "//flutter/private/tools:kernel_filter.dart",
     ] + [":copy_" + name for name in COPIES],
     main = "sdk_sets_test.dart",
     deps = [

@@ -91,8 +91,8 @@ def _reserved_test_impl(ctx):
 _reserved_test = unittest.make(_reserved_test_impl)
 
 def _kernel(env):
-    kernels = [a for a in analysistest.target_actions(env) if a.mnemonic == "FlutterKernelCompile"]
-    asserts.equals(env, 1, len(kernels), "expected one FlutterKernelCompile")
+    kernels = [a for a in analysistest.target_actions(env) if a.mnemonic == "DartKernel"]
+    asserts.equals(env, 1, len(kernels), "expected one DartKernel")
     return kernels[0] if kernels else None
 
 def _compile_impl(ctx):
@@ -192,7 +192,7 @@ def version_defines_test_suite(name):
     _compile_test(name = name + "_kernel_target", target_under_test = ":_version_kernel")
     _dev_loop_test(name = name + "_dev_loop", target_under_test = ":_versioned_app")
     _modular_test(name = name + "_test_modular", target_under_test = ":_version_test", mnemonic = "DartEntryKernel")
-    _whole_program_test(name = name + "_test_whole_program", target_under_test = ":_version_test", mnemonic = "FlutterKernelCompile")
+    _whole_program_test(name = name + "_test_whole_program", target_under_test = ":_version_test", mnemonic = "DartKernel")
     _sdk_defines_test(name = name + "_sdk_defines")
     _every_release_describes_itself_test(name = name + "_every_release")
     _reserved_test(name = name + "_reserved")

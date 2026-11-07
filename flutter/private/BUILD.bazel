@@ -543,8 +543,8 @@ bzl_library(
     srcs = ["flutter_compile.bzl"],
     visibility = ["//flutter:__subpackages__"],
     deps = [
-        ":exec_groups",
-        ":path_mapping",
+        ":flutter_module",
+        "@rules_dart//dart:utils",
     ],
 )
 

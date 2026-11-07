@@ -1,15 +1,77 @@
-"""Per-library kernel compilation for Flutter: the SDK description and the aspect.
+"""Flutter's kernel platform: the SDK description, and the aspect that compiles modules against it.
 
 rules_dart compiles each library target once into a kernel module, and an
 executable compiles only its entrypoint against those modules and links them
-(see rules_dart's `dart_module.bzl`). A module is valid only for the platform it
-was compiled against, so Flutter has its own aspect, made over the Flutter SDK
-described here, and its own modules.
+(see rules_dart's `dart_module.bzl`); a whole program is compiled from source
+in one action (`dart_whole_program_kernel_action`). A kernel is valid only for
+the platform it was compiled against, so Flutter describes its own here, from
+the selected SDK, and has its own aspect and modules.
 """
 
 load("@rules_dart//dart:providers.bzl", "DartKernelSdkInfo")
-load("@rules_dart//dart:utils.bzl", "dart_module_aspect")
+load("@rules_dart//dart:utils.bzl", "dart_kernel_runtime", "dart_module_aspect")
 load("//flutter/private:exec_groups.bzl", "FLUTTER_EXEC_TOOLS")
+
+# The libraries whose classes' `toString` an optimized build reduces to the
+# default, as flutter_tools' `buildModeOptions` asks for profile and release.
+_DELETE_TOSTRING = [
+    "--delete-tostring-package-uri=dart:ui",
+    "--delete-tostring-package-uri=package:flutter",
+]
+
+def flutter_kernel_sdk_info(sdk, libraries_spec = None):
+    """The `DartKernelSdkInfo` of one Flutter SDK's platform.
+
+    A runtime per build mode, as flutter_tools compiles for each
+    (`buildModeOptions` in `compile.dart`): debug and profile against the
+    non-product platform, which keeps the VM service and the profiling hooks,
+    and release against the product one. Each fixes `dart.vm.profile` and
+    `dart.vm.product`, constants the front end folds, so a kernel for one mode
+    cannot run as another's. Profile and release also drop the `toString`
+    bodies of `dart:ui` and `package:flutter` classes, as `flutter build` does,
+    for a smaller snapshot.
+
+    Args:
+      sdk: A `FlutterSdkInfo` or `FlutterExecToolsInfo` of the selected SDK,
+        for the host the compile runs on.
+      libraries_spec: The `libraries.json` naming the `dart:` libraries a
+        Flutter program can import, which modules compile against; None for
+        a whole-program compile, which reads the platform dill instead.
+
+    Returns:
+      The `DartKernelSdkInfo`. It has a `release` runtime only where `sdk`
+      has the product platform, which a debug build does not fetch.
+    """
+    runtimes = {
+        "debug": dart_kernel_runtime(
+            sdk.platform_kernel_dill,
+            defines = ["dart.vm.profile=false", "dart.vm.product=false"],
+        ),
+        "profile": dart_kernel_runtime(
+            sdk.platform_kernel_dill,
+            defines = ["dart.vm.profile=true", "dart.vm.product=false"],
+            flags = _DELETE_TOSTRING,
+        ),
+    }
+    if sdk.platform_kernel_dill_product:
+        runtimes["release"] = dart_kernel_runtime(
+            sdk.platform_kernel_dill_product,
+            defines = ["dart.vm.profile=false", "dart.vm.product=true"],
+            flags = _DELETE_TOSTRING,
+        )
+    return DartKernelSdkInfo(
+        target = "flutter",
+        runtime = sdk.dartaotruntime,
+        kernel_worker = sdk.kernel_worker,
+        frontend_server = sdk.frontend_server,
+        runtimes = runtimes,
+        # Modules are what a test links, and `flutter test` compiles debug.
+        module_runtime = "debug",
+        libraries_spec = libraries_spec,
+        libraries_target = "flutter",
+        # The compilers read the files named above and nothing else of the SDK.
+        tool_files = depset(),
+    )
 
 def _flutter_kernel_sdk_impl(ctx):
     sdk = ctx.toolchains["@rules_flutter//flutter:toolchain_type"].flutter_sdk_info
@@ -35,22 +97,7 @@ def _flutter_kernel_sdk_impl(ctx):
         toolchain = "@rules_flutter//flutter:toolchain_type",
         progress_message = "Deriving Flutter's libraries.json for %s" % ctx.label,
     )
-    return [DartKernelSdkInfo(
-        target = "flutter",
-        runtime = sdk.dartaotruntime,
-        kernel_worker = sdk.kernel_worker,
-        frontend_server = sdk.frontend_server,
-        platform = sdk.platform_kernel_dill,
-        libraries_spec = libraries_spec,
-        libraries_target = "flutter",
-        # What flutter_tools folds into a debug compile. A module is compiled
-        # with an explicit environment, so a declaration left out here would
-        # not be left to the engine: it would take the default the compiler
-        # was given.
-        defines = ["dart.vm.product=false", "dart.vm.profile=false"],
-        # The compilers read the files named above and nothing else of the SDK.
-        tool_files = depset(),
-    )]
+    return [flutter_kernel_sdk_info(sdk, libraries_spec)]
 
 flutter_kernel_sdk = rule(
     implementation = _flutter_kernel_sdk_impl,
@@ -61,7 +108,7 @@ flutter_kernel_sdk = rule(
         ),
     },
     toolchains = ["@rules_flutter//flutter:toolchain_type"],
-    doc = "The `DartKernelSdkInfo` for the debug Flutter platform, from the resolved Flutter toolchain.",
+    doc = "The `DartKernelSdkInfo` Flutter's kernel modules compile against, from the resolved Flutter toolchain.",
 )
 
 # The modules compile on a `portable` host that has the Flutter tools as well

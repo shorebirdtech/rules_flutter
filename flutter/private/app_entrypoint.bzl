@@ -414,29 +414,3 @@ def app_scheme_sources(package_name, lib_root, main, srcs):
         {"path": f.short_path, "uri": app_scheme_location(f).uri}
         for f in app_scheme_files(package_name, lib_root, main, srcs)
     ]
-
-def resolve_kernel_entrypoint(main, package_name, lib_root):
-    """Resolve the application kernel entrypoint: the user's own `main`.
-
-    Args:
-        main: The app's `main` `File`.
-        package_name: The app's Dart package name, or "" when the app is not
-            registered as a package (no `package:` URI is possible then).
-        lib_root: The app's library root, from `derive_lib_root`.
-
-    Returns:
-        struct(
-            file: File — the entrypoint compiled into the kernel,
-            uri: str — what frontend_server uses as the compilation root, from
-                `app_main_location`: identical to the dev tool's incremental
-                compile root (hot-reload URI parity) wherever `main` sits,
-            root: str or None — the exec-root-relative directory `uri` needs
-                mounted under `APP_SCHEME`, or None for a `package:` URI.
-        )
-    """
-    location = app_main_location(package_name, lib_root, main)
-    return struct(
-        file = main,
-        uri = location.uri,
-        root = location.root,
-    )

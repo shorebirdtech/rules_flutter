@@ -21,7 +21,7 @@ load("//flutter/private:flutter_test.bzl", "flutter_test")
 
 _PACKAGE = "tracking_fixture"
 _MAIN = "lib/language_version_main.dart"
-_FLAG = "--track-widget-creation"
+_FLAG = "--track-creation-locations"
 _DBG = {"//command_line_option:compilation_mode": "dbg"}
 _RELEASE = {"//command_line_option:compilation_mode": "opt"}
 _PROFILE = {
@@ -30,8 +30,8 @@ _PROFILE = {
 }
 
 def _kernel_argv(env):
-    kernels = [a for a in analysistest.target_actions(env) if a.mnemonic == "FlutterKernelCompile"]
-    asserts.equals(env, 1, len(kernels), "expected one FlutterKernelCompile")
+    kernels = [a for a in analysistest.target_actions(env) if a.mnemonic == "DartKernel"]
+    asserts.equals(env, 1, len(kernels), "expected one DartKernel")
     return kernels[0].argv if kernels else []
 
 def _recorded(argv):
@@ -103,7 +103,7 @@ _test_tracks_whole_program_test = analysistest.make(
     _test_tracks_impl,
     attrs = {
         "flag": attr.string(default = _FLAG),
-        "mnemonic": attr.string(default = "FlutterKernelCompile"),
+        "mnemonic": attr.string(default = "DartKernel"),
     },
     config_settings = {str(Label("@rules_dart//dart:modular_kernel")): False},
 )

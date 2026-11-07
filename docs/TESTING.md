@@ -1480,9 +1480,11 @@ applies to each one — wait for the reload to complete before reverting.
 **Release/AOT codegen run.** `bazel build //:app_macos -c opt` (release/AOT), launch
 the extracted `.app`, and capture its window (e.g. the bundled
 `//tools/macos_screenshot:screenshot --pid <pid>`): the generated output from the
-app package + both dep packages must render. This verifies the release `.pkgsrcs`
-assembly + gen_snapshot path co-locates and compiles all generated code at runtime —
-distinct from the dev multi-root path, and from the `build_test`s which only compile.
+app package + both dep packages must render. This verifies that the release kernel
+compile, which finds each package's hand-written and generated files across the
+source tree and `bazel-out` (`--filesystem-root` for each), and gen_snapshot after
+it, run all generated code — distinct from the dev tool's compiler, and from the
+`build_test`s which only compile.
 
 Tests the full dev tool hot reload cycle: launch app, take screenshot, edit source, hot reload, take screenshot, verify the change rendered, revert source.
 
@@ -1529,9 +1531,12 @@ curl -s "http://localhost:PORT/sessions/APPID/screenshot/native?token=TOKEN" \
 
 ### Stale staged sources (a poisoned action cache)
 
-An app package that mixes hand-written and generated sources is assembled into a
+A web app's package that mixes hand-written and generated sources is assembled into a
 `*.pkgsrcs` tree artifact (rules_dart's `assemble_source_dir`, via bazel-lib's
-`copy_to_directory`) so the Dart toolchain sees one real `rootUri`. That staged
+`copy_to_directory`) so the web compilers see one real `rootUri`. (A native app's
+kernel compile reads such a package in place, from the source tree and `bazel-out`
+both, and stages nothing; the race below can still leave a stale kernel cached, and
+the fix there is the same: remove that one output and rebuild.) That staged
 tree can keep content from a superseded build **while the source tree is clean**,
 and bazel will go on replaying it. It reads exactly like a broken checkout or a
 broken dev tool; it is neither.
@@ -1554,20 +1559,19 @@ plain `-c dbg`.
 
 **Diagnose — diff the staged copy against its source.** For the loud variant the
 error names the staged path; for the quiet variant, diff the file you just edited.
-The two build-emitted package configs give the mapping with no guessing:
-`app.package_config.json` carries each package's staged `*.pkgsrcs` root, and
-`app.dev_package_config.json` carries the same package's source root as
-`org-dartlang-app:///<dir>`.
+The build-emitted package config gives the mapping with no guessing:
+`__web_app_branches.package_config.json` carries each package's staged `*.pkgsrcs`
+root.
 
 ```sh
 cd e2e/codegen
 
 # Loud variant — the error names the exact staged path; diff that one file.
 diff dep_part/lib/settings.dart \
-  bazel-out/darwin_arm64-dbg/bin/app.dep_part.pkgsrcs/lib/settings.dart
+  bazel-out/darwin_arm64-dbg/bin/__web_app_branches.dep_part.pkgsrcs/lib/settings.dart
 
 # Quiet variant — nothing names a configuration, so check every staged copy.
-for t in bazel-out/*/bin/app.dep_part.pkgsrcs; do
+for t in bazel-out/*/bin/__web_app_branches.dep_part.pkgsrcs; do
   diff -q dep_part/lib/settings.dart "$t/lib/settings.dart"
 done
 ```
@@ -1578,20 +1582,20 @@ is an action-cache hit — only the downstream compile re-runs, and fails identi
 every time.
 
 ```sh
-bazel build :app -c dbg --explain=/tmp/explain.log --verbose_explanations
+bazel build :web_app -c dbg --explain=/tmp/explain.log --verbose_explanations
 grep pkgsrcs /tmp/explain.log   # poisoned: no output
 ```
 
 **Fix — delete that one tree and rebuild.**
 
 ```sh
-TREE=bazel-out/darwin_arm64-dbg/bin/app.dep_part.pkgsrcs   # the one the diff flagged
+TREE=bazel-out/darwin_arm64-dbg/bin/__web_app_branches.dep_part.pkgsrcs   # the one the diff flagged
 chmod -R u+w "$TREE" && rm -rf "$TREE"
-bazel build :app -c dbg
+bazel build :web_app -c dbg
 ```
 
 `--explain` then reports `Executing action 'Copying files to directory
-app.dep_part.pkgsrcs': action changed since cached execution.` **Do not reach for
+__web_app_branches.dep_part.pkgsrcs': action changed since cached execution.` **Do not reach for
 `bazel clean`** (forbidden — see CLAUDE.md): removing one output directory forces
 one action to re-run, where `bazel clean` discards the whole cache to repair a
 single entry.

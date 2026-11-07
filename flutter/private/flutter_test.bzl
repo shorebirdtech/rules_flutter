@@ -63,7 +63,7 @@ load("@flutter_version_pin//:version.bzl", "FLUTTER_VERSION")
 load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo", "DartKernelSdkInfo")
 load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "KERNEL_LISTS_ATTR", "KERNEL_TOOL_ATTR", "TRACK_CREATION_LOCATIONS_ATTR", "collect_modules", "collect_packages", "collect_transitive_srcs", "dart_analyzable_info_with_packages", "dart_entry_kernel_action", "dart_import_check_aspect", "dart_link_kernel_action", "dart_package_info", "derive_lib_root", "executable_defines", "executable_defines_config", "import_check_validation", "kernel_lists", "runfiles_path", "track_creation_locations")
 load("//flutter:providers.bzl", "FlutterApplicationInputsInfo", "FlutterInfo")
-load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "compile_package_config", "synthesize_app_package")
+load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "synthesize_app_package")
 load("//flutter/private:application_libraries.bzl", "application_libraries", "application_libraries_aspect")
 load(
     "//flutter/private:common.bzl",
@@ -78,7 +78,7 @@ load(
     "flutter_program_inputs",
 )
 load("//flutter/private:exec_groups.bzl", "FLUTTER_EXEC_TOOLS", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
-load("//flutter/private:flutter_compile.bzl", "flutter_kernel_compile_action")
+load("//flutter/private:flutter_compile.bzl", "flutter_kernel_compile")
 load("//flutter/private:flutter_module.bzl", "flutter_module_aspect")
 load("//flutter/private:flutter_native_assets.bzl", "CODE_ASSETS_DOC", "collect_bundled_code_asset_files", "resolve_native_assets", "write_native_assets_manifest")
 load("//flutter/private:sdk_defines.bzl", "sdk_dart_defines", "version_dart_defines")
@@ -735,41 +735,26 @@ def _link_modules(ctx, deps, bootstrap, own_srcs, packages, native_assets_manife
     return dart_link_kernel_action(ctx, ctx.executable._kernel_tool, entry_dill, linked, kernel_dill, kernel_list = kernel_list)
 
 def _compile_whole_program(ctx, tools, deps, bootstrap, own_srcs, packages, native_assets_manifest, kernel_dill):
-    """Compiles the bootstrap and everything it reaches from source, as `flutter_application` does.
-
-    Packages whose hand-written and generated sources straddle the source tree
-    and `bazel-out` are co-located first, so `part` directives and a package's
-    single `rootUri` resolve.
-    """
-    all_srcs = collect_transitive_srcs(deps).to_list() + own_srcs + [bootstrap]
-    pc = compile_package_config(ctx, packages, all_srcs)
-    flutter_kernel_compile_action(
-        ctx = ctx,
-        dartaotruntime = tools.dartaotruntime,
-        dart = tools.dart,
-        kernel_filter_tool = ctx.file._kernel_filter_tool,
-        sdk_files = tools.sdk_files,
-        frontend_server = tools.frontend_server,
-        # The debug platform: asserts on, as `flutter test` compiles.
-        platform_dill = tools.platform_kernel_dill,
+    """Compiles the bootstrap and everything it reaches from source, as `flutter_application` does."""
+    flutter_kernel_compile(
+        ctx,
+        tools,
+        # The debug platform, as `flutter test` compiles.
+        runtime = "debug",
         main = bootstrap,
+        srcs = depset(own_srcs, transitive = [collect_transitive_srcs(deps)]),
+        packages = packages,
+        output = kernel_dill,
         # Under the app scheme, not the bootstrap's exec path: frontend_server
         # names a root given as a path by the sandbox it ran in, so the kernel
         # and every coverage report would carry a sandbox-specific `file://`
         # path to the test.
         entrypoint_uri = _own_source_uri(bootstrap, modular = False),
-        # The bootstrap's output root and the test's source root.
-        filesystem_root_files = [bootstrap, ctx.file.main] + ([ctx.file.test_config] if ctx.file.test_config else []),
-        srcs = pc.srcs,
-        package_config = pc.config_file,
-        output = kernel_dill,
-        aot = False,
         defines = executable_defines(ctx),
         # Widgets know where they were built, as under `flutter test`: the
         # inspector and the "relevant error-causing widget" of a failure read
         # it. Set by `_track_widget_creation`, as the modules' is.
-        extra_flags = ["--track-widget-creation"] if track_creation_locations(ctx) else [],
-        target = "flutter",
+        track_widget_creation = track_creation_locations(ctx),
         native_assets_manifest = native_assets_manifest,
     )
 
@@ -814,7 +799,6 @@ _TEST_ATTRS = {
         "shader_includes",
         "require_sksl_shaders",
         "_shader_compile_tool",
-        "_kernel_filter_tool",
         "license_file",
         "additional_licenses",
         "tree_shake_icons",

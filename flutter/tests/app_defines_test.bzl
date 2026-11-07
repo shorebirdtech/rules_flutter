@@ -14,9 +14,9 @@ def _comma_test_impl(ctx):
     kernels = [
         a
         for a in analysistest.target_actions(env)
-        if a.mnemonic == "FlutterKernelCompile"
+        if a.mnemonic == "DartKernel"
     ]
-    asserts.equals(env, 1, len(kernels), "expected one FlutterKernelCompile")
+    asserts.equals(env, 1, len(kernels), "expected one DartKernel")
     argv = kernels[0].argv if kernels else []
     asserts.true(env, "-DATTR_COMMA=a,b" in argv, "the attr define reaches the compile whole")
     asserts.true(env, "-DFLAG_COMMA=c,d" in argv, "the flag define reaches the compile whole")

@@ -397,17 +397,12 @@ class NativePipelineAssembler {
     // a frontend_server exit 255 several steps later.
     requireDeclaredFilesExist(devConfig);
     // The dev package_config points a source-assembled app package at the live
-    // source + generated roots via filesystemScheme; for non-codegen apps it
-    // equals the build config.
+    // source + generated roots via filesystemScheme, and every other package
+    // at its directory.
     //
-    // Always the dev one, named rather than discovered among the build outputs.
-    // The app's DefaultInfo carries two outputs ending in `package_config.json`
-    // — the build's `<name>.package_config.json` and the dev
-    // `<name>.dev_package_config.json` — so a suffix match picks between them
-    // by list order. The build one maps `package:` URIs into the frozen
-    // `.pkgsrcs` tree the bundle was assembled from, so a compiler pointed at
-    // it reads a copy of the source instead of the source: every edit compiles
-    // cleanly, reports a successful reload, and changes nothing on screen.
+    // Always the dev one, named in the dev config. The build's own compile
+    // reads its packages under a scheme rooted in its sandbox, which only that
+    // action can resolve.
     //
     // The empty case below cannot arise on native: `flutter_application.bzl`
     // writes this `_dev_config.json` only inside `if is_debug and
@@ -421,8 +416,7 @@ class NativePipelineAssembler {
       throw DevToolException(
         'The build emitted a dev config at $devConfigPath with no '
         'devPackageConfig. Without it this run has no package config that '
-        'resolves to live sources, and every hot reload would recompile the '
-        'copy of the tree the bundle was assembled from.',
+        'resolves to live sources, so no hot reload could compile an edit.',
       );
     }
     final packageConfig = await _stablePackageConfig(

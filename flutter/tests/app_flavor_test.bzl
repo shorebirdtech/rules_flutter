@@ -21,9 +21,9 @@ def _kernel(env):
     kernels = [
         a
         for a in analysistest.target_actions(env)
-        if a.mnemonic == "FlutterKernelCompile"
+        if a.mnemonic == "DartKernel"
     ]
-    asserts.equals(env, 1, len(kernels), "expected one FlutterKernelCompile")
+    asserts.equals(env, 1, len(kernels), "expected one DartKernel")
     return kernels[0] if kernels else None
 
 def _flavor_defines(argv):

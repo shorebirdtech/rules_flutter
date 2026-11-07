@@ -19,6 +19,15 @@ _FILE_WRITING_FLAGS = [
     "write-v8-snapshot-profile-to",
 ]
 
+_RESOLVE_DWARF_PATHS_REFUSED = (
+    "%s: extra_gen_snapshot_options cannot hold `--resolve-dwarf-paths`. The " +
+    "kernel names each source `org-dartlang-app:///<path in the workspace>` " +
+    "or by its `package:` URI, never a path on disk, so the build is the same " +
+    "on every machine, and gen_snapshot converts only `file:` URIs: it would " +
+    "abort. Leave it out; the debug information then names each source by its " +
+    "import URI."
+)
+
 def gen_snapshot_options(ctx, inputs = None):
     """Reads the gen_snapshot options a rule's attributes ask for.
 
@@ -55,6 +64,9 @@ def gen_snapshot_options(ctx, inputs = None):
             split_debug_info = ctx.attr.split_debug_info,
         )
     for option in inputs.extra_gen_snapshot_options:
+        if option.partition("=")[0].replace("_", "-") == "--resolve-dwarf-paths":
+            fail(_RESOLVE_DWARF_PATHS_REFUSED % ctx.label)
+
         # As flutter_tools does, `--no-strip` is read here and not passed on:
         # whether the snapshot is stripped is the rule's to decide, and an
         # Apple rule strips after its dSYM is made, not in gen_snapshot.
@@ -113,7 +125,13 @@ def _flutter_aot_action(
         outputs.append(object)
     if debug_info != None:
         args.add("--dwarf-stack-traces")
-        args.add("--resolve-dwarf-paths")
+
+        # Not `--resolve-dwarf-paths`, which `flutter build` passes: it writes
+        # each script's resolved URI as a path of the machine that compiled
+        # it, and gen_snapshot aborts on any scheme but `file:` and the SDK's.
+        # The kernel reads its sources under `APP_SCHEME`, so the debug info
+        # names each by its import URI (`package:app/main.dart`), the same on
+        # every machine. `gen_snapshot_options` refuses it from the user.
         args.add(debug_info, format = "--save-debugging-info=%s")
         outputs.append(debug_info)
 
