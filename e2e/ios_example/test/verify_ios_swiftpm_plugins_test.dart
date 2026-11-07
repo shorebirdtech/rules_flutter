@@ -24,9 +24,14 @@
 /// podspec that runs a script phase; Flutter builds it from the Package.swift,
 /// and so the app carries its plugin class.
 ///
+/// `swift6_plugin` (a path package) is `swift-tools-version: 6.0` and its
+/// source does not compile in the Swift 5 language mode: the app carries it.
+///
 /// `resource_plugin` (a path package) has a resource, `greeting.txt`, which
 /// SwiftPM bundles as `resource_plugin_resource_plugin.bundle`: the app
-/// carries the bundle and the file in it.
+/// carries the bundle and the file in it. Its Objective-C target
+/// `resource_plugin_objc` has a resource of its own, which it reads through
+/// `SWIFTPM_MODULE_BUNDLE`: the app carries that bundle and the class too.
 library;
 
 import 'dart:convert';
@@ -75,6 +80,8 @@ void main() {
       ('firebase-ios-sdk FirebaseInstallations', 'FIRInstallations'),
       ('libremidi_flutter', 'lrm_observer_new'),
       ('script_phase_plugin', 'ScriptPhasePlugin'),
+      ('resource_plugin_objc', 'ResourcePluginObjC'),
+      ('swift6_plugin', 'Swift6Plugin'),
     ]) {
       check.expect(
         'a binary in the bundle carries the target $target',
@@ -94,6 +101,12 @@ void main() {
         "the app carries resource_plugin's resource bundle",
         condition: File(
           '${bundle.path}/resource_plugin_resource_plugin.bundle/greeting.txt',
+        ).existsSync(),
+      )
+      ..expect(
+        "the app carries resource_plugin_objc's resource bundle",
+        condition: File(
+          '${bundle.path}/resource_plugin_resource_plugin_objc.bundle/objc_greeting.txt',
         ).existsSync(),
       );
     bundle.finish('All Swift package plugin checks passed.');

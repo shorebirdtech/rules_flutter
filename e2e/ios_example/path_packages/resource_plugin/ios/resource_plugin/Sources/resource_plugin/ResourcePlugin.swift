@@ -1,8 +1,12 @@
 import Flutter
 import Foundation
+import resource_plugin_objc
 
 /// Answers `greeting` with the text of `greeting.txt`, a resource of the
-/// plugin's Swift package, which it finds through `Bundle.module`.
+/// plugin's Swift package, which it finds through `Bundle.module`; and
+/// `greetingObjc` with the text of `objc_greeting.txt`, a resource of the
+/// package's Objective-C target, which that target reads through
+/// `SWIFTPM_MODULE_BUNDLE`.
 public class ResourcePlugin: NSObject, FlutterPlugin {
     public static func register(with registrar: FlutterPluginRegistrar) {
         let channel = FlutterMethodChannel(
@@ -11,6 +15,10 @@ public class ResourcePlugin: NSObject, FlutterPlugin {
     }
 
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+        if call.method == "greetingObjc" {
+            result(ResourcePluginObjC.greeting())
+            return
+        }
         guard call.method == "greeting" else {
             result(FlutterMethodNotImplemented)
             return

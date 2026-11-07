@@ -11,9 +11,13 @@ dependencies:
   # An iOS plugin with a Package.swift and a podspec script phase.
   script_phase_plugin:
     path: path_packages/script_phase_plugin
-  # An iOS plugin whose Swift package has a resource.
+  # An iOS plugin whose Swift package has a resource, one of them read from
+  # Objective-C.
   resource_plugin:
     path: path_packages/resource_plugin
+  # An iOS plugin whose Swift package is in the Swift 6 language mode.
+  swift6_plugin:
+    path: path_packages/swift6_plugin
   video_player_avfoundation: 2.12.3
 dev_dependencies:
   very_good_analysis: ^10.3.0

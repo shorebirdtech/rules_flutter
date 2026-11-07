@@ -346,6 +346,7 @@ flutter_application(
         "@deps//:libremidi_flutter",
         "@deps//:resource_plugin",
         "@deps//:script_phase_plugin",
+        "@deps//:swift6_plugin",
         "@deps//:video_player_avfoundation",
     ],
 )
@@ -503,6 +504,7 @@ flutter_library(
         "@deps//:libremidi_flutter",
         "@deps//:resource_plugin",
         "@deps//:script_phase_plugin",
+        "@deps//:swift6_plugin",
         "@deps//:video_player_avfoundation",
         "@rules_flutter//flutter:material_icons",
     ],

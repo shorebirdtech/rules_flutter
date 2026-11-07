@@ -4,6 +4,7 @@ import 'package:flutter_qjs_next/flutter_qjs.dart';
 import 'package:libremidi_flutter/libremidi_flutter.dart';
 import 'package:resource_plugin/resource_plugin.dart';
 import 'package:script_phase_plugin/script_phase_plugin.dart';
+import 'package:swift6_plugin/swift6_plugin.dart';
 import 'package:video_player_avfoundation/video_player_avfoundation.dart';
 
 /// Shows what plugins built from their Swift packages answer:
@@ -22,7 +23,10 @@ import 'package:video_player_avfoundation/video_player_avfoundation.dart';
 /// * script_phase_plugin, whose podspec runs a script phase but which Flutter
 ///   builds from its Package.swift, answers `swiftpm`.
 /// * resource_plugin reads a resource of its Swift package from
-///   `Bundle.module`: `from the bundle`.
+///   `Bundle.module`: `from the bundle`; and one of its Objective-C target
+///   from `SWIFTPM_MODULE_BUNDLE`: `from the objc bundle`.
+/// * swift6_plugin, whose source compiles only in the Swift 6 language mode,
+///   answers `Swift 6 language mode`.
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final quickjs = getJavascriptRuntime().evaluate('6 * 7').stringResult;
@@ -45,11 +49,15 @@ Future<void> main() async {
   );
   final scriptPhase = await _answer(scriptPhasePluginBuild);
   final resource = await _answer(resourcePluginGreeting);
+  final resourceObjc = await _answer(resourcePluginObjcGreeting);
+  final swift6 = await _answer(swift6PluginMode);
   runApp(
     Center(
       child: Text(
         'quickjs: $quickjs\nvideo_player: $videoPlayer\nfirebase: $firebase\n'
-        'midi: $midi\nscript_phase: $scriptPhase\nresource: $resource',
+        'midi: $midi\nscript_phase: $scriptPhase\nresource: $resource\n'
+        'resource_objc: $resourceObjc\n'
+        'swift6: $swift6',
         textDirection: TextDirection.ltr,
       ),
     ),

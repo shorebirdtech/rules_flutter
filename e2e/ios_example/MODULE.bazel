@@ -26,6 +26,7 @@ flutter_pub.from_lock(
     build_from_pubspec = [
         "resource_plugin",
         "script_phase_plugin",
+        "swift6_plugin",
     ],
     lock = "//:pubspec.lock",
     # The Swift packages the Apple plugins depend on (firebase_core's

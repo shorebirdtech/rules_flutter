@@ -9,7 +9,16 @@ let package = Package(
     targets: [
         .target(
             name: "resource_plugin",
-            dependencies: [.product(name: "FlutterFramework", package: "FlutterFramework")],
+            dependencies: [
+                .product(name: "FlutterFramework", package: "FlutterFramework"),
+                "resource_plugin_objc",
+            ],
+            resources: [.process("Resources")]
+        ),
+        // Objective-C, with a resource of its own, which it reads through
+        // `SWIFTPM_MODULE_BUNDLE`.
+        .target(
+            name: "resource_plugin_objc",
             resources: [.process("Resources")]
         ),
     ]
