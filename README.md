@@ -1024,6 +1024,8 @@ use_repo(android_ndk_repository_extension, "androidndk")
 register_toolchains("@androidndk//:all")
 ```
 
+**Order of the `bazel_dep` lines.** Keep `rules_flutter`'s above `rules_android`'s, as here. rules_android builds some of its tools from Go, with the first Go SDK the module graph declares: your module's own, then each dependency's in the order your `MODULE.bazel` names them. rules_flutter declares one new enough for the Gazelle the graph resolves; rules_android's own, Go 1.22.4, is not, and with rules_android named first, every Android build fails during analysis with `go: go.work requires go >= 1.24.12 (running go 1.22.4; GOTOOLCHAIN=local)`. A `go_sdk.download` in your own `MODULE.bazel` takes precedence over both.
+
 **NDK `api_level`.** Set it to the app's `min_sdk_version`, as Gradle compiles native code at `minSdkVersion`. The extension defaults to 31, so without `configure` your `cc_library` code (an FFI library, a plugin's C code) is built against API 31 and can call functions that devices on API 24 to 30 lack. Such a library installs, and then fails to load there with an unresolved symbol. The root module's `configure` is the one that counts; a dependency's is ignored.
 
 **Environment variables.** Two are needed, and both are read by repository rules while Bazel fetches:
