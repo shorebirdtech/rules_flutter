@@ -5,6 +5,7 @@ load("@rules_flutter//flutter:ios.bzl", "IOS_MINIMUM_OS_VERSION", "flutter_ios_a
 load("@rules_flutter//flutter:linux.bzl", "flutter_linux_app")
 load("@rules_flutter//flutter:macos.bzl", "flutter_macos_app")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
+load("@rules_flutter//flutter:windows.bzl", "flutter_windows_app")
 load("@rules_flutter//tools/e2e_testing:apple_release_build.bzl", "apple_release_build")
 
 exports_files(["pubspec.lock"])
@@ -85,6 +86,15 @@ flutter_linux_app(
     name = "linux_app",
     application = ":app_flutter",
     tags = ["manual"],
+)
+
+# A Windows bundle, built on a Windows machine whose checkout's `host_<mode>` out
+# dirs hold the embedder and the gen_snapshot. The scan for the snapshot hash
+# reads `flutter_windows.dll` in the AOT modes.
+flutter_windows_app(
+    name = "windows_app",
+    application = ":app_flutter",
+    target_compatible_with = ["@platforms//os:windows"],
 )
 
 # The web bundle, and the render check that runs it in the pinned headless

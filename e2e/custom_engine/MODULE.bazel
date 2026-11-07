@@ -185,6 +185,7 @@ use_repo(
     "flutter_stock_web_sdk",
     "flutter_toolchains",
     "flutter_web_sdk",
+    "flutter_windows-x64",
 )
 
 flutter_pub = use_extension("@rules_flutter//flutter/pub:extensions.bzl", "pub")

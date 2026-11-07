@@ -88,6 +88,61 @@ def _xcframework_info(identifier, architecture, simulator):
         variant = "\n\t\t\t<key>SupportedPlatformVariant</key>\n\t\t\t<string>simulator</string>" if simulator else "",
     )
 
+def _windows_checkout(rctx, path, link, meta):
+    """A checkout built on an x86_64 Windows machine: its host build holds the engine too.
+
+    `tools/gn` names the machine's own build `host_<mode>`, and it holds the
+    Windows embedder and the machine's gen_snapshot beside the host tools, so
+    there are no `win_<mode>` directories (the machine's own would make every
+    Windows slot ambiguous). The Dart SDK is the prebuilt one in
+    `engine/src/flutter/prebuilts/windows-x64`, which `flutter_prebuilt_dart_sdk`
+    names.
+    """
+    host = "@flutter_windows-x64//:"
+    dart_sdk = path(host + "dart-sdk/bin/dart.exe").dirname.dirname
+    host_tools = path(host + "host-tools/icudtl.dat").dirname
+    font_tools = path(host + "font-subset-tools/font-subset.exe").dirname
+    kernel_debug = path("@flutter_stock_engine//kernel/debug:flutter_patched_sdk/platform_strong.dill").dirname
+    kernel_release = path("@flutter_stock_engine//kernel/release:flutter_patched_sdk_product/platform_strong.dill").dirname
+    dev_root = path("@flutter_dev_root_src//:bin/cache/flutter.version.json").dirname.dirname.dirname
+
+    link(dev_root.get_child("packages"), "checkout/packages")
+    link(dev_root.get_child("bin").get_child("cache").get_child("pkg").get_child("sky_engine"), "checkout/engine/src/flutter/sky/packages/sky_engine")
+    link(dev_root.get_child("bin").get_child("cache").get_child("flutter.version.json"), "checkout/bin/cache/flutter.version.json")
+    rctx.file("checkout/bin/internal/material_fonts.version", meta.material_fonts_url.split("/")[-2] + "\n")
+    rctx.file("checkout/CHECKOUT", "A stand-in for a flutter/flutter checkout.\n")
+
+    for mode in ["debug", "profile", "release"]:
+        engine = path("@flutter_desktop_engine_windows-x64_{}//:engine/flutter_windows.dll".format(mode)).dirname
+        out = _OUT + "host_{}/".format(mode)
+        rctx.file(out + "args.gn", _args_gn(mode, meta.engine_revision, "x64").replace("flutter_prebuilt_dart_sdk = false", "flutter_prebuilt_dart_sdk = true"))
+        for name in [
+            "flutter_windows.dll",
+            "flutter_windows.dll.lib",
+            "flutter_export.h",
+            "flutter_windows.h",
+            "flutter_messenger.h",
+            "flutter_plugin_registrar.h",
+            "flutter_texture_registrar.h",
+        ]:
+            link(engine.get_child(name), out + name)
+        link(engine.dirname.get_child("cpp-client-wrapper").get_child("cpp_client_wrapper"), out + "cpp_client_wrapper")
+        if mode != "debug":
+            link(engine.get_child("gen_snapshot.exe"), out + "gen_snapshot/gen_snapshot.exe")
+
+    debug = _OUT + "host_debug/"
+    link(dart_sdk, "checkout/engine/src/flutter/prebuilts/windows-x64/dart-sdk")
+    for name in ["flutter_tester.exe", "icudtl.dat", "impellerc.exe", "shader_lib"]:
+        link(host_tools.get_child(name), debug + name)
+    link(font_tools.get_child("font-subset.exe"), debug + "font-subset.exe")
+    link(font_tools.get_child("const_finder.dart.snapshot"), debug + "gen/const_finder.dart.snapshot")
+    for name in ["vm_isolate_snapshot.bin", "isolate_snapshot.bin"]:
+        link(host_tools.get_child(name), debug + "gen/flutter/lib/snapshot/" + name)
+    link(kernel_debug, debug + "flutter_patched_sdk")
+    link(kernel_release, _OUT + "host_release/flutter_patched_sdk")
+    _web_out_dir(rctx, path, link, meta.engine_revision, False)
+    rctx.file("BUILD.bazel", 'exports_files(glob(["checkout/CHECKOUT"]))\n')
+
 def _fake_checkout_impl(rctx):
     def path(label):
         return rctx.path(Label(label))
@@ -96,6 +151,9 @@ def _fake_checkout_impl(rctx):
         rctx.symlink(source, destination)
 
     meta = FLUTTER_VERSIONS[_RELEASE]
+    if rctx.os.name.lower().startswith("windows"):
+        _windows_checkout(rctx, path, link, meta)
+        return
 
     # The machine's own build is `host_<mode>`: `host_<mode>_arm64` on a Mac,
     # and on an x86_64 Linux machine `host_<mode>`, which also holds the Linux
