@@ -31,6 +31,17 @@ class FakeCdpPage implements CdpSender {
   /// null for a page that takes the message.
   String? bridgeThrows;
 
+  /// What the page says of how far it got when asked (`location.href`,
+  /// `document.readyState` and the rest), or null for a page whose main thread
+  /// does not answer.
+  Map<String, Object?>? pageState = const {
+    'url': 'http://127.0.0.1:8080/',
+    'readyState': 'complete',
+    'crossOriginIsolated': true,
+    'flutterLoader': true,
+    'loaded': ['flutter_bootstrap.js 200', 'main.dart.mjs 200'],
+  };
+
   /// The answers to goldens the bridge was handed, as the JSON text each was.
   final goldenAnswers = <String>[];
 
@@ -124,6 +135,15 @@ class FakeCdpPage implements CdpSender {
       return {
         'result': {
           'result': <String, Object?>{'type': 'undefined'},
+        },
+      };
+    }
+    if (expression.contains('document.readyState')) {
+      final state = pageState;
+      if (state == null) await Completer<void>().future;
+      return {
+        'result': {
+          'result': {'type': 'string', 'value': json.encode(state)},
         },
       };
     }

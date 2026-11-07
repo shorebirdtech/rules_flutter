@@ -179,6 +179,62 @@ class CdpSuiteTransport implements IntegrationSuiteTransport {
     'Inspected target navigated or closed',
   ];
 
+  /// What the page behind [page] shows of how far it got: its URL, whether
+  /// its document has loaded, whether it is cross-origin isolated (which the
+  /// WebAssembly renderer's threads need), whether Flutter's loader is there,
+  /// and the resources it has fetched, each with its status.
+  ///
+  /// For a page that never installed its bridge, which otherwise says nothing:
+  /// a fetch that failed, a loader that never ran and a main thread that is
+  /// stuck are told apart by this. Asked in [answerWithin], since a stuck
+  /// page does not answer, which is then what this says.
+  static Future<String> describePage(
+    CdpSender page, {
+    Duration answerWithin = const Duration(seconds: 5),
+  }) async {
+    final Map<String, dynamic> reply;
+    try {
+      reply = await page
+          .send(
+            'Runtime.evaluate',
+            {'expression': _pageStateProbe, 'returnByValue': true},
+            // The connection's own bound, past the one this wait keeps.
+            timeout: answerWithin * 2,
+          )
+          .timeout(answerWithin);
+    } on TimeoutException {
+      return 'The page did not answer an evaluation within '
+          '${answerWithin.inSeconds}s, so its main thread is busy or stuck.';
+    } on StateError catch (e) {
+      return 'Asking the page how far it got failed: ${e.message}.';
+    }
+    final value = reply['result']?['result']?['value'];
+    final Object? state = value is String ? json.decode(value) : null;
+    if (state is! Map) {
+      return 'Asked how far it got, the page answered ${reply['result']}.';
+    }
+    final loaded = (state['loaded'] as List?)?.join(', ');
+    return 'The page is at ${state['url']}, its document is '
+        '${state['readyState']}, it is '
+        '${state['crossOriginIsolated'] == true ? '' : 'not '}cross-origin '
+        'isolated, Flutter\'s loader is '
+        '${state['flutterLoader'] == true ? '' : 'not '}there, and it has '
+        'fetched ${loaded == null || loaded.isEmpty ? 'nothing' : loaded}.';
+  }
+
+  /// The page's own account of how far it got, as JSON text: see
+  /// [describePage]. A resource's status is 0 when the browser does not say
+  /// (an opaque or a cached response).
+  static const _pageStateProbe =
+      '(() => JSON.stringify({'
+      'url: location.href,'
+      'readyState: document.readyState,'
+      'crossOriginIsolated: self.crossOriginIsolated,'
+      'flutterLoader: !!(globalThis._flutter && globalThis._flutter.loader),'
+      "loaded: performance.getEntriesByType('resource').map(e => "
+      "new URL(e.name).pathname.split('/').pop() + ' ' + e.responseStatus),"
+      '}))()';
+
   static const _unknownReason =
       'the connection to the browser closed, and the device could not say why';
 

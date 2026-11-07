@@ -67,6 +67,61 @@ void main() {
       });
     });
 
+    test('that never installs its bridge says how far the page got: where it '
+        'is, whether it loaded, and what it fetched', () {
+      fakeAsync((async) {
+        Object? failure;
+        connector()(
+          WebDevice(),
+          instance,
+          ceiling: _ceiling,
+        ).then<void>((_) {}, onError: (Object e) => failure = e);
+
+        async.elapse(_ceiling + const Duration(seconds: 1));
+
+        expect(
+          failure,
+          isA<SuiteUnreachable>().having(
+            (e) => e.message,
+            'message',
+            allOf(
+              contains('http://127.0.0.1:8080/'),
+              contains('complete'),
+              contains('main.dart.mjs 200'),
+            ),
+          ),
+        );
+      });
+    });
+
+    test('that never installs its bridge and does not answer is said to have '
+        'a main thread that does not answer', () {
+      fakeAsync((async) {
+        page.pageState = null;
+        Object? failure;
+        connector()(
+          WebDevice(),
+          instance,
+          ceiling: _ceiling,
+        ).then<void>((_) {}, onError: (Object e) => failure = e);
+
+        async.elapse(_ceiling + const Duration(seconds: 10));
+
+        expect(
+          failure,
+          isA<SuiteUnreachable>().having(
+            (e) => e.message,
+            'message',
+            allOf(
+              contains('did not install the integration test bridge'),
+              contains('main thread'),
+            ),
+          ),
+        );
+        expect(page.isClosed, isTrue);
+      });
+    });
+
     test('that is lost before its bridge is installed fails with the '
         'browser\'s account of how it ended', () async {
       final result = connector()(WebDevice(), instance, ceiling: _ceiling);

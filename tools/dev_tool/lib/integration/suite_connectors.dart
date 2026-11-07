@@ -115,11 +115,12 @@ SuiteConnector chromePageConnector({PageOpener open = _openPage}) =>
         await page.close();
         throw SuiteUnreachable('$e');
       } on TimeoutException {
+        final state = await CdpSuiteTransport.describePage(page);
         await page.close();
         throw SuiteUnreachable(
           'the page did not install the integration test bridge within '
           '${ceiling.inSeconds}s. Its test bootstrap, `runIntegrationSuite`, '
-          'was never reached.',
+          'was never reached. $state',
         );
       }
     };
