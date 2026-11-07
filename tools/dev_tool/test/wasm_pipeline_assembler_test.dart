@@ -11,8 +11,10 @@
 /// reply has to carry.
 library;
 
+import 'package:flutter_bazel_dev_tool/frontend_server.dart';
 import 'package:flutter_bazel_dev_tool/logging.dart';
 import 'package:flutter_bazel_dev_tool/reload_pipeline.dart';
+import 'package:flutter_bazel_dev_tool/reload_strategy.dart';
 import 'package:flutter_bazel_dev_tool/session_host.dart';
 import 'package:flutter_bazel_dev_tool/web_pipeline_assembler.dart';
 import 'package:test/test.dart';
@@ -118,6 +120,75 @@ void main() {
         expect(reply['error'], contains('WASM hot restart failed'));
       },
     );
+  });
+
+  group('phase lines', () {
+    late List<Map<String, dynamic>> lines;
+
+    setUp(() {
+      lines = [];
+      final sub = Logger.root.onRecord.listen((r) {
+        final o = r.object;
+        if (o is Map && o['message'] == 'reload_phase') {
+          lines.add(Map<String, dynamic>.from(o));
+        }
+      });
+      addTearDown(sub.cancel);
+    });
+
+    test(
+      'a restart says queue, build and total, with the build failing',
+      () async {
+        assemble();
+
+        await host.commandRunner.run('app.restart', {});
+
+        expect(
+          [for (final l in lines) l['phase']],
+          ['queue', 'build', 'total'],
+        );
+        expect(
+          [for (final l in lines) l['event']],
+          [
+            'finished',
+            'failed',
+            'finished',
+          ],
+        );
+        expect(lines[1]['verb'], 'Restart');
+        expect(lines.last['text'], matches(r'^Restart finished in \d+ms$'));
+      },
+    );
+
+    test('a hot reload refusal still ends with the total', () async {
+      assemble();
+
+      await host.commandRunner.run('app.hotReload', {});
+
+      expect([for (final l in lines) l['phase']], ['queue', 'total']);
+      expect(lines.last['verb'], 'Hot reload');
+    });
+
+    test('the strategy says apply once the build has succeeded', () async {
+      final ran = <String>[];
+      final strategy = WasmReloadStrategy(
+        // Nothing listens on port 1, so the page reload is rejected.
+        cdpPort: 1,
+        rebuild: () async => true,
+        phase: <T>(name, body) {
+          ran.add(name);
+          return body();
+        },
+      );
+
+      final outcome = await strategy.applyRestart(
+        CompileResult(dillPath: '', success: true),
+        host.sessions,
+      );
+
+      expect(ran, ['build', 'apply']);
+      expect(outcome, isA<StrategyRejected>());
+    });
   });
 
   group('with no CDP port', () {

@@ -799,11 +799,19 @@ class WasmReloadStrategy implements ReloadStrategy {
   /// Callback to rebuild via bazel. Returns true on success.
   final Future<bool> Function() rebuild;
 
+  /// Runs a step as a named phase of the command in flight, so the log says
+  /// how long it took. Observation only; the default says nothing.
+  final Future<T> Function<T>(String name, Future<T> Function() body) phase;
+
   WasmReloadStrategy({
     required this.cdpPort,
     required this.rebuild,
     this.appUrl,
+    this.phase = _unlogged,
   });
+
+  static Future<T> _unlogged<T>(String name, Future<T> Function() body) =>
+      body();
 
   @override
   Future<StrategyOutcome> applyReload(
@@ -842,11 +850,11 @@ class WasmReloadStrategy implements ReloadStrategy {
 
   Future<StrategyOutcome> _rebuildAndReload() async {
     try {
-      final buildOk = await rebuild();
+      final buildOk = await phase('build', rebuild);
       if (!buildOk) {
         return const StrategyRejected('the WASM rebuild failed');
       }
-      await cdpPageReload(cdpPort, appUrl: appUrl);
+      await phase('apply', () => cdpPageReload(cdpPort, appUrl: appUrl));
       return const StrategyApplied(1);
     } catch (e) {
       return StrategyRejected('WASM hot restart failed: $e');

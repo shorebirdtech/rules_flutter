@@ -289,7 +289,7 @@ class ReloadPipeline {
     // Said only when there is something to wait for: a pipeline that is ready
     // answers at once, and a line per command for that is noise.
     if (ready.isReady) return _checkReady(verb);
-    return _phase('pipeline setup', () => _checkReady(verb));
+    return phase('pipeline setup', () => _checkReady(verb));
   }
 
   Future<Map<String, dynamic>?> _checkReady(String verb) async {
@@ -403,7 +403,7 @@ class ReloadPipeline {
     // tracker's own baseline. Off the filesystem's clock, not the wall
     // clock's: see [fileClockNow].
     final rebuiltBefore = await fileClockNow();
-    if (!await _phase('asset build', rebuild)) {
+    if (!await phase('asset build', rebuild)) {
       return const AssetOutcome(
         rebuildFailed: 'Asset rebuild (bazel) failed; see build output above.',
       );
@@ -425,7 +425,7 @@ class ReloadPipeline {
           : AssetOutcome(changed: changed);
     }
 
-    final outcome = await _phase(
+    final outcome = await phase(
       'asset delivery',
       () => applyTo.applyAssets(
         changed,
@@ -452,7 +452,7 @@ class ReloadPipeline {
     List<String> addressed,
   ) async {
     final refresh = refreshGenerated;
-    if (refresh == null || await _phase('generated sources build', refresh)) {
+    if (refresh == null || await phase('generated sources build', refresh)) {
       return null;
     }
     return toWire(
@@ -551,7 +551,7 @@ class ReloadPipeline {
 
     if (patcher == null) return (refusal: null, verdict: verdict, patch: null);
 
-    final outcome = await _phase(
+    final outcome = await phase(
       'native patch',
       () => patcher(
         movedLibraries: switch (verdict) {
@@ -679,12 +679,12 @@ class ReloadPipeline {
 
   /// Run [body] as the phase [name] of the command in flight, saying how long
   /// it took. Silent outside a command; never delays [body].
-  Future<T> _phase<T>(String name, Future<T> Function() body) =>
+  Future<T> phase<T>(String name, Future<T> Function() body) =>
       _phases?.run(name, body) ?? body();
 
   /// Run [handler] with its phases said in the log — and, for a `--machine`
   /// client, as one `app.progress` item that ends with the command.
-  Future<Map<String, dynamic>> _logged(
+  Future<Map<String, dynamic>> logged(
     String verb,
     Future<Map<String, dynamic>> Function(Map<String, dynamic>) handler,
     Map<String, dynamic> params,
@@ -712,7 +712,7 @@ class ReloadPipeline {
 
   /// Restart the app: a full recompile and a fresh `main()`.
   Future<Map<String, dynamic>> restart(Map<String, dynamic> params) =>
-      _logged('Restart', _restart, params);
+      logged('Restart', _restart, params);
 
   Future<Map<String, dynamic>> _restart(Map<String, dynamic> params) async {
     command++;
@@ -762,7 +762,7 @@ class ReloadPipeline {
       // unloaded old machine code would crash, not hot-reload.
       final relaunch = relaunchIfNativeLibsChanged;
       if (relaunch != null) {
-        switch (await _phase('native libs relaunch check', relaunch)) {
+        switch (await phase('native libs relaunch check', relaunch)) {
           // The rebuild that had to happen before anything could be compiled,
           // and it did not. Reported the way the codegen rebuild's failure is,
           // and for the same reason: not `unavailable`, which says this run
@@ -822,7 +822,7 @@ class ReloadPipeline {
       if (relaunch == null &&
           refreshGenerated == null &&
           rebuildLibs != null &&
-          !await _phase('native libs build', rebuildLibs)) {
+          !await phase('native libs build', rebuildLibs)) {
         return toWire(
           CommandReport(
             verb: 'Restart',
@@ -905,7 +905,7 @@ class ReloadPipeline {
     final invalidated = preCompile == null
         ? const <String>[]
         : appliedVersions.findChangedFrom(preCompile).toList();
-    final result = await _phase(
+    final result = await phase(
       'compile and apply',
       () => recompileAndRestart(
         frontendServer: fs,
@@ -953,7 +953,7 @@ class ReloadPipeline {
 
   /// Hot reload: recompile what changed and inject it into the live isolate.
   Future<Map<String, dynamic>> hotReload(Map<String, dynamic> params) =>
-      _logged('Hot reload', _hotReload, params);
+      logged('Hot reload', _hotReload, params);
 
   Future<Map<String, dynamic>> _hotReload(Map<String, dynamic> params) async {
     command++;
@@ -1124,7 +1124,7 @@ class ReloadPipeline {
       );
     }
 
-    final result = await _phase(
+    final result = await phase(
       'compile and apply',
       () => recompileAndReload(
         frontendServer: fs,
