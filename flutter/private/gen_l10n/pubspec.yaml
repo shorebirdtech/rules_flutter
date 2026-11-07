@@ -23,6 +23,9 @@ dependencies:
   intl: ^0.20.3
   meta: ^1.18.3
   path: ^1.9.1
+  # Through `process` and `file`. 3.0.x reads `Platform.packageRoot`, which
+  # Dart 3.13 no longer has.
+  platform: ^3.1.6
   process: ^5.0.5
   stack_trace: ^1.12.1
   yaml: ^3.1.3
