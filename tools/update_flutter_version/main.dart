@@ -10,7 +10,10 @@
 ///   1. Looks up the engine revision from the Flutter tag
 ///   2. Downloads each artifact and computes SHA-256 (archives already pinned
 ///      in versions.bzl for this version are reused, not downloaded again)
-///   3. Prints the Starlark snippet to add to versions.bzl
+///   3. Prints the Starlark snippet to add to versions.bzl, with the exact
+///      version pins of the SDK's own packages (`FLUTTER_SDK_EXACT_PINS`)
+///
+/// `--sdk-pins-only <version>` prints just those pins.
 library;
 
 import 'dart:convert';
@@ -18,6 +21,7 @@ import 'dart:io';
 
 import 'artifact_list.dart';
 import 'pinned_checksums.dart';
+import 'sdk_pins.dart';
 import 'shader_flags.dart';
 
 const gcsBase = 'https://storage.googleapis.com/flutter_infra_release/flutter';
@@ -30,7 +34,12 @@ Future<void> main(List<String> args) async {
     exit(1);
   }
 
-  final version = args[0];
+  final pinsOnly = args[0] == '--sdk-pins-only';
+  if (pinsOnly && args.length < 2) {
+    stderr.writeln('Usage: --sdk-pins-only <flutter-version>');
+    exit(1);
+  }
+  final version = pinsOnly ? args[1] : args[0];
 
   // Locate the Flutter repo. BUILD_WORKSPACE_DIRECTORY is set by `bazel run`.
   final workspaceDir =
@@ -49,6 +58,11 @@ Future<void> main(List<String> args) async {
       'or set FLUTTER_REPO to an existing clone.',
     );
     exit(1);
+  }
+
+  if (pinsOnly) {
+    print(renderPins(version, _sdkPins(version, flutterRepo)));
+    return;
   }
 
   // Get engine revision from the Flutter tag.
@@ -246,6 +260,11 @@ Future<void> main(List<String> args) async {
   print('        source_sha256 = "${checksums['__source__'] ?? 'FIXME'}",');
   print('    ),');
   print('');
+  print(
+    '=== Add to FLUTTER_SDK_EXACT_PINS in flutter/private/versions.bzl ===',
+  );
+  print('');
+  print(renderPins(version, _sdkPins(version, flutterRepo)));
   print('=== Add to ARTIFACT_CHECKSUMS in flutter/private/versions.bzl ===');
   print('');
   print('    "$version": {');
@@ -495,4 +514,41 @@ void _checkShaderFlags(String version, String flutterRepo, String workspace) {
   for (final line in mismatches) {
     print('    $line');
   }
+}
+
+/// The exact pins of the SDK packages at the Flutter tag [version], read from
+/// `packages/*/pubspec.yaml` of the clone at [flutterRepo].
+Map<String, Map<String, String>> _sdkPins(String version, String flutterRepo) {
+  String git(List<String> args) {
+    final result = Process.runSync(
+      'git',
+      args,
+      workingDirectory: flutterRepo,
+    );
+    if (result.exitCode != 0) {
+      stderr.writeln('ERROR: git ${args.join(' ')}: ${result.stderr}');
+      exit(1);
+    }
+    return result.stdout as String;
+  }
+
+  final pubspecs = <String, String>{};
+  for (final line in git([
+    'ls-tree',
+    '--name-only',
+    '$version:packages',
+  ]).split('\n')) {
+    final package = line.trim();
+    // flutter_tools is the tool, not a package an app's lock lists; its
+    // dependencies are pinned for the tool's own build.
+    if (package.isEmpty || package == 'flutter_tools') continue;
+    final show = Process.runSync(
+      'git',
+      ['show', '$version:packages/$package/pubspec.yaml'],
+      workingDirectory: flutterRepo,
+    );
+    // A directory of packages/ with no pubspec is not a package.
+    if (show.exitCode == 0) pubspecs[package] = show.stdout as String;
+  }
+  return exactPins(pubspecs);
 }

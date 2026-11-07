@@ -30,10 +30,10 @@ load("//flutter/private:flutter_unsupported_package.bzl", "flutter_unsupported_p
 load("//flutter/private:linux_runtime_pins.bzl", "LINUX_RUNTIME")
 load("//flutter/private:lock_entry_kind.bzl", "ENGINE_PROVIDED", "FLUTTER_FRAMEWORK", "FLUTTER_SOURCE", "GIT", "HOSTED", "UNSUPPORTED", "lock_entry_kind")
 load("//flutter/private:pub_lock_sdks.bzl", "parse_lock_sdk_constraints", "version_below_lower_bound")
-load("//flutter/private:pub_reconcile.bzl", "reconcile_package", "unsupported_locks")
+load("//flutter/private:pub_reconcile.bzl", "reconcile_package", "sdk_pin_errors", "unsupported_locks")
 load("//flutter/private:pub_resolve.bzl", "resolve_errors", "resolved_targets")
 load("//flutter/private:toolchain_version.bzl", "select_flutter_version")
-load("//flutter/private:versions.bzl", "CHROME_FOR_TESTING", "flutter_source_sha256")
+load("//flutter/private:versions.bzl", "CHROME_FOR_TESTING", "flutter_sdk_exact_pins", "flutter_source_sha256")
 load(":repositories.bzl", "flutter_register_toolchains")
 
 _DEFAULT_NAME = "flutter"
@@ -385,6 +385,10 @@ def _declare_pub_packages(tags, flutter_version, user_overlay_roots):
         chosen[name] = result.entry
     if problems:
         fail("\n\n".join(problems))
+
+    pin_problems = sdk_pin_errors(flutter_version, flutter_sdk_exact_pins(flutter_version), chosen, entries)
+    if pin_problems:
+        fail("\n\n".join(pin_problems))
 
     built = {name: e for name, e in chosen.items() if e.kind in [HOSTED, GIT, FLUTTER_SOURCE]}
     other = sorted(

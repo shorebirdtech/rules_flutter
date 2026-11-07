@@ -117,6 +117,220 @@ FLUTTER_VERSIONS = {
     ),
 }
 
+# The hosted packages the Flutter SDK's own packages depend on at exactly one
+# version, per Flutter version and SDK package (the `dependencies:` of
+# `packages/*/pubspec.yaml`, `flutter_tools` aside). pub resolves any app that
+# uses an SDK package to those versions, so a build with one copy of each
+# package must not move a package past one: `flutter.pub` fails when a lock
+# would. `bazel run //tools/update_flutter_version -- <version>` prints the entry.
+FLUTTER_SDK_EXACT_PINS = {
+    "3.41.2": {
+        "flutter": {
+            "characters": "1.4.1",
+            "collection": "1.19.1",
+            "material_color_utilities": "0.13.0",
+            "meta": "1.17.0",
+            "vector_math": "2.2.0",
+        },
+        "flutter_localizations": {
+            "intl": "0.20.2",
+            "path": "1.9.1",
+        },
+        "flutter_test": {
+            "clock": "1.1.2",
+            "collection": "1.19.1",
+            "fake_async": "1.3.3",
+            "leak_tracker_flutter_testing": "3.0.10",
+            "matcher": "0.12.18",
+            "meta": "1.17.0",
+            "path": "1.9.1",
+            "stack_trace": "1.12.1",
+            "stream_channel": "2.1.4",
+            "test_api": "0.7.9",
+            "vector_math": "2.2.0",
+        },
+    },
+    "3.41.6": {
+        "flutter": {
+            "characters": "1.4.1",
+            "collection": "1.19.1",
+            "material_color_utilities": "0.13.0",
+            "meta": "1.17.0",
+            "vector_math": "2.2.0",
+        },
+        "flutter_localizations": {
+            "intl": "0.20.2",
+            "path": "1.9.1",
+        },
+        "flutter_test": {
+            "clock": "1.1.2",
+            "collection": "1.19.1",
+            "fake_async": "1.3.3",
+            "leak_tracker_flutter_testing": "3.0.10",
+            "matcher": "0.12.19",
+            "meta": "1.17.0",
+            "path": "1.9.1",
+            "stack_trace": "1.12.1",
+            "stream_channel": "2.1.4",
+            "test_api": "0.7.10",
+            "vector_math": "2.2.0",
+        },
+    },
+    "3.41.7": {
+        "flutter": {
+            "characters": "1.4.1",
+            "collection": "1.19.1",
+            "material_color_utilities": "0.13.0",
+            "meta": "1.17.0",
+            "vector_math": "2.2.0",
+        },
+        "flutter_localizations": {
+            "intl": "0.20.2",
+            "path": "1.9.1",
+        },
+        "flutter_test": {
+            "clock": "1.1.2",
+            "collection": "1.19.1",
+            "fake_async": "1.3.3",
+            "leak_tracker_flutter_testing": "3.0.10",
+            "matcher": "0.12.19",
+            "meta": "1.17.0",
+            "path": "1.9.1",
+            "stack_trace": "1.12.1",
+            "stream_channel": "2.1.4",
+            "test_api": "0.7.10",
+            "vector_math": "2.2.0",
+        },
+    },
+    "3.44.0": {
+        "flutter": {
+            "characters": "1.4.1",
+            "collection": "1.19.1",
+            "material_color_utilities": "0.13.0",
+            "meta": "1.18.0",
+            "vector_math": "2.2.0",
+        },
+        "flutter_localizations": {
+            "intl": "0.20.2",
+            "path": "1.9.1",
+        },
+        "flutter_test": {
+            "clock": "1.1.2",
+            "collection": "1.19.1",
+            "fake_async": "1.3.3",
+            "leak_tracker_flutter_testing": "3.0.10",
+            "matcher": "0.12.19",
+            "meta": "1.18.0",
+            "path": "1.9.1",
+            "stack_trace": "1.12.1",
+            "stream_channel": "2.1.4",
+            "test_api": "0.7.11",
+            "vector_math": "2.2.0",
+        },
+    },
+    "3.44.1": {
+        "flutter": {
+            "characters": "1.4.1",
+            "collection": "1.19.1",
+            "material_color_utilities": "0.13.0",
+            "meta": "1.18.0",
+            "vector_math": "2.2.0",
+        },
+        "flutter_localizations": {
+            "intl": "0.20.2",
+            "path": "1.9.1",
+        },
+        "flutter_test": {
+            "clock": "1.1.2",
+            "collection": "1.19.1",
+            "fake_async": "1.3.3",
+            "leak_tracker_flutter_testing": "3.0.10",
+            "matcher": "0.12.19",
+            "meta": "1.18.0",
+            "path": "1.9.1",
+            "stack_trace": "1.12.1",
+            "stream_channel": "2.1.4",
+            "test_api": "0.7.11",
+            "vector_math": "2.2.0",
+        },
+    },
+    "3.47.2": {
+        "flutter": {
+            "material_color_utilities": "0.13.0",
+        },
+        "flutter_test": {
+            "matcher": "0.12.20",
+            "test_api": "0.7.12",
+        },
+    },
+    "3.47.5": {
+        "flutter": {
+            "material_color_utilities": "0.13.0",
+        },
+        "flutter_test": {
+            "matcher": "0.12.20",
+            "test_api": "0.7.12",
+        },
+    },
+    "3.47.6": {
+        "flutter": {
+            "material_color_utilities": "0.13.0",
+        },
+        "flutter_test": {
+            "matcher": "0.12.20",
+            "test_api": "0.7.12",
+        },
+    },
+    "3.47.7": {
+        "flutter": {
+            "material_color_utilities": "0.13.0",
+        },
+        "flutter_test": {
+            "matcher": "0.12.20",
+            "test_api": "0.7.12",
+        },
+    },
+    "3.47.8": {
+        "flutter": {
+            "material_color_utilities": "0.13.0",
+        },
+        "flutter_test": {
+            "matcher": "0.12.20",
+            "test_api": "0.7.12",
+        },
+    },
+    "3.47.9": {
+        "flutter": {
+            "material_color_utilities": "0.13.0",
+        },
+        "flutter_test": {
+            "matcher": "0.12.20",
+            "test_api": "0.7.12",
+        },
+    },
+}
+
+def flutter_sdk_exact_pins(flutter_version):
+    """Returns the exact pins of a release's SDK packages.
+
+    Args:
+        flutter_version: Flutter release tag (e.g. "3.47.9"). Must be a key of
+            FLUTTER_VERSIONS.
+
+    Returns:
+        A dict of SDK package name to a dict of the packages it depends on
+        exactly and the versions it pins.
+    """
+    pins = FLUTTER_SDK_EXACT_PINS.get(flutter_version)
+    if pins == None:
+        fail((
+            "No exact SDK pins recorded for Flutter {v}.\n" +
+            "Add its entry to FLUTTER_SDK_EXACT_PINS in " +
+            "//flutter/private:versions.bzl; " +
+            "`bazel run //tools/update_flutter_version -- {v}` prints it."
+        ).format(v = flutter_version))
+    return pins
+
 def flutter_source_sha256(flutter_version):
     """Returns the recorded sha256 of a release's GitHub source tarball.
 
