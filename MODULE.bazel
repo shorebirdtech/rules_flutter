@@ -51,6 +51,16 @@ bazel_dep(name = "rules_go", version = "0.64.2")
 go_sdk = use_extension("@rules_go//go:extensions.bzl", "go_sdk")
 go_sdk.download(version = "1.27.3")
 
+# The Android SDK rules_android resolves from `ANDROID_HOME`, for the SDK tools
+# rules_flutter's own rules name (`flutter_android_release`'s apksigner). The
+# app configures it in its own MODULE.bazel; this only makes the repository
+# visible here.
+android_sdk_repository_extension = use_extension(
+    "@rules_android//rules/android_sdk_repository:rule.bzl",
+    "android_sdk_repository_extension",
+)
+use_repo(android_sdk_repository_extension, "androidsdk")
+
 bazel_dep(name = "bazelrc-preset.bzl", version = "1.10.0", dev_dependency = True)
 
 # The development tooling rules_flutter shares with the repositories built on

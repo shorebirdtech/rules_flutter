@@ -183,7 +183,7 @@ Commands (after `--`):
 """,
 )
 
-def flutter_android_release(name, apksigner = "@androidsdk//:apksigner_deploy.jar", **kwargs):
+def flutter_android_release(name, apksigner = Label("@androidsdk//:apksigner_deploy.jar"), **kwargs):
     """Signs an App Bundle and its APK with the app's upload key, when run.
 
     See the rule, `_flutter_android_release`, for what it does and its

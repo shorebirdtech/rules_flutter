@@ -120,16 +120,16 @@ ANDROID_TARGET_SDK_VERSION = _ANDROID_TARGET_SDK_VERSION
 # that contract. It adds nothing to the APK that the engine target wasn't
 # already carrying at runtime.
 _ANDROIDX_EMBEDDING_DEPS = [
-    "@rules_android_maven//:androidx_annotation_annotation",
-    "@rules_android_maven//:androidx_core_core",
-    "@rules_android_maven//:androidx_exifinterface_exifinterface",
-    "@rules_android_maven//:androidx_fragment_fragment",
-    "@rules_android_maven//:androidx_lifecycle_lifecycle_common",
-    "@rules_android_maven//:androidx_lifecycle_lifecycle_runtime",
-    "@rules_android_maven//:androidx_tracing_tracing",
-    "@rules_android_maven//:androidx_window_window",
-    "@rules_android_maven//:androidx_window_window_java",
-    "@rules_android_maven//:com_getkeepsafe_relinker_relinker",
+    Label("@rules_android_maven//:androidx_annotation_annotation"),
+    Label("@rules_android_maven//:androidx_core_core"),
+    Label("@rules_android_maven//:androidx_exifinterface_exifinterface"),
+    Label("@rules_android_maven//:androidx_fragment_fragment"),
+    Label("@rules_android_maven//:androidx_lifecycle_lifecycle_common"),
+    Label("@rules_android_maven//:androidx_lifecycle_lifecycle_runtime"),
+    Label("@rules_android_maven//:androidx_tracing_tracing"),
+    Label("@rules_android_maven//:androidx_window_window"),
+    Label("@rules_android_maven//:androidx_window_window_java"),
+    Label("@rules_android_maven//:com_getkeepsafe_relinker_relinker"),
 ]
 
 # -- Composable rules (Tier 2) ------------------------------------------------
