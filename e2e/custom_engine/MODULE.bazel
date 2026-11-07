@@ -12,14 +12,14 @@ module(name = "rules_flutter_custom_engine")
 bazel_dep(name = "rules_flutter", version = "0.0.0")
 bazel_dep(name = "rules_dart", version = "0.8.1")
 bazel_dep(name = "bazel_skylib", version = "1.9.2")
-bazel_dep(name = "apple_support", version = "2.9.1")
-bazel_dep(name = "rules_apple", version = "5.2.0")
-bazel_dep(name = "rules_cc", version = "0.2.26")
-bazel_dep(name = "rules_swift", version = "4.1.2")
+bazel_dep(name = "apple_support", version = "2.12.0")
+bazel_dep(name = "rules_apple", version = "5.4.0")
+bazel_dep(name = "rules_cc", version = "0.2.28")
+bazel_dep(name = "rules_swift", version = "4.2.2")
 bazel_dep(name = "platforms", version = "1.1.0")
-bazel_dep(name = "rules_android", version = "0.8.0")
+bazel_dep(name = "rules_android", version = "0.8.1")
 bazel_dep(name = "rules_android_ndk", version = "0.1.5")
-bazel_dep(name = "rules_kotlin", version = "2.4.20")
+bazel_dep(name = "rules_kotlin", version = "2.4.21")
 bazel_dep(name = "rules_java", version = "9.9.0")
 bazel_dep(name = "llvm", version = "0.8.26")
 
@@ -51,14 +51,6 @@ single_version_override(
         # exhaust that on a 16 GB machine. The patch keeps every cap and drops
         # the initial sizes. Drop it once a rules_android release does.
         "//patches:rules_android_no_initial_heap.patch",
-        # Three genrules unzip an entry of the aapt2 proto jar into their
-        # working directory, the execution root, which an unsandboxed action
-        # (Windows) shares with the same genrule in another configuration:
-        # the second `unzip` prompts "replace Configuration.proto?" and the
-        # build fails, on a fresh output base every time and on each rerun
-        # that finds the file. The patch reads the entry through a pipe.
-        # Drop it once a rules_android release does.
-        "//patches:rules_android_unzip_to_stdout.patch",
         # `bazel run` of an `android_application` (an App Bundle) installs it
         # on a device through bundletool, and fails three ways: the script
         # looks for the JDK at its execution path, which the runfiles tree
@@ -68,11 +60,6 @@ single_version_override(
         # PATH, where the SDK's adb need not be. The patch fixes all four.
         # Drop it once a rules_android release does.
         "//patches:rules_android_bundle_run.patch",
-        # An App Bundle carries R8's mapping for Play to deobfuscate stack
-        # traces with, but android_binary's R8 path provides no
-        # ProguardMappingInfo, so android_application leaves it out. Drop it
-        # once a rules_android release provides it.
-        "//patches:rules_android_r8_mapping.patch",
     ],
 )
 
@@ -261,7 +248,7 @@ register_toolchains("@androidndk//:all")
 # but the resolved protobuf module is 34.0 (gencode 4.34.0).  The root module's
 # maven.install tags take precedence, so we re-declare the two affected repos
 # with bumped protobuf jars.
-bazel_dep(name = "rules_jvm_external", version = "7.1")
+bazel_dep(name = "rules_jvm_external", version = "7.2")
 
 # Every maven.install below names a lock_file: the jars are fetched by checksum,
 # so they land in Bazel's repository cache, instead of being resolved through

@@ -111,7 +111,7 @@ rules_flutter also works with Bazel's automatic execution groups:
 common --incompatible_auto_exec_groups
 ```
 
-With it, Bazel places each action by the toolchain it names rather than by every toolchain its rule uses, which matters once you register execution platforms of more than one kind (a Linux remote worker beside your Mac, say). rules_flutter's actions land the same with the flag on or off: `gen_snapshot` for iOS and macOS, Xcode tools and signing run on a Mac; kernel compiles, asset and shader bundling and web compiles run on any host with the Flutter SDK; stripping the Android engine runs on the machine running Bazel, where its NDK is. An Android app needs fixes to rulesets it builds with, because rules_android 0.8.0, protobuf 34 and rules_go have actions the flag rejects or places on the wrong host: copy the three `single_version_override` patches in [`e2e/android_example/MODULE.bazel`](e2e/android_example/MODULE.bazel) into your own `MODULE.bazel`. Once you register an execution platform other than your machine, also copy its `archive_override` patch for rules_android_ndk, which keeps the local NDK's tools on the machine that has it.
+With it, Bazel places each action by the toolchain it names rather than by every toolchain its rule uses, which matters once you register execution platforms of more than one kind (a Linux remote worker beside your Mac, say). rules_flutter's actions land the same with the flag on or off: `gen_snapshot` for iOS and macOS, Xcode tools and signing run on a Mac; kernel compiles, asset and shader bundling and web compiles run on any host with the Flutter SDK; stripping the Android engine runs on the machine running Bazel, where its NDK is. An Android app needs fixes to rulesets it builds with, because rules_android 0.8.1, protobuf 34 and rules_go have actions the flag rejects or places on the wrong host: copy the three `single_version_override` patches in [`e2e/android_example/MODULE.bazel`](e2e/android_example/MODULE.bazel) into your own `MODULE.bazel`. Once you register an execution platform other than your machine, also copy its `archive_override` patch for rules_android_ndk, which keeps the local NDK's tools on the machine that has it.
 
 ### Your first app
 
@@ -977,7 +977,7 @@ What the extension needs:
 - **A version equal to the app's.** rules_apple gives an extension no version unless you pass one, and the system expects an extension's version to match its app's. Declare the version once, with `flutter_apple_bundle_version` (from `flutter:ios.bzl` or `flutter:macos.bzl`, taking `build_name` and `build_number`) or rules_apple's `apple_bundle_version`, and pass it as the `version` of the app and of each extension.
 - **A bundle id under the app's**, such as `com.example.myapp.widgets`.
 - **An Info.plist with the bundle keys.** Besides `NSExtension` and its `NSExtensionPointIdentifier`, give `CFBundleName` (`$(PRODUCT_NAME)`), `CFBundleExecutable` (`$(EXECUTABLE_NAME)`), `CFBundleIdentifier` (`$(PRODUCT_BUNDLE_IDENTIFIER)`) and `CFBundlePackageType` `XPC!`. Without them the simulator refuses to install the app.
-- **Its App Intents.** A control's button, an interactive widget or a configurable widget runs an App Intent in the extension, so give the library to the extension's `app_intents` as well as its `deps`. rules_apple 5.2.0's `macos_extension` has no `app_intents` attribute. `e2e/macos_example/patches/` has a patch that adds it; apply it with `single_version_override(module_name = "rules_apple", version = "5.2.0", patch_strip = 1, patches = [...])`. Overrides only apply in the root module, so an app needs the override in its own `MODULE.bazel`; it does not come with rules_flutter.
+- **Its App Intents.** A control's button, an interactive widget or a configurable widget runs an App Intent in the extension, so give the library to the extension's `app_intents` as well as its `deps`. rules_apple 5.4.0's `macos_extension` has no `app_intents` attribute. `e2e/macos_example/patches/` has a patch that adds it; apply it with `single_version_override(module_name = "rules_apple", version = "5.4.0", patch_strip = 1, patches = [...])`. Overrides only apply in the root module, so an app needs the override in its own `MODULE.bazel`; it does not come with rules_flutter.
 - **On macOS, a sandbox.** macOS loads a widget or share extension only if its entitlements include `com.apple.security.app-sandbox`.
 - **Visibility** to the package of the app target, if it lives elsewhere. `flutter_ios_app` and `flutter_macos_app` must sit in the package that holds `ios/Runner/` or `macos/Runner/`.
 
@@ -1006,7 +1006,7 @@ flutter_android_app(
 Add these to `MODULE.bazel`:
 
 ```starlark
-bazel_dep(name = "rules_android", version = "0.8.0")
+bazel_dep(name = "rules_android", version = "0.8.1")
 bazel_dep(name = "rules_android_ndk", version = "0.1.5")
 
 use_repo(flutter, "flutter_toolchains")
@@ -1056,7 +1056,7 @@ ERROR: An error occurred during the fetch of repository
   path attribute of android_ndk_repository must be set.
 ```
 
-**Building on Windows.** rules_android 0.8.0 starts its tool JVMs with an initial heap as large as their cap (`-Xms3G` for resource processing, `-Xms8g` for desugaring, D8 and R8), and a JVM commits its initial heap as it starts. Windows counts that against RAM plus the pagefile whether or not the JVM uses it, so on a 16 GB machine a few of them running at once fail the build with `There is insufficient memory for the Java Runtime Environment to continue` and `The paging file is too small for this operation to complete`. Apply `rules_android_no_initial_heap.patch` from [`e2e/android_example/patches/`](e2e/android_example/patches/) in your `single_version_override` of rules_android, as that workspace's `MODULE.bazel` does. It keeps each heap cap and drops only the initial sizes. A second patch from the same directory, `rules_android_unzip_to_stdout.patch`, stops three rules_android genrules from failing with `replace Configuration.proto? [y]es, [n]o...`: each unzips an entry of the aapt2 proto jar into the execution root, where nothing sandboxes it on Windows, and the same genrule built in a second configuration finds the file. macOS and Linux build without either.
+**Building on Windows.** rules_android 0.8.1 starts its tool JVMs with an initial heap as large as their cap (`-Xms3G` for resource processing, `-Xms8g` for desugaring, D8 and R8), and a JVM commits its initial heap as it starts. Windows counts that against RAM plus the pagefile whether or not the JVM uses it, so on a 16 GB machine a few of them running at once fail the build with `There is insufficient memory for the Java Runtime Environment to continue` and `The paging file is too small for this operation to complete`. Apply `rules_android_no_initial_heap.patch` from [`e2e/android_example/patches/`](e2e/android_example/patches/) in your `single_version_override` of rules_android, as that workspace's `MODULE.bazel` does. It keeps each heap cap and drops only the initial sizes. macOS and Linux build without it.
 
 **Maven dependencies.** The androidx and Kotlin jars the runner and plugins compile against come from `@rules_android_maven`, which rules_flutter declares with rules_jvm_external and pins with a lock file (`rules_android_maven_install.json`). Each jar is then fetched by checksum and kept in Bazel's repository cache, so a fresh output base or CI runner does not download them again. If your `MODULE.bazel` declares no `maven.install` of that name, you get this as is.
 
@@ -1118,7 +1118,7 @@ bazel build //:my_app_android \
 
 The platforms are rules_android's own, `@rules_android//:armeabi-v7a`, `@rules_android//:arm64-v8a` and `@rules_android//:x86_64`, and are named for their ABI because rules_android packages a platform's native libraries into `lib/<platform name>/`. Write them as shown: the flag's value is read by rules_android, which resolves the label from its own repository, so a platform of your own repository, or `@rules_flutter//...`, is not found. The engine of each ABI comes with rules_flutter; nothing of it goes in your `use_repo`.
 
-The flag is rules_android's Starlark flag, which rules_android reads first. The short `--android_platforms` also works: rules_android aliases it to that flag (`flag_alias`), and Bazel's native option of the same name is what rules_android falls back to while it exists. The long form names `@rules_android` on the command line, so your root `MODULE.bazel` needs `bazel_dep(name = "rules_android", version = "0.8.0")`.
+The flag is rules_android's Starlark flag, which rules_android reads first. The short `--android_platforms` also works: rules_android aliases it to that flag (`flag_alias`), and Bazel's native option of the same name is what rules_android falls back to while it exists. The long form names `@rules_android` on the command line, so your root `MODULE.bazel` needs `bazel_dep(name = "rules_android", version = "0.8.1")`.
 
 Put the platforms you usually build for in your `.bazelrc`, with a config for the others:
 
@@ -1209,9 +1209,9 @@ bazel run //:app_release
 - With Play App Signing, the bundle you upload is signed with the upload key, and Google signs the APKs it serves with the app signing key it keeps. `app-release.apk` is for distribution outside Play; it is the APK of the same release build, signed with the same key (by the Android SDK's `apksigner`, which `flutter_android_release` takes from `@androidsdk`), so it will not update a copy installed from Play. As in Gradle's, its native libraries are stored uncompressed and 16 KB-aligned.
 - Raise `build_number` for each upload: Play refuses a version code it has seen.
 
-`bazel run //:app_bundle` installs the bundle on the device `ANDROID_SERIAL` names, through bundletool and signed with the debug key, as rules_android intends. rules_android 0.8.0 needs [`rules_android_bundle_run.patch`](e2e/android_example/patches/rules_android_bundle_run.patch) in your `single_version_override` of rules_android for that: without it the command fails to find the JDK, aapt2, the Kotlin runtime and adb. `flutter_android_release` does not need the patch.
+`bazel run //:app_bundle` installs the bundle on the device `ANDROID_SERIAL` names, through bundletool and signed with the debug key, as rules_android intends. rules_android 0.8.1 needs [`rules_android_bundle_run.patch`](e2e/android_example/patches/rules_android_bundle_run.patch) in your `single_version_override` of rules_android for that: without it the command fails to find the JDK, aapt2, the Kotlin runtime and adb. `flutter_android_release` does not need the patch.
 
-A release bundle should also carry R8's mapping (`BUNDLE-METADATA/com.android.tools.build.obfuscation/proguard.map`), from which Play deobfuscates the Java and Kotlin frames of crash reports, as a Gradle-built bundle does. rules_android 0.8.0 leaves it out; [`rules_android_r8_mapping.patch`](e2e/android_example/patches/rules_android_r8_mapping.patch) from the same directory puts it in.
+A release bundle carries R8's mapping (`BUNDLE-METADATA/com.android.tools.build.obfuscation/proguard.map`), from which Play deobfuscates the Java and Kotlin frames of crash reports, as a Gradle-built bundle does.
 
 <details>
 <summary>Composable rules</summary>

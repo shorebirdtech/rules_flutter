@@ -759,7 +759,7 @@ def flutter_android_app(
             `<app_bundle>_unsigned.aab`, for the ABIs and compilation mode of
             the build like the APK's. `bazel run` of it installs it on a
             device with bundletool, signed with the debug key; rules_android
-            0.8.0 needs a patch for that (see the README's Android section).
+            0.8.1 needs a patch for that (see the README's Android section).
             Hand it to `flutter_android_release` to sign a release. rules_android also
             declares `<app_bundle>_base`, the bundle's own `android_binary`.
         bundle_config: The bundletool `BundleConfig` (`.pb.json`) of
