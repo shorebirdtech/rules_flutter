@@ -100,7 +100,7 @@ def resolve_errors(lock, hub, lock_pkgs, resolve):
         if name not in lock_pkgs:
             errors.append(
                 ("flutter_pub.from_lock(name = \"{hub}\") maps \"{name}\" in resolve, but {lock} does not list it. " +
-                 "Remove it from resolve, or re-resolve the lock: bazel run @rules_flutter//flutter:pub -- get").format(
+                 "Remove it from resolve, or re-resolve the lock: bazel run @rules_flutter//flutter/pub -- get").format(
                     hub = hub,
                     name = name,
                     lock = str(lock),

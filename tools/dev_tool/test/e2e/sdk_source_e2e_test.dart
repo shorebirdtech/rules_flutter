@@ -89,7 +89,7 @@ void main() {
       );
       expect(
         result.output,
-        contains('bazel run @rules_flutter//flutter:pub -- get'),
+        contains('bazel run @rules_flutter//flutter/pub -- get'),
         reason: 'the failure does not say how to re-resolve the lock\n$result',
       );
     },

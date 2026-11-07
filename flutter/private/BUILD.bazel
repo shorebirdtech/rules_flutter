@@ -882,3 +882,22 @@ bzl_library(
     srcs = ["engine_out_dirs.bzl"],
     visibility = ["//flutter:__subpackages__"],
 )
+
+bzl_library(
+    name = "pub_extension",
+    srcs = ["pub_extension.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+    deps = [
+        ":flutter_face_repo",
+        ":flutter_framework_package",
+        ":flutter_pub_index",
+        ":flutter_pub_library_repo",
+        ":flutter_resolved_package",
+        ":flutter_sdks_repo",
+        ":flutter_unsupported_package",
+        ":lock_entry_kind",
+        ":pub_lock_sdks",
+        ":pub_resolve",
+        ":versions",
+    ],
+)

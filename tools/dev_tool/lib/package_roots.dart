@@ -3,7 +3,7 @@
 /// A build-emitted dev package_config names third-party packages relatively:
 ///
 /// ```json
-/// {"name": "flutter", "rootUri": "../../../external/rules_flutter++flutter_pub+flutter_pub__flutter"}
+/// {"name": "flutter", "rootUri": "../../../external/rules_flutter++pub+flutter_pub__flutter"}
 /// ```
 ///
 /// Resolved from where that file lives (`bazel-out/<config>/bin/`), those three

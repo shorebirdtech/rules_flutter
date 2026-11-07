@@ -8,8 +8,9 @@
 ///     either hub's name exists.
 ///  2. A lock behind another on a package fails when the module is read, at
 ///     `on_version_conflict = "error"`, naming both locks, both versions, the
-///     package and the command that fixes it. That command runs while the
-///     conflict stands (the toolchain it needs is another extension's), and
+///     package and the command that fixes it. A lock behind on several
+///     packages gets one command naming all of them. That command runs while
+///     the conflict stands (the toolchain it needs is another extension's), and
 ///     after it the hub analyses. At `"upgrade"` it builds the higher version.
 ///  3. Locks that disagree on where a package comes from, or on the digest of
 ///     one version, fail naming both.
@@ -116,14 +117,98 @@ void main() {
     },
   );
 
+  // The runner must not build anything from either pub extension: rules_dart's
+  // own `pub` fails on the same conflict, and the command is what fixes it.
+  for (final alsoRulesDart in [false, true])
+    test(
+      'the command a version conflict names runs while the conflict stands, '
+      'and fixes it${alsoRulesDart ? ', with rules_dart\'s pub extension failing on the same locks' : ''}',
+      () async {
+        final ws = await PubInputsFixture(
+          http: true,
+          lockPackage: 'app',
+          rulesDartPubLocks: alsoRulesDart ? ['app', 'other'] : [],
+          hosted: [HostedPackage('vplain', version: '1.0.0')],
+          files: {
+            'app/pubspec.yaml':
+                'name: app\n'
+                'environment:\n'
+                '  sdk: ^3.0.0\n'
+                'dependencies:\n'
+                '  vplain:\n'
+                '    hosted: "{{SERVER}}"\n'
+                '    version: ^1.0.0\n',
+          },
+          otherHubs: [
+            _other([HostedPackage('vplain', version: '1.1.0')]),
+          ],
+        ).materialize();
+
+        if (alsoRulesDart) {
+          // rules_dart's own extension really does refuse these locks.
+          final dart = await ws.query('@dartdeps//:vplain');
+          expect(dart.succeeded, isFalse, reason: '$dart');
+          expect(
+            dart.output,
+            allOf(contains('rules_dart'), contains('vplain')),
+            reason: '$dart',
+          );
+        }
+
+        final conflict = await ws.query('@pubhub//:vplain');
+        expect(conflict.succeeded, isFalse, reason: '$conflict');
+        final commands =
+            RegExp(
+                  r'^\s*bazel run (\S+) -- (.+)$',
+                  multiLine: true,
+                )
+                .allMatches(conflict.output)
+                .where((m) => m.group(1)!.contains('flutter/pub'))
+                .toList();
+        expect(commands, hasLength(1), reason: '$conflict');
+        final command = commands.single;
+
+        // The cache is the test's own, so the packages of its registry do not
+        // land in the developer's.
+        final cache = Directory.systemTemp.createTempSync('pub_cache_');
+        addTearDown(() => cache.deleteSync(recursive: true));
+        final fixed = await ws.bazel(
+          [
+            'run',
+            command.group(1)!,
+            '--',
+            ...command.group(2)!.trim().split(RegExp(r'\s+')),
+          ],
+          environment: {'PUB_CACHE': cache.path},
+        );
+        expect(fixed.succeeded, isTrue, reason: '$fixed');
+        expect(
+          ws.file('app/pubspec.lock').readAsStringSync(),
+          contains('version: "1.1.0"'),
+        );
+
+        final analysed = await ws.bazel([
+          'build',
+          '--nobuild',
+          '@pubhub//:vplain',
+        ]);
+        expect(analysed.succeeded, isTrue, reason: '$analysed');
+      },
+    );
+
   test(
-    'the command a version conflict names runs while the conflict stands, '
-    'and fixes it',
+    'a lock behind on two packages is fixed by one command naming both',
     () async {
+      HostedPackage pkg(String name, String version) => HostedPackage(
+        name,
+        version: version,
+        pubspec:
+            'name: $name\nversion: $version\nenvironment:\n  sdk: ^3.0.0\n',
+      );
       final ws = await PubInputsFixture(
         http: true,
         lockPackage: 'app',
-        hosted: [HostedPackage('vplain', version: '1.0.0')],
+        hosted: [pkg('vplain', '1.0.0'), pkg('vother', '1.0.0')],
         files: {
           'app/pubspec.yaml':
               'name: app\n'
@@ -132,47 +217,79 @@ void main() {
               'dependencies:\n'
               '  vplain:\n'
               '    hosted: "{{SERVER}}"\n'
+              '    version: ^1.0.0\n'
+              '  vother:\n'
+              '    hosted: "{{SERVER}}"\n'
               '    version: ^1.0.0\n',
         },
         otherHubs: [
-          _other([HostedPackage('vplain', version: '1.1.0')]),
+          _other([pkg('vplain', '1.1.0'), pkg('vother', '1.1.0')]),
         ],
       ).materialize();
 
       final conflict = await ws.query('@pubhub//:vplain');
       expect(conflict.succeeded, isFalse, reason: '$conflict');
+      expect(conflict.output, contains('"vplain" has conflicting versions'));
+      expect(conflict.output, contains('"vother" has conflicting versions'));
       final commands = RegExp(
         r'^\s*bazel run (\S+) -- (.+)$',
         multiLine: true,
       ).allMatches(conflict.output).toList();
       expect(commands, hasLength(1), reason: '$conflict');
-      final command = commands.single;
+      expect(
+        commands.single.group(2),
+        allOf(contains('vother'), contains('vplain')),
+        reason: '$conflict',
+      );
 
-      // The cache is the test's own, so the packages of its registry do not
-      // land in the developer's.
       final cache = Directory.systemTemp.createTempSync('pub_cache_');
       addTearDown(() => cache.deleteSync(recursive: true));
       final fixed = await ws.bazel(
         [
           'run',
-          command.group(1)!,
+          commands.single.group(1)!,
           '--',
-          ...command.group(2)!.trim().split(RegExp(r'\s+')),
+          ...commands.single.group(2)!.trim().split(RegExp(r'\s+')),
         ],
         environment: {'PUB_CACHE': cache.path},
       );
       expect(fixed.succeeded, isTrue, reason: '$fixed');
-      expect(
-        ws.file('app/pubspec.lock').readAsStringSync(),
-        contains('version: "1.1.0"'),
-      );
+      final lock = ws.file('app/pubspec.lock').readAsStringSync();
+      expect('version: "1.1.0"'.allMatches(lock), hasLength(2), reason: lock);
 
       final analysed = await ws.bazel([
         'build',
         '--nobuild',
         '@pubhub//:vplain',
+        '@pubhub//:vother',
       ]);
       expect(analysed.succeeded, isTrue, reason: '$analysed');
+    },
+  );
+
+  test(
+    'the old flutter_pub extension fails with the lines that replace it',
+    () async {
+      final ws = await PubInputsFixture(
+        hosted: [HostedPackage('vplain')],
+        legacyPubExtension: true,
+      ).materialize();
+
+      final result = await ws.query('@pubhub//:vplain');
+      expect(result.succeeded, isFalse, reason: '$result');
+      expect(
+        result.output,
+        allOf(
+          contains('@rules_flutter//flutter:extensions.bzl'),
+          contains(
+            'moved to `pub` in `@rules_flutter//flutter/pub:extensions.bzl`',
+          ),
+          contains(
+            'use_extension("@rules_flutter//flutter/pub:extensions.bzl", "pub")',
+          ),
+        ),
+        reason: '$result',
+      );
     },
   );
 

@@ -255,7 +255,18 @@ class PubInputsFixture {
     this.otherHubs = const [],
     this.onVersionConflict,
     this.http = false,
+    this.legacyPubExtension = false,
+    this.rulesDartPubLocks = const [],
   });
+
+  /// Lock packages (`''` for the root, or `other`) that rules_dart's own `pub`
+  /// extension also reads, as `pub.from_lock()` tags of one hub. Locks that
+  /// disagree on a package fail every repository of that extension.
+  final List<String> rulesDartPubLocks;
+
+  /// Whether the module still reaches the pub extension where it used to be,
+  /// `flutter_pub` in `@rules_flutter//flutter:extensions.bzl`.
+  final bool legacyPubExtension;
 
   /// Whether the registry is served over HTTP, as pub's hosted API, rather
   /// than from `file://`: `dart pub` itself only resolves against HTTP, so a
@@ -323,6 +334,14 @@ class PubInputsFixture {
       ..writeln('  dart: ">=3.0.0 <4.0.0"');
     return out.toString();
   }
+
+  /// rules_dart's `pub` extension, with a `from_lock` tag per lock.
+  static String _rulesDartPubTags(List<String> lockPackages) => [
+    'dart_pub = use_extension("@rules_dart//dart/pub:extensions.bzl", "pub")',
+    for (final lock in lockPackages)
+      'dart_pub.from_lock(name = "dartdeps", lock = "//$lock:pubspec.lock")',
+    'use_repo(dart_pub, "dartdeps")',
+  ].join('\n');
 
   /// One `flutter_pub.from_lock(...)` tag of the module.
   static String _tag(
@@ -465,10 +484,11 @@ local_path_override(
 flutter = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter")
 flutter.toolchain(flutter_version = "$flutterVersion")
 
-flutter_pub = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter_pub")
+flutter_pub = ${legacyPubExtension ? 'use_extension("@rules_flutter//flutter:extensions.bzl", "flutter_pub")' : 'use_extension("@rules_flutter//flutter/pub:extensions.bzl", "pub")'}
 ${overlayRoots.isEmpty ? '' : 'flutter_pub.plugin_overlays(roots = ${jsonEncode(overlayRoots)})'}
 ${_tag(pubHub, lockPackage, resolve, onVersionConflict)}
 ${otherHubs.map((h) => _tag(h.name, h.lockPackage, h.resolve, h.onVersionConflict)).join('\n')}
+${rulesDartPubLocks.isEmpty ? '' : _rulesDartPubTags(rulesDartPubLocks)}
 use_repo(flutter_pub, ${{pubHub, for (final h in otherHubs) h.name}.map((n) => '"$n"').join(', ')}${spokeNames.map((n) => ', "flutter_pub__$n"').join()})
 ''';
 

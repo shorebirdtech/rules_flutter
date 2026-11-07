@@ -207,6 +207,11 @@ void main() {
           expect(result.output, contains('full commit id'), reason: '$result');
           expect(
             result.output,
+            contains('bazel run @rules_flutter//flutter/pub -- get'),
+            reason: '$result',
+          );
+          expect(
+            result.output,
             isNot(contains('during the fetch of repository')),
             reason: 'the refusal should come from reading the lock\n$result',
           );

@@ -142,11 +142,9 @@ void main() {
           'cpp_wrapper_sha256': str(digest),
         }),
         ProbeRepo('cross_ok', 'flutter_cross_compilation_repo', {
-          'flutter_version': str(fakeFlutterVersion),
           'engine_revision': str(revision),
           'host_platform': str('darwin-arm64'),
           'target_platform': str('android-arm64'),
-          'host_repo_name': str('host'),
           'gen_snapshot_sha256': str(digest),
         }, bzl: 'flutter_cross_repo'),
         ProbeRepo('web_sdk_ok', 'flutter_web_sdk_repo', {

@@ -55,12 +55,27 @@ dart_binary(
     deps = ["@rules_dart//dart/runfiles"],
 )
 
-dart_binary(
-    name = "pub_runner",
-    compile_mode = "exe",
-    main = "pub.dart",
+# The pub runner: `dart compile exe` builds it from these two files, which
+# import only the Dart libraries, so that it depends on no pub repository (a
+# lock conflict there must not stop the command that fixes the lock). They are
+# files, not a library, because the runner must not depend on a Dart target; the
+# test below owns them for analysis and formatting.
+exports_files(
+    [
+        "pub.dart",
+        "pub_runfiles.dart",
+    ],
     visibility = ["//flutter:__subpackages__"],
-    deps = ["@rules_dart//dart/runfiles"],
+)
+
+dart_test(
+    name = "pub_runfiles_test",
+    srcs = [
+        "pub.dart",
+        "pub_runfiles.dart",
+    ],
+    main = "test/pub_runfiles_test.dart",
+    deps = ["@dev_tool_deps//:test"],
 )
 
 # `assemble_directory.dart` as a program, for the test fixtures that build a

@@ -2034,7 +2034,7 @@ def fetch_flutter_source_package(ctx, package_name, flutter_version, sha256):
         fail((
             "pubspec.lock lists `{name}` from the Flutter SDK, but Flutter {version}'s " +
             "source has no packages/{name}; re-resolve the lock with the pinned " +
-            "toolchain (`bazel run @rules_flutter//flutter:pub -- get`)."
+            "toolchain (`bazel run @rules_flutter//flutter/pub -- get`)."
         ).format(name = package_name, version = flutter_version))
     for child in package_dir.readdir():
         ctx.rename(child, ctx.path(child.basename))

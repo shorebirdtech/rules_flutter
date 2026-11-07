@@ -78,6 +78,12 @@ void main() {
         contains('sha256'),
         reason: 'the refusal should say what is missing\n$result',
       );
+      expect(
+        result.output,
+        contains('bazel run @rules_flutter//flutter/pub -- get'),
+        reason:
+            'the refusal should print the command that fixes the lock\n$result',
+      );
     });
   });
 

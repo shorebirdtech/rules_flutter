@@ -151,7 +151,7 @@ Future<void> main(List<String> args) async {
   // keyed by release tag rather than engine revision. Every rule that needs
   // Flutter's own Dart source pins this one checksum: the per-package SDK
   // spokes, the vendored gen-l10n generator, and the FLUTTER_ROOT tree behind
-  // `flutter:pub`. A version entry without it cannot be built.
+  // `flutter/pub`. A version entry without it cannot be built.
   final pinnedSource = pinnedSourceSha256(versionsBzl, version);
   if (pinnedSource != null) {
     checksums['__source__'] = pinnedSource;

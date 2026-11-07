@@ -2,7 +2,6 @@ load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag", "int_flag", "string_flag")
 load("//flutter/private:build_settings.bzl", "dart_defines_flag")
 load("//flutter/private:flutter_material_icons.bzl", "flutter_material_icons")
-load("//flutter/private:flutter_pub.bzl", "flutter_pub")
 
 # This is the target rule authors should put in their "toolchains"
 # attribute in order to get a runtime for the correct platform.
@@ -108,17 +107,6 @@ dart_defines_flag(
 # requiring callers to select() on the host platform.
 flutter_material_icons(
     name = "material_icons",
-    visibility = ["//visibility:public"],
-)
-
-# `dart pub`, run from the pinned toolchain against the current workspace, so
-# that the SDK which resolves pubspec.lock is the SDK which compiles it:
-#
-#   bazel run @rules_flutter//flutter:pub -- get
-#
-# Fetches @flutter_dev_root on first use; no normal build depends on it.
-flutter_pub(
-    name = "pub",
     visibility = ["//visibility:public"],
 )
 
@@ -231,12 +219,8 @@ bzl_library(
     visibility = ["//visibility:public"],
     deps = [
         ":repositories",
-        "//flutter/private:flutter_framework_package",
-        "//flutter/private:flutter_resolved_package",
-        "//flutter/private:flutter_unsupported_package",
-        "//flutter/private:lock_entry_kind",
-        "//flutter/private:pub_lock_sdks",
-        "//flutter/private:pub_resolve",
+        "//flutter/private:flutter_sdks_repo",
+        "//flutter/private:pub_extension",
         "//flutter/private:toolchain_version",
     ],
 )

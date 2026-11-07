@@ -51,7 +51,7 @@ use_repo(flutter, "flutter_toolchains")
 
 register_toolchains("@flutter_toolchains//:all")
 
-flutter_pub = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter_pub")
+flutter_pub = use_extension("@rules_flutter//flutter/pub:extensions.bzl", "pub")
 flutter_pub.from_lock(
     name = "deps",
     lock = "//:pubspec.lock",
@@ -203,7 +203,7 @@ The Flutter SDK packages a lock lists with `source: sdk` build too. `package:flu
 
 #### Git packages
 
-A dependency with `git:` in `pubspec.yaml` is listed in `pubspec.lock` with `source: git`, and it builds like a hosted one: a plain package, a package with assets or a plugin, as its own `pubspec.yaml` says. The hub fetches the commit the lock records (`resolved-ref`) and lays out the package's directory of the repository (`path:`, the repository root by default) as `dart pub get` does, so a package in a monorepo is only its own directory. Run `bazel run @rules_flutter//flutter:pub -- get` after changing the dependency, and commit the lock: it is what pins the commit.
+A dependency with `git:` in `pubspec.yaml` is listed in `pubspec.lock` with `source: git`, and it builds like a hosted one: a plain package, a package with assets or a plugin, as its own `pubspec.yaml` says. The hub fetches the commit the lock records (`resolved-ref`) and lays out the package's directory of the repository (`path:`, the repository root by default) as `dart pub get` does, so a package in a monorepo is only its own directory. Run `bazel run @rules_flutter//flutter/pub -- get` after changing the dependency, and commit the lock: it is what pins the commit.
 
 - A `resolved-ref` that is not a full commit id is refused when Bazel reads the lock, naming the lock and the package. Run `pub get` to have pub write the commit it resolved.
 - The fetch uses the `git` on your machine and its configuration, so credential helpers, `url.<base>.insteadOf` mirrors and proxies work as they do for `dart pub get`. Writing the files uses none of it: attributes in the repository apply, a host's line-ending or filter settings do not, so the same commit is the same files everywhere. A `git` older than 2.14 is refused.
@@ -235,7 +235,7 @@ flutter_pub.from_lock(
 - If your target depends back on a hosted package that depends on it, the build fails with Bazel's cycle error: pub allows the cycle, and Bazel does not.
 - One lock serves one repository: the package's `BUILD.bazel` names one hub's labels (`@deps//:intl`), so two apps with two locks cannot share a package this way. Use one lock for the monorepo, resolved from a pub workspace or from one app.
 - The members of a pub workspace (`workspace:` in the root `pubspec.yaml`) are not in the lock. Depend on them by label.
-- A lock below the repository root is resolved with `bazel run @rules_flutter//flutter:pub -- get --directory=apps/greeter`.
+- A lock below the repository root is resolved with `bazel run @rules_flutter//flutter/pub -- get --directory=apps/greeter`.
 
 #### Plugins' Maven dependencies
 
@@ -367,9 +367,9 @@ flutter_apple_plugin_library(
 Bazel reads `pubspec.lock` and never writes it. To regenerate it, use the Flutter toolchain the rules pin rather than a Flutter installed on your machine:
 
 ```sh
-bazel run @rules_flutter//flutter:pub -- get       # after editing pubspec.yaml
-bazel run @rules_flutter//flutter:pub -- upgrade
-bazel run @rules_flutter//flutter:pub -- add qr
+bazel run @rules_flutter//flutter/pub -- get       # after editing pubspec.yaml
+bazel run @rules_flutter//flutter/pub -- upgrade
+bazel run @rules_flutter//flutter/pub -- add qr
 ```
 
 Arguments pass through to `dart pub` unchanged, and the command runs at your workspace root, so the lock lands where `flutter_pub.from_lock` reads it.
@@ -381,12 +381,12 @@ The fetched toolchain contains engine artifacts and a Dart SDK but no `bin/flutt
 A package below the workspace root, such as a `tools/*` package or an app of a monorepo, is resolved by the same target with pub's `--directory` flag. The path is relative to the workspace root, and the lock lands beside that package's `pubspec.yaml`:
 
 ```sh
-bazel run @rules_flutter//flutter:pub -- get --directory tools/my_tool
+bazel run @rules_flutter//flutter/pub -- get --directory tools/my_tool
 ```
 
 ### Several locks in one build
 
-Every package is one repository for the whole build, however many `flutter_pub.from_lock` tags list it: a hub (`@deps//:flutter`) is the set of aliases its own lock names. A build has one version of each package, the highest any lock records, and nothing is built below the version its lock records. By default a lock that is behind another on a package fails when the module is read, naming both locks and the fix, `bazel run @rules_flutter//flutter:pub -- upgrade --directory=<the lock's directory> <package>` from the workspace root. Only builds that use a hub fail: the toolchain comes from the other extension, so the fix runs. A lock whose constraints do not allow the higher version sets `on_version_conflict = "upgrade"` on its `flutter_pub.from_lock`, and its packages are built at it. The locks must otherwise agree: a package from different sources, registries or digests, or git commits, always fails. `resolve` and `ignore_hooks` apply to the whole build. rules_flutter's own tools are a lock of this kind (`on_version_conflict = "upgrade"`), so a release that moves them can put your lock behind: re-resolve it with the command above.
+Every package is one repository for the whole build, however many `flutter_pub.from_lock` tags list it: a hub (`@deps//:flutter`) is the set of aliases its own lock names. A build has one version of each package, the highest any lock records, and nothing is built below the version its lock records. By default a lock that is behind another on a package fails when the module is read, naming both locks and the fix, `bazel run @rules_flutter//flutter/pub -- upgrade --directory=<the lock's directory> <package>` from the workspace root. Only builds that use a hub fail: the toolchain comes from the other extension, so the fix runs. A lock whose constraints do not allow the higher version sets `on_version_conflict = "upgrade"` on its `flutter_pub.from_lock`, and its packages are built at it. The locks must otherwise agree: a package from different sources, registries or digests, or git commits, always fails. `resolve` and `ignore_hooks` apply to the whole build. rules_flutter's own tools are a lock of this kind (`on_version_conflict = "upgrade"`), so a release that moves them can put your lock behind: re-resolve it with the command above.
 
 ### Packages with build hooks
 

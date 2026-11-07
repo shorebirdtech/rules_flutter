@@ -22,7 +22,7 @@ repository for the same reason the web SDK and the iOS engine do: it is an
 engine artifact, fetched only when something actually analyzes Flutter code.
 Hanging it off `flutter_dev_root` would have been cheaper to write and much
 worse to use — that repository downloads the entire flutter/flutter tag
-tarball, and it exists to be fetched only when `@rules_flutter//flutter:pub`
+tarball, and it exists to be fetched only when `@rules_flutter//flutter/pub`
 runs.
 
 The generated package carries its non-Dart `lib/` members (`_embedder.yaml`

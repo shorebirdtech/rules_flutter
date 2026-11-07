@@ -22,7 +22,7 @@ needs exactly three things from that directory:
 
 This repository assembles those three from the same GitHub tag tarball
 `flutter_framework_package` and `flutter_pub_package` already download, at the version the toolchain pins. It
-is fetched only when `@rules_flutter//flutter:pub` is built, never by a normal
+is fetched only when `@rules_flutter//flutter/pub` is built, never by a normal
 build.
 """
 
@@ -39,7 +39,7 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
-# The anchor `@rules_flutter//flutter:pub` resolves FLUTTER_ROOT from: it sits
+# The anchor `@rules_flutter//flutter/pub` resolves FLUTTER_ROOT from: it sits
 # at a fixed depth (bin/cache/flutter.version.json) below the root.
 filegroup(
     name = "version_manifest",
@@ -117,7 +117,7 @@ def _flutter_dev_root_repo_impl(repository_ctx):
 
 flutter_dev_root_repo = repository_rule(
     _flutter_dev_root_repo_impl,
-    doc = "Assembles a FLUTTER_ROOT-shaped tree for `@rules_flutter//flutter:pub`.",
+    doc = "Assembles a FLUTTER_ROOT-shaped tree for `@rules_flutter//flutter/pub`.",
     attrs = {
         "flutter_version": attr.string(
             doc = "Flutter SDK version, matching a tag in flutter/flutter. Unused with `framework_json`.",

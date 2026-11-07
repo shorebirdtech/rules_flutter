@@ -15,7 +15,7 @@ local_path_override(
 flutter = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter")
 flutter.toolchain(flutter_version = "3.47.9")
 
-flutter_pub = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter_pub")
+flutter_pub = use_extension("@rules_flutter//flutter/pub:extensions.bzl", "pub")
 
 # The lock is not at the root, and two of its packages are `path:` dependencies
 # of this repository. Each is mapped to the target that builds it; the target

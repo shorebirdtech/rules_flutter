@@ -102,7 +102,7 @@ def _resolve_commands(sdk, default_sdk, verb, locks):
     for lock in locks:
         lock_dir = Label(lock).package
         args = verb + (" --directory=" + lock_dir if lock_dir else "")
-        commands.append("bazel run {}@rules_flutter//flutter:pub -- {}".format(flag, args))
+        commands.append("bazel run {}@rules_flutter//flutter/pub -- {}".format(flag, args))
     return "\n    ".join(commands)
 
 def check_lock_floor(index, sdk, framework_version, default_sdk = "flutter"):

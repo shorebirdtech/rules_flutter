@@ -32,7 +32,7 @@ local_path_override(
     path = "../..",
 )
 
-flutter_pub = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter_pub")
+flutter_pub = use_extension("@rules_flutter//flutter/pub:extensions.bzl", "pub")
 flutter_pub.from_lock(
     name = "hub_a",
     lock = "//hub_a:pubspec.lock",

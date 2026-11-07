@@ -10,7 +10,7 @@ by a *newer* Flutter than the build uses.
 The other direction (an older resolver silently capping packages at older
 versions) leaves no trace in the lock at all: the result is a perfectly valid
 solution under the newer SDK. Nothing can detect it after the fact, which is
-why `@rules_flutter//flutter:pub` exists — resolving with the pinned toolchain
+why `@rules_flutter//flutter/pub` exists — resolving with the pinned toolchain
 is the only thing that prevents it.
 """
 

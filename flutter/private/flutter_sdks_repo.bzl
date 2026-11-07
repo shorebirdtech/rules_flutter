@@ -1,6 +1,6 @@
-"""The Flutter SDKs the `flutter` extension declared, for the `flutter_pub` extension.
+"""The Flutter SDKs the `flutter` extension declared, for the `pub` extension.
 
-The locks are another extension's (`flutter_pub`), so that a lock it refuses
+The locks are another extension's (`pub`), so that a lock it refuses
 fails the hubs and not the toolchains. The hubs still build each SDK's
 framework packages, so that extension needs what this one decided about the
 SDKs: each one's release and framework source. It reads them here, from

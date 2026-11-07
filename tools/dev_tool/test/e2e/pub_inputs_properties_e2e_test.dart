@@ -501,7 +501,7 @@ void main() {
     /// under `$HOME/.dart-tool` the first time it runs. A build tool that
     /// runs it on a developer's behalf, to resolve a lock file, has no
     /// business making that choice for them: `bazel run
-    /// @rules_flutter//flutter:pub` must leave the HOME it ran under as it
+    /// @rules_flutter//flutter/pub` must leave the HOME it ran under as it
     /// found it. The cache is given a directory of its own so that the only
     /// thing the canary could receive is what pub writes besides packages.
     test('leaves the HOME it runs under untouched', () async {
@@ -521,7 +521,7 @@ void main() {
         'run',
         '--run_under=env -u CI -u GITHUB_ACTIONS -u BUILD_ID '
             'HOME=${home.path} PUB_CACHE=${cache.path}',
-        '@rules_flutter//flutter:pub',
+        '@rules_flutter//flutter/pub',
         '--',
         'get',
       ]);

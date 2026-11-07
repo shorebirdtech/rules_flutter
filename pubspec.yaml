@@ -1,7 +1,7 @@
 # One pub workspace for the Dart packages this repository's own tools are built
 # from, so a single resolution picks one version of every package they share
 # (and honours the exact pins of the Flutter SDK's `flutter_test`). Re-resolve
-# every tool at once with `bazel run //flutter:pub -- upgrade` at this root;
+# every tool at once with `bazel run //flutter/pub -- upgrade` at this root;
 # `//:pubspec.lock` is the lock `dev_tool_deps` in MODULE.bazel reads.
 name: rules_flutter_tools
 publish_to: none

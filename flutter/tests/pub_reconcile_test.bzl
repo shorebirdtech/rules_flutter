@@ -7,7 +7,7 @@ when the module is read, naming both locks and what to do.
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("//flutter/private:lock_entry_kind.bzl", "FLUTTER_SOURCE", "GIT", "HOSTED", "UNSUPPORTED")
-load("//flutter/private:pub_reconcile.bzl", "reconcile_package", "sdk_pin_errors", "unsupported_locks")
+load("//flutter/private:pub_reconcile.bzl", "pub_command", "reconcile_package", "sdk_pin_errors", "unsupported_locks", "version_conflict_fix")
 
 def _dir(lock):
     return lock.split("//")[1].split(":")[0]
@@ -52,6 +52,15 @@ def _locks_that_agree_share_the_package_test_impl(ctx):
 
 locks_that_agree_share_the_package_test = unittest.make(_locks_that_agree_share_the_package_test_impl)
 
+def _the_runner_command_names_the_lock_test_impl(ctx):
+    env = unittest.begin(ctx)
+    asserts.equals(env, "bazel run @rules_flutter//flutter/pub -- get", pub_command("get", ""))
+    asserts.equals(env, "bazel run @rules_flutter//flutter/pub -- get --directory=apps/a", pub_command("get", "apps/a"))
+    asserts.equals(env, "bazel run @rules_flutter//flutter/pub -- upgrade --directory=a meta intl", pub_command("upgrade", "a", ["meta", "intl"]))
+    return unittest.end(env)
+
+the_runner_command_names_the_lock_test = unittest.make(_the_runner_command_names_the_lock_test_impl)
+
 def _a_lower_version_at_error_is_refused_test_impl(ctx):
     env = unittest.begin(ctx)
 
@@ -67,10 +76,13 @@ def _a_lower_version_at_error_is_refused_test_impl(ctx):
         "1.19.0 (hub \"dev_tool_deps\", @rules_flutter//:pubspec.lock, on_version_conflict = \"upgrade\")",
         "the highest a lock records",
         "//app:pubspec.lock pins a lower one",
+    ])
+    fix = version_conflict_fix(r.behind)
+    _mentions(env, fix, [
         "from the root of the workspace that holds it",
-        "\n       bazel run @rules_flutter//flutter:pub -- upgrade --directory=app meta\n",
+        "\n       bazel run @rules_flutter//flutter/pub -- upgrade --directory=app meta\n",
         "on_version_conflict = \"upgrade\"",
-        "constraints forbid 1.19.0",
+        "constraints forbid the higher versions",
     ])
 
     # A lock at the workspace root needs no directory; two locks behind get a
@@ -80,11 +92,23 @@ def _a_lower_version_at_error_is_refused_test_impl(ctx):
         _hosted("1.18.0", hub = "b", lock = "//b/c:pubspec.lock"),
         _hosted("1.19.0", hub = "tools", lock = "//tools:pubspec.lock"),
     ])
-    _mentions(env, r.errors[0], [
-        "\n       bazel run @rules_flutter//flutter:pub -- upgrade meta\n",
-        "\n       bazel run @rules_flutter//flutter:pub -- upgrade --directory=b/c meta\n",
+    fix = version_conflict_fix(r.behind)
+    _mentions(env, fix, [
+        "\n       bazel run @rules_flutter//flutter/pub -- upgrade meta\n",
+        "\n       bazel run @rules_flutter//flutter/pub -- upgrade --directory=b/c meta\n",
         "holds each",
     ])
+
+    # A lock behind on several packages gets one command naming all of them.
+    behind = []
+    for name in ["vector_math", "meta", "collection"]:
+        behind.extend(reconcile_package(name, [
+            _hosted("1.18.0", lock = "//app:pubspec.lock"),
+            _hosted("1.19.0", hub = "tools", lock = "//tools:pubspec.lock"),
+        ]).behind)
+    fix = version_conflict_fix(behind)
+    _mentions(env, fix, ["\n       bazel run @rules_flutter//flutter/pub -- upgrade --directory=app collection meta vector_math\n"])
+    asserts.equals(env, 1, fix.count("upgrade --directory=app"))
 
     return unittest.end(env)
 
@@ -243,6 +267,7 @@ def pub_reconcile_test_suite(name):
         name,
         one_lock_is_its_own_entry_test,
         locks_that_agree_share_the_package_test,
+        the_runner_command_names_the_lock_test,
         a_lower_version_at_error_is_refused_test,
         the_highest_version_wins_at_upgrade_test,
         every_lower_lock_at_error_is_named_test,
