@@ -160,7 +160,7 @@ def _desktop_engine_repo_name(name, target_platform, mode):
     """The repo holding the desktop engine of one build mode for a target platform."""
     return "{}_desktop_engine_{}_{}".format(name, target_platform, mode)
 
-def flutter_register_toolchains(name, flutter_version, framework_json = ""):
+def flutter_register_toolchains(name, flutter_version, framework_json = "", framework_json_file = None):
     """Declares the repositories of the stock release SDK.
 
     Creates a repository for each host platform, cross-compilation repos, the
@@ -173,6 +173,7 @@ def flutter_register_toolchains(name, flutter_version, framework_json = ""):
         flutter_version: the Flutter release the engine is.
         framework_json: the label of the SDK's `flutter_framework.json`, when
             its framework is not the release's.
+        framework_json_file: the same file, for the toolchains to read what the framework is.
     """
     meta = FLUTTER_VERSIONS[flutter_version]
     checksums = ARTIFACT_CHECKSUMS.get(flutter_version, {})
@@ -375,4 +376,5 @@ exports_files(["gen_snapshot_arm64"], visibility = ["//visibility:public"])
         material_fonts = "@{}_{{host}}//:material-fonts/MaterialIcons-Regular.otf".format(name),
         sysroot_prefix = name,
         framework_json = framework_json,
+        framework_json_file = framework_json_file,
     )

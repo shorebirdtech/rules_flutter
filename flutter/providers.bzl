@@ -21,6 +21,8 @@ FlutterSdkInfo = provider(
         "platform_kernel_dill": "File: `platform_strong.dill` — the debug platform kernel.",
         "platform_kernel_dill_product": "File or None: `platform_strong_product.dill` — the release platform kernel. None in debug mode.",
         "patched_sdk": "Target: The Flutter patched Dart SDK root directory.",
+        "sdk_defines": "list[str]: The `FLUTTER_VERSION`, `FLUTTER_FRAMEWORK_REVISION`, ... defines that describe " +
+                       "the SDK's framework and engine (`sdk_defines.bzl`).",
         "sdk": "str: The name of the SDK this toolchain belongs to (`flutter`, the stock release, or the " +
                "name of a declared one).",
         "host_tools": "FlutterHostToolsInfo: The host tools slice the toolchain was assembled from.",
@@ -86,6 +88,7 @@ FlutterExecToolsInfo = provider(
         "platform_kernel_dill": "File: `platform_strong.dill` — the debug platform kernel.",
         "platform_kernel_dill_product": "File or None: `platform_strong_product.dill` — the release platform kernel.",
         "patched_sdk": "Target: The Flutter patched Dart SDK root directory.",
+        "sdk_defines": "list[str]: The defines that describe the SDK's framework and engine.",
         "sdk": "str: The name of the SDK these tools belong to.",
         "host_tools": "FlutterHostToolsInfo: The host tools slice these were assembled from.",
         "flutter_tester": "File: The `flutter_tester` headless engine that runs widget tests.",

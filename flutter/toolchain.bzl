@@ -32,6 +32,7 @@ def _flutter_toolchain_impl(ctx):
         version = ctx.attr.version,
         engine_revision = ctx.attr.engine_revision,
         sdk = ctx.attr.sdk,
+        sdk_defines = ctx.attr.sdk_defines,
         dart = host.dart,
         dartaotruntime = host.dartaotruntime,
         gen_snapshot = gen_snapshot.binary if gen_snapshot else None,
@@ -100,6 +101,9 @@ flutter_toolchain = rule(
             doc = "The name of the SDK this toolchain belongs to.",
             mandatory = True,
         ),
+        "sdk_defines": attr.string_list(
+            doc = "The defines that describe the SDK's framework and engine.",
+        ),
         "host_tools": attr.label(
             doc = "The host tools of the execution platform: a `flutter_host_tools` slice.",
             mandatory = True,
@@ -155,6 +159,7 @@ def _flutter_exec_tools_impl(ctx):
         version = ctx.attr.version,
         engine_revision = ctx.attr.engine_revision,
         sdk = ctx.attr.sdk,
+        sdk_defines = ctx.attr.sdk_defines,
         host_os = host.host_os,
         host_arch = host.host_arch,
         dart = host.dart,
@@ -185,6 +190,7 @@ flutter_exec_tools = rule(
         "version": attr.string(doc = "The Flutter SDK version string.", mandatory = True),
         "engine_revision": attr.string(doc = "The Flutter engine commit hash.", mandatory = True),
         "sdk": attr.string(doc = "The name of the SDK these tools belong to.", mandatory = True),
+        "sdk_defines": attr.string_list(doc = "The defines that describe the SDK's framework and engine."),
         "host_tools": attr.label(
             doc = "The host tools: a `flutter_host_tools` slice.",
             mandatory = True,

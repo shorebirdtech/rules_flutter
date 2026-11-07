@@ -18,6 +18,7 @@ load("//flutter/private:engine_helpers.bzl", "dart_binary_name", "dartaotruntime
 load("//flutter/private:engine_labels.bzl", "ENGINE_MODES", "desktop_engine_dir", "native_target")
 load("//flutter/private:pinned.bzl", "pinned")
 load("//flutter/private:toolchains_repo.bzl", "CROSS_COMPILATION_PAIRS", "DESKTOP_ENGINE_PLATFORMS", "HOST_PLATFORMS")
+load("//flutter/private:versions.bzl", "FLUTTER_VERSIONS")
 
 _LOAD = 'load("@rules_flutter//flutter:engine.bzl", "flutter_gen_snapshot", "flutter_host_tools", "flutter_linux_engine_slice", "flutter_macos_engine_slice", "flutter_platform_kernel", "flutter_windows_engine_slice")\n\n'
 
@@ -212,6 +213,8 @@ def _flutter_stock_engine_repo_impl(repository_ctx):
     repository_ctx.file("flutter_engine.json", json.encode_indent({
         "origin": "release",
         "description": "Flutter {} release engine {}".format(repository_ctx.attr.flutter_version, engine_revision),
+        "engine_revision": engine_revision,
+        "dart_version": FLUTTER_VERSIONS[repository_ctx.attr.flutter_version].dart_version,
     }) + "\n")
     repository_ctx.file("BUILD.bazel", 'exports_files(["flutter_engine.json"], visibility = ["//visibility:public"])\n')
 

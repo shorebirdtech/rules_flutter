@@ -82,7 +82,7 @@ load(
 )
 load("//flutter/private:path_mapping.bzl", "file_ref", "json_config_args")
 load("//flutter/private:plugin_registrant.bzl", "generate_dart_plugin_registrant")
-load("//flutter/private:sdk_defines.bzl", "version_dart_defines")
+load("//flutter/private:sdk_defines.bzl", "program_version_dart_defines")
 load("//flutter/private:sdk_origin.bzl", "require_release_engine")
 load(
     "//flutter/private:validation.bzl",
@@ -389,8 +389,8 @@ def _flutter_web_bundle_impl(ctx):
     # tree-shake kernel) and the dev-config emission: the user's defines and
     # the flavor's, the app's version and the SDK's. There is no `build_info`
     # on web to keep the flavor out of.
-    user_defines = merge_dart_defines(ctx) + flavor_dart_defines(ctx.attr.flavor) + version_dart_defines(
-        tools.version,
+    user_defines = merge_dart_defines(ctx) + flavor_dart_defines(ctx.attr.flavor) + program_version_dart_defines(
+        tools.sdk_defines,
         ctx.attr.build_name,
         ctx.attr.build_number,
     )

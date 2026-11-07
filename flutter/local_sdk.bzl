@@ -177,10 +177,13 @@ def _engine_out_dirs_impl(repository_ctx):
     path_env = repository_ctx.attr.path_env
     checkout = _checkout_path(repository_ctx, path_env)
     pins = [n.strip() for n in (repository_ctx.getenv(repository_ctx.attr.engines_env) or "").split(",") if n.strip()]
-    repository_ctx.file("flutter_engine.json", json.encode_indent({
+
+    # What the engine is, for the defines programs get: its commit as gn
+    # recorded it, and the Dart its SDK bundles. Filled in below.
+    engine_json = {
         "origin": "out_dir",
         "description": "Engine out dirs of a Flutter checkout, built outside Bazel",
-    }) + "\n")
+    }
 
     provided = {}  # (package, target) -> BUILD text
     reasons = {}  # (package, target) -> why it is missing
@@ -284,6 +287,8 @@ def _engine_out_dirs_impl(repository_ctx):
             else:
                 for dest, source in files.items():
                     _link(repository_ctx, source, dest)
+                engine_json["engine_revision"] = args.get("engine_version", "")
+                engine_json["dart_version"] = repository_ctx.read(dart_sdk.get_child("version")).strip()
                 root_build += """
 load("@rules_dart//dart:toolchain.bzl", "dart_sdk_files")
 
@@ -395,6 +400,7 @@ flutter_gen_snapshot(
 
     # Every slice of the contract is a target: the ones the out dirs provide,
     # and for the rest a missing slice that says why.
+    repository_ctx.file("flutter_engine.json", json.encode_indent(engine_json) + "\n")
     repository_ctx.file("BUILD.bazel", root_build + root_exports + 'exports_files(["flutter_engine.json"], visibility = ["//visibility:public"])\n')
     for package, targets in contract_slices().items():
         content = _ENGINE_LOAD

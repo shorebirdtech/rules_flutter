@@ -242,6 +242,7 @@ def _register_sdk(sdk):
             name = name,
             flutter_version = sdk.version,
             framework_json = str(_framework_json(sdk.framework)) if sdk.framework else "",
+            framework_json_file = _framework_json(sdk.framework) if sdk.framework else None,
         )
         return "@{}_stock_engine".format(name)
 
@@ -264,6 +265,8 @@ def _register_sdk(sdk):
         material_fonts = "@{}//:material-fonts/MaterialIcons-Regular.otf".format(fonts),
         sysroot_prefix = _DEFAULT_NAME,
         framework_json = str(_framework_json(sdk.framework)) if sdk.framework else "",
+        framework_json_file = _framework_json(sdk.framework) if sdk.framework else None,
+        engine_json_file = Label("@@{}//:flutter_engine.json".format(sdk.engine.repo_name)),
     )
     return _label_prefix(sdk.engine)
 

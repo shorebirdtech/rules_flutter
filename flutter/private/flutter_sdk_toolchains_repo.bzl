@@ -10,7 +10,9 @@ downloads: the slices an analysed toolchain names are the files fetched.
 
 load("//flutter/private:engine_helpers.bzl", "platform_to_arch", "platform_to_os")
 load("//flutter/private:engine_labels.bzl", "engine_label", "gen_snapshot_label", "host_tools_label", "kernel_label", "mode_select", "native_target")
+load("//flutter/private:sdk_defines.bzl", "custom_sdk_dart_defines", "sdk_dart_defines")
 load("//flutter/private:toolchains_repo.bzl", "CROSS_COMPILATION_PAIRS", "DESKTOP_CROSS_PAIRS", "HOST_PLATFORMS")
+load("//flutter/private:versions.bzl", "FLUTTER_VERSIONS")
 
 def _release_kernel(engine):
     return """select({{
@@ -30,10 +32,11 @@ def _engine(engine, platform):
         debug = engine_label(engine, platform, "debug"),
     )
 
-def _common(engine, host, sdk, version, engine_revision):
+def _common(engine, host, sdk, version, engine_revision, sdk_defines):
     return """    sdk = "{sdk}",
     version = "{version}",
     engine_revision = "{engine_revision}",
+    sdk_defines = {sdk_defines},
     host_tools = "{host_tools}",
     platform_kernel_debug = "{kernel_debug}",
     platform_kernel_release = {kernel_release},
@@ -41,12 +44,13 @@ def _common(engine, host, sdk, version, engine_revision):
         sdk = sdk,
         version = version,
         engine_revision = engine_revision,
+        sdk_defines = json.encode(sdk_defines),
         host_tools = host_tools_label(engine, host),
         kernel_debug = kernel_label(engine, False),
         kernel_release = _release_kernel(engine),
     )
 
-def sdk_toolchains_build_content(engine, sdk, version, engine_revision, material_fonts, sysroot_prefix, framework_json = ""):
+def sdk_toolchains_build_content(engine, sdk, version, engine_revision, material_fonts, sysroot_prefix, framework_json = "", sdk_defines = []):
     """The BUILD file of one SDK's toolchain implementations.
 
     Args:
@@ -60,6 +64,7 @@ def sdk_toolchains_build_content(engine, sdk, version, engine_revision, material
             (`<prefix>_linux_sysroot_<arch>`).
         framework_json: The label of the SDK's `flutter_framework.json` when
             its framework is not the release's.
+        sdk_defines: The defines that describe the SDK to the programs built with it.
 
     Returns:
         The BUILD.bazel text.
@@ -74,7 +79,7 @@ load("@rules_flutter//flutter:toolchain.bzl", "flutter_exec_tools", "flutter_too
         return '    linux_sysroot = "@{}_linux_sysroot_{}//:sysroot_files",\n'.format(sysroot_prefix, arch)
 
     for host, meta in HOST_PLATFORMS.items():
-        common = _common(engine, host, sdk, version, engine_revision)
+        common = _common(engine, host, sdk, version, engine_revision, sdk_defines)
         content += """
 flutter_exec_tools(
     name = "{host}_exec_tools_toolchain",
@@ -111,7 +116,7 @@ flutter_toolchain(
                 framework = framework,
                 host = host,
                 target = target,
-                common = _common(engine, host, sdk, version, engine_revision),
+                common = _common(engine, host, sdk, version, engine_revision, sdk_defines),
                 gen_snapshot = _gen_snapshot(engine, target, host),
                 fonts = material_fonts.format(host = host),
                 target_os = platform_to_os(target),
@@ -134,7 +139,7 @@ flutter_toolchain(
                 framework = framework,
                 host = host,
                 target = target,
-                common = _common(engine, host, sdk, version, engine_revision),
+                common = _common(engine, host, sdk, version, engine_revision, sdk_defines),
                 engine = _engine(engine, target),
                 fonts = material_fonts.format(host = host),
                 target_os = platform_to_os(target),
@@ -143,8 +148,35 @@ flutter_toolchain(
             )
     return content
 
+def _read_json(repository_ctx, label):
+    return json.decode(repository_ctx.read(label)) if label else {}
+
+def _sdk_defines(repository_ctx):
+    """What describes the SDK to its programs: each piece from its own source.
+
+    The release's pieces are versions.bzl's; a framework or engine of the
+    root module's choosing says what it is in `flutter_framework.json` and
+    `flutter_engine.json`. Where its path is not set there is nothing to say,
+    and the toolchain fails when used.
+    """
+    version = repository_ctx.attr.version
+    meta = FLUTTER_VERSIONS.get(version) if version else None
+    framework = _read_json(repository_ctx, repository_ctx.attr.framework_json_file)
+    engine = _read_json(repository_ctx, repository_ctx.attr.engine_json_file)
+    if framework.get("unset") or engine.get("unset"):
+        return []
+    if not framework and not engine:
+        return sdk_dart_defines(version)
+    return custom_sdk_dart_defines(
+        framework.get("version") or version,
+        framework["commit"] if framework else (meta.framework_revision if meta else ""),
+        engine["engine_revision"] if "engine_revision" in engine else (meta.engine_revision if meta else ""),
+        engine["dart_version"] if "dart_version" in engine else (meta.dart_version if meta else ""),
+    )
+
 def _flutter_sdk_toolchains_repo_impl(repository_ctx):
     repository_ctx.file("BUILD.bazel", sdk_toolchains_build_content(
+        sdk_defines = _sdk_defines(repository_ctx),
         engine = repository_ctx.attr.engine,
         sdk = repository_ctx.attr.sdk,
         version = repository_ctx.attr.version,
@@ -164,6 +196,8 @@ flutter_sdk_toolchains_repo = repository_rule(
         "engine_revision": attr.string(doc = "The engine revision the SDK reports."),
         "material_fonts": attr.string(doc = "Label of the Material icons font; `{host}` stands for the host platform.", mandatory = True),
         "sysroot_prefix": attr.string(doc = "Prefix of the Linux sysroot repositories.", mandatory = True),
+        "framework_json_file": attr.label(doc = "The `flutter_framework.json` itself, which says what the framework is.", allow_single_file = True),
+        "engine_json_file": attr.label(doc = "The engine source's `flutter_engine.json`, which says what the engine is.", allow_single_file = True),
         "framework_json": attr.string(doc = "The label of the SDK's `flutter_framework.json`, when its framework is not the release's."),
     },
 )

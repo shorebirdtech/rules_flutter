@@ -60,6 +60,27 @@ def sdk_dart_defines(flutter_version):
         "FLUTTER_DART_VERSION=" + meta.dart_version,
     ]
 
+def custom_sdk_dart_defines(version, framework_revision, engine_revision, dart_version):
+    """The defines that describe an SDK whose pieces are not all the release's.
+
+    Args:
+        version: The framework's `flutterVersion`.
+        framework_revision: Its commit, or empty.
+        engine_revision: The engine's commit, or empty.
+        dart_version: The Dart the engine bundles, or empty.
+
+    Returns:
+        The `KEY=VALUE` defines, in `SDK_DEFINE_KEYS` order.
+    """
+    return [
+        "FLUTTER_VERSION=" + version,
+        "FLUTTER_CHANNEL=" + _CHANNEL,
+        "FLUTTER_GIT_URL=" + _GIT_URL,
+        "FLUTTER_FRAMEWORK_REVISION=" + framework_revision[:_SHORT_REVISION],
+        "FLUTTER_ENGINE_REVISION=" + engine_revision[:_SHORT_REVISION],
+        "FLUTTER_DART_VERSION=" + dart_version,
+    ]
+
 def app_version_dart_defines(build_name, build_number):
     """The defines `appBuildName` and `appBuildNumber` read.
 
@@ -75,6 +96,19 @@ def app_version_dart_defines(build_name, build_number):
         "%s=%s" % (APP_BUILD_NAME_DEFINE, build_name or DEFAULT_BUILD_NAME),
         "%s=%s" % (APP_BUILD_NUMBER_DEFINE, build_number or DEFAULT_BUILD_NUMBER),
     ]
+
+def program_version_dart_defines(sdk_defines, build_name, build_number):
+    """All the version defines of a program: the app's, then the SDK's as the toolchain gives them.
+
+    Args:
+        sdk_defines: `FlutterSdkInfo.sdk_defines`.
+        build_name: The program's `build_name`.
+        build_number: The program's `build_number`.
+
+    Returns:
+        The `KEY=VALUE` defines.
+    """
+    return app_version_dart_defines(build_name, build_number) + list(sdk_defines)
 
 def version_dart_defines(flutter_version, build_name, build_number):
     """All the version defines of a program, in the order `flutter_tools` adds them.

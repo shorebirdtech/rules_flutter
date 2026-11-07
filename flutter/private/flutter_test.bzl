@@ -81,7 +81,7 @@ load("//flutter/private:exec_groups.bzl", "FLUTTER_EXEC_TOOLS", "PORTABLE", "POR
 load("//flutter/private:flutter_compile.bzl", "flutter_kernel_compile_action")
 load("//flutter/private:flutter_module.bzl", "flutter_module_aspect")
 load("//flutter/private:flutter_native_assets.bzl", "CODE_ASSETS_DOC", "collect_bundled_code_asset_files", "resolve_native_assets", "write_native_assets_manifest")
-load("//flutter/private:sdk_defines.bzl", "version_dart_defines")
+load("//flutter/private:sdk_defines.bzl", "sdk_dart_defines", "version_dart_defines")
 load("//flutter/private:test_tags.bzl", "tag_selectors")
 
 # The target's Flutter SDK, whose `flutter_tester` runs the test.
@@ -259,6 +259,13 @@ def _flutter_test_impl(ctx):
             "`FlutterVersion` would report one release while the tests run on another: " +
             "register the toolchain of the default `flutter.toolchain()`."
         ) % (ctx.label, ctx.attr._flutter_version, runner_tools.version))
+
+    if list(runner_tools.sdk_defines) != sdk_dart_defines(ctx.attr._flutter_version):
+        fail((
+            "%s: the \"%s\" Flutter SDK describes itself to programs differently from the release the " +
+            "test's modules were compiled for (%s): `FlutterVersion` would report one SDK while the tests " +
+            "run on another. flutter_test supports the release SDK only so far."
+        ) % (ctx.label, runner_tools.sdk, ctx.attr._flutter_version))
 
     is_macos = ctx.target_platform_has_constraint(
         ctx.attr._macos_constraint[platform_common.ConstraintValueInfo],

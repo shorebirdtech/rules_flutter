@@ -100,6 +100,35 @@ void main() {
     });
   }
 
+  test('the program is told what the selected SDK is', () async {
+    Future<String> kernelDefines(String sdk) async {
+      final aquery = await _bazel([
+        'aquery',
+        'mnemonic(".*Kernel.*", //:app_flutter)',
+        '$_sdkFlag$sdk',
+        '--output=text',
+      ]);
+      expect(aquery.exitCode, 0, reason: '${aquery.stderr}');
+      return RegExp(
+        r'FLUTTER_[A-Z_]+=[^ ,\x27"]*',
+      ).allMatches('${aquery.stdout}').map((m) => m.group(0)).toSet().join(' ');
+    }
+
+    // The release's framework revision is versions.bzl's; the stand-in
+    // checkout is not a git repository, so it has none to report.
+    expect(
+      await kernelDefines('local'),
+      allOf(
+        matches(RegExp(r'FLUTTER_FRAMEWORK_REVISION=( |$)')),
+        contains('FLUTTER_ENGINE_REVISION=89c39edfdf'),
+      ),
+    );
+    expect(
+      await kernelDefines('flutter'),
+      isNot(matches(RegExp(r'FLUTTER_FRAMEWORK_REVISION=( |$)'))),
+    );
+  });
+
   test('the release SDK records nothing', () async {
     expect(await _record('flutter', const []), isNull);
   });
