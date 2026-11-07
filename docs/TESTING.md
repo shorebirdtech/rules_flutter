@@ -1760,6 +1760,20 @@ gcloud compute instances delete flutter-windows-test --quiet
 
 **When to run:** After any change to Windows runner code, engine selection, or bundle assembly.
 
+### Windows build speed on a VM
+
+Create the VM with `--machine-type=n2-standard-16 --disk-size=200GB`; the script puts
+the boot disk on `pd-ssd`. The default `pd-standard` disk makes an Android build look
+hung: rules_android's Python tools (`aar_resources_extractor`, `aar_native_libs_zip_creator`
+and others) unpack a ~2000-file runfiles tree into `%TEMP%` for every action and delete
+it on exit, and on a standard disk (about 650 IOPS, 7-12 ms latency, queue length 12,
+measured) each of those actions took 3 to 10 minutes of waiting with no CPU use. The
+same `e2e/android_example` `build //...` was still at 4,400 of 4,760 actions after more
+than an hour there, and finished in 9 minutes with `%TEMP%` on SSD. `startup` options
+and Defender exclusions do not change that. If a VM already exists on a standard disk,
+attach a `pd-ssd` data disk and set `TEMP` and `TMP` to a directory on it before
+running Bazel.
+
 ### Windows integration tests (GCP VM)
 
 `e2e/integration_test`'s Windows targets run on the VM above, with three additions to what

@@ -1,6 +1,7 @@
 /// Creates a preemptible Windows VM for Flutter app visual verification.
 ///
 /// Usage: dart run tools/vm/create_windows_vm.dart [vm-name]
+///            [--machine-type=e2-standard-4] [--disk-size=100GB]
 ///
 /// The VM is created with:
 /// - Windows Server 2022
@@ -21,7 +22,8 @@ import 'gcloud.dart';
 import 'hermetic_dart.dart';
 
 const _defaultName = 'flutter-windows-test';
-const _machineType = 'e2-standard-4';
+const _defaultMachineType = 'e2-standard-4';
+const _defaultDiskSize = '100GB';
 const _imageFamily = 'windows-2022';
 const _imageProject = 'windows-cloud';
 
@@ -51,6 +53,12 @@ Set-ItemProperty -Path \$regPath -Name DefaultDomainName -Value "."
 /// Installs tools, then waits for the auto-logon session to be Active
 /// before signalling completion.
 const _startupScript = r'''
+# Keep Defender's real-time scan off the build trees. A Bazel build writes tens
+# of thousands of small files, and scanning them takes most of a core, which a
+# timing measurement here would then include. Set before anything builds.
+Add-MpPreference -ExclusionPath 'C:\b','C:\rf','C:\rules_dart','C:\android','C:\tools','C:\temp','C:\Users\testuser\AppData\Local\Temp','C:\Windows\Temp'
+Add-MpPreference -ExclusionProcess 'java.exe','bazel.exe','dart.exe','cl.exe','link.exe','gen_snapshot.exe','aapt2.exe'
+
 # Install Chocolatey (package manager).
 if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
     Set-ExecutionPolicy Bypass -Scope Process -Force
@@ -132,7 +140,16 @@ New-Item -Path C:\startup_complete.txt -Value "STARTUP_COMPLETE" -Force
 ''';
 
 Future<void> main(List<String> args) async {
-  final vmName = args.isNotEmpty ? args[0] : _defaultName;
+  String option(String name, String fallback) {
+    final prefix = '--$name=';
+    final given = args.where((a) => a.startsWith(prefix));
+    return given.isEmpty ? fallback : given.last.substring(prefix.length);
+  }
+
+  final positional = args.where((a) => !a.startsWith('--')).toList();
+  final vmName = positional.isNotEmpty ? positional.first : _defaultName;
+  final machineType = option('machine-type', _defaultMachineType);
+  final diskSize = option('disk-size', _defaultDiskSize);
   final project = await getProject();
   final zone = await getZone();
   final dartVersion = await hermeticDartVersion();
@@ -140,7 +157,7 @@ Future<void> main(List<String> args) async {
   print('Creating Windows VM: $vmName');
   print('  Project: $project');
   print('  Zone: $zone');
-  print('  Machine type: $_machineType');
+  print('  Machine type: $machineType');
   print('  Dart SDK: $dartVersion (from @rules_dart//dart)');
   print('  Image: $_imageFamily ($_imageProject)');
   print('  Preemptible: yes');
@@ -167,7 +184,7 @@ Future<void> main(List<String> args) async {
       'instances',
       'create',
       vmName,
-      '--machine-type=$_machineType',
+      '--machine-type=$machineType',
       '--image-family=$_imageFamily',
       '--image-project=$_imageProject',
       '--provisioning-model=SPOT',
@@ -177,7 +194,13 @@ Future<void> main(List<String> args) async {
       '--metadata=enable-windows-ssh=TRUE',
       '--metadata-from-file=sysprep-specialize-script-ps1=${tmpSpecialize.path},windows-startup-script-ps1=${tmpStartup.path}',
       '--scopes=default',
-      '--boot-disk-size=100GB',
+      // SSD, not the default standard disk: a Bazel build here is tens of
+      // thousands of small file writes and deletes, and rules_android's Python
+      // tools extract ~2000 files into %TEMP% on every run. On a standard disk
+      // those actions took minutes each and a build looked hung (measured: the
+      // same android_example build, 60+ min unfinished vs 9 min).
+      '--boot-disk-type=pd-ssd',
+      '--boot-disk-size=$diskSize',
     ]);
   } finally {
     tmpDir.deleteSync(recursive: true);
