@@ -34,6 +34,7 @@ def _flutter_sdk_record_impl(ctx):
         record = None,
         engine_label = engine_label,
         engine_cpus = engine.cpus if engine else [],
+        engine_xcframework_slices = engine.xcframework_slices if engine else [],
     )
 
     # The release's pieces are the official ones and agree by construction.
@@ -70,6 +71,8 @@ def _flutter_sdk_record_impl(ctx):
     args.add(script)
     args.add("--mode=" + mode)
     args.add(engine.binary, format = "--engine-binary=%s")
+    if engine.binary_entry:
+        args.add("--engine-binary-entry=" + engine.binary_entry)
     args.add("--engine-label=" + engine_label)
     inputs = [script, record_in, engine.binary, kernel.platform_dill, sdk.host_tools.dart_platform_dill, sdk.host_tools.dartaotruntime]
     if mode != "debug":
@@ -100,7 +103,12 @@ def _flutter_sdk_record_impl(ctx):
     )
     return [
         DefaultInfo(files = depset([record])),
-        FlutterSdkRecordInfo(record = record, engine_label = engine_label, engine_cpus = engine.cpus),
+        FlutterSdkRecordInfo(
+            record = record,
+            engine_label = engine_label,
+            engine_cpus = engine.cpus,
+            engine_xcframework_slices = engine.xcframework_slices,
+        ),
     ]
 
 flutter_sdk_record = rule(

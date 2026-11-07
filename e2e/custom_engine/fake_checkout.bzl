@@ -5,8 +5,15 @@ hold them (`docs/design/design_custom_engine.md`, section 7.2), with `args.gn`
 files written to match, so the adapters read a tree they cannot tell from a
 developer's, and the binaries in it are real and run.
 
+The iOS and Android out dirs are laid out the same way: `ios_debug_sim_arm64`
+(the simulator, a one-slice `Flutter.xcframework`), `ios_profile` and `ios_release`
+(devices), and `android_<mode>_arm64` and `android_<mode>_x64` (a `flutter.jar`,
+and the gen_snapshot of the AOT modes in `universal/`, where a Mac build puts the
+one that runs on both Mac CPUs).
+
 With `gen_snapshot_flutter_version` set, the release gen_snapshot is that of
 another Flutter release (another Dart): the mismatch the check exists to refuse.
+Every platform's AOT gen_snapshot is replaced by it.
 """
 
 # buildifier: disable=bzl-visibility
@@ -28,6 +35,52 @@ def _args_gn(mode, revision):
         'dart_version = "stock-artifacts"',
         "",
     ])
+
+def _mobile_args_gn(os, mode, cpu, revision, simulator = False):
+    return "\n".join([
+        'target_os = "{}"'.format(os),
+        'target_cpu = "{}"'.format(cpu),
+        'flutter_runtime_mode = "{}"'.format(mode),
+        "use_ios_simulator = {}".format("true" if simulator else "false"),
+        'engine_version = "{}"'.format(revision),
+        'content_hash = "stock-artifacts"',
+        'dart_version = "stock-artifacts"',
+        "",
+    ])
+
+# The xcframework a `ninja flutter_framework` makes of one built Flutter.framework:
+# its one platform directory, and the Info.plist that names it.
+def _xcframework_info(identifier, architecture, simulator):
+    return """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>AvailableLibraries</key>
+	<array>
+		<dict>
+			<key>LibraryIdentifier</key>
+			<string>{identifier}</string>
+			<key>LibraryPath</key>
+			<string>Flutter.framework</string>
+			<key>SupportedArchitectures</key>
+			<array>
+				<string>{architecture}</string>
+			</array>
+			<key>SupportedPlatform</key>
+			<string>ios</string>{variant}
+		</dict>
+	</array>
+	<key>CFBundlePackageType</key>
+	<string>XFWK</string>
+	<key>XCFrameworkFormatVersion</key>
+	<string>1.0</string>
+</dict>
+</plist>
+""".format(
+        identifier = identifier,
+        architecture = architecture,
+        variant = "\n\t\t\t<key>SupportedPlatformVariant</key>\n\t\t\t<string>simulator</string>" if simulator else "",
+    )
 
 def _fake_checkout_impl(rctx):
     def path(label):
@@ -91,7 +144,54 @@ def _fake_checkout_impl(rctx):
         framework = path("@flutter_desktop_engine_darwin-x64_{}//:engine/FlutterMacOS.framework/Versions/A/FlutterMacOS".format(mode)).dirname.dirname.dirname
         link(framework, out + "FlutterMacOS.xcframework/macos-arm64_x86_64/FlutterMacOS.framework")
 
+    _mobile_out_dirs(rctx, path, link, meta.engine_revision, other_gen = rctx.path("other_dart/gen_snapshot") if other else None)
+
     rctx.file("BUILD.bazel", 'exports_files(glob(["checkout/CHECKOUT"]))\n')
+
+def _mobile_out_dirs(rctx, path, link, revision, other_gen):
+    """The iOS and Android out dirs: the official engines, laid out as ninja leaves them."""
+
+    # iOS. The simulator engine is the debug one, for this Mac's CPU; the devices'
+    # are the profile and release ones. Each xcframework holds one platform
+    # directory, as one out dir's `flutter_framework` target makes it.
+    ios = {
+        "debug": ("ios_debug_sim_arm64", "ios-arm64-simulator", "@flutter_stock_ios_engine//:debug/Flutter.xcframework/ios-arm64_x86_64-simulator/Flutter.framework/Flutter"),
+        "profile": ("ios_profile", "ios-arm64", "@flutter_ios_engine_profile//:Flutter.xcframework/ios-arm64/Flutter.framework/Flutter"),
+        "release": ("ios_release", "ios-arm64", "@flutter_stock_ios_engine//:Flutter.xcframework/ios-arm64/Flutter.framework/Flutter"),
+    }
+    ios_gen_snapshot = {
+        "profile": "@flutter_ios_engine_profile//:gen_snapshot_arm64",
+        "release": "@flutter_stock_ios_engine//:gen_snapshot_arm64",
+    }
+    for mode, (name, identifier, binary) in ios.items():
+        out = _OUT + name + "/"
+        simulator = mode == "debug"
+        rctx.file(out + "args.gn", _mobile_args_gn("ios", mode, "arm64", revision, simulator))
+        xcframework = out + "Flutter.xcframework/"
+        link(path(binary).dirname, xcframework + identifier + "/Flutter.framework")
+        rctx.file(xcframework + "Info.plist", _xcframework_info(identifier, "arm64", simulator))
+        if mode != "debug":
+            link(other_gen or path(ios_gen_snapshot[mode]), out + "universal/gen_snapshot_arm64")
+
+    # Android. A `flutter.jar` for each ABI and mode, and the gen_snapshot of
+    # each AOT mode that runs on this Mac.
+    for arch in ["arm", "arm64", "x64"]:
+        jars = {
+            "debug": "@flutter_stock_android_engine_{}//:debug/flutter.jar",
+            "profile": "@flutter_android_engine_{}_profile//:flutter.jar",
+            "release": "@flutter_stock_android_engine_{}//:flutter.jar",
+        }
+        gen_snapshots = {
+            "profile": "@flutter_cross_darwin-arm64_android-{}_profile//:gen_snapshot",
+            "release": "@flutter_cross_darwin-arm64_android-{}//:gen_snapshot",
+        }
+        for mode, jar in jars.items():
+            # `tools/gn` names an out dir without the CPU that is a platform's default.
+            out = _OUT + "android_{}{}/".format(mode, "" if arch == "arm" else "_" + arch)
+            rctx.file(out + "args.gn", _mobile_args_gn("android", mode, arch, revision))
+            link(path(jar.format(arch)), out + "flutter.jar")
+            if mode != "debug":
+                link(other_gen or path(gen_snapshots[mode].format(arch)), out + "universal/gen_snapshot")
 
 fake_checkout = repository_rule(
     _fake_checkout_impl,

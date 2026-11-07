@@ -12,7 +12,7 @@ engines come from repos of their own per mode.
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("//flutter/private:engine_helpers.bzl", "engine_filegroup_for_os", "engine_target_name")
-load("//flutter/private:flutter_android_engine_repo.bzl", "android_engine_build_file")
+load("//flutter/private:flutter_face_repo.bzl", "android_engine_face_extra")
 load(":engine_mode.bzl", "engine_modes")
 
 _TOOLCHAIN_TYPE = "@rules_flutter//flutter:toolchain_type"
@@ -74,21 +74,33 @@ def _target_name_test_impl(ctx):
 
 def _android_engine_targets_test_impl(ctx):
     env = unittest.begin(ctx)
-    text = android_engine_build_file("arm64-v8a", "sdk_android_profile")
+    text = android_engine_face_extra({"flutter": "@flutter_stock_engine", "local": "@local_engine"}, "arm64", "arm64-v8a")
+
+    # One stripped jar for each SDK and mode, over that SDK's slice of the ABI.
     asserts.equals(
         env,
-        ["debug_stripped", "profile_stripped", "release_stripped", "stripped"],
+        [
+            "flutter_debug_stripped",
+            "flutter_profile_stripped",
+            "flutter_release_stripped",
+            "flutter_stripped",
+            "local_debug_stripped",
+            "local_profile_stripped",
+            "local_release_stripped",
+            "local_stripped",
+            "stripped",
+        ],
         _names(text),
     )
+    asserts.true(env, "jar = \"@local_engine//android-arm64/release:engine\"" in text)
+    asserts.true(env, "jar = \"@flutter_stock_engine//android-arm64/debug:engine\"" in text)
 
-    # `stripped` is the select over the three jars, never one mode's jar.
-    asserts.true(env, "alias(\n    name = \"stripped\"" in text)
-    asserts.true(env, "\"@rules_flutter//flutter/private:dbg\": \":debug_stripped\"" in text)
-    asserts.true(env, "\"@rules_flutter//flutter/private:profile\": \":profile_stripped\"" in text)
-    asserts.true(env, "\"//conditions:default\": \":release_stripped\"" in text)
-    asserts.true(env, "actual = \"@sdk_android_profile//:profile_stripped\"" in text)
-    asserts.true(env, "name = \"release_stripped\",\n    jar = \"flutter.jar\"" in text)
-    asserts.true(env, "name = \"debug_stripped\",\n    jar = \"debug/flutter.jar\"" in text)
+    # Each SDK's `<sdk>_stripped` is the select over its three jars, never one
+    # mode's jar, and `stripped` is the select over the SDKs.
+    asserts.true(env, "\"@rules_flutter//flutter/private:dbg\": \":flutter_debug_stripped\"" in text)
+    asserts.true(env, "\"@rules_flutter//flutter/private:profile\": \":local_profile_stripped\"" in text)
+    asserts.true(env, "\"//conditions:default\": \":flutter_release_stripped\"" in text)
+    asserts.true(env, "\"@flutter_toolchains//:sdk_local\": \":local_stripped\"" in text)
     return unittest.end(env)
 
 _filegroup_names_test = unittest.make(_filegroup_names_test_impl)

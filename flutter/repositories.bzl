@@ -5,7 +5,6 @@ See https://docs.bazel.build/versions/main/skylark/deploying.html#dependencies
 """
 
 load("//flutter/private:artifact_urls.bzl", "android_engine_artifact_path", "cpp_client_wrapper_artifact_path", "dart_sdk_artifact_path", "desktop_engine_artifact_path", "engine_artifact_url", "gen_snapshot_cross_artifact_path", "host_artifacts_path", "ios_engine_artifact_path")
-load("//flutter/private:constants.bzl", "ANDROID_ABI_FOR_ARCH")
 load("//flutter/private:engine_helpers.bzl", "ENGINE_MODES", "PLATFORM_PREFIX_TO_OS", "engine_arch_for_os", "gen_snapshot_binary_name", "gen_snapshot_host_platform")
 load("//flutter/private:flutter_android_engine_repo.bzl", "flutter_android_engine_repo")
 load("//flutter/private:flutter_cross_repo.bzl", "flutter_cross_compilation_repo")
@@ -22,20 +21,10 @@ load("//flutter/private:pinned.bzl", "pinned")
 load("//flutter/private:toolchains_repo.bzl", "CROSS_COMPILATION_PAIRS", "DESKTOP_CROSS_PAIRS", "DESKTOP_ENGINE_PLATFORMS", "HOST_PLATFORMS", "sdk_repo_name")
 load("//flutter/private:versions.bzl", "ARTIFACT_CHECKSUMS", "FLUTTER_VERSIONS", "LINUX_SYSROOT_CHECKSUMS")
 
-# The profile engine's repository: its flutter.jar, and the stripped copy the
-# Android engine repo's `stripped` aliases in a profile build (see
-# flutter_android_engine_repo.bzl).
+# The profile engine's repository: its flutter.jar, which the Android engine
+# slice of the profile mode is over.
 _ANDROID_PROFILE_ENGINE_BUILD = """\
-load("@rules_flutter//flutter/private:flutter_android_engine_jar.bzl", "flutter_android_engine_jar")
-
 exports_files(["flutter.jar"], visibility = ["//visibility:public"])
-
-flutter_android_engine_jar(
-    name = "profile_stripped",
-    jar = "flutter.jar",
-    android_abi = "{abi}",
-    visibility = ["//visibility:public"],
-)
 """
 
 def _flutter_engine_artifacts_impl(repository_ctx):
@@ -286,9 +275,7 @@ def flutter_register_toolchains(name, flutter_version, framework_json = "", fram
 
     # Android engine repos (lazy — one per ABI, only downloaded when Android targets are built).
     # Each repo carries both the release engine (AOT) and the debug engine (JIT);
-    # the flutter_android_engine macro select()s between its two jar targets, so
-    # consumers only need a single `flutter_android_engine_<abi>` use_repo entry —
-    # matching the macOS and iOS engine repos.
+    # the stock engine source's slices are over their jars.
     android_engine_repos_created = {}
     for _host_platform, targets in CROSS_COMPILATION_PAIRS.items():
         for target_platform in targets:
@@ -300,40 +287,32 @@ def flutter_register_toolchains(name, flutter_version, framework_json = "", fram
             android_engine_repos_created[android_arch] = True
 
             flutter_android_engine_repo(
-                name = name + "_android_engine_" + android_arch,
+                name = name + "_stock_android_engine_" + android_arch,
                 engine_revision = meta.engine_revision,
                 android_arch = android_arch,
                 release_sha256 = checksums.get(android_engine_artifact_path(android_arch, "release"), ""),
                 debug_sha256 = checksums.get(android_engine_artifact_path(android_arch, "debug"), ""),
-                profile_repo_name = name + "_android_engine_" + android_arch + "_profile",
             )
 
             # The profile engine, apart so only a profile build fetches it.
-            # The engine repo aliases it, so consumers need no use_repo entry
-            # for it.
             profile_engine_path = android_engine_artifact_path(android_arch, "profile")
             flutter_profile_repo(
                 name = name + "_android_engine_" + android_arch + "_profile",
                 engine_revision = meta.engine_revision,
                 downloads = {profile_engine_path: ""},
                 sha256s = {profile_engine_path: checksums.get(profile_engine_path, "")},
-                build_file_content = _ANDROID_PROFILE_ENGINE_BUILD.format(
-                    abi = ANDROID_ABI_FOR_ARCH[android_arch],
-                ),
+                build_file_content = _ANDROID_PROFILE_ENGINE_BUILD,
             )
 
     # iOS engine repo (lazy — only downloaded when iOS targets are built).
     # One repo carries both the release engine (device, AOT) and the debug
-    # engine (simulator, JIT), and aliases the profile engine below; its
-    # `Flutter_xcframework` follows the build mode, so consumers only need a
-    # single `flutter_ios_engine` use_repo entry — matching the macOS engine
-    # alias repo.
+    # engine (simulator, JIT); the stock engine source's slices are over its
+    # files and the profile engine's below.
     flutter_ios_engine_repo(
-        name = name + "_ios_engine",
+        name = name + "_stock_ios_engine",
         engine_revision = meta.engine_revision,
         release_sha256 = checksums.get(ios_engine_artifact_path("release"), ""),
         debug_sha256 = checksums.get(ios_engine_artifact_path("debug"), ""),
-        profile_repo_name = name + "_ios_engine_profile",
     )
 
     # The iOS profile engine and its gen_snapshot, apart so only a profile
@@ -351,7 +330,10 @@ def flutter_register_toolchains(name, flutter_version, framework_json = "", fram
     visibility = ["//visibility:public"],
 )
 
-exports_files(["gen_snapshot_arm64"], visibility = ["//visibility:public"])
+exports_files(
+    ["gen_snapshot_arm64"] + glob(["Flutter.xcframework/**"]),
+    visibility = ["//visibility:public"],
+)
 """,
     )
 

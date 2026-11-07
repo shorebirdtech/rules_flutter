@@ -251,14 +251,15 @@ const e2eWorkspaces = <E2eWorkspace>[
     'custom_engine',
     runs: {
       Os.macos:
-          'a macOS app built against a stand-in checkout\'s framework and '
-          'engine out dirs (the official artifacts laid out as a checkout), '
-          'in debug and release, with its `flutter_sdk.json`; and the refusal '
-          'of a gen_snapshot from another Dart',
+          'macOS, iOS (simulator and device) and Android (both ABIs) apps '
+          'built against a stand-in checkout\'s framework and engine out dirs '
+          '(the official artifacts laid out as a checkout), in debug and '
+          'release, with their `flutter_sdk.json`; and the refusal of a '
+          'gen_snapshot from another Dart',
     },
     skips: {
-      Os.linux: 'macOS engine slices only, so far',
-      Os.windows: 'macOS engine slices only, so far',
+      Os.linux: 'macOS, iOS and Android engine slices only, so far',
+      Os.windows: 'macOS, iOS and Android engine slices only, so far',
     },
   ),
   E2eWorkspace(

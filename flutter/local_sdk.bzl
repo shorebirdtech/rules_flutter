@@ -36,10 +36,11 @@ When the out dirs of a slot are ambiguous (both `host_debug_arm64` and
 """
 
 load("//flutter/private:engine_labels.bzl", "contract_slices", "native_target")
-load("//flutter/private:engine_out_dirs.bzl", "effective_cpu", "parse_args_gn", "parse_out_dir_name", "select_out_dir")
+load("//flutter/private:engine_out_dirs.bzl", "dict_text", "effective_cpu", "first_existing", "link_into", "out_dir_provenance", "parse_args_gn", "parse_out_dir_name", "select_out_dir")
 load("//flutter/private:framework_source.bzl", "FRAMEWORK_JSON")
+load("//flutter/private:out_dir_mobile.bzl", "mobile_slices")
 
-_ENGINE_LOAD = 'load("@rules_flutter//flutter:engine.bzl", "flutter_gen_snapshot", "flutter_host_tools", "flutter_macos_engine_slice", "flutter_missing_slice", "flutter_platform_kernel")\n'
+_ENGINE_LOAD = 'load("@rules_flutter//flutter:engine.bzl", "flutter_android_engine_slice", "flutter_gen_snapshot", "flutter_host_tools", "flutter_ios_engine_slice", "flutter_macos_engine_slice", "flutter_missing_slice", "flutter_platform_kernel")\n'
 
 def _unset_message(env):
     return (
@@ -140,38 +141,15 @@ def _missing(name, message):
         message = json.encode(message),
     )
 
-def _dict(d):
-    return "{" + ", ".join(['"{}": {}'.format(k, json.encode(v)) for k, v in sorted(d.items())]) + "}"
-
-def _provenance(out_dir, args):
-    provenance = {"origin": "out_dir", "out_dir": out_dir, "as_of": "gn"}
-    for key in ["engine_version", "content_hash", "dart_version"]:
-        if args.get(key):
-            provenance[key] = args[key]
-    return provenance
-
-def _first_existing(candidates):
-    for candidate in candidates:
-        if candidate.exists:
-            return candidate
-    return None
-
 def _gen_snapshot_file(out, cpu):
     """flutter_tools' `_genSnapshotPath`: the first of these directories holding the name."""
     names = ["gen_snapshot_" + cpu, "gen_snapshot"]
     for directory in [".", "universal", "clang_x64", "clang_x86", "clang_i386", "clang_arm64", "clang_riscv64"]:
         base = out if directory == "." else out.get_child(directory)
-        found = _first_existing([base.get_child(name) for name in names])
+        found = first_existing([base.get_child(name) for name in names])
         if found:
             return found
     return None
-
-def _link(repository_ctx, source, destination):
-    repository_ctx.symlink(source, destination)
-    if source.is_dir:
-        repository_ctx.watch_tree(source)
-    else:
-        repository_ctx.watch(source)
 
 def _engine_out_dirs_impl(repository_ctx):
     path_env = repository_ctx.attr.path_env
@@ -198,7 +176,7 @@ def _engine_out_dirs_impl(repository_ctx):
     if not checkout:
         default_reason = _unset_message(path_env)
     elif not os_name.startswith("mac"):
-        default_reason = "The engine out dirs serve macOS apps built on a Mac so far; this host is " + os_name + "."
+        default_reason = "The engine out dirs serve macOS, iOS and Android apps built on a Mac so far; this host is " + os_name + "."
     else:
         src = repository_ctx.path(checkout).get_child("engine").get_child("src")
         out_root = src.get_child("out")
@@ -286,7 +264,7 @@ def _engine_out_dirs_impl(repository_ctx):
                 ).format(out = tools, absent = ", ".join(sorted(absent)), name = chosen["debug"])
             else:
                 for dest, source in files.items():
-                    _link(repository_ctx, source, dest)
+                    link_into(repository_ctx, source, dest)
                 engine_json["engine_revision"] = args.get("engine_version", "")
                 engine_json["dart_version"] = repository_ctx.read(dart_sdk.get_child("version")).strip()
                 root_build += """
@@ -305,7 +283,7 @@ filegroup(
 )
 """
                 root_exports = 'exports_files(glob(["**"], exclude = ["BUILD.bazel", "flutter_engine.json"]), visibility = ["//visibility:public"])\n'
-                prov = _dict(_provenance(chosen["debug"], args))
+                prov = dict_text(out_dir_provenance(chosen["debug"], args))
                 provided[("host/" + host, "tools")] = """
 flutter_host_tools(
     name = "tools",
@@ -334,8 +312,8 @@ flutter_host_tools(
 
             patched = tools.get_child("flutter_patched_sdk")
             if patched.exists:
-                _link(repository_ctx, patched, "kernel/debug/flutter_patched_sdk")
-                provided[("kernel/debug", "platform")] = _kernel_stanza("flutter_patched_sdk", _dict(_provenance(chosen["debug"], args)))
+                link_into(repository_ctx, patched, "kernel/debug/flutter_patched_sdk")
+                provided[("kernel/debug", "platform")] = _kernel_stanza("flutter_patched_sdk", dict_text(out_dir_provenance(chosen["debug"], args)))
             else:
                 reasons[("kernel/debug", "platform")] = "The host debug out dir {} has no flutter_patched_sdk.".format(tools)
 
@@ -344,8 +322,8 @@ flutter_host_tools(
             release_out = src.get_child("out").get_child(chosen["release"])
             patched = release_out.get_child("flutter_patched_sdk")
             if patched.exists:
-                _link(repository_ctx, patched, "kernel/release/flutter_patched_sdk_product")
-                provided[("kernel/release", "platform")] = _kernel_stanza("flutter_patched_sdk_product", _dict(_provenance(chosen["release"], args_of[chosen["release"]])))
+                link_into(repository_ctx, patched, "kernel/release/flutter_patched_sdk_product")
+                provided[("kernel/release", "platform")] = _kernel_stanza("flutter_patched_sdk_product", dict_text(out_dir_provenance(chosen["release"], args_of[chosen["release"]])))
             else:
                 reasons[("kernel/release", "platform")] = "The host release out dir {} has no flutter_patched_sdk.".format(release_out)
 
@@ -363,7 +341,7 @@ flutter_host_tools(
             if framework == None:
                 reasons[("macos/" + mode, "engine")] = "The out dir {} has no FlutterMacOS.xcframework with a macOS slice: build the macOS engine target (ninja -C out/{} flutter/shell/platform/darwin/macos:FlutterMacOS).".format(out, name)
             else:
-                _link(repository_ctx, framework, "macos/{}/FlutterMacOS.framework".format(mode))
+                link_into(repository_ctx, framework, "macos/{}/FlutterMacOS.framework".format(mode))
                 provided[("macos/" + mode, "engine")] = """
 filegroup(
     name = "files",
@@ -379,14 +357,14 @@ flutter_macos_engine_slice(
     provenance = {prov},
     visibility = ["//visibility:public"],
 )
-""".format(mode = mode, engine_cpu = "arm64" if cpu == "arm64" else "x86_64", prov = _dict(_provenance(name, args)))
+""".format(mode = mode, engine_cpu = "arm64" if cpu == "arm64" else "x86_64", prov = dict_text(out_dir_provenance(name, args)))
             if mode != "debug":
                 gen_snapshot = _gen_snapshot_file(out, cpu)
                 target = native_target(host)
                 if gen_snapshot == None:
                     reasons[(target + "/" + mode, "gen_snapshot_" + host)] = "The out dir {} has no gen_snapshot_{} (or gen_snapshot) in ., universal or a clang_* directory.".format(out, cpu)
                 else:
-                    _link(repository_ctx, gen_snapshot, "{}/{}/gen_snapshot".format(target, mode))
+                    link_into(repository_ctx, gen_snapshot, "{}/{}/gen_snapshot".format(target, mode))
                     provided[(target + "/" + mode, "gen_snapshot_" + host)] = """
 flutter_gen_snapshot(
     name = "gen_snapshot_{host}",
@@ -396,7 +374,12 @@ flutter_gen_snapshot(
     provenance = {prov},
     visibility = ["//visibility:public"],
 )
-""".format(host = host, cpu = "arm64" if cpu == "arm64" else "x86_64", mode = mode, prov = _dict(_provenance(name, args)))
+""".format(host = host, cpu = "arm64" if cpu == "arm64" else "x86_64", mode = mode, prov = dict_text(out_dir_provenance(name, args)))
+
+        # The iOS and Android engines, and their gen_snapshots.
+        mobile = mobile_slices(repository_ctx, out_root, candidates, args_of, pins, found, cpu)
+        provided.update(mobile.provided)
+        reasons.update(mobile.reasons)
 
     # Every slice of the contract is a target: the ones the out dirs provide,
     # and for the rest a missing slice that says why.
@@ -410,7 +393,7 @@ flutter_gen_snapshot(
                 content += provided[key]
             else:
                 content += _missing(target, reasons.get(key) or default_reason or (
-                    "The engine out dirs provide the macOS slices so far; {} is not one of them.".format(package + ":" + target)
+                    "The engine out dirs provide the macOS, iOS and Android slices so far; {} is not one of them.".format(package + ":" + target)
                 ))
         repository_ctx.file(package + "/BUILD.bazel", content)
 
@@ -433,7 +416,7 @@ flutter_platform_kernel(
 
 flutter_engine_out_dirs = repository_rule(
     _engine_out_dirs_impl,
-    doc = "An engine source (the contract of `@rules_flutter//flutter:engine.bzl`) over the out dirs of a checkout whose path an environment variable gives. macOS slices so far; the others are missing slices that say so.",
+    doc = "An engine source (the contract of `@rules_flutter//flutter:engine.bzl`) over the out dirs of a checkout whose path an environment variable gives. macOS, iOS and Android slices so far; the others are missing slices that say so.",
     attrs = {
         "path_env": attr.string(
             doc = "The environment variable holding the checkout's path. Set it with `--repo_env`.",

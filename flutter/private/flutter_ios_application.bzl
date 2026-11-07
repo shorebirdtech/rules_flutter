@@ -23,12 +23,13 @@ load("@bazel_skylib//lib:dicts.bzl", "dicts")
 load("@rules_apple//apple/internal:framework_import_support.bzl", "framework_import_support")
 load("@rules_cc//cc:find_cc_toolchain.bzl", "use_cc_toolchain")
 load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
-load("//flutter:providers.bzl", "FlutterApplicationInfo")
+load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterSdkRecordInfo")
 load("//flutter/private:apple_xcode.bzl", "declare_dsym", "run_xcode_tool", "split_and_strip_aot_binary")
 load("//flutter/private:assemble_directory.bzl", "ASSEMBLE_DIRECTORY_ATTRS", "assemble_directory")
 load("//flutter/private:constants.bzl", "IOS_MINIMUM_OS_VERSION")
 load("//flutter/private:exec_groups.bzl", "PORTABLE_EXEC_GROUPS", "portable_tools")
 load("//flutter/private:flutter_native_assets.bzl", "native_asset_framework_name")
+load("//flutter/private:mobile_engine_check.bzl", "check_ios_engine")
 
 def _flutter_ios_application_impl(ctx):
     """Bundles Flutter compilation outputs for iOS packaging."""
@@ -148,6 +149,12 @@ def _flutter_ios_framework_impl(ctx):
              "use flutter_ios_simulator_build_test.") % ctx.var["COMPILATION_MODE"],
         )
 
+    # The engine must have a slice for this environment and CPU, and an app of
+    # a custom SDK keeps the record of the checked pieces it was built from.
+    sdk_record = ctx.attr._sdk_record[FlutterSdkRecordInfo]
+    check_ios_engine(ctx.label, sdk_record, apple_support.target_arch_from_rule_ctx(ctx), is_device)
+    record_steps = [("file", "flutter_sdk.json", sdk_record.record)] if sdk_record.record else []
+
     ctx.actions.write(framework_plist, _APP_FRAMEWORK_INFO_PLIST.format(
         minimum_os_version = minimum_os_version,
     ))
@@ -175,7 +182,7 @@ def _flutter_ios_framework_impl(ctx):
             ctx,
             tools,
             framework_assets,
-            [("tree", ".", flutter_assets)],
+            [("tree", ".", flutter_assets)] + record_steps,
             mnemonic = "FlutterIOSCopyAssets",
             progress_message = "Copying flutter_assets into App.framework",
         )
@@ -218,7 +225,7 @@ def _flutter_ios_framework_impl(ctx):
                 ("file", "kernel_blob.bin", kernel_dill),
                 ("file", "vm_snapshot_data", vm_snapshot),
                 ("file", "isolate_snapshot_data", iso_snapshot),
-            ],
+            ] + record_steps,
             mnemonic = "FlutterIOSDebugAssets",
             progress_message = "Assembling debug App.framework with kernel and VM snapshots",
         )
@@ -243,6 +250,10 @@ flutter_ios_framework = rule(
             "minimum_os_version": attr.string(
                 doc = "Minimum iOS deployment target version.",
                 default = IOS_MINIMUM_OS_VERSION,
+            ),
+            "_sdk_record": attr.label(
+                default = "//flutter/private:sdk_record",
+                providers = [FlutterSdkRecordInfo],
             ),
         },
     ),

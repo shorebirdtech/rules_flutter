@@ -80,3 +80,82 @@ alias(
     visibility = ["//visibility:public"],
 )
 """
+
+# The iOS engine of each build mode. `Flutter_xcframework` is what rules_apple
+# imports as Flutter.xcframework, so it follows the mode itself: the simulator
+# engine under `-c dbg`, the device engines otherwise.
+IOS_ENGINE_TARGETS = {
+    "Flutter_xcframework_debug": "{prefix}//ios/debug:engine",
+    "Flutter_xcframework_profile": "{prefix}//ios/profile:engine",
+    "Flutter_xcframework_release": "{prefix}//ios/release:engine",
+}
+
+IOS_ENGINE_EXTRA = """
+# The engine of the build mode.
+alias(
+    name = "Flutter_xcframework",
+    actual = select({
+        "@rules_flutter//flutter/private:dbg": ":Flutter_xcframework_debug",
+        "@rules_flutter//flutter/private:profile": ":Flutter_xcframework_profile",
+        "//conditions:default": ":Flutter_xcframework_release",
+    }),
+    visibility = ["//visibility:public"],
+)
+"""
+
+def android_engine_face_extra(sdks, arch, abi):
+    """The BUILD text of the Android engine face of one CPU.
+
+    `stripped` is the engine jar of the selected SDK and the build mode with
+    its native libraries stripped and set apart, as a Gradle build strips
+    them. The stripping is made once per SDK and mode, not in each
+    `flutter_android_engine` target, which every pub plugin has one of.
+
+    Args:
+        sdks: A dict from each declared SDK to the label prefix of its engine
+            source (`@repo`).
+        arch: The CPU part of the target (`arm64`, `x64`).
+        abi: The Android ABI of that CPU (`arm64-v8a`).
+
+    Returns:
+        BUILD text, for `flutter_face_repo(extra = ...)`.
+    """
+    content = 'load("@rules_flutter//flutter/private:flutter_android_engine_jar.bzl", "flutter_android_engine_jar")\n'
+    declared = ", ".join(sorted(sdks.keys()))
+    for sdk, prefix in sorted(sdks.items()):
+        for mode in ["debug", "profile", "release"]:
+            content += """
+flutter_android_engine_jar(
+    name = "{sdk}_{mode}_stripped",
+    jar = "{prefix}//android-{arch}/{mode}:engine",
+    android_abi = "{abi}",
+)
+""".format(sdk = sdk, mode = mode, prefix = prefix, arch = arch, abi = abi)
+        content += """
+# The stripped engine of `{sdk}` in the build mode.
+alias(
+    name = "{sdk}_stripped",
+    actual = select({{
+        "@rules_flutter//flutter/private:dbg": ":{sdk}_debug_stripped",
+        "@rules_flutter//flutter/private:profile": ":{sdk}_profile_stripped",
+        "//conditions:default": ":{sdk}_release_stripped",
+    }}),
+)
+""".format(sdk = sdk)
+    branches = "".join([
+        '            "@flutter_toolchains//:sdk_{sdk}": ":{sdk}_stripped",\n'.format(sdk = sdk)
+        for sdk in sorted(sdks.keys())
+    ])
+    return content + """
+# The engine of the selected SDK and the build mode, stripped: debug under
+# `-c dbg`, profile under `-c opt` with `//flutter:profile`, release otherwise.
+alias(
+    name = "stripped",
+    actual = select(
+        {{
+{branches}        }},
+        no_match_error = "No Flutter SDK is declared for --@rules_flutter//flutter:sdk. Declared: {declared}.",
+    ),
+    visibility = ["//visibility:public"],
+)
+""".format(branches = branches, declared = declared)

@@ -272,38 +272,46 @@ dart_binary(
     ],
 ) for suffix in [""]]
 
-# The check over the stock artifacts of this host, in each build mode: the
-# pinned release passes it, with the hash its Dart has. (macOS only: the
-# engine slice is the host's own.)
+# The check over the stock artifacts, in each build mode: the pinned release
+# passes it, with the hash its Dart has. The host's own engine, and the iOS and
+# Android engines a Mac cross-compiles for (macOS only: the engine slice of the
+# host is the host's own, and the cross toolchains of a Mac are the ones built
+# for these platforms).
+_STOCK_RECORD_PLATFORMS = {
+    "host": "",
+    "ios": "//flutter/platforms:ios_arm64",
+    "android_arm64": "@rules_android//:arm64-v8a",
+    "android_x64": "@rules_android//:x86_64",
+}
+
+_STOCK_RECORD_MODES = [
+    "debug",
+    "profile",
+    "release",
+]
+
 [flutter_sdk_record(
-    name = "stock_record_%s_check" % mode,
+    name = "stock_record_%s_%s_check" % (platform, mode) if platform != "host" else "stock_record_%s_check" % mode,
     always = True,
     mode = mode,
     tags = ["manual"],
-) for mode in [
-    "debug",
-    "profile",
-    "release",
-]]
+) for platform in _STOCK_RECORD_PLATFORMS for mode in _STOCK_RECORD_MODES]
 
 [record_in_mode(
-    name = "stock_record_%s" % mode,
+    name = "stock_record_%s_%s" % (platform, mode) if platform != "host" else "stock_record_%s" % mode,
     mode = mode,
-    record = ":stock_record_%s_check" % mode,
+    platform = _STOCK_RECORD_PLATFORMS[platform],
+    record = ":stock_record_%s_%s_check" % (platform, mode) if platform != "host" else ":stock_record_%s_check" % mode,
     tags = ["manual"],
-) for mode in [
-    "debug",
-    "profile",
-    "release",
-]]
+) for platform in _STOCK_RECORD_PLATFORMS for mode in _STOCK_RECORD_MODES]
 
 dart_test(
     name = "sdk_record_stock_test",
-    data = [":stock_record_%s" % mode for mode in [
-        "debug",
-        "profile",
-        "release",
-    ]],
+    data = [
+        ":stock_record_%s" % mode if platform == "host" else ":stock_record_%s_%s" % (platform, mode)
+        for platform in _STOCK_RECORD_PLATFORMS
+        for mode in _STOCK_RECORD_MODES
+    ],
     main = "test/sdk_record_stock_test.dart",
     target_compatible_with = ["@platforms//os:macos"],
     deps = [

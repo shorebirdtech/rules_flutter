@@ -127,7 +127,7 @@ flutter_toolchain = rule(
         ),
         "engine": attr.label(
             doc = "The target's engine of the build mode, so a `select()` on the mode picks it: " +
-                  "a `flutter_<os>_engine` slice. Unset for mobile/web targets.",
+                  "a `flutter_<os>_engine` slice. Unset for web targets.",
             providers = [FlutterEngineInfo],
         ),
         "material_icons_font": attr.label(

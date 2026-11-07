@@ -85,7 +85,7 @@ def flutter_application_build(ctx, inputs):
         ctx.attr._android_constraint[platform_common.ConstraintValueInfo],
     )
     target_platform = detect_target_platform(is_ios, is_macos, is_linux, is_windows, is_android)
-    if not is_macos:
+    if target_platform not in ["macos", "ios", "android"]:
         require_release_engine(ctx.label, flutter_sdk_info.sdk, flutter_sdk_info.host_tools, target_platform)
 
     # A pub package that builds its native code with `hook/build.dart` has no

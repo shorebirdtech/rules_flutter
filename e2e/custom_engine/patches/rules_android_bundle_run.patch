@@ -1,0 +1,79 @@
+diff --git a/rules/android_application/android_application_rule.bzl b/rules/android_application/android_application_rule.bzl
+--- a/rules/android_application/android_application_rule.bzl
++++ b/rules/android_application/android_application_rule.bzl
+@@ -350,10 +350,16 @@
+     # Create `blaze run` script
+     java_runtime = _common.get_host_javabase(ctx)[java_common.JavaRuntimeInfo]
+     base_apk_info = ctx.attr.base_module[ApkInfo]
+-    deploy_script_files = [base_apk_info.signing_keys[-1]]
++    aapt2 = get_android_toolchain(ctx).aapt2
++    adb = get_android_sdk(ctx).adb.executable
++    deploy_script_files = [base_apk_info.signing_keys[-1], aapt2.files_to_run.executable, adb]
+     subs = {
+-        "%java_executable%": java_runtime.java_executable_exec_path,
++        # The script runs from the runfiles tree, where the JDK is found by its
++        # runfiles path, not its execution path.
++        "%java_executable%": java_runtime.java_executable_runfiles_path,
+         "%bundletool_path%": get_android_toolchain(ctx).bundletool.files_to_run.executable.short_path,
++        "%aapt2%": aapt2.files_to_run.executable.short_path,
++        "%adb%": adb.short_path,
+         "%aab%": ctx.outputs.unsigned_aab.short_path,
+         "%newest_key%": base_apk_info.signing_keys[-1].short_path,
+     }
+@@ -385,7 +391,9 @@
+             runfiles = ctx.runfiles([
+                 ctx.outputs.unsigned_aab,
+                 get_android_toolchain(ctx).bundletool.files_to_run.executable,
+-            ] + deploy_script_files, transitive_files = java_runtime.files),
++            ] + deploy_script_files, transitive_files = java_runtime.files).merge(
++                aapt2[DefaultInfo].default_runfiles,
++            ),
+         ),
+     ]
+ 
+diff --git a/rules/android_application/bundle_deploy.sh_template b/rules/android_application/bundle_deploy.sh_template
+--- a/rules/android_application/bundle_deploy.sh_template
++++ b/rules/android_application/bundle_deploy.sh_template
+@@ -2,6 +2,9 @@
+ 
+ java_executable="%java_executable%"
+ bundletool="%bundletool_path%"
++aapt2="%aapt2%"
++# Absolute: ddmlib starts adb from adb's own directory.
++adb="$PWD/%adb%"
+ aab="%aab%"
+ oldest_signer_properties="%oldest_signer_properties%"
+ newest_key="%newest_key%"
+@@ -18,6 +21,7 @@
+   --bundle="$aab"
+   --output="$tmp"
+   --overwrite
++  --aapt2="$aapt2"
+   --local-testing
+   --ks="$newest_key"
+   --ks-pass=pass:android
+@@ -40,6 +44,6 @@
+ "$java_executable" -jar "$bundletool" build-apks "${args[@]}" || exit
+ 
+ "$java_executable" -jar "$bundletool" install-apks \
+-  --adb="$(which adb)" \
++  --adb="$adb" \
+   --apks "$tmp" \
+   --modules=_ALL_ || exit
+diff --git a/tools/android/BUILD b/tools/android/BUILD
+--- a/tools/android/BUILD
++++ b/tools/android/BUILD
+@@ -66,7 +66,12 @@
+     name = "bundletool",
+     main_class = "com.android.tools.build.bundletool.BundleToolMain",
+     visibility = ["//visibility:public"],
+-    runtime_deps = ["@rules_android_maven//:com_android_tools_build_bundletool"],
++    runtime_deps = [
++        "@rules_android_maven//:com_android_tools_build_bundletool",
++        # bundletool's device commands (install-apks, get-device-spec) reach
++        # Kotlin code that its POM does not declare the runtime of.
++        "@rules_android_maven//:org_jetbrains_kotlin_kotlin_stdlib",
++    ],
+ )
+ 
+ java_plugin(

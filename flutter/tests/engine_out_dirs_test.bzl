@@ -98,9 +98,51 @@ def _slots_test_impl(ctx):
     asserts.equals(env, None, sim.name)
     return unittest.end(env)
 
+def _mobile_slots_test_impl(ctx):
+    env = unittest.begin(ctx)
+
+    # The iOS simulator's slot is a `--simulator` out dir for the CPU, and the
+    # device's is not one.
+    names = _candidates("ios_debug_sim_unopt_arm64", "ios_debug_unopt", "ios_release", "ios_profile_unopt")
+    simulator = select_out_dir(names, ["ios"], "debug", "arm64", [], sim = True)
+    asserts.equals(env, "ios_debug_sim_unopt_arm64", simulator.name)
+    asserts.equals(env, "ios_release", select_out_dir(names, ["ios"], "release", "arm64", []).name)
+    asserts.equals(env, "ios_profile_unopt", select_out_dir(names, ["ios"], "profile", "arm64", []).name)
+
+    # The other simulator CPU is not served, and the message names the out
+    # dirs a simulator build is called.
+    other = select_out_dir(names, ["ios"], "debug", "x64", [], sim = True)
+    asserts.equals(env, None, other.name)
+    asserts.equals(
+        env,
+        "no out dir ios_debug_sim, ios_debug_sim_unopt found for debug on x64",
+        other.error,
+    )
+
+    # A device debug build is not the simulator's.
+    asserts.equals(env, "ios_debug_unopt", select_out_dir(names, ["ios"], "debug", "arm64", []).name)
+
+    # An Android out dir is named for its CPU; 32-bit ARM, `android_debug_unopt`,
+    # serves neither 64-bit slot.
+    android = _candidates("android_release_arm64", "android_release_x64", "android_debug_unopt")
+    asserts.equals(env, "android_release_arm64", select_out_dir(android, ["android"], "release", "arm64", []).name)
+    asserts.equals(env, "android_release_x64", select_out_dir(android, ["android"], "release", "x64", []).name)
+    asserts.equals(env, None, select_out_dir(android, ["android"], "debug", "arm64", []).name)
+    asserts.equals(env, None, select_out_dir(android, ["android"], "debug", "x64", []).name)
+
+    # It serves the 32-bit slot, whose out dir `tools/gn` names without a CPU.
+    asserts.equals(env, "android_debug_unopt", select_out_dir(android, ["android"], "debug", "arm", []).name)
+    asserts.equals(
+        env,
+        "no out dir android_release, android_release_unopt found for release on arm",
+        select_out_dir(_candidates("android_debug"), ["android"], "release", "arm", []).error,
+    )
+    return unittest.end(env)
+
 _names_test = unittest.make(_names_test_impl)
 _args_gn_test = unittest.make(_args_gn_test_impl)
 _slots_test = unittest.make(_slots_test_impl)
+_mobile_slots_test = unittest.make(_mobile_slots_test_impl)
 
 def engine_out_dirs_test_suite(name):
-    unittest.suite(name, _names_test, _args_gn_test, _slots_test)
+    unittest.suite(name, _names_test, _args_gn_test, _slots_test, _mobile_slots_test)

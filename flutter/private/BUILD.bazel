@@ -901,3 +901,21 @@ bzl_library(
         ":versions",
     ],
 )
+
+bzl_library(
+    name = "out_dir_mobile",
+    srcs = ["out_dir_mobile.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+    deps = [
+        ":engine_labels",
+        ":engine_out_dirs",
+        ":toolchains_repo",
+    ],
+)
+
+bzl_library(
+    name = "mobile_engine_check",
+    srcs = ["mobile_engine_check.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+    deps = [":engine_labels"],
+)

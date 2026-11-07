@@ -101,13 +101,14 @@ flutter_toolchain(
             sysroot = sysroot(meta.arch) if meta.os == "linux" else "",
         )
 
-    # Cross-compilation: the host's tools with the target's gen_snapshot.
+    # Cross-compilation: the host's tools with the target's gen_snapshot and engine.
     for host, targets in CROSS_COMPILATION_PAIRS.items():
         for target in targets:
             content += """
 flutter_toolchain(
     name = "{host}_to_{target}_toolchain",
 {common}    gen_snapshot = {gen_snapshot},
+    engine = {engine},
     material_icons_font = "{fonts}",
     target_os = "{target_os}",
     target_arch = "{target_arch}",
@@ -118,6 +119,7 @@ flutter_toolchain(
                 target = target,
                 common = _common(engine, host, sdk, version, engine_revision, sdk_defines),
                 gen_snapshot = _gen_snapshot(engine, target, host),
+                engine = _engine(engine, target),
                 fonts = material_fonts.format(host = host),
                 target_os = platform_to_os(target),
                 target_arch = platform_to_arch(target),

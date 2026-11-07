@@ -15,9 +15,11 @@ names (the latest version will be picked for each name) and can register them as
 effectively overriding the default named toolchain due to toolchain resolution precedence.
 """
 
+load("//flutter/private:constants.bzl", "ANDROID_ABI_FOR_ARCH")
+load("//flutter/private:engine_labels.bzl", "android_arches")
 load("//flutter/private:flutter_chrome_for_testing.bzl", "flutter_chrome_for_testing")
 load("//flutter/private:flutter_dev_root_repo.bzl", "flutter_dev_root_repo")
-load("//flutter/private:flutter_face_repo.bzl", "MACOS_ENGINE_EXTRA", "MACOS_ENGINE_TARGETS", "flutter_face_repo")
+load("//flutter/private:flutter_face_repo.bzl", "IOS_ENGINE_EXTRA", "IOS_ENGINE_TARGETS", "MACOS_ENGINE_EXTRA", "MACOS_ENGINE_TARGETS", "android_engine_face_extra", "flutter_face_repo")
 load("//flutter/private:flutter_linux_runtime_repo.bzl", "flutter_linux_runtime_repo")
 load("//flutter/private:flutter_material_fonts_repo.bzl", "flutter_material_fonts_repo")
 load("//flutter/private:flutter_sdk_toolchains_repo.bzl", "flutter_sdk_toolchains_repo")
@@ -222,6 +224,19 @@ def _toolchain_extension(module_ctx):
         targets = MACOS_ENGINE_TARGETS,
         extra = MACOS_ENGINE_EXTRA,
     )
+    flutter_face_repo(
+        name = "flutter_ios_engine",
+        sdks = engine_prefixes,
+        targets = IOS_ENGINE_TARGETS,
+        extra = IOS_ENGINE_EXTRA,
+    )
+    for arch in android_arches():
+        flutter_face_repo(
+            name = "flutter_android_engine_" + arch,
+            sdks = engine_prefixes,
+            targets = {},
+            extra = android_engine_face_extra(engine_prefixes, arch, ANDROID_ABI_FOR_ARCH[arch]),
+        )
     flutter_face_repo(
         name = "flutter_dev_root",
         sdks = {name: "@{}_dev_root_src".format(name) for name in sdks},

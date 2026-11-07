@@ -53,17 +53,67 @@ def kernel_label(engine, release):
     return "{}//kernel/{}:platform".format(engine, "release" if release else "debug")
 
 def engine_label(engine, platform, mode):
-    """The label of a desktop engine slice.
+    """The label of an engine slice.
 
     Args:
         engine: The engine repository, as a label prefix.
-        platform: The target's platform string (`darwin-x64`, `linux-arm64`, ...).
+        platform: The target's platform string (`darwin-x64`, `linux-arm64`,
+            `ios-arm64`, `android-x64`, ...).
         mode: `debug`, `profile` or `release`.
 
     Returns:
         The label string.
     """
-    return "{}//{}/{}:engine".format(engine, _DESKTOP_ENGINE_DIR[platform], mode)
+    return "{}//{}/{}:engine".format(engine, engine_dir(platform), mode)
+
+def engine_dir(platform):
+    """The slice directory of a target platform's engine.
+
+    Args:
+        platform: The target's platform string.
+
+    Returns:
+        `macos`, `linux-<arch>`, `windows-<arch>`, `ios` or `android-<arch>`.
+    """
+    if platform.startswith("ios-"):
+        return "ios"
+    if platform.startswith("android-"):
+        return platform
+    return _DESKTOP_ENGINE_DIR[platform]
+
+# The CPU name the engine contract uses (`FlutterEngineInfo.cpus`) for each Android target architecture.
+_ANDROID_ENGINE_CPU = {
+    "arm": "arm",
+    "arm64": "arm64",
+    "x64": "x86_64",
+}
+
+def android_engine_cpu(arch):
+    """The CPU an Android engine of an architecture contains, as `FlutterEngineInfo.cpus` names it.
+
+    Args:
+        arch: The architecture part of the target (`arm64`, `x64`).
+
+    Returns:
+        `arm64`, `x86_64`, ...
+    """
+    if arch not in _ANDROID_ENGINE_CPU:
+        fail("No engine CPU is named for the Android architecture \"%s\"." % arch)
+    return _ANDROID_ENGINE_CPU[arch]
+
+def android_arches():
+    """The CPUs Android engines are published for.
+
+    Returns:
+        The architecture parts (`arm64`, `x64`, ...) of the Android targets,
+        so that one more ABI is one more entry of `TARGET_PLATFORMS`.
+    """
+    arches = []
+    for targets in CROSS_COMPILATION_PAIRS.values():
+        for target in targets:
+            if target.startswith("android-") and target.split("-")[1] not in arches:
+                arches.append(target.split("-")[1])
+    return arches
 
 def desktop_engine_dir(platform):
     """The slice directory of a desktop platform's engine.
@@ -139,6 +189,12 @@ def contract_slices():
         directory = desktop_engine_dir(platform)
         for mode in ENGINE_MODES:
             slices.setdefault("{}/{}".format(directory, mode), []).append("engine")
+    for targets in CROSS_COMPILATION_PAIRS.values():
+        for target in targets:
+            for mode in ENGINE_MODES:
+                packages = slices.setdefault("{}/{}".format(engine_dir(target), mode), [])
+                if "engine" not in packages:
+                    packages.append("engine")
     for host in HOST_PLATFORMS:
         target = native_target(host)
         for mode in ["profile", "release"]:

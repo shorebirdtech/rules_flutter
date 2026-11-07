@@ -3,10 +3,10 @@
 Every slice of an engine source records where it came from (`provenance`); the
 official release's say `origin: release`. A source of the user's choosing
 provides the slices of the platforms it supports and says so for the rest, but
-a platform whose engine is still imported by its own repository (iOS, Android,
-web) would be given the release's engine whatever SDK a build selects. A rule
-for such a platform checks the SDK it was given, so a custom engine is never
-silently combined with the release's.
+a platform whose engine is still imported by its own repository (web, and the
+Linux and Windows engines' headers) would be given the release's engine
+whatever SDK a build selects. A rule for such a platform checks the SDK it was
+given, so a custom engine is never silently combined with the release's.
 """
 
 RELEASE_ORIGIN = "release"
@@ -34,6 +34,6 @@ def require_release_engine(label, sdk, host_tools, platform):
     if not is_release_engine(host_tools):
         fail((
             "{label}: the \"{sdk}\" Flutter SDK has no {platform} engine: its engine source " +
-            "serves macOS apps so far. Build {platform} apps with the release SDK " +
+            "serves macOS, iOS and Android apps so far. Build {platform} apps with the release SDK " +
             "(--@rules_flutter//flutter:sdk=flutter)."
         ).format(label = label, sdk = sdk, platform = platform))

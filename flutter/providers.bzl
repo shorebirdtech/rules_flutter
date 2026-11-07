@@ -66,6 +66,7 @@ FlutterSdkRecordInfo = provider(
         "record": "File or None: `flutter_sdk.json`, bundled into the app's `flutter_assets`.",
         "engine_label": "str: The label of the engine slice the app links, or empty.",
         "engine_cpus": "list[str]: The CPUs that engine contains, or empty where the app has none to check.",
+        "engine_xcframework_slices": "list[str]: iOS only: the platform directories of that engine's Flutter.xcframework.",
     },
 )
 

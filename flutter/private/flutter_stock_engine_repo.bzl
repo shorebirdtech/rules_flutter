@@ -9,18 +9,23 @@ gen_snapshot) and the macOS profile repositories. The slice targets name those
 files by label, so fetching this repository fetches only the patched SDK; a
 slice's files are fetched when a build uses it.
 
+iOS and Android engines are the lazily fetched `<name>_stock_ios_engine` and
+`<name>_stock_android_engine_<arch>` repositories' files, with the profile
+engines in repositories of their own.
+
 The patched SDK is the one download here: it is the same for every host, so one
 copy serves them all.
 """
 
 load("//flutter/private:artifact_urls.bzl", "engine_artifact_url")
+load("//flutter/private:constants.bzl", "ANDROID_ABI_FOR_ARCH")
 load("//flutter/private:engine_helpers.bzl", "dart_binary_name", "dartaotruntime_binary_name", "gen_snapshot_binary_name")
-load("//flutter/private:engine_labels.bzl", "ENGINE_MODES", "desktop_engine_dir", "native_target")
+load("//flutter/private:engine_labels.bzl", "ENGINE_MODES", "android_arches", "android_engine_cpu", "desktop_engine_dir", "native_target")
 load("//flutter/private:pinned.bzl", "pinned")
 load("//flutter/private:toolchains_repo.bzl", "CROSS_COMPILATION_PAIRS", "DESKTOP_ENGINE_PLATFORMS", "HOST_PLATFORMS")
 load("//flutter/private:versions.bzl", "FLUTTER_VERSIONS")
 
-_LOAD = 'load("@rules_flutter//flutter:engine.bzl", "flutter_gen_snapshot", "flutter_host_tools", "flutter_linux_engine_slice", "flutter_macos_engine_slice", "flutter_platform_kernel", "flutter_windows_engine_slice")\n\n'
+_LOAD = 'load("@rules_flutter//flutter:engine.bzl", "flutter_android_engine_slice", "flutter_gen_snapshot", "flutter_host_tools", "flutter_ios_engine_slice", "flutter_linux_engine_slice", "flutter_macos_engine_slice", "flutter_platform_kernel", "flutter_windows_engine_slice")\n\n'
 
 _ENGINE_RULES = {
     "macos": "flutter_macos_engine_slice",
@@ -110,6 +115,67 @@ def _engine(platform, mode, repo, provenance):
         provenance = _dict(provenance),
     )
 
+# The platform directories of the iOS release's xcframeworks: the device, and
+# the simulator whose arm64 and x86_64 binaries are one universal binary.
+_IOS_XCFRAMEWORK_SLICES = ["ios-arm64", "ios-arm64_x86_64-simulator"]
+
+def _ios_engine(name, mode, provenance):
+    """The iOS engine of one mode: the simulator's under debug, the device's otherwise."""
+    stock = "{}_stock_ios_engine".format(name)
+    if mode == "debug":
+        files = "@{}//:Flutter_xcframework_debug".format(stock)
+        binary = "@{}//:debug/Flutter.xcframework/ios-arm64_x86_64-simulator/Flutter.framework/Flutter".format(stock)
+    elif mode == "profile":
+        profile = "{}_ios_engine_profile".format(name)
+        files = "@{}//:Flutter_xcframework_profile".format(profile)
+        binary = "@{}//:Flutter.xcframework/ios-arm64/Flutter.framework/Flutter".format(profile)
+    else:
+        files = "@{}//:Flutter_xcframework_release".format(stock)
+        binary = "@{}//:Flutter.xcframework/ios-arm64/Flutter.framework/Flutter".format(stock)
+    return """flutter_ios_engine_slice(
+    name = "engine",
+    mode = "{mode}",
+    cpus = ["arm64", "x86_64"],
+    files = "{files}",
+    binary = "{binary}",
+    xcframework_slices = {slices},
+    provenance = {provenance},
+    visibility = ["//visibility:public"],
+)
+""".format(
+        mode = mode,
+        files = files,
+        binary = binary,
+        slices = _IOS_XCFRAMEWORK_SLICES,
+        provenance = _dict(provenance),
+    )
+
+def _android_engine(name, arch, mode, provenance):
+    """The Android engine of one ABI and mode: its `flutter.jar`, whose `libflutter.so` is the binary."""
+    if mode == "debug":
+        jar = "@{}_stock_android_engine_{}//:debug/flutter.jar".format(name, arch)
+    elif mode == "profile":
+        jar = "@{}_android_engine_{}_profile//:flutter.jar".format(name, arch)
+    else:
+        jar = "@{}_stock_android_engine_{}//:flutter.jar".format(name, arch)
+    return """flutter_android_engine_slice(
+    name = "engine",
+    mode = "{mode}",
+    cpus = ["{cpu}"],
+    files = "{jar}",
+    binary = "{jar}",
+    binary_entry = "lib/{abi}/libflutter.so",
+    provenance = {provenance},
+    visibility = ["//visibility:public"],
+)
+""".format(
+        mode = mode,
+        cpu = android_engine_cpu(arch),
+        jar = jar,
+        abi = ANDROID_ABI_FOR_ARCH[arch],
+        provenance = _dict(provenance),
+    )
+
 def _gen_snapshot(host, mode, cpu, label, provenance):
     return """flutter_gen_snapshot(
     name = "gen_snapshot_{host}",
@@ -181,12 +247,19 @@ def stock_engine_packages(name, provenance):
             cpu = target.split("-")[1]
             for mode in ["release", "profile"]:
                 if target.startswith("ios"):
-                    repo = "{}_ios_engine".format(name) + ("_profile" if mode == "profile" else "")
+                    repo = "{}_ios_engine_profile".format(name) if mode == "profile" else "{}_stock_ios_engine".format(name)
                     label = "@{}//:gen_snapshot_arm64".format(repo)
                 else:
                     repo = "{}_cross_{}_{}".format(name, host, target) + ("_profile" if mode == "profile" else "")
                     label = "@{}//:{}".format(repo, gen_snapshot_binary_name(host))
                 add("{}/{}".format(target, mode), _gen_snapshot(host, mode, {"arm": "arm", "arm64": "arm64"}.get(cpu, "x86_64"), label, provenance))
+
+    # The mobile engines. Only the iOS engine of the device and the simulator
+    # is one repository for all hosts.
+    for mode in ENGINE_MODES:
+        add("ios/" + mode, _ios_engine(name, mode, provenance))
+        for arch in android_arches():
+            add("android-{}/{}".format(arch, mode), _android_engine(name, arch, mode, provenance))
     return packages
 
 def _flutter_stock_engine_repo_impl(repository_ctx):

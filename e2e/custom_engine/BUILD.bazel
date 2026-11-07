@@ -1,5 +1,8 @@
+load("@rules_flutter//flutter:android.bzl", "flutter_android_app")
 load("@rules_flutter//flutter:defs.bzl", "flutter_application")
+load("@rules_flutter//flutter:ios.bzl", "IOS_MINIMUM_OS_VERSION", "flutter_ios_app", "flutter_ios_framework_gen", "flutter_ios_simulator_build")
 load("@rules_flutter//flutter:macos.bzl", "flutter_macos_app")
+load("@rules_flutter//tools/e2e_testing:apple_release_build.bzl", "apple_release_build")
 
 exports_files(["pubspec.lock"])
 
@@ -18,4 +21,56 @@ flutter_macos_app(
     application = ":app_flutter",
     bundle_id = "com.example.customengine",
     target_compatible_with = ["@platforms//os:macos"],
+)
+
+# The same program for iOS and Android. A simulator app is a debug build; the
+# device framework is the AOT release one, built without the provisioning an
+# installable device app needs.
+flutter_application(
+    name = "ios_flutter",
+    package_name = "custom_engine",
+    main = "lib/main.dart",
+    min_os_version = IOS_MINIMUM_OS_VERSION,
+    deps = ["@deps//:flutter"],
+)
+
+flutter_ios_app(
+    name = "ios_app",
+    application = ":ios_flutter",
+    bundle_id = "com.example.customengine",
+    tags = ["manual"],
+)
+
+flutter_ios_simulator_build(
+    name = "ios_simulator",
+    testonly = True,
+    target_compatible_with = ["@platforms//os:macos"],
+    targets = [":ios_app"],
+)
+
+flutter_ios_framework_gen(
+    name = "ios_framework",
+    application = ":ios_flutter",
+    tags = ["manual"],
+)
+
+apple_release_build(
+    name = "ios_device_framework",
+    compilation_mode = "opt",
+    ios_device = True,
+    tags = ["manual"],
+    targets = [":ios_framework"],
+)
+
+flutter_application(
+    name = "android_flutter",
+    package_name = "custom_engine",
+    main = "lib/main.dart",
+    deps = ["@deps//:flutter"],
+)
+
+flutter_android_app(
+    name = "android_app",
+    package_name = "com.example.customengine",
+    application = ":android_flutter",
 )

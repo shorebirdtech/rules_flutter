@@ -57,10 +57,11 @@ flag to pass.
 """
 
 load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
-load("//flutter:providers.bzl", "FlutterApplicationInfo")
+load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterSdkRecordInfo")
 load("//flutter/private:assemble_directory.bzl", "ASSEMBLE_DIRECTORY_ATTRS", "assemble_directory")
 load("//flutter/private:common.bzl", "android_elf_machine_for_abi", "compute_android_jni_path")
 load("//flutter/private:exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
+load("//flutter/private:mobile_engine_check.bzl", "check_android_engine")
 
 def _android_abi(ctx):
     """The ABI of the Android platform this bundle is built for.
@@ -208,6 +209,22 @@ def _copy_assets_with_kernel(ctx, flutter_assets, kernel_dill, tools):
     )
     return out
 
+def _copy_assets_with_record(ctx, flutter_assets, record, tools):
+    """Copy flutter_assets and add `flutter_sdk.json`, the record of the SDK the app is built with."""
+    out = ctx.actions.declare_directory(ctx.label.name + "_recorded_flutter_assets")
+    assemble_directory(
+        ctx,
+        tools,
+        out,
+        [
+            ("tree", ".", flutter_assets),
+            ("file", "flutter_sdk.json", record),
+        ],
+        mnemonic = "FlutterAndroidSdkRecordAssets",
+        progress_message = "Adding the Flutter SDK record to flutter_assets %s" % ctx.label,
+    )
+    return out
+
 def _flutter_android_bundle_impl(ctx):
     """Bundles Flutter compilation outputs for Android packaging."""
     app_info = ctx.attr.application[FlutterApplicationInfo]
@@ -228,6 +245,13 @@ def _flutter_android_bundle_impl(ctx):
     # The AOT output is the libapp.so for Android.
     aot_output = app_info.aot_output
     abi = _android_abi(ctx)
+
+    # The engine must have been built for the app's ABI, and an app of a
+    # custom SDK keeps the record of the checked pieces it was built from.
+    sdk_record = ctx.attr._sdk_record[FlutterSdkRecordInfo]
+    check_android_engine(ctx.label, sdk_record, abi)
+    if sdk_record.record:
+        flutter_assets = _copy_assets_with_record(ctx, flutter_assets, sdk_record.record, tools)
 
     # In debug mode (JIT) with no plugin/FFI libs there is nothing to
     # package.
@@ -287,6 +311,10 @@ Set to False if you only build release APKs and do not need mobile-install.""",
         "_validate_tool": attr.label(
             default = "//flutter/private/tools:validate_android_elf.dart",
             allow_single_file = True,
+        ),
+        "_sdk_record": attr.label(
+            default = "//flutter/private:sdk_record",
+            providers = [FlutterSdkRecordInfo],
         ),
         "_android_constraint": attr.label(default = "@platforms//os:android"),
         "_arm64_constraint": attr.label(default = "@platforms//cpu:aarch64"),

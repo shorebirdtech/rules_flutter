@@ -498,4 +498,113 @@ void main() {
       expect(err.toString(), contains('not a JSON object'));
     });
   });
+
+  group('an engine binary inside a jar', () {
+    const entry = 'lib/arm64-v8a/libflutter.so';
+
+    /// A zip of the given entries (name to bytes), each deflated or stored.
+    Artifact jar(
+      String name,
+      Map<String, List<int>> entries, {
+      bool deflate = true,
+    }) {
+      final out = BytesBuilder();
+      final central = BytesBuilder();
+      var count = 0;
+      for (final MapEntry(key: entryName, value: data) in entries.entries) {
+        final stored = deflate ? ZLibCodec(raw: true).encode(data) : data;
+        final nameBytes = utf8.encode(entryName);
+        final offset = out.length;
+        final local = ByteData(30)
+          ..setUint32(0, 0x04034b50, Endian.little)
+          ..setUint16(8, deflate ? 8 : 0, Endian.little)
+          ..setUint32(18, stored.length, Endian.little)
+          ..setUint32(22, data.length, Endian.little)
+          ..setUint16(26, nameBytes.length, Endian.little);
+        out
+          ..add(local.buffer.asUint8List())
+          ..add(nameBytes)
+          ..add(stored);
+        final header = ByteData(46)
+          ..setUint32(0, 0x02014b50, Endian.little)
+          ..setUint16(10, deflate ? 8 : 0, Endian.little)
+          ..setUint32(20, stored.length, Endian.little)
+          ..setUint32(24, data.length, Endian.little)
+          ..setUint16(28, nameBytes.length, Endian.little)
+          ..setUint32(42, offset, Endian.little);
+        central
+          ..add(header.buffer.asUint8List())
+          ..add(nameBytes);
+        count++;
+      }
+      final directoryOffset = out.length;
+      out.add(central.toBytes());
+      final end = ByteData(22)
+        ..setUint32(0, 0x06054b50, Endian.little)
+        ..setUint16(8, count, Endian.little)
+        ..setUint16(10, count, Endian.little)
+        ..setUint32(12, central.length, Endian.little)
+        ..setUint32(16, directoryOffset, Endian.little);
+      out.add(end.buffer.asUint8List());
+      final file = File('${dir.path}/$name')..writeAsBytesSync(out.toBytes());
+      return Artifact('//label:$name', file.path, entry: entry);
+    }
+
+    List<int> library(List<String> hashes) => [
+      ...utf8.encode('ELF junk\x00'),
+      for (final h in hashes) ...[...utf8.encode(h), 0, 1, 2, 3],
+      // Enough bytes after the hash that deflate needs several blocks.
+      for (var i = 0; i < 200000; i++) (i * 7) & 0xff,
+    ];
+
+    for (final deflate in [true, false]) {
+      test('its hash is the one the check compares (deflate $deflate)', () {
+        final record = checkOf(
+          engine: jar('engine.jar', {
+            'classes.dex': [1, 2, 3],
+            entry: library([hashA]),
+          }, deflate: deflate),
+        );
+        expect(record['snapshot_hash'], hashA);
+      });
+    }
+
+    test(
+      'a hash that differs from gen_snapshot is a mismatch naming the entry',
+      () {
+        final message = failureOf(
+          () => checkOf(
+            engine: jar('engine.jar', {
+              entry: library([hashB]),
+            }),
+          ),
+        );
+        expect(message, contains('does not match itself'));
+        expect(message, contains('snapshot hash $hashB'));
+        expect(message, contains('entry $entry'));
+      },
+    );
+
+    test('a jar without the entry fails naming it', () {
+      final message = failureOf(
+        () => checkOf(
+          engine: jar('engine.jar', {
+            'classes.dex': [1],
+          }),
+        ),
+      );
+      expect(message, contains('no such entry'));
+      expect(message, contains(entry));
+    });
+
+    test('a file that is not a zip fails', () {
+      final bogus = write('engine.jar', utf8.encode('not a zip'));
+      final message = failureOf(
+        () => checkOf(
+          engine: Artifact(bogus.label, bogus.path, entry: entry),
+        ),
+      );
+      expect(message, contains('not a zip archive'));
+    });
+  });
 }

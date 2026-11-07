@@ -58,6 +58,7 @@ FlutterEngineInfo = provider(
         "cpus": "list[str]: The CPUs the binary contains (`arm64`, `x86_64`).",
         "files": "depset[File]: The framework, library and headers.",
         "binary": "File: The one file whose snapshot hash is read.",
+        "binary_entry": "str: When `binary` is an archive (Android's `flutter.jar`), the entry of it that holds the engine library; otherwise empty.",
         "xcframework_slices": "list[str]: iOS only: the xcframework slices present.",
         "cpp_client_wrapper": "depset[File] or None: Windows only.",
         "provenance": "dict[str, str]: Where the files came from.",
@@ -207,6 +208,7 @@ def _engine_impl(ctx):
         cpus = ctx.attr.cpus,
         files = files,
         binary = ctx.file.binary,
+        binary_entry = ctx.attr.binary_entry,
         xcframework_slices = ctx.attr.xcframework_slices,
         cpp_client_wrapper = None,
         provenance = ctx.attr.provenance,
@@ -226,7 +228,8 @@ _ENGINE_ATTRS = {
         mandatory = True,
         allow_single_file = True,
     ),
-    "xcframework_slices": attr.string_list(doc = "iOS only."),
+    "binary_entry": attr.string(doc = "When `binary` is an archive, the entry of it that holds the engine library. Android only: `lib/<abi>/libflutter.so` of `flutter.jar`."),
+    "xcframework_slices": attr.string_list(doc = "iOS only: the xcframework's platform directories (`ios-arm64`, `ios-arm64-simulator`, `ios-arm64_x86_64-simulator`, ...)."),
     "provenance": attr.string_dict(doc = "Where the files came from."),
 }
 
@@ -238,6 +241,8 @@ def _engine_rule(os):
     )
 
 flutter_macos_engine_slice = _engine_rule("macos")
+flutter_ios_engine_slice = _engine_rule("ios")
+flutter_android_engine_slice = _engine_rule("android")
 flutter_linux_engine_slice = _engine_rule("linux")
 flutter_windows_engine_slice = _engine_rule("windows")
 

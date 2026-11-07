@@ -34,7 +34,8 @@
 ///
 /// Usage (every flag as `--name=value`):
 ///   dart sdk_check.dart --mode=debug|profile|release
-///       --engine-binary=<path> --engine-label=<label>
+///       --engine-binary=<path> [--engine-binary-entry=<zip entry>]
+///       --engine-label=<label>
 ///       [--gen-snapshot=<path> --gen-snapshot-label=<label>]
 ///       --engine-platform-dill=<path> --engine-platform-dill-label=<label>
 ///       --dart-platform-dill=<path> --dart-platform-dill-label=<label>
@@ -60,12 +61,18 @@ const _kernelHeaderLength = 4 + 4 + 10;
 /// The modes the tool knows, and the ones that have a `gen_snapshot`.
 const _modes = ['debug', 'profile', 'release'];
 
-/// One file of the SDK, named the way messages name it.
+/// One file of the SDK, named the way messages name it. With an [entry], the
+/// file is that entry of the zip at [path]: an Android engine's
+/// `libflutter.so` lives inside `flutter.jar`.
 class Artifact {
-  const Artifact(this.label, this.path);
+  const Artifact(this.label, this.path, {this.entry});
 
   final String label;
   final String path;
+  final String? entry;
+
+  /// Where the file is, for a message.
+  String get location => entry == null ? path : '$path, entry $entry';
 }
 
 /// A check that failed. [message] is the whole text for stderr.
@@ -133,17 +140,44 @@ bool _isHexLower(int b) => (b >= 0x30 && b <= 0x39) || (b >= 0x61 && b <= 0x66);
 bool _isAlnumLower(int b) =>
     (b >= 0x30 && b <= 0x39) || (b >= 0x61 && b <= 0x7a);
 
-/// Every snapshot hash candidate in the file at [path], read in chunks.
+/// Collects snapshot hash candidates from a stream of chunks.
 ///
 /// Tracks the current run of `[0-9a-z]` bytes across chunk boundaries, so a
-/// candidate that straddles two reads is found and nothing is held in memory
+/// candidate that straddles two chunks is found and nothing is held in memory
 /// beyond one chunk.
-Set<String> snapshotHashCandidates(String path, {int chunkSize = 1 << 20}) {
+class _HashScanner {
   final found = <String>{};
-  final run = Uint8List(32);
+  final _run = Uint8List(32);
+
   // Length of the current run of [0-9a-z] bytes, saturating at 33.
-  var runLength = 0;
-  var runIsHex = true;
+  var _runLength = 0;
+  var _runIsHex = true;
+
+  void add(List<int> chunk, int length) {
+    for (var i = 0; i < length; i++) {
+      final b = chunk[i];
+      if (_isAlnumLower(b)) {
+        if (_runLength < 32) {
+          _run[_runLength] = b;
+          _runIsHex = _runIsHex && _isHexLower(b);
+        }
+        if (_runLength < 33) {
+          _runLength++;
+        }
+      } else {
+        if (b == 0 && _runLength == 32 && _runIsHex) {
+          found.add(String.fromCharCodes(_run));
+        }
+        _runLength = 0;
+        _runIsHex = true;
+      }
+    }
+  }
+}
+
+/// Every snapshot hash candidate in the file at [path], read in chunks.
+Set<String> snapshotHashCandidates(String path, {int chunkSize = 1 << 20}) {
+  final scanner = _HashScanner();
   final handle = File(path).openSync();
   try {
     final chunk = Uint8List(chunkSize);
@@ -152,30 +186,135 @@ Set<String> snapshotHashCandidates(String path, {int chunkSize = 1 << 20}) {
       if (read == 0) {
         break;
       }
-      for (var i = 0; i < read; i++) {
-        final b = chunk[i];
-        if (_isAlnumLower(b)) {
-          if (runLength < 32) {
-            run[runLength] = b;
-            runIsHex = runIsHex && _isHexLower(b);
-          }
-          if (runLength < 33) {
-            runLength++;
-          }
-        } else {
-          if (b == 0 && runLength == 32 && runIsHex) {
-            found.add(String.fromCharCodes(run));
-          }
-          runLength = 0;
-          runIsHex = true;
-        }
-      }
+      scanner.add(chunk, read);
     }
   } finally {
     handle.closeSync();
   }
-  return found;
+  return scanner.found;
 }
+
+class _ChunkSink extends ByteConversionSinkBase {
+  _ChunkSink(this._onChunk);
+
+  final void Function(List<int> chunk) _onChunk;
+
+  @override
+  void add(List<int> chunk) => _onChunk(chunk);
+
+  @override
+  void close() {}
+}
+
+int _u16(Uint8List b, int o) => b[o] | b[o + 1] << 8;
+int _u32(Uint8List b, int o) => _u16(b, o) | _u16(b, o + 2) << 16;
+
+/// Every snapshot hash candidate in [entry] of the zip at [path].
+///
+/// Reads the entry's data straight from the archive (stored, or deflated and
+/// inflated in chunks), since the tool has no archive library. Zip64 archives
+/// are refused: an engine jar is far below 4 GB.
+Set<String> zipEntryHashCandidates(
+  Artifact artifact, {
+  int chunkSize = 1 << 20,
+}) {
+  final path = artifact.path;
+  final entry = artifact.entry!;
+  SdkCheckFailure failure(String why) => SdkCheckFailure(
+    'Cannot read $entry from ${artifact.label}\n($path)\n$why',
+  );
+
+  final handle = File(path).openSync();
+  try {
+    final length = handle.lengthSync();
+    final tailLength = length < 65557 ? length : 65557;
+    handle.setPositionSync(length - tailLength);
+    final tail = handle.readSync(tailLength);
+    var eocd = -1;
+    for (var i = tail.length - 22; i >= 0; i--) {
+      if (_u32(tail, i) == 0x06054b50) {
+        eocd = i;
+        break;
+      }
+    }
+    if (eocd < 0) {
+      throw failure('It is not a zip archive.');
+    }
+    final count = _u16(tail, eocd + 10);
+    final directorySize = _u32(tail, eocd + 12);
+    final directoryOffset = _u32(tail, eocd + 16);
+    if (count == 0xffff || directorySize == 0xffffffff) {
+      throw failure('Zip64 archives are not supported.');
+    }
+    handle.setPositionSync(directoryOffset);
+    final directory = handle.readSync(directorySize);
+
+    var at = 0;
+    for (var n = 0; n < count; n++) {
+      if (_u32(directory, at) != 0x02014b50) {
+        throw failure('Its central directory is damaged.');
+      }
+      final method = _u16(directory, at + 10);
+      final compressed = _u32(directory, at + 20);
+      final nameLength = _u16(directory, at + 28);
+      final extraLength = _u16(directory, at + 30);
+      final commentLength = _u16(directory, at + 32);
+      final localOffset = _u32(directory, at + 42);
+      final name = utf8.decode(
+        directory.sublist(at + 46, at + 46 + nameLength),
+        allowMalformed: true,
+      );
+      at += 46 + nameLength + extraLength + commentLength;
+      if (name != entry) {
+        continue;
+      }
+      if (compressed == 0xffffffff || localOffset == 0xffffffff) {
+        throw failure('Zip64 archives are not supported.');
+      }
+      handle.setPositionSync(localOffset);
+      final local = handle.readSync(30);
+      if (_u32(local, 0) != 0x04034b50) {
+        throw failure('Its local header is damaged.');
+      }
+      final dataOffset = localOffset + 30 + _u16(local, 26) + _u16(local, 28);
+      handle.setPositionSync(dataOffset);
+
+      final scanner = _HashScanner();
+      void feed(List<int> bytes) => scanner.add(bytes, bytes.length);
+      final ByteConversionSink inflater;
+      if (method == 0) {
+        inflater = _ChunkSink(feed);
+      } else if (method == 8) {
+        inflater = ZLibDecoder(raw: true).startChunkedConversion(
+          _ChunkSink(feed),
+        );
+      } else {
+        throw failure('Its compression method $method is not supported.');
+      }
+      var remaining = compressed;
+      while (remaining > 0) {
+        final chunk = handle.readSync(
+          remaining < chunkSize ? remaining : chunkSize,
+        );
+        if (chunk.isEmpty) {
+          throw failure('The archive ends inside the entry.');
+        }
+        inflater.add(chunk);
+        remaining -= chunk.length;
+      }
+      inflater.close();
+      return scanner.found;
+    }
+    throw failure('The archive has no such entry.');
+  } finally {
+    handle.closeSync();
+  }
+}
+
+/// Every snapshot hash candidate in [artifact].
+Set<String> artifactHashCandidates(Artifact artifact) => artifact.entry == null
+    ? snapshotHashCandidates(artifact.path)
+    : zipEntryHashCandidates(artifact);
 
 String _describeHashes(Set<String> hashes) {
   if (hashes.isEmpty) {
@@ -192,13 +331,13 @@ String _entry(String role, Artifact artifact, String detail) {
   const roleWidth = 15;
   final indent = ' ' * (2 + roleWidth);
   return '  ${role.padRight(roleWidth)}${artifact.label}\n'
-      '$indent(${artifact.path})\n'
+      '$indent(${artifact.location})\n'
       '$indent$detail';
 }
 
 /// What the file at [artifact] holds, in the fields the checks read.
 class _Scan {
-  _Scan(this.artifact) : hashes = snapshotHashCandidates(artifact.path);
+  _Scan(this.artifact) : hashes = artifactHashCandidates(artifact);
 
   final Artifact artifact;
   final Set<String> hashes;
@@ -400,6 +539,7 @@ String encodeRecord(Map<String, Object?> record) =>
 const _flagNames = {
   'mode',
   'engine-binary',
+  'engine-binary-entry',
   'engine-label',
   'gen-snapshot',
   'gen-snapshot-label',
@@ -465,7 +605,11 @@ int run(List<String> args, {StringSink? err}) {
 
     final record = check(
       mode: need('mode'),
-      engineBinary: Artifact(need('engine-label'), need('engine-binary')),
+      engineBinary: Artifact(
+        need('engine-label'),
+        need('engine-binary'),
+        entry: flags['engine-binary-entry'],
+      ),
       genSnapshot: genSnapshot,
       enginePlatformDill: artifact('engine-platform-dill'),
       dartPlatformDill: artifact('dart-platform-dill'),
