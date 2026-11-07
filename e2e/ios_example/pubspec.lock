@@ -62,6 +62,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.5.2"
+  libremidi_flutter:
+    dependency: "direct main"
+    description:
+      name: libremidi_flutter
+      sha256: "0799545c79ee72c7d35edee22cbf9e04c4b482d59b0ac51062140a5924682e48"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.9.0"
   material_color_utilities:
     dependency: transitive
     description:
@@ -86,6 +94,20 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.1.8"
+  resource_plugin:
+    dependency: "direct main"
+    description:
+      path: "path_packages/resource_plugin"
+      relative: true
+    source: path
+    version: "0.0.1"
+  script_phase_plugin:
+    dependency: "direct main"
+    description:
+      path: "path_packages/script_phase_plugin"
+      relative: true
+    source: path
+    version: "0.0.1"
   sky_engine:
     dependency: transitive
     description: flutter

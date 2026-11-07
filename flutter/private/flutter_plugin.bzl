@@ -17,6 +17,13 @@ Platform-specific native dependencies use select() in BUILD files:
     )
 """
 
+load("@build_bazel_rules_apple//apple:providers.bzl", "AppleResourceInfo")
+
+# rules_apple has no public aspect that collects a library's resources (5.4.0),
+# so this is its internal one: a rules_apple upgrade can move or change it, and
+# the Apple build of any plugin then fails to load. Check it on every upgrade.
+# buildifier: disable=bzl-visibility
+load("@build_bazel_rules_apple//apple/internal/aspects:resource_aspect.bzl", "apple_resource_aspect")
 load("@build_bazel_rules_swift//swift:swift.bzl", "SwiftInfo")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo")
@@ -136,6 +143,9 @@ def plugin_contributions(ctx, package_name, package_root, declares_plugin):
             label = lib.label,
             cc_info = lib[CcInfo] if CcInfo in lib else None,
             swift_info = lib[SwiftInfo] if SwiftInfo in lib else None,
+            # The library's resources (a Swift package target's resource
+            # bundle), for the app's bundle.
+            resource_info = lib[AppleResourceInfo] if AppleResourceInfo in lib else None,
             unbuilt_native_code = _unbuilt_native_code(lib),
             package = package_name,
         ))
@@ -363,6 +373,10 @@ PLUGIN_PACKAGE_ATTRS = {
     "apple_libs": attr.label_list(
         doc = "Per-platform Apple swift_library targets (typically `flutter_apple_plugin_library`s) carrying the plugin's macOS / iOS native code. Each label's name must contain `macos` or `ios` so the runner aggregator can route it. Set this via `select()` on the target platform so only one platform's swift_library analyzes per build — both with the same module name in the same configuration would conflict on the produced `<module>.swiftmodule` output. A generated pub package may name a `flutter_unbuilt_plugin_library` instead, which fails the build of that platform (see `unbuilt_native_code.bzl`).",
         providers = [[CcInfo], [FlutterUnbuiltNativeCodeInfo]],
+        # The libraries' resources, as an app's bundling collects them from
+        # its own dependencies: the runner links the libraries through the
+        # aggregator, which carries them on (`flutter_apple_plugins_aggregator`).
+        aspects = [apple_resource_aspect],
     ),
     "linux_libs": attr.label_list(
         doc = "Linux plugin source bundles (`flutter_linux_plugin_library`). Propagated through `FlutterInfo.linux_plugin_libraries` so the Linux runner folds them into its `cc_common.compile()` pass. A generated pub package may name a `flutter_unbuilt_plugin_library` instead, which fails the Linux runner.",

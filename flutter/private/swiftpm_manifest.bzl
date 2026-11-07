@@ -541,6 +541,23 @@ def _target_build(dump, target, deps, platform, manifest_dir, problems):
     exclude = [within(p, "the excluded path") for p in target.get("exclude", [])]
     public_headers = within(target.get("publicHeadersPath") or "include", "the public header path")
 
+    # A build tool plugin runs code at build time (cargokit's builds a Rust
+    # crate), which rules_flutter does not.
+    for usage in target.get("pluginUsages") or []:
+        problems.append("its target `{}` uses the SwiftPM build plugin {}, which rules_flutter does not run".format(name, json.encode(usage)))
+
+    # Its resources, which SwiftPM puts in a bundle of their own.
+    resources = []
+    for resource in target.get("resources", []):
+        rule = resource.get("rule") or {}
+        path = within(resource.get("path", ""), "the resource")
+        if "copy" in rule:
+            resources.append(struct(path = path, copy = True))
+        elif "process" in rule:
+            resources.append(struct(path = path, copy = False))
+        else:
+            problems.append("its target `{}` has a resource rules_flutter does not bundle: {}".format(name, json.encode(resource)))
+
     settings = {attr: {c: [] for c in CONFIGURATIONS} for attr in _SETTING_ATTRS}
     target_mode = None
 
@@ -604,6 +621,8 @@ def _target_build(dump, target, deps, platform, manifest_dir, problems):
         name = name,
         deps = deps,
         remote_products = remote_products,
+        resources = resources,
+        resource_bundle = "{}_{}".format(dump.get("name", ""), name),
         swift_language_mode = swift_language_mode,
         dir = target_dir,
         sources = sources,
@@ -639,7 +658,9 @@ def swift_package_targets(dump, package_name, platform, manifest_dir):
         that is the plugin's module; and `targets`, the targets to build,
         each after those it depends on. A target is a struct: `name`;
         `deps`, the names of the package's targets it depends on;
-        `swift_language_mode`, `"5"` or `"6"`;
+        `swift_language_mode`, `"5"` or `"6"`; `resources`, structs with
+        `path` and `copy` (`.copy`, else `.process`); `resource_bundle`, the
+        name of the bundle SwiftPM puts them in (`<package>_<target>`);
         `remote_products`, the `(identity, product)` of each product of a
         remote package (`.package(url:)`) it depends on; `dir`, its
         source directory; `sources`, the files and directories its sources

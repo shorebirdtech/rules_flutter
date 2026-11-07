@@ -22,6 +22,11 @@ flutter.toolchain(flutter_version = "3.47.9")
 flutter_pub = use_extension("@rules_flutter//flutter/pub:extensions.bzl", "pub")
 flutter_pub.from_lock(
     name = "deps",
+    # A path package with no Bazel build, built from its pubspec.
+    build_from_pubspec = [
+        "resource_plugin",
+        "script_phase_plugin",
+    ],
     lock = "//:pubspec.lock",
     # The Swift packages the Apple plugins depend on (firebase_core's
     # firebase-ios-sdk), written by `bazel run @deps//swift:resolve`.

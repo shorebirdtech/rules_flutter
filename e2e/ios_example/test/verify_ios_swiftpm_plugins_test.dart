@@ -15,9 +15,22 @@
 /// target, and depends on `firebase-ios-sdk`, a remote Swift package that the
 /// workspace's `Package.resolved` pins: the app carries both targets and the
 /// Firebase SDK's code.
+///
+/// `libremidi_flutter` 0.9.0 is an FFI plugin (`ffiPlugin: true`, no plugin
+/// class) whose Swift package compiles its C++: the app carries the functions
+/// Dart looks up.
+///
+/// `script_phase_plugin` (a path package here) has a Package.swift and a
+/// podspec that runs a script phase; Flutter builds it from the Package.swift,
+/// and so the app carries its plugin class.
+///
+/// `resource_plugin` (a path package) has a resource, `greeting.txt`, which
+/// SwiftPM bundles as `resource_plugin_resource_plugin.bundle`: the app
+/// carries the bundle and the file in it.
 library;
 
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:rules_flutter_e2e_testing/ios_bundle.dart';
 import 'package:rules_flutter_e2e_testing/mach_o.dart';
@@ -60,6 +73,8 @@ void main() {
       ('firebase_core_objc', 'FLTFirebasePluginRegistry'),
       ('firebase-ios-sdk FirebaseCore', 'FIRApp'),
       ('firebase-ios-sdk FirebaseInstallations', 'FIRInstallations'),
+      ('libremidi_flutter', 'lrm_observer_new'),
+      ('script_phase_plugin', 'ScriptPhasePlugin'),
     ]) {
       check.expect(
         'a binary in the bundle carries the target $target',
@@ -68,12 +83,19 @@ void main() {
         ),
       );
     }
-    check.expect(
-      'no binary carries the macOS-only target',
-      condition: !binaries.any(
-        (f) => MachO(f.path).hasSymbolContaining('FVPCoreVideoDisplayLink'),
-      ),
-    );
+    check
+      ..expect(
+        'no binary carries the macOS-only target',
+        condition: !binaries.any(
+          (f) => MachO(f.path).hasSymbolContaining('FVPCoreVideoDisplayLink'),
+        ),
+      )
+      ..expect(
+        "the app carries resource_plugin's resource bundle",
+        condition: File(
+          '${bundle.path}/resource_plugin_resource_plugin.bundle/greeting.txt',
+        ).existsSync(),
+      );
     bundle.finish('All Swift package plugin checks passed.');
   } finally {
     bundle.dispose();

@@ -87,6 +87,7 @@ def flutter_apple_plugin_library(
         sdk_dylibs = [],
         clang_module = False,
         swift_language_mode = None,
+        data = [],
         visibility = None,
         tags = None,
         **kwargs):
@@ -157,6 +158,8 @@ def flutter_apple_plugin_library(
             module named `module_name` itself, as a C-family target of a
             Swift package is, rather than a Swift module that re-exports one
             (the default, which a plugin's registrant imports).
+        data: Resources the app carries for the library, such as the
+            `apple_resource_bundle` of a Swift package target's resources.
         swift_language_mode: `"6"` to compile the Swift sources in Swift 6
             mode, as SwiftPM compiles a target of a `swift-tools-version:
             6.0` package; Swift 5 (the default) otherwise.
@@ -240,6 +243,7 @@ def flutter_apple_plugin_library(
             conlyopts = conlyopts,
             linkopts = sdk_linkopts + linkopts,
             alwayslink = True,
+            data = data,
             deps = clang_deps,
             tags = tags,
             target_compatible_with = target_compatible_with,
@@ -323,6 +327,7 @@ def flutter_apple_plugin_library(
     swift_library(
         name = name,
         features = features,
+        data = data,
         srcs = swift_files,
         module_name = module_name,
         copts = copts + swift_copts + extra_copts,

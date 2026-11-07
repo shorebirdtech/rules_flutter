@@ -458,6 +458,31 @@ def _swift_language_mode_test_impl(ctx):
 
 swift_language_mode_test = unittest.make(_swift_language_mode_test_impl)
 
+def _resources_test_impl(ctx):
+    env = unittest.begin(ctx)
+    built = swift_package_targets(_dump([_target(resources = [
+        {"path": "Resources", "rule": {"process": {}}},
+        {"path": "data", "rule": {"copy": {}}},
+    ])], name = "foo_pkg"), "foo", "ios", "ios/foo")
+    asserts.equals(env, [], built.problems)
+    target = built.targets[0]
+    asserts.equals(env, [
+        ("ios/foo/Sources/foo/Resources", False),
+        ("ios/foo/Sources/foo/data", True),
+    ], [(r.path, r.copy) for r in target.resources])
+
+    # SwiftPM's bundle is named after the package and the target.
+    asserts.equals(env, "foo_pkg_foo", target.resource_bundle)
+
+    asserts.equals(env, [
+        "its target `foo` has a resource rules_flutter does not bundle: {\"path\":\"x\",\"rule\":{\"embedInCode\":{}}}",
+    ], swift_package_targets(_dump([_target(resources = [
+        {"path": "x", "rule": {"embedInCode": {}}},
+    ])]), "foo", "ios", "ios/foo").problems)
+    return unittest.end(env)
+
+resources_test = unittest.make(_resources_test_impl)
+
 def _swift_package_target_problems_test_impl(ctx):
     env = unittest.begin(ctx)
 
@@ -484,6 +509,11 @@ def _swift_package_target_problems_test_impl(ctx):
         _target(dependencies = [{"byName": ["sdk", None]}]),
         _target(name = "sdk", type = "binary"),
     ])))
+
+    # A build tool plugin, which would run code at build time.
+    asserts.equals(env, [
+        "its target `foo` uses the SwiftPM build plugin {\"plugin\":[\"Cargokit\",\"cargokit\"]}, which rules_flutter does not run",
+    ], problems(_dump([_target(pluginUsages = [{"plugin": ["Cargokit", "cargokit"]}])])))
 
     # A path that leaves the package, and a setting kind with no mapping.
     asserts.equals(env, [
@@ -520,5 +550,6 @@ def swiftpm_manifest_test_suite(name):
         swift_package_targets_test,
         remote_products_test,
         swift_language_mode_test,
+        resources_test,
         swift_package_target_problems_test,
     )

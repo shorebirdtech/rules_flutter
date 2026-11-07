@@ -314,9 +314,9 @@ Some plugins make a library with their platform's build system rather than from 
 
 - Gradle's `externalNativeBuild` (CMake or ndk-build) in `android/build.gradle(.kts)`, as `package:jni` uses.
 - cargokit, which `flutter_rust_bridge` plugins use to build a Rust crate with cargo: `apply from: ".../cargokit/gradle/plugin.gradle"` in the Gradle script, a podspec script phase running `cargokit/build_pod.sh`, or `apply_cargokit()` in a `CMakeLists.txt`.
-- Any other CocoaPods script phase (`s.script_phase`) in the plugin's podspec.
+- Any other CocoaPods script phase (`s.script_phase`) in the plugin's podspec, for a platform without a `Package.swift`, which Flutter builds instead (see below).
 - A `CMakeLists.txt` that sets `<plugin>_bundled_libraries`, Flutter's way of shipping a library the plugin's CMake build makes or downloads.
-- `ffiPlugin: true` for the platform in the pubspec, which tells Flutter to build the plugin's native sources into a library that Dart opens.
+- `ffiPlugin: true` for the platform in the pubspec, which tells Flutter to build the plugin's native sources into a library that Dart opens, unless the platform is iOS or macOS and the plugin has a `Package.swift` (see below).
 
 An app built without the library would fail at run time when the plugin loads it, so the build for that platform fails instead, naming the package, the platform and the mechanism. Builds for the plugin's other platforms are unaffected. To build the app, build the library with Bazel (a `rust_shared_library` of `rules_rust` for a Rust crate, a `cc_shared_library` for C or C++) and give the package a target that lists it in `native_deps`, in either of two ways:
 
@@ -329,7 +329,11 @@ An Apple plugin whose iOS or macOS side is a Swift package (`ios/<plugin>/Packag
 
 - its sources, as the target's `path`, `sources` and `exclude` give them, Swift, Objective-C, C and C++ alike;
 - its public headers (`publicHeadersPath`) and header search paths;
+- its resources (`.process` and `.copy`), in the bundle SwiftPM makes for them (`<package>_<target>.bundle`), which `Bundle.module` (Swift) and `SWIFTPM_MODULE_BUNDLE` (Objective-C) find;
+- its Swift language mode: the target's `swiftLanguageMode`, else the package's `swiftLanguageModes`, else Swift 6 for `swift-tools-version: 6.0` and Swift 5 before;
 - its settings: `.define` and `.unsafeFlags` in `cSettings`, `cxxSettings` and `swiftSettings`, `linkedFramework`, `linkedLibrary` and `.unsafeFlags` in `linkerSettings`, Swift's upcoming and experimental features, and the package's C and C++ language standards. A setting for `.when(configuration: .debug)` applies to builds other than `-c opt`, one for `.release` to `-c opt` (Flutter's profile and release modes), and one for other platforms to none.
+
+As in `flutter build`, a plugin with a `Package.swift` is built from it whatever its podspec does (a script phase included), and an FFI plugin (`ffiPlugin: true`) with one is linked into the app, where Dart finds its symbols with `DynamicLibrary.process()`.
 
 Only an iOS or macOS build reads the manifests, and it needs Xcode for it, as any Apple build does. Other platforms, and other hosts, never evaluate a manifest.
 

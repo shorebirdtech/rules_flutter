@@ -186,6 +186,18 @@ def _apple_manifest_dir(ctx, platform, shared_darwin_source):
     directory = "{}/{}".format("darwin" if shared_darwin_source else platform, ctx.attr.package_name)
     return directory if ctx.path(directory + "/Package.swift").exists else ""
 
+def _builds_apple_library(ctx, platform, info):
+    """Whether Flutter builds the plugin's `platform` code into the app.
+
+    A plugin class's code is compiled with the app, and so is an FFI plugin's
+    Swift package: Flutter links every plugin's package, and Dart finds its
+    symbols in the process.
+    """
+    if info.get("pluginClass", ""):
+        return True
+    shared_darwin = info.get("sharedDarwinSource", False) == True
+    return info.get("ffiPlugin", False) == True and bool(_apple_manifest_dir(ctx, platform, shared_darwin))
+
 def _fail_on_swiftpm_dependencies(package_name, platform, manifests):
     """Fails when a plugin's SwiftPM package depends on a directory outside the plugin.
 
@@ -491,7 +503,13 @@ def _platform_native_build(ctx, platform, info):
         mechanism = gradle_native_build(ctx.read(script), path) if script else ""
         build = "its Gradle build ({})".format(path) if script else "its Gradle build"
     elif platform in ("ios", "macos"):
-        directory = "darwin" if info.get("sharedDarwinSource", False) == True else platform
+        shared_darwin = info.get("sharedDarwinSource", False) == True
+        if _apple_manifest_dir(ctx, platform, shared_darwin):
+            # Flutter builds a plugin with a Package.swift with Swift Package
+            # Manager, whatever its podspec runs and whether or not it is an
+            # FFI plugin, and so does rules_flutter (`apple_plugin_repo.bzl`).
+            return ""
+        directory = "darwin" if shared_darwin else platform
         podspec = _podspec(ctx, directory)
         path = "{}/{}".format(directory, podspec.basename) if podspec else ""
         mechanism = podspec_native_build(ctx.read(podspec), path) if podspec else ""
@@ -528,7 +546,7 @@ def _detect_unbuilt_native_code(ctx, plugin_block):
                 platform,
                 mechanism,
             )
-        elif platform in ("ios", "macos") and info.get("pluginClass", ""):
+        elif platform in ("ios", "macos") and _builds_apple_library(ctx, platform, info):
             # The sources are compiled, so the plugin's Package.swift says
             # what else that compile needs: a directory outside the plugin fails the
             # fetch. (Its settings are the Apple repository's to apply.)
@@ -2221,7 +2239,7 @@ def _flutter_pub_package_impl(ctx):
         apple_layouts = {}
         apple_privacy_manifests = {}
         for platform, info, shared_darwin in (("ios", ios_info, ios_shared_darwin), ("macos", macos_info, macos_shared_darwin)):
-            if not info or not info.get("pluginClass", "") or platform in unbuilt_native_code:
+            if not info or not _builds_apple_library(ctx, platform, info) or platform in unbuilt_native_code:
                 continue
             srcs_dirs = _detect_apple_source_dirs(ctx, ctx.attr.package_name, platform, shared_darwin)
             manifest_dir = _apple_manifest_dir(ctx, platform, shared_darwin)
