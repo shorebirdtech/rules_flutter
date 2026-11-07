@@ -42,3 +42,20 @@ fonts_bundled_test = analysistest.make(
         "manifest": attr.string(mandatory = True),
     },
 )
+
+def _pkg_assets_owner_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    target = analysistest.target_under_test(env)
+    owned = sorted([
+        "{}:{}".format(entry.package_name, entry.asset_path)
+        for entry in target[FlutterInfo].pub_assets.to_list()
+    ])
+    asserts.equals(env, sorted(ctx.attr.assets), owned)
+    return analysistest.end(env)
+
+# `assets` lists each asset as `<package>:<path>`; the bundle keys it
+# `packages/<package>/<path>`.
+pkg_assets_owner_test = analysistest.make(
+    _pkg_assets_owner_test_impl,
+    attrs = {"assets": attr.string_list(mandatory = True)},
+)

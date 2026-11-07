@@ -182,11 +182,10 @@ def plugin_contributions(ctx, package_name, declares_plugin):
 
     # Pub-package asset contributions (fonts/assets/shaders from the parsed
     # flutter:-block, applicable to plugins that also ship icon fonts or
-    # bundled assets — same shape as flutter_library). asset_pkg uses the
-    # rule's `package_name` attr verbatim (empty = bare paths).
-    asset_pkg = ctx.attr.package_name
+    # bundled assets — same shape as flutter_library), under the Dart package
+    # name.
     extra_pub_fonts, extra_pub_assets, extra_pub_shaders = build_pub_contributions(
-        asset_pkg,
+        package_name,
         ctx.attr.fonts_json,
         ctx.attr.font_files,
         ctx.attr.pkg_assets,

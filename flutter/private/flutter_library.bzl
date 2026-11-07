@@ -404,14 +404,11 @@ def _flutter_library_impl(ctx):
     lib_root = derive_lib_root(ctx.label.workspace_root, ctx.label.package)
     package = flutter_package_record(ctx, package_name, lib_root)
 
-    # The asset-prefix package name uses the rule's `package_name` attr
-    # verbatim (empty string sentinel = bare paths, non-empty = `packages/X/`).
-    # Distinct from the Dart package name in DartInfo, which always derives a
-    # value via derive_package_name. Users opting out of asset prefixing leave
-    # `package_name` unset.
-    asset_pkg = ctx.attr.package_name
+    # Every asset, font and shader is bundled under `packages/<package_name>/`,
+    # the Dart package name in DartInfo, so `package:` imports and asset keys
+    # cannot disagree.
     extra_pub_fonts, extra_pub_assets, extra_pub_shaders = build_pub_contributions(
-        asset_pkg,
+        package_name,
         ctx.attr.fonts_json,
         ctx.attr.font_files,
         ctx.attr.pkg_assets,
@@ -537,15 +534,15 @@ flutter_library = rule(
             doc = "Dart language version (`<major>.<minor>`) for this package's `package_config.json` entry. Mirrors `dart_library`'s attribute. Empty string means defer to the toolchain default.",
         ),
         "fonts_json": attr.string(
-            doc = "JSON-encoded list of font-family declarations (mirrors `flutter.fonts` in pubspec.yaml). Each entry: `{family: str, fonts: [{asset: str, weight: int?, style: str?}]}`. The `asset` paths are package-relative and must each match a value in `font_files`. The asset bundle aggregator prefixes family + asset paths with `packages/<package_name>/` when this rule's `package_name` is non-empty (empty = bare paths, used for non-package contributions like the toolchain MaterialIcons target). An `asset` of `packages/<other>/<path>` whose file is not at that path in this package names a font of the package `<other>`: it stays at that path, as in a pubspec, and `font_files` gives the label of its file.",
+            doc = "JSON-encoded list of font-family declarations (mirrors `flutter.fonts` in pubspec.yaml). Each entry: `{family: str, fonts: [{asset: str, weight: int?, style: str?}]}`. The `asset` paths are package-relative and must each match a value in `font_files`. The asset bundle aggregator prefixes family + asset paths with `packages/<package_name>/` under the Dart package name (`package_name`, or the name derived from the BUILD file's path). An `asset` of `packages/<other>/<path>` whose file is not at that path in this package names a font of the package `<other>`: it stays at that path, as in a pubspec, and `font_files` gives the label of its file.",
             default = "",
         ),
         "font_files": attr.label_keyed_string_dict(
-            doc = "Map of font File label -> package-relative asset path. The string value must match an `asset` field in `fonts_json`. The file is bundled at `packages/<package_name>/<path>` (or bare `<path>` when `package_name` is empty).",
+            doc = "Map of font File label -> package-relative asset path. The string value must match an `asset` field in `fonts_json`. The file is bundled at `packages/<package_name>/<path>`.",
             allow_files = True,
         ),
         "pkg_assets": attr.label_keyed_string_dict(
-            doc = "Map of asset File label -> package-relative path (mirrors `flutter.assets` in pubspec.yaml). Bundled at `packages/<package_name>/<path>` (or bare `<path>` when `package_name` is empty); also included in AssetManifest.",
+            doc = "Map of asset File label -> package-relative path (mirrors `flutter.assets` in pubspec.yaml). Bundled at `packages/<package_name>/<path>`; also included in AssetManifest.",
             allow_files = True,
         ),
         "license_file": LICENSE_FILE_ATTR,
@@ -563,7 +560,7 @@ flutter_library = rule(
             allow_files = True,
         ),
         "pkg_shaders": attr.label_keyed_string_dict(
-            doc = "Map of shader File label -> package-relative path (mirrors `flutter.shaders` in pubspec.yaml). Routed through the impellerc compile and bundled at `packages/<package_name>/<path>` (or bare `<path>` when `package_name` is empty).",
+            doc = "Map of shader File label -> package-relative path (mirrors `flutter.shaders` in pubspec.yaml). Routed through the impellerc compile and bundled at `packages/<package_name>/<path>`.",
             allow_files = True,
         ),
     } | WEB_COMPILER_INDEPENDENT_ATTR,

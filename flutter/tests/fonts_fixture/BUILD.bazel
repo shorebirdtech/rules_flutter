@@ -1,5 +1,5 @@
 load("//flutter:defs.bzl", "flutter_library", "flutter_plugin")
-load("//flutter/tests:flutter_fonts_test.bzl", "font_mismatch_fails_test", "fonts_bundled_test")
+load("//flutter/tests:flutter_fonts_test.bzl", "font_mismatch_fails_test", "fonts_bundled_test", "pkg_assets_owner_test")
 
 flutter_library(
     name = "two_fonts",
@@ -24,20 +24,30 @@ fonts_bundled_test(
     target_under_test = ":two_fonts",
 )
 
+# No `package_name`: the Dart package name derived from the BUILD file's path
+# is the one the fonts and `pkg_assets` are bundled under, as `assets` is.
 flutter_library(
-    name = "bare_paths",
+    name = "derived_name",
     srcs = ["lib/fixture.dart"],
     font_files = {"fonts/Regular.ttf": "fonts/Regular.ttf"},
     fonts_json = '[{"family":"F","fonts":[{"asset":"fonts/Regular.ttf"}]}]',
+    pkg_assets = {"fonts/Bold.ttf": "assets/p.txt"},
     tags = ["manual"],
 )
 
 fonts_bundled_test(
-    name = "bare_paths_test",
+    name = "derived_name_test",
     size = "small",
-    files = {"fonts/Regular.ttf": "fonts/Regular.ttf"},
-    manifest = '[{"family":"F","fonts":[{"asset":"fonts/Regular.ttf"}]}]',
-    target_under_test = ":bare_paths",
+    files = {"packages/fonts_fixture/fonts/Regular.ttf": "fonts/Regular.ttf"},
+    manifest = '[{"family":"packages/fonts_fixture/F","fonts":[{"asset":"packages/fonts_fixture/fonts/Regular.ttf"}]}]',
+    target_under_test = ":derived_name",
+)
+
+pkg_assets_owner_test(
+    name = "derived_name_assets_test",
+    size = "small",
+    assets = ["fonts_fixture:assets/p.txt"],
+    target_under_test = ":derived_name",
 )
 
 # A font of another package keeps that package's path; only the family is this
