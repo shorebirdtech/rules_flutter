@@ -23,6 +23,15 @@ config_setting(
     visibility = ["//visibility:public"],
 )
 
+# The configuration a plugin's `Package.swift` calls Release
+# (`.when(configuration: .release)`): `flutter build` builds Xcode's Release
+# configuration in profile and release mode, and Bazel builds both with `-c opt`.
+config_setting(
+    name = "swiftpm_release",
+    values = {"compilation_mode": "opt"},
+    visibility = ["//visibility:public"],
+)
+
 # Profile mode: `-c opt` with `--@rules_flutter//flutter:profile`. Selects the
 # profile engine and gen_snapshot. The flag under any other `-c` matches
 # neither this nor `//flutter:release`; `flutter_application` refuses it.

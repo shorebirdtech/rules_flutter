@@ -244,7 +244,7 @@ def _member_content_test_impl(ctx):
         code_assets = [],
         has_unreplaced_hook = "",
         plugin_platforms_json = "{}",
-        apple_ios_srcs_dirs = ["ios/Classes"],
+        apple_libs = {"ios": "@flutter_pub_apple__rusty//:rusty_apple_ios"},
         unbuilt_native_code = {
             "linux": "linux message",
             "macos": "macos message",
@@ -257,13 +257,14 @@ def _member_content_test_impl(ctx):
         'flutter_unbuilt_plugin_library(\n    name = "rusty_linux",\n    message = "linux message",',
         'flutter_unbuilt_plugin_library(\n    name = "rusty_windows",\n    message = "windows message",',
         '"@platforms//os:macos": [\n            ":rusty_apple_macos",\n        ],',
-        '"@platforms//os:ios": [\n            ":rusty_apple_ios",\n        ],',
+        '"@platforms//os:ios": [\n            "@flutter_pub_apple__rusty//:rusty_apple_ios",\n        ],',
         'linux_libs = [":rusty_linux"],',
         'windows_libs = [":rusty_windows"],',
-        'flutter_apple_plugin_library(\n    name = "rusty_apple_ios",',
     ]:
         asserts.true(env, part in content, "%r not in:\n%s" % (part, content))
-    asserts.false(env, 'flutter_apple_plugin_library(\n    name = "rusty_apple_macos"' in content, content)
+
+    # The Apple libraries are the Apple repository's, not the spoke's.
+    asserts.false(env, "flutter_apple_plugin_library(" in content, content)
     return unittest.end(env)
 
 _member_content_test = unittest.make(_member_content_test_impl)

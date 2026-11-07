@@ -295,11 +295,20 @@ An app built without the library would fail at run time when the plugin loads it
 - A plugin overlay (`flutter_pub.plugin_overlays`): a `BUILD.bazel.tpl` for the package whose `flutter_plugin` lists the library. `@rules_flutter//ext/jni` does this for `package:jni`.
 - A `flutter_plugin` of your own, which `flutter_pub.from_lock(resolve = {"<package>": "//your:target"})` puts in place of the package (see "Packages in your workspace").
 
-### Apple plugins that set build settings
+### Apple plugins built from their Package.swift
 
-rules_flutter compiles an Apple plugin's sources itself; it does not evaluate the plugin's `Package.swift`. A manifest can set preprocessor macros and compiler flags (`.define` and `.unsafeFlags` in `cSettings`, `cxxSettings` or `swiftSettings`), and can compute them. `permission_handler_apple` reads your app's `Info.plist` and turns on a permission's code only when the plist declares its usage description: `NSCameraUsageDescription` sets `PERMISSION_CAMERA=1`. Built without its defines, the plugin compiles and reports every permission as denied, even one the user granted.
+An Apple plugin whose iOS or macOS side is a Swift package (`ios/<plugin>/Package.swift`, or `darwin/<plugin>/Package.swift` with `sharedDarwinSource`) is built as its manifest says, as `flutter build` does with Swift Package Manager. rules_flutter reads the manifest with Xcode's `swift package dump-package` and compiles the target of the plugin's library product (`flutter-qjs-next` for `flutter_qjs_next`):
 
-So an iOS or macOS app that links such a plugin fails at analysis, as for a plugin whose own build makes its library (above), listing each setting and the manifest that sets it. Other platforms, and Dart tests on the Mac, are unaffected. `geolocator_apple` is the exception: rules_flutter bundles an overlay for it that builds it as `flutter build` does without the `BYPASS_PERMISSION_LOCATION_ALWAYS` environment variable.
+- its sources, as the target's `path`, `sources` and `exclude` give them, Swift, Objective-C, C and C++ alike;
+- its public headers (`publicHeadersPath`) and header search paths;
+- its settings: `.define` and `.unsafeFlags` in `cSettings`, `cxxSettings` and `swiftSettings`, `linkedFramework`, `linkedLibrary` and `.unsafeFlags` in `linkerSettings`, Swift's upcoming and experimental features, and the package's C and C++ language standards. A setting for `.when(configuration: .debug)` applies to builds other than `-c opt`, one for `.release` to `-c opt` (Flutter's profile and release modes), and one for other platforms to none.
+
+Only an iOS or macOS build reads the manifests, and it needs Xcode for it, as any Apple build does. Other platforms, and other hosts, never evaluate a manifest.
+
+Some manifests rules_flutter cannot honour this way, and an iOS or macOS app that links such a plugin fails at analysis, saying why. Other platforms are unaffected.
+
+- A plugin's library product that is more than one target, or a target that depends on another target of the package (`video_player_avfoundation`, the Firebase plugins), a binary target, or a setting rules_flutter does not apply.
+- Settings the manifest can compute from what surrounds the build. A manifest that imports more than `PackageDescription`, or reads its `Context`, and sets `.define` or `.unsafeFlags` can compute them from your app or your environment, and rules_flutter evaluates it where it sees neither. `permission_handler_apple` reads your app's `Info.plist` and turns on a permission's code only when the plist declares its usage description: `NSCameraUsageDescription` sets `PERMISSION_CAMERA=1`. Built without its defines, the plugin compiles and reports every permission as denied, even one the user granted. `geolocator_apple` is the exception: rules_flutter bundles an overlay for it that builds it as `flutter build` does without the `BYPASS_PERMISSION_LOCATION_ALWAYS` environment variable.
 
 Supply the settings your app needs with a plugin overlay. Point `flutter_pub.plugin_overlays` at a directory, and write the package's `BUILD.bazel.tpl` under its major version. For `permission_handler_apple` 9.x in an app that asks for the camera and notifications:
 

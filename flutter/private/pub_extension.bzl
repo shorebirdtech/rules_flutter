@@ -14,6 +14,7 @@ load("@rules_dart//dart/ext:registry.bzl", "curated_code_assets")
 load("@rules_dart//dart/pub:pub_lock_package.bzl", "check_pub_archive_sha256", "check_pub_git_resolved_ref", "is_relative_git_url")
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_lock")
 load("//flutter/private:android_plugin_maven.bzl", "MAVEN_DEPS_FILE", "flutter_android_maven")
+load("//flutter/private:apple_plugin_repo.bzl", "apple_repo", "flutter_apple_plugin_repo")
 load("//flutter/private:flutter_face_repo.bzl", "flutter_face_repo")
 load("//flutter/private:flutter_framework_package.bzl", "flutter_framework_package")
 load("//flutter/private:flutter_gen_l10n_repo.bzl", "flutter_gen_l10n_repo")
@@ -470,6 +471,7 @@ def _declare_pub_packages(tags, sdks, user_overlay_roots):
                 )
         elif e.kind == HOSTED:
             flutter_pub_library_repo(name = library_repo(name), package_name = name)
+            flutter_apple_plugin_repo(name = apple_repo(name), package_name = name, version = e.version)
             flutter_pub_package(
                 name = source_repo(name),
                 package_name = name,
@@ -489,6 +491,7 @@ def _declare_pub_packages(tags, sdks, user_overlay_roots):
             )
         elif e.kind == GIT:
             flutter_pub_library_repo(name = library_repo(name), package_name = name)
+            flutter_apple_plugin_repo(name = apple_repo(name), package_name = name, version = e.version)
             flutter_pub_package(
                 name = source_repo(name),
                 package_name = name,
@@ -504,6 +507,7 @@ def _declare_pub_packages(tags, sdks, user_overlay_roots):
         elif e.kind == FLUTTER_SOURCE:
             for prefix, sdk in reps.items():
                 flutter_pub_library_repo(name = library_repo(name, prefix), package_name = name, prefix = prefix)
+                flutter_apple_plugin_repo(name = apple_repo(name, prefix), package_name = name, prefix = prefix, version = e.version)
                 flutter_pub_package(
                     name = source_repo(name, prefix),
                     package_name = name,

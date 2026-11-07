@@ -17,11 +17,27 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.19.1"
+  ffi:
+    dependency: transitive
+    description:
+      name: ffi
+      sha256: "6d7fd89431262d8f3125e81b50d3847a091d846eafcd4fdb88dd06f36d705a45"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.2.0"
   flutter:
     dependency: "direct main"
     description: flutter
     source: sdk
     version: "0.0.0"
+  flutter_qjs_next:
+    dependency: "direct main"
+    description:
+      name: flutter_qjs_next
+      sha256: e5fd66c5abdb3cb81cb6700e3cc203abb5353b244ec8e6a16ba0304faf1f21b5
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.5.2"
   material_color_utilities:
     dependency: transitive
     description:
@@ -61,3 +77,4 @@ packages:
     version: "10.3.0"
 sdks:
   dart: ">=3.13.0 <4.0.0"
+  flutter: ">=3.44.0"

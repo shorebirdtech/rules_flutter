@@ -330,6 +330,41 @@ flutter_ios_simulator_build_test(
     targets = [":testonly_app"],
 )
 
+# An app over a pub plugin whose Apple side is a Swift package, built as its
+# Package.swift says: `flutter_qjs_next` compiles QuickJS's C sources with
+# defines its manifest sets, one of them for debug builds only.
+flutter_application(
+    name = "swiftpm_plugins_flutter",
+    package_name = "ios_example",
+    main = "lib/swiftpm_plugins_main.dart",
+    min_os_version = IOS_MINIMUM_OS_VERSION,
+    deps = [
+        "@deps//:flutter",
+        "@deps//:flutter_qjs_next",
+    ],
+)
+
+flutter_ios_app(
+    name = "swiftpm_plugins_app",
+    application = ":swiftpm_plugins_flutter",
+    bundle_id = "com.rulesflutter.ios.example.swiftpm",
+    tags = ["manual"],
+)
+
+flutter_ios_simulator_build(
+    name = "swiftpm_plugins_simulator",
+    testonly = True,
+    targets = [":swiftpm_plugins_app"],
+)
+
+dart_test(
+    name = "verify_ios_swiftpm_plugins_test",
+    data = [":swiftpm_plugins_simulator"],
+    main = "test/verify_ios_swiftpm_plugins_test.dart",
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
+)
+
 # Both apps in one build_test: a per-package module-name collision is an
 # analysis-time action conflict, so it fails here rather than at runtime.
 flutter_ios_simulator_build_test(
@@ -457,6 +492,7 @@ flutter_library(
     srcs = glob(["lib/**/*.dart"]),
     deps = [
         "@deps//:flutter",
+        "@deps//:flutter_qjs_next",
         "@rules_flutter//flutter:material_icons",
     ],
 )

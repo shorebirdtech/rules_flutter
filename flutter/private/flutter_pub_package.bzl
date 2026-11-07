@@ -16,9 +16,11 @@ For each such package in a Flutter app's pubspec.lock this rule:
      step is the same.
   2. Reads the package's pubspec.yaml, as pub does (rules_dart's `read_pubspec`).
   3. Projects `flutter.plugin.platforms` via `flutter_plugin_block`.
-  4. Scans the extracted package tree for per-platform Apple source layouts
-     (modern SwiftPM `<platform>/<pkg>/Sources/<pkg>/`, shared-darwin
-     `darwin/Classes/`, legacy `<platform>/Classes/`).
+  4. Finds each Apple platform's library: the plugin's `Package.swift`
+     (`<platform>/<pkg>/`, or `darwin/<pkg>/` with `sharedDarwinSource`), or
+     without one its CocoaPods source layout (shared-darwin
+     `darwin/Classes/`, legacy `<platform>/Classes/`). The plugin's Apple
+     repository (`apple_plugin_repo.bzl`) builds those libraries.
   5. Branches on what the pubspec declares:
        - Nothing of Flutter's → emit rules_dart's `pub_package_member`.
          Pure-Dart pub packages reach consumers exactly as they do under
@@ -26,10 +28,9 @@ For each such package in a Flutter app's pubspec.lock this rule:
        - A `flutter.plugin` block, or fonts, assets, shaders or
          `uses-material-design` → emit a `flutter_pub_member`, a plugin whose
          `plugin_platforms_json` carries the parsed metadata when the block is
-         there, plus per-platform sub-targets: `:<pkg>_apple_macos` /
-         `:<pkg>_apple_ios` `flutter_apple_plugin_library` when Apple sources
-         are detected for the corresponding `flutter.plugin.platforms.<plat>`
-         entry.
+         there, which links the plugin's Apple libraries (`<pkg>_apple_macos`
+         and `<pkg>_apple_ios` of its Apple repository) for each of
+         `flutter.plugin.platforms.<plat>` that has one.
   6. Records the names the pubspec depends on, and the kind of member this is
      (`flutter_pub_index.bzl`), for the package's library repository.
 
@@ -50,6 +51,7 @@ load("@rules_dart//dart/pub:pub_graph.bzl", "write_pubspec_dependencies")
 load("@rules_dart//dart/pub:pub_lock_package.bzl", "fetch_pub_archive", "fetch_pub_git", "find_pub_license_file")
 load("@rules_dart//dart/pub:pubspec.bzl", "read_pubspec")
 load("//flutter/private:android_plugin_maven.bzl", "MAVEN_DEPS_FILE", "gradle_statements", "parse_gradle_maven_dependencies")
+load("//flutter/private:apple_plugin_repo.bzl", "APPLE_PLUGIN_FILE", "apple_library_label")
 load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url")
 load("//flutter/private:asset_variants.bzl", "variant_scale")
 load("//flutter/private:cmake_link_libraries.bzl", "parse_cmake_link_libraries")
@@ -57,7 +59,7 @@ load("//flutter/private:flutter_pub_index.bzl", "MEMBER_DART", "MEMBER_FILE", "M
 load("//flutter/private:flutter_pubspec.bzl", "flutter_assets_block", "flutter_licenses_block", "flutter_manifest_errors", "flutter_plugin_block")
 load("//flutter/private:framework_source.bzl", "check_dependency_constraints", "link_framework_package", "unset_message", "write_unset_stub")
 load("//flutter/private:pinned.bzl", "pinned")
-load("//flutter/private:swiftpm_manifest.bzl", "build_settings_message", "find_swiftpm_build_settings", "find_unsupported_swiftpm_dependencies")
+load("//flutter/private:swiftpm_manifest.bzl", "find_unsupported_swiftpm_dependencies")
 load(
     "//flutter/private:unbuilt_native_code.bzl",
     "cmake_native_build",
@@ -67,7 +69,7 @@ load(
     "unbuilt_native_code_message",
 )
 
-# Apple source extensions we sweep into the per-platform plugin library.
+# The Apple source extensions of a plugin's CocoaPods layout.
 _APPLE_SRC_EXTENSIONS = ("swift", "m", "mm", "h")
 
 # C/C++ source extensions for Linux/Windows plugin libraries.
@@ -173,6 +175,15 @@ def _apple_manifests(ctx, platform, shared_darwin_source):
             ))
     return manifests
 
+def _apple_manifest_dir(ctx, platform, shared_darwin_source):
+    """The directory of the plugin's `Package.swift` for `platform`, or "".
+
+    As Flutter looks for it: `<platform>/<plugin>/`, or `darwin/<plugin>/`
+    when the pubspec sets `sharedDarwinSource`.
+    """
+    directory = "{}/{}".format("darwin" if shared_darwin_source else platform, ctx.attr.package_name)
+    return directory if ctx.path(directory + "/Package.swift").exists else ""
+
 def _fail_on_swiftpm_dependencies(package_name, platform, manifests):
     """Fails when a plugin's SwiftPM package depends on other Swift packages.
 
@@ -199,27 +210,6 @@ def _fail_on_swiftpm_dependencies(package_name, platform, manifests):
                 manifest = manifest.path,
                 deps = "\n".join(["  - " + d for d in unsupported]),
             ))
-
-def _apple_build_settings(manifests):
-    """The build settings the plugin's manifests set, which rules_flutter does not supply.
-
-    Args:
-        manifests: The plugin's manifests for one platform (`_apple_manifests`).
-
-    Returns:
-        None when there are none; otherwise a struct with `manifest` (the
-        manifests that set them, comma-separated) and `settings`.
-    """
-    paths = []
-    settings = []
-    for manifest in manifests:
-        found = find_swiftpm_build_settings(manifest.content)
-        if found:
-            paths.append(manifest.path)
-            settings.extend(found)
-    if not settings:
-        return None
-    return struct(manifest = ", ".join(paths), settings = settings)
 
 def _detect_apple_include_dirs(ctx, source_dirs, package_name):
     """Collect SwiftPM-canonical public-header directories for the given Apple sources.
@@ -515,10 +505,9 @@ def _detect_unbuilt_native_code(ctx, plugin_block):
     Returns:
         A dict of platform (`android`, `ios`, `macos`, `linux`, `windows`) to
         the message its build fails with, for each platform the pubspec
-        declares whose build makes a library rules_flutter cannot, or
-        (iOS and macOS) whose Package.swift sets build settings rules_flutter
-        does not supply. Fails the fetch when that Package.swift depends on
-        other Swift packages.
+        declares whose build makes a library rules_flutter cannot. Fails the
+        fetch when an iOS or macOS Package.swift depends on other Swift
+        packages.
     """
     out = {}
     for platform in ("android", "ios", "macos", "linux", "windows"):
@@ -535,19 +524,10 @@ def _detect_unbuilt_native_code(ctx, plugin_block):
             )
         elif platform in ("ios", "macos") and info.get("pluginClass", ""):
             # The sources are compiled, so the plugin's Package.swift says
-            # what else that compile needs: other Swift packages, which fail
-            # the fetch, and build settings, which fail this platform's build.
+            # what else that compile needs: other Swift packages fail the
+            # fetch. (Its settings are the Apple repository's to apply.)
             manifests = _apple_manifests(ctx, platform, info.get("sharedDarwinSource", False) == True)
             _fail_on_swiftpm_dependencies(ctx.attr.package_name, platform, manifests)
-            settings = _apple_build_settings(manifests)
-            if settings:
-                out[platform] = build_settings_message(
-                    ctx.attr.package_name,
-                    ctx.attr.version,
-                    platform,
-                    settings.manifest,
-                    settings.settings,
-                )
     return out
 
 def make_android_native_build_content(message):
@@ -1138,10 +1118,7 @@ def make_flutter_member_build_content(
         code_assets,
         has_unreplaced_hook,
         plugin_platforms_json = "",
-        apple_macos_srcs_dirs = [],
-        apple_ios_srcs_dirs = [],
-        apple_macos_include_dirs = [],
-        apple_ios_include_dirs = [],
+        apple_libs = {},
         apple_macos_privacy_manifests = [],
         apple_ios_privacy_manifests = [],
         linux_src_dir = "",
@@ -1166,9 +1143,10 @@ def make_flutter_member_build_content(
     Emits the package's `flutter_pub_member`, a plugin when
     `plugin_platforms_json` is given and otherwise a package that only
     bundles fonts, assets and shaders (`cupertino_icons`), plus optional
-    per-platform `flutter_apple_plugin_library` (Apple) /
-    `flutter_linux_plugin_library` /
-    `flutter_windows_plugin_library` sub-targets.
+    per-platform `flutter_linux_plugin_library` /
+    `flutter_windows_plugin_library` sub-targets. Its Apple libraries are
+    in the plugin's Apple repository (`apple_plugin_repo.bzl`), which only
+    an iOS or macOS build fetches.
 
     Android Kotlin/Java sources are exposed via a sibling `android/`
     sub-package (see `make_android_subpackage_build_content`), which the
@@ -1194,10 +1172,8 @@ def make_flutter_member_build_content(
         has_unreplaced_hook: Path of a build hook nothing replaces, or "".
         plugin_platforms_json: JSON-encoded `flutter.plugin.platforms` dict;
             empty for a package that is not a plugin.
-        apple_macos_srcs_dirs: Detected macOS Apple source dirs.
-        apple_ios_srcs_dirs: Detected iOS Apple source dirs.
-        apple_macos_include_dirs: SwiftPM-style public-header dirs (macOS).
-        apple_ios_include_dirs: SwiftPM-style public-header dirs (iOS).
+        apple_libs: Dict of `ios` and `macos` to the label of the plugin's
+            library for that platform, in its Apple repository.
         apple_macos_privacy_manifests: `PrivacyInfo.xcprivacy` paths (macOS).
         apple_ios_privacy_manifests: `PrivacyInfo.xcprivacy` paths (iOS).
         linux_src_dir: Linux C/C++ source dir, or "".
@@ -1226,9 +1202,7 @@ def make_flutter_member_build_content(
         unbuilt_native_code: Dict of `ios`, `macos`, `linux` or `windows` to
             the message the build of that platform fails with: the plugin's
             native code there is made by a build rules_flutter does not run
-            (`unbuilt_native_code.bzl`), or its Package.swift sets build
-            settings rules_flutter does not supply (`swiftpm_manifest.bzl`).
-            That platform's library is a
+            (`unbuilt_native_code.bzl`). That platform's library is a
             `flutter_unbuilt_plugin_library` instead of compiled sources.
 
     Returns:
@@ -1240,8 +1214,6 @@ def make_flutter_member_build_content(
     linux_libs_arg = ""
     windows_libs_arg = ""
 
-    if apple_macos_srcs_dirs or apple_ios_srcs_dirs:
-        extra_loads.append('load("@rules_flutter//flutter:macos.bzl", "flutter_apple_plugin_library")')
     if unbuilt_native_code:
         extra_loads.append('load("@rules_flutter//flutter/private:unbuilt_native_code.bzl", "flutter_unbuilt_plugin_library")')
     if linux_src_dir:
@@ -1257,36 +1229,6 @@ def make_flutter_member_build_content(
     # web-only workspace never triggers the parse and doesn't pay the
     # @rules_android / @rules_kotlin cost, and an Android app links the
     # libraries of the plugins it depends on.
-
-    if apple_macos_srcs_dirs:
-        extra_targets.append("""
-flutter_apple_plugin_library(
-    name = "{name}_apple_macos",
-    srcs = {srcs},
-    includes = {includes},
-    module_name = "{name}",
-    platform = "macos",
-    visibility = ["//visibility:public"],
-)""".format(
-            name = name,
-            srcs = _glob_block(apple_macos_srcs_dirs, _APPLE_SRC_EXTENSIONS),
-            includes = repr(apple_macos_include_dirs),
-        ))
-
-    if apple_ios_srcs_dirs:
-        extra_targets.append("""
-flutter_apple_plugin_library(
-    name = "{name}_apple_ios",
-    srcs = {srcs},
-    includes = {includes},
-    module_name = "{name}",
-    platform = "ios",
-    visibility = ["//visibility:public"],
-)""".format(
-            name = name,
-            srcs = _glob_block(apple_ios_srcs_dirs, _APPLE_SRC_EXTENSIONS),
-            includes = repr(apple_ios_include_dirs),
-        ))
 
     if linux_src_dir:
         linux_srcs, linux_hdrs = _split_glob_block([linux_src_dir], _DESKTOP_C_EXTS, _DESKTOP_HDR_EXTS)
@@ -1335,11 +1277,13 @@ flutter_unbuilt_plugin_library(
     visibility = ["//visibility:public"],
 )""".format(name = unbuilt_names[platform], message = repr(unbuilt_native_code[platform])))
 
-    has_macos_lib = bool(apple_macos_srcs_dirs) or "macos" in unbuilt_native_code
-    has_ios_lib = bool(apple_ios_srcs_dirs) or "ios" in unbuilt_native_code
-    if has_macos_lib or has_ios_lib:
-        macos_branch = '            ":{name}_apple_macos",'.format(name = name) if has_macos_lib else ""
-        ios_branch = '            ":{name}_apple_ios",'.format(name = name) if has_ios_lib else ""
+    apple_lib_labels = dict(apple_libs)
+    for platform in ("ios", "macos"):
+        if platform in unbuilt_native_code:
+            apple_lib_labels[platform] = ":" + unbuilt_names[platform]
+    if apple_lib_labels:
+        macos_branch = "            {},".format(repr(apple_lib_labels["macos"])) if "macos" in apple_lib_labels else ""
+        ios_branch = "            {},".format(repr(apple_lib_labels["ios"])) if "ios" in apple_lib_labels else ""
         apple_libs_arg = """    apple_libs = select({{
         "@platforms//os:macos": [
 {macos_branch}
@@ -2201,10 +2145,6 @@ def _flutter_pub_package_impl(ctx):
         return ctx.repo_metadata(reproducible = True)
 
     if plugin_block.present:
-        # Detect Apple sources per platform when pluginClass is set.
-        apple_macos_srcs_dirs = []
-        apple_ios_srcs_dirs = []
-
         macos_info = plugin_block.platforms.get("macos", {})
         ios_info = plugin_block.platforms.get("ios", {})
         linux_info = plugin_block.platforms.get("linux", {})
@@ -2213,51 +2153,31 @@ def _flutter_pub_package_impl(ctx):
         macos_shared_darwin = macos_info.get("sharedDarwinSource", False) if macos_info else False
         ios_shared_darwin = ios_info.get("sharedDarwinSource", False) if ios_info else False
 
-        apple_macos_include_dirs = []
-        apple_ios_include_dirs = []
-        apple_macos_privacy_manifests = []
-        apple_ios_privacy_manifests = []
-
         # A platform whose library the plugin's own build makes by means
-        # rules_flutter does not run, or whose Package.swift sets build
-        # settings rules_flutter does not supply, gets a stand-in for its
-        # library that fails that platform's build; its sources are not
-        # compiled.
+        # rules_flutter does not run gets a stand-in for its library that
+        # fails that platform's build; its sources are not compiled.
         unbuilt_native_code = _detect_unbuilt_native_code(ctx, plugin_block)
 
-        if macos_info and macos_info.get("pluginClass", "") and "macos" not in unbuilt_native_code:
-            apple_macos_srcs_dirs = _detect_apple_source_dirs(
-                ctx,
-                ctx.attr.package_name,
-                "macos",
-                macos_shared_darwin,
-            )
-            apple_macos_include_dirs = _detect_apple_include_dirs(
-                ctx,
-                apple_macos_srcs_dirs,
-                ctx.attr.package_name,
-            )
-            apple_macos_privacy_manifests = _detect_apple_privacy_manifests(
-                ctx,
-                apple_macos_srcs_dirs,
-            )
-
-        if ios_info and ios_info.get("pluginClass", "") and "ios" not in unbuilt_native_code:
-            apple_ios_srcs_dirs = _detect_apple_source_dirs(
-                ctx,
-                ctx.attr.package_name,
-                "ios",
-                ios_shared_darwin,
-            )
-            apple_ios_include_dirs = _detect_apple_include_dirs(
-                ctx,
-                apple_ios_srcs_dirs,
-                ctx.attr.package_name,
-            )
-            apple_ios_privacy_manifests = _detect_apple_privacy_manifests(
-                ctx,
-                apple_ios_srcs_dirs,
-            )
+        # Each Apple platform with a plugin class has a library in the
+        # plugin's Apple repository, built from its Package.swift or, without
+        # one, from its CocoaPods source layout.
+        apple_layouts = {}
+        apple_privacy_manifests = {}
+        for platform, info, shared_darwin in (("ios", ios_info, ios_shared_darwin), ("macos", macos_info, macos_shared_darwin)):
+            if not info or not info.get("pluginClass", "") or platform in unbuilt_native_code:
+                continue
+            srcs_dirs = _detect_apple_source_dirs(ctx, ctx.attr.package_name, platform, shared_darwin)
+            manifest_dir = _apple_manifest_dir(ctx, platform, shared_darwin)
+            if not manifest_dir and not srcs_dirs:
+                continue
+            apple_layouts[platform] = {
+                "include_dirs": [] if manifest_dir else _detect_apple_include_dirs(ctx, srcs_dirs, ctx.attr.package_name),
+                "manifest_dir": manifest_dir,
+                "srcs_dirs": [] if manifest_dir else srcs_dirs,
+            }
+            apple_privacy_manifests[platform] = _detect_apple_privacy_manifests(ctx, srcs_dirs)
+        if apple_layouts:
+            ctx.file(APPLE_PLUGIN_FILE, json.encode({"platforms": apple_layouts}))
 
         # Linux/Windows desktop sources: scan whenever pluginClass is
         # set on that platform. The plugin's own `linux/`/`windows/`
@@ -2312,12 +2232,12 @@ def _flutter_pub_package_impl(ctx):
             code_assets = ctx.attr.code_assets,
             has_unreplaced_hook = unreplaced_hook,
             plugin_platforms_json = plugin_platforms_json,
-            apple_macos_srcs_dirs = apple_macos_srcs_dirs,
-            apple_ios_srcs_dirs = apple_ios_srcs_dirs,
-            apple_macos_include_dirs = apple_macos_include_dirs,
-            apple_ios_include_dirs = apple_ios_include_dirs,
-            apple_macos_privacy_manifests = apple_macos_privacy_manifests,
-            apple_ios_privacy_manifests = apple_ios_privacy_manifests,
+            apple_libs = {
+                platform: apple_library_label(ctx.attr.package_name, platform, ctx.attr.prefix)
+                for platform in apple_layouts
+            },
+            apple_macos_privacy_manifests = apple_privacy_manifests.get("macos", []),
+            apple_ios_privacy_manifests = apple_privacy_manifests.get("ios", []),
             linux_src_dir = linux_src_dir,
             windows_src_dir = windows_src_dir,
             fonts_json_str = fonts_json_str,

@@ -1,7 +1,16 @@
 """Unit tests for swiftpm_manifest.bzl."""
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
-load("//flutter/private:swiftpm_manifest.bzl", "build_settings_message", "find_swiftpm_build_settings", "find_unsupported_swiftpm_dependencies")
+load(
+    "//flutter/private:swiftpm_manifest.bzl",
+    "build_settings_message",
+    "find_manifest_computations",
+    "find_swiftpm_build_settings",
+    "find_unsupported_swiftpm_dependencies",
+    "shell_quote_copt",
+    "swift_package_message",
+    "swift_package_target",
+)
 
 def _plain_test_impl(ctx):
     env = unittest.begin(ctx)
@@ -167,10 +176,12 @@ def _build_settings_message_test_impl(ctx):
         "ios",
         "ios/permission_handler_apple/Package.swift",
         ["define PERMISSION_CAMERA = enabled(\"PERMISSION_CAMERA\")", "define PERMISSION_PHOTOS = x"],
+        ["import Foundation"],
     )
     for fragment in [
         "package:permission_handler_apple 9.6.5 sets build settings in ios/permission_handler_apple/Package.swift",
         "\n    define PERMISSION_CAMERA = enabled(\"PERMISSION_CAMERA\")\n    define PERMISSION_PHOTOS = x\n",
+        "from what surrounds the build (import Foundation)",
         "the iOS build stops here",
         "flutter_pub.plugin_overlays",
         "`-D<NAME>`",
@@ -179,6 +190,190 @@ def _build_settings_message_test_impl(ctx):
     return unittest.end(env)
 
 build_settings_message_test = unittest.make(_build_settings_message_test_impl)
+
+def _computations_test_impl(ctx):
+    env = unittest.begin(ctx)
+    asserts.equals(env, [], find_manifest_computations("""
+// swift-tools-version: 5.9
+// import Foundation, in a comment
+import PackageDescription
+let package = Package(name: "foo", targets: [.target(name: "foo", cSettings: [.define("A")])])
+"""))
+    asserts.equals(env, ["import Foundation", "import Darwin"], find_manifest_computations("""
+import PackageDescription
+@preconcurrency import Foundation
+import struct Darwin.size_t
+let v = ProcessInfo.processInfo.environment["X"] ?? "0"
+"""))
+    asserts.equals(env, ["Context"], find_manifest_computations("""
+import PackageDescription
+let dir = Context.packageDirectory
+"""))
+
+    # A string that says `import` is not an import.
+    asserts.equals(env, [], find_manifest_computations("""
+import PackageDescription
+let note = "do not import Foundation here"
+"""))
+    return unittest.end(env)
+
+computations_test = unittest.make(_computations_test_impl)
+
+def _shell_quote_copt_test_impl(ctx):
+    env = unittest.begin(ctx)
+    asserts.equals(env, "-DA=1", shell_quote_copt("-DA=1"))
+    asserts.equals(env, "'-DV=\"x y\"'", shell_quote_copt("-DV=\"x y\""))
+    asserts.equals(env, "'-DQ='\\''q'\\'''", shell_quote_copt("-DQ='q'"))
+    asserts.equals(env, "'-DP=$$HOME'", shell_quote_copt("-DP=$HOME"))
+    return unittest.end(env)
+
+shell_quote_copt_test = unittest.make(_shell_quote_copt_test_impl)
+
+def _dump(targets, products = None, **kwargs):
+    """A `dump-package` result: the plugin `foo` with `targets`."""
+    result = {
+        "name": "foo",
+        "products": products if products != None else [
+            {"name": "foo", "targets": ["foo"], "type": {"library": ["automatic"]}},
+        ],
+        "targets": targets,
+    }
+    result.update(kwargs)
+    return result
+
+def _target(**kwargs):
+    t = {
+        "dependencies": [{"product": ["FlutterFramework", "FlutterFramework", None, None]}],
+        "exclude": [],
+        "name": "foo",
+        "path": None,
+        "publicHeadersPath": None,
+        "resources": [],
+        "settings": [],
+        "sources": None,
+        "type": "regular",
+    }
+    t.update(kwargs)
+    return t
+
+def _swift_package_target_test_impl(ctx):
+    env = unittest.begin(ctx)
+
+    # What `swift package dump-package` prints for flutter_qjs_next's shape:
+    # defines in both C and C++ settings, one of them for Debug only, header
+    # search paths, a linked library and the package's C++ standard; plus
+    # settings for the other platform and the other configuration.
+    target = swift_package_target(_dump([_target(
+        exclude = ["quickjs/VERSION.txt"],
+        path = "Sources/foo",
+        publicHeadersPath = "include",
+        settings = [
+            {"kind": {"headerSearchPath": {"_0": "."}}, "tool": "c"},
+            {"kind": {"headerSearchPath": {"_0": "quickjs"}}, "tool": "c"},
+            {"kind": {"define": {"_0": "CONFIG_VERSION=\"2026-06-04\""}}, "tool": "c"},
+            {"condition": {"config": "debug", "platformNames": []}, "kind": {"define": {"_0": "DUMP_LEAKS=1"}}, "tool": "c"},
+            {"kind": {"define": {"_0": "CONFIG_VERSION=\"2026-06-04\""}}, "tool": "cxx"},
+            {"condition": {"platformNames": ["macos"]}, "kind": {"define": {"_0": "MAC_ONLY"}}, "tool": "c"},
+            {"condition": {"platformNames": ["ios"]}, "kind": {"define": {"_0": "IOS_ONLY"}}, "tool": "c"},
+            {"condition": {"config": "release", "platformNames": []}, "kind": {"unsafeFlags": {"_0": ["-O3"]}}, "tool": "cxx"},
+            {"kind": {"define": {"_0": "SWIFT_FLAG"}}, "tool": "swift"},
+            {"kind": {"enableUpcomingFeature": {"_0": "ExistentialAny"}}, "tool": "swift"},
+            {"kind": {"linkedLibrary": {"_0": "c++"}}, "tool": "linker"},
+            {"kind": {"linkedFramework": {"_0": "Photos"}}, "tool": "linker"},
+            {"kind": {"unsafeFlags": {"_0": ["-weak_framework", "XCTest"]}}, "tool": "linker"},
+        ],
+    )], cxxLanguageStandard = "c++17", cLanguageStandard = None), "foo", "ios", "ios/foo")
+    asserts.equals(env, [], target.problems)
+    asserts.equals(env, "ios/foo/Sources/foo", target.dir)
+    asserts.equals(env, ["ios/foo/Sources/foo"], target.sources)
+    asserts.equals(env, ["ios/foo/Sources/foo/quickjs/VERSION.txt"], target.exclude)
+    asserts.equals(env, "ios/foo/Sources/foo/include", target.public_headers)
+    asserts.equals(env, [
+        "ios/foo/Sources/foo/include",
+        "ios/foo/Sources/foo",
+        "ios/foo/Sources/foo/quickjs",
+    ], target.includes)
+    asserts.equals(env, {
+        "": ["-DCONFIG_VERSION=\"2026-06-04\"", "-DIOS_ONLY"],
+        "debug": ["-DDUMP_LEAKS=1"],
+        "release": [],
+    }, target.clang_copts)
+    asserts.equals(env, {"": ["-std=c++17"], "debug": [], "release": ["-O3"]}, target.cxxopts)
+    asserts.equals(env, {"": [], "debug": [], "release": []}, target.conlyopts)
+    asserts.equals(env, ["-DSWIFT_FLAG", "-enable-upcoming-feature", "ExistentialAny"], target.swift_copts[""])
+    asserts.equals(env, ["c++"], target.sdk_dylibs[""])
+    asserts.equals(env, ["Photos"], target.sdk_frameworks[""])
+    asserts.equals(env, ["-weak_framework", "XCTest"], target.linkopts[""])
+
+    # Named sources, and a target at the package's root.
+    target = swift_package_target(_dump([_target(
+        path = ".",
+        sources = ["Sources/foo/Plugin.mm", "Sources/foo/cpp"],
+        publicHeadersPath = "Sources/foo",
+    )]), "foo", "macos", "darwin/foo")
+    asserts.equals(env, [], target.problems)
+    asserts.equals(env, "darwin/foo", target.dir)
+    asserts.equals(env, ["darwin/foo/Sources/foo/Plugin.mm", "darwin/foo/Sources/foo/cpp"], target.sources)
+    asserts.equals(env, "darwin/foo/Sources/foo", target.public_headers)
+    return unittest.end(env)
+
+swift_package_target_test = unittest.make(_swift_package_target_test_impl)
+
+def _swift_package_target_problems_test_impl(ctx):
+    env = unittest.begin(ctx)
+
+    def problems(dump, platform = "ios"):
+        return swift_package_target(dump, "foo", platform, "ios/foo").problems
+
+    # Flutter links the product named after the plugin.
+    asserts.equals(env, [
+        "it has no library product named `foo`, which Flutter links a plugin's package by",
+    ], problems(_dump([_target()], products = [{"name": "Foo", "targets": ["foo"], "type": {"library": ["automatic"]}}])))
+
+    # firebase_core's shape: the product is two targets.
+    asserts.equals(env, [
+        "its `foo` product is the targets `foo`, `foo_objc`, and rules_flutter builds a plugin's package only as one target",
+    ], problems(_dump(
+        [_target(), _target(name = "foo_objc")],
+        products = [{"name": "foo", "targets": ["foo", "foo_objc"], "type": {"library": ["automatic"]}}],
+    )))
+
+    # video_player_avfoundation's: the target depends on other targets of the
+    # package, one of them on this platform only.
+    dump = _dump([
+        _target(dependencies = [
+            {"target": ["foo_ios", {"platformNames": ["ios"]}]},
+            {"byName": ["foo_objc", None]},
+        ]),
+        _target(name = "foo_ios"),
+        _target(name = "foo_objc"),
+    ])
+    asserts.equals(env, [
+        "its target `foo` depends on its target `foo_ios`, and rules_flutter builds a plugin's package only as one target",
+        "its target `foo` depends on its target `foo_objc`, and rules_flutter builds a plugin's package only as one target",
+    ], problems(dump))
+    asserts.equals(env, [
+        "its target `foo` depends on its target `foo_objc`, and rules_flutter builds a plugin's package only as one target",
+    ], problems(dump, "macos"))
+
+    # A path that leaves the package, and a setting kind with no mapping.
+    asserts.equals(env, [
+        "its target `foo` names the header search path `../../../x`, outside the package",
+        "its target `foo` has a swift setting rules_flutter does not apply: {\"strictMemorySafety\":{}}",
+    ], problems(_dump([_target(settings = [
+        {"kind": {"headerSearchPath": {"_0": "../../../x"}}, "tool": "c"},
+        {"kind": {"strictMemorySafety": {}}, "tool": "swift"},
+    ])])))
+
+    message = swift_package_message("foo", "1.0.0", "macos", "darwin/foo/Package.swift", ["a", "b"])
+    for fragment in [
+        "package:foo 1.0.0 cannot be built for macOS as its darwin/foo/Package.swift says:\n    a\n    b\n",
+        "flutter_pub.plugin_overlays",
+    ]:
+        asserts.true(env, fragment in message, fragment + " not in " + message)
+    return unittest.end(env)
+
+swift_package_target_problems_test = unittest.make(_swift_package_target_problems_test_impl)
 
 def swiftpm_manifest_test_suite(name):
     unittest.suite(
@@ -190,4 +385,8 @@ def swiftpm_manifest_test_suite(name):
         computed_defines_test,
         literal_settings_test,
         build_settings_message_test,
+        computations_test,
+        shell_quote_copt_test,
+        swift_package_target_test,
+        swift_package_target_problems_test,
     )
