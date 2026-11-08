@@ -13,6 +13,11 @@ List<int> _u32(int v) => [
   (v >> 24) & 0xff,
 ];
 
+/// What [zip] writes as an entry's CRC-32: not the real checksum, which
+/// nothing here computes, but equal exactly for equal [content] in these tests.
+int fakeCrc(List<int> content) =>
+    content.fold(content.length, (h, b) => (h * 31 + b) & 0xffffffff);
+
 /// A zip archive of [entries]: each a name, a compression method, the bytes
 /// to store and the length of the local header's extra field, which is how
 /// zipalign pads an entry's data to an alignment.
@@ -42,8 +47,8 @@ Uint8List zip(List<(String, int, List<int>, int)> entries) {
       ..add(_u16(20)) // version needed
       ..add(_u16(0))
       ..add(_u16(method))
-      ..add(_u32(0))
-      ..add(_u32(0))
+      ..add(_u32(0)) // time, date
+      ..add(_u32(fakeCrc(content)))
       ..add(_u32(content.length))
       ..add(_u32(content.length))
       ..add(_u16(encoded.length))
@@ -86,6 +91,7 @@ void main() {
     // 30-byte local header, then the name, then the extra field.
     expect(entries.first.dataOffset, 30 + 23 + 7);
     expect(entries.last.dataOffset, 30 + 23 + 7 + 3 + 30 + 11);
+    expect(entries.last.crc32, fakeCrc([4, 5]));
   });
 
   test('rejects what is not a zip archive', () {

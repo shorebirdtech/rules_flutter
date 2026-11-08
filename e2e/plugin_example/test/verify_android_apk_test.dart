@@ -18,8 +18,10 @@ import 'dart:io';
 import 'package:rules_flutter_e2e_testing/apk.dart';
 import 'package:rules_flutter_e2e_testing/bundle_check.dart';
 import 'package:rules_flutter_e2e_testing/elf.dart';
+import 'package:rules_flutter_e2e_testing/jar_library.dart';
 import 'package:rules_flutter_e2e_testing/runfiles_paths.dart';
 import 'package:rules_flutter_e2e_testing/zip_entries.dart';
+import 'package:runfiles/runfiles.dart';
 
 /// Classes the plugin closure requires at runtime, keyed by what ships them.
 /// One representative class per source — if the class is not *defined* in
@@ -104,15 +106,14 @@ void main() {
   }
 
   // The app's classes before R8 renames them.
-  final deployJar = {
-    for (final entry in zipEntries(
-      File(
-        requireRunfile('plugin_android_deploy.jar', what: 'deploy jar'),
-      ).readAsBytesSync(),
-    ))
-      entry.name,
-  };
+  final deployJarEntries = zipEntries(
+    File(
+      requireRunfile('plugin_android_deploy.jar', what: 'deploy jar'),
+    ).readAsBytesSync(),
+  );
+  final deployJar = {for (final entry in deployJarEntries) entry.name};
   _verifyDatastoreVariant(check, deployJar);
+  _verifyOneKotlinStdlib(check, deployJarEntries);
   check
     ..expect(
       'the app has the plugin class of kotlin_only_plugin, a `path` package '
@@ -122,6 +123,32 @@ void main() {
       ),
     )
     ..finish('\nAll plugin_example APK verification checks passed.');
+}
+
+/// Checks that the app carries one Kotlin standard library, as Gradle does:
+/// the jar `org.jetbrains.kotlin:kotlin-stdlib` resolves to, and no class in
+/// its packages that another kotlin-stdlib defines differently or adds. Kotlin
+/// libraries also link rules_kotlin's own stdlib.
+void _verifyOneKotlinStdlib(BundleCheck check, List<ZipEntry> deployJar) {
+  final jars = Platform.environment['KOTLIN_STDLIB_RUNFILES']!
+      .split(' ')
+      .where((path) => path.endsWith('.jar') && !path.endsWith('-sources.jar'))
+      .toList();
+  if (jars.length != 1) {
+    check.fail('kotlin-stdlib resolves to one jar, not $jars');
+    return;
+  }
+  final stdlib = zipEntries(
+    File(Runfiles.create().rlocation(jars.single)).readAsBytesSync(),
+  );
+  final foreign = classesNotFrom(deployJar, stdlib);
+  check.expect(
+    "the app's Kotlin standard library is all ${jars.single.split('/').last}",
+    condition: foreign.isEmpty,
+    detail:
+        '${foreign.length} classes of another version, such as '
+        '${foreign.take(3).join(', ')}',
+  );
 }
 
 /// Checks that the app's classes, before R8 renames them, come from

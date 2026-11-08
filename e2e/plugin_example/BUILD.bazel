@@ -596,7 +596,8 @@ dart_test(
 # packaged .so is ELF for the ABI of its directory. Verifies the arm64 APK
 # (release), the -c dbg APK, asserting INTERNET is present iff debug, the
 # armeabi-v7a and x86_64 APKs, asserting each carries no ABI but its own, and
-# the fat APK, asserting it carries all three.
+# the fat APK, asserting it carries all three. And that the app's Kotlin
+# standard library is the one `kotlin-stdlib` resolves to, not a mix of two.
 dart_test(
     name = "verify_android_apk_test",
     data = [
@@ -607,11 +608,18 @@ dart_test(
         ":plugin_android_fat",
         ":plugin_android_x86_64",
         "@bazel_tools//tools/zip:zipper",
+        "@rules_android_maven//:org_jetbrains_kotlin_kotlin_stdlib",
     ],
-    env = {"ZIPPER_RUNFILE": "$(rlocationpath @bazel_tools//tools/zip:zipper)"},
+    env = {
+        "KOTLIN_STDLIB_RUNFILES": "$(rlocationpaths @rules_android_maven//:org_jetbrains_kotlin_kotlin_stdlib)",
+        "ZIPPER_RUNFILE": "$(rlocationpath @bazel_tools//tools/zip:zipper)",
+    },
     main = "test/verify_android_apk_test.dart",
     tags = ["android"],
-    deps = ["@rules_flutter//tools/e2e_testing"],
+    deps = [
+        "@rules_dart//dart/runfiles",
+        "@rules_flutter//tools/e2e_testing",
+    ],
 )
 
 # Runtime verifier for the Android APK. Installs on a connected emulator or

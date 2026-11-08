@@ -173,7 +173,8 @@ maven.install(
         # kotlin.coroutines.Continuation (PortContinuation returns
         # Dispatchers.getIO()), so every workspace using a jnigen-based
         # plugin needs these on the plugin's compile classpath and in the
-        # APK dex.
+        # APK dex. kotlin-stdlib's version here is not the app's: see the
+        # override of it below.
         "org.jetbrains.kotlin:kotlin-stdlib:2.1.20",
         "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0",
     ],
@@ -232,6 +233,27 @@ maven.artifact(
         ("androidx.lifecycle:lifecycle-common", "androidx_lifecycle_lifecycle_common_jvm"),
         ("org.jetbrains.kotlinx:kotlinx-coroutines-core", "org_jetbrains_kotlinx_kotlinx_coroutines_core_jvm"),
         ("org.jetbrains.kotlinx:kotlinx-serialization-core", "org_jetbrains_kotlinx_kotlinx_serialization_core_jvm"),
+    ]
+]
+
+# One Kotlin standard library in an app, the compiler's. rules_kotlin links its
+# compiler's stdlib into every Kotlin library it builds (the runner, the
+# registrant, plugins), so an app also linking the Maven kotlin-stdlib that
+# androidx and plugins ask for would carry two versions mixed. The Kotlin
+# Gradle plugin adds its compiler's stdlib to the app and aligns
+# kotlin-stdlib-jdk7 and -jdk8 to it; Gradle then ships the highest version
+# anything asks for, which is the compiler's unless a library needs a newer
+# stdlib than the compiler is.
+[
+    maven.override(
+        name = "rules_android_maven",
+        coordinates = "org.jetbrains.kotlin:" + artifact,
+        target = "@rules_kotlin//kotlin/compiler:" + artifact,
+    )
+    for artifact in [
+        "kotlin-stdlib",
+        "kotlin-stdlib-jdk7",
+        "kotlin-stdlib-jdk8",
     ]
 ]
 

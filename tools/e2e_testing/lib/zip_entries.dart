@@ -6,7 +6,12 @@ import 'dart:typed_data';
 
 /// One entry of a zip archive's central directory.
 class ZipEntry {
-  ZipEntry(this.name, {required this.method, required this.dataOffset});
+  ZipEntry(
+    this.name, {
+    required this.method,
+    required this.dataOffset,
+    required this.crc32,
+  });
 
   /// The entry's path in the archive.
   final String name;
@@ -16,6 +21,10 @@ class ZipEntry {
 
   /// Where the entry's data starts in the archive, after its local header.
   final int dataOffset;
+
+  /// The CRC-32 of the entry's uncompressed data: equal for entries with the
+  /// same content, whichever archive and compression they come from.
+  final int crc32;
 
   /// Whether the entry is stored uncompressed.
   bool get stored => method == 0;
@@ -60,6 +69,7 @@ List<ZipEntry> zipEntries(Uint8List bytes) {
       throw FormatException('no central directory header at $at');
     }
     final method = data.getUint16(at + 10, Endian.little);
+    final crc32 = data.getUint32(at + 16, Endian.little);
     final nameLength = data.getUint16(at + 28, Endian.little);
     final extraLength = data.getUint16(at + 30, Endian.little);
     final commentLength = data.getUint16(at + 32, Endian.little);
@@ -76,6 +86,7 @@ List<ZipEntry> zipEntries(Uint8List bytes) {
         name,
         method: method,
         dataOffset: local + 30 + localName + localExtra,
+        crc32: crc32,
       ),
     );
     at += 46 + nameLength + extraLength + commentLength;
