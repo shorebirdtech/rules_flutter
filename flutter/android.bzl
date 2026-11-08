@@ -236,8 +236,13 @@ def flutter_android_maven_artifacts(name, application, maven, **kwargs):
     `bazel run` of it prints the lines to paste into
     `maven.install(name = "rules_android_maven", artifacts = [...])` for the
     plugins `application` depends on and no others, marking those the install
-    lacks or has too low. `flutter_android_app` declares one as
-    `<name>_maven_artifacts`; declare this one for Tier-2 wiring.
+    lacks or has too low. It also prints the artifacts the install resolves
+    that Gradle would raise: those whose versions the Gradle module metadata
+    of another artifact aligns (androidx `activity` 1.9.0 asks for
+    `activity-ktx` 1.9.0), which rules_jvm_external does not read. That
+    metadata it fetches from the install's repositories when it runs.
+    `flutter_android_app` declares one as `<name>_maven_artifacts`; declare
+    this one for Tier-2 wiring.
 
     Args:
         name: The target name.
@@ -261,7 +266,7 @@ def flutter_android_maven_artifacts(name, application, maven, **kwargs):
         compile_mode = "exe",
         data = [":__%s_report" % name],
         deps = [Label("@rules_dart//dart/runfiles")],
-        main = Label("//flutter/private/tools:print_report.dart"),
+        main = Label("//flutter/private/tools:maven_artifacts.dart"),
         **kwargs
     )
 

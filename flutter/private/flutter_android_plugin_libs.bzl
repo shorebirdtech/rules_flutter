@@ -30,7 +30,7 @@ load("//flutter/private:flutter_android_application.bzl", "ANDROID_NATIVE_LIBS_A
 FlutterAndroidMavenInfo = provider(
     doc = "What a pub hub's Android plugins declare in their Gradle builds, and what `@rules_android_maven` resolved.",
     fields = {
-        "data": "dict: `hub` (str), `resolved` (dict of `group:artifact` to version) and `packages` (list of dicts with `package`, `version`, `deps` and `errors`), as `maven_check_message` reads it.",
+        "data": "dict: `repo` (str), `resolved` (dict of `group:artifact` to version), `repositories` (the install's Maven repositories) and `packages` (list of dicts with `package`, `version`, `deps` and `errors`), as `maven_check_message` reads it.",
     },
 )
 
@@ -225,7 +225,7 @@ def _flutter_android_maven_report_impl(ctx):
     # A target reached through a transition on `platforms` arrives as a list
     # of one.
     entries = ctx.attr.application[0][FlutterApplicationInfo].android_libs.to_list()
-    out = ctx.actions.declare_file(ctx.label.name + ".txt")
+    out = ctx.actions.declare_file(ctx.label.name + ".json")
     ctx.actions.write(out, maven_app_report(
         ctx.attr.maven[FlutterAndroidMavenInfo].data,
         {entry.package: True for entry in entries},
@@ -252,5 +252,5 @@ flutter_android_maven_report = rule(
             mandatory = True,
         ),
     },
-    doc = "Writes the Maven artifacts the plugins an application links declare, as lines to paste into `maven.install`, marking those `@rules_android_maven` lacks. Unlike `flutter_android_plugin_libs` it never fails for what is missing: it is how to find out.",
+    doc = "Writes what the `maven_artifacts` program of an application reads: the Maven artifacts the plugins it links declare, and what `@rules_android_maven` resolves. Unlike `flutter_android_plugin_libs` it never fails for what is missing: it is how to find out.",
 )

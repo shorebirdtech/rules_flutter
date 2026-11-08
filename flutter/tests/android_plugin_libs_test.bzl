@@ -44,26 +44,27 @@ _ignores_what_it_does_not_link_test = analysistest.make(_ignores_what_it_does_no
 def _report_content(env):
     actions = [a for a in analysistest.target_actions(env) if a.mnemonic == "FileWrite"]
     asserts.equals(env, 1, len(actions))
-    return actions[0].content
+    return json.decode(actions[0].content)
 
 def _report_names_only_its_plugins_impl(ctx):
-    """An app that links plugin A reports A's artifact, not B's or the installed one."""
+    """An app that links plugin A reports A's artifact, not B's."""
     env = analysistest.begin(ctx)
     content = _report_content(env)
-    asserts.true(env, '"g:needed_by_a:2.0",  # declared by package:plugin_a 1.0; missing' in content, content)
-    asserts.false(env, "needed_by_b" in content, content)
-    asserts.true(env, "Android plugins that //app:a links" in content, content)
+    asserts.equals(env, {
+        "g:needed_by_a": {"version": "2.0", "declared_by": ["package:plugin_a 1.0"]},
+    }, content["requirements"])
+    asserts.equals(env, "//app:a", content["app"])
     return analysistest.end(env)
 
 _report_names_only_its_plugins_test = analysistest.make(_report_names_only_its_plugins_impl)
 
 def _report_does_not_fail_impl(ctx):
-    """An app whose plugins are all satisfied reports so, listing only its own."""
+    """An app whose plugins the install all satisfies reports, listing only its own."""
     env = analysistest.begin(ctx)
     content = _report_content(env)
-    asserts.true(env, "All 1 are provided" in content, content)
-    asserts.true(env, '"g:installed:1.0"' in content, content)
-    asserts.false(env, "needed_by" in content, content)
+    asserts.equals(env, ["g:installed"], content["requirements"].keys())
+    asserts.equals(env, {"g:installed": "1.0"}, content["resolved"])
+    asserts.equals(env, ["https://maven.google.com"], content["repositories"])
     return analysistest.end(env)
 
 _report_does_not_fail_test = analysistest.make(_report_does_not_fail_impl)

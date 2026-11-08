@@ -649,7 +649,7 @@ def maven_check_message(data, linked, report = None):
     return format_maven_failure(data["repo"], problems, errors, report)
 
 def maven_app_report(data, linked, app):
-    """The text an application's `maven_artifacts` target prints.
+    """What an application's `maven_artifacts` target reads.
 
     Args:
         data: The decoded `maven_requirements.json` of the build, as for
@@ -659,13 +659,17 @@ def maven_app_report(data, linked, app):
         app: The label of the application, for the header.
 
     Returns:
-        The artifacts those packages declare, as `format_artifacts_report`
-        writes them, marking those `@rules_android_maven` lacks.
+        The artifacts those packages declare, as `artifacts_report` writes
+        them.
     """
     packages = [p for p in data["packages"] if p["package"] in linked]
-    requirements = merge_plugin_requirements(packages)
-    problems = maven_problems(requirements, data["resolved"])
-    return format_artifacts_report(data["repo"], requirements, problems, app)
+    return artifacts_report(
+        data["repo"],
+        merge_plugin_requirements(packages),
+        data["resolved"],
+        data["repositories"],
+        app,
+    )
 
 def _artifact_line(coordinate, version, declared_by, note):
     return '"%s:%s",  # declared by %s%s' % (
@@ -730,44 +734,32 @@ def format_maven_failure(repo, problems, errors, report = None):
         ).format(groups = "\n".join(groups)))
     return "\n\n".join(parts)
 
-def format_artifacts_report(repo, requirements, problems, app = None):
-    """The text `bazel run @flutter_pub_android_maven//:maven_artifacts` prints.
+def artifacts_report(repo, requirements, resolved, repositories, app = None):
+    """The JSON a `maven_artifacts` program reads (tools/maven_artifacts.dart).
+
+    The program prints the lines to paste into `maven.install`, after reading
+    the Gradle module metadata of what the install resolves, which takes the
+    network and so cannot happen in the build.
 
     Args:
         repo: The name of the repository holding the build's Maven data.
         requirements: The result of `merge_plugin_requirements`.
-        problems: The result of `maven_problems`.
+        resolved: Dict of `group:artifact` to the version the install
+            resolves.
+        repositories: The install's Maven repositories, in its order.
         app: The label of the application whose plugins `requirements` cover.
             None means every plugin of the build.
 
     Returns:
-        A block ready to paste into `artifacts = [...]`, with a header saying
-        which entries are missing or too low.
+        The JSON string.
     """
-    reasons = {p["coordinate"]: p["reason"] for p in problems}
-    lines = []
-    for coordinate in sorted(requirements.keys()):
-        req = requirements[coordinate]
-        lines.append(_artifact_line(
-            coordinate,
-            req["version"],
-            req["declared_by"],
-            reasons.get(coordinate, ""),
-        ))
-    if app:
-        out = ["# Maven artifacts the Android plugins that %s links declare." % app]
-    else:
-        out = ["# Maven artifacts the Android plugins of @%s declare." % repo]
-    if not lines:
-        out.append("# None.")
-    elif problems:
-        out.append("# %d of %d are missing or too low in @rules_android_maven (marked)." % (len(problems), len(lines)))
-    else:
-        out.append("# All %d are provided by @rules_android_maven." % len(lines))
-    out.append("# Paste into maven.install(name = \"rules_android_maven\", artifacts = [...]):")
-    out.append("")
-    out += ["        " + line for line in lines]
-    return "\n".join(out) + "\n"
+    return json.encode({
+        "app": app,
+        "repo": repo,
+        "repositories": repositories,
+        "requirements": requirements,
+        "resolved": resolved,
+    })
 
 def _resolved_versions(build):
     """`group:artifact` to version from a rules_jvm_external repo's BUILD."""
@@ -789,6 +781,14 @@ def _resolved_versions(build):
 
 def _flutter_android_maven_impl(rctx):
     resolved = _resolved_versions(rctx.read(rctx.path(Label("@rules_android_maven//:BUILD"))))
+
+    # The install's repositories, which rules_jvm_external lists for its own
+    # `outdated` program.
+    repositories = [
+        line.strip()
+        for line in rctx.read(rctx.path(Label("@rules_android_maven//:outdated.repositories"))).splitlines()
+        if line.strip()
+    ]
     packages = [json.decode(rctx.read(rctx.path(label))) for label in rctx.attr.spokes]
     packages = [p for p in packages if p["deps"] or p["errors"]]
 
@@ -797,14 +797,18 @@ def _flutter_android_maven_impl(rctx):
     # for finding what a lock's plugins need all at once.
     requirements_json = json.encode({
         "repo": ANDROID_MAVEN_REPO,
+        "repositories": repositories,
         "resolved": resolved,
         "packages": packages,
     })
     rctx.file("resolved.bzl", "RESOLVED = %s\n" % repr(resolved))
-    requirements = merge_plugin_requirements(packages)
-    problems = maven_problems(requirements, resolved)
-    rctx.file("report.txt", format_artifacts_report(ANDROID_MAVEN_REPO, requirements, problems))
-    rctx.file("print_report.dart", rctx.read(Label("//flutter/private/tools:print_report.dart")))
+    rctx.file("report.json", artifacts_report(
+        ANDROID_MAVEN_REPO,
+        merge_plugin_requirements(packages),
+        resolved,
+        repositories,
+    ))
+    rctx.file("maven_artifacts.dart", rctx.read(Label("//flutter/private/tools:maven_artifacts.dart")))
     rctx.file("BUILD.bazel", """\
 load("@rules_dart//dart:defs.bzl", "dart_binary")
 load("@rules_flutter//flutter/private:flutter_android_plugin_libs.bzl", "flutter_android_maven_requirements")
@@ -817,14 +821,15 @@ flutter_android_maven_requirements(
     visibility = ["//visibility:public"],
 )
 
-# Prints report.txt: every Maven artifact the build's Android plugins declare,
-# as the lines to paste into maven.install(name = "rules_android_maven").
+# Prints every Maven artifact the build's Android plugins declare, and those
+# Gradle would align, as the lines to paste into
+# maven.install(name = "rules_android_maven").
 dart_binary(
     name = "maven_artifacts",
-    args = ["$(rlocationpath :report.txt)"],
+    args = ["$(rlocationpath :report.json)"],
     compile_mode = "exe",
-    data = [":report.txt"],
-    main = "print_report.dart",
+    data = [":report.json"],
+    main = "maven_artifacts.dart",
     visibility = ["//visibility:public"],
     deps = ["@rules_dart//dart/runfiles"],
 )

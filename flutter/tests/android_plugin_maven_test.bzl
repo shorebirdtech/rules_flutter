@@ -3,8 +3,8 @@
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load(
     "//flutter/private:android_plugin_maven.bzl",
+    "artifacts_report",
     "compare_maven_versions",
-    "format_artifacts_report",
     "format_maven_failure",
     "maven_check_message",
     "maven_labels",
@@ -331,12 +331,23 @@ def _report_test_impl(ctx):
     req = merge_plugin_requirements([
         _pkg("a", "1.2", [_dep("g:old", "1.2"), _dep("g:fine", "1.0")]),
     ])
-    report = format_artifacts_report("flutter_pub_android_maven", req, maven_problems(req, {"g:old": "1.1", "g:fine": "1.0"}))
-    asserts.true(env, "1 of 2 are missing or too low" in report, report)
-    asserts.true(env, '        "g:fine:1.0",  # declared by package:a 1.2\n' in report, report)
-    asserts.true(env, '        "g:old:1.2",  # declared by package:a 1.2; resolves 1.1\n' in report, report)
-    ok = format_artifacts_report("flutter_pub_android_maven", req, [])
-    asserts.true(env, "All 2 are provided" in ok, ok)
+    report = json.decode(artifacts_report(
+        "flutter_pub_android_maven",
+        req,
+        {"g:old": "1.1", "g:fine": "1.0"},
+        ["https://maven.google.com"],
+        "//:app",
+    ))
+    asserts.equals(env, {
+        "app": "//:app",
+        "repo": "flutter_pub_android_maven",
+        "repositories": ["https://maven.google.com"],
+        "requirements": {
+            "g:fine": {"version": "1.0", "declared_by": ["package:a 1.2"]},
+            "g:old": {"version": "1.2", "declared_by": ["package:a 1.2"]},
+        },
+        "resolved": {"g:old": "1.1", "g:fine": "1.0"},
+    }, report)
     return unittest.end(env)
 
 report_test = unittest.make(_report_test_impl)
