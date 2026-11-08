@@ -570,7 +570,9 @@ ignored_package_test(
 )
 
 # An app's `<name>_maven_artifacts` reports the Maven artifacts of the plugins
-# that app depends on and no others.
+# that app depends on and no others, and that the install needs no artifact
+# raised to align with another. It reads Gradle module metadata from the
+# install's Maven repositories.
 dart_test(
     name = "verify_android_maven_artifacts_test",
     data = [
@@ -586,7 +588,10 @@ dart_test(
         "ONE_PLUGIN_REPORT_PROGRAM": "$(rlocationpath :package_info_only_android_maven_artifacts)",
     },
     main = "test/verify_android_maven_artifacts_test.dart",
-    tags = ["android"],
+    tags = [
+        "android",
+        "requires-network",
+    ],
     deps = ["@rules_dart//dart/runfiles"],
 )
 

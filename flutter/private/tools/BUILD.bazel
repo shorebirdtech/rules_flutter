@@ -18,6 +18,7 @@ exports_files(
         "assemble_directory.dart",
         "generate_asset_manifest.dart",
         "bundle_app.dart",
+        "check_android_classes.dart",
         "check_apple_version_keys.dart",
         "collect_notices.dart",
         "compile_shader.dart",
@@ -162,6 +163,7 @@ _UNIT_TESTS = {
         ["@rules_dart//dart/runfiles"],
     ),
     "validate_android_elf_test": ("validate_android_elf.dart", []),
+    "check_android_classes_test": ("check_android_classes.dart", []),
     "maven_artifacts_test": (
         "maven_artifacts.dart",
         ["@rules_dart//dart/runfiles"],

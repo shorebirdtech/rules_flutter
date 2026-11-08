@@ -92,6 +92,7 @@ load("//flutter/private:constants.bzl", _ANDROID_MIN_SDK_VERSION = "ANDROID_MIN_
 load("//flutter/private:flutter_android_application.bzl", _flutter_android_bundle = "flutter_android_bundle")
 load("//flutter/private:flutter_android_build.bzl", _flutter_android_build = "flutter_android_build")
 load("//flutter/private:flutter_android_bundle_install.bzl", _flutter_android_app_bundle = "flutter_android_app_bundle")
+load("//flutter/private:flutter_android_classes.bzl", _flutter_android_class_check = "flutter_android_class_check")
 load("//flutter/private:flutter_android_manifest_merge.bzl", _flutter_android_manifest_merge = "flutter_android_manifest_merge")
 load("//flutter/private:flutter_android_plugin_library.bzl", _flutter_android_plugin_library = "flutter_android_plugin_library")
 load("//flutter/private:flutter_android_plugin_libs.bzl", _flutter_android_maven_report = "flutter_android_maven_report", _flutter_android_plugin_libs = "flutter_android_plugin_libs")
@@ -1084,6 +1085,19 @@ def flutter_android_app(
     # since the manifest promises it.
     kwargs["nocompress_extensions"] = kwargs.pop("nocompress_extensions", []) + [".so"]
 
+    # 9b. Fail the build when two jars the app links define a class
+    # differently, which Gradle's resolution would not let happen: see
+    # flutter_android_classes.bzl. A dependency of the binary, so building the
+    # app runs it.
+    _flutter_android_class_check(
+        name = "__%s_class_check" % name,
+        app = "//%s:%s" % (native.package_name(), name),
+        libraries = binary_deps + deps,
+        report = "//%s:%s_maven_artifacts" % (native.package_name(), name),
+        tags = tags,
+        testonly = testonly,
+    )
+
     # 10. Final android_binary, and the App Bundle beside it. rules_android's
     # `android_application` declares an `android_binary` of its own,
     # `<app_bundle>_base`, from the same arguments: it cannot take this one.
@@ -1093,7 +1107,7 @@ def flutter_android_app(
         resource_files = resources if resources else None,
         assets = ["__%s_flutter_assets" % name],
         assets_dir = "assets",
-        deps = binary_deps + deps,
+        deps = binary_deps + deps + ["__%s_class_check" % name],
         proguard_specs = proguard_specs,
         tags = tags,
         testonly = testonly,

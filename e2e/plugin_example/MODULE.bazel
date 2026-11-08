@@ -86,6 +86,18 @@ maven.install(
         "androidx.datastore:datastore:1.2.1",
         "androidx.media:media:1.7.0",
         "androidx.preference:preference:1.2.1",
+        # The -ktx companions Gradle aligns with their main artifacts through
+        # the main artifacts' Gradle module metadata, which Coursier does not
+        # read. Left at the old versions preference 1.2.1 brings, their classes
+        # would conflict with the main artifacts': `bazel run
+        # //:plugin_android_maven_artifacts` prints these.
+        "androidx.activity:activity-ktx:1.9.0",
+        "androidx.collection:collection-ktx:1.4.2",
+        "androidx.core:core-ktx:1.17.0",
+        "androidx.fragment:fragment-ktx:1.8.9",
+        "androidx.lifecycle:lifecycle-runtime-ktx:2.10.0",
+        "androidx.lifecycle:lifecycle-viewmodel-ktx:2.10.0",
+        "androidx.savedstate:savedstate-ktx:1.4.0",
     ],
     known_contributing_modules = [
         "rules_android",
