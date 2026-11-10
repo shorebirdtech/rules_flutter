@@ -1,0 +1,29 @@
+# The Android SDK `flutter_bazel` drives devices with: the workspace's own
+# `@androidsdk`, whichever SDK the root module chose for it (rules_android's
+# `android_sdk_repository`, which reads `ANDROID_HOME`, or
+# hermetic_android_toolchains' download). The dev tool asks `sdk` whether the
+# workspace has one at all before it builds `adb` or `aapt2`: with no
+# `ANDROID_HOME`, `android_sdk_repository` writes a repository whose `sdk` is a
+# plain filegroup and which has neither tool. `manual`, as the targets of
+# `@androidsdk` are: they are named, not swept up by `//...`.
+
+alias(
+    name = "sdk",
+    actual = "@androidsdk//:sdk",
+    tags = ["manual"],
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "adb",
+    actual = "@androidsdk//:adb",
+    tags = ["manual"],
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "aapt2",
+    actual = "@androidsdk//:aapt2",
+    tags = ["manual"],
+    visibility = ["//visibility:public"],
+)

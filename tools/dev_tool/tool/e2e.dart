@@ -80,6 +80,13 @@ import 'package:runfiles/runfiles.dart';
 /// anchors.
 const _manifestFlag = '--flutter-version-manifest=';
 
+/// The second: the runfiles path of the Android SDK's `adb` for this host,
+/// which the suite's Android cases ask which device to run on.
+const _adbFlag = '--adb=';
+
+/// What the suite reads that `adb` from.
+const _adbVariable = 'FLUTTER_BAZEL_E2E_ADB';
+
 /// The path used when the caller names none.
 const _defaultPath = 'test/e2e/';
 
@@ -98,7 +105,14 @@ Future<void> main(List<String> runArgs) async {
   final flutterRoot = _flutterRoot(
     runArgs.first.substring(_manifestFlag.length),
   );
-  final args = runArgs.sublist(1);
+  if (runArgs.length < 2 || !runArgs[1].startsWith(_adbFlag)) {
+    _fail(
+      'started without $_adbFlag, so not by its Bazel target. Run the suite '
+      'with `bazel run //tools/dev_tool:e2e`.',
+    );
+  }
+  final adb = _runfile(runArgs[1].substring(_adbFlag.length), 'adb');
+  final args = runArgs.sublist(2);
   final packageDir = _packageDir();
   // Forwarded verbatim and in order — splitting flags from positionals would
   // tear `--plain-name occluded` in half, since the value carries no leading
@@ -120,7 +134,7 @@ Future<void> main(List<String> runArgs) async {
   stderr.writeln('e2e: FLUTTER_ROOT=$flutterRoot');
   stderr.writeln('e2e: ${packageDir.path}\$ dart ${testArgs.join(' ')}');
 
-  final outcome = await _runSuite(packageDir, flutterRoot, testArgs);
+  final outcome = await _runSuite(packageDir, flutterRoot, adb, testArgs);
   outcome.report();
   exit(outcome.ok ? 0 : 1);
 }
@@ -145,26 +159,33 @@ Directory _packageDir() {
 
 /// The `FLUTTER_ROOT` the suite's pub resolution reads: the root above the
 /// version manifest at the runfiles path [manifestPath].
-String _flutterRoot(String manifestPath) {
+String _flutterRoot(String manifestPath) =>
+    File(_runfile(manifestPath, 'the Flutter version manifest'))
+        .absolute
+        .parent
+        .parent
+        .parent
+        .path;
+
+/// The absolute path of the runfile at [path], [what] naming it if it is not
+/// there.
+String _runfile(String path, String what) {
   final Runfiles runfiles;
   try {
     runfiles = Runfiles.create();
   } on StateError catch (e) {
     _fail('cannot find this runner\'s runfiles: ${e.message}');
   }
-  final manifest = File(runfiles.rlocation(manifestPath));
-  if (!manifest.existsSync()) {
-    _fail(
-      'cannot find the Flutter version manifest: its runfile '
-      '$manifestPath resolves to ${manifest.path}.',
-    );
+  final file = File(runfiles.rlocation(path));
+  if (!file.existsSync()) {
+    _fail('cannot find $what: its runfile $path resolves to ${file.path}.');
   }
-  return manifest.absolute.parent.parent.parent.path;
+  return file.absolute.path;
 }
 
 /// This process's environment without what `bazel run` added for it, and with
-/// [flutterRoot]. See the library comment for what each would break.
-Map<String, String> _suiteEnvironment(String flutterRoot) => {
+/// [flutterRoot] and [adb]. See the library comment for what each would break.
+Map<String, String> _suiteEnvironment(String flutterRoot, String adb) => {
   for (final MapEntry(:key, :value) in Platform.environment.entries)
     if (key != 'BUILD_WORKSPACE_DIRECTORY' &&
         key != 'BUILD_WORKING_DIRECTORY' &&
@@ -172,18 +193,20 @@ Map<String, String> _suiteEnvironment(String flutterRoot) => {
         !key.startsWith('RUNFILES_'))
       key: value,
   'FLUTTER_ROOT': flutterRoot,
+  _adbVariable: adb,
 };
 
 Future<Outcome> _runSuite(
   Directory packageDir,
   String flutterRoot,
+  String adb,
   List<String> testArgs,
 ) async {
   final process = await Process.start(
     Platform.resolvedExecutable,
     [...testArgs, '--reporter', 'json'],
     workingDirectory: packageDir.path,
-    environment: _suiteEnvironment(flutterRoot),
+    environment: _suiteEnvironment(flutterRoot, adb),
     includeParentEnvironment: false,
   );
   // The runner's own diagnostics — version solving, load errors, a test's own

@@ -14,6 +14,7 @@ import 'dart:async';
 
 import 'package:args/args.dart';
 
+import 'android_sdk.dart';
 import 'bazel.dart';
 import 'dev_tool_exception.dart';
 import 'device.dart';
@@ -341,10 +342,25 @@ class RunPlan {
     // info` spawns and a toolchain resolution have been spent on it.
     final compilationMode = compilationModeFor(results);
 
-    // Devices FIRST — they dictate the platform build flags — and before any
-    // `bazel` spawn, so an id that names no device is refused at once.
+    // Resolve the workspace root once rather than per callsite: it avoids
+    // redundant `bazel info` spawns and gives every consumer the same answer.
+    // Under `bazel run` it spawns nothing.
+    final workspace = await bazel.findWorkspaceRoot();
+    final userBuildArgs = userBazelFlags(
+      configs: results['config'] as List<String>,
+      buildArgs: results['build-arg'] as List<String>,
+    );
+
+    // Devices next — they dictate the platform build flags. Only an Android
+    // device builds anything here (the workspace's adb and aapt2), so an id
+    // that names no device is refused at once.
     final devices = await resolveDevices(
       results['device'] as List<String>,
+      androidSdk: WorkspaceAndroidSdk(
+        workspace: workspace,
+        runBazel: bazel.run,
+        userFlags: userBuildArgs,
+      ),
     );
 
     // The flags a device builds with can depend on the device itself (an
@@ -353,19 +369,12 @@ class RunPlan {
       await device.resolveBuildArgs();
     }
 
-    // Resolve the workspace root once rather than per callsite: it avoids
-    // redundant `bazel info` spawns and gives every consumer the same answer.
-    final workspace = await bazel.findWorkspaceRoot();
     // DevTools needs the toolchain's `dart` on every platform. The compilers
     // take nothing from here: they run what the app's dev config names.
     //
     // With the flags the run will build with, because the fetch analyses the
     // target: see [resolveToolchainPaths]. The profile flag is among them, so
     // the toolchain is resolved in the configuration the build will use.
-    final userBuildArgs = userBazelFlags(
-      configs: results['config'] as List<String>,
-      buildArgs: results['build-arg'] as List<String>,
-    );
     final extraArgs = [
       ...userBuildArgs,
       ...defineFlags,

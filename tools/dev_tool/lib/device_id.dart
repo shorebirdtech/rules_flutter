@@ -20,9 +20,9 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import 'android_sdk.dart';
 import 'dev_tool_exception.dart';
 import 'device.dart';
-import 'host_tools.dart';
 import 'logging.dart';
 import 'temp_dir.dart';
 
@@ -54,17 +54,21 @@ const deviceIdProbeBound = Duration(seconds: 3);
 /// An id that names no kind throws a [DevToolException]. Only then are
 /// `simctl`, `devicectl` and `adb` asked about it — through [runProbe], each
 /// bounded by [deviceIdProbeBound] — so the message can give the exact form to
-/// pass. [adbPath] overrides where `adb` is looked for.
+/// pass.
+///
+/// An Android device is driven with the tools of [androidSdk], the
+/// workspace's: an Android id in a workspace with none is refused, saying so,
+/// and the lookups leave Android out there rather than build anything for it.
 Future<List<Device>> resolveDevices(
   List<String> ids, {
+  required AndroidSdk androidSdk,
   ProcessRunSync? runProbe,
-  String? adbPath,
 }) async {
   if (ids.isEmpty) return [detectDevice()];
   final devices = <Device>[];
   final refused = <String>[];
   for (final id in ids) {
-    final device = _resolveDevice(id);
+    final device = await _resolveDevice(id, androidSdk);
     if (device == null) {
       refused.add(id);
     } else {
@@ -74,7 +78,7 @@ Future<List<Device>> resolveDevices(
   if (refused.isEmpty) return devices;
   final known = await _lookUpDevices(
     runProbe ?? _boundedRun,
-    adbPath: adbPath,
+    androidSdk: androidSdk,
   );
   throw DevToolException(
     [for (final id in refused) _explainRefusal(id, known)].join('\n\n'),
@@ -82,7 +86,7 @@ Future<List<Device>> resolveDevices(
 }
 
 /// The device [id] names, or null when it names no kind of device.
-Device? _resolveDevice(String id) {
+Future<Device?> _resolveDevice(String id, AndroidSdk androidSdk) async {
   switch (id) {
     case 'macos':
       return MacOSDevice();
@@ -99,20 +103,28 @@ Device? _resolveDevice(String id) {
     // Whichever device `adb` itself picks, which is the one attached when there
     // is one and a named refusal from adb when there are several.
     case 'android':
-      return AndroidDevice();
+      final tools = await androidSdk.require();
+      return AndroidDevice(adbPath: tools.adb, aapt2Path: tools.aapt2);
   }
   final colon = id.indexOf(':');
   if (colon < 0) return null;
   final kind = id.substring(0, colon);
   final rest = id.substring(colon + 1);
-  final make = switch (kind) {
-    'ios-simulator' => (String udid) => IOSSimulatorDevice(udid: udid),
-    'ios' => (String udid) => IOSDevice(udid: udid),
+  final Future<Device> Function(String)? make = switch (kind) {
+    'ios-simulator' => (String udid) async => IOSSimulatorDevice(udid: udid),
+    'ios' => (String udid) async => IOSDevice(udid: udid),
     // The prefix is stripped, never passed on: a colon in `adb -s` means a
     // network device, so the server reads the serial as `android` and the rest
     // as a service name, and answers `unknown host service
     // '<serial>:features'` — a sentence naming neither the id nor the flag.
-    'android' => (String serial) => AndroidDevice(deviceId: serial),
+    'android' => (String serial) async {
+      final tools = await androidSdk.require();
+      return AndroidDevice(
+        deviceId: serial,
+        adbPath: tools.adb,
+        aapt2Path: tools.aapt2,
+      );
+    },
     _ => null,
   };
   if (make == null) return null;
@@ -162,7 +174,10 @@ Future<ProcessResult> _boundedRun(String executable, List<String> arguments) =>
       what: '`$executable ${arguments.join(' ')}`',
     );
 
-Future<_Lookup> _lookUpDevices(ProcessRunSync run, {String? adbPath}) async {
+Future<_Lookup> _lookUpDevices(
+  ProcessRunSync run, {
+  required AndroidSdk androidSdk,
+}) async {
   Future<(String, List<KnownDevice>?)> probe(
     String what,
     Future<List<KnownDevice>> Function() body,
@@ -182,7 +197,26 @@ Future<_Lookup> _lookUpDevices(ProcessRunSync run, {String? adbPath}) async {
     }
   }
 
-  final found = await Future.wait([
+  // A workspace with no Android SDK has no Android devices to offer, so its
+  // `adb` is neither asked nor counted as unanswered: null. One whose SDK
+  // could not be built is unanswered, as a tool that failed is.
+  Future<(String, List<KnownDevice>?)?> adb() async {
+    final AndroidSdkTools? tools;
+    try {
+      tools = await androidSdk.find();
+    } on DevToolException catch (e) {
+      return probe('adb', () => throw e);
+    }
+    if (tools == null) return null;
+    final adb = tools.adb;
+    return probe('adb', () async {
+      final result = await run(adb, ['devices', '-l']);
+      _requireSuccess(result, '$adb devices -l');
+      return parseAdbDevices(result.stdout as String);
+    });
+  }
+
+  final found = await Future.wait<(String, List<KnownDevice>?)?>([
     probe('simctl', () async {
       final result = await run('xcrun', ['simctl', 'list', 'devices', '-j']);
       _requireSuccess(result, 'xcrun simctl list devices -j');
@@ -211,14 +245,8 @@ Future<_Lookup> _lookUpDevices(ProcessRunSync run, {String? adbPath}) async {
         ];
       });
     }),
-    probe('adb', () async {
-      final adb = adbPath ?? adbTool().find();
-      if (adb == null) throw StateError('adb was not found');
-      final result = await run(adb, ['devices', '-l']);
-      _requireSuccess(result, '$adb devices -l');
-      return parseAdbDevices(result.stdout as String);
-    }),
-  ]);
+    adb(),
+  ]).then((all) => all.nonNulls.toList());
   return _Lookup(
     [for (final (_, list) in found) ...?list],
     [

@@ -3196,6 +3196,8 @@ The rest of this section spells the command out in full so it works before you s
 
 An id has to say what kind of device it names, so a bare UDID or serial is refused: an emulator is `-d android:emulator-5554`, not `-d emulator-5554`. Guessing the kind would mean asking `simctl`, `devicectl` and `adb` on every launch. When an id is refused, the tool asks them then, and names the form to pass, for example `pass -d ios-simulator:<udid>`.
 
+On Android the tool drives the device with the `adb` and `aapt2` of the workspace's own `@androidsdk`, the SDK the app builds with (downloaded, or found at `ANDROID_HOME`; see [Android](#android)), which it builds for the host before it asks the device anything. Nothing needs to be on your `PATH`, and no Android Studio needs to be installed. A workspace with no Android SDK lists no Android devices and builds nothing Android; `-d android` there fails, saying so. An adb server that Android Studio already started keeps running. An `adb` restarts the server only when the server speaks another protocol version (the `1.0.41` that `adb version` prints), and current platform-tools releases all speak the same one, so the tool's `adb` uses that server.
+
 For `-d ios`, the tool lists attached devices with `devicectl` and ignores devices that were paired once but are not attached now. With two attached, it asks for `-d ios:<udid>` rather than guessing. A device has two identifiers, the hardware UDID Xcode shows and the CoreDevice UUID that `devicectl` prints, and either works there.
 
 ### Hot reload and hot restart

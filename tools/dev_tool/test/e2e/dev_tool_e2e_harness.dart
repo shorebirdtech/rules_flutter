@@ -1435,36 +1435,16 @@ Future<BoundedRun> runBounded(
   );
 }
 
-/// Resolve `adb` the same way the dev tool itself does: $ANDROID_HOME
-/// → macOS default → PATH. Inlined to keep the harness independent of
-/// the dev tool's internal device library.
+/// The `adb` the Android cases ask which device to run on: the Android SDK's
+/// for this host, which `bazel run //tools/dev_tool:e2e` names in
+/// `FLUTTER_BAZEL_E2E_ADB`. The dev tool drives the device with its workspace's
+/// own; either reaches the one adb server, so what this one lists is what the
+/// tool sees.
 ///
-/// Note the fallthrough: an `$ANDROID_HOME` that holds no `platform-tools/adb`
-/// does not mean "no adb", it means "keep looking", and on a machine with an
-/// SDK in the default location the search then finds a perfectly working one.
-/// That is why every message built from a probe names the path that actually
-/// answered rather than the variable that was set.
-String resolveAdb(Map<String, String> environment) {
-  final androidHome = environment['ANDROID_HOME'];
-  if (androidHome != null) {
-    final adb = p.join(androidHome, 'platform-tools', 'adb');
-    if (File(adb).existsSync()) return adb;
-  }
-  if (Platform.isMacOS) {
-    final home = environment['HOME'];
-    if (home != null) {
-      final adb = p.join(
-        home,
-        'Library',
-        'Android',
-        'sdk',
-        'platform-tools',
-        'adb',
-      );
-      if (File(adb).existsSync()) return adb;
-    }
-  }
-  return 'adb';
+/// Null when the variable is unset: the suite was not started by its target.
+String? resolveAdb(Map<String, String> environment) {
+  final adb = environment['FLUTTER_BAZEL_E2E_ADB'];
+  return adb == null || adb.isEmpty ? null : adb;
 }
 
 /// One line of `adb devices` output: a serial and the state adb reports it in.
@@ -1507,16 +1487,22 @@ sealed class AndroidDeviceProbe {
 
   /// Ask [environment]'s host which device an Android e2e run should use.
   ///
-  /// [adbPath] overrides the [resolveAdb] search; tests inject a stub through
-  /// it, since `Platform.environment` cannot be mutated in-process and a
-  /// developer's shell profile must not be able to change a unit test's
-  /// verdict.
+  /// [adbPath] overrides [resolveAdb]; tests inject a stub through it, since
+  /// `Platform.environment` cannot be mutated in-process and a developer's
+  /// shell must not be able to change a unit test's verdict.
   static AndroidDeviceProbe detect({
     Map<String, String>? environment,
     String? adbPath,
   }) {
     final env = environment ?? Platform.environment;
     final adb = adbPath ?? resolveAdb(env);
+    if (adb == null) {
+      return const AndroidProbeFailed(
+        'FLUTTER_BAZEL_E2E_ADB is unset, so there is no adb to ask: run the '
+        'suite with `bazel run //tools/dev_tool:e2e`, which sets it to the '
+        "Android SDK's.",
+      );
+    }
 
     final ProcessResult result;
     try {
@@ -1527,9 +1513,7 @@ sealed class AndroidDeviceProbe {
       // macOS, iOS and web groups declared in the same file. The error is
       // carried as data instead of discarded.
       return AndroidProbeFailed(
-        'could not run `$adb devices`: $error\n'
-        'Set \$ANDROID_HOME to an SDK whose platform-tools/adb runs, or put '
-        'adb on PATH.',
+        'could not run `$adb devices`: $error',
       );
     }
 
@@ -1650,9 +1634,7 @@ sealed class AndroidDeviceProbe {
 final class AndroidDeviceFound extends AndroidDeviceProbe {
   final String serial;
 
-  /// The `adb` that answered — not the one `$ANDROID_HOME` pointed at, which
-  /// [resolveAdb] may have fallen through. Reported so a run says which SDK it
-  /// actually used.
+  /// The `adb` that answered. Reported so a run says which SDK it used.
   final String adb;
 
   const AndroidDeviceFound(this.serial, this.adb);

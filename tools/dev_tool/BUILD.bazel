@@ -161,6 +161,7 @@ _UNIT_TESTS = {
         ],
     },
     "agent_command_test": {"fakes": True},
+    "android_sdk_test": {},
     "android_serial_test": {},
     "app_exit_test": {
         "fakes": True,
@@ -514,6 +515,7 @@ dart_binary(
     ],
     compile_mode = "kernel",
     main = "tool/e2e.dart",
+    tags = ["manual"],
     visibility = ["//visibility:private"],
     deps = _TEST_DEPS + _PATH_DEP + [
         "//tools/e2e_testing",
@@ -529,20 +531,27 @@ dart_binary(
 # runner starts `dart test` on that same VM. `@rules_dart//dart` in `data`
 # declares the rest of its SDK (`dart test` needs pub and the front end, which a
 # kernel's own runfiles leave out). `@flutter_dev_root` is the `FLUTTER_ROOT`
-# pub resolves the workspace's `sdk: flutter` packages against. The runner works
-# on the source tree through `BUILD_WORKSPACE_DIRECTORY`, not on these runfiles,
-# and the suite's own Bazel commands run after the outer `bazel run` has
-# released the workspace.
+# pub resolves the workspace's `sdk: flutter` packages against. `adb` is the one
+# the Android cases ask which device to run on, the SDK's for this host, as the
+# dev tool's own is. The runner works on the source tree through
+# `BUILD_WORKSPACE_DIRECTORY`, not on these runfiles, and the suite's own Bazel
+# commands run after the outer `bazel run` has released the workspace. `manual`
+# as `adb` is: building it needs the SDK, so `//...` must not sweep it up.
 dart_binary(
     name = "e2e",
-    args = ["--flutter-version-manifest=$(rlocationpath @flutter_dev_root//:version_manifest)"],
+    args = [
+        "--flutter-version-manifest=$(rlocationpath @flutter_dev_root//:version_manifest)",
+        "--adb=$(rlocationpath //tools/dev_tool/android_sdk:adb)",
+    ],
     compile_mode = "kernel",
     data = [
+        "//tools/dev_tool/android_sdk:adb",
         "@flutter_dev_root//:dev_root",
         "@flutter_dev_root//:version_manifest",
         "@rules_dart//dart",
     ],
     main = "tool/e2e.dart",
+    tags = ["manual"],
     visibility = ["//visibility:private"],
     deps = ["@rules_dart//dart/runfiles"],
 )

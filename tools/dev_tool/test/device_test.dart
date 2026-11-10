@@ -146,12 +146,19 @@ void main() {
     });
 
     test('AndroidDevice name includes deviceId when provided', () {
-      final device = AndroidDevice(deviceId: 'emulator-5554');
+      final device = AndroidDevice(
+        adbPath: 'adb',
+        aapt2Path: 'aapt2',
+        deviceId: 'emulator-5554',
+      );
       expect(device.name, 'Android (emulator-5554)');
     });
 
     test('AndroidDevice name is "Android" when no deviceId', () {
-      final device = AndroidDevice();
+      final device = AndroidDevice(
+        adbPath: 'adb',
+        aapt2Path: 'aapt2',
+      );
       expect(device.name, 'Android');
     });
   });
@@ -189,12 +196,26 @@ void main() {
     });
 
     test('AndroidDevice builds for the ABI it was told', () {
-      expect(AndroidDevice(abi: 'arm64-v8a').buildArgs, [
-        '--@rules_android//flags:android_platforms=@rules_android//:arm64-v8a',
-      ]);
-      expect(AndroidDevice(abi: 'x86_64').buildArgs, [
-        '--@rules_android//flags:android_platforms=@rules_android//:x86_64',
-      ]);
+      expect(
+        AndroidDevice(
+          adbPath: 'adb',
+          aapt2Path: 'aapt2',
+          abi: 'arm64-v8a',
+        ).buildArgs,
+        [
+          '--@rules_android//flags:android_platforms=@rules_android//:arm64-v8a',
+        ],
+      );
+      expect(
+        AndroidDevice(
+          adbPath: 'adb',
+          aapt2Path: 'aapt2',
+          abi: 'x86_64',
+        ).buildArgs,
+        [
+          '--@rules_android//flags:android_platforms=@rules_android//:x86_64',
+        ],
+      );
     });
 
     // An APK is dexed, linked, zipped and signed, and a macOS debug bundle's
@@ -202,7 +223,11 @@ void main() {
     // libraries and assets that go into them, so each says where to read
     // those without building the artifact.
     test('AndroidDevice names the bundle parts a restart reads', () {
-      final parts = AndroidDevice(abi: 'x86_64').launchBundleParts;
+      final parts = AndroidDevice(
+        adbPath: 'adb',
+        aapt2Path: 'aapt2',
+        abi: 'x86_64',
+      ).launchBundleParts;
       expect(parts, isNotNull);
       expect(parts!.aspect, contains('android_bundle_parts.bzl'));
       expect(parts.assetsGroup, 'flutter_android_bundle_parts');
@@ -244,7 +269,13 @@ void main() {
     });
 
     test('AndroidDevice does not guess an ABI it has not been told', () {
-      expect(() => AndroidDevice().buildArgs, throwsStateError);
+      expect(
+        () => AndroidDevice(
+          adbPath: 'adb',
+          aapt2Path: 'aapt2',
+        ).buildArgs,
+        throwsStateError,
+      );
     });
 
     group('AndroidDevice asks the device its ABI', () {
@@ -254,6 +285,7 @@ void main() {
       }) async {
         final calls = <String>[];
         final device = AndroidDevice(
+          aapt2Path: 'aapt2',
           deviceId: deviceId,
           adbPath: 'adb',
           runProcess: (exe, args) async {
@@ -316,6 +348,7 @@ void main() {
       test('a told ABI is not asked again', () async {
         final calls = <String>[];
         final device = AndroidDevice(
+          aapt2Path: 'aapt2',
           abi: 'x86_64',
           adbPath: 'adb',
           runProcess: (exe, args) async {
@@ -329,6 +362,7 @@ void main() {
 
       test('an adb failure is reported with the device it asked', () async {
         final device = AndroidDevice(
+          aapt2Path: 'aapt2',
           deviceId: 'PIXEL',
           adbPath: 'adb',
           runProcess: (exe, args) async =>
@@ -971,6 +1005,7 @@ void main() {
       final fakeLogcat = FakeProcess();
 
       final device = AndroidDevice(
+        aapt2Path: 'aapt2',
         deviceId: 'emulator-5554',
         packageName: 'com.example.app',
         adbPath: 'adb',
@@ -1006,6 +1041,7 @@ void main() {
         final calls = <(String, List<String>)>[];
         final fakeLogcat = FakeProcess();
         final device = AndroidDevice(
+          aapt2Path: 'aapt2',
           packageName: 'com.example.app',
           activityName: '.FlutterActivity',
           adbPath: 'adb',
@@ -1033,6 +1069,7 @@ void main() {
       final calls = <(String, List<String>)>[];
       final fakeLogcat = FakeProcess();
       final device = AndroidDevice(
+        aapt2Path: 'aapt2',
         packageName: 'com.example.app',
         adbPath: 'adb',
         runProcess: (exe, args) async {
@@ -1054,6 +1091,7 @@ void main() {
       final fakeLogcat = FakeProcess();
 
       final device = AndroidDevice(
+        aapt2Path: 'aapt2',
         packageName: 'com.example.app',
         activityName: '.FlutterActivity',
         adbPath: 'adb',
@@ -1081,6 +1119,7 @@ void main() {
       final fakeLogcat = FakeProcess();
 
       final device = AndroidDevice(
+        aapt2Path: 'aapt2',
         packageName: 'com.example.app',
         adbPath: 'adb',
         runProcess: (exe, args) async {
@@ -1100,6 +1139,7 @@ void main() {
 
     test('throws on adb install failure', () async {
       final device = AndroidDevice(
+        aapt2Path: 'aapt2',
         packageName: 'com.example.app',
         adbPath: 'adb',
         runProcess: (exe, args) async {
@@ -1128,6 +1168,7 @@ void main() {
       // A reader who cannot see the serial the tool used has nothing to compare
       // against the one they would have typed.
       final device = AndroidDevice(
+        aapt2Path: 'aapt2',
         deviceId: '58051JEBF01271',
         packageName: 'com.example.app',
         adbPath: 'adb',
@@ -1156,6 +1197,7 @@ void main() {
       // `-d android` lets adb choose, and its message says which it chose or
       // why it would not. Quoting a serial we never passed would be a fiction.
       final device = AndroidDevice(
+        aapt2Path: 'aapt2',
         packageName: 'com.example.app',
         adbPath: 'adb',
         runProcess: (exe, args) async => args.contains('install')
@@ -1200,6 +1242,7 @@ void main() {
         required int availableKb,
         bool alreadyInstalled = false,
       }) => AndroidDevice(
+        aapt2Path: 'aapt2',
         packageName: 'com.example.app',
         adbPath: 'adb',
         runProcess: (exe, args) async {
@@ -1291,6 +1334,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         // else — a bad signature, an ABI mismatch — is passed through
         // unembellished rather than dressed up as a storage problem.
         final device = AndroidDevice(
+          aapt2Path: 'aapt2',
           packageName: 'com.example.app',
           adbPath: 'adb',
           runProcess: (exe, args) async => args.contains('install')
@@ -1320,6 +1364,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       FakeProcess logcat,
       ProcessResult Function() onForward,
     ) => AndroidDevice(
+      aapt2Path: 'aapt2',
       packageName: 'com.example.app',
       adbPath: 'adb',
       runProcess: (exe, args) async =>
@@ -1425,6 +1470,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         final calls = <List<String>>[];
         var asked = 0;
         final device = AndroidDevice(
+          aapt2Path: 'aapt2',
           packageName: 'com.example.app',
           adbPath: 'adb',
           runProcess: (exe, args) async {
@@ -1777,6 +1823,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       final fakeLogcat = FakeProcess();
 
       final device = AndroidDevice(
+        aapt2Path: 'aapt2',
         packageName: 'com.example.app',
         adbPath: 'adb',
         runProcess: (exe, args) async {
@@ -1805,6 +1852,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     }) {
       final calls = <List<String>>[];
       final device = AndroidDevice(
+        aapt2Path: 'aapt2',
         packageName: 'com.example.app',
         adbPath: 'adb',
         runProcess: (exe, args) async {
@@ -1898,17 +1946,9 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       expect(await namesFor(WindowsDevice()), isEmpty);
     });
 
-    test('an Android run needs adb, plus aapt2 to read the APK', () async {
-      expect(await namesFor(AndroidDevice()), ['adb', 'aapt2']);
-    });
-
-    test('aapt2 is not needed when the package is already known', () async {
-      expect(await namesFor(AndroidDevice(packageName: 'com.example.app')), [
-        'adb',
-      ]);
-    });
-
-    test('an explicitly located tool is not searched for', () async {
+    // Its adb and aapt2 are the workspace's SDK's, built before the device
+    // exists, so there is nothing on the host to look for.
+    test('an Android run needs nothing installed', () async {
       expect(
         await namesFor(
           AndroidDevice(adbPath: '/sdk/adb', aapt2Path: '/sdk/aapt2'),
@@ -2148,6 +2188,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       required FakeProcess logcat,
     }) {
       return AndroidDevice(
+        aapt2Path: 'aapt2',
         packageName: 'com.example.app',
         adbPath: 'adb',
         runProcess: (exe, args) async {
@@ -2315,6 +2356,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       final calls = <(String, List<String>)>[];
       final fakeLogcat = FakeProcess();
       final device = AndroidDevice(
+        aapt2Path: 'aapt2',
         packageName: 'com.example.app',
         adbPath: 'adb',
         runProcess: (exe, args) async {
@@ -3131,6 +3173,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       final logcat = FakeProcess();
       final forwards = <String>[];
       final device = AndroidDevice(
+        aapt2Path: 'aapt2',
         packageName: 'com.example.app',
         adbPath: 'adb',
         runProcess: (exe, args) async {
@@ -3168,6 +3211,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       () async {
         final calls = <List<String>>[];
         final device = AndroidDevice(
+          aapt2Path: 'aapt2',
           packageName: 'com.example.app',
           adbPath: 'adb',
           runProcess: (exe, args) async {
@@ -3206,6 +3250,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     test('an Android launch on an empty log reads all of it', () async {
       final calls = <List<String>>[];
       final device = AndroidDevice(
+        aapt2Path: 'aapt2',
         packageName: 'com.example.app',
         adbPath: 'adb',
         runProcess: (exe, args) async {
@@ -3228,6 +3273,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       'an Android launch that cannot read the log fails, saying so',
       () async {
         final device = AndroidDevice(
+          aapt2Path: 'aapt2',
           packageName: 'com.example.app',
           adbPath: 'adb',
           runProcess: (exe, args) async {
@@ -3835,6 +3881,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       final calls = <(String, List<String>)>[];
 
       final device = AndroidDevice(
+        aapt2Path: 'aapt2',
         deviceId: '58051JEBF01271',
         adbPath: 'adb',
         startScreenshotProcess: (exe, args) async {
@@ -3865,6 +3912,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       () async {
         final wedged = FakeProcess();
         final device = AndroidDevice(
+          aapt2Path: 'aapt2',
           deviceId: '58051JEBF01271',
           adbPath: 'adb',
           startScreenshotProcess: (exe, args) async => wedged,
@@ -3904,6 +3952,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       /// it is handed — the emulator names the file itself, so a caller can
       /// only look for what turned up.
       AndroidDevice emulator(List<String> files) => AndroidDevice(
+        aapt2Path: 'aapt2',
         deviceId: 'emulator-5554',
         adbPath: 'adb',
         startScreenshotProcess: (exe, args) async {
@@ -3931,6 +3980,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       test('passes the console command a directory of its own', () async {
         final calls = <List<String>>[];
         final device = AndroidDevice(
+          aapt2Path: 'aapt2',
           deviceId: 'emulator-5554',
           adbPath: 'adb',
           startScreenshotProcess: (exe, args) async {
@@ -4002,6 +4052,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       const budget = Duration(milliseconds: 500);
       final started = <FakeProcess>[];
       final device = AndroidDevice(
+        aapt2Path: 'aapt2',
         deviceId: '58051JEBF01271',
         adbPath: 'adb',
         startScreenshotProcess: (exe, args) async {

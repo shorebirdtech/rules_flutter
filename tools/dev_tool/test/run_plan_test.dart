@@ -67,8 +67,18 @@ void main() {
     test('devices of different ABIs are refused, naming each and why', () {
       expect(
         () => assertDevicesShareOneBuild([
-          AndroidDevice(deviceId: 'PIXEL', abi: 'arm64-v8a'),
-          AndroidDevice(deviceId: 'emulator-5554', abi: 'x86_64'),
+          AndroidDevice(
+            adbPath: 'adb',
+            aapt2Path: 'aapt2',
+            deviceId: 'PIXEL',
+            abi: 'arm64-v8a',
+          ),
+          AndroidDevice(
+            adbPath: 'adb',
+            aapt2Path: 'aapt2',
+            deviceId: 'emulator-5554',
+            abi: 'x86_64',
+          ),
         ]),
         throwsA(
           isA<DevToolException>().having(
@@ -89,8 +99,18 @@ void main() {
     test('devices of one ABI share a build', () {
       expect(
         () => assertDevicesShareOneBuild([
-          AndroidDevice(deviceId: 'PIXEL', abi: 'arm64-v8a'),
-          AndroidDevice(deviceId: 'emulator-5554', abi: 'arm64-v8a'),
+          AndroidDevice(
+            adbPath: 'adb',
+            aapt2Path: 'aapt2',
+            deviceId: 'PIXEL',
+            abi: 'arm64-v8a',
+          ),
+          AndroidDevice(
+            adbPath: 'adb',
+            aapt2Path: 'aapt2',
+            deviceId: 'emulator-5554',
+            abi: 'arm64-v8a',
+          ),
         ]),
         returnsNormally,
       );
@@ -100,7 +120,7 @@ void main() {
       expect(
         () => assertDevicesShareOneBuild([
           IOSSimulatorDevice(udid: 'SIM'),
-          AndroidDevice(abi: 'arm64-v8a'),
+          AndroidDevice(adbPath: 'adb', aapt2Path: 'aapt2', abi: 'arm64-v8a'),
         ]),
         throwsA(isA<DevToolException>()),
       );

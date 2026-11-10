@@ -1382,21 +1382,17 @@ Map<String, String> desktopLaunchEnvironment({
 
 /// Extract package name and launchable activity from an APK via aapt2.
 ///
-/// [aapt2Path] names the binary to run; when omitted it is resolved through
-/// [aapt2Tool], which throws a [MissingHostToolException] rather than handing
-/// `Process.run` a bare `'aapt2'` and letting a misconfigured SDK surface as a
-/// failure to launch.
+/// [aapt2Path] names the binary to run: the workspace's SDK's.
 Future<({String packageName, String? activityName})> extractPackageInfo(
   String apkPath, {
   ProcessRunSync? runProcess,
-  String? aapt2Path,
+  required String aapt2Path,
 }) async {
   final run = runProcess ?? Process.run;
-  final aapt2 = aapt2Path ?? aapt2Tool().require();
-  final result = await run(aapt2, ['dump', 'badging', apkPath]);
+  final result = await run(aapt2Path, ['dump', 'badging', apkPath]);
   if (result.exitCode != 0) {
     throw StateError(
-      '`$aapt2 dump badging $apkPath` failed '
+      '`$aapt2Path dump badging $apkPath` failed '
       '(exit ${result.exitCode}): ${result.stderr}',
     );
   }
@@ -1444,8 +1440,16 @@ class AndroidDevice extends Device {
   String? _packageName;
   String? _activityName;
   String? _abi;
-  final String? _explicitAdbPath;
-  final String? _explicitAapt2Path;
+
+  /// The `adb` to run: the workspace's SDK's (see `android_sdk.dart`), or
+  /// the one an integration test's runner names.
+  final String adbPath;
+
+  /// The `aapt2` that reads the APK's package name and launchable activity,
+  /// from the same SDK. Only a launch that has to read the APK's manifest
+  /// runs it.
+  final String aapt2Path;
+
   final ProcessRunSync _runProcess;
   final ProcessStarter _startProcess;
 
@@ -1474,38 +1478,17 @@ class AndroidDevice extends Device {
     String? packageName,
     String? activityName,
     String? abi,
-    String? adbPath,
-    String? aapt2Path,
+    required this.adbPath,
+    required this.aapt2Path,
     ProcessRunSync? runProcess,
     ProcessStarter? startProcess,
     ProcessStarter? startScreenshotProcess,
   }) : _packageName = packageName,
        _activityName = activityName,
        _abi = abi,
-       _explicitAdbPath = adbPath,
-       _explicitAapt2Path = aapt2Path,
        _runProcess = runProcess ?? Process.run,
        _startProcess = startProcess ?? Process.start,
        _injectedScreenshotStart = startScreenshotProcess;
-
-  /// The `adb` to run, resolved on first use.
-  ///
-  /// Lazy so that merely naming an Android serial on a machine with no SDK is
-  /// not itself an error — [preflight] is where that gets reported, with the
-  /// context that a run is about to need it.
-  late final String adbPath = _explicitAdbPath ?? adbTool().require();
-
-  /// The `aapt2` to run, resolved on first use. Only a launch that has to read
-  /// the APK's manifest touches it.
-  late final String aapt2Path = _explicitAapt2Path ?? aapt2Tool().require();
-
-  @override
-  Future<List<HostTool>> requiredHostTools() async => [
-    if (_explicitAdbPath == null) adbTool(),
-    // Needed only to read the package name and launchable activity out of
-    // the APK, which a caller that already named them skips.
-    if (_packageName == null && _explicitAapt2Path == null) aapt2Tool(),
-  ];
 
   @override
   NativePatchDelivery? get nativePatchDelivery {

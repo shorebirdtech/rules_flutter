@@ -2,10 +2,43 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter_bazel_dev_tool/android_sdk.dart';
 import 'package:flutter_bazel_dev_tool/dev_tool_exception.dart';
 import 'package:flutter_bazel_dev_tool/device.dart';
 import 'package:flutter_bazel_dev_tool/device_id.dart';
 import 'package:test/test.dart';
+
+const _tools = AndroidSdkTools(adb: '/fake/adb', aapt2: '/fake/aapt2');
+
+/// An [AndroidSdk] that answers [tools], counting how often it is asked.
+class _FakeAndroidSdk extends AndroidSdk {
+  final AndroidSdkTools? tools;
+  var asked = 0;
+
+  _FakeAndroidSdk(this.tools);
+
+  @override
+  Future<AndroidSdkTools?> find() async {
+    asked++;
+    return tools;
+  }
+
+  @override
+  String get absence => 'this workspace has no Android SDK (fake).';
+}
+
+/// An [AndroidSdk] whose tools could not be built.
+class _BrokenAndroidSdk extends AndroidSdk {
+  @override
+  Future<AndroidSdkTools?> find() async =>
+      throw DevToolException('Could not build the Android SDK\'s adb.');
+
+  @override
+  String get absence => throw StateError('unused');
+}
+
+final _sdk = _FakeAndroidSdk(_tools);
+final _noSdk = _FakeAndroidSdk(null);
 
 const _simUdid = '176BA0D3-AFA5-4D72-BE1F-0F5916796259';
 
@@ -81,7 +114,7 @@ Matcher _refusal(Object message) => isA<DevToolException>().having(
 void main() {
   group('resolveDevices', () {
     test('returns auto-detected device when no IDs given', () async {
-      expect(await resolveDevices([]), hasLength(1));
+      expect(await resolveDevices([], androidSdk: _sdk), hasLength(1));
     });
 
     test('resolves each keyword to its device kind', () async {
@@ -93,7 +126,7 @@ void main() {
         'ios-simulator',
         'ios',
         'android',
-      ]);
+      ], androidSdk: _sdk);
       expect(devices[0], isA<MacOSDevice>());
       expect(devices[1], isA<LinuxDevice>());
       expect(devices[2], isA<WindowsDevice>());
@@ -106,13 +139,17 @@ void main() {
     test(
       'resolves ios-simulator:UDID to IOSSimulatorDevice with udid',
       () async {
-        final device = (await resolveDevices(['ios-simulator:ABC-123'])).single;
+        final device = (await resolveDevices([
+          'ios-simulator:ABC-123',
+        ], androidSdk: _sdk)).single;
         expect((device as IOSSimulatorDevice).udid, 'ABC-123');
       },
     );
 
     test('resolves ios:UDID to IOSDevice with udid', () async {
-      final device = (await resolveDevices(['ios:ABC-123'])).single;
+      final device = (await resolveDevices([
+        'ios:ABC-123',
+      ], androidSdk: _sdk)).single;
       expect((device as IOSDevice).udid, 'ABC-123');
     });
 
@@ -122,8 +159,37 @@ void main() {
       // service name and answers `unknown host service '<serial>:features'` —
       // an error naming neither the device id nor the flag that produced it,
       // for a device the same `adb` installs to by hand.
-      final device = (await resolveDevices(['android:58051JEBF01271'])).single;
+      final device = (await resolveDevices([
+        'android:58051JEBF01271',
+      ], androidSdk: _sdk)).single;
       expect((device as AndroidDevice).deviceId, '58051JEBF01271');
+    });
+
+    test('drives an Android device with the workspace SDK\'s tools', () async {
+      final device =
+          (await resolveDevices(['android'], androidSdk: _sdk)).single
+              as AndroidDevice;
+      expect(device.adbPath, '/fake/adb');
+      expect(device.aapt2Path, '/fake/aapt2');
+    });
+
+    test('asks for the Android SDK only for an Android device', () async {
+      final sdk = _FakeAndroidSdk(_tools);
+      await resolveDevices([
+        'macos',
+        'chrome',
+        'ios-simulator',
+      ], androidSdk: sdk);
+      expect(sdk.asked, 0);
+    });
+
+    test('refuses an Android device in a workspace with no SDK', () async {
+      for (final id in ['android', 'android:emulator-5554']) {
+        await expectLater(
+          resolveDevices([id], androidSdk: _noSdk),
+          throwsA(_refusal(contains('this workspace has no Android SDK'))),
+        );
+      }
     });
 
     test('resolving known forms asks no other tool', () async {
@@ -135,14 +201,18 @@ void main() {
           'android:emulator-5554',
         ],
         runProbe: host.run,
-        adbPath: '/fake/adb',
+        androidSdk: _sdk,
       );
       expect(host.calls, isEmpty);
     });
 
     test('refuses a prefix with nothing after it', () async {
       await expectLater(
-        resolveDevices(['ios-simulator:'], runProbe: _fakeHost().run),
+        resolveDevices(
+          ['ios-simulator:'],
+          runProbe: _fakeHost().run,
+          androidSdk: _sdk,
+        ),
         throwsA(
           _refusal(contains('-d ios-simulator for the one that is booted')),
         ),
@@ -151,10 +221,41 @@ void main() {
   });
 
   group('resolveDevices refuses an id that names no device kind', () {
+    test('an SDK that could not be built leaves adb unanswered', () async {
+      await expectLater(
+        resolveDevices(
+          ['emulator-5554'],
+          runProbe: _fakeHost().run,
+          androidSdk: _BrokenAndroidSdk(),
+        ),
+        throwsA(_refusal(contains('adb could not be asked'))),
+      );
+    });
+
+    test('without an Android SDK, lists no Android devices', () async {
+      final host = _fakeHost();
+      await expectLater(
+        resolveDevices(
+          ['emulator-5554'],
+          runProbe: host.run,
+          androidSdk: _noSdk,
+        ),
+        throwsA(
+          _refusal(
+            allOf(
+              contains('No device that simctl or devicectl lists has that id.'),
+              isNot(contains('adb')),
+            ),
+          ),
+        ),
+      );
+      expect(host.calls.map((c) => c.first), everyElement('xcrun'));
+    });
+
     test('a bare simulator UDID, naming the simulator and its form', () async {
       final host = _fakeHost();
       await expectLater(
-        resolveDevices([_simUdid], runProbe: host.run, adbPath: '/fake/adb'),
+        resolveDevices([_simUdid], runProbe: host.run, androidSdk: _sdk),
         throwsA(
           _refusal(
             allOf(
@@ -178,7 +279,7 @@ void main() {
         resolveDevices(
           ['emulator-5554'],
           runProbe: _fakeHost().run,
-          adbPath: '/fake/adb',
+          androidSdk: _sdk,
         ),
         throwsA(
           _refusal(
@@ -194,7 +295,7 @@ void main() {
     test('an iOS device by either of its identifiers', () async {
       for (final id in ['00008101-001C', 'CORE-DEVICE-UUID']) {
         await expectLater(
-          resolveDevices([id], runProbe: _fakeHost().run, adbPath: '/fake/adb'),
+          resolveDevices([id], runProbe: _fakeHost().run, androidSdk: _sdk),
           throwsA(
             _refusal(
               allOf(
@@ -212,7 +313,7 @@ void main() {
         resolveDevices(
           ['ios-simulater:$_simUdid'], // typos:ignore-line
           runProbe: _fakeHost().run,
-          adbPath: '/fake/adb',
+          androidSdk: _sdk,
         ),
         throwsA(_refusal(contains('pass -d ios-simulator:$_simUdid'))),
       );
@@ -223,7 +324,7 @@ void main() {
         resolveDevices(
           ['emulator-5556'],
           runProbe: _fakeHost().run,
-          adbPath: '/fake/adb',
+          androidSdk: _sdk,
         ),
         throwsA(
           _refusal(
@@ -246,7 +347,7 @@ void main() {
         resolveDevices(
           ['emulator-5554'],
           runProbe: _fakeHost(fail: {'adb', 'devicectl'}).run,
-          adbPath: '/fake/adb',
+          androidSdk: _sdk,
         ),
         throwsA(
           _refusal(
@@ -264,7 +365,7 @@ void main() {
       Future<ProcessResult> run(String exe, List<String> args) async =>
           ProcessResult(1, 72, '', 'xcrun: error: unable to find utility');
       await expectLater(
-        resolveDevices(['x'], runProbe: run, adbPath: '/fake/adb'),
+        resolveDevices(['x'], runProbe: run, androidSdk: _sdk),
         throwsA(
           _refusal(
             allOf(
@@ -283,7 +384,7 @@ void main() {
           resolveDevices(
             ['macos', _simUdid, 'emulator-5554'],
             runProbe: _fakeHost().run,
-            adbPath: '/fake/adb',
+            androidSdk: _sdk,
           ),
           throwsA(
             _refusal(

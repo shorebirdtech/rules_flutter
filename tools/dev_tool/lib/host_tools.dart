@@ -1,8 +1,9 @@
 /// Locating the external programs the dev tool drives.
 ///
-/// The dev tool shells out to binaries it neither owns nor can vendor: the
-/// Android SDK's `adb` and `aapt2`, `lldb` and `iproxy` for a physical iOS
-/// device, Chrome. They belong to the user's machine, so searching the SDK's
+/// The dev tool shells out to binaries it neither owns nor can vendor: `lldb`
+/// and `iproxy` for a physical iOS device, Chrome. (The Android SDK's `adb` and
+/// `aapt2` are not among them: they are the workspace's, built by Bazel; see
+/// `android_sdk.dart`.) They belong to the user's machine, so searching the SDK's
 /// own conventional locations and PATH is legitimate — *guessing* is not.
 /// Handing `Process.run` a bare `'aapt2'` and hoping defers the failure into
 /// the middle of a launch, where it surfaces as an unrelated fault: an APK
@@ -103,51 +104,6 @@ class HostTool {
   ];
 }
 
-/// The `adb` that installs the APK, starts the activity and carries logcat.
-HostTool adbTool({Map<String, String>? environment}) {
-  final env = environment ?? Platform.environment;
-  return HostTool(
-    name: 'adb',
-    purpose:
-        'install the app on an Android device, start it, and read its '
-        'logs',
-    candidates: [
-      for (final sdk in androidSdkRoots(env))
-        p.join(sdk, 'platform-tools', _exeName('adb')),
-    ],
-    remedy: _androidSdkRemedy(
-      env,
-      component: 'the platform-tools package',
-      sdkmanagerPackage: 'platform-tools',
-    ),
-    environment: env,
-  );
-}
-
-/// The `aapt2` that reads an APK's package name and launchable activity.
-///
-/// Every installed build-tools version is a candidate, newest first: newest is
-/// the right one to read a current APK with, and naming them all makes the
-/// diagnostic show what is actually installed rather than what was expected.
-HostTool aapt2Tool({Map<String, String>? environment}) {
-  final env = environment ?? Platform.environment;
-  return HostTool(
-    name: 'aapt2',
-    purpose: 'read the package name and launchable activity out of the APK',
-    candidates: [
-      for (final sdk in androidSdkRoots(env))
-        for (final version in buildToolsVersions(sdk))
-          p.join(sdk, 'build-tools', version, _exeName('aapt2')),
-    ],
-    remedy: _androidSdkRemedy(
-      env,
-      component: 'the build-tools package',
-      sdkmanagerPackage: 'build-tools;35.0.0',
-    ),
-    environment: env,
-  );
-}
-
 /// The debugger a physical iOS device needs before its engine will start.
 HostTool lldbTool({Map<String, String>? environment}) => HostTool(
   name: 'lldb',
@@ -199,79 +155,6 @@ HostTool chromeTool({Map<String, String>? environment}) {
         'desktop device (-d macos / -d linux / -d windows).',
     environment: env,
   );
-}
-
-/// Android SDK roots to search, most authoritative first.
-///
-/// Both env vars are the SDK's own conventions, and an Android build that
-/// takes the installed SDK reads them too (see README). The macOS path after them is where
-/// Android Studio installs by default, and is what makes the common setup work
-/// with nothing exported; no equivalent guess is made elsewhere, because on
-/// those platforms an unset variable is better reported than guessed around.
-List<String> androidSdkRoots(Map<String, String> environment) {
-  final roots = <String>[];
-  for (final key in const ['ANDROID_HOME', 'ANDROID_SDK_ROOT']) {
-    final value = environment[key];
-    if (value != null && value.isNotEmpty) roots.add(value);
-  }
-  final home = environment['HOME'];
-  if (Platform.isMacOS && home != null && home.isNotEmpty) {
-    roots.add(p.join(home, 'Library', 'Android', 'sdk'));
-  }
-  return roots;
-}
-
-/// Installed `build-tools/<version>` directory names, newest first.
-///
-/// Ordered by numeric segment rather than lexically: `9.0.0` sorts *after*
-/// `34.0.0` as a string, which would have picked a decade-old aapt2 over the
-/// current one.
-List<String> buildToolsVersions(String sdkRoot) {
-  final dir = Directory(p.join(sdkRoot, 'build-tools'));
-  if (!dir.existsSync()) return const [];
-  final versions =
-      dir
-          .listSync()
-          .whereType<Directory>()
-          .map((d) => p.basename(d.path))
-          .toList()
-        ..sort((a, b) => _compareVersions(b, a));
-  return versions;
-}
-
-int _compareVersions(String a, String b) {
-  final left = _versionSegments(a);
-  final right = _versionSegments(b);
-  for (var i = 0; i < left.length || i < right.length; i++) {
-    final l = i < left.length ? left[i] : 0;
-    final r = i < right.length ? right[i] : 0;
-    if (l != r) return l.compareTo(r);
-  }
-  // Same numbers: `34.0.0-rc1` is not `34.0.0`, and a stable name sorts first
-  // because the string with nothing appended is shorter.
-  return b.length.compareTo(a.length);
-}
-
-List<int> _versionSegments(String version) => [
-  for (final part in version.split(RegExp(r'[.\-]'))) int.tryParse(part) ?? 0,
-];
-
-String _androidSdkRemedy(
-  Map<String, String> environment, {
-  required String component,
-  required String sdkmanagerPackage,
-}) {
-  final roots = androidSdkRoots(environment);
-  if (roots.isEmpty) {
-    return 'Neither ANDROID_HOME nor ANDROID_SDK_ROOT is set. Point one at '
-        'your Android SDK root (Android Studio installs it at '
-        '~/Library/Android/sdk on macOS, ~/Android/Sdk on Linux) with '
-        '$component installed, or put the binary on PATH.';
-  }
-  return 'The Android SDK is ${roots.first} (ANDROID_HOME/ANDROID_SDK_ROOT), '
-      'but $component is not installed there: add it from Android Studio\'s '
-      'SDK Manager or with `sdkmanager "$sdkmanagerPackage"`, or put the '
-      'binary on PATH.';
 }
 
 String _exeName(String name) =>
