@@ -263,6 +263,19 @@ maven.override(
     ]
 ]
 
+# Hamcrest 2 is one artifact, `org.hamcrest:hamcrest`, which took over the
+# classes of hamcrest-core and hamcrest-library; at 2.x both are empty stubs
+# that depend on it. rules_android's tooling asks for hamcrest-core 2.2, so
+# every install resolves hamcrest 2.2, and junit's hamcrest-core with it. An
+# app that links Espresso, which asks for hamcrest-library 1.3, would link
+# that jar's classes beside their newer copies in hamcrest 2.2: hamcrest-library
+# resolves as its 2.2 stub would, to hamcrest itself.
+maven.override(
+    name = "rules_android_maven",
+    coordinates = "org.hamcrest:hamcrest-library",
+    target = "@rules_android_maven//:org_hamcrest_hamcrest",
+)
+
 # One Kotlin standard library in an app, the compiler's. rules_kotlin links its
 # compiler's stdlib into every Kotlin library it builds (the runner, the
 # registrant, plugins), so an app also linking the Maven kotlin-stdlib that
