@@ -138,7 +138,6 @@ def _download_framework(repository_ctx, flutter_version):
         ),
     )
 
-
 flutter_framework_package = repository_rule(
     implementation = _flutter_framework_package_impl,
     doc = "Downloads package:flutter from the pinned Flutter source and generates its flutter_library target.",
