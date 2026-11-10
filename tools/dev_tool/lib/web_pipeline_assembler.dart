@@ -42,6 +42,7 @@ import 'run_plan.dart';
 import 'session.dart';
 import 'session_host.dart';
 import 'temp_dir.dart';
+import 'tool_services.dart';
 import 'toolchain_info.dart';
 import 'vm_service_client.dart';
 import 'vm_service_logs.dart';
@@ -132,6 +133,11 @@ class WebPipelineAssembler {
       });
       final devConfig = parseDevConfig(devConfigPath);
       requireDeclaredFilesExist(devConfig);
+      // Before the launch, so the page's VM service client registers
+      // `flutterVersion` when it connects.
+      host.toolServices.flutterVersion = FlutterSdkVersion.fromDevConfig(
+        devConfig,
+      );
 
       // Build web toolchain paths and find web output dir from build outputs.
       final webToolchain = buildWebToolchainFromOutputs(

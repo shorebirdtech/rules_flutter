@@ -48,6 +48,7 @@ import 'reload_pipeline.dart';
 import 'session.dart';
 import 'session_host.dart';
 import 'temp_dir.dart';
+import 'tool_services.dart';
 import 'toolchain_info.dart';
 import 'vm_service_client.dart';
 
@@ -396,6 +397,16 @@ class NativePipelineAssembler {
     // declared and did not write fails here, naming the file, rather than as
     // a frontend_server exit 255 several steps later.
     requireDeclaredFilesExist(devConfig);
+    // The apps are already up and connected, so their clients register it now;
+    // a re-dial or a relaunch registers it with the rest.
+    host.toolServices.flutterVersion = FlutterSdkVersion.fromDevConfig(
+      devConfig,
+    );
+    await Future.wait([
+      for (final session in host.sessions)
+        if (session.vmClient case final client?)
+          client.registerFlutterVersion(),
+    ]);
     // The dev package_config points a source-assembled app package at the live
     // source + generated roots via filesystemScheme, and every other package
     // at its directory.

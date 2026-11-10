@@ -1,6 +1,8 @@
 import 'package:flutter_bazel_dev_tool/command_failure.dart';
 import 'package:flutter_bazel_dev_tool/command_runner.dart';
+import 'package:flutter_bazel_dev_tool/dev_tool_exception.dart';
 import 'package:flutter_bazel_dev_tool/tool_services.dart';
+import 'package:flutter_bazel_dev_tool/toolchain_info.dart';
 import 'package:flutter_bazel_dev_tool/vm_service_client.dart';
 import 'package:test/test.dart';
 import 'package:vm_service/vm_service.dart';
@@ -33,6 +35,31 @@ typedef _Report = ({String action, String method, Map<String, dynamic> result});
 
 FakeVmService _fake() => FakeVmService(
   isolates: [IsolateRef(id: 'iso-1', name: 'main', number: '1')],
+);
+
+/// A dev config with the defines `sdk_defines.bzl` gives every app, beside a
+/// user's own.
+DevConfig _devConfig({List<String>? defines}) => DevConfig(
+  engineRevision: 'a804b261645ef8c13eb3d5c44a5c2fb0340c5539',
+  flutterVersion: '3.47.2',
+  dartSdkRoot: '',
+  dartaotruntime: '',
+  frontendServer: '',
+  patchedSdkRoot: '',
+  appEntrypoint: 'package:app/main.dart',
+  dartDefines:
+      defines ??
+      [
+        'GREETING=a=b',
+        'FLUTTER_BUILD_NAME=1.0.0',
+        'FLUTTER_BUILD_NUMBER=1',
+        'FLUTTER_VERSION=3.47.2',
+        'FLUTTER_CHANNEL=stable',
+        'FLUTTER_GIT_URL=https://github.com/flutter/flutter.git',
+        'FLUTTER_FRAMEWORK_REVISION=d3b14c8769',
+        'FLUTTER_ENGINE_REVISION=a804b26164',
+        'FLUTTER_DART_VERSION=3.13.2',
+      ],
 );
 
 void main() {
@@ -200,6 +227,60 @@ void main() {
     });
   });
 
+  group('flutterVersion', () {
+    test(
+      'answers with flutter_tools\' keys, from the build\'s defines',
+      () async {
+        services.flutterVersion = FlutterSdkVersion.fromDevConfig(_devConfig());
+        final fake = _fake();
+        await services.registerOn(fake);
+        expect(fake.registeredServices['flutterVersion'], ToolServices.alias);
+        expect(await fake.callRegistered('flutterVersion'), {
+          'result': {
+            'type': 'Success',
+            'frameworkVersion': '3.47.2',
+            'channel': 'stable',
+            'repositoryUrl': 'https://github.com/flutter/flutter.git',
+            'engineRevision': 'a804b261645ef8c13eb3d5c44a5c2fb0340c5539',
+            'dartSdkVersion': '3.13.2',
+            'flutterVersion': '3.47.2',
+            'frameworkRevisionShort': 'd3b14c8769',
+            'engineRevisionShort': 'a804b26164',
+          },
+        });
+      },
+    );
+
+    test('is not registered before the build has said', () async {
+      final fake = _fake();
+      expect(await services.registerOn(fake), isFalse);
+      expect(fake.registeredServices.keys, isNot(contains('flutterVersion')));
+    });
+
+    test('a web run\'s copy without hotRestart sees the version', () async {
+      final web = services.withoutHotRestart();
+      services.flutterVersion = FlutterSdkVersion.fromDevConfig(_devConfig());
+      final fake = _fake();
+      expect(await web.registerOn(fake), isTrue);
+      expect(fake.registeredServices.keys, ['reloadSources', 'flutterVersion']);
+    });
+
+    test('a dev config missing an SDK define fails by name', () {
+      expect(
+        () => FlutterSdkVersion.fromDevConfig(
+          _devConfig(defines: ['FLUTTER_VERSION=3.47.2']),
+        ),
+        throwsA(
+          isA<DevToolException>().having(
+            (e) => e.message,
+            'message',
+            contains('FLUTTER_CHANNEL'),
+          ),
+        ),
+      );
+    });
+  });
+
   group('VmServiceClient', () {
     test('registers the services on connect', () async {
       final fake = _fake();
@@ -214,6 +295,39 @@ void main() {
       expect(fake.registeredServices.keys, ['reloadSources', 'hotRestart']);
       await client.disconnect();
     });
+
+    test(
+      'registers flutterVersion on a connection made before it was known, '
+      'once',
+      () async {
+        final fake = _fake();
+        final client = VmServiceClient(
+          connector: connectorFor(fake),
+          services: services,
+        );
+        await client.connect(
+          Uri.parse('http://127.0.0.1:1/'),
+          createDevFS: false,
+        );
+        expect(fake.registeredServices.keys, ['reloadSources', 'hotRestart']);
+
+        services.flutterVersion = FlutterSdkVersion.fromDevConfig(
+          _devConfig(),
+        );
+        await client.registerFlutterVersion();
+        // A second would throw: the fake, like the real one, takes one handler
+        // per name per connection.
+        await client.registerFlutterVersion();
+        expect(fake.registeredServices.keys, [
+          'reloadSources',
+          'hotRestart',
+          'flutterVersion',
+        ]);
+        final answer = await fake.callRegistered('flutterVersion');
+        expect((answer['result'] as Map)['frameworkVersion'], '3.47.2');
+        await client.disconnect();
+      },
+    );
 
     test('registers nothing without services', () async {
       final fake = _fake();

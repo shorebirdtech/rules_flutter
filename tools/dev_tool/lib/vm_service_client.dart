@@ -395,6 +395,24 @@ class VmServiceClient {
   /// cannot reload offers no reload, as `flutter_tools`' cold runner does not.
   final ToolServices? services;
 
+  /// The connection `flutterVersion` is registered on, so it is registered
+  /// once per connection however it got there.
+  VmService? _versionRegisteredOn;
+
+  /// Register `flutterVersion` on the current connection, now that
+  /// [ToolServices.flutterVersion] is known — a native run learns it from the
+  /// dev config after this client connected. Connections made from now on
+  /// register it themselves. Does nothing without [services] or a connection.
+  Future<void> registerFlutterVersion() async {
+    final svc = _service;
+    final tools = services;
+    if (svc == null || tools == null || identical(_versionRegisteredOn, svc)) {
+      return;
+    }
+    _versionRegisteredOn = svc;
+    await tools.registerFlutterVersionOn(svc);
+  }
+
   VmServiceClient({
     VmServiceConnector? connector,
     this.services,
@@ -497,7 +515,7 @@ class VmServiceClient {
 
     // On every connection, re-dials included: a registration belongs to the
     // connection that made it, and DDS drops it when that connection closes.
-    await services?.registerOn(svc);
+    if (await services?.registerOn(svc) ?? false) _versionRegisteredOn = svc;
 
     // Registered only now, after the handshake. Watching from the moment the
     // socket comes up would leave a watcher behind for a dial that died

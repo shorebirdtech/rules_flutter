@@ -8,12 +8,96 @@
 /// it never loads. `flutter_tools` registers both (`vmservice.dart`,
 /// `setUpVmService`), and so does this tool, routed to the same commands `r`,
 /// `R`, `app.hotReload` and `app.restart` reach.
+///
+/// It also registers `flutterVersion`, which DevTools calls to show which
+/// Flutter the app runs on, once the build has said which: see
+/// [FlutterSdkVersion].
 library;
 
 import 'package:vm_service/vm_service.dart';
 
 import 'command_failure.dart';
 import 'command_runner.dart';
+import 'dev_tool_exception.dart';
+import 'toolchain_info.dart';
+
+/// The Flutter SDK an app was built with, as `flutter_tools`' `flutterVersion`
+/// service reports it (`vmservice.dart`, `FlutterVersion.toJson` plus the two
+/// short revisions).
+///
+/// Read from the defines the build compiled into the app (`FLUTTER_VERSION`,
+/// `FLUTTER_FRAMEWORK_REVISION`, ...), which `package:flutter`'s own
+/// `FlutterVersion` reads too, so the service and the app cannot disagree.
+/// Those carry the framework revision only in its short form and no commit
+/// dates or DevTools version, so the full `frameworkRevision`,
+/// `frameworkCommitDate` and `devToolsVersion` are left out rather than made
+/// up. DevTools shows the short revisions and reads none of the three.
+class FlutterSdkVersion {
+  final String frameworkVersion;
+  final String channel;
+  final String repositoryUrl;
+  final String frameworkRevisionShort;
+  final String engineRevision;
+  final String engineRevisionShort;
+  final String dartSdkVersion;
+
+  const FlutterSdkVersion({
+    required this.frameworkVersion,
+    required this.channel,
+    required this.repositoryUrl,
+    required this.frameworkRevisionShort,
+    required this.engineRevision,
+    required this.engineRevisionShort,
+    required this.dartSdkVersion,
+  });
+
+  /// From a `_dev_config.json`, native or web: both carry the SDK's defines
+  /// in `dartDefines` and the engine's full revision beside them.
+  ///
+  /// A define the build did not set is rules/dev-tool version skew, and fails
+  /// by name.
+  factory FlutterSdkVersion.fromDevConfig(DevConfig config) {
+    final defines = <String, String>{
+      for (final define in config.dartDefines)
+        if (define.indexOf('=') case final i when i > 0)
+          define.substring(0, i): define.substring(i + 1),
+    };
+    String need(String key) =>
+        defines[key] ??
+        (throw DevToolException(
+          'the dev config does not define $key, which every app is compiled '
+          'with. The app and this dev tool were built from different '
+          'revisions of rules_flutter.',
+        ));
+    return FlutterSdkVersion(
+      frameworkVersion: need('FLUTTER_VERSION'),
+      channel: need('FLUTTER_CHANNEL'),
+      repositoryUrl: need('FLUTTER_GIT_URL'),
+      frameworkRevisionShort: need('FLUTTER_FRAMEWORK_REVISION'),
+      engineRevision: config.engineRevision,
+      engineRevisionShort: need('FLUTTER_ENGINE_REVISION'),
+      dartSdkVersion: need('FLUTTER_DART_VERSION'),
+    );
+  }
+
+  /// The service's `result`, keyed as `flutter_tools` keys it.
+  Map<String, Object> toJson() => {
+    'frameworkVersion': frameworkVersion,
+    'channel': channel,
+    'repositoryUrl': repositoryUrl,
+    'engineRevision': engineRevision,
+    'dartSdkVersion': dartSdkVersion,
+    'flutterVersion': frameworkVersion,
+    'frameworkRevisionShort': frameworkRevisionShort,
+    'engineRevisionShort': engineRevisionShort,
+  };
+}
+
+/// Where [ToolServices] and its [ToolServices.withoutHotRestart] copy keep the
+/// version, so one set on either is seen by both.
+class _VersionSlot {
+  FlutterSdkVersion? version;
+}
 
 /// Told the outcome of a reload or restart a VM service client asked for.
 ///
@@ -43,9 +127,21 @@ class ToolServices {
 
   static const reloadSourcesService = 'reloadSources';
   static const hotRestartService = 'hotRestart';
+  static const flutterVersionService = 'flutterVersion';
 
   final CommandRunner _commands;
   final ToolServiceReporter _report;
+  final _VersionSlot _version;
+
+  /// The SDK `flutterVersion` answers with, or null while the build has not
+  /// said, in which case the service is not registered.
+  ///
+  /// Known only once the dev config is read. A web run reads it before it
+  /// connects; a native run reads it after the app is up and connected, so
+  /// setting it does not reach a connection already made:
+  /// `VmServiceClient.registerFlutterVersion` registers it there.
+  FlutterSdkVersion? get flutterVersion => _version.version;
+  set flutterVersion(FlutterSdkVersion? value) => _version.version = value;
 
   /// Whether to register `hotRestart` as well as `reloadSources`.
   ///
@@ -60,29 +156,62 @@ class ToolServices {
   ToolServices({
     required CommandRunner commands,
     required ToolServiceReporter report,
-    this.hotRestart = true,
-  }) : _commands = commands,
-       _report = report;
+    bool hotRestart = true,
+  }) : this._(commands, report, hotRestart, _VersionSlot());
 
-  /// The same services without `hotRestart`. See [hotRestart].
+  ToolServices._(this._commands, this._report, this.hotRestart, this._version);
+
+  /// The same services without `hotRestart`, sharing [flutterVersion]. See
+  /// [hotRestart].
   ToolServices withoutHotRestart() =>
-      ToolServices(commands: _commands, report: _report, hotRestart: false);
+      ToolServices._(_commands, _report, false, _version);
 
   /// Install the handlers on [service] and announce them.
   ///
   /// Handlers go in before the registrations are sent: DDS forwards a call to
   /// a service the moment it is registered, and a call that arrived first
   /// would be answered "method not found".
-  Future<void> registerOn(VmService service) async {
+  ///
+  /// Answers whether it registered `flutterVersion`, which it does only when
+  /// [flutterVersion] is known.
+  Future<bool> registerOn(VmService service) async {
     service.registerServiceCallback(reloadSourcesService, _reloadSources);
     if (hotRestart) {
       service.registerServiceCallback(hotRestartService, _hotRestart);
     }
+    final version = flutterVersion;
+    if (version != null) {
+      service.registerServiceCallback(
+        flutterVersionService,
+        (_) async => _versionResponse(version),
+      );
+    }
     await Future.wait([
       service.registerService(reloadSourcesService, alias),
       if (hotRestart) service.registerService(hotRestartService, alias),
+      if (version != null)
+        service.registerService(flutterVersionService, alias),
     ]);
+    return version != null;
   }
+
+  /// Register `flutterVersion` alone, on a [service] [registerOn] reached
+  /// before [flutterVersion] was known. Throws if it still is not.
+  Future<void> registerFlutterVersionOn(VmService service) async {
+    final version = flutterVersion;
+    if (version == null) {
+      throw StateError('flutterVersion is registered once it is known.');
+    }
+    service.registerServiceCallback(
+      flutterVersionService,
+      (_) async => _versionResponse(version),
+    );
+    await service.registerService(flutterVersionService, alias);
+  }
+
+  static Map<String, dynamic> _versionResponse(FlutterSdkVersion version) => {
+    'result': {'type': 'Success', ...version.toJson()},
+  };
 
   /// `reloadSources`, with `flutter_tools`' parameters: `isolateId` (required,
   /// as there), `force` and `pause`.
