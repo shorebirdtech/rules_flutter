@@ -20,6 +20,7 @@ Output bundle structure:
         icudtl.dat
 """
 
+load("@rules_dart//dart:providers.bzl", "DartAnalyzableInfo")
 load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
 load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterSdkRecordInfo")
 load("//flutter/private:cc_runner_compile.bzl", "compile_and_link_runner")
@@ -524,7 +525,12 @@ def _flutter_linux_bundle_impl(ctx):
         progress_message = "Bundling Linux app %s" % ctx.label,
     )
 
-    return [DefaultInfo(files = depset([bundle_dir]))]
+    application = ctx.attr.application
+
+    # The program's own Dart files, for rules_dart's analysis of the app.
+    return [DefaultInfo(files = depset([bundle_dir]))] + (
+        [application[DartAnalyzableInfo]] if DartAnalyzableInfo in application else []
+    )
 
 flutter_linux_bundle_rule = rule(
     implementation = _flutter_linux_bundle_impl,

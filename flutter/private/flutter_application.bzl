@@ -26,6 +26,7 @@ load("//flutter/private:flutter_aot_compile.bzl", "flutter_aot_elf_action", "flu
 load("//flutter/private:flutter_info.bzl", "dedup_plugins")
 load("//flutter/private:flutter_native_assets.bzl", "CODE_ASSETS_DOC", "collect_bundled_code_asset_files", "resolve_native_assets", "write_native_assets_manifest")
 load("//flutter/private:native_sources.bzl", "collect_native_source_pairs")
+load("//flutter/private:program_analysis.bzl", "program_analyzable_info")
 
 def flutter_application_build(ctx, inputs):
     """Builds the program `inputs` describes as the application `ctx` declares.
@@ -490,6 +491,17 @@ def flutter_application_build(ctx, inputs):
             source_attributes = ["srcs"] if hasattr(ctx.attr, "application") else ["srcs", "main"],
             dependency_attributes = ["deps", "application"],
             extensions = ["dart"],
+        ),
+        # What lets rules_dart's analysis check the program's own files: its
+        # `main`, which may be outside any `lib/`, its sources, and the sources
+        # of what it compiles staged copies of. Deliberately not a `DartInfo`:
+        # `deps` requires one, and an application is not a dependency.
+        program_analyzable_info(
+            ctx,
+            inputs.package,
+            inputs.package_root,
+            inputs.deps,
+            [inputs.main] + inputs.srcs + inputs.staged_sources,
         ),
     ]
     providers.append(OutputGroupInfo(**output_groups))

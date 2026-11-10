@@ -1,0 +1,49 @@
+load("@rules_dart//dart:defs.bzl", "dart_analysis_test", "dart_package_metadata")
+load("//flutter:defs.bzl", "flutter_application")
+load("//flutter:integration_test.bzl", "flutter_application_variant", "flutter_integration_bootstrap")
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "integration_program_analysis",
+)
+
+# An application and an integration test's program over it, as the integration
+# test macros declare one, with packages from a hub of this repository. The
+# program stages the integration-test support library into itself
+# (`flutter_integration_bootstrap`), and its analysis checks the support
+# library's sources in place of the staged copies: this is where those sources
+# are analyzed. `manual`: nothing here needs building, only analyzing.
+flutter_application(
+    name = "app",
+    main = "lib/main.dart",
+    package = ":pubspec-metadata",
+    tags = ["manual"],
+    deps = ["@dev_tool_deps//:flutter"],
+)
+
+flutter_integration_bootstrap(
+    name = "bootstrap",
+    src = "integration_test/app_test.dart",
+    tags = ["manual"],
+)
+
+flutter_application_variant(
+    name = "program",
+    srcs = ["integration_test/app_test.dart"],
+    application = ":app",
+    main = ":bootstrap.dart",
+    tags = ["manual"],
+    unchecked_srcs = [":bootstrap"],
+    deps = [
+        "@dev_tool_deps//:flutter_test",
+        "@dev_tool_deps//:integration_test",
+        "@dev_tool_deps//:stack_trace",
+        "@dev_tool_deps//:stream_channel",
+        "@dev_tool_deps//:test_api",
+    ],
+)
+
+dart_analysis_test(
+    name = "analysis_test",
+    targets = [":program"],
+)

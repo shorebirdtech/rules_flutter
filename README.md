@@ -79,7 +79,7 @@ Android needs none: the engine of each ABI is rules_flutter's own, so a workspac
 
 The macOS and iOS engine repositories name the engine of the build mode directly, for a rule of your own that links the engine: `@flutter_macos_engine//:engine_library` and `@flutter_ios_engine//:Flutter_xcframework` are the debug engine under `-c dbg`, the profile engine under `-c opt --@rules_flutter//flutter:profile`, and the release engine under any other `-c opt`. To pin one engine whatever the mode, use `engine_debug_library`, `engine_profile_library` or `engine_release_library` on macOS (the Linux and Windows engines of the SDK repositories are named the same way), and `Flutter_xcframework_debug`, `Flutter_xcframework_profile` or `Flutter_xcframework_release` on iOS.
 
-Static analysis needs nothing extra. rules_dart's analysis resolves `dart:ui` in a `flutter_library`, `flutter_plugin` or `flutter_test` through the `sky_engine` package, which those rules add to the analyzer's closure themselves. Their compiled output does not change.
+Static analysis needs nothing extra. rules_dart's analysis resolves `dart:ui` in a `flutter_library`, `flutter_plugin`, `flutter_test`, `flutter_application` or `flutter_application_variant` through the `sky_engine` package, which those rules add to the analyzer's closure themselves. Their compiled output does not change.
 
 **Analysis and lints.** Static analysis is rules_dart's `dart_analyze` aspect, which `.bazelrc` turns on for `bazel test`; nothing runs without it. A lint set such as `flutter_lints` reaches the analyzer through a `dart_analysis_options` target, not through `deps`:
 
@@ -107,6 +107,8 @@ common --@rules_dart//dart:analysis_config=//:analysis_config
 ```
 
 `bazel test //...` then fails on any analyzer finding. [`e2e/android_example`](e2e/android_example/BUILD.bazel) is set up this way.
+
+Each target is checked over its own files: a library's sources; a `flutter_test`'s, `flutter_application`'s or variant's `main` and `srcs`, whether or not they are under `lib/`; and, for an iOS, macOS, Linux, Windows or web app and an integration test, those of the program it runs. An Android app (rules_android's `android_binary`) passes on nothing, so check its program through the `flutter_application`. A `manual` target is not checked by `//...`; name it in a `dart_analysis_test(targets = [...])`.
 
 ### .bazelrc
 

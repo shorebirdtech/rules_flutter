@@ -18,6 +18,7 @@ load("//flutter/private:flutter_shader_compile.bzl", "flutter_shader_compile_act
 load("//flutter/private:native_sources.bzl", "native_sources_aspect")
 load("//flutter/private:notices.bzl", "NOTICES_ATTRS", "additional_licenses_of", "flutter_notices_action", "notices_asset_key", "package_licenses_of")
 load("//flutter/private:plugin_registrant.bzl", "generate_dart_plugin_registrant", "generate_dev_plugin_registrants")
+load("//flutter/private:program_analysis.bzl", "PROGRAM_SKY_ENGINE_ATTR")
 load("//flutter/private:sdk_defines.bzl", "program_version_dart_defines")
 load("//flutter/private:validation.bzl", "validate_dart_defines")
 
@@ -1252,7 +1253,9 @@ def flutter_program_inputs(ctx, metadata = None):
         each asset is keyed from), `language_version` and `license_file` are
         fields of their own; `main`, `srcs`, `assets`, `shaders`,
         `shader_includes`, `license_file` and `additional_licenses` are Files
-        (`unchecked_srcs`, among `srcs`, are not checked against `deps`); `deps`,
+        (`unchecked_srcs`, among `srcs`, are not checked against `deps`;
+        `staged_sources` are the sources of staged copies among them, which
+        analysis checks in their place); `deps`,
         `native_deps` and `code_assets` are Targets; the rest, `flavor`
         among them, are as the attributes of `flutter_application` of the same
         names.
@@ -1263,6 +1266,7 @@ def flutter_program_inputs(ctx, metadata = None):
         main = getattr(ctx.file, "main", None),
         srcs = list(getattr(ctx.files, "srcs", [])),
         unchecked_srcs = [],
+        staged_sources = [],
         deps = getattr(ctx.attr, "deps", []),
         defines = list(getattr(ctx.attr, "defines", [])),
         flavor = getattr(ctx.attr, "flavor", ""),
@@ -1447,6 +1451,7 @@ FLUTTER_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | {
         default = Label("//flutter/private/tools:generate_asset_manifest.dart"),
         allow_single_file = True,
     ),
+    "_sky_engine": PROGRAM_SKY_ENGINE_ATTR,
 } | NOTICES_ATTRS | AGENT_EXTENSIONS_ATTR
 
 # What a `flutter_application` states about its program: the attributes

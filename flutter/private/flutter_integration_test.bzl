@@ -8,6 +8,7 @@ device of the family, and the test rule refuses a runner of another.
 """
 
 load("@rules_android//providers:providers.bzl", "AndroidSdkInfo")
+load("@rules_dart//dart:providers.bzl", "DartAnalyzableInfo")
 load("@rules_dart//dart:utils.bzl", "runfiles_path")
 load("//flutter:providers.bzl", "FlutterIntegrationRunnerInfo", "FlutterLinuxRuntimeInfo")
 load("//flutter/private:dbg_transition.bzl", "DBG_SETTINGS", "dbg_transition")
@@ -456,7 +457,11 @@ def integration_test_impl(ctx, family, inherited_environment = []):
             inherited_environment = inherited_environment,
         ),
         testing.ExecutionInfo(runner.execution_requirements),
-    ]
+        # The program's own Dart files, as the app passes them on, so
+        # rules_dart's analysis checks the test file and what it imports
+        # under this test's name. An Android app (rules_android's
+        # `android_binary`) passes nothing on.
+    ] + ([app[DartAnalyzableInfo]] if DartAnalyzableInfo in app else [])
 
 # The attributes every integration test rule has, whatever its family.
 #

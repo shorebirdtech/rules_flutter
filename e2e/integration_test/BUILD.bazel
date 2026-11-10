@@ -1,5 +1,5 @@
 load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_analysis_test", "dart_binary", "dart_package_metadata")
-load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_library", "flutter_test")
+load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_test")
 load("@rules_flutter//flutter:integration_test.bzl", "flutter_android_integration_test", "flutter_ios_simulator_integration_test", "flutter_linux_integration_test", "flutter_macos_integration_test", "flutter_web_integration_test", "flutter_windows_integration_test")
 load(":test_outcome.bzl", "outcome_test")
 
@@ -23,42 +23,30 @@ dart_package_metadata(
     package_name = "integration_test_example",
 )
 
-# The app's Dart as a library, so the analyzer has something to stage:
-# `flutter_application` is a bundle and carries no `DartInfo`.
-flutter_library(
-    name = "app_lib",
-    srcs = glob(["lib/**/*.dart"]),
-    package = ":pubspec-metadata",
-    deps = ["@deps//:flutter"],
-)
-
+# What `bazel test //...` does not analyze. Every test and application gives the
+# analyzer its own files, so each target that is not `manual` is analyzed as it
+# is built. These are the files only `manual` targets compile: the suites the
+# outcome tests run, and the integration tests meant to fail. The crash test
+# runs on desktops only, so it is analyzed through the host's own.
 dart_analysis_test(
-    name = "app_lib_analysis",
-    targets = [":app_lib"],
-)
-
-# The test files, as a library for the same reason: the tests' programs are
-# bundles, which the analyzer does not look into.
-flutter_library(
-    name = "test_files_lib",
+    name = "manual_tests_analysis",
     testonly = True,
-    srcs = glob([
-        "integration_test/**/*.dart",
-        "test/**/*.dart",
-    ]),
-    package = ":pubspec-metadata",
-    deps = [
-        ":app_lib",
-        "@deps//:flutter",
-        "@deps//:flutter_test",
-        "@deps//:integration_test",
-    ],
-)
-
-dart_analysis_test(
-    name = "test_files_analysis",
-    testonly = True,
-    targets = [":test_files_lib"],
+    targets = [
+        ":no_tests",
+        ":on_platform",
+        ":skip",
+        ":test_on",
+        ":timeout",
+        ":web_golden_mismatch",
+        ":web_red",
+        ":web_skip",
+        ":web_tags",
+        ":web_test_on",
+    ] + select({
+        "@platforms//os:linux": [":linux_crash"],
+        "@platforms//os:macos": [":macos_crash"],
+        "@platforms//os:windows": [":windows_crash"],
+    }),
 )
 
 # The counter app. Each integration test runs it as the application with the

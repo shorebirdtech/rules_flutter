@@ -795,6 +795,7 @@ def flutter_ios_app(
     flutter_apple_app(
         name = name,
         app = "__%s_app" % name,
+        application = application,
         validations = ["__%s_version_check" % name],
         tags = tags,
         target_compatible_with = target_compatible_with + select({

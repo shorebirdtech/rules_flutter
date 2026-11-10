@@ -1,4 +1,4 @@
-name: integration_support_analysis
+name: integration_program_analysis
 publish_to: none
 environment:
   sdk: ^3.13.0

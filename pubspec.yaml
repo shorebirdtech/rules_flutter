@@ -15,4 +15,4 @@ workspace:
   - tools/macos_gui_session
   - flutter/private/tools
   - flutter/private/gen_l10n
-  - flutter/tests/integration_support_analysis
+  - flutter/tests/integration_program_analysis

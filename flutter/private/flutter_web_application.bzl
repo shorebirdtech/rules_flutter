@@ -32,8 +32,7 @@ from, and `deps` is split the same way.
 """
 
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
-load("@rules_dart//dart:providers.bzl", "DartInfo")
-load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "dart_analyzable_info", "generate_dev_package_config", "import_check_validation", "package_info_from_metadata", "package_lib_prefix", "resolve_package_identity")
+load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "generate_dev_package_config", "import_check_validation", "resolve_package_identity")
 load("//flutter:providers.bzl", "FlutterInfo", "FlutterNativeLibraryInfo", "FlutterSdkRecordInfo")
 load(
     "//flutter/private:app_entrypoint.bzl",
@@ -81,6 +80,7 @@ load(
 )
 load("//flutter/private:path_mapping.bzl", "file_ref", "json_config_args")
 load("//flutter/private:plugin_registrant.bzl", "generate_dart_plugin_registrant")
+load("//flutter/private:program_analysis.bzl", "PROGRAM_SKY_ENGINE_ATTR", "program_analyzable_info", "staged_sources")
 load("//flutter/private:sdk_defines.bzl", "program_version_dart_defines")
 load(
     "//flutter/private:validation.bzl",
@@ -1145,41 +1145,17 @@ def _flutter_web_bundle_impl(ctx):
         _validation = import_checks,
     )
 
-    # What lets rules_dart's analysis check a web app. Until this existed the rule handed out no Dart provider at all, so every web
-    # example had to declare its sources a second time as a `flutter_library`
-    # purely for the analyzer to stage — and anything the bundle reached that
-    # the shadow library missed was analyzed by nothing. `dart_web_application`
-    # upstream already provides the equivalent; this closes the asymmetry.
-    #
-    # Deliberately not offered as a `DartInfo`: `deps` requires one, and an
-    # application bundle is not a dependency.
-    #
-    # `dart_analyzable_info`, not `dart_analyzable_info_no_package`: this rule
-    # names a mandatory `package` and its `srcs` are that package's
-    # `lib/` files, which import each other by `package:<self>/…`. The
-    # package-less closure the other constructor nests gives the analyzer no
-    # record to resolve those against and reports every one `uri_does_not_exist`.
-    #
-    # The source split is decided by path, not by attr. A `flutter_test`'s
-    # `main` is always a `test/` entrypoint outside any `lib/`, so it is always
-    # package-less; a web app's is usually `lib/main.dart` — inside the package,
-    # reachable as `package:<self>/main.dart` — and sometimes not, as when it
-    # sits at the package root beside `web/`. Which one holds is decidable from
-    # the file's own path, so neither case has to be assumed.
-    main_in_package = ctx.file.main.short_path.startswith(package_lib_prefix(package_root))
-
-    # `_sky_engine` joins the analyzer's closure and nothing else. The web
-    # compilers get `dart:ui` from the web SDK; the analyzer resolves it only by
-    # following the package_config to `package:sky_engine`'s `lib/_embedder.yaml`,
-    # so analysis genuinely needs an entry compilation does not.
-    analyzable_info = dart_analyzable_info(
-        label = ctx.label,
-        # The declaration the compile path above names, so the analyzer and
-        # the compiler agree on the version.
-        packages = [package_info_from_metadata(ctx.label, identity.metadata, package_root)],
-        deps = primary.deps + [ctx.attr._sky_engine],
-        srcs = ctx.files.srcs + ([ctx.file.main] if main_in_package else []),
-        entry_srcs = [] if main_in_package else [ctx.file.main],
+    # What lets rules_dart's analysis check a web app: its `main` and `srcs`,
+    # and the sources of what `unchecked_srcs` staged copies of (an
+    # integration test's support library). Deliberately not offered as a
+    # `DartInfo`: `deps` requires one, and an application bundle is not a
+    # dependency.
+    analyzable_info = program_analyzable_info(
+        ctx,
+        identity.metadata,
+        package_root,
+        primary.deps,
+        [ctx.file.main] + ctx.files.srcs + staged_sources(ctx.attr.unchecked_srcs),
     )
 
     # In debug mode, output DDC dev files alongside the web directory.
@@ -1368,12 +1344,7 @@ _WEB_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | {
     if k in _WEB_RELEVANT_KEYS
 }
 
-# Reaches the analysis closure only — see `analyzable_info` in the impl. No
-# BUILD file names it and no compile action's inputs change.
-_WEB_APPLICATION_ATTRS["_sky_engine"] = attr.label(
-    default = Label("@flutter_sky_engine//:sky_engine"),
-    providers = [DartInfo],
-)
+_WEB_APPLICATION_ATTRS["_sky_engine"] = PROGRAM_SKY_ENGINE_ATTR
 
 _WEB_APPLICATION_ATTRS["unchecked_srcs"] = attr.label_list(
     doc = "Dart sources among `srcs` whose imports are not checked against `deps`: files a rule wrote for the program (an integration test's bootstrap and support library), whose imports are that rule's to get right. `main` is exempt when listed here too. Set by the bundle macro from its `unchecked_srcs`.",

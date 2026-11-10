@@ -2,6 +2,7 @@
 
 load("@rules_dart//dart:providers.bzl", "DartInfo")
 load("//flutter/private:app_entrypoint.bzl", "app_scheme_location", "compute_wrapper_main_import")
+load("//flutter/private:program_analysis.bzl", "StagedSourcesInfo")
 load("//flutter/private:required_packages.bzl", "check_required_packages")
 
 # How the program reaches the test file it runs.
@@ -72,7 +73,13 @@ def _flutter_integration_bootstrap_impl(ctx):
         "%s/integration_suite.dart" % support_dir,
         test_config_import = _source_import(ctx, config) if config else None,
     ))
-    return [DefaultInfo(files = depset([bootstrap] + support))]
+    return [
+        DefaultInfo(files = depset([bootstrap] + support)),
+        # The support files are staged as they are, beside one another, so the
+        # originals import each other as the copies do: analysis of a program
+        # checks these, as it checks no generated file.
+        StagedSourcesInfo(sources = depset(ctx.files._support)),
+    ]
 
 flutter_integration_bootstrap = rule(
     implementation = _flutter_integration_bootstrap_impl,

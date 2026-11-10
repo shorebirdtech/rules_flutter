@@ -65,7 +65,7 @@ cannot write there.
 load("@bazel_skylib//lib:structs.bzl", "structs")
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo", "DartKernelSdkInfo")
-load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "KERNEL_LIST_ATTR", "KERNEL_TOOL_ATTR", "TRACK_CREATION_LOCATIONS_ATTR", "collect_modules", "collect_packages", "collect_transitive_srcs", "dart_analyzable_info", "dart_entry_kernel_action", "dart_import_check_aspect", "dart_link_kernel_action", "executable_defines", "executable_defines_config", "import_check_validation", "kernel_list", "package_identity_attrs", "package_info_from_metadata", "package_lib_prefix", "runfiles_path", "track_creation_locations")
+load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "KERNEL_LIST_ATTR", "KERNEL_TOOL_ATTR", "TRACK_CREATION_LOCATIONS_ATTR", "collect_modules", "collect_packages", "collect_transitive_srcs", "dart_entry_kernel_action", "dart_import_check_aspect", "dart_link_kernel_action", "executable_defines", "executable_defines_config", "import_check_validation", "kernel_list", "package_identity_attrs", "runfiles_path", "track_creation_locations")
 load("//flutter:providers.bzl", "FlutterApplicationInputsInfo", "FlutterInfo", "FlutterTestProgramInfo")
 load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "synthesize_app_package")
 load("//flutter/private:application_libraries.bzl", "application_libraries", "application_libraries_aspect")
@@ -86,6 +86,7 @@ load("//flutter/private:flutter_compile.bzl", "flutter_kernel_compile")
 load("//flutter/private:flutter_module.bzl", "flutter_module_aspect")
 load("//flutter/private:flutter_native_assets.bzl", "CODE_ASSETS_DOC", "collect_bundled_code_asset_files", "resolve_native_assets", "write_native_assets_manifest")
 load("//flutter/private:flutter_program_test.bzl", "add_user_env", "program_environment", "track_widget_creation", _flutter_test_rule = "flutter_test")
+load("//flutter/private:program_analysis.bzl", "PROGRAM_SKY_ENGINE_ATTR", "program_analyzable_info")
 load("//flutter/private:sdk_defines.bzl", "app_version_dart_defines")
 
 # The target's Flutter SDK, whose `flutter_tester` runs the test.
@@ -367,6 +368,7 @@ def _test_inputs(ctx, kind):
         for field in _APPLICATION_PACKAGE_FIELDS + _APPLICATION_BUNDLE_FIELDS
     } | {
         "srcs": app.srcs + kept_main + own.srcs,
+        "staged_sources": app.staged_sources,
         "deps": deps.values(),
         "code_assets": own.code_assets + app.code_assets,
     }))
@@ -599,47 +601,12 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
             deps,
         )),
         # What lets rules_dart's analysis check a `flutter_test`. The test's
-        # `main` belongs to no package's `lib/`, so no
-        # `DartInfo` can name it and it reaches the analyzer only through here.
-        # Deliberately not offered as a `DartInfo`: `deps` requires one, and a
-        # test is not a dependency.
-        #
-        # Built by `dart_analyzable_info` rather than
-        # `dart_analyzable_info_no_package`, because a `flutter_test` is not package-less
-        # the way a `dart_test` is: it names its `package`, and its `srcs`
-        # are that package's `lib/`. The compile path already says so —
-        # `synthesize_app_package` registers the same root record so
-        # `package:<self>/…` imports resolve — and the package-less closure the
-        # other constructor nests instead reports every such import as
-        # `uri_does_not_exist`, blaming a line that is correct.
-        #
-        # Hence the source split: `entry_srcs` is a `main` outside any `lib/`,
-        # and `srcs` the `lib/` files reachable as `package:<self>/…`.
-        #
-        # `package_root` is the declaration's directory, the root the compile
-        # path above passes to `synthesize_app_package`. The two used to
-        # disagree — synthesis hardcoded `""` — which is how a sub-package
-        # target could analyze clean and compile against the *workspace
-        # root's* `lib/`. One source, so they cannot drift again.
-        #
-        # `_sky_engine` joins the analyzer's closure and nothing else.
-        # Compilation gets `dart:ui` from the patched SDK the toolchain
-        # supplies; the analyzer resolves it only by following the
-        # package_config to `package:sky_engine`'s `lib/_embedder.yaml`, so
-        # analysis genuinely needs an entry compilation does not.
-        dart_analyzable_info(
-            label = ctx.label,
-            # The same declaration the compile path above names, so analysis
-            # reads the language version the compiler does.
-            # The application's, for a test compiled in its package.
-            packages = [package_info_from_metadata(ctx.label, inputs.package, package_root)],
-            deps = deps + [ctx.attr._sky_engine],
-            # Split by path, as `flutter_web_application` does: a test built in
-            # an application's package (`application`) can have its main in
-            # that package's `lib/`, where `package:<self>/…` reaches it.
-            srcs = inputs.srcs + [f for f in entry_files if f.short_path.startswith(package_lib_prefix(package_root))],
-            entry_srcs = [f for f in entry_files if not f.short_path.startswith(package_lib_prefix(package_root))],
-        ),
+        # `main` belongs to no package's `lib/`, so no `DartInfo` can name it
+        # and it reaches the analyzer only through here. Deliberately not
+        # offered as a `DartInfo`: `deps` requires one, and a test is not a
+        # dependency. A test built in an application's package (`application`)
+        # has the application's sources among its own.
+        program_analyzable_info(ctx, inputs.package, package_root, deps, inputs.srcs + entry_files + inputs.staged_sources),
     ])
 
 def _link_modules(ctx, deps, bootstrap, own_srcs, packages, native_assets_manifest, kernel_dill, kernel_list):
@@ -872,16 +839,7 @@ _PROGRAM_ATTRS["_golden_comparator_src"] = attr.label(
     allow_single_file = [".dart"],
 )
 
-# Analysis-only. `package:sky_engine`'s `lib/_embedder.yaml` is the whole of how
-# the analyzer resolves `dart:ui`; without it every Flutter import in a widget
-# test fails to resolve. It is an implicit attr rather than something each
-# `flutter_test` lists, because needing it is a property of analyzing Flutter
-# Dart, not a choice any BUILD file makes — and it reaches only
-# `dart_analyzable_info`, so no compile action's inputs change.
-_PROGRAM_ATTRS["_sky_engine"] = attr.label(
-    default = Label("@flutter_sky_engine//:sky_engine"),
-    providers = [DartInfo],
-)
+_PROGRAM_ATTRS["_sky_engine"] = PROGRAM_SKY_ENGINE_ATTR
 
 flutter_suite_program = rule(
     implementation = _flutter_suite_program_impl,

@@ -8,6 +8,7 @@ load("//flutter/private:code_asset_libraries.bzl", "code_asset_libraries_aspect"
 load("//flutter/private:common.bzl", "FLUTTER_APPLICATION_TOOL_ATTRS", "PLATFORM_CONSTRAINT_ATTRS", "flutter_deps_attr")
 load("//flutter/private:exec_groups.bzl", "PORTABLE_EXEC_GROUPS")
 load("//flutter/private:flutter_application.bzl", "flutter_application_build")
+load("//flutter/private:program_analysis.bzl", "staged_sources")
 load("//flutter/private:required_packages.bzl", "check_required_packages")
 
 def _flutter_application_variant_impl(ctx):
@@ -27,6 +28,7 @@ def _flutter_application_variant_impl(ctx):
         "main": ctx.file.main,
         "srcs": program.srcs + kept_main + ctx.files.srcs + ctx.files.unchecked_srcs,
         "unchecked_srcs": program.unchecked_srcs + ctx.files.unchecked_srcs,
+        "staged_sources": program.staged_sources + staged_sources(ctx.attr.unchecked_srcs),
         "deps": deps,
         "defines": program.defines + ctx.attr.defines,
         "code_assets": program.code_assets,
