@@ -10,6 +10,7 @@ load(
     "maven_labels",
     "maven_problems",
     "maven_target_name",
+    "maven_warning_message",
     "merge_plugin_requirements",
     "parse_gradle_maven_dependencies",
 )
@@ -42,7 +43,10 @@ def _parsed(d):
 def _shared_preferences_test_impl(ctx):
     env = unittest.begin(ctx)
     r = parse_gradle_maven_dependencies(_SHARED_PREFERENCES_KTS)
-    asserts.equals(env, [], r.errors)
+    asserts.equals(env, [], r.unread)
+
+    # `android { dependencies { } }` declares the project's own dependencies.
+    asserts.equals(env, [True, True, True], [d.checked for d in r.deps])
     asserts.equals(env, [
         ("deps", "androidx.datastore:datastore", "1.1.7"),
         ("deps", "androidx.datastore:datastore-preferences", "1.1.7"),
@@ -77,7 +81,7 @@ dependencies {
     runtimeOnly "s:t:1.0"
 }
 """)
-    asserts.equals(env, [], r.errors)
+    asserts.equals(env, [], r.unread)
     asserts.equals(env, [
         ("deps", "androidx.annotation:annotation", "1.9.1"),
         ("deps", "androidx.media3:media3-exoplayer", "1.5.1"),
@@ -115,9 +119,13 @@ def _unsupported_forms_test_impl(ctx):
         'releaseCompileOnly "a:b:1"',
         "implementation 'a:b:1', 'c:d:2'",
     ]
-    r = parse_gradle_maven_dependencies("\n".join(["  " + line for line in lines]))
+    r = parse_gradle_maven_dependencies("dependencies {\n" + "\n".join(["  " + line for line in lines]) + "\n}\n")
     asserts.equals(env, [], r.deps)
-    asserts.equals(env, lines, r.errors)
+    asserts.equals(env, lines, [u.line for u in r.unread])
+    asserts.equals(env, ["form"] * len(lines), [u.why for u in r.unread])
+
+    # Each is named by its line in the file.
+    asserts.equals(env, list(range(2, 2 + len(lines))), [u.line_number for u in r.unread])
 
     # Configuration blocks and unrelated lines are not dependencies.
     r = parse_gradle_maven_dependencies("""
@@ -126,10 +134,53 @@ kapt { correctErrorTypes = true }
 compileSdk = 34
 compileOptions { sourceCompatibility = 1 }
 """)
-    asserts.equals(env, ([], []), (r.deps, r.errors))
+    asserts.equals(env, ([], []), (r.deps, r.unread))
     return unittest.end(env)
 
 unsupported_forms_test = unittest.make(_unsupported_forms_test_impl)
+
+def _conditional_declarations_test_impl(ctx):
+    """A declaration inside a condition is read, linked if present, and not checked.
+
+    Gradle may run it or not, so the reader cannot say whether the plugin
+    needs it; only one directly in `dependencies { }` is a requirement.
+    """
+    env = unittest.begin(ctx)
+    r = parse_gradle_maven_dependencies("""\
+dependencies {
+    implementation "a:always:1.0"
+    if (project.hasProperty("x")) {
+        implementation "a:if:1.0"
+    } else {
+        implementation "a:else:1.0"
+    }
+}
+afterEvaluate {
+    dependencies {
+        implementation "a:later:1.0"
+    }
+}
+dependencies { if (flag) { api 'a:one_line:1.0' } }
+""")
+    asserts.equals(
+        env,
+        [
+            ("a:always", True),
+            ("a:if", False),
+            ("a:else", False),
+            ("a:later", False),
+            ("a:one_line", False),
+        ],
+        [(d.group + ":" + d.artifact, d.checked) for d in r.deps],
+    )
+    asserts.equals(
+        env,
+        [(4, "conditional"), (6, "conditional"), (11, "conditional"), (14, "conditional")],
+        [(u.line_number, u.why) for u in r.unread],
+    )
+    return unittest.end(env)
+
+conditional_declarations_test = unittest.make(_conditional_declarations_test_impl)
 
 def _versions_test_impl(ctx):
     env = unittest.begin(ctx)
@@ -175,11 +226,20 @@ def _escape_test_impl(ctx):
 
 escape_test = unittest.make(_escape_test_impl)
 
-def _dep(coordinate, version, kind = "deps"):
-    return {"kind": kind, "coordinate": coordinate, "version": version, "line": ""}
+def _dep(coordinate, version, kind = "deps", checked = True):
+    return {"kind": kind, "coordinate": coordinate, "version": version, "line": "", "checked": checked}
 
-def _pkg(name, version, deps, errors = []):
-    return {"package": name, "version": version, "deps": deps, "errors": errors}
+def _pkg(name, version, deps, unread = []):
+    return {
+        "package": name,
+        "version": version,
+        "script": "android/build.gradle",
+        "deps": deps,
+        "unread": unread,
+    }
+
+def _unread(line_number, line, why = "form"):
+    return {"line": line, "line_number": line_number, "why": why}
 
 def _labels_test_impl(ctx):
     env = unittest.begin(ctx)
@@ -223,7 +283,7 @@ def _check_names_only_what_the_linked_plugins_need_test_impl(ctx):
         "resolved": {"g:have": "1.0"},
         "packages": [
             _pkg("a", "1.0", [_dep("g:needed_by_a", "2.0"), _dep("g:have", "1.0")]),
-            _pkg("b", "1.0", [_dep("g:needed_by_b", "3.0")], ["implementation(libs.b)"]),
+            _pkg("b", "1.0", [_dep("g:needed_by_b", "3.0")], [_unread(3, "implementation(libs.b)")]),
             _pkg("c", "1.0", [_dep("g:needed_by_c", None)]),
         ],
     }
@@ -235,8 +295,17 @@ def _check_names_only_what_the_linked_plugins_need_test_impl(ctx):
 
     a_and_b = maven_check_message(data, {"a": True, "b": True})
     asserts.true(env, "g:needed_by_a" in a_and_b and "g:needed_by_b" in a_and_b, a_and_b)
-    asserts.true(env, "    package:b 1.0\n        implementation(libs.b)" in a_and_b, a_and_b)
     asserts.false(env, "needed_by_c" in a_and_b, a_and_b)
+
+    # A line the reader cannot read is no failure: it warns.
+    asserts.false(env, "libs.b" in a_and_b, a_and_b)
+    asserts.equals(env, "", maven_warning_message(data, {"a": True}, "//:app"))
+    warning = maven_warning_message(data, {"a": True, "b": True}, "//:app")
+    asserts.true(
+        env,
+        "    package:b 1.0, android/build.gradle\n        3: implementation(libs.b)" in warning,
+        warning,
+    )
 
     # A package the hub records nothing for (no Android library of a pub
     # plugin's kind) needs nothing, and an app that links none is satisfied.
@@ -306,24 +375,50 @@ def _failure_message_test_impl(ctx):
         _pkg("b", "3.4", [_dep("g:old", "1.2"), _dep("g:gone", None)]),
     ])
     problems = maven_problems(req, {"g:old": "1.1"})
-    message = format_maven_failure(problems, {
-        "package:c 5.0": ["implementation(libs.x)", "kapt(\"a:b:1\")"],
-        "package:d 1.0": ["api(project(\":p\"))"],
-    })
+    message = format_maven_failure(problems)
     for needle in [
         '"g:gone:<version>",  # declared by package:b 3.4; missing',
         '"g:old:1.2",  # declared by package:a 1.2, package:b 3.4; resolves 1.1',
         "REPIN=1 bazel run @rules_flutter_maven//:pin",
         "bazel run @<hub>//android:maven_artifacts",
-        "    package:c 5.0\n        implementation(libs.x)\n        kapt(\"a:b:1\")",
-        "    package:d 1.0\n        api(project(\":p\"))",
-        "android/BUILD.bazel.tpl",
     ]:
         asserts.true(env, needle in message, needle + " missing from:\n" + message)
-    asserts.equals(env, "", format_maven_failure([], {}))
+    asserts.equals(env, "", format_maven_failure([]))
     return unittest.end(env)
 
 failure_message_test = unittest.make(_failure_message_test_impl)
+
+def _warning_message_test_impl(ctx):
+    env = unittest.begin(ctx)
+    data = {
+        "resolved": {},
+        "packages": [
+            _pkg("c", "5.0", [], [
+                _unread(12, "implementation(libs.x)"),
+                _unread(13, "kapt(\"a:b:1\")"),
+            ]),
+            _pkg("d", "1.0", [_dep("g:maybe", "1.0", checked = False)], [
+                _unread(7, "api(project(\":p\"))"),
+                _unread(9, "implementation \"g:maybe:1.0\"", "conditional"),
+            ]),
+        ],
+    }
+    message = maven_warning_message(data, {"c": True, "d": True}, "//:app")
+    for needle in [
+        "//:app links Android plugins",
+        "    package:c 5.0, android/build.gradle\n        12: implementation(libs.x)\n        13: kapt(\"a:b:1\")",
+        "    package:d 1.0, android/build.gradle\n        7: api(project(\":p\"))",
+        "    package:d 1.0, android/build.gradle\n        9: implementation \"g:maybe:1.0\"",
+        "android/BUILD.bazel.tpl",
+        'maven.install(name = "rules_flutter_maven"',
+    ]:
+        asserts.true(env, needle in message, needle + " missing from:\n" + message)
+
+    # An unchecked declaration is no requirement.
+    asserts.equals(env, "", maven_check_message(data, {"c": True, "d": True}))
+    return unittest.end(env)
+
+warning_message_test = unittest.make(_warning_message_test_impl)
 
 def _report_test_impl(ctx):
     env = unittest.begin(ctx)
@@ -355,6 +450,7 @@ def android_plugin_maven_test_suite(name):
         shared_preferences_test,
         groovy_and_variables_test,
         unsupported_forms_test,
+        conditional_declarations_test,
         versions_test,
         escape_test,
         labels_test,
@@ -363,5 +459,6 @@ def android_plugin_maven_test_suite(name):
         merge_test,
         problems_test,
         failure_message_test,
+        warning_message_test,
         report_test,
     )

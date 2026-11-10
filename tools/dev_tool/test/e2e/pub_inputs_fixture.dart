@@ -817,6 +817,9 @@ Future<({List<String> coordinates, List<String> unread})> recordedMavenDeps(
       for (final dep in json['deps']! as List)
         (dep as Map<String, Object?>)['coordinate']! as String,
     ],
-    unread: [for (final line in json['errors']! as List) line as String],
+    unread: [
+      for (final line in json['unread']! as List)
+        (line as Map<String, Object?>)['line']! as String,
+    ],
   );
 }

@@ -3,7 +3,7 @@
 The property, from the function's own contract ("a dependency the parser
 cannot read is never silently lost"): every Maven coordinate a Gradle script
 declares as a dependency is accounted for. It is either read (in `deps`) or
-reported (in a line of `errors`). Reading it wrongly is a different failure,
+reported (in a line of `unread`). Reading it wrongly is a different failure,
 covered by `android_plugin_maven_test.bzl`; what this guards is a dependency
 that is in neither list, which compiles without it and fails at javac far from
 the cause.
@@ -25,7 +25,7 @@ def _accounted_for_impl(ctx):
     result = parse_gradle_maven_dependencies(ctx.attr.script)
     read = [d.group + ":" + d.artifact for d in result.deps]
     for coordinate in ctx.attr.coordinates:
-        reported = [line for line in result.errors if coordinate in line]
+        reported = [u.line for u in result.unread if coordinate in u.line]
         asserts.true(
             env,
             coordinate in read or reported,
@@ -34,7 +34,7 @@ def _accounted_for_impl(ctx):
              "script:\n{script}").format(
                 coordinate = coordinate,
                 read = read,
-                errors = result.errors,
+                errors = [u.line for u in result.unread],
                 script = ctx.attr.script,
             ),
         )

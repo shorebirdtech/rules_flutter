@@ -23,14 +23,14 @@ load("@rules_java//java/common:java_common.bzl", "java_common")
 load("@rules_java//java/common:java_info.bzl", "JavaInfo")
 load("@rules_java//java/common:proguard_spec_info.bzl", "ProguardSpecInfo")
 load("//flutter:providers.bzl", "FlutterApplicationInfo")
-load("//flutter/private:android_plugin_maven.bzl", "maven_app_report", "maven_check_message")
+load("//flutter/private:android_plugin_maven.bzl", "maven_app_report", "maven_check_message", "maven_warning_message")
 load("//flutter/private:exec_groups.bzl", "PORTABLE_EXEC_GROUPS", "portable_tools")
 load("//flutter/private:flutter_android_application.bzl", "ANDROID_NATIVE_LIBS_ATTRS", "android_abi", "validate_android_native_libs")
 
 FlutterAndroidMavenInfo = provider(
     doc = "What a pub hub's Android plugins declare in their Gradle builds, and what `@rules_flutter_maven` resolved.",
     fields = {
-        "data": "dict: `resolved` (dict of `group:artifact` to version), `repositories` (the install's Maven repositories) and `packages` (list of dicts with `package`, `version`, `deps` and `errors`), as `maven_check_message` reads it.",
+        "data": "dict: `resolved` (dict of `group:artifact` to version), `repositories` (the install's Maven repositories) and `packages` (list of dicts with `package`, `version`, `script`, `deps` and `unread`), as `maven_check_message` reads it.",
     },
 )
 
@@ -171,13 +171,23 @@ def _native_libs_validation(ctx, libs):
 def _flutter_android_plugin_libs_impl(ctx):
     entries = ctx.attr.deps[FlutterApplicationInfo].android_libs.to_list()
     if ctx.attr.maven:
-        message = maven_check_message(
-            ctx.attr.maven[FlutterAndroidMavenInfo].data,
-            {entry.package: True for entry in entries},
-            ctx.attr.report or None,
-        )
+        data = ctx.attr.maven[FlutterAndroidMavenInfo].data
+        linked = {entry.package: True for entry in entries}
+        message = maven_check_message(data, linked, ctx.attr.report or None)
         if message:
             fail(message)
+
+        # Gradle lines the reader did not check: a reader of Gradle's language
+        # that is not Gradle can be wrong about them, so they warn.
+        app = ctx.attr.deps.label
+        warning = maven_warning_message(
+            data,
+            linked,
+            str(app) if app.repo_name else "//%s:%s" % (app.package, app.name),
+        )
+        if warning:
+            # buildifier: disable=print
+            print("WARNING: " + warning)
 
     libs = []
     for entry in entries:

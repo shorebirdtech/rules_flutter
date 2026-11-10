@@ -109,16 +109,22 @@ def _opens_a_closure(header):
     rest = header[len(identifier):]
     return bool(rest.strip()) and rest[0] in " \t('\"" and not rest.strip().startswith("=")
 
-def _split_statements(line, out):
-    """Appends the statements of one physical line of a Gradle script to `out`.
+def _split_statements(line, number, out):
+    """Appends the tokens of one physical line of a Gradle script to `out`.
 
-    A line holds several when a block is opened and closed on it (`dependencies
-    { implementation 'a:b:1' }`) or `;` separates them. Braces, brackets and
-    parentheses inside a string or inside a call's arguments never split, and
-    the closure of a dependency declaration stays with it (see
-    `_opens_a_closure`), so the declaration is reported whole if it is not one
-    the reader supports.
+    Each token is a struct with `kind` (`"statement"`, `"open"` for a block
+    header, whose `text` is what precedes its `{`, or `"close"`), `text` and
+    `line`, the 1-based line `number`. A line holds several when a block is
+    opened and closed on it (`dependencies { implementation 'a:b:1' }`) or `;`
+    separates them. Braces, brackets and parentheses inside a string or inside
+    a call's arguments never split, and the closure of a dependency declaration
+    stays with it (see `_opens_a_closure`), so the declaration is reported
+    whole if it is not one the reader supports.
     """
+
+    def token(kind, text):
+        out.append(struct(kind = kind, text = text.strip(), line = number))
+
     cur = ""
     quote = ""
     depth = 0
@@ -147,15 +153,27 @@ def _split_statements(line, out):
             cur += line[i:end]
             i = end
             continue
-        elif depth == 0 and c in ";{}":
+        elif depth == 0 and c == "{":
+            token("open", cur)
+            cur = ""
+        elif depth == 0 and c in ";}":
             if cur.strip():
-                out.append(cur.strip())
+                token("statement", cur)
+            if c == "}":
+                token("close", "")
             cur = ""
         else:
             cur += c
         i += 1
     if cur.strip():
-        out.append(cur.strip())
+        token("statement", cur)
+
+def _gradle_tokens(content):
+    """The tokens of a Gradle build script, comments removed (see `_split_statements`)."""
+    out = []
+    for number, raw in enumerate(content.split("\n")):
+        _split_statements(_strip_line_comment(raw), number + 1, out)
+    return out
 
 def gradle_statements(content):
     """The statements of a Gradle build script, comments removed.
@@ -166,10 +184,7 @@ def gradle_statements(content):
     Returns:
         A list of stripped strings, one per statement or block header.
     """
-    out = []
-    for raw in content.split("\n"):
-        _split_statements(_strip_line_comment(raw), out)
-    return out
+    return [t.text for t in _gradle_tokens(content) if t.kind != "close" and t.text]
 
 def _string_literal(text):
     """The value of `text` when it is exactly one string literal, else None."""
@@ -313,18 +328,46 @@ def _add_call_as_declaration(line):
         return line
     return configuration + "(" + inner[comma + 1:].strip() + ")"
 
+# Blocks a `dependencies { }` block may sit in and still declare the
+# project's dependencies unconditionally: `android { dependencies { } }`
+# delegates to the project's.
+_TRANSPARENT_BLOCKS = ("android",)
+
+def _unconditional(blocks):
+    """Whether a statement inside the block headers `blocks` always runs as a dependency declaration.
+
+    True inside a top-level `dependencies { }` (or one in `android { }`); false
+    inside anything else, such as an `if`, an `afterEvaluate` or a loop, whose
+    statements Gradle may run once, many times, or never.
+    """
+    if not blocks or blocks[-1] != "dependencies":
+        return False
+    for header in blocks[:-1]:
+        if header not in _TRANSPARENT_BLOCKS:
+            return False
+    return True
+
 def parse_gradle_maven_dependencies(content):
     """Reads the Maven dependencies out of a Gradle build script.
 
-    Statement based (see `gradle_statements`: a line can hold several, and a
+    Statement based (see `_split_statements`: a line can hold several, and a
     block opened and closed on one line is read like one spread over many).
-    Each dependency must be exactly one string literal of the form
-    `group:artifact:version` (a `:classifier` and an `@packaging` are allowed
-    and dropped), declared as `implementation "..."`, `implementation("...")`
-    or `add("implementation", "...")`. Anything else that is a dependency on
-    the plugin's compile or runtime classpath, and an `apply from:` that pulls
-    in statements this reader never sees, is reported in `errors`, so a
-    dependency the parser cannot read is never silently lost.
+    A dependency the reader understands is exactly one string literal of the
+    form `group:artifact:version` (a `:classifier` and an `@packaging` are
+    allowed and dropped), declared as `implementation "..."`,
+    `implementation("...")` or `add("implementation", "...")`, directly in the
+    `dependencies { }` block. Only those are `checked`: the application that
+    links the plugin fails when `@rules_flutter_maven` lacks one.
+
+    The rest is reported in `unread`, each with its line, so a dependency the
+    reader cannot read is never silently lost, and is a warning rather than a
+    failure, since a reader of Gradle's language that is not Gradle can be
+    wrong about it: a declaration in another form (a version catalog entry,
+    `platform(...)`, `files(...)`, a `kapt` or `debugImplementation`
+    configuration), an `apply from:` that pulls in statements this reader never
+    sees, and a well-formed declaration inside a condition or another block,
+    which is also in `deps`, unchecked, and linked where `@rules_flutter_maven`
+    has it.
 
     Args:
         content: The text of `build.gradle` or `build.gradle.kts`.
@@ -333,20 +376,33 @@ def parse_gradle_maven_dependencies(content):
         A struct. `deps` is a list of structs with `kind` (`"deps"`,
         `"compile_only"` or `"runtime"`), `group`, `artifact`, `version` (a
         string, or None when it is a variable the file does not define or a
-        dynamic version, which get a presence-only check) and `line`.
-        `errors` is the list of lines that could not be read.
+        dynamic version, which get a presence-only check), `line` (the
+        statement), `line_number` and `checked`. `unread` is a list of structs
+        with `line` (the statement), `line_number` and `why`: `"form"` for a
+        statement the reader cannot read, `"conditional"` for a declaration it
+        reads but outside the `dependencies` block's own statements.
     """
-    lines = gradle_statements(content)
+    tokens = _gradle_tokens(content)
 
     variables = {}
-    for line in lines:
-        d = _variable_definition(line)
-        if d:
-            variables[d[0]] = d[1]
+    for t in tokens:
+        if t.kind == "statement":
+            d = _variable_definition(t.text)
+            if d:
+                variables[d[0]] = d[1]
 
     deps = []
-    errors = []
-    for original in lines:
+    unread = []
+    blocks = []
+    for t in tokens:
+        if t.kind == "open":
+            blocks.append(t.text)
+            continue
+        if t.kind == "close":
+            if blocks:
+                blocks.pop()
+            continue
+        original = t.text
         line = original
         identifier = _leading_identifier(line)
         if not identifier:
@@ -355,7 +411,7 @@ def parse_gradle_maven_dependencies(content):
         # `apply from: "deps.gradle"` pulls in statements this reader never
         # sees, so it is reported rather than followed.
         if identifier == "apply" and _applies_a_script(line[len(identifier):]):
-            errors.append(original)
+            unread.append(struct(line = original, line_number = t.line, why = "form"))
             continue
 
         # `add("implementation", "a:b:1")` is `implementation("a:b:1")`.
@@ -377,23 +433,23 @@ def parse_gradle_maven_dependencies(content):
         if not rest or rest[0] == "=" or rest[0] == "{":
             continue
         if kind == "error":
-            errors.append(original)
+            unread.append(struct(line = original, line_number = t.line, why = "form"))
             continue
 
         arg = rest
         if arg.startswith("("):
             if not arg.endswith(")"):
-                errors.append(original)
+                unread.append(struct(line = original, line_number = t.line, why = "form"))
                 continue
             arg = arg[1:-1]
         coordinate = _string_literal(arg)
         if coordinate == None:
-            errors.append(original)
+            unread.append(struct(line = original, line_number = t.line, why = "form"))
             continue
         coordinate = coordinate.split("@")[0]
         parts = coordinate.split(":")
         if len(parts) < 3 or len(parts) > 4 or not parts[0] or not parts[1] or not parts[2]:
-            errors.append(original)
+            unread.append(struct(line = original, line_number = t.line, why = "form"))
             continue
         group = parts[0]
         artifact = parts[1]
@@ -404,14 +460,19 @@ def parse_gradle_maven_dependencies(content):
         version = _substitute_version(parts[2], variables)
         if version != None and _is_dynamic(version):
             version = None
+        checked = _unconditional(blocks)
+        if not checked:
+            unread.append(struct(line = original, line_number = t.line, why = "conditional"))
         deps.append(struct(
             kind = kind,
             group = group,
             artifact = artifact,
             version = version,
             line = original,
+            line_number = t.line,
+            checked = checked,
         ))
-    return struct(deps = deps, errors = errors)
+    return struct(deps = deps, unread = unread)
 
 def maven_target_name(group, artifact):
     """rules_jvm_external's target name for `group:artifact`.
@@ -566,8 +627,10 @@ def merge_plugin_requirements(packages):
 
     Args:
         packages: List of dicts with `package`, `version` and `deps`, the
-            latter dicts with `coordinate` (`group:artifact`) and `version`
-            (a string, or None for a declaration that names no usable one).
+            latter dicts with `coordinate` (`group:artifact`), `version`
+            (a string, or None for a declaration that names no usable one)
+            and `checked`. A declaration that is not `checked` (one the
+            reader found inside a condition) is no requirement.
 
     Returns:
         A dict of coordinate to a dict with `version` (the highest declared,
@@ -578,6 +641,8 @@ def merge_plugin_requirements(packages):
     for pkg in packages:
         label = "package:%s %s" % (pkg["package"], pkg["version"])
         for d in pkg["deps"]:
+            if not d["checked"]:
+                continue
             req = requirements.setdefault(
                 d["coordinate"],
                 {"version": None, "declared_by": []},
@@ -625,7 +690,7 @@ def maven_check_message(data, linked, report = None):
     Args:
         data: The decoded `maven_requirements.json` of the build: `resolved`
             (`group:artifact` to version) and `packages` (each a dict of
-            `package`, `version`, `deps` and `errors`).
+            `package`, `version`, `script`, `deps` and `unread`).
         linked: The names of the packages whose Android libraries the
             application links. A package the hub records no requirements for
             needs nothing.
@@ -638,13 +703,67 @@ def maven_check_message(data, linked, report = None):
     """
     packages = [p for p in data["packages"] if p["package"] in linked]
     requirements = merge_plugin_requirements(packages)
-    problems = maven_problems(requirements, data["resolved"])
-    errors = {
-        "package:%s %s" % (p["package"], p["version"]): p["errors"]
-        for p in packages
-        if p["errors"]
-    }
-    return format_maven_failure(problems, errors, report)
+    return format_maven_failure(maven_problems(requirements, data["resolved"]), report)
+
+def maven_warning_message(data, linked, app):
+    """What an application that links `linked` plugins warns of, or "".
+
+    The Gradle lines of those plugins that the reader did not check: ones it
+    cannot read, and declarations inside a condition. Each is named by file
+    and line. A reader of Gradle's language that is not Gradle can be wrong
+    about these, so they warn rather than fail.
+
+    Args:
+        data: The decoded `maven_requirements.json` of the build, as for
+            `maven_check_message`.
+        linked: The names of the packages whose Android libraries the
+            application links.
+        app: The label of the application, for the message.
+
+    Returns:
+        The warning, or the empty string when there is nothing to say.
+    """
+    form = []
+    conditional = []
+    for p in sorted(data["packages"], key = lambda p: p["package"]):
+        if p["package"] not in linked:
+            continue
+        for kind, out in [("form", form), ("conditional", conditional)]:
+            lines = [u for u in p["unread"] if u["why"] == kind]
+            if lines:
+                out.append("    package:%s %s, %s\n%s" % (
+                    p["package"],
+                    p["version"],
+                    p["script"],
+                    "\n".join(["        %d: %s" % (u["line_number"], u["line"]) for u in lines]),
+                ))
+    parts = []
+    if form:
+        parts.append((
+            "{app} links Android plugins whose Gradle builds declare " +
+            "dependencies in a form rules_flutter does not read, so it neither " +
+            "checks them nor links them:\n\n{groups}\n\n" +
+            "If a plugin's Android code then fails to compile, add the " +
+            "artifacts it needs to the root module's " +
+            '`maven.install(name = "rules_flutter_maven", artifacts = [...])` ' +
+            "and give the plugin an overlay (flutter_pub.plugin_overlays in " +
+            "MODULE.bazel): <root>/<package>/BUILD.bazel.tpl for the Dart side " +
+            "and <root>/<package>/android/BUILD.bazel.tpl, which declares the " +
+            "plugin's Android library with those @rules_flutter_maven deps. An " +
+            "android/BUILD.bazel.tpl is used only beside a BUILD.bazel.tpl."
+        ).format(app = app, groups = "\n".join(form)))
+    if conditional:
+        parts.append((
+            "{app} links Android plugins whose Gradle builds declare " +
+            "dependencies inside a condition or another block, which Gradle " +
+            "may or may not run. rules_flutter links each one " +
+            "@rules_flutter_maven has, and does not require the others:" +
+            "\n\n{groups}\n\n" +
+            "If a plugin's Android code needs one that is missing, add it to " +
+            'the root module\'s `maven.install(name = "rules_flutter_maven", ' +
+            "artifacts = [...])`."
+        ).format(app = app, groups = "\n".join(conditional)))
+    return "\n\n".join(parts)
 
 def maven_app_report(data, linked, app):
     """What an application's `maven_artifacts` target reads.
@@ -676,57 +795,40 @@ def _artifact_line(coordinate, version, declared_by, note):
         "; " + note if note else "",
     )
 
-def format_maven_failure(problems, errors, report = None):
+def format_maven_failure(problems, report = None):
     """The message `check()` fails with.
 
     Args:
         problems: The result of `maven_problems`.
-        errors: Dict of `package:<name> <version>` to the Gradle lines that
-            could not be read.
         report: The label of the application's `maven_artifacts` target. None
             points to a hub's, which covers every plugin of the build.
 
     Returns:
-        The message, listing every problem at once.
+        The message, listing every problem at once, or the empty string when
+        there is none.
     """
-    parts = []
-    if problems:
-        lines = [
-            _artifact_line(p["coordinate"], p["version"], p["declared_by"], p["reason"])
-            for p in problems
-        ]
-        parts.append((
-            "The Android plugins this app links declare Maven " +
-            "dependencies that @rules_flutter_maven does not provide at a " +
-            "high enough version:\n\n    {lines}\n\n" +
-            "Gradle gives a plugin the highest version declared anywhere in " +
-            "the app, and so does the single resolution behind " +
-            "@rules_flutter_maven. Add these to the root module's " +
-            '`maven.install(name = "rules_flutter_maven", artifacts = [...])` ' +
-            "and regenerate that install's lock file:\n\n" +
-            "    REPIN=1 bazel run @rules_flutter_maven//:pin\n\n" +
-            "`bazel run {report}` prints the complete block for {scope}."
-        ).format(
-            lines = "\n    ".join(lines),
-            report = report or "@<hub>//android:maven_artifacts",
-            scope = "the plugins this app links" if report else "every plugin of the build",
-        ))
-    if errors:
-        groups = []
-        for pkg in sorted(errors.keys()):
-            groups.append("    %s\n        %s" % (pkg, "\n        ".join(errors[pkg])))
-        parts.append((
-            "These Gradle dependency lines cannot be translated. Each must " +
-            "be a single 'group:artifact:version' string in implementation, " +
-            "api, compileOnly or runtimeOnly:\n\n{groups}\n\n" +
-            "Provide a plugin overlay for each package (flutter_pub.plugin_overlays " +
-            "in MODULE.bazel): <root>/<package>/BUILD.bazel.tpl for the Dart " +
-            "side and <root>/<package>/android/BUILD.bazel.tpl, which " +
-            "declares the plugin's Android library with its " +
-            "@rules_flutter_maven deps. An android/BUILD.bazel.tpl is used " +
-            "only beside a BUILD.bazel.tpl."
-        ).format(groups = "\n".join(groups)))
-    return "\n\n".join(parts)
+    if not problems:
+        return ""
+    lines = [
+        _artifact_line(p["coordinate"], p["version"], p["declared_by"], p["reason"])
+        for p in problems
+    ]
+    return (
+        "The Android plugins this app links declare Maven " +
+        "dependencies that @rules_flutter_maven does not provide at a " +
+        "high enough version:\n\n    {lines}\n\n" +
+        "Gradle gives a plugin the highest version declared anywhere in " +
+        "the app, and so does the single resolution behind " +
+        "@rules_flutter_maven. Add these to the root module's " +
+        '`maven.install(name = "rules_flutter_maven", artifacts = [...])` ' +
+        "and regenerate that install's lock file:\n\n" +
+        "    REPIN=1 bazel run @rules_flutter_maven//:pin\n\n" +
+        "`bazel run {report}` prints the complete block for {scope}."
+    ).format(
+        lines = "\n    ".join(lines),
+        report = report or "@<hub>//android:maven_artifacts",
+        scope = "the plugins this app links" if report else "every plugin of the build",
+    )
 
 def artifacts_report(requirements, resolved, repositories, app = None):
     """The JSON a `maven_artifacts` program reads (tools/maven_artifacts.dart).
@@ -782,7 +884,7 @@ def _flutter_android_maven_impl(rctx):
         if line.strip()
     ]
     packages = [json.decode(rctx.read(rctx.path(label))) for label in rctx.attr.spokes]
-    packages = [p for p in packages if p["deps"] or p["errors"]]
+    packages = [p for p in packages if p["deps"] or p["unread"]]
 
     # The whole build's requirements, as an application's check reads them: it
     # picks the packages it links and no others. The build-wide report below is

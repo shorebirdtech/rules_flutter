@@ -631,12 +631,18 @@ def _read_plugin_maven_deps(ctx):
     """Parse the spoke's `android/build.gradle*` Maven dependencies.
 
     Reads the package's Gradle build file (`build.gradle`, else the `.kts`).
-    Returns the parse result of `parse_gradle_maven_dependencies`: the declared
-    dependencies and the lines it could not read. Both are empty when the
-    package has no Gradle script.
+    Returns the parse result of `parse_gradle_maven_dependencies` (the
+    declared dependencies and the lines it did not check), with `script`, the
+    file's path in the package. All empty when the package has no Gradle
+    script.
     """
     script = _android_gradle_script(ctx)
-    return parse_gradle_maven_dependencies(ctx.read(script) if script else "")
+    parsed = parse_gradle_maven_dependencies(ctx.read(script) if script else "")
+    return struct(
+        deps = parsed.deps,
+        unread = parsed.unread,
+        script = "android/" + script.basename if script else "",
+    )
 
 def _maven_dep_dicts(parsed):
     """The parsed dependencies as the dicts `maven_deps.json` records."""
@@ -646,24 +652,35 @@ def _maven_dep_dicts(parsed):
             "coordinate": d.group + ":" + d.artifact,
             "version": d.version,
             "line": d.line,
+            "checked": d.checked,
         }
         for d in parsed.deps
     ]
 
-def _write_maven_deps(ctx, deps, errors):
+def _unread_dicts(parsed):
+    """The lines the parser did not check, as `maven_deps.json` records them."""
+    return [
+        {"line": u.line, "line_number": u.line_number, "why": u.why}
+        for u in parsed.unread
+    ]
+
+def _write_maven_deps(ctx, deps, unread, script):
     """Record the Maven dependencies the Android check of the hub reads.
 
     Written for every spoke, so `@flutter_pub_android_maven` can read
     all of them: empty for a package that is not an Android plugin with
     sources. For a plugin whose `android/BUILD.bazel` an overlay supplies,
-    the dependencies its Gradle build declares and no errors. At the root of
-    the spoke, as a package with no Android library has no `android/` package.
+    the dependencies its Gradle build declares and no unread lines. At the
+    root of the spoke, as a package with no Android library has no `android/`
+    package. `script` is the Gradle script's path in the package, which the
+    warning about `unread` lines names.
     """
     ctx.file(MAVEN_DEPS_FILE, json.encode({
         "package": ctx.attr.package_name,
         "version": ctx.attr.version,
+        "script": script,
         "deps": deps,
-        "errors": errors,
+        "unread": unread,
     }) + "\n")
 
 def _glob_block(srcs_dirs, extensions):
@@ -2276,9 +2293,12 @@ def _flutter_pub_package_impl(ctx):
         # and its `maven_artifacts` block. Lines the parser cannot read are
         # what the overlay replaces, so they are not reported.
         overlay_maven_deps = []
+        overlay_script = ""
         if overlay_android_content:
-            overlay_maven_deps = _maven_dep_dicts(_read_plugin_maven_deps(ctx))
-        _write_maven_deps(ctx, overlay_maven_deps, [])
+            overlay_parsed = _read_plugin_maven_deps(ctx)
+            overlay_maven_deps = _maven_dep_dicts(overlay_parsed)
+            overlay_script = overlay_parsed.script
+        _write_maven_deps(ctx, overlay_maven_deps, [], overlay_script)
         if overlay_android_content:
             ctx.file("android/BUILD.bazel", overlay_android_content)
         return ctx.repo_metadata(reproducible = not ctx.attr.directory)
@@ -2467,15 +2487,17 @@ def _flutter_pub_package_impl(ctx):
     # get a load-time fail() here instead: an Android app that links one
     # breaks loudly rather than shipping an APK missing the library.
     #
-    # Gradle dependencies the reader cannot translate are recorded, not
-    # failed on here: the library is written as for the ones it can read, and
-    # the application that links the plugin fails, naming the lines with
-    # everything else it lacks (`flutter_android_plugin_libs`).
+    # Gradle dependencies the reader did not check are recorded, not
+    # reported here: the library is written as for the ones it read, and the
+    # application that links the plugin warns, naming each line
+    # (`flutter_android_plugin_libs`).
     maven_deps = []
-    maven_errors = []
+    maven_unread = []
+    maven_script = ""
     if android_gradle_maven and not android_native_build:
         maven_deps = _maven_dep_dicts(android_gradle_maven)
-        maven_errors = android_gradle_maven.errors
+        maven_unread = _unread_dicts(android_gradle_maven)
+        maven_script = android_gradle_maven.script
     if android_native_build:
         ctx.file("android/BUILD.bazel", make_android_native_build_content(android_native_build))
     elif android_src_dir or android_has_resources:
@@ -2487,7 +2509,7 @@ def _flutter_pub_package_impl(ctx):
             consumer_proguard_specs = android_consumer_proguard_specs,
             has_resources = android_has_resources,
         ))
-    _write_maven_deps(ctx, maven_deps, maven_errors)
+    _write_maven_deps(ctx, maven_deps, maven_unread, maven_script)
     return ctx.repo_metadata(reproducible = not ctx.attr.directory)
 
 flutter_pub_package = repository_rule(
