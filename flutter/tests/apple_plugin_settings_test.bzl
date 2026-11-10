@@ -11,8 +11,11 @@ without importing Foundation, as `permission_handler_apple`'s
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
+load("@build_bazel_rules_swift//swift:swift.bzl", "SwiftInfo")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
-load("//flutter/private:flutter_apple_plugin_library.bzl", "flutter_apple_plugin_library")
+load("//flutter:providers.bzl", "FlutterPluginPlatformInfo")
+load("//flutter/private:flutter_apple_plugin_library.bzl", "FlutterAppleModuleHeadersInfo", "flutter_apple_plugin_library")
+load("//flutter/private:flutter_plugin_platform.bzl", "flutter_plugin_platform")
 
 _SRC = "apple_plugin_fixture/Sources/fixture"
 
@@ -38,6 +41,23 @@ def _define_reaches_the_compile_impl(ctx):
     return analysistest.end(env)
 
 _define_reaches_the_compile_test = analysistest.make(_define_reaches_the_compile_impl)
+
+def _one_clang_module_impl(ctx):
+    env = analysistest.begin(ctx)
+    lib = analysistest.target_under_test(env)[FlutterPluginPlatformInfo].lib
+
+    # The plugin's sources are one Clang module named `module_name`, which
+    # Swift, the registrant's `import fixture`, sees as that module.
+    modules = [m for m in lib[SwiftInfo].direct_modules]
+    asserts.equals(env, ["fixture"], [m.name for m in modules])
+    asserts.true(env, modules[0].clang != None, "the module is a Clang module")
+    asserts.equals(env, None, modules[0].swift)
+
+    # Its public headers are what an add-to-app framework holds.
+    asserts.equals(env, ["FixturePlugin.h"], [h.basename for h in lib[FlutterAppleModuleHeadersInfo].headers])
+    return analysistest.end(env)
+
+_one_clang_module_test = analysistest.make(_one_clang_module_impl)
 
 def _swift_version(env):
     compiles = [a for a in analysistest.target_actions(env) if a.mnemonic == "SwiftCompile"]
@@ -77,7 +97,22 @@ def apple_plugin_settings_test_suite(name):
     )
     _define_reaches_the_compile_test(
         name = name + "_define_reaches_the_compile",
-        target_under_test = ":_%s_fixture_apple_macos__objc" % name,
+        target_under_test = ":%s_fixture_apple_macos" % name,
+        target_compatible_with = macos,
+    )
+
+    # An Objective-C plugin is one module, as SwiftPM, CocoaPods and Xcode
+    # build it, which its `flutter_plugin_platform` gives Swift.
+    flutter_plugin_platform(
+        name = name + "_fixture_macos",
+        platform = "macos",
+        lib = ":%s_fixture_apple_macos" % name,
+        plugin_class = "FixturePlugin",
+        tags = ["manual"],
+    )
+    _one_clang_module_test(
+        name = name + "_one_clang_module",
+        target_under_test = ":%s_fixture_macos" % name,
         target_compatible_with = macos,
     )
 
@@ -106,6 +141,7 @@ def apple_plugin_settings_test_suite(name):
         name = name,
         tests = [
             name + "_define_reaches_the_compile",
+            name + "_one_clang_module",
             name + "_swift_5",
             name + "_swift_6",
         ],

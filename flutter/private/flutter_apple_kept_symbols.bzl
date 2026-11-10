@@ -9,7 +9,7 @@ the archives of the plugin's package define, which makes each a root for that re
 other symbol of the app is left to it.
 """
 
-load("@build_bazel_rules_swift//swift:swift.bzl", "SwiftInfo")
+load("@build_bazel_rules_swift//swift:swift.bzl", "SwiftInfo", "swift_clang_module_aspect")
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load(
@@ -19,6 +19,7 @@ load(
     "XCODE_TOOL_TOOLCHAINS",
     "run_xcode_tool",
 )
+load("//flutter/private:flutter_apple_plugin_library.bzl", "FlutterAppleModuleHeadersInfo", "module_headers_aspect")
 
 def _package_archives(library, repo):
     """The static archives `library` links that are built in the repository `repo`.
@@ -72,7 +73,9 @@ def _impl(ctx):
 
     # The library's resources are not forwarded: `apple_resource_aspect`
     # collects them from `deps`, as it does for any target.
-    return [library[DefaultInfo], cc_info, library[SwiftInfo]]
+    return [library[DefaultInfo], cc_info, library[SwiftInfo]] + (
+        [library[FlutterAppleModuleHeadersInfo]] if FlutterAppleModuleHeadersInfo in library else []
+    )
 
 flutter_apple_kept_symbols = rule(
     implementation = _impl,
@@ -81,7 +84,10 @@ flutter_apple_kept_symbols = rule(
         deps = attr.label_list(
             doc = "The plugin's library, forwarded as it is: exactly one. Named `deps` so the resource aspect follows it.",
             mandatory = True,
-            providers = [CcInfo, SwiftInfo],
+            providers = [CcInfo],
+            # The module of an Objective-C library as Swift sees it, and its
+            # public headers, for an add-to-app framework.
+            aspects = [swift_clang_module_aspect, module_headers_aspect],
         ),
     ),
     fragments = XCODE_TOOL_FRAGMENTS,

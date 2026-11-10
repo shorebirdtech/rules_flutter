@@ -41,7 +41,7 @@ load("@build_bazel_rules_apple//apple:providers.bzl", "AppleResourceInfo")
 # this is its internal one, as in flutter_plugin.bzl.
 # buildifier: disable=bzl-visibility
 load("@build_bazel_rules_apple//apple/internal/aspects:resource_aspect.bzl", "apple_resource_aspect")
-load("@build_bazel_rules_swift//swift:swift.bzl", "SwiftInfo")
+load("@build_bazel_rules_swift//swift:swift.bzl", "SwiftInfo", "swift_clang_module_aspect")
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
@@ -134,7 +134,8 @@ flutter_swiftpm_app_libraries = rule(
     attrs = {
         "deps": attr.label_list(
             doc = "The libraries, each `flutter_apple_plugin_library` or the stand-in that fails its build.",
-            aspects = [apple_resource_aspect],
+            # And the module of an Objective-C library as Swift sees it.
+            aspects = [apple_resource_aspect, swift_clang_module_aspect],
         ),
     },
     doc = "The build's plugin libraries whose defines come from the app: `@flutter_pub_apple_app_settings//:libraries`.",

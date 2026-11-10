@@ -21,7 +21,6 @@ Usage:
     )
 """
 
-load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@build_bazel_rules_apple//apple:apple.bzl", "apple_dynamic_framework_import", "apple_dynamic_xcframework_import")
 load("@build_bazel_rules_swift//mixed_language:mixed_language_library.bzl", "mixed_language_library")
 load("@build_bazel_rules_swift//swift:swift.bzl", "SwiftInfo", "swift_library")
@@ -58,27 +57,34 @@ _swift_header_include = rule(
 )
 
 FlutterAppleModuleHeadersInfo = provider(
-    doc = "The public C-family headers of a plugin module of Swift and Objective-C both.",
+    doc = "The public C-family headers of a plugin's module, which its add-to-app framework holds.",
     fields = {"headers": "The module's own public headers, as Files."},
 )
 
 def _module_headers_aspect_impl(target, ctx):
+    if FlutterAppleModuleHeadersInfo in target or CcInfo not in target:
+        return []
+
     # A `mixed_language_library`'s C-family half is its `clang_target`, whose
     # public headers are the module's and the generated umbrella header.
     clang = getattr(ctx.rule.attr, "clang_target", None)
-    if not clang or CcInfo not in clang or SwiftInfo not in target:
-        return []
-    umbrella = ctx.rule.file.umbrella_header
-    return [FlutterAppleModuleHeadersInfo(headers = [
-        h
-        for h in clang[CcInfo].compilation_context.direct_public_headers
-        if h != umbrella
-    ])]
+    if clang and CcInfo in clang and SwiftInfo in target:
+        umbrella = ctx.rule.file.umbrella_header
+        return [FlutterAppleModuleHeadersInfo(headers = [
+            h
+            for h in clang[CcInfo].compilation_context.direct_public_headers
+            if h != umbrella
+        ])]
+
+    # A library of C-family sources alone is its own module.
+    if SwiftInfo not in target:
+        return [FlutterAppleModuleHeadersInfo(headers = target[CcInfo].compilation_context.direct_public_headers)]
+    return []
 
 module_headers_aspect = aspect(
     implementation = _module_headers_aspect_impl,
-    doc = "Gives a mixed `flutter_apple_plugin_library` its public C-family headers " +
-          "(`FlutterAppleModuleHeadersInfo`), which an add-to-app framework holds.",
+    doc = "Gives a `flutter_apple_plugin_library` of C-family sources its module's " +
+          "public headers (`FlutterAppleModuleHeadersInfo`), which an add-to-app framework holds.",
 )
 
 def _extension(path):
@@ -138,13 +144,12 @@ def flutter_apple_plugin_library(
         includes = [],
         sdk_frameworks = [],
         sdk_dylibs = [],
-        clang_module = False,
         swift_language_mode = None,
         data = [],
         visibility = None,
         tags = None,
         **kwargs):
-    """Build a Flutter plugin's Apple sources into a swift_library.
+    """Build a Flutter plugin's Apple sources into one module named `module_name`.
 
     With Swift and C, C++ or Objective-C sources (`.m`, `.mm`, `.c`, `.cpp`
     and the like) both, the library is one module of the two, as SwiftPM
@@ -152,8 +157,10 @@ def flutter_apple_plugin_library(
     without an import, the C-family sources see the Swift through
     `<module_name>-Swift.h` (`#import <module_name/module_name-Swift.h>` or
     `#import "module_name-Swift.h"`), and importers see both. With C-family
-    sources alone, they are compiled by an internal `objc_library` that a
-    Swift module of `module_name` re-exports. A Swift-only library may have
+    sources alone, the library is an `objc_library` whose Clang module is
+    `module_name`, as SwiftPM, CocoaPods and Xcode build an Objective-C
+    plugin; Swift sees it as a module through rules_swift's
+    `swift_clang_module_aspect`. A Swift-only library may have
     a bridging header, `<module_name>-Bridging-Header.h` in `srcs`, which
     the Swift compile imports.
 
@@ -165,7 +172,8 @@ def flutter_apple_plugin_library(
             layout, and `public_hdrs` is not given, only those are the
             module's public headers; the others are private to the ObjC
             compile, as SwiftPM treats them.
-        module_name: Swift module name. Defaults to `name`.
+        module_name: The module's name, which the plugin registrant imports.
+            Defaults to `name`.
         platform: `"macos"` or `"ios"`, which picks the Flutter framework
             the sources compile against; or `"darwin"` for sources that build
             for both (`sharedDarwinSource`), which compile against the
@@ -215,10 +223,6 @@ def flutter_apple_plugin_library(
             without this; an overlay lists them here.
         sdk_dylibs: Apple SDK dynamic libraries to link (e.g. `["c++"]`,
             `["sqlite3"]`), as a `Package.swift`'s `linkedLibrary` does.
-        clang_module: Whether a library without Swift sources is a Clang
-            module named `module_name` itself, as a C-family target of a
-            Swift package is, rather than a Swift module that re-exports one
-            (the default, which a plugin's registrant imports).
         data: Resources the app carries for the library, such as the
             `apple_resource_bundle` of a Swift package target's resources.
         swift_language_mode: `"6"` to compile the Swift sources in Swift 6
@@ -227,10 +231,14 @@ def flutter_apple_plugin_library(
         visibility: Target visibility.
         tags: Bazel tags. Defaults to `["manual"]` so the spoke target
             is only built when something depends on it.
-        **kwargs: Forwarded to the underlying swift_library.
+        **kwargs: Forwarded to the underlying `swift_library`,
+            `mixed_language_library` or `objc_library`.
     """
     if platform not in ("macos", "ios", "darwin"):
         fail("flutter_apple_plugin_library: platform must be 'macos', 'ios' or 'darwin', got '%s'" % platform)
+
+    if swift_language_mode not in (None, "5", "6"):
+        fail("flutter_apple_plugin_library: swift_language_mode must be \"5\" or \"6\", got %r" % swift_language_mode)
 
     if tags == None:
         tags = ["manual"]
@@ -315,8 +323,13 @@ def flutter_apple_plugin_library(
     # sources are in; a Swift-only plugin has no objc_library to carry them.
     sdk_linkopts = ["-Wl,-framework," + f for f in sdk_frameworks] + ["-l" + d for d in sdk_dylibs]
 
-    objc_module_name = ""
-    if clang_module and not swift_files:
+    if not swift_files:
+        # A plugin of C-family sources alone is one Clang module named
+        # `module_name`, as SwiftPM, CocoaPods and Xcode build it. Swift
+        # importers, the app's plugin registrant among them, see it through
+        # `swift_clang_module_aspect`, which `flutter_plugin_platform.lib`
+        # applies.
+        kwargs.pop("swiftc_inputs", None)
         objc_library(
             name = name,
             srcs = objc_files + private_headers,
@@ -329,17 +342,20 @@ def flutter_apple_plugin_library(
             cxxopts = cxxopts,
             conlyopts = conlyopts,
             linkopts = sdk_linkopts + linkopts,
+            # Every object of the plugin is in the app, as Xcode links a
+            # Swift package's objects and CocoaPods its framework: code that
+            # only Dart reaches, through `DynamicLibrary.process()`, has no
+            # reference from the app's link to pull it in.
             alwayslink = True,
             data = data,
             deps = clang_deps,
             tags = tags,
             target_compatible_with = target_compatible_with,
             visibility = visibility,
+            **kwargs
         )
         return
 
-    if swift_language_mode not in (None, "5", "6"):
-        fail("flutter_apple_plugin_library: swift_language_mode must be \"5\" or \"6\", got %r" % swift_language_mode)
     features = list(kwargs.pop("features", []))
     swiftc_inputs = list(kwargs.pop("swiftc_inputs", []))
     if swift_language_mode == "6":
@@ -382,10 +398,8 @@ def flutter_apple_plugin_library(
             sdk_frameworks = sdk_frameworks,
             sdk_dylibs = sdk_dylibs,
             linkopts = linkopts,
-            # Every object of the plugin is in the app, as Xcode links a
-            # Swift package's objects and CocoaPods its framework: code that
-            # only Dart reaches, through `DynamicLibrary.process()`, has no
-            # reference from the app's link to pull it in.
+            # Every object of the plugin is in the app, as for one of
+            # C-family sources alone.
             alwayslink = True,
             data = data,
             features = features,
@@ -398,33 +412,6 @@ def flutter_apple_plugin_library(
         )
         return
 
-    if objc_files:
-        # An Objective-C plugin: its sources are a module of their own, which
-        # the Swift module below re-exports for the registrant's `import`.
-        objc_target = "_%s__objc" % name
-        objc_module_name = "%s_objc" % module_name
-        objc_library(
-            name = objc_target,
-            srcs = objc_files + private_headers,
-            hdrs = headers,
-            textual_hdrs = textual_hdrs,
-            includes = includes,
-            sdk_frameworks = sdk_frameworks,
-            sdk_dylibs = sdk_dylibs,
-            module_name = objc_module_name,
-            enable_modules = True,
-            copts = _AUTOLINK + copts + clang_copts,
-            cxxopts = cxxopts,
-            conlyopts = conlyopts,
-            # Every object of the plugin is in the app, as for a mixed one.
-            alwayslink = True,
-            deps = clang_deps,
-            tags = tags,
-            target_compatible_with = target_compatible_with,
-            visibility = ["//visibility:private"],
-        )
-        swift_deps = swift_deps + [":" + objc_target]
-
     bridging_header = None
     extra_copts = []
     for h in headers + private_headers:
@@ -436,26 +423,6 @@ def flutter_apple_plugin_library(
             ])
             break
 
-    # swift_library requires non-empty srcs. An Objective-C plugin (e.g.
-    # package_info_plus's `.m`-only macOS impl) gets a synthetic Swift file
-    # that `@_exported import`s the Objective-C module, so consumers that
-    # `import <module_name>` see its classes.
-    has_swift = bool(swift_files)
-    if not swift_files:
-        placeholder_target = "_%s__swift_placeholder" % name
-        placeholder_file = "_%s__placeholder.swift" % name
-        placeholder_content = ["// GENERATED — re-exports the ObjC module so Swift `import %s` works." % module_name]
-        if objc_module_name:
-            placeholder_content.append("@_exported import %s" % objc_module_name)
-        write_file(
-            name = placeholder_target,
-            out = placeholder_file,
-            content = placeholder_content,
-            tags = tags,
-            target_compatible_with = target_compatible_with,
-        )
-        swift_files = [":" + placeholder_target]
-
     swift_library(
         name = name,
         features = features,
@@ -466,8 +433,8 @@ def flutter_apple_plugin_library(
         linkopts = sdk_linkopts + linkopts,
         deps = swift_deps,
         swiftc_inputs = swiftc_inputs + ([bridging_header] if bridging_header else []),
-        generates_header = has_swift,
-        generated_header_name = (module_name + "-Swift.h") if has_swift else None,
+        generates_header = True,
+        generated_header_name = module_name + "-Swift.h",
         tags = tags,
         target_compatible_with = target_compatible_with,
         visibility = visibility,

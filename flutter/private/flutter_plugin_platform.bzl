@@ -17,6 +17,7 @@ load("@build_bazel_rules_apple//apple:providers.bzl", "AppleResourceInfo")
 # See `flutter_plugin.bzl` for why the internal aspect, and what an upgrade checks.
 # buildifier: disable=bzl-visibility
 load("@build_bazel_rules_apple//apple/internal/aspects:resource_aspect.bzl", "apple_resource_aspect")
+load("@build_bazel_rules_swift//swift:swift.bzl", "swift_clang_module_aspect")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("//flutter:providers.bzl", "FlutterPluginPlatformInfo")
 load("//flutter/private:constants.bzl", "PLUGIN_PLATFORMS")
@@ -50,7 +51,7 @@ def _check(ctx):
         fail("%s: `group` is the Maven group of an Android plugin's AAR; this platform is %s." % (ctx.label, p))
     if p == "android" and a.plugin_class and a.plugin_class != "none" and not a.package:
         fail("%s: an Android `plugin_class` needs its Java `package`." % ctx.label)
-    lib = a.lib
+    lib = a.apple_lib or a.lib
     if lib == None:
         return
     providers, what = _LIB_PROVIDERS[p]
@@ -71,7 +72,7 @@ def _flutter_plugin_platform_impl(ctx):
         default_package = a.default_package,
         package = a.package,
         group = a.group,
-        lib = a.lib,
+        lib = a.apple_lib or a.lib,
     )]
 
 flutter_plugin_platform_rule = rule(
@@ -107,14 +108,19 @@ flutter_plugin_platform_rule = rule(
             doc = "Android only: the Maven group `flutter_android_aar` publishes the plugin's AAR under (Gradle's `group`, which a plugin's `android/build.gradle` sets). A workspace plugin built into an AAR must set it; there is no default, as a wrong group would publish under someone else's coordinates.",
         ),
         "lib": attr.label(
-            doc = "The platform's native library. `flutter_plugin_platform` selects it on the platform.",
-            providers = [[CcInfo], [FlutterSwiftPMAppLibraryInfo], [FlutterLinuxPluginInfo], [FlutterWindowsPluginInfo], [FlutterUnbuiltNativeCodeInfo]],
+            doc = "The platform's native library on Linux and Windows. `flutter_plugin_platform` selects it on the platform.",
+            providers = [[FlutterLinuxPluginInfo], [FlutterWindowsPluginInfo], [FlutterUnbuiltNativeCodeInfo]],
+        ),
+        "apple_lib": attr.label(
+            doc = "The platform's native library on iOS and macOS, as `lib` is on the others. A separate attribute for its aspects, which need an Apple build.",
+            providers = [[CcInfo], [FlutterSwiftPMAppLibraryInfo], [FlutterUnbuiltNativeCodeInfo]],
             # The libraries' resources, as an app's bundling collects them from
             # its own dependencies: the runner links the libraries through the
             # aggregator, which carries them on (`flutter_apple_plugins_aggregator`).
-            # And the public headers of a module of Swift and Objective-C,
-            # for its add-to-app framework.
-            aspects = [apple_resource_aspect, module_headers_aspect],
+            # The public headers of a C-family module, for its add-to-app
+            # framework. And an Objective-C library's Clang module as Swift
+            # sees it, for the registrant's `import`.
+            aspects = [apple_resource_aspect, module_headers_aspect, swift_clang_module_aspect],
         ),
     },
     doc = "The rule of `flutter_plugin_platform`, whose `lib` is analysed in every build it is reached in.",
@@ -148,7 +154,10 @@ def flutter_plugin_platform(name, platform, lib = None, **kwargs):
             Label("@platforms//os:" + platform): lib,
             "//conditions:default": None,
         })
-    flutter_plugin_platform_rule(name = name, platform = platform, lib = lib, **kwargs)
+    if platform in ("ios", "macos"):
+        flutter_plugin_platform_rule(name = name, platform = platform, apple_lib = lib, **kwargs)
+    else:
+        flutter_plugin_platform_rule(name = name, platform = platform, lib = lib, **kwargs)
 
 def plugin_platforms_of(label, targets):
     """The `FlutterPluginPlatformInfo` of each of a plugin's `platforms`, by platform.

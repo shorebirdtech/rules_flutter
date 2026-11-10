@@ -16,8 +16,8 @@ host imports:
   `Modules/<module>.swiftmodule/<triple>.swiftinterface`, compiled with
   library evolution as Xcode's `BUILD_LIBRARY_FOR_DISTRIBUTION=YES` compiles
   it;
-- an Objective-C plugin: its public headers in `Headers/`, under an umbrella
-  header of the module map;
+- an Objective-C plugin: its public headers in `Headers/`, under the umbrella
+  header and module map CocoaPods gives a framework pod;
 - a plugin of both: one module of the two, the Swift part its `Swift`
   submodule, as Xcode builds a mixed framework.
 
@@ -126,48 +126,58 @@ def _plugin_module(entry):
         `swift` struct, or None).
     """
     name = entry.package
-    if not entry.swift_info:
-        # A C-family library that is its own module.
-        return struct(
-            name = name,
-            objc_headers = entry.cc_info.compilation_context.direct_public_headers,
-            swift_header = None,
-            swift = None,
-        )
-    modules = {m.name: m for m in entry.swift_info.transitive_modules.to_list()}
+    modules = {m.name: m for m in entry.swift_info.transitive_modules.to_list()} if entry.swift_info else {}
     if name not in modules:
         fail("%s: the plugin %s has no module named %s, the name its registrant imports" % (entry.label, entry.package, name))
     module = modules[name]
     swift_header = None
-    if module.clang and module.clang.compilation_context:
+    if module.swift and module.clang and module.clang.compilation_context:
         for header in module.clang.compilation_context.direct_public_headers:
             if header.basename == name + "-Swift.h":
                 swift_header = header
-    if getattr(entry, "module_headers", None) != None:
-        # One module of Swift and Objective-C.
-        objc_headers = entry.module_headers
-    else:
-        # An Objective-C plugin's Swift module re-exports its module of
-        # Objective-C, `<module>_objc`, and has no generated header.
-        objc = modules.get(name + "_objc")
-        objc_headers = []
-        if objc and objc.clang and objc.clang.compilation_context:
-            objc_headers = objc.clang.compilation_context.direct_public_headers
     return struct(
         name = name,
-        objc_headers = [h for h in objc_headers if not h.basename.endswith("-Bridging-Header.h")],
+        objc_headers = [
+            h
+            for h in (getattr(entry, "module_headers", None) or [])
+            if not h.basename.endswith("-Bridging-Header.h")
+        ],
         swift_header = swift_header,
         swift = module.swift if swift_header else None,
     )
 
 def _module_map(name, module):
-    umbrella = 'framework module {name} {{\n  umbrella header "{name}-umbrella.h"\n  export *\n  module * {{ export * }}\n}}\n'.format(name = name)
+    umbrella = 'framework module {name} {{\n  umbrella header "{name}-umbrella.h"\n\n  export *\n  module * {{ export * }}\n}}\n'.format(name = name)
     swift = '{framework}module {name}{sub} {{\n  header "{name}-Swift.h"\n  requires objc\n}}\n'
     if module.objc_headers and module.swift_header:
         return umbrella + swift.format(framework = "", name = name, sub = ".Swift")
     if module.objc_headers:
         return umbrella
     return swift.format(framework = "framework ", name = name, sub = "")
+
+# The start of the umbrella header CocoaPods writes for a framework pod
+# (`Pod::Generator::Header`), the one `flutter build ios-framework` and
+# `macos-framework` build a plugin as.
+_UMBRELLA_PROLOGUE = """#ifdef __OBJC__
+#import <{framework}/{framework}.h>
+#else
+#ifndef FOUNDATION_EXPORT
+#if defined(__cplusplus)
+#define FOUNDATION_EXPORT extern "C"
+#else
+#define FOUNDATION_EXPORT extern
+#endif
+#endif
+#endif
+
+"""
+
+def _umbrella_header(platform_type, headers):
+    """A framework's umbrella header: the platform's UI framework, then the module's public headers."""
+    return _UMBRELLA_PROLOGUE.format(framework = "Cocoa" if platform_type == "macos" else "UIKit") + "".join([
+        '#import "%s"\n' % h.basename
+        for h in headers
+    ])
 
 def _resource_steps(entry, resources_root):
     info = getattr(entry, "resource_info", None)
@@ -415,10 +425,7 @@ def _framework_steps(ctx, slice, entry, module, binary):
 
     if module.objc_headers:
         umbrella = ctx.actions.declare_file(directory + "/%s-umbrella.h" % name)
-        ctx.actions.write(umbrella, "#import <Foundation/Foundation.h>\n\n" + "".join([
-            '#import "%s"\n' % h.basename
-            for h in module.objc_headers
-        ]))
+        ctx.actions.write(umbrella, _umbrella_header(slice.platform_type, module.objc_headers))
         steps.append(("file", "%s/Headers/%s-umbrella.h" % (root, name), umbrella))
         for header in module.objc_headers:
             steps.append(("file", "%s/Headers/%s" % (root, header.basename), header))

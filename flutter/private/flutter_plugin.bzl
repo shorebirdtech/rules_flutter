@@ -122,8 +122,8 @@ def plugin_contributions(ctx, package_name, package_root, declares_plugin):
                 label = lib.label,
                 cc_info = lib[CcInfo] if CcInfo in lib else None,
                 swift_info = lib[SwiftInfo] if SwiftInfo in lib else None,
-                # A module of Swift and Objective-C both: its public
-                # Objective-C headers.
+                # The module's public C-family headers, for its add-to-app
+                # framework.
                 module_headers = lib[FlutterAppleModuleHeadersInfo].headers if FlutterAppleModuleHeadersInfo in lib else None,
                 # The library's resources (a Swift package target's resource
                 # bundle), for the app's bundle.
