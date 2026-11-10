@@ -87,6 +87,29 @@ jobs:
           cache-save: false
       - run: bazel run --noincompatible_auto_exec_groups @overhead//:bazel_env -- update-symlink
       - run: bazel run --noincompatible_auto_exec_groups @overhead//lint:prek -- run --all-files --show-diff-on-failure
+  # Every workspace's MODULE.bazel.lock, the root's and those under e2e/: for
+  # each, `bazel mod deps` and `bazel build --nobuild //...` with
+  # --lockfile_mode=error, which catch a missing entry and one gone stale that
+  # no build reads. A runner has no `.bazelrc.user` to switch the check off.
+  # On macOS because analysing `//...` needs every platform's toolchain, and
+  # only a macOS host has the iOS ones. See docs/TESTING.md, "Lock files".
+  lockfiles:
+    name: Lock files
+    runs-on: macos-latest
+    # Cold, it fetches every workspace's toolchains to analyse it.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # 0.19.1
+        with:
+          cache-version: ${{ env.CACHE_VERSION }}
+          repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
+          cache-save: false
+      # e2e/external_module takes rules_flutter from the release archive, as
+      # the `consumer-query` job explains.
+      - name: Extract the release archive
+        run: bazel run //tools/consumer_archive
+      - run: bazel run @overhead//locks
   # A module that depends on rules_flutter must be able to list all of it, as
   # tools and IDE plugins do with `@rules_flutter//...`, from the release
   # archive it gets. Development tooling
@@ -272,21 +295,10 @@ jobs:
         run: |
           $ndk = $env:ANDROID_NDK_HOME ?? $env:ANDROID_NDK_ROOT
           "ANDROID_NDK_HOME=$($ndk -replace '\\','/')" >> $env:GITHUB_ENV
-      # The workspace's MODULE.bazel.lock, checked before the build. Its
-      # `.bazelrc` already builds with --lockfile_mode=error, which refuses a
-      # lock that lacks an entry the build needs; `bazel mod deps` also catches
-      # an entry that has gone stale, which a build never reads. A runner has no
-      # `.bazelrc.user` to switch the check off. See docs/TESTING.md, "Lock
-      # files".
-      # On Windows this and the step below run in the short output base the
-      # setup step names, so both use one Bazel server. Without it, nested
-      # runfiles (e.g. the hermetic Python interpreter's _socket.pyd used by
-      # rules_android's aar_embedded_jars_extractor) exceed the 260-char
-      # MAX_PATH limit and fail to load with "DLL load failed ... The filename
-      # or extension is too long".
-      - name: bazel mod deps (e2e/${{ matrix.workspace }})
-        working-directory: e2e/${{ matrix.workspace }}
-        run: bazel mod deps --lockfile_mode=error
+      # The workspace's `.bazelrc` builds with --lockfile_mode=error, which
+      # refuses a lock that lacks an entry the build needs; the `lockfiles` job
+      # checks every lock for stale entries too.
+      #
       # --test_output=errors so a failure's assertion reaches this log. Without
       # it the output stays in a test.log on the runner and is discarded with
       # the machine. `build` takes no test flags: the workspaces that run it
