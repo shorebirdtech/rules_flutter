@@ -11,7 +11,14 @@
 | `android`, `android:<serial>` | The device `adb` picks, or the one named. |
 
 An id must say what kind of device it is: `-d android:emulator-5554`, not
-`-d emulator-5554`. A refused id comes back with the form to use. Repeat `-d`
+`-d emulator-5554`. A refused id comes back with the form to use.
+
+`flutter_bazel devices` lists every device the tool can run on now, with its
+`-d` id in the second column; `devices --machine` prints the same as a JSON
+list whose `id` is the `-d` id. It lists booted simulators only, and Android
+devices in the `device` state; one it cannot use (an unauthorized phone) or a
+lookup that timed out is named under the list. Give a slow lookup longer with
+`--device-timeout <seconds>` (3 by default). Repeat `-d`
 to run on several devices at once; each gets its own `appId`, so read every
 `app.started` event, not just the first.
 
@@ -27,7 +34,7 @@ may be using the others.
 - **iOS simulator.** One must be booted: `xcrun simctl list devices booted`.
   Otherwise the run fails with "No booted iOS simulator found". Boot one with
   `xcrun simctl boot <udid>`.
-- **Android.** `adb devices` lists what is attached. A physical phone behind a
+- **Android.** `flutter_bazel devices` lists what is attached. A physical phone behind a
   lock screen still runs the app, but every screenshot shows the lock screen and
   the app draws nothing (`notRendering` on replies). Prefer an emulator for
   anything visual, and do not try to unlock someone's phone.

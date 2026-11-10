@@ -227,7 +227,9 @@ _UNIT_TESTS = {
         "deps": _PATH_DEP,
     },
     "device_integration_test": {"fakes": True},
+    "device_discovery_test": {},
     "device_id_test": {},
+    "devices_command_test": {"deps": ["@dev_tool_deps//:args"]},
     "device_test": {
         "fakes": True,
         "deps": [

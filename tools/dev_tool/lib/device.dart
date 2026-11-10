@@ -3371,12 +3371,16 @@ class IOSDeviceInfo {
   /// [MdnsVmServiceDiscovery.discover].
   final List<String> hostnames;
 
+  /// Its iOS version and build, `27.2 24B119`, when `devicectl` reports it.
+  final String? osVersion;
+
   IOSDeviceInfo({
     required this.udid,
     required this.coreDeviceId,
     required this.name,
     required this.transport,
     required this.hostnames,
+    this.osVersion,
   });
 
   /// Whether [identifier] names this device, in either identifier space.
@@ -3422,6 +3426,14 @@ List<IOSDeviceInfo> parseDevicectlDevices(String jsonText) {
         coreDeviceId: coreDeviceId,
         name: properties['name'] as String? ?? udid,
         transport: transport,
+        osVersion: switch ((
+          properties['osVersionNumber'],
+          properties['osBuildUpdate'],
+        )) {
+          (final String version, final String build) => '$version $build',
+          (final String version, _) => version,
+          _ => null,
+        },
         hostnames:
             ((connection['localHostnames'] as List?) ??
                     (connection['potentialHostnames'] as List?) ??

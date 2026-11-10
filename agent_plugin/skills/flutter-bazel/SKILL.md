@@ -56,8 +56,10 @@ Pick the device with `-d`. The host desktop (`macos`, `linux`, `windows`) is the
 fastest loop when the project has that target. Other ids: `chrome`,
 `ios-simulator`, `ios`, `android`, and the forms that name one device,
 `ios-simulator:<udid>`, `ios:<udid>`, `android:<serial>`. A bare serial or UDID
-is refused. See [reference/devices.md](reference/devices.md) before using
-anything but the host.
+is refused. `flutter_bazel devices` (or `devices --machine` for JSON) lists
+every usable device with the exact `-d` id to pass. See
+[reference/devices.md](reference/devices.md) before using anything but the
+host.
 
 ## 2. Start a session in the background
 

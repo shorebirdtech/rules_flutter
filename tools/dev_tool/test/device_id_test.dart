@@ -73,6 +73,11 @@ const _adbOutput =
     'emulator-5554          device product:sdk_gphone64_arm64 '
     'model:sdk_gphone64_arm64 device:emu64a transport_id:1\n';
 
+const _adbProps =
+    '[ro.product.model]: [sdk_gphone64_arm64]\n'
+    '[ro.product.cpu.abilist]: [arm64-v8a]\n'
+    '[ro.hardware]: [ranchu]\n';
+
 /// Answers the three lookups as a host with one of each device would.
 ///
 /// [fail] names lookups (`simctl`, `devicectl`, `adb`) that throw instead, the
@@ -87,8 +92,10 @@ const _adbOutput =
         ? 'simctl'
         : args.contains('devicectl')
         ? 'devicectl'
+        : args.contains('getprop')
+        ? 'getprop'
         : 'adb';
-    if (fail.contains(which)) {
+    if (fail.contains(which == 'getprop' ? 'adb' : which)) {
       throw StateError('`$exe` did not answer within 3000ms and was killed.');
     }
     switch (which) {
@@ -97,6 +104,8 @@ const _adbOutput =
       case 'devicectl':
         File(args.last).writeAsStringSync(_devicectlJson);
         return ProcessResult(2, 0, '', '');
+      case 'getprop':
+        return ProcessResult(4, 0, _adbProps, '');
       default:
         return ProcessResult(3, 0, _adbOutput, '');
     }
@@ -201,6 +210,7 @@ void main() {
           'android:emulator-5554',
         ],
         runProbe: host.run,
+        appleHost: true,
         androidSdk: _sdk,
       );
       expect(host.calls, isEmpty);
@@ -211,6 +221,7 @@ void main() {
         resolveDevices(
           ['ios-simulator:'],
           runProbe: _fakeHost().run,
+          appleHost: true,
           androidSdk: _sdk,
         ),
         throwsA(
@@ -226,6 +237,7 @@ void main() {
         resolveDevices(
           ['emulator-5554'],
           runProbe: _fakeHost().run,
+          appleHost: true,
           androidSdk: _BrokenAndroidSdk(),
         ),
         throwsA(_refusal(contains('adb could not be asked'))),
@@ -238,6 +250,7 @@ void main() {
         resolveDevices(
           ['emulator-5554'],
           runProbe: host.run,
+          appleHost: true,
           androidSdk: _noSdk,
         ),
         throwsA(
@@ -255,7 +268,12 @@ void main() {
     test('a bare simulator UDID, naming the simulator and its form', () async {
       final host = _fakeHost();
       await expectLater(
-        resolveDevices([_simUdid], runProbe: host.run, androidSdk: _sdk),
+        resolveDevices(
+          [_simUdid],
+          runProbe: host.run,
+          appleHost: true,
+          androidSdk: _sdk,
+        ),
         throwsA(
           _refusal(
             allOf(
@@ -271,6 +289,7 @@ void main() {
         'xcrun simctl',
         'xcrun devicectl',
         '/fake/adb devices',
+        '/fake/adb -s',
       });
     });
 
@@ -279,12 +298,13 @@ void main() {
         resolveDevices(
           ['emulator-5554'],
           runProbe: _fakeHost().run,
+          appleHost: true,
           androidSdk: _sdk,
         ),
         throwsA(
           _refusal(
             allOf(
-              contains("the Android device 'sdk_gphone64_arm64' (device)"),
+              contains("the Android device 'sdk gphone64 arm64' (device)"),
               contains('pass -d android:emulator-5554'),
             ),
           ),
@@ -295,7 +315,12 @@ void main() {
     test('an iOS device by either of its identifiers', () async {
       for (final id in ['00008101-001C', 'CORE-DEVICE-UUID']) {
         await expectLater(
-          resolveDevices([id], runProbe: _fakeHost().run, androidSdk: _sdk),
+          resolveDevices(
+            [id],
+            runProbe: _fakeHost().run,
+            appleHost: true,
+            androidSdk: _sdk,
+          ),
           throwsA(
             _refusal(
               allOf(
@@ -313,6 +338,7 @@ void main() {
         resolveDevices(
           ['ios-simulater:$_simUdid'], // typos:ignore-line
           runProbe: _fakeHost().run,
+          appleHost: true,
           androidSdk: _sdk,
         ),
         throwsA(_refusal(contains('pass -d ios-simulator:$_simUdid'))),
@@ -324,6 +350,7 @@ void main() {
         resolveDevices(
           ['emulator-5556'],
           runProbe: _fakeHost().run,
+          appleHost: true,
           androidSdk: _sdk,
         ),
         throwsA(
@@ -347,6 +374,7 @@ void main() {
         resolveDevices(
           ['emulator-5554'],
           runProbe: _fakeHost(fail: {'adb', 'devicectl'}).run,
+          appleHost: true,
           androidSdk: _sdk,
         ),
         throwsA(
@@ -365,7 +393,7 @@ void main() {
       Future<ProcessResult> run(String exe, List<String> args) async =>
           ProcessResult(1, 72, '', 'xcrun: error: unable to find utility');
       await expectLater(
-        resolveDevices(['x'], runProbe: run, androidSdk: _sdk),
+        resolveDevices(['x'], runProbe: run, appleHost: true, androidSdk: _sdk),
         throwsA(
           _refusal(
             allOf(
@@ -384,6 +412,7 @@ void main() {
           resolveDevices(
             ['macos', _simUdid, 'emulator-5554'],
             runProbe: _fakeHost().run,
+            appleHost: true,
             androidSdk: _sdk,
           ),
           throwsA(

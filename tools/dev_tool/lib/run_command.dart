@@ -89,8 +89,9 @@ class RunCommand {
       help:
           'Device to run on: ${acceptedDeviceIdForms.join(', ')}. An id '
           'must name its kind, so a bare UDID or serial is refused: '
-          '-d android:emulator-5554, not -d emulator-5554. Repeat for '
-          'multi-device.',
+          '-d android:emulator-5554, not -d emulator-5554. '
+          '`flutter_bazel devices` lists each device with its id. Repeat '
+          'for multi-device.',
     )
     ..addFlag(
       'hot',

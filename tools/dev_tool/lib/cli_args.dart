@@ -32,6 +32,7 @@ String topLevelUsage(ArgParser parser) => [
   '  build       Build a Flutter target with Bazel',
   '  run         Build, run, and hot reload a Flutter target',
   '  attach      Connect to an already-running Flutter app',
+  '  devices     List the devices `run -d` can run on',
   '',
   'Run options (all of them: flutter_bazel run --help):',
   for (final name in _summarizedRunOptions)
