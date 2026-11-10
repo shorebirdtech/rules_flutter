@@ -266,3 +266,17 @@ def desktop_engine_artifact_path(os, arch, mode):
     elif os == "windows":
         return "{dir}/windows-{arch}-flutter.zip".format(dir = platform_dir, arch = arch)
     return None
+
+def macos_xcframework_artifact_path(mode):
+    """The artifact path of Flutter's signed `FlutterMacOS.xcframework` of a mode.
+
+    The engine cache's `framework.zip`, which `flutter build macos-framework`
+    copies: `darwin-x64/framework.zip` for debug, `darwin-x64-<mode>/` otherwise.
+
+    Args:
+        mode: Build mode ("debug", "profile", "release").
+
+    Returns:
+        Artifact path like "darwin-x64-release/framework.zip".
+    """
+    return ("darwin-x64" if mode == "debug" else "darwin-x64-" + mode) + "/framework.zip"

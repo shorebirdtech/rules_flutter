@@ -266,6 +266,10 @@ ARTIFACT_CHECKSUMS = {
         "linux-x64-debug/linux-x64-flutter-gtk.zip": "e324b676106db415bec41d211caeb7a5137d061704f7af83264f382b4e2ff354",
         "linux-arm64-debug/linux-arm64-flutter-gtk.zip": "2362f5ea27b35990e5d75822fd9a95da0b24d626cb6c7e8c20700d4c1ef4442d",
         "windows-x64-debug/windows-x64-flutter.zip": "60d3821fc90f871ad6848ee8020b9c0cf5a1a8aad1ba3d1707caedbf6ae5ff8a",
+        # macOS add-to-app (Flutter's signed FlutterMacOS.xcframework per mode)
+        "darwin-x64/framework.zip": "a4724d7f73272605ccea553be2b1101c0b30cb701f94300cb3f398f55b4fce7d",
+        "darwin-x64-profile/framework.zip": "596fc6c3953e2ba2991048317f38d05f3609f2df67bfa46624b34a517f023712",
+        "darwin-x64-release/framework.zip": "e350e9559baaadc8d0d658b70dd294f04eb5b75fd93a25796f1fb8b5befdb363",
         # iOS engine (Flutter.xcframework — release and profile for device, debug for simulator)
         "ios-release/artifacts.zip": "c8deec7126fcdfa93d94a20d2aa7fdfe7d4644eea9ae38ccc396a03dbcb25bc0",
         "ios-profile/artifacts.zip": "633f6280bff6fbbc51ee0acf4dadbd46d8703b329aeadea2e93b069027029356",
@@ -352,6 +356,10 @@ ARTIFACT_CHECKSUMS = {
         "linux-x64-debug/linux-x64-flutter-gtk.zip": "2d292648be8ddad16c3d040798b616e403715dcd38388d7ebcea5513ee4f080a",
         "linux-arm64-debug/linux-arm64-flutter-gtk.zip": "9f981f550ef8b2a4d0fb7303927324c4ddac2de81ed9af827dfd07a1d189c219",
         "windows-x64-debug/windows-x64-flutter.zip": "014af1a13f8b9bf8fbba396d491b9b9a71ea05086afde70db9fcca2faaa300de",
+        # macOS add-to-app (Flutter's signed FlutterMacOS.xcframework per mode)
+        "darwin-x64/framework.zip": "c409d87e922c7c731713663d0055ba9d7a492f3b41c535722dbc5446e4513e7c",
+        "darwin-x64-profile/framework.zip": "51fe246e44f8dab987f5ee98943db578c66cca8030656ad3ac7080a1c00827ff",
+        "darwin-x64-release/framework.zip": "8709689bd10007eb320301dea436ba91c7e6d404d7372b5b018bd9fb42284118",
         # iOS engine (Flutter.xcframework — release and profile for device, debug for simulator)
         "ios-release/artifacts.zip": "d2f31932154b7fa5153ee17e7be3f82d8b09ea04d5cffc902a01f93b2b5dccde",
         "ios-profile/artifacts.zip": "cb173527665bfc8b1b14ec67bd1385e1f2474404c557c9a793f86297bd83fe0f",
@@ -438,6 +446,10 @@ ARTIFACT_CHECKSUMS = {
         "linux-x64-debug/linux-x64-flutter-gtk.zip": "2a522fd7d5c12a54165f1e48001fcb331649a24a21083510fe6734699346d7e2",
         "linux-arm64-debug/linux-arm64-flutter-gtk.zip": "3bc51f15607618bcd940d4fd08271f8e96669e6a74d1971d187509d93e68b41b",
         "windows-x64-debug/windows-x64-flutter.zip": "504cf624589f5fbc38a241f6a46669f7166a5f8d54037b2caab9d4a9e8ff0d47",
+        # macOS add-to-app (Flutter's signed FlutterMacOS.xcframework per mode)
+        "darwin-x64/framework.zip": "5f81edcafd7d1f5d16678cb853e8fb0cd24fac4fce020ce264457e343dee7f8b",
+        "darwin-x64-profile/framework.zip": "31f2d1477b93e9d24f54a5402ba340edaee1ff65bb98690db323398c20c3d306",
+        "darwin-x64-release/framework.zip": "eafc1acb76a754513e5a61d05152fe2ba69ea39c6f60e6cddbb5dbd6559f9b4a",
         # iOS engine (Flutter.xcframework — release and profile for device, debug for simulator)
         "ios-release/artifacts.zip": "6e950779c094f09e438700bd670f201a7029ee6b1af9a94d1fd713547394766a",
         "ios-profile/artifacts.zip": "95cc5c8fc20b4e68fc7d6d255fb134ef74fa3e340119bebff503ab69acab03e2",
@@ -524,6 +536,10 @@ ARTIFACT_CHECKSUMS = {
         "linux-x64-debug/linux-x64-flutter-gtk.zip": "e1ed3d3ccc0d42d1dc58fa141dc83c4be511e5a2a1cbe0319c2aa8ae6afeadc4",
         "linux-arm64-debug/linux-arm64-flutter-gtk.zip": "678af4d1384aa3c27f413920c9dcb3cd49a44d8168fd3b35fa7c6a5e2f00c4d8",
         "windows-x64-debug/windows-x64-flutter.zip": "ae6952439ba6c1f646d524c1838111c64fdb471f9c38f502bc678fa450e71a53",
+        # macOS add-to-app (Flutter's signed FlutterMacOS.xcframework per mode)
+        "darwin-x64/framework.zip": "54cdcac3acffb21c29f526e07cb075c9aef5b3f65c3c9e26be38ec9db54efbf1",
+        "darwin-x64-profile/framework.zip": "85ef3ce03c4ce1767b3dbc67c857ef54cdc6a5f3ab002192e4f00acbb8ee2ea3",
+        "darwin-x64-release/framework.zip": "aaa6c7895464547d3c45aeee70e67122067378c2073ea98ce9b799a5c7c7dfc8",
         # iOS engine (Flutter.xcframework — release and profile for device, debug for simulator)
         "ios-release/artifacts.zip": "3e3e5a772ca311074aaca857dba5cc1f253f3568242debcf07840c75b897584f",
         "ios-profile/artifacts.zip": "b6459899c53709470e52315c5ae1aede2363fb694c4de282c6f8c4e769a7ad58",
@@ -610,6 +626,10 @@ ARTIFACT_CHECKSUMS = {
         "linux-x64-debug/linux-x64-flutter-gtk.zip": "37a7ab2b9f78e77de5154aae41d647592254fe7f390546b9cb4c618717495163",
         "linux-arm64-debug/linux-arm64-flutter-gtk.zip": "d26602cd0d0048a1f4add12d7cb3726bbd1b00ff52f943cfb9ca8264d1508835",
         "windows-x64-debug/windows-x64-flutter.zip": "96fbaa7304c794e67de396a9229866bb3cf26e80fc95de9bf6b48e4b847c7f33",
+        # macOS add-to-app (Flutter's signed FlutterMacOS.xcframework per mode)
+        "darwin-x64/framework.zip": "a79aa55117da13fcb3647ff01e12cfa9096d3083c7305c52aa6ef4ca818e7a1f",
+        "darwin-x64-profile/framework.zip": "8677b61f1991e18573fe6add76cd3ae51d8d166c355680703bd3a6fa01504387",
+        "darwin-x64-release/framework.zip": "70ebce7376aa025a97d5291da6b5ea33bda5ca38faa7989fe10d41de1edee212",
         # iOS engine (Flutter.xcframework — release and profile for device, debug for simulator)
         "ios-release/artifacts.zip": "eab7101445685f1c7b843c316790062bb429af2e4064f9a7a9ebb06322bdd6a2",
         "ios-profile/artifacts.zip": "0877f459a98f8429af2859ed0bd6c764e1c987381f9b7fbacac3ee846ae1e651",
@@ -696,6 +716,10 @@ ARTIFACT_CHECKSUMS = {
         "linux-x64-debug/linux-x64-flutter-gtk.zip": "9e333f37446a702d7415ae98ff23278e21ccc01714862f4294bf91a70aed8af0",
         "linux-arm64-debug/linux-arm64-flutter-gtk.zip": "fa16659d9100ecedbbd0558275c5291937276b1f7e0b87847580cd1554dbe03a",
         "windows-x64-debug/windows-x64-flutter.zip": "d050a048d62e3753a05f9bfc044e1939eca9cb2e8b899723de3ddb37ba0df726",
+        # macOS add-to-app (Flutter's signed FlutterMacOS.xcframework per mode)
+        "darwin-x64/framework.zip": "65dbdb5e3e0d24dd219aa24f8ea2404aa7443b9725ae17f24f8207ba86b946c8",
+        "darwin-x64-profile/framework.zip": "7dcb649121a123d99c2458d0b825bc1137a597ae5b98e5ef267da40dbc3ff1d4",
+        "darwin-x64-release/framework.zip": "644b6657f0d818073aec55b4981383ae5387494c59a41956e54e3d299ef44d31",
         # iOS engine (Flutter.xcframework — release and profile for device, debug for simulator)
         "ios-release/artifacts.zip": "74ae4aafa7dcef5a96d0a7bddd727fb8c2bf73617d45cb01440c5820952cbf43",
         "ios-profile/artifacts.zip": "23ff396ef2f16be8d6f80c49b318fbde5df8dd4166a93da9c61548bf1a250b75",

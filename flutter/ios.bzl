@@ -70,6 +70,7 @@ load("//flutter/private:debug_build.bzl", _debug_build = "debug_build")
 load("//flutter/private:flutter_apple_bundle_version.bzl", _flutter_apple_bundle_version = "flutter_apple_bundle_version")
 load("//flutter/private:flutter_apple_plugin_library.bzl", _flutter_apple_plugin_library_macro = "flutter_apple_plugin_library")
 load("//flutter/private:flutter_apple_plugins_aggregator.bzl", _flutter_apple_plugins_aggregator = "flutter_apple_plugins_aggregator")
+load("//flutter/private:flutter_apple_xcframeworks.bzl", _flutter_ios_app_xcframework = "flutter_ios_app_xcframework", _flutter_ios_engine_xcframework = "flutter_ios_engine_xcframework")
 load("//flutter/private:flutter_ios_application.bzl", _flutter_ios_app_framework_rule = "flutter_ios_app_framework", _flutter_ios_application = "flutter_ios_application", _flutter_ios_native_frameworks_rule = "flutter_ios_native_frameworks", _flutter_ios_privacy_manifests_rule = "flutter_ios_privacy_manifests")
 load("//flutter/private:flutter_ios_registrant.bzl", _flutter_ios_registrant_rule = "flutter_ios_registrant")
 load("//flutter/private:flutter_plist_merge.bzl", _flutter_entitlements_merge = "flutter_entitlements_merge", _flutter_plist_merge = "flutter_plist_merge")
@@ -82,6 +83,12 @@ load("//flutter/private:validation.bzl", "validate_minimum_os_version")
 IOS_MINIMUM_OS_VERSION = _IOS_MINIMUM_OS_VERSION
 IOS_DEFAULT_LAUNCH_STORYBOARD = "@rules_flutter//flutter/private/runners/ios:Base.lproj/LaunchScreen.storyboard"
 IOS_DEFAULT_MAIN_STORYBOARD = "@rules_flutter//flutter/private/runners/ios:Base.lproj/Main.storyboard"
+
+# Add-to-app, for a host app built by Xcode (see README, "Add-to-app"): the
+# application's App.xcframework and a copy of Flutter's own engine xcframework,
+# in the build mode of the configuration.
+flutter_ios_app_xcframework = _flutter_ios_app_xcframework
+flutter_ios_engine_xcframework = _flutter_ios_engine_xcframework
 
 # Merges entitlement additions into a base entitlements file — the additive
 # seam rules_apple's single-file `entitlements` attribute does not provide.

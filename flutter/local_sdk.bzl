@@ -245,6 +245,7 @@ def _local_engine_impl(repository_ctx):
                 )
                 if machine.os == "macos":
                     reasons[("macos/" + mode, "engine")] = message
+                    reasons[("macos/" + mode, "xcframework")] = message
                     reasons[(native_target(host) + "/" + mode, "gen_snapshot_" + host)] = message
                 if mode == "release":
                     reasons[("kernel/release", "platform")] = message
@@ -364,8 +365,28 @@ flutter_host_tools(
                         framework = child.get_child("FlutterMacOS.framework")
                         break
             if framework == None:
-                reasons[("macos/" + mode, "engine")] = "The out dir {} has no FlutterMacOS.xcframework with a macOS slice: build the macOS engine target (ninja -C out/{} flutter/shell/platform/darwin/macos:FlutterMacOS).".format(out, name)
+                missing = "The out dir {} has no FlutterMacOS.xcframework with a macOS slice: build the macOS engine target (ninja -C out/{} flutter/shell/platform/darwin/macos:FlutterMacOS).".format(out, name)
+                reasons[("macos/" + mode, "engine")] = missing
+                reasons[("macos/" + mode, "xcframework")] = missing
             else:
+                # The whole xcframework, for macOS add-to-app.
+                link_into(repository_ctx, xcframework, "macos/{}/FlutterMacOS.xcframework".format(mode))
+                provided[("macos/" + mode, "xcframework")] = """
+filegroup(
+    name = "xcframework_files",
+    srcs = glob(["FlutterMacOS.xcframework/**"]),
+)
+
+flutter_macos_engine_slice(
+    name = "xcframework",
+    mode = "{mode}",
+    cpus = ["{engine_cpu}"],
+    files = ":xcframework_files",
+    binary = ":FlutterMacOS.xcframework/{slice}/FlutterMacOS.framework/Versions/A/FlutterMacOS",
+    provenance = {prov},
+    visibility = ["//visibility:public"],
+)
+""".format(mode = mode, engine_cpu = "arm64" if cpu == "arm64" else "x86_64", slice = framework.dirname.basename, prov = dict_text(out_dir_provenance(name, args)))
                 link_into(repository_ctx, framework, "macos/{}/FlutterMacOS.framework".format(mode))
                 provided[("macos/" + mode, "engine")] = """
 filegroup(
@@ -443,6 +464,7 @@ alias(
             apple = "The engine out dirs are read on a {} machine; macOS and iOS engines are built on a Mac.".format(os_label)
             for mode in ["debug", "profile", "release"]:
                 reasons[("macos/" + mode, "engine")] = apple
+                reasons[("macos/" + mode, "xcframework")] = apple
                 reasons[("ios/" + mode, "engine")] = apple
             for target in ["macos-arm64", "macos-x64", "ios-arm64"]:
                 for mode in ["profile", "release"]:

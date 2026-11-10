@@ -11,7 +11,9 @@ load(
     "IOS_MINIMUM_OS_VERSION",
     "flutter_ios_app",
     "flutter_ios_app_framework_gen",
+    "flutter_ios_app_xcframework",
     "flutter_ios_engine",
+    "flutter_ios_engine_xcframework",
     "flutter_ios_info_plist_gen",
     "flutter_ios_native_frameworks_gen",
     "flutter_ios_privacy_manifests_gen",
@@ -25,7 +27,9 @@ load(
     "MACOS_MINIMUM_OS_VERSION",
     "flutter_macos_app",
     "flutter_macos_app_framework_gen",
+    "flutter_macos_app_xcframework",
     "flutter_macos_engine",
+    "flutter_macos_engine_xcframework",
     "flutter_macos_info_plist_gen",
     "flutter_macos_menu_xib_gen",
     "flutter_macos_native_libs_gen",
@@ -35,6 +39,7 @@ load(
 )
 load("@rules_flutter//flutter:web.bzl", "flutter_web_bundle")
 load("@rules_flutter//flutter:windows.bzl", "flutter_windows_app")
+load("@rules_flutter//tools/e2e_testing:apple_release_build.bzl", "apple_release_build")
 load("@rules_flutter//tools/e2e_testing:device_profile.bzl", "device_profile")
 load(":android_apk.bzl", "android_apk")
 load(":desktop_link_libraries_test.bzl", "linux_link_libraries_test", "windows_link_libraries_test")
@@ -851,3 +856,76 @@ dart_test(
     target_compatible_with = ["@platforms//os:macos"],
     deps = ["@rules_flutter//tools/e2e_testing"],
 )
+
+# =============================================================================
+# Add-to-app: Apple
+# =============================================================================
+#
+# The xcframeworks a host app built by Xcode links, as `flutter build
+# ios-framework` and `macos-framework` make them. `:add_to_app_*_test` checks
+# them in debug and in release.
+
+_ADD_TO_APP_PLATFORMS = [
+    "ios",
+    "macos",
+]
+
+# Each mode the tests check, and the compilation mode that builds it.
+_ADD_TO_APP_MODES = {
+    "debug": "dbg",
+    "release": "fastbuild",
+}
+
+flutter_ios_app_xcframework(
+    name = "add_to_app_ios_app",
+    application = ":plugin_app",
+    tags = ["manual"],
+)
+
+flutter_ios_engine_xcframework(
+    name = "add_to_app_ios_engine",
+    tags = ["manual"],
+)
+
+flutter_macos_app_xcframework(
+    name = "add_to_app_macos_app",
+    application = ":plugin_app",
+    tags = ["manual"],
+)
+
+flutter_macos_engine_xcframework(
+    name = "add_to_app_macos_engine",
+    tags = ["manual"],
+)
+
+[
+    apple_release_build(
+        name = "add_to_app_%s_%s" % (platform, mode),
+        compilation_mode = compilation_mode,
+        sign = False,
+        tags = ["manual"],
+        targets = [
+            ":add_to_app_%s_app" % platform,
+            ":add_to_app_%s_engine" % platform,
+        ],
+    )
+    for platform in _ADD_TO_APP_PLATFORMS
+    for mode, compilation_mode in _ADD_TO_APP_MODES.items()
+]
+
+[
+    dart_test(
+        name = "add_to_app_%s_%s_test" % (platform, mode),
+        args = [
+            "--platform=" + platform,
+            "--mode=" + mode,
+            "$(rootpaths :add_to_app_%s_%s)" % (platform, mode),
+        ],
+        data = [":add_to_app_%s_%s" % (platform, mode)],
+        main = "test/add_to_app_apple_test.dart",
+        target_compatible_with = ["@platforms//os:macos"],
+        deps = ["@rules_flutter//tools/e2e_testing"],
+    )
+    for platform in _ADD_TO_APP_PLATFORMS
+    for mode, compilation_mode in _ADD_TO_APP_MODES.items()
+]

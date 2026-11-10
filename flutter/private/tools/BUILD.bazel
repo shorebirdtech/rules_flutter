@@ -15,6 +15,7 @@ load(":sdk_record_mode.bzl", "record_in_mode")
 exports_files(
     [
         "android_release.dart",
+        "apple_frameworks.dart",
         "assemble_directory.dart",
         "generate_asset_manifest.dart",
         "bundle_app.dart",
@@ -235,6 +236,18 @@ dart_test(
         "@dev_tool_deps//:test",
         "@rules_dart//dart/runfiles",
     ],
+)
+
+# The Apple bundle tool imports the directory assembler's copies, so both are
+# its `srcs`.
+dart_test(
+    name = "apple_frameworks_test",
+    srcs = [
+        "apple_frameworks.dart",
+        "assemble_directory.dart",
+    ],
+    main = "test/apple_frameworks_test.dart",
+    deps = ["@dev_tool_deps//:test"],
 )
 
 # The merger imports the binary plist reader, so both are its `srcs`.

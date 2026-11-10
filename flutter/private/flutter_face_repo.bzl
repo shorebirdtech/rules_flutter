@@ -66,6 +66,9 @@ MACOS_ENGINE_TARGETS = {
     "engine_debug_library": "{prefix}//macos/debug:engine",
     "engine_profile_library": "{prefix}//macos/profile:engine",
     "engine_release_library": "{prefix}//macos/release:engine",
+    "xcframework_debug": "{prefix}//macos/debug:xcframework",
+    "xcframework_profile": "{prefix}//macos/profile:xcframework",
+    "xcframework_release": "{prefix}//macos/release:xcframework",
 }
 
 MACOS_ENGINE_EXTRA = """
@@ -76,6 +79,18 @@ alias(
         "@rules_flutter//flutter/private:dbg": ":engine_debug_library",
         "@rules_flutter//flutter/private:profile": ":engine_profile_library",
         "//conditions:default": ":engine_release_library",
+    }),
+    visibility = ["//visibility:public"],
+)
+
+# Flutter's signed FlutterMacOS.xcframework of the build mode, for macOS
+# add-to-app.
+alias(
+    name = "xcframework",
+    actual = select({
+        "@rules_flutter//flutter/private:dbg": ":xcframework_debug",
+        "@rules_flutter//flutter/private:profile": ":xcframework_profile",
+        "//conditions:default": ":xcframework_release",
     }),
     visibility = ["//visibility:public"],
 )

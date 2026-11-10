@@ -116,6 +116,18 @@ def _engine(platform, mode, repo, provenance):
         provenance = _dict(provenance),
     )
 
+def _macos_xcframework(repo, mode, provenance):
+    return """flutter_macos_engine_slice(
+    name = "xcframework",
+    mode = "{mode}",
+    cpus = ["arm64", "x86_64"],
+    files = "@{repo}//:xcframework",
+    binary = "@{repo}//:FlutterMacOS.xcframework/macos-arm64_x86_64/FlutterMacOS.framework/Versions/A/FlutterMacOS",
+    provenance = {provenance},
+    visibility = ["//visibility:public"],
+)
+""".format(mode = mode, repo = repo, provenance = _dict(provenance))
+
 # The platform directories of the iOS release's xcframeworks: the device, and
 # the simulator whose arm64 and x86_64 binaries are one universal binary.
 _IOS_XCFRAMEWORK_SLICES = ["ios-arm64", "ios-arm64_x86_64-simulator"]
@@ -283,6 +295,11 @@ def stock_engine_packages(name, provenance):
                     repo = "{}_cross_{}_{}".format(name, host, target) + ("_profile" if mode == "profile" else "")
                     label = "@{}//:{}".format(repo, gen_snapshot_binary_name(host))
                 add("{}/{}".format(target, mode), _gen_snapshot(host, mode, {"arm": "arm", "arm64": "arm64"}.get(cpu, "x86_64"), label, provenance))
+
+    # Flutter's signed FlutterMacOS.xcframework of each mode, which macOS
+    # add-to-app copies as `flutter build macos-framework` does.
+    for mode in ENGINE_MODES:
+        add("macos/" + mode, _macos_xcframework("{}_macos_xcframework_{}".format(name, mode), mode, provenance))
 
     add("web", _web_sdk(name, provenance))
 

@@ -205,6 +205,8 @@ def contract_slices():
         directory = desktop_engine_dir(platform)
         for mode in ENGINE_MODES:
             slices.setdefault("{}/{}".format(directory, mode), []).append("engine")
+    for mode in ENGINE_MODES:
+        slices["macos/" + mode].append("xcframework")
     for targets in CROSS_COMPILATION_PAIRS.values():
         for target in targets:
             for mode in ENGINE_MODES:

@@ -86,6 +86,14 @@ const artifactSections = [
     ],
   ),
   ArtifactSection(
+    "macOS add-to-app (Flutter's signed FlutterMacOS.xcframework per mode)",
+    [
+      'darwin-x64/framework.zip',
+      'darwin-x64-profile/framework.zip',
+      'darwin-x64-release/framework.zip',
+    ],
+  ),
+  ArtifactSection(
     'iOS engine (Flutter.xcframework — release and profile for device, debug for simulator)',
     [
       'ios-release/artifacts.zip',

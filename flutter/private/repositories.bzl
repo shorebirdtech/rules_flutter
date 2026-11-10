@@ -4,13 +4,14 @@ The `flutter` module extension declares them, once for each SDK a
 `flutter.toolchain()` names.
 """
 
-load("//flutter/private:artifact_urls.bzl", "android_engine_artifact_path", "cpp_client_wrapper_artifact_path", "dart_sdk_artifact_path", "desktop_engine_artifact_path", "engine_artifact_url", "gen_snapshot_cross_artifact_path", "host_artifacts_path", "ios_engine_artifact_path")
+load("//flutter/private:artifact_urls.bzl", "android_engine_artifact_path", "cpp_client_wrapper_artifact_path", "dart_sdk_artifact_path", "desktop_engine_artifact_path", "engine_artifact_url", "gen_snapshot_cross_artifact_path", "host_artifacts_path", "ios_engine_artifact_path", "macos_xcframework_artifact_path")
 load("//flutter/private:engine_helpers.bzl", "ENGINE_MODES", "PLATFORM_PREFIX_TO_OS", "engine_arch_for_os", "gen_snapshot_binary_name", "gen_snapshot_host_platform")
 load("//flutter/private:flutter_android_engine_repo.bzl", "flutter_android_engine_repo")
 load("//flutter/private:flutter_cross_repo.bzl", "flutter_cross_compilation_repo")
 load("//flutter/private:flutter_desktop_engine_repo.bzl", "flutter_desktop_engine_repo")
 load("//flutter/private:flutter_ios_engine_repo.bzl", "flutter_ios_engine_repo")
 load("//flutter/private:flutter_linux_sysroot_repo.bzl", "flutter_linux_sysroot_repo")
+load("//flutter/private:flutter_macos_xcframework_repo.bzl", "flutter_macos_xcframework_repo")
 load("//flutter/private:flutter_profile_repo.bzl", "flutter_profile_repo")
 load("//flutter/private:flutter_sdk_toolchains_repo.bzl", "flutter_sdk_toolchains_repo")
 load("//flutter/private:flutter_sky_engine_repo.bzl", "flutter_sky_engine_repo")
@@ -254,6 +255,16 @@ def flutter_register_toolchains(name, flutter_version, framework_json = "", fram
                 sha256 = checksums.get(engine_path, ""),
                 cpp_wrapper_sha256 = checksums.get(cpp_client_wrapper_artifact_path(target_platform), ""),
             )
+
+    # Flutter's signed FlutterMacOS.xcframework of each mode, for macOS
+    # add-to-app (lazy: only the mode being built is downloaded).
+    for mode in ENGINE_MODES:
+        flutter_macos_xcframework_repo(
+            name = "{}_macos_xcframework_{}".format(name, mode),
+            engine_revision = meta.engine_revision,
+            mode = mode,
+            sha256 = checksums.get(macos_xcframework_artifact_path(mode), ""),
+        )
 
     # Web SDK repo (lazy — only downloaded when web targets are built).
     flutter_web_sdk_repo(
