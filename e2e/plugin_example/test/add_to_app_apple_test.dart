@@ -2,13 +2,14 @@
 /// ios-framework` and `macos-framework` make.
 ///
 /// Usage: `add_to_app_apple_test --platform=P --mode=M --plugins=A,B
-/// --code-assets=C XCFRAMEWORK...`, `P`
-/// `ios` or `macos`, `M` `debug`, `profile` or `release`, each
-/// `XCFRAMEWORK` a runfiles path of an `.xcframework`.
+/// --code-assets=C TARGET`, `P` `ios` or `macos`, `M` `debug`, `profile` or
+/// `release`, `TARGET` the name of a `flutter_ios_xcframeworks` or
+/// `flutter_macos_xcframeworks` in the test's runfiles. The test runs its
+/// `bazel run` program, which writes `<Mode>/` of the mode only, its
+/// xcframeworks, and above it the registrant's sources (and on iOS in debug
+/// the LLDB files), as `flutter build ios-framework` lays them out, and
+/// checks what it wrote.
 ///
-/// It reads each xcframework where the build wrote it, which it finds through
-/// the link to its `Info.plist`: a sandbox's copy of a versioned framework has
-/// lost the framework's own links.
 ///
 /// Properties, per xcframework:
 ///
@@ -351,6 +352,31 @@ void _checkRegistrant(String xcframework) {
   }
 }
 
+/// Runs the `bazel run` program of the target [name] (`module_ios`), as
+/// `bazel run //:<name>` would, into a new directory, and returns it.
+String _export(String name) {
+  final program = requireRunfile('$name.export', what: 'The export program');
+  final output = Directory.systemTemp.createTempSync('add_to_app_export').path;
+  final result = Process.runSync(
+    program,
+    ['--output=$output'],
+    environment: {
+      'RULES_FLUTTER_XCFRAMEWORKS_CONFIG': runfileKey(
+        '$name.xcframeworks_export.json',
+      ),
+      'BUILD_WORKSPACE_DIRECTORY': output,
+      'BUILD_WORKING_DIRECTORY': output,
+    },
+  );
+  if (result.exitCode != 0) {
+    stderr.writeln(
+      'bazel run //:$name failed:\n${result.stdout}${result.stderr}',
+    );
+    exit(1);
+  }
+  return output;
+}
+
 void main(List<String> args) {
   String? platform;
   String? mode;
@@ -358,6 +384,7 @@ void main(List<String> args) {
   var codeAssets = <String>{};
   final looseFiles = <String>{};
   final xcframeworks = <String>[];
+  String? layout;
   for (final arg in args) {
     if (arg.startsWith('--platform=')) {
       platform = arg.substring('--platform='.length);
@@ -367,20 +394,23 @@ void main(List<String> args) {
       plugins = arg.substring('--plugins='.length).split(',').toSet();
     } else if (arg.startsWith('--code-assets=')) {
       codeAssets = arg.substring('--code-assets='.length).split(',').toSet();
-    } else if (!arg.endsWith('.xcframework')) {
-      looseFiles.add(arg.split('/').last);
     } else {
-      // Its `Info.plist` links to the file the build wrote, whose directory
-      // has the links.
-      final plist = File(
-        '${requireRunfile(arg, what: 'xcframework')}/Info.plist',
-      );
-      xcframeworks.add(
-        plist.resolveSymbolicLinksSync().replaceAll(
-          RegExp(r'/Info\.plist$'),
-          '',
-        ),
-      );
+      layout = _export(arg);
+    }
+  }
+  if (layout != null && mode != null) {
+    final modeDirectory = mode[0].toUpperCase() + mode.substring(1);
+    for (final entry in Directory(layout).listSync()) {
+      final name = entry.path.split('/').last;
+      if (entry is! Directory) {
+        looseFiles.add(name);
+      } else if (name != modeDirectory) {
+        _failures.add('$name/: the layout of a $mode build has no other mode');
+      } else {
+        for (final xcframework in Directory(entry.path).listSync()) {
+          xcframeworks.add(xcframework.path);
+        }
+      }
     }
   }
   if (platform == null || mode == null || xcframeworks.isEmpty) {
@@ -424,8 +454,15 @@ void main(List<String> args) {
     _failures.add('$name.xcframework: missing');
   }
   final loose = platform == 'ios'
-      ? {'GeneratedPluginRegistrant.h', 'GeneratedPluginRegistrant.m'}
-      : <String>{};
+      ? {
+          'GeneratedPluginRegistrant.h',
+          'GeneratedPluginRegistrant.m',
+          if (mode == 'debug') ...{
+            'flutter_lldbinit',
+            'flutter_lldb_helper.py',
+          },
+        }
+      : {'GeneratedPluginRegistrant.swift'};
   _check(
     looseFiles.length == loose.length && looseFiles.containsAll(loose),
     'the files beside the xcframeworks are $looseFiles, not $loose',

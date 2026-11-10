@@ -6,10 +6,8 @@
 /// * `--add-tree <name> <dir>` copies the contents of `<dir>` into `<name>`,
 ///   following symlinks.
 /// * `--add-bundle <name> <dir>` copies `<dir>`, a framework, an xcframework
-///   or a directory holding them, into `<name>`, and gives every versioned
-///   framework in it the symlinks a versioned framework has.
-/// * `--link-versions <name>` gives the framework at `<name>`, whose contents
-///   are already under `Versions/<version>/`, those symlinks.
+///   or a directory holding them, into `<name>`, each versioned framework in
+///   it as its version directory alone (see below).
 /// * `--add-replacing <name> <file> <from> <to>` copies `<file>` to `<name>`
 ///   with each `<from>` in it replaced by `<to>`.
 /// * `--add-interface <name> <file> <module> <rename>` copies the Swift module
@@ -20,18 +18,20 @@
 ///
 /// A versioned (macOS) framework keeps its contents in `Versions/A/` and has
 /// `Versions/Current -> A` and, at its top, a link to each entry of
-/// `Versions/Current/` but `_CodeSignature`. A Bazel action sees the
-/// directory artifacts it reads with their links followed, so a framework read
-/// that way has copies, not links, at those places. `--add-bundle` copies only
-/// the version directories and makes the links again, so the bundle it writes
-/// has the layout that the framework's signature and Xcode expect.
+/// `Versions/Current/` but `_CodeSignature`. Bazel does not keep a link to a
+/// directory in a directory artifact: an action reading the artifact sees a
+/// copy, and staging it for a test can turn the output into copies. So in
+/// Bazel's outputs a versioned framework is its `Versions/<version>/` alone,
+/// and [linkVersions] makes the links when the frameworks leave Bazel
+/// (`apple_xcframeworks_export.dart`). They are the links the framework had
+/// when it was signed, so its signature holds.
 ///
 /// The tool has no package dependencies and runs with the bare Dart SDK.
 ///
 /// Usage:
 ///   dart apple_frameworks.dart --output <dir>
 ///       [--add <name> <file> | --add-tree <name> <dir>
-///        | --add-bundle <name> <dir> | --link-versions <name>
+///        | --add-bundle <name> <dir>
 ///        | --add-replacing <name> <file> <from> <to>
 ///        | --add-interface <name> <file> <module> <rename>]...
 import 'dart:io';
@@ -41,7 +41,7 @@ import 'assemble_directory.dart' show copyFile, copyTree;
 const _usage =
     'usage: apple_frameworks.dart --output <dir> '
     '[--add <name> <file> | --add-tree <name> <dir> '
-    '| --add-bundle <name> <dir> | --link-versions <name> '
+    '| --add-bundle <name> <dir> '
     '| --add-replacing <name> <file> <from> <to> '
     '| --add-interface <name> <file> <module> <rename>]...';
 
@@ -55,9 +55,9 @@ List<Directory> _versionDirectories(Directory versions) => [
     if (entry is Directory && _base(entry.path) != 'Current') entry,
 ]..sort((a, b) => a.path.compareTo(b.path));
 
-/// Copies [source] into [destination], recreating the links of each versioned
-/// framework in it.
-void copyBundle(Directory source, Directory destination) {
+/// Copies [source] into [destination], each versioned framework in it as its
+/// version directory alone, with its links when [link].
+void copyBundle(Directory source, Directory destination, {bool link = false}) {
   destination.createSync(recursive: true);
   final versions = Directory('${source.path}/Versions');
   if (source.path.endsWith('.framework') && versions.existsSync()) {
@@ -67,7 +67,7 @@ void copyBundle(Directory source, Directory destination) {
         Directory('${destination.path}/Versions/${_base(version.path)}'),
       );
     }
-    linkVersions(destination);
+    if (link) linkVersions(destination);
     return;
   }
   for (final entry in source.listSync(followLinks: false)) {
@@ -75,7 +75,7 @@ void copyBundle(Directory source, Directory destination) {
     final target = '${destination.path}/$name';
     switch (FileSystemEntity.typeSync(entry.path)) {
       case FileSystemEntityType.directory:
-        copyBundle(Directory(entry.path), Directory(target));
+        copyBundle(Directory(entry.path), Directory(target), link: link);
       case FileSystemEntityType.file:
         copyFile(File(entry.path), target);
       case _:
@@ -143,8 +143,6 @@ int run(List<String> args) {
         output = args[++i];
       case '--add' || '--add-tree' || '--add-bundle':
         steps.add((args[i], [args[++i], args[++i]]));
-      case '--link-versions':
-        steps.add((args[i], [args[++i]]));
       case '--add-replacing' || '--add-interface':
         steps.add((args[i], [args[++i], args[++i], args[++i], args[++i]]));
       default:
@@ -166,8 +164,6 @@ int run(List<String> args) {
         copyTree(Directory(values[1]), Directory(at(values[0])));
       case '--add-bundle':
         copyBundle(Directory(values[1]), Directory(at(values[0])));
-      case '--link-versions':
-        linkVersions(Directory(at(values[0])));
       case '--add-replacing':
         final text = File(values[1]).readAsStringSync();
         File(at(values[0]))

@@ -42,12 +42,16 @@ def _impl(ctx):
             files.append(target[AppleFrameworkImportInfo].framework_imports)
         if ctx.attr.generate_dsym and OutputGroupInfo in target and hasattr(target[OutputGroupInfo], "dsyms"):
             files.append(target[OutputGroupInfo].dsyms)
-    return [DefaultInfo(files = depset(transitive = files))]
+    return [DefaultInfo(
+        files = depset(transitive = files),
+        # A `bazel run` program among them (an export) runs from the test.
+        runfiles = ctx.runfiles().merge_all([t[DefaultInfo].default_runfiles for t in ctx.attr.targets]),
+    )]
 
 apple_release_build = rule(
     implementation = _impl,
-    doc = """Forwards the files of `targets`, built in `compilation_mode`, and the frameworks
-of the framework imports among them.
+    doc = """Forwards the files and runfiles of `targets`, built in `compilation_mode`, and the
+frameworks of the framework imports among them.
 
 With `generate_dsym`, builds them with `--apple_generate_dsym` and forwards
 the dSYM bundles the targets' `dsyms` output group holds besides their own

@@ -62,7 +62,7 @@ If `flutter build` works for you, here is what Bazel adds:
 
 - [Getting started](#getting-started)
 - [Dependencies](#dependencies): pub packages, build hooks, native code
-- [Building for each platform](#building-for-each-platform): macOS, iOS, Android, Linux, Windows, web, cross-compiling, release permissions
+- [Building for each platform](#building-for-each-platform): macOS, iOS, Android, Linux, Windows, web, cross-compiling, release permissions, add-to-app
 - [Custom engines and frameworks](#custom-engines-and-frameworks): a local flutter/flutter checkout and its engine, provenance, writing an engine source
 - [Rules reference](#rules-reference): libraries, applications, tests, integration tests, plugins, code generation, providers
 - [The dev tool](#the-dev-tool): running apps, hot reload, driving an app from a script
@@ -1947,6 +1947,45 @@ unzip -oq bazel-bin/my_app_ios.ipa -d /tmp/ipa && \
 ```
 
 Remember that a plain `bazel build` is a release build, so it already takes the release side of each of these choices. `e2e/macos_example`, `e2e/android_example`, and `e2e/ios_example` each have a test that reads the built artifact this way.
+
+### Add-to-app: iOS and macOS
+
+A native app built **with Bazel** embeds Flutter through the Tier 2 rules of `flutter/ios.bzl` and `flutter/macos.bzl` (`flutter_ios_app_framework_gen`, `flutter_ios_engine`, ...) in its own `ios_application` or `macos_application`. A native app built **with Xcode** takes Flutter as xcframeworks instead, as `flutter build ios-framework` and `flutter build macos-framework` make them:
+
+```starlark
+load("@rules_flutter//flutter:ios.bzl", "flutter_ios_xcframeworks")
+
+flutter_ios_xcframeworks(
+    name = "module_ios",
+    application = ":my_app",  # a flutter_application
+)
+```
+
+```sh
+bazel run //:module_ios -c dbg                                     # build/ios/framework/Debug/
+bazel run //:module_ios -c opt --@rules_flutter//flutter:profile   # .../Profile/
+bazel run //:module_ios -c opt                                     # .../Release/
+```
+
+Each build makes one mode, the configuration's, and `bazel run` writes it to `build/ios/framework/<Mode>/` in the package (`-- --output=<dir>` elsewhere), replacing what an earlier run wrote for that mode and saying which other modes are from earlier runs. Build every mode from the same sources: Xcode picks the directory by its configuration, and a Debug Flutter.xcframework with a Release App.xcframework crashes at launch. `flutter_macos_xcframeworks` is the same for macOS, under `build/macos/framework/`.
+
+What `<Mode>/` holds, as upstream:
+
+| xcframework | What it is |
+|---|---|
+| `App.xcframework` | The Dart program and its assets: AOT in profile and release (with `dSYMs/`), kernel in debug. The iOS simulator slice is a debug build in every mode, as upstream's: the simulator engine runs nothing else. |
+| `Flutter.xcframework`, `FlutterMacOS.xcframework` | Flutter's own engine xcframework of the mode, copied with Flutter's signature. |
+| `<plugin>.xcframework` | One per plugin with Apple code, named after its module, holding only that plugin's code; it links Flutter at `@rpath`. Plugins built from a `Package.swift` are included, which upstream's CocoaPods-only command leaves out. |
+| `<code asset>.xcframework` | One per code asset (a build hook's or `flutter_native_asset`'s dynamic library). |
+| `FlutterPluginRegistrant.xcframework` | iOS: a static framework of upstream's Objective-C `GeneratedPluginRegistrant`. |
+
+Above the modes are `GeneratedPluginRegistrant.h` and `.m` (iOS; use them or the framework) or `GeneratedPluginRegistrant.swift` (macOS), and after a debug iOS build `flutter_lldbinit` and `flutter_lldb_helper.py`, which a debug build on an iOS 26 or later device needs as the scheme's LLDB init file. Integrate them as Flutter's [add-to-app guide for iOS](https://docs.flutter.dev/add-to-app/ios/project-setup) describes for `flutter build ios-framework`: link and embed the dynamic xcframeworks (Embed & Sign), link FlutterPluginRegistrant without embedding it, and point the paths at `$(CONFIGURATION)`.
+
+`plugins = False` leaves the plugins out (upstream's `--no-plugins`), for a host that ships them itself; `static_plugins = True` makes them static frameworks to link and not embed (`--static`).
+
+A plugin whose library depends on something that is not a plugin, such as a product of a remote Swift package, fails the build with a message: upstream makes such a dependency an xcframework of its own, which these rules do not yet. So does a plugin whose `Package.swift` reads the app's settings.
+
+The pieces are Tier 2 rules of their own, each building the configuration's mode: `flutter_ios_app_xcframework`, `flutter_ios_engine_xcframework`, `flutter_ios_plugin_xcframeworks`, `flutter_ios_code_asset_xcframeworks` and `flutter_ios_registrant_xcframework`, and their `flutter_macos_*` counterparts but the registrant. Bazel keeps no link to a directory in a directory artifact, so in `bazel-bin` a macOS framework is its `Versions/A/` alone; `bazel run` makes the links a versioned framework has.
 
 ## Custom engines and frameworks
 

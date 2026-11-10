@@ -151,9 +151,7 @@ def assemble_bundle(ctx, output, steps, mnemonic, progress_message):
         output: The directory to fill.
         steps: Its contents, in order: `("file", name, file)`, `("tree", name,
             directory)` (its contents), `("bundle", name, directory)` (a
-            framework or xcframework, its versioned frameworks linked again),
-            `("link-versions", name)` (link the versioned framework at
-            `name`), `("replacing", name, file, from, to)` (a copy with text
+            framework or xcframework), `("replacing", name, file, from, to)` (a copy with text
             replaced) or `("interface", name, file, module, rename)` (a Swift
             module interface of a mixed framework module, `rename` the name
             of its C-family half in it, or `-`).
@@ -169,9 +167,6 @@ def assemble_bundle(ctx, output, steps, mnemonic, progress_message):
     inputs = [tool] + ctx.files._apple_frameworks_imports
     for step in steps:
         kind = step[0]
-        if kind == "link-versions":
-            args.add("--link-versions", step[1])
-            continue
         if kind in ("replacing", "interface"):
             args.add("--add-" + kind, step[1])
             args.add(step[2])
@@ -257,6 +252,10 @@ def xcframework_info_plist(ctx, output, name, slices, dsyms = [], static = False
 def framework_root(slice, name, static = False):
     """Where a framework's contents go: `Versions/A` of a versioned (macOS) one.
 
+    Bazel keeps no link to a directory in a directory artifact, so a versioned
+    framework is its `Versions/A` alone until it leaves Bazel, when
+    `apple_xcframeworks_export.dart` makes its links (`apple_frameworks.dart`).
+
     Args:
         slice: The `SLICES` entry.
         name: The framework's name.
@@ -283,21 +282,6 @@ def framework_resources(slice, name, static = False):
     """
     root = framework_root(slice, name, static)
     return root + "/Resources" if slice.platform_type == "macos" else root
-
-def link_versions_step(slice, name, static = False):
-    """The step that links a versioned framework, or none for an iOS one.
-
-    Args:
-        slice: The `SLICES` entry.
-        name: The framework's name.
-        static: Whether it is a static framework.
-
-    Returns:
-        A list of zero or one `assemble_bundle` steps.
-    """
-    if slice.platform_type == "macos" and not static:
-        return [("link-versions", "%s/%s.framework" % (slice.id, name))]
-    return []
 
 def dsym_steps(slice, framework, dsym_files):
     """The steps that place a framework's dSYM bundle in its slice's `dSYMs/`.

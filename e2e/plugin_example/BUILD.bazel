@@ -11,18 +11,14 @@ load(
     "IOS_MINIMUM_OS_VERSION",
     "flutter_ios_app",
     "flutter_ios_app_framework_gen",
-    "flutter_ios_app_xcframework",
-    "flutter_ios_code_asset_xcframeworks",
     "flutter_ios_engine",
-    "flutter_ios_engine_xcframework",
     "flutter_ios_info_plist_gen",
     "flutter_ios_native_frameworks_gen",
-    "flutter_ios_plugin_xcframeworks",
     "flutter_ios_privacy_manifests_gen",
     "flutter_ios_registrant_gen",
-    "flutter_ios_registrant_xcframework",
     "flutter_ios_runner_lib_gen",
     "flutter_ios_simulator_build_test",
+    "flutter_ios_xcframeworks",
 )
 load("@rules_flutter//flutter:linux.bzl", "flutter_linux_app")
 load(
@@ -30,17 +26,14 @@ load(
     "MACOS_MINIMUM_OS_VERSION",
     "flutter_macos_app",
     "flutter_macos_app_framework_gen",
-    "flutter_macos_app_xcframework",
-    "flutter_macos_code_asset_xcframeworks",
     "flutter_macos_engine",
-    "flutter_macos_engine_xcframework",
     "flutter_macos_info_plist_gen",
     "flutter_macos_menu_xib_gen",
     "flutter_macos_native_libs_gen",
-    "flutter_macos_plugin_xcframeworks",
     "flutter_macos_privacy_manifests_gen",
     "flutter_macos_registrant_gen",
     "flutter_macos_runner_lib_gen",
+    "flutter_macos_xcframeworks",
 )
 load("@rules_flutter//flutter:web.bzl", "flutter_web_bundle")
 load("@rules_flutter//flutter:windows.bzl", "flutter_windows_app")
@@ -869,7 +862,7 @@ dart_test(
 #
 # The xcframeworks a host app built by Xcode links, as `flutter build
 # ios-framework` and `macos-framework` make them. `:add_to_app_*_test` checks
-# them in debug and in release.
+# them, and their layout, in debug and in release.
 
 # The module: the Flutter screen the host shows, with a plugin of each kind
 # the packaging handles.
@@ -888,6 +881,20 @@ flutter_application(
     ],
 )
 
+# The Tier 1 targets: `bazel run //:module_ios` writes
+# build/ios/framework/<Mode>/, as `flutter build ios-framework` does.
+flutter_ios_xcframeworks(
+    name = "module_ios",
+    application = ":add_to_app_module",
+    tags = ["manual"],
+)
+
+flutter_macos_xcframeworks(
+    name = "module_macos",
+    application = ":add_to_app_module",
+    tags = ["manual"],
+)
+
 _ADD_TO_APP_PLATFORMS = [
     "ios",
     "macos",
@@ -899,71 +906,13 @@ _ADD_TO_APP_MODES = {
     "release": "fastbuild",
 }
 
-flutter_ios_app_xcframework(
-    name = "add_to_app_ios_app",
-    application = ":add_to_app_module",
-    tags = ["manual"],
-)
-
-flutter_ios_engine_xcframework(
-    name = "add_to_app_ios_engine",
-    tags = ["manual"],
-)
-
-flutter_macos_app_xcframework(
-    name = "add_to_app_macos_app",
-    application = ":add_to_app_module",
-    tags = ["manual"],
-)
-
-flutter_macos_engine_xcframework(
-    name = "add_to_app_macos_engine",
-    tags = ["manual"],
-)
-
-flutter_ios_plugin_xcframeworks(
-    name = "add_to_app_ios_plugins",
-    application = ":add_to_app_module",
-    tags = ["manual"],
-)
-
-flutter_ios_code_asset_xcframeworks(
-    name = "add_to_app_ios_code_assets",
-    application = ":add_to_app_module",
-    tags = ["manual"],
-)
-
-flutter_ios_registrant_xcframework(
-    name = "add_to_app_ios_registrant",
-    application = ":add_to_app_module",
-    plugins = ":add_to_app_ios_plugins",
-    tags = ["manual"],
-)
-
-flutter_macos_plugin_xcframeworks(
-    name = "add_to_app_macos_plugins",
-    application = ":add_to_app_module",
-    tags = ["manual"],
-)
-
-flutter_macos_code_asset_xcframeworks(
-    name = "add_to_app_macos_code_assets",
-    application = ":add_to_app_module",
-    tags = ["manual"],
-)
-
 [
     apple_release_build(
         name = "add_to_app_%s_%s" % (platform, mode),
         compilation_mode = compilation_mode,
         sign = False,
         tags = ["manual"],
-        targets = [
-            ":add_to_app_%s_app" % platform,
-            ":add_to_app_%s_engine" % platform,
-            ":add_to_app_%s_plugins" % platform,
-            ":add_to_app_%s_code_assets" % platform,
-        ] + ([":add_to_app_ios_registrant"] if platform == "ios" else []),
+        targets = [":module_" + platform],
     )
     for platform in _ADD_TO_APP_PLATFORMS
     for mode, compilation_mode in _ADD_TO_APP_MODES.items()
@@ -977,7 +926,7 @@ flutter_macos_code_asset_xcframeworks(
             "--mode=" + mode,
             "--plugins=audio_session,mixed_plugin,package_info_plus,shared_preferences_foundation,url_launcher_" + platform,
             "--code-assets=objective_c",
-            "$(rootpaths :add_to_app_%s_%s)" % (platform, mode),
+            "module_" + platform,
         ],
         data = [":add_to_app_%s_%s" % (platform, mode)],
         main = "test/add_to_app_apple_test.dart",
@@ -985,5 +934,5 @@ flutter_macos_code_asset_xcframeworks(
         deps = ["@rules_flutter//tools/e2e_testing"],
     )
     for platform in _ADD_TO_APP_PLATFORMS
-    for mode, compilation_mode in _ADD_TO_APP_MODES.items()
+    for mode in _ADD_TO_APP_MODES
 ]

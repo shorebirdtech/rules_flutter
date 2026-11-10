@@ -65,6 +65,7 @@ load("//flutter/private:app_version.bzl", "version_arg", "version_target_conflic
 load("//flutter/private:apple_app.bzl", "flutter_apple_app")
 load("//flutter/private:apple_engine.bzl", _IOS_ENGINE_XCFRAMEWORK = "IOS_ENGINE_XCFRAMEWORK")
 load("//flutter/private:apple_version_check.bzl", _flutter_apple_version_check = "flutter_apple_version_check")
+load("//flutter/private:apple_xcframeworks_layout.bzl", "flutter_apple_xcframeworks_layout")
 load("//flutter/private:constants.bzl", _IOS_MINIMUM_OS_VERSION = "IOS_MINIMUM_OS_VERSION")
 load("//flutter/private:debug_build.bzl", _debug_build = "debug_build")
 load("//flutter/private:flutter_apple_bundle_version.bzl", _flutter_apple_bundle_version = "flutter_apple_bundle_version")
@@ -865,5 +866,86 @@ def flutter_ios_simulator_build_test(name, targets, **kwargs):
     build_test(
         name = name,
         targets = ["__%s_dbg" % name],
+        **kwargs
+    )
+
+def flutter_ios_xcframeworks(
+        name,
+        application,
+        plugins = True,
+        static_plugins = False,
+        minimum_os_version = IOS_MINIMUM_OS_VERSION,
+        **kwargs):
+    """The xcframeworks a host app built by Xcode embeds Flutter with, as `flutter build ios-framework` makes them.
+
+    `bazel build` makes the build mode of the configuration (`-c dbg` Debug,
+    `-c opt --@rules_flutter//flutter:profile` Profile, otherwise Release) as
+    `<name>/<Mode>/`: App.xcframework, a copy of Flutter's own engine
+    xcframework, an xcframework per plugin and per code asset,
+    FlutterPluginRegistrant.xcframework (link it; or add the
+    `GeneratedPluginRegistrant.h` and `.m` above the modes to the host),
+    as upstream lays them out. `bazel run` writes that to
+    `build/ios/framework/` in the package (`-- --output=<dir>` elsewhere),
+    replacing that mode's directory, so a run per mode fills `Debug/`,
+    `Profile/` and `Release/`. The frameworks are not signed: Xcode signs them
+    when it embeds them.
+
+    Args:
+        name: The target: build it, or run it to export.
+        application: The `flutter_application` the host shows.
+        plugins: Whether to package the application's plugins; False when the
+            host ships them itself (upstream's `--no-plugins`).
+        static_plugins: Static plugin frameworks, linked and not embedded
+            (upstream's `--static`).
+        minimum_os_version: The minimum iOS version of the frameworks.
+        **kwargs: `visibility`, `tags` and the like, for `name`.
+    """
+    internal_tags = kwargs.get("tags", []) + ["manual"]
+    _flutter_ios_app_xcframework(
+        name = "_%s_app" % name,
+        application = application,
+        minimum_os_version = minimum_os_version,
+        tags = internal_tags,
+    )
+    _flutter_ios_engine_xcframework(
+        name = "_%s_engine" % name,
+        tags = internal_tags,
+    )
+    _flutter_ios_code_asset_xcframeworks(
+        name = "_%s_code_assets" % name,
+        application = application,
+        minimum_os_version = minimum_os_version,
+        tags = internal_tags,
+    )
+    xcframeworks = [
+        "_%s_app" % name,
+        "_%s_engine" % name,
+        "_%s_code_assets" % name,
+    ]
+    if plugins:
+        _flutter_ios_plugin_xcframeworks(
+            name = "_%s_plugins" % name,
+            application = application,
+            minimum_os_version = minimum_os_version,
+            static = static_plugins,
+            tags = internal_tags,
+        )
+        _flutter_ios_registrant_xcframework(
+            name = "_%s_registrant" % name,
+            application = application,
+            plugins = "_%s_plugins" % name,
+            minimum_os_version = minimum_os_version,
+            tags = internal_tags,
+        )
+        xcframeworks += ["_%s_plugins" % name, "_%s_registrant" % name]
+    flutter_apple_xcframeworks_layout(
+        name = name,
+        platform = "ios",
+        xcframeworks = xcframeworks,
+        renamed_files = {},
+        debug_files = [
+            Label("//flutter/private/add_to_app:flutter_lldbinit"),
+            Label("//flutter/private/add_to_app:flutter_lldb_helper.py"),
+        ],
         **kwargs
     )

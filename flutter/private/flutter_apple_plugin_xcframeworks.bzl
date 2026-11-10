@@ -31,7 +31,7 @@ load("@bazel_skylib//lib:dicts.bzl", "dicts")
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
 load("//flutter:providers.bzl", "FlutterApplicationInfo")
-load("//flutter/private:apple_add_to_app.bzl", "BUNDLE_ATTRS", "SLICES", "SLICES_TRANSITION", "assemble_bundle", "framework_resources", "framework_root", "link_versions_step", "xcframework_info_plist")
+load("//flutter/private:apple_add_to_app.bzl", "BUNDLE_ATTRS", "SLICES", "SLICES_TRANSITION", "assemble_bundle", "framework_resources", "framework_root", "xcframework_info_plist")
 load("//flutter/private:apple_xcode.bzl", "XCODE_TOOL_ATTRS", "XCODE_TOOL_FRAGMENTS", "XCODE_TOOL_TOOLCHAINS", "run_xcode_tool")
 load("//flutter/private:constants.bzl", "IOS_MINIMUM_OS_VERSION", "MACOS_MINIMUM_OS_VERSION")
 load("//flutter/private:exec_groups.bzl", "PORTABLE_EXEC_GROUPS")
@@ -453,7 +453,7 @@ def _framework_steps(ctx, slice, entry, module, binary):
     for manifest in privacy:
         steps.append(("file", resources + "/PrivacyInfo.xcprivacy", manifest))
     steps.extend(_resource_steps(entry, resources))
-    return steps + link_versions_step(slice, name, static)
+    return steps
 
 def _plugin_xcframeworks_impl(ctx):
     platform = ctx.attr._platform

@@ -58,6 +58,35 @@ dart_binary(
     deps = ["@rules_dart//dart/runfiles"],
 )
 
+# The program behind `bazel run` of `flutter_ios_xcframeworks` and
+# `flutter_macos_xcframeworks`: writes the build's xcframeworks where
+# `flutter build ios-framework` writes them.
+dart_binary(
+    name = "apple_xcframeworks_export",
+    srcs = [
+        "apple_frameworks.dart",
+        "assemble_directory.dart",
+    ],
+    compile_mode = "exe",
+    main = "apple_xcframeworks_export.dart",
+    visibility = ["//flutter:__subpackages__"],
+    deps = ["@rules_dart//dart/runfiles"],
+)
+
+dart_test(
+    name = "apple_xcframeworks_export_test",
+    srcs = [
+        "apple_frameworks.dart",
+        "apple_xcframeworks_export.dart",
+        "assemble_directory.dart",
+    ],
+    main = "test/apple_xcframeworks_export_test.dart",
+    deps = [
+        "@dev_tool_deps//:test",
+        "@rules_dart//dart/runfiles",
+    ],
+)
+
 # The program behind `bazel run` of `flutter_android_app`'s App Bundle:
 # installs it on a device with bundletool.
 dart_binary(

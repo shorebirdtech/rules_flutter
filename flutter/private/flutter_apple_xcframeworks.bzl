@@ -11,7 +11,7 @@ of its configuration (see `apple_add_to_app.bzl` for the slices).
 load("@bazel_skylib//lib:dicts.bzl", "dicts")
 load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
 load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterSdkRecordInfo")
-load("//flutter/private:apple_add_to_app.bzl", "BUNDLE_ATTRS", "SLICES", "SLICES_TRANSITION", "assemble_bundle", "dsym_steps", "framework_root", "link_versions_step", "relative_to", "xcframework_info_plist")
+load("//flutter/private:apple_add_to_app.bzl", "BUNDLE_ATTRS", "SLICES", "SLICES_TRANSITION", "assemble_bundle", "dsym_steps", "framework_root", "relative_to", "xcframework_info_plist")
 load("//flutter/private:apple_xcode.bzl", "XCODE_TOOL_ATTRS", "XCODE_TOOL_FRAGMENTS", "XCODE_TOOL_TOOLCHAINS", "declare_dsym", "run_xcode_tool", "split_and_strip_aot_binary")
 load("//flutter/private:assemble_directory.bzl", "ASSEMBLE_DIRECTORY_ATTRS")
 load("//flutter/private:constants.bzl", "IOS_MINIMUM_OS_VERSION", "MACOS_MINIMUM_OS_VERSION")
@@ -112,7 +112,7 @@ def _macos_app_slice(ctx, slice, app_info, sdk_record):
             ("file", assets + "/isolate_snapshot_data", tools.isolate_snapshot),
         ])
     return struct(
-        steps = steps + link_versions_step(slice, "App") + dsym_steps(slice, "App.framework", dsym_files),
+        steps = steps + dsym_steps(slice, "App.framework", dsym_files),
         has_dsym = bool(dsym_files),
     )
 
@@ -197,25 +197,17 @@ def _engine_xcframework_impl(ctx):
     xcframework_name = engine.name + ".xcframework"
     framework_name = engine.name + ".framework"
     steps = []
-    frameworks = {}
     for f in ctx.files._engine:
         path = relative_to(f, xcframework_name)
         parts = path.split("/")
 
-        # A versioned framework, read through its links, has copies at their
-        # places: only its version directory is taken, and the links made
-        # again.
+        # A versioned framework is its version directory alone in Bazel's
+        # outputs: the files read through its links are left out.
         if framework_name in parts:
             inner = parts[parts.index(framework_name) + 1:]
-            if inner and inner[0] != "Versions" and ctx.attr._platform == "macos":
+            if inner and (inner[0] != "Versions" or (len(inner) > 1 and inner[1] == "Current")) and ctx.attr._platform == "macos":
                 continue
-            if len(inner) > 1 and inner[0] == "Versions":
-                if inner[1] == "Current":
-                    continue
-                frameworks["/".join(parts[:parts.index(framework_name) + 1])] = True
         steps.append(("file", path, f))
-    for framework in sorted(frameworks):
-        steps.append(("link-versions", framework))
     xcframework = ctx.actions.declare_directory(ctx.label.name + "/" + xcframework_name)
     assemble_bundle(
         ctx,

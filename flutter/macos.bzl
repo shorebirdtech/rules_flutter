@@ -65,6 +65,7 @@ load("//flutter/private:app_version.bzl", "version_arg", "version_target_conflic
 load("//flutter/private:apple_app.bzl", "flutter_apple_app")
 load("//flutter/private:apple_engine.bzl", _MACOS_ENGINE_FRAMEWORK = "MACOS_ENGINE_FRAMEWORK")
 load("//flutter/private:apple_version_check.bzl", _flutter_apple_version_check = "flutter_apple_version_check")
+load("//flutter/private:apple_xcframeworks_layout.bzl", "flutter_apple_xcframeworks_layout")
 load("//flutter/private:constants.bzl", _MACOS_MINIMUM_OS_VERSION = "MACOS_MINIMUM_OS_VERSION")
 load("//flutter/private:flutter_apple_bundle_version.bzl", _flutter_apple_bundle_version = "flutter_apple_bundle_version")
 load("//flutter/private:flutter_apple_plugin_library.bzl", _flutter_apple_plugin_library_macro = "flutter_apple_plugin_library")
@@ -745,4 +746,82 @@ def flutter_macos_app(
         }),
         testonly = testonly,
         visibility = visibility,
+    )
+
+def flutter_macos_xcframeworks(
+        name,
+        application,
+        plugins = True,
+        static_plugins = False,
+        minimum_os_version = MACOS_MINIMUM_OS_VERSION,
+        **kwargs):
+    """The xcframeworks a host app built by Xcode embeds Flutter with, as `flutter build macos-framework` makes them.
+
+    `bazel build` makes the build mode of the configuration (`-c dbg` Debug,
+    `-c opt --@rules_flutter//flutter:profile` Profile, otherwise Release) as
+    `<name>/<Mode>/`: App.xcframework, a copy of Flutter's own engine
+    xcframework, an xcframework per plugin and per code asset,
+    and `GeneratedPluginRegistrant.swift` above the modes, to copy into
+    the host,
+    as upstream lays them out. `bazel run` writes that to
+    `build/macos/framework/` in the package (`-- --output=<dir>` elsewhere),
+    replacing that mode's directory, so a run per mode fills `Debug/`,
+    `Profile/` and `Release/`. The frameworks are not signed: Xcode signs them
+    when it embeds them.
+
+    Args:
+        name: The target: build it, or run it to export.
+        application: The `flutter_application` the host shows.
+        plugins: Whether to package the application's plugins; False when the
+            host ships them itself (upstream's `--no-plugins`).
+        static_plugins: Static plugin frameworks, linked and not embedded
+            (upstream's `--static`).
+        minimum_os_version: The minimum macOS version of the frameworks.
+        **kwargs: `visibility`, `tags` and the like, for `name`.
+    """
+    internal_tags = kwargs.get("tags", []) + ["manual"]
+    _flutter_macos_app_xcframework(
+        name = "_%s_app" % name,
+        application = application,
+        minimum_os_version = minimum_os_version,
+        tags = internal_tags,
+    )
+    _flutter_macos_engine_xcframework(
+        name = "_%s_engine" % name,
+        tags = internal_tags,
+    )
+    _flutter_macos_code_asset_xcframeworks(
+        name = "_%s_code_assets" % name,
+        application = application,
+        minimum_os_version = minimum_os_version,
+        tags = internal_tags,
+    )
+    xcframeworks = [
+        "_%s_app" % name,
+        "_%s_engine" % name,
+        "_%s_code_assets" % name,
+    ]
+    renamed = {}
+    if plugins:
+        _flutter_macos_plugin_xcframeworks(
+            name = "_%s_plugins" % name,
+            application = application,
+            minimum_os_version = minimum_os_version,
+            static = static_plugins,
+            tags = internal_tags,
+        )
+        _flutter_macos_registrant_rule(
+            name = "_%s_registrant" % name,
+            application = application,
+            tags = internal_tags,
+        )
+        xcframeworks.append("_%s_plugins" % name)
+        renamed[":_%s_registrant" % name] = "GeneratedPluginRegistrant.swift"
+    flutter_apple_xcframeworks_layout(
+        name = name,
+        platform = "macos",
+        xcframeworks = xcframeworks,
+        renamed_files = renamed,
+        debug_files = [],
+        **kwargs
     )
