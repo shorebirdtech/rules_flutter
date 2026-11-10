@@ -1,7 +1,7 @@
 # CI workflow for rules_flutter
 #
 # Runs repo-root tests (Starlark unit tests, the pre-commit hooks) and the e2e tests
-# on every push/PR. Each e2e workspace runs on the operating systems where it
+# on every push/PR, and weekly. Each e2e workspace runs on the operating systems where it
 # exercises something no other job does; the `plan` job reads which, and why,
 # from tools/ci_matrix/e2e_matrix.dart.
 #
@@ -14,9 +14,15 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Weekly, to catch breakage from outside: a new runner image, Bazel, or a
+  # dependency that moved.
+  schedule:
+    - cron: "0 9 * * 1"
+# A new push to a pull request or branch cancels its older runs. On main every
+# run gets its own group and runs to the end, so each commit there is tested.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}::${{ github.event.pull_request.number > 0 && format('pr-{0}', github.event.pull_request.number) || github.ref_name }}${{ github.ref_name == 'main' && format('::{0}', github.run_id) || '' }}
+  cancel-in-progress: ${{ github.ref_name != 'main' }}
 # One repository cache per OS, set up by bazel-contrib/setup-bazel and shared
 # by every Bazel job: downloads are content-addressed, so a workspace never
 # needs its own copy.
@@ -25,7 +31,8 @@ concurrency:
 # MODULE.bazel at `module-root`. Every job passes this same list instead, so
 # they all land on one key per OS whichever workspace they build. A change to
 # any of these files starts a new key, restored from the newest older one; the
-# cache only grows that way, so bump `cache-version` to start it over.
+# cache only grows that way. Every setup-bazel step also passes CACHE_VERSION as
+# its `cache-version`, part of every key: bump it to start the caches over.
 #
 # Only e2e hello_world saves it, on pushes to main. It builds for every
 # platform and so fetches the most; were every job allowed to save, the first
@@ -33,20 +40,27 @@ concurrency:
 # could not replace it. Every other job, and every pull request, only restores,
 # then downloads whatever its own workspace needs beyond that.
 env:
+  CACHE_VERSION: "1"
   BAZEL_REPOSITORY_CACHE_KEY_FILES: |
     - MODULE.bazel
     - MODULE.bazel.lock
     - e2e/*/MODULE.bazel
     - e2e/_overlay_tests/*/MODULE.bazel
     - flutter/private/versions.bzl
+# Every job has a timeout, at a few times its slowest recent run, and more
+# where a cold cache makes it fetch toolchains: 15 minutes for a check of a
+# command or two, 30 for analysing one workspace, 60 for the root workspace's
+# tests or a cold toolchain fetch, 120 for an e2e workspace.
 jobs:
   unit-tests:
     name: Unit tests
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # 0.19.1
         with:
+          cache-version: ${{ env.CACHE_VERSION }}
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
           cache-save: false
       - name: bazel test //...
@@ -63,10 +77,12 @@ jobs:
   pre-commit:
     name: pre-commit
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # 0.19.1
         with:
+          cache-version: ${{ env.CACHE_VERSION }}
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
           cache-save: false
       - run: bazel run --noincompatible_auto_exec_groups @overhead//:bazel_env -- update-symlink
@@ -79,6 +95,7 @@ jobs:
   consumer-query:
     name: Consumer query (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -87,6 +104,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # 0.19.1
         with:
+          cache-version: ${{ env.CACHE_VERSION }}
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
           cache-save: false
       # What a consumer gets is the release archive (`git archive`, trimmed by
@@ -105,6 +123,7 @@ jobs:
   dart-tool-tests:
     name: Dart tool tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1
@@ -143,6 +162,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # 0.19.1
         with:
+          cache-version: ${{ env.CACHE_VERSION }}
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
           cache-save: false
       # setup-bazel pins every workspace to one output base with a `startup`
@@ -189,6 +209,7 @@ jobs:
   plan:
     name: Plan E2E jobs
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
@@ -227,6 +248,7 @@ jobs:
       - uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # 0.19.1
         with:
           output-base: ${{ runner.os == 'Windows' && format('{0}/b', substr(github.workspace, 0, 2)) || '' }}
+          cache-version: ${{ env.CACHE_VERSION }}
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
           cache-save: ${{ github.event_name == 'push' && matrix.workspace == 'hello_world' }}
       - name: Install GTK3 (Linux)
