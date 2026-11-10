@@ -244,10 +244,16 @@ jobs:
       # `_socket.pyd`, under MAX_PATH. `--output_user_root` on the command line
       # cannot do this: setup-bazel's `startup --output_base` line in
       # `~/.bazelrc` beats it. tools/ci_matrix/test/windows_paths_test.dart
-      # checks the arithmetic.
+      # checks the arithmetic. Workflow expressions cannot take a substring, so
+      # a step names the drive first.
+      - name: Name the workspace drive (Windows)
+        id: drive
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: '"drive=$(Split-Path -Qualifier $env:GITHUB_WORKSPACE)" >> $env:GITHUB_OUTPUT'
       - uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # 0.19.1
         with:
-          output-base: ${{ runner.os == 'Windows' && format('{0}/b', substr(github.workspace, 0, 2)) || '' }}
+          output-base: ${{ runner.os == 'Windows' && format('{0}/b', steps.drive.outputs.drive) || '' }}
           cache-version: ${{ env.CACHE_VERSION }}
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
           cache-save: ${{ github.event_name == 'push' && matrix.workspace == 'hello_world' }}
