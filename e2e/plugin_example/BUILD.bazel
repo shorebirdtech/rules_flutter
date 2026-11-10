@@ -37,7 +37,7 @@ load("@rules_flutter//flutter:web.bzl", "flutter_web_bundle")
 load("@rules_flutter//flutter:windows.bzl", "flutter_windows_app")
 load("@rules_flutter//tools/e2e_testing:device_profile.bzl", "device_profile")
 load(":android_apk.bzl", "android_apk")
-load(":desktop_link_libraries_test.bzl", "desktop_link_libraries_test")
+load(":desktop_link_libraries_test.bzl", "linux_link_libraries_test", "windows_link_libraries_test")
 load(":ignored_package_test.bzl", "ignored_package_test")
 
 exports_files(["pubspec.lock"])
@@ -443,9 +443,14 @@ build_test(
     targets = [":plugin_linux"],
 )
 
-desktop_link_libraries_test(
-    name = "desktop_link_libraries_test",
-    target_under_test = ":plugin_app",
+windows_link_libraries_test(
+    name = "windows_link_libraries_test",
+    target_under_test = "@deps//:url_launcher_windows",
+)
+
+linux_link_libraries_test(
+    name = "linux_link_libraries_test",
+    target_under_test = "@deps//:url_launcher_linux",
 )
 
 build_test(

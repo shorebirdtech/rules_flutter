@@ -31,3 +31,7 @@ ANDROID_ABI_FOR_ARCH = {
     "arm64": "arm64-v8a",
     "x64": "x86_64",
 }
+
+# The platforms of a pubspec's `flutter: plugin: platforms:`, each a
+# `flutter_plugin_platform`.
+PLUGIN_PLATFORMS = ["android", "ios", "linux", "macos", "web", "windows"]

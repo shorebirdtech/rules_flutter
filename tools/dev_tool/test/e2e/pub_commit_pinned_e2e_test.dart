@@ -149,7 +149,7 @@ void main() {
       expect(plainBuild, contains('pub_package_member'));
       expect(plainBuild, isNot(contains('flutter_pub_member')));
       expect(pluginBuild, contains('flutter_pub_member'));
-      expect(pluginBuild, contains('plugin_platforms_json'));
+      expect(pluginBuild, contains('flutter_plugin_platform('));
       expect(assetsBuild, contains('flutter_pub_member'));
       expect(assetsBuild, contains('assets/data.txt'));
       final build = await ws.bazel([

@@ -435,7 +435,7 @@ flutter_swiftpm_app_library(
 """
 
 # A library whose defines come from the app, and which cannot be built: the
-# stand-in is both what `apple_libs` names and what the build's list holds.
+# stand-in is both what its `flutter_plugin_platform`'s `lib` names and what the build's list holds.
 _APP_LIBRARY_STAND_IN = """
 alias(
     name = "{name}{suffix}",

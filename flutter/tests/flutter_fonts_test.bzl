@@ -1,21 +1,21 @@
-"""Tests that `fonts_json` and `font_files` state the same fonts.
+"""Tests of the fonts a package's `flutter_font_family` targets bundle.
 
-Every font a package declares must reach the bundle with its own file, and
-every file listed must belong to a declared font. A mismatch fails the build,
-as a missing font does for `flutter build`.
+Every font a package declares reaches the bundle with its own file, keyed as
+flutter_tools keys it, and a font that is no file of the package fails the
+build unless its `asset` names another package's.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("//flutter:providers.bzl", "FlutterInfo")
 load("//flutter/private:flutter_library.bzl", "aggregate_pub_contributions", "package_root_of")
 
-def _font_mismatch_fails_test_impl(ctx):
+def _analysis_fails_test_impl(ctx):
     env = analysistest.begin(ctx)
     asserts.expect_failure(env, ctx.attr.message)
     return analysistest.end(env)
 
-font_mismatch_fails_test = analysistest.make(
-    _font_mismatch_fails_test_impl,
+analysis_fails_test = analysistest.make(
+    _analysis_fails_test_impl,
     attrs = {"message": attr.string(mandatory = True)},
     expect_failure = True,
 )

@@ -11,12 +11,5 @@ flutter_plugin(
     srcs = ["lib/declares.dart"],
     native_assets = ["//flutter/tests/shared_code_asset_fixture:a_system"],
     package = ":pubspec-metadata",
-    platforms = [
-        "android",
-        "ios",
-        "linux",
-        "macos",
-        "windows",
-    ],
     visibility = ["//flutter/tests:__subpackages__"],
 )

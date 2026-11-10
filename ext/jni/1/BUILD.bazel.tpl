@@ -24,7 +24,7 @@
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
 load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
-load("@rules_flutter//flutter:defs.bzl", "flutter_plugin")
+load("@rules_flutter//flutter:defs.bzl", "flutter_plugin", "flutter_plugin_platform")
 
 dart_package_metadata(
     name = "pubspec-metadata",
@@ -49,11 +49,35 @@ flutter_plugin(
         "//conditions:default": [],
     }),
     package = ":pubspec-metadata",
-    plugin_platforms_json = "{\"android\":{\"ffiPlugin\":true,\"package\":\"com.github.dart_lang.jni\",\"pluginClass\":\"JniPlugin\"},\"linux\":{\"ffiPlugin\":true},\"windows\":{\"ffiPlugin\":true}}",
+    platforms = [
+        ":plugin_android",
+        ":plugin_linux",
+        ":plugin_windows",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         {DEPS}
     ],
+)
+
+flutter_plugin_platform(
+    name = "plugin_android",
+    ffi_plugin = True,
+    package = "com.github.dart_lang.jni",
+    platform = "android",
+    plugin_class = "JniPlugin",
+)
+
+flutter_plugin_platform(
+    name = "plugin_linux",
+    ffi_plugin = True,
+    platform = "linux",
+)
+
+flutter_plugin_platform(
+    name = "plugin_windows",
+    ffi_plugin = True,
+    platform = "windows",
 )
 
 # Shared Java support classes, consumed by the android/ sub-package's

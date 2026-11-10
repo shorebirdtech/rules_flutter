@@ -169,7 +169,7 @@ flutter_unbuilt_plugin_library = rule(
     },
     doc = "Stands in for a pub plugin's library on a platform where its native code " +
           "is built by something rules_flutter does not run. Written by " +
-          "`flutter_pub_package` in `apple_libs`, `linux_libs` or `windows_libs`; " +
+          "`flutter_pub_package` as the `lib` of that platform's `flutter_plugin_platform`; " +
           "the build of that platform fails with `message`, and only that build.",
 )
 

@@ -22,7 +22,7 @@ three parts:
   reads. Anything else the evaluation finds different from the fetch-time one
   fails the build: only defines may depend on the app.
 * `flutter_swiftpm_app_library`, named as the plugin's library is
-  (`<package>_apple_<platform>`), which the plugin's `apple_libs` names. It is
+  (`<package>_apple_<platform>`), which the plugin's `flutter_plugin_platform` names as its `lib`. It is
   a marker that names the library, and builds nothing.
 * An entry in `@flutter_pub_apple_app_settings//:libraries`, the build's list
   of such libraries (`flutter_apple_app_settings_repo`).
@@ -107,7 +107,7 @@ flutter_swiftpm_app_library = rule(
             doc = "The name of the library in this package. Not a dependency: the library is built for each app, under `swiftpm_app_transition`.",
         ),
     },
-    doc = "Names, in a plugin's `apple_libs`, a library whose defines its `Package.swift` decides from the app. See the module docstring.",
+    doc = "Names, as the `lib` of a plugin's `flutter_plugin_platform`, a library whose defines its `Package.swift` decides from the app. See the module docstring.",
 )
 
 FlutterSwiftPMAppLibrariesInfo = provider(

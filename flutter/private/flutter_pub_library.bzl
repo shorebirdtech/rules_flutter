@@ -61,7 +61,7 @@ def _flutter_pub_member_impl(ctx):
                 ctx,
                 package_name,
                 member.package.package_root,
-                declares_plugin = bool(ctx.attr.plugin_platforms_json or ctx.attr.platforms),
+                declares_plugin = bool(ctx.attr.platforms),
             ),
         ),
     ]
@@ -72,7 +72,7 @@ flutter_pub_member = rule(
         mandatory = True,
         doc = "The package's `dart_package_metadata`, which states its facts.",
     ),
-    doc = "One Flutter pub package's files and facts, which a `flutter_pub_library` builds; not a library by itself. A plugin when `plugin_platforms_json` says so; otherwise it contributes only its assets, fonts and shaders.",
+    doc = "One Flutter pub package's files and facts, which a `flutter_pub_library` builds; not a library by itself. A plugin when it has `platforms`; otherwise it contributes only its assets, fonts and shaders.",
 )
 
 def _flutter_pub_library_impl(ctx):

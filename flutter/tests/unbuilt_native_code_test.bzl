@@ -8,7 +8,7 @@ build nothing but their sources.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
-load("//flutter:providers.bzl", "FlutterApplicationInfo")
+load("//flutter:providers.bzl", "FlutterInfo")
 load("//flutter/private:flutter_desktop_plugin_info.bzl", "plugin_link_flags")
 load(
     "//flutter/private:flutter_pub_package.bzl",
@@ -243,7 +243,12 @@ def _member_content_test_impl(ctx):
         language_version = "3.4",
         code_assets = [],
         unreplaced_hook = "",
-        plugin_platforms_json = "{}",
+        plugin_platforms = {
+            "ios": {"pluginClass": "RustyPlugin"},
+            "linux": {"ffiPlugin": True},
+            "macos": {"ffiPlugin": True},
+            "windows": {"ffiPlugin": True},
+        },
         apple_libs = {"ios": "@flutter_pub_apple__rusty//:rusty_apple_ios"},
         unbuilt_native_code = {
             "linux": "linux message",
@@ -256,10 +261,10 @@ def _member_content_test_impl(ctx):
         'flutter_unbuilt_plugin_library(\n    name = "rusty_apple_macos",\n    message = "macos message",',
         'flutter_unbuilt_plugin_library(\n    name = "rusty_linux",\n    message = "linux message",',
         'flutter_unbuilt_plugin_library(\n    name = "rusty_windows",\n    message = "windows message",',
-        '"@platforms//os:macos": [\n            ":rusty_apple_macos",\n        ],',
-        '"@platforms//os:ios": [\n            "@flutter_pub_apple__rusty//:rusty_apple_ios",\n        ],',
-        'linux_libs = [":rusty_linux"],',
-        'windows_libs = [":rusty_windows"],',
+        'flutter_plugin_platform(\n    name = "plugin_macos",\n    ffi_plugin = True,\n    lib = ":rusty_apple_macos",\n    platform = "macos",\n)',
+        'flutter_plugin_platform(\n    name = "plugin_ios",\n    lib = "@flutter_pub_apple__rusty//:rusty_apple_ios",\n    platform = "ios",\n    plugin_class = "RustyPlugin",\n)',
+        'flutter_plugin_platform(\n    name = "plugin_linux",\n    ffi_plugin = True,\n    lib = ":rusty_linux",\n    platform = "linux",\n)',
+        'flutter_plugin_platform(\n    name = "plugin_windows",\n    ffi_plugin = True,\n    lib = ":rusty_windows",\n    platform = "windows",\n)',
     ]:
         asserts.true(env, part in content, "%r not in:\n%s" % (part, content))
 
@@ -302,23 +307,42 @@ def _other_apple_platform_builds_test_impl(ctx):
 
 _other_apple_platform_builds_test = analysistest.make(_other_apple_platform_builds_test_impl)
 
-def _app_carries_desktop_messages_test_impl(ctx):
-    """The application hands the runner each desktop stand-in, with its message."""
+def _platform(label):
+    return {"//command_line_option:platforms": str(Label(label))}
+
+def _carries_linux_message_test_impl(ctx):
+    """In a Linux build the plugin hands the runner its Linux stand-in, with its message."""
     env = analysistest.begin(ctx)
-    info = analysistest.target_under_test(env)[FlutterApplicationInfo]
+    info = analysistest.target_under_test(env)[FlutterInfo]
     asserts.equals(
         env,
         ["package:rusty 1.0 builds native code for Linux with cargokit"],
         [e.unbuilt_native_code for e in info.linux_plugin_libraries.to_list()],
     )
+    asserts.equals(env, [], info.apple_plugin_libraries.to_list())
+    return analysistest.end(env)
+
+_carries_linux_message_test = analysistest.make(
+    _carries_linux_message_test_impl,
+    config_settings = _platform("//flutter/platforms:linux_x64"),
+)
+
+def _carries_macos_message_test_impl(ctx):
+    """In a macOS build the plugin hands the aggregator its macOS stand-in, and no Linux one."""
+    env = analysistest.begin(ctx)
+    info = analysistest.target_under_test(env)[FlutterInfo]
     asserts.equals(
         env,
         ["package:rusty 1.0 builds native code for macOS with cargokit"],
         [e.unbuilt_native_code for e in info.apple_plugin_libraries.to_list()],
     )
+    asserts.equals(env, [], info.linux_plugin_libraries.to_list())
     return analysistest.end(env)
 
-_app_carries_desktop_messages_test = analysistest.make(_app_carries_desktop_messages_test_impl)
+_carries_macos_message_test = analysistest.make(
+    _carries_macos_message_test_impl,
+    config_settings = _platform("//flutter/platforms:macos_arm64"),
+)
 
 def unbuilt_native_code_test_suite(name):
     """The tests of `unbuilt_native_code.bzl` and of the builds that fail on it.
@@ -339,4 +363,5 @@ def unbuilt_native_code_test_suite(name):
     _link_flags_test(name = name + "_link_flags_test", target_under_test = ":" + name + "_link_flags_subject")
     _apple_fails_test(name = name + "_apple_fails_test", target_under_test = _FIXTURE + "macos_plugins")
     _other_apple_platform_builds_test(name = name + "_other_apple_platform_builds_test", target_under_test = _FIXTURE + "ios_plugins")
-    _app_carries_desktop_messages_test(name = name + "_app_carries_desktop_messages_test", target_under_test = _FIXTURE + "app")
+    _carries_linux_message_test(name = name + "_carries_linux_message_test", target_under_test = _FIXTURE[:-1] + "/rusty")
+    _carries_macos_message_test(name = name + "_carries_macos_message_test", target_under_test = _FIXTURE[:-1] + "/rusty")

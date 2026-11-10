@@ -1,4 +1,4 @@
-load("@rules_flutter//flutter:defs.bzl", "flutter_library")
+load("@rules_flutter//flutter:defs.bzl", "flutter_font_family", "flutter_library")
 
 flutter_library(
     name = "widgets",
@@ -7,10 +7,15 @@ flutter_library(
         "pa.txt",
         "w.txt",
     ],
-    font_files = {"f.ttf": "lib/widgets/f.ttf"},
-    fonts_json = '[{"family":"OwnFont","fonts":[{"asset":"lib/widgets/f.ttf"}]}]',
+    fonts = [":own_font"],
     package = "//apps/own:pubspec-metadata",
     shaders = ["s.frag"],
     visibility = ["//apps/own:__pkg__"],
     deps = ["@deps//:flutter"],
+)
+
+flutter_font_family(
+    name = "own_font",
+    family = "OwnFont",
+    fonts = ["f.ttf"],
 )

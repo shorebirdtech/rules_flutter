@@ -256,7 +256,7 @@ def _member_exports_android_lib_test_impl(ctx):
         language_version = "3.4",
         code_assets = [],
         unreplaced_hook = "",
-        plugin_platforms_json = "{}",
+        plugin_platforms = {},
         has_android_lib = True,
     )
     asserts.true(
@@ -270,13 +270,57 @@ def _member_exports_android_lib_test_impl(ctx):
         language_version = "3.4",
         code_assets = [],
         unreplaced_hook = "",
-        plugin_platforms_json = "{}",
+        plugin_platforms = {},
     )
     asserts.false(env, "exports" in without, without)
 
     return unittest.end(env)
 
 member_exports_android_lib_test = unittest.make(_member_exports_android_lib_test_impl)
+
+def _member_declares_fonts_and_platforms_test_impl(ctx):
+    """A member's fonts and plugin platforms are targets it lists, one for each.
+
+    A font with no weight, style or `asset` is its file in the family; the
+    rest are `flutter_font`s. Each `flutter.plugin.platforms` entry is a
+    `flutter_plugin_platform` with its keys in snake case and its library,
+    and keys flutter_tools does not read on that platform are left out.
+    """
+    env = unittest.begin(ctx)
+
+    content = make_flutter_member_build_content(
+        name = "p",
+        language_version = "3.4",
+        code_assets = [],
+        unreplaced_hook = "",
+        plugin_platforms = {
+            "android": {"package": "com.example.p", "pluginClass": "PPlugin"},
+            "ios": {"dartPluginClass": "PIos", "dartFileName": "p_ios.dart", "sharedDarwinSource": True},
+            "ohos": {"pluginClass": "Unknown"},
+            "web": {"fileName": "p_web.dart", "package": "ignored", "pluginClass": "PWeb"},
+        },
+        apple_libs = {"ios": "@flutter_pub_apple__p//:p_apple_ios"},
+        fonts = [
+            struct(family = "Plain", fonts = [struct(src = ":fonts/a.ttf", asset = None, weight = None, style = None)]),
+            struct(family = "Borrowed", fonts = [struct(src = ":_fonts_of_other_packages/o/b.ttf", asset = "packages/o/b.ttf", weight = 700, style = "italic")]),
+        ],
+    )
+    for part in [
+        '    platforms = [\n        ":plugin_android",\n        ":plugin_ios",\n        ":plugin_web",\n    ],',
+        'flutter_plugin_platform(\n    name = "plugin_android",\n    package = "com.example.p",\n    platform = "android",\n    plugin_class = "PPlugin",\n)',
+        'flutter_plugin_platform(\n    name = "plugin_ios",\n    dart_file_name = "p_ios.dart",\n    dart_plugin_class = "PIos",\n    lib = "@flutter_pub_apple__p//:p_apple_ios",\n    platform = "ios",\n)',
+        'flutter_plugin_platform(\n    name = "plugin_web",\n    file_name = "p_web.dart",\n    platform = "web",\n    plugin_class = "PWeb",\n)',
+        '    fonts = [\n        ":font_family_0",\n        ":font_family_1",\n    ],',
+        'flutter_font_family(\n    name = "font_family_0",\n    family = "Plain",\n    fonts = [\n        ":fonts/a.ttf",\n    ],\n)',
+        'flutter_font(\n    name = "font_family_1_0",\n    asset = "packages/o/b.ttf",\n    src = ":_fonts_of_other_packages/o/b.ttf",\n    style = "italic",\n    weight = 700,\n)',
+        'flutter_font_family(\n    name = "font_family_1",\n    family = "Borrowed",\n    fonts = [\n        ":font_family_1_0",\n    ],\n)',
+    ]:
+        asserts.true(env, part in content, "%r not in:\n%s" % (part, content))
+    asserts.false(env, "Unknown" in content, content)
+    asserts.false(env, "sharedDarwinSource" in content or "shared_darwin" in content, content)
+    return unittest.end(env)
+
+member_declares_fonts_and_platforms_test = unittest.make(_member_declares_fonts_and_platforms_test_impl)
 
 # The non-Dart remainder of `lib/` — the same partition rules_dart's
 # `make_dart_library_build_content` emits. `srcs + resources = lib/**`
@@ -310,7 +354,7 @@ def _spokes_state_their_resolved_version_test_impl(ctx):
         language_version = "3.4",
         code_assets = [],
         unreplaced_hook = "",
-        plugin_platforms_json = '{"web":{"pluginClass":"WebPlugin"}}',
+        plugin_platforms = {"web": {"pluginClass": "WebPlugin"}},
         apple_macos_privacy_manifests = [],
         apple_ios_privacy_manifests = [],
         linux_src_dir = "",
@@ -324,8 +368,6 @@ def _spokes_state_their_resolved_version_test_impl(ctx):
         language_version = "3.4",
         code_assets = [],
         unreplaced_hook = "",
-        fonts_json_str = "",
-        font_files = {},
         assets = [],
         shaders = [],
         version = "1.0.8",
@@ -374,8 +416,6 @@ def _spoke_without_a_version_states_none_test_impl(ctx):
         language_version = "3.4",
         code_assets = [],
         unreplaced_hook = "",
-        fonts_json_str = "",
-        font_files = {},
         assets = [],
         shaders = [],
     )
@@ -400,7 +440,7 @@ def _plugin_spoke_carries_resources_test_impl(ctx):
         language_version = "3.4",
         code_assets = [],
         unreplaced_hook = "",
-        plugin_platforms_json = '{"web":{"pluginClass":"WebPlugin"}}',
+        plugin_platforms = {"web": {"pluginClass": "WebPlugin"}},
         apple_macos_privacy_manifests = [],
         apple_ios_privacy_manifests = [],
         linux_src_dir = "",
@@ -428,8 +468,6 @@ def _library_spoke_carries_resources_test_impl(ctx):
         language_version = "3.4",
         code_assets = [],
         unreplaced_hook = "",
-        fonts_json_str = "",
-        font_files = {},
         assets = [],
         shaders = [":lib/glow.frag"],
     )
@@ -457,8 +495,7 @@ def _file_names_are_written_as_string_literals_test_impl(ctx):
             language_version = "3.4",
             code_assets = [],
             unreplaced_hook = "",
-            fonts_json_str = "",
-            font_files = {":" + name: name},
+            fonts = [struct(family = "F", fonts = [struct(src = ":" + name, asset = None, weight = 700, style = None)])],
             assets = [":" + name],
             shaders = [":" + name],
         ),
@@ -467,7 +504,7 @@ def _file_names_are_written_as_string_literals_test_impl(ctx):
             language_version = "3.4",
             code_assets = [],
             unreplaced_hook = "",
-            plugin_platforms_json = "{}",
+            plugin_platforms = {},
             apple_libs = {"macos": "@flutter_pub_apple__p//:p_apple_macos"},
             apple_macos_privacy_manifests = [name],
             apple_ios_privacy_manifests = [],
@@ -498,8 +535,6 @@ def _spoke_with_shaders_declares_their_includes_test_impl(ctx):
             language_version = "3.4",
             code_assets = [],
             unreplaced_hook = "",
-            fonts_json_str = "",
-            font_files = {},
             assets = [],
             shaders = shaders,
         )
@@ -769,7 +804,7 @@ def _desktop_plugin_libraries_carry_their_link_libraries_test_impl(ctx):
         language_version = "3.4",
         code_assets = [],
         unreplaced_hook = "",
-        plugin_platforms_json = '{"windows":{"pluginClass":"UrlLauncherWindows"},"linux":{"pluginClass":"UrlLauncherLinux"}}',
+        plugin_platforms = {"linux": {"pluginClass": "UrlLauncherLinux"}, "windows": {"pluginClass": "UrlLauncherWindows"}},
         apple_macos_privacy_manifests = [],
         apple_ios_privacy_manifests = [],
         linux_src_dir = "linux",
@@ -806,8 +841,6 @@ def _platform_restricted_assets_are_stated_in_the_spoke_test_impl(ctx):
         language_version = "3.4",
         code_assets = [],
         unreplaced_hook = "",
-        fonts_json_str = "",
-        font_files = {},
         assets = [":assets/a.txt", ":assets/b.txt"],
         shaders = [],
         asset_platforms = {"assets/a.txt": ["android", "web"]},
@@ -832,8 +865,6 @@ def _platform_restricted_shaders_are_stated_in_the_spoke_test_impl(ctx):
         language_version = "3.4",
         code_assets = [],
         unreplaced_hook = "",
-        fonts_json_str = "",
-        font_files = {},
         assets = [],
         shaders = [":shaders/a.frag", ":shaders/b.frag"],
         shader_platforms = {"shaders/a.frag": ["android", "web"]},
@@ -858,8 +889,6 @@ def _flavor_restricted_assets_are_stated_in_the_spoke_test_impl(ctx):
         language_version = "3.4",
         code_assets = [],
         unreplaced_hook = "",
-        fonts_json_str = "",
-        font_files = {},
         assets = [":assets/a.txt", ":assets/b.txt"],
         shaders = [],
         asset_flavors = {"assets/a.txt": ["paid", "premium"]},
@@ -884,8 +913,6 @@ def _flavor_restricted_shaders_are_stated_in_the_spoke_test_impl(ctx):
         language_version = "3.4",
         code_assets = [],
         unreplaced_hook = "",
-        fonts_json_str = "",
-        font_files = {},
         assets = [],
         shaders = [":shaders/a.frag", ":shaders/b.frag"],
         shader_flavors = {"shaders/a.frag": ["paid", "premium"]},
@@ -1016,6 +1043,7 @@ def flutter_pub_package_test_suite(name):
         resources_without_manifest_test,
         no_resources_subpackage_test,
         member_exports_android_lib_test,
+        member_declares_fonts_and_platforms_test,
         plugin_spoke_carries_resources_test,
         library_spoke_carries_resources_test,
         file_names_are_written_as_string_literals_test,

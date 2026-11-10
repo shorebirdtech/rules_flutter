@@ -31,13 +31,6 @@ flutter_plugin(
     name = "plugin_owner",
     srcs = ["lib/owner.dart"],
     package = ":pubspec-metadata",
-    platforms = [
-        "android",
-        "ios",
-        "linux",
-        "macos",
-        "windows",
-    ],
 )
 
 forwarding_package(

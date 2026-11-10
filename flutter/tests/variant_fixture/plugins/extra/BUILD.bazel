@@ -1,4 +1,4 @@
-load("//flutter:defs.bzl", "dart_package_metadata", "flutter_plugin")
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_plugin", "flutter_plugin_platform")
 
 dart_package_metadata(
     name = "pubspec-metadata",
@@ -10,7 +10,14 @@ flutter_plugin(
     name = "extra_plugin",
     srcs = ["lib/extra_plugin.dart"],
     package = ":pubspec-metadata",
-    plugin_platforms_json = '{"macos":{"pluginClass":"ExtraPlugin"}}',
+    platforms = [":macos"],
     tags = ["manual"],
     visibility = ["//flutter/tests:__subpackages__"],
+)
+
+flutter_plugin_platform(
+    name = "macos",
+    platform = "macos",
+    plugin_class = "ExtraPlugin",
+    tags = ["manual"],
 )

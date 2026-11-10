@@ -14,7 +14,7 @@
 # audio_session version routes here.
 
 load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
-load("@rules_flutter//flutter:defs.bzl", "flutter_plugin")
+load("@rules_flutter//flutter:defs.bzl", "flutter_plugin", "flutter_plugin_platform")
 load("@rules_flutter//flutter:macos.bzl", "flutter_apple_plugin_library")
 
 dart_package_metadata(
@@ -35,17 +35,45 @@ flutter_plugin(
         "@platforms//os:android": ["//android:lib"],
         "//conditions:default": [],
     }),
-    apple_libs = select({
-        "@platforms//os:macos": [":{PKG}_apple_macos"],
-        "@platforms//os:ios": [":{PKG}_apple_ios"],
-        "//conditions:default": [],
-    }),
     package = ":pubspec-metadata",
-    plugin_platforms_json = "{\"android\":{\"package\":\"com.ryanheise.audio_session\",\"pluginClass\":\"AudioSessionPlugin\"},\"ios\":{\"pluginClass\":\"AudioSessionPlugin\"},\"macos\":{\"pluginClass\":\"AudioSessionPlugin\"},\"web\":{\"fileName\":\"audio_session_web.dart\",\"pluginClass\":\"AudioSessionWeb\"}}",
+    platforms = [
+        ":plugin_android",
+        ":plugin_ios",
+        ":plugin_macos",
+        ":plugin_web",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         {DEPS}
     ],
+)
+
+flutter_plugin_platform(
+    name = "plugin_android",
+    package = "com.ryanheise.audio_session",
+    platform = "android",
+    plugin_class = "AudioSessionPlugin",
+)
+
+flutter_plugin_platform(
+    name = "plugin_ios",
+    lib = ":{PKG}_apple_ios",
+    platform = "ios",
+    plugin_class = "AudioSessionPlugin",
+)
+
+flutter_plugin_platform(
+    name = "plugin_macos",
+    lib = ":{PKG}_apple_macos",
+    platform = "macos",
+    plugin_class = "AudioSessionPlugin",
+)
+
+flutter_plugin_platform(
+    name = "plugin_web",
+    file_name = "audio_session_web.dart",
+    platform = "web",
+    plugin_class = "AudioSessionWeb",
 )
 
 flutter_apple_plugin_library(

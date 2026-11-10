@@ -17,8 +17,12 @@ rules that compile Dart code, bundle assets, and run tests.
     of the package names it with `package`.
 - `flutter_library`: Collects Flutter Dart sources and assets into a reusable
     dependency. Wire into `flutter_application` via `deps`.
-- `flutter_plugin`: Declares a Flutter plugin with optional Dart registration
-    class and/or native shared library dependencies.
+- `flutter_font_family` and `flutter_font`: A font family a library or plugin
+    bundles, and a font of it with a weight or style: its pubspec's
+    `flutter: fonts:`. List families in `fonts`.
+- `flutter_plugin`: Declares a Flutter plugin, with a `flutter_plugin_platform`
+    for each platform it registers on (its pubspec's `flutter: plugin:
+    platforms:`) and optional native shared library dependencies.
 - `flutter_test`: Runs Flutter widget tests using the flutter_tester runtime. It
     declares a `flutter_suite_program` (compiles the test, returns
     `FlutterTestProgramInfo`) and a `flutter_program_test` (runs any such program).
@@ -62,11 +66,13 @@ load("@rules_dart//dart:defs.bzl", _dart_package_metadata = "dart_package_metada
 load("//flutter/private:flutter_aot_snapshot.bzl", _flutter_aot_snapshot = "flutter_aot_snapshot")
 load("//flutter/private:flutter_application.bzl", _flutter_application = "flutter_application")
 load("//flutter/private:flutter_asset_bundle.bzl", _flutter_asset_bundle = "flutter_asset_bundle")
+load("//flutter/private:flutter_font.bzl", _flutter_font = "flutter_font", _flutter_font_family = "flutter_font_family")
 load("//flutter/private:flutter_gen_l10n.bzl", _flutter_gen_l10n = "flutter_gen_l10n")
 load("//flutter/private:flutter_kernel.bzl", _flutter_kernel = "flutter_kernel")
 load("//flutter/private:flutter_library.bzl", _flutter_library = "flutter_library")
 load("//flutter/private:flutter_native_library.bzl", _flutter_native_library = "flutter_native_library")
 load("//flutter/private:flutter_plugin.bzl", _flutter_plugin = "flutter_plugin")
+load("//flutter/private:flutter_plugin_platform.bzl", _flutter_plugin_platform = "flutter_plugin_platform")
 load("//flutter/private:flutter_profile_build.bzl", _flutter_profile_build = "flutter_profile_build")
 load("//flutter/private:flutter_program_test.bzl", _flutter_program_test = "flutter_program_test")
 load("//flutter/private:flutter_test.bzl", _flutter_suite_program = "flutter_suite_program", _flutter_test = "flutter_test", _flutter_tester_binary = "flutter_tester_binary")
@@ -96,11 +102,14 @@ def flutter_application(name, **kwargs):
     )
 
 flutter_asset_bundle = _flutter_asset_bundle
+flutter_font = _flutter_font
+flutter_font_family = _flutter_font_family
 flutter_gen_l10n = _flutter_gen_l10n
 flutter_kernel = _flutter_kernel
 flutter_library = _flutter_library
 flutter_native_library = _flutter_native_library
 flutter_plugin = _flutter_plugin
+flutter_plugin_platform = _flutter_plugin_platform
 flutter_profile_build = _flutter_profile_build
 
 def flutter_test(name, main, test_config = None, **kwargs):

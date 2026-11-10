@@ -1,4 +1,4 @@
-"E2e test: Flutter plugin with dart_plugin_class (Dart-side registration)"
+"E2e test: Flutter plugins whose platforms register a Dart class (dart_plugin_class) or a native one"
 
 module(name = "rules_flutter_plugin_example")
 

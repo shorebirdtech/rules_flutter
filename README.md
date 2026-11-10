@@ -2062,11 +2062,49 @@ flutter_library(
 | `srcs` | Dart source files. Required. |
 | `deps` | `dart_library` or `flutter_library` targets. |
 | `assets` | Asset files: images, fonts, and so on, from anywhere in the Dart package. Bundled at `packages/<package_name>/<path>` in a program of another package and at `<path>` in a program of this package (its own `flutter_test`, or the application this is part of), as `flutter build` keys them. The path is the file's path from the package root, the directory above `lib/`, so a file listed here is one of the package's: to bundle a file from elsewhere (another package, or a generated file) at a path of this package, put it at that path with a rule of this package, such as `copy_file`, and list that. |
-| `fonts_json` | The package's font families, as the JSON form of `flutter: fonts:` in `pubspec.yaml`: `'[{"family": "Inter", "fonts": [{"asset": "fonts/Inter-Regular.ttf"}, {"asset": "fonts/Inter-Bold.ttf", "weight": 700}]}]'`. Each `asset` is a path from the package root and must be a value in `font_files`. A program of another package sees the family as `packages/<package_name>/<family>`. |
-| `font_files` | The font files of `fonts_json`, as `{file: path}`. |
+| `fonts` | The package's font families, `flutter_font_family` targets, as `flutter: fonts:` in `pubspec.yaml` declares them (see [Fonts](#fonts)). A program of another package sees each family as `packages/<package_name>/<family>`, and each font at `packages/<package_name>/<path>`; a program of this package sees both bare, as `flutter build` keys them. |
 | `shaders` | The package's fragment shaders, mirroring `flutter: shaders:` in `pubspec.yaml`, keyed by their path from the package root as `assets` are. Bundled at `packages/<package_name>/<path>` in a program of another package and at `<path>` in a program of this package (its own `flutter_test`, or the application this is part of), as `flutter build` keys them, where `FragmentProgram.fromAsset` looks for them. |
 | `shader_includes` | Files the `shaders` may `#include`, such as `glob(["shaders/**/*.glsl"])`. A shader compiles with only its declared inputs, so an include not listed here is not found. |
 | `package` | The package's `dart_package_metadata`, `:pubspec-metadata` in the BUILD file at the package root, which states its name, its language version (the `sdk:` constraint in `pubspec.yaml`), its version, its licence and its hooks. Its directory is the package root, and `srcs` and `resources` must be under that root's `lib/`. Without it, the package is named for its root directory and states nothing else. |
+
+#### Fonts
+
+A font family is a target, as an entry of `flutter: fonts:` is, and each of its fonts a file or a `flutter_font` with the entry's `weight` and `style`:
+
+```starlark
+flutter_font(
+    name = "inter_bold",
+    src = "fonts/Inter-Bold.ttf",
+    weight = 700,  # 100 to 900; style = "italic" or "normal"
+)
+
+flutter_font_family(
+    name = "inter",
+    family = "Inter",
+    fonts = [
+        "fonts/Inter-Regular.ttf",  # no weight, no style
+        ":inter_bold",
+    ],
+)
+
+flutter_library(
+    name = "ui",
+    srcs = glob(["lib/**/*.dart"]),
+    fonts = [":inter"],
+    package = ":pubspec-metadata",
+)
+```
+
+| Rule | Attribute | Description |
+|---|---|---|
+| `flutter_font_family` | `family` | The family name, which `TextStyle.fontFamily` selects. Defaults to the target's name. |
+| | `fonts` | Its fonts, in order: `flutter_font` targets, or font files, each a font with no weight and no style. |
+| `flutter_font` | `src` | The font file. Required. |
+| | `weight` | `100` to `900`, in steps of 100. Unset, the font has none. |
+| | `style` | `normal` or `italic`. Unset, the font has none. |
+| | `asset` | For a font of another package, the `packages/<package>/<path>` a pubspec names it by: every program bundles `src` at that path. |
+
+A font is a file of the package whose `flutter_library` or `flutter_plugin` lists the family, keyed by its path from the package root, as an asset is; a file outside it fails the build unless `asset` names it as another package's.
 
 **Fonts fetched at run time.** `package:google_fonts` downloads fonts over the network when the app first draws them. In a `flutter_test`, whose test binding answers every HTTP request with an error, a widget drawing such a font fails, and an app offline falls back to another font. To ship the fonts instead, list their `.ttf` files (`Lato-Regular.ttf`, as Google Fonts names them) in a `flutter_library`'s `assets`, where `google_fonts` finds them by file name in the asset manifest, and set `GoogleFonts.config.allowRuntimeFetching = false` before `runApp`.
 
@@ -2588,32 +2626,61 @@ The rule forwards the files of `targets`, so a test names them in `data` and fin
 
 Declares a Flutter plugin written in your workspace: its Dart code plus per-platform native implementations. Plugins from pub do not need this; the hub declares them.
 
+Each platform the plugin registers on is a `flutter_plugin_platform`, as each entry of `flutter: plugin: platforms:` is in a pubspec, holding that platform's registration and its native library:
+
 ```starlark
+flutter_plugin_platform(
+    name = "ios",
+    platform = "ios",
+    plugin_class = "AudioSessionPlugin",
+    lib = ":audio_session_apple",
+)
+
+flutter_plugin_platform(
+    name = "web",
+    platform = "web",
+    plugin_class = "AudioSessionWeb",
+    file_name = "audio_session_web.dart",
+)
+
 flutter_plugin(
-    name = "multiply_plugin",
-    srcs = ["lib/multiply_plugin.dart"],
-    dart_plugin_class = "MultiplyPlugin",
-    native_deps = ["//:multiply"],
-    platforms = ["macos", "linux", "windows", "ios"],
+    name = "audio_session",
+    srcs = glob(["lib/**/*.dart"]),
+    platforms = [
+        ":ios",
+        ":web",
+    ],
 )
 ```
 
-| Attribute | Description |
+| Attribute of `flutter_plugin_platform` | Description |
+|---|---|
+| `platform` | `android`, `ios`, `linux`, `macos`, `web` or `windows`. Required. |
+| `plugin_class` | `pluginClass`: the class registered with the platform's plugin registry. On web, the Dart class whose `registerWith(Registrar)` the web registrant calls. |
+| `dart_plugin_class` | `dartPluginClass`: the Dart class whose `registerWith()` runs before `main()`. |
+| `dart_file_name` | `dartFileName`: the library under `lib/` that declares `dart_plugin_class`. Defaults to `<package>.dart`. Not on web. |
+| `file_name` | `fileName`: the library under `lib/` that declares a web `plugin_class`. Defaults to `<package>.dart`. Web only. |
+| `ffi_plugin` | `ffiPlugin`: the platform's native code is a library Dart opens through `dart:ffi`. |
+| `default_package` | `default_package`: the package that implements a federated plugin on this platform. |
+| `package` | `package`: the Java package of an Android `plugin_class`. Android only, and required with a `plugin_class`. |
+| `lib` | The platform's native library: a `flutter_apple_plugin_library` on iOS and macOS, a `flutter_linux_plugin_library` or `flutter_windows_plugin_library` on the desktops. Only a build for `platform` analyses it. Not on Android or web. |
+
+A platform has a `plugin_class`, a `dart_plugin_class`, `ffi_plugin` or a `default_package`, as flutter_tools requires.
+
+| Attribute of `flutter_plugin` | Description |
 |---|---|
 | `srcs` | Dart sources. |
 | `deps` | `dart_library` or `flutter_library` targets. |
-| `platforms` | The platforms the plugin supports. |
-| `dart_plugin_class` | The Dart class registered with the engine at startup. |
-| `plugin_class` | The native plugin class, for plugins with a native registration. |
-| `android_package` | The Java package of the Android `plugin_class`. Required when `platforms` lists `android` with a `plugin_class`. |
-| `exports` | The plugin's Android library, in a `select()` on `@platforms//os:android`. Android apps that depend on the plugin link it. |
+| `platforms` | A `flutter_plugin_platform` for each platform the plugin registers on. |
+| `exports` | The plugin's Android library, in a `select()` on `@platforms//os:android`. Android apps that depend on the plugin link it. It is here rather than on the `android` platform because rules_android's dexing reaches a library through `exports` and no other attribute. |
 | `native_deps` | Shared libraries bundled for `dart:ffi`. |
 | `native_assets` | `flutter_native_asset` targets, usually inside a `select()` on platform. |
 | `assets`, `resources` | Asset and resource files. An asset is keyed as on `flutter_library`. |
 | `shaders`, `shader_includes` | The package's fragment shaders and what they `#include`, as on `flutter_library`. |
+| `fonts` | The package's font families, as on `flutter_library`. |
 | `package` | The package's `dart_package_metadata`, as on `flutter_library`. It states the package's name, language version and version, its `hook/link.dart` (see [Link hooks](#link-hooks)) and its `NOTICES` or `LICENSE` file, as `flutter build` reads it from the package root: programs that depend on the package list that file in their `NOTICES`. |
 
-A plugin's native code is its own target. Swift goes in a `flutter_apple_plugin_library` per platform, passed as `apple_libs`. Kotlin or Java goes in a `flutter_android_plugin_library`, passed as `exports` in a `select()` on `@platforms//os:android` (an empty list otherwise). Every Android app that depends on the plugin then links it, as it links a pub plugin's library: `flutter_android_app` packages it, registers its plugin class and merges its `manifest` (receivers, services, permissions) into the app's. It gets a generated `BuildConfig` in its `java_package`, with `DEBUG` and `BUILD_TYPE` as Gradle's would be in the build's mode. Its `flutter_engine` is a `flutter_android_engine(neverlink = True)`: the plugin compiles against the engine and the app ships its own, of the app's ABI. `e2e/plugin_example/glass_plugin` shows both, with shaders.
+A plugin's native code is its own target. Swift goes in a `flutter_apple_plugin_library`, the `lib` of the `ios` or `macos` platform; one with `platform = "darwin"` compiles for whichever of the two the build is for, so a plugin whose sources are shared (`sharedDarwinSource`) names the one library as the `lib` of both. Kotlin or Java goes in a `flutter_android_plugin_library`, passed as `exports` in a `select()` on `@platforms//os:android` (an empty list otherwise). Every Android app that depends on the plugin then links it, as it links a pub plugin's library: `flutter_android_app` packages it, registers its plugin class and merges its `manifest` (receivers, services, permissions) into the app's. It gets a generated `BuildConfig` in its `java_package`, with `DEBUG` and `BUILD_TYPE` as Gradle's would be in the build's mode. Its `flutter_engine` is a `flutter_android_engine(neverlink = True)`: the plugin compiles against the engine and the app ships its own, of the app's ABI. `e2e/plugin_example/glass_plugin` shows both, with shaders.
 
 `e2e/ffi_example` shows a plugin built on Native Assets, `e2e/ffi_plugin_example` one with a Dart plugin class and `native_deps`, and `e2e/plugin_example` one with a Dart plugin class only.
 
@@ -2821,8 +2888,10 @@ sdk = ctx.toolchains["@rules_flutter//flutter:toolchain_type"].flutter_sdk_info
 | Field | Type | Description |
 |---|---|---|
 | `pub_assets` | `depset[struct]` | The asset files of each package, each with its `package_name`, its `package_root`, its path from that root and the file. A program bundles them as `packages/<package_name>/<path>`, or as `<path>` when the package is the program's own. |
-| `plugins` | `list[struct]` | Plugin metadata, each with `name` and `platforms`. |
+| `plugins` | `list[struct]` | Plugin metadata, each with `name` and `platforms`, a dict of platform to the `FlutterPluginPlatformInfo` of its `flutter_plugin_platform`. |
 | `transitive_native_libs` | `depset[File]` | Shared libraries from plugins' `native_deps`. |
+
+**`FlutterFontFamilyInfo`** is carried by `flutter_font_family`: its `family`, and its `fonts`, a `FlutterFontInfo` each (`file`, `weight`, `style` and `asset`, as on `flutter_font`). **`FlutterPluginPlatformInfo`** is carried by `flutter_plugin_platform`: its attributes, with `lib` the native library of a build for its platform, or `None`.
 
 **`FlutterApplicationInfo`** is carried by `flutter_application` and consumed by the platform rules:
 

@@ -28,11 +28,11 @@ For each such package in a Flutter app's pubspec.lock this rule:
          Pure-Dart pub packages reach consumers exactly as they do under
          `pub.pub()`.
        - A `flutter.plugin` block, or fonts, assets, shaders or
-         `uses-material-design` → emit a `flutter_pub_member`, a plugin whose
-         `plugin_platforms_json` carries the parsed metadata when the block is
-         there, which links the plugin's Apple libraries (`<pkg>_apple_macos`
-         and `<pkg>_apple_ios` of its Apple repository) for each of
-         `flutter.plugin.platforms.<plat>` that has one.
+         `uses-material-design` → emit a `flutter_pub_member`, a plugin when
+         the block is there, with a `flutter_plugin_platform` for each of
+         `flutter.plugin.platforms.<plat>`, holding its registration and its
+         native library: for iOS and macOS, `<pkg>_apple_<plat>` of the
+         plugin's Apple repository.
   6. Records the names the pubspec depends on, and the kind of member this is
      (`flutter_pub_index.bzl`), for the package's library repository.
 
@@ -58,6 +58,7 @@ load("//flutter/private:apple_plugin_repo.bzl", "APPLE_PLUGIN_FILE", "apple_libr
 load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url")
 load("//flutter/private:asset_variants.bzl", "variant_scale")
 load("//flutter/private:cmake_link_libraries.bzl", "parse_cmake_link_libraries")
+load("//flutter/private:constants.bzl", "PLUGIN_PLATFORMS")
 load("//flutter/private:flutter_pub_index.bzl", "MEMBER_DART", "MEMBER_FILE", "MEMBER_FLUTTER", "MEMBER_OVERLAY", "library_label", "owner_prefix", "read_index", "sibling_path", "source_repo")
 load("//flutter/private:flutter_pubspec.bzl", "flutter_assets_block", "flutter_licenses_block", "flutter_manifest_errors", "flutter_plugin_block")
 load("//flutter/private:framework_source.bzl", "check_dependency_constraints", "link_framework_package", "unset_message", "write_unset_stub")
@@ -753,36 +754,24 @@ def _checked_file_name(package, what, path):
         ))
     return path
 
-def _encode_fonts_json(parsed_fonts):
-    """Convert flutter_assets_block().fonts to the JSON shape flutter_library expects."""
-    fonts_for_json = []
-    for entry in parsed_fonts:
-        fonts_list = []
-        for font in entry.fonts:
-            d = {"asset": font.asset}
-            if font.weight != None:
-                d["weight"] = font.weight
-            if font.style != None:
-                d["style"] = font.style
-            fonts_list.append(d)
-        fonts_for_json.append({"family": entry.family, "fonts": fonts_list})
-    return json.encode(fonts_for_json) if fonts_for_json else ""
-
-def _font_label(ctx, path):
-    """The label of the file of the font a package lists at `path`.
+def _font_source(ctx, path):
+    """The file of the font a package lists at `path`, and its `asset` if it is another package's.
 
     As in flutter_tools, `packages/<other>/<rest>` that is no file of this
     package is the file `<rest>` of the package `<other>`, which need not list
     it. A file of another package is linked into this repository rather than
     named across repositories: a package's files are private to it, and any of
-    them can be named this way.
+    them can be named this way. Its `flutter_font` keeps `path` as its `asset`.
+
+    Returns:
+        `struct(src, asset)`: the label of the file, and `path` or None.
     """
     parts = path.split("/", 2)
     if parts[0] != "packages" or len(parts) < 3 or ctx.path(path).exists:
-        return ":" + path
+        return struct(src = ":" + path, asset = None)
     other, rest = parts[1], parts[2]
     if other == ctx.attr.package_name:
-        return ":" + rest
+        return struct(src = ":" + rest, asset = path)
     index = read_index(ctx, ctx.attr.prefix)
     if other not in index.built:
         fail("package {}: the font file {} names the package {}, which the lock does not build.".format(ctx.attr.package_name, repr(path), other))
@@ -791,16 +780,64 @@ def _font_label(ctx, path):
         fail("package {}: the font file {} names {} of the package {}, which has no such file.".format(ctx.attr.package_name, repr(path), repr(rest), other))
     link = "_fonts_of_other_packages/{}/{}".format(other, rest)
     ctx.symlink(file, link)
-    return ":" + link
+    return struct(src = ":" + link, asset = path)
 
-def _build_font_files_dict(ctx, parsed_fonts):
-    """Build the `font_files` label_keyed_string_dict literal, {label: path, ...}."""
-    out = {}
+def _font_families(ctx, parsed_fonts):
+    """The font families a package declares, for `make_flutter_member_build_content`.
+
+    Args:
+        ctx: The repository context.
+        parsed_fonts: `flutter_assets_block().fonts`.
+
+    Returns:
+        A list of `struct(family, fonts)`, each font a `struct(src, asset,
+        weight, style)`: the label of its file, the `asset` of a font of
+        another package or None, and its weight and style or None.
+    """
+    families = []
     for entry in parsed_fonts:
+        fonts = []
         for font in entry.fonts:
-            path = _checked_file_name(ctx.attr.package_name, "font file", font.asset)
-            out[_font_label(ctx, path)] = path
-    return out
+            source = _font_source(ctx, _checked_file_name(ctx.attr.package_name, "font file", font.asset))
+            fonts.append(struct(src = source.src, asset = source.asset, weight = font.weight, style = font.style))
+        families.append(struct(family = entry.family, fonts = fonts))
+    return families
+
+def _format_font_targets(families):
+    """The `flutter_font_family` targets of `families`, and the `flutter_font`s of their fonts with a weight, style or `asset`.
+
+    Returns:
+        `struct(targets, labels)`: the BUILD source of the targets, and the
+        labels of the families, for the member's `fonts`.
+    """
+    targets = []
+    labels = []
+    for i, family in enumerate(families):
+        name = "font_family_{}".format(i)
+        fonts = []
+        for j, font in enumerate(family.fonts):
+            if font.weight == None and font.style == None and font.asset == None:
+                fonts.append(font.src)
+                continue
+            font_name = "{}_{}".format(name, j)
+            attrs = ["    name = {},".format(repr(font_name))]
+            if font.asset != None:
+                attrs.append("    asset = {},".format(repr(font.asset)))
+            attrs.append("    src = {},".format(repr(font.src)))
+            if font.style != None:
+                attrs.append("    style = {},".format(repr(font.style)))
+            if font.weight != None:
+                attrs.append("    weight = {},".format(font.weight))
+            targets.append("\nflutter_font(\n{}\n)".format("\n".join(attrs)))
+            fonts.append(":" + font_name)
+        targets.append("""
+flutter_font_family(
+    name = {name},
+    family = {family},
+    fonts = {fonts},
+)""".format(name = repr(name), family = repr(family.family), fonts = _format_label_list_literal(fonts)))
+        labels.append(":" + name)
+    return struct(targets = targets, labels = labels)
 
 def _with_variants(ctx, package, path):
     """`path` if it is a file, and the files of that name in its `<number>x/` siblings.
@@ -993,14 +1030,6 @@ def flavor_restrictions(package):
 
     return struct(add = add, flavors = restricted)
 
-def _format_label_dict_literal(d, indent = "        "):
-    """Render `{":foo": "foo", ":bar": "bar"}` as a multi-line BUILD source dict."""
-    if not d:
-        return "{}"
-    keys = sorted(d.keys())
-    lines = ["{indent}{k}: {v},".format(indent = indent, k = repr(k), v = repr(d[k])) for k in keys]
-    return "{\n" + "\n".join(lines) + "\n" + indent[:-4] + "}"
-
 def _format_label_list_literal(labels, indent = "        "):
     """Render `[":foo", ":bar"]` as a multi-line BUILD source list."""
     lines = ["{indent}{label},".format(indent = indent, label = repr(label)) for label in labels]
@@ -1017,13 +1046,11 @@ _SHADER_INCLUDES_GLOB = """    shader_includes = glob(
         allow_empty = True,
     ),"""
 
-def _format_pub_asset_attrs(fonts_json_str, font_files, assets, shaders, asset_platforms = {}, shader_platforms = {}, asset_flavors = {}, shader_flavors = {}, additional_licenses = []):
-    """Render the four pub-asset attrs as BUILD source, omitting empty ones."""
+def _format_pub_asset_attrs(font_families, assets, shaders, asset_platforms = {}, shader_platforms = {}, asset_flavors = {}, shader_flavors = {}, additional_licenses = []):
+    """Render the pub-asset attrs as BUILD source, omitting empty ones."""
     parts = []
-    if fonts_json_str:
-        parts.append("    fonts_json = {},".format(repr(fonts_json_str)))
-    if font_files:
-        parts.append("    font_files = {},".format(_format_label_dict_literal(font_files)))
+    if font_families:
+        parts.append("    fonts = {},".format(_format_label_list_literal(font_families)))
     if assets:
         parts.append("    assets = {},".format(_format_label_list_literal(assets)))
     if asset_platforms:
@@ -1051,7 +1078,7 @@ def _format_pub_asset_attrs(fonts_json_str, font_files, assets, shaders, asset_p
 # `lib/` is addressable as `package:<name>/<path>` whatever the extension;
 # a spoke that keeps only `*.dart` is a package with pieces missing.
 # `resources` is orthogonal to the declared-asset attrs (`assets` /
-# `shaders` / `font_files`): those name what is transformed and bundled
+# `shaders` / `fonts`): those name what is transformed and bundled
 # into flutter_assets, while `resources` names membership in the staged
 # package tree. A shader under `lib/` is legitimately both.
 #
@@ -1121,19 +1148,68 @@ pub_package_member(
         metadata_target = METADATA_TARGET_NAME,
     )
 
+# The keys of a `flutter.plugin.platforms` entry, and the attribute of
+# `flutter_plugin_platform` each is. `sharedDarwinSource` is none: it says
+# where the sources are, and the libraries built from them say that.
+_PLUGIN_PLATFORM_KEYS = (
+    ("pluginClass", "plugin_class"),
+    ("dartPluginClass", "dart_plugin_class"),
+    ("dartFileName", "dart_file_name"),
+    ("fileName", "file_name"),
+    ("ffiPlugin", "ffi_plugin"),
+    ("default_package", "default_package"),
+    ("package", "package"),
+)
+
+# Where flutter_tools reads each key: the rest are of every platform.
+_PLUGIN_PLATFORM_KEY_PLATFORMS = {
+    "dartFileName": ("android", "ios", "linux", "macos", "windows"),
+    "ffiPlugin": ("android", "ios", "linux", "macos", "windows"),
+    "fileName": ("web",),
+    "package": ("android",),
+}
+
+def _format_plugin_platform(platform, info, lib):
+    """The `flutter_plugin_platform` of one `flutter.plugin.platforms` entry, as BUILD source.
+
+    Args:
+        platform: The entry's platform.
+        info: Its keys and values, as `flutter_plugin_block` projects them.
+        lib: The label of the platform's native library, or None.
+
+    Returns:
+        The target's BUILD source.
+    """
+    attrs = {"platform": repr(platform)}
+    if lib:
+        attrs["lib"] = repr(lib)
+    for key, attr in _PLUGIN_PLATFORM_KEYS:
+        value = info.get(key)
+        if value in (None, "", False) or platform not in _PLUGIN_PLATFORM_KEY_PLATFORMS.get(key, (platform,)):
+            continue
+        if key == "ffiPlugin":
+            if value == True:
+                attrs[attr] = "True"
+            continue
+        attrs[attr] = repr(str(value))
+    attrs = ["    name = {},".format(repr("plugin_" + platform))] + [
+        "    {} = {},".format(attr, attrs[attr])
+        for attr in sorted(attrs)
+    ]
+    return "\nflutter_plugin_platform(\n{}\n)".format("\n".join(attrs))
+
 def make_flutter_member_build_content(
         name,
         language_version,
         code_assets,
         unreplaced_hook,
-        plugin_platforms_json = "",
+        plugin_platforms = None,
         apple_libs = {},
         apple_macos_privacy_manifests = [],
         apple_ios_privacy_manifests = [],
         linux_src_dir = "",
         windows_src_dir = "",
-        fonts_json_str = "",
-        font_files = {},
+        fonts = [],
         assets = [],
         shaders = [],
         version = "",
@@ -1151,10 +1227,12 @@ def make_flutter_member_build_content(
     """Generate BUILD content for the source repository of a Flutter pub package.
 
     Emits the package's `flutter_pub_member`, a plugin when
-    `plugin_platforms_json` is given and otherwise a package that only
-    bundles fonts, assets and shaders (`cupertino_icons`), plus optional
-    per-platform `flutter_linux_plugin_library` /
-    `flutter_windows_plugin_library` sub-targets. Its Apple libraries are
+    `plugin_platforms` is given and otherwise a package that only
+    bundles fonts, assets and shaders (`cupertino_icons`), with a
+    `flutter_plugin_platform` for each platform it registers on, its
+    `flutter_font_family` targets, and optional per-platform
+    `flutter_linux_plugin_library` / `flutter_windows_plugin_library`
+    sub-targets. Its Apple libraries are
     in the plugin's Apple repository (`apple_plugin_repo.bzl`), which only
     an iOS or macOS build fetches.
 
@@ -1182,16 +1260,16 @@ def make_flutter_member_build_content(
         code_assets: `dart_code_asset` label strings replacing this
             package's build hook output.
         unreplaced_hook: Path of a build hook nothing replaces, or "".
-        plugin_platforms_json: JSON-encoded `flutter.plugin.platforms` dict;
-            empty for a package that is not a plugin.
+        plugin_platforms: The `flutter.plugin.platforms` dict, of platform
+            to its entry's keys and values; None for a package that is not a
+            plugin.
         apple_libs: Dict of `ios` and `macos` to the label of the plugin's
             library for that platform, in its Apple repository.
         apple_macos_privacy_manifests: `PrivacyInfo.xcprivacy` paths (macOS).
         apple_ios_privacy_manifests: `PrivacyInfo.xcprivacy` paths (iOS).
         linux_src_dir: Linux C/C++ source dir, or "".
         windows_src_dir: Windows C/C++ source dir, or "".
-        fonts_json_str: JSON-encoded `flutter.fonts` declarations, or "".
-        font_files: Dict of font file label -> package-relative path.
+        fonts: The package's font families (`_font_families`).
         assets: Labels of the package's asset files.
         asset_platforms: Dict of package-relative asset path -> the platforms
             it ships on, for the assets a `platforms:` entry restricts.
@@ -1222,9 +1300,6 @@ def make_flutter_member_build_content(
     """
     extra_loads = []
     extra_targets = []
-    apple_libs_arg = ""
-    linux_libs_arg = ""
-    windows_libs_arg = ""
 
     if unbuilt_native_code:
         extra_loads.append('load("@rules_flutter//flutter/private:unbuilt_native_code.bzl", "flutter_unbuilt_plugin_library")')
@@ -1289,32 +1364,33 @@ flutter_unbuilt_plugin_library(
     visibility = ["//visibility:public"],
 )""".format(name = unbuilt_names[platform], message = repr(unbuilt_native_code[platform])))
 
-    apple_lib_labels = dict(apple_libs)
+    # Each platform's native library, which its `flutter_plugin_platform`
+    # gives only to a build for that platform: the Apple ones are in the
+    # plugin's Apple repository, which no other build fetches.
+    libs = dict(apple_libs)
     for platform in ("ios", "macos"):
         if platform in unbuilt_native_code:
-            apple_lib_labels[platform] = ":" + unbuilt_names[platform]
-    if apple_lib_labels:
-        macos_branch = "            {},".format(repr(apple_lib_labels["macos"])) if "macos" in apple_lib_labels else ""
-        ios_branch = "            {},".format(repr(apple_lib_labels["ios"])) if "ios" in apple_lib_labels else ""
-        apple_libs_arg = """    apple_libs = select({{
-        "@platforms//os:macos": [
-{macos_branch}
-        ],
-        "@platforms//os:ios": [
-{ios_branch}
-        ],
-        "//conditions:default": [],
-    }}),
-""".format(
-            macos_branch = macos_branch,
-            ios_branch = ios_branch,
-        )
-
+            libs[platform] = ":" + unbuilt_names[platform]
     if linux_src_dir or "linux" in unbuilt_native_code:
-        linux_libs_arg = '    linux_libs = [":{name}_linux"],\n'.format(name = name)
-
+        libs["linux"] = ":{}_linux".format(name)
     if windows_src_dir or "windows" in unbuilt_native_code:
-        windows_libs_arg = '    windows_libs = [":{name}_windows"],\n'.format(name = name)
+        libs["windows"] = ":{}_windows".format(name)
+
+    platform_labels = []
+    if plugin_platforms != None:
+        for platform in PLUGIN_PLATFORMS:
+            if platform not in plugin_platforms:
+                continue
+            platform_labels.append(":plugin_" + platform)
+            extra_targets.append(_format_plugin_platform(platform, plugin_platforms[platform], libs.get(platform)))
+        if platform_labels:
+            extra_loads.append('load("@rules_flutter//flutter/private:flutter_plugin_platform.bzl", "flutter_plugin_platform")')
+    platforms_arg = "    platforms = {},\n".format(_format_label_list_literal(platform_labels)) if platform_labels else ""
+
+    font_targets = _format_font_targets(fonts)
+    if fonts:
+        extra_loads.append('load("@rules_flutter//flutter/private:flutter_font.bzl", "flutter_font", "flutter_font_family")')
+        extra_targets.extend(font_targets.targets)
 
     # Android sources travel through a sibling `android/` sub-package, whose
     # `:lib` the member lists under its `exports` on Android only.
@@ -1351,7 +1427,7 @@ flutter_unbuilt_plugin_library(
             ios_lines = ios_lines,
         )
 
-    pub_attrs = _format_pub_asset_attrs(fonts_json_str, font_files, assets, shaders, asset_platforms, shader_platforms, additional_licenses = additional_licenses, asset_flavors = asset_flavors, shader_flavors = shader_flavors)
+    pub_attrs = _format_pub_asset_attrs(font_targets.labels, assets, shaders, asset_platforms, shader_platforms, additional_licenses = additional_licenses, asset_flavors = asset_flavors, shader_flavors = shader_flavors)
 
     # The `lib/` glob is `allow_empty`: a pub package can be only assets or native
     # code, with no Dart.
@@ -1363,7 +1439,7 @@ flutter_pub_member(
     name = "{name}",
     srcs = glob(["lib/**/*.dart"], allow_empty = True),
 {resources}    package = ":{metadata_target}",
-{plugin_platforms_json_attr}{android_lib_arg}{apple_libs_arg}{linux_libs_arg}{windows_libs_arg}{apple_privacy_files_arg}{pub_attrs}    visibility = ["//visibility:public"],
+{platforms_arg}{android_lib_arg}{apple_privacy_files_arg}{pub_attrs}    visibility = ["//visibility:public"],
 )
 {extra_targets}
 """.format(
@@ -1371,13 +1447,10 @@ flutter_pub_member(
         metadata = _member_metadata(name, language_version, code_assets, unreplaced_hook, version, license_file, link_hook),
         metadata_target = METADATA_TARGET_NAME,
         resources = _RESOURCES_GLOB_BLOCK,
-        plugin_platforms_json_attr = "    plugin_platforms_json = {},\n".format(repr(plugin_platforms_json)) if plugin_platforms_json else "",
+        platforms_arg = platforms_arg,
         extra_loads = "\n".join(extra_loads),
         extra_targets = "\n".join(extra_targets),
         android_lib_arg = android_lib_arg,
-        apple_libs_arg = apple_libs_arg,
-        linux_libs_arg = linux_libs_arg,
-        windows_libs_arg = windows_libs_arg,
         apple_privacy_files_arg = apple_privacy_files_arg,
         pub_attrs = pub_attrs,
     )
@@ -2141,8 +2214,7 @@ def _flutter_pub_package_impl(ctx):
 
     # Pre-compute the pub-asset attr inputs once. Used by either branch
     # below (plugin vs library).
-    fonts_json_str = _encode_fonts_json(asset_block.fonts)
-    font_files = _build_font_files_dict(ctx, asset_block.fonts)
+    font_families = _font_families(ctx, asset_block.fonts)
     flavors = flavor_restrictions(ctx.attr.package_name)
     bundled_assets = _build_assets(ctx, ctx.attr.package_name, asset_block.assets, flavors)
     bundled_shaders = _build_shaders(ctx.attr.package_name, asset_block.shaders, flavors)
@@ -2298,7 +2370,6 @@ def _flutter_pub_package_impl(ctx):
                 android_manifest = _detect_android_manifest(ctx)
                 android_consumer_proguard_specs = _detect_consumer_proguard_specs(ctx)
 
-        plugin_platforms_json = json.encode(plugin_block.platforms)
         build_content = make_flutter_member_build_content(
             name = ctx.attr.package_name,
             language_version = language_version,
@@ -2307,7 +2378,7 @@ def _flutter_pub_package_impl(ctx):
             code_assets = ctx.attr.code_assets,
             unreplaced_hook = unreplaced_hook,
             link_hook = hooks.link_hook,
-            plugin_platforms_json = plugin_platforms_json,
+            plugin_platforms = plugin_block.platforms,
             apple_libs = {
                 platform: apple_library_label(ctx.attr.package_name, platform, ctx.attr.prefix)
                 for platform in apple_layouts
@@ -2316,8 +2387,7 @@ def _flutter_pub_package_impl(ctx):
             apple_ios_privacy_manifests = apple_privacy_manifests.get("ios", []),
             linux_src_dir = linux_src_dir,
             windows_src_dir = windows_src_dir,
-            fonts_json_str = fonts_json_str,
-            font_files = font_files,
+            fonts = font_families,
             assets = bundled_assets.labels,
             asset_platforms = bundled_assets.platforms,
             shaders = bundled_shaders.labels,
@@ -2348,8 +2418,7 @@ def _flutter_pub_package_impl(ctx):
             code_assets = ctx.attr.code_assets,
             unreplaced_hook = unreplaced_hook,
             link_hook = hooks.link_hook,
-            fonts_json_str = fonts_json_str,
-            font_files = font_files,
+            fonts = font_families,
             assets = bundled_assets.labels,
             asset_platforms = bundled_assets.platforms,
             shaders = bundled_shaders.labels,

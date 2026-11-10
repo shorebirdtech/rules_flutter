@@ -762,9 +762,17 @@ bzl_library(
     srcs = ["flutter_library.bzl"],
     visibility = ["//flutter:__subpackages__"],
     deps = [
+        ":flutter_font",
         ":flutter_info",
         "//flutter:providers",
     ],
+)
+
+bzl_library(
+    name = "flutter_font",
+    srcs = ["flutter_font.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+    deps = ["//flutter:providers"],
 )
 
 bzl_library(
@@ -909,10 +917,19 @@ bzl_library(
     visibility = ["//flutter:__subpackages__"],
     deps = [
         ":common",
+        ":flutter_font",
         ":flutter_info",
         ":flutter_library",
+        ":flutter_plugin_platform",
         "//flutter:providers",
     ],
+)
+
+bzl_library(
+    name = "flutter_plugin_platform",
+    srcs = ["flutter_plugin_platform.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+    deps = ["//flutter:providers"],
 )
 
 bzl_library(

@@ -48,13 +48,3 @@ dart_in_resources_fails_test = analysistest.make(
     _dart_in_resources_fails_test_impl,
     expect_failure = True,
 )
-
-def _missing_font_fails_test_impl(ctx):
-    env = analysistest.begin(ctx)
-    asserts.expect_failure(env, "but font_files does not provide it")
-    return analysistest.end(env)
-
-missing_font_fails_test = analysistest.make(
-    _missing_font_fails_test_impl,
-    expect_failure = True,
-)

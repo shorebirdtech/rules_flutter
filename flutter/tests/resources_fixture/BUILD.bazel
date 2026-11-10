@@ -1,6 +1,6 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
-load("//flutter:defs.bzl", "dart_package_metadata", "flutter_library", "flutter_plugin")
-load("//flutter/tests:dart_resources_test.bzl", "dart_in_resources_fails_test", "missing_font_fails_test", "resources_probe")
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_library", "flutter_plugin", "flutter_plugin_platform")
+load("//flutter/tests:dart_resources_test.bzl", "dart_in_resources_fails_test", "resources_probe")
 
 # One package; each target below is a separate subject of a test.
 dart_package_metadata(
@@ -27,11 +27,17 @@ flutter_library(
     visibility = ["//flutter/tests:__pkg__"],
 )
 
+flutter_plugin_platform(
+    name = "web",
+    platform = "web",
+    plugin_class = "FixturePlugin",
+)
+
 flutter_plugin(
     name = "resources_plugin",
     srcs = ["lib/fixture.dart"],
     package = ":pubspec-metadata",
-    plugin_platforms_json = '{"web":{"pluginClass":"FixturePlugin"}}',
+    platforms = [":web"],
     resources = ["lib/data.yaml"],
 )
 
@@ -72,7 +78,7 @@ flutter_plugin(
     name = "dart_in_resources_plugin",
     srcs = ["lib/fixture.dart"],
     package = ":pubspec-metadata",
-    plugin_platforms_json = '{"web":{"pluginClass":"FixturePlugin"}}',
+    platforms = [":web"],
     resources = ["lib/fixture.dart"],
     tags = ["manual"],
 )
@@ -87,19 +93,4 @@ dart_in_resources_fails_test(
     name = "dart_in_resources_plugin_test",
     size = "small",
     target_under_test = ":dart_in_resources_plugin",
-)
-
-# fonts_json names a font that font_files does not provide.
-flutter_library(
-    name = "missing_font_library",
-    srcs = ["lib/fixture.dart"],
-    fonts_json = '[{"family":"Missing","fonts":[{"asset":"assets/fonts/Missing.ttf"}]}]',
-    package = ":pubspec-metadata",
-    tags = ["manual"],
-)
-
-missing_font_fails_test(
-    name = "missing_font_library_test",
-    size = "small",
-    target_under_test = ":missing_font_library",
 )

@@ -9,7 +9,7 @@ End-to-end demonstrator for `rules_flutter`'s pub.dev plugin pipeline. Imports t
 - **`package_info_plus`** — monolithic; one package owns every platform's native code (ObjC on Apple, Kotlin Android, web Dart).
 - **`shared_preferences`** — federated. Its Android implementation declares Maven dependencies (`androidx.datastore`, `androidx.preference`) in `android/build.gradle.kts`; the build takes them from this workspace's `maven.install(name = "rules_flutter_maven")`, and fails naming any that are missing. `lib/main.dart` writes a value and reads it back (`prefs=roundtrip ok`) on every platform, web included (localStorage).
 - **`record_android`** — Android-only federated implementation, depended on directly (no umbrella). Regression case for a plugin that ships `android/src/main/res/` resources (`R.drawable.ic_mic`) and declares no Gradle dependencies at all — it compiles purely against the Flutter embedding's exported androidx classpath, and its library manifest's RECORD_AUDIO permission must merge into the APK, with no flag needed.
-- **`//greeting_plugin`** — hand-written Bazel `flutter_plugin` target with `dart_plugin_class = "GreetingPlugin"`. Regression case for pure-Bazel-deps plugins.
+- **`//greeting_plugin`** — hand-written Bazel `flutter_plugin` target, with a `flutter_plugin_platform` for each platform whose `dart_plugin_class` is `GreetingPlugin`. Regression case for pure-Bazel-deps plugins.
 
 ## Building and verifying
 

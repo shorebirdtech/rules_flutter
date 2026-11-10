@@ -17,8 +17,7 @@ def make_registrant_content(plugins, target_platform = None, agent_import = None
       a plain `registerPlugins()` function calling
       `<PluginClass>.registerWith(webPluginRegistrar);`. Called by the web
       bootstrap wrapper's main (there is no engine pre-main hook on web).
-      The `fileName` override (from `flutter.plugin.platforms.web.fileName`)
-      is honored. `agent_import` and `native_agent_import` are ignored — no
+      Each plugin's `fileName` is the library imported. `agent_import` and `native_agent_import` are ignored — no
       agent surface on web.
     - **Other platforms (or `None`)**: the upstream engine-invocable shape —
       `@pragma('vm:entry-point') class _PluginRegistrant` with a static
@@ -28,13 +27,15 @@ def make_registrant_content(plugins, target_platform = None, agent_import = None
       `-Dflutter.dart_plugin_registrant` and invokes `register()` before
       `main()` on every root-isolate launch — including hot restart, which
       is what keeps plugin registration and the agent surface alive after
-      a restart. `fileName` (or legacy `dartFileName`) is honored.
+      a restart. Each plugin's `dartFileName` is the library imported.
 
     Args:
-        plugins: List of plugin structs (name, platforms dict).
+        plugins: List of plugin structs (name, platforms: dict of platform to
+            `FlutterPluginPlatformInfo`).
         target_platform: Optional platform string (e.g. "web", "linux", "android").
             When set, only registers plugins for that platform. When None,
-            falls back to legacy "first platform with dartPluginClass wins".
+            registers each plugin's Dart class of the first platform, by name,
+            that has one.
         agent_import: Optional relative import for the staged agent-extensions
             library; when set, `register()` calls
             `registerRulesFlutterAgentExtensions()` before the plugins and a
@@ -53,29 +54,17 @@ def make_registrant_content(plugins, target_platform = None, agent_import = None
     dart_plugins = []
     for plugin in plugins:
         if target_platform:
-            info = plugin.platforms.get(target_platform, {})
-            if not info:
-                continue
-            dart_class = info.get("dartPluginClass", "")
-            if dart_class:
-                dart_file_name = info.get("fileName", info.get("dartFileName", plugin.name + ".dart"))
+            infos = [plugin.platforms[target_platform]] if target_platform in plugin.platforms else []
+        else:
+            # The first platform, by name, with a Dart class.
+            infos = [plugin.platforms[p] for p in sorted(plugin.platforms) if plugin.platforms[p].dart_plugin_class][:1]
+        for info in infos:
+            if info.dart_plugin_class and info.dart_plugin_class != "none":
                 dart_plugins.append(struct(
                     package = plugin.name,
-                    dart_plugin_class = dart_class,
-                    dart_file_name = dart_file_name,
+                    dart_plugin_class = info.dart_plugin_class,
+                    dart_file_name = info.dart_file_name or plugin.name + ".dart",
                 ))
-        else:
-            # Legacy: pick first platform with dartPluginClass.
-            for _platform, info in plugin.platforms.items():
-                dart_class = info.get("dartPluginClass", "")
-                if dart_class:
-                    dart_file_name = info.get("fileName", info.get("dartFileName", plugin.name + ".dart"))
-                    dart_plugins.append(struct(
-                        package = plugin.name,
-                        dart_plugin_class = dart_class,
-                        dart_file_name = dart_file_name,
-                    ))
-                    break
 
     if not dart_plugins and not agent_import and not native_agent_import:
         return ""
@@ -123,25 +112,21 @@ def _make_web_registrant_content(plugins):
     web_plugins_with_registrar = []
     web_plugins_no_registrar = []
     for plugin in plugins:
-        info = plugin.platforms.get("web", {})
+        info = plugin.platforms.get("web")
         if not info:
             continue
-        plugin_class = info.get("pluginClass", "")
-        if plugin_class and plugin_class != "none":
-            file_name = info.get("fileName", info.get("dartFileName", plugin.name + ".dart"))
+        if info.plugin_class and info.plugin_class != "none":
             web_plugins_with_registrar.append(struct(
                 package = plugin.name,
-                plugin_class = plugin_class,
-                file_name = file_name,
+                plugin_class = info.plugin_class,
+                file_name = info.file_name or plugin.name + ".dart",
             ))
             continue
-        dart_class = info.get("dartPluginClass", "")
-        if dart_class:
-            file_name = info.get("fileName", info.get("dartFileName", plugin.name + ".dart"))
+        if info.dart_plugin_class and info.dart_plugin_class != "none":
             web_plugins_no_registrar.append(struct(
                 package = plugin.name,
-                plugin_class = dart_class,
-                file_name = file_name,
+                plugin_class = info.dart_plugin_class,
+                file_name = info.file_name or plugin.name + ".dart",
             ))
 
     if not web_plugins_with_registrar and not web_plugins_no_registrar:
@@ -176,15 +161,13 @@ def _collect_native_plugins(plugins, target_platform):
     """
     result = []
     for plugin in plugins:
-        info = plugin.platforms.get(target_platform, {})
-        if info:
-            plugin_class = info.get("pluginClass", "")
-            if plugin_class and plugin_class != "none":
-                result.append(struct(
-                    name = plugin.name,
-                    plugin_class = plugin_class,
-                    package = info.get("package", ""),
-                ))
+        info = plugin.platforms.get(target_platform)
+        if info and info.plugin_class and info.plugin_class != "none":
+            result.append(struct(
+                name = plugin.name,
+                plugin_class = info.plugin_class,
+                package = info.package,
+            ))
     return result
 
 def make_linux_registrant_content(plugins):
@@ -320,8 +303,7 @@ def make_android_registrant_content(plugins, java_package = "io.flutter.plugins"
         if not java_pkg:
             fail(
                 "plugin %s registers %s on Android but names no Java " % (p.name, p.plugin_class) +
-                "package: set `android_package` on its flutter_plugin (or " +
-                "`android.package` in `plugin_platforms_json`).",
+                "package: set `package` on its `android` flutter_plugin_platform.",
             )
         fqcn = "%s.%s" % (java_pkg, p.plugin_class)
         lines.append("    try {")
