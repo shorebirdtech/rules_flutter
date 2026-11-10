@@ -100,7 +100,7 @@ void main() {
         '{"id":{"namedSet":{"id":"1"}},"namedSetOfFiles":{"files":[{"name":"b.json","uri":"file:///x/root/bazel-out/k/bin/b.json","pathPrefix":["bazel-out","k","bin"]}]}}',
         '{"id":{"namedSet":{"id":"0"}},"namedSetOfFiles":{"files":[{"name":"a.json","uri":"file:///x/root/bazel-out/k/bin/a.json","pathPrefix":["bazel-out","k","bin"]}],"fileSets":[{"id":"1"}]}}',
         '{"id":{"namedSet":{"id":"2"}},"namedSetOfFiles":{"files":[{"name":"other","uri":"file:///x/root/other"}]}}',
-        '{"id":{"targetCompleted":{"label":"//:app","aspect":"@@rules_flutter+//flutter:dev_files.bzl%flutter_dev_files"}},"completed":{"outputGroup":[{"name":"flutter_native_hot_patch","fileSets":[{"id":"2"}]}]}}',
+        '{"id":{"targetCompleted":{"label":"//:app","aspect":"@@rules_flutter+//flutter:dev_files.bzl%flutter_dev_files_aspect"}},"completed":{"outputGroup":[{"name":"flutter_native_hot_patch","fileSets":[{"id":"2"}]}]}}',
         '{"id":{"targetCompleted":{"label":"//:app","aspect":"@@rules_flutter+//flutter:native_hot_patch.bzl%flutter_native_hot_patch_aspect"}},"completed":{"outputGroup":[{"name":"flutter_native_hot_patch","fileSets":[{"id":"0"}]}]}}',
       ];
       final outputs = aspectOutputsFromBuildEvents(
@@ -245,7 +245,7 @@ void main() {
       expect(
         args,
         contains(
-          '--aspects=@rules_flutter//flutter:dev_files.bzl%flutter_dev_files',
+          '--aspects=@rules_flutter//flutter:dev_files.bzl%flutter_dev_files_aspect',
         ),
       );
       expect(args, contains('--output_groups=+flutter_dev_files'));

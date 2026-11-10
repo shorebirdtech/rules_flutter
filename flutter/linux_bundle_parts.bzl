@@ -29,12 +29,12 @@ tool the build runs is not in the app.
 load("//flutter:providers.bzl", "FlutterApplicationInfo")
 load("//flutter/private:bundle_parts.bzl", "parts_of_dependencies", "parts_result", "runner_binary")
 
-BUNDLE_PARTS_OUTPUT_GROUP = "flutter_linux_bundle_parts"
-NATIVE_LIBS_OUTPUT_GROUP = "flutter_linux_native_libs"
+LINUX_BUNDLE_PARTS_OUTPUT_GROUP = "flutter_linux_bundle_parts"
+LINUX_NATIVE_LIBS_OUTPUT_GROUP = "flutter_linux_native_libs"
 
 def _flutter_linux_bundle_parts_aspect_impl(_target, ctx):
     if ctx.configuration.is_tool_configuration():
-        return parts_result([], [], [], BUNDLE_PARTS_OUTPUT_GROUP, NATIVE_LIBS_OUTPUT_GROUP)
+        return parts_result([], [], [], LINUX_BUNDLE_PARTS_OUTPUT_GROUP, LINUX_NATIVE_LIBS_OUTPUT_GROUP)
     assets = []
     native_libs = []
 
@@ -56,8 +56,8 @@ def _flutter_linux_bundle_parts_aspect_impl(_target, ctx):
         assets,
         native_libs,
         parts_of_dependencies(ctx.rule.attr),
-        BUNDLE_PARTS_OUTPUT_GROUP,
-        NATIVE_LIBS_OUTPUT_GROUP,
+        LINUX_BUNDLE_PARTS_OUTPUT_GROUP,
+        LINUX_NATIVE_LIBS_OUTPUT_GROUP,
     )
 
 flutter_linux_bundle_parts_aspect = aspect(

@@ -39,12 +39,12 @@ load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("//flutter:providers.bzl", "FlutterApplicationInfo")
 load("//flutter/private:bundle_parts.bzl", "own_libraries", "parts_of_dependencies", "parts_result")
 
-BUNDLE_PARTS_OUTPUT_GROUP = "flutter_android_bundle_parts"
-NATIVE_LIBS_OUTPUT_GROUP = "flutter_android_native_libs"
+ANDROID_BUNDLE_PARTS_OUTPUT_GROUP = "flutter_android_bundle_parts"
+ANDROID_NATIVE_LIBS_OUTPUT_GROUP = "flutter_android_native_libs"
 
 def _flutter_android_bundle_parts_aspect_impl(target, ctx):
     if ctx.configuration.is_tool_configuration():
-        return parts_result([], [], [], BUNDLE_PARTS_OUTPUT_GROUP, NATIVE_LIBS_OUTPUT_GROUP)
+        return parts_result([], [], [], ANDROID_BUNDLE_PARTS_OUTPUT_GROUP, ANDROID_NATIVE_LIBS_OUTPUT_GROUP)
     assets = []
     native_libs = []
 
@@ -67,8 +67,8 @@ def _flutter_android_bundle_parts_aspect_impl(target, ctx):
         assets,
         native_libs,
         parts_of_dependencies(ctx.rule.attr),
-        BUNDLE_PARTS_OUTPUT_GROUP,
-        NATIVE_LIBS_OUTPUT_GROUP,
+        ANDROID_BUNDLE_PARTS_OUTPUT_GROUP,
+        ANDROID_NATIVE_LIBS_OUTPUT_GROUP,
     )
 
 flutter_android_bundle_parts_aspect = aspect(
