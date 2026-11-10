@@ -26,14 +26,15 @@ The strip tool is the C++ toolchain's, resolved for the Android platform of
 `android_abi` — the NDK toolchain an Android build registers. The action runs
 in its own exec group, which resolves that toolchain together with the Flutter
 host tools whose `dart` runs the stripping script. The group is pinned to the
-machine running Bazel. rules_android_ndk's NDK is a local install
-(`ANDROID_NDK_HOME`), and every release (through 0.1.5) registers its toolchains
-without execution constraints, so they match any execution platform: without
-the pin, a registered remote Linux platform would take the strip and run it
-against a macOS NDK it cannot see. Once a released rules_android_ndk declares
-the OS and CPU of a local NDK's toolchains, drop the pin and let them place the
-action, which then still shares one execution platform with the Flutter host
-tools. The unstripped jar stays in its repository for symbolizing a native
+machine running Bazel. rules_android_ndk's NDK, an installed one
+(`ANDROID_NDK_HOME`), has toolchains with no execution constraints in every
+release (through 0.1.5), so they match any execution platform: without the pin,
+a registered remote Linux platform would take the strip and run it against a
+macOS NDK it cannot see. hermetic_android_toolchains' NDK declares the host of
+each of its toolchains, but the pin has to hold for both. Once a released
+rules_android_ndk declares the OS and CPU of an installed NDK's toolchains, drop
+the pin and let them place the action, which then still shares one execution
+platform with the Flutter host tools. The unstripped jar stays in its repository for symbolizing a native
 engine crash.
 """
 

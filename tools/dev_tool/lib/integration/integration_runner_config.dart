@@ -231,6 +231,12 @@ class IntegrationRunnerConfig {
   /// SDK the app was built against.
   String get adbPath => _launcherPath('adb', 'the SDK\'s');
 
+  /// The runfiles path of the `aapt2` an Android test reads the APK's package
+  /// and launchable activity with: the launcher's `aapt2`, the Android
+  /// toolchain's. A [FormatException] names the key when the runner did not
+  /// give one.
+  String get aapt2Path => _launcherPath('aapt2', 'the Android toolchain\'s');
+
   /// The device type of the simulator an iOS test runs on, as `simctl list
   /// devicetypes` names it (`iPhone 16`): the launcher's `deviceType`. A
   /// [FormatException] names the key when the runner did not give one.

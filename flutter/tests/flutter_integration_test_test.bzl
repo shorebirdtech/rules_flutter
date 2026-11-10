@@ -287,14 +287,25 @@ _chrome_runner_test = analysistest.make(_chrome_runner_impl)
 
 # -- Android -----------------------------------------------------------------
 
+def _brings_aapt2(env, runner):
+    """The runner names an `aapt2` of `@androidsdk` by runfiles path, and brings it."""
+    aapt2 = runner.launcher_config.aapt2
+    asserts.true(env, "androidsdk" in aapt2 and "aapt2" in aapt2.split("/")[-1], "the aapt2 of @androidsdk, not %s" % aapt2)
+    asserts.true(
+        env,
+        [f for f in runner.runfiles.to_list() if f.short_path.removeprefix("../") == aapt2],
+        "that aapt2 is brought",
+    )
+
 def _android_runner_impl(ctx):
-    """The Android runner names the `adb` its SDK has for the host the test runs on, by runfiles path, and brings it."""
+    """The Android runner names the `adb` its SDK has for the host the test runs on and an `aapt2`, by runfiles path, and brings them."""
     env = analysistest.begin(ctx)
     runner = analysistest.target_under_test(env)[FlutterIntegrationRunnerInfo]
     asserts.equals(env, "android", runner.family)
     expected = "_main/flutter/tests/integration_fixture/fake_sdk/platform-tools/" + ctx.attr.adb
     asserts.equals(env, expected, runner.launcher_config.adb, "the adb of the %s host, read from the runfiles" % ctx.attr.host)
-    asserts.equals(env, [ctx.attr.adb], [f.basename for f in runner.runfiles.to_list()], "that adb is brought")
+    asserts.true(env, ctx.attr.adb in [f.basename for f in runner.runfiles.to_list()], "that adb is brought")
+    _brings_aapt2(env, runner)
     asserts.equals(env, "1", runner.execution_requirements.get("no-remote"))
     asserts.equals(env, "1", runner.execution_requirements.get("no-sandbox"))
     return analysistest.end(env)
@@ -332,18 +343,15 @@ _ANDROID_RUNNER_TESTS = {
 }
 
 def _android_rule_impl(ctx):
-    """The Android test rule tells the runner which adb, takes the device from the invoking shell, and places the test where its device is."""
+    """The Android test rule tells the runner which adb and aapt2, takes the device from the invoking shell, and places the test where its device is."""
     env = analysistest.begin(ctx)
     target = analysistest.target_under_test(env)
     config = written_json(env, ".integration_config.json")
     if config == None:
         return analysistest.end(env)
     asserts.equals(env, "android", config["family"])
-    asserts.equals(
-        env,
-        {"adb": "_main/flutter/tests/integration_fixture/fake_sdk/platform-tools/adb"},
-        config["launcher"],
-    )
+    asserts.equals(env, ["aapt2", "adb"], sorted(config["launcher"].keys()))
+    asserts.equals(env, "_main/flutter/tests/integration_fixture/fake_sdk/platform-tools/adb", config["launcher"]["adb"])
     asserts.equals(env, {}, config["env"])
     asserts.true(env, len(config["appArtifacts"]) > 0, "the app's files are the runner's to choose from")
 
@@ -379,12 +387,13 @@ def _android_wrong_family_impl(ctx):
 _android_wrong_family_test = analysistest.make(_android_wrong_family_impl, expect_failure = True)
 
 def _emulator_runner_impl(ctx):
-    """The emulator runner names the emulator, its image and what the device is, brings them and the SDK's adb, and asks for the cores the emulator takes."""
+    """The emulator runner names the emulator, its image and what the device is, brings them, the SDK's adb and an aapt2, and asks for the cores the emulator takes."""
     env = analysistest.begin(ctx)
     runner = analysistest.target_under_test(env)[FlutterIntegrationRunnerInfo]
     asserts.equals(env, "android", runner.family)
     fixture = "_main/flutter/tests/integration_fixture/"
     asserts.equals(env, fixture + "fake_sdk/platform-tools/adb", runner.launcher_config.adb)
+    _brings_aapt2(env, runner)
     emulator = runner.launcher_config.emulator
     asserts.equals(env, fixture + "fake_emulator/emulator/emulator", emulator.executable)
     asserts.equals(env, fixture + "fake_image/source.properties", emulator.systemImage)
@@ -393,12 +402,9 @@ def _emulator_runner_impl(ctx):
     asserts.equals(env, "aosp_atd", emulator.tag)
     asserts.equals(env, 2, emulator.cores)
     asserts.equals(env, 2048, emulator.memoryMb)
-    asserts.equals(
-        env,
-        ["adb", "emulator", "qemu-system", "source.properties", "system.img"],
-        sorted([f.basename for f in runner.runfiles.to_list()]),
-        "the adb, the emulator with what it carries, and the image",
-    )
+    brought = [f.basename for f in runner.runfiles.to_list()]
+    for file in ["adb", "emulator", "qemu-system", "source.properties", "system.img"]:
+        asserts.true(env, file in brought, "the adb, the emulator with what it carries, and the image: %s" % file)
     asserts.equals(env, "1", runner.execution_requirements.get("no-remote"))
     asserts.equals(env, "1", runner.execution_requirements.get("no-sandbox"))
     asserts.true(env, "cpu:3" in runner.execution_requirements, "the device's two cores and one for the emulator's own work")

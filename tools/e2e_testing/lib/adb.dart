@@ -306,8 +306,7 @@ String _adbFromRunfiles() {
   if (!File(path).existsSync()) {
     stderr.writeln(
       'adb not found at $path (from \$$adbRunfileEnv=$rlocationPath): the '
-      'Android SDK at ANDROID_HOME needs its platform-tools package '
-      '(`sdkmanager platform-tools`)',
+      'Android SDK `@androidsdk` names has no platform-tools',
     );
     exit(1);
   }

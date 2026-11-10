@@ -18,7 +18,6 @@ import 'package:path/path.dart' as p;
 import 'package:rules_flutter_macos_gui_session/macos_gui_session.dart';
 
 import '../device.dart';
-import '../host_tools.dart';
 import '../web_options.dart';
 import 'android_serial.dart';
 import 'device_lock.dart';
@@ -164,7 +163,7 @@ Future<DeviceChoice> chooseDevice(
         startIsolated: startIsolated,
       );
     case IntegrationFamily.android:
-      final adb = resolve(config.adbPath);
+      final adb = _runnerTool(resolve(config.adbPath), 'adb');
       final serial = await chooseAndroidSerial(
         adb: adb,
         requested: environment['ANDROID_SERIAL'],
@@ -174,7 +173,7 @@ Future<DeviceChoice> chooseDevice(
         AndroidDevice(
             deviceId: serial,
             adbPath: adb,
-            aapt2Path: _aapt2OfSdkOf(adb),
+            aapt2Path: _runnerTool(resolve(config.aapt2Path), 'aapt2'),
           )
           // A debug app serves the VM service the suite is driven through, and
           // cannot without the INTERNET permission, which the launch checks.
@@ -230,7 +229,8 @@ Future<DeviceChoice> _emulatorChoice(
       '`--@rules_flutter//flutter/integration_test:android_device=attached`.',
     );
   }
-  final adb = resolve(config.adbPath);
+  final adb = _runnerTool(resolve(config.adbPath), 'adb');
+  final aapt2 = _runnerTool(resolve(config.aapt2Path), 'aapt2');
   final ps = run ?? Process.run;
   final say = log ?? (_) {};
   final scratch = EmulatorScratch(
@@ -268,7 +268,7 @@ Future<DeviceChoice> _emulatorChoice(
   final device = AndroidDevice(
     deviceId: ports.serial,
     adbPath: adb,
-    aapt2Path: _aapt2OfSdkOf(adb),
+    aapt2Path: aapt2,
     runProcess:
         run ??
         (exe, args) => Process.run(
@@ -346,23 +346,16 @@ Future<DeviceChoice> _emulatorChoice(
   }, vmServiceConnector());
 }
 
-/// The `aapt2` of the Android SDK that [adb] belongs to.
-///
-/// The runner's `adb` is a link to the SDK's own, and the build tools that read
-/// the APK's package and launchable activity are the same SDK's: found from the
-/// `adb`, never from the host's environment, so a test reads the APK with the
-/// tools of the SDK it was built against.
-String _aapt2OfSdkOf(String adb) {
-  final String sdk;
-  try {
-    sdk = p.dirname(p.dirname(File(adb).resolveSymbolicLinksSync()));
-  } on FileSystemException catch (e) {
+/// [path], the runner's [tool], once it is there: a runfile that is missing
+/// names itself rather than failing to start.
+String _runnerTool(String path, String tool) {
+  if (!File(path).existsSync()) {
     throw StateError(
-      'the runner\'s adb $adb is not there (${e.osError?.message ?? e.message}): '
-      'the Android SDK it links to is gone.',
+      'the runner\'s $tool $path is not there: the Android SDK or toolchain '
+      'it comes from is gone.',
     );
   }
-  return aapt2Tool(environment: {'ANDROID_HOME': sdk, 'PATH': ''}).require();
+  return path;
 }
 
 /// Takes the lock [key] for the run, and returns what gives it back.

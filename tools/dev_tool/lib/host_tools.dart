@@ -203,8 +203,8 @@ HostTool chromeTool({Map<String, String>? environment}) {
 
 /// Android SDK roots to search, most authoritative first.
 ///
-/// Both env vars are the SDK's own conventions and this repo's Android builds
-/// already require one of them (see README). The macOS path after them is where
+/// Both env vars are the SDK's own conventions, and an Android build that
+/// takes the installed SDK reads them too (see README). The macOS path after them is where
 /// Android Studio installs by default, and is what makes the common setup work
 /// with nothing exported; no equivalent guess is made elsewhere, because on
 /// those platforms an unset variable is better reported than guessed around.

@@ -61,6 +61,10 @@ test:deep --test_tag_filters=
 # also affects the contents of the lock file.
 common --lockfile_mode=error
 
+# Accepts the licence of the Android SDK version MODULE.bazel downloads for
+# this repository's tests (README, "Android"), as rules_kotlin's examples do.
+common --repo_env=ACCEPTED_ANDROID_SDK_LICENSE_VERSION=35
+
 # rules_jvm_external 7+ and rules_android 0.7.2+ ship internal tool jars
 # compiled at Java 21+. Bazel's `--tool_java_runtime_version` defaults to
 # `remotejdk_11`, which produces UnsupportedClassVersionError at action

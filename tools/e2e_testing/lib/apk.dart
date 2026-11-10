@@ -134,7 +134,7 @@ class Apk {
         '$minAlign a 16KB-page device requires. It would install and then '
         'fail to load at launch ("ELF alignment check failed") on hardware '
         'booted that way, with nothing wrong at build time. See the '
-        'rules_android_ndk pin in MODULE.bazel.',
+        'README, "16 KB pages".',
       );
     } else {
       check.pass(

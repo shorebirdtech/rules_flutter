@@ -77,7 +77,7 @@ If `flutter build` works for you, here is what Bazel adds:
 | All | Bazel 9.3 or newer. The rules download Flutter 3.47.9 themselves; the supported releases are 3.47.x, and any other `flutter_version` fails naming the supported ones. |
 | macOS | Xcode, for `rules_apple` and `rules_swift`. |
 | iOS | A Mac with Apple silicon, and Xcode. rules_flutter builds iOS for arm64 only, so an Intel Mac's x86_64 simulator is not supported. The simulator needs no signing identity. A physical device does; see [Running on an iOS device](#running-on-an-ios-device). `flutter_bazel` screenshots, of a simulator or a device, need Xcode 27 or later, whose `devicectl` lists and captures screens and knows simulators (measured with Xcode 27.2, `devicectl` 651.32; earlier Xcodes were not tried). |
-| Android | The Android SDK and NDK, with `ANDROID_HOME` and `ANDROID_NDK_HOME` set. See [Android](#android). |
+| Android | Nothing installed: hermetic_android_toolchains downloads the Android SDK and NDK. An installed SDK and NDK, at `ANDROID_HOME` and `ANDROID_NDK_HOME`, work instead. See [Android](#android). |
 | Linux | A C++ toolchain. From macOS, an LLVM cross-toolchain. |
 | Windows | MSVC for native builds. From macOS or Linux, a C++ cross-toolchain, debug builds only. |
 | Web | Nothing extra. Compiling Dart to WASM or JavaScript is fully hermetic. |
@@ -200,7 +200,7 @@ common --incompatible_auto_exec_groups
 common --@@rules_python+//python/config_settings:bootstrap_impl=script
 ```
 
-rules_flutter's actions land the same with the flag on or off: `gen_snapshot` for iOS and macOS, Xcode tools and signing run on a Mac; kernel compiles, asset and shader bundling and web compiles run on any host with the Flutter SDK; stripping the Android engine runs on the machine running Bazel, where its NDK is. An Android app needs fixes to rulesets it builds with, because rules_android 0.8.1, protobuf and rules_go have actions the flag rejects or places on the wrong host, and rules_android_ndk 0.1.5 lets any execution platform run the local NDK's clang. [`e2e/android_example`](e2e/android_example/MODULE.bazel) is set up this way: copy its `single_version_override` patches for rules_android, protobuf and rules_go, and its patch for rules_android_ndk, into your own `MODULE.bazel`. Of those, `rules_android_no_initial_heap.patch` is not about remote execution: every Android build on a Windows host needs it (see **Building on Windows** under [Android](#android)).
+rules_flutter's actions land the same with the flag on or off: `gen_snapshot` for iOS and macOS, Xcode tools and signing run on a Mac; kernel compiles, asset and shader bundling and web compiles run on any host with the Flutter SDK; stripping the Android engine runs on the machine running Bazel, where its NDK is. An Android app needs fixes to rulesets it builds with, because rules_android 0.8.1, protobuf and rules_go have actions the flag rejects or places on the wrong host. [`e2e/android_example`](e2e/android_example/MODULE.bazel) is set up this way: copy its `single_version_override` patches for rules_android, protobuf and rules_go into your own `MODULE.bazel`. The downloaded NDK of the [Android](#android) setup declares which host each of its toolchains runs on; an installed one (rules_android_ndk 0.1.5, `ANDROID_NDK_HOME`) has toolchains that match any execution platform, so a remote worker would be sent this machine's clang. Build with the downloaded NDK when actions run remotely. Of those, `rules_android_no_initial_heap.patch` is not about remote execution: every Android build on a Windows host needs it (see **Building on Windows** under [Android](#android)).
 
 ### Your first app
 
@@ -1158,6 +1158,7 @@ Add these to `MODULE.bazel`:
 ```starlark
 bazel_dep(name = "rules_android", version = "0.8.1")
 bazel_dep(name = "rules_android_ndk", version = "0.1.5")
+bazel_dep(name = "hermetic_android_toolchains", version = "0.5.0", dev_dependency = True)
 
 # rules_android_ndk 0.1.5 links arm64 libraries for 4 KB pages: see "16 KB
 # pages" below.
@@ -1170,8 +1171,74 @@ git_override(
 use_repo(flutter, "flutter_toolchains")
 use_repo(flutter_pub, "deps")
 
+android = use_extension("@hermetic_android_toolchains//:extensions.bzl", "android", dev_dependency = True)
+
+# The Android platform the app compiles against, and the build tools.
+android.sdk(
+    build_tools_version = "35.0.0",
+    version = "35",
+)
+
 # The NDK CC toolchain, used for native and FFI deps built for Android and
-# to strip the engine's native libraries, as a Gradle build does.
+# to strip the engine's native libraries, as a Gradle build does. `api_level`
+# is your app's `min_sdk_version` (24 unless you set it).
+android.ndk(
+    api_level = 24,
+    version = "r28c",
+)
+use_repo(android, "androidndk", "androidsdk")
+
+# Every module's `@androidsdk` and `@androidndk` (rules_android's,
+# rules_android_ndk's, rules_flutter's) are these.
+rules_android_sdk = use_extension(
+    "@rules_android//rules/android_sdk_repository:rule.bzl",
+    "android_sdk_repository_extension",
+    dev_dependency = True,
+)
+override_repo(rules_android_sdk, "androidsdk")
+
+rules_android_ndk = use_extension(
+    "@rules_android_ndk//:extension.bzl",
+    "android_ndk_repository_extension",
+    dev_dependency = True,
+)
+override_repo(rules_android_ndk, "androidndk")
+
+register_toolchains(
+    "@androidndk//:all",
+    "@androidsdk//:all",
+    dev_dependency = True,
+)
+```
+
+and, once you have read and accepted the licences of the Android SDK and NDK, these to `.bazelrc`, naming the versions you accepted:
+
+```bazelrc
+common --repo_env=ACCEPTED_ANDROID_SDK_LICENSE_VERSION=35
+common --repo_env=ACCEPTED_ANDROID_NDK_LICENSE_VERSION=r28c
+```
+
+The androidx and Kotlin jars the app links come pinned by rules_flutter's own lock, so an app whose plugins declare no Maven artifacts needs nothing more. See **Maven dependencies** below for one whose plugins, or whose own Android code, do.
+
+**The SDK and NDK.** [hermetic_android_toolchains](https://github.com/keith/hermetic_android_toolchains) downloads the SDK platform, build tools, platform tools and NDK of the versions you name, each checked against its checksum, so nothing needs to be installed and every machine and CI runner builds with the same tools. It does so for macOS, Linux x86_64 and Windows x86_64 hosts, the hosts Google publishes the NDK for. `r28c` (28.2.13676358) is the NDK Flutter's Gradle plugin builds with. Without the licence lines, the build stops during fetch, saying which line to add:
+
+```
+Before using the hermetic Android SDK toolchain you must read and accept the
+license for the current version. Once you have done so, add this in your
+'.bazelrc':
+
+common --repo_env=ACCEPTED_ANDROID_SDK_LICENSE_VERSION=35
+```
+
+On a Mac the downloads are about 1.1 GB, 950 MB of it the NDK, which unpacks to 2.8 GB. Bazel keeps the archives in its repository cache and the unpacked NDK in its repository contents cache, which every workspace on the machine shares; each workspace's output base holds its own 350 MB copy of the SDK.
+
+**Order of the `bazel_dep` lines.** Keep `rules_flutter`'s above `rules_android`'s, as here. rules_android builds some of its tools from Go, with the first Go SDK the module graph declares: your module's own, then each dependency's in the order your `MODULE.bazel` names them. rules_flutter declares one new enough for the Gazelle the graph resolves; rules_android's own, Go 1.22.4, is not, and with rules_android named first, every Android build fails during analysis with `go: go.work requires go >= 1.24.12 (running go 1.22.4; GOTOOLCHAIN=local)`. A `go_sdk.download` in your own `MODULE.bazel` takes precedence over both.
+
+**NDK `api_level`.** Set it to the app's `min_sdk_version`, as Gradle compiles native code at `minSdkVersion`. Your `cc_library` code (an FFI library, a plugin's C code) is built against it, and at a higher level can call functions that older devices lack: such a library installs, and then fails to load there with an unresolved symbol. hermetic_android_toolchains defaults to 31.
+
+**An installed SDK and NDK instead.** rules_android and rules_android_ndk can take the SDK and NDK installed on the machine, found through two environment variables. In `MODULE.bazel`, in place of everything from `hermetic_android_toolchains` down:
+
+```starlark
 android_ndk_repository_extension = use_extension(
     "@rules_android_ndk//:extension.bzl",
     "android_ndk_repository_extension",
@@ -1193,15 +1260,7 @@ android_sdk_repository_extension.configure(api_level = 35)
 use_repo(android_sdk_repository_extension, "androidsdk")
 ```
 
-The androidx and Kotlin jars the app links come pinned by rules_flutter's own lock, so an app whose plugins declare no Maven artifacts needs nothing more. See **Maven dependencies** below for one whose plugins, or whose own Android code, do.
-
-**Order of the `bazel_dep` lines.** Keep `rules_flutter`'s above `rules_android`'s, as here. rules_android builds some of its tools from Go, with the first Go SDK the module graph declares: your module's own, then each dependency's in the order your `MODULE.bazel` names them. rules_flutter declares one new enough for the Gazelle the graph resolves; rules_android's own, Go 1.22.4, is not, and with rules_android named first, every Android build fails during analysis with `go: go.work requires go >= 1.24.12 (running go 1.22.4; GOTOOLCHAIN=local)`. A `go_sdk.download` in your own `MODULE.bazel` takes precedence over both.
-
-**Compile SDK.** Without `configure(api_level = ...)`, rules_android compiles against the newest Android platform installed on the machine, so two machines can build the same app differently: a newer `android.jar` can, for instance, mark a method a plugin's Kotlin calls `@Nullable` and fail its compile. Name a platform you have installed.
-
-**NDK `api_level`.** Set it to the app's `min_sdk_version`, as Gradle compiles native code at `minSdkVersion`. The extension defaults to 31, so without `configure` your `cc_library` code (an FFI library, a plugin's C code) is built against API 31 and can call functions that devices on API 24 to 30 lack. Such a library installs, and then fails to load there with an unresolved symbol. The root module's `configure` is the one that counts; a dependency's is ignored.
-
-**Environment variables.** Two are needed, and both are read by repository rules while Bazel fetches:
+Without `configure(api_level = ...)`, rules_android compiles against the newest Android platform installed on the machine, so two machines can build the same app differently: a newer `android.jar` can, for instance, mark a method a plugin's Kotlin calls `@Nullable` and fail its compile. Name a platform you have installed. rules_android_ndk's `api_level` defaults to 31, and the root module's `configure` is the one that counts; a dependency's is ignored. Both variables are read by repository rules while Bazel fetches:
 
 | Variable | Value | Read by |
 |---|---|---|
@@ -1302,7 +1361,7 @@ common --@rules_android//flags:desugar_java8_libs=false
 
 It is a build-wide flag of rules_android's, so only your project can set it; `flutter_android_app` cannot. Leave it on if your own Android code, or a plugin's, calls one of those APIs: a plugin that does says in its setup to enable `isCoreLibraryDesugaringEnabled`.
 
-**16 KB pages.** Devices with 16 KB memory pages, which Android 15 introduced, refuse a native library whose segments are aligned for 4 KB ones, and the app dies on launch. A Gradle build gets 16 KB alignment from NDK r28 and later. Bazel links an Android app's C/C++ code with the Android C/C++ toolchain, and rules_flutter leaves the alignment to it. rules_android_ndk 0.1.5's toolchain links every arm64 library for 4 KB pages; upstream fixed it in commit `efc0c191`, which no release has yet. Until one does, pin rules_android_ndk to a commit of its main branch with the fix, with the `git_override` the `MODULE.bazel` lines above carry. For arm64-v8a and x86_64 the build checks the native libraries the application and its plugins bring, prebuilt ones inside the plugins' AARs included, and fails naming any that is aligned for 4 KB pages, or whose `GNU_RELRO` segment ends partway through a 16 KB page that holds writable data after it (such a library loads, and crashes when it writes that data), the two checks of Android's [16 KB page size guide](https://developer.android.com/guide/practices/page-sizes). A 16 KB-aligned library loads on a 4 KB device too. An app that does not need 16 KB support, because it runs only on 4 KB devices or sets `android:pageSizeCompat` for Android 16's page size compatibility mode, can build with `--@rules_flutter//flutter:allow_4kb_aligned_native_libraries`, which turns both checks off. Google Play requires 16 KB support of apps that target Android 15 or later.
+**16 KB pages.** Devices with 16 KB memory pages, which Android 15 introduced, refuse a native library whose segments are aligned for 4 KB ones, and the app dies on launch. A Gradle build gets 16 KB alignment from NDK r28 and later. Bazel links an Android app's C/C++ code with the Android C/C++ toolchain, and rules_flutter leaves the alignment to it. rules_android_ndk 0.1.5's toolchain, which the downloaded NDK's toolchains are made from too, links every arm64 library for 4 KB pages; upstream fixed it in commit `efc0c191`, which no release has yet. Until one does, pin rules_android_ndk to a commit of its main branch with the fix, with the `git_override` the `MODULE.bazel` lines above carry. For arm64-v8a and x86_64 the build checks the native libraries the application and its plugins bring, prebuilt ones inside the plugins' AARs included, and fails naming any that is aligned for 4 KB pages, or whose `GNU_RELRO` segment ends partway through a 16 KB page that holds writable data after it (such a library loads, and crashes when it writes that data), the two checks of Android's [16 KB page size guide](https://developer.android.com/guide/practices/page-sizes). A 16 KB-aligned library loads on a 4 KB device too. An app that does not need 16 KB support, because it runs only on 4 KB devices or sets `android:pageSizeCompat` for Android 16's page size compatibility mode, can build with `--@rules_flutter//flutter:allow_4kb_aligned_native_libraries`, which turns both checks off. Google Play requires 16 KB support of apps that target Android 15 or later.
 
 | Attribute | Description |
 |---|---|
@@ -2568,7 +2627,7 @@ bazel test :app_android_test \
 - **The emulator needs the host's hypervisor**: Hypervisor.framework on macOS, KVM on Linux (`/dev/kvm` readable and writable by the user; a cloud VM needs nested virtualisation). Without it the test fails before anything boots, saying so and how to enable it. On Linux the emulator loads the X client libraries it links from the pinned Linux runtime of [Linux integration tests](#linux-integration-tests), not the host's.
 - **Tests on emulators run side by side.** Each takes a pair of the ports `adb` knows emulators by (5554 to 5585, passing over those of emulators already running, so 16 at once) under a lock (`/tmp/rules_flutter-locks/android-emulator-<port>.lock`), and Bazel schedules each with three cores, the device's two and one for the emulator. The emulator answers to an `adb` server of the test's own that looks at no USB or network device, so a phone that is attached is never touched. An emulator that a SIGKILL left behind is shut down by the next test that takes its ports. The emulator's output and the device's whole log are kept with the test's outputs (`emulator.log`, `logcat.txt` in `bazel-testlogs/<test>/test.outputs/`).
 - **On an attached device** (`--@rules_flutter//flutter/integration_test:android_device=attached`), the test runs on the device `ANDROID_SERIAL` names, else the only one attached; with none, or several and none named, it fails, naming `adb devices` and the variable that picks one. It is a failure, not a skip: a skipped test reads as a pass. Two tests on one device take turns on a lock (`/tmp/rules_flutter-locks/android-<serial>.lock`), which the operating system releases if a test dies. The app is built for arm64-v8a. `ANDROID_SERIAL` given to a test that runs on the emulator fails it, naming the flag.
-- **`adb` is the SDK's own**, the `@androidsdk` repository rules_android resolves from `ANDROID_HOME`, which your `MODULE.bazel` already declares for building an APK, not one found on `PATH`, and the file the SDK has for the host the test runs on (`adb.exe` on Windows). The `aapt2` that reads the APK's package and launch activity is the one of that same SDK. `runner` takes a runner of your own: `flutter_android_emulator_runner(sdk = ..., emulator = ..., system_image = ...)`, whose `system_image` can be another `flutter_android_system_image` (another API level, say) and whose `cores` and `memory_mb` size the device, or `flutter_android_device_runner(sdk = ...)`.
+- **`adb` is the SDK's own**, that of the `@androidsdk` your `MODULE.bazel` already declares for building an APK (downloaded, or found at `ANDROID_HOME`), not one found on `PATH`, and the file the SDK has for the host the test runs on (`adb.exe` on Windows). The `aapt2` that reads the APK's package and launch activity is `@androidsdk`'s too. `runner` takes a runner of your own: `flutter_android_emulator_runner(sdk = ..., emulator = ..., system_image = ...)`, whose `system_image` can be another `flutter_android_system_image` (another API level, say) and whose `cores` and `memory_mb` size the device, or `flutter_android_device_runner(sdk = ...)`.
 - **`abi`** (by default the emulator image's, or `arm64-v8a` on an attached device; `x86_64` and `armeabi-v7a` otherwise) is the ABI the app is built for, whatever `--@rules_android//flags:android_platforms` says: it has to be the one the device runs. An emulator runner whose image runs another fails analysis, naming both.
 - **`integration_test`'s Android library links into the app**, and its Gradle build asks for `androidx.test:runner`, `androidx.test:rules`, `androidx.test.espresso:espresso-core` and `com.google.guava:guava`. Name a version of each in the `rules_flutter_maven` install of your `MODULE.bazel` (Gradle's `1.2+`, `1.2+` and `3.3+` are ranges; analysis names whatever is missing, and `bazel run @<hub>//android:maven_artifacts` prints the block). Only the tests' apps link it: your own app does not.
 - **The app stays installed** on an attached device, as `flutter test` leaves it. `adb uninstall <application_id>` removes it.

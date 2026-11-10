@@ -11,7 +11,8 @@
 ///   RULES_FLUTTER_ANDROID_RELEASE_CONFIG  runfiles path of the JSON file the
 ///       rule writes: `label`, `package`, `keyProperties` (plain strings), and
 ///       the runfiles paths `aab`, `apk`, `java`, `jarsigner`, `keytool`,
-///       `bundletool`, `apksigner`.
+///       `bundletool`, and `apksigner`, the runfiles paths of apksigner's
+///       classpath.
 ///   BUILD_WORKSPACE_DIRECTORY, BUILD_WORKING_DIRECTORY  set by `bazel run`.
 library;
 
@@ -23,6 +24,10 @@ import 'package:runfiles/runfiles.dart';
 const configEnv = 'RULES_FLUTTER_ANDROID_RELEASE_CONFIG';
 const storePasswordEnv = 'RULES_FLUTTER_STORE_PASSWORD';
 const keyPasswordEnv = 'RULES_FLUTTER_KEY_PASSWORD';
+
+/// The entry point of the SDK's apksigner, the `main_class` of its
+/// `java_binary` in every Android SDK repository.
+const apksignerMainClass = 'com.android.apksigner.ApkSignerTool';
 
 /// A failure the user can act on, reported as `error: <message>`.
 class ReleaseException implements Exception {
@@ -315,21 +320,22 @@ List<String> bundletoolValidateArgs({
 }) => ['-jar', bundletool, 'validate', '--bundle=$bundle'];
 
 /// Signs the APK [unsigned] with the upload key, writing [signedOut], with
-/// the SDK's apksigner, the jar [apksigner].
+/// the SDK's apksigner, whose classpath is [apksigner].
 ///
 /// The build stored the APK's native libraries uncompressed and zipaligned
 /// them to 16 KB, as AGP packages `flutter build apk`, which a device with
 /// 16 KB pages needs to map them; apksigner keeps that alignment, and
 /// replaces the debug signature the build gave the APK.
 List<String> apksignerSignArgs({
-  required String apksigner,
+  required List<String> apksigner,
   required String keystore,
   required String alias,
   required String unsigned,
   required String signedOut,
 }) => [
-  '-jar',
-  apksigner,
+  '-cp',
+  apksigner.join(Platform.isWindows ? ';' : ':'),
+  apksignerMainClass,
   'sign',
   '--ks',
   keystore,
@@ -426,6 +432,14 @@ class ToolConfig {
     }
 
     String path(String key) => runfiles.rlocation(plain(key));
+    List<String> paths(String key) {
+      final value = json[key];
+      if (value is! List || value.isEmpty || value.any((p) => p is! String)) {
+        throw ReleaseException('the release config has no `$key` paths');
+      }
+      return [for (final p in value) runfiles.rlocation(p as String)];
+    }
+
     return ToolConfig(
       label: plain('label'),
       package: plain('package'),
@@ -436,7 +450,7 @@ class ToolConfig {
       jarsigner: path('jarsigner'),
       keytool: path('keytool'),
       bundletool: path('bundletool'),
-      apksigner: path('apksigner'),
+      apksigner: paths('apksigner'),
     );
   }
 
@@ -452,8 +466,8 @@ class ToolConfig {
   final String keytool;
   final String bundletool;
 
-  /// The Android SDK's apksigner, as one jar.
-  final String apksigner;
+  /// The classpath of the Android SDK's apksigner.
+  final List<String> apksigner;
 }
 
 String _join(Iterable<String> parts) =>

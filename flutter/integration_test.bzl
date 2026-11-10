@@ -723,8 +723,8 @@ def flutter_android_integration_test(
             `flutter_android_device_runner`. By default the emulator of the host,
             or the attached device under
             `--@rules_flutter//flutter/integration_test:android_device=attached`,
-            either driven with the `adb` of `@androidsdk`, the Android SDK
-            rules_android resolves from `ANDROID_HOME`.
+            either driven with the `adb` of `@androidsdk`, the Android SDK the
+            app builds with.
         abi: The ABI the app is built for, which the device must run: `arm64-v8a`
             for a phone or an Apple-silicon emulator, `x86_64` for an emulator
             on an x86_64 host, `armeabi-v7a` for a 32-bit ARM device. By

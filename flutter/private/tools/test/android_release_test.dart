@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:test/test.dart';
 
 import '../android_release.dart';
@@ -210,7 +212,7 @@ void main() {
         bundle: '/out.aab',
       ),
       'apksignerSignArgs': apksignerSignArgs(
-        apksigner: '/apksigner.jar',
+        apksigner: ['/apksigner.jar', '/lib.jar'],
         keystore: '/k.jks',
         alias: 'upload',
         unsigned: '/u.apk',
@@ -272,8 +274,11 @@ void main() {
       expect(
         lists['apksignerSignArgs'],
         containsAllInOrder([
-          '-jar',
-          '/apksigner.jar',
+          '-cp',
+          Platform.isWindows
+              ? '/apksigner.jar;/lib.jar'
+              : '/apksigner.jar:/lib.jar',
+          apksignerMainClass,
           'sign',
           '--alignment-preserved',
           'true',

@@ -480,21 +480,15 @@ void main() {
 
   group('the device of an Android config', () {
     late Directory scratch;
-    late String sdkAdb;
     late String runfilesAdb;
+    late String runfilesAapt2;
     setUp(() {
       scratch = Directory.systemTemp.createTempSync('android_choice_test');
-      // The SDK the runner's `adb` belongs to, and the runfiles entry that
-      // links to it, as Bazel's `@androidsdk` repository does.
-      final sdk = Directory(p.join(scratch.path, 'sdk'));
-      sdkAdb = p.join(sdk.path, 'platform-tools', 'adb');
-      File(sdkAdb).createSync(recursive: true);
-      File(
-        p.join(sdk.path, 'build-tools', '35.0.0', _aapt2),
-      ).createSync(recursive: true);
+      // The runner's `adb` and `aapt2`, as runfiles.
       runfilesAdb = p.join(scratch.path, 'runfiles', 'adb');
-      Directory(p.dirname(runfilesAdb)).createSync(recursive: true);
-      Link(runfilesAdb).createSync(sdkAdb);
+      runfilesAapt2 = p.join(scratch.path, 'runfiles', _aapt2);
+      File(runfilesAdb).createSync(recursive: true);
+      File(runfilesAapt2).createSync(recursive: true);
     });
     tearDown(() => scratch.deleteSync(recursive: true));
 
@@ -502,7 +496,10 @@ void main() {
       source: '_main/pkg/app_test.dart',
       family: IntegrationFamily.android,
       appArtifacts: const ['_main/app.apk'],
-      launcher: const {'adb': 'androidsdk/platform-tools/adb'},
+      launcher: const {
+        'aapt2': 'androidsdk/aapt2',
+        'adb': 'androidsdk/platform-tools/adb',
+      },
       testDisplayName: '//pkg:android_test',
       env: const {},
     );
@@ -514,7 +511,7 @@ void main() {
     }) => chooseDevice(
       androidConfig,
       os: 'macos',
-      resolve: (path) => runfilesAdb,
+      resolve: (path) => path.endsWith('aapt2') ? runfilesAapt2 : runfilesAdb,
       environment: environment,
       run: (executable, arguments) async {
         asked?.add([executable, ...arguments]);
@@ -528,9 +525,8 @@ void main() {
         'List of devices attached\n58051JEBF01271\tdevice\n'
         'emulator-5554\tdevice\n';
 
-    test('is the attached device, driven with the adb the runner named and '
-        'the aapt2 of the same SDK, and expects the VM service a debug app '
-        'serves', () async {
+    test('is the attached device, driven with the adb and aapt2 the runner '
+        'named, and expects the VM service a debug app serves', () async {
       final asked = <List<String>>[];
 
       final choice = await choose(devices: oneDevice, asked: asked);
@@ -538,16 +534,7 @@ void main() {
       final device = choice.device as AndroidDevice;
       expect(device.deviceId, '58051JEBF01271');
       expect(device.adbPath, runfilesAdb);
-      expect(
-        device.aapt2Path,
-        p.join(
-          scratch.resolveSymbolicLinksSync(),
-          'sdk',
-          'build-tools',
-          '35.0.0',
-          _aapt2,
-        ),
-      );
+      expect(device.aapt2Path, runfilesAapt2);
       expect(device.expectsVmService, isTrue);
       expect(asked, [
         [runfilesAdb, 'devices'],
@@ -578,11 +565,9 @@ void main() {
     });
 
     test(
-      'is refused when the SDK of the adb has no aapt2, naming it',
+      'is refused when the runner\'s aapt2 is not there, naming the path',
       () async {
-        File(
-          p.join(scratch.path, 'sdk', 'build-tools', '35.0.0', _aapt2),
-        ).deleteSync();
+        File(runfilesAapt2).deleteSync();
 
         await expectLater(
           choose(devices: oneDevice),
@@ -590,7 +575,7 @@ void main() {
             isA<StateError>().having(
               (e) => e.message,
               'message',
-              allOf(contains('aapt2'), contains('build-tools')),
+              allOf(contains('aapt2'), contains(runfilesAapt2)),
             ),
           ),
         );
@@ -600,7 +585,7 @@ void main() {
     test(
       'is refused when the runner\'s adb is not there, naming the path',
       () async {
-        File(sdkAdb).deleteSync();
+        File(runfilesAdb).deleteSync();
 
         await expectLater(
           choose(devices: oneDevice),

@@ -187,16 +187,51 @@ _FAMILIES_WITHOUT_ENVIRONMENT = {
     IOS_SIMULATOR: "an iOS simulator",
 }
 
-def _flutter_android_device_runner_impl(ctx):
+def _android_host_tools(ctx):
+    """The `adb` of the runner's SDK and the `aapt2` of `@androidsdk`.
+
+    Args:
+      ctx: The context of an Android runner, with `sdk` and `_aapt2`.
+
+    Returns:
+      A struct of `launcher_config` (the runfiles paths of `adb` and `aapt2`)
+      and `runfiles` (a depset of the files they run with).
+    """
+
     # The SDK says which `adb` it has for the platform its tools run on, so the
     # one named here runs on the host that runs the test: `adb.exe` on Windows.
     adb = ctx.attr.sdk[AndroidSdkInfo].adb.executable
+    aapt2 = ctx.attr._aapt2[DefaultInfo]
+    workspace = ctx.workspace_name
+    return struct(
+        launcher_config = {
+            "aapt2": runfiles_path(aapt2.files_to_run.executable, workspace),
+            "adb": runfiles_path(adb, workspace),
+        },
+        runfiles = depset(
+            [adb, aapt2.files_to_run.executable],
+            transitive = [aapt2.default_runfiles.files],
+        ),
+    )
+
+# The `aapt2` that reads the app's package and launchable activity out of the
+# APK: the one of the SDK that built it, `@androidsdk` (the Android toolchain's
+# default), for the host that runs the test, as `adb` is.
+_AAPT2_ATTR = attr.label(
+    default = Label("@androidsdk//:aapt2"),
+    # A script beside its binary on Linux and macOS, `aapt2.exe` itself on
+    # Windows.
+    allow_files = True,
+    cfg = "exec",
+    executable = True,
+)
+
+def _flutter_android_device_runner_impl(ctx):
+    tools = _android_host_tools(ctx)
     return [FlutterIntegrationRunnerInfo(
         family = ANDROID,
-        launcher_config = struct(adb = runfiles_path(adb, ctx.workspace_name)),
-        # `adb` is a link to the Android SDK's own, and the host tools beside it
-        # that the test reads the APK with are found from where it leads.
-        runfiles = depset([adb]),
+        launcher_config = struct(**tools.launcher_config),
+        runfiles = tools.runfiles,
         execution_requirements = dict(_EXECUTION_REQUIREMENTS),
         target_compatible_with = [],
     )]
@@ -205,11 +240,12 @@ flutter_android_device_runner = rule(
     implementation = _flutter_android_device_runner_impl,
     attrs = {
         "sdk": attr.label(
-            doc = "The Android SDK, an `android_sdk` target such as `@androidsdk//:sdk`, the one rules_android resolves from `ANDROID_HOME`. Its `adb` runs the test.",
+            doc = "The Android SDK, an `android_sdk` target such as `@androidsdk//:sdk`. Its `adb` runs the test.",
             mandatory = True,
             cfg = "exec",
             providers = [AndroidSdkInfo],
         ),
+        "_aapt2": _AAPT2_ATTR,
     },
     doc = """Runs an Android integration test on an attached phone or a running emulator.
 
@@ -222,11 +258,13 @@ device (`android-<serial>`), so two tests on one device run one after the other
 instead of installing over each other.
 
 `adb` is the SDK's own, never one found on `PATH`, and the one the SDK has for the
-host the test runs on (`adb.exe` on Windows).""",
+host the test runs on (`adb.exe` on Windows). The `aapt2` that reads the app's
+package and launchable activity out of the APK is that of `@androidsdk`, the SDK
+that built it.""",
 )
 
 def _flutter_android_emulator_runner_impl(ctx):
-    adb = ctx.attr.sdk[AndroidSdkInfo].adb.executable
+    tools = _android_host_tools(ctx)
     image = ctx.attr.system_image[FlutterAndroidSystemImageInfo]
     emulator = ctx.file.emulator
     emulator_files = depset([emulator], transitive = [ctx.attr.emulator[DefaultInfo].default_runfiles.files])
@@ -252,7 +290,6 @@ def _flutter_android_emulator_runner_impl(ctx):
         FlutterIntegrationRunnerInfo(
             family = ANDROID,
             launcher_config = struct(
-                adb = runfiles_path(adb, workspace),
                 emulator = struct(
                     executable = runfiles_path(emulator, workspace),
                     systemImage = runfiles_path(image.properties, workspace),
@@ -262,9 +299,9 @@ def _flutter_android_emulator_runner_impl(ctx):
                     cores = ctx.attr.cores,
                     memoryMb = ctx.attr.memory_mb,
                 ),
-                **launcher
+                **(launcher | tools.launcher_config)
             ),
-            runfiles = depset([adb], transitive = [emulator_files, image.files, runtime_files]),
+            runfiles = depset(transitive = [tools.runfiles, emulator_files, image.files, runtime_files]),
             # What the emulator takes of the machine, so that Bazel schedules the
             # test with it: its virtual cores, and the host's work of drawing
             # its screen and serving its devices.
@@ -295,11 +332,12 @@ flutter_android_emulator_runner = rule(
             default = 2048,
         ),
         "sdk": attr.label(
-            doc = "The Android SDK, an `android_sdk` target such as `@androidsdk//:sdk`. Its `adb` drives the emulator, and its build tools read the app's package.",
+            doc = "The Android SDK, an `android_sdk` target such as `@androidsdk//:sdk`. Its `adb` drives the emulator.",
             mandatory = True,
             cfg = "exec",
             providers = [AndroidSdkInfo],
         ),
+        "_aapt2": _AAPT2_ATTR,
         "system_image": attr.label(
             doc = "The system image the emulator boots, a `flutter_android_system_image`, such as `@rules_flutter//flutter/integration_test:android_system_image`, the pinned AOSP test image of the host's ABI. A test's `abi` must be the image's.",
             mandatory = True,

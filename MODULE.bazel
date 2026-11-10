@@ -55,15 +55,47 @@ bazel_dep(name = "rules_go", version = "0.64.2")
 go_sdk = use_extension("@rules_go//go:extensions.bzl", "go_sdk")
 go_sdk.download(version = "1.27.3")
 
-# The Android SDK rules_android resolves from `ANDROID_HOME`, for the SDK tools
-# rules_flutter's own rules name (`flutter_android_release`'s apksigner). The
-# app configures it in its own MODULE.bazel; this only makes the repository
-# visible here.
+# The Android SDK, for the SDK tools rules_flutter's own rules name
+# (`flutter_android_release`'s apksigner). The app chooses the SDK in its own
+# MODULE.bazel: rules_android's, found at `ANDROID_HOME`, or
+# hermetic_android_toolchains', which overrides this repository. This only
+# makes it visible here.
 android_sdk_repository_extension = use_extension(
     "@rules_android//rules/android_sdk_repository:rule.bzl",
     "android_sdk_repository_extension",
 )
 use_repo(android_sdk_repository_extension, "androidsdk")
+
+# This repository's own tests build with the downloaded SDK, as the README
+# recommends an app does, so they need no `ANDROID_HOME`. `.bazelrc` accepts
+# its licence. No test here builds native Android code, so no NDK.
+bazel_dep(name = "hermetic_android_toolchains", version = "0.5.0", dev_dependency = True)
+
+android = use_extension("@hermetic_android_toolchains//:extensions.bzl", "android", dev_dependency = True)
+android.sdk(
+    build_tools_version = "35.0.0",
+    version = "35",
+)
+
+# Named apart from `androidsdk`, which the `use_repo` above imports; every module's
+# `@androidsdk` is this one.
+use_repo(android, hermetic_androidsdk = "androidsdk")
+
+android_sdk_override = use_extension(
+    "@rules_android//rules/android_sdk_repository:rule.bzl",
+    "android_sdk_repository_extension",
+    dev_dependency = True,
+)
+
+override_repo(
+    android_sdk_override,
+    androidsdk = "hermetic_androidsdk",
+)
+
+register_toolchains(
+    "@hermetic_androidsdk//:all",
+    dev_dependency = True,
+)
 
 # Builds the Swift packages Apple plugins depend on (`.package(url:)`).
 bazel_dep(name = "rules_swift_package_manager", version = "1.25.0")
