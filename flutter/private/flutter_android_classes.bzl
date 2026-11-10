@@ -15,6 +15,7 @@ load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
 load("@rules_java//java/common:java_common.bzl", "java_common")
 load("@rules_java//java/common:java_info.bzl", "JavaInfo")
+load("//flutter/private:android_plugin_maven.bzl", "compare_maven_versions")
 load("//flutter/private:exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
 load("//flutter/private:rule_edges.bzl", "rule_attr_targets")
 
@@ -51,6 +52,55 @@ def _origin(jar, coordinates):
     """What the message calls `jar`: its Maven coordinates, or its target."""
     label = str(jar.owner)
     return coordinates.get(label, label)
+
+# `com.google.guava:listenablefuture` 1.0 as rules_jvm_external imports it.
+# `@rules_android_maven//:com_google_guava_listenablefuture` is rules_flutter's
+# compile-only override of it (MODULE.bazel).
+LISTENABLEFUTURE_RUNTIME = Label("@rules_android_maven//:original_com_google_guava_listenablefuture")
+
+def _guava_brings_listenablefuture(coordinate):
+    """Whether `coordinate` is a Guava that Gradle links without listenablefuture.
+
+    From 27.0, Guava's POM asks for `com.google.guava:listenablefuture` at
+    `9999.0-empty-to-avoid-conflict-with-guava`, a jar with no classes, and
+    Gradle resolves the highest version asked for: the app's ListenableFuture
+    is Guava's own.
+    """
+    parts = coordinate.split(":")
+    if len(parts) < 3 or parts[0] != "com.google.guava" or parts[1] != "guava":
+        return False
+    return compare_maven_versions(parts[-1], "27.0") >= 0
+
+def _flutter_android_listenablefuture_impl(ctx):
+    for lib in ctx.attr.libraries:
+        for _, coordinate in lib[_MavenCoordinatesInfo].coordinates.to_list():
+            if _guava_brings_listenablefuture(coordinate):
+                return [CcInfo()]
+    return [java_common.merge([dep[JavaInfo] for dep in ctx.attr.runtime_deps])]
+
+flutter_android_listenablefuture = rule(
+    implementation = _flutter_android_listenablefuture_impl,
+    attrs = {
+        "libraries": attr.label_list(
+            doc = "The other Java and Android libraries of the app's `android_binary`.",
+            aspects = [_maven_coordinates_aspect],
+        ),
+        "runtime_deps": attr.label_list(
+            doc = "The listenablefuture 1.0 jar, which the app links unless `libraries` link a Guava that brings the interface.",
+            default = [LISTENABLEFUTURE_RUNTIME],
+            providers = [JavaInfo],
+        ),
+    },
+    doc = """Links `com.google.guava:listenablefuture` 1.0 into an Android app when Gradle would.
+
+`@rules_android_maven` resolves the jar for every app of the workspace, and
+rules_flutter's override of it there leaves it on the compile classpath only.
+Gradle resolves each app on its own: an app that links Guava 27.0 or later gets
+the empty `9999.0-empty-to-avoid-conflict-with-guava` placeholder Guava asks
+for, and Guava's copy of `ListenableFuture`; any other app gets the 1.0 jar
+that androidx asks for. A dependency of the app's `android_binary` that links
+the jar in the second case and nothing in the first.""",
+)
 
 def _flutter_android_class_check_impl(ctx):
     infos = [lib[JavaInfo] for lib in ctx.attr.libraries if JavaInfo in lib]

@@ -92,7 +92,7 @@ load("//flutter/private:constants.bzl", _ANDROID_MIN_SDK_VERSION = "ANDROID_MIN_
 load("//flutter/private:flutter_android_application.bzl", _flutter_android_bundle = "flutter_android_bundle")
 load("//flutter/private:flutter_android_build.bzl", _flutter_android_build = "flutter_android_build")
 load("//flutter/private:flutter_android_bundle_install.bzl", _flutter_android_app_bundle = "flutter_android_app_bundle")
-load("//flutter/private:flutter_android_classes.bzl", _flutter_android_class_check = "flutter_android_class_check")
+load("//flutter/private:flutter_android_classes.bzl", _LISTENABLEFUTURE_RUNTIME = "LISTENABLEFUTURE_RUNTIME", _flutter_android_class_check = "flutter_android_class_check", _flutter_android_listenablefuture = "flutter_android_listenablefuture")
 load("//flutter/private:flutter_android_manifest_merge.bzl", _flutter_android_manifest_merge = "flutter_android_manifest_merge")
 load("//flutter/private:flutter_android_plugin_library.bzl", _flutter_android_plugin_library = "flutter_android_plugin_library")
 load("//flutter/private:flutter_android_plugin_libs.bzl", _flutter_android_maven_report = "flutter_android_maven_report", _flutter_android_plugin_libs = "flutter_android_plugin_libs")
@@ -331,6 +331,17 @@ def flutter_android_engine(name, neverlink = False, **kwargs):
             engine in the app's `android_binary` deps leaves it False.
         **kwargs: Additional arguments (e.g. visibility, tags).
     """
+    _flutter_android_engine(name, neverlink, listenablefuture = not neverlink, **kwargs)
+
+def _flutter_android_engine(name, neverlink, listenablefuture, **kwargs):
+    """`flutter_android_engine`, linking listenablefuture 1.0 if `listenablefuture`.
+
+    androidx needs `com.google.guava:listenablefuture` at runtime, and
+    `@rules_android_maven` has it on the compile classpath only (see
+    `flutter_android_listenablefuture`). A linked engine of your own
+    `android_binary` links it; `flutter_android_app`'s does not, and the app
+    links it when Gradle would.
+    """
     tags = kwargs.pop("tags", ["manual"])
 
     # The engine of an ABI exists for platforms of that ABI only.
@@ -378,7 +389,8 @@ def flutter_android_engine(name, neverlink = False, **kwargs):
     # compile does not need.
     _android_library(
         name = name,
-        exports = ["_%s_jar" % name] + _ANDROIDX_EMBEDDING_DEPS + ([] if neverlink else engine),
+        exports = ["_%s_jar" % name] + _ANDROIDX_EMBEDDING_DEPS + ([] if neverlink else engine) +
+                  ([_LISTENABLEFUTURE_RUNTIME] if listenablefuture else []),
         proguard_specs = ["@rules_flutter//flutter/private/runners/android:flutter_engine_proguard.pro"],
         neverlink = neverlink,
         tags = tags,
@@ -832,9 +844,12 @@ def flutter_android_app(
         testonly = testonly,
     )
 
-    # 4. Import Flutter engine.
-    flutter_android_engine(
+    # 4. Import Flutter engine. listenablefuture is the app's own choice:
+    # see step 9b.
+    _flutter_android_engine(
         name = "__%s_engine" % name,
+        neverlink = False,
+        listenablefuture = False,
         tags = tags,
         testonly = testonly,
     )
@@ -1088,7 +1103,18 @@ def flutter_android_app(
     # since the manifest promises it.
     kwargs["nocompress_extensions"] = kwargs.pop("nocompress_extensions", []) + [".so"]
 
-    # 9b. Fail the build when two jars the app links define a class
+    # 9b. listenablefuture 1.0 at runtime, unless the app links a Guava that
+    # brings the interface, as Gradle resolves it: see
+    # flutter_android_classes.bzl.
+    _flutter_android_listenablefuture(
+        name = "__%s_listenablefuture" % name,
+        libraries = binary_deps + deps,
+        tags = tags,
+        testonly = testonly,
+    )
+    binary_deps.append("__%s_listenablefuture" % name)
+
+    # 9c. Fail the build when two jars the app links define a class
     # differently, which Gradle's resolution would not let happen: see
     # flutter_android_classes.bzl. A dependency of the binary, so building the
     # app runs it.

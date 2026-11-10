@@ -1,4 +1,5 @@
 load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
+load("@rules_java//java:java_library.bzl", "java_library")
 load(":flutter_module.bzl", "flutter_kernel_sdk")
 load(":flutter_sdk_record.bzl", "flutter_sdk_record", "flutter_web_sdk_record")
 load(":unsupported_toolchain.bzl", "flutter_unsupported_toolchain")
@@ -13,6 +14,15 @@ flutter_unsupported_toolchain(
     # Analysed only through toolchain resolution: built on its own, it fails.
     tags = ["manual"],
     visibility = ["//visibility:public"],
+)
+
+# What `com.google.guava:listenablefuture` is in `@rules_android_maven`: the
+# 1.0 jar on the compile classpath only. See the override in MODULE.bazel.
+java_library(
+    name = "listenablefuture_compile_only",
+    neverlink = True,
+    visibility = ["//visibility:public"],
+    exports = ["@rules_android_maven//:original_com_google_guava_listenablefuture"],
 )
 
 # Compilation mode config_settings for select() in macros.

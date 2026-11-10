@@ -5,4 +5,10 @@
 # matches the lock.
 common --lockfile_mode=error
 
+# The Java settings README.md tells an Android consumer to add, so analysing
+# `@rules_flutter//...` needs no JDK installed on the machine.
+common --tool_java_language_version=25
+common --tool_java_runtime_version=remotejdk_25
+common --java_runtime_version=remotejdk_25
+
 try-import %workspace%/.bazelrc.user

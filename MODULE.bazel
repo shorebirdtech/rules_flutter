@@ -208,12 +208,27 @@ maven.install(
 # select guava's empty "9999.0" listenablefuture placeholder, leaving the
 # interface undefined in the APK dex and crashing the profile installer with
 # NoClassDefFoundError. Force the real jar.
+#
+# Gradle resolves this per app, and an app that links Guava 27.0 or later
+# gets the placeholder: Guava's POM asks for it, Gradle takes the highest
+# version asked for, and Guava's own copy of the interface is the app's one.
+# This install is one resolution for every app, so the jar is compile-only
+# here: `flutter_android_app` links it unless the app links such a Guava
+# (`flutter_android_listenablefuture` in flutter_android_classes.bzl), and
+# `flutter_android_engine` links it always. Any other `android_binary` that
+# needs it at runtime depends on
+# `@rules_android_maven//:original_com_google_guava_listenablefuture`.
 maven.artifact(
     name = "rules_android_maven",
     artifact = "listenablefuture",
     force_version = True,
     group = "com.google.guava",
     version = "1.0",
+)
+maven.override(
+    name = "rules_android_maven",
+    coordinates = "com.google.guava:listenablefuture",
+    target = "//flutter/private:listenablefuture_compile_only",
 )
 
 # A Kotlin Multiplatform library publishes a common artifact whose jar holds
