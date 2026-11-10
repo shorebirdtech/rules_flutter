@@ -19,22 +19,46 @@ def parse_flutter_version(v):
         result.append(int(x))
     return result
 
-def select_flutter_version(root_version, versions):
-    """The version a toolchain name gets.
+def select_flutter_version(name, root_version, requests):
+    """The version a toolchain name gets, or why the module graph cannot have one.
 
-    The root module chooses, as it chooses every toolchain: its tag wins over
-    any a dependency declares. A name the root does not declare takes the
-    highest version the other modules ask for.
+    The root module's version is used exactly, as rules_go uses the root's Go
+    SDK: the root chooses every toolchain. A dependency may not be given an
+    SDK older than it asks for, so one asking for a newer version than the
+    root's fails the build, naming it and the fix. A name the root does not
+    declare takes the highest version any module asks for.
 
     Args:
+        name: The toolchain name, for the error.
         root_version: The root module's version for the name, or None.
-        versions: Every module's version for the name, the root's included.
+        requests: `(module name, version)` for every module's request for the
+            name, the root's included.
 
     Returns:
-        The selected version.
+        `struct(version, error)`: the selected version and None, or None and
+        the message to fail with.
     """
     if root_version != None:
-        return root_version
+        newer = [
+            (module, v)
+            for module, v in requests
+            if parse_flutter_version(v) > parse_flutter_version(root_version)
+        ]
+        if newer:
+            return struct(version = None, error = (
+                "The root module pins flutter.toolchain(name = \"{name}\") to Flutter {root}, " +
+                "older than {modules} asks for. A module is never given an older SDK than it " +
+                "asks for: raise the root's flutter_version to {highest} or newer."
+            ).format(
+                name = name,
+                root = root_version,
+                modules = ", ".join(["{} ({})".format(m, v) for m, v in newer]),
+                highest = _highest([v for _, v in newer]),
+            ))
+        return struct(version = root_version, error = None)
+    return struct(version = _highest([v for _, v in requests]), error = None)
+
+def _highest(versions):
     selected = versions[0]
     for v in versions[1:]:
         if parse_flutter_version(v) > parse_flutter_version(selected):

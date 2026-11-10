@@ -68,6 +68,7 @@ def _declared_sdks(module_ctx):
     # every toolchain: its own tag wins. A name the root does not declare takes
     # the highest version the other modules ask for.
     tags = {}
+    requests = {}
     root_versions = {}
     for mod in module_ctx.modules:
         for toolchain in mod.tags.toolchain:
@@ -90,6 +91,9 @@ def _declared_sdks(module_ctx):
                     "Only the root module may: a library module must not impose a fork on its dependents."
                 ).format(toolchain.name, mod.name))
             tags.setdefault(toolchain.name, []).append(toolchain)
+            requests.setdefault(toolchain.name, [])
+            if toolchain.flutter_version:
+                requests[toolchain.name].append((mod.name, toolchain.flutter_version))
 
     sdks = {}
     for name, name_tags in tags.items():
@@ -110,7 +114,12 @@ def _declared_sdks(module_ctx):
                 "flutter.toolchain(name = \"{}\") needs flutter_version: the release that " +
                 "supplies the half of the SDK that is not given."
             ).format(name))
-        selected = select_flutter_version(root_versions.get(name), versions) if versions else None
+        selected = None
+        if versions:
+            selection = select_flutter_version(name, root_versions.get(name), requests[name])
+            if selection.error:
+                fail(selection.error)
+            selected = selection.version
         if selected:
             require_supported_flutter_version(selected)
         fonts_sha256 = [t.material_fonts_sha256 for t in name_tags if t.material_fonts_sha256]
