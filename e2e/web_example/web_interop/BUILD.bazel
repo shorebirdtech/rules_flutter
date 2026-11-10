@@ -29,7 +29,7 @@ dart_package_metadata(
 # they are compatible with web platforms alone: `bazel build //...` skips them
 # in its own configuration, and each web app builds them for its compilers.
 _WEB_ONLY = select({
-    "@rules_dart//dart/constraints:none": ["@platforms//:incompatible"],
+    "@rules_dart//dart/constraints:vm": ["@platforms//:incompatible"],
     "//conditions:default": [],
 })
 

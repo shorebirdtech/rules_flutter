@@ -69,7 +69,7 @@ dart_library(
         ["lib/**"],
         exclude = ["lib/**/*.dart"],
     ),
-    web_compiler_independent = True,
+    runtime_independent = True,
     visibility = ["//visibility:public"],
 )
 """

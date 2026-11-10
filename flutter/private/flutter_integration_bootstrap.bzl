@@ -1,7 +1,7 @@
 """`flutter_integration_bootstrap`: the program an integration test file runs as."""
 
 load("@rules_dart//dart:providers.bzl", "DartInfo")
-load("@rules_dart//dart:utils.bzl", "web_compiler_reset")
+load("@rules_dart//dart:utils.bzl", "runtime_reset")
 load("//flutter/private:app_entrypoint.bzl", "app_scheme_location", "compute_wrapper_main_import")
 load("//flutter/private:program_analysis.bzl", "StagedSourcesInfo")
 load("//flutter/private:required_packages.bzl", "check_required_packages")
@@ -88,7 +88,7 @@ flutter_integration_bootstrap = rule(
     # build was before any web app's transition: a web app reaches them through
     # its application's branches, and imports the bootstrap from a wrapper in
     # that output directory, by a path relative to it.
-    cfg = web_compiler_reset,
+    cfg = runtime_reset,
     attrs = {
         "src": attr.label(
             doc = "The integration test file, whose `main` declares the tests. " +

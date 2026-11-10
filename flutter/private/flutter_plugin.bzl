@@ -21,7 +21,7 @@ library:
 load("@build_bazel_rules_swift//swift:swift.bzl", "SwiftInfo")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@rules_dart//dart:providers.bzl", "DartInfo")
-load("@rules_dart//dart:utils.bzl", "WEB_COMPILER_INDEPENDENT_ATTR", "dart_info", "library_package", "package_identity_attrs", "web_compiler_reset_when_independent")
+load("@rules_dart//dart:utils.bzl", "RUNTIME_INDEPENDENT_ATTR", "dart_info", "library_package", "package_identity_attrs", "runtime_reset_when_independent")
 load("@rules_java//java/common:java_info.bzl", "JavaInfo")
 load("//flutter:providers.bzl", "FlutterDataAssetInfo", "FlutterPluginPlatformInfo")
 load("//flutter/private:common.bzl", "collect_binding_contracts", "collect_native_libs")
@@ -284,14 +284,14 @@ PLUGIN_PACKAGE_ATTRS = package_identity_attrs() | {
 flutter_plugin = rule(
     implementation = _flutter_plugin_impl,
     # As `flutter_library`: configured once per web compiler that reaches it,
-    # unless `web_compiler_independent`.
-    cfg = web_compiler_reset_when_independent,
+    # unless `runtime_independent`.
+    cfg = runtime_reset_when_independent,
     attrs = PLUGIN_PACKAGE_ATTRS | {
         "_sky_engine": SKY_ENGINE_ATTR,
         "deps": attr.label_list(
             doc = "Dart/Flutter library dependencies.",
             providers = [DartInfo],
         ),
-    } | WEB_COMPILER_INDEPENDENT_ATTR,
+    } | RUNTIME_INDEPENDENT_ATTR,
     doc = "Declares a Flutter plugin with platform metadata and optional native dependencies.",
 )

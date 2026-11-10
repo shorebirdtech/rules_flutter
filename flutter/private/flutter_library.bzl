@@ -1,7 +1,7 @@
 """Implementation of the flutter_library rule."""
 
 load("@rules_dart//dart:providers.bzl", "DartInfo")
-load("@rules_dart//dart:utils.bzl", "WEB_COMPILER_INDEPENDENT_ATTR", "dart_analyzable_info", "dart_info", "derive_package_root", "library_package", "package_identity_attrs", "web_compiler_reset_when_independent")
+load("@rules_dart//dart:utils.bzl", "RUNTIME_INDEPENDENT_ATTR", "dart_analyzable_info", "dart_info", "derive_package_root", "library_package", "package_identity_attrs", "runtime_reset_when_independent")
 load("//flutter:providers.bzl", "FlutterFontFamilyInfo", "FlutterInfo")
 load("//flutter/private:flutter_font.bzl", "FONTS_ATTR")
 load("//flutter/private:flutter_info.bzl", "flutter_info")
@@ -448,21 +448,21 @@ _LIBRARY_ATTRS = package_identity_attrs() | {
               "not listed here is not found.",
         allow_files = True,
     ),
-} | WEB_COMPILER_INDEPENDENT_ATTR
+} | RUNTIME_INDEPENDENT_ATTR
 
 flutter_library = rule(
     implementation = _flutter_library_impl,
     # A library reached under a web bundle's compilers is configured once for
-    # each, unless it says `web_compiler_independent` (every generated pub and
+    # each, unless it says `runtime_independent` (every generated pub and
     # SDK package does), which builds it once with no web compiler.
-    cfg = web_compiler_reset_when_independent,
+    cfg = runtime_reset_when_independent,
     attrs = _LIBRARY_ATTRS,
     doc = "Collects Flutter sources and assets, propagates DartInfo and FlutterInfo. Does not compile.",
 )
 
 flutter_framework_library = rule(
     implementation = _flutter_library_impl,
-    cfg = web_compiler_reset_when_independent,
+    cfg = runtime_reset_when_independent,
     attrs = _LIBRARY_ATTRS | {
         "framework_shaders": attr.label_list(
             doc = "The Flutter framework's own shaders, compiled per platform and bundled at `shaders/<file name>`, unlisted in the asset manifest, as flutter_tools bundles them. No pubspec declares them: flutter_tools hardcodes them.",

@@ -72,7 +72,7 @@ flutter_framework_library(
     ),
     framework_shaders = glob(["lib/src/material/shaders/*.frag"]),
 {deps}    package = ":{metadata_target}",
-    web_compiler_independent = True,
+    runtime_independent = True,
     visibility = ["//visibility:public"],
 )
 """.format(

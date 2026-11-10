@@ -2,7 +2,7 @@
 
 load("@apple_support//lib:apple_support.bzl", "apple_support")
 load("@bazel_skylib//lib:structs.bzl", "structs")
-load("@rules_dart//dart:utils.bzl", "link_hook_runner_attr", "web_compiler_reset")
+load("@rules_dart//dart:utils.bzl", "link_hook_runner_attr", "runtime_reset")
 load("//flutter:providers.bzl", "FlutterApplicationInputsInfo")
 load("//flutter/private:code_asset_libraries.bzl", "code_asset_libraries_aspect")
 load("//flutter/private:common.bzl", "FLUTTER_APPLICATION_TOOL_ATTRS", "PLATFORM_CONSTRAINT_ATTRS", "flutter_deps_attr")
@@ -49,7 +49,7 @@ flutter_application_variant = rule(
             allow_single_file = [".dart"],
             # As the application's `main`: a written one is in the output
             # directory of the web app's wrapper that imports it.
-            cfg = web_compiler_reset,
+            cfg = runtime_reset,
         ),
         "srcs": attr.label_list(
             doc = "Dart sources added to the application's.",

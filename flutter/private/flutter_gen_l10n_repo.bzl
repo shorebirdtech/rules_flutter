@@ -155,7 +155,7 @@ dart_library(
     deps = [
 {deps}
     ],
-    web_compiler_independent = True,
+    runtime_independent = True,
     visibility = ["//visibility:public"],
 )
 """.format(version = version, srcs = srcs, deps = deps, metadata = METADATA_TARGET_NAME))

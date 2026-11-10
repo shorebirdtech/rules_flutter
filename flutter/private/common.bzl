@@ -7,7 +7,7 @@ flutter_application, flutter_android_bundle, and flutter_ios_application.
 
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_dart//dart:providers.bzl", "DartInfo")
-load("@rules_dart//dart:utils.bzl", "KERNEL_TOOL_ATTR", "collect_packages", "collect_transitive_srcs", "dart_import_check_aspect", "generate_dev_package_config", "import_check_validation", "package_identity_attrs", "resolve_package_identity", "web_compiler_reset")
+load("@rules_dart//dart:utils.bzl", "KERNEL_TOOL_ATTR", "collect_packages", "collect_transitive_srcs", "dart_import_check_aspect", "generate_dev_package_config", "import_check_validation", "package_identity_attrs", "resolve_package_identity", "runtime_reset")
 load("//flutter:providers.bzl", "FlutterInfo", "FlutterNativeLibraryInfo")
 load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "app_main_location", "app_scheme_files", "app_scheme_location", "app_scheme_sources", "synthesize_app_package", "with_root")
 load("//flutter/private:flutter_asset_bundle.bzl", "flutter_asset_bundle_action")
@@ -1358,7 +1358,7 @@ KERNEL_COMPILE_ATTRS = package_identity_attrs(
         # A `main` a rule writes is written in the configuration the build
         # had before any web app's transition, so it is in the same output
         # directory as the web app's own wrapper that imports it.
-        cfg = web_compiler_reset,
+        cfg = runtime_reset,
     ),
     "srcs": attr.label_list(
         doc = "Additional Dart source files.",
@@ -1403,7 +1403,7 @@ FLUTTER_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | {
         aspects = [native_sources_aspect],
         # Built for the platform the build had before any web app's
         # transition: no C++ toolchain targets a web platform.
-        cfg = web_compiler_reset,
+        cfg = runtime_reset,
     ),
     "obfuscate": attr.bool(
         doc = "If True, obfuscate Dart symbols in the AOT output. Pair with split_debug_info to produce a symbol map for deobfuscation.",

@@ -12,7 +12,7 @@ Shared, built once with no web compiler:
   * a `flutter_native_library`, the same library whichever compiler an app that
     bundles it is built for;
   * what a `flutter_gen_l10n` generates;
-  * a `flutter_library` or `flutter_plugin` that says `web_compiler_independent`,
+  * a `flutter_library` or `flutter_plugin` that says `runtime_independent`,
     as every package pub provides does, and what it depends on.
 
 Built per compiler, which makes the check above mean something:

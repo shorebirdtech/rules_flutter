@@ -43,7 +43,7 @@ def _flutter_spoke_declares_its_language_version_test_impl(ctx):
     asserts.true(env, '"@flutter_pub__meta//:meta",' in content, content)
 
     # An SDK package is the same under every web compiler.
-    asserts.true(env, "\n    web_compiler_independent = True," in content, content)
+    asserts.true(env, "\n    runtime_independent = True," in content, content)
 
     return unittest.end(env)
 

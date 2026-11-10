@@ -1675,7 +1675,7 @@ flutter_application(
     name = "app",
     ...
     target_compatible_with = select({
-        "@rules_dart//dart/constraints:none": ["@platforms//:incompatible"],
+        "@rules_dart//dart/constraints:vm": ["@platforms//:incompatible"],
         "//conditions:default": [],
     }),
 )
@@ -1758,7 +1758,7 @@ The `select()` goes in a library, not in the application's `deps`: a `select()` 
 
 What the bundle holds once comes from the primary compiler's version of the program (`dart2wasm` for the default `compiler`): the plugin registrant, the assets and shaders, and the icon tree-shaking scan. A dependency that differs by compiler should not differ in what plugins or assets it brings. An icon only the other compiler's variant uses is shaken out of the font unless `tree_shake_icons = False`.
 
-These are built once, however many compilers reach them: pub packages (and Flutter SDK packages), anything a `flutter_library` or `flutter_plugin` marks `web_compiler_independent = True`, `flutter_native_library`, `dart_code_asset`, `flutter_data_asset`, `flutter_gen_l10n`, and `dart_codegen` and its siblings. Code generation therefore cannot vary by compiler; a generator that needs to emit a variant per compiler emits both, and the library above chooses. Only the first-party libraries on the path from the bundle to a `select()` are analysed once per compiler, and a library has no action, so that costs analysis time only.
+These are built once, however many compilers reach them: pub packages (and Flutter SDK packages), anything a `flutter_library` or `flutter_plugin` marks `runtime_independent = True`, `flutter_native_library`, `dart_code_asset`, `flutter_data_asset`, `flutter_gen_l10n`, and `dart_codegen` and its siblings. Code generation therefore cannot vary by compiler; a generator that needs to emit a variant per compiler emits both, and the library above chooses. Only the first-party libraries on the path from the bundle to a `select()` are analysed once per compiler, and a library has no action, so that costs analysis time only.
 
 A library that has no variant outside the web says so with `target_compatible_with = select({"@rules_dart//dart/constraints:js": [], "@rules_dart//dart/constraints:wasm": [], "//conditions:default": ["@platforms//:incompatible"]})`, as in rules_dart, so `bazel build //...` skips it rather than failing on it.
 

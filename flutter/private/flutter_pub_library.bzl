@@ -24,7 +24,7 @@ which a pure-Dart package is, so one cycle can mix packages of both kinds.
 """
 
 load("@rules_dart//dart:providers.bzl", "DartInfo", "DartPackageMetadataInfo")
-load("@rules_dart//dart:utils.bzl", "dart_info", "package_identity_attrs", "web_compiler_reset")
+load("@rules_dart//dart:utils.bzl", "dart_info", "package_identity_attrs", "runtime_reset")
 load("@rules_dart//dart/pub:pub_library.bzl", "DartPackageMemberInfo", "dart_package_member_info")
 load("@rules_java//java/common:java_info.bzl", "JavaInfo")
 load("//flutter/private:flutter_info.bzl", "flutter_info")
@@ -121,7 +121,7 @@ flutter_pub_library = rule(
     implementation = _flutter_pub_library_impl,
     # A pub package cannot `select()` on the web compiler, so it is built once
     # whichever web compilers an app reaching it compiles for.
-    cfg = web_compiler_reset,
+    cfg = runtime_reset,
     attrs = {
         "members": attr.label_list(
             providers = [DartPackageMemberInfo],
