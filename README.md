@@ -74,7 +74,7 @@ If `flutter build` works for you, here is what Bazel adds:
 
 | Platform | What you need |
 |---|---|
-| All | Bazel 9.3 or newer. The rules download Flutter 3.47.9 themselves; the supported releases are 3.47.x, and any other `flutter_version` fails naming the supported ones. |
+| All | Bazel 9.2 or newer. The rules download Flutter 3.47.9 themselves; the supported releases are 3.47.x, and any other `flutter_version` fails naming the supported ones. |
 | macOS | Xcode, for `rules_apple` and `rules_swift`. |
 | iOS | A Mac with Apple silicon, and Xcode. rules_flutter builds iOS for arm64 only, so an Intel Mac's x86_64 simulator is not supported. The simulator needs no signing identity. A physical device does; see [Running on an iOS device](#running-on-an-ios-device). `flutter_bazel` screenshots, of a simulator or a device, need Xcode 27 or later, whose `devicectl` lists and captures screens and knows simulators (measured with Xcode 27.2, `devicectl` 651.32; earlier Xcodes were not tried). |
 | Android | Nothing installed: hermetic_android_toolchains downloads the Android SDK and NDK. An installed SDK and NDK, at `ANDROID_HOME` and `ANDROID_NDK_HOME`, work instead. See [Android](#android). |
