@@ -143,7 +143,7 @@ void main() {
         final app = await launchAppDirectly(
           ws,
           buildArgs: const [
-            '--@rules_flutter//flutter:extra_dart_defines=E2E_MESSAGE=defines,live',
+            '--@rules_dart//dart:extra_dart_defines=E2E_MESSAGE=defines,live',
           ],
         );
         final dt = await attachDevTool(

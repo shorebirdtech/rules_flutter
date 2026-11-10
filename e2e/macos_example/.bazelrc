@@ -15,7 +15,7 @@ common:macos --experimental_output_paths=strip
 
 # A named config for the dev tool's `--config` e2e test: the define it sets
 # reaches the app only if the tool passes the config to its builds.
-build:e2e_define --@rules_flutter//flutter:extra_dart_defines=E2E_MESSAGE=from,config
+build:e2e_define --@rules_dart//dart:extra_dart_defines=E2E_MESSAGE=from,config
 
 try-import %workspace%/.bazelrc.user
 

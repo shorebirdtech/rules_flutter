@@ -15,8 +15,8 @@ common --tool_java_runtime_version=remotejdk_25
 # occurrence. No commas: a flutter_test's dependencies are compiled by
 # kernel_worker, which splits -D values on them (an app's compile keeps them,
 # see //flutter/tests:app_defines_test).
-common --@rules_flutter//flutter:extra_dart_defines=E2E_FLAG=from_flag
-common --@rules_flutter//flutter:extra_dart_defines=E2E_WINNER=flag
+common --@rules_dart//dart:extra_dart_defines=E2E_FLAG=from_flag
+common --@rules_dart//dart:extra_dart_defines=E2E_WINNER=flag
 
 # Share the results of identical actions between configurations (one
 # Android ABI and the next, -c dbg and -c fastbuild, platform transitions).

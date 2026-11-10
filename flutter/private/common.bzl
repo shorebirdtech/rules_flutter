@@ -1158,10 +1158,13 @@ def flutter_build_mode(ctx):
         return "profile"
     return "debug" if compilation_mode == "dbg" else "release"
 
+# The command-line defines flag is rules_dart's, so a Flutter compile and a
+# Dart one in the same build read the same declarations.
 EXTRA_DART_DEFINES_ATTR = {
     "_extra_dart_defines": attr.label(
-        doc = "The //flutter:extra_dart_defines build setting, appended after the target's own `defines`.",
-        default = Label("//flutter:extra_dart_defines"),
+        doc = "rules_dart's `//dart:extra_dart_defines` build setting, appended after the target's own `defines`.",
+        default = Label("@rules_dart//dart:extra_dart_defines"),
+        providers = [BuildSettingInfo],
     ),
 }
 
@@ -1180,12 +1183,34 @@ def flavor_dart_defines(flavor):
     """
     return ["%s=%s" % (APP_FLAVOR_DEFINE, flavor)] if flavor else []
 
+def flag_dart_defines(ctx, defines = None):
+    """The `extra_dart_defines` flag's defines, after checking them and the target's own.
+
+    rules_dart reserves no key; the Flutter build sets some itself (see
+    `RESERVED_DART_DEFINE_KEYS`), so they are refused here, from the target's
+    `defines` and from the command line alike.
+
+    Args:
+        ctx: Rule context with `defines` and `_extra_dart_defines` attrs.
+        defines: The target's own defines, if not `ctx`'s: a program rebuilt
+            under another target carries the application's, and its own.
+
+    Returns:
+        The flag's list of KEY=VALUE define strings.
+    """
+    if defines == None:
+        defines = ctx.attr.defines
+    validate_dart_defines(defines, "defines attribute of %s" % ctx.label)
+    flag = ctx.attr._extra_dart_defines[BuildSettingInfo].value
+    validate_dart_defines(flag, "`--@rules_dart//dart:extra_dart_defines`, building %s" % ctx.label)
+    return flag
+
 def merge_dart_defines(ctx, defines = None):
     """Merge a target's `defines` attr with the extra_dart_defines flag.
 
     Flag values come after attr values, so on a duplicated key the command
-    line wins (the compilers take the last -D). The flag validates its own
-    value in its rule impl; only the attr is validated here.
+    line wins (the compilers take the last -D). Both are checked for the
+    keys the build reserves.
 
     Args:
         ctx: Rule context with `defines` and `_extra_dart_defines` attrs.
@@ -1197,8 +1222,7 @@ def merge_dart_defines(ctx, defines = None):
     """
     if defines == None:
         defines = ctx.attr.defines
-    validate_dart_defines(defines, "defines attribute of %s" % ctx.label)
-    return list(defines) + ctx.attr._extra_dart_defines[BuildSettingInfo].value
+    return list(defines) + flag_dart_defines(ctx, defines)
 
 def flutter_deps_attr(aspects = [], **kwargs):
     """The `deps` attribute of every rule that compiles a Flutter program.

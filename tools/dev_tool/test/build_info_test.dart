@@ -367,7 +367,7 @@ void main() {
       });
       expect(parsed.buildArgs(extra: const ['--//custom:flag']), [
         '--ios_multi_cpus=sim_arm64',
-        '--@rules_flutter//flutter:extra_dart_defines=E2E_FLAG=from,flag',
+        '--@rules_dart//dart:extra_dart_defines=E2E_FLAG=from,flag',
         '--//custom:flag',
       ]);
     });

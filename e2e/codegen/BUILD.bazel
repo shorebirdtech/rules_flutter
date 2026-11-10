@@ -308,7 +308,7 @@ flutter_test(
 # asset is built for the transitioned platform and must still load.
 platform(
     name = "host_transitioned",
-    flags = ["--@rules_flutter//flutter:extra_dart_defines=PLATFORM_TRANSITIONED=true"],
+    flags = ["--@rules_dart//dart:extra_dart_defines=PLATFORM_TRANSITIONED=true"],
     parents = ["@platforms//host"],
 )
 

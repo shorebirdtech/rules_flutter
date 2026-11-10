@@ -76,6 +76,7 @@ load(
     "check_unreplaced_hooks",
     "declare_flutter_assets_dir",
     "detect_target_platform",
+    "flag_dart_defines",
     "flavor_dart_defines",
     "flutter_build_assets",
     "flutter_compile_shaders",
@@ -393,6 +394,10 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
       `struct(info, providers)`: the `FlutterTestProgramInfo` of the compiled
       program, and the other providers both rules return.
     """
+
+    # rules_dart's checks of the environment reserve no key; the keys the
+    # Flutter build sets itself are refused here.
+    flag_dart_defines(ctx)
     inputs = _test_inputs(ctx, kind)
     deps = inputs.deps
     if not _can_bootstrap(deps):

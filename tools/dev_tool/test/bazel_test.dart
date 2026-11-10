@@ -321,8 +321,8 @@ void main() {
   group('dartDefineFlags', () {
     test('maps each define to one repeatable build-setting flag', () {
       expect(dartDefineFlags(['A=1', 'B=x,y']), [
-        '--@rules_flutter//flutter:extra_dart_defines=A=1',
-        '--@rules_flutter//flutter:extra_dart_defines=B=x,y',
+        '--@rules_dart//dart:extra_dart_defines=A=1',
+        '--@rules_dart//dart:extra_dart_defines=B=x,y',
       ]);
     });
 

@@ -80,7 +80,7 @@ class RunCommand {
       splitCommas: false,
       help:
           'Dart environment define (KEY=VALUE) forwarded to the build '
-          'as --@rules_flutter//flutter:extra_dart_defines and replayed '
+          'as --@rules_dart//dart:extra_dart_defines and replayed '
           'on hot reload/restart recompiles. Repeat for multiple defines.',
     )
     ..addMultiOption(

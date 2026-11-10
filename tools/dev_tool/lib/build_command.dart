@@ -38,7 +38,7 @@ class BuildCommand {
       splitCommas: false,
       help:
           'Dart environment define (KEY=VALUE) forwarded to the build '
-          'as --@rules_flutter//flutter:extra_dart_defines. Repeat for '
+          'as --@rules_dart//dart:extra_dart_defines. Repeat for '
           'multiple defines.',
     )
     ..addFlag(

@@ -252,7 +252,7 @@ class _TailedOutput extends SubprocessOutput {
   String get tail => lines.join('\n');
 }
 
-/// Maps `--dart-define KEY=VALUE` values to the rules_flutter build-setting
+/// Maps `--dart-define KEY=VALUE` values to the rules_dart build-setting
 /// flags every bazel invocation (build AND cquery) must carry so they all
 /// resolve in the same configuration.
 ///
@@ -260,7 +260,7 @@ class _TailedOutput extends SubprocessOutput {
 /// commas survive intact.
 List<String> dartDefineFlags(List<String> dartDefines) => [
   for (final define in dartDefines)
-    '--@rules_flutter//flutter:extra_dart_defines=$define',
+    '--@rules_dart//dart:extra_dart_defines=$define',
 ];
 
 /// Maps `--config` values to the `--config=<name>` flags every bazel

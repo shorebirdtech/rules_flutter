@@ -128,6 +128,5 @@ flutter_kernel_sdk = rule(
 # as a Dart SDK: `flutter_kernel_sdk` is built for that host.
 flutter_module_aspect = dart_module_aspect(
     Label("//flutter/private:flutter_kernel_sdk"),
-    extra_dart_defines = Label("//flutter:extra_dart_defines"),
     exec_toolchains = [FLUTTER_EXEC_TOOLS],
 )
