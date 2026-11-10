@@ -45,6 +45,8 @@ def _check(ctx):
         fail("%s: `file_name` is a web plugin's; on %s, `dart_file_name` names the file of the `dart_plugin_class`." % (ctx.label, p))
     if a.package and p != "android":
         fail("%s: `package` is the Java package of an Android `plugin_class`; this platform is %s." % (ctx.label, p))
+    if a.group and p != "android":
+        fail("%s: `group` is the Maven group of an Android plugin's AAR; this platform is %s." % (ctx.label, p))
     if p == "android" and a.plugin_class and a.plugin_class != "none" and not a.package:
         fail("%s: an Android `plugin_class` needs its Java `package`." % ctx.label)
     lib = a.lib
@@ -67,6 +69,7 @@ def _flutter_plugin_platform_impl(ctx):
         ffi_plugin = a.ffi_plugin,
         default_package = a.default_package,
         package = a.package,
+        group = a.group,
         lib = a.lib,
     )]
 
@@ -99,6 +102,9 @@ flutter_plugin_platform_rule = rule(
         "package": attr.string(
             doc = "`package`: the Java package of an Android `plugin_class`.",
         ),
+        "group": attr.string(
+            doc = "Android only: the Maven group `flutter_android_aar` publishes the plugin's AAR under (Gradle's `group`, which a plugin's `android/build.gradle` sets). A workspace plugin built into an AAR must set it; there is no default, as a wrong group would publish under someone else's coordinates.",
+        ),
         "lib": attr.label(
             doc = "The platform's native library. `flutter_plugin_platform` selects it on the platform.",
             providers = [[CcInfo], [FlutterSwiftPMAppLibraryInfo], [FlutterLinuxPluginInfo], [FlutterWindowsPluginInfo], [FlutterUnbuiltNativeCodeInfo]],
@@ -125,7 +131,7 @@ def flutter_plugin_platform(name, platform, lib = None, **kwargs):
             both. An Android plugin's library is its `flutter_plugin`'s
             `exports`.
         **kwargs: `plugin_class`, `dart_plugin_class`, `dart_file_name`,
-            `file_name`, `ffi_plugin`, `default_package`, `package`, and the
+            `file_name`, `ffi_plugin`, `default_package`, `package`, `group`, and the
             common attributes. See the rule.
     """
     if lib != None:

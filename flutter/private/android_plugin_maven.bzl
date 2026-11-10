@@ -970,10 +970,6 @@ def _flutter_android_maven_impl(rctx):
     ]
     packages = [json.decode(rctx.read(rctx.path(label))) for label in rctx.attr.spokes]
 
-    # The Maven group each package's Gradle build publishes it under, which
-    # `flutter_android_aar` publishes the plugin's AAR under. Every package, as
-    # one with no Maven dependencies is published too.
-    groups = {p["package"]: p.get("group") for p in packages}
     annotated = annotated_requirements(packages, resolved)
     if annotated.errors:
         fail("\n\n".join(annotated.errors))
@@ -983,7 +979,6 @@ def _flutter_android_maven_impl(rctx):
     # picks the packages it links and no others. The build-wide report below is
     # for finding what a lock's plugins need all at once.
     requirements_json = json.encode({
-        "groups": groups,
         "repositories": repositories,
         "resolved": resolved,
         "packages": packages,

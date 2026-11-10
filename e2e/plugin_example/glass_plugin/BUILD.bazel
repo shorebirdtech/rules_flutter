@@ -39,6 +39,8 @@ flutter_plugin(
 
 flutter_plugin_platform(
     name = "android",
+    # The Maven group of its AAR in a `flutter_android_aar` repository.
+    group = "com.example.glass_plugin",
     package = "com.example.glass_plugin",
     platform = "android",
     plugin_class = "GlassPlugin",
@@ -79,4 +81,27 @@ flutter_android_plugin_library(
     flutter_engine = ":android_engine",
     java_package = "com.example.glass_plugin",
     manifest = "android/src/main/AndroidManifest.xml",
+)
+
+# The plugin again with no Maven `group`, which `//glass_app:no_group_aar` shows
+# a workspace plugin built into an AAR must set.
+flutter_plugin(
+    name = "glass_plugin_no_group",
+    srcs = ["lib/glass_plugin.dart"],
+    package = ":pubspec-metadata",
+    platforms = [":android_no_group"],
+    tags = ["manual"],
+    visibility = ["//glass_app:__pkg__"],
+    exports = select({
+        "@platforms//os:android": [":glass_plugin_android"],
+        "//conditions:default": [],
+    }),
+    deps = ["@deps//:flutter"],
+)
+
+flutter_plugin_platform(
+    name = "android_no_group",
+    package = "com.example.glass_plugin",
+    platform = "android",
+    plugin_class = "GlassPlugin",
 )

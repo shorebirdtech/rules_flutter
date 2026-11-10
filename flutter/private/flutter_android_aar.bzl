@@ -387,7 +387,6 @@ def _flutter_android_plugin_aars_impl(ctx):
     mode = flutter_build_mode(ctx)
     app = ctx.attr.application[0]
     data = ctx.attr.maven[FlutterAndroidMavenInfo].data
-    groups = data.get("groups", {})
     own_by_label = {lib.label: lib for lib in app[_OwnLibraryInfo].libraries.to_list()}
 
     # The plugins' native libraries, from each ABI's build of the application.
@@ -412,17 +411,12 @@ def _flutter_android_plugin_aars_impl(ctx):
             continue
         seen[lib.label] = True
         package = entry.package
-        group = groups.get(package)
+        group = entry.group
         if not group:
-            fail(("%s: plugin `%s` has no Maven group to publish its AAR under. Its Gradle " +
-                  "build sets the group a `flutter build aar` publishes it under " +
-                  "(`group = \"com.example.%s\"` at the top of android/build.gradle), and " +
-                  "rules_flutter reads it from there; %s") % (
-                ctx.label,
-                package,
-                package,
-                "this one sets none it can read." if package in groups else "this plugin is not from a `flutter_pub` hub, so there is no Gradle build to read.",
-            ))
+            fail(("%s: plugin `%s` has no Maven group to publish its AAR under. Set `group` on its " +
+                  "Android `flutter_plugin_platform`, e.g. `group = \"com.example.%s\"`. A plugin " +
+                  "from a `flutter_pub` hub takes it from `group` in its android/build.gradle, " +
+                  "which this one does not set.") % (ctx.label, package, package))
         own = own_by_label.get(lib.label)
         if own == None:
             fail("%s: no classes found for %s, the Android library of plugin `%s`." % (ctx.label, lib.label, package))
@@ -509,7 +503,7 @@ _flutter_android_plugin_aars = rule(
             default = DEFAULT_AAR_ABIS,
         ),
         "maven": attr.label(
-            doc = "The build's Android Maven requirements: each plugin's Maven group and the artifacts its Gradle build declares.",
+            doc = "The build's Android Maven requirements: the artifacts each plugin's Gradle build declares.",
             mandatory = True,
             providers = [FlutterAndroidMavenInfo],
         ),
@@ -529,11 +523,12 @@ def flutter_android_plugin_aars(
     module: the classes the plugin's library compiles itself (with its
     generated `BuildConfig`, not its dependencies'), its resources, `R.txt`,
     manifest, consumer R8 rules (`proguard_specs`), and the shared libraries
-    of its own package under `jni/<abi>/`. Each is published under the Maven
-    group the plugin's `android/build.gradle` sets, and its POM lists the
-    Maven artifacts that build declares (and the Kotlin standard library, for a
-    plugin in Kotlin). A plugin with no group, or not from a `flutter_pub` hub,
-    fails the build.
+    of its own package under `jni/<abi>/`. Each is published under the `group`
+    of the plugin's Android `flutter_plugin_platform` (a pub plugin's is the
+    group its `android/build.gradle` sets), and its POM lists the Maven
+    artifacts a pub plugin's Gradle build declares (and the Kotlin standard
+    library, for a plugin in Kotlin). A plugin with no group fails the build,
+    naming it.
 
     Args:
         name: Target name.

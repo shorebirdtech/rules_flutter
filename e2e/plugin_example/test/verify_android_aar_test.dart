@@ -51,6 +51,15 @@ const _plugins = <String, (String, String)>{
   ),
 };
 
+/// The plugin written in the workspace, whose Maven group is the `group` of its
+/// Android `flutter_plugin_platform`, and a class its own code defines.
+const _workspacePlugins = <String, (String, String)>{
+  'glass_plugin': (
+    'com.example.glass_plugin',
+    'com/example/glass_plugin/GlassPlugin.class',
+  ),
+};
+
 /// What each plugin's POM lists beyond the Kotlin standard library: the
 /// Maven artifacts its Gradle build declares, with the scope Gradle publishes
 /// them at (`implementation` is runtime).
@@ -70,6 +79,7 @@ const _pluginDependencies = {
 
 /// The plugins written in Kotlin, whose POMs name the standard library.
 const _kotlin = {
+  'glass_plugin',
   'kotlin_only_plugin',
   'package_info_plus',
   'record_android',
@@ -109,6 +119,18 @@ void main() {
       mode: 'release',
       abis: ['arm64-v8a'],
       plugins: ['annotated_plugin'],
+    );
+
+    // A plugin written in the workspace: the Maven group is the `group` of its
+    // Android `flutter_plugin_platform`, there being no Gradle build to read.
+    _verifyRepo(
+      check,
+      scratch,
+      requireRunfile('glass_app/glass_module_aar_repo', what: 'Repository'),
+      mode: 'release',
+      abis: ['arm64-v8a'],
+      plugins: ['glass_plugin'],
+      modulePackage: 'com.example.glass_app.module',
     );
   } finally {
     scratch.deleteSync(recursive: true);
@@ -152,9 +174,10 @@ void _verifyRepo(
   required String mode,
   required List<String> abis,
   required List<String> plugins,
+  String modulePackage = _module,
 }) {
   final label = '$mode ${abis.join('+')}';
-  final module = _path(_module, 'flutter_$mode', '1.0');
+  final module = _path(modulePackage, 'flutter_$mode', '1.0');
 
   // Every artifact, and nothing else: an AAR and a POM, with their checksums.
   final expected = {
@@ -190,9 +213,9 @@ void _verifyRepo(
   if (!pomFile.existsSync()) return;
   final pom = pomFile.readAsStringSync();
   check.expect(
-    '$label: the module is $_module:flutter_$mode:1.0, an aar',
+    '$label: the module is $modulePackage:flutter_$mode:1.0, an aar',
     condition:
-        _one(pom, 'groupId') == _module &&
+        _one(pom, 'groupId') == modulePackage &&
         _one(pom, 'artifactId') == 'flutter_$mode' &&
         _one(pom, 'version') == '1.0' &&
         _one(pom, 'packaging') == 'aar',
@@ -268,8 +291,8 @@ void _verifyRepo(
   }
   final manifest = File('${aar.path}/AndroidManifest.xml').readAsStringSync();
   check.expect(
-    "$label: the module manifest's package is $_module",
-    condition: manifest.contains('package="$_module"'),
+    "$label: the module manifest's package is $modulePackage",
+    condition: manifest.contains('package="$modulePackage"'),
     detail: manifest,
   );
   final classes = _files(_extract(scratch, '${aar.path}/classes.jar'));
@@ -289,7 +312,7 @@ void _verifyRepo(
 
 String _pluginGroup(String plugin) => plugin == 'annotated_plugin'
     ? 'com.example.annotated_plugin'
-    : _plugins[plugin]!.$1;
+    : (_plugins[plugin] ?? _workspacePlugins[plugin])!.$1;
 
 void _verifyPlugin(
   BundleCheck check,
@@ -350,7 +373,7 @@ void _verifyPlugin(
       .toSet();
   final own = plugin == 'annotated_plugin'
       ? 'com/example/annotated_plugin/AnnotatedPlugin.class'
-      : _plugins[plugin]!.$2;
+      : (_plugins[plugin] ?? _workspacePlugins[plugin])!.$2;
   check.expect(
     "$label: $plugin's classes.jar has $own",
     condition: classes.contains(own),

@@ -50,6 +50,7 @@ flutter_plugin(
 
 flutter_plugin_platform(
     name = "plugin_android",
+    group = "com.ryanheise.audio_session",
     package = "com.ryanheise.audio_session",
     platform = "android",
     plugin_class = "AudioSessionPlugin",

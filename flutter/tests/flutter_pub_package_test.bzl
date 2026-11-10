@@ -314,6 +314,7 @@ def _member_declares_fonts_and_platforms_test_impl(ctx):
             "web": {"fileName": "p_web.dart", "package": "ignored", "pluginClass": "PWeb"},
         },
         apple_libs = {"ios": "@flutter_pub_apple__p//:p_apple_ios"},
+        android_group = "com.example.group",
         fonts = [
             struct(family = "Plain", fonts = [struct(src = ":fonts/a.ttf", asset = None, weight = None, style = None)]),
             struct(family = "Borrowed", fonts = [struct(src = ":_fonts_of_other_packages/o/b.ttf", asset = "packages/o/b.ttf", weight = 700, style = "italic")]),
@@ -321,7 +322,7 @@ def _member_declares_fonts_and_platforms_test_impl(ctx):
     )
     for part in [
         '    platforms = [\n        ":plugin_android",\n        ":plugin_ios",\n        ":plugin_web",\n    ],',
-        'flutter_plugin_platform(\n    name = "plugin_android",\n    package = "com.example.p",\n    platform = "android",\n    plugin_class = "PPlugin",\n)',
+        'flutter_plugin_platform(\n    name = "plugin_android",\n    group = "com.example.group",\n    package = "com.example.p",\n    platform = "android",\n    plugin_class = "PPlugin",\n)',
         'flutter_plugin_platform(\n    name = "plugin_ios",\n    dart_file_name = "p_ios.dart",\n    dart_plugin_class = "PIos",\n    lib = "@flutter_pub_apple__p//:p_apple_ios",\n    platform = "ios",\n)',
         'flutter_plugin_platform(\n    name = "plugin_web",\n    file_name = "p_web.dart",\n    platform = "web",\n    plugin_class = "PWeb",\n)',
         '    fonts = [\n        ":font_family_0",\n        ":font_family_1",\n    ],',

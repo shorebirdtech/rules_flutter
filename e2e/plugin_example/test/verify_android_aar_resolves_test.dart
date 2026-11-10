@@ -118,16 +118,22 @@ void main() {
           (value! as Map<String, Object?>)['version']! as String,
   };
 
-  for (final (name, module) in [
-    ('plugin_module_repo_release', 'flutter_release'),
-    ('plugin_module_repo_debug', 'flutter_debug'),
-    ('annotated_module_aar_repo', 'flutter_release'),
+  const module = 'com.example.plugin_example.module';
+  for (final (name, root) in [
+    ('plugin_module_repo_release', '$module:flutter_release:1.0'),
+    ('plugin_module_repo_debug', '$module:flutter_debug:1.0'),
+    ('annotated_module_aar_repo', '$module:flutter_release:1.0'),
+    // A workspace plugin's module, in its own package.
+    (
+      'glass_app/glass_module_aar_repo',
+      'com.example.glass_app.module:flutter_release:1.0',
+    ),
   ]) {
     _resolve(
       check,
       name,
       requireRunfile(name, what: 'Repository'),
-      'com.example.plugin_example.module:$module:1.0',
+      root,
       engine,
       pinned,
     );

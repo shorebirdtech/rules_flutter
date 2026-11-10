@@ -63,6 +63,7 @@ flutter_plugin(
 flutter_plugin_platform(
     name = "plugin_android",
     ffi_plugin = True,
+    group = "com.github.dart_lang.jni",
     package = "com.github.dart_lang.jni",
     platform = "android",
     plugin_class = "JniPlugin",

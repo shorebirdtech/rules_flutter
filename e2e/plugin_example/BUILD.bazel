@@ -1017,6 +1017,10 @@ flutter_android_aar(
     application = ":plugin_app",
 )
 
+# A module of one plugin written in the workspace, `glass_plugin`
+# (//glass_app:glass_module_aar), which publishes under the `group` of its
+# Android `flutter_plugin_platform`.
+
 # A module of one plugin, `annotated_plugin`, whose Maven dependency
 # `flutter_pub.annotation` states, built for one ABI.
 flutter_android_aar(
@@ -1048,6 +1052,7 @@ dart_test(
         ":annotated_module_aar",
         ":plugin_module_repo_debug",
         ":plugin_module_repo_release",
+        "//glass_app:glass_module_aar",
         "@bazel_tools//tools/zip:zipper",
     ],
     env = {"ZIPPER_RUNFILE": "$(rlocationpath @bazel_tools//tools/zip:zipper)"},
@@ -1082,6 +1087,7 @@ dart_test(
         ":plugin_module_repo_debug",
         ":plugin_module_repo_release",
         ":rules_flutter_maven_install.json",
+        "//glass_app:glass_module_aar",
     ] + _FLUTTER_MAVEN_POMS,
     env = {"FLUTTER_MAVEN_POMS": " ".join(["$(rlocationpath %s)" % pom for pom in _FLUTTER_MAVEN_POMS])},
     main = "test/verify_android_aar_resolves_test.dart",

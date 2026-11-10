@@ -674,7 +674,7 @@ def _annotated_dicts(labels):
     """
     return [{"label": label, "name": label.rsplit("//:", 1)[1]} for label in labels]
 
-def _write_maven_deps(ctx, deps, unread, script, annotated = [], group = None):
+def _write_maven_deps(ctx, deps, unread, script, annotated = []):
     """Record the Maven dependencies the Android check of the hub reads.
 
     Written for every spoke, so `@flutter_pub_android_maven` can read
@@ -684,14 +684,11 @@ def _write_maven_deps(ctx, deps, unread, script, annotated = [], group = None):
     root of the spoke, as a package with no Android library has no `android/`
     package. `script` is the Gradle script's path in the package, which the
     warning about `unread` lines names. `annotated` are the labels the root's
-    `flutter_pub.annotation` added to the library. `group` is the Maven group
-    the Gradle build publishes the plugin under, which `flutter_android_aar`
-    publishes it under too, or None.
+    `flutter_pub.annotation` added to the library.
     """
     ctx.file(MAVEN_DEPS_FILE, json.encode({
         "package": ctx.attr.package_name,
         "version": ctx.attr.version,
-        "group": group,
         "script": script,
         "deps": deps,
         "unread": unread,
@@ -1201,18 +1198,21 @@ _PLUGIN_PLATFORM_KEY_PLATFORMS = {
     "package": ("android",),
 }
 
-def _format_plugin_platform(platform, info, lib):
+def _format_plugin_platform(platform, info, lib, group = ""):
     """The `flutter_plugin_platform` of one `flutter.plugin.platforms` entry, as BUILD source.
 
     Args:
         platform: The entry's platform.
         info: Its keys and values, as `flutter_plugin_block` projects them.
         lib: The label of the platform's native library, or None.
+        group: The Maven group the plugin's Gradle build sets (Android), or "".
 
     Returns:
         The target's BUILD source.
     """
     attrs = {"platform": repr(platform)}
+    if group and platform == "android":
+        attrs["group"] = repr(group)
     if lib:
         attrs["lib"] = repr(lib)
     for key, attr in _PLUGIN_PLATFORM_KEYS:
@@ -1254,6 +1254,7 @@ def make_flutter_member_build_content(
         shader_flavors = {},
         has_android_lib = False,
         unbuilt_native_code = {},
+        android_group = "",
         license_file = "",
         link_hook = ""):
     """Generate BUILD content for the source repository of a Flutter pub package.
@@ -1326,6 +1327,8 @@ def make_flutter_member_build_content(
             native code there is made by a build rules_flutter does not run
             (`unbuilt_native_code.bzl`). That platform's library is a
             `flutter_unbuilt_plugin_library` instead of compiled sources.
+        android_group: The Maven group the plugin's Gradle build sets, which its
+            Android `flutter_plugin_platform` states as `group`, or "".
 
     Returns:
         BUILD.bazel content as a string.
@@ -1414,7 +1417,7 @@ flutter_unbuilt_plugin_library(
             if platform not in plugin_platforms:
                 continue
             platform_labels.append(":plugin_" + platform)
-            extra_targets.append(_format_plugin_platform(platform, plugin_platforms[platform], libs.get(platform)))
+            extra_targets.append(_format_plugin_platform(platform, plugin_platforms[platform], libs.get(platform), android_group))
         if platform_labels:
             extra_loads.append('load("@rules_flutter//flutter/private:flutter_plugin_platform.bzl", "flutter_plugin_platform")')
     platforms_arg = "    platforms = {},\n".format(_format_label_list_literal(platform_labels)) if platform_labels else ""
@@ -2324,13 +2327,11 @@ def _flutter_pub_package_impl(ctx):
         # what the overlay replaces, so they are not reported.
         overlay_maven_deps = []
         overlay_script = ""
-        overlay_group = None
         if overlay_android_content:
             overlay_parsed = _read_plugin_maven_deps(ctx)
             overlay_maven_deps = _maven_dep_dicts(overlay_parsed)
             overlay_script = overlay_parsed.script
-            overlay_group = overlay_parsed.group
-        _write_maven_deps(ctx, overlay_maven_deps, [], overlay_script, group = overlay_group)
+        _write_maven_deps(ctx, overlay_maven_deps, [], overlay_script)
         if overlay_android_content:
             ctx.file("android/BUILD.bazel", overlay_android_content)
         return ctx.repo_metadata(reproducible = not ctx.attr.directory)
@@ -2450,6 +2451,7 @@ def _flutter_pub_package_impl(ctx):
             linux_link = linux_link,
             windows_link = windows_link,
             has_android_lib = bool(android_src_dir or android_has_resources or android_native_build),
+            android_group = (android_gradle_maven.group or "") if android_gradle_maven else "",
             unbuilt_native_code = {
                 platform: message
                 for platform, message in unbuilt_native_code.items()
@@ -2535,7 +2537,6 @@ def _flutter_pub_package_impl(ctx):
     maven_deps = []
     maven_unread = []
     maven_script = ""
-    maven_group = android_gradle_maven.group if android_gradle_maven else None
     if android_gradle_maven and not android_native_build:
         maven_deps = _maven_dep_dicts(android_gradle_maven)
         maven_unread = _unread_dicts(android_gradle_maven)
@@ -2552,7 +2553,7 @@ def _flutter_pub_package_impl(ctx):
             consumer_proguard_specs = android_consumer_proguard_specs,
             has_resources = android_has_resources,
         ))
-    _write_maven_deps(ctx, maven_deps, maven_unread, maven_script, list(ctx.attr.android_deps), group = maven_group)
+    _write_maven_deps(ctx, maven_deps, maven_unread, maven_script, list(ctx.attr.android_deps))
     return ctx.repo_metadata(reproducible = not ctx.attr.directory)
 
 flutter_pub_package = repository_rule(

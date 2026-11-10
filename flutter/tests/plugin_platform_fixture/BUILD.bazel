@@ -36,6 +36,21 @@ analysis_fails_test(
 )
 
 flutter_plugin_platform(
+    name = "group_off_android",
+    group = "com.example.p",
+    platform = "ios",
+    plugin_class = "P",
+    tags = ["manual"],
+)
+
+analysis_fails_test(
+    name = "group_off_android_test",
+    size = "small",
+    message = "`group` is the Maven group of an Android plugin's AAR",
+    target_under_test = ":group_off_android",
+)
+
+flutter_plugin_platform(
     name = "file_name_off_web",
     dart_plugin_class = "P",
     file_name = "p.dart",
