@@ -46,6 +46,11 @@ If `flutter build` works for you, here is what Bazel adds:
 ```starlark
 bazel_dep(name = "rules_flutter", version = "<latest from registry.bazel.build/modules/rules_flutter>")
 
+# Your BUILD files load `dart_package_metadata`, and `dart_library` if you have
+# plain Dart packages, from rules_dart: the version rules_flutter's own
+# MODULE.bazel names, or later.
+bazel_dep(name = "rules_dart", version = "<the version rules_flutter depends on>")
+
 flutter = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter")
 flutter.toolchain(flutter_version = "3.47.9")
 use_repo(flutter, "flutter_toolchains")
@@ -158,12 +163,18 @@ rules_flutter's actions land the same with the flag on or off: `gen_snapshot` fo
 Start from a project made with `flutter create`. It has `lib/main.dart`, a `pubspec.yaml`, and one folder per platform. rules_flutter reads those files as they are. You add a `BUILD.bazel`:
 
 ```starlark
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_flutter//flutter:defs.bzl", "flutter_application")
 load("@rules_flutter//flutter:macos.bzl", "flutter_macos_app")
 
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "my_app",
+)
+
 flutter_application(
     name = "my_app",
-    package_name = "my_app",
+    package = ":pubspec",
     main = "lib/main.dart",
     srcs = glob(["lib/**/*.dart"]),
     assets = glob(["assets/**"]),
@@ -182,7 +193,7 @@ flutter_macos_app(
 
 `flutter_application` compiles the Dart code and bundles the assets. Each platform then has a macro, like `flutter_macos_app`, that wraps it in a runnable app. Two attributes deserve a note:
 
-- `package_name` must match the `name:` field in `pubspec.yaml`. Hot reload and code generation both rely on it.
+- `dart_package_metadata` is the Bazel stand-in for `pubspec.yaml`: it states the package's facts once (its name, its language version, its licence), and every target of the package names it with `package`. Its `package_name` must match the `name:` field in `pubspec.yaml`. Hot reload and code generation both rely on it.
 - `@rules_flutter//flutter:material_icons` bundles the Material icon font. Any app that uses Material widgets needs it in `deps`.
 
 Build it, or run it with hot reload:
@@ -226,7 +237,7 @@ To check a profile build from a test without those flags on the command line, wr
 ```starlark
 flutter_application(
     name = "my_app",
-    package_name = "my_app",
+    package = ":pubspec",
     main = "lib/main.dart",
     deps = [
         "@deps//:flutter",
@@ -282,7 +293,7 @@ flutter_pub.from_lock(
 )
 ```
 
-- The target is a `flutter_library`, a `flutter_plugin` or a `dart_library`. Its name is free; its `package_name` must be the pub package's name, or analysis fails naming the target, the key and the name it declares. For a package with assets, fonts or shaders that is also what bundles them at `packages/<package>/<path>`, as `flutter build` does. The target must be `//visibility:public`, because the hub's repository forwards to it.
+- The target is a `flutter_library`, a `flutter_plugin` or a `dart_library`. Its name is free; the `package_name` of its `dart_package_metadata` must be the pub package's name, or analysis fails naming the target, the key and the name it declares. For a package with assets, fonts or shaders that is also what bundles them at `packages/<package>/<path>`, as `flutter build` does. The target must be `//visibility:public`, because the hub's repository forwards to it.
 - Every `path` package of the lock must be named in exactly one of `resolve`, `build_from_pubspec` and `ignored` (below). Usually it is mapped to the target in the Bazel package at the path (`../../packages/greeting` from `apps/greeter` is `//packages/greeting`), but where the path points is pub's concern only: a package pub reads from a sibling checkout can be mapped to a target of the module Bazel takes it from (`"ui_kit": "@ui_kit"`). A `path` package named nowhere fails as soon as Bazel reads the lock, naming the lock and the package, with the lines to add.
 - A hosted, git or `sdk` package may be mapped as well, from any repository, to replace it for the whole graph with a fork or a patched copy. The hub's `@deps//:<package>` is then your target, a hosted package that depends on it gets it too, and the locked package is never fetched. The lock's version is not checked against your target. Naming a package the lock does not list is an error.
 - Depend on a mapped package as `@deps//:greeting`, or by its label.
@@ -507,9 +518,14 @@ cc_shared_library(
     deps = [":my_cc_lib"],
 )
 
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "my_app",
+)
+
 flutter_application(
     name = "my_app",
-    package_name = "my_app",
+    package = ":pubspec",
     main = "lib/main.dart",
     native_deps = [":my_native_lib"],
     deps = ["@deps//:flutter"],
@@ -520,7 +536,7 @@ If you would rather bind with `@Native(assetId: ...)` and let the Dart VM find t
 
 #### Choosing the library that serves an asset id
 
-A package that owns an asset id supplies its library through its `code_assets`. An application or a `flutter_test` can serve the id from a different library by naming one in its own `code_assets`, which replaces whatever its `deps` supply under that id, as on rules_dart's `dart_binary` and `dart_test`. Several ids can name one library. That is how two bridges linked into one shared library run against one copy of it:
+A package that owns an asset id supplies its library through the `code_assets` of its `dart_package_metadata`. An application or a `flutter_test` can serve the id from a different library by naming one in its own `code_assets`, which replaces whatever its `deps` supply under that id, as on rules_dart's `dart_binary` and `dart_test`. Several ids can name one library. That is how two bridges linked into one shared library run against one copy of it:
 
 ```starlark
 cc_shared_library(
@@ -563,7 +579,7 @@ flutter_application(
 )
 ```
 
-A library that reaches Dart as a code asset (a target providing rules_dart's `DartCodeAssetInfo`, loaded through `@Native`) is wrapped the same way. The wrapper is itself that code asset, so it goes where the bare asset would have gone: in the `code_assets` of the package that owns the asset id, whether that package is a `flutter_plugin`, a `flutter_library` or a `dart_library`.
+A library that reaches Dart as a code asset (a target providing rules_dart's `DartCodeAssetInfo`, loaded through `@Native`) is wrapped the same way. The wrapper is itself that code asset, so it goes where the bare asset would have gone: in the `code_assets` of the `dart_package_metadata` of the package that owns the asset id, whichever of `flutter_plugin`, `flutter_library` or `dart_library` its targets are.
 
 ```starlark
 flutter_native_library(
@@ -572,11 +588,16 @@ flutter_native_library(
     binding_contract = ["@my_bridge//bridge:codegen.ir"],
 )
 
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "my_bridge_bindings",
+    code_assets = [":bridge"],
+)
+
 dart_library(
     name = "my_bridge_bindings",
-    package_name = "my_bridge_bindings",
     srcs = ["lib/bindings.dart"],
-    code_assets = [":bridge"],
+    package = ":pubspec",
 )
 ```
 
@@ -666,9 +687,14 @@ On iOS and macOS, rules_apple's `apple_bundle_version` can instead read the vers
 A flavor is a target. Give `flutter_application` (or `flutter_web_app`) a `flavor`, and declare one application per flavor, with the platform target of each beside it:
 
 ```starlark
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "my_app",
+)
+
 flutter_application(
     name = "app_paid",
-    package_name = "my_app",
+    package = ":pubspec",
     main = "lib/main.dart",
     flavor = "paid",
     deps = [...],
@@ -683,7 +709,7 @@ flutter_macos_app(
 
 flutter_web_app(
     name = "web_paid",
-    package_name = "my_app",
+    package = ":pubspec",
     flavor = "paid",
     deps = [...],
 )
@@ -1527,11 +1553,17 @@ flutter_windows_bundle(
 Run `flutter create --platforms=web .` first so `web/` has its `index.html`, `manifest.json`, and icons. Any of those that are missing are replaced by built-in templates. Add `flutter_web_sdk` to `use_repo`.
 
 ```starlark
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
+
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "my_app",
+)
 
 flutter_web_app(
     name = "my_app_web",
-    package_name = "my_app",
+    package = ":pubspec",
     main = "lib/main.dart",
     deps = ["@deps//:flutter", "@rules_flutter//flutter:material_icons"],
     app_name = "My App",
@@ -1542,7 +1574,7 @@ Unlike the other platforms, the web macro takes `main` and `deps` directly rathe
 
 | Attribute | Description |
 |---|---|
-| `package_name` | The Dart package name, same as `pubspec.yaml`. Required. |
+| `package` | The package's `dart_package_metadata`, which states its name (the `name:` of `pubspec.yaml`) and language version. Required. |
 | `deps` | `dart_library` or `flutter_library` targets. Required. |
 | `main` | The entry point. Defaults to `"lib/main.dart"`. It can sit outside the package's `lib/`; list any file it imports by relative path in `srcs`. |
 | `app_name` | Used for the HTML title and manifest. Defaults to the target name. |
@@ -1569,37 +1601,49 @@ The cost of `js_fallback = False` is the browsers that cannot run WASM, and unde
 A bundle compiles its program once for each compiler it ships: dart2wasm, dart2js for the fallback, and DDC for `flutter_bazel run -d chrome` (DDC compiles what dart2js does, so a debug bundle has two versions of the program at most). The program can differ between them. Dart's own way to do that is a conditional import on `dart.library.js_interop`, but it cannot give dart2js and dart2wasm different declared types or different files. For that, each compiler builds its dependencies for its own web platform, one carrying the constraint value `@rules_dart//dart/constraints:wasm` or `:js`, and a library picks its variant with a `select()` on those in its `deps`. This is [rules_dart's mechanism](https://github.com/aran/rules_dart#per-compiler-code); a Flutter app uses it through `flutter_library` and `flutter_plugin` the same way.
 
 ```starlark
-# lib/ids.dart in each variant: the same API, a different type.
-flutter_library(
-    name = "ids_typed",  # typedef Ids = Int64List
+# ids_typed/BUILD.bazel, and ids_js/BUILD.bazel the same with its own
+# lib/ids.dart: the same API, a different type.
+dart_package_metadata(
+    name = "pubspec",
     package_name = "ids",
-    srcs = ["typed/lib/ids.dart"],
 )
 
 flutter_library(
-    name = "ids_js",  # typedef Ids = List<int>
-    package_name = "ids",
-    srcs = ["js/lib/ids.dart"],
+    name = "ids",  # typedef Ids = Int64List (in ids_js, List<int>)
+    srcs = ["lib/ids.dart"],
+    package = ":pubspec",
+)
+
+# ids/BUILD.bazel
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "ids_select",
 )
 
 flutter_library(
     name = "ids",
-    package_name = "ids_select",
+    package = ":pubspec",
     deps = select({
-        "@rules_dart//dart/constraints:js": [":ids_js"],
+        "@rules_dart//dart/constraints:js": ["//ids_js"],
         # dart2wasm, and a build for no web platform (the VM's).
-        "//conditions:default": [":ids_typed"],
+        "//conditions:default": ["//ids_typed"],
     }),
+)
+
+# BUILD.bazel
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "app",
 )
 
 flutter_web_app(
     name = "app",
-    package_name = "app",
-    deps = [":ids", "@deps//:flutter"],
+    package = ":pubspec",
+    deps = ["//ids", "@deps//:flutter"],
 )
 ```
 
-The `select()` goes in a library, not in the bundle's `deps`: a `select()` is resolved in the configuration of the target that holds it, and the bundle's own is not yet a web platform's. The variants are separate libraries with the same `package_name`, each in a directory of its own, so the import is the same whichever is picked. `e2e/web_example/int64` is this app, which renders `Int64List max: 9223372036854775807` from the WebAssembly build and `List<int> max: 9007199254740991` from the JavaScript one.
+The `select()` goes in a library, not in the bundle's `deps`: a `select()` is resolved in the configuration of the target that holds it, and the bundle's own is not yet a web platform's. The variants are separate libraries whose `dart_package_metadata` state the same `package_name`, each in a directory of its own, so the import is the same whichever is picked. `e2e/web_example/int64` is this app, which renders `Int64List max: 9223372036854775807` from the WebAssembly build and `List<int> max: 9007199254740991` from the JavaScript one.
 
 What the bundle holds once comes from the primary compiler's version of the program (`dart2wasm` for the default `compiler`): the plugin registrant, the assets and shaders, and the icon tree-shaking scan. A dependency that differs by compiler should not differ in what plugins or assets it brings. An icon only the other compiler's variant uses is shaken out of the font unless `tree_shake_icons = False`.
 
@@ -1621,13 +1665,19 @@ The files under `web/` are treated as templates and substituted the way `flutter
 <summary>Composable rules</summary>
 
 ```starlark
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_bundle")
+
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "my_app",
+)
 
 # WASM, with a dart2js build beside it for browsers that cannot run WASM
 # (the default):
 flutter_web_bundle(
     name = "my_app_web",
-    package_name = "my_app",
+    package = ":pubspec",
     main = "lib/main.dart",
     deps = ["@deps//:flutter"],
 )
@@ -1635,7 +1685,7 @@ flutter_web_bundle(
 # WASM only, for an app dart2js cannot compile, served to every engine:
 flutter_web_bundle(
     name = "my_app_web_wasm",
-    package_name = "my_app",
+    package = ":pubspec",
     main = "lib/main.dart",
     js_fallback = False,
     wasm_browsers = ["blink", "gecko", "webkit"],
@@ -1645,7 +1695,7 @@ flutter_web_bundle(
 # JavaScript alone, for wider browser support:
 flutter_web_bundle(
     name = "my_app_web_js",
-    package_name = "my_app",
+    package = ":pubspec",
     main = "lib/main.dart",
     compiler = "dart2js",
     renderer = "canvaskit",
@@ -1681,7 +1731,7 @@ The default renderer, fetched from `www.gstatic.com`, works in an isolated page 
 ```starlark
 flutter_web_app(
     name = "app",
-    package_name = "my_app",
+    package = ":pubspec",
     deps = [...],
     cross_origin_embedder_policy = "credentialless",  # default "require-corp"
 )
@@ -2003,12 +2053,17 @@ The core rules load from `@rules_flutter//flutter:defs.bzl`.
 Collects Dart sources and assets for a Flutter package. It does not compile anything. It carries `DartInfo` and `FlutterInfo` to whatever depends on it.
 
 ```starlark
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "my_lib",
+)
+
 flutter_library(
     name = "my_lib",
     srcs = glob(["lib/**/*.dart"]),
     deps = ["@deps//:some_package"],
     assets = glob(["assets/**"]),
-    package_name = "my_lib",
+    package = ":pubspec",
 )
 ```
 
@@ -2021,8 +2076,7 @@ flutter_library(
 | `font_files` | The font files of `fonts_json`, as `{file: path}`. |
 | `shaders` | The package's fragment shaders, mirroring `flutter: shaders:` in `pubspec.yaml`, keyed by their path from the package root as `assets` are. Bundled at `packages/<package_name>/<path>` in a program of another package and at `<path>` in a program of this package (its own `flutter_test`, or the application this is part of), as `flutter build` keys them, where `FragmentProgram.fromAsset` looks for them. |
 | `shader_includes` | Files the `shaders` may `#include`, such as `glob(["shaders/**/*.glsl"])`. A shader compiles with only its declared inputs, so an include not listed here is not found. |
-| `package_name` | The Dart package name. Defaults to the last component of the Bazel package path. |
-| `language_version` | The Dart language version, matching the `sdk:` constraint in `pubspec.yaml`. |
+| `package` | The package's `dart_package_metadata`, which states its name, its language version (the `sdk:` constraint in `pubspec.yaml`), its version, its licence and its hooks. Its directory is the package root. Without it, the package is named for its root directory and states nothing else. |
 
 **Fonts fetched at run time.** `package:google_fonts` downloads fonts over the network when the app first draws them. In a `flutter_test`, whose test binding answers every HTTP request with an error, a widget drawing such a font fails, and an app offline falls back to another font. To ship the fonts instead, list their `.ttf` files (`Lato-Regular.ttf`, as Google Fonts names them) in a `flutter_library`'s `assets`, where `google_fonts` finds them by file name in the asset manifest, and set `GoogleFonts.config.allowRuntimeFetching = false` before `runApp`.
 
@@ -2031,9 +2085,14 @@ flutter_library(
 Compiles a Flutter app. In debug mode (`-c dbg`) it produces a kernel `.dill` for the JIT. Otherwise it produces AOT native code. Either way it also builds the `flutter_assets/` bundle. The platform macros consume its `FlutterApplicationInfo`.
 
 ```starlark
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "my_app",
+)
+
 flutter_application(
     name = "my_app",
-    package_name = "my_app",
+    package = ":pubspec",
     main = "lib/main.dart",
     srcs = glob(["lib/**/*.dart"]),
     deps = [
@@ -2048,13 +2107,12 @@ flutter_application(
 | Attribute | Description |
 |---|---|
 | `main` | The entry point. Required. It can sit outside the package's `lib/`, as `flutter run -t` allows: `test_driver/app.dart`, say. See [Hot reload and hot restart](#hot-reload-and-hot-restart). |
-| `package_name` | The Dart package name, the same as `pubspec.yaml`'s `name:`. Required. It keys the compiled libraries under stable `package:` URIs, which hot reload matches against, and resolves `package:<self>/...` imports. |
+| `package` | The app's `dart_package_metadata`. Required. Its `package_name` is the same as `pubspec.yaml`'s `name:`; it keys the compiled libraries under stable `package:` URIs, which hot reload matches against, and resolves `package:<self>/...` imports. |
 | `srcs` | Other Dart sources in the app package, including generated ones. List here any file a `main` outside `lib/` imports by relative path. |
 | `deps` | `dart_library` or `flutter_library` targets. Add `@rules_flutter//flutter:material_icons` to bundle the Material icon font. |
 | `assets` | Asset files for the bundle, each under its path in the application's Bazel package (`assets/a.png`), wherever in the workspace that package is. That is the key `rootBundle` and `Image.asset` load it by, and the one `flutter run` gives it. A file from another package fails the build. |
 | `native_deps` | Shared libraries to bundle for `dart:ffi`. |
 | `defines` | Dart environment defines, the `-D` flags. |
-| `language_version` | The Dart language version, matching `pubspec.yaml`. |
 | `obfuscate` | Obfuscate Dart symbols in the AOT output. Pair with `split_debug_info`. Default `False`. |
 | `split_debug_info` | Write debug info to a separate `.symbols` file. Default `False`. |
 | `extra_gen_snapshot_options` | Extra flags for `gen_snapshot`. `--no-strip` keeps the shipped binary's local symbols, as it does in `flutter build`; it is not passed on to `gen_snapshot`. A flag that makes `gen_snapshot` write a file (`--save-obfuscation-map`, `--write-v8-snapshot-profile-to`, `--print-instructions-sizes-to`) names it relative to the package, as `--save-obfuscation-map=obfuscation.json`. The file is built to `<name>_gen_snapshot/obfuscation.json`, and it is in the target's `gen_snapshot_files` output group. |
@@ -2064,9 +2122,10 @@ flutter_application(
 | `require_sksl_shaders` | Fail the build when a shader cannot be compiled for Skia (SkSL). By default such a shader, say one that indexes a uniform array in a loop, is compiled for Impeller alone with a warning, as `flutter build` does, and fails to load only where the app renders with Skia. Web builds always need SkSL. Default `False`. |
 | `tree_shake_icons` | Keep only the icon glyphs the app uses, in a release or profile build. Default `True`. It needs every `IconData` to be constant, and an icon font family of one font file; as with `flutter build`, a non-constant `IconData`, a family of several font files that the app draws icons from, or a `const_finder` or `font-subset` that fails fails the build. Set `False` to ship the fonts whole. |
 | `link_hook_assets` | The data assets packages' link hooks emit, each `package:<package>/<name>`. See [Link hooks](#link-hooks). |
-| `license_file` | The program's own licence, the `NOTICES` or `LICENSE` file at the root of its package. `NOTICES.Z` (`NOTICES` on the web) lists it under `package_name`, with the licence of every package in `deps` (each `flutter_library`, `flutter_plugin`, `dart_library` and pub package states its own as `license_file`) and the Flutter engine's, which every program ships. |
 | `additional_licenses` | The files the pubspec's `flutter: licenses:` lists. They are appended to `NOTICES.Z` as they are, after the sorted entries. |
 | `minimum_os_version` | Minimum Apple deployment target, passed to `gen_snapshot` as `--macho-min-os-version`. |
+
+**Licences.** The program's own licence is the `license_file` of its `dart_package_metadata`, the `NOTICES` or `LICENSE` file at the root of its package. `NOTICES.Z` (`NOTICES` on the web) lists it under the package name, with the licence of every package in `deps` (each package states its own: a package of your workspace as the `license_file` of its `dart_package_metadata`) and the Flutter engine's, which every program ships.
 
 **Defines from the command line.** The repeatable flag `--@rules_flutter//flutter:extra_dart_defines=KEY=VALUE` adds a define to every Dart compile: native kernel, `flutter_test`, dart2wasm, and dart2js. Each occurrence of the flag is one define, so values may contain commas, except in a `flutter_test`: its dependencies are compiled one library at a time by the SDK's `kernel_worker`, which splits every value on commas, so a comma there is refused at analysis. When a key is set both by the flag and by the `defines` attribute, the flag wins. The keys `dart.vm.profile` and `dart.vm.product` are set by the build from the compilation mode and cannot be passed. The dev tool's `--dart-define` forwards to this flag and replays the defines on hot reload and restart, matching `flutter run --dart-define`.
 
@@ -2106,18 +2165,23 @@ flutter_macos_app(
 Compiles and runs widget and unit tests on the Dart VM with Flutter's test engine. Assertions are enabled.
 
 ```starlark
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "my_app",
+)
+
 flutter_test(
     name = "widget_test",
-    package_name = "my_app",
+    package = ":pubspec",
     main = "test/widget_test.dart",
     srcs = glob(["lib/**/*.dart"]),
     deps = ["@deps//:flutter", "@deps//:flutter_test"],
 )
 ```
 
-It takes the compile attributes of `flutter_application` (`main`, `srcs`, `deps`, `defines`, `package_name`, `language_version`, `assets`, `shaders`) plus the usual `data` and `env`, and `include_tags` and `exclude_tags` (below). Values in `env` are literal; there is no `$(location)` expansion.
+It takes the compile attributes of `flutter_application` (`main`, `srcs`, `deps`, `defines`, `package`, `assets`, `shaders`) plus the usual `data` and `env`, and `include_tags` and `exclude_tags` (below). Values in `env` are literal; there is no `$(location)` expansion.
 
-A test of an app can name the app's `flutter_application` as `application` instead of repeating its package, as `flutter test` compiles a test in the package it is in. The application's package name, language version, sources, `deps`, `code_assets` and assets become the test's, so `package:my_app/…` resolves; the test's `main`, `srcs`, `deps` and `code_assets` add to them, and its `defines` and `flavor` are its own:
+A test of an app can name the app's `flutter_application` as `application` instead of repeating its package, as `flutter test` compiles a test in the package it is in. The application's package, sources, `deps`, `code_assets` and assets become the test's, so `package:my_app/…` resolves; the test's `main`, `srcs`, `deps` and `code_assets` add to them, and its `defines` and `flavor` are its own:
 
 ```starlark
 flutter_test(
@@ -2184,17 +2248,23 @@ Two limits come from Flutter rather than from these rules:
 
 ### flutter_suite_program and flutter_program_test
 
-`flutter_test` is a macro over two rules. `flutter_suite_program` compiles the test and returns a `FlutterTestProgramInfo` (below); `flutter_program_test` runs any target that returns one. `flutter_test(name = "x", ...)` declares a `flutter_suite_program` named `x.program` and the test `x`, so everything above holds as before: the attributes of both rules are `flutter_test`'s, a compile attribute (`main`, `srcs`, `deps`, `package_name`, `application`, `flavor`, `enable_impeller`, `test_config`, ...) goes to the program, a run attribute (`include_tags`, `exclude_tags`, `env`, `size`, `timeout`, `shard_count`, `args`) to the test, and `data`, `tags`, `visibility` and the platform constraints to both. The test's kind is `flutter_test` whichever way it is declared, so `bazel query 'kind(flutter_test, //...)'` lists every test and nothing else. The program is a target of its own, of kind `flutter_suite_program`.
+`flutter_test` is a macro over two rules. `flutter_suite_program` compiles the test and returns a `FlutterTestProgramInfo` (below); `flutter_program_test` runs any target that returns one. `flutter_test(name = "x", ...)` declares a `flutter_suite_program` named `x.program` and the test `x`, so everything above holds as before: the attributes of both rules are `flutter_test`'s, a compile attribute (`main`, `srcs`, `deps`, `package`, `application`, `flavor`, `enable_impeller`, `test_config`, ...) goes to the program, a run attribute (`include_tags`, `exclude_tags`, `env`, `size`, `timeout`, `shard_count`, `args`) to the test, and `data`, `tags`, `visibility` and the platform constraints to both. The test's kind is `flutter_test` whichever way it is declared, so `bazel query 'kind(flutter_test, //...)'` lists every test and nothing else. The program is a target of its own, of kind `flutter_suite_program`.
 
 Use the two rules directly to run a program that something else compiled, with everything `flutter_test` gives a test: the `bazel test` result protocol, `@Tags` selection (`include_tags`, `exclude_tags`, `DART_TEST_TAGS`), JUnit output, golden comparison and `--update-goldens`, code assets, sharding and coverage:
 
 ```starlark
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_flutter//flutter:defs.bzl", "flutter_suite_program", "flutter_program_test")
+
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "my_app",
+)
 
 flutter_suite_program(
     name = "widget_program",
     testonly = True,
-    package_name = "my_app",
+    package = ":pubspec",
     main = "test/widget_test.dart",
     data = glob(["test/goldens/**"]),
     deps = ["@deps//:flutter", "@deps//:flutter_test"],
@@ -2217,9 +2287,14 @@ A rule that compiles tests its own way returns `FlutterTestProgramInfo` and `flu
 Runs a program under `flutter_tester`, the headless engine `flutter_test` uses, as an ordinary executable rather than a test. Use it to make build outputs with Flutter's rendering, such as store screenshots: the outputs do not have to be `testonly`. It is compiled as `flutter_test` compiles a test and takes the same attributes, `enable_impeller` included, except `include_tags` and `exclude_tags`: it is not a test, and `DART_TEST_TAGS` in a shell does not change it. A program that registers no test fails.
 
 ```starlark
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "my_app",
+)
+
 flutter_tester_binary(
     name = "render",
-    package_name = "my_app",
+    package = ":pubspec",
     main = "tool/render.dart",
     enable_impeller = True,
     deps = ["//:my_app_lib", "@deps//:flutter", "@deps//:flutter_test"],
@@ -2246,12 +2321,18 @@ Build it for the machine it runs on. `bazel run` does that, and a rule that runs
 macOS, Windows, Linux, the web (headless Chrome), Android devices and the iOS simulator are the platforms so far; Windows is [below](#windows-integration-tests), Linux [after it](#linux-integration-tests), the web [next](#web-integration-tests), Android [after that](#android-integration-tests) and iOS [last](#ios-simulator-integration-tests).
 
 ```starlark
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_flutter//flutter:defs.bzl", "flutter_application")
 load("@rules_flutter//flutter:integration_test.bzl", "flutter_macos_integration_test")
 
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "my_app",
+)
+
 flutter_application(
     name = "app_flutter",
-    package_name = "my_app",
+    package = ":pubspec",
     main = "lib/main.dart",
     srcs = glob(["lib/**/*.dart"]),
     deps = ["@deps//:flutter"],
@@ -2338,12 +2419,18 @@ The macro is Tier 1. Tier 2 is `flutter_integration_bootstrap`, `flutter_applica
 `flutter_web_integration_test` runs the same test file in headless Chrome. `flutter test` refuses web devices (flutter/flutter#66264), and `flutter drive -d chrome` reports only pass or fail; this reports each `testWidgets` as a case, as the other platforms do, with `--test_filter`, tags and `shard_count`.
 
 ```starlark
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_flutter//flutter:integration_test.bzl", "flutter_web_integration_test")
+
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "my_app",
+)
 
 flutter_web_integration_test(
     name = "app_web_test",
     src = "integration_test/app_test.dart",
-    package_name = "my_app",
+    package = ":pubspec",
     srcs = glob(["lib/**/*.dart"]),
     assets = glob(["assets/**"]),
     deps = [
@@ -2354,7 +2441,7 @@ flutter_web_integration_test(
 )
 ```
 
-A web app is its own program and takes the sources and `deps` the test compiles, not an `application` (`flutter_web_app` has none): the macro's `package_name`, `srcs`, `deps` and the rest (`assets`, `web_dir`, `base_href`, and the other `flutter_web_app` arguments) are `flutter_web_app`'s. The test's program is that app with the test as its `main`, built in debug mode whatever `-c` says, served from a directory of its own on the loopback and opened in a headless Chrome.
+A web app is its own program and takes the sources and `deps` the test compiles, not an `application` (`flutter_web_app` has none): the macro's `package`, `srcs`, `deps` and the rest (`assets`, `web_dir`, `base_href`, and the other `flutter_web_app` arguments) are `flutter_web_app`'s. The test's program is that app with the test as its `main`, built in debug mode whatever `-c` says, served from a directory of its own on the loopback and opened in a headless Chrome.
 
 - **The browser is pinned.** It is Chrome for Testing's headless shell (`@rules_flutter//flutter/integration_test:chrome`), downloaded by version and `sha256` for macOS (arm64, x64), Linux (x64, arm64) and Windows x64, so the page is drawn by the same browser wherever the test runs. Only the host's own is fetched, and only when a web integration test is analysed. A host with no pinned shell skips the test (`@platforms//:incompatible`); it is never run in another browser. `runner` takes a `flutter_chrome_runner` of your own. `bazel run @rules_flutter//tools/update_chrome_for_testing` prints a newer pin.
 - **The suite is driven over the browser's DevTools protocol**, which a web bundle has in place of a VM service: the page publishes a hook the host calls, and calls a binding the host added, so there is no port to open and no server of the page's own. The browser's profile is deleted when the test ends, and the browser is killed.
@@ -2535,9 +2622,7 @@ flutter_plugin(
 | `native_assets` | `flutter_native_asset` targets, usually inside a `select()` on platform. |
 | `assets`, `resources` | Asset and resource files. An asset is keyed as on `flutter_library`. |
 | `shaders`, `shader_includes` | The package's fragment shaders and what they `#include`, as on `flutter_library`. |
-| `package_name`, `language_version`, `version` | The package's name, language version, and version. |
-| `link_hook` | The package's `hook/link.dart`. See [Link hooks](#link-hooks). `flutter_library` takes it too. |
-| `license_file` | The package's `NOTICES` or `LICENSE` file, as `flutter build` reads it from the package root. Programs that depend on the package list it in their `NOTICES`. `flutter_library` takes it too. |
+| `package` | The package's `dart_package_metadata`, as on `flutter_library`. It states the package's name, language version and version, its `hook/link.dart` (see [Link hooks](#link-hooks)) and its `NOTICES` or `LICENSE` file, as `flutter build` reads it from the package root: programs that depend on the package list that file in their `NOTICES`. |
 
 A plugin's native code is its own target. Swift goes in a `flutter_apple_plugin_library` per platform, passed as `apple_libs`. Kotlin or Java goes in a `flutter_android_plugin_library`, passed as `exports` in a `select()` on `@platforms//os:android` (an empty list otherwise). Every Android app that depends on the plugin then links it, as it links a pub plugin's library: `flutter_android_app` packages it, registers its plugin class and merges its `manifest` (receivers, services, permissions) into the app's. It gets a generated `BuildConfig` in its `java_package`, with `DEBUG` and `BUILD_TYPE` as Gradle's would be in the build's mode. Its `flutter_engine` is a `flutter_android_engine(neverlink = True)`: the plugin compiles against the engine and the app ships its own, of the app's ABI. `e2e/plugin_example/glass_plugin` shows both, with shaders.
 
@@ -2548,18 +2633,32 @@ A plugin's native code is its own target. Swift goes in a `flutter_apple_plugin_
 A package can decide what it ships from how the app uses it. Mark a `final class` with `@RecordUse()` from `package:meta` (1.19 or later), and write a `hook/link.dart` that reads the recorded uses with `package:record_use` and emits data assets with `package:data_assets`. The hook may import pure Dart from its own package's `lib/`, not Flutter.
 
 ```starlark
+# symbols/BUILD.bazel
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "symbols",
+    link_hook = "hook/link.dart",
+)
+
 flutter_plugin(
     name = "symbols",
     srcs = glob(["lib/**/*.dart"]),
-    link_hook = "hook/link.dart",
+    package = ":pubspec",
     platforms = [],
     deps = ["@deps//:data_assets", "@deps//:hooks", "@deps//:meta", "@deps//:record_use"],
 )
 
+# app/BUILD.bazel
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "app",
+)
+
 flutter_application(
     name = "app",
+    package = ":pubspec",
     link_hook_assets = ["package:symbols/index.json"],
-    deps = [":symbols", "@deps//:flutter"],
+    deps = ["//symbols", "@deps//:flutter"],
     # ...
 )
 ```
@@ -2585,12 +2684,17 @@ These are what `flutter_application` is made of. Most apps never need them.
 rules_dart provides `dart_codegen` and `dart_aggregate_codegen`, which replace `build_runner` with ordinary Bazel actions. They load from `@rules_dart//dart:defs.bzl`. A generated file goes into the consuming target's `srcs`, and the rules place it next to its hand-written sibling so a `part` directive resolves:
 
 ```starlark
-load("@rules_dart//dart:defs.bzl", "dart_aggregate_codegen", "dart_codegen")
+load("@rules_dart//dart:defs.bzl", "dart_aggregate_codegen", "dart_codegen", "dart_package_metadata")
+
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "my_app",
+)
 
 # One output per input file, for example a json_serializable part.
 dart_codegen(
     name = "user_json",
-    package_name = "my_app",
+    package = ":pubspec",
     src = "lib/user.dart",
     generator = "tools/json_generator.dart",
     output_suffixes = [".g.dart"],
@@ -2599,7 +2703,7 @@ dart_codegen(
 # One output from all the inputs, for example a route registry.
 dart_aggregate_codegen(
     name = "registry",
-    package_name = "my_app",
+    package = ":pubspec",
     srcs = ["lib/model.dart", "lib/order.dart"],
     generator_script = "tools/aggregate_generator.dart",
     outputs = ["lib/registry.g.dart"],
@@ -2607,7 +2711,7 @@ dart_aggregate_codegen(
 
 flutter_application(
     name = "my_app",
-    package_name = "my_app",
+    package = ":pubspec",
     main = "lib/main.dart",
     srcs = ["lib/user.dart", ":user_json", ":registry"],
     deps = ["@deps//:flutter"],
@@ -2634,7 +2738,7 @@ flutter_gen_l10n(
 
 flutter_test(
     name = "l10n_test",
-    package_name = "my_app",
+    package = ":pubspec",
     srcs = [":app_l10n"],
     main = "test/l10n_test.dart",
     deps = [
