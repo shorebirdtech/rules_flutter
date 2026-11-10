@@ -260,3 +260,80 @@ flutter_ios_registrant_xcframework = rule(
 for a module, and the `GeneratedPluginRegistrant.h` and `.m` it is built from, which
 `flutter build ios-framework` gives an app project. Link the framework; do not embed it.""",
 )
+
+def swift_package_registrant(plugins, platform):
+    """The `GeneratedPluginRegistrant.swift` of upstream's add-to-app Swift package.
+
+    iOS: upstream's `_iosSwiftPluginRegistryTemplate`. macOS: its
+    `_macosSwiftPluginRegistryTemplate`, public, as `flutter build
+    swift-package` writes it for a package.
+
+    Args:
+        plugins: Structs of `name` (the plugin's module) and `plugin_class`.
+        platform: `ios` or `macos`.
+
+    Returns:
+        The file's text.
+    """
+    imports = "".join(["import %s\n" % p.name for p in plugins])
+    if platform == "ios":
+        body = "".join([
+            ('        if let {var} = registry.registrar(forPlugin: "{cls}") {{\n' +
+             "            {cls}.register(with: {var})\n" +
+             "        }}\n").format(var = p.plugin_class[0].lower() + p.plugin_class[1:], cls = p.plugin_class)
+            for p in plugins
+        ])
+        return """//
+//  Generated file. Do not edit.
+//
+import Flutter
+import UIKit
+
+{imports}
+@objc public class GeneratedPluginRegistrant: NSObject {{
+    @objc public static func register(with registry: FlutterPluginRegistry) {{
+{body}    }}
+}}
+""".format(imports = imports, body = body)
+    body = "".join([
+        '  {cls}.register(with: registry.registrar(forPlugin: "{cls}"))\n'.format(cls = p.plugin_class)
+        for p in plugins
+    ])
+    return """//
+//  Generated file. Do not edit.
+//
+
+import FlutterMacOS
+import Foundation
+
+{imports}
+public func RegisterGeneratedPlugins(registry: FlutterPluginRegistry) {{
+{body}}}
+""".format(imports = imports, body = body)
+
+def _swift_package_registrant_impl(ctx):
+    plugins = []
+    for plugin in (ctx.attr.application[FlutterApplicationInfo].plugins if ctx.attr.register_plugins else []):
+        info = plugin.platforms.get(ctx.attr.platform)
+        if info and info.plugin_class and info.plugin_class != "none":
+            plugins.append(struct(name = plugin.name, plugin_class = info.plugin_class))
+    output = ctx.actions.declare_file(ctx.label.name + "/GeneratedPluginRegistrant.swift")
+    ctx.actions.write(output, swift_package_registrant(plugins, ctx.attr.platform))
+    return [DefaultInfo(files = depset([output]))]
+
+flutter_apple_swift_package_registrant = rule(
+    implementation = _swift_package_registrant_impl,
+    attrs = {
+        "application": attr.label(
+            doc = "The `flutter_application` whose plugins the registrant registers.",
+            mandatory = True,
+            providers = [FlutterApplicationInfo],
+        ),
+        "platform": attr.string(mandatory = True, values = ["ios", "macos"]),
+        "register_plugins": attr.bool(
+            doc = "Whether it registers the plugins; False when the host ships them itself.",
+            default = True,
+        ),
+    },
+    doc = "The Swift `GeneratedPluginRegistrant` of the add-to-app Swift package, as `flutter build swift-package` writes it.",
+)

@@ -46,6 +46,29 @@ def build_mode_directory(ctx):
         return "Profile"
     return "Release"
 
+# Upstream's per-mode `FlutterPluginRegistrant` package, its plugins and
+# frameworks binary targets.
+_PACKAGE_SWIFT = """// swift-tools-version: 5.9
+// {mode}
+//
+//  Generated file. Do not edit.
+//
+import PackageDescription
+
+let package = Package(
+    name: "FlutterPluginRegistrant",
+    platforms: [
+        {platform}("{minimum_os_version}"),
+    ],
+    products: [
+        .library(name: "FlutterPluginRegistrant", type: .static, targets: ["FlutterPluginRegistrant"]),
+    ],
+    targets: [
+        .target(name: "FlutterPluginRegistrant", dependencies: [{dependencies}]),
+{binary_targets}    ]
+)
+"""
+
 def _layout_impl(ctx):
     mode = build_mode_directory(ctx)
     steps = []
@@ -72,6 +95,29 @@ def _layout_impl(ctx):
     if mode == "Debug":
         for f in ctx.files.debug_files:
             place(f.basename, ("file", f.basename, f))
+
+    # The Swift package beside the xcframeworks, as `flutter build
+    # swift-package` writes one per mode: a library of the Swift registrant
+    # over every xcframework as a binary target.
+    if ctx.file.swift_package_registrant:
+        binaries = sorted([
+            name[:-len(".xcframework")]
+            for name in seen
+            if name.endswith(".xcframework") and name != "FlutterPluginRegistrant.xcframework"
+        ])
+        manifest = ctx.actions.declare_file(ctx.label.name + "_package/Package.swift")
+        ctx.actions.write(manifest, _PACKAGE_SWIFT.format(
+            mode = mode,
+            platform = {"ios": ".iOS", "macos": ".macOS"}[ctx.attr.platform],
+            minimum_os_version = ctx.attr.minimum_os_version,
+            dependencies = ", ".join(['"%s"' % b for b in binaries]),
+            binary_targets = "".join([
+                '        .binaryTarget(name: "{name}", path: "{name}.xcframework"),\n'.format(name = b)
+                for b in binaries
+            ]),
+        ))
+        place("Package.swift", ("file", mode + "/Package.swift", manifest))
+        place("Sources", ("file", mode + "/Sources/FlutterPluginRegistrant/GeneratedPluginRegistrant.swift", ctx.file.swift_package_registrant))
 
     tree = ctx.actions.declare_directory(ctx.label.name)
     assemble_bundle(
@@ -141,6 +187,14 @@ flutter_apple_xcframeworks_layout = rule(
         "debug_files": attr.label_list(
             doc = "Files placed above `<Mode>/` when the mode is debug.",
             allow_files = True,
+        ),
+        "swift_package_registrant": attr.label(
+            doc = "The Swift registrant of the Swift package `<Mode>/` is too " +
+                  "(`flutter_apple_swift_package_registrant`); none, no package.",
+            allow_single_file = [".swift"],
+        ),
+        "minimum_os_version": attr.string(
+            doc = "The minimum OS version of the Swift package.",
         ),
         "_profile": attr.label(default = "//flutter:profile"),
     }, EXPORT_ATTRS),

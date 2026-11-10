@@ -28,6 +28,9 @@ import 'assemble_directory.dart' show copyFile;
 
 const configEnv = 'RULES_FLUTTER_XCFRAMEWORKS_CONFIG';
 
+/// The link to the mode's Swift package that a host app adds.
+const swiftPackageLink = 'FlutterPluginRegistrant';
+
 /// The build modes `flutter build <platform>-framework` writes, by directory.
 const modes = ['Debug', 'Profile', 'Release'];
 
@@ -93,6 +96,19 @@ List<String> exportTree(ExportConfig config, String output) {
     }
   }
   final lines = ['Frameworks written to ${mode.path}.'];
+
+  // The Swift package of the mode, as `flutter build swift-package` points its
+  // `FlutterPluginRegistrant` at the mode Xcode builds.
+  if (File('${mode.path}/Package.swift').existsSync()) {
+    final package = Link('${destination.path}/$swiftPackageLink');
+    if (package.existsSync()) package.deleteSync();
+    package.createSync(config.mode);
+    lines.add(
+      'The Swift package $swiftPackageLink is ${config.mode}: add it to your '
+      'project as a local package, and point it at the mode Xcode builds '
+      '(a scheme pre-action: ln -sfn "\$CONFIGURATION" $swiftPackageLink).',
+    );
+  }
   final others = [
     for (final m in modes)
       if (m != config.mode && Directory('${destination.path}/$m').existsSync())

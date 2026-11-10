@@ -32,6 +32,9 @@
 /// * iOS: `FlutterPluginRegistrant.xcframework`, a static framework that
 ///   defines `GeneratedPluginRegistrant` and none of the plugins it
 ///   registers, and the `GeneratedPluginRegistrant.h` and `.m` beside it.
+/// * The Swift package of the mode, as `flutter build swift-package` writes
+///   it: `FlutterPluginRegistrant` links to the mode, SwiftPM reads its
+///   manifest, and every xcframework is a binary target of it.
 /// * With `--signed=true`, every xcframework's signature verifies as the
 ///   export wrote it; Flutter's engine keeps Flutter's, the others are
 ///   signed (ad hoc). Without, only Flutter's engine is signed.
@@ -40,6 +43,7 @@
 ///   one Flutter signed.
 library;
 
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:rules_flutter_e2e_testing/plist.dart';
@@ -415,6 +419,58 @@ void _checkSignature(String xcframework, {required bool signed}) {
   );
 }
 
+/// The Swift package: `FlutterPluginRegistrant` links to the mode, whose
+/// manifest SwiftPM reads, its registrant a source target over a binary
+/// target per xcframework but FlutterPluginRegistrant's, each one there.
+void _checkSwiftPackage(String layout, String mode) {
+  final link = Link('$layout/FlutterPluginRegistrant');
+  _check(
+    link.existsSync() && link.targetSync() == mode,
+    'FlutterPluginRegistrant does not link to $mode',
+  );
+  final dumped = Process.runSync('xcrun', [
+    'swift',
+    'package',
+    // SwiftPM cannot sandbox the manifest inside the test's sandbox.
+    '--disable-sandbox',
+    '--package-path',
+    '$layout/FlutterPluginRegistrant',
+    'dump-package',
+  ]);
+  _check(
+    dumped.exitCode == 0,
+    'SwiftPM cannot read the package:\n${dumped.stderr}',
+  );
+  if (dumped.exitCode != 0) return;
+  final manifest = jsonDecode(dumped.stdout.toString()) as Map<String, Object?>;
+  final targets = [
+    for (final t in manifest['targets']! as List<Object?>)
+      t! as Map<String, Object?>,
+  ];
+  final binaries = [
+    for (final t in targets)
+      if (t['type'] == 'binary') t['path']! as String,
+  ];
+  final onDisk = [
+    for (final e in Directory('$layout/$mode').listSync())
+      if (e.path.endsWith('.xcframework') &&
+          !e.path.endsWith('/FlutterPluginRegistrant.xcframework'))
+        e.path.split('/').last,
+  ];
+  _check(
+    binaries.toSet().length == onDisk.length &&
+        binaries.toSet().containsAll(onDisk),
+    'the package binary targets are $binaries, not $onDisk',
+  );
+  _check(
+    File(
+      '$layout/$mode/Sources/FlutterPluginRegistrant/'
+      'GeneratedPluginRegistrant.swift',
+    ).existsSync(),
+    'the package has no registrant source',
+  );
+}
+
 void main(List<String> args) {
   String? platform;
   String? mode;
@@ -441,15 +497,19 @@ void main(List<String> args) {
   }
   if (layout != null && mode != null) {
     final modeDirectory = mode[0].toUpperCase() + mode.substring(1);
+    _checkSwiftPackage(layout, modeDirectory);
     for (final entry in Directory(layout).listSync()) {
       final name = entry.path.split('/').last;
+      if (name == 'FlutterPluginRegistrant') continue;
       if (entry is! Directory) {
         looseFiles.add(name);
       } else if (name != modeDirectory) {
         _failures.add('$name/: the layout of a $mode build has no other mode');
       } else {
         for (final xcframework in Directory(entry.path).listSync()) {
-          xcframeworks.add(xcframework.path);
+          if (xcframework.path.endsWith('.xcframework')) {
+            xcframeworks.add(xcframework.path);
+          }
         }
       }
     }

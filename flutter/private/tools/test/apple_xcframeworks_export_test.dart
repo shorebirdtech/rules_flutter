@@ -73,4 +73,22 @@ void main() {
     expect(lines.join('\n'), contains('Debug is from an earlier run'));
     expect(lines.join('\n'), contains('FlutterPluginRegistrant.xcframework'));
   });
+
+  test('points the Swift package link at the mode it writes', () {
+    write('tree/Debug/Package.swift', 'debug package');
+    write('out/Release/Package.swift', 'release package');
+    Link('${dir.path}/out/FlutterPluginRegistrant').createSync('Release');
+
+    exportTree(config('Debug'), '${dir.path}/out');
+
+    expect(
+      Link('${dir.path}/out/FlutterPluginRegistrant').targetSync(),
+      'Debug',
+    );
+    expect(
+      File('${dir.path}/out/FlutterPluginRegistrant/Package.swift')
+          .readAsStringSync(),
+      'debug package',
+    );
+  });
 }
