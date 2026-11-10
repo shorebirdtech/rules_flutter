@@ -1985,6 +1985,8 @@ Above the modes are `GeneratedPluginRegistrant.h` and `.m` (iOS; use them or the
 
 The xcframeworks are built unsigned, so the build is the same on every machine and caches; Xcode signs the frameworks it embeds. To sign the xcframeworks themselves, as `flutter build ios-framework --codesign-identity` does, give `codesign_identity`: a certificate's name or SHA-1 as `codesign` takes it, or `-` for ad hoc. They are then signed in a step of its own over the unsigned build (`flutter_apple_xcframeworks_codesign`, which also composes over a layout you assemble), on this Mac and outside the sandbox so `codesign` reaches the keychain. Each xcframework is signed with `--timestamp=none` but in release, as upstream signs it; Flutter's engine xcframework keeps Flutter's signature. Changing the identity re-runs only the signing.
 
+The frameworks have arm64 slices only (no Intel simulator or Mac), so a host builds for arm64: `ARCHS = arm64` in its build settings where Xcode would otherwise build every architecture (a release build, or a generic simulator destination).
+
 `plugins = False` leaves the plugins out (upstream's `--no-plugins`), for a host that ships them itself; `static_plugins = True` makes them static frameworks to link and not embed (`--static`).
 
 A plugin whose library depends on something that is not a plugin, such as a product of a remote Swift package, fails the build with a message: upstream makes such a dependency an xcframework of its own, which these rules do not yet. So does a plugin whose `Package.swift` reads the app's settings.
