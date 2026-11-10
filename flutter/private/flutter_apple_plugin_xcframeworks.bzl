@@ -580,8 +580,21 @@ def _code_asset_xcframeworks_impl(ctx):
                 ])
             else:
                 # A library, as the macOS app's bundle has it (`Contents/Frameworks/<name>`)
-                # and its native-assets manifest names it.
-                steps.append(("file", "%s/%s" % (slice.id, name), dylib))
+                # and its native-assets manifest names it, its install name its
+                # own name there: a host that links it (a Swift package's binary
+                # target is linked) finds it through `@rpath`.
+                library = ctx.actions.declare_file("%s_slices/%s/%s" % (ctx.label.name, slice.id, name))
+                run_xcode_tool(
+                    ctx,
+                    command = 'cp "$1" "$2" && chmod u+w "$2" && xcrun install_name_tool -id "$3" "$2"',
+                    arguments = [ctx.actions.args().add_all([dylib, library, "@rpath/" + name])],
+                    inputs = [dylib],
+                    outputs = [library],
+                    mnemonic = "FlutterCodeAssetLibrary",
+                    execution_requirements = PATH_MAPPING,
+                    progress_message = "Naming %s for add-to-app" % name,
+                )
+                steps.append(("file", "%s/%s" % (slice.id, name), library))
         plist = ctx.actions.declare_file("%s_slices/%s.xcframework.plist" % (ctx.label.name, name))
         base = name[:-len(".dylib")] if name.endswith(".dylib") else name
         if platform == "ios":

@@ -960,3 +960,43 @@ _ADD_TO_APP_MODES = {
     for mode in _ADD_TO_APP_MODES
     for variant in _ADD_TO_APP_VARIANTS
 ]
+
+# Native hosts built by Xcode (`xcodebuild`), taking the module through its
+# Swift package: the iOS one on the booted simulator in debug, the macOS one
+# in debug and release. Each test writes the module into the host, builds it,
+# runs it until every plugin answers, and saves a screenshot in its undeclared
+# outputs. `manual`: they need Xcode, a booted simulator and an unlocked GUI
+# session. Run them with `--test_tag_filters=`.
+[
+    dart_test(
+        name = "add_to_app_%s_host_%s_test" % (platform, mode),
+        args = [
+            "--platform=" + platform,
+            "--configuration=" + mode.capitalize(),
+            "module_" + platform,
+            "add_to_app_host/" + platform,
+        ],
+        data = [":add_to_app_%s_%s" % (platform, mode)] + glob(["add_to_app_host/%s/**" % platform]),
+        main = "test/add_to_app_host_test.dart",
+        tags = ["manual"],
+        target_compatible_with = ["@platforms//os:macos"],
+        deps = ["@rules_flutter//tools/e2e_testing"],
+    )
+    for platform, mode in [
+        ("ios", "debug"),
+        ("macos", "debug"),
+        ("macos", "release"),
+    ]
+]
+
+# `manual`, so `bazel test //...` never gives them to the analysis aspect;
+# this checks them anyway.
+dart_analysis_test(
+    name = "add_to_app_host_test_analysis",
+    target_compatible_with = ["@platforms//os:macos"],
+    targets = [
+        ":add_to_app_ios_host_debug_test",
+        ":add_to_app_macos_host_debug_test",
+        ":add_to_app_macos_host_release_test",
+    ],
+)

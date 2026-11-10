@@ -46,8 +46,8 @@ library;
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:rules_flutter_e2e_testing/add_to_app.dart';
 import 'package:rules_flutter_e2e_testing/plist.dart';
-import 'package:rules_flutter_e2e_testing/runfiles_paths.dart';
 
 final _failures = <String>[];
 
@@ -359,31 +359,6 @@ void _checkRegistrant(String xcframework) {
   }
 }
 
-/// Runs the `bazel run` program of the target [name] (`module_ios`), as
-/// `bazel run //:<name>` would, into a new directory, and returns it.
-String _export(String name) {
-  final program = requireRunfile('$name.export', what: 'The export program');
-  final output = Directory.systemTemp.createTempSync('add_to_app_export').path;
-  final result = Process.runSync(
-    program,
-    ['--output=$output'],
-    environment: {
-      'RULES_FLUTTER_XCFRAMEWORKS_CONFIG': runfileKey(
-        '$name.xcframeworks_export.json',
-      ),
-      'BUILD_WORKSPACE_DIRECTORY': output,
-      'BUILD_WORKING_DIRECTORY': output,
-    },
-  );
-  if (result.exitCode != 0) {
-    stderr.writeln(
-      'bazel run //:$name failed:\n${result.stdout}${result.stderr}',
-    );
-    exit(1);
-  }
-  return output;
-}
-
 /// A signed layout: every xcframework's signature verifies as it was written
 /// out, links made again included; Flutter's engine keeps Flutter's
 /// (TeamIdentifier `S8QB4VV633`), the others are signed ad hoc. Unsigned:
@@ -492,7 +467,7 @@ void main(List<String> args) {
     } else if (arg.startsWith('--code-assets=')) {
       codeAssets = arg.substring('--code-assets='.length).split(',').toSet();
     } else {
-      layout = _export(arg);
+      layout = exportXcframeworks(arg);
     }
   }
   if (layout != null && mode != null) {
