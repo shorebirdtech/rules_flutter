@@ -30,11 +30,20 @@ void _usage() {
 
 /// Runs the report [program] on [report], recording the metadata it reads
 /// into [snapshot]. Whether it succeeded.
-bool _record(String program, String report, File snapshot) {
+///
+/// [program] is a runfile of this one, so it gets [runfiles]' environment:
+/// under `bazel run` nothing sets it, and the program's own `.runfiles`
+/// directory, where it would look next, does not exist.
+bool _record(
+  Runfiles runfiles,
+  String program,
+  String report,
+  File snapshot,
+) {
   final result = Process.runSync(program, [
     report,
     '--record=${snapshot.path}',
-  ]);
+  ], environment: runfiles.environment);
   if (result.exitCode == 0) return true;
   stderr.writeln('$program exited ${result.exitCode}\n${result.stderr}');
   return false;
@@ -78,7 +87,12 @@ void main(List<String> args) {
   try {
     final recorded = File('${scratch.path}/gradle_module_metadata.json');
     for (var i = 0; i < rest.length; i += 2) {
-      if (!_record(runfiles.rlocation(rest[i]), rest[i + 1], recorded)) {
+      if (!_record(
+        runfiles,
+        runfiles.rlocation(rest[i]),
+        rest[i + 1],
+        recorded,
+      )) {
         exitCode = 1;
         return;
       }
