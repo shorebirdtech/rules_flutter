@@ -38,11 +38,11 @@ local `HEAD`, and `.worktreeinclude` copies `.bazelrc.user` and `tools/bazel`
 into them. A worktree you make yourself with `git worktree add` runs the
 command above in the worktree.
 
-To run every check through `bazel run` instead, without `.bazel_env`, as CI
-does:
+CI builds `.bazel_env` and runs the hooks from it. To run every check through
+`bazel run` instead, without `.bazel_env`:
 
 ```shell
-bazel run @overhead//lint:prek -- run --all-files --hook-stage manual
+bazel run --enable_runfiles @overhead//lint:prek -- run --all-files --hook-stage manual
 ```
 
 On Windows, where bazel_env does not run, install the hooks without the three
