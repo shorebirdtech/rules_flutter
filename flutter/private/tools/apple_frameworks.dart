@@ -10,6 +10,13 @@
 ///   framework in it the symlinks a versioned framework has.
 /// * `--link-versions <name>` gives the framework at `<name>`, whose contents
 ///   are already under `Versions/<version>/`, those symlinks.
+/// * `--add-replacing <name> <file> <from> <to>` copies `<file>` to `<name>`
+///   with each `<from>` in it replaced by `<to>`.
+/// * `--add-interface <name> <file> <module> <rename>` copies the Swift module
+///   interface `<file>` to `<name>` as the interface of a framework module
+///   `<module>` that has a C-family half: it imports that half, as Xcode's
+///   interface of a mixed framework does, and calls `<rename>`, the name the
+///   half had when the Swift was compiled, `<module>` (`-` for none).
 ///
 /// A versioned (macOS) framework keeps its contents in `Versions/A/` and has
 /// `Versions/Current -> A` and, at its top, a link to each entry of
@@ -24,7 +31,9 @@
 /// Usage:
 ///   dart apple_frameworks.dart --output <dir>
 ///       [--add <name> <file> | --add-tree <name> <dir>
-///        | --add-bundle <name> <dir> | --link-versions <name>]...
+///        | --add-bundle <name> <dir> | --link-versions <name>
+///        | --add-replacing <name> <file> <from> <to>
+///        | --add-interface <name> <file> <module> <rename>]...
 import 'dart:io';
 
 import 'assemble_directory.dart' show copyFile, copyTree;
@@ -32,7 +41,9 @@ import 'assemble_directory.dart' show copyFile, copyTree;
 const _usage =
     'usage: apple_frameworks.dart --output <dir> '
     '[--add <name> <file> | --add-tree <name> <dir> '
-    '| --add-bundle <name> <dir> | --link-versions <name>]...';
+    '| --add-bundle <name> <dir> | --link-versions <name> '
+    '| --add-replacing <name> <file> <from> <to> '
+    '| --add-interface <name> <file> <module> <rename>]...';
 
 String _base(String path) =>
     path.split(Platform.pathSeparator).lastWhere((s) => s.isNotEmpty);
@@ -96,6 +107,26 @@ void linkVersions(Directory framework) {
   }
 }
 
+/// The Swift module interface [text] of module [module], made the interface
+/// of a framework whose C-family half is module [module] too.
+///
+/// Its header comments come first, then `@_exported import <module>`, which
+/// makes the C-family half visible to the Swift module's importers. A module
+/// [rename] the Swift was compiled against, the C-family half under another
+/// name, is called [module].
+String frameworkInterface(String text, String module, String? rename) {
+  if (rename != null) {
+    text = text.replaceAll(RegExp('\\b${RegExp.escape(rename)}\\b'), module);
+  }
+  final lines = text.split('\n');
+  final header = lines.takeWhile((l) => l.startsWith('//')).length;
+  return [
+    ...lines.take(header),
+    '@_exported import $module',
+    ...lines.skip(header),
+  ].join('\n');
+}
+
 /// Runs the tool over [args] (the command line) and returns the exit code.
 ///
 /// A single argument `@<file>` stands for the arguments in `<file>`, one per
@@ -114,6 +145,8 @@ int run(List<String> args) {
         steps.add((args[i], [args[++i], args[++i]]));
       case '--link-versions':
         steps.add((args[i], [args[++i]]));
+      case '--add-replacing' || '--add-interface':
+        steps.add((args[i], [args[++i], args[++i], args[++i], args[++i]]));
       default:
         stderr.writeln('unexpected argument: ${args[i]}\n$_usage');
         return 64;
@@ -135,6 +168,22 @@ int run(List<String> args) {
         copyBundle(Directory(values[1]), Directory(at(values[0])));
       case '--link-versions':
         linkVersions(Directory(at(values[0])));
+      case '--add-replacing':
+        final text = File(values[1]).readAsStringSync();
+        File(at(values[0]))
+          ..parent.createSync(recursive: true)
+          ..writeAsStringSync(text.replaceAll(values[2], values[3]));
+      case '--add-interface':
+        final text = File(values[1]).readAsStringSync();
+        File(at(values[0]))
+          ..parent.createSync(recursive: true)
+          ..writeAsStringSync(
+            frameworkInterface(
+              text,
+              values[2],
+              values[3] == '-' ? null : values[3],
+            ),
+          );
     }
   }
   return 0;

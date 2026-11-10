@@ -152,8 +152,11 @@ def assemble_bundle(ctx, output, steps, mnemonic, progress_message):
         steps: Its contents, in order: `("file", name, file)`, `("tree", name,
             directory)` (its contents), `("bundle", name, directory)` (a
             framework or xcframework, its versioned frameworks linked again),
-            or `("link-versions", name)` (link the versioned framework at
-            `name`).
+            `("link-versions", name)` (link the versioned framework at
+            `name`), `("replacing", name, file, from, to)` (a copy with text
+            replaced) or `("interface", name, file, module, rename)` (a Swift
+            module interface of a mixed framework module, `rename` the name
+            of its C-family half in it, or `-`).
         mnemonic: The action's mnemonic.
         progress_message: The action's progress message.
     """
@@ -168,6 +171,12 @@ def assemble_bundle(ctx, output, steps, mnemonic, progress_message):
         kind = step[0]
         if kind == "link-versions":
             args.add("--link-versions", step[1])
+            continue
+        if kind in ("replacing", "interface"):
+            args.add("--add-" + kind, step[1])
+            args.add(step[2])
+            args.add_all([step[3], step[4]])
+            inputs.append(step[2])
             continue
         flag = {"file": "--add", "tree": "--add-tree", "bundle": "--add-bundle"}.get(kind)
         if not flag:

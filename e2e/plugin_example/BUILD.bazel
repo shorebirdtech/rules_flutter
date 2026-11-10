@@ -12,10 +12,12 @@ load(
     "flutter_ios_app",
     "flutter_ios_app_framework_gen",
     "flutter_ios_app_xcframework",
+    "flutter_ios_code_asset_xcframeworks",
     "flutter_ios_engine",
     "flutter_ios_engine_xcframework",
     "flutter_ios_info_plist_gen",
     "flutter_ios_native_frameworks_gen",
+    "flutter_ios_plugin_xcframeworks",
     "flutter_ios_privacy_manifests_gen",
     "flutter_ios_registrant_gen",
     "flutter_ios_runner_lib_gen",
@@ -28,11 +30,13 @@ load(
     "flutter_macos_app",
     "flutter_macos_app_framework_gen",
     "flutter_macos_app_xcframework",
+    "flutter_macos_code_asset_xcframeworks",
     "flutter_macos_engine",
     "flutter_macos_engine_xcframework",
     "flutter_macos_info_plist_gen",
     "flutter_macos_menu_xib_gen",
     "flutter_macos_native_libs_gen",
+    "flutter_macos_plugin_xcframeworks",
     "flutter_macos_privacy_manifests_gen",
     "flutter_macos_registrant_gen",
     "flutter_macos_runner_lib_gen",
@@ -802,6 +806,7 @@ flutter_library(
     package = ":pubspec-metadata",
     deps = [
         "//greeting_plugin",
+        "//mixed_plugin",
         "@deps//:audio_session",
         "@deps//:flutter",
         "@deps//:geolocator_apple",
@@ -865,6 +870,23 @@ dart_test(
 # ios-framework` and `macos-framework` make them. `:add_to_app_*_test` checks
 # them in debug and in release.
 
+# The module: the Flutter screen the host shows, with a plugin of each kind
+# the packaging handles.
+flutter_application(
+    name = "add_to_app_module",
+    main = "lib/add_to_app_main.dart",
+    package = ":pubspec-metadata",
+    deps = [
+        "//mixed_plugin",
+        "@deps//:audio_session",
+        "@deps//:flutter",
+        "@deps//:package_info_plus",
+        "@deps//:path_provider",
+        "@deps//:shared_preferences",
+        "@deps//:url_launcher",
+    ],
+)
+
 _ADD_TO_APP_PLATFORMS = [
     "ios",
     "macos",
@@ -878,7 +900,7 @@ _ADD_TO_APP_MODES = {
 
 flutter_ios_app_xcframework(
     name = "add_to_app_ios_app",
-    application = ":plugin_app",
+    application = ":add_to_app_module",
     tags = ["manual"],
 )
 
@@ -889,12 +911,36 @@ flutter_ios_engine_xcframework(
 
 flutter_macos_app_xcframework(
     name = "add_to_app_macos_app",
-    application = ":plugin_app",
+    application = ":add_to_app_module",
     tags = ["manual"],
 )
 
 flutter_macos_engine_xcframework(
     name = "add_to_app_macos_engine",
+    tags = ["manual"],
+)
+
+flutter_ios_plugin_xcframeworks(
+    name = "add_to_app_ios_plugins",
+    application = ":add_to_app_module",
+    tags = ["manual"],
+)
+
+flutter_ios_code_asset_xcframeworks(
+    name = "add_to_app_ios_code_assets",
+    application = ":add_to_app_module",
+    tags = ["manual"],
+)
+
+flutter_macos_plugin_xcframeworks(
+    name = "add_to_app_macos_plugins",
+    application = ":add_to_app_module",
+    tags = ["manual"],
+)
+
+flutter_macos_code_asset_xcframeworks(
+    name = "add_to_app_macos_code_assets",
+    application = ":add_to_app_module",
     tags = ["manual"],
 )
 
@@ -907,6 +953,8 @@ flutter_macos_engine_xcframework(
         targets = [
             ":add_to_app_%s_app" % platform,
             ":add_to_app_%s_engine" % platform,
+            ":add_to_app_%s_plugins" % platform,
+            ":add_to_app_%s_code_assets" % platform,
         ],
     )
     for platform in _ADD_TO_APP_PLATFORMS
@@ -919,6 +967,8 @@ flutter_macos_engine_xcframework(
         args = [
             "--platform=" + platform,
             "--mode=" + mode,
+            "--plugins=audio_session,mixed_plugin,package_info_plus,shared_preferences_foundation,url_launcher_" + platform,
+            "--code-assets=objective_c",
             "$(rootpaths :add_to_app_%s_%s)" % (platform, mode),
         ],
         data = [":add_to_app_%s_%s" % (platform, mode)],

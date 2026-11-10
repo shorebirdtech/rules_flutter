@@ -1,0 +1,45 @@
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_plugin", "flutter_plugin_platform")
+load("@rules_flutter//flutter:macos.bzl", "flutter_apple_plugin_library")
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "mixed_plugin",
+)
+
+# A plugin whose Apple code is Objective-C and Swift in one module, as a
+# CocoaPods plugin with both kinds of source is: the plugin class is
+# Objective-C, and a Swift class beside it is public too. Add-to-app packages
+# it as one framework with both, the Swift part a submodule
+# (//:add_to_app_*).
+flutter_plugin(
+    name = "mixed_plugin",
+    srcs = ["lib/mixed_plugin.dart"],
+    package = ":pubspec-metadata",
+    platforms = [
+        ":ios",
+        ":macos",
+    ],
+    visibility = ["//visibility:public"],
+    deps = ["@deps//:flutter"],
+)
+
+flutter_plugin_platform(
+    name = "ios",
+    lib = ":mixed_plugin_apple",
+    platform = "ios",
+    plugin_class = "MXDMixedPlugin",
+)
+
+flutter_plugin_platform(
+    name = "macos",
+    lib = ":mixed_plugin_apple",
+    platform = "macos",
+    plugin_class = "MXDMixedPlugin",
+)
+
+flutter_apple_plugin_library(
+    name = "mixed_plugin_apple",
+    srcs = glob(["darwin/Classes/*"]),
+    module_name = "mixed_plugin",
+    platform = "darwin",
+)

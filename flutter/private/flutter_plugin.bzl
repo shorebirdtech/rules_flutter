@@ -126,6 +126,9 @@ def plugin_contributions(ctx, package_name, package_root, declares_plugin):
                 resource_info = apple_resource_info(lib),
                 unbuilt_native_code = _unbuilt_native_code(lib),
                 package = package_name,
+                # The plugin's privacy manifest, which an add-to-app framework
+                # of the plugin carries.
+                privacy_manifests = tuple(ctx.files.apple_privacy_files),
                 # A library its Package.swift gives defines from the app, which
                 # the app's aggregator builds for itself (`swiftpm_app_settings.bzl`).
                 app_library = lib[FlutterSwiftPMAppLibraryInfo].library if FlutterSwiftPMAppLibraryInfo in lib else None,

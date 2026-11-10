@@ -68,6 +68,7 @@ load("//flutter/private:apple_version_check.bzl", _flutter_apple_version_check =
 load("//flutter/private:constants.bzl", _MACOS_MINIMUM_OS_VERSION = "MACOS_MINIMUM_OS_VERSION")
 load("//flutter/private:flutter_apple_bundle_version.bzl", _flutter_apple_bundle_version = "flutter_apple_bundle_version")
 load("//flutter/private:flutter_apple_plugin_library.bzl", _flutter_apple_plugin_library_macro = "flutter_apple_plugin_library")
+load("//flutter/private:flutter_apple_plugin_xcframeworks.bzl", _flutter_macos_code_asset_xcframeworks = "flutter_macos_code_asset_xcframeworks", _flutter_macos_plugin_xcframeworks = "flutter_macos_plugin_xcframeworks")
 load("//flutter/private:flutter_apple_plugins_aggregator.bzl", _flutter_apple_plugins_aggregator = "flutter_apple_plugins_aggregator")
 load("//flutter/private:flutter_apple_xcframeworks.bzl", _flutter_macos_app_xcframework = "flutter_macos_app_xcframework", _flutter_macos_engine_xcframework = "flutter_macos_engine_xcframework")
 load("//flutter/private:flutter_macos_application.bzl", _flutter_macos_app_framework_rule = "flutter_macos_app_framework", _flutter_macos_native_libs_rule = "flutter_macos_native_libs", _flutter_macos_privacy_manifests_rule = "flutter_macos_privacy_manifests")
@@ -80,10 +81,13 @@ load("//flutter/private:validation.bzl", "validate_minimum_os_version")
 MACOS_MINIMUM_OS_VERSION = _MACOS_MINIMUM_OS_VERSION
 
 # Add-to-app, for a host app built by Xcode (see README, "Add-to-app"): the
-# application's App.xcframework and a copy of Flutter's own engine xcframework,
-# in the build mode of the configuration.
+# application's App.xcframework, a copy of Flutter's own engine xcframework, an
+# xcframework per plugin and per code asset, in the build mode of the
+# configuration.
 flutter_macos_app_xcframework = _flutter_macos_app_xcframework
 flutter_macos_engine_xcframework = _flutter_macos_engine_xcframework
+flutter_macos_plugin_xcframeworks = _flutter_macos_plugin_xcframeworks
+flutter_macos_code_asset_xcframeworks = _flutter_macos_code_asset_xcframeworks
 
 # Merges entitlement additions into a base entitlements file — the additive
 # seam rules_apple's single-file `entitlements` attribute does not provide.

@@ -1,7 +1,8 @@
 /// Checks the xcframeworks of Apple add-to-app against what `flutter build
 /// ios-framework` and `macos-framework` make.
 ///
-/// Usage: `add_to_app_apple_test --platform=P --mode=M XCFRAMEWORK...`, `P`
+/// Usage: `add_to_app_apple_test --platform=P --mode=M --plugins=A,B
+/// --code-assets=C XCFRAMEWORK...`, `P`
 /// `ios` or `macos`, `M` `debug`, `profile` or `release`, each
 /// `XCFRAMEWORK` a runfiles path of an `.xcframework`.
 ///
@@ -19,6 +20,14 @@
 ///   every mode. Every binary's install name is `@rpath/App.framework/App`,
 ///   and it is built for its platform. A macOS framework is versioned, its
 ///   links in place.
+/// * One xcframework per plugin of `--plugins` (and no other), each slice a
+///   framework of the plugin's own code: its binary links Flutter at
+///   `@rpath` and holds none of it, has the framework's install name, and in
+///   profile and release a dSYM. Its module compiles: an Objective-C file
+///   that `@import`s every plugin, and a Swift file that `import`s every
+///   plugin with a Swift interface, type-check against each slice.
+/// * One xcframework per code asset of `--code-assets`: on iOS a framework
+///   per slice, on macOS the library itself.
 /// * `Flutter.xcframework` and `FlutterMacOS.xcframework`: Flutter's
 ///   signature verifies, so the copy is byte for byte and link for link the
 ///   one Flutter signed.
@@ -169,15 +178,170 @@ void _checkEngine(String xcframework, String platform) {
   }
 }
 
+/// The library identifiers of [xcframework]'s slices, with each entry of its
+/// `Info.plist`.
+Map<String, Map<String, Object?>> _libraries(String xcframework) => {
+  for (final l
+      in Plist.read('$xcframework/Info.plist').values['AvailableLibraries']!
+          as List<Object?>)
+    (l! as Map<String, Object?>)['LibraryIdentifier']! as String:
+        l as Map<String, Object?>,
+};
+
+void _checkPlugin(String xcframework, String platform, String mode) {
+  final name = xcframework.split('/').last.replaceAll('.xcframework', '');
+  final engine = platform == 'ios' ? 'Flutter' : 'FlutterMacOS';
+  for (final MapEntry(key: id, value: library) in _libraries(
+    xcframework,
+  ).entries) {
+    final slice = '$xcframework/$id';
+    final binary = '$slice/${library['BinaryPath']}';
+    final debug = mode == 'debug' || id.endsWith('-simulator');
+    final versioned = platform == 'macos' ? 'Versions/A/' : '';
+    _check(
+      _installName(binary) == '@rpath/$name.framework/$versioned$name',
+      '$name $id: install name ${_installName(binary)}',
+    );
+    final linked = _run('otool', ['-L', binary]);
+    _check(
+      linked.contains('@rpath/$engine.framework/'),
+      '$name $id: does not link $engine at @rpath:\n$linked',
+    );
+    _check(
+      !_run('nm', ['-U', binary]).contains(r'_OBJC_CLASS_$_FlutterEngine'),
+      '$name $id: holds the Flutter engine',
+    );
+    _check(
+      File('$slice/$name.framework/Modules/module.modulemap').existsSync(),
+      '$name $id: no module map',
+    );
+    _check(
+      Directory('$slice/dSYMs/$name.framework.dSYM').existsSync() == !debug,
+      '$name $id: dSYM ${debug ? 'there' : 'missing'} in $mode',
+    );
+    if (platform == 'macos') _checkVersioned('$slice/$name.framework', name);
+  }
+}
+
+void _checkCodeAsset(String xcframework, String platform) {
+  final name = xcframework.split('/').last.replaceAll('.xcframework', '');
+  for (final MapEntry(key: id, value: library) in _libraries(
+    xcframework,
+  ).entries) {
+    final binary = '$xcframework/$id/${library['BinaryPath']}';
+    final want = platform == 'ios' ? '$name.framework/$name' : '$name.dylib';
+    _check(
+      library['BinaryPath'] == want,
+      '$name $id: binary ${library['BinaryPath']}, not $want',
+    );
+    if (platform == 'ios') {
+      _check(
+        _installName(binary) == '@rpath/$name.framework/$name',
+        '$name $id: install name ${_installName(binary)}',
+      );
+    }
+  }
+}
+
+/// Type-checks a host's use of every plugin's module against each slice:
+/// Objective-C `@import`s them all, Swift `import`s those with a Swift
+/// interface.
+void _checkModules(
+  List<String> plugins,
+  String engine,
+  String platform,
+) {
+  final dir = Directory.systemTemp.createTempSync('add_to_app_modules');
+  try {
+    final names = [
+      for (final p in plugins) p.split('/').last.replaceAll('.xcframework', ''),
+    ];
+    final objc = File('${dir.path}/host.m')
+      ..writeAsStringSync(
+        [for (final n in names) '@import $n;'].join('\n'),
+      );
+    final swiftNames = names.where(
+      (n) => plugins.any(
+        (p) =>
+            p.endsWith('/$n.xcframework') &&
+            Directory(p)
+                .listSync(recursive: true)
+                .any((e) => e.path.endsWith('.swiftinterface')),
+      ),
+    );
+    final swift = File('${dir.path}/host.swift')
+      ..writeAsStringSync([for (final n in swiftNames) 'import $n'].join('\n'));
+    final slices = platform == 'ios'
+        ? {
+            'ios-arm64': ('iphoneos', 'arm64-apple-ios15.0'),
+            'ios-arm64-simulator': (
+              'iphonesimulator',
+              'arm64-apple-ios15.0-simulator',
+            ),
+          }
+        : {'macos-arm64': ('macosx', 'arm64-apple-macos12.0')};
+    final engineSlices = Directory(engine)
+        .listSync()
+        .whereType<Directory>()
+        .where((d) => !d.path.split('/').last.startsWith('_'));
+    for (final MapEntry(key: id, value: (sdk, target)) in slices.entries) {
+      final engineSlice = engineSlices.firstWhere(
+        (d) => id.endsWith('-simulator') == d.path.endsWith('-simulator'),
+      );
+      final search = [
+        '-F${engineSlice.path}',
+        for (final p in plugins) '-F$p/$id',
+      ];
+      final clang = Process.runSync('xcrun', [
+        '-sdk',
+        sdk,
+        'clang',
+        '-fmodules',
+        '-fsyntax-only',
+        '-target',
+        target,
+        ...search,
+        objc.path,
+      ]);
+      _check(
+        clang.exitCode == 0,
+        '$id: an Objective-C host cannot import the plugins:\n${clang.stderr}',
+      );
+      final swiftc = Process.runSync('xcrun', [
+        '-sdk',
+        sdk,
+        'swiftc',
+        '-typecheck',
+        '-target',
+        target,
+        ...search,
+        swift.path,
+      ]);
+      _check(
+        swiftc.exitCode == 0,
+        '$id: a Swift host cannot import the plugins:\n${swiftc.stderr}',
+      );
+    }
+  } finally {
+    dir.deleteSync(recursive: true);
+  }
+}
+
 void main(List<String> args) {
   String? platform;
   String? mode;
+  var plugins = <String>{};
+  var codeAssets = <String>{};
   final xcframeworks = <String>[];
   for (final arg in args) {
     if (arg.startsWith('--platform=')) {
       platform = arg.substring('--platform='.length);
     } else if (arg.startsWith('--mode=')) {
       mode = arg.substring('--mode='.length);
+    } else if (arg.startsWith('--plugins=')) {
+      plugins = arg.substring('--plugins='.length).split(',').toSet();
+    } else if (arg.startsWith('--code-assets=')) {
+      codeAssets = arg.substring('--code-assets='.length).split(',').toSet();
     } else {
       // Its `Info.plist` links to the file the build wrote, whose directory
       // has the links.
@@ -199,15 +363,32 @@ void main(List<String> args) {
     );
     exit(64);
   }
+  final found = <String>{};
+  final pluginPaths = <String>[];
+  String? engine;
   for (final xcframework in xcframeworks) {
-    switch (xcframework.split('/').last) {
-      case 'App.xcframework':
+    final name = xcframework.split('/').last.replaceAll('.xcframework', '');
+    found.add(name);
+    switch (name) {
+      case 'App':
         _checkApp(xcframework, platform, mode);
-      case 'Flutter.xcframework' || 'FlutterMacOS.xcframework':
+      case 'Flutter' || 'FlutterMacOS':
+        engine = xcframework;
         _checkEngine(xcframework, platform);
-      case final other:
-        _failures.add('$other: no checks for this xcframework');
+      case _ when plugins.contains(name):
+        pluginPaths.add(xcframework);
+        _checkPlugin(xcframework, platform, mode);
+      case _ when codeAssets.contains(name):
+        _checkCodeAsset(xcframework, platform);
+      case _:
+        _failures.add('$name.xcframework: not expected');
     }
+  }
+  for (final name in {...plugins, ...codeAssets}.difference(found)) {
+    _failures.add('$name.xcframework: missing');
+  }
+  if (engine != null && pluginPaths.isNotEmpty) {
+    _checkModules(pluginPaths, engine, platform);
   }
   if (_failures.isNotEmpty) {
     stderr.writeln(_failures.join('\n'));

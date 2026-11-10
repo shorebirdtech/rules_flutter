@@ -335,6 +335,7 @@ def flutter_apple_plugin_library(
     # package_info_plus's `.m`-only macOS impl) get a synthetic placeholder
     # Swift file. The Swift module is essentially empty; the ObjC interface
     # reaches Swift consumers via the objc_library dep's clang module map.
+    has_swift = bool(swift_files)
     if not swift_files:
         # ObjC-only plugin: emit a placeholder Swift file that
         # `@_exported import`s the ObjC module so consumers that
@@ -370,6 +371,8 @@ def flutter_apple_plugin_library(
         linkopts = sdk_linkopts + linkopts,
         deps = swift_deps,
         swiftc_inputs = swiftc_inputs + ([bridging_header] if bridging_header else []),
+        generates_header = has_swift,
+        generated_header_name = (module_name + "-Swift.h") if has_swift else None,
         tags = tags,
         target_compatible_with = target_compatible_with,
         visibility = visibility,
