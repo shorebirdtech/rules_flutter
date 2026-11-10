@@ -188,16 +188,16 @@ def _toolchain_extension(module_ctx):
 
         # The outline stripper for this SDK's Dart. A release engine's is
         # built from that Dart release's pinned source; a custom engine
-        # provides its own (the contract's `//kernel_outline:kernel_outline`).
+        # provides its own (the contract's `//outline_tool:outline_tool`).
         # Fetched only with `--@rules_dart//dart:outline_kernel`.
         if sdk.engine == None:
             dart_kernel_source(
-                name = name + "_kernel_outline_src",
+                name = name + "_outline_tool_src",
                 dart_version = FLUTTER_VERSIONS[sdk.version].dart_version,
             )
-            outline_packages[name] = "@{}_kernel_outline_src//".format(name)
+            outline_packages[name] = "@{}_outline_tool_src//".format(name)
         else:
-            outline_packages[name] = _label_prefix(sdk.engine) + "//kernel_outline"
+            outline_packages[name] = _label_prefix(sdk.engine) + "//outline_tool"
 
     # The repositories rules_flutter and its users name by fixed names, each
     # an alias into the selected SDK's own.
@@ -226,9 +226,9 @@ def _toolchain_extension(module_ctx):
             extra = android_engine_face_extra(engine_prefixes, arch, ANDROID_ABI_FOR_ARCH[arch]),
         )
     flutter_face_repo(
-        name = "flutter_kernel_outline",
+        name = "flutter_outline_tool",
         sdks = outline_packages,
-        targets = {"kernel_outline": "{prefix}:kernel_outline"},
+        targets = {"outline_tool": "{prefix}:outline_tool"},
     )
     flutter_face_repo(
         name = "flutter_dev_root",

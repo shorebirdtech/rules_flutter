@@ -28,7 +28,7 @@ void main() {
       workspace = Workspace(
         resolver: SourceUriResolver(
           workspaceRoot: tmp.path,
-          sourcePackages: const [(name: 'app', libRoot: '')],
+          sourcePackages: const [(name: 'app', packageRoot: '')],
         ),
       );
       compiler = FakeCompiler();
@@ -434,7 +434,7 @@ void main() {
       workspace = Workspace(
         resolver: SourceUriResolver(
           workspaceRoot: tmp.path,
-          sourcePackages: const [(name: 'app', libRoot: '')],
+          sourcePackages: const [(name: 'app', packageRoot: '')],
         ),
       );
       compiler = FakeCompiler();

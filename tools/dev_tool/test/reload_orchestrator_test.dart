@@ -42,7 +42,7 @@ void main() {
       workspace = Workspace(
         resolver: SourceUriResolver(
           workspaceRoot: tmp.path,
-          sourcePackages: const [(name: 'app', libRoot: '')],
+          sourcePackages: const [(name: 'app', packageRoot: '')],
         ),
       );
       applied = AppliedVersions();
@@ -203,7 +203,7 @@ void main() {
         final ws = Workspace(
           resolver: SourceUriResolver(
             workspaceRoot: tmp.path,
-            sourcePackages: const [(name: 'app', libRoot: '')],
+            sourcePackages: const [(name: 'app', packageRoot: '')],
           ),
           generatedFiles: {genUri: genFile.path},
         );

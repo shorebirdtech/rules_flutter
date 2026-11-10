@@ -2293,7 +2293,7 @@ void main() {
       final server = serverWith(
         workspaceRoot: dir.path,
         // `generate_dev_package_config` writes exactly this for a
-        // source-assembled package: `<filesystemScheme>:///<lib_root>`. The
+        // source-assembled package: `<filesystemScheme>:///<package_root>`. The
         // frontend_server resolves it via `--filesystem-root`; nothing that
         // wants a file path can.
         packageConfigPath: writeConfig(dir, 'org-dartlang-app:///').path,

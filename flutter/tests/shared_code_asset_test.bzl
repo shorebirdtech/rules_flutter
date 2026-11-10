@@ -185,7 +185,7 @@ def _fake_package_impl(ctx):
     assets = tuple([t[DartCodeAssetInfo] for t in ctx.attr.code_assets])
     pkg = DartPackageInfo(
         package_name = ctx.attr.package_name,
-        lib_root = ctx.label.package,
+        package_root = ctx.label.package,
         code_assets = assets,
     )
     return [DartInfo(
@@ -212,7 +212,7 @@ def _fake_cycle_impl(ctx):
     packages = tuple([
         DartPackageInfo(
             package_name = name,
-            lib_root = "%s/%s" % (ctx.label.package, name),
+            package_root = "%s/%s" % (ctx.label.package, name),
             code_assets = (asset,),
         )
         for name, asset in zip(names, assets)

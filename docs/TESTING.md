@@ -207,7 +207,7 @@ root's. Your own `.bazelrc.user` turns that off (see above), which is why a
 local sweep cannot tell you a lock has drifted. This does, from the repository
 root:
 
-    bazel run @overhead//locks
+    bazel run @overhead//locks:check
 
 overhead is the dev-tooling module rules_flutter shares with rules_dart (see
 "Tooling" in `AGENTS.md`). For the root and every workspace under `e2e/` with a
@@ -227,7 +227,7 @@ applies.
 
 It lists each stale workspace with the command that fixes it:
 
-    bazel run @overhead//locks -- --refresh e2e/smoke
+    bazel run --lockfile_mode=off @overhead//locks:refresh -- e2e/smoke
 
 which runs `bazel mod tidy --lockfile_mode=refresh`, then
 `bazel mod deps` and `bazel build --nobuild --lockfile_mode=update //...`, again
@@ -299,7 +299,7 @@ would.
 
 A stale lock fails the build, at the point the repo loads:
 `rules_android_maven_install.json contains an invalid input signature ... must
-be regenerated`. `bazel run @overhead//locks` finds it in each e2e workspace
+be regenerated`. `bazel run @overhead//locks:check` finds it in each e2e workspace
 (`build --nobuild //...`), and the Maven check of rules_flutter's own finds the
 root's: `bazel fetch --repo=@rules_android_maven`. That check is
 
@@ -313,7 +313,7 @@ To regenerate, after a change to the artifacts or to a module that contributes
 them:
 
     bazel run //tools/maven_locks -- --refresh e2e/hello_world
-    bazel run @overhead//locks -- --refresh e2e/hello_world
+    bazel run --lockfile_mode=off @overhead//locks:refresh -- e2e/hello_world
 
 The first re-pins every stale Maven repo of that workspace (`REPIN=1 bazel run
 @rules_android_maven//:pin` underneath, run in the workspace); the second
@@ -1032,7 +1032,7 @@ fourth thing to do when none applies.
 `.github/workflows/ci.yaml` runs, on every push and pull request:
 
 - `bazel test //...` in the repository root (Linux);
-- `bazel run @overhead//locks` (macOS), which fails on a stale or incomplete
+- `bazel run @overhead//locks:check` (macOS), which fails on a stale or incomplete
   `MODULE.bazel.lock` in any workspace, see "Lock files" in § 1;
 - the pre-commit hooks, the dev_tool unit tests, and the web smoke test (§ 5);
 - `bazel test //...` in every e2e workspace (`build //...` where it has no test
@@ -1239,7 +1239,7 @@ A Flutter SDK package other than `package:flutter` (`flutter_test`, `integration
 
 `@<hub>//:<pkg>` is the package's library. The lock's other entries (`package:flutter`, which `flutter_framework_package` builds, and the stubs for entries nothing supplies) are one repository each, `flutter_pub__<pkg>`, which is their library. `flutter_pub_index` holds the package names of every lock once for all of them, so no repository's attributes grow with the locks. `@<hub>//:<pkg>` is an alias to the shared repository; a hub holds exactly the packages its own lock(s) list.
 
-`flutter_pub_library` reads its members' providers itself: a `DartInfo` with one package record per member (each keeps its name, `lib_root` and language version, so `package_config.json` cannot tell it from packages built one to a target) and a `FlutterInfo` that merges what each member contributes (plugin, native libraries, assets, fonts, shaders). A cycle can mix Flutter members and rules_dart's.
+`flutter_pub_library` reads its members' providers itself: a `DartInfo` with one package record per member (each keeps its name, `package_root` and language version, so `package_config.json` cannot tell it from packages built one to a target) and a `FlutterInfo` that merges what each member contributes (plugin, native libraries, assets, fonts, shaders). A cycle can mix Flutter members and rules_dart's.
 
 Not every case has a cycle's answer. A package built from an overlay is its own whole target and cannot be built with others, so an overlay in a cycle is an error at the fetch of its library, naming the package. `pub_cycle_e2e_test.dart` covers the cases.
 
@@ -1971,14 +1971,14 @@ runner needs both).
 | Android release (`flutter_android_release`, `flutter_android_app`'s `app_bundle`/`bundle_config`/`proguard_specs`, `flutter/android_proguard_rules.pro`, `flutter/android_bundle_config.pb.json`, `release_transition.bzl`, `android_release.dart`, `flutter_android_bundle_install.bzl`, `android_bundle_install.dart`) | Root `//...` (`android_release_test`), android_example `//...` (`verify_android_release_test` signs with a key it makes), plugin_example `//...` for an R8 change, **and** "Android release (manual)" in § 4: both signed installs render on the phone |
 | Android ABI selection (`flutter_android_engine`, `flutter_android_bundle`, `flutter_android_build`, `AndroidDevice` ABI in `device.dart`) | Root `//...`, android_example, hello_world and plugin_example `//...` (force-run `verify_android_apk_test`), dev_tool unit **and** `flutter_bazel run` on the attached phone (arm64-v8a) and on an x86_64 emulator, which must each launch the app |
 | Toolchain / SDK, or any action's inputs from the Dart SDK | smoke, hello_world, and `//flutter/tests:sdk_inputs_test` with `//flutter/tests/sdk_sets:sdk_sets_test` (see § "SDK inputs") |
-| Reconciling several locks, or which extension makes which repository (`pub_reconcile.bzl`, the `flutter` extension in `flutter/extensions.bzl` and the `pub` extension in `flutter/pub/extensions.bzl`) | Root `//flutter/tests:pub_reconcile_test`, `bazel run //tools/dev_tool:e2e -- test/e2e/pub_versions_e2e_test.dart` (its fix-command case shows `bazel run @rules_flutter//flutter/pub` running while the locks disagree, which needs every repository the runner reaches to come from `flutter`), `e2e/dual_hub` `//...`, and `bazel run @overhead//locks` |
+| Reconciling several locks, or which extension makes which repository (`pub_reconcile.bzl`, the `flutter` extension in `flutter/extensions.bzl` and the `pub` extension in `flutter/pub/extensions.bzl`) | Root `//flutter/tests:pub_reconcile_test`, `bazel run //tools/dev_tool:e2e -- test/e2e/pub_versions_e2e_test.dart` (its fix-command case shows `bazel run @rules_flutter//flutter/pub` running while the locks disagree, which needs every repository the runner reaches to come from `flutter`), `e2e/dual_hub` `//...`, and `bazel run @overhead//locks:check` |
 | Naming a lock's `path` packages (`pub_resolve.bzl`, `flutter_resolved_package.bzl`, `resolved_package.bzl`, `resolve`, `build_from_pubspec` and `ignored` in `flutter/private/pub_extension.bzl`, `fetch_local_package` in `flutter_pub_package.bzl`) | Root `//flutter/tests:pub_resolve_test` and `:pub_reconcile_test`, `bazel run //tools/dev_tool:e2e -- test/e2e/pub_resolve_e2e_test.dart test/e2e/pub_path_package_e2e_test.dart test/e2e/pub_inputs_properties_e2e_test.dart`, `e2e/pub_resolve` `//...` (its `:render_test` is the render check), and plugin_example's `:verify_android_registrant_test`, `:verify_android_apk_test` and `:ignored_package_test` (a Kotlin-only `path` plugin built from its pubspec into the APK, and an ignored one) |
 | Reading a pubspec (`flutter_pubspec.bzl`, a `read_pubspec` call in `flutter_pub_package.bzl` or `flutter_framework_package.bzl`) | Root `//flutter/tests:flutter_pubspec_test` and `:flutter_framework_package_test` (the projection of `fields`, on dict inputs), hello_world and plugin_example `//...`, **and** `bazel run //tools/dev_tool:e2e -- test/e2e/pubspec_reading_e2e_test.dart test/e2e/framework_pubspec_e2e_test.dart test/e2e/pub_inputs_e2e_test.dart test/e2e/pub_inputs_properties_e2e_test.dart test/e2e/pub_cycle_e2e_test.dart test/e2e/sdk_source_e2e_test.dart` (what the repository rules do with the pubspecs they read, which no Starlark unit test can run) |
 | Anything that downloads (`download*` in a repository rule, `ARTIFACT_CHECKSUMS` / `source_sha256` / `CHROME_FOR_TESTING` in `versions.bzl`, `flutter_pub_package`, `flutter_chrome_for_testing`, `update_flutter_version`, `update_chrome_for_testing`) | Root `//flutter/tests:download_digests_test` (every table digest is 64-hex, for every version, host, target and mode the macros iterate, and for each host's Chrome for Testing archive; `bazel run //tools/update_chrome_for_testing` reprints the Chrome entry, so it also shows the pinned digests are the ones the archives have) and `//flutter/tests:pinned_test` (what counts as a digest) and `//flutter/tests:chrome_runner_build_test` (this host's Chrome for Testing shell downloads, verifies and unpacks) and `//tools/download_guard/...` (every `download*` call in `//flutter` passes its digest through `pinned()`, which refuses a missing or malformed one before the request; a hosted pub package goes through rules_dart's `fetch_pub_archive`, which the lint accepts only when it is loaded from `@rules_dart//dart/pub:pub_lock_package.bzl` and given a `sha256`), **and** `bazel run //tools/dev_tool:e2e -- test/e2e/digest_pinned_e2e_test.dart test/e2e/digest_missing_e2e_test.dart test/e2e/pub_archive_e2e_test.dart test/e2e/sdk_source_e2e_test.dart` (what a fetch does with a good, a bad and a missing digest, and what a Flutter SDK package's fetch from the source tarball does with a package that is, and is not, in it; needs no device; the generated workspace resolves its modules from Bazel's registry or repository cache) |
 | A new or removed e2e workspace, or where one runs in CI (`tools/ci_matrix/e2e_matrix.dart`, `.github/workflows/ci.yaml`) | `bazel run //tools/ci_matrix` (fails on a gap) and `bazel test //tools/ci_matrix/...` |
 | A new package with a `BUILD` that loads a repo only development has (a dev dependency of `MODULE.bazel`), or a change to `ignore_directories` in `REPO.bazel` | `bazel run //tools/consumer_archive`, then `cd e2e/external_module` and both `bazel query "@rules_flutter//..."` and `bazel build --nobuild "@rules_flutter//..."` must succeed (the archive is committed state only, and omits what `.gitattributes` trims); put such a package in `ignore_directories` |
 | The bazelrc preset (`tools/preset.bazelrc`, or a bump of overhead) | `bazel run @overhead//preset`, then `bazel run @overhead//preset -- --check` |
-| Maven artifacts (a `maven.install` in any `MODULE.bazel`, or a bump of `rules_android` or `rules_jvm_external`) | `bazel run //tools/maven_locks -- --refresh` on every Android workspace (hello_world, plugin_example, android_example, custom_engine, integration_test) and `.`, then `bazel run @overhead//locks -- --refresh` on each, and `bazel run //:record_gradle_module_metadata` in plugin_example if its lock changed — see "Maven lock files" in § 1 |
+| Maven artifacts (a `maven.install` in any `MODULE.bazel`, or a bump of `rules_android` or `rules_jvm_external`) | `bazel run //tools/maven_locks -- --refresh` on every Android workspace (hello_world, plugin_example, android_example, custom_engine, integration_test) and `.`, then `bazel run --lockfile_mode=off @overhead//locks:refresh` on each, and `bazel run //:record_gradle_module_metadata` in plugin_example if its lock changed — see "Maven lock files" in § 1 |
 | dev_tool (unit) | `bazel test //tools/dev_tool/...` (already covered by root `//...`) |
 | dev_tool (e2e) | `bazel run //tools/dev_tool:e2e`, see § 2 |
 | dev_tool reload paths (`run_command.dart`, `vm_service_client.dart`, `hot_reload/**`, `session.dart`, `reload_pipeline.dart`) | dev_tool unit + e2e **and** manual hot reload **and** hot restart — see "Hot reload / hot restart (manual)" |

@@ -242,7 +242,7 @@ def _member_content_test_impl(ctx):
         name = "rusty",
         language_version = "3.4",
         code_assets = [],
-        has_unreplaced_hook = "",
+        unreplaced_hook = "",
         plugin_platforms_json = "{}",
         apple_libs = {"ios": "@flutter_pub_apple__rusty//:rusty_apple_ios"},
         unbuilt_native_code = {

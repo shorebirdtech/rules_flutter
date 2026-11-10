@@ -23,10 +23,10 @@ load("//flutter:defs.bzl", "flutter_test")
 # not `package:test_api`, so the generated bootstrap would not compile. And a
 # `flutter_test` cannot build in a non-root Bazel package at all: `package_for`
 # (rules_dart `dart/private/source_set.bzl`) claims every path under a
-# non-empty `lib_root`, so the generated bootstrap joins this package's group,
+# non-empty `package_root`, so the generated bootstrap joins this package's group,
 # triggers source assembly into a `.pkgsrcs` directory, and its relative import
 # of `main` stops resolving. Every `flutter_test` that runs today sits at a
-# workspace root, where `lib_root` is `""` and only `lib/…` is claimed.
+# workspace root, where `package_root` is `""` and only `lib/…` is claimed.
 #
 # Only the analysis closure is exercised: `:analysis_test` reaches this target
 # through the analysis aspect, which reads the provider, so nothing is built

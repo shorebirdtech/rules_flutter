@@ -165,8 +165,8 @@ class WebPipelineAssembler {
       // between them by the order `bazel cquery --output=files` happens to
       // print, which is the dev one. For a source-assembled (codegen) app that
       // is the wrong answer for this consumer: its `rootUri`s are
-      // `<filesystemScheme>:///<lib_root>`, and DWDS resolves a `package:` URI
-      // through this config only to open the result as a file —
+      // `<filesystemScheme>:///<package_root>`, and DWDS resolves a `package:`
+      // URI through this config only to open the result as a file —
       // `Uri.toFilePath()` throws `Cannot extract a file path from a
       // org-dartlang-app URI`, so every first-party library shows a blank
       // source pane in the debugger.

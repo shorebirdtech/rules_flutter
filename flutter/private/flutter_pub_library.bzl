@@ -13,7 +13,7 @@ package is split in two, as rules_dart's `pub.from_lock()` splits it (see
 * `flutter_pub_library` is the dependency cycle of one or more members, and
   everything the cycle depends on outside itself. It builds one `DartInfo`
   with a package record for each member, and one `FlutterInfo` that merges
-  what each member contributes. Each package keeps its own name, `lib_root`
+  what each member contributes. Each package keeps its own name, `package_root`
   and language version, so `package_config.json` cannot tell it from packages
   built one to a target; and what a package bundles is bundled under its own
   `packages/<name>/`, whichever member an app depends on.
@@ -57,7 +57,7 @@ def _flutter_pub_member_impl(ctx):
         version = ctx.attr.version,
         link_hook = ctx.file.link_hook,
         license_file = ctx.file.license_file,
-        has_unreplaced_hook = ctx.attr.has_unreplaced_hook,
+        unreplaced_hook = ctx.attr.unreplaced_hook,
     )
     return [
         member,
@@ -65,7 +65,7 @@ def _flutter_pub_member_impl(ctx):
             contributions = plugin_contributions(
                 ctx,
                 package_name,
-                member.package.lib_root,
+                member.package.package_root,
                 declares_plugin = bool(ctx.attr.plugin_platforms_json or ctx.attr.platforms),
             ),
         ),

@@ -29,7 +29,7 @@ load(
     "WEB_PLATFORM_SETTINGS",
     "collect_packages",
     "collect_transitive_srcs",
-    "derive_lib_root",
+    "derive_package_root",
     "web_platform_settings",
 )
 load("//flutter/private:app_entrypoint.bzl", "compile_package_config", "synthesize_app_package")
@@ -149,7 +149,7 @@ def _runtime(ctx):
     return "none"
 
 def _flutter_web_branch_impl(ctx):
-    lib_root = derive_lib_root(ctx.label.workspace_root, ctx.label.package)
+    package_root = derive_package_root(ctx.label.workspace_root, ctx.label.package)
     deps = ctx.attr.deps
     srcs = list(ctx.files.srcs) + collect_transitive_srcs(deps).to_list()
 
@@ -158,7 +158,7 @@ def _flutter_web_branch_impl(ctx):
     # inputs so it ends up inside the same assembled directory as its lib/
     # siblings — that's what lets `main.dart`'s relative imports resolve to
     # the assembled (codegen-co-located) copies of its package siblings.
-    packages = synthesize_app_package(ctx.attr.bundle, collect_packages(deps), ctx.attr.package_name, lib_root, ctx.attr.language_version)
+    packages = synthesize_app_package(ctx.attr.bundle, collect_packages(deps), ctx.attr.package_name, package_root, ctx.attr.language_version)
     staged = compile_package_config(ctx, packages, srcs + [ctx.file.main])
     return [
         FlutterWebBranchInfo(

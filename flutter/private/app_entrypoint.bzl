@@ -67,7 +67,7 @@ def with_root(roots, root):
         return list(roots)
     return list(roots) + [root]
 
-def app_main_location(package_name, lib_root, main):
+def app_main_location(package_name, package_root, main):
     """The URI the app's `main` is compiled under, everywhere it is compiled.
 
     Its `package:` URI when it has one (`app_main_package_uri`), which needs
@@ -77,42 +77,42 @@ def app_main_location(package_name, lib_root, main):
 
     Args:
         package_name: The app's Dart package name, or `""`.
-        lib_root: The app's library root, from `derive_lib_root`.
+        package_root: The app's package root, from `derive_package_root`.
         main: The app's `main` `File`.
 
     Returns:
         struct(uri, root): `root` is None for a `package:` URI.
     """
-    package_uri = app_main_package_uri(package_name, lib_root, main.short_path)
+    package_uri = app_main_package_uri(package_name, package_root, main.short_path)
     if package_uri:
         return struct(uri = package_uri, root = None)
     return app_scheme_location(main)
 
-def package_lib_prefix(lib_root):
+def package_lib_prefix(package_root):
     """The `short_path` prefix holding a package's `package:`-reachable files.
 
-    A Dart package rooted at `lib_root` exposes `<lib_root>/lib/x.dart` as
-    `package:<name>/x.dart`; a workspace-rooted package (`lib_root == ""`)
+    A Dart package rooted at `package_root` exposes `<package_root>/lib/x.dart` as
+    `package:<name>/x.dart`; a workspace-rooted package (`package_root == ""`)
     exposes `lib/x.dart`. Every question of the form "is this file reachable
     as `package:<self>/…`, and under what suffix" is this prefix plus a
     `startswith`, so the arithmetic is written once, here, and shared by the
     compile path, the dev-config path and the analyzer's source split.
 
-    `lib_root` always comes from `derive_lib_root`, which speaks `short_path`
+    `package_root` always comes from `derive_package_root`, which speaks `short_path`
     convention (`external/X` → `../X`). Paths tested against this prefix must
     therefore be `short_path`s too — an exec path carries a `bazel-out/…`
     prefix for a generated `main` and would not match.
 
     Args:
-      lib_root: The package's library root, from `derive_lib_root`.
+      package_root: The package's package root, from `derive_package_root`.
 
     Returns:
       The prefix, always ending in `/`.
     """
-    return (lib_root + "/lib/") if lib_root else "lib/"
+    return (package_root + "/lib/") if package_root else "lib/"
 
-def check_foreign_root_package(label, packages, package_name, lib_root):
-    """Checks that no dependency claims a *differently named* package at `lib_root`.
+def check_foreign_root_package(label, packages, package_name, package_root):
+    """Checks that no dependency claims a *differently named* package at `package_root`.
 
     `synthesize_app_package` drops every transitive record rooted where the app
     is, because two Dart packages cannot share a root: the same `lib/x.dart`
@@ -134,7 +134,7 @@ def check_foreign_root_package(label, packages, package_name, lib_root):
       label: The app/test rule's label, for the message.
       packages: List of `DartPackageInfo` (from `collect_packages`).
       package_name: The app's own `package_name`.
-      lib_root: The app's library root, from `derive_lib_root`.
+      package_root: The app's package root, from `derive_package_root`.
 
     Returns:
       An error message naming every foreign package at the app's root, or
@@ -143,7 +143,7 @@ def check_foreign_root_package(label, packages, package_name, lib_root):
     foreign = [
         p.package_name
         for p in packages
-        if p.lib_root == lib_root and p.package_name != package_name
+        if p.package_root == package_root and p.package_name != package_name
     ]
     if not foreign:
         return None
@@ -159,27 +159,27 @@ def check_foreign_root_package(label, packages, package_name, lib_root):
          "package: set `package_name = \"%s\"`, list the library's sources in " +
          "`srcs` (typically `glob([\"lib/**/*.dart\"])`), and drop the " +
          "dependency on it.") %
-        (label, ", ".join(foreign), lib_root if lib_root else "the workspace root", package_name, foreign[0], foreign[0])
+        (label, ", ".join(foreign), package_root if package_root else "the workspace root", package_name, foreign[0], foreign[0])
     )
 
-def synthesize_app_package(label, packages, package_name, lib_root, language_version):
+def synthesize_app_package(label, packages, package_name, package_root, language_version):
     """Replace colliding transitive entries with the app's own package.
 
     A `flutter_application` / `flutter_test` / `flutter_web_application` whose
     own sources live under `lib/` is conceptually the root of its Dart
     package — but any `dart_library` it depends on rooted at the same
-    directory exposes a `DartPackageInfo` with that same `lib_root`, which
+    directory exposes a `DartPackageInfo` with that same `package_root`, which
     would collide with the app's mapping (two packages can't share a
     `rootUri`). Drop those colliding transitive entries and append one fresh
     entry for the app itself.
 
-    `lib_root` is the app's own, from `derive_lib_root`, not a bare `""`. They
+    `package_root` is the app's own, from `derive_package_root`, not a bare `""`. They
     agree for a workspace-rooted app and differ for one in a nested Bazel
     package, where `""` claims the workspace root and makes
     `package:<self>/main.dart` resolve to a *different app's* `lib/main.dart`.
     See `package_lib_prefix`.
 
-    The filter is on `lib_root`, not on `package_name`: every record at the
+    The filter is on `package_root`, not on `package_name`: every record at the
     app's root is dropped, including one whose name differs from the app's.
     Two packages rooted at the same directory cannot both be expressed in a
     `package_config.json` regardless of what they are called, so there is no
@@ -193,7 +193,7 @@ def synthesize_app_package(label, packages, package_name, lib_root, language_ver
       packages: List of `DartPackageInfo` (from `collect_packages`).
       package_name: The app's `package_name`. Always non-empty — every
         Flutter consumer rule declares it as a mandatory attribute.
-      lib_root: The app's library root, from `derive_lib_root`.
+      package_root: The app's package root, from `derive_package_root`.
       language_version: The app's `language_version` attr, or `""` when it
         states none. Required rather than defaulted: a caller that forgot to
         forward it and an app that genuinely declares none would otherwise be
@@ -201,7 +201,7 @@ def synthesize_app_package(label, packages, package_name, lib_root, language_ver
         came to accept the attribute and silently drop it.
 
     Returns:
-      The packages list with every entry at `lib_root` replaced by one
+      The packages list with every entry at `package_root` replaced by one
       synthesized app entry, carrying `language_version`.
 
     Pub writes the root package's `languageVersion` from its own
@@ -211,17 +211,17 @@ def synthesize_app_package(label, packages, package_name, lib_root, language_ver
     arrives as an attribute because it lives in `pubspec.yaml`, which the
     analysis phase cannot read — the same reason `package_name` is explicit.
     """
-    err = check_foreign_root_package(label, packages, package_name, lib_root)
+    err = check_foreign_root_package(label, packages, package_name, package_root)
     if err != None:
         fail(err)
 
-    return [p for p in packages if p.lib_root != lib_root] + [struct(
+    return [p for p in packages if p.package_root != package_root] + [struct(
         package_name = package_name,
-        lib_root = lib_root,
+        package_root = package_root,
         language_version = language_version,
     )]
 
-def resolve_wrapper_main_import(package_name, lib_root, main_short_path, main_path, wrapper_depth):
+def resolve_wrapper_main_import(package_name, package_root, main_short_path, main_path, wrapper_depth):
     """Import URI a generated wrapper should use to reach the user's `main`.
 
     Used by the web bootstrap wrapper (`make_web_wrapper_main_content`).
@@ -233,13 +233,13 @@ def resolve_wrapper_main_import(package_name, lib_root, main_short_path, main_pa
     relative file path from the wrapper otherwise.
 
     Takes both of `main`'s paths because the two branches need different ones:
-    the `package:` mapping is decided in `short_path` space (what `lib_root`
+    the `package:` mapping is decided in `short_path` space (what `package_root`
     speaks), while the relative fallback is walked from the wrapper's own
     location in the exec root.
 
     Args:
       package_name: The app's `package_name` (or `""`).
-      lib_root: The app's library root, from `derive_lib_root`.
+      package_root: The app's package root, from `derive_package_root`.
       main_short_path: `main.short_path`, tested against the package prefix.
       main_path: Exec-root-relative path to the user's main `.dart`.
       wrapper_depth: Number of path components in the wrapper's `dirname`.
@@ -247,19 +247,19 @@ def resolve_wrapper_main_import(package_name, lib_root, main_short_path, main_pa
     Returns:
       A string suitable for the wrapper's `import '<value>' as entrypoint`.
     """
-    return app_main_package_uri(package_name, lib_root, main_short_path) or compute_wrapper_main_import(wrapper_depth, main_path)
+    return app_main_package_uri(package_name, package_root, main_short_path) or compute_wrapper_main_import(wrapper_depth, main_path)
 
 def compile_package_config(ctx, packages, all_srcs):
     """Co-locate packages and write the matching `package_config.json`.
 
     The co-location step assembles any package whose hand-written + generated
     sources straddle the source tree and `bazel-out` (e.g. a `dart_codegen`
-    `part`) into one real directory, then rewrites that package's `lib_root`
+    `part`) into one real directory, then rewrites that package's `package_root`
     to the assembled directory's `short_path`. The package_config is written
     using the exec-root-relative generator so an assembled package's
     `rootUri` resolves to its bazel-out tree artifact. The two steps are
     locked together — writing the config with the prefix-based generator
-    against a colocated `lib_root` would yield the wrong `rootUri`.
+    against a colocated `package_root` would yield the wrong `rootUri`.
 
     Args:
       ctx: The rule context (must carry `COPY_TO_DIRECTORY_TOOLCHAINS`).
@@ -322,27 +322,27 @@ def compute_same_root_main_import(wrapper_dir, main_path):
     depth = len(wrapper_dir.split("/")) if wrapper_dir else 0
     return "../" * depth + main_path
 
-def app_main_package_uri(package_name, lib_root, main_short_path):
+def app_main_package_uri(package_name, package_root, main_short_path):
     """The `package:` URI for the app's own `main`, for hot-reload URI parity.
 
     `synthesize_app_package` registers the app as a package rooted at
-    `lib_root`, so `package:<name>/X` resolves to `<lib_root>/lib/X`. The dev
+    `package_root`, so `package:<name>/X` resolves to `<package_root>/lib/X`. The dev
     tool's incremental compiler keys the entrypoint by that same
     `package:<name>/main.dart`. The running kernel must reach the user's main
     via this `package:` URI — not a relative file path — or it keys the
     library `file://` and `reloadSources` can't match it.
 
-    The mapping is decided by stripping `package_lib_prefix(lib_root)`, the
+    The mapping is decided by stripping `package_lib_prefix(package_root)`, the
     one place that arithmetic lives, so the URI this returns is backed by the
     record synthesis writes rather than derived independently of it. The
     previous `rsplit("/lib/")` was such an independent derivation: it named
     `package:<name>/main.dart` for a nested app's `<pkg>/lib/main.dart` while
-    the record said `lib_root=""`, so the URI resolved to the *workspace
+    the record said `package_root=""`, so the URI resolved to the *workspace
     root's* `lib/main.dart`.
 
     Args:
         package_name: The app's Dart package name (`ctx.attr.package_name`).
-        lib_root: The app's library root, from `derive_lib_root`.
+        package_root: The app's package root, from `derive_package_root`.
         main_short_path: The app main's `short_path`. Not its exec path — see
             `package_lib_prefix` for why the two are not interchangeable.
 
@@ -353,7 +353,7 @@ def app_main_package_uri(package_name, lib_root, main_short_path):
     """
     if not package_name:
         return None
-    prefix = package_lib_prefix(lib_root)
+    prefix = package_lib_prefix(package_root)
     if not main_short_path.startswith(prefix):
         return None
     rel = main_short_path[len(prefix):]
@@ -361,7 +361,7 @@ def app_main_package_uri(package_name, lib_root, main_short_path):
         return None
     return "package:%s/%s" % (package_name, rel)
 
-def app_scheme_files(package_name, lib_root, main, srcs):
+def app_scheme_files(package_name, package_root, main, srcs):
     """The first-party source files the app reads under `APP_SCHEME`.
 
     Empty for a `main` with a `package:` URI. Otherwise the `main` and every
@@ -375,16 +375,16 @@ def app_scheme_files(package_name, lib_root, main, srcs):
 
     Args:
         package_name: The app's Dart package name, or `""`.
-        lib_root: The app's library root, from `derive_lib_root`.
+        package_root: The app's package root, from `derive_package_root`.
         main: The app's `main` `File`.
         srcs: The app's own `srcs` `File`s.
 
     Returns:
         A list of `File`s.
     """
-    if app_main_package_uri(package_name, lib_root, main.short_path):
+    if app_main_package_uri(package_name, package_root, main.short_path):
         return []
-    prefix = package_lib_prefix(lib_root)
+    prefix = package_lib_prefix(package_root)
     out = []
     for f in [main] + [s for s in srcs if s != main]:
         if not f.is_source or f.short_path.startswith("../"):
@@ -394,7 +394,7 @@ def app_scheme_files(package_name, lib_root, main, srcs):
         out.append(f)
     return out
 
-def app_scheme_sources(package_name, lib_root, main, srcs):
+def app_scheme_sources(package_name, package_root, main, srcs):
     """The files the dev loop reloads under `APP_SCHEME`, by workspace path.
 
     The files of `app_scheme_files`, each keyed by its URI: an edit to a file
@@ -403,7 +403,7 @@ def app_scheme_sources(package_name, lib_root, main, srcs):
 
     Args:
         package_name: The app's Dart package name, or `""`.
-        lib_root: The app's library root, from `derive_lib_root`.
+        package_root: The app's package root, from `derive_package_root`.
         main: The app's `main` `File`.
         srcs: The app's own `srcs` `File`s.
 
@@ -412,5 +412,5 @@ def app_scheme_sources(package_name, lib_root, main, srcs):
     """
     return [
         {"path": f.short_path, "uri": app_scheme_location(f).uri}
-        for f in app_scheme_files(package_name, lib_root, main, srcs)
+        for f in app_scheme_files(package_name, package_root, main, srcs)
     ]

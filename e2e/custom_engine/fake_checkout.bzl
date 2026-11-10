@@ -94,7 +94,7 @@ def _dart_source(path, link):
     The release Dart's `pkg/kernel` and `pkg/_fe_analyzer_shared`, from the
     release SDK's outline repository: the stand-in's compiler is the release's.
     """
-    dart_source = path("@flutter_kernel_outline_src//:kernel/pubspec.yaml").dirname.dirname
+    dart_source = path("@flutter_outline_tool_src//:kernel/pubspec.yaml").dirname.dirname
     for package in ["kernel", "_fe_analyzer_shared"]:
         link(dart_source.get_child(package), "checkout/engine/src/flutter/third_party/dart/pkg/" + package)
 

@@ -6,10 +6,7 @@ file `flutter_pub.from_lock(swift_package_resolved = ...)` names, or
 `Package.resolved` beside the lock. See `swift_packages.bzl`.
 """
 
-load("@rules_dart//dart:utils.bzl", "runfiles_path")
-
-# buildifier: disable=bzl-visibility
-load("@rules_dart//dart/private:dart_compile.bzl", "dart_compile_action")
+load("@rules_dart//dart:utils.bzl", "dart_compile_action", "runfiles_path")
 load("//flutter/private:host_transition.bzl", "host_transition")
 
 def _flutter_swift_resolve_impl(ctx):

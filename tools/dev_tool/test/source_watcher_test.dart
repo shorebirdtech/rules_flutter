@@ -280,7 +280,7 @@ void main() {
         // (watcher → SourceUriResolver.uriFor) yields the expected URIs.
         final resolver = SourceUriResolver(
           workspaceRoot: '/root',
-          sourcePackages: const [(name: 'app', libRoot: '')],
+          sourcePackages: const [(name: 'app', packageRoot: '')],
         );
         final change = SourceChange({'/root/lib/foo/bar.dart'});
         final uris = change.paths.map(resolver.uriFor).toSet();

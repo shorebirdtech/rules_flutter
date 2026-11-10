@@ -462,14 +462,14 @@ def native_assets_test_suite(name):
 # failing analysis — it is not an offender, and it could not have been one.
 
 def _legacy_dart_library_impl(ctx):
-    # The pre-`has_unreplaced_hook` record shape, matching rules_dart's own
-    # `//dart/tests/no_lv_fixture`: `package_name` and `lib_root` and nothing
+    # The pre-`unreplaced_hook` record shape, matching rules_dart's own
+    # `//dart/tests/no_lv_fixture`: `package_name` and `package_root` and nothing
     # else. Built by hand on purpose — a fixture asserting that older producers
     # still work cannot be written through a constructor that makes them
     # current.
     pkg = DartPackageInfo(
         package_name = ctx.attr.package_name,
-        lib_root = ctx.label.package,
+        package_root = ctx.label.package,
     )
     return [
         DefaultInfo(files = depset(ctx.files.srcs)),
@@ -487,7 +487,7 @@ legacy_dart_library = rule(
         "package_name": attr.string(mandatory = True),
         "srcs": attr.label_list(allow_files = [".dart"]),
     },
-    doc = "Emits a `DartPackageInfo` predating `has_unreplaced_hook`.",
+    doc = "Emits a `DartPackageInfo` predating `unreplaced_hook`.",
 )
 
 def _hook_check_probe_impl(ctx):

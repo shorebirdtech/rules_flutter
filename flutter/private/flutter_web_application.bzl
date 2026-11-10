@@ -33,7 +33,7 @@ from, and `deps` is split the same way.
 
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_dart//dart:providers.bzl", "DartInfo")
-load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "dart_analyzable_info_with_packages", "dart_package_info", "derive_lib_root", "generate_dev_package_config", "import_check_validation")
+load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "dart_analyzable_info_with_packages", "dart_package_info", "derive_package_root", "generate_dev_package_config", "import_check_validation")
 load("//flutter:providers.bzl", "FlutterInfo", "FlutterNativeLibraryInfo", "FlutterSdkRecordInfo")
 load(
     "//flutter/private:app_entrypoint.bzl",
@@ -406,7 +406,7 @@ def _flutter_web_bundle_impl(ctx):
     # Step 1: Collect sources, generate package config, handle plugin registrant.
     # dart compile wasm/js take .dart source directly (not kernel .dill).
     #
-    # The app's own library root — the single answer to "what is
+    # The app's own package root — the single answer to "what is
     # `package:<self>/…` rooted at" for this target. Everything downstream
     # that asks the question (package synthesis, the wrapper's import, the
     # dev-config entrypoint, the analyzer's source split) takes it from here
@@ -414,7 +414,7 @@ def _flutter_web_bundle_impl(ctx):
     # analysis path came to disagree: analysis derived it, compilation
     # assumed `""`, and a nested app's `package:` URIs silently resolved
     # against the workspace root instead of its own package.
-    lib_root = derive_lib_root(ctx.label.workspace_root, ctx.label.package)
+    package_root = derive_package_root(ctx.label.workspace_root, ctx.label.package)
 
     # Every reader of `deps` reads a named branch. Each compile takes its own
     # compiler's; everything the bundle holds once — the plugin registrant
@@ -459,7 +459,7 @@ def _flutter_web_bundle_impl(ctx):
     # Hot-reload dev metadata (debug only): a multi-root dev package_config so a
     # source-assembled (codegen) app resolves package: URIs across the live
     # source tree + generated bazel-out roots, instead of the frozen assembled
-    # `.pkgsrcs` dir the build config uses. Computed pre-colocation (lib_root +
+    # `.pkgsrcs` dir the build config uses. Computed pre-colocation (package_root +
     # File.is_source intact). See rules_dart generate_dev_package_config.
     dev_package_config = None
     dev_filesystem_roots = []
@@ -478,7 +478,7 @@ def _flutter_web_bundle_impl(ctx):
         # synthetic entrypoint under the app scheme, from this root.
         dev_filesystem_roots = with_root(
             dev_pc.filesystem_roots,
-            app_main_location(ctx.attr.package_name, lib_root, ctx.file.main).root,
+            app_main_location(ctx.attr.package_name, package_root, ctx.file.main).root,
         )
         dev_filesystem_scheme = dev_pc.scheme
         dev_generated_source_uris = dev_pc.generated_source_uris
@@ -527,7 +527,7 @@ def _flutter_web_bundle_impl(ctx):
     # directory and its relative imports find their colocated siblings.
     main_import = resolve_wrapper_main_import(
         ctx.attr.package_name,
-        lib_root,
+        package_root,
         ctx.file.main.short_path,
         ctx.file.main.path,
         wrapper_depth,
@@ -1165,7 +1165,7 @@ def _flutter_web_bundle_impl(ctx):
     # reachable as `package:<self>/main.dart` — and sometimes not, as when it
     # sits at the package root beside `web/`. Which one holds is decidable from
     # the file's own path, so neither case has to be assumed.
-    main_in_package = ctx.file.main.short_path.startswith(package_lib_prefix(lib_root))
+    main_in_package = ctx.file.main.short_path.startswith(package_lib_prefix(package_root))
 
     # `_sky_engine` joins the analyzer's closure and nothing else. The web
     # compilers get `dart:ui` from the web SDK; the analyzer resolves it only by
@@ -1176,7 +1176,7 @@ def _flutter_web_bundle_impl(ctx):
         packages = [dart_package_info(
             label = ctx.label,
             package_name = ctx.attr.package_name,
-            lib_root = lib_root,
+            package_root = package_root,
             # As on the compile path above: the analyzer and the compiler have
             # to agree on the version, or the attr closes the divergence in
             # only one.
@@ -1235,7 +1235,7 @@ def _flutter_web_bundle_impl(ctx):
         # named some other app's entrypoint whenever the workspace root held
         # one, and the dev loop booted that program with nothing reporting a
         # mismatch.
-        app_entrypoint = app_main_location(ctx.attr.package_name, lib_root, ctx.file.main).uri
+        app_entrypoint = app_main_location(ctx.attr.package_name, package_root, ctx.file.main).uri
 
         # Declares every build output the config names; see `dev_config.bzl`.
         ddc_files.extend(write_dev_config(ctx, ctx.actions.declare_file(ctx.label.name + "_dev_config.json"), {
@@ -1290,7 +1290,7 @@ def _flutter_web_bundle_impl(ctx):
             # Named separately from `devPackageConfig` because the two are not
             # interchangeable and only the call site knows which it wants. A
             # source-assembled package's dev `rootUri` is
-            # `<filesystemScheme>:///<lib_root>`, which the frontend_server
+            # `<filesystemScheme>:///<package_root>`, which the frontend_server
             # resolves through `--filesystem-root` but `Uri.toFilePath()`
             # cannot: DWDS asked through it gets "Cannot extract a file path
             # from a org-dartlang-app URI" and shows no source at all. This
@@ -1319,10 +1319,10 @@ def _flutter_web_bundle_impl(ctx):
                 for f, contracts in native_module_contracts.items()
             },
             # First-party source packages (app + local deps) the dev tool maps
-            # live edits back to via its SourceUriResolver. libRoot is
+            # live edits back to via its SourceUriResolver. packageRoot is
             # workspace-relative.
             "sourcePackages": [
-                {"name": sp[0], "libRoot": sp[1]}
+                {"name": sp[0], "packageRoot": sp[1]}
                 for sp in dev_source_packages
             ],
             # The sources outside every package the app compiles under the app
@@ -1331,7 +1331,7 @@ def _flutter_web_bundle_impl(ctx):
             # `main` with a `package:` URI.
             "appSources": app_scheme_sources(
                 ctx.attr.package_name,
-                lib_root,
+                package_root,
                 ctx.file.main,
                 ctx.files.srcs,
             ),

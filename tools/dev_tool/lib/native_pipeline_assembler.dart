@@ -479,8 +479,8 @@ class NativePipelineAssembler {
       // `toMultiRootPath`), trying a `package:` URI first, which keeps every
       // reference to a file under a single URI identity in the incremental
       // compiler's state. Nothing else refers to the registrant — no import, no
-      // invalidation, and it sits outside every package's `libRoot`, so it is
-      // not reachable as a `package:` URI — leaving no second identity to
+      // invalidation, and it sits outside every package's `packageRoot`, so it
+      // is not reachable as a `package:` URI — leaving no second identity to
       // collide with.
       dartPluginRegistrantUri: registrant.isEmpty
           ? ''

@@ -81,7 +81,7 @@ class _Harness {
     Directory(p.join(tmp.path, 'lib')).createSync();
     final resolver = SourceUriResolver(
       workspaceRoot: tmp.path,
-      sourcePackages: const [(name: 'app', libRoot: '')],
+      sourcePackages: const [(name: 'app', packageRoot: '')],
     );
     final workspace = Workspace(resolver: resolver);
     return _Harness._(

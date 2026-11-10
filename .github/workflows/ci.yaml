@@ -108,7 +108,7 @@ jobs:
       # the `consumer-query` job explains.
       - name: Extract the release archive
         run: bazel run //tools/consumer_archive
-      - run: bazel run @overhead//locks
+      - run: bazel run @overhead//locks:check
       - name: bazelrc preset
         run: bazel run @overhead//preset -- --check
   # A module that depends on rules_flutter must be able to list all of it, as

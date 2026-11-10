@@ -432,10 +432,10 @@ def flutter_application_build(ctx, inputs):
                 # reload; see `native_sources.bzl`.
                 "nativeLibSources": native_lib_sources,
                 # First-party source packages (app + local deps) the dev tool
-                # maps live edits back to via its SourceUriResolver. libRoot is
+                # maps live edits back to via its SourceUriResolver. packageRoot is
                 # workspace-relative.
                 "sourcePackages": [
-                    {"name": sp[0], "libRoot": sp[1]}
+                    {"name": sp[0], "packageRoot": sp[1]}
                     for sp in compilation.dev_source_packages
                 ],
                 # The sources outside every package the app compiles under the

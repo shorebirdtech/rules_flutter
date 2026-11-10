@@ -25,10 +25,7 @@ writes `pubspec.lock` and `.dart_tool/package_config.json` and does not produce
 from the build graph instead, so that file has no consumer here.
 """
 
-load("@rules_dart//dart:utils.bzl", "runfiles_path")
-
-# buildifier: disable=bzl-visibility
-load("@rules_dart//dart/private:dart_compile.bzl", "dart_compile_action")
+load("@rules_dart//dart:utils.bzl", "dart_compile_action", "runfiles_path")
 load("//flutter/private:host_transition.bzl", "host_transition")
 
 def _flutter_pub_impl(ctx):

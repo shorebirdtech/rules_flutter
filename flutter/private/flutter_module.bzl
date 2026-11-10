@@ -69,7 +69,7 @@ def flutter_kernel_sdk_info(sdk, libraries_spec = None, extra_defines = [], outl
         )
     return DartKernelSdkInfo(
         target = "flutter",
-        runtime = sdk.dartaotruntime,
+        aot_runtime = sdk.dartaotruntime,
         kernel_worker = sdk.kernel_worker,
         frontend_server = sdk.frontend_server,
         runtimes = runtimes,

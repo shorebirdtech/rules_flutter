@@ -112,7 +112,7 @@ class _Harness {
 
     final resolver = SourceUriResolver(
       workspaceRoot: tmp.path,
-      sourcePackages: const [(name: 'app', libRoot: '')],
+      sourcePackages: const [(name: 'app', packageRoot: '')],
     );
     final workspace = Workspace(resolver: resolver);
     final applied = AppliedVersions();

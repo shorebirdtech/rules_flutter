@@ -413,16 +413,16 @@ flutter_gen_snapshot(
         kernel_pubspec = dart_src.get_child("pkg").get_child("kernel").get_child("pubspec.yaml")
         repository_ctx.watch(kernel_pubspec)
         if kernel_pubspec.exists:
-            kernel = fetch_dart_kernel_source(repository_ctx, str(dart_src), "kernel_outline/src")
-            provided[("kernel_outline", "kernel_outline")] = """
+            kernel = fetch_dart_kernel_source(repository_ctx, str(dart_src), "outline_tool/src")
+            provided[("outline_tool", "outline_tool")] = """
 alias(
-    name = "kernel_outline",
+    name = "outline_tool",
     actual = "{}",
     visibility = ["//visibility:public"],
 )
 """.format(kernel.outline_tool)
         else:
-            reasons[("kernel_outline", "kernel_outline")] = (
+            reasons[("outline_tool", "outline_tool")] = (
                 "{}={} has no Dart source at {}, which outline compiles build their stripper from: " +
                 "run `gclient sync` in the checkout, or build with --@rules_dart//dart:outline_kernel=false."
             ).format(path_env, checkout, dart_src)

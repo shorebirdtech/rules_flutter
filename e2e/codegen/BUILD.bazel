@@ -103,7 +103,7 @@ flutter_application(
 # This exists specifically so the dev tool's hot-reload path is exercised
 # against an app whose *own* Dart package is source-assembled: `:app` mixes a
 # source-tree file (lib/user.dart) with a generated one (:user_json), so
-# `colocate_packages` rewrites the app package's lib_root to an assembled
+# `colocate_packages` rewrites the app package's package_root to an assembled
 # `*.pkgsrcs` tree-artifact, and its package_config.json rootUri becomes
 # `app.codegen_e2e.pkgsrcs` rather than the source-tree `../../..`. Pure
 # source-tree examples (macos_example, hello_world) never produce this shape,

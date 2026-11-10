@@ -71,7 +71,7 @@ flutter_library(
     name = "hook_fixture",
     package_name = "hook_fixture",
     srcs = ["lib/hook_fixture.dart"],
-    has_unreplaced_hook = "hook/build.dart",
+    unreplaced_hook = "hook/build.dart",
 )
 
 # Reaching that package from an application must fail at analysis. Left
@@ -86,7 +86,7 @@ flutter_application(
 )
 
 # The tolerance side of the same check. A `DartPackageInfo` built against a
-# rules_dart predating `has_unreplaced_hook` has no such field, and reaching it
+# rules_dart predating `unreplaced_hook` has no such field, and reaching it
 # from an application must be a non-event: it cannot be an offender, because a
 # producer with no field could not have recorded a hook. Probed directly rather
 # than through `flutter_application` so the assertion is about the check and

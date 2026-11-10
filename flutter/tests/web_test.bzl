@@ -623,12 +623,12 @@ def _dev_config_test_impl(ctx):
     # so its `main` is the only first-party source here — and it is listed
     # under this target's own package, not the workspace root.
     #
-    # An app record claiming `lib_root = ""` would match no file of a package
+    # An app record claiming `package_root = ""` would match no file of a package
     # that does not sit at the workspace root, so a live edit to such an app's
     # `main` would map to no package at all.
     asserts.equals(
         env,
-        [{"name": "web_fixture", "libRoot": "flutter/tests"}],
+        [{"name": "web_fixture", "packageRoot": "flutter/tests"}],
         config["sourcePackages"],
     )
 

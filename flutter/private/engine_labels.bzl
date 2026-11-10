@@ -199,7 +199,7 @@ def contract_slices():
     for host in HOST_PLATFORMS:
         slices["host/" + host] = ["tools"]
     slices["kernel/debug"] = ["platform"]
-    slices["kernel_outline"] = ["kernel_outline"]
+    slices["outline_tool"] = ["outline_tool"]
     slices["kernel/release"] = ["platform"]
     for platform in DESKTOP_ENGINE_PLATFORMS:
         directory = desktop_engine_dir(platform)

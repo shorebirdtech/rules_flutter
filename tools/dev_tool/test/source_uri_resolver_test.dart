@@ -6,13 +6,13 @@ void main() {
   group('SourceUriResolver', () {
     const ws = '/work/app';
 
-    SourceUriResolver make(List<({String name, String libRoot})> pkgs) =>
+    SourceUriResolver make(List<({String name, String packageRoot})> pkgs) =>
         SourceUriResolver(workspaceRoot: ws, sourcePackages: pkgs);
 
     test(
-      'maps an app lib file (root package, empty libRoot) to package: URI',
+      'maps an app lib file (root package, empty packageRoot) to package: URI',
       () {
-        final r = make([(name: 'app', libRoot: '')]);
+        final r = make([(name: 'app', packageRoot: '')]);
         expect(r.uriFor('$ws/lib/main.dart'), 'package:app/main.dart');
         expect(
           r.uriFor('$ws/lib/sub/widget.dart'),
@@ -21,10 +21,10 @@ void main() {
       },
     );
 
-    test('maps a dependency package source under its libRoot', () {
+    test('maps a dependency package source under its packageRoot', () {
       final r = make([
-        (name: 'app', libRoot: ''),
-        (name: 'dep', libRoot: 'packages/dep'),
+        (name: 'app', packageRoot: ''),
+        (name: 'dep', packageRoot: 'packages/dep'),
       ]);
       expect(
         r.uriFor('$ws/packages/dep/lib/api.dart'),
@@ -36,8 +36,8 @@ void main() {
       // A package nested under another: the inner package must claim its files,
       // not the outer one.
       final r = make([
-        (name: 'outer', libRoot: ''),
-        (name: 'inner', libRoot: 'lib/vendored'),
+        (name: 'outer', packageRoot: ''),
+        (name: 'inner', packageRoot: 'lib/vendored'),
       ]);
       // libDir(outer) = /work/app/lib ; libDir(inner) = /work/app/lib/vendored/lib
       expect(
@@ -48,7 +48,7 @@ void main() {
     });
 
     test('returns null for a path outside every source package lib dir', () {
-      final r = make([(name: 'app', libRoot: '')]);
+      final r = make([(name: 'app', packageRoot: '')]);
       // Not under any lib/ (e.g. a tool script, or a pub dep in external/).
       expect(r.uriFor('$ws/tools/gen.dart'), isNull);
       expect(r.uriFor('/elsewhere/lib/x.dart'), isNull);
@@ -56,8 +56,8 @@ void main() {
 
     test('sourceLibDirs lists each package lib directory', () {
       final r = make([
-        (name: 'app', libRoot: ''),
-        (name: 'dep', libRoot: 'packages/dep'),
+        (name: 'app', packageRoot: ''),
+        (name: 'dep', packageRoot: 'packages/dep'),
       ]);
       expect(r.sourceLibDirs.map(p.normalize), [
         p.normalize('$ws/lib'),
@@ -71,7 +71,7 @@ void main() {
       // the app scheme. The build declares both, with their URIs.
       SourceUriResolver withAppSources() => SourceUriResolver(
         workspaceRoot: ws,
-        sourcePackages: [(name: 'app', libRoot: '')],
+        sourcePackages: [(name: 'app', packageRoot: '')],
         appSources: [
           (
             path: 'test_driver/app.dart',
@@ -123,7 +123,7 @@ void main() {
     });
 
     test('normalizes input paths (handles .. and trailing separators)', () {
-      final r = make([(name: 'app', libRoot: '')]);
+      final r = make([(name: 'app', packageRoot: '')]);
       expect(
         r.uriFor('$ws/lib/foo/../main.dart'),
         'package:app/main.dart',

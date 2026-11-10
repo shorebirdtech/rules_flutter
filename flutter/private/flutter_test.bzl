@@ -23,7 +23,7 @@ Wire-up:
      point, and all of it listed in a kernel list, which the runner joins into the
      one kernel flutter_tester loads when it starts it (in memory on Linux, a
      temporary file elsewhere), so no test stores a copy of its libraries.
-     With `--@rules_dart//dart:kernel_lists=false` the build joins them into
+     With `--@rules_dart//dart:kernel_list=false` the build joins them into
      one `.dill` instead. A test therefore recompiles only its own files, and a change to a shared
      library recompiles that library's module and those downstream of it once,
      not every test that reaches it. With
@@ -62,7 +62,7 @@ cannot write there.
 load("@bazel_skylib//lib:structs.bzl", "structs")
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo", "DartKernelSdkInfo")
-load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "KERNEL_LISTS_ATTR", "KERNEL_TOOL_ATTR", "TRACK_CREATION_LOCATIONS_ATTR", "collect_modules", "collect_packages", "collect_transitive_srcs", "dart_analyzable_info_with_packages", "dart_entry_kernel_action", "dart_import_check_aspect", "dart_link_kernel_action", "dart_package_info", "derive_lib_root", "executable_defines", "executable_defines_config", "import_check_validation", "kernel_lists", "runfiles_path", "track_creation_locations")
+load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "KERNEL_LIST_ATTR", "KERNEL_TOOL_ATTR", "TRACK_CREATION_LOCATIONS_ATTR", "collect_modules", "collect_packages", "collect_transitive_srcs", "dart_analyzable_info_with_packages", "dart_entry_kernel_action", "dart_import_check_aspect", "dart_link_kernel_action", "dart_package_info", "derive_package_root", "executable_defines", "executable_defines_config", "import_check_validation", "kernel_list", "runfiles_path", "track_creation_locations")
 load("//flutter:providers.bzl", "FlutterApplicationInputsInfo", "FlutterInfo", "FlutterTestProgramInfo")
 load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "synthesize_app_package")
 load("//flutter/private:application_libraries.bzl", "application_libraries", "application_libraries_aspect")
@@ -492,12 +492,12 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
 
     # Register the test's own package so `package:<self>/foo` imports inside
     # test sources resolve.
-    lib_root = derive_lib_root(inputs.label.workspace_root, inputs.label.package)
+    package_root = derive_package_root(inputs.label.workspace_root, inputs.label.package)
     packages = synthesize_app_package(
         ctx.label,
         collect_packages(deps),
         inputs.package_name,
-        lib_root,
+        package_root,
         inputs.language_version,
     )
 
@@ -506,12 +506,12 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
         own_srcs.append(staged_comparator)
     kernel_dill = ctx.actions.declare_file(ctx.label.name + ".dill")
 
-    # With `--@rules_dart//dart:kernel_lists`, `kernel_dill` is a list of the
+    # With `--@rules_dart//dart:kernel_list`, `kernel_dill` is a list of the
     # kernels the program is made of, and these are the files it names.
     listed_kernels = depset()
-    kernel_list = modular and kernel_lists(ctx)
+    as_kernel_list = modular and kernel_list(ctx)
     if modular:
-        listed_kernels = _link_modules(ctx, deps, bootstrap, own_srcs, packages, native_assets_manifest, kernel_dill, kernel_list)
+        listed_kernels = _link_modules(ctx, deps, bootstrap, own_srcs, packages, native_assets_manifest, kernel_dill, as_kernel_list)
     else:
         _compile_whole_program(ctx, portable_tools(ctx), deps, bootstrap, own_srcs, packages, native_assets_manifest, kernel_dill)
 
@@ -564,7 +564,7 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
 
     info = FlutterTestProgramInfo(
         kernel = kernel_dill,
-        kernel_list = bool(kernel_list),
+        kernel_list = bool(as_kernel_list),
         kernels = listed_kernels,
         assets = flutter_assets,
         tester = runner_tools.flutter_tester,
@@ -615,7 +615,7 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
         # Hence the source split: `srcs` is the `main` outside any `lib/`, and
         # `package_srcs` the `lib/` files reachable as `package:<self>/…`.
         #
-        # `lib_root` comes from `derive_lib_root`, the same call the compile
+        # `package_root` comes from `derive_package_root`, the same call the compile
         # path above now passes to `synthesize_app_package`. The two used to
         # disagree — synthesis hardcoded `""` — which is how a sub-package
         # target could analyze clean and compile against the *workspace
@@ -631,7 +631,7 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
             packages = [dart_package_info(
                 label = ctx.label,
                 package_name = inputs.package_name,
-                lib_root = lib_root,
+                package_root = package_root,
                 # The same version the compile path above states. Analysis
                 # reading a different one than the compiler is the divergence
                 # this attr exists to close, reappearing one layer down.
@@ -799,7 +799,7 @@ _PROGRAM_ATTRS.update(_ENVIRONMENT.attrs)
 
 _PROGRAM_ATTRS.update(PLATFORM_CONSTRAINT_ATTRS)
 _PROGRAM_ATTRS.update(KERNEL_TOOL_ATTR)
-_PROGRAM_ATTRS.update(KERNEL_LISTS_ATTR)
+_PROGRAM_ATTRS.update(KERNEL_LIST_ATTR)
 _PROGRAM_ATTRS.update(TRACK_CREATION_LOCATIONS_ATTR)
 
 # Each library in `deps` is compiled into a kernel module by the aspect, and its

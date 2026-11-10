@@ -470,7 +470,7 @@ void main() {
             'message',
             allOf(
               contains('flutter_test runner: cannot join the test'),
-              contains('--@rules_dart//dart:kernel_lists=false'),
+              contains('--@rules_dart//dart:kernel_list=false'),
               contains('entry.dill'),
             ),
           ),

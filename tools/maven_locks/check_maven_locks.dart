@@ -1,5 +1,5 @@
 // Checks the Maven lock files of the root and the e2e workspaces: the part of
-// lock checking that is rules_flutter's own. `bazel run @overhead//locks`
+// lock checking that is rules_flutter's own. `bazel run @overhead//locks:check`
 // checks every MODULE.bazel.lock; this checks what that cannot know about
 // `rules_jvm_external`.
 //
@@ -17,8 +17,9 @@
 // skip (see `checkMavenNoise`).
 //
 // `--refresh` re-pins a stale lock with `REPIN=1 bazel run @repo//:pin`, which
-// needs Maven access, then `bazel run @overhead//locks -- --refresh` records
-// what the new lock changes in MODULE.bazel.lock.
+// needs Maven access, then
+// `bazel run --lockfile_mode=off @overhead//locks:refresh` records what the
+// new lock changes in MODULE.bazel.lock.
 //
 // Bazel runs with the workspace's committed `.bazelrc` but not its gitignored
 // `.bazelrc.user`, which overrides rules_dart with a sibling checkout and

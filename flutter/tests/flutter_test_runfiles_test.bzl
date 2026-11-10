@@ -11,8 +11,8 @@ load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("//flutter:providers.bzl", "FlutterTestProgramInfo")
 
 _WHOLE_PROGRAM = {str(Label("@rules_dart//dart:modular_kernel")): False}
-_KERNEL_LISTS_OFF = {str(Label("@rules_dart//dart:kernel_lists")): False}
-_KERNEL_LISTS_ON = {str(Label("@rules_dart//dart:kernel_lists")): True}
+_KERNEL_LIST_OFF = {str(Label("@rules_dart//dart:kernel_list")): False}
+_KERNEL_LIST_ON = {str(Label("@rules_dart//dart:kernel_list")): True}
 
 # Directories of the SDK repository whose files only a compile opens.
 _COMPILE_ONLY = ["/dart-sdk/", "/patched-sdk/"]
@@ -78,11 +78,11 @@ def _runs_a_joined_kernel_impl(ctx):
 
 _runs_a_kernel_list_test = analysistest.make(
     _runs_a_kernel_list_impl,
-    config_settings = _KERNEL_LISTS_ON,
+    config_settings = _KERNEL_LIST_ON,
 )
 _runs_a_joined_kernel_test = analysistest.make(
     _runs_a_joined_kernel_impl,
-    config_settings = _KERNEL_LISTS_OFF,
+    config_settings = _KERNEL_LIST_OFF,
 )
 
 def flutter_test_runfiles_test_suite(name):

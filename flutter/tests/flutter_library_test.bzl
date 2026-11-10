@@ -1,7 +1,7 @@
 """Unit tests for flutter_library.bzl pure functions."""
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
-load("@rules_dart//dart:utils.bzl", "derive_lib_root", "derive_package_name")
+load("@rules_dart//dart:utils.bzl", "derive_package_name", "derive_package_root")
 load("//flutter/private:flutter_info.bzl", "dedup_plugins")
 load("//flutter/private:flutter_library.bzl", "ships_in")
 
@@ -23,17 +23,17 @@ def _package_name_falls_back_to_label_name_test_impl(ctx):
     asserts.equals(env, "my_target", result)
     return unittest.end(env)
 
-def _lib_root_workspace_root_and_package_test_impl(ctx):
+def _package_root_workspace_root_and_package_test_impl(ctx):
     env = unittest.begin(ctx)
 
-    # derive_lib_root converts external/X -> ../X (short_path convention)
-    result = derive_lib_root("external/my_repo", "packages/my_lib")
+    # derive_package_root converts external/X -> ../X (short_path convention)
+    result = derive_package_root("external/my_repo", "packages/my_lib")
     asserts.equals(env, "../my_repo/packages/my_lib", result)
     return unittest.end(env)
 
-def _lib_root_strips_trailing_lib_test_impl(ctx):
+def _package_root_strips_trailing_lib_test_impl(ctx):
     env = unittest.begin(ctx)
-    result = derive_lib_root("", "packages/my_lib/lib")
+    result = derive_package_root("", "packages/my_lib/lib")
     asserts.equals(env, "packages/my_lib", result)
     return unittest.end(env)
 
@@ -99,8 +99,8 @@ _t7_test = unittest.make(_ships_in_truth_table_test_impl)
 _t0_test = unittest.make(_package_name_explicit_attr_wins_test_impl)
 _t1_test = unittest.make(_package_name_falls_back_to_label_package_test_impl)
 _t2_test = unittest.make(_package_name_falls_back_to_label_name_test_impl)
-_t3_test = unittest.make(_lib_root_workspace_root_and_package_test_impl)
-_t4_test = unittest.make(_lib_root_strips_trailing_lib_test_impl)
+_t3_test = unittest.make(_package_root_workspace_root_and_package_test_impl)
+_t4_test = unittest.make(_package_root_strips_trailing_lib_test_impl)
 _t5_test = unittest.make(_dedup_plugins_removes_duplicates_test_impl)
 _t6_test = unittest.make(_dedup_plugins_preserves_order_test_impl)
 

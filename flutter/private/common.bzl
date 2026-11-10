@@ -7,7 +7,7 @@ flutter_application, flutter_android_bundle, and flutter_ios_application.
 
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_dart//dart:providers.bzl", "DartInfo")
-load("@rules_dart//dart:utils.bzl", "KERNEL_TOOL_ATTR", "collect_packages", "collect_transitive_srcs", "dart_import_check_aspect", "derive_lib_root", "generate_dev_package_config", "import_check_validation")
+load("@rules_dart//dart:utils.bzl", "KERNEL_TOOL_ATTR", "collect_packages", "collect_transitive_srcs", "dart_import_check_aspect", "derive_package_root", "generate_dev_package_config", "import_check_validation")
 load("//flutter:providers.bzl", "FlutterInfo", "FlutterNativeLibraryInfo")
 load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "app_main_location", "app_scheme_files", "app_scheme_location", "app_scheme_sources", "synthesize_app_package", "with_root")
 load("//flutter/private:flutter_asset_bundle.bzl", "flutter_asset_bundle_action")
@@ -128,7 +128,7 @@ def check_unreplaced_hooks(label, deps):
     offenders = [
         pkg
         for pkg in packages
-        if hasattr(pkg, "has_unreplaced_hook") and pkg.has_unreplaced_hook
+        if hasattr(pkg, "unreplaced_hook") and pkg.unreplaced_hook
     ]
     if not offenders:
         return None
@@ -144,7 +144,7 @@ def check_unreplaced_hooks(label, deps):
     ) % (
         label,
         "\n".join([
-            "  - %s (%s)" % (pkg.package_name, pkg.has_unreplaced_hook)
+            "  - %s (%s)" % (pkg.package_name, pkg.unreplaced_hook)
             for pkg in offenders
         ]),
     )
@@ -264,7 +264,7 @@ def flutter_compile_kernel(ctx, tools, aot = None, target_platform = None, nativ
         inputs: The program to compile, from `flutter_program_inputs`; `ctx`'s
             own when None. A program rebuilt under another target
             (`flutter_application_variant`) is the application's, changed, and
-            keeps the application's package: its library root, and so what
+            keeps the application's package: its package root, and so what
             `package:<name>/…` resolves to.
 
     Returns:
@@ -283,17 +283,17 @@ def flutter_compile_kernel(ctx, tools, aot = None, target_platform = None, nativ
     # sandbox `file://` URIs can't be matched against the kernel's libraries).
     app_pkg_name = inputs.package_name
 
-    # The app's own library root, which is what `package:<name>/…` resolves
+    # The app's own package root, which is what `package:<name>/…` resolves
     # against. Derived from the label rather than assumed to be the workspace
     # root, so an app in a nested Bazel package registers a `rootUri` pointing
     # at its own directory; assuming `""` pointed every nested app's
     # `package:` URIs at whatever sits in the *workspace's* `lib/`.
-    app_lib_root = derive_lib_root(inputs.label.workspace_root, inputs.label.package)
+    app_package_root = derive_package_root(inputs.label.workspace_root, inputs.label.package)
     packages = synthesize_app_package(
         ctx.label,
         packages,
         app_pkg_name,
-        app_lib_root,
+        app_package_root,
         inputs.language_version,
     )
 
@@ -327,7 +327,7 @@ def flutter_compile_kernel(ctx, tools, aot = None, target_platform = None, nativ
     dev_generated_source_uris = []
     dev_source_packages = []
     dev_app_sources = []
-    main_location = app_main_location(app_pkg_name, app_lib_root, inputs.main) if inputs.main else None
+    main_location = app_main_location(app_pkg_name, app_package_root, inputs.main) if inputs.main else None
     app_entrypoint_uri = main_location.uri if main_location else None
 
     if emit_dev_config:
@@ -345,10 +345,10 @@ def flutter_compile_kernel(ctx, tools, aot = None, target_platform = None, nativ
         # not the `main`'s when the two differ: a generated `main` (a
         # variant's test bootstrap) importing a source test beside the
         # application.
-        for scheme_file in app_scheme_files(app_pkg_name, app_lib_root, inputs.main, inputs.srcs) if inputs.main else []:
+        for scheme_file in app_scheme_files(app_pkg_name, app_package_root, inputs.main, inputs.srcs) if inputs.main else []:
             dev_filesystem_roots = with_root(dev_filesystem_roots, app_scheme_location(scheme_file).root)
         dev_filesystem_scheme = dev_pc.scheme
-        dev_app_sources = app_scheme_sources(app_pkg_name, app_lib_root, inputs.main, inputs.srcs) if inputs.main else []
+        dev_app_sources = app_scheme_sources(app_pkg_name, app_package_root, inputs.main, inputs.srcs) if inputs.main else []
         dev_generated_source_uris = dev_pc.generated_source_uris
         dev_source_packages = dev_pc.source_packages
         dev_generated_sources = resolve_dev_generated_sources(
@@ -1244,7 +1244,7 @@ def flutter_program_inputs(ctx):
 
     Returns:
         A struct. `label` is the target whose package the program is in (its
-        library root, and the key of each asset); `main`, `srcs`, `assets`,
+        package root, and the key of each asset); `main`, `srcs`, `assets`,
         `shaders`, `shader_includes`, `license_file` and `additional_licenses` are Files
         (`unchecked_srcs`, among `srcs`, are not checked against `deps`); `deps`,
         `native_deps` and `code_assets` are Targets; the rest, `flavor`

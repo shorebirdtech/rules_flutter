@@ -234,11 +234,11 @@ class DevConfig {
   /// Deliberately a second field rather than a second use of
   /// [devPackageConfig]. The two answer different questions and a
   /// source-assembled app is where they diverge: the dev config's `rootUri` is
-  /// `<filesystemScheme>:///<lib_root>`, which the frontend_server resolves
-  /// through `--filesystem-root` and `Uri.toFilePath()` refuses outright. The
-  /// compiler wants the dev one (live sources); DWDS wants this one, because
-  /// its job is to read the source off disk and show it. Handed the dev one it
-  /// throws `Cannot extract a file path from a org-dartlang-app URI` on every
+  /// `<filesystemScheme>:///<package_root>`, which the frontend_server
+  /// resolves through `--filesystem-root` and `Uri.toFilePath()` refuses
+  /// outright. The compiler wants the dev one (live sources); DWDS wants this
+  /// one, because its job is to read the source off disk and show it. Handed
+  /// the dev one it throws `Cannot extract a file path from a org-dartlang-app URI` on every
   /// first-party library and the debugger shows a blank pane.
   final String buildPackageConfig;
 
@@ -307,11 +307,11 @@ class DevConfig {
   /// pub package's prebuilt — which no edit between reloads can move.
   final Map<String, List<String>> nativeLibSources;
 
-  /// First-party source packages (app + local deps) as `{name, libRoot}`, where
-  /// `libRoot` is workspace-relative. Drives the [SourceUriResolver] so a live
-  /// edit in any of these packages maps to its `package:` URI. Empty for web
-  /// dev configs only if the build emitted none.
-  final List<({String name, String libRoot})> sourcePackages;
+  /// First-party source packages (app + local deps) as `{name, packageRoot}`,
+  /// where `packageRoot` is workspace-relative. Drives the [SourceUriResolver]
+  /// so a live edit in any of these packages maps to its `package:` URI. Empty
+  /// for web dev configs only if the build emitted none.
+  final List<({String name, String packageRoot})> sourcePackages;
 
   /// The sources outside every package that the app compiles under
   /// [filesystemScheme], as `{path, uri}` with `path` workspace-relative: a
@@ -524,7 +524,7 @@ class DevConfig {
         for (final e in (json['sourcePackages'] as List?) ?? const [])
           (
             name: (e as Map)['name'] as String,
-            libRoot: e['libRoot'] as String,
+            packageRoot: e['packageRoot'] as String,
           ),
       ],
       appSources: [

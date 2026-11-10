@@ -1944,7 +1944,7 @@ An engine source has a `flutter_engine.json` at its root and a target, a *slice*
 | `//host/<host>:tools` | `flutter_host_tools` (`FlutterHostToolsInfo`) | every build whose actions run on `<host>` |
 | `//kernel/debug:platform` | `flutter_platform_kernel` (`FlutterPlatformKernelInfo`) | debug and profile Dart compiles |
 | `//kernel/release:platform` | `flutter_platform_kernel` | release Dart compiles |
-| `//kernel_outline:kernel_outline` | the outline tool, for example an `alias` to rules_dart's `dart_kernel_source(path = ...)` of the engine's Dart | builds with `--@rules_dart//dart:outline_kernel` (the default) |
+| `//outline_tool:outline_tool` | the outline tool, for example an `alias` to the `:outline_tool` of a rules_dart `dart_kernel_source(path = ...)` of the engine's Dart | builds with `--@rules_dart//dart:outline_kernel` (the default) |
 | `//macos/<mode>:engine` | `flutter_macos_engine_slice` (`FlutterEngineInfo`) | macOS apps |
 | `//ios/<mode>:engine` | `flutter_ios_engine_slice` | iOS apps; `debug` is the simulator engine |
 | `//android-<arch>/<mode>:engine` | `flutter_android_engine_slice` | Android apps; `<arch>` is `arm`, `arm64` or `x64` |

@@ -1,7 +1,7 @@
 """Implementation of the flutter_library rule."""
 
 load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo")
-load("@rules_dart//dart:utils.bzl", "WEB_COMPILER_INDEPENDENT_ATTR", "dart_analyzable_info_with_packages", "dart_info", "dart_package_info", "derive_lib_root", "derive_package_name", "web_compiler_reset_when_independent")
+load("@rules_dart//dart:utils.bzl", "WEB_COMPILER_INDEPENDENT_ATTR", "dart_analyzable_info_with_packages", "dart_info", "dart_package_info", "derive_package_name", "derive_package_root", "web_compiler_reset_when_independent")
 load("//flutter:providers.bzl", "FlutterInfo")
 load("//flutter/private:flutter_info.bzl", "LINK_HOOK_ATTR", "flutter_info")
 
@@ -31,7 +31,7 @@ def package_root_of(owner):
     Returns:
         The root's short_path, "" for the main repository's root.
     """
-    return derive_lib_root(owner.label.workspace_root, owner.label.package)
+    return derive_package_root(owner.label.workspace_root, owner.label.package)
 
 def path_in_package(label, root, f):
     """The path of `f` from the root of its Dart package.
@@ -44,7 +44,7 @@ def path_in_package(label, root, f):
 
     Args:
         label: The target that lists `f`, for the error.
-        root: The package root, from `derive_lib_root` or `package_root_of`.
+        root: The package root, from `derive_package_root` or `package_root_of`.
         f: A File of the package rooted at `root`.
 
     Returns:
@@ -87,7 +87,7 @@ def own_asset_contributions(ctx, package_name, package_root):
     Args:
         ctx: Rule context, with an `assets` attr.
         package_name: The Dart package name of the library.
-        package_root: Its package root, from `derive_lib_root`.
+        package_root: Its package root, from `derive_package_root`.
 
     Returns:
         List of `pub_assets` structs.
@@ -139,7 +139,7 @@ def build_pub_contributions(package_name, package_root, fonts_json, font_files_d
 
     Args:
         package_name: str — the Dart package the contributions are of.
-        package_root: str — that package's root, from `derive_lib_root`. A
+        package_root: str — that package's root, from `derive_package_root`. A
             program whose own package this is bundles them bare, any other
             under `packages/<package_name>/` (see `asset_key`).
         fonts_json: str — JSON-encoded list of
@@ -369,7 +369,7 @@ SKY_ENGINE_ATTR = attr.label(
     providers = [DartInfo],
 )
 
-def flutter_package_record(ctx, package_name, lib_root):
+def flutter_package_record(ctx, package_name, package_root):
     """The package a Flutter library rule declares, as one `DartPackageInfo`.
 
     Built once per target, so the compile-side `DartInfo` and the analyzer's
@@ -378,9 +378,9 @@ def flutter_package_record(ctx, package_name, lib_root):
 
     Args:
       ctx: The rule context. Reads `language_version`, `code_assets`,
-        `version`, `has_unreplaced_hook`, `link_hook` and `license_file`.
+        `version`, `unreplaced_hook`, `link_hook` and `license_file`.
       package_name: The Dart package name.
-      lib_root: The package root (parent of `lib/`).
+      package_root: The package root (parent of `lib/`).
 
     Returns:
       A `DartPackageInfo`.
@@ -388,11 +388,11 @@ def flutter_package_record(ctx, package_name, lib_root):
     return dart_package_info(
         label = ctx.label,
         package_name = package_name,
-        lib_root = lib_root,
+        package_root = package_root,
         language_version = ctx.attr.language_version,
         code_assets = ctx.attr.code_assets,
         version = ctx.attr.version,
-        has_unreplaced_hook = ctx.attr.has_unreplaced_hook,
+        unreplaced_hook = ctx.attr.unreplaced_hook,
         link_hook = ctx.file.link_hook,
         license_file = ctx.file.license_file,
     )
@@ -442,15 +442,15 @@ def _flutter_library_impl(ctx):
         ctx.label.package,
         ctx.label.name,
     )
-    lib_root = derive_lib_root(ctx.label.workspace_root, ctx.label.package)
-    package = flutter_package_record(ctx, package_name, lib_root)
+    package_root = derive_package_root(ctx.label.workspace_root, ctx.label.package)
+    package = flutter_package_record(ctx, package_name, package_root)
 
     # Every asset, font and shader is of the Dart package in DartInfo, by name
     # and root, so `package:` imports and asset keys cannot disagree. Each
     # program decides from the root whether it is its own package's.
     extra_pub_fonts, extra_pub_assets, extra_pub_shaders = build_pub_contributions(
         package_name,
-        lib_root,
+        package_root,
         ctx.attr.fonts_json,
         ctx.attr.font_files,
         ctx.attr.pkg_assets,
@@ -465,7 +465,7 @@ def _flutter_library_impl(ctx):
     # `resources` names the non-Dart remainder of `lib/`; a Dart source there
     # is a mis-filed `srcs` entry, and identical paths with identical
     # extensions would otherwise collide silently. Mirrors `dart_library`.
-    extra_pub_assets.extend(own_asset_contributions(ctx, package_name, lib_root))
+    extra_pub_assets.extend(own_asset_contributions(ctx, package_name, package_root))
 
     for f in ctx.files.resources:
         if f.extension == "dart":
@@ -556,7 +556,7 @@ flutter_library = rule(
                   "the way pub's own do — depending on the package is enough.",
             providers = [DartCodeAssetInfo],
         ),
-        "has_unreplaced_hook": attr.string(
+        "unreplaced_hook": attr.string(
             doc = "Path of a build hook this package ships that nothing " +
                   "replaces, or empty. Recorded at repo generation; the " +
                   "application that depends on the package fails on it.",

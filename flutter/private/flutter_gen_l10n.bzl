@@ -16,7 +16,7 @@ Bazel files the generator never writes, and the build would fail with an opaque
 grouping below is what keeps that correct.
 """
 
-load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "dart_compile_reset")
+load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "non_dart_transition")
 load("//flutter/private:exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS")
 load("//flutter/private:path_mapping.bzl", "dirname")
 
@@ -158,7 +158,7 @@ flutter_gen_l10n = rule(
     # Generated code does not vary by web compiler or creation tracking: one
     # generation, shared by every copy of the library that lists it in `srcs`,
     # which compiles it in its own configuration.
-    cfg = dart_compile_reset,
+    cfg = non_dart_transition,
     attrs = {
         "arbs": attr.label_list(
             doc = "The `.arb` files, all in one directory, including the " +

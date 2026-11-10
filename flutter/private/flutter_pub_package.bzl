@@ -1037,8 +1037,8 @@ def _format_pub_asset_attrs(fonts_json_str, font_files, pkg_assets, pkg_shaders,
         parts.append(_SHADER_INCLUDES_GLOB)
     return ("\n".join(parts) + "\n") if parts else ""
 
-def _format_code_asset_attrs(code_assets, has_unreplaced_hook):
-    """Render the `code_assets` / `has_unreplaced_hook` attrs for a spoke.
+def _format_code_asset_attrs(code_assets, unreplaced_hook):
+    """Render the `code_assets` / `unreplaced_hook` attrs for a spoke.
 
     Shared by the `flutter_library` and `flutter_plugin` generators so the two
     emit an identical shape; the `dart_library` branch gets the equivalent from
@@ -1048,8 +1048,8 @@ def _format_code_asset_attrs(code_assets, has_unreplaced_hook):
     if code_assets:
         lines = ["        {},".format(repr(a)) for a in code_assets]
         block += "    code_assets = [\n{}\n    ],\n".format("\n".join(lines))
-    if has_unreplaced_hook:
-        block += "    has_unreplaced_hook = {},\n".format(repr(has_unreplaced_hook))
+    if unreplaced_hook:
+        block += "    unreplaced_hook = {},\n".format(repr(unreplaced_hook))
     return block
 
 # The non-Dart remainder of `lib/`, emitted verbatim by both spoke
@@ -1098,7 +1098,7 @@ def _format_license_file_attr(license_file):
     """
     return '    license_file = "{}",\n'.format(license_file) if license_file else ""
 
-def make_dart_member_build_content(name, language_version, code_assets, has_unreplaced_hook, version = "", license_file = ""):
+def make_dart_member_build_content(name, language_version, code_assets, unreplaced_hook, version = "", license_file = ""):
     """Generate BUILD content for the source repository of a pure-Dart pub package.
 
     A package with nothing of Flutter's in its pubspec is rules_dart's own
@@ -1110,7 +1110,7 @@ def make_dart_member_build_content(name, language_version, code_assets, has_unre
         language_version: Dart language version string (e.g. `"3.4"`).
         code_assets: `dart_code_asset` label strings replacing this
             package's build hook output.
-        has_unreplaced_hook: Path of a build hook nothing replaces, or "".
+        unreplaced_hook: Path of a build hook nothing replaces, or "".
         version: The resolved package version, or "".
         license_file: The package's `NOTICES` or `LICENSE` (`find_pub_license_file`), or "".
 
@@ -1133,14 +1133,14 @@ pub_package_member(
         language_version = language_version,
         version = _format_version_attr(version),
         license = _format_license_file_attr(license_file),
-        asset_attrs = _format_code_asset_attrs(code_assets, has_unreplaced_hook),
+        asset_attrs = _format_code_asset_attrs(code_assets, unreplaced_hook),
     )
 
 def make_flutter_member_build_content(
         name,
         language_version,
         code_assets,
-        has_unreplaced_hook,
+        unreplaced_hook,
         plugin_platforms_json = "",
         apple_libs = {},
         apple_macos_privacy_manifests = [],
@@ -1193,7 +1193,7 @@ def make_flutter_member_build_content(
         language_version: Dart language version string (e.g. `"3.4"`).
         code_assets: `dart_code_asset` label strings replacing this
             package's build hook output.
-        has_unreplaced_hook: Path of a build hook nothing replaces, or "".
+        unreplaced_hook: Path of a build hook nothing replaces, or "".
         plugin_platforms_json: JSON-encoded `flutter.plugin.platforms` dict;
             empty for a package that is not a plugin.
         apple_libs: Dict of `ios` and `macos` to the label of the plugin's
@@ -1382,7 +1382,7 @@ flutter_pub_member(
         name = name,
         version = _format_version_attr(version),
         license = _format_license_file_attr(license_file),
-        asset_attrs = _format_code_asset_attrs(code_assets, has_unreplaced_hook),
+        asset_attrs = _format_code_asset_attrs(code_assets, unreplaced_hook),
         resources = _RESOURCES_GLOB_BLOCK,
         language_version = language_version,
         plugin_platforms_json_attr = "    plugin_platforms_json = {},\n".format(repr(plugin_platforms_json)) if plugin_platforms_json else "",
@@ -2305,7 +2305,7 @@ def _flutter_pub_package_impl(ctx):
             version = ctx.attr.version,
             license_file = license_file,
             code_assets = ctx.attr.code_assets,
-            has_unreplaced_hook = unreplaced_hook,
+            unreplaced_hook = unreplaced_hook,
             plugin_platforms_json = plugin_platforms_json,
             apple_libs = {
                 platform: apple_library_label(ctx.attr.package_name, platform, ctx.attr.prefix)
@@ -2345,7 +2345,7 @@ def _flutter_pub_package_impl(ctx):
             version = ctx.attr.version,
             license_file = license_file,
             code_assets = ctx.attr.code_assets,
-            has_unreplaced_hook = unreplaced_hook,
+            unreplaced_hook = unreplaced_hook,
             fonts_json_str = fonts_json_str,
             font_files = font_files,
             pkg_assets = pkg_assets.files,
@@ -2368,7 +2368,7 @@ def _flutter_pub_package_impl(ctx):
             name = ctx.attr.package_name,
             language_version = language_version,
             code_assets = ctx.attr.code_assets,
-            has_unreplaced_hook = unreplaced_hook,
+            unreplaced_hook = unreplaced_hook,
             version = ctx.attr.version,
             license_file = license_file,
         )

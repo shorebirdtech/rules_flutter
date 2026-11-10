@@ -254,7 +254,7 @@ Future<SessionHost> _assemble(_World world, {required bool launched}) async {
   host.registerReloadCommands(pipeline);
   final resolver = SourceUriResolver(
     workspaceRoot: world.workspace,
-    sourcePackages: const [(name: 'app', libRoot: '')],
+    sourcePackages: const [(name: 'app', packageRoot: '')],
   );
   final workspace = Workspace(resolver: resolver);
   pipeline

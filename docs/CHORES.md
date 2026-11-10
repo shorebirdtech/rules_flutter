@@ -139,12 +139,12 @@ would otherwise put a local checkout's module graph into a lock.
 **Procedure**:
 
 - Module locks, root and e2e:
-  `bazel run --lockfile_mode=off @overhead//locks -- --refresh`
+  `bazel run --lockfile_mode=off @overhead//locks:refresh`
 - Maven locks (`maven.install` lock files), one workspace at a time:
   `bazel run //tools/maven_locks -- --refresh <workspace>`, for example
   `e2e/smoke`.
 
-**Verification**: `bazel run @overhead//locks` and `bazel run //tools/maven_locks`.
+**Verification**: `bazel run @overhead//locks:check` and `bazel run //tools/maven_locks`.
 Run the first on macOS: it analyses `//...` in every workspace, and only macOS
 can analyse the iOS rules.
 

@@ -27,7 +27,7 @@ load("@build_bazel_rules_apple//apple/internal/aspects:resource_aspect.bzl", "ap
 load("@build_bazel_rules_swift//swift:swift.bzl", "SwiftInfo")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo")
-load("@rules_dart//dart:utils.bzl", "WEB_COMPILER_INDEPENDENT_ATTR", "dart_info", "derive_lib_root", "derive_package_name", "web_compiler_reset_when_independent")
+load("@rules_dart//dart:utils.bzl", "WEB_COMPILER_INDEPENDENT_ATTR", "dart_info", "derive_package_name", "derive_package_root", "web_compiler_reset_when_independent")
 load("@rules_java//java/common:java_info.bzl", "JavaInfo")
 load("//flutter:providers.bzl", "FlutterDataAssetInfo", "FlutterInfo", "FlutterNativeAssetInfo")
 load("//flutter/private:common.bzl", "collect_binding_contracts", "collect_native_libs")
@@ -76,7 +76,7 @@ def plugin_contributions(ctx, package_name, package_root, declares_plugin):
     Args:
       ctx: The rule context: the attributes of `flutter_plugin` other than `deps`.
       package_name: The Dart package name.
-      package_root: Its package root, from `derive_lib_root`.
+      package_root: Its package root, from `derive_package_root`.
       declares_plugin: Whether the target is a plugin to register. A pub
         package without a `flutter.plugin` block is not one, though it
         contributes assets and fonts.
@@ -271,8 +271,8 @@ def _flutter_plugin_impl(ctx):
         ctx.label.package,
         ctx.label.name,
     )
-    lib_root = derive_lib_root(ctx.label.workspace_root, ctx.label.package)
-    package = flutter_package_record(ctx, package_name, lib_root)
+    package_root = derive_package_root(ctx.label.workspace_root, ctx.label.package)
+    package = flutter_package_record(ctx, package_name, package_root)
 
     # A plugin contributes on more channels than a library does, but the shape
     # is the same: name what this target adds, and let each constructor merge
@@ -291,7 +291,7 @@ def _flutter_plugin_impl(ctx):
         flutter_analyzable_info(ctx, package),
         flutter_info(
             deps = ctx.attr.deps,
-            **plugin_contributions(ctx, package_name, lib_root, True)
+            **plugin_contributions(ctx, package_name, package_root, True)
         ),
     ]
 
@@ -347,7 +347,7 @@ PLUGIN_PACKAGE_ATTRS = {
               "the way pub's own do — depending on the package is enough.",
         providers = [DartCodeAssetInfo],
     ),
-    "has_unreplaced_hook": attr.string(
+    "unreplaced_hook": attr.string(
         doc = "Path of a build hook this package ships that nothing " +
               "replaces, or empty. Recorded at repo generation; the " +
               "application that depends on the package fails on it.",

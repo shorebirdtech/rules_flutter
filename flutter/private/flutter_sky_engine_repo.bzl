@@ -80,9 +80,9 @@ def _flutter_sky_engine_repo_impl(repository_ctx):
     )
 
     # The Bazel package has to sit at `sky_engine/`, not at the repository
-    # root: `dart_library` derives its `lib_root` from the label, and requires
-    # every source to live under `<lib_root>/lib/`. Declared at the root, the
-    # sources would be at `sky_engine/lib/...` against a `lib_root` expecting
+    # root: `dart_library` derives its `package_root` from the label, and requires
+    # every source to live under `<package_root>/lib/`. Declared at the root, the
+    # sources would be at `sky_engine/lib/...` against a `package_root` expecting
     # `lib/...`, and the rule rejects that outright.
     repository_ctx.file("sky_engine/BUILD.bazel", _PACKAGE_BUILD_TEMPLATE)
 

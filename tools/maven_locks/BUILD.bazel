@@ -1,6 +1,6 @@
 load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_test")
 
-# The Maven half of lock checking, which `bazel run @overhead//locks` cannot
+# The Maven half of lock checking, which `bazel run @overhead//locks:check` cannot
 # know: every `maven.install` names a `lock_file`, the root's locks (which
 # consumers get) are current, and the declarations print no warnings.
 #   bazel run //tools/maven_locks                         check

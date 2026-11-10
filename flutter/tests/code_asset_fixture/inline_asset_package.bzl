@@ -22,7 +22,7 @@ def _inline_asset_package_impl(ctx):
     )
     pkg = DartPackageInfo(
         package_name = ctx.attr.package_name,
-        lib_root = ctx.label.package,
+        package_root = ctx.label.package,
         code_assets = (asset,),
     )
     return [DartInfo(
