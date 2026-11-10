@@ -165,26 +165,6 @@ android_sdk_repository_extension = use_extension(
 android_sdk_repository_extension.configure(api_level = 35)
 use_repo(android_sdk_repository_extension, "androidsdk")
 
-# The androidx and Kotlin jars, pinned by this module's own lock.
-maven = use_extension("@rules_jvm_external//:extensions.bzl", "maven")
-maven.install(
-    name = "rules_android_maven",
-    artifacts = [
-        "androidx.annotation:annotation:1.9.1",
-        "androidx.lifecycle:lifecycle-common:2.10.0",
-    ],
-    known_contributing_modules = [
-        "rules_android",
-        "rules_flutter",
-    ],
-    lock_file = "//:rules_android_maven_install.json",
-    repositories = [
-        "https://maven.google.com",
-        "https://repo1.maven.org/maven2",
-    ],
-)
-use_repo(maven, "rules_android_maven")
-
 fake_checkout = use_repo_rule("//:fake_checkout.bzl", "fake_checkout")
 
 fake_checkout(name = "fake_checkout")

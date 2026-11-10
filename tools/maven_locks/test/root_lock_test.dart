@@ -1,4 +1,4 @@
-/// What the root `rules_android_maven_install.json`, the lock every consumer
+/// What the root `rules_flutter_maven_install.json`, the lock every consumer
 /// of rules_flutter gets, must hold.
 ///
 /// androidx.lifecycle is released as one version group: `lifecycle-runtime`

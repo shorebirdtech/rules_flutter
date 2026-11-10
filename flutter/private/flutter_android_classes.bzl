@@ -54,9 +54,9 @@ def _origin(jar, coordinates):
     return coordinates.get(label, label)
 
 # `com.google.guava:listenablefuture` 1.0 as rules_jvm_external imports it.
-# `@rules_android_maven//:com_google_guava_listenablefuture` is rules_flutter's
+# `@rules_flutter_maven//:com_google_guava_listenablefuture` is rules_flutter's
 # compile-only override of it (MODULE.bazel).
-LISTENABLEFUTURE_RUNTIME = Label("@rules_android_maven//:original_com_google_guava_listenablefuture")
+LISTENABLEFUTURE_RUNTIME = Label("@rules_flutter_maven//:original_com_google_guava_listenablefuture")
 
 def _guava_brings_listenablefuture(coordinate):
     """Whether `coordinate` is a Guava that Gradle links without listenablefuture.
@@ -93,7 +93,7 @@ flutter_android_listenablefuture = rule(
     },
     doc = """Links `com.google.guava:listenablefuture` 1.0 into an Android app when Gradle would.
 
-`@rules_android_maven` resolves the jar for every app of the workspace, and
+`@rules_flutter_maven` resolves the jar for every app of the workspace, and
 rules_flutter's override of it there leaves it on the compile classpath only.
 Gradle resolves each app on its own: an app that links Guava 27.0 or later gets
 the empty `9999.0-empty-to-avoid-conflict-with-guava` placeholder Guava asks

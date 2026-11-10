@@ -357,8 +357,8 @@ kt_android_library(
     tags = ["manual"],
     deps = [
         ":app_engine",
-        "@rules_android_maven//:androidx_annotation_annotation",
-        "@rules_android_maven//:androidx_lifecycle_lifecycle_common",
+        "@rules_flutter_maven//:androidx_annotation_annotation",
+        "@rules_flutter_maven//:androidx_lifecycle_lifecycle_common",
     ],
 )
 

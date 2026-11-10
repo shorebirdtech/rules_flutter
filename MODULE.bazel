@@ -140,16 +140,20 @@ register_toolchains("@flutter_toolchains//:all")
 # AndroidX dependencies the Flutter Android embedding (flutter.jar) requires
 # at runtime, mirroring the dependency list of Flutter's official
 # io.flutter:flutter_embedding_* Maven POM, plus androidx.annotation needed to
-# compile the runner Kotlin sources. Uses the "rules_android_maven" repo name
-# so rules_jvm_external merges these artifacts with rules_android's own maven
-# deps in downstream workspaces — user modules inherit them and only declare
-# artifacts their own code uses.
+# compile the runner Kotlin sources.
 #
-# A module that depends on rules_flutter declares its own install of this name,
-# with a lock of its own; the lock below is rules_flutter's, for its own builds.
+# `@rules_flutter_maven` is the one resolution of an app's Android libraries,
+# as Gradle resolves one per app: these, the Maven dependencies the app's
+# plugins declare, and those of the app's own Android code. A module that
+# needs more declares `maven.install(name = "rules_flutter_maven")` with its
+# artifacts and a lock of its own, and rules_jvm_external merges them with
+# these. A module that adds nothing gets this module's lock.
+#
+# The name is this module's, as rules_jvm_external asks of a module used
+# through `bazel_dep`, so no other module's tools share the resolution.
 maven = use_extension("@rules_jvm_external//:extensions.bzl", "maven")
 maven.install(
-    name = "rules_android_maven",
+    name = "rules_flutter_maven",
     # Coursier refuses an exact version range in a POM (`[1.3.6]`) when
     # anything asks for a higher version; Gradle, which plugins are written
     # against, lets the higher one win. Relaxed reconciliation does the same.
@@ -195,6 +199,11 @@ maven.install(
         "org.jetbrains.kotlin:kotlin-stdlib:2.1.20",
         "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0",
     ],
+    # The lock of these artifacts, which a module that adds none to the
+    # repository gets. Regenerate it with
+    # `bazel run //tools/maven_locks -- --refresh .` (docs/TESTING.md, "Maven
+    # lock files").
+    lock_file = "//:rules_flutter_maven_install.json",
     repositories = [
         "https://maven.google.com",
         "https://repo1.maven.org/maven2",
@@ -203,30 +212,28 @@ maven.install(
 
 # lifecycle-runtime pulls in androidx.profileinstaller, whose
 # AbstractResolvableFuture implements com.google.guava's ListenableFuture and
-# runs in every app shortly after launch. In workspaces where guava is also
-# resolved (rules_android's tooling depends on it), coursier would otherwise
-# select guava's empty "9999.0" listenablefuture placeholder, leaving the
-# interface undefined in the APK dex and crashing the profile installer with
-# NoClassDefFoundError. Force the real jar.
-#
-# Gradle resolves this per app, and an app that links Guava 27.0 or later
-# gets the placeholder: Guava's POM asks for it, Gradle takes the highest
-# version asked for, and Guava's own copy of the interface is the app's one.
-# This install is one resolution for every app, so the jar is compile-only
-# here: `flutter_android_app` links it unless the app links such a Guava
-# (`flutter_android_listenablefuture` in flutter_android_classes.bzl), and
-# `flutter_android_engine` links it always. Any other `android_binary` that
-# needs it at runtime depends on
-# `@rules_android_maven//:original_com_google_guava_listenablefuture`.
+# runs in every app shortly after launch. androidx asks for the 1.0 jar that
+# holds it; from 27.0, Guava's POM asks for
+# `9999.0-empty-to-avoid-conflict-with-guava`, a jar with no classes, and
+# Coursier, like Gradle, takes the highest version asked for. Gradle resolves
+# each app on its own, so an app that links such a Guava gets the empty jar
+# and Guava's own copy of the interface, and any other app gets the 1.0 jar.
+# This install is one resolution for every app of a workspace, and an
+# integration test's app links Guava: so the jar is forced to 1.0 and is
+# compile-only here. `flutter_android_app` links it unless the app links such
+# a Guava (`flutter_android_listenablefuture` in flutter_android_classes.bzl),
+# and `flutter_android_engine` links it always. Any other `android_binary`
+# that needs it at runtime depends on
+# `@rules_flutter_maven//:original_com_google_guava_listenablefuture`.
 maven.artifact(
-    name = "rules_android_maven",
+    name = "rules_flutter_maven",
     artifact = "listenablefuture",
     force_version = True,
     group = "com.google.guava",
     version = "1.0",
 )
 maven.override(
-    name = "rules_android_maven",
+    name = "rules_flutter_maven",
     coordinates = "com.google.guava:listenablefuture",
     target = "//flutter/private:listenablefuture_compile_only",
 )
@@ -237,7 +244,7 @@ maven.override(
 # variant instead. Gradle never sees the common jar; Coursier, which reads
 # only the POM, resolves both, and the common jar's metadata would ship in
 # every APK as Java resources. Each common artifact the Flutter embedding's
-# dependencies (and rules_android's) pull in resolves to its `-jvm` variant
+# dependencies and common plugins pull in resolves to its `-jvm` variant
 # here, as Gradle resolves it. The overrides apply to every module's install
 # of this name.
 #
@@ -249,9 +256,9 @@ maven.override(
 # artifact an install does not resolve adds nothing to it.
 [
     maven.override(
-        name = "rules_android_maven",
+        name = "rules_flutter_maven",
         coordinates = coordinates,
-        target = "@rules_android_maven//:" + target,
+        target = "@rules_flutter_maven//:" + target,
     )
     for coordinates, target in [
         ("androidx.annotation:annotation", "androidx_annotation_annotation_jvm"),
@@ -263,19 +270,6 @@ maven.override(
     ]
 ]
 
-# Hamcrest 2 is one artifact, `org.hamcrest:hamcrest`, which took over the
-# classes of hamcrest-core and hamcrest-library; at 2.x both are empty stubs
-# that depend on it. rules_android's tooling asks for hamcrest-core 2.2, so
-# every install resolves hamcrest 2.2, and junit's hamcrest-core with it. An
-# app that links Espresso, which asks for hamcrest-library 1.3, would link
-# that jar's classes beside their newer copies in hamcrest 2.2: hamcrest-library
-# resolves as its 2.2 stub would, to hamcrest itself.
-maven.override(
-    name = "rules_android_maven",
-    coordinates = "org.hamcrest:hamcrest-library",
-    target = "@rules_android_maven//:org_hamcrest_hamcrest",
-)
-
 # One Kotlin standard library in an app, the compiler's. rules_kotlin links its
 # compiler's stdlib into every Kotlin library it builds (the runner, the
 # registrant, plugins), so an app also linking the Maven kotlin-stdlib that
@@ -286,7 +280,7 @@ maven.override(
 # stdlib than the compiler is.
 [
     maven.override(
-        name = "rules_android_maven",
+        name = "rules_flutter_maven",
         coordinates = "org.jetbrains.kotlin:" + artifact,
         target = "@rules_kotlin//kotlin/compiler:" + artifact,
     )
@@ -297,28 +291,7 @@ maven.override(
     ]
 ]
 
-use_repo(maven, "rules_android_maven")
-
-# The lock for rules_flutter's own builds, as the root module. A dev
-# dependency, so a module that depends on rules_flutter never sees it:
-# rules_jvm_external accepts one lock per repository unless the root declares
-# its own, and rules_android ships one for this repository too. The root's
-# last install tag of a name sets its lock and these attributes, so this tag
-# comes after the one above and repeats them. The lock pins the merged
-# artifacts, so jars are fetched by checksum; regenerate it with
-# `REPIN=1 bazel run @rules_android_maven//:pin` (docs/TESTING.md, "Maven lock
-# files").
-maven_dev = use_extension("@rules_jvm_external//:extensions.bzl", "maven", dev_dependency = True)
-maven_dev.install(
-    name = "rules_android_maven",
-    # rules_android adds its tool dependencies to this repository.
-    known_contributing_modules = ["rules_android"],
-    lock_file = "//:rules_android_maven_install.json",
-    repositories = [
-        "https://maven.google.com",
-        "https://repo1.maven.org/maven2",
-    ],
-)
+use_repo(maven, "rules_flutter_maven")
 
 # Pub dependencies of every Dart tool in this repository: the dev tool, the rule
 # tools, the vendored `flutter gen-l10n` generator and the integration-test

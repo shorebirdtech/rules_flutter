@@ -132,7 +132,7 @@ flutter_android_app_bundle = rule(
         "_kotlin_stdlib": attr.label(
             # bundletool's device commands (install-apks) reach Kotlin code
             # whose runtime its POM does not declare.
-            default = Label("@rules_android_maven//:org_jetbrains_kotlin_kotlin_stdlib"),
+            default = Label("@rules_flutter_maven//:org_jetbrains_kotlin_kotlin_stdlib"),
             providers = [JavaInfo],
         ),
         "_tool": attr.label(

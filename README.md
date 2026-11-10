@@ -322,7 +322,7 @@ A `path` package that no Bazel build may contain, such as a tool run with `dart 
 
 #### Plugins' Maven dependencies
 
-A plugin's `android/build.gradle(.kts)` declares the Maven artifacts its Kotlin or Java compiles against, such as `androidx.datastore:datastore` for `shared_preferences_android`. Those come from the same place as the embedding's androidx libraries: the `maven.install(name = "rules_android_maven")` in your root `MODULE.bazel`. That is one resolution for the whole app, so there is one version of each artifact, and when two plugins want different versions the highest wins, as it does under Gradle.
+A plugin's `android/build.gradle(.kts)` declares the Maven artifacts its Kotlin or Java compiles against, such as `androidx.datastore:datastore` for `shared_preferences_android`. Those come from the same place as the embedding's androidx libraries: `@rules_flutter_maven`, rules_flutter's own rules_jvm_external repository, which your root `MODULE.bazel` extends with a `maven.install(name = "rules_flutter_maven")` of its own (see **Maven dependencies** under [Android](#android)). That is one resolution for the whole app, so there is one version of each artifact, and when two plugins want different versions the highest wins, as it does under Gradle. An app whose plugins declare no Maven artifacts needs no install: rules_flutter's lock covers it.
 
 rules_flutter reads these Gradle forms:
 
@@ -341,10 +341,10 @@ When an artifact is missing from the install, or resolves lower than a plugin de
 Add those lines to `artifacts = [...]` and re-pin the install's lock file:
 
 ```sh
-REPIN=1 bazel run @rules_android_maven//:pin
+REPIN=1 bazel run @rules_flutter_maven//:pin
 ```
 
-To get the block for an app before building it, `bazel run //:my_app_maven_artifacts` (`<name>_maven_artifacts` for a `flutter_android_app` named `my_app`; `flutter_android_maven_artifacts` declares the same for a hand-wired app) prints the lines for the plugins that app depends on, and no others, marking the entries that are missing or too low. It works while the build is failing for lack of them, which is when to run it. `bazel run @flutter_pub_android_maven//:maven_artifacts` (declare it with `use_repo(flutter_pub, "flutter_pub_android_maven")`, or use any hub's `@<hub>//android:maven_artifacts`, which aliases it) prints the block for every plugin of the build instead: use it to seed `maven.install` before any app exists, or for a workspace with several apps that share one install. Only Android builds read any of this; a web or desktop build never fetches it.
+To get the block for an app before building it, `bazel run //:my_app_maven_artifacts` (`<name>_maven_artifacts` for a `flutter_android_app` named `my_app`; `flutter_android_maven_artifacts` declares the same for a hand-wired app) prints the lines for the plugins that app depends on, and no others, marking the entries that are missing or too low. It works while the build is failing for lack of them, which is when to run it. `bazel run @<hub>//android:maven_artifacts`, for any hub, prints the block for every plugin of the build instead: use it to seed `maven.install` before any app exists, or for a workspace with several apps that share one install. Only Android builds read any of this; a web or desktop build never fetches it.
 
 Gradle also aligns libraries that are published together. androidx `activity` 1.9.0 declares, in its Gradle module metadata (the `.module` file beside its POM), that `activity-ktx` must be 1.9.0 too, because the Kotlin extensions moved from `activity-ktx` into `activity`. Coursier reads only POMs, so an install whose `preference` 1.2.1 asks for `activity-ktx` 1.5.1 keeps it beside `activity` 1.9.0, and the two jars define the same classes differently. Both `maven_artifacts` programs therefore also read the `.module` file of every artifact the install resolves, from the install's repositories (so they need network access, as the pin does), and print a line for each artifact Gradle would raise. To run one without the network, as a test does, record that metadata once with `bazel run //:my_app_maven_artifacts -- --record=<file>` and read it back with `-- --metadata=<file>`, which fails naming any artifact the file lacks. Each line it prints for an artifact to raise looks like this:
 
@@ -354,9 +354,9 @@ Gradle also aligns libraries that are published together. androidx `activity` 1.
 
 Building a `flutter_android_app` checks the result: when two jars it links define a class with different bytes, the build fails and names both, with their Maven coordinates. The app's deploy jar would keep whichever copy comes first, a mix of two versions of one library. Resource classes (`R`, `R$string`) are not compared, since every Android library carries its own and `android_binary` replaces them with the app's.
 
-Coursier, which resolves the install, is stricter than Gradle about exact version ranges. For example, `androidx.preference:preference:1.2.1`, which `shared_preferences_android` needs, depends on `androidx.fragment:fragment` as `[1.3.6]`, an exact version, while other artifacts want a higher one. Gradle lets the higher version win; Coursier alone reports a conflict. rules_flutter's own `maven.install` passes Coursier `--reconciliation *:*:relaxed` through `additional_coursier_options`, which makes it pick the highest version too. rules_jvm_external concatenates those options across every module that declares an install of the name, so your `maven.install(name = "rules_android_maven")` inherits them and needs no `force_version` entries for such ranges. Do not set `resolver = "gradle"` or `"maven"` to get this: the Gradle resolver selects the JVM or desktop variant of Kotlin Multiplatform libraries (for example `androidx.lifecycle:lifecycle-runtime-desktop`) in place of the Android one, and the Maven resolver reports the same hard-range conflict.
+Coursier, which resolves the install, is stricter than Gradle about exact version ranges. For example, `androidx.preference:preference:1.2.1`, which `shared_preferences_android` needs, depends on `androidx.fragment:fragment` as `[1.3.6]`, an exact version, while other artifacts want a higher one. Gradle lets the higher version win; Coursier alone reports a conflict. rules_flutter's own `maven.install` passes Coursier `--reconciliation *:*:relaxed` through `additional_coursier_options`, which makes it pick the highest version too. rules_jvm_external concatenates those options across every module that declares an install of the name, so your `maven.install(name = "rules_flutter_maven")` inherits them and needs no `force_version` entries for such ranges. Do not set `resolver = "gradle"` or `"maven"` to get this: the Gradle resolver selects the JVM or desktop variant of Kotlin Multiplatform libraries (for example `androidx.lifecycle:lifecycle-runtime-desktop`) in place of the Android one, and the Maven resolver reports the same hard-range conflict.
 
-A dependency written any other way (a version catalog entry such as `libs.foo`, `project(...)`, `platform(...)`, `files(...)`, Groovy map notation, a trailing `{ exclude ... }` block, `kapt`, `ksp`, `annotationProcessor`, `coreLibraryDesugaring`, or a `debugImplementation`-style variant configuration) is listed in the same message as a line rules_flutter cannot translate. For such a package, supply a plugin overlay with `flutter_pub.plugin_overlays`: a `BUILD.bazel.tpl` for the package and an `android/BUILD.bazel.tpl` that declares its Android library and the `@rules_android_maven` labels it needs. The `android/` template is used only beside the top-level one, and the top-level template's `flutter_plugin` must list that library under `exports`, as above, for an app to link it.
+A dependency written any other way (a version catalog entry such as `libs.foo`, `project(...)`, `platform(...)`, `files(...)`, Groovy map notation, a trailing `{ exclude ... }` block, `kapt`, `ksp`, `annotationProcessor`, `coreLibraryDesugaring`, or a `debugImplementation`-style variant configuration) is listed in the same message as a line rules_flutter cannot translate. For such a package, supply a plugin overlay with `flutter_pub.plugin_overlays`: a `BUILD.bazel.tpl` for the package and an `android/BUILD.bazel.tpl` that declares its Android library and the `@rules_flutter_maven` labels it needs. The `android/` template is used only beside the top-level one, and the top-level template's `flutter_plugin` must list that library under `exports`, as above, for an app to link it.
 
 Permissions a plugin declares in its own manifest, such as `record_android`'s `RECORD_AUDIO`, reach the app's manifest as they do under Gradle. You don't need `--merge_android_manifest_permissions`.
 
@@ -1108,7 +1108,6 @@ Add these to `MODULE.bazel`:
 ```starlark
 bazel_dep(name = "rules_android", version = "0.8.1")
 bazel_dep(name = "rules_android_ndk", version = "0.1.5")
-bazel_dep(name = "rules_jvm_external", version = "7.2")
 
 # rules_android_ndk 0.1.5 links arm64 libraries for 4 KB pages: see "16 KB
 # pages" below.
@@ -1142,25 +1141,9 @@ android_sdk_repository_extension = use_extension(
 )
 android_sdk_repository_extension.configure(api_level = 35)
 use_repo(android_sdk_repository_extension, "androidsdk")
-
-# The androidx and Kotlin jars, pinned by this module's own lock.
-maven = use_extension("@rules_jvm_external//:extensions.bzl", "maven")
-maven.install(
-    name = "rules_android_maven",
-    known_contributing_modules = [
-        "rules_android",
-        "rules_flutter",
-    ],
-    lock_file = "//:rules_android_maven_install.json",
-    repositories = [
-        "https://maven.google.com",
-        "https://repo1.maven.org/maven2",
-    ],
-)
-use_repo(maven, "rules_android_maven")
 ```
 
-Then create the lock and fill it, once: `touch rules_android_maven_install.json && bazel run @rules_android_maven//:pin`. See **Maven dependencies** below.
+The androidx and Kotlin jars the app links come pinned by rules_flutter's own lock, so an app whose plugins declare no Maven artifacts needs nothing more. See **Maven dependencies** below for one whose plugins, or whose own Android code, do.
 
 **Order of the `bazel_dep` lines.** Keep `rules_flutter`'s above `rules_android`'s, as here. rules_android builds some of its tools from Go, with the first Go SDK the module graph declares: your module's own, then each dependency's in the order your `MODULE.bazel` names them. rules_flutter declares one new enough for the Gazelle the graph resolves; rules_android's own, Go 1.22.4, is not, and with rules_android named first, every Android build fails during analysis with `go: go.work requires go >= 1.24.12 (running go 1.22.4; GOTOOLCHAIN=local)`. A `go_sdk.download` in your own `MODULE.bazel` takes precedence over both.
 
@@ -1200,29 +1183,30 @@ ERROR: An error occurred during the fetch of repository
 
 **Building on Windows.** rules_android 0.8.1 starts its tool JVMs with an initial heap as large as their cap (`-Xms3G` for resource processing, `-Xms8g` for desugaring, D8 and R8), and a JVM commits its initial heap as it starts. Windows counts that against RAM plus the pagefile whether or not the JVM uses it, so on a 16 GB machine a few of them running at once fail the build with `There is insufficient memory for the Java Runtime Environment to continue` and `The paging file is too small for this operation to complete`. Apply `rules_android_no_initial_heap.patch` from [`e2e/android_example/patches/`](e2e/android_example/patches/) in your `single_version_override` of rules_android, as that workspace's `MODULE.bazel` does. It keeps each heap cap and drops only the initial sizes. macOS and Linux build without it.
 
-**Maven dependencies.** The androidx and Kotlin jars the runner and plugins compile against come from `@rules_android_maven`, which rules_flutter and rules_android each declare with rules_jvm_external. Your module's `maven.install` of that name, as in the setup above, names the lock file (`rules_android_maven_install.json`) that pins all of it: each jar is fetched by checksum and kept in Bazel's repository cache, so a fresh output base or CI runner does not download it again. It is required: without it, the repository takes the lock rules_android 0.8.1 ships, which lacks the artifacts rules_flutter adds, and Android builds fail asking for a repin.
+**Maven dependencies.** The androidx and Kotlin jars the runner and plugins compile against come from `@rules_flutter_maven`, rules_flutter's own rules_jvm_external repository: one resolution of the app's Android libraries, as Gradle makes one per app. rules_flutter declares the embedding's artifacts in it with a lock of its own, and an app that needs no others uses that lock: each jar is fetched by checksum and kept in Bazel's repository cache, so a fresh output base or CI runner does not download it again.
 
-To add artifacts, say another androidx library that a plugin's `build.gradle` needs, list them in it:
+When your plugins declare Maven artifacts, or your own Android code (a `kt_android_library` beside the app, say) needs some, declare an install of the same name in your root `MODULE.bazel`, with the artifacts and a lock file of your own:
 
 ```starlark
+bazel_dep(name = "rules_jvm_external", version = "7.2")
+
+maven = use_extension("@rules_jvm_external//:extensions.bzl", "maven")
 maven.install(
-    name = "rules_android_maven",
+    name = "rules_flutter_maven",
     artifacts = ["androidx.browser:browser:1.9.0"],
-    known_contributing_modules = [
-        "rules_android",
-        "rules_flutter",
-    ],
-    lock_file = "//:rules_android_maven_install.json",
+    known_contributing_modules = ["rules_flutter"],
+    lock_file = "//:rules_flutter_maven_install.json",
     repositories = [
         "https://maven.google.com",
         "https://repo1.maven.org/maven2",
     ],
 )
+use_repo(maven, "rules_flutter_maven")
 ```
 
-The lock rules_jvm_external writes merges your artifacts with rules_flutter's and rules_android's. `known_contributing_modules` lists the other modules whose artifacts join yours. Without it rules_jvm_external prints a notice naming them each time it evaluates the extension, and with it only the listed modules contribute: a module you add later that declares artifacts for `rules_android_maven` has to be added to the list. rules_android and rules_flutter are the two that contribute today. `repositories` replaces the default, Maven Central alone, which lacks the androidx and Android tools artifacts.
+Then create the lock and fill it: `touch rules_flutter_maven_install.json && REPIN=1 bazel run @rules_flutter_maven//:pin`. rules_jvm_external merges your artifacts with rules_flutter's into the one resolution and the lock pins both; your code depends on them as `@rules_flutter_maven//:androidx_browser_browser`, the labels rules_jvm_external gives every artifact. `known_contributing_modules` lists the other modules whose artifacts join yours. Without it rules_jvm_external prints a notice naming them each time it evaluates the extension, and with it only the listed modules contribute: a module you add later that declares artifacts for `rules_flutter_maven` has to be added to the list. `repositories` replaces the default, Maven Central alone, which lacks the androidx artifacts.
 
-Run `REPIN=1 bazel run @rules_android_maven//:pin` again after changing the artifacts, or bumping rules_flutter or rules_android: Bazel fails the build until you do. Do not repeat an artifact that rules_android already declares at a lower version than yours: rules_android's version is the one used (`com.android.tools:r8` is one), and the pin warns that your line has no effect. [`e2e/plugin_example/MODULE.bazel`](e2e/plugin_example/MODULE.bazel) is a worked example.
+Run `REPIN=1 bazel run @rules_flutter_maven//:pin` again after changing the artifacts, or bumping rules_flutter: Bazel fails the build until you do. rules_android's own tools resolve in its own repository, `@rules_android_maven`, with the lock it ships, and need nothing from you. [`e2e/plugin_example/MODULE.bazel`](e2e/plugin_example/MODULE.bazel) is a worked example for plugins, and [`e2e/android_example/MODULE.bazel`](e2e/android_example/MODULE.bazel) for an app's own Kotlin code.
 
 **ABIs.** The ABIs of the APK are the platforms of `--@rules_android//flags:android_platforms`, as for any rules_android `android_binary`. One platform builds an APK for that ABI; several build one APK for all of them, like the fat APK `flutter build apk` makes. The Flutter engine, the app's `libapp.so`, the native libraries of the AARs your plugins bring and any C/C++ deps are each packaged for every ABI, from one mechanism: `android_binary` builds its dependencies once for each platform and packages what each build brings.
 
@@ -2487,7 +2471,7 @@ bazel test :app_android_test \
 - **On an attached device** (`--@rules_flutter//flutter/integration_test:android_device=attached`), the test runs on the device `ANDROID_SERIAL` names, else the only one attached; with none, or several and none named, it fails, naming `adb devices` and the variable that picks one. It is a failure, not a skip: a skipped test reads as a pass. Two tests on one device take turns on a lock (`/tmp/rules_flutter-locks/android-<serial>.lock`), which the operating system releases if a test dies. The app is built for arm64-v8a. `ANDROID_SERIAL` given to a test that runs on the emulator fails it, naming the flag.
 - **`adb` is the SDK's own**, the `@androidsdk` repository rules_android resolves from `ANDROID_HOME`, which your `MODULE.bazel` already declares for building an APK, not one found on `PATH`, and the file the SDK has for the host the test runs on (`adb.exe` on Windows). The `aapt2` that reads the APK's package and launch activity is the one of that same SDK. `runner` takes a runner of your own: `flutter_android_emulator_runner(sdk = ..., emulator = ..., system_image = ...)`, whose `system_image` can be another `flutter_android_system_image` (another API level, say) and whose `cores` and `memory_mb` size the device, or `flutter_android_device_runner(sdk = ...)`.
 - **`abi`** (by default the emulator image's, or `arm64-v8a` on an attached device; `x86_64` and `armeabi-v7a` otherwise) is the ABI the app is built for, whatever `--@rules_android//flags:android_platforms` says: it has to be the one the device runs. An emulator runner whose image runs another fails analysis, naming both.
-- **`integration_test`'s Android library links into the app**, and its Gradle build asks for `androidx.test:runner`, `androidx.test:rules`, `androidx.test.espresso:espresso-core` and `com.google.guava:guava`. Name a version of each in the `rules_android_maven` install of your `MODULE.bazel` (Gradle's `1.2+`, `1.2+` and `3.3+` are ranges; analysis names whatever is missing, and `bazel run @<hub>//android:maven_artifacts` prints the block). Only the tests' apps link it: your own app does not.
+- **`integration_test`'s Android library links into the app**, and its Gradle build asks for `androidx.test:runner`, `androidx.test:rules`, `androidx.test.espresso:espresso-core` and `com.google.guava:guava`. Name a version of each in the `rules_flutter_maven` install of your `MODULE.bazel` (Gradle's `1.2+`, `1.2+` and `3.3+` are ranges; analysis names whatever is missing, and `bazel run @<hub>//android:maven_artifacts` prints the block). Only the tests' apps link it: your own app does not.
 - **The app stays installed** on an attached device, as `flutter test` leaves it. `adb uninstall <application_id>` removes it.
 - **`env` is refused**: an app started by the device cannot be handed an environment. Pass `defines` to the application instead.
 - Results, `--test_filter`, tags, `shard_count`, and the failures (a failing case, an app that exits, a suite that registers nothing) are as on the other platforms.

@@ -70,27 +70,25 @@ android_sdk_repository_extension = use_extension(
 android_sdk_repository_extension.configure(api_level = 35)
 use_repo(android_sdk_repository_extension, "androidsdk")
 
-# The androidx and Kotlin jars, pinned by this module's own lock.
+# What the integration_test package's Gradle build declares, joining
+# rules_flutter's artifacts in one resolution, with a lock of this module's.
 maven = use_extension("@rules_jvm_external//:extensions.bzl", "maven")
 maven.install(
-    name = "rules_android_maven",
-    # What the integration_test package's Gradle build declares.
+    name = "rules_flutter_maven",
     artifacts = [
         "androidx.test.espresso:espresso-core:3.6.1",
         "androidx.test:rules:1.6.1",
         "androidx.test:runner:1.6.2",
+        "com.google.guava:guava:28.1-android",
     ],
-    known_contributing_modules = [
-        "rules_android",
-        "rules_flutter",
-    ],
-    lock_file = "//:rules_android_maven_install.json",
+    known_contributing_modules = ["rules_flutter"],
+    lock_file = "//:rules_flutter_maven_install.json",
     repositories = [
         "https://maven.google.com",
         "https://repo1.maven.org/maven2",
     ],
 )
-use_repo(maven, "rules_android_maven")
+use_repo(maven, "rules_flutter_maven")
 
 # Hermetic C++ toolchain for Linux arm64 execution platforms, so a C++ tool
 # built for the exec platform (zipper, xmllint) can be compiled when Bazel runs

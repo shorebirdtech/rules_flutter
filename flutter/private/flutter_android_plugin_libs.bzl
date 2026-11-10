@@ -10,7 +10,7 @@ and a BUILD file cannot name them, so this rule links them: it returns what a
 dependencies.
 
 It also checks the Maven artifacts the linked plugins' Gradle builds declare
-against what `@rules_android_maven` resolved, for those plugins only: an app
+against what `@rules_flutter_maven` resolved, for those plugins only: an app
 that does not link a plugin never needs its artifacts. And it checks that a
 device of the ABI can load the native libraries the plugins bring, prebuilt
 ones inside their AARs included: on a 64-bit ABI, that they are aligned for
@@ -28,9 +28,9 @@ load("//flutter/private:exec_groups.bzl", "PORTABLE_EXEC_GROUPS", "portable_tool
 load("//flutter/private:flutter_android_application.bzl", "ANDROID_NATIVE_LIBS_ATTRS", "android_abi", "validate_android_native_libs")
 
 FlutterAndroidMavenInfo = provider(
-    doc = "What a pub hub's Android plugins declare in their Gradle builds, and what `@rules_android_maven` resolved.",
+    doc = "What a pub hub's Android plugins declare in their Gradle builds, and what `@rules_flutter_maven` resolved.",
     fields = {
-        "data": "dict: `repo` (str), `resolved` (dict of `group:artifact` to version), `repositories` (the install's Maven repositories) and `packages` (list of dicts with `package`, `version`, `deps` and `errors`), as `maven_check_message` reads it.",
+        "data": "dict: `resolved` (dict of `group:artifact` to version), `repositories` (the install's Maven repositories) and `packages` (list of dicts with `package`, `version`, `deps` and `errors`), as `maven_check_message` reads it.",
     },
 )
 
@@ -198,7 +198,7 @@ flutter_android_plugin_libs = rule(
             providers = [FlutterApplicationInfo],
         ),
         "maven": attr.label(
-            doc = "The build's Android Maven requirements (`@flutter_pub_android_maven//:requirements`, or any hub's `//android:maven_requirements`), to check those of the linked plugins against `@rules_android_maven`. Leave unset when no linked plugin comes from `flutter_pub.from_lock`.",
+            doc = "The build's Android Maven requirements (any hub's `//android:maven_requirements`), to check those of the linked plugins against `@rules_flutter_maven`. Leave unset when no linked plugin comes from `flutter_pub.from_lock`.",
             providers = [FlutterAndroidMavenInfo],
         ),
         "report": attr.string(
@@ -206,7 +206,7 @@ flutter_android_plugin_libs = rule(
         ),
     } | ANDROID_NATIVE_LIBS_ATTRS,
     exec_groups = PORTABLE_EXEC_GROUPS,
-    doc = "Links the Android libraries of the plugins an application depends on, as a library exporting them would, and fails when `@rules_android_maven` lacks what their Gradle builds declare.",
+    doc = "Links the Android libraries of the plugins an application depends on, as a library exporting them would, and fails when `@rules_flutter_maven` lacks what their Gradle builds declare.",
 )
 
 # A plugin's Android library is among an application's `android_libs` only in
@@ -243,7 +243,7 @@ flutter_android_maven_report = rule(
             providers = [FlutterApplicationInfo],
         ),
         "maven": attr.label(
-            doc = "The build's Android Maven requirements (`@flutter_pub_android_maven//:requirements`).",
+            doc = "The build's Android Maven requirements (any hub's `//android:maven_requirements`).",
             mandatory = True,
             providers = [FlutterAndroidMavenInfo],
         ),
@@ -252,5 +252,5 @@ flutter_android_maven_report = rule(
             mandatory = True,
         ),
     },
-    doc = "Writes what the `maven_artifacts` program of an application reads: the Maven artifacts the plugins it links declare, and what `@rules_android_maven` resolves. Unlike `flutter_android_plugin_libs` it never fails for what is missing: it is how to find out.",
+    doc = "Writes what the `maven_artifacts` program of an application reads: the Maven artifacts the plugins it links declare, and what `@rules_flutter_maven` resolves. Unlike `flutter_android_plugin_libs` it never fails for what is missing: it is how to find out.",
 )

@@ -42,8 +42,8 @@ kt_android_library(
     deps = [
         ":_engine",
         ":_build_config",
-        "@rules_android_maven//:androidx_annotation_annotation",
-        "@rules_android_maven//:androidx_lifecycle_lifecycle_common",
-        "@rules_android_maven//:androidx_media_media",
+        "@rules_flutter_maven//:androidx_annotation_annotation",
+        "@rules_flutter_maven//:androidx_lifecycle_lifecycle_common",
+        "@rules_flutter_maven//:androidx_media_media",
     ],
 )

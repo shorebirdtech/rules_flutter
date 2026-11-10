@@ -272,19 +272,20 @@ from the repository cache.
 
 | Lock | In | Pins |
 |---|---|---|
-| `rules_android_maven_install.json` | the repo root, and every Android e2e workspace (`hello_world`, `plugin_example`, `android_example`, `custom_engine`, `integration_test`) | `@rules_android_maven` |
+| `rules_flutter_maven_install.json` | the repo root, and the Android e2e workspaces that add artifacts (`plugin_example`, `android_example`, `integration_test`) | `@rules_flutter_maven` |
 
-rules_android 0.8.1 pins its other two installs, `@android_ide_common_30_1_3` and
-`@bazel_worker_maven`, with locks of its own, and no workspace declares them.
+`hello_world` and `custom_engine` add none and declare no install: they use the
+root's lock, as a consumer whose plugins declare no Maven artifacts does.
+rules_android 0.8.1 pins its own installs, `@rules_android_maven`,
+`@android_ide_common_30_1_3` and `@bazel_worker_maven`, with locks of its own,
+and no workspace declares them.
 
-A lock holds the artifacts of every module that contributes to its repo, not
-only the ones the file next to it lists: `@rules_android_maven` merges what
-rules_android, rules_flutter and the workspace declare, and
-rules_jvm_external decides which version of an artifact several of them name
-(`com.android.tools:r8` resolves to 9.3.16, rules_android's, so the workspaces
-do not declare it: a root line at a lower version than a dependency's has no
-effect, and the pin warns). So a bump of rules_android, a change to the root
-`maven.install`, or a change to a workspace's list makes the e2e locks stale.
+A workspace's lock holds the artifacts of every module that contributes to the
+repo, not only the ones the file next to it lists: `@rules_flutter_maven` merges
+what rules_flutter and the workspace declare, and rules_jvm_external takes the
+highest version of an artifact both name. So a change to the root
+`maven.install` makes the root lock and the e2e locks stale, and a change to a
+workspace's list makes its own.
 
 Evaluating the extension warns when a repository has contributions from other
 modules that its root `maven.install` does not name (`known_contributing_modules`,
@@ -308,19 +309,17 @@ other artifacts ask for (2.0.0, 2.6.1, 2.6.1, and `savedstate` 1.2.1) beside
 `lifecycle-runtime` 2.10.0. `//tools/maven_locks:root_lock_test` fails on a
 root lock where the group is not at one version.
 
-The root's lock pins rules_flutter's own builds. A consumer gets no use of it:
-rules_android 0.8.1 ships a lock for `@rules_android_maven` too, and
-rules_jvm_external refuses two locks for one repository unless the root module
-names one, which then pins the whole merged repository. So every Android app
-declares `maven.install(name = "rules_android_maven", lock_file = ...)` itself
-(README, "Maven dependencies"), and every Android e2e workspace does, as an app
-would.
+The root's lock ships to consumers. rules_jvm_external takes the one lock a
+repository's modules name, and the root module's when it names one, which then
+pins the whole merged repository. So a consumer that adds no artifacts gets the
+root's lock, and one that adds some declares `maven.install(name =
+"rules_flutter_maven", lock_file = ...)` itself (README, "Maven dependencies").
 
 A stale lock fails the build, at the point the repo loads:
-`rules_android_maven_install.json contains an invalid input signature ... must
+`rules_flutter_maven_install.json contains an invalid input signature ... must
 be regenerated`. `bazel run @overhead//locks:check` finds it in each e2e workspace
 (`build --nobuild //...`), and the Maven check of rules_flutter's own finds the
-root's: `bazel fetch --repo=@rules_android_maven`. That check is
+root's: `bazel fetch --repo=@rules_flutter_maven`. That check is
 
     bazel run //tools/maven_locks
 
@@ -331,11 +330,11 @@ above. Run both commands; neither covers the other.
 To regenerate, after a change to the artifacts or to a module that contributes
 them:
 
-    bazel run //tools/maven_locks -- --refresh e2e/hello_world
-    bazel run --lockfile_mode=off @overhead//locks:refresh -- e2e/hello_world
+    bazel run //tools/maven_locks -- --refresh e2e/plugin_example
+    bazel run --lockfile_mode=off @overhead//locks:refresh -- e2e/plugin_example
 
 The first re-pins every stale Maven repo of that workspace (`REPIN=1 bazel run
-@rules_android_maven//:pin` underneath, run in the workspace); the second
+@rules_flutter_maven//:pin` underneath, run in the workspace); the second
 refreshes its `MODULE.bazel.lock` as above. The root's lock is re-pinned the same
 way, `bazel run //tools/maven_locks -- --refresh .`, and then every Android e2e
 lock the change reaches. Pinning resolves through Coursier, so it needs Maven
@@ -987,8 +986,9 @@ after):
         --test_env=ANDROID_SERIAL=<serial>
 
 Their app links `integration_test`'s Android library, so this workspace's
-`rules_android_maven` install pins `androidx.test:runner`, `:rules` and
-`espresso-core` (the plugin's own build asks for `1.2+`, `1.2+` and `3.3+`).
+`rules_flutter_maven` install pins `androidx.test:runner`, `:rules`,
+`espresso-core` and `guava` (the plugin's own build asks for `1.2+`, `1.2+`,
+`3.3+` and `28.1-android`).
 
 The iOS tests need nothing booted or attached: each makes a simulator
 (`rules_flutter-<test>-<pid>-<start>`, an iPhone 16 on the newest iOS runtime;
@@ -1185,7 +1185,7 @@ instead of extracting it.
 
 ### Plugin verification matrix
 
-`e2e/plugin_example` exercises real pub.dev plugins — `path_provider` (federated, SwiftPM Apple, **jnigen Android** — path_provider_android ≥ 2.3 calls Java through `package:jni`, whose C support library `libdartjni.so` is built from source by the bundled `ext/jni` overlay and packaged at `lib/<abi>/` — pure-Dart Linux/Windows), `url_launcher` (federated, SwiftPM Apple, Kotlin Android, real C++ Linux/Windows, web Dart), `package_info_plus` (monolithic, every platform including web), `shared_preferences` (federated; its Android Gradle build declares `androidx.datastore` and `androidx.preference`, which must come from the workspace's `rules_android_maven` install; every platform including web), `audio_session` (curated `ext/` overlay), and `record_android` 1.5.1 (Android-only federated implementation used without its umbrella — regression case for a plugin that ships `android/src/main/res/` resources referenced as `R.drawable.ic_mic` and declares **no** Gradle dependencies, compiling purely against the embedding's exported androidx classpath) — plus the hand-written `:greeting_plugin` (regression case for pure-Bazel-deps plugins). `lib/main.dart` resolves a string from each plugin and renders + emits them on a single `plugin_example_results …` log line. Each platform's e2e check asserts the line is correct; empty/null/error content fails loudly.
+`e2e/plugin_example` exercises real pub.dev plugins — `path_provider` (federated, SwiftPM Apple, **jnigen Android** — path_provider_android ≥ 2.3 calls Java through `package:jni`, whose C support library `libdartjni.so` is built from source by the bundled `ext/jni` overlay and packaged at `lib/<abi>/` — pure-Dart Linux/Windows), `url_launcher` (federated, SwiftPM Apple, Kotlin Android, real C++ Linux/Windows, web Dart), `package_info_plus` (monolithic, every platform including web), `shared_preferences` (federated; its Android Gradle build declares `androidx.datastore` and `androidx.preference`, which must come from the workspace's `rules_flutter_maven` install; every platform including web), `audio_session` (curated `ext/` overlay), and `record_android` 1.5.1 (Android-only federated implementation used without its umbrella — regression case for a plugin that ships `android/src/main/res/` resources referenced as `R.drawable.ic_mic` and declares **no** Gradle dependencies, compiling purely against the embedding's exported androidx classpath) — plus the hand-written `:greeting_plugin` (regression case for pure-Bazel-deps plugins). `lib/main.dart` resolves a string from each plugin and renders + emits them on a single `plugin_example_results …` log line. Each platform's e2e check asserts the line is correct; empty/null/error content fails loudly.
 
 | Assertion | Source | Expected |
 |---|---|---|
@@ -1193,7 +1193,7 @@ instead of extracting it.
 | `documentsPath=…` | `getApplicationDocumentsDirectory().path` (`kIsWeb`-guarded) | `/Users/…` on macOS, `/var/…` on iOS, `/home/…` on Linux, `C:\Users\…` on Windows, `/data/user/0/…` on Android, `web: not supported` on web. |
 | `tempPath=…` | `getTemporaryDirectory().path` (`kIsWeb`-guarded) | Absolute path with the platform-appropriate prefix; web shows `web: not supported`. |
 | `launchOk=launch ok` | `canLaunchUrl(Uri.parse('https://flutter.dev'))` | Exact `launch ok` on macOS/iOS/Linux/Windows/web. On Android the correct value is `launch denied`: `canLaunchUrl` is subject to package visibility and the app declares no `<queries>` for https VIEW intents (flutter create output ships untouched). Either way the channel responded — an `error:` value means the `url_launcher` registrant didn't fire. |
-| `prefs=roundtrip ok` | `SharedPreferences.getInstance()`, `setString('e2e_key', <millisecond time>)`, then `getString` | Exact `roundtrip ok` on every platform. `mismatch …` means the write did not read back; `error:` means the registrant didn't fire. On Android a build failure naming missing `@rules_android_maven` artifacts means the workspace's `maven.install` lacks what the plugins' Gradle builds declare; `bazel run //:<android app>_maven_artifacts` prints the block for that app's plugins (`@<hub>//android:maven_artifacts` for every plugin of the build). |
+| `prefs=roundtrip ok` | `SharedPreferences.getInstance()`, `setString('e2e_key', <millisecond time>)`, then `getString` | Exact `roundtrip ok` on every platform. `mismatch …` means the write did not read back; `error:` means the registrant didn't fire. On Android a build failure naming missing `@rules_flutter_maven` artifacts means the workspace's `maven.install` lacks what the plugins' Gradle builds declare; `bazel run //:<android app>_maven_artifacts` prints the block for that app's plugins (`@<hub>//android:maven_artifacts` for every plugin of the build). |
 | `greeting=Hello from GreetingPlugin!` | `//greeting_plugin:greeting_plugin` (regression case) | Exact match. |
 | `recordHasPermission=…` | `MethodChannel('com.llfbandit.record/messages')` `create` + `hasPermission(request: false)` | `has=true` on Android (`verify_android_app_test` grants RECORD_AUDIO via `adb shell pm grant` first, which itself fails if the plugin's manifest didn't merge); `not supported` everywhere else. An `error:` value means the `record_android` registrant didn't fire or its resources failed to compile. |
 

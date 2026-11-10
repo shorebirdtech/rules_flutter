@@ -1,5 +1,5 @@
 /// Records, or checks, `test/gradle_module_metadata.json`: the Gradle module
-/// metadata of the artifacts `@rules_android_maven` resolves, which
+/// metadata of the artifacts `@rules_flutter_maven` resolves, which
 /// `verify_android_maven_artifacts_test` reads in place of maven.google.com.
 ///
 /// Usage: `gradle_module_metadata record|check [--snapshot=SNAPSHOT]

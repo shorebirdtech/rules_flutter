@@ -104,7 +104,6 @@ void main() {
   group('formatReport', () {
     test('marks what the plugins need and what Gradle would align', () {
       final report = formatReport(
-        repo: 'flutter_pub_android_maven',
         app: '//:app',
         requirements: {
           'g:fine': Requirement('1.0', ['package:a 1.2']),
@@ -132,7 +131,6 @@ void main() {
 
     test('raises a declared artifact Gradle would align higher', () {
       final report = formatReport(
-        repo: 'r',
         app: null,
         requirements: {
           'a:ktx': Requirement('1.0', ['package:a 1.0']),
@@ -152,7 +150,6 @@ void main() {
 
     test('says when there is nothing to paste', () {
       final report = formatReport(
-        repo: 'r',
         app: '//:app',
         requirements: {},
         resolved: {'g:a': '1.0'},

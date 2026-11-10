@@ -17,13 +17,13 @@ flutter_unsupported_toolchain(
     visibility = ["//visibility:public"],
 )
 
-# What `com.google.guava:listenablefuture` is in `@rules_android_maven`: the
+# What `com.google.guava:listenablefuture` is in `@rules_flutter_maven`: the
 # 1.0 jar on the compile classpath only. See the override in MODULE.bazel.
 java_library(
     name = "listenablefuture_compile_only",
     neverlink = True,
     visibility = ["//visibility:public"],
-    exports = ["@rules_android_maven//:original_com_google_guava_listenablefuture"],
+    exports = ["@rules_flutter_maven//:original_com_google_guava_listenablefuture"],
 )
 
 # Compilation mode config_settings for select() in macros.

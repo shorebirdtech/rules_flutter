@@ -10,7 +10,7 @@
 // Every `maven.install` in the root and e2e MODULE.bazel files must name a
 // `lock_file`, so its jars are fetched by checksum and land in Bazel's
 // repository cache. The root's own locks ship to every consumer of the
-// ruleset and no e2e workspace pins them, so fetching each root install's
+// ruleset, which no e2e workspace re-pins, so fetching each root install's
 // repo (rules_jvm_external compares the lock with the declared artifacts when
 // it loads the repo) is what finds a stale one. Every workspace's installs
 // are also evaluated afresh, to print the warnings a lock file lets Bazel
@@ -205,9 +205,9 @@ class _Runner {
   }
 
   /// Whether the Maven lock files of the repository root's own `maven.install`
-  /// tags are current. Those ship to every user of the ruleset; no e2e
-  /// workspace pins them (each pins its own, merged, copy), so a stale one
-  /// would reach consumers unseen.
+  /// tags are current. Those ship to every user of the ruleset, and an e2e
+  /// workspace that adds artifacts pins its own merged copy instead, so a
+  /// stale one would reach consumers unseen.
   Future<bool> checkRootMaven() async {
     final names = _installs;
     var ok = true;

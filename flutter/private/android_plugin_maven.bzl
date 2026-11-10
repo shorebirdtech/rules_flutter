@@ -2,7 +2,7 @@
 
 A pub plugin's `android/build.gradle(.kts)` declares the Maven artifacts its
 Kotlin/Java sources compile against. The app's Android Maven classpath is one
-`rules_jvm_external` resolution, `@rules_android_maven`, so that Coursier picks
+`rules_jvm_external` resolution, `@rules_flutter_maven`, so that Coursier picks
 one version of every artifact for the whole app (the highest, as Gradle does).
 A plugin's declared artifacts therefore have to come from that repo.
 
@@ -10,9 +10,9 @@ This file holds the pieces:
 
 * `parse_gradle_maven_dependencies` reads the declarations out of a script.
 * `merge_plugin_requirements` and `maven_problems` merge what every plugin of
-  the build's plugins declare and compare it with what `@rules_android_maven` resolved.
+  the build's plugins declare and compare it with what `@rules_flutter_maven` resolved.
 * `flutter_android_maven` is a repository rule, one per build, that gathers what
-  every plugin declares and what `@rules_android_maven` resolved. It writes
+  every plugin declares and what `@rules_flutter_maven` resolved. It writes
   a `requirements` target, which an application's `flutter_android_plugin_libs`
   reads to check the plugins that application links (and those only),
   `resolved.bzl`, which a plugin's `android/` package
@@ -24,8 +24,6 @@ This file holds the pieces:
 Only an Android build that links a plugin reads any of this, so only such a
 build fetches it.
 """
-
-load("//flutter/private:flutter_pub_index.bzl", "ANDROID_MAVEN_REPO")
 
 # Where each spoke records what its Gradle build declares, at the spoke's root.
 MAVEN_DEPS_FILE = "flutter_android_maven_deps.json"
@@ -423,7 +421,7 @@ def maven_target_name(group, artifact):
         artifact: The Maven artifact id.
 
     Returns:
-        The name of the target `@rules_android_maven` gives the artifact.
+        The name of the target `@rules_flutter_maven` gives the artifact.
     """
     name = group + ":" + artifact
     for c in ".-:/+$".elems():
@@ -536,12 +534,12 @@ def compare_maven_versions(a, b):
     return 0
 
 def maven_labels(declared, resolved = None):
-    """The `@rules_android_maven` labels of a plugin's declared artifacts.
+    """The `@rules_flutter_maven` labels of a plugin's declared artifacts.
 
     Args:
         declared: List of dicts with `kind` (`"deps"`, `"compile_only"`,
             `"runtime"`) and `coordinate` (`group:artifact`).
-        resolved: Dict of `group:artifact` to the version `@rules_android_maven`
+        resolved: Dict of `group:artifact` to the version `@rules_flutter_maven`
             resolved, or None for every artifact. An artifact it lacks has no
             target to depend on, so one not in `resolved` is left out.
 
@@ -554,7 +552,7 @@ def maven_labels(declared, resolved = None):
         if resolved != None and d["coordinate"] not in resolved:
             continue
         group, artifact = d["coordinate"].split(":")[:2]
-        label = "@rules_android_maven//:" + maven_target_name(group, artifact)
+        label = "@rules_flutter_maven//:" + maven_target_name(group, artifact)
         if label not in labels[d["kind"]]:
             labels[d["kind"]].append(label)
     return struct(
@@ -592,7 +590,7 @@ def merge_plugin_requirements(packages):
     return requirements
 
 def maven_problems(requirements, resolved):
-    """The requirements `@rules_android_maven` does not meet.
+    """The requirements `@rules_flutter_maven` does not meet.
 
     Args:
         requirements: The result of `merge_plugin_requirements`.
@@ -625,18 +623,18 @@ def maven_check_message(data, linked, report = None):
     """What an application that links `linked` plugins fails with, or "".
 
     Args:
-        data: The decoded `maven_requirements.json` of the build: `repo` (its
-            name), `resolved` (`group:artifact` to version) and `packages`
-            (each a dict of `package`, `version`, `deps` and `errors`).
+        data: The decoded `maven_requirements.json` of the build: `resolved`
+            (`group:artifact` to version) and `packages` (each a dict of
+            `package`, `version`, `deps` and `errors`).
         linked: The names of the packages whose Android libraries the
             application links. A package the hub records no requirements for
             needs nothing.
         report: The label of the application's `maven_artifacts` target, which
-            the message points to. None points to the shared repository's.
+            the message points to. None points to a hub's.
 
     Returns:
         The failure message naming only what those packages need, or the empty
-        string when `@rules_android_maven` provides all of it.
+        string when `@rules_flutter_maven` provides all of it.
     """
     packages = [p for p in data["packages"] if p["package"] in linked]
     requirements = merge_plugin_requirements(packages)
@@ -646,7 +644,7 @@ def maven_check_message(data, linked, report = None):
         for p in packages
         if p["errors"]
     }
-    return format_maven_failure(data["repo"], problems, errors, report)
+    return format_maven_failure(problems, errors, report)
 
 def maven_app_report(data, linked, app):
     """What an application's `maven_artifacts` target reads.
@@ -664,7 +662,6 @@ def maven_app_report(data, linked, app):
     """
     packages = [p for p in data["packages"] if p["package"] in linked]
     return artifacts_report(
-        data["repo"],
         merge_plugin_requirements(packages),
         data["resolved"],
         data["repositories"],
@@ -679,17 +676,15 @@ def _artifact_line(coordinate, version, declared_by, note):
         "; " + note if note else "",
     )
 
-def format_maven_failure(repo, problems, errors, report = None):
+def format_maven_failure(problems, errors, report = None):
     """The message `check()` fails with.
 
     Args:
-        repo: The name of the repository holding the build's Maven data
-            (`flutter_pub_android_maven`).
         problems: The result of `maven_problems`.
         errors: Dict of `package:<name> <version>` to the Gradle lines that
             could not be read.
         report: The label of the application's `maven_artifacts` target. None
-            points to the repository's, which covers every plugin of the build.
+            points to a hub's, which covers every plugin of the build.
 
     Returns:
         The message, listing every problem at once.
@@ -701,20 +696,19 @@ def format_maven_failure(repo, problems, errors, report = None):
             for p in problems
         ]
         parts.append((
-            "The Android plugins this app links from @{repo} declare Maven " +
-            "dependencies that @rules_android_maven does not provide at a " +
+            "The Android plugins this app links declare Maven " +
+            "dependencies that @rules_flutter_maven does not provide at a " +
             "high enough version:\n\n    {lines}\n\n" +
             "Gradle gives a plugin the highest version declared anywhere in " +
             "the app, and so does the single resolution behind " +
-            "@rules_android_maven. Add these to the root module's " +
-            '`maven.install(name = "rules_android_maven", artifacts = [...])` ' +
+            "@rules_flutter_maven. Add these to the root module's " +
+            '`maven.install(name = "rules_flutter_maven", artifacts = [...])` ' +
             "and regenerate that install's lock file:\n\n" +
-            "    REPIN=1 bazel run @rules_android_maven//:pin\n\n" +
+            "    REPIN=1 bazel run @rules_flutter_maven//:pin\n\n" +
             "`bazel run {report}` prints the complete block for {scope}."
         ).format(
-            repo = repo,
             lines = "\n    ".join(lines),
-            report = report or "@%s//:maven_artifacts" % repo,
+            report = report or "@<hub>//android:maven_artifacts",
             scope = "the plugins this app links" if report else "every plugin of the build",
         ))
     if errors:
@@ -729,12 +723,12 @@ def format_maven_failure(repo, problems, errors, report = None):
             "in MODULE.bazel): <root>/<package>/BUILD.bazel.tpl for the Dart " +
             "side and <root>/<package>/android/BUILD.bazel.tpl, which " +
             "declares the plugin's Android library with its " +
-            "@rules_android_maven deps. An android/BUILD.bazel.tpl is used " +
+            "@rules_flutter_maven deps. An android/BUILD.bazel.tpl is used " +
             "only beside a BUILD.bazel.tpl."
         ).format(groups = "\n".join(groups)))
     return "\n\n".join(parts)
 
-def artifacts_report(repo, requirements, resolved, repositories, app = None):
+def artifacts_report(requirements, resolved, repositories, app = None):
     """The JSON a `maven_artifacts` program reads (tools/maven_artifacts.dart).
 
     The program prints the lines to paste into `maven.install`, after reading
@@ -742,7 +736,6 @@ def artifacts_report(repo, requirements, resolved, repositories, app = None):
     network and so cannot happen in the build.
 
     Args:
-        repo: The name of the repository holding the build's Maven data.
         requirements: The result of `merge_plugin_requirements`.
         resolved: Dict of `group:artifact` to the version the install
             resolves.
@@ -755,7 +748,6 @@ def artifacts_report(repo, requirements, resolved, repositories, app = None):
     """
     return json.encode({
         "app": app,
-        "repo": repo,
         "repositories": repositories,
         "requirements": requirements,
         "resolved": resolved,
@@ -780,13 +772,13 @@ def _resolved_versions(build):
     return best
 
 def _flutter_android_maven_impl(rctx):
-    resolved = _resolved_versions(rctx.read(rctx.path(Label("@rules_android_maven//:BUILD"))))
+    resolved = _resolved_versions(rctx.read(rctx.path(Label("@rules_flutter_maven//:BUILD"))))
 
     # The install's repositories, which rules_jvm_external lists for its own
     # `outdated` program.
     repositories = [
         line.strip()
-        for line in rctx.read(rctx.path(Label("@rules_android_maven//:outdated.repositories"))).splitlines()
+        for line in rctx.read(rctx.path(Label("@rules_flutter_maven//:outdated.repositories"))).splitlines()
         if line.strip()
     ]
     packages = [json.decode(rctx.read(rctx.path(label))) for label in rctx.attr.spokes]
@@ -796,14 +788,12 @@ def _flutter_android_maven_impl(rctx):
     # picks the packages it links and no others. The build-wide report below is
     # for finding what a lock's plugins need all at once.
     requirements_json = json.encode({
-        "repo": ANDROID_MAVEN_REPO,
         "repositories": repositories,
         "resolved": resolved,
         "packages": packages,
     })
     rctx.file("resolved.bzl", "RESOLVED = %s\n" % repr(resolved))
     rctx.file("report.json", artifacts_report(
-        ANDROID_MAVEN_REPO,
         merge_plugin_requirements(packages),
         resolved,
         repositories,
@@ -823,7 +813,7 @@ flutter_android_maven_requirements(
 
 # Prints every Maven artifact the build's Android plugins declare, and those
 # Gradle would align, as the lines to paste into
-# maven.install(name = "rules_android_maven").
+# maven.install(name = "rules_flutter_maven").
 dart_binary(
     name = "maven_artifacts",
     args = ["$(rlocationpath :report.json)"],
@@ -845,7 +835,7 @@ flutter_android_maven = repository_rule(
     },
     doc = """The Maven requirements of the build's Android plugins.
 
-Reads the versions `@rules_android_maven` resolved and the dependencies every
+Reads the versions `@rules_flutter_maven` resolved and the dependencies every
 spoke's Gradle build declares, and generates a `requirements` target (for an
 application's check of the plugins it links), `resolved.bzl` (what a plugin's
 library may depend on) and the `maven_artifacts` target (every plugin of the

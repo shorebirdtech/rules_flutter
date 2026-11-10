@@ -73,7 +73,6 @@ flutter_android_plugin_libs(
 flutter_android_maven_requirements(
     name = "maven",
     data = json.encode({
-        "repo": "flutter_pub_android_maven",
         "repositories": ["https://maven.google.com"],
         "resolved": {"g:installed": "1.0"},
         "packages": [

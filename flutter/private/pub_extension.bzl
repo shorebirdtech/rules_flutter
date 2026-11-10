@@ -706,7 +706,7 @@ def _declare_pub_packages(tags, settings, sdks, user_overlay_roots, cycles):
                 )
 
     # The build's Android Maven data: what every built spoke's Gradle build
-    # declares, against what `@rules_android_maven` resolved. An Android app's
+    # declares, against what `@rules_flutter_maven` resolved. An Android app's
     # `flutter_android_plugin_libs` checks the part its plugins need, and a
     # spoke's `android/` package reads what resolved, so only Android builds
     # fetch it.

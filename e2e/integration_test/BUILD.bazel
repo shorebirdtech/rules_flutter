@@ -966,7 +966,7 @@ outcome_test(
 #         --test_env=ANDROID_SERIAL=<serial>
 #
 # The app needs `androidx.test` and Espresso in this workspace's
-# `rules_android_maven` install, which `integration_test`'s Android library
+# `rules_flutter_maven` install, which `integration_test`'s Android library
 # links.
 
 # The two tests of `:macos_pass_test`, on a device: each is reported.

@@ -163,7 +163,7 @@ def _record_android_subpackage_test_impl(ctx):
     asserts.true(env, '":_engine",' in content, content)
     asserts.false(
         env,
-        "@rules_android_maven//:androidx" in content,
+        "@rules_flutter_maven//:androidx" in content,
         "androidx deps must flow via the engine's exports, not be " +
         "restated per plugin:\n" + content,
     )

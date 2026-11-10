@@ -1,5 +1,5 @@
 /// Prints the Maven artifacts an Android build needs, as the lines to paste
-/// into `maven.install(name = "rules_android_maven", artifacts = [...])`.
+/// into `maven.install(name = "rules_flutter_maven", artifacts = [...])`.
 ///
 /// Two kinds of line:
 ///
@@ -19,7 +19,7 @@
 /// Usage: `maven_artifacts <runfiles path of the report's JSON> [options]`.
 /// `flutter_android_maven` (every plugin of the build) and
 /// `flutter_android_maven_report` (an application's) write that JSON:
-/// `repo`, `app` (or null), `requirements` (coordinate to `version` and
+/// `app` (or null), `requirements` (coordinate to `version` and
 /// `declared_by`), `resolved` (coordinate to version) and `repositories`.
 ///
 /// Options, each a file path (relative to the directory `bazel run` was
@@ -136,7 +136,6 @@ Future<Map<String, Alignment>> align(
 /// [requirements] are the plugins' declarations, [resolved] what the install
 /// resolves, [aligned] the result of [align] over both.
 String formatReport({
-  required String repo,
   required String? app,
   required Map<String, Requirement> requirements,
   required Map<String, String> resolved,
@@ -184,7 +183,7 @@ String formatReport({
 
   final out = <String>[
     app == null
-        ? '# Maven artifacts the Android plugins of @$repo declare.'
+        ? '# Maven artifacts the Android plugins of the build declare.'
         : '# Maven artifacts the Android plugins that $app links declare.',
   ];
   if (requirements.isEmpty) {
@@ -192,11 +191,11 @@ String formatReport({
   } else if (changed > 0) {
     out.add(
       '# $changed of ${requirements.length} are missing or too low in '
-      '@rules_android_maven (marked).',
+      '@rules_flutter_maven (marked).',
     );
   } else {
     out.add(
-      '# All ${requirements.length} are provided by @rules_android_maven.',
+      '# All ${requirements.length} are provided by @rules_flutter_maven.',
     );
   }
   if (alignedOnly.isNotEmpty) {
@@ -212,7 +211,7 @@ String formatReport({
   } else {
     out
       ..add(
-        '# Paste into maven.install(name = "rules_android_maven", '
+        '# Paste into maven.install(name = "rules_flutter_maven", '
         'artifacts = [...]):',
       )
       ..add('')
@@ -517,7 +516,6 @@ Future<void> main(List<String> args) async {
     }
     stdout.write(
       formatReport(
-        repo: data['repo'] as String,
         app: data['app'] as String?,
         requirements: requirements,
         resolved: resolved,
@@ -530,7 +528,7 @@ Future<void> main(List<String> args) async {
   } on Exception catch (e) {
     stderr.writeln(
       'Could not read the Gradle module metadata of the artifacts '
-      '@rules_android_maven resolves from ${repositories.join(', ')}: $e',
+      '@rules_flutter_maven resolves from ${repositories.join(', ')}: $e',
     );
     exitCode = 1;
   } finally {

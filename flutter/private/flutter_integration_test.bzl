@@ -591,7 +591,7 @@ program's.
 
 An integration test's app links `integration_test`'s Android library, which needs
 `androidx.test:runner`, `androidx.test:rules`, `androidx.test.espresso:espresso-core`
-and `com.google.guava:guava` in the workspace's `@rules_android_maven` install:
+and `com.google.guava:guava` in the workspace's `@rules_flutter_maven` install:
 analysis says which are missing.""",
 )
 

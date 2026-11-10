@@ -160,7 +160,7 @@ void main() {
         contains('4 classes, such as a/A.class, a/B.class, a/C.class'),
       );
       expect(message, contains('bazel run //:app_maven_artifacts'));
-      expect(message, contains('REPIN=1 bazel run @rules_android_maven//:pin'));
+      expect(message, contains('REPIN=1 bazel run @rules_flutter_maven//:pin'));
     });
   });
 

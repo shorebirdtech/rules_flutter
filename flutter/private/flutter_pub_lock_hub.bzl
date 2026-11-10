@@ -83,7 +83,7 @@ alias(
         """\
 # What an Android app's `flutter_android_plugin_libs` checks the plugins it
 # links against: every plugin's Maven requirements and what
-# @rules_android_maven resolved.
+# @rules_flutter_maven resolved.
 alias(
     name = "maven_requirements",
     actual = "@{maven}//:requirements",
@@ -91,7 +91,7 @@ alias(
 )
 
 # Prints every Maven artifact the build's Android plugins declare, ready to
-# paste into the root module's maven.install(name = "rules_android_maven").
+# paste into the root module's maven.install(name = "rules_flutter_maven").
 alias(
     name = "maven_artifacts",
     actual = "@{maven}//:maven_artifacts",

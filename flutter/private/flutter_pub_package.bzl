@@ -1435,7 +1435,7 @@ def make_android_subpackage_build_content(
             `build.gradle*`: dicts with `kind` (`"deps"`, `"compile_only"`,
             `"runtime"`), `coordinate` (`group:artifact`), `version` (string
             or None) and `line`. When non-empty the generated library depends
-            on the artifacts `@rules_android_maven` resolved. One it lacks is
+            on the artifacts `@rules_flutter_maven` resolved. One it lacks is
             left out, so that the application's `flutter_android_plugin_libs`
             reports it, by name, with the rest the app needs, rather than
             Bazel failing on a label that does not exist.
@@ -1556,7 +1556,7 @@ write_file(
     # Base deps every plugin spoke gets: the engine (which carries the
     # FlutterPlugin SPI plus the embedding's androidx compile classpath
     # via its exports) and the BuildConfig stub. The plugin's own Maven
-    # artifacts come from `@rules_android_maven`, checked by the application
+    # artifacts come from `@rules_flutter_maven`, checked by the application
     # that links this library (see `flutter_android_plugin_libs`).
     deps_expr = '[":_engine", ":_build_config"]'
     maven_loads = ""
@@ -1570,7 +1570,7 @@ write_file(
             'load("@rules_flutter//flutter/private:android_plugin_maven.bzl", "maven_labels")\n'
         )
         maven_call = """
-# The artifacts this plugin's Gradle build declares that @rules_android_maven
+# The artifacts this plugin's Gradle build declares that @rules_flutter_maven
 # has. An application that links the plugin fails, naming every one it lacks
 # or has too low, before this library is built (`flutter_android_plugin_libs`).
 _maven = maven_labels({declared}, RESOLVED)

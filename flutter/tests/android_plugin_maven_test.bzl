@@ -189,15 +189,15 @@ def _labels_test_impl(ctx):
         _dep("androidx.core:core", None, "compile_only"),
         _dep("x:y", None, "runtime"),
     ])
-    asserts.equals(env, ["@rules_android_maven//:androidx_annotation_annotation"], r.deps)
-    asserts.equals(env, ["@rules_android_maven//:androidx_core_core"], r.compile_only)
-    asserts.equals(env, ["@rules_android_maven//:x_y"], r.runtime_deps)
+    asserts.equals(env, ["@rules_flutter_maven//:androidx_annotation_annotation"], r.deps)
+    asserts.equals(env, ["@rules_flutter_maven//:androidx_core_core"], r.compile_only)
+    asserts.equals(env, ["@rules_flutter_maven//:x_y"], r.runtime_deps)
     return unittest.end(env)
 
 labels_test = unittest.make(_labels_test_impl)
 
 def _labels_leave_out_what_was_not_resolved_test_impl(ctx):
-    """An artifact `@rules_android_maven` lacks has no target, so a library names none.
+    """An artifact `@rules_flutter_maven` lacks has no target, so a library names none.
 
     The application that links the plugin reports it, by name, with the rest.
     """
@@ -206,7 +206,7 @@ def _labels_leave_out_what_was_not_resolved_test_impl(ctx):
         [_dep("a:present", None), _dep("b:absent", None), _dep("c:absent", None, "runtime")],
         {"a:present": "1.0"},
     )
-    asserts.equals(env, ["@rules_android_maven//:a_present"], r.deps)
+    asserts.equals(env, ["@rules_flutter_maven//:a_present"], r.deps)
     asserts.equals(env, [], r.runtime_deps)
     return unittest.end(env)
 
@@ -220,7 +220,6 @@ def _check_names_only_what_the_linked_plugins_need_test_impl(ctx):
     """
     env = unittest.begin(ctx)
     data = {
-        "repo": "flutter_pub_android_maven",
         "resolved": {"g:have": "1.0"},
         "packages": [
             _pkg("a", "1.0", [_dep("g:needed_by_a", "2.0"), _dep("g:have", "1.0")]),
@@ -307,21 +306,21 @@ def _failure_message_test_impl(ctx):
         _pkg("b", "3.4", [_dep("g:old", "1.2"), _dep("g:gone", None)]),
     ])
     problems = maven_problems(req, {"g:old": "1.1"})
-    message = format_maven_failure("flutter_pub_android_maven", problems, {
+    message = format_maven_failure(problems, {
         "package:c 5.0": ["implementation(libs.x)", "kapt(\"a:b:1\")"],
         "package:d 1.0": ["api(project(\":p\"))"],
     })
     for needle in [
         '"g:gone:<version>",  # declared by package:b 3.4; missing',
         '"g:old:1.2",  # declared by package:a 1.2, package:b 3.4; resolves 1.1',
-        "REPIN=1 bazel run @rules_android_maven//:pin",
-        "bazel run @flutter_pub_android_maven//:maven_artifacts",
+        "REPIN=1 bazel run @rules_flutter_maven//:pin",
+        "bazel run @<hub>//android:maven_artifacts",
         "    package:c 5.0\n        implementation(libs.x)\n        kapt(\"a:b:1\")",
         "    package:d 1.0\n        api(project(\":p\"))",
         "android/BUILD.bazel.tpl",
     ]:
         asserts.true(env, needle in message, needle + " missing from:\n" + message)
-    asserts.equals(env, "", format_maven_failure("flutter_pub_android_maven", [], {}))
+    asserts.equals(env, "", format_maven_failure([], {}))
     return unittest.end(env)
 
 failure_message_test = unittest.make(_failure_message_test_impl)
@@ -332,7 +331,6 @@ def _report_test_impl(ctx):
         _pkg("a", "1.2", [_dep("g:old", "1.2"), _dep("g:fine", "1.0")]),
     ])
     report = json.decode(artifacts_report(
-        "flutter_pub_android_maven",
         req,
         {"g:old": "1.1", "g:fine": "1.0"},
         ["https://maven.google.com"],
@@ -340,7 +338,6 @@ def _report_test_impl(ctx):
     ))
     asserts.equals(env, {
         "app": "//:app",
-        "repo": "flutter_pub_android_maven",
         "repositories": ["https://maven.google.com"],
         "requirements": {
             "g:fine": {"version": "1.0", "declared_by": ["package:a 1.2"]},

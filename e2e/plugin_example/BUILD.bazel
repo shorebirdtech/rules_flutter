@@ -612,7 +612,7 @@ _REPORT_ARGS = [
 ]
 
 # Records the snapshot those reports read, from the live repositories, after a
-# re-pin that changes what @rules_android_maven resolves:
+# re-pin that changes what @rules_flutter_maven resolves:
 #   bazel run //:record_gradle_module_metadata
 dart_binary(
     name = "record_gradle_module_metadata",
@@ -659,10 +659,10 @@ dart_test(
         ":plugin_android_fat",
         ":plugin_android_x86_64",
         "@bazel_tools//tools/zip:zipper",
-        "@rules_android_maven//:org_jetbrains_kotlin_kotlin_stdlib",
+        "@rules_flutter_maven//:org_jetbrains_kotlin_kotlin_stdlib",
     ],
     env = {
-        "KOTLIN_STDLIB_RUNFILES": "$(rlocationpaths @rules_android_maven//:org_jetbrains_kotlin_kotlin_stdlib)",
+        "KOTLIN_STDLIB_RUNFILES": "$(rlocationpaths @rules_flutter_maven//:org_jetbrains_kotlin_kotlin_stdlib)",
         "ZIPPER_RUNFILE": "$(rlocationpath @bazel_tools//tools/zip:zipper)",
     },
     main = "test/verify_android_apk_test.dart",

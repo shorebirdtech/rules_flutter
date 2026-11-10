@@ -74,7 +74,7 @@ class _HomeState extends State<_Home> {
     // shared_preferences is federated and, on Android, declares Maven
     // dependencies (androidx.datastore, androidx.preference) in its Gradle
     // build: the case where those must reach the plugin's compile classpath
-    // from @rules_android_maven. A value unique to this run proves the read
+    // from @rules_flutter_maven. A value unique to this run proves the read
     // comes from this write, not from state an earlier run left behind.
     final prefs = await _safe(() async {
       final stored = DateTime.now().millisecondsSinceEpoch.toString();

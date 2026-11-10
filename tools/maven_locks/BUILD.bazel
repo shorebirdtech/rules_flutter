@@ -27,9 +27,9 @@ dart_test(
 dart_test(
     name = "root_lock_test",
     size = "small",
-    data = ["//:rules_android_maven_install.json"],
+    data = ["//:rules_flutter_maven_install.json"],
     env = {
-        "ROOT_LOCK": "$(rlocationpath //:rules_android_maven_install.json)",
+        "ROOT_LOCK": "$(rlocationpath //:rules_flutter_maven_install.json)",
         "RUNFILES_SOURCE_REPO": "",
     },
     main = "test/root_lock_test.dart",

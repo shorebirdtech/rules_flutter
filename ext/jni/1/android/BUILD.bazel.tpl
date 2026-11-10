@@ -51,9 +51,9 @@ kt_android_library(
     deps = [
         ":_build_config",
         ":_engine",
-        "@rules_android_maven//:androidx_annotation_annotation",
-        "@rules_android_maven//:androidx_lifecycle_lifecycle_common",
-        "@rules_android_maven//:org_jetbrains_kotlin_kotlin_stdlib",
-        "@rules_android_maven//:org_jetbrains_kotlinx_kotlinx_coroutines_core",
+        "@rules_flutter_maven//:androidx_annotation_annotation",
+        "@rules_flutter_maven//:androidx_lifecycle_lifecycle_common",
+        "@rules_flutter_maven//:org_jetbrains_kotlin_kotlin_stdlib",
+        "@rules_flutter_maven//:org_jetbrains_kotlinx_kotlinx_coroutines_core",
     ],
 )

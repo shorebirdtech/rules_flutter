@@ -130,11 +130,11 @@ String? conflictMessage(
       'metadata; rules_jvm_external reads only POMs. Raise the older '
       "artifact to the version Gradle would pick: `bazel run $report` prints "
       'the Maven artifacts this app needs, those versions included. Add them '
-      'to the root module\'s `maven.install(name = "rules_android_maven", '
+      'to the root module\'s `maven.install(name = "rules_flutter_maven", '
       'artifacts = [...])` and regenerate its lock file:',
     )
     ..writeln()
-    ..write('    REPIN=1 bazel run @rules_android_maven//:pin');
+    ..write('    REPIN=1 bazel run @rules_flutter_maven//:pin');
   return out.toString();
 }
 

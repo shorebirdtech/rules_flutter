@@ -121,16 +121,16 @@ ANDROID_TARGET_SDK_VERSION = _ANDROID_TARGET_SDK_VERSION
 # that contract. It adds nothing to the APK that the engine target wasn't
 # already carrying at runtime.
 _ANDROIDX_EMBEDDING_DEPS = [
-    Label("@rules_android_maven//:androidx_annotation_annotation"),
-    Label("@rules_android_maven//:androidx_core_core"),
-    Label("@rules_android_maven//:androidx_exifinterface_exifinterface"),
-    Label("@rules_android_maven//:androidx_fragment_fragment"),
-    Label("@rules_android_maven//:androidx_lifecycle_lifecycle_common"),
-    Label("@rules_android_maven//:androidx_lifecycle_lifecycle_runtime"),
-    Label("@rules_android_maven//:androidx_tracing_tracing"),
-    Label("@rules_android_maven//:androidx_window_window"),
-    Label("@rules_android_maven//:androidx_window_window_java"),
-    Label("@rules_android_maven//:com_getkeepsafe_relinker_relinker"),
+    Label("@rules_flutter_maven//:androidx_annotation_annotation"),
+    Label("@rules_flutter_maven//:androidx_core_core"),
+    Label("@rules_flutter_maven//:androidx_exifinterface_exifinterface"),
+    Label("@rules_flutter_maven//:androidx_fragment_fragment"),
+    Label("@rules_flutter_maven//:androidx_lifecycle_lifecycle_common"),
+    Label("@rules_flutter_maven//:androidx_lifecycle_lifecycle_runtime"),
+    Label("@rules_flutter_maven//:androidx_tracing_tracing"),
+    Label("@rules_flutter_maven//:androidx_window_window"),
+    Label("@rules_flutter_maven//:androidx_window_window_java"),
+    Label("@rules_flutter_maven//:com_getkeepsafe_relinker_relinker"),
 ]
 
 # -- Composable rules (Tier 2) ------------------------------------------------
@@ -235,7 +235,7 @@ def flutter_android_maven_artifacts(name, application, maven, **kwargs):
     """A program that prints the Maven artifacts an application's plugins need.
 
     `bazel run` of it prints the lines to paste into
-    `maven.install(name = "rules_android_maven", artifacts = [...])` for the
+    `maven.install(name = "rules_flutter_maven", artifacts = [...])` for the
     plugins `application` depends on and no others, marking those the install
     lacks or has too low. It also prints the artifacts the install resolves
     that Gradle would raise: those whose versions the Gradle module metadata
@@ -250,9 +250,8 @@ def flutter_android_maven_artifacts(name, application, maven, **kwargs):
     Args:
         name: The target name.
         application: The `flutter_application` whose plugins to report on.
-        maven: The build's Maven requirements, `@flutter_pub_android_maven//:requirements`
-            (or the `android/maven_requirements` of any `flutter_pub.from_lock`
-            hub, which aliases it).
+        maven: The build's Maven requirements: `@<hub>//android:maven_requirements`
+            of any `flutter_pub.from_lock` hub.
         **kwargs: Passed to both targets the macro declares (`tags`,
             `testonly`, `visibility`).
     """
@@ -337,7 +336,7 @@ def _flutter_android_engine(name, neverlink, listenablefuture, **kwargs):
     """`flutter_android_engine`, linking listenablefuture 1.0 if `listenablefuture`.
 
     androidx needs `com.google.guava:listenablefuture` at runtime, and
-    `@rules_android_maven` has it on the compile classpath only (see
+    `@rules_flutter_maven` has it on the compile classpath only (see
     `flutter_android_listenablefuture`). A linked engine of your own
     `android_binary` links it; `flutter_android_app`'s does not, and the app
     links it when Gradle would.
@@ -699,7 +698,7 @@ def flutter_android_app(
         not use contributes no code, no manifest entries and no Maven
         requirements to the APK.
       - Checks the Maven artifacts the Gradle builds of those plugins
-        declare against `@rules_android_maven`, failing with every one the
+        declare against `@rules_flutter_maven`, failing with every one the
         app lacks, by name.
       - Permissions that plugins and AARs declare in their own manifests
         (e.g. record_android's RECORD_AUDIO) are lifted into the app's

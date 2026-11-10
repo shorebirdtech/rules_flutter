@@ -695,7 +695,7 @@ def flutter_android_integration_test(
     Android's `integration_test` library needs `androidx.test:runner`,
     `androidx.test:rules`, `androidx.test.espresso:espresso-core` and
     `com.google.guava:guava` in the workspace's `maven.install` of
-    `rules_android_maven`; analysis names the ones that are missing.
+    `rules_flutter_maven`; analysis names the ones that are missing.
 
     Intermediate targets `__<name>_bootstrap`, `__<name>_program`, `__<name>_app`
     and, without a `runner`, `__<name>_emulator` and `__<name>_device` are this

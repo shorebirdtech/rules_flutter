@@ -20,7 +20,7 @@ exports_files(
 )
 
 exports_files(
-    ["rules_android_maven_install.json"],
+    ["rules_flutter_maven_install.json"],
     visibility = ["//tools/maven_locks:__pkg__"],
 )
 
