@@ -49,6 +49,9 @@ def device_flag(name, device_target, what):
     native.label_flag(
         name = name,
         build_setting_default = ":" + unset,
+        # It describes the app: `scope = "target"` keeps it out of the exec
+        # configuration, so setting it rebuilds no tool.
+        scope = "target",
         tags = ["manual"],
         visibility = ["//visibility:public"],
     )

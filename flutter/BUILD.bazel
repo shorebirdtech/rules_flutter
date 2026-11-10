@@ -40,6 +40,9 @@ toolchain_type(
 bool_flag(
     name = "profile",
     build_setting_default = False,
+    # It describes the app, and no build tool reads it: `scope = "target"`
+    # keeps it out of the exec configuration, so setting it rebuilds no tool.
+    scope = "target",
     visibility = ["//visibility:public"],
 )
 
@@ -53,6 +56,8 @@ bool_flag(
 string_flag(
     name = "sdk",
     build_setting_default = "flutter",
+    # No `scope = "target"`: the SDK decides how every Flutter compile is
+    # done, a build tool's in the exec configuration included.
     visibility = ["//visibility:public"],
 )
 
@@ -117,6 +122,9 @@ exports_files(
 int_flag(
     name = "wasm_opt_cpus",
     build_setting_default = 4,
+    # It describes the app, and no build tool reads it: `scope = "target"`
+    # keeps it out of the exec configuration, so setting it rebuilds no tool.
+    scope = "target",
     visibility = ["//visibility:public"],
 )
 

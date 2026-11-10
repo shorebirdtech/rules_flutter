@@ -50,12 +50,18 @@ config_setting(
 label_flag(
     name = "swiftpm_app_info_plist",
     build_setting_default = ":swiftpm_no_app_Info.plist",
+    # It describes the app, and no build tool reads it: `scope = "target"`
+    # keeps it out of the exec configuration, so setting it rebuilds no tool.
+    scope = "target",
     visibility = ["//visibility:public"],
 )
 
 string_list_flag(
     name = "swiftpm_app_environment",
     build_setting_default = [],
+    # It describes the app, and no build tool reads it: `scope = "target"`
+    # keeps it out of the exec configuration, so setting it rebuilds no tool.
+    scope = "target",
     visibility = ["//visibility:public"],
 )
 

@@ -10,6 +10,8 @@ load(":outline_cutoff.bzl", "VARIANTS", "outline_cutoff_modules", "outline_sdks"
 string_flag(
     name = "variant",
     build_setting_default = "base",
+    # No build tool reads it: `scope = "target"` keeps it from reconfiguring them.
+    scope = "target",
     values = VARIANTS,
 )
 
