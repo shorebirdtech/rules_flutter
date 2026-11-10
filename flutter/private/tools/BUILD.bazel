@@ -1,4 +1,4 @@
-load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_library", "dart_test")
+load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_library", "dart_package_metadata", "dart_test")
 load("//flutter/private:flutter_sdk_record.bzl", "flutter_sdk_record")
 load(":sdk_record_mode.bzl", "record_in_mode")
 
@@ -101,6 +101,11 @@ dart_binary(
     visibility = ["//flutter/tests:__pkg__"],
 )
 
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "flutter_rule_tools",
+)
+
 # The host half of `package:test`'s `RemoteListener` protocol, and Bazel's test
 # protocol (`--test_filter`, sharding, JUnit) it applies. `flutter_test_runner`
 # carries it over a WebSocket; the integration test runner carries it over an
@@ -109,8 +114,8 @@ dart_binary(
 # which this directory's pubspec names, so `lib/` is where its files must sit.
 dart_library(
     name = "remote_suite",
-    package_name = "flutter_rule_tools",
     srcs = glob(["lib/**/*.dart"]),
+    package = ":pubspec",
     # Public because `flutter_pub.from_lock(resolve = ...)` in MODULE.bazel maps
     # the dev tool's lock entry for this package to it, and the hub's repository
     # forwards to it from outside this repository's packages.

@@ -8,6 +8,7 @@ licence file contributes nothing.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("//flutter:defs.bzl", "flutter_application")
 load(":action_content.bzl", "action_config")
 
@@ -47,10 +48,15 @@ def notices_test_suite(name):
     Args:
         name: The test suite name.
     """
-    flutter_application(
-        name = "_notices_app",
+    dart_package_metadata(
+        name = "_notices_app_pubspec",
         package_name = "notices_app",
         license_file = "//flutter/tests/notices_fixture:APP_LICENSE",
+        tags = ["manual"],
+    )
+    flutter_application(
+        name = "_notices_app",
+        package = ":_notices_app_pubspec",
         main = "web_fixture_main.dart",
         tags = ["manual"],
         deps = [
@@ -58,9 +64,14 @@ def notices_test_suite(name):
             "//flutter/tests/notices_fixture:notices_flutter",
         ],
     )
+    dart_package_metadata(
+        name = "_plain_app_pubspec",
+        package_name = "plain_app",
+        tags = ["manual"],
+    )
     flutter_application(
         name = "_plain_app",
-        package_name = "plain_app",
+        package = ":_plain_app_pubspec",
         main = "web_fixture_main.dart",
         tags = ["manual"],
         deps = ["//flutter/tests/notices_fixture:notices_bare"],

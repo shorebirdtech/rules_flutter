@@ -1,4 +1,4 @@
-load("@rules_dart//dart:defs.bzl", "dart_analysis_test")
+load("@rules_dart//dart:defs.bzl", "dart_analysis_test", "dart_package_metadata")
 load("//flutter:web.bzl", "flutter_web_bundle")
 
 # The guard on `flutter_web_bundle`'s `DartAnalyzableInfo`, in the root
@@ -31,19 +31,24 @@ load("//flutter:web.bzl", "flutter_web_bundle")
 # which reads the provider rather than the bundle output, so the web compile
 # never runs.
 
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "flutter_web_analyze_fixture",
+)
+
 flutter_web_bundle(
     name = "fixture_web",
-    package_name = "flutter_web_analyze_fixture",
     srcs = ["lib/greeting.dart"],
     main = "lib/main.dart",
+    package = ":pubspec",
     tags = ["manual"],
 )
 
 flutter_web_bundle(
     name = "root_main_fixture_web",
-    package_name = "flutter_web_analyze_fixture",
     srcs = ["lib/greeting.dart"],
     main = "boot.dart",
+    package = ":pubspec",
     tags = ["manual"],
 )
 

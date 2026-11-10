@@ -1,8 +1,15 @@
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_flutter//flutter:defs.bzl", "flutter_asset_bundle")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
 load("//tools:bundle.bzl", "bundled_app", "tree_of")
 
 exports_files(["pubspec.lock"])
+
+# The workspace's own package, which the applications here are built in.
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "asset_bundle",
+)
 
 # -- First-party assets of an application at the workspace root ---------------
 
@@ -98,8 +105,8 @@ platform(
 
 flutter_web_app(
     name = "web_with_fx_platforms",
-    package_name = "asset_bundle",
     js_fallback = False,
+    package = ":pubspec",
     deps = [
         "@deps//:flutter",
         "@fx_platforms",
@@ -151,9 +158,9 @@ bundled_app(
 # Web selects flavored assets like the other platforms.
 flutter_web_app(
     name = "web_with_fx_flavors_paid",
-    package_name = "asset_bundle",
     flavor = "paid",
     js_fallback = False,
+    package = ":pubspec",
     deps = [
         "@deps//:flutter",
         "@fx_flavors",
@@ -191,8 +198,8 @@ bundled_app(
 
 flutter_web_app(
     name = "web_with_fx_shaders",
-    package_name = "asset_bundle",
     js_fallback = False,
+    package = ":pubspec",
     deps = [
         "@deps//:flutter",
         "@fx_shaders",
@@ -208,19 +215,25 @@ tree_of(
 # -- Licences ---------------------------------------------------------------------
 
 # An application that states its own licence and the files its pubspec's
-# `flutter: licenses:` lists.
+# `flutter: licenses:` lists: the same package, declared with a licence for the
+# applications that state one.
+dart_package_metadata(
+    name = "licensed_pubspec",
+    package_name = "asset_bundle",
+    license_file = "licenses/LICENSE",
+)
+
 bundled_app(
     name = "app_with_licences",
     additional_licenses = ["licenses/THIRD_PARTY.txt"],
-    license_file = "licenses/LICENSE",
+    package = ":licensed_pubspec",
 )
 
 flutter_web_app(
     name = "web_with_licences",
-    package_name = "asset_bundle",
     additional_licenses = ["licenses/THIRD_PARTY.txt"],
     js_fallback = False,
-    license_file = "licenses/LICENSE",
+    package = ":licensed_pubspec",
     deps = ["@deps//:flutter"],
 )
 
@@ -251,8 +264,8 @@ tree_of(
 
 flutter_web_app(
     name = "web_with_licence_fixtures",
-    package_name = "asset_bundle",
     js_fallback = False,
+    package = ":pubspec",
     deps = [
         "@deps//:flutter",
         "@fx_licence_dart",

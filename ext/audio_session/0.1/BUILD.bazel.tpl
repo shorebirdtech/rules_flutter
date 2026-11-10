@@ -13,8 +13,17 @@
 # `_resolve_overlay_template`. The overlay sits under `0.1/`, so any 0.1.x
 # audio_session version routes here.
 
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_flutter//flutter:defs.bzl", "flutter_plugin")
 load("@rules_flutter//flutter:macos.bzl", "flutter_apple_plugin_library")
+
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "{PKG}",
+    language_version = "{LANGUAGE_VERSION}",
+    {LICENSE}
+    visibility = ["//visibility:public"],
+)
 
 flutter_plugin(
     name = "{PKG}",
@@ -31,9 +40,7 @@ flutter_plugin(
         "@platforms//os:ios": [":{PKG}_apple_ios"],
         "//conditions:default": [],
     }),
-    language_version = "{LANGUAGE_VERSION}",
-    package_name = "{PKG}",
-    {LICENSE}
+    package = ":pubspec",
     plugin_platforms_json = "{\"android\":{\"package\":\"com.ryanheise.audio_session\",\"pluginClass\":\"AudioSessionPlugin\"},\"ios\":{\"pluginClass\":\"AudioSessionPlugin\"},\"macos\":{\"pluginClass\":\"AudioSessionPlugin\"},\"web\":{\"fileName\":\"audio_session_web.dart\",\"pluginClass\":\"AudioSessionWeb\"}}",
     visibility = ["//visibility:public"],
     deps = [

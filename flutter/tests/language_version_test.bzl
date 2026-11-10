@@ -32,6 +32,7 @@ compiler.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_dart//dart:providers.bzl", "DartAnalyzableInfo")
 load("//flutter:web.bzl", "flutter_web_bundle")
 load("//flutter/private:flutter_aot_snapshot.bzl", "flutter_aot_snapshot")
@@ -131,10 +132,15 @@ def _setup_fixtures():
     so none of these would compile. The tests read declared actions and
     providers, which analysis alone produces.
     """
-    flutter_application(
-        name = "_lv_application",
+    dart_package_metadata(
+        name = "_lv_application_pubspec",
         package_name = _PACKAGE,
         language_version = _LANGUAGE_VERSION,
+        tags = ["manual"],
+    )
+    flutter_application(
+        name = "_lv_application",
+        package = ":_lv_application_pubspec",
         main = _MAIN,
         tags = ["manual"],
     )
@@ -144,8 +150,7 @@ def _setup_fixtures():
     # generated bootstrap it would emit has something to import.
     flutter_test(
         name = "_lv_flutter_test",
-        package_name = _PACKAGE,
-        language_version = _LANGUAGE_VERSION,
+        package = ":_lv_application_pubspec",
         main = _MAIN,
         tags = ["manual"],
         deps = ["//flutter/tests/flutter_test_analyze_fixture/fake_test_api"],
@@ -153,8 +158,7 @@ def _setup_fixtures():
 
     flutter_web_bundle(
         name = "_lv_web",
-        package_name = _PACKAGE,
-        language_version = _LANGUAGE_VERSION,
+        package = ":_lv_application_pubspec",
         main = _MAIN,
         tags = ["manual"],
     )
@@ -164,16 +168,14 @@ def _setup_fixtures():
     # is most of the test.
     flutter_kernel(
         name = "_lv_kernel",
-        package_name = _PACKAGE,
-        language_version = _LANGUAGE_VERSION,
+        package = ":_lv_application_pubspec",
         main = _MAIN,
         tags = ["manual"],
     )
 
     flutter_aot_snapshot(
         name = "_lv_aot",
-        package_name = _PACKAGE,
-        language_version = _LANGUAGE_VERSION,
+        package = ":_lv_application_pubspec",
         main = _MAIN,
         tags = ["manual"],
     )

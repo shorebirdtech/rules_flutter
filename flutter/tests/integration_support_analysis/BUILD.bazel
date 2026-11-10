@@ -1,6 +1,12 @@
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("//flutter:defs.bzl", "flutter_library")
 
 exports_files(["pubspec.lock"])
+
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "integration_support_analysis",
+)
 
 # The integration-test support library, as a library so the analysis aspect
 # reaches it. `flutter_integration_bootstrap` stages these files into each
@@ -9,7 +15,6 @@ exports_files(["pubspec.lock"])
 # where they sit. This one resolves those packages from a hub of this repository.
 flutter_library(
     name = "support",
-    package_name = "integration_support_analysis",
     srcs = [
         "//flutter/private/integration_test/support:_channel.dart",
         "//flutter/private/integration_test/support:_channel_io.dart",
@@ -17,6 +22,7 @@ flutter_library(
         "//flutter/private/integration_test/support:_golden.dart",
         "//flutter/private/integration_test/support:integration_suite.dart",
     ],
+    package = ":pubspec",
     deps = [
         "@dev_tool_deps//:flutter_test",
         "@dev_tool_deps//:integration_test",

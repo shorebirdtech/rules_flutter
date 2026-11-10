@@ -1,3 +1,4 @@
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("//flutter:defs.bzl", "flutter_tester_binary")
 
 # A constraint no execution platform has, standing in for the Apple ones an
@@ -16,11 +17,16 @@ platform(
     visibility = ["//flutter/tests:__pkg__"],
 )
 
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "tester_binary",
+)
+
 # Left `manual`; only the analysistest builds it.
 flutter_tester_binary(
     name = "tester_binary",
-    package_name = "tester_binary",
     main = "main.dart",
+    package = ":pubspec",
     tags = ["manual"],
     visibility = ["//flutter/tests:__pkg__"],
     deps = ["//flutter/tests/dart_asset_fixture:fake_test_api"],

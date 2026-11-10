@@ -1,4 +1,9 @@
-load("@rules_dart//dart:defs.bzl", "dart_library")
+load("@rules_dart//dart:defs.bzl", "dart_library", "dart_package_metadata")
+
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "intl",
+)
 
 # Replaces the lock's hosted `intl` for the whole graph:
 # `flutter_pub.from_lock(resolve = ...)` in MODULE.bazel maps it here, so
@@ -6,7 +11,7 @@ load("@rules_dart//dart:defs.bzl", "dart_library")
 # greeting is built with this one.
 dart_library(
     name = "intl",
-    package_name = "intl",
     srcs = glob(["lib/**/*.dart"]),
+    package = ":pubspec",
     visibility = ["//visibility:public"],
 )

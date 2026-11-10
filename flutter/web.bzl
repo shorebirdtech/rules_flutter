@@ -69,7 +69,7 @@ def flutter_web_manifest_gen(name, app_name, **kwargs):
 
 # -- Low-level assembler (Tier 2) --------------------------------------------
 
-def flutter_web_bundle(name, main, package_name, deps = [], srcs = [], unchecked_srcs = [], language_version = "", web_sdk = None, tags = [], testonly = None, **kwargs):
+def flutter_web_bundle(name, main, package, deps = [], srcs = [], unchecked_srcs = [], web_sdk = None, tags = [], testonly = None, **kwargs):
     """Builds a Flutter web application (WASM or JS) with all deployment artifacts.
 
     This is the low-level assembler rule. For most projects, prefer
@@ -92,14 +92,14 @@ def flutter_web_bundle(name, main, package_name, deps = [], srcs = [], unchecked
     Args:
         name: Target name.
         main: The entrypoint `.dart` file.
-        package_name: The Dart package name of the app.
+        package: The `dart_package_metadata` of the app's Dart package: its
+            name, language version and licence.
         deps: The program's Dart and Flutter libraries.
         srcs: The app's own Dart sources beside `main`.
         unchecked_srcs: More Dart sources beside `main`, whose imports are not
             checked against `deps`: files a rule wrote for the program, whose
             imports are that rule's to get right. `main` is exempt when listed
             here too.
-        language_version: The app package's language version (`<major>.<minor>`).
         web_sdk: Optional web SDK repo name (e.g. "@my_flutter_web_sdk").
             Defaults to "@flutter_web_sdk".
         tags: Tags of the bundle and of its staging target.
@@ -119,8 +119,7 @@ def flutter_web_bundle(name, main, package_name, deps = [], srcs = [], unchecked
         deps = deps,
         srcs = srcs + unchecked_srcs,
         main = main,
-        package_name = package_name,
-        language_version = language_version,
+        package = package,
         tags = tags + ([] if "manual" in tags else ["manual"]),
         testonly = testonly,
         visibility = ["//visibility:private"],
@@ -128,11 +127,10 @@ def flutter_web_bundle(name, main, package_name, deps = [], srcs = [], unchecked
     _flutter_web_bundle_rule(
         name = name,
         main = main,
-        package_name = package_name,
+        package = package,
         deps = deps,
         srcs = srcs + unchecked_srcs,
         unchecked_srcs = unchecked_srcs,
-        language_version = language_version,
         branches = ":" + branches,
         tags = tags,
         testonly = testonly,
@@ -143,7 +141,7 @@ def flutter_web_bundle(name, main, package_name, deps = [], srcs = [], unchecked
 
 def flutter_web_app(
         name,
-        package_name,
+        package,
         deps,
         main = "lib/main.dart",
         app_name = None,
@@ -202,9 +200,10 @@ def flutter_web_app(
 
     Args:
         name: Target name.
-        package_name: Dart package name (same value as `pubspec.yaml`'s `name:`).
-            Required: keys the web bootstrap's `package:` URI for `main` and
-            anchors codegen sibling co-location.
+        package: The `dart_package_metadata` of the app's Dart package (the
+            Bazel stand-in for its `pubspec.yaml`). Required: its
+            `package_name` keys the web bootstrap's `package:` URI for `main`
+            and anchors codegen sibling co-location.
         deps: dart_library or flutter_library dependencies.
         main: The main .dart entry point (default "lib/main.dart").
         app_name: Application name for generated HTML/manifest (defaults to name).
@@ -298,7 +297,7 @@ def flutter_web_app(
 
     flutter_web_bundle(
         name = name,
-        package_name = package_name,
+        package = package,
         main = main,
         deps = deps,
         title = effective_app_name,

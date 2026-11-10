@@ -7,6 +7,7 @@ installed, and `plugin_ok` one that is. `plugin_native`'s library brings
 prebuilt native libraries, as an AAR's do.
 """
 
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("//flutter:android.bzl", "flutter_android_plugin_libs")
 load("//flutter:defs.bzl", "flutter_application")
 load("//flutter/private:flutter_android_plugin_libs.bzl", "flutter_android_maven_report", "flutter_android_maven_requirements")
@@ -15,10 +16,14 @@ package(default_visibility = ["//flutter/tests:__subpackages__"])
 
 [
     [
+        dart_package_metadata(
+            name = "app_uses_%s_pubspec" % n,
+            package_name = "app_uses_" + n,
+        ),
         flutter_application(
             name = "app_uses_" + n,
-            package_name = "app_uses_" + n,
             main = "main.dart",
+            package = ":app_uses_%s_pubspec" % n,
             tags = ["manual"],
             deps = ["//flutter/tests/android_plugin_libs_fixture/%s:plugin_%s" % (n, n)],
         ),
@@ -49,10 +54,15 @@ package(default_visibility = ["//flutter/tests:__subpackages__"])
     ]
 ]
 
+dart_package_metadata(
+    name = "app_uses_native_pubspec",
+    package_name = "app_uses_native",
+)
+
 flutter_application(
     name = "app_uses_native",
-    package_name = "app_uses_native",
     main = "main.dart",
+    package = ":app_uses_native_pubspec",
     tags = ["manual"],
     deps = ["//flutter/tests/android_plugin_libs_fixture/native:plugin_native"],
 )

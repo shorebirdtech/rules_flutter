@@ -1,6 +1,7 @@
 """Plugin `plugin_native`, whose Android library brings prebuilt native libraries."""
 
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_java//java:java_library.bzl", "java_library")
 load("//flutter:defs.bzl", "flutter_plugin")
 load(":aar_like.bzl", "aar_like")
@@ -25,10 +26,15 @@ aar_like(
     native_libs = ":native_libs.zip",
 )
 
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "plugin_native",
+)
+
 flutter_plugin(
     name = "plugin_native",
-    package_name = "plugin_native",
     srcs = ["lib/plugin_native.dart"],
+    package = ":pubspec",
     tags = ["manual"],
     exports = [":lib_native"],
 )

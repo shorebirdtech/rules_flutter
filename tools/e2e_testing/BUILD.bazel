@@ -1,4 +1,4 @@
-load("@rules_dart//dart:defs.bzl", "dart_library", "dart_test")
+load("@rules_dart//dart:defs.bzl", "dart_library", "dart_package_metadata", "dart_test")
 
 # The target platform of a Linux machine, for the tests of what a build there
 # skips.
@@ -9,6 +9,11 @@ platform(
         "@platforms//os:linux",
     ],
     visibility = ["//visibility:public"],
+)
+
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "rules_flutter_e2e_testing",
 )
 
 # The checks the e2e workspaces' `verify_*_test`s share, as a library:
@@ -22,8 +27,8 @@ platform(
 # release archive, and it is public only so the e2e workspaces can name it.
 dart_library(
     name = "e2e_testing",
-    package_name = "rules_flutter_e2e_testing",
     srcs = glob(["lib/**/*.dart"]),
+    package = ":pubspec",
     visibility = ["//visibility:public"],
     deps = [
         "//tools/macos_gui_session",

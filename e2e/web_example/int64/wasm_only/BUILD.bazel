@@ -1,5 +1,11 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
+
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "int64_wasm_only",
+)
 
 # An app holding 64-bit integers in an `Int64List`, which only WebAssembly
 # supports: dart2js refuses the largest 64-bit literal at compile time and
@@ -10,9 +16,9 @@ load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
 # which keeps the fallback.)
 flutter_web_app(
     name = "wasm_only_app",
-    package_name = "int64_wasm_only",
     app_name = "Int64List",
     js_fallback = False,
+    package = ":pubspec",
     deps = ["@deps//:flutter"],
 )
 

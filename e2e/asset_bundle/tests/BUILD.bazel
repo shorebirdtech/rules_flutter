@@ -1,12 +1,17 @@
-load("@rules_dart//dart:defs.bzl", "dart_library")
+load("@rules_dart//dart:defs.bzl", "dart_library", "dart_package_metadata")
 load("//tools:bundle.bzl", "bundle_test", "notices_test")
 load(":font_of_other_package_test.bzl", "font_of_other_package_test")
 load(":two_files_one_key_test.bzl", "two_files_one_key_test")
 
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "asset_bundle_checks",
+)
+
 dart_library(
     name = "bundle_check",
-    package_name = "asset_bundle_checks",
     srcs = ["lib/bundle_check.dart"],
+    package = ":pubspec",
     visibility = ["//visibility:public"],
 )
 

@@ -65,7 +65,7 @@ cannot write there.
 load("@bazel_skylib//lib:structs.bzl", "structs")
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo", "DartKernelSdkInfo")
-load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "KERNEL_LIST_ATTR", "KERNEL_TOOL_ATTR", "TRACK_CREATION_LOCATIONS_ATTR", "collect_modules", "collect_packages", "collect_transitive_srcs", "dart_analyzable_info", "dart_entry_kernel_action", "dart_import_check_aspect", "dart_link_kernel_action", "dart_package_info", "derive_package_root", "executable_defines", "executable_defines_config", "import_check_validation", "kernel_list", "package_lib_prefix", "runfiles_path", "track_creation_locations")
+load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "KERNEL_LIST_ATTR", "KERNEL_TOOL_ATTR", "TRACK_CREATION_LOCATIONS_ATTR", "collect_modules", "collect_packages", "collect_transitive_srcs", "dart_analyzable_info", "dart_entry_kernel_action", "dart_import_check_aspect", "dart_link_kernel_action", "executable_defines", "executable_defines_config", "import_check_validation", "kernel_list", "package_lib_prefix", "runfiles_path", "track_creation_locations")
 load("//flutter:providers.bzl", "FlutterApplicationInputsInfo", "FlutterInfo", "FlutterTestProgramInfo")
 load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "synthesize_app_package")
 load("//flutter/private:application_libraries.bzl", "application_libraries", "application_libraries_aspect")
@@ -83,6 +83,7 @@ load(
 )
 load("//flutter/private:exec_groups.bzl", "FLUTTER_EXEC_TOOLS", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
 load("//flutter/private:flutter_compile.bzl", "flutter_kernel_compile")
+load("//flutter/private:flutter_library.bzl", "package_attr", "package_identity", "package_record")
 load("//flutter/private:flutter_module.bzl", "flutter_module_aspect")
 load("//flutter/private:flutter_native_assets.bzl", "CODE_ASSETS_DOC", "collect_bundled_code_asset_files", "resolve_native_assets", "write_native_assets_manifest")
 load("//flutter/private:flutter_program_test.bzl", "add_user_env", "program_environment", "track_widget_creation", _flutter_test_rule = "flutter_test")
@@ -313,7 +314,10 @@ def _target_arch(ctx):
 # What a test of an `application` takes from it besides its Dart program: the
 # asset bundle's inputs, which the test's own attributes cannot add to, since
 # the bundle keys every asset by the one package it is in.
-_APPLICATION_BUNDLE_FIELDS = ["assets", "shaders", "shader_includes", "license_file", "additional_licenses"]
+_APPLICATION_BUNDLE_FIELDS = ["assets", "shaders", "shader_includes", "additional_licenses"]
+
+# What a test of an `application` takes from it as the package it is compiled in.
+_APPLICATION_PACKAGE_FIELDS = ["label", "package", "package_name", "package_root", "language_version", "license_file"]
 
 def _test_inputs(ctx, kind):
     """The program the test compiles, as `flutter_program_inputs` describes one.
@@ -333,20 +337,20 @@ def _test_inputs(ctx, kind):
     application = getattr(ctx.attr, "application", [])
     application = application[0] if application else None
     if application == None:
-        if not own.package_name:
+        if own.package == None:
             fail((
-                "{kind} {label}: `package_name` is required: the Dart package " +
-                "the test is compiled in. Or name the `application` whose " +
-                "package it is."
+                "{kind} {label}: `package` is required: the " +
+                "`dart_package_metadata` of the Dart package the test is " +
+                "compiled in. Or name the `application` whose package it is."
             ).format(kind = kind, label = ctx.label))
         return own
     app = application[FlutterApplicationInputsInfo].inputs
-    if own.package_name and own.package_name != app.package_name:
+    if own.package != None and own.package.label != app.package.label:
         fail((
-            "{kind} {label}: `package_name` {own} is not the package of " +
+            "{kind} {label}: `package` {own} is not the package of " +
             "`application` {app_label}, {app}, which the test is compiled in. " +
-            "Leave `package_name` out."
-        ).format(kind = kind, label = ctx.label, own = repr(own.package_name), app_label = application.label, app = repr(app.package_name)))
+            "Leave `package` out."
+        ).format(kind = kind, label = ctx.label, own = own.package.label, app_label = application.label, app = app.package.label))
     for field in _APPLICATION_BUNDLE_FIELDS:
         if getattr(own, field):
             fail((
@@ -362,7 +366,7 @@ def _test_inputs(ctx, kind):
     kept_main = [app.main] if app.main != None and app.main not in app.srcs else []
     return struct(**(structs.to_dict(own) | {
         field: getattr(app, field)
-        for field in ["label", "package_name", "language_version"] + _APPLICATION_BUNDLE_FIELDS
+        for field in _APPLICATION_PACKAGE_FIELDS + _APPLICATION_BUNDLE_FIELDS
     } | {
         "srcs": app.srcs + kept_main + own.srcs,
         "deps": deps.values(),
@@ -496,13 +500,13 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
 
     # Register the test's own package so `package:<self>/foo` imports inside
     # test sources resolve.
-    package_root = derive_package_root(inputs.label.workspace_root, inputs.label.package)
+    package_root = inputs.package_root
     packages = synthesize_app_package(
         ctx.label,
         collect_packages(deps),
         inputs.package_name,
         package_root,
-        inputs.language_version,
+        inputs.package,
     )
 
     own_srcs = list(inputs.srcs) + entry_files
@@ -604,7 +608,7 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
         #
         # Built by `dart_analyzable_info` rather than
         # `dart_analyzable_info_no_package`, because a `flutter_test` is not package-less
-        # the way a `dart_test` is: it declares `package_name`, and its `srcs`
+        # the way a `dart_test` is: it names its `package`, and its `srcs`
         # are that package's `lib/`. The compile path already says so —
         # `synthesize_app_package` registers the same root record so
         # `package:<self>/…` imports resolve — and the package-less closure the
@@ -614,11 +618,11 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
         # Hence the source split: `entry_srcs` is a `main` outside any `lib/`,
         # and `srcs` the `lib/` files reachable as `package:<self>/…`.
         #
-        # `package_root` comes from `derive_package_root`, the same call the compile
-        # path above now passes to `synthesize_app_package`. The two used to
+        # `package_root` is the declaration's directory, the root the compile
+        # path above passes to `synthesize_app_package`. The two used to
         # disagree — synthesis hardcoded `""` — which is how a sub-package
         # target could analyze clean and compile against the *workspace
-        # root's* `lib/`. One derivation, so they cannot drift again.
+        # root's* `lib/`. One source, so they cannot drift again.
         #
         # `_sky_engine` joins the analyzer's closure and nothing else.
         # Compilation gets `dart:ui` from the patched SDK the toolchain
@@ -627,15 +631,9 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
         # analysis genuinely needs an entry compilation does not.
         dart_analyzable_info(
             label = ctx.label,
-            packages = [dart_package_info(
-                label = ctx.label,
-                package_name = inputs.package_name,
-                package_root = package_root,
-                # The same version the compile path above states. Analysis
-                # reading a different one than the compiler is the divergence
-                # this attr exists to close, reappearing one layer down.
-                language_version = inputs.language_version,
-            )],
+            # The same declaration the compile path above names, so analysis
+            # reads the language version the compiler does.
+            packages = [package_record(ctx.label, package_identity(ctx, inputs.package))],
             deps = deps + [ctx.attr._sky_engine],
             # Split by path, as `flutter_web_application` does: a test built in
             # an application's package (`application`) can have its main in
@@ -734,9 +732,7 @@ _PROGRAM_ATTRS = {
         "flavor",
         "build_name",
         "build_number",
-        "language_version",
         "_extra_dart_defines",
-        "package_name",
         # Asset-bundle inputs. Same surface as flutter_application — most
         # widget tests don't touch these, but Material widgets implicitly
         # require shader and font assets to render.
@@ -745,7 +741,6 @@ _PROGRAM_ATTRS = {
         "shader_includes",
         "require_sksl_shaders",
         "_shader_compile_tool",
-        "license_file",
         "additional_licenses",
         "tree_shake_icons",
         "_asset_bundle_tool",
@@ -822,11 +817,11 @@ _PROGRAM_ATTRS["deps"] = attr.label_list(
 _PROGRAM_ATTRS["application"] = attr.label(
     doc = "A `flutter_application` (or `flutter_application_variant`) " +
           "whose package the test is compiled in, as `flutter test` compiles " +
-          "a test in the package it is in: its `package_name`, sources, " +
+          "a test in the package it is in: its `package`, sources, " +
           "`deps`, `code_assets` and assets are the test's, and `main`, " +
           "`srcs`, `deps` and `code_assets` add to them, so the test imports " +
           "the application's libraries as `package:<name>/…`. " +
-          "`package_name` and the asset attributes are then the " +
+          "`package` and the asset attributes are then the " +
           "application's and not given here. Its `defines` and `flavor` are " +
           "not taken: the test's own are.",
     providers = [FlutterApplicationInputsInfo],
@@ -834,13 +829,16 @@ _PROGRAM_ATTRS["application"] = attr.label(
     cfg = _ENVIRONMENT.cfg,
 )
 
-_PROGRAM_ATTRS["package_name"] = attr.string(
-    doc = "The Dart package the test is compiled in (`pubspec.yaml`'s " +
-          "`name:`), so `package:<name>/…` resolves against `srcs` in this " +
-          "package's `lib/`. A test beside the library it covers *is* that " +
-          "package: give it the library's `package_name` and list the " +
-          "library's sources in `srcs`, instead of depending on the sibling " +
-          "target. Required, unless `application` names the package.",
+_PROGRAM_ATTRS["package"] = package_attr(
+    doc = "The `dart_package_metadata` of the Dart package the test is " +
+          "compiled in (the Bazel stand-in for its `pubspec.yaml`), so " +
+          "`package:<name>/…` resolves against `srcs` in that package's " +
+          "`lib/`, and the test's files take its `language_version`. Its " +
+          "directory is the package root, wherever the test's BUILD file is. " +
+          "A test of a library *is* that library's package: name the " +
+          "library's `dart_package_metadata`, and list the library's " +
+          "sources in `srcs` or depend on it. Required, unless `application` " +
+          "names the package.",
 )
 
 _PROGRAM_ATTRS["code_assets"] = attr.label_list(
@@ -1058,7 +1056,7 @@ def flutter_test(name, **kwargs):
     `<name>.program` that compiles the test, and the
     test `<name>` that runs it, whose kind is `flutter_test`. Every attribute
     of either rule, and of a Bazel test, can be given here: the compile's
-    (`main`, `srcs`, `deps`, `package_name`, `application`, `defines`,
+    (`main`, `srcs`, `deps`, `package`, `application`, `defines`,
     `flavor`, `assets`, `enable_impeller`, `test_config`, ...) go to the
     program, the run's (`include_tags`, `exclude_tags`, `env`, `size`,
     `timeout`, `shard_count`, `args`, ...) to the test, and `data`, `tags`,

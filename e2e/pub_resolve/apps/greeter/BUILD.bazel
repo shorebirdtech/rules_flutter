@@ -1,4 +1,4 @@
-load("@rules_dart//dart:defs.bzl", "dart_test")
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata", "dart_test")
 load("@rules_flutter//flutter:defs.bzl", "flutter_test")
 load("@rules_flutter//flutter:integration_test.bzl", "flutter_web_integration_test")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
@@ -14,10 +14,15 @@ _DEPS = [
     "@deps//:greeting",
 ]
 
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "greeter",
+)
+
 flutter_web_app(
     name = "greeter",
-    package_name = "greeter",
     app_name = "Greeter",
+    package = ":pubspec",
     deps = _DEPS,
 )
 
@@ -25,9 +30,9 @@ flutter_web_app(
 # the fork that replaces the hosted `intl` and a second path package's tagline.
 flutter_test(
     name = "greeter_test",
-    package_name = "greeter",
     srcs = ["lib/main.dart"],
     main = "test/greeter_test.dart",
+    package = ":pubspec",
     deps = _DEPS + ["@deps//:flutter_test"],
 )
 
@@ -36,9 +41,9 @@ flutter_test(
 # not verified, and Bazel reports it skipped there.
 flutter_web_integration_test(
     name = "render_test",
-    package_name = "greeter",
     src = "integration_test/render_test.dart",
     srcs = glob(["lib/**/*.dart"]),
+    package = ":pubspec",
     target_compatible_with = select({
         "@platforms//os:linux": [],
         "@platforms//os:macos": [],

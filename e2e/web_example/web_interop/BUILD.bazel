@@ -1,4 +1,5 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_app", "flutter_web_bundle")
 load(":icon_font_test.bzl", "icon_font_test")
 
@@ -19,16 +20,21 @@ _DEPS = [
     "@rules_flutter//flutter:material_icons",
 ]
 
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "web_interop",
+)
+
 # An app whose own code imports `dart:js_interop`, `package:web` and
 # `dart:ui_web`, with icon tree shaking off so nothing but the two compilers
 # stands between the source and a bundle. The defaults: dart2wasm, with dart2js
 # beside it for browsers that cannot run WebAssembly, so one build covers both.
 flutter_web_app(
     name = "interop_app_no_icon_shaking",
-    package_name = "web_interop",
     srcs = _SRCS,
     app_name = "Interop (all icons)",
     main = "lib/interop_main.dart",
+    package = ":pubspec",
     tree_shake_icons = False,
     deps = _DEPS,
 )
@@ -42,10 +48,10 @@ build_test(
 # another from a web plugin; see `lib/glyph_main.dart`.
 flutter_web_app(
     name = "glyph_app",
-    package_name = "web_interop",
     srcs = _SRCS,
     app_name = "Glyphs",
     main = "lib/glyph_main.dart",
+    package = ":pubspec",
     deps = _DEPS + [
         "//web_interop/icon_plugin",
         "@deps//:flutter_web_plugins",
@@ -77,29 +83,29 @@ icon_font_test(
 # which compiles `main` for the Dart VM, where `dart:js_interop` does not exist.
 flutter_web_app(
     name = "interop_app",
-    package_name = "web_interop",
     srcs = _SRCS,
     app_name = "Interop",
     main = "lib/interop_main.dart",
+    package = ":pubspec",
     deps = _DEPS,
 )
 
 flutter_web_app(
     name = "interop_app_wasm_only",
-    package_name = "web_interop",
     srcs = _SRCS,
     app_name = "Interop (WASM only)",
     js_fallback = False,
     main = "lib/interop_main.dart",
+    package = ":pubspec",
     deps = _DEPS,
 )
 
 flutter_web_bundle(
     name = "interop_app_dart2js",
-    package_name = "web_interop",
     srcs = _SRCS,
     compiler = "dart2js",
     main = "lib/interop_main.dart",
+    package = ":pubspec",
     renderer = "canvaskit",
     title = "Interop (dart2js)",
     deps = _DEPS,

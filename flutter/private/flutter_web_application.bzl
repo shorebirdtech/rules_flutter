@@ -33,7 +33,7 @@ from, and `deps` is split the same way.
 
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_dart//dart:providers.bzl", "DartInfo")
-load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "dart_analyzable_info", "dart_package_info", "derive_package_root", "generate_dev_package_config", "import_check_validation", "package_lib_prefix")
+load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "dart_analyzable_info", "generate_dev_package_config", "import_check_validation", "package_lib_prefix")
 load("//flutter:providers.bzl", "FlutterInfo", "FlutterNativeLibraryInfo", "FlutterSdkRecordInfo")
 load(
     "//flutter/private:app_entrypoint.bzl",
@@ -64,6 +64,7 @@ load(
 load("//flutter/private:dev_config.bzl", "dev_config_file", "dev_search_roots", "dev_source_dir", "write_dev_config")
 load("//flutter/private:exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
 load("//flutter/private:flutter_info.bzl", "dedup_plugins")
+load("//flutter/private:flutter_library.bzl", "package_identity", "package_record")
 load(
     "//flutter/private:flutter_web_branch.bzl",
     "BRANCH_COMPILER",
@@ -413,7 +414,8 @@ def _flutter_web_bundle_impl(ctx):
     # analysis path came to disagree: analysis derived it, compilation
     # assumed `""`, and a nested app's `package:` URIs silently resolved
     # against the workspace root instead of its own package.
-    package_root = derive_package_root(ctx.label.workspace_root, ctx.label.package)
+    identity = package_identity(ctx)
+    package_root = identity.package_root
 
     # Every reader of `deps` reads a named branch. Each compile takes its own
     # compiler's; everything the bundle holds once — the plugin registrant
@@ -477,7 +479,7 @@ def _flutter_web_bundle_impl(ctx):
         # synthetic entrypoint under the app scheme, from this root.
         dev_filesystem_roots = with_root(
             dev_pc.filesystem_roots,
-            app_main_location(ctx.attr.package_name, package_root, ctx.file.main).root,
+            app_main_location(identity.package_name, package_root, ctx.file.main).root,
         )
         dev_filesystem_scheme = dev_pc.scheme
         dev_generated_source_uris = dev_pc.generated_source_uris
@@ -525,7 +527,7 @@ def _flutter_web_bundle_impl(ctx):
     # `rootUri`, so the user's `main.dart` is read from the assembled
     # directory and its relative imports find their colocated siblings.
     main_import = resolve_wrapper_main_import(
-        ctx.attr.package_name,
+        identity.package_name,
         package_root,
         ctx.file.main.short_path,
         ctx.file.main.path,
@@ -769,7 +771,7 @@ def _flutter_web_bundle_impl(ctx):
             ) % (ctx.label, ctx.file.version_json.short_path, "` and `".join(given)))
         version_json = ctx.file.version_json
     else:
-        app_name = ctx.attr.package_name or ctx.label.name
+        app_name = identity.package_name
         version = web_version(ctx.attr.build_name, ctx.attr.build_number)
         version_json = ctx.actions.declare_file(ctx.label.name + "_version.json")
         ctx.actions.write(version_json, json.encode({
@@ -1153,7 +1155,7 @@ def _flutter_web_bundle_impl(ctx):
     # application bundle is not a dependency.
     #
     # `dart_analyzable_info`, not `dart_analyzable_info_no_package`: this rule
-    # declares a mandatory `package_name` and its `srcs` are that package's
+    # names a mandatory `package` and its `srcs` are that package's
     # `lib/` files, which import each other by `package:<self>/…`. The
     # package-less closure the other constructor nests gives the analyzer no
     # record to resolve those against and reports every one `uri_does_not_exist`.
@@ -1172,15 +1174,9 @@ def _flutter_web_bundle_impl(ctx):
     # so analysis genuinely needs an entry compilation does not.
     analyzable_info = dart_analyzable_info(
         label = ctx.label,
-        packages = [dart_package_info(
-            label = ctx.label,
-            package_name = ctx.attr.package_name,
-            package_root = package_root,
-            # As on the compile path above: the analyzer and the compiler have
-            # to agree on the version, or the attr closes the divergence in
-            # only one.
-            language_version = ctx.attr.language_version,
-        )],
+        # The declaration the compile path above names, so the analyzer and
+        # the compiler agree on the version.
+        packages = [package_record(ctx.label, identity)],
         deps = primary.deps + [ctx.attr._sky_engine],
         srcs = ctx.files.srcs + ([ctx.file.main] if main_in_package else []),
         entry_srcs = [] if main_in_package else [ctx.file.main],
@@ -1234,7 +1230,7 @@ def _flutter_web_bundle_impl(ctx):
         # named some other app's entrypoint whenever the workspace root held
         # one, and the dev loop booted that program with nothing reporting a
         # mismatch.
-        app_entrypoint = app_main_location(ctx.attr.package_name, package_root, ctx.file.main).uri
+        app_entrypoint = app_main_location(identity.package_name, package_root, ctx.file.main).uri
 
         # Declares every build output the config names; see `dev_config.bzl`.
         ddc_files.extend(write_dev_config(ctx, ctx.actions.declare_file(ctx.label.name + "_dev_config.json"), {
@@ -1329,7 +1325,7 @@ def _flutter_web_bundle_impl(ctx):
             # beside it — with the URI the compiler keys each by. Empty for a
             # `main` with a `package:` URI.
             "appSources": app_scheme_sources(
-                ctx.attr.package_name,
+                identity.package_name,
                 package_root,
                 ctx.file.main,
                 ctx.files.srcs,
@@ -1361,7 +1357,6 @@ _WEB_RELEVANT_KEYS = (
     "require_sksl_shaders",
     "_shader_compile_tool",
     "tree_shake_icons",
-    "license_file",
     "additional_licenses",
     "_asset_bundle_tool",
     "_notices_tool",

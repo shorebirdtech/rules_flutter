@@ -5,15 +5,21 @@
 its iOS build does not.
 """
 
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("//flutter:defs.bzl", "flutter_application")
 load("//flutter:macos.bzl", "flutter_apple_plugins_aggregator")
 
 package(default_visibility = ["//flutter/tests:__subpackages__"])
 
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "app",
+)
+
 flutter_application(
     name = "app",
-    package_name = "app",
     main = "main.dart",
+    package = ":pubspec",
     tags = ["manual"],
     deps = ["//flutter/tests/unbuilt_native_code_fixture/rusty"],
 )

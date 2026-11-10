@@ -1,11 +1,17 @@
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("//flutter:defs.bzl", "flutter_plugin")
+
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "shared_declares",
+)
 
 # Settles the two `shared_a` packages' disagreement by declaring the id itself.
 flutter_plugin(
     name = "declares",
-    package_name = "shared_declares",
     srcs = ["lib/declares.dart"],
     native_assets = ["//flutter/tests/shared_code_asset_fixture:a_system"],
+    package = ":pubspec",
     platforms = [
         "android",
         "ios",

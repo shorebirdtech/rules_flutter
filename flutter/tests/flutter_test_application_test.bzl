@@ -7,6 +7,7 @@ version and sources, so `package:<app>/…` in the test (or its
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_dart//dart:providers.bzl", "DartAnalyzableInfo")
 load("//flutter/private:flutter_application.bzl", "flutter_application")
 load("//flutter/private:flutter_test.bzl", "flutter_test")
@@ -66,10 +67,15 @@ def flutter_test_application_test_suite(name):
     Args:
         name: Prefix for the generated test targets and the suite itself.
     """
-    flutter_application(
-        name = "_fta_application",
+    dart_package_metadata(
+        name = "_fta_application_pubspec",
         package_name = _PACKAGE,
         language_version = _LANGUAGE_VERSION,
+        tags = ["manual"],
+    )
+    flutter_application(
+        name = "_fta_application",
+        package = ":_fta_application_pubspec",
         main = _APP_MAIN,
         tags = ["manual"],
     )
@@ -80,10 +86,15 @@ def flutter_test_application_test_suite(name):
         tags = ["manual"],
         deps = [_FAKE_TEST_API],
     )
+    dart_package_metadata(
+        name = "_fta_other_package_pubspec",
+        package_name = "another_package",
+        tags = ["manual"],
+    )
     flutter_test(
         name = "_fta_other_package",
         application = ":_fta_application",
-        package_name = "another_package",
+        package = ":_fta_other_package_pubspec",
         main = _TEST_MAIN,
         tags = ["manual"],
         deps = [_FAKE_TEST_API],
@@ -107,7 +118,7 @@ def flutter_test_application_test_suite(name):
     _refused_test(
         name = name + "_no_package",
         target_under_test = ":_fta_no_package.program",
-        message = "`package_name` is required",
+        message = "`package` is required",
     )
     native.test_suite(
         name = name,

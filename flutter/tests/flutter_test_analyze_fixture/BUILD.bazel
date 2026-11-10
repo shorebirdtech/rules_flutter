@@ -1,5 +1,10 @@
-load("@rules_dart//dart:defs.bzl", "dart_analysis_test")
+load("@rules_dart//dart:defs.bzl", "dart_analysis_test", "dart_package_metadata")
 load("//flutter:defs.bzl", "flutter_test")
+
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "flutter_test_analyze_fixture",
+)
 
 # The guard on `flutter_test`'s `DartAnalyzableInfo`, in the root workspace so
 # `bazel test //...` covers it. Test sources are the files this whole provider
@@ -36,9 +41,9 @@ load("//flutter:defs.bzl", "flutter_test")
 # instead; see `//:test_api_only_test` there.
 flutter_test(
     name = "fixture_test",
-    package_name = "flutter_test_analyze_fixture",
     srcs = ["lib/counter.dart"],
     main = "test/counter_test.dart",
+    package = ":pubspec",
     tags = ["manual"],
     deps = ["//flutter/tests/flutter_test_analyze_fixture/fake_test_api"],
 )

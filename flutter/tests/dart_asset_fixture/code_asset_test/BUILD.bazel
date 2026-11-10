@@ -1,4 +1,10 @@
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("//flutter:defs.bzl", "flutter_test")
+
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "code_asset_test",
+)
 
 # A test that loads native code assets both ways. The analysis tests build it
 # for this host and for another platform, and check which configuration its
@@ -6,8 +12,8 @@ load("//flutter:defs.bzl", "flutter_test")
 # package root with a dep's. Left `manual`; only the analysistests build it.
 flutter_test(
     name = "code_asset_flutter_test",
-    package_name = "code_asset_test",
     main = "main.dart",
+    package = ":pubspec",
     tags = ["manual"],
     visibility = ["//flutter/tests:__pkg__"],
     deps = [

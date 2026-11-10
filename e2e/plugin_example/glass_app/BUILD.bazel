@@ -1,5 +1,5 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
-load("@rules_dart//dart:defs.bzl", "dart_test")
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata", "dart_test")
 load("@rules_flutter//flutter:android.bzl", "flutter_android_app")
 load("@rules_flutter//flutter:defs.bzl", "flutter_application")
 load("@rules_flutter//flutter:ios.bzl", "flutter_ios_app", "flutter_ios_simulator_build_test")
@@ -16,10 +16,15 @@ _DEPS = [
     "@deps//:flutter",
 ]
 
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "glass_app",
+)
+
 flutter_application(
     name = "glass_flutter",
-    package_name = "glass_app",
     main = "lib/main.dart",
+    package = ":pubspec",
     deps = _DEPS,
 )
 
@@ -47,7 +52,7 @@ flutter_android_app(
 # skwasm: dart2wasm, the macro's renderer.
 flutter_web_app(
     name = "glass_web",
-    package_name = "glass_app",
+    package = ":pubspec",
     tags = ["manual"],
     deps = _DEPS,
 )
@@ -55,9 +60,9 @@ flutter_web_app(
 # CanvasKit: dart2js.
 flutter_web_bundle(
     name = "glass_web_canvaskit",
-    package_name = "glass_app",
     compiler = "dart2js",
     main = "lib/main.dart",
+    package = ":pubspec",
     tags = ["manual"],
     deps = _DEPS,
 )

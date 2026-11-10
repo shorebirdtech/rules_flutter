@@ -1,5 +1,5 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
-load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_test")
+load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_package_metadata", "dart_test")
 load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_library")
 load(
     "@rules_flutter//flutter:linux.bzl",
@@ -12,10 +12,15 @@ load(
 
 exports_files(["pubspec.lock"])
 
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "linux_example",
+)
+
 flutter_application(
     name = "app_flutter",
-    package_name = "linux_example",
     main = "lib/main.dart",
+    package = ":pubspec",
     deps = [
         "@deps//:flutter",
         "@rules_flutter//flutter:material_icons",
@@ -60,9 +65,9 @@ flutter_linux_app(
 # the app has to be `testonly` too: `:testonly_app_build_test`.
 flutter_application(
     name = "testonly_flutter",
-    package_name = "linux_example",
     testonly = True,
     main = "lib/testonly_main.dart",
+    package = ":pubspec",
     deps = ["@deps//:flutter"],
 )
 
@@ -160,8 +165,8 @@ dart_analysis_config(
 # the analyzer to stage.
 flutter_library(
     name = "app_lib",
-    package_name = "linux_example",
     srcs = glob(["lib/**/*.dart"]),
+    package = ":pubspec",
     deps = [
         "@deps//:flutter",
         "@rules_flutter//flutter:material_icons",

@@ -70,13 +70,13 @@ load("//flutter/private:test_config.bzl", "find_test_config")
 
 flutter_aot_snapshot = _flutter_aot_snapshot
 
-def flutter_application(name, package_name = "", **kwargs):
+def flutter_application(name, **kwargs):
     """Compiles a Flutter application with stable package: URIs for hot reload.
 
-    Auto-derives `package_name` from the rule name if not explicitly set.
-    This ensures the kernel uses `package:<name>/main.dart` URIs instead of
-    sandbox `file:///` URIs, which is required for hot reload incremental
-    deltas to match the running application's library URIs.
+    Its `package` names the `dart_package_metadata` of the app's Dart package,
+    so the kernel uses `package:<name>/main.dart` URIs instead of sandbox
+    `file:///` URIs, which is required for hot reload incremental deltas to
+    match the running application's library URIs.
 
     `flavor` makes the application one flavor (`appFlavor`, and the pub
     packages' `flavors:` assets and shaders): declare one application per
@@ -84,12 +84,10 @@ def flutter_application(name, package_name = "", **kwargs):
 
     Args:
         name: Target name.
-        package_name: Dart package name (from pubspec.yaml). Defaults to name.
         **kwargs: All other arguments forwarded to the underlying rule.
     """
     _flutter_application(
         name = name,
-        package_name = package_name or name,
         **kwargs
     )
 

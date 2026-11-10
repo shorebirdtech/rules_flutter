@@ -15,13 +15,19 @@ load("//flutter/private:flutter_pub_index.bzl", "library_repo")
 
 def _flutter_pub_goldens_impl(ctx):
     ctx.file("BUILD.bazel", """\
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("{flutter_test_bzl}", "flutter_test")
+
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "rules_flutter_golden_service",
+)
 
 flutter_test(
     name = "service",
     main = "{service}",
     srcs = ["{comparator}"],
-    package_name = "rules_flutter_golden_service",
+    package = ":pubspec",
     deps = ["@{flutter_test_repo}//:flutter_test"],
     tags = ["manual"],
     testonly = True,

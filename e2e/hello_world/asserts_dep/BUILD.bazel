@@ -1,4 +1,10 @@
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_flutter//flutter:defs.bzl", "flutter_library")
+
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "assert_dep",
+)
 
 # A library the asserts tests (`//:asserts_fire_test`) and
 # `//asserts_violation_dep` reach as a dependency, so its code compiles apart
@@ -6,7 +12,7 @@ load("@rules_flutter//flutter:defs.bzl", "flutter_library")
 # the whole-program one.
 flutter_library(
     name = "asserts_dep",
-    package_name = "assert_dep",
     srcs = ["lib/guarded.dart"],
+    package = ":pubspec",
     visibility = ["//visibility:public"],
 )

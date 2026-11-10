@@ -6,14 +6,15 @@ Bazel's runfiles — so this exists to prove the other half of the contract: the
 manifest the frontend_server embeds names a path that resolves in the runfiles
 layout, and the library is actually staged there.
 
-Nothing here mentions Flutter. The asset rides `DartPackageInfo.code_assets`
-and is lifted off the Dart package graph by `resolve_native_assets`, which is
-how a pub package's hook-built library arrives.
+Nothing here mentions Flutter. The package's `dart_package_metadata` states the
+asset, which rides `DartPackageInfo.code_assets` and is lifted off the Dart
+package graph by `resolve_native_assets`, which is how a pub package's
+hook-built library arrives.
 """
 
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
-load("@rules_dart//dart:defs.bzl", "dart_code_asset", "dart_library")
+load("@rules_dart//dart:defs.bzl", "dart_code_asset", "dart_library", "dart_package_metadata")
 
 # The header is this library's binding contract: the signatures live there, so a
 # change to it is a change to what a caller may call, and a change to the `.c`
@@ -49,10 +50,15 @@ dart_code_asset(
     shared_library = ":native_add_shared",
 )
 
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "native_add",
+    code_assets = [":code_asset"],
+)
+
 dart_library(
     name = "native_add",
-    package_name = "native_add",
     srcs = ["lib/native_add.dart"],
-    code_assets = [":code_asset"],
+    package = ":pubspec",
     visibility = ["//:__pkg__"],
 )

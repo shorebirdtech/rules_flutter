@@ -1,9 +1,9 @@
 """Implementation of the flutter_library rule."""
 
-load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo")
-load("@rules_dart//dart:utils.bzl", "WEB_COMPILER_INDEPENDENT_ATTR", "dart_analyzable_info", "dart_info", "dart_package_info", "derive_package_name", "derive_package_root", "web_compiler_reset_when_independent")
+load("@rules_dart//dart:providers.bzl", "DartInfo", "DartPackageMetadataInfo")
+load("@rules_dart//dart:utils.bzl", "WEB_COMPILER_INDEPENDENT_ATTR", "dart_analyzable_info", "dart_info", "dart_package_info", "derive_package_name", "derive_package_root", "package_info_from_metadata", "web_compiler_reset_when_independent")
 load("//flutter:providers.bzl", "FlutterInfo")
-load("//flutter/private:flutter_info.bzl", "LINK_HOOK_ATTR", "flutter_info")
+load("//flutter/private:flutter_info.bzl", "flutter_info")
 
 def _names_other_package(asset_path, file):
     """Whether a font's `asset` names a font of another package.
@@ -21,16 +21,97 @@ def _names_other_package(asset_path, file):
     """
     return asset_path.startswith("packages/") and file.owner.name != asset_path
 
+def package_attr(doc, mandatory = False):
+    """The `package` attribute: the `dart_package_metadata` of the target's Dart package.
+
+    As rules_dart's own rules take it, so a package built by targets of both
+    rule sets names one declaration on each.
+
+    Args:
+        doc: The attribute's documentation.
+        mandatory: Whether the target must name one.
+
+    Returns:
+        The `attr.label`.
+    """
+    return attr.label(
+        providers = [DartPackageMetadataInfo],
+        mandatory = mandatory,
+        doc = doc,
+    )
+
+def package_identity(ctx, metadata = None):
+    """The Dart package a target is part of, from the `dart_package_metadata` it names.
+
+    The declaration's directory is the package root, as a pubspec's is,
+    wherever the target's own BUILD file is. A target naming none is named
+    after its root's directory, the one above `lib/`, and states nothing else.
+
+    Args:
+        ctx: Rule context whose `package` attribute (`package_attr`) names the
+            declaration, when `metadata` is not given.
+        metadata: The `DartPackageMetadataInfo`, for a target whose package is
+            another's (a test compiled in its application's).
+
+    Returns:
+        `struct(metadata, package_name, package_root, language_version,
+        license_file)`: the `DartPackageMetadataInfo` or None, and the facts
+        it states.
+    """
+    if metadata == None:
+        declaration = getattr(ctx.attr, "package", None)
+        metadata = declaration[DartPackageMetadataInfo] if declaration else None
+    if metadata == None:
+        return struct(
+            metadata = None,
+            package_name = derive_package_name("", ctx.label.package, ctx.label.name),
+            package_root = derive_package_root(ctx.label.workspace_root, ctx.label.package),
+            language_version = "",
+            license_file = None,
+        )
+    return struct(
+        metadata = metadata,
+        package_name = metadata.package_name,
+        package_root = metadata.package_root,
+        language_version = metadata.language_version,
+        license_file = metadata.license_file,
+    )
+
+def package_record(label, identity, package_root = None):
+    """The `DartPackageInfo` of a target of the package `identity` describes.
+
+    Args:
+        label: The target's label.
+        identity: From `package_identity`.
+        package_root: Where the package's sources are, when not its root.
+
+    Returns:
+        A `DartPackageInfo`.
+    """
+    root = identity.package_root if package_root == None else package_root
+    if identity.metadata != None:
+        return package_info_from_metadata(label, identity.metadata, root)
+    return dart_package_info(
+        label = label,
+        package_name = identity.package_name,
+        package_root = root,
+        language_version = "",
+    )
+
 def package_root_of(owner):
     """The root of the Dart package `owner` is in: the directory above `lib/`.
 
     Args:
-        owner: Rule context, or anything else with a `label` (a program's
-            inputs, whose `label` is the target whose package it is).
+        owner: A program's inputs (`flutter_program_inputs`), which carry the
+            root of the package the program is in, or a rule context or
+            anything else with a `label`, whose root it is from its BUILD
+            file's directory.
 
     Returns:
         The root's short_path, "" for the main repository's root.
     """
+    if type(owner) == "struct" and hasattr(owner, "package_root"):
+        return owner.package_root
     return derive_package_root(owner.label.workspace_root, owner.label.package)
 
 def path_in_package(label, root, f):
@@ -77,12 +158,6 @@ def asset_key(entry, path, program_root):
     if not entry.package_name or entry.package_root == program_root:
         return path
     return "packages/{}/{}".format(entry.package_name, path)
-
-LICENSE_FILE_ATTR = attr.label(
-    doc = "The package's licence: the `NOTICES` or `LICENSE` file at its root, as `flutter build` reads it. " +
-          "An application that depends on the package lists it in its `NOTICES`, under the package's name.",
-    allow_single_file = True,
-)
 
 ADDITIONAL_LICENSES_ATTR = attr.label_list(
     doc = "Licence files beyond the package's `LICENSE`: what its pubspec's `flutter: licenses:` lists. " +
@@ -338,33 +413,19 @@ SKY_ENGINE_ATTR = attr.label(
     providers = [DartInfo],
 )
 
-def flutter_package_record(ctx, package_name, package_root):
-    """The package a Flutter library rule declares, as one `DartPackageInfo`.
-
-    Built once per target, so the compile-side `DartInfo` and the analyzer's
-    `DartAnalyzableInfo` state the same package, with the same language
-    version, code assets, version and hooks.
-
-    Args:
-      ctx: The rule context. Reads `language_version`, `code_assets`,
-        `version`, `unreplaced_hook`, `link_hook` and `license_file`.
-      package_name: The Dart package name.
-      package_root: The package root (parent of `lib/`).
-
-    Returns:
-      A `DartPackageInfo`.
-    """
-    return dart_package_info(
-        label = ctx.label,
-        package_name = package_name,
-        package_root = package_root,
-        language_version = ctx.attr.language_version,
-        code_assets = ctx.attr.code_assets,
-        version = ctx.attr.version,
-        unreplaced_hook = ctx.attr.unreplaced_hook,
-        link_hook = ctx.file.link_hook,
-        license_file = ctx.file.license_file,
-    )
+# The `package` attribute of `flutter_library`, `flutter_plugin` and
+# `flutter_framework_library`, which `dart_library` takes too.
+LIBRARY_PACKAGE_DOC = (
+    "The `dart_package_metadata` declaring the Dart package this target is " +
+    "part of, as `dart_library`'s `package`: its `package_name`, " +
+    "`language_version`, `version`, `license_file`, `link_hook` and " +
+    "`code_assets` (the `dart_code_asset`s standing in for its " +
+    "`hook/build.dart`, which reach every program depending on the package). " +
+    "Its directory is the package root. Every target of one package names " +
+    "the same one, whichever rule set the target is from. Unset, the package " +
+    "is named after its root's directory, the one above `lib/`, and states " +
+    "nothing else."
+)
 
 def flutter_analyzable_info(ctx, package):
     """The package a Flutter library rule declares, as the analyzer sees it.
@@ -378,7 +439,7 @@ def flutter_analyzable_info(ctx, package):
     Args:
       ctx: The rule context. Reads `deps`, `srcs`, `resources` and
         `_sky_engine` (`SKY_ENGINE_ATTR`).
-      package: The target's `DartPackageInfo`, from `flutter_package_record`.
+      package: The target's `DartPackageInfo`, from `package_record`.
 
     Returns:
       A `DartAnalyzableInfo`.
@@ -406,13 +467,10 @@ def flutter_analyzable_info_of_packages(ctx, packages, srcs, resources):
     )
 
 def _flutter_library_impl(ctx):
-    package_name = derive_package_name(
-        ctx.attr.package_name,
-        ctx.label.package,
-        ctx.label.name,
-    )
-    package_root = derive_package_root(ctx.label.workspace_root, ctx.label.package)
-    package = flutter_package_record(ctx, package_name, package_root)
+    identity = package_identity(ctx)
+    package_name = identity.package_name
+    package_root = identity.package_root
+    package = package_record(ctx.label, identity)
 
     # Every asset, font and shader is of the Dart package in DartInfo, by name
     # and root, so `package:` imports and asset keys cannot disagree. Each
@@ -503,44 +561,15 @@ _LIBRARY_ATTRS = {
         doc = "The package's fragment shaders, mirroring `flutter: shaders:` in pubspec.yaml: any file of this target's Dart package, compiled with impellerc. The path of each is its path from the package root, as the pubspec lists it. A program of another package bundles it at `packages/<package_name>/<path>`; a program of this package (its own `flutter_test`, or the application whose code this is) bundles it at `<path>`, as `flutter build` keys them and where `FragmentProgram.fromAsset` looks.",
         allow_files = True,
     ),
-    "package_name": attr.string(
-        doc = "The Dart package name. If omitted, defaults to the last component of the Bazel package path.",
-    ),
-    "code_assets": attr.label_list(
-        doc = "`dart_code_asset` targets standing in for this package's " +
-              "`hook/build.dart` output. Declared on the owning package " +
-              "rather than on the consuming application so they propagate " +
-              "the way pub's own do — depending on the package is enough.",
-        providers = [DartCodeAssetInfo],
-    ),
-    "unreplaced_hook": attr.string(
-        doc = "Path of a build hook this package ships that nothing " +
-              "replaces, or empty. Recorded at repo generation; the " +
-              "application that depends on the package fails on it.",
-    ),
-    "version": attr.string(
-        doc = "The package's own version, as resolved by pub (e.g. `2.2.0`). " +
-              "Set automatically by the generated pub spokes; leave it empty on " +
-              "hand-written targets, which have no resolved version to state. " +
-              "Mirrors `dart_library`'s attribute, and has its one use: when a " +
-              "single package name arrives from two hubs, two records stating " +
-              "different versions fail the build instead of the first one " +
-              "silently standing in for the second. An empty version never " +
-              "conflicts.",
-    ),
-    "link_hook": LINK_HOOK_ATTR,
-    "language_version": attr.string(
-        doc = "Dart language version (`<major>.<minor>`) for this package's `package_config.json` entry. Mirrors `dart_library`'s attribute. Empty string means defer to the toolchain default.",
-    ),
+    "package": package_attr(LIBRARY_PACKAGE_DOC),
     "fonts_json": attr.string(
-        doc = "JSON-encoded list of font-family declarations (mirrors `flutter.fonts` in pubspec.yaml). Each entry: `{family: str, fonts: [{asset: str, weight: int?, style: str?}]}`. The `asset` paths are package-relative and must each match a value in `font_files`. A program of another package prefixes the family and the asset paths with `packages/<package_name>/`, under the Dart package name (`package_name`, or the name derived from the BUILD file's path); a program of this package keeps them as declared. An `asset` of `packages/<other>/<path>` whose file is not at that path in this package names a font of the package `<other>`: it stays at that path, as in a pubspec, and `font_files` gives the label of its file.",
+        doc = "JSON-encoded list of font-family declarations (mirrors `flutter.fonts` in pubspec.yaml). Each entry: `{family: str, fonts: [{asset: str, weight: int?, style: str?}]}`. The `asset` paths are package-relative and must each match a value in `font_files`. A program of another package prefixes the family and the asset paths with `packages/<package_name>/`, under the Dart package name (its `package`'s `package_name`, or the name derived from the BUILD file's path); a program of this package keeps them as declared. An `asset` of `packages/<other>/<path>` whose file is not at that path in this package names a font of the package `<other>`: it stays at that path, as in a pubspec, and `font_files` gives the label of its file.",
         default = "",
     ),
     "font_files": attr.label_keyed_string_dict(
         doc = "Map of font File label -> package-relative asset path. The string value must match an `asset` field in `fonts_json`. A program of another package bundles it at `packages/<package_name>/<path>`; a program of this package (its own `flutter_test`, or the application whose code this is) bundles it at `<path>`, as `flutter build` keys what a pubspec lists.",
         allow_files = True,
     ),
-    "license_file": LICENSE_FILE_ATTR,
     "additional_licenses": ADDITIONAL_LICENSES_ATTR,
     "asset_platforms": ASSET_PLATFORMS_ATTR,
     "shader_platforms": SHADER_PLATFORMS_ATTR,

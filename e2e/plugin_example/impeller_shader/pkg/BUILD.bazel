@@ -1,11 +1,17 @@
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_flutter//flutter:defs.bzl", "flutter_library")
+
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "impeller_shader",
+)
 
 # A package shader SkSL cannot compile: shaders/indexed.frag indexes a
 # uniform array in a loop. See ../BUILD.bazel.
 flutter_library(
     name = "pkg",
-    package_name = "impeller_shader",
     srcs = [],
+    package = ":pubspec",
     shaders = ["shaders/indexed.frag"],
     visibility = ["//impeller_shader:__pkg__"],
     deps = ["@deps//:flutter"],

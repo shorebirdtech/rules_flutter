@@ -1,6 +1,7 @@
 """Analysis tests for `web_dir`, the directory served at a web bundle's root."""
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("//flutter:web.bzl", "flutter_web_app", "flutter_web_bundle")
 load(":action_content.bzl", "action_config")
 
@@ -88,9 +89,14 @@ def web_dir_test_suite(name):
     Args:
         name: Prefix for the generated test targets.
     """
+    dart_package_metadata(
+        name = "_bundle_pubspec",
+        package_name = "web_dir",
+        tags = ["manual"],
+    )
     flutter_web_bundle(
         name = "_bundle",
-        package_name = "web_dir",
+        package = ":_bundle_pubspec",
         main = "main.dart",
         web_dir = "web_apps/second",
         web_assets = [
@@ -102,7 +108,7 @@ def web_dir_test_suite(name):
     )
     flutter_web_app(
         name = "_app",
-        package_name = "web_dir",
+        package = ":_bundle_pubspec",
         main = "main.dart",
         deps = [],
         web_dir = "web_apps/second",
@@ -110,7 +116,7 @@ def web_dir_test_suite(name):
     )
     flutter_web_bundle(
         name = "_trailing_slash",
-        package_name = "web_dir",
+        package = ":_bundle_pubspec",
         main = "main.dart",
         web_dir = "web_apps/second/",
         tags = ["manual"],

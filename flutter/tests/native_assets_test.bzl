@@ -380,11 +380,11 @@ def native_assets_test_suite(name):
     )
 
     # Ownership is checked where the asset is declared, not where it is
-    # reached — so a `flutter_library` naming an id namespaced to some other
-    # package fails on its own analysis, with no application involved.
+    # reached — so a package's declaration naming an id namespaced to some
+    # other package fails on its own analysis, with no application involved.
     _expect_failure_test(
         name = name + "_misowned_code_asset",
-        target_under_test = "//flutter/tests/dart_asset_fixture:misowned_asset_fixture",
+        target_under_test = "//flutter/tests/dart_asset_fixture:not_asset_fixture_pubspec",
         expected_substring = "is not namespaced to this package",
     )
 

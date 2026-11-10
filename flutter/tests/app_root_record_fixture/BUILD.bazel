@@ -1,7 +1,8 @@
 # A `flutter_library` at the root of an app's own directory, with a code asset
-# and a licence, and apps at that root that state no language version, the
-# same one, and a different one. See `//flutter/tests:app_root_record_test.bzl`.
+# and a licence, an app at that root naming the same `dart_package_metadata`,
+# and one naming another. See `//flutter/tests:app_root_record_test.bzl`.
 
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("//flutter:defs.bzl", "flutter_library")
 load("//flutter/tests:app_root_record_test.bzl", "app_record_probe")
 load("//flutter/tests/code_asset_fixture:stand_in_code_asset.bzl", "stand_in_code_asset")
@@ -15,33 +16,37 @@ stand_in_code_asset(
     system_uri = "libapp_root_record.so",
 )
 
-flutter_library(
-    name = "root_library",
+dart_package_metadata(
+    name = "pubspec",
     package_name = "app_root_record",
-    srcs = ["lib/root_record.dart"],
     code_assets = [":system_asset"],
     language_version = "3.5",
     license_file = "LICENSE",
 )
 
-app_record_probe(
-    name = "app",
-    package_name = "app_root_record",
-    deps = [":root_library"],
+flutter_library(
+    name = "root_library",
+    srcs = ["lib/root_record.dart"],
+    package = ":pubspec",
 )
 
 app_record_probe(
-    name = "app_same_version",
-    package_name = "app_root_record",
-    language_version = "3.5",
+    name = "app",
+    package = ":pubspec",
     deps = [":root_library"],
+)
+
+# The same package declared a second time, at another language version.
+dart_package_metadata(
+    name = "other_pubspec",
+    package_name = "app_root_record",
+    language_version = "3.6",
 )
 
 # Fails analysis: only the analysistest that expects it builds it.
 app_record_probe(
-    name = "app_other_version",
-    package_name = "app_root_record",
-    language_version = "3.6",
+    name = "app_other_declaration",
+    package = ":other_pubspec",
     tags = ["manual"],
     deps = [":root_library"],
 )

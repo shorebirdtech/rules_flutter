@@ -22,14 +22,13 @@ files named after its target, and two of them in one target collide. The
 bundle macro (`flutter_web_bundle`) declares that target beside the bundle.
 """
 
-load("@rules_dart//dart:providers.bzl", "DartInfo")
+load("@rules_dart//dart:providers.bzl", "DartInfo", "DartPackageMetadataInfo")
 load(
     "@rules_dart//dart:utils.bzl",
     "COPY_TO_DIRECTORY_TOOLCHAINS",
     "WEB_PLATFORM_SETTINGS",
     "collect_packages",
     "collect_transitive_srcs",
-    "derive_package_root",
     "web_platform_settings",
 )
 load("//flutter/private:app_entrypoint.bzl", "compile_package_config", "synthesize_app_package")
@@ -149,7 +148,8 @@ def _runtime(ctx):
     return "none"
 
 def _flutter_web_branch_impl(ctx):
-    package_root = derive_package_root(ctx.label.workspace_root, ctx.label.package)
+    metadata = ctx.attr.package[DartPackageMetadataInfo]
+    package_root = metadata.package_root
     deps = ctx.attr.deps
     srcs = list(ctx.files.srcs) + collect_transitive_srcs(deps).to_list()
 
@@ -158,7 +158,7 @@ def _flutter_web_branch_impl(ctx):
     # inputs so it ends up inside the same assembled directory as its lib/
     # siblings — that's what lets `main.dart`'s relative imports resolve to
     # the assembled (codegen-co-located) copies of its package siblings.
-    packages = synthesize_app_package(ctx.attr.bundle, collect_packages(deps), ctx.attr.package_name, package_root, ctx.attr.language_version)
+    packages = synthesize_app_package(ctx.attr.bundle, collect_packages(deps), metadata.package_name, package_root, metadata)
     staged = compile_package_config(ctx, packages, srcs + [ctx.file.main])
     return [
         FlutterWebBranchInfo(
@@ -177,8 +177,7 @@ flutter_web_branch = rule(
         "deps": attr.label_list(providers = [DartInfo]),
         "srcs": attr.label_list(allow_files = [".dart"]),
         "main": attr.label(allow_single_file = [".dart"], mandatory = True),
-        "package_name": attr.string(mandatory = True),
-        "language_version": attr.string(),
+        "package": attr.label(providers = [DartPackageMetadataInfo], mandatory = True),
         "bundle": attr.string(
             doc = "The bundle this stages, for the messages that name it.",
             mandatory = True,
@@ -189,8 +188,8 @@ flutter_web_branch = rule(
     toolchains = COPY_TO_DIRECTORY_TOOLCHAINS,
     doc = """One compiler's view of a `flutter_web_bundle`'s program.
 
-Declared by the bundle macro with the bundle's `deps`, `srcs`, `main`,
-`package_name` and `language_version`, and reached from the bundle through the
+Declared by the bundle macro with the bundle's `deps`, `srcs`, `main` and
+`package`, and reached from the bundle through the
 same split as its `deps`, so each configured target stages the program as one
 compiler sees it. Not for use outside that macro.""",
 )

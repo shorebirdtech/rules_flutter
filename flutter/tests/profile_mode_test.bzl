@@ -9,6 +9,7 @@ actions the rule declares.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("//flutter/private:flutter_aot_snapshot.bzl", "flutter_aot_snapshot")
 load("//flutter/private:flutter_application.bzl", "flutter_application")
 load("//flutter/private:flutter_profile_build.bzl", "flutter_profile_build")
@@ -158,15 +159,20 @@ def profile_mode_test_suite(name):
     Args:
       name: The test_suite name.
     """
+    dart_package_metadata(
+        name = "_profile_application_pubspec",
+        package_name = _PACKAGE,
+        tags = ["manual"],
+    )
     flutter_application(
         name = "_profile_application",
-        package_name = _PACKAGE,
+        package = ":_profile_application_pubspec",
         main = _MAIN,
         tags = ["manual"],
     )
     flutter_aot_snapshot(
         name = "_profile_aot",
-        package_name = _PACKAGE,
+        package = ":_profile_application_pubspec",
         main = _MAIN,
         tags = ["manual"],
     )

@@ -21,8 +21,17 @@
 
 load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
 load("@rules_cc//cc:objc_library.bzl", "objc_library")
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_flutter//flutter:defs.bzl", "flutter_plugin")
 load("@rules_flutter//flutter:native_assets.bzl", "flutter_native_asset")
+
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "{PKG}",
+    language_version = "{LANGUAGE_VERSION}",
+    {LICENSE}
+    visibility = ["//visibility:public"],
+)
 
 # `objective_c` is a pure-Dart support library — there's no
 # `flutter.plugin` block in pubspec.yaml. We use `flutter_plugin` with
@@ -36,14 +45,12 @@ flutter_plugin(
         ["lib/**/*.dart"],
         allow_empty = True,
     ),
-    language_version = "{LANGUAGE_VERSION}",
     native_assets = select({
         "@platforms//os:macos": [":{PKG}_native_asset"],
         "@platforms//os:ios": [":{PKG}_native_asset"],
         "//conditions:default": [],
     }),
-    package_name = "{PKG}",
-    {LICENSE}
+    package = ":pubspec",
     platforms = [],
     visibility = ["//visibility:public"],
     deps = [

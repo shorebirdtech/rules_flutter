@@ -1,9 +1,14 @@
-load("@rules_dart//dart:defs.bzl", "dart_library")
+load("@rules_dart//dart:defs.bzl", "dart_library", "dart_package_metadata")
+
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "outline_b",
+)
 
 dart_library(
     name = "b",
-    package_name = "outline_b",
     srcs = ["lib/b.dart"],
+    package = ":pubspec",
     visibility = ["//flutter/tests/outline_fixture:__subpackages__"],
     deps = ["//flutter/tests/outline_fixture/a"],
 )

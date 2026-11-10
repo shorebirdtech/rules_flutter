@@ -1,6 +1,12 @@
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_flutter//flutter:android.bzl", "flutter_android_engine", "flutter_android_plugin_library")
 load("@rules_flutter//flutter:defs.bzl", "flutter_plugin")
 load("@rules_flutter//flutter:macos.bzl", "flutter_apple_plugin_library")
+
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "glass_plugin",
+)
 
 # A plugin written in the workspace that ships fragment shaders, the shape of
 # a Liquid Glass UI kit: `shaders` is its pubspec's `flutter: shaders:`,
@@ -9,7 +15,6 @@ load("@rules_flutter//flutter:macos.bzl", "flutter_apple_plugin_library")
 # native side.
 flutter_plugin(
     name = "glass_plugin",
-    package_name = "glass_plugin",
     srcs = ["lib/glass_plugin.dart"],
     android_package = "com.example.glass_plugin",
     apple_libs = select({
@@ -17,6 +22,7 @@ flutter_plugin(
         "@platforms//os:ios": [":glass_plugin_apple_ios"],
         "//conditions:default": [],
     }),
+    package = ":pubspec",
     platforms = [
         "android",
         "ios",

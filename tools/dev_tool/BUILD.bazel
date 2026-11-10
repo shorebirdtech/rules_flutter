@@ -1,4 +1,4 @@
-load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_library", "dart_test")
+load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_library", "dart_package_metadata", "dart_test")
 load(":source_repo.bzl", "SOURCE_REPO")
 
 exports_files(["pubspec.lock"])
@@ -24,10 +24,15 @@ _LIB_DEPS = [
     "@rules_dart//dart/runfiles",
 ]
 
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "flutter_bazel_dev_tool",
+)
+
 dart_library(
     name = "lib",
-    package_name = "flutter_bazel_dev_tool",
     srcs = glob(["lib/**/*.dart"]),
+    package = ":pubspec",
     visibility = ["//visibility:private"],
     deps = _LIB_DEPS,
 )

@@ -3,9 +3,10 @@
 A library in `native_deps` is a target the application names, so the
 application reads its `flutter_native_library` wrapper and its sources straight
 off that edge. A code asset is not named by the application at all: it rides
-`DartPackageInfo.code_assets` up from whichever package owns it — a
+`DartPackageInfo.code_assets` up from whichever package owns it. The package's
+`dart_package_metadata` states it, and any target of the package carries it: a
 `flutter_plugin`, a `flutter_library`, or a plain `dart_library` written by a
-rule set that knows nothing of Flutter — and that record holds only the
+rule set that knows nothing of Flutter. That record holds only the
 `DartCodeAssetInfo`, not the target that declared it.
 
 This aspect goes back to the targets. Applied to an application's `deps` and

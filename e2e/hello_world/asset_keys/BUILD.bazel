@@ -1,4 +1,10 @@
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_flutter//flutter:defs.bzl", "flutter_library", "flutter_test")
+
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "asset_keys",
+)
 
 # A package with assets, named `asset_keys` after its directory.
 flutter_library(
@@ -8,6 +14,7 @@ flutter_library(
         "assets/k.txt",
         "assets/p.txt",
     ],
+    package = ":pubspec",
     visibility = ["//visibility:public"],
     deps = ["@deps//:flutter"],
 )
@@ -17,8 +24,8 @@ flutter_library(
 # `//:dependency_asset_keys_test` loads the same assets from a dependent.
 flutter_test(
     name = "own_asset_keys_test",
-    package_name = "asset_keys",
     main = "test/own_asset_keys_test.dart",
+    package = ":pubspec",
     deps = [
         ":asset_keys",
         "@deps//:flutter",

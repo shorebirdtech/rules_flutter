@@ -13,6 +13,7 @@ mounts one scheme at a time.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("//flutter/private:app_entrypoint.bzl", "compute_same_root_main_import")
 load("//flutter/private:flutter_application.bzl", "flutter_application")
 load(":action_content.bzl", "written_json")
@@ -141,6 +142,11 @@ def app_entrypoint_test_suite(name):
     Args:
         name: The test suite name.
     """
+    dart_package_metadata(
+        name = "_ae_outside_lib_pubspec",
+        package_name = _PACKAGE,
+        tags = ["manual"],
+    )
     flutter_application(
         name = "_ae_outside_lib",
         srcs = [
@@ -148,13 +154,13 @@ def app_entrypoint_test_suite(name):
             # Under `lib/`, so keyed by its `package:` URI and not listed.
             "lib/web_fixture_main.dart",
         ],
-        package_name = _PACKAGE,
+        package = ":_ae_outside_lib_pubspec",
         main = "web_fixture_main.dart",
         tags = ["manual"],
     )
     flutter_application(
         name = "_ae_in_lib",
-        package_name = _PACKAGE,
+        package = ":_ae_outside_lib_pubspec",
         main = "lib/web_fixture_main.dart",
         tags = ["manual"],
     )

@@ -65,10 +65,11 @@ Map<String, String> pathPackage(
               '$dependencies',
     '$dir/lib/$name.dart': 'int value = 1;\n',
     '$dir/BUILD.bazel':
-        'load("@rules_dart//dart:defs.bzl", "dart_library")\n'
+        'load("@rules_dart//dart:defs.bzl", "dart_library", "dart_package_metadata")\n'
+        'dart_package_metadata(name = "pubspec", package_name = "$name")\n'
         'dart_library(\n'
         '    name = "${target.isEmpty ? name : target}",\n'
-        '    package_name = "$name",\n'
+        '    package = ":pubspec",\n'
         '    srcs = glob(["lib/**/*.dart"]),\n'
         '    deps = [${deps.map((d) => '"$d"').join(', ')}],\n'
         '    visibility = ["//visibility:public"],\n'
@@ -200,10 +201,11 @@ void main() {
       package: pathPackage('greeting', deps: greetingDeps),
       files: {
         'BUILD.bazel':
-            'load("@rules_dart//dart:defs.bzl", "dart_library")\n'
+            'load("@rules_dart//dart:defs.bzl", "dart_library", "dart_package_metadata")\n'
+            'dart_package_metadata(name = "pubspec", package_name = "app")\n'
             'dart_library(\n'
             '    name = "app",\n'
-            '    package_name = "app",\n'
+            '    package = ":pubspec",\n'
             '    srcs = ["lib/app.dart"],\n'
             '    deps = ["//packages/greeting", "@pubhub//:uses_greeting"],\n'
             ')\n',
@@ -300,33 +302,36 @@ void main() {
         '    source: hosted\n'
         '    version: "9.9.9"\n';
 
-    PubInputsFixture fixture({String packageName = 'forkme'}) =>
-        PubInputsFixture(
-          hosted: [usesFork],
-          extraLockEntries: forkmeEntry,
-          spokes: ['forkme'],
-          resolve: {'forkme': '//third_party/forkme:forkme_fork'},
-          files: {
-            'third_party/forkme/BUILD.bazel':
-                'load("@rules_dart//dart:defs.bzl", "dart_library")\n'
-                'dart_library(\n'
-                '    name = "forkme_fork",\n'
-                '    package_name = "$packageName",\n'
-                '    srcs = ["lib/forkme.dart"],\n'
-                '    visibility = ["//visibility:public"],\n'
-                ')\n',
-            'third_party/forkme/lib/forkme.dart': 'int value = 2;\n',
-            'BUILD.bazel':
-                'load("@rules_dart//dart:defs.bzl", "dart_library")\n'
-                'dart_library(\n'
-                '    name = "app",\n'
-                '    package_name = "app",\n'
-                '    srcs = ["lib/app.dart"],\n'
-                '    deps = ["@pubhub//:forkme", "@pubhub//:uses_fork"],\n'
-                ')\n',
-            'lib/app.dart': 'int value = 1;\n',
-          },
-        );
+    PubInputsFixture fixture({
+      String packageName = 'forkme',
+    }) => PubInputsFixture(
+      hosted: [usesFork],
+      extraLockEntries: forkmeEntry,
+      spokes: ['forkme'],
+      resolve: {'forkme': '//third_party/forkme:forkme_fork'},
+      files: {
+        'third_party/forkme/BUILD.bazel':
+            'load("@rules_dart//dart:defs.bzl", "dart_library", "dart_package_metadata")\n'
+            'dart_package_metadata(name = "pubspec", package_name = "$packageName")\n'
+            'dart_library(\n'
+            '    name = "forkme_fork",\n'
+            '    package = ":pubspec",\n'
+            '    srcs = ["lib/forkme.dart"],\n'
+            '    visibility = ["//visibility:public"],\n'
+            ')\n',
+        'third_party/forkme/lib/forkme.dart': 'int value = 2;\n',
+        'BUILD.bazel':
+            'load("@rules_dart//dart:defs.bzl", "dart_library", "dart_package_metadata")\n'
+            'dart_package_metadata(name = "pubspec", package_name = "app")\n'
+            'dart_library(\n'
+            '    name = "app",\n'
+            '    package = ":pubspec",\n'
+            '    srcs = ["lib/app.dart"],\n'
+            '    deps = ["@pubhub//:forkme", "@pubhub//:uses_fork"],\n'
+            ')\n',
+        'lib/app.dart': 'int value = 1;\n',
+      },
+    );
 
     test('is what the hub label and its dependents get, and is never '
         'fetched', () async {

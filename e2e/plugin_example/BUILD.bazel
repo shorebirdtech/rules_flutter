@@ -2,7 +2,7 @@ load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@rules_apple//apple:ios.bzl", "ios_application")
 load("@rules_apple//apple:macos.bzl", "macos_application")
 load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
-load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_analysis_test", "dart_binary", "dart_test")
+load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_analysis_test", "dart_binary", "dart_package_metadata", "dart_test")
 load("@rules_flutter//flutter:android.bzl", "flutter_android_app", "flutter_android_build", "flutter_android_registrant")
 load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_library")
 load(
@@ -42,10 +42,15 @@ load(":ignored_package_test.bzl", "ignored_package_test")
 
 exports_files(["pubspec.lock"])
 
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "plugin_example",
+)
+
 flutter_application(
     name = "plugin_app",
-    package_name = "plugin_example",
     main = "lib/main.dart",
+    package = ":pubspec",
     deps = [
         "//greeting_plugin",
         "@deps//:audio_session",
@@ -65,8 +70,8 @@ flutter_application(
 # below compiles it and registers it.
 flutter_application(
     name = "integration_app",
-    package_name = "plugin_example",
     main = "lib/main.dart",
+    package = ":pubspec",
     deps = [
         "//greeting_plugin",
         "@deps//:audio_session",
@@ -86,8 +91,8 @@ flutter_application(
 # `:verify_android_plugin_scope_test`.
 flutter_application(
     name = "package_info_only_app",
-    package_name = "plugin_example",
     main = "lib/package_info_only.dart",
+    package = ":pubspec",
     deps = [
         "@deps//:flutter",
         "@deps//:package_info_plus",
@@ -265,8 +270,8 @@ ios_application(
 
 flutter_web_bundle(
     name = "plugin_web",
-    package_name = "plugin_example",
     main = "lib/main.dart",
+    package = ":pubspec",
     title = "Plugin Example",
     deps = [
         "//greeting_plugin",
@@ -752,8 +757,8 @@ dart_analysis_config(
 # the analyzer to stage.
 flutter_library(
     name = "app_lib",
-    package_name = "plugin_example",
     srcs = glob(["lib/**/*.dart"]),
+    package = ":pubspec",
     deps = [
         "//greeting_plugin",
         "@deps//:audio_session",
@@ -786,8 +791,8 @@ flutter_library(
 # which this app sets for it: :verify_macos_app_settings_test.
 flutter_application(
     name = "location_app",
-    package_name = "plugin_example",
     main = "lib/location_main.dart",
+    package = ":pubspec",
     deps = [
         "@deps//:flutter",
         "@deps//:geolocator_apple",

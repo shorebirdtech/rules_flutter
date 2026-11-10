@@ -1,6 +1,7 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_plugin")
 load("@rules_flutter//flutter:native_assets.bzl", "flutter_data_asset", "flutter_native_asset")
 
@@ -44,33 +45,38 @@ flutter_data_asset(
     file = "data/blob.txt",
 )
 
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "native_assets_synthetic",
+)
+
 # 3. A flutter_plugin glue target that pulls the native_asset and
 #    data_asset into the FlutterInfo dep graph. Empty `platforms = []`
 #    keeps it acting as a plain pure-Dart container; the only purpose
 #    is to surface FlutterInfo with the asset entries for transitive
 #    pickup by `flutter_application`.
 #
-#    It claims the app's own `package_name` because it shares the app's
-#    Bazel package, and two Dart packages cannot be rooted at one
+#    It names the app's own `dart_package_metadata` because it shares the
+#    app's Bazel package, and two Dart packages cannot be rooted at one
 #    directory. Carrying no sources it is not a package in its own
 #    right, and its assets are already id'd under the app's name.
 flutter_plugin(
     name = "synthetic_glue",
-    package_name = "native_assets_synthetic",
     srcs = [],
     data_assets = [":synthetic_blob"],
     native_assets = select({
         "@platforms//os:macos": [":synthetic_native_asset_macos"],
         "//conditions:default": [],
     }),
+    package = ":pubspec",
     platforms = [],
 )
 
 # 4. The application itself.
 flutter_application(
     name = "synthetic_app",
-    package_name = "native_assets_synthetic",
     main = "lib/main.dart",
+    package = ":pubspec",
     deps = [
         ":synthetic_glue",
         "@deps//:flutter",

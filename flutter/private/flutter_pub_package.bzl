@@ -60,6 +60,7 @@ load("//flutter/private:cmake_link_libraries.bzl", "parse_cmake_link_libraries")
 load("//flutter/private:flutter_pub_index.bzl", "MEMBER_DART", "MEMBER_FILE", "MEMBER_FLUTTER", "MEMBER_OVERLAY", "library_label", "owner_prefix", "read_index", "sibling_path", "source_repo")
 load("//flutter/private:flutter_pubspec.bzl", "flutter_assets_block", "flutter_licenses_block", "flutter_manifest_errors", "flutter_plugin_block")
 load("//flutter/private:framework_source.bzl", "check_dependency_constraints", "link_framework_package", "unset_message", "write_unset_stub")
+load("//flutter/private:package_metadata_content.bzl", "PACKAGE_METADATA_LOAD", "make_package_metadata_content", "package_metadata_target")
 load("//flutter/private:pinned.bzl", "pinned")
 load("//flutter/private:swiftpm_manifest.bzl", "find_manifest_computations", "find_swiftpm_build_settings", "find_unsupported_swiftpm_dependencies")
 load(
@@ -1042,21 +1043,6 @@ def _format_pub_asset_attrs(fonts_json_str, font_files, assets, shaders, asset_p
         parts.append(_SHADER_INCLUDES_GLOB)
     return ("\n".join(parts) + "\n") if parts else ""
 
-def _format_code_asset_attrs(code_assets, unreplaced_hook):
-    """Render the `code_assets` / `unreplaced_hook` attrs for a spoke.
-
-    Shared by the `flutter_library` and `flutter_plugin` generators so the two
-    emit an identical shape; the `dart_library` branch gets the equivalent from
-    rules_dart's own `make_dart_library_build_content`.
-    """
-    block = ""
-    if code_assets:
-        lines = ["        {},".format(repr(a)) for a in code_assets]
-        block += "    code_assets = [\n{}\n    ],\n".format("\n".join(lines))
-    if unreplaced_hook:
-        block += "    unreplaced_hook = {},\n".format(repr(unreplaced_hook))
-    return block
-
 # The non-Dart remainder of `lib/`, emitted verbatim by both spoke
 # generators below — the same partition rules_dart's
 # `make_dart_library_build_content` uses, so `srcs + resources = lib/**`
@@ -1076,69 +1062,62 @@ _RESOURCES_GLOB_BLOCK = """    resources = glob(
     ),
 """
 
-def _format_version_attr(version):
-    """The `version` attr line for a spoke, or nothing when it is unknown.
+def _member_metadata(name, language_version, code_assets, unreplaced_hook, version, license_file, link_hook):
+    """The `dart_package_metadata` of a generated member: the package's facts.
 
-    Omitted rather than written empty, matching
-    `make_dart_library_build_content`. The attribute's only use is agreement
-    checking between two records for one package name, and an unstated version
-    never conflicts — so a spoke with nothing to say says nothing.
-
-    Args:
-        version: The resolved package version, or "".
-
-    Returns:
-        A BUILD attribute line, or "".
+    Shared by the `pub_package_member` and `flutter_pub_member` generators, so
+    the two state a package alike: what rules_dart's own pub spokes state.
+    A version or licence that is unknown is not stated.
     """
-    return '    version = "{}",\n'.format(version) if version else ""
+    return make_package_metadata_content(
+        name,
+        language_version = language_version,
+        version = version,
+        code_assets = code_assets,
+        build_hook = unreplaced_hook,
+        link_hook = link_hook,
+        license_file = license_file,
+    )
 
-def _format_license_file_attr(license_file):
-    """Format the `license_file` attribute line of a member, or nothing.
-
-    Args:
-        license_file: The package-relative name `find_pub_license_file` found, or "".
-
-    Returns:
-        A BUILD attribute line, or "".
-    """
-    return '    license_file = "{}",\n'.format(license_file) if license_file else ""
-
-def make_dart_member_build_content(name, language_version, code_assets, unreplaced_hook, version = "", license_file = ""):
+def make_dart_member_build_content(name, language_version, code_assets, unreplaced_hook, version = "", license_file = "", link_hook = ""):
     """Generate BUILD content for the source repository of a pure-Dart pub package.
 
     A package with nothing of Flutter's in its pubspec is rules_dart's own
     `pub_package_member`, as a package fetched by `pub.from_lock()` is, so
     it reaches consumers as it does under `pub.pub()`: no `FlutterInfo`.
 
+    Its facts are on a `dart_package_metadata` beside it, which the member
+    names with `package`.
+
     Args:
-        name: Target name (also the `package_name`).
+        name: Target name (also the package's name).
         language_version: Dart language version string (e.g. `"3.4"`).
         code_assets: `dart_code_asset` label strings replacing this
             package's build hook output.
-        unreplaced_hook: Path of a build hook nothing replaces, or "".
+        unreplaced_hook: Path of a build hook nothing replaces, or "": the
+            metadata's `build_hook`.
         version: The resolved package version, or "".
         license_file: The package's `NOTICES` or `LICENSE` (`find_pub_license_file`), or "".
+        link_hook: Its `hook/link.dart`, or "".
 
     Returns:
         BUILD.bazel content as a string.
     """
-    return """\
+    return PACKAGE_METADATA_LOAD + """\
 load("@rules_dart//dart/pub:pub_library.bzl", "pub_package_member")
 
+{metadata}
 pub_package_member(
     name = "{name}",
     srcs = glob(["lib/**/*.dart"], allow_empty = True),
-{resources}    package_name = "{name}",
-    language_version = "{language_version}",
-{version}{license}{asset_attrs}    visibility = ["//visibility:public"],
+{resources}    package = ":{metadata_target}",
+    visibility = ["//visibility:public"],
 )
 """.format(
         name = name,
         resources = _RESOURCES_GLOB_BLOCK,
-        language_version = language_version,
-        version = _format_version_attr(version),
-        license = _format_license_file_attr(license_file),
-        asset_attrs = _format_code_asset_attrs(code_assets, unreplaced_hook),
+        metadata = _member_metadata(name, language_version, code_assets, unreplaced_hook, version, license_file, link_hook),
+        metadata_target = package_metadata_target(name),
     )
 
 def make_flutter_member_build_content(
@@ -1166,7 +1145,8 @@ def make_flutter_member_build_content(
         shader_flavors = {},
         has_android_lib = False,
         unbuilt_native_code = {},
-        license_file = ""):
+        license_file = "",
+        link_hook = ""):
     """Generate BUILD content for the source repository of a Flutter pub package.
 
     Emits the package's `flutter_pub_member`, a plugin when
@@ -1190,8 +1170,10 @@ def make_flutter_member_build_content(
     library repository writes once it knows the cycle.
 
     Args:
-        name: Target name (also the `package_name`).
+        name: Target name (also the package's name, which its
+            `dart_package_metadata` states with its other facts).
         license_file: The package's `NOTICES` or `LICENSE` (`find_pub_license_file`), or "".
+        link_hook: Its `hook/link.dart`, or "".
         has_android_lib: Whether the package has an `android/` sub-package
             that defines `:lib`, which the member lists under `exports`,
             selected on Android.
@@ -1220,8 +1202,8 @@ def make_flutter_member_build_content(
         shader_flavors: Dict of package-relative shader path -> the flavors
             it ships in, for the shaders a `flavors:` entry restricts.
         version: The resolved package version this spoke was fetched at, or
-            empty. Emitted only when known, matching
-            `make_dart_library_build_content`: its sole use is agreement
+            empty. Stated only when known, as rules_dart's pub spokes state
+            it: its sole use is agreement
             checking when one package name arrives from two hubs, and an
             unstated version never conflicts with a stated one.
         linux_link: The result of `parse_cmake_link_libraries` for the plugin's
@@ -1372,24 +1354,22 @@ flutter_unbuilt_plugin_library(
 
     # The `lib/` glob is `allow_empty`: a pub package can be only assets or native
     # code, with no Dart.
-    return """\
+    return PACKAGE_METADATA_LOAD + """\
 load("@rules_flutter//flutter/private:flutter_pub_library.bzl", "flutter_pub_member")
 {extra_loads}
+{metadata}
 flutter_pub_member(
     name = "{name}",
     srcs = glob(["lib/**/*.dart"], allow_empty = True),
-{resources}    package_name = "{name}",
-{plugin_platforms_json_attr}    language_version = "{language_version}",
-{version}{license}{android_lib_arg}{apple_libs_arg}{linux_libs_arg}{windows_libs_arg}{apple_privacy_files_arg}{asset_attrs}{pub_attrs}    visibility = ["//visibility:public"],
+{resources}    package = ":{metadata_target}",
+{plugin_platforms_json_attr}{android_lib_arg}{apple_libs_arg}{linux_libs_arg}{windows_libs_arg}{apple_privacy_files_arg}{pub_attrs}    visibility = ["//visibility:public"],
 )
 {extra_targets}
 """.format(
         name = name,
-        version = _format_version_attr(version),
-        license = _format_license_file_attr(license_file),
-        asset_attrs = _format_code_asset_attrs(code_assets, unreplaced_hook),
+        metadata = _member_metadata(name, language_version, code_assets, unreplaced_hook, version, license_file, link_hook),
+        metadata_target = package_metadata_target(name),
         resources = _RESOURCES_GLOB_BLOCK,
-        language_version = language_version,
         plugin_platforms_json_attr = "    plugin_platforms_json = {},\n".format(repr(plugin_platforms_json)) if plugin_platforms_json else "",
         extra_loads = "\n".join(extra_loads),
         extra_targets = "\n".join(extra_targets),
@@ -1662,28 +1642,32 @@ kt_android_library(
 # The hook entrypoints upstream Dart defines (`package:hooks` — `build` and
 # `link`). A package shipping one produces native libraries by running Dart at
 # build time, which Bazel cannot do hermetically; something must stand in for it.
-_DART_BUILD_HOOKS = ["hook/build.dart", "hook/link.dart"]
+def _detect_hooks(ctx):
+    """The package's hooks: a build hook nothing replaces, and its link hook.
 
-def _detect_unreplaced_hook(ctx):
-    """Return the path of a build hook nothing replaces, or "".
+    `unreplaced_hook` is `hook/build.dart` when the package has one and neither
+    `code_assets` nor `ignore_hook` replaces it, else "". Recording rather than
+    failing here is deliberate, and matches rules_dart: the whole lock is
+    materialised, including packages nothing depends on, so failing at repo
+    generation would break builds over packages never reached. The
+    application that actually depends on one fails instead.
 
-    Recording rather than failing here is deliberate, and matches rules_dart:
-    the whole lock is materialised, including packages nothing depends on, so
-    failing at repo generation would break builds over packages never reached.
-    The application that actually depends on one fails instead.
+    `link_hook` is `hook/link.dart` when the package has one, for an
+    application listing its assets in `link_hook_assets` to run, as rules_dart's
+    pub spokes record it.
     """
-    if ctx.attr.code_assets or ctx.attr.ignore_hook:
-        return ""
-    for candidate in _DART_BUILD_HOOKS:
-        if ctx.path(candidate).exists:
-            return candidate
-    return ""
+    replaced = bool(ctx.attr.code_assets) or ctx.attr.ignore_hook
+    return struct(
+        unreplaced_hook = "hook/build.dart" if not replaced and ctx.path("hook/build.dart").exists else "",
+        link_hook = "hook/link.dart" if ctx.path("hook/link.dart").exists else "",
+    )
 
 _LANGUAGE_VERSION_PLACEHOLDER = "{LANGUAGE_VERSION}"
 _DEPS_PLACEHOLDER = "{DEPS}"
 
 # Where an overlay states its package's licence: the `license_file` attribute
-# line the generated spokes carry, or nothing for a package with none.
+# line the generated spokes' `dart_package_metadata` carries, or nothing for a
+# package with none.
 _LICENSE_PLACEHOLDER = "{LICENSE}"
 
 # The prefixes a repository label of another package takes in an overlay
@@ -1815,7 +1799,8 @@ def apply_overlay_substitutions(content, package_name, version, language_version
             derived from the same pubspec-and-lock intersection a generated
             spoke uses.
         license_file: The package's `NOTICES` or `LICENSE` (`find_pub_license_file`)
-            for `{LICENSE}`, which becomes its `license_file` line, or nothing.
+            for `{LICENSE}`, which becomes the `license_file` line of the
+            overlay's `dart_package_metadata`, or nothing.
 
     Returns:
         The substituted content.
@@ -1927,7 +1912,7 @@ def _resolve_overlay_template(ctx, overlay_root_label, package_name, version, la
                     "finds; an overlay replaces generated content wholesale, so " +
                     "without the placeholder the package's licence is missing " +
                     "from the `NOTICES` of every program that uses it.\n" +
-                    "Write {placeholder} on its own line among the target's attributes."
+                    "Write {placeholder} on its own line among the attributes of its `dart_package_metadata`."
                 ).format(tpl = str(tpl), placeholder = _LICENSE_PLACEHOLDER))
             hardcoded = find_hardcoded_language_version(content)
             if hardcoded:
@@ -2169,7 +2154,8 @@ def _flutter_pub_package_impl(ctx):
 
     # Computed once, before the branch: which generator runs depends on the
     # pubspec, but a build hook is a property of the package either way.
-    unreplaced_hook = _detect_unreplaced_hook(ctx)
+    hooks = _detect_hooks(ctx)
+    unreplaced_hook = hooks.unreplaced_hook
 
     # Try overlays first (user-supplied roots win over the bundled
     # `@rules_flutter//ext/` tree). On match, the overlay replaces
@@ -2319,6 +2305,7 @@ def _flutter_pub_package_impl(ctx):
             license_file = license_file,
             code_assets = ctx.attr.code_assets,
             unreplaced_hook = unreplaced_hook,
+            link_hook = hooks.link_hook,
             plugin_platforms_json = plugin_platforms_json,
             apple_libs = {
                 platform: apple_library_label(ctx.attr.package_name, platform, ctx.attr.prefix)
@@ -2359,6 +2346,7 @@ def _flutter_pub_package_impl(ctx):
             license_file = license_file,
             code_assets = ctx.attr.code_assets,
             unreplaced_hook = unreplaced_hook,
+            link_hook = hooks.link_hook,
             fonts_json_str = fonts_json_str,
             font_files = font_files,
             assets = bundled_assets.labels,
@@ -2382,6 +2370,7 @@ def _flutter_pub_package_impl(ctx):
             language_version = language_version,
             code_assets = ctx.attr.code_assets,
             unreplaced_hook = unreplaced_hook,
+            link_hook = hooks.link_hook,
             version = ctx.attr.version,
             license_file = license_file,
         )

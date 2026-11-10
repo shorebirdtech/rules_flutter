@@ -1,8 +1,14 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_flutter//flutter:android.bzl", "flutter_android_app")
 load("@rules_flutter//flutter:defs.bzl", "flutter_application")
 load("@rules_flutter//flutter:ios.bzl", "flutter_ios_app", "flutter_ios_simulator_build_test")
 load("@rules_flutter//flutter:macos.bzl", "flutter_macos_app")
+
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "impeller_shader_app",
+)
 
 # A package shader SkSL cannot compile (pkg/shaders/indexed.frag indexes a
 # uniform array in a loop). It builds for the platforms that render with
@@ -11,8 +17,8 @@ load("@rules_flutter//flutter:macos.bzl", "flutter_macos_app")
 # (lib/main.dart).
 flutter_application(
     name = "app_flutter",
-    package_name = "impeller_shader_app",
     main = "lib/main.dart",
+    package = ":pubspec",
     deps = [
         "//impeller_shader/pkg",
         "@deps//:flutter",
@@ -45,8 +51,8 @@ flutter_android_app(
 # fail.
 flutter_application(
     name = "app_flutter_sksl_required",
-    package_name = "impeller_shader_app",
     main = "lib/main.dart",
+    package = ":pubspec",
     require_sksl_shaders = True,
     tags = ["manual"],
     deps = [

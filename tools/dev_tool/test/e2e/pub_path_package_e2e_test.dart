@@ -40,10 +40,11 @@ Map<String, String> _package(String dir) => {
 /// A library of the workspace that depends on the hub's `greeting`.
 const _appBuild = {
   'BUILD.bazel':
-      'load("@rules_dart//dart:defs.bzl", "dart_library")\n'
+      'load("@rules_dart//dart:defs.bzl", "dart_library", "dart_package_metadata")\n'
+      'dart_package_metadata(name = "pubspec", package_name = "app")\n'
       'dart_library(\n'
       '    name = "app",\n'
-      '    package_name = "app",\n'
+      '    package = ":pubspec",\n'
       '    srcs = ["lib/app.dart"],\n'
       '    deps = ["@pubhub//:greeting"],\n'
       ')\n',

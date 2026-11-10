@@ -1,10 +1,15 @@
-load("@rules_dart//dart:defs.bzl", "dart_library")
+load("@rules_dart//dart:defs.bzl", "dart_library", "dart_package_metadata")
+
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "shared_b",
+    code_assets = ["//flutter/tests/shared_code_asset_fixture:b_own"],
+)
 
 # The second bindings package, the same shape as `../a`.
 dart_library(
     name = "b",
-    package_name = "shared_b",
     srcs = ["lib/b.dart"],
-    code_assets = ["//flutter/tests/shared_code_asset_fixture:b_own"],
+    package = ":pubspec",
     visibility = ["//flutter/tests:__subpackages__"],
 )

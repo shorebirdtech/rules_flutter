@@ -1,17 +1,22 @@
-load("@rules_dart//dart:defs.bzl", "dart_test")
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata", "dart_test")
 load("@rules_flutter//flutter:defs.bzl", "flutter_application")
 load("@rules_flutter//flutter:macos.bzl", "flutter_macos_app")
 
 exports_files(["pubspec.lock"])
+
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "link_hooks",
+)
 
 # `glyphs`' link hook runs over the uses the release compile records and emits
 # the index of glyphs the app constructs, bundled at
 # `flutter_assets/packages/glyphs/glyphs/index.json`.
 flutter_application(
     name = "app",
-    package_name = "link_hooks",
     link_hook_assets = ["package:glyphs/glyphs/index.json"],
     main = "lib/main.dart",
+    package = ":pubspec",
     deps = [
         "//glyphs",
         "@deps//:flutter",
@@ -32,9 +37,9 @@ flutter_macos_app(
 # builds it and checks the hook's message reaches the user.
 flutter_application(
     name = "dynamic_app",
-    package_name = "link_hooks",
     link_hook_assets = ["package:glyphs/glyphs/index.json"],
     main = "lib/dynamic_main.dart",
+    package = ":pubspec",
     tags = ["manual"],
     deps = [
         "//glyphs",

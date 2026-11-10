@@ -1,6 +1,6 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
-load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_test")
+load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_package_metadata", "dart_test")
 load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_library")
 load(
     "@rules_flutter//flutter:windows.bzl",
@@ -13,14 +13,19 @@ load(
 
 exports_files(["pubspec.lock"])
 
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "windows_example",
+)
+
 flutter_application(
     name = "app_flutter",
-    package_name = "windows_example",
     # Not the default, and the same as `:app`'s, whose bundle and program must
     # agree.
     build_name = "2.3.4",
     build_number = "56",
     main = "lib/main.dart",
+    package = ":pubspec",
     deps = [
         "@deps//:flutter",
         "@rules_flutter//flutter:material_icons",
@@ -66,9 +71,9 @@ flutter_windows_app(
 # the app has to be `testonly` too: `:testonly_app_build_test`.
 flutter_application(
     name = "testonly_flutter",
-    package_name = "windows_example",
     testonly = True,
     main = "lib/testonly_main.dart",
+    package = ":pubspec",
     deps = ["@deps//:flutter"],
 )
 
@@ -191,8 +196,8 @@ dart_analysis_config(
 # the analyzer to stage.
 flutter_library(
     name = "app_lib",
-    package_name = "windows_example",
     srcs = glob(["lib/**/*.dart"]),
+    package = ":pubspec",
     deps = [
         "@deps//:flutter",
         "@rules_flutter//flutter:material_icons",

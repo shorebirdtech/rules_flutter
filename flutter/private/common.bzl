@@ -7,13 +7,13 @@ flutter_application, flutter_android_bundle, and flutter_ios_application.
 
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_dart//dart:providers.bzl", "DartInfo")
-load("@rules_dart//dart:utils.bzl", "KERNEL_TOOL_ATTR", "collect_packages", "collect_transitive_srcs", "dart_import_check_aspect", "derive_package_root", "generate_dev_package_config", "import_check_validation")
+load("@rules_dart//dart:utils.bzl", "KERNEL_TOOL_ATTR", "collect_packages", "collect_transitive_srcs", "dart_import_check_aspect", "generate_dev_package_config", "import_check_validation")
 load("//flutter:providers.bzl", "FlutterInfo", "FlutterNativeLibraryInfo")
 load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "app_main_location", "app_scheme_files", "app_scheme_location", "app_scheme_sources", "synthesize_app_package", "with_root")
 load("//flutter/private:flutter_asset_bundle.bzl", "flutter_asset_bundle_action")
 load("//flutter/private:flutter_compile.bzl", "flutter_kernel_compile")
 load("//flutter/private:flutter_info.bzl", "dedup_plugins")
-load("//flutter/private:flutter_library.bzl", "aggregate_pub_contributions", "asset_key", "package_root_of", "path_in_package", "ships_in")
+load("//flutter/private:flutter_library.bzl", "aggregate_pub_contributions", "asset_key", "package_attr", "package_identity", "package_root_of", "path_in_package", "ships_in")
 load("//flutter/private:flutter_shader_compile.bzl", "flutter_shader_compile_action")
 load("//flutter/private:native_sources.bzl", "native_sources_aspect")
 load("//flutter/private:notices.bzl", "NOTICES_ATTRS", "additional_licenses_of", "flutter_notices_action", "notices_asset_key", "package_licenses_of")
@@ -284,17 +284,16 @@ def flutter_compile_kernel(ctx, tools, aot = None, target_platform = None, nativ
     app_pkg_name = inputs.package_name
 
     # The app's own package root, which is what `package:<name>/…` resolves
-    # against. Derived from the label rather than assumed to be the workspace
-    # root, so an app in a nested Bazel package registers a `rootUri` pointing
-    # at its own directory; assuming `""` pointed every nested app's
-    # `package:` URIs at whatever sits in the *workspace's* `lib/`.
-    app_package_root = derive_package_root(inputs.label.workspace_root, inputs.label.package)
+    # against: its declaration's directory, so an app in a nested Bazel
+    # package registers a `rootUri` pointing at its own directory, not at
+    # whatever sits in the *workspace's* `lib/`.
+    app_package_root = inputs.package_root
     packages = synthesize_app_package(
         ctx.label,
         packages,
         app_pkg_name,
         app_package_root,
-        inputs.language_version,
+        inputs.package,
     )
 
     # `synthesize_app_package` appends the app's own package last.
@@ -1243,14 +1242,18 @@ def flutter_program_inputs(ctx):
         ctx: Rule context.
 
     Returns:
-        A struct. `label` is the target whose package the program is in (its
-        package root, and the key of each asset); `main`, `srcs`, `assets`,
-        `shaders`, `shader_includes`, `license_file` and `additional_licenses` are Files
+        A struct. `label` is the target the program is built for, and
+        `package` the `DartPackageMetadataInfo` of the package it is in (None
+        for a rule naming none), whose `package_name`, `package_root` (what
+        each asset is keyed from), `language_version` and `license_file` are
+        fields of their own; `main`, `srcs`, `assets`, `shaders`,
+        `shader_includes`, `license_file` and `additional_licenses` are Files
         (`unchecked_srcs`, among `srcs`, are not checked against `deps`); `deps`,
         `native_deps` and `code_assets` are Targets; the rest, `flavor`
         among them, are as the attributes of `flutter_application` of the same
         names.
     """
+    identity = package_identity(ctx)
     return struct(
         label = ctx.label,
         main = getattr(ctx.file, "main", None),
@@ -1261,13 +1264,15 @@ def flutter_program_inputs(ctx):
         flavor = getattr(ctx.attr, "flavor", ""),
         build_name = getattr(ctx.attr, "build_name", ""),
         build_number = getattr(ctx.attr, "build_number", ""),
-        package_name = getattr(ctx.attr, "package_name", ""),
-        language_version = getattr(ctx.attr, "language_version", ""),
+        package = identity.metadata,
+        package_name = identity.package_name,
+        package_root = identity.package_root,
+        language_version = identity.language_version,
         assets = list(getattr(ctx.files, "assets", [])),
         shaders = list(getattr(ctx.files, "shaders", [])),
         shader_includes = list(getattr(ctx.files, "shader_includes", [])),
         require_sksl_shaders = getattr(ctx.attr, "require_sksl_shaders", False),
-        license_file = getattr(ctx.file, "license_file", None),
+        license_file = identity.license_file,
         additional_licenses = list(getattr(ctx.files, "additional_licenses", [])),
         tree_shake_icons = getattr(ctx.attr, "tree_shake_icons", False),
         native_deps = list(getattr(ctx.attr, "native_deps", [])),
@@ -1283,7 +1288,7 @@ def flutter_program_inputs(ctx):
 # The attrs `flutter_compile_kernel` reads off its caller's `ctx`. Every rule
 # that calls it spreads this bundle wholesale rather than naming the members,
 # because naming them is what let the contract break: `flutter_compile_kernel`
-# reaches into `ctx.attr.language_version` on whatever context it is handed,
+# reaches into `ctx.attr.package` on whatever context it is handed,
 # and the two callers that built a narrowed attr surface — `flutter_aot_snapshot`
 # cherry-picking from `FLUTTER_APPLICATION_ATTRS`, `flutter_kernel`
 # hand-rolling a near-copy that had already drifted — simply did not have it.
@@ -1301,39 +1306,24 @@ KERNEL_COMPILE_ATTRS = {
         mandatory = True,
         allow_single_file = [".dart"],
     ),
-    "package_name": attr.string(
-        doc = "Dart package name (same value as `pubspec.yaml`'s `name:`). " +
-              "Required: keys the kernel's libraries under stable `package:` URIs " +
-              "(hot-reload parity with the dev tool), anchors codegen sibling " +
-              "co-location, and resolves `package:<self>/...` imports. There is " +
-              "no signal in the Bazel graph that can determine this reliably, " +
-              "so it must be declared explicitly.\n\n" +
-              "A target declared beside the library it covers — a " +
-              "`flutter_test` in the same directory as its `flutter_library`, " +
-              "the layout pub uses — *is* that package rather than a consumer " +
-              "of it: give it the library's `package_name` and list the " +
-              "library's sources in `srcs`, instead of depending on the " +
-              "sibling target. Two Dart packages cannot share a directory, so " +
-              "a dependency declaring a different package name at this " +
-              "target's own root is refused.",
+    "package": package_attr(
+        doc = "The `dart_package_metadata` declaring the program's own Dart " +
+              "package, the Bazel stand-in for its `pubspec.yaml`. Required: " +
+              "its `package_name` keys the kernel's libraries under stable " +
+              "`package:` URIs (hot-reload parity with the dev tool) and " +
+              "resolves `package:<self>/...` imports; its `language_version` " +
+              "is the program's own, as pub derives it from " +
+              "`environment.sdk` (left unset, the program's sources compile " +
+              "at the SDK's current version, newer than `flutter build` " +
+              "would allow); its `license_file` is listed in `NOTICES.Z` " +
+              "under the package's name. Its directory is the package root, " +
+              "which `srcs` (its `lib/`) and the keys of `assets` are " +
+              "relative to.\n\n" +
+              "The `flutter_library` targets of the same package — the app's " +
+              "own `lib/`, beside it — name the same declaration. Two Dart " +
+              "packages cannot share a directory, so a dependency declaring " +
+              "a different package at the program's root is refused.",
         mandatory = True,
-    ),
-    "language_version": attr.string(
-        doc = "Dart language version for the app's own package, in " +
-              "`<major>.<minor>` form — the same value pub derives from this " +
-              "package's `environment.sdk` lower bound and writes into " +
-              "`package_config.json` (`sdk: ^3.12.0` → `\"3.12\"`). " +
-              "Optional, and it lives here for the same reason `package_name` " +
-              "does: it is stated in `pubspec.yaml`, which the analysis phase " +
-              "cannot read.\n\n" +
-              "Left unset, the app's entry carries no `languageVersion`, and " +
-              "`package_config.json` reads that as the *current* SDK's — so " +
-              "the build accepts newer syntax than the app's own pubspec " +
-              "permits, and applies newer semantics to code written against " +
-              "an older version. That is a divergence from `flutter build`, " +
-              "not a neutral default. Set it to match your pubspec if the two " +
-              "differ. Same attribute, same meaning, as on `flutter_library` " +
-              "and `flutter_plugin`.",
     ),
     "srcs": attr.label_list(
         doc = "Additional Dart source files.",
@@ -1440,13 +1430,6 @@ FLUTTER_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | {
               "otherwise the build fails, as `flutter build` does. Only applies to release builds.",
         default = True,
     ),
-    "license_file": attr.label(
-        doc = "The program's own licence: the `NOTICES` or `LICENSE` file at the root of its " +
-              "package, which `flutter build` reads from the app's package root. It is listed " +
-              "in `NOTICES.Z` under `package_name`, with the engine's licences and the " +
-              "additional ones.",
-        allow_single_file = True,
-    ),
     "additional_licenses": attr.label_list(
         doc = "Licence files appended to `NOTICES.Z` as they are, after the packages' " +
               "licences: what `flutter: licenses:` lists in the program's `pubspec.yaml`.",
@@ -1476,14 +1459,12 @@ FLUTTER_PROGRAM_ATTR_NAMES = [
     "deps",
     "extra_gen_snapshot_options",
     "flavor",
-    "language_version",
-    "license_file",
     "link_hook_assets",
     "main",
     "minimum_os_version",
     "native_deps",
     "obfuscate",
-    "package_name",
+    "package",
     "require_sksl_shaders",
     "shader_includes",
     "shaders",

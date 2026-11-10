@@ -1,10 +1,15 @@
-load("@rules_dart//dart:defs.bzl", "dart_library")
+load("@rules_dart//dart:defs.bzl", "dart_library", "dart_package_metadata")
+
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "count_b",
+    code_assets = ["//:count_b_own"],
+)
 
 # The second bindings package; see `//count_a`.
 dart_library(
     name = "count_b",
-    package_name = "count_b",
     srcs = ["lib/count_b.dart"],
-    code_assets = ["//:count_b_own"],
+    package = ":pubspec",
     visibility = ["//visibility:public"],
 )

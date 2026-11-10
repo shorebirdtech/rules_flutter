@@ -1,4 +1,4 @@
-load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_analysis_test", "dart_binary")
+load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_analysis_test", "dart_binary", "dart_package_metadata")
 load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_library", "flutter_test")
 load("@rules_flutter//flutter:integration_test.bzl", "flutter_android_integration_test", "flutter_ios_simulator_integration_test", "flutter_linux_integration_test", "flutter_macos_integration_test", "flutter_web_integration_test", "flutter_windows_integration_test")
 load(":test_outcome.bzl", "outcome_test")
@@ -18,12 +18,17 @@ dart_analysis_config(
     options = [":options"],
 )
 
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "integration_test_example",
+)
+
 # The app's Dart as a library, so the analyzer has something to stage:
 # `flutter_application` is a bundle and carries no `DartInfo`.
 flutter_library(
     name = "app_lib",
-    package_name = "integration_test_example",
     srcs = glob(["lib/**/*.dart"]),
+    package = ":pubspec",
     deps = ["@deps//:flutter"],
 )
 
@@ -36,12 +41,12 @@ dart_analysis_test(
 # bundles, which the analyzer does not look into.
 flutter_library(
     name = "test_files_lib",
-    package_name = "integration_test_example",
     testonly = True,
     srcs = glob([
         "integration_test/**/*.dart",
         "test/**/*.dart",
     ]),
+    package = ":pubspec",
     deps = [
         ":app_lib",
         "@deps//:flutter",
@@ -60,18 +65,18 @@ dart_analysis_test(
 # test as its program.
 flutter_application(
     name = "app_flutter",
-    package_name = "integration_test_example",
     srcs = glob(["lib/**/*.dart"]),
     main = "lib/main.dart",
+    package = ":pubspec",
     deps = ["@deps//:flutter"],
 )
 
 # The same app as a flavor's target.
 flutter_application(
     name = "app_flutter_paid",
-    package_name = "integration_test_example",
     flavor = "paid",
     main = "lib/main.dart",
+    package = ":pubspec",
     deps = ["@deps//:flutter"],
 )
 
@@ -117,8 +122,8 @@ _TAGS_TEST_DEPS = [
 # `library_tag` on every one. Passes as a whole.
 flutter_test(
     name = "tags_test",
-    package_name = "integration_test_example",
     main = "test/tags_test.dart",
+    package = ":pubspec",
     deps = _TAGS_TEST_DEPS,
 )
 
@@ -126,26 +131,26 @@ flutter_test(
 # below: the same suite with a fixed selection, and a suite with no case.
 flutter_test(
     name = "tags_fixed",
-    package_name = "integration_test_example",
     include_tags = ["golden"],
     main = "test/tags_test.dart",
+    package = ":pubspec",
     tags = ["manual"],
     deps = _TAGS_TEST_DEPS,
 )
 
 flutter_test(
     name = "tags_fixed_empty",
-    package_name = "integration_test_example",
     include_tags = ["no_such_tag"],
     main = "test/tags_test.dart",
+    package = ":pubspec",
     tags = ["manual"],
     deps = _TAGS_TEST_DEPS,
 )
 
 flutter_test(
     name = "no_tests",
-    package_name = "integration_test_example",
     main = "test/no_tests_test.dart",
+    package = ":pubspec",
     tags = ["manual"],
     deps = _TAGS_TEST_DEPS,
 )
@@ -239,8 +244,8 @@ outcome_test(
 [
     flutter_test(
         name = name,
-        package_name = "integration_test_example",
         main = "test/%s_test.dart" % name,
+        package = ":pubspec",
         tags = ["manual"],
         deps = _TAGS_TEST_DEPS,
     )
@@ -724,9 +729,9 @@ _WEB_HOSTS = select({
 # The same in a browser, where the framework reads `NOTICES`, uncompressed.
 flutter_web_integration_test(
     name = "web_licences_test",
-    package_name = "integration_test_example",
     src = "integration_test/licences_test.dart",
     srcs = glob(["lib/**/*.dart"]),
+    package = ":pubspec",
     target_compatible_with = _WEB_HOSTS,
     deps = ["@deps//:flutter"] + _TEST_DEPS,
 )
@@ -734,9 +739,9 @@ flutter_web_integration_test(
 # The two tests of `:macos_pass_test`, in a browser: each is reported.
 flutter_web_integration_test(
     name = "web_pass_test",
-    package_name = "integration_test_example",
     src = "integration_test/counter_test.dart",
     srcs = glob(["lib/**/*.dart"]),
+    package = ":pubspec",
     target_compatible_with = _WEB_HOSTS,
     deps = ["@deps//:flutter"] + _TEST_DEPS,
 )
@@ -744,19 +749,19 @@ flutter_web_integration_test(
 # `appFlavor` in a browser: the web app's `flavor`, and null without one.
 flutter_web_integration_test(
     name = "web_flavor_test",
-    package_name = "integration_test_example",
     src = "integration_test/flavor_paid_test.dart",
     srcs = glob(["lib/**/*.dart"]),
     flavor = "paid",
+    package = ":pubspec",
     target_compatible_with = _WEB_HOSTS,
     deps = ["@deps//:flutter"] + _TEST_DEPS,
 )
 
 flutter_web_integration_test(
     name = "web_no_flavor_test",
-    package_name = "integration_test_example",
     src = "integration_test/flavor_none_test.dart",
     srcs = glob(["lib/**/*.dart"]),
+    package = ":pubspec",
     target_compatible_with = _WEB_HOSTS,
     deps = ["@deps//:flutter"] + _TEST_DEPS,
 )
@@ -765,9 +770,9 @@ flutter_web_integration_test(
 # the host's `vm`, as `flutter test` reads it, not the browser the app runs in.
 flutter_web_integration_test(
     name = "web_skip",
-    package_name = "integration_test_example",
     src = "integration_test/skip_test.dart",
     srcs = glob(["lib/**/*.dart"]),
+    package = ":pubspec",
     tags = ["manual"],
     target_compatible_with = _WEB_HOSTS,
     deps = ["@deps//:flutter"] + _TEST_DEPS,
@@ -775,9 +780,9 @@ flutter_web_integration_test(
 
 flutter_web_integration_test(
     name = "web_test_on",
-    package_name = "integration_test_example",
     src = "integration_test/test_on_test.dart",
     srcs = glob(["lib/**/*.dart"]),
+    package = ":pubspec",
     tags = ["manual"],
     target_compatible_with = _WEB_HOSTS,
     deps = ["@deps//:flutter"] + _TEST_DEPS,
@@ -815,9 +820,9 @@ outcome_test(
 # `manual`, since it is meant to fail: the red twin below runs it.
 flutter_web_integration_test(
     name = "web_red",
-    package_name = "integration_test_example",
     src = "integration_test/failing_test.dart",
     srcs = glob(["lib/**/*.dart"]),
+    package = ":pubspec",
     tags = ["manual"],
     target_compatible_with = _WEB_HOSTS,
     deps = ["@deps//:flutter"] + _TEST_DEPS,
@@ -840,10 +845,10 @@ outcome_test(
 # picture over the DevTools connection and the host compares it.
 flutter_web_integration_test(
     name = "web_golden_test",
-    package_name = "integration_test_example",
     src = "integration_test/golden_test.dart",
     srcs = glob(["lib/**/*.dart"]) + _GOLDEN_SRCS,
     data = _GOLDENS,
+    package = ":pubspec",
     target_compatible_with = _WEB_HOSTS,
     deps = ["@deps//:flutter"] + _TEST_DEPS,
 )
@@ -855,10 +860,10 @@ flutter_web_integration_test(
 # own package.
 flutter_web_integration_test(
     name = "web_golden_config_test",
-    package_name = "integration_test_example",
     src = "integration_test/tolerant/golden_tolerant_test.dart",
     srcs = glob(["lib/**/*.dart"]) + _GOLDEN_SRCS,
     data = _TOLERANT_FILES,
+    package = ":pubspec",
     target_compatible_with = _WEB_HOSTS,
     deps = ["@deps//:flutter"] + _TEST_DEPS,
 )
@@ -867,10 +872,10 @@ flutter_web_integration_test(
 # as a busy machine leaves it: the picture is still the swatch's own.
 flutter_web_integration_test(
     name = "web_golden_mid_frame_test",
-    package_name = "integration_test_example",
     src = "integration_test/golden_mid_frame_test.dart",
     srcs = glob(["lib/**/*.dart"]) + _GOLDEN_SRCS,
     data = _GOLDENS,
+    package = ":pubspec",
     target_compatible_with = _WEB_HOSTS,
     deps = ["@deps//:flutter"] + _TEST_DEPS,
 )
@@ -880,10 +885,10 @@ flutter_web_integration_test(
 # swatch's own.
 flutter_web_integration_test(
     name = "web_golden_live_frames_test",
-    package_name = "integration_test_example",
     src = "integration_test/golden_live_frames_test.dart",
     srcs = glob(["lib/**/*.dart"]) + _GOLDEN_SRCS,
     data = _GOLDENS,
+    package = ":pubspec",
     target_compatible_with = _WEB_HOSTS,
     deps = ["@deps//:flutter"] + _TEST_DEPS,
 )
@@ -891,10 +896,10 @@ flutter_web_integration_test(
 # `manual`, since it is meant to fail: the red twin below runs it.
 flutter_web_integration_test(
     name = "web_golden_mismatch",
-    package_name = "integration_test_example",
     src = "integration_test/golden_mismatch_test.dart",
     srcs = glob(["lib/**/*.dart"]) + _GOLDEN_SRCS,
     data = _GOLDENS,
+    package = ":pubspec",
     tags = ["manual"],
     target_compatible_with = _WEB_HOSTS,
     deps = ["@deps//:flutter"] + _TEST_DEPS,
@@ -917,9 +922,9 @@ outcome_test(
 # `manual`, since the outcome tests below run it with a selection.
 flutter_web_integration_test(
     name = "web_tags",
-    package_name = "integration_test_example",
     src = "integration_test/tags_test.dart",
     srcs = glob(["lib/**/*.dart"]),
+    package = ":pubspec",
     tags = ["manual"],
     target_compatible_with = _WEB_HOSTS,
     deps = ["@deps//:flutter"] + _TEST_DEPS,
@@ -927,10 +932,10 @@ flutter_web_integration_test(
 
 flutter_web_integration_test(
     name = "web_tags_fixed_empty",
-    package_name = "integration_test_example",
     src = "integration_test/tags_test.dart",
     srcs = glob(["lib/**/*.dart"]),
     include_tags = ["no_such_tag"],
+    package = ":pubspec",
     tags = ["manual"],
     target_compatible_with = _WEB_HOSTS,
     deps = ["@deps//:flutter"] + _TEST_DEPS,

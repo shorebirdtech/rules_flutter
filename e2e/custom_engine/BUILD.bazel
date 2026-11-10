@@ -1,3 +1,4 @@
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_flutter//flutter:android.bzl", "flutter_android_app")
 load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_test")
 load("@rules_flutter//flutter:integration_test.bzl", "flutter_web_integration_test")
@@ -10,10 +11,15 @@ load("@rules_flutter//tools/e2e_testing:apple_release_build.bzl", "apple_release
 
 exports_files(["pubspec.lock"])
 
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "custom_engine",
+)
+
 flutter_application(
     name = "app_flutter",
-    package_name = "custom_engine",
     main = "lib/main.dart",
+    package = ":pubspec",
     deps = ["@deps//:flutter"],
 )
 
@@ -32,9 +38,9 @@ flutter_macos_app(
 # installable device app needs.
 flutter_application(
     name = "ios_flutter",
-    package_name = "custom_engine",
     main = "lib/main.dart",
     minimum_os_version = IOS_MINIMUM_OS_VERSION,
+    package = ":pubspec",
     deps = ["@deps//:flutter"],
 )
 
@@ -68,8 +74,8 @@ apple_release_build(
 
 flutter_application(
     name = "android_flutter",
-    package_name = "custom_engine",
     main = "lib/main.dart",
+    package = ":pubspec",
     deps = ["@deps//:flutter"],
 )
 
@@ -102,17 +108,17 @@ flutter_windows_app(
 # SDK under --@rules_flutter//flutter:sdk=local.
 flutter_web_app(
     name = "web_app",
-    package_name = "custom_engine",
     app_name = "Custom Engine",
+    package = ":pubspec",
     tags = ["manual"],
     deps = ["@deps//:flutter"],
 )
 
 flutter_web_integration_test(
     name = "web_render_test",
-    package_name = "custom_engine",
     src = "integration_test/render_test.dart",
     srcs = ["lib/main.dart"],
+    package = ":pubspec",
     tags = ["manual"],
     deps = [
         "@deps//:flutter",
@@ -125,9 +131,9 @@ flutter_web_integration_test(
 # compiled against that SDK's platform kernel.
 flutter_test(
     name = "widget_test",
-    package_name = "custom_engine",
     srcs = ["lib/main.dart"],
     main = "test/widget_test.dart",
+    package = ":pubspec",
     tags = ["manual"],
     deps = [
         "@deps//:flutter",

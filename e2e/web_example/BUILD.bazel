@@ -1,5 +1,5 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
-load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_test")
+load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_package_metadata", "dart_test")
 load("@rules_flutter//flutter:defs.bzl", "flutter_library")
 load("@rules_flutter//flutter:integration_test.bzl", "flutter_web_integration_test")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_app", "flutter_web_bundle", "flutter_web_manifest_gen")
@@ -12,13 +12,18 @@ exports_files(["pubspec.lock"])
 # beside it (`js_fallback`, on by default) for browsers that cannot run WASM.
 # =============================================================================
 
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "web_example",
+)
+
 flutter_web_app(
     name = "app_wasm",
-    package_name = "web_example",
     app_name = "Web Example",
     # A first-party asset, so the web dev loop's asset reload has something
     # real to deliver.
     assets = glob(["assets/**"]),
+    package = ":pubspec",
     deps = [
         "@deps//:flutter",
         "@rules_flutter//flutter:material_icons",
@@ -29,10 +34,10 @@ flutter_web_app(
 # `paid` in it, and stays so through the dev loop's reload and restart.
 flutter_web_app(
     name = "web_example_paid",
-    package_name = "web_example",
     app_name = "Web Example Paid",
     assets = glob(["assets/**"]),
     flavor = "paid",
+    package = ":pubspec",
     deps = [
         "@deps//:flutter",
         "@rules_flutter//flutter:material_icons",
@@ -43,7 +48,6 @@ flutter_web_app(
 # user-provided web/index.html.
 flutter_web_app(
     name = "app_wasm_subpath",
-    package_name = "web_example",
     app_name = "Web Example (subpath)",
     # A first-party asset, so the web dev loop's asset reload has something
     # real to deliver.
@@ -52,6 +56,7 @@ flutter_web_app(
     # Not the default, so :verify_version_json_test can see it arrive.
     build_name = "2.3.4",
     build_number = "42",
+    package = ":pubspec",
     deps = [
         "@deps//:flutter",
         "@rules_flutter//flutter:material_icons",
@@ -64,9 +69,9 @@ flutter_web_app(
 # hot reload has to deliver edits to it and to the sibling it imports.
 flutter_web_app(
     name = "app_test_driver",
-    package_name = "web_example",
     srcs = ["test_driver/banner.dart"],
     main = "test_driver/app.dart",
+    package = ":pubspec",
     deps = [
         "@deps//:flutter",
         "@rules_flutter//flutter:material_icons",
@@ -87,7 +92,6 @@ flutter_web_manifest_gen(
 
 flutter_web_bundle(
     name = "app_js",
-    package_name = "web_example",
     assets = glob(["assets/**"]),
     base_href = "/web_example_js/",
     compiler = "dart2js",
@@ -97,6 +101,7 @@ flutter_web_bundle(
     frequency_based_minification = False,
     main = "lib/main.dart",
     manifest_json = ":app_js_manifest",
+    package = ":pubspec",
     renderer = "canvaskit",
     title = "Web Example JS",
     web_assets = glob(
@@ -118,8 +123,8 @@ flutter_web_bundle(
 
 flutter_web_app(
     name = "app_no_pwa",
-    package_name = "web_example",
     app_name = "Web Example No PWA",
+    package = ":pubspec",
     pwa = False,
     deps = [
         "@deps//:flutter",
@@ -143,13 +148,13 @@ flutter_web_app(
 
 flutter_web_bundle(
     name = "app_dev_boot",
-    package_name = "web_example",
     # `lib/main.dart` reads one, and an app reporting a failed asset load is a
     # worse signal to run an assertion against than one that boots cleanly.
     assets = glob(["assets/**"]),
     bootstrap_js = "templates/dev_bootstrap.js",
     compiler = "dart2js",
     main = "lib/main.dart",
+    package = ":pubspec",
     renderer = "canvaskit",
     title = "Web Example (dev boot)",
     web_defines = {"API_URL": "https://api.example.com"},
@@ -252,8 +257,8 @@ dart_analysis_config(
 # that no bundle reaches would otherwise be analyzed by nothing.
 flutter_library(
     name = "app_lib",
-    package_name = "web_example",
     srcs = glob(["lib/**/*.dart"]),
+    package = ":pubspec",
     deps = [
         "@deps//:flutter",
         "@rules_flutter//flutter:material_icons",
@@ -272,7 +277,6 @@ flutter_library(
 
 flutter_web_app(
     name = "app_tuned",
-    package_name = "web_example",
     app_name = "Web Example (tuned)",
     assets = glob(["assets/**"]),
     # The size report, produced as a named output rather than deployed. It
@@ -281,6 +285,7 @@ flutter_web_app(
     # Kept unminified and unstripped so the bundle can be read.
     minify_js = "false",
     minify_wasm = "false",
+    package = ":pubspec",
     strip_wasm = False,
     # Serves the renderer from the app itself, which is what lets this bundle
     # run under a `script-src 'self'` policy — the CDN copy is a script the
@@ -295,10 +300,10 @@ flutter_web_app(
 # WebAssembly only: no dart2js compile runs and the bundle has no main.dart.js.
 flutter_web_app(
     name = "app_wasm_only",
-    package_name = "web_example",
     app_name = "Web Example (WASM only)",
     assets = glob(["assets/**"]),
     js_fallback = False,
+    package = ":pubspec",
     deps = [
         "@deps//:flutter",
         "@rules_flutter//flutter:material_icons",
@@ -312,10 +317,10 @@ flutter_web_app(
 # `canvaskit/` directory is there to be checked.
 flutter_web_app(
     name = "app_all_browsers",
-    package_name = "web_example",
     app_name = "Web Example (all browsers)",
     assets = glob(["assets/**"]),
     js_fallback = False,
+    package = ":pubspec",
     use_local_canvaskit = True,
     wasm_browsers = [
         "blink",
@@ -333,10 +338,10 @@ flutter_web_app(
 # a browser the loader refuses.
 flutter_web_app(
     name = "app_no_blink",
-    package_name = "web_example",
     app_name = "Web Example (no blink)",
     assets = glob(["assets/**"]),
     js_fallback = False,
+    package = ":pubspec",
     wasm_browsers = [
         "gecko",
         "webkit",
@@ -368,9 +373,9 @@ build_test(
 # A profile build of the same app: release-shaped, but readable.
 flutter_web_app(
     name = "app_profile",
-    package_name = "web_example",
     app_name = "Web Example (profile)",
     assets = glob(["assets/**"]),
+    package = ":pubspec",
     profile = True,
     deps = [
         "@deps//:flutter",
@@ -413,11 +418,11 @@ dart_test(
 
 flutter_web_integration_test(
     name = "render_test",
-    package_name = "web_example",
     src = "integration_test/render_test.dart",
     srcs = glob(["lib/**/*.dart"]),
     # A first-party asset, which the second case reads.
     assets = glob(["assets/**"]),
+    package = ":pubspec",
     target_compatible_with = select({
         "@platforms//os:linux": [],
         "@platforms//os:macos": [],

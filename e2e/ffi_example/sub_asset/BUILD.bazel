@@ -1,4 +1,10 @@
-load("@rules_dart//dart:defs.bzl", "dart_library")
+load("@rules_dart//dart:defs.bzl", "dart_library", "dart_package_metadata")
+
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "sub_asset",
+    code_assets = ["//:sub_native"],
+)
 
 # A package that owns a native code asset and knows nothing of Flutter: a plain
 # `dart_library`, the shape a bridge generator that does not depend on
@@ -8,8 +14,7 @@ load("@rules_dart//dart:defs.bzl", "dart_library")
 # a running app.
 dart_library(
     name = "sub_asset",
-    package_name = "sub_asset",
     srcs = ["lib/sub_asset.dart"],
-    code_assets = ["//:sub_native"],
+    package = ":pubspec",
     visibility = ["//visibility:public"],
 )

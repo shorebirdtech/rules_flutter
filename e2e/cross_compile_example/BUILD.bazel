@@ -1,13 +1,18 @@
-load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options")
+load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_package_metadata")
 load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_library")
 load("@rules_flutter//flutter:linux.bzl", "flutter_linux_app")
 
 exports_files(["pubspec.lock"])
 
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "hello_world",
+)
+
 flutter_application(
     name = "cross_app",
-    package_name = "hello_world",
     main = "lib/main.dart",
+    package = ":pubspec",
     visibility = ["//stock_runner:__pkg__"],
     deps = [
         "@deps//:flutter",
@@ -48,8 +53,8 @@ dart_analysis_config(
 # the analyzer to stage.
 flutter_library(
     name = "app_lib",
-    package_name = "hello_world",
     srcs = glob(["lib/**/*.dart"]),
+    package = ":pubspec",
     deps = [
         "@deps//:flutter",
         "@rules_flutter//flutter:material_icons",

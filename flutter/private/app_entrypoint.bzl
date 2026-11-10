@@ -77,7 +77,7 @@ def app_main_location(package_name, package_root, main):
 
     Args:
         package_name: The app's Dart package name, or `""`.
-        package_root: The app's package root, from `derive_package_root`.
+        package_root: The app's package root, its declaration's directory.
         main: The app's `main` `File`.
 
     Returns:
@@ -110,8 +110,8 @@ def check_foreign_root_package(label, packages, package_name, package_root):
     Args:
       label: The app/test rule's label, for the message.
       packages: List of `DartPackageInfo` (from `collect_packages`).
-      package_name: The app's own `package_name`.
-      package_root: The app's package root, from `derive_package_root`.
+      package_name: The app's own package name.
+      package_root: The app's package root.
 
     Returns:
       An error message naming every foreign package at the app's root, or
@@ -127,19 +127,19 @@ def check_foreign_root_package(label, packages, package_name, package_root):
 
     return (
         ("%s: a dependency declares Dart package `%s` rooted at `%s`, which is " +
-         "this target's own package root — it declares `package_name = \"%s\"`. " +
+         "this target's own package root — its `package` is package `%s`. " +
          "Two Dart packages cannot share a root, so only one of them can be " +
          "expressed, and `package:%s/…` imports would fail at the frontend as " +
          "an unresolved URI.\n\n" +
          "Either give that library a Bazel package of its own (its own " +
          "directory with its own `lib/`), or let this target *be* that " +
-         "package: set `package_name = \"%s\"`, list the library's sources in " +
-         "`srcs` (typically `glob([\"lib/**/*.dart\"])`), and drop the " +
-         "dependency on it.") %
+         "package: name that library's `dart_package_metadata` (package " +
+         "`%s`) in `package`, and depend on the library or list its sources " +
+         "in `srcs`.") %
         (label, ", ".join(foreign), package_root if package_root else "the workspace root", package_name, foreign[0], foreign[0])
     )
 
-def synthesize_app_package(label, packages, package_name, package_root, language_version):
+def synthesize_app_package(label, packages, package_name, package_root, metadata):
     """Replace the records at the app's root with the app's own package.
 
     A `flutter_application` / `flutter_test` / `flutter_web_application` whose
@@ -147,16 +147,12 @@ def synthesize_app_package(label, packages, package_name, package_root, language
     `flutter_library` or `dart_library` it depends on rooted at the same
     directory is that same package. One directory is one entry in a
     `package_config.json`, so their records give way to one record for the
-    app: the app's statement merged with theirs by rules_dart's
-    `merged_package_record`. What the libraries state carries through: their
-    code assets, licence, hooks and version, so the app bundles the native
-    code and lists the licence of its own root library.
+    app: the app's merged with theirs by rules_dart's `merged_package_record`.
+    Every one of them names the package's one `dart_package_metadata`, the
+    app's included, so they state the same facts; one naming another, or
+    none, fails the build naming both.
 
-    The language version is the app's when it states one. An app that states
-    none takes the version a library at its root states. When both state one
-    and they differ, the build fails naming both.
-
-    `package_root` is the app's own, from `derive_package_root`, not a bare
+    `package_root` is the app's own, its declaration's directory, not a bare
     `""`. They agree for a workspace-rooted app and differ for one in a nested
     Bazel package, where `""` claims the workspace root and makes
     `package:<self>/main.dart` resolve to a *different app's* `lib/main.dart`.
@@ -173,25 +169,15 @@ def synthesize_app_package(label, packages, package_name, package_root, language
       label: The app/test rule's label, recorded on the app's record and
         named in errors.
       packages: List of `DartPackageInfo` (from `collect_packages`).
-      package_name: The app's `package_name`. Always non-empty — every
-        Flutter consumer rule declares it as a mandatory attribute.
-      package_root: The app's package root, from `derive_package_root`.
-      language_version: The app's `language_version` attr, or `""` when it
-        states none. Required rather than defaulted: a caller that forgot to
-        forward it and an app that genuinely declares none would otherwise be
-        the same call, which is how `flutter_test` and `flutter_web_bundle`
-        came to accept the attribute and silently drop it.
+      package_name: The app's package name, its declaration's.
+      package_root: The app's package root, its declaration's directory.
+      metadata: The `DartPackageMetadataInfo` of the app's package, or None
+        for a program naming none (a test compiled in a package it does not
+        declare).
 
     Returns:
       The packages list with every entry at `package_root` replaced by the
       app's own `DartPackageInfo`, last.
-
-    Pub writes the root package's `languageVersion` from its own
-    `environment.sdk` lower bound. An absent key is not "the default":
-    `package_config.json` reads it as the current SDK's, so an app without one
-    is compiled under newer semantics than its pubspec declares. The value
-    arrives as an attribute because it lives in `pubspec.yaml`, which the
-    analysis phase cannot read — the same reason `package_name` is explicit.
     """
     err = check_foreign_root_package(label, packages, package_name, package_root)
     if err != None:
@@ -199,7 +185,7 @@ def synthesize_app_package(label, packages, package_name, package_root, language
 
     at_root = [p for p in packages if p.package_root == package_root]
     return [p for p in packages if p.package_root != package_root] + [
-        merged_package_record(label, package_name, package_root, language_version, at_root),
+        merged_package_record(label, package_name, package_root, metadata, at_root),
     ]
 
 def resolve_wrapper_main_import(package_name, package_root, main_short_path, main_path, wrapper_depth):
@@ -220,7 +206,7 @@ def resolve_wrapper_main_import(package_name, package_root, main_short_path, mai
 
     Args:
       package_name: The app's `package_name` (or `""`).
-      package_root: The app's package root, from `derive_package_root`.
+      package_root: The app's package root, its declaration's directory.
       main_short_path: `main.short_path`, tested against the package prefix.
       main_path: Exec-root-relative path to the user's main `.dart`.
       wrapper_depth: Number of path components in the wrapper's `dirname`.
@@ -322,8 +308,8 @@ def app_main_package_uri(package_name, package_root, main_short_path):
     root's* `lib/main.dart`.
 
     Args:
-        package_name: The app's Dart package name (`ctx.attr.package_name`).
-        package_root: The app's package root, from `derive_package_root`.
+        package_name: The app's Dart package name (its `package`'s).
+        package_root: The app's package root, its declaration's directory.
         main_short_path: The app main's `short_path`. Not its exec path — see
             `package_lib_prefix` for why the two are not interchangeable.
 
@@ -356,7 +342,7 @@ def app_scheme_files(package_name, package_root, main, srcs):
 
     Args:
         package_name: The app's Dart package name, or `""`.
-        package_root: The app's package root, from `derive_package_root`.
+        package_root: The app's package root, its declaration's directory.
         main: The app's `main` `File`.
         srcs: The app's own `srcs` `File`s.
 
@@ -384,7 +370,7 @@ def app_scheme_sources(package_name, package_root, main, srcs):
 
     Args:
         package_name: The app's Dart package name, or `""`.
-        package_root: The app's package root, from `derive_package_root`.
+        package_root: The app's package root, its declaration's directory.
         main: The app's `main` `File`.
         srcs: The app's own `srcs` `File`s.
 

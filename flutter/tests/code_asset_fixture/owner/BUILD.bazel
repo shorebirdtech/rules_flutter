@@ -1,10 +1,11 @@
-"""The packages that own the fixture's code assets: one Flutter package rule, one
-Dart package rule that knows nothing of Flutter, the bare control, a rule that
-forwards a package under an attribute of its own name, and one that makes its
-asset with no target of its own. Each reaches its own application only, so
-sharing a root is not a conflict."""
+"""The packages that own the fixture's code assets: one package built by a
+Flutter package rule and by a Dart package rule that knows nothing of Flutter,
+the bare control, a rule that forwards a package under an attribute of its own
+name, and one that makes its asset with no target of its own. Each reaches its
+own application only, so sharing a root is not a conflict. `owner_twin/` is the
+first package again, its asset bare."""
 
-load("@rules_dart//dart:defs.bzl", "dart_library")
+load("@rules_dart//dart:defs.bzl", "dart_library", "dart_package_metadata")
 load("//flutter:defs.bzl", "flutter_plugin")
 load("//flutter/tests/code_asset_fixture:forwarding_package.bzl", "forwarding_package")
 load("//flutter/tests/code_asset_fixture:inline_asset_package.bzl", "inline_asset_package")
@@ -14,18 +15,22 @@ package(default_visibility = [
     "//flutter/tests/code_asset_fixture/test:__pkg__",
 ])
 
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "code_asset_owner",
+    code_assets = ["//flutter/tests/code_asset_fixture:wrapped"],
+)
+
 dart_library(
     name = "dart_owner",
-    package_name = "code_asset_owner",
     srcs = ["lib/owner.dart"],
-    code_assets = ["//flutter/tests/code_asset_fixture:wrapped"],
+    package = ":pubspec",
 )
 
 flutter_plugin(
     name = "plugin_owner",
-    package_name = "code_asset_owner",
     srcs = ["lib/owner.dart"],
-    code_assets = ["//flutter/tests/code_asset_fixture:wrapped"],
+    package = ":pubspec",
     platforms = [
         "android",
         "ios",
@@ -35,19 +40,16 @@ flutter_plugin(
     ],
 )
 
-dart_library(
-    name = "bare_owner",
+dart_package_metadata(
+    name = "bare_owner_pubspec",
     package_name = "bare_owner",
-    srcs = ["lib/owner.dart"],
     code_assets = ["//flutter/tests/code_asset_fixture:bare_code_asset"],
 )
 
-# The same id and library as `dart_owner`, bare.
 dart_library(
-    name = "bare_twin_owner",
-    package_name = "code_asset_owner",
+    name = "bare_owner",
     srcs = ["lib/owner.dart"],
-    code_assets = ["//flutter/tests/code_asset_fixture:code_asset"],
+    package = ":bare_owner_pubspec",
 )
 
 forwarding_package(

@@ -2,7 +2,7 @@ load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@rules_apple//apple:ios.bzl", "ios_application")
 load("@rules_apple//apple:macos.bzl", "macos_application")
 load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
-load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_test")
+load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_package_metadata", "dart_test")
 load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_library")
 load(
     "@rules_flutter//flutter:ios.bzl",
@@ -32,13 +32,18 @@ exports_files(["pubspec.lock"])
 # Shared: Flutter application (both entry points in single compilation)
 # =============================================================================
 
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "multi_window_example",
+)
+
 # iOS 13.0 minimum: UIScene / UIWindowSceneDelegate APIs (required for
 # multi-scene support) are unavailable before iOS 13.
 flutter_application(
     name = "app_flutter",
-    package_name = "multi_window_example",
     main = "lib/main.dart",
     minimum_os_version = "13.0",
+    package = ":pubspec",
     deps = [
         "@deps//:flutter",
         "@rules_flutter//flutter:material_icons",
@@ -242,8 +247,8 @@ dart_analysis_config(
 # the analyzer to stage.
 flutter_library(
     name = "app_lib",
-    package_name = "multi_window_example",
     srcs = glob(["lib/**/*.dart"]),
+    package = ":pubspec",
     deps = [
         "@deps//:flutter",
         "@rules_flutter//flutter:material_icons",

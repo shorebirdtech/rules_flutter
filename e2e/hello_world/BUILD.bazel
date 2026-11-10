@@ -1,7 +1,7 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@rules_apple//apple:ios.bzl", "ios_application")
 load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
-load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_test")
+load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_package_metadata", "dart_test")
 load("@rules_flutter//flutter:android.bzl", "flutter_android_app")
 load("@rules_flutter//flutter:defs.bzl", "flutter_aot_snapshot", "flutter_application", "flutter_asset_bundle", "flutter_kernel", "flutter_library", "flutter_profile_build", "flutter_program_test", "flutter_suite_program", "flutter_test", "flutter_tester_binary")
 load(
@@ -29,11 +29,16 @@ exports_files(["pubspec.lock"])
 
 # -- Advanced: low-level compilation rules (most users use flutter_application) --
 
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "hello_world",
+)
+
 flutter_kernel(
     name = "hello_world",
-    package_name = "hello_world",
     srcs = ["lib/common_widgets.dart"],
     main = "lib/main.dart",
+    package = ":pubspec",
     deps = [
         "@deps//:cupertino_icons",
         "@deps//:flutter",
@@ -44,9 +49,9 @@ flutter_kernel(
 
 flutter_aot_snapshot(
     name = "hello_world_aot",
-    package_name = "hello_world",
     srcs = ["lib/common_widgets.dart"],
     main = "lib/main.dart",
+    package = ":pubspec",
     deps = [
         "@deps//:cupertino_icons",
         "@deps//:flutter",
@@ -63,9 +68,9 @@ flutter_asset_bundle(
 
 flutter_application(
     name = "hello_world_app",
-    package_name = "hello_world",
     srcs = ["lib/common_widgets.dart"],
     main = "lib/main.dart",
+    package = ":pubspec",
     deps = [
         "@deps//:cupertino_icons",
         "@deps//:flutter",
@@ -77,8 +82,8 @@ flutter_application(
 # An app that opens the licence page, to see the bundled licences listed.
 flutter_application(
     name = "licences_app",
-    package_name = "hello_world",
     main = "lib/licences_main.dart",
+    package = ":pubspec",
     deps = [
         "@deps//:cupertino_icons",
         "@deps//:flutter",
@@ -95,8 +100,8 @@ flutter_macos_app(
 
 flutter_web_app(
     name = "licences_web",
-    package_name = "hello_world",
     main = "lib/licences_main.dart",
+    package = ":pubspec",
     deps = [
         "@deps//:cupertino_icons",
         "@deps//:flutter",
@@ -230,8 +235,8 @@ flutter_windows_app(
 
 flutter_web_app(
     name = "hello_world_web",
-    package_name = "hello_world",
     srcs = ["lib/common_widgets.dart"],
+    package = ":pubspec",
     deps = [
         "@deps//:cupertino_icons",
         "@deps//:flutter",
@@ -248,12 +253,12 @@ flutter_web_app(
 # regression-check the bootstrap + harness wired into //flutter/private:flutter_test.
 flutter_test(
     name = "widget_test",
-    package_name = "hello_world",
     srcs = [
         "lib/common_widgets.dart",
         "lib/main.dart",
     ],
     main = "test/widget_test.dart",
+    package = ":pubspec",
     deps = [
         "@deps//:cupertino_icons",
         "@deps//:flutter",
@@ -267,8 +272,8 @@ flutter_test(
 # (`//asset_keys:own_asset_keys_test`) loads them bare.
 flutter_test(
     name = "dependency_asset_keys_test",
-    package_name = "hello_world",
     main = "test/dependency_asset_keys_test.dart",
+    package = ":pubspec",
     deps = [
         "//asset_keys",
         "@deps//:flutter",
@@ -280,8 +285,8 @@ flutter_test(
 # engine's included.
 flutter_test(
     name = "licences_test",
-    package_name = "hello_world",
     main = "test/licences_test.dart",
+    package = ":pubspec",
     deps = [
         "@deps//:cupertino_icons",
         "@deps//:flutter",
@@ -295,12 +300,12 @@ flutter_test(
 # package. Its binding must initialise and pump a widget under flutter_tester.
 flutter_test(
     name = "integration_binding_test",
-    package_name = "hello_world",
     srcs = [
         "lib/common_widgets.dart",
         "lib/main.dart",
     ],
     main = "test/integration_binding_test.dart",
+    package = ":pubspec",
     deps = [
         "@deps//:cupertino_icons",
         "@deps//:flutter",
@@ -325,8 +330,8 @@ build_test(
 # declares the other three beside it. See test/asserts/asserts_fire_test.dart.
 flutter_test(
     name = "asserts_fire_test",
-    package_name = "hello_world",
     main = "test/asserts/asserts_fire_test.dart",
+    package = ":pubspec",
     deps = [
         "//asserts_dep",
         "@deps//:flutter",
@@ -343,8 +348,8 @@ build_variant_tests(
 # `flutter test`, in the same four builds. See test/asserts/widget_creation_test.dart.
 flutter_test(
     name = "widget_creation_test",
-    package_name = "hello_world",
     main = "test/asserts/widget_creation_test.dart",
+    package = ":pubspec",
     deps = [
         "@deps//:flutter",
         "@deps//:flutter_test",
@@ -360,9 +365,9 @@ build_variant_tests(
 # See test/flavor_test.dart and test/no_flavor_test.dart.
 flutter_test(
     name = "flavor_test",
-    package_name = "hello_world",
     flavor = "paid",
     main = "test/flavor_test.dart",
+    package = ":pubspec",
     deps = [
         "@deps//:flutter",
         "@deps//:flutter_test",
@@ -371,8 +376,8 @@ flutter_test(
 
 flutter_test(
     name = "no_flavor_test",
-    package_name = "hello_world",
     main = "test/no_flavor_test.dart",
+    package = ":pubspec",
     deps = [
         "@deps//:flutter",
         "@deps//:flutter_test",
@@ -384,7 +389,6 @@ flutter_test(
 # MODULE.bazel): change them with it. See test/flutter_version_test.dart.
 flutter_test(
     name = "flutter_version_test",
-    package_name = "hello_world",
     build_name = "2.3.4",
     build_number = "7",
     env = {
@@ -393,6 +397,7 @@ flutter_test(
         "EXPECTED_FLUTTER_ENGINE_REVISION": "89c39edfdf",
     },
     main = "test/flutter_version_test.dart",
+    package = ":pubspec",
     deps = [
         "@deps//:flutter",
         "@deps//:flutter_test",
@@ -417,8 +422,8 @@ build_variant_tests(
 [
     flutter_test(
         name = "const_violation_%s_test" % where,
-        package_name = "hello_world",
         main = "test/asserts/const_violation_%s_test.dart" % where,
+        package = ":pubspec",
         tags = ["manual"],
         deps = [
             "//asserts_dep",
@@ -440,9 +445,9 @@ build_variant_tests(
 # An Impeller-only shader, drawn in flutter_tester running Impeller.
 flutter_test(
     name = "impeller_shader_test",
-    package_name = "hello_world",
     enable_impeller = True,
     main = "test/impeller_shader_test.dart",
+    package = ":pubspec",
     shaders = ["shaders/indexed.frag"],
     deps = [
         "@deps//:flutter",
@@ -455,9 +460,9 @@ flutter_test(
 # not `testonly`; the test reads that output.
 flutter_tester_binary(
     name = "render_swatch",
-    package_name = "hello_world",
     enable_impeller = True,
     main = "tool/render_swatch.dart",
+    package = ":pubspec",
     deps = [
         "@deps//:flutter",
         "@deps//:flutter_test",
@@ -485,8 +490,8 @@ dart_test(
 # directories up from the test.
 flutter_test(
     name = "test_config_test",
-    package_name = "hello_world",
     main = "test/configured/nested/test_config_test.dart",
+    package = ":pubspec",
     deps = [
         "@deps//:flutter",
         "@deps//:flutter_test",
@@ -496,8 +501,8 @@ flutter_test(
 # The same, with `main` spelled as an absolute label in this package.
 flutter_test(
     name = "test_config_label_test",
-    package_name = "hello_world",
     main = "//:test/configured/nested/test_config_test.dart",
+    package = ":pubspec",
     deps = [
         "@deps//:flutter",
         "@deps//:flutter_test",
@@ -506,8 +511,8 @@ flutter_test(
 
 flutter_test(
     name = "bazel_protocol_test",
-    package_name = "hello_world",
     main = "test/bazel_protocol_test.dart",
+    package = ":pubspec",
     deps = [
         "@deps//:flutter",
         "@deps//:flutter_test",
@@ -516,8 +521,8 @@ flutter_test(
 
 flutter_test(
     name = "bazel_protocol_sharded_test",
-    package_name = "hello_world",
     main = "test/bazel_protocol_test.dart",
+    package = ":pubspec",
     shard_count = 3,
     deps = [
         "@deps//:flutter",
@@ -530,12 +535,12 @@ flutter_test(
 # flag-beats-attr precedence.
 flutter_test(
     name = "dart_defines_test",
-    package_name = "hello_world",
     defines = [
         "E2E_ATTR=from_attr",
         "E2E_WINNER=attr",
     ],
     main = "test/dart_defines_test.dart",
+    package = ":pubspec",
     deps = [
         "@deps//:flutter_test",
     ],
@@ -549,10 +554,10 @@ flutter_test(
 # `bazel run //:program_pair_test -- --update-goldens`.
 flutter_suite_program(
     name = "program_pair_program",
-    package_name = "hello_world",
     testonly = True,
     data = glob(["test/goldens/**"]),
     main = "test/program_pair_test.dart",
+    package = ":pubspec",
     deps = [
         "@deps//:flutter",
         "@deps//:flutter_test",
@@ -569,8 +574,8 @@ flutter_program_test(
 # working bootstrap for tests that don't initialize any Flutter binding.
 flutter_test(
     name = "hello_test",
-    package_name = "hello_world",
     main = "hello_test.dart",
+    package = ":pubspec",
     deps = [
         "@deps//:flutter_test",
     ],
@@ -759,8 +764,8 @@ dart_analysis_config(
 # the analyzer to stage.
 flutter_library(
     name = "app_lib",
-    package_name = "hello_world",
     srcs = glob(["lib/**/*.dart"]),
+    package = ":pubspec",
     deps = [
         "@deps//:cupertino_icons",
         "@deps//:flutter",

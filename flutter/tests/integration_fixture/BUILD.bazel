@@ -1,3 +1,4 @@
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("//flutter:integration_test.bzl", "flutter_android_app_integration_test", "flutter_android_device_runner", "flutter_android_emulator_runner", "flutter_android_system_image", "flutter_application_variant", "flutter_chrome_runner", "flutter_desktop_app_integration_test", "flutter_integration_bootstrap", "flutter_ios_app_integration_test", "flutter_ios_simulator_runner", "flutter_web_app_integration_test")
 load("//flutter:web.bzl", "flutter_web_bundle")
 load("//flutter/tests:fake_android_sdk.bzl", "fake_android_sdk")
@@ -126,11 +127,16 @@ flutter_chrome_runner(
     tags = ["manual"],
 )
 
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "integration_fixture",
+)
+
 # A web bundle run by the web test rule, in the fake browser.
 flutter_web_bundle(
     name = "web_app",
-    package_name = "integration_fixture",
     main = "test/a_test.dart",
+    package = ":pubspec",
     tags = ["manual"],
 )
 
@@ -146,9 +152,9 @@ flutter_web_app_integration_test(
 # checked against the bundle's `deps`.
 flutter_web_bundle(
     name = "web_unchecked",
-    package_name = "integration_fixture",
     srcs = ["test/b_test.dart"],
     main = "test/a_test.dart",
+    package = ":pubspec",
     tags = ["manual"],
     unchecked_srcs = ["test/flutter_test_config.dart"],
 )

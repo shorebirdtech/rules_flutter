@@ -1,6 +1,12 @@
 load("@bazel_skylib//rules:diff_test.bzl", "diff_test")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("//flutter:defs.bzl", "flutter_test")
+
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "suite",
+)
 
 # `flutter_test` is a macro over `flutter_suite_program` and
 # `flutter_program_test`. These queries are what a user's `kind(...)` sees:
@@ -9,10 +15,10 @@ load("//flutter:defs.bzl", "flutter_test")
 # the attributes only a test has (`size`, `shard_count`) are on it alone.
 flutter_test(
     name = "suite",
-    package_name = "suite",
     size = "large",
     env = {"A": "b"},
     main = "main.dart",
+    package = ":pubspec",
     shard_count = 2,
     tags = [
         "manual",

@@ -31,12 +31,13 @@
 ///     sources the build declared — the gap that let a reload report success
 ///     over machine code from before the edit.
 ///  7. **A library delivered as a code asset patches the same way.** `sub`
-///     reaches the app on a plain `dart_library`'s `code_assets`, from a rule
-///     that is not rules_dart's, and is called through `@Native`. The
-///     `flutter_native_library` wrapper in those `code_assets` is the only place
-///     its contract and patch builder are declared: without the contract, the
-///     sources the build declares for it make every edit a reload withheld over
-///     a library nothing describes, and without the builder nothing is armed.
+///     reaches the app through the `code_assets` of a plain `dart_library`
+///     package's `dart_package_metadata`, from a rule that is not rules_dart's,
+///     and is called through `@Native`. The `flutter_native_library` wrapper in
+///     those `code_assets` is the only place its contract and patch builder are
+///     declared: without the contract, the sources the build declares for it
+///     make every edit a reload withheld over a library nothing describes, and
+///     without the builder nothing is armed.
 ///  8. **One library serving two asset ids patches once, and keeps its state.**
 ///     `counter` serves `package:count_a` and `package:count_b` from one image,
 ///     through one wrapper per id that all name one `hot_patch`. The builder is

@@ -6,6 +6,7 @@ flutter_library(
     name = "own",
     srcs = ["own.dart"],
     assets = ["r.txt"],
+    package = "//apps/own:pubspec",
     visibility = ["//apps/own:__pkg__"],
     deps = ["@deps//:flutter"],
 )

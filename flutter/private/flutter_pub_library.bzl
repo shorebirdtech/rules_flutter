@@ -23,7 +23,7 @@ pass through rules_dart. It accepts rules_dart's own `pub_package_member` too,
 which a pure-Dart package is, so one cycle can mix packages of both kinds.
 """
 
-load("@rules_dart//dart:providers.bzl", "DartInfo")
+load("@rules_dart//dart:providers.bzl", "DartInfo", "DartPackageMetadataInfo")
 load("@rules_dart//dart:utils.bzl", "dart_info", "web_compiler_reset")
 load("@rules_dart//dart/pub:pub_library.bzl", "DartPackageMemberInfo", "dart_package_member_info")
 load("@rules_java//java/common:java_info.bzl", "JavaInfo")
@@ -39,7 +39,8 @@ FlutterPubMemberInfo = provider(
 )
 
 def _flutter_pub_member_impl(ctx):
-    package_name = ctx.attr.package_name
+    metadata = ctx.attr.package[DartPackageMetadataInfo]
+    package_name = metadata.package_name
     for f in ctx.files.resources:
         if f.extension == "dart":
             fail(
@@ -49,15 +50,9 @@ def _flutter_pub_member_impl(ctx):
             )
     member = dart_package_member_info(
         label = ctx.label,
-        package_name = package_name,
-        language_version = ctx.attr.language_version,
+        metadata = metadata,
         srcs = ctx.files.srcs,
         resources = ctx.files.resources,
-        code_assets = ctx.attr.code_assets,
-        version = ctx.attr.version,
-        link_hook = ctx.file.link_hook,
-        license_file = ctx.file.license_file,
-        unreplaced_hook = ctx.attr.unreplaced_hook,
     )
     return [
         member,
@@ -74,9 +69,10 @@ def _flutter_pub_member_impl(ctx):
 flutter_pub_member = rule(
     implementation = _flutter_pub_member_impl,
     attrs = PLUGIN_PACKAGE_ATTRS | {
-        "package_name": attr.string(
+        "package": attr.label(
             mandatory = True,
-            doc = "The pub package's name.",
+            providers = [DartPackageMetadataInfo],
+            doc = "The package's `dart_package_metadata`, which states its facts.",
         ),
     },
     doc = "One Flutter pub package's files and facts, which a `flutter_pub_library` builds; not a library by itself. A plugin when `plugin_platforms_json` says so; otherwise it contributes only its assets, fonts and shaders.",

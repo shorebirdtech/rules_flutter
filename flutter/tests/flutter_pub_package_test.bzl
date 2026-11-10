@@ -619,6 +619,31 @@ def _members_state_their_license_file_test_impl(ctx):
 
 members_state_their_license_file_test = unittest.make(_members_state_their_license_file_test_impl)
 
+def _members_name_their_package_metadata_test_impl(ctx):
+    """Both member kinds state the package's facts on a `dart_package_metadata` they name."""
+    env = unittest.begin(ctx)
+
+    dart = make_dart_member_build_content("meta", "3.4", ["//:meta_asset"], "hook/build.dart", version = "1.17.0", link_hook = "hook/link.dart")
+    flutter = make_flutter_member_build_content("cupertino_icons", "3.4", [], "", version = "1.0.8")
+    for content in [dart, flutter]:
+        asserts.true(env, 'load("@rules_dart//dart:defs.bzl", "dart_package_metadata")' in content, content)
+        asserts.true(env, '\ndart_package_metadata(\n    name = "pubspec",\n' in content, content)
+        asserts.true(env, '\n    package = ":pubspec",' in content, content)
+        asserts.false(env, "\n    package_name = " in content.split("dart_package_metadata(")[1].split(")\n")[1], content)
+    asserts.true(env, '\n    package_name = "meta",\n    language_version = "3.4",\n    version = "1.17.0",' in dart, dart)
+    asserts.true(env, '\n    build_hook = "hook/build.dart",' in dart, dart)
+    asserts.true(env, '\n    link_hook = "hook/link.dart",' in dart, dart)
+    asserts.true(env, '\n        "//:meta_asset",' in dart, dart)
+
+    # The package called `pubspec` has a library of that name.
+    named_pubspec = make_dart_member_build_content("pubspec", "3.4", [], "")
+    asserts.true(env, '\n    name = "pubspec_metadata",' in named_pubspec, named_pubspec)
+    asserts.true(env, '\n    package = ":pubspec_metadata",' in named_pubspec, named_pubspec)
+
+    return unittest.end(env)
+
+members_name_their_package_metadata_test = unittest.make(_members_name_their_package_metadata_test_impl)
+
 def _overlay_substitutes_the_license_test_impl(ctx):
     """An overlay's `{LICENSE}` becomes the attribute line, or its line goes."""
     env = unittest.begin(ctx)
@@ -980,6 +1005,7 @@ def flutter_pub_package_test_suite(name):
         overlay_substitutes_the_dependencies_test,
         overlay_substitutes_the_license_test,
         members_state_their_license_file_test,
+        members_name_their_package_metadata_test,
         hardcoded_overlay_dependency_is_rejected_test,
         removed_hub_placeholder_is_refused_test,
         parse_gradle_android_namespace_test,

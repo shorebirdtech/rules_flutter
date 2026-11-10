@@ -9,6 +9,7 @@ sources are all generated.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("//flutter:web.bzl", "flutter_web_bundle")
 load("//flutter/private:flutter_application.bzl", "flutter_application")
 
@@ -139,16 +140,21 @@ def dev_config_test_suite(name):
     Args:
         name: The test suite name.
     """
+    dart_package_metadata(
+        name = "_dc_native_pubspec",
+        package_name = "dc_fixture",
+        tags = ["manual"],
+    )
     flutter_application(
         name = "_dc_native",
-        package_name = "dc_fixture",
+        package = ":_dc_native_pubspec",
         main = "lib/web_fixture_main.dart",
         deps = ["//flutter/tests/dev_config_fixture:prebuilt"],
         tags = ["manual"],
     )
     flutter_web_bundle(
         name = "_dc_web",
-        package_name = "dc_fixture",
+        package = ":_dc_native_pubspec",
         main = "lib/web_fixture_main.dart",
         deps = ["//flutter/tests/dev_config_fixture:prebuilt"],
         tags = ["manual"],

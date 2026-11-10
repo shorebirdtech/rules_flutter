@@ -135,7 +135,12 @@ def _flutter_gen_l10n_repo_impl(repository_ctx):
     ])
 
     repository_ctx.file("BUILD.bazel", """\
-load("@rules_dart//dart:defs.bzl", "dart_library")
+load("@rules_dart//dart:defs.bzl", "dart_library", "dart_package_metadata")
+
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "flutter_gen_l10n",
+)
 
 # The gen-l10n generator carved out of flutter_tools {version}. See
 # rules_flutter's flutter_gen_l10n_repo.bzl for what was cut and why, and for
@@ -145,7 +150,7 @@ dart_library(
     srcs = [
 {srcs}
     ],
-    package_name = "flutter_gen_l10n",
+    package = ":pubspec",
     deps = [
 {deps}
     ],

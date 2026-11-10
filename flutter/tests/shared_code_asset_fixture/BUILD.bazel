@@ -8,6 +8,7 @@ out, not at what they contain.
 """
 
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("//flutter:android.bzl", "flutter_android_bundle")
 load("//flutter:defs.bzl", "flutter_application", "flutter_native_library")
 load("//flutter:ios.bzl", "flutter_ios_native_frameworks_gen")
@@ -17,6 +18,11 @@ load("//flutter/private:flutter_android_application.bzl", _flutter_android_bundl
 load("//flutter/tests/code_asset_fixture:stand_in_code_asset.bzl", "stand_in_code_asset")
 
 package(default_visibility = ["//flutter/tests:__subpackages__"])
+
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "shared_app",
+)
 
 [
     [
@@ -132,9 +138,9 @@ _DEPS = [
 [
     flutter_application(
         name = name,
-        package_name = "shared_app",
         code_assets = code_assets,
         main = "main.dart",
+        package = ":pubspec",
         tags = ["manual"],
         deps = _DEPS,
     )
@@ -207,8 +213,8 @@ flutter_native_asset(
 
 flutter_application(
     name = "app_declared",
-    package_name = "shared_app",
     main = "main.dart",
+    package = ":pubspec",
     tags = ["manual"],
     deps = [
         "//flutter/tests/shared_code_asset_fixture/a",

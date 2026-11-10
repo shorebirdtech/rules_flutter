@@ -1,11 +1,16 @@
-load("@rules_dart//dart:defs.bzl", "dart_library")
+load("@rules_dart//dart:defs.bzl", "dart_library", "dart_package_metadata")
+
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "shared_a",
+    code_assets = ["//flutter/tests/shared_code_asset_fixture:a_own"],
+)
 
 # A bindings package that declares a standalone library of its own, for its own
 # tests. An application can serve its id from another library.
 dart_library(
     name = "a",
-    package_name = "shared_a",
     srcs = ["lib/a.dart"],
-    code_assets = ["//flutter/tests/shared_code_asset_fixture:a_own"],
+    package = ":pubspec",
     visibility = ["//flutter/tests:__subpackages__"],
 )

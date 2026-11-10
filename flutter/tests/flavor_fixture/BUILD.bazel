@@ -1,16 +1,22 @@
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("//flutter:defs.bzl", "flutter_library")
 
 package(default_visibility = ["//flutter/tests:__pkg__"])
 
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "flavor_test_lib",
+)
+
 # A pub package's contribution: one asset for every build, one for the paid flavor.
 flutter_library(
     name = "flavor_lib",
-    package_name = "flavor_test_lib",
     srcs = ["flavor_pkg.dart"],
     asset_flavors = {"assets/paid.txt": ["paid"]},
     assets = [
         "assets/all.txt",
         "assets/paid.txt",
     ],
+    package = ":pubspec",
     tags = ["manual"],
 )

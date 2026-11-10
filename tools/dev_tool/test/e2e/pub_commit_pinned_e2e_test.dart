@@ -176,10 +176,11 @@ void main() {
         git: [GitPackage('gdep')],
         files: {
           'BUILD.bazel':
-              'load("@rules_dart//dart:defs.bzl", "dart_library")\n'
+              'load("@rules_dart//dart:defs.bzl", "dart_library", "dart_package_metadata")\n'
+              'dart_package_metadata(name = "pubspec", package_name = "app")\n'
               'dart_library(\n'
               '    name = "app",\n'
-              '    package_name = "app",\n'
+              '    package = ":pubspec",\n'
               '    srcs = ["lib/app.dart"],\n'
               '    deps = ["@pubhub//:uses_gdep"],\n'
               ')\n',
@@ -275,10 +276,11 @@ void main() {
             '    version: "1.0.0"\n',
         files: {
           'third_party/forked/BUILD.bazel':
-              'load("@rules_dart//dart:defs.bzl", "dart_library")\n'
+              'load("@rules_dart//dart:defs.bzl", "dart_library", "dart_package_metadata")\n'
+              'dart_package_metadata(name = "pubspec", package_name = "forked")\n'
               'dart_library(\n'
               '    name = "forked_fork",\n'
-              '    package_name = "forked",\n'
+              '    package = ":pubspec",\n'
               '    srcs = ["lib/forked.dart"],\n'
               '    visibility = ["//visibility:public"],\n'
               ')\n',

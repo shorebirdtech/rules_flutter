@@ -1,4 +1,11 @@
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("//tools:bundle.bzl", "bundled_app")
+
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "own",
+    visibility = ["//visibility:public"],
+)
 
 # An application whose own package is split over BUILD files under its `lib/`:
 # one library left unnamed (its derived name is the application's) and one
@@ -7,9 +14,9 @@ load("//tools:bundle.bzl", "bundled_app")
 # them, with no `packages/own/` in front.
 bundled_app(
     name = "app",
-    package_name = "own",
     assets = ["assets/a.txt"],
     main = "//apps/own/lib:main.dart",
+    package = ":pubspec",
     deps = [
         "//apps/own/lib:own",
         "//apps/own/lib/widgets",

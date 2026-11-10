@@ -1,5 +1,5 @@
 load("@rules_apple//apple:ios.bzl", "ios_application")
-load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_test")
+load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_package_metadata", "dart_test")
 load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_library")
 load(
     "@rules_flutter//flutter:ios.bzl",
@@ -29,9 +29,13 @@ exports_files(["pubspec.lock"])
 # Shared: Flutter application (Dart compilation)
 # =============================================================================
 
+dart_package_metadata(
+    name = "ios_example_pubspec",
+    package_name = "ios_example",
+)
+
 flutter_application(
     name = "app_flutter",
-    package_name = "ios_example",
     # A first-party asset so the dev loop has something real to deliver here.
     # iOS is the platform where this mattered: the runner reaches this target
     # through a split transition, so the app's `flutter_assets` tree lives in a
@@ -45,6 +49,7 @@ flutter_application(
     build_number = "42",
     main = "lib/main.dart",
     minimum_os_version = IOS_MINIMUM_OS_VERSION,
+    package = ":ios_example_pubspec",
     deps = [
         "@deps//:flutter",
         "@rules_flutter//flutter:material_icons",
@@ -102,10 +107,10 @@ flutter_ios_app(
 # app has to be `testonly` too: `:testonly_app_build_test`.
 flutter_application(
     name = "testonly_flutter",
-    package_name = "ios_example",
     testonly = True,
     main = "lib/testonly_main.dart",
     minimum_os_version = IOS_MINIMUM_OS_VERSION,
+    package = ":ios_example_pubspec",
     deps = ["@deps//:flutter"],
 )
 
@@ -115,6 +120,11 @@ flutter_ios_app(
     application = ":testonly_flutter",
     bundle_id = "com.rulesflutter.ios.example.testonly",
     tags = ["manual"],
+)
+
+dart_package_metadata(
+    name = "ios_example_second_pubspec",
+    package_name = "ios_example_second",
 )
 
 # A second app in the same package, built from a second application.
@@ -134,9 +144,9 @@ flutter_ios_app(
 # directories where nothing can collide.
 flutter_application(
     name = "app_flutter_second",
-    package_name = "ios_example_second",
     main = "lib/main.dart",
     minimum_os_version = IOS_MINIMUM_OS_VERSION,
+    package = ":ios_example_second_pubspec",
     deps = [
         "@deps//:flutter",
         "@rules_flutter//flutter:material_icons",
@@ -336,9 +346,9 @@ flutter_ios_simulator_build_test(
 # `video_player_avfoundation` is four targets, one of them iOS-only.
 flutter_application(
     name = "swiftpm_plugins_flutter",
-    package_name = "ios_example",
     main = "lib/swiftpm_plugins_main.dart",
     minimum_os_version = IOS_MINIMUM_OS_VERSION,
+    package = ":ios_example_pubspec",
     deps = [
         "@deps//:ffi_dynamic_plugin",
         "@deps//:firebase_core",
@@ -496,8 +506,8 @@ dart_analysis_config(
 # the analyzer to stage.
 flutter_library(
     name = "app_lib",
-    package_name = "ios_example",
     srcs = glob(["lib/**/*.dart"]),
+    package = ":ios_example_pubspec",
     deps = [
         "@deps//:audio_session",
         "@deps//:ffi_dynamic_plugin",
@@ -706,9 +716,9 @@ dart_test(
 # else, so the camera's code is in it and the microphone's is not.
 flutter_application(
     name = "permission_flutter",
-    package_name = "ios_example",
     main = "lib/permission_main.dart",
     minimum_os_version = IOS_MINIMUM_OS_VERSION,
+    package = ":ios_example_pubspec",
     deps = [
         "@deps//:flutter",
         "@deps//:permission_handler",
@@ -727,9 +737,9 @@ flutter_ios_app(
 # the app sets for their manifests, as a shell would under `flutter build`.
 flutter_application(
     name = "audio_session_flutter",
-    package_name = "ios_example",
     main = "lib/audio_session_main.dart",
     minimum_os_version = IOS_MINIMUM_OS_VERSION,
+    package = ":ios_example_pubspec",
     deps = [
         "@deps//:audio_session",
         "@deps//:flutter",

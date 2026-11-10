@@ -1,5 +1,11 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
+
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "int64",
+)
 
 # An app holding 64-bit identifiers that keeps the dart2js fallback. dart2wasm
 # compiles it with an `Int64List` and the largest 64-bit integer; dart2js, and
@@ -9,8 +15,8 @@ load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
 # JavaScript one.
 flutter_web_app(
     name = "int64_app",
-    package_name = "int64",
     app_name = "Int64 identifiers",
+    package = ":pubspec",
     deps = [
         "//int64/ids",
         "@deps//:flutter",
@@ -22,8 +28,8 @@ flutter_web_app(
 # `List<int>` variant, and the end-to-end test shows it on screen.
 flutter_web_app(
     name = "int64_app_js_fallback",
-    package_name = "int64",
     app_name = "Int64 identifiers (JavaScript)",
+    package = ":pubspec",
     wasm_browsers = [
         "gecko",
         "webkit",

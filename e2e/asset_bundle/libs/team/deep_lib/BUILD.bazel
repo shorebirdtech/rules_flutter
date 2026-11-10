@@ -1,10 +1,16 @@
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_flutter//flutter:defs.bzl", "flutter_library")
+
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "deep_lib",
+)
 
 flutter_library(
     name = "deep_lib",
-    package_name = "deep_lib",
     srcs = ["lib/deep_lib.dart"],
     assets = glob(["assets/**"]),
+    package = ":pubspec",
     visibility = ["//visibility:public"],
     deps = ["@deps//:flutter"],
 )

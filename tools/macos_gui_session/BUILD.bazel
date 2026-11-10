@@ -1,4 +1,9 @@
-load("@rules_dart//dart:defs.bzl", "dart_library")
+load("@rules_dart//dart:defs.bzl", "dart_library", "dart_package_metadata")
+
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "rules_flutter_macos_gui_session",
+)
 
 # Whether a macOS desktop session can show a window, kept awake for a run, and
 # why not when it cannot. A shipped library: the integration test runner checks
@@ -6,8 +11,8 @@ load("@rules_dart//dart:defs.bzl", "dart_library")
 # workspaces' tests, which are not shipped.
 dart_library(
     name = "macos_gui_session",
-    package_name = "rules_flutter_macos_gui_session",
     srcs = glob(["lib/**/*.dart"]),
+    package = ":pubspec",
     # Public because `flutter_pub.from_lock(resolve = ...)` in MODULE.bazel maps
     # the dev tool's lock entry for this package to it, and the hub's repository
     # aliases it from outside this repository's packages.

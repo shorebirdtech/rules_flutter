@@ -1,16 +1,22 @@
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("//flutter:defs.bzl", "flutter_application")
 load("//flutter:integration_test.bzl", "flutter_application_variant")
 
 package(default_visibility = ["//flutter/tests:__subpackages__"])
 
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "variant_app",
+)
+
 # The application the variants rebuild: a source beside its `main`, an asset, a
 # plugin, all in this package.
 flutter_application(
     name = "app",
-    package_name = "variant_app",
     srcs = ["lib/helper.dart"],
     assets = ["assets/a.txt"],
     main = "lib/main.dart",
+    package = ":pubspec",
     tags = ["manual"],
     deps = ["//flutter/tests/variant_fixture/plugins/base:base_plugin"],
 )
@@ -27,8 +33,8 @@ flutter_application_variant(
 # The application of a flavor's target.
 flutter_application(
     name = "flavored_app",
-    package_name = "variant_app",
     flavor = "paid",
     main = "lib/main.dart",
+    package = ":pubspec",
     tags = ["manual"],
 )

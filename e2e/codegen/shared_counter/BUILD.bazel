@@ -8,7 +8,7 @@ tree.
 
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
-load("@rules_dart//dart:defs.bzl", "dart_code_asset", "dart_library")
+load("@rules_dart//dart:defs.bzl", "dart_code_asset", "dart_library", "dart_package_metadata")
 
 cc_library(
     name = "counter_cc",
@@ -33,11 +33,16 @@ dart_code_asset(
     shared_library = ":counter_own",
 )
 
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "shared_counter",
+    code_assets = [":own"],
+)
+
 dart_library(
     name = "shared_counter",
-    package_name = "shared_counter",
     srcs = ["lib/shared_counter.dart"],
-    code_assets = [":own"],
+    package = ":pubspec",
     visibility = ["//:__pkg__"],
 )
 

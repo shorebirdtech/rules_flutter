@@ -1,4 +1,9 @@
-load("@rules_dart//dart:defs.bzl", "dart_library")
+load("@rules_dart//dart:defs.bzl", "dart_library", "dart_package_metadata")
+
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "web_branches_dep",
+)
 
 # A package a web fixture in `web_test.bzl` depends on, so the tests there can
 # see how often each compile's package config names it. In a directory of its
@@ -6,7 +11,7 @@ load("@rules_dart//dart:defs.bzl", "dart_library")
 # root.
 dart_library(
     name = "web_branches_dep",
-    package_name = "web_branches_dep",
     srcs = ["lib/web_branches_dep.dart"],
+    package = ":pubspec",
     visibility = ["//flutter/tests:__pkg__"],
 )

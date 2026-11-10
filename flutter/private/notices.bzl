@@ -65,6 +65,11 @@ def package_licenses_of(deps, own = []):
         f = package_license_file(record)
         if f:
             listed[record.package_name] = f
+
+    # The program's own package is listed once, as its own: a library of it
+    # in `deps` names the same declaration, and so the same licence.
+    for name, _ in own:
+        listed.pop(name, None)
     return [(name, listed[name]) for name in sorted(listed)] + own
 
 def additional_licenses_of(deps, own = []):

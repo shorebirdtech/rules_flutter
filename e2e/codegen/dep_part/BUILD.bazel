@@ -1,25 +1,30 @@
-load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_codegen")
+load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_codegen", "dart_package_metadata")
 load("@rules_flutter//flutter:defs.bzl", "flutter_library")
 
 # Dependency package mixing a hand-written source with a generated `part`.
 # Consumed by //:app — exercises per-dependency source assembly and the dev
 # tool resolving a generated part in a NON-app package.
 
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "dep_part",
+)
+
 dart_codegen(
     name = "settings_gen",
-    package_name = "dep_part",
     src = "lib/settings.dart",
     generator = "tools/settings_generator.dart",
     output_suffixes = [".g.dart"],
+    package = ":pubspec",
 )
 
 flutter_library(
     name = "dep_part",
-    package_name = "dep_part",
     srcs = [
         "lib/settings.dart",
         ":settings_gen",
     ],
+    package = ":pubspec",
     visibility = ["//visibility:public"],
 )
 

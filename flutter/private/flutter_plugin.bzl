@@ -26,14 +26,14 @@ load("@build_bazel_rules_apple//apple:providers.bzl", "AppleResourceInfo")
 load("@build_bazel_rules_apple//apple/internal/aspects:resource_aspect.bzl", "apple_resource_aspect")
 load("@build_bazel_rules_swift//swift:swift.bzl", "SwiftInfo")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
-load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo")
-load("@rules_dart//dart:utils.bzl", "WEB_COMPILER_INDEPENDENT_ATTR", "dart_info", "derive_package_name", "derive_package_root", "web_compiler_reset_when_independent")
+load("@rules_dart//dart:providers.bzl", "DartInfo")
+load("@rules_dart//dart:utils.bzl", "WEB_COMPILER_INDEPENDENT_ATTR", "dart_info", "web_compiler_reset_when_independent")
 load("@rules_java//java/common:java_info.bzl", "JavaInfo")
 load("//flutter:providers.bzl", "FlutterDataAssetInfo", "FlutterInfo", "FlutterNativeAssetInfo")
 load("//flutter/private:common.bzl", "collect_binding_contracts", "collect_native_libs")
 load("//flutter/private:flutter_desktop_plugin_info.bzl", "FlutterLinuxPluginInfo", "FlutterWindowsPluginInfo")
-load("//flutter/private:flutter_info.bzl", "LINK_HOOK_ATTR", "flutter_info")
-load("//flutter/private:flutter_library.bzl", "ADDITIONAL_LICENSES_ATTR", "ASSET_FLAVORS_ATTR", "ASSET_PLATFORMS_ATTR", "LICENSE_FILE_ATTR", "SHADER_FLAVORS_ATTR", "SHADER_PLATFORMS_ATTR", "SKY_ENGINE_ATTR", "build_pub_contributions", "flutter_analyzable_info", "flutter_package_record", "own_additional_licenses")
+load("//flutter/private:flutter_info.bzl", "flutter_info")
+load("//flutter/private:flutter_library.bzl", "ADDITIONAL_LICENSES_ATTR", "ASSET_FLAVORS_ATTR", "ASSET_PLATFORMS_ATTR", "LIBRARY_PACKAGE_DOC", "SHADER_FLAVORS_ATTR", "SHADER_PLATFORMS_ATTR", "SKY_ENGINE_ATTR", "build_pub_contributions", "flutter_analyzable_info", "own_additional_licenses", "package_attr", "package_identity", "package_record")
 load("//flutter/private:native_sources.bzl", "collect_native_source_pairs", "native_sources_aspect")
 load("//flutter/private:swiftpm_app_settings.bzl", "FlutterSwiftPMAppLibraryInfo")
 load("//flutter/private:unbuilt_native_code.bzl", "FlutterUnbuiltNativeCodeInfo")
@@ -257,13 +257,10 @@ def plugin_contributions(ctx, package_name, package_root, declares_plugin):
     )
 
 def _flutter_plugin_impl(ctx):
-    package_name = derive_package_name(
-        ctx.attr.package_name,
-        ctx.label.package,
-        ctx.label.name,
-    )
-    package_root = derive_package_root(ctx.label.workspace_root, ctx.label.package)
-    package = flutter_package_record(ctx, package_name, package_root)
+    identity = package_identity(ctx)
+    package_name = identity.package_name
+    package_root = identity.package_root
+    package = package_record(ctx.label, identity)
 
     # A plugin contributes on more channels than a library does, but the shape
     # is the same: name what this target adds, and let each constructor merge
@@ -303,10 +300,7 @@ PLUGIN_PACKAGE_ATTRS = {
         doc = "Asset files to include: any file of this target's Dart package, keyed as `flutter_library.assets` is.",
         allow_files = True,
     ),
-    "package_name": attr.string(
-        doc = "The Dart package name. If omitted, derived from label.",
-    ),
-    "license_file": LICENSE_FILE_ATTR,
+    "package": package_attr(LIBRARY_PACKAGE_DOC),
     "additional_licenses": ADDITIONAL_LICENSES_ATTR,
     "platforms": attr.string_list(
         doc = "Platforms this plugin supports (android, ios, macos, linux, windows, web).",
@@ -330,32 +324,6 @@ PLUGIN_PACKAGE_ATTRS = {
     "native_deps": attr.label_list(
         doc = "Native dependencies. Use select() for platform-conditional deps.",
         aspects = [native_sources_aspect],
-    ),
-    "code_assets": attr.label_list(
-        doc = "`dart_code_asset` targets standing in for this package's " +
-              "`hook/build.dart` output. Declared on the owning package " +
-              "rather than on the consuming application so they propagate " +
-              "the way pub's own do — depending on the package is enough.",
-        providers = [DartCodeAssetInfo],
-    ),
-    "unreplaced_hook": attr.string(
-        doc = "Path of a build hook this package ships that nothing " +
-              "replaces, or empty. Recorded at repo generation; the " +
-              "application that depends on the package fails on it.",
-    ),
-    "version": attr.string(
-        doc = "The package's own version, as resolved by pub (e.g. `2.2.0`). " +
-              "Set automatically by the generated pub spokes; leave it empty on " +
-              "hand-written targets, which have no resolved version to state. " +
-              "Mirrors `dart_library`'s attribute, and has its one use: when a " +
-              "single package name arrives from two hubs, two records stating " +
-              "different versions fail the build instead of the first one " +
-              "silently standing in for the second. An empty version never " +
-              "conflicts.",
-    ),
-    "link_hook": LINK_HOOK_ATTR,
-    "language_version": attr.string(
-        doc = "Dart language version (`<major>.<minor>`) for this package's `package_config.json` entry. Mirrors `dart_library`'s attribute. Empty string means defer to the toolchain default.",
     ),
     "exports": attr.label_list(
         doc = "The plugin's Android libraries: a `flutter_android_plugin_library` or a `kt_android_library`, anything with `JavaInfo`. An Android app links the libraries of the plugins it depends on, and no others. Set this with `select()` on `@platforms//os:android`, with an empty list as the default, so that only an Android build loads and analyses it: `select({\"@platforms//os:android\": [\"//android:lib\"], \"//conditions:default\": []})`. Named `exports`, as a Java library's re-exported dependencies are, because rules_android dexes an APK's libraries one at a time by an aspect that follows `deps`, `exports` and `runtime_deps` and nothing else, so only an `exports` edge makes the library visible to it.",

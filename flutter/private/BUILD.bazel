@@ -274,7 +274,10 @@ bzl_library(
     name = "flutter_sky_engine_repo",
     srcs = ["flutter_sky_engine_repo.bzl"],
     visibility = ["//flutter:__subpackages__"],
-    deps = [":pinned"],
+    deps = [
+        ":package_metadata_content",
+        ":pinned",
+    ],
 )
 
 bzl_library(
@@ -955,8 +958,15 @@ bzl_library(
     visibility = ["//flutter:__subpackages__"],
     deps = [
         ":artifact_urls",
+        ":package_metadata_content",
         ":pinned",
     ],
+)
+
+bzl_library(
+    name = "package_metadata_content",
+    srcs = ["package_metadata_content.bzl"],
+    visibility = ["//flutter:__subpackages__"],
 )
 
 bzl_library(

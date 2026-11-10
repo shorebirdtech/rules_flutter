@@ -16,7 +16,7 @@ def _flutter_application_variant_impl(ctx):
     check_required_packages(ctx.label, deps, ctx.attr.requires_packages)
 
     # Everything not named here is the application's own: its package and so
-    # its `package:` URIs and asset keys, its assets, native dependencies and
+    # its `package:` URIs and asset keys (`package`, `package_root`), its assets, native dependencies and
     # build options. `label` in particular stays the application's, which is
     # what makes `package:<app>/…` imports in the new `main` resolve.
     #
@@ -87,9 +87,14 @@ change, and neither rebuilds what the program does not touch: the Flutter
 framework's and each package's kernels are shared with the application.
 
 ```starlark
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "my_app",
+)
+
 flutter_application(
     name = "app_flutter",
-    package_name = "my_app",
+    package = ":pubspec",
     main = "lib/main.dart",
     deps = ["@deps//:flutter"],
 )

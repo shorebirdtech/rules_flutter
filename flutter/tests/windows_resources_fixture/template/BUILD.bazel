@@ -1,13 +1,19 @@
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("//flutter:defs.bzl", "flutter_application")
 load("//flutter:windows.bzl", "flutter_windows_app")
 load("//flutter/tests:windows_resources_test.bzl", "windows_resources_test_suite", "windows_runner_title_test")
 
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "windows_resources_fixture",
+)
+
 # The application's build number is the app's.
 flutter_application(
     name = "app",
-    package_name = "windows_resources_fixture",
     build_number = "9",
     main = "//flutter/tests/windows_resources_fixture:main.dart",
+    package = ":pubspec",
     tags = ["manual"],
 )
 

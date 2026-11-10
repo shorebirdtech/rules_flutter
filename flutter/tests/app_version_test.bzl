@@ -9,6 +9,7 @@ Instantiated from `flutter/tests/app_version/BUILD.bazel`, beside its fixtures.
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("@build_bazel_rules_apple//apple:providers.bzl", "AppleBundleVersionInfo")
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("//flutter:android.bzl", "flutter_android_manifest_merge")
 load("//flutter:defs.bzl", "flutter_application")
 load("//flutter:ios.bzl", "flutter_apple_bundle_version")
@@ -271,9 +272,14 @@ def app_version_test_suite(name):
 
     # An app takes the version of the application it is built over; setting
     # the same one is fine, a different one is an error.
+    dart_package_metadata(
+        name = "_versioned_application_pubspec",
+        package_name = "app_version",
+        tags = ["manual"],
+    )
     flutter_application(
         name = "_versioned_application",
-        package_name = "app_version",
+        package = ":_versioned_application_pubspec",
         main = "main.dart",
         build_name = "2.1",
         build_number = "42",
@@ -388,7 +394,7 @@ def app_version_test_suite(name):
     # Web.
     flutter_web_bundle(
         name = "_web_default",
-        package_name = "app_version",
+        package = ":_versioned_application_pubspec",
         main = "main.dart",
         tags = ["manual"],
     )
@@ -401,7 +407,7 @@ def app_version_test_suite(name):
     )
     flutter_web_bundle(
         name = "_web_given",
-        package_name = "app_version",
+        package = ":_versioned_application_pubspec",
         main = "main.dart",
         build_name = "2.1.0-beta \"x\"",
         build_number = "42",
@@ -416,7 +422,7 @@ def app_version_test_suite(name):
     )
     flutter_web_bundle(
         name = "_web_two_versions",
-        package_name = "app_version",
+        package = ":_versioned_application_pubspec",
         main = "main.dart",
         version_json = "version.json",
         build_number = "42",

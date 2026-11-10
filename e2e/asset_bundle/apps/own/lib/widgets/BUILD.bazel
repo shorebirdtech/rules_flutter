@@ -2,7 +2,6 @@ load("@rules_flutter//flutter:defs.bzl", "flutter_library")
 
 flutter_library(
     name = "widgets",
-    package_name = "own",
     srcs = ["widgets.dart"],
     assets = [
         "pa.txt",
@@ -10,6 +9,7 @@ flutter_library(
     ],
     font_files = {"f.ttf": "lib/widgets/f.ttf"},
     fonts_json = '[{"family":"OwnFont","fonts":[{"asset":"lib/widgets/f.ttf"}]}]',
+    package = "//apps/own:pubspec",
     shaders = ["s.frag"],
     visibility = ["//apps/own:__pkg__"],
     deps = ["@deps//:flutter"],

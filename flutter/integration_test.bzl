@@ -88,7 +88,7 @@ def _find_test_config(name, src):
         lambda path: bool(native.glob([path], allow_empty = True)),
     )
 
-def _golden_service(name, deps, srcs, test_config, application = None, package_name = None):
+def _golden_service(name, deps, srcs, test_config, application = None, package = None):
     """The `flutter_test` that compares the test's goldens on the host.
 
     The host runner has no `dart:ui`, which comparing two pictures needs, so a
@@ -105,7 +105,7 @@ def _golden_service(name, deps, srcs, test_config, application = None, package_n
     does in its comparator's bootstrap, so a comparator or tolerance the config
     sets applies. Like `flutter test`'s, that service is compiled in the app's
     package, so the config imports the app's libraries as `package:<app>/…`:
-    the `application`'s, or for a test that has none, the `package_name` whose
+    the `application`'s, or for a test that has none, the `package` whose
     sources are among `srcs`. It is built with the config, the test's `deps`
     and the `srcs` it may import, and shared by the tests of the package that
     name all of the same.
@@ -117,8 +117,8 @@ def _golden_service(name, deps, srcs, test_config, application = None, package_n
         test_config: The test's `flutter_test_config.dart`, or None.
         application: The application the test runs, whose package the service
             is compiled in.
-        package_name: The package the service is compiled in, for a test with
-            no `application`.
+        package: The `dart_package_metadata` of the package the service is
+            compiled in, for a test with no `application`.
 
     Returns:
         The label of the service.
@@ -141,10 +141,10 @@ def _golden_service(name, deps, srcs, test_config, application = None, package_n
     # with different `deps` or `srcs` cannot share one that compiles with only
     # one of them.
     config = native.package_relative_label(test_config)
-    package = {"application": application} if application else {"package_name": package_name}
+    compiled_in = {"application": application} if application else {"package": package}
     built_with = [str(native.package_relative_label(d)) for d in sorted(deps)] + \
                  [str(native.package_relative_label(f)) for f in sorted(srcs)] + \
-                 [str(native.package_relative_label(application)) if application else package_name]
+                 [str(native.package_relative_label(application or package))]
     service = "__golden_service_%s_%d" % (
         "".join([c if c.isalnum() else "_" for c in config.name.elems()]),
         abs(hash(str(config) + "|" + "|".join(built_with))),
@@ -159,7 +159,7 @@ def _golden_service(name, deps, srcs, test_config, application = None, package_n
             tags = ["manual"],
             testonly = True,
             visibility = ["//visibility:private"],
-            **package
+            **compiled_in
         )
     return ":" + service
 
@@ -520,7 +520,7 @@ def flutter_linux_integration_test(
 def flutter_web_integration_test(
         name,
         src,
-        package_name,
+        package,
         deps,
         srcs = [],
         test_config = None,
@@ -557,8 +557,8 @@ def flutter_web_integration_test(
         src: The test file. Its `main` declares the tests, as for `flutter create`:
             `IntegrationTestWidgetsFlutterBinding.ensureInitialized()` and
             `testWidgets`, calling the app's own `main()`.
-        package_name: The Dart package name of the app (`pubspec.yaml`'s `name:`),
-            as `flutter_web_app` takes it.
+        package: The `dart_package_metadata` of the app's Dart package, as
+            `flutter_web_app` takes it.
         deps: The program's libraries: the app's own and what the test imports. It
             must bring `integration_test` and `flutter_test` (`@<hub>//:integration_test`
             and `@<hub>//:flutter_test`), which analysis fails without, naming them.
@@ -615,7 +615,7 @@ def flutter_web_integration_test(
     )
     flutter_web_app(
         name = app,
-        package_name = package_name,
+        package = package,
         main = ":%s.dart" % bootstrap,
         # The test, what it imports, and its config.
         srcs = srcs + [src] + ([test_config] if test_config else []),
@@ -633,8 +633,8 @@ def flutter_web_integration_test(
         name = name,
         app = ":" + app,
         src = src,
-        # The app's own sources are among `srcs`, in `package_name`.
-        golden_service = _golden_service(name, deps, srcs, test_config, package_name = package_name),
+        # The app's own sources are among `srcs`, in `package`.
+        golden_service = _golden_service(name, deps, srcs, test_config, package = package),
         env = env,
         data = data,
         include_tags = include_tags,

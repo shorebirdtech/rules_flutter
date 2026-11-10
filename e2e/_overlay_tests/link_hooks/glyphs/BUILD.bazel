@@ -1,4 +1,11 @@
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_flutter//flutter:defs.bzl", "flutter_plugin")
+
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "glyphs",
+    link_hook = "hook/link.dart",
+)
 
 # A package with a link hook: `hook/link.dart` reads the recorded uses of
 # `Glyph` and emits `package:glyphs/glyphs/index.json`, and fails the build on
@@ -7,7 +14,7 @@ load("@rules_flutter//flutter:defs.bzl", "flutter_plugin")
 flutter_plugin(
     name = "glyphs",
     srcs = glob(["lib/**/*.dart"]),
-    link_hook = "hook/link.dart",
+    package = ":pubspec",
     platforms = [],
     visibility = ["//visibility:public"],
     deps = [

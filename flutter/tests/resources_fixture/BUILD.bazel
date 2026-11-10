@@ -1,6 +1,12 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("//flutter:defs.bzl", "flutter_library", "flutter_plugin")
 load("//flutter/tests:dart_resources_test.bzl", "dart_in_resources_fails_test", "missing_font_fails_test", "resources_probe")
+
+dart_package_metadata(
+    name = "resources_fixture_pubspec",
+    package_name = "resources_fixture",
+)
 
 # A library whose lib/ holds a Dart source, a YAML file, and a shader. The
 # shader is deliberately listed on BOTH channels: `resources` says it is part
@@ -10,8 +16,8 @@ load("//flutter/tests:dart_resources_test.bzl", "dart_in_resources_fails_test", 
 # legitimately both — this fixture pins that coexistence.
 flutter_library(
     name = "resources_library",
-    package_name = "resources_fixture",
     srcs = ["lib/fixture.dart"],
+    package = ":resources_fixture_pubspec",
     resources = [
         "lib/data.yaml",
         "lib/glow.frag",
@@ -21,10 +27,15 @@ flutter_library(
     visibility = ["//flutter/tests:__pkg__"],
 )
 
+dart_package_metadata(
+    name = "resources_plugin_pubspec",
+    package_name = "resources_plugin",
+)
+
 flutter_plugin(
     name = "resources_plugin",
-    package_name = "resources_plugin",
     srcs = ["lib/fixture.dart"],
+    package = ":resources_plugin_pubspec",
     plugin_platforms_json = '{"web":{"pluginClass":"FixturePlugin"}}',
     resources = ["lib/data.yaml"],
 )
@@ -53,19 +64,29 @@ build_test(
     ],
 )
 
+dart_package_metadata(
+    name = "dart_in_resources_pubspec",
+    package_name = "dart_in_resources",
+)
+
 # Mis-filed Dart source: refused, mirroring dart_library.
 flutter_library(
     name = "dart_in_resources_library",
-    package_name = "dart_in_resources",
     srcs = ["lib/fixture.dart"],
+    package = ":dart_in_resources_pubspec",
     resources = ["lib/fixture.dart"],
     tags = ["manual"],
 )
 
+dart_package_metadata(
+    name = "dart_in_resources_plugin_pubspec",
+    package_name = "dart_in_resources_plugin",
+)
+
 flutter_plugin(
     name = "dart_in_resources_plugin",
-    package_name = "dart_in_resources_plugin",
     srcs = ["lib/fixture.dart"],
+    package = ":dart_in_resources_plugin_pubspec",
     plugin_platforms_json = '{"web":{"pluginClass":"FixturePlugin"}}',
     resources = ["lib/fixture.dart"],
     tags = ["manual"],
@@ -83,12 +104,17 @@ dart_in_resources_fails_test(
     target_under_test = ":dart_in_resources_plugin",
 )
 
+dart_package_metadata(
+    name = "missing_font_pubspec",
+    package_name = "missing_font",
+)
+
 # fonts_json names a font that font_files does not provide.
 flutter_library(
     name = "missing_font_library",
-    package_name = "missing_font",
     srcs = ["lib/fixture.dart"],
     fonts_json = '[{"family":"Missing","fonts":[{"asset":"assets/fonts/Missing.ttf"}]}]',
+    package = ":missing_font_pubspec",
     tags = ["manual"],
 )
 

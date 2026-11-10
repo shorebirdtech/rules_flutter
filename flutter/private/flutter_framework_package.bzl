@@ -23,6 +23,7 @@ load("@rules_dart//dart/pub:pubspec.bzl", "read_pubspec")
 load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url")
 load("//flutter/private:flutter_pub_index.bzl", "library_label", "read_index")
 load("//flutter/private:framework_source.bzl", "check_dependency_constraints", "check_lock_floor", "link_framework_package", "read_framework", "unset_message", "write_unset_stub")
+load("//flutter/private:package_metadata_content.bzl", "PACKAGE_METADATA_LOAD", "make_package_metadata_content", "package_metadata_target")
 load("//flutter/private:pinned.bzl", "pinned")
 
 _PACKAGE = "flutter"
@@ -56,9 +57,10 @@ def make_flutter_framework_build_content(deps, language_version, license_file = 
         dep_lines = ['        "{}",'.format(dep) for dep in deps]
         deps_block = "    deps = [\n{}\n    ],\n".format("\n".join(dep_lines))
 
-    return """\
+    return PACKAGE_METADATA_LOAD + """\
 load("@rules_flutter//flutter/private:flutter_library.bzl", "flutter_framework_library")
 
+{metadata}
 flutter_framework_library(
     name = "{name}",
     srcs = glob(["lib/**/*.dart"]),
@@ -68,16 +70,19 @@ flutter_framework_library(
         allow_empty = True,
     ),
     framework_shaders = glob(["lib/src/material/shaders/*.frag"]),
-{deps}    package_name = "{name}",
-    language_version = "{language_version}",
+{deps}    package = ":{metadata_target}",
     web_compiler_independent = True,
-{license}    visibility = ["//visibility:public"],
+    visibility = ["//visibility:public"],
 )
 """.format(
         name = _PACKAGE,
         deps = deps_block,
-        language_version = language_version,
-        license = '    license_file = "{}",\n'.format(license_file) if license_file else "",
+        metadata = make_package_metadata_content(
+            _PACKAGE,
+            language_version = language_version,
+            license_file = license_file,
+        ),
+        metadata_target = package_metadata_target(_PACKAGE),
     )
 
 def _flutter_framework_package_impl(repository_ctx):

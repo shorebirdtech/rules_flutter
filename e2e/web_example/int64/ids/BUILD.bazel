@@ -1,4 +1,10 @@
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_flutter//flutter:defs.bzl", "flutter_library")
+
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "int64_ids_select",
+)
 
 # `package:int64_ids` as the app's compiler sees it. The variants are separate
 # libraries with one package name, so the app imports it the same way whichever
@@ -11,8 +17,8 @@ load("@rules_flutter//flutter:defs.bzl", "flutter_library")
 # VM would.
 flutter_library(
     name = "ids",
-    package_name = "int64_ids_select",
     srcs = [],
+    package = ":pubspec",
     visibility = ["//int64:__pkg__"],
     deps = select({
         "@rules_dart//dart/constraints:js": ["//int64/ids_js:ids"],

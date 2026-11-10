@@ -4,7 +4,7 @@ load("@rules_apple//apple:macos.bzl", "macos_application")
 load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
-load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_analysis_test", "dart_binary", "dart_code_asset", "dart_test")
+load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_analysis_test", "dart_binary", "dart_code_asset", "dart_package_metadata", "dart_test")
 load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_library", "flutter_native_library")
 load(
     "@rules_flutter//flutter:ios.bzl",
@@ -282,14 +282,19 @@ c_hot_patch(
     ]
 ]
 
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "ffi_example",
+)
+
 flutter_application(
     name = "ffi_app",
-    package_name = "ffi_example",
     code_assets = [
         ":count_a_native",
         ":count_b_native",
     ],
     main = "lib/main.dart",
+    package = ":pubspec",
     deps = [
         "//add_plugin",
         "//count_a",
@@ -610,8 +615,8 @@ dart_analysis_config(
 # the analyzer to stage.
 flutter_library(
     name = "app_lib",
-    package_name = "ffi_example",
     srcs = glob(["lib/**/*.dart"]),
+    package = ":pubspec",
     deps = [
         "//add_plugin",
         "//count_a",

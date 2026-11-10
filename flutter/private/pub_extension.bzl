@@ -71,8 +71,9 @@ digest in every lock.
     "resolve": attr.string_keyed_label_dict(
         doc = """\
 Lock packages, each mapped to the target that builds it: a `flutter_library`,
-`flutter_plugin` or `dart_library` whose `package_name` is the pub package's
-name (a target that declares another name fails analysis, naming both). Every
+`flutter_plugin` or `dart_library` whose `dart_package_metadata` has the pub
+package's name as its `package_name` (a target that declares another name fails
+analysis, naming both). Every
 hub's `@<hub>//:<package>` for it is that target, and a hosted package that
 depends on the package gets it too, for the whole build: another lock's entry
 for the package is not fetched, and a package mapped to different targets by two

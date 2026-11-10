@@ -4,7 +4,7 @@ load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("@rules_cc//cc:cc_import.bzl", "cc_import")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
-load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_analysis_test", "dart_code_asset", "dart_test")
+load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_analysis_test", "dart_code_asset", "dart_package_metadata", "dart_test")
 load(
     "@rules_flutter//flutter:android.bzl",
     "flutter_android_app",
@@ -81,9 +81,13 @@ cc_library(
     ]
 ]
 
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "android_example",
+)
+
 flutter_application(
     name = "app_flutter",
-    package_name = "android_example",
     srcs = glob(["lib/**/*.dart"]),
     # Not the default: every app built over this has it as its version, and
     # `:second_app` states it too, which has to agree.
@@ -95,6 +99,7 @@ flutter_application(
     ],
     main = "lib/main.dart",
     native_deps = [":add"],
+    package = ":pubspec",
     deps = [
         "//count_a",
         "//count_b",
@@ -108,10 +113,10 @@ flutter_application(
 # `testonly` too: `:testonly_app_build_test`.
 flutter_application(
     name = "testonly_flutter",
-    package_name = "android_example",
     testonly = True,
     srcs = glob(["lib/**/*.dart"]),
     main = "lib/testonly_main.dart",
+    package = ":pubspec",
     deps = ["@deps//:flutter"],
 )
 
@@ -377,9 +382,9 @@ android_binary(
 
 flutter_web_bundle(
     name = "app_web",
-    package_name = "android_example",
     srcs = glob(["lib/**/*.dart"]),
     main = "lib/main.dart",
+    package = ":pubspec",
     deps = ["@deps//:flutter"],
 )
 
@@ -533,8 +538,8 @@ dart_analysis_config(
 # the analyzer to stage.
 flutter_library(
     name = "app_lib",
-    package_name = "android_example",
     srcs = glob(["lib/**/*.dart"]),
+    package = ":pubspec",
     deps = [
         "@deps//:flutter",
     ],

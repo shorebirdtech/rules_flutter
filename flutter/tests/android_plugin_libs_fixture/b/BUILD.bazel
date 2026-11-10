@@ -1,5 +1,6 @@
 """Plugin `plugin_b`, with an Android library."""
 
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_java//java:java_library.bzl", "java_library")
 load("//flutter:defs.bzl", "flutter_plugin")
 
@@ -10,10 +11,15 @@ java_library(
     srcs = ["B.java"],
 )
 
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "plugin_b",
+)
+
 flutter_plugin(
     name = "plugin_b",
-    package_name = "plugin_b",
     srcs = ["lib/plugin_b.dart"],
+    package = ":pubspec",
     tags = ["manual"],
     exports = [":lib_b"],
 )

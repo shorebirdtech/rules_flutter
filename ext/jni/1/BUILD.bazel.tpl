@@ -23,7 +23,16 @@
 
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_flutter//flutter:defs.bzl", "flutter_plugin")
+
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "{PKG}",
+    language_version = "{LANGUAGE_VERSION}",
+    {LICENSE}
+    visibility = ["//visibility:public"],
+)
 
 flutter_plugin(
     name = "{PKG}",
@@ -35,13 +44,11 @@ flutter_plugin(
         "@platforms//os:android": ["//android:lib"],
         "//conditions:default": [],
     }),
-    language_version = "{LANGUAGE_VERSION}",
     native_deps = select({
         "@platforms//os:android": [":dartjni"],
         "//conditions:default": [],
     }),
-    package_name = "{PKG}",
-    {LICENSE}
+    package = ":pubspec",
     plugin_platforms_json = "{\"android\":{\"ffiPlugin\":true,\"package\":\"com.github.dart_lang.jni\",\"pluginClass\":\"JniPlugin\"},\"linux\":{\"ffiPlugin\":true},\"windows\":{\"ffiPlugin\":true}}",
     visibility = ["//visibility:public"],
     deps = [

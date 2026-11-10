@@ -112,7 +112,8 @@ def _flutter_native_library_impl(ctx):
             hot_patch = hot_patch,
         ),
         # And a code asset forwarded as itself, so the wrapper goes in the
-        # owning package's `code_assets` where the bare asset would have gone.
+        # `code_assets` of the owning package's `dart_package_metadata` where
+        # the bare asset would have gone.
     ] + ([code_asset] if code_asset else [])
 
 flutter_native_library = rule(
@@ -143,9 +144,9 @@ flutter_application(
 A library Dart reaches as a code asset — `library` provides rules_dart's
 `DartCodeAssetInfo`, and the bindings call it through `@Native` — is wrapped
 the same way. The wrapper forwards that `DartCodeAssetInfo`, so it goes where
-the bare asset would have gone: in the `code_assets` of the package that owns
-the asset id, a `flutter_plugin`, a `flutter_library` or a `dart_library`
-alike, or under whatever attribute a package rule forwards it on. The
+the bare asset would have gone: in the `code_assets` of the
+`dart_package_metadata` of the package that owns the asset id, whether its
+targets are `flutter_plugin`, `flutter_library` or `dart_library`. The
 application finds it there and puts its contract on the path it bundles the
 library under.
 
@@ -156,11 +157,16 @@ flutter_native_library(
     binding_contract = ["@my_bridge//bridge:codegen.ir"],
 )
 
+dart_package_metadata(
+    name = "pubspec",
+    package_name = "my_bridge_bindings",
+    code_assets = [":bridge"],
+)
+
 dart_library(
     name = "bindings",
-    package_name = "my_bridge_bindings",
     srcs = ["lib/bindings.dart"],
-    code_assets = [":bridge"],
+    package = ":pubspec",
 )
 ```
 
@@ -185,7 +191,7 @@ library. See the attribute for what the named target has to build.
 """,
     attrs = {
         "library": attr.label(
-            doc = """The native library target, as it would appear in `native_deps` (or in a web bundle's `native_modules`), or a code asset as it would appear in a package's `code_assets`.
+            doc = """The native library target, as it would appear in `native_deps` (or in a web bundle's `native_modules`), or a code asset as it would appear in the `code_assets` of a package's `dart_package_metadata`.
 
 A shared library on a native platform; a `.wasm` module on web. Usually a rule's
 output, and a checked-in prebuilt file works too.

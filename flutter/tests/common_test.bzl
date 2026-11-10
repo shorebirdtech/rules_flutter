@@ -1,6 +1,7 @@
 """Unit tests for app_entrypoint.bzl pure functions."""
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
+load("@rules_dart//dart:providers.bzl", "DartPackageMetadataInfo")
 load("@rules_dart//dart:utils.bzl", "dart_package_info")
 load(
     "//flutter/private:app_entrypoint.bzl",
@@ -202,7 +203,7 @@ def _synthesize_app_package_replaces_collision_test_impl(ctx):
         dart_package_info(label = Label("//:dep"), package_name = "transitive", package_root = "../pub/transitive", language_version = ""),
         dart_package_info(label = Label("//:dep"), package_name = "my_app", package_root = "", language_version = ""),
     ]
-    result = synthesize_app_package("//:app", packages, "my_app", "", "")
+    result = synthesize_app_package("//:app", packages, "my_app", "", None)
     asserts.equals(env, 2, len(result))
     asserts.equals(env, "transitive", result[0].package_name)
     asserts.equals(env, "my_app", result[1].package_name)
@@ -222,7 +223,7 @@ def _synthesize_app_package_roots_at_its_own_package_test_impl(ctx):
         dart_package_info(label = Label("//:dep"), package_name = "root_lib", package_root = "", language_version = ""),
         dart_package_info(label = Label("//:dep"), package_name = "custom_boot", package_root = "custom_boot", language_version = ""),
     ]
-    result = synthesize_app_package("//custom_boot:app", packages, "custom_boot", "custom_boot", "")
+    result = synthesize_app_package("//custom_boot:app", packages, "custom_boot", "custom_boot", None)
     asserts.equals(env, 2, len(result))
 
     # The workspace-root library is not the app's root, so it is kept.
@@ -243,7 +244,7 @@ _t5_test = unittest.make(_resolve_wrapper_main_import_prefers_package_uri_test_i
 _t6_test = unittest.make(_resolve_wrapper_main_import_falls_back_to_relative_test_impl)
 
 def _synthesize_app_package_carries_language_version_test_impl(ctx):
-    """The app's entry states the version pub would grant it.
+    """The app's entry states the version its declaration states.
 
     Left unset the entry has none, and `package_config.json` reads a missing
     `languageVersion` as the *current* SDK's — so an app pinned to an older
@@ -251,14 +252,24 @@ def _synthesize_app_package_carries_language_version_test_impl(ctx):
     """
     env = unittest.begin(ctx)
 
-    stated = synthesize_app_package("//:app", [], "my_app", "", "3.12")
+    declared = DartPackageMetadataInfo(
+        label = Label("//:pubspec"),
+        package_name = "my_app",
+        package_root = "",
+        language_version = "3.12",
+        version = "",
+        code_assets = (),
+        unreplaced_hook = "",
+        link_hook = None,
+        license_file = None,
+    )
+    stated = synthesize_app_package("//:app", [], "my_app", "", declared)
     asserts.equals(env, "3.12", stated[0].language_version)
+    asserts.equals(env, Label("//:pubspec"), stated[0].metadata)
 
-    # An app that states none passes `""` explicitly and keeps it — nothing
-    # here knows its pubspec, and inventing a version would be worse than
-    # omitting one. It has to be stated: were this argument defaultable, a
-    # caller that simply forgot would land on this same case unnoticed.
-    unset = synthesize_app_package("//:app", [], "my_app", "", "")
+    # An app naming no declaration states none — nothing here knows its
+    # pubspec, and inventing a version would be worse than omitting one.
+    unset = synthesize_app_package("//:app", [], "my_app", "", None)
     asserts.equals(env, "", unset[0].language_version)
 
     return unittest.end(env)
