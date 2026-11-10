@@ -84,7 +84,7 @@ code in it.
 - `--machine` keeps stdout to JSON protocol events, one `[{...}]` per line, and
   turns the file watcher off, so nothing reloads until you ask.
 - `LOG_FORMAT=json` makes each of the tool's own stderr lines one JSON record.
-- `--no-devtools` stops it opening a DevTools tab in a browser.
+- `--no-devtools` skips starting a DevTools server, which you would not open. The app is still registered with the Dart Tooling Daemon.
 - On `-d chrome`, add `--web-run-headless`.
 
 The first run builds the tool and the app, which takes minutes on a cold cache.

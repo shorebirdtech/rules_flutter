@@ -3206,7 +3206,7 @@ Or, inside a session, `/plugin marketplace add aran/rules_flutter` and then `/pl
 
 With the skill or without it, three choices make the loop work well.
 
-**Start the app in machine mode, in the background.** The run lives for the whole session, so start it once and send its output to files. `--machine` keeps stdout to protocol events, `LOG_FORMAT=json` makes the channel record on stderr one parseable line, and `--no-devtools` avoids opening a browser tab nobody will look at. On the web, add `--web-run-headless`.
+**Start the app in machine mode, in the background.** The run lives for the whole session, so start it once and send its output to files. `--machine` keeps stdout to protocol events, `LOG_FORMAT=json` makes the channel record on stderr one parseable line, and `--no-devtools` skips starting a DevTools server nobody will open. On the web, add `--web-run-headless`.
 
 ```sh
 LOG_FORMAT=json fl run -t //:my_app_macos -d macos --machine --no-devtools \
