@@ -6,13 +6,13 @@ own extension so that a lock it refuses breaks only the builds that use its
 repositories, never the toolchains, and `bazel run @rules_flutter//flutter/pub`,
 which fixes the lock, still runs.
 
-Every module can define a toolchain version under the default name, "flutter".
-The latest of those versions will be selected (the rest discarded),
-and will always be registered by rules_flutter.
+Every module can ask for a toolchain version under the default name, "flutter",
+which rules_flutter always registers. The root module's version is the one
+used; without one, the highest version any module asks for is used.
 
-Additionally, the root module can define arbitrarily many more toolchain versions under different
-names (the latest version will be picked for each name) and can register them as it sees fit,
-effectively overriding the default named toolchain due to toolchain resolution precedence.
+The root module can declare more toolchains under other names (each name
+resolved the same way) and register them as it sees fit, overriding the default
+one by toolchain resolution precedence.
 """
 
 load("//flutter/private:constants.bzl", "ANDROID_ABI_FOR_ARCH")
@@ -26,7 +26,7 @@ load("//flutter/private:flutter_material_fonts_repo.bzl", "flutter_material_font
 load("//flutter/private:flutter_sdk_toolchains_repo.bzl", "flutter_sdk_toolchains_repo")
 load("//flutter/private:flutter_sdks_repo.bzl", "encode_sdks", "flutter_sdks_repo")
 load("//flutter/private:linux_runtime_pins.bzl", "LINUX_RUNTIME")
-load("//flutter/private:pub_extension.bzl", "DEFAULT_SDK_NAME", "framework_json", "pub_from_lock_tag", "pub_plugin_overlays_tag")
+load("//flutter/private:pub_extension.bzl", "DEFAULT_SDK_NAME", "framework_json")
 load("//flutter/private:toolchain_version.bzl", "select_flutter_version")
 load("//flutter/private:toolchains_repo.bzl", "flutter_toolchains_repo", "sdk_repo_name")
 load("//flutter/private:versions.bzl", "ANDROID_EMULATOR", "ANDROID_SYSTEM_IMAGE", "CHROME_FOR_TESTING", "FLUTTER_VERSIONS", "flutter_source_sha256", "require_supported_flutter_version")
@@ -165,40 +165,7 @@ def _register_sdk(sdk):
     )
     return _label_prefix(sdk.engine)
 
-# The MODULE.bazel lines that replace the old pub extension, for the messages
-# that tell a module to migrate.
-_MIGRATION = (
-    "    flutter_pub = use_extension(\"@rules_flutter//flutter/pub:extensions.bzl\", \"pub\")\n" +
-    "    flutter_pub.from_lock(...)        # same attributes as before\n" +
-    "    flutter_pub.plugin_overlays(...)  # same attributes as before\n" +
-    "    use_repo(flutter_pub, \"deps\")     # the hubs are repositories of this extension"
-)
-
-def moved_to_pub_message(modules):
-    """The error for modules that declare pub tags on an extension that no longer resolves them."""
-    return ("`flutter.pub(...)`, `flutter.plugin_overlays(...)` and the `flutter_pub` extension of " +
-            "`@rules_flutter//flutter:extensions.bzl` moved to `pub` in " +
-            "`@rules_flutter//flutter/pub:extensions.bzl`. In the MODULE.bazel of {modules}:\n" +
-            "{migration}").format(
-        modules = ", ".join(sorted(modules)),
-        migration = _MIGRATION,
-    )
-
-def _moved_to_pub(module_ctx):
-    """Fails naming each module that still declares pub tags on `flutter`."""
-    stale = [
-        mod.name
-        for mod in module_ctx.modules
-        if mod.tags.pub or mod.tags.plugin_overlays
-    ]
-    if stale:
-        fail(moved_to_pub_message(stale))
-
-def _flutter_pub_moved(module_ctx):
-    fail(moved_to_pub_message([mod.name for mod in module_ctx.modules]))
-
 def _toolchain_extension(module_ctx):
-    _moved_to_pub(module_ctx)
     sdks = _declared_sdks(module_ctx)
     engine_prefixes = {}
     for name in sorted(sdks.keys()):
@@ -319,25 +286,8 @@ flutter = module_extension(
     implementation = _toolchain_extension,
     tag_classes = {
         "toolchain": flutter_toolchain,
-        # Moved to `pub` in `@rules_flutter//flutter/pub:extensions.bzl`.
-        # Declared here only so a module still using them gets the migration,
-        # not Bazel's bare "does not generate repository" error.
-        "pub": pub_from_lock_tag,
-        "plugin_overlays": pub_plugin_overlays_tag,
     },
     os_dependent = False,
     arch_dependent = False,
     doc = "Installs the Flutter SDKs and their toolchains.",
-)
-
-flutter_pub = module_extension(
-    implementation = _flutter_pub_moved,
-    tag_classes = {
-        "from_lock": pub_from_lock_tag,
-        "plugin_overlays": pub_plugin_overlays_tag,
-    },
-    os_dependent = False,
-    arch_dependent = False,
-    doc = "Moved to `pub` in `@rules_flutter//flutter/pub:extensions.bzl`; " +
-          "using this fails with the lines to change.",
 )

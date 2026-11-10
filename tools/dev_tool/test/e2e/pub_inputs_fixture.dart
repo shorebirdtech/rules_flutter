@@ -264,7 +264,6 @@ class PubInputsFixture {
     this.otherHubs = const [],
     this.onVersionConflict,
     this.http = false,
-    this.legacyPubExtension = false,
     this.rulesDartPubLocks = const [],
     this.buildFromPubspec = const [],
     this.ignored = const {},
@@ -282,10 +281,6 @@ class PubInputsFixture {
   /// extension also reads, as `pub.from_lock()` tags of one hub. Locks that
   /// disagree on a package fail every repository of that extension.
   final List<String> rulesDartPubLocks;
-
-  /// Whether the module still reaches the pub extension where it used to be,
-  /// `flutter_pub` in `@rules_flutter//flutter:extensions.bzl`.
-  final bool legacyPubExtension;
 
   /// Whether the registry is served over HTTP, as pub's hosted API, rather
   /// than from `file://`: `dart pub` itself only resolves against HTTP, so a
@@ -508,7 +503,7 @@ local_path_override(
 flutter = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter")
 flutter.toolchain(flutter_version = "$flutterVersion")
 
-flutter_pub = ${legacyPubExtension ? 'use_extension("@rules_flutter//flutter:extensions.bzl", "flutter_pub")' : 'use_extension("@rules_flutter//flutter/pub:extensions.bzl", "pub")'}
+flutter_pub = use_extension("@rules_flutter//flutter/pub:extensions.bzl", "pub")
 ${overlayRoots.isEmpty ? '' : 'flutter_pub.plugin_overlays(roots = ${jsonEncode(overlayRoots)})'}
 ${_tag(pubHub, lockPackage, resolve, onVersionConflict, buildFromPubspec: buildFromPubspec, ignored: ignored)}
 ${otherHubs.map((h) => _tag(h.name, h.lockPackage, h.resolve, h.onVersionConflict)).join('\n')}

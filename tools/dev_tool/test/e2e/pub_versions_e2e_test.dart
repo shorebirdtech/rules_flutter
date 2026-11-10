@@ -268,32 +268,6 @@ void main() {
   );
 
   test(
-    'the old flutter_pub extension fails with the lines that replace it',
-    () async {
-      final ws = await PubInputsFixture(
-        hosted: [HostedPackage('vplain')],
-        legacyPubExtension: true,
-      ).materialize();
-
-      final result = await ws.query('@pubhub//:vplain');
-      expect(result.succeeded, isFalse, reason: '$result');
-      expect(
-        result.output,
-        allOf(
-          contains('@rules_flutter//flutter:extensions.bzl'),
-          contains(
-            'moved to `pub` in `@rules_flutter//flutter/pub:extensions.bzl`',
-          ),
-          contains(
-            'use_extension("@rules_flutter//flutter/pub:extensions.bzl", "pub")',
-          ),
-        ),
-        reason: '$result',
-      );
-    },
-  );
-
-  test(
     'a lock behind another at "upgrade" builds the higher version',
     () async {
       final ws = await PubInputsFixture(
