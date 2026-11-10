@@ -105,7 +105,7 @@ _DART_VM_SERVICE_PLIST = "@rules_flutter//flutter/private/runners/ios:DartVmServ
 # `tags = ["manual"]`: the targets are only meaningful as deps of an
 # `ios_application` (whose split transition puts them in an iOS
 # configuration). Built standalone by a `//...` pattern they'd run in the
-# host configuration — wrapping the wrong platform's dylibs and invoking
+# host platform's configuration — wrapping the wrong platform's dylibs and invoking
 # Apple-only tools (`xcrun`), which fails outright on non-macOS hosts.
 
 def flutter_ios_registrant_gen(name, **kwargs):

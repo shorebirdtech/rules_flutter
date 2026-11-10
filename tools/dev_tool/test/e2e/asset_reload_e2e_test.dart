@@ -393,7 +393,7 @@ void main() {
     /// rules_apple split transition, so the running app's `flutter_assets`
     /// tree lives in a configuration — `…-ST-<hash>` — that no command line
     /// can name. Tracking the tool's own bare build of the application instead
-    /// lands in the host configuration, and everything then reports success:
+    /// lands in the host platform's configuration, and everything then reports success:
     /// the rebuild writes a real tree, the tracker diffs a real tree, they are
     /// different trees, and the edit never leaves the machine.
     ///

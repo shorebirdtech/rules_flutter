@@ -380,14 +380,14 @@ bzl_library(
     srcs = ["flutter_pub.bzl"],
     visibility = ["//flutter:__subpackages__"],
     deps = [
-        ":host_transition",
+        ":host_platform_transition",
         "@rules_dart//dart:utils",
     ],
 )
 
 bzl_library(
-    name = "host_transition",
-    srcs = ["host_transition.bzl"],
+    name = "host_platform_transition",
+    srcs = ["host_platform_transition.bzl"],
     visibility = ["//flutter:__subpackages__"],
 )
 
@@ -414,7 +414,7 @@ bzl_library(
     srcs = ["flutter_android_bundle_install.bzl"],
     visibility = ["//flutter:__subpackages__"],
     deps = [
-        ":host_transition",
+        ":host_platform_transition",
         "@rules_dart//dart:utils",
     ],
 )
@@ -430,7 +430,7 @@ bzl_library(
     srcs = ["flutter_android_release.bzl"],
     visibility = ["//flutter:__subpackages__"],
     deps = [
-        ":host_transition",
+        ":host_platform_transition",
         ":release_transition",
         "@rules_dart//dart:utils",
     ],

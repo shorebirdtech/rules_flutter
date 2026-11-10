@@ -88,8 +88,9 @@ class RunPlan {
   ///
   /// Kept apart from [extraArgs] because the dev-loop builds need them without
   /// the device flags: a bare build of the flutter_application resolves in the
-  /// host configuration, while these change it wherever they are applied. Only
-  /// the user knows they were passed, and nothing in the app records them.
+  /// host platform's configuration, while these change it wherever they are
+  /// applied. Only the user knows they were passed, and nothing in the app
+  /// records them.
   final List<String> userBuildArgs;
 
   /// `opt` in profile mode, `dbg` with hot reload, else whatever `-c` said.

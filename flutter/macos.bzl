@@ -94,7 +94,7 @@ flutter_apple_bundle_version = _flutter_apple_bundle_version
 # Like every other *_gen macro in this file, these default to
 # `tags = ["manual"]`: the targets are only meaningful as deps of a
 # `macos_application` and run Apple-only tooling, so a standalone `//...`
-# build (host configuration) is wrong everywhere and fails outright on
+# build (the host platform's configuration) is wrong everywhere and fails outright on
 # non-macOS hosts.
 
 def flutter_macos_framework_gen(name, **kwargs):

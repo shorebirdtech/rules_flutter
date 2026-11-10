@@ -6,11 +6,11 @@ configuration) and the tool that decides what a reload may do with it (built for
 the machine the dev tool runs on).
 
 The tool runs beside the app after the build, not in a build action, so it is
-built for the machine running Bazel (`host_transition`) rather than for an
+built for the machine running Bazel (`host_platform_transition`) rather than for an
 execution platform, which may be a remote machine of another OS.
 """
 
-load("@rules_flutter//flutter:native_hot_patch.bzl", "host_transition")
+load("@rules_flutter//flutter:native_hot_patch.bzl", "host_platform_transition")
 
 def _c_hot_patch_impl(ctx):
     library = [
@@ -59,6 +59,6 @@ c_hot_patch = rule(
         "body": attr.label(mandatory = True, allow_single_file = True, doc = "The source a patch is built from, which must define no state of its own."),
         "state_layout": attr.label(allow_single_file = True, doc = "The header that shapes the state the launched image holds and passes to the body; a change to it needs a restart."),
         "sources": attr.label_list(allow_files = True, doc = "What a reload stats to decide whether to ask."),
-        "tool": attr.label(mandatory = True, executable = True, cfg = host_transition),
+        "tool": attr.label(mandatory = True, executable = True, cfg = host_platform_transition),
     },
 )

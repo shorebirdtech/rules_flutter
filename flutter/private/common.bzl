@@ -455,12 +455,12 @@ def flutter_compile_kernel(ctx, tools, aot = None, target_platform = None, nativ
             "dartDefines": user_defines,
             "assetsDir": assets_dir.path,
             # The platform this kernel was compiled for. The dev tool's own
-            # build runs in the host configuration, so only the app can say
+            # build runs in the host platform's configuration, so only the app can say
             # which platform-filtered plugin registrant its reloads need.
             "targetPlatform": target_platform,
             # The manifest this kernel's `@Native(assetId:)` bindings resolve
             # through, written for this configuration's OS and CPU. The dev
-            # tool's compiler is started from the host configuration, whose
+            # tool's compiler is started from the host platform's configuration, whose
             # manifest names the host's libraries, so only the app can say
             # which one a hot restart's kernel has to carry. "" when none.
             "nativeAssetsManifest": native_assets_manifest.path if native_assets_manifest else "",

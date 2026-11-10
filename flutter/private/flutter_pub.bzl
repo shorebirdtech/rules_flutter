@@ -26,7 +26,7 @@ from the build graph instead, so that file has no consumer here.
 """
 
 load("@rules_dart//dart:utils.bzl", "dart_compile_action", "runfiles_path")
-load("//flutter/private:host_transition.bzl", "host_transition")
+load("//flutter/private:host_platform_transition.bzl", "host_platform_transition")
 
 def _flutter_pub_impl(ctx):
     flutter_sdk_info = ctx.toolchains["@rules_flutter//flutter:toolchain_type"].flutter_sdk_info
@@ -73,7 +73,7 @@ flutter_pub = rule(
     # `bazel run` starts the runner and its `dart` on the machine running
     # Bazel, so the whole target is built for that machine, whatever
     # `--platforms` names; the Flutter toolchain for that platform runs there.
-    cfg = host_transition,
+    cfg = host_platform_transition,
     toolchains = [
         "@rules_flutter//flutter:toolchain_type",
         "@rules_dart//dart:toolchain_type",

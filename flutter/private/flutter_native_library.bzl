@@ -283,12 +283,12 @@ The command runs on the machine the dev tool runs on, after the build and
 outside any build action, so build its program for that machine: not
 `cfg = "exec"`, which builds a tool for whichever execution platform a build
 action resolves to, and not `cfg = "target"`, which is the app's platform (iOS,
-Android). `host_transition` does it:
+Android). `host_platform_transition` does it:
 
 ```starlark
-load("@rules_flutter//flutter:native_hot_patch.bzl", "host_transition")
+load("@rules_flutter//flutter:native_hot_patch.bzl", "host_platform_transition")
 
-    attrs = {"tool": attr.label(executable = True, cfg = host_transition)},
+    attrs = {"tool": attr.label(executable = True, cfg = host_platform_transition)},
 ```
 """,
         ),

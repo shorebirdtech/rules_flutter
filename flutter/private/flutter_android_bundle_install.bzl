@@ -17,7 +17,7 @@ load("@rules_android//providers:providers.bzl", "AndroidBundleInfo", "ApkInfo")
 load("@rules_dart//dart:utils.bzl", "runfiles_path")
 load("@rules_java//java/common:java_common.bzl", "java_common")
 load("@rules_java//java/common:java_info.bzl", "JavaInfo")
-load("//flutter/private:host_transition.bzl", "host_transition")
+load("//flutter/private:host_platform_transition.bzl", "host_platform_transition")
 
 _ANDROID_TOOLCHAIN = "@rules_android//toolchains/android:toolchain_type"
 _ANDROID_SDK_TOOLCHAIN = "@rules_android//toolchains/android_sdk:toolchain_type"
@@ -111,7 +111,7 @@ flutter_android_app_bundle = rule(
     # `bazel run` starts the program and the JDK on this machine. The bundle
     # takes its ABIs from `--@rules_android//flags:android_platforms`, which
     # this leaves alone.
-    cfg = host_transition,
+    cfg = host_platform_transition,
     exec_groups = {_HOST_TOOLS: exec_group(
         exec_compatible_with = HOST_CONSTRAINTS,
         toolchains = [_ANDROID_TOOLCHAIN, _ANDROID_SDK_TOOLCHAIN],

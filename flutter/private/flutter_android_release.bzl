@@ -20,7 +20,7 @@ The program, `flutter/private/tools/android_release.dart`, writes
 load("@platforms//host:constraints.bzl", "HOST_CONSTRAINTS")
 load("@rules_android//providers:providers.bzl", "AndroidBundleInfo", "ApkInfo")
 load("@rules_dart//dart:utils.bzl", "runfiles_path")
-load("//flutter/private:host_transition.bzl", "host_transition")
+load("//flutter/private:host_platform_transition.bzl", "host_platform_transition")
 load("//flutter/private:release_transition.bzl", "android_release_transition")
 
 _ANDROID_TOOLCHAIN = "@rules_android//toolchains/android:toolchain_type"
@@ -115,7 +115,7 @@ _flutter_android_release = rule(
     implementation = _flutter_android_release_impl,
     executable = True,
     # `bazel run` starts the program and the JDK on this machine.
-    cfg = host_transition,
+    cfg = host_platform_transition,
     toolchains = [_JAVA_RUNTIME_TOOLCHAIN],
     exec_groups = {_HOST_TOOLS: exec_group(
         exec_compatible_with = HOST_CONSTRAINTS,

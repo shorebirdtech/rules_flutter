@@ -7,7 +7,7 @@ file `flutter_pub.from_lock(swift_package_resolved = ...)` names, or
 """
 
 load("@rules_dart//dart:utils.bzl", "dart_compile_action", "runfiles_path")
-load("//flutter/private:host_transition.bzl", "host_transition")
+load("//flutter/private:host_platform_transition.bzl", "host_platform_transition")
 
 def _flutter_swift_resolve_impl(ctx):
     dart_sdk_info = ctx.toolchains["@rules_dart//dart:toolchain_type"].dart_sdk_info
@@ -38,7 +38,7 @@ def _flutter_swift_resolve_impl(ctx):
 flutter_swift_resolve = rule(
     implementation = _flutter_swift_resolve_impl,
     executable = True,
-    cfg = host_transition,
+    cfg = host_platform_transition,
     toolchains = ["@rules_dart//dart:toolchain_type"],
     attrs = {
         "hub": attr.string(doc = "The hub's name, for messages.", mandatory = True),
