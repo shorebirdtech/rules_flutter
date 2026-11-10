@@ -80,7 +80,11 @@ through the path the committed check actually takes.
 back into the tree. **The reviewed diff is the deliverable, not a green
 build**: never run it and commit the result unread. (`bazel run
 @rules_dart//dart/format -- <patterns>` is safe to apply as it stands: it writes
-exactly what the format check would otherwise fail on.)
+exactly what the format check would otherwise fail on.) Everything after the
+`--` is what the tools' own `bazel build` receives, so a `deep`-tier target
+needs its config there: `bazel run @rules_dart//dart/format -- --config=deep
+//:gradle_host_test`. An exclusion pattern needs a `--` of its own first, as
+with `bazel build`: `-- //app/... -//app/gen/...`.
 
 The reason: `avoid_redundant_argument_values` deletes `sourceRepository:` from
 `Runfiles.create` call sites. That argument is a
