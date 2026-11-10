@@ -65,6 +65,7 @@ load("//flutter/private:app_version.bzl", "version_arg", "version_target_conflic
 load("//flutter/private:apple_app.bzl", "flutter_apple_app")
 load("//flutter/private:apple_engine.bzl", _MACOS_ENGINE_FRAMEWORK = "MACOS_ENGINE_FRAMEWORK")
 load("//flutter/private:apple_version_check.bzl", _flutter_apple_version_check = "flutter_apple_version_check")
+load("//flutter/private:apple_xcframeworks_codesign.bzl", _flutter_apple_xcframeworks_codesign = "flutter_apple_xcframeworks_codesign")
 load("//flutter/private:apple_xcframeworks_layout.bzl", "flutter_apple_xcframeworks_layout")
 load("//flutter/private:constants.bzl", _MACOS_MINIMUM_OS_VERSION = "MACOS_MINIMUM_OS_VERSION")
 load("//flutter/private:flutter_apple_bundle_version.bzl", _flutter_apple_bundle_version = "flutter_apple_bundle_version")
@@ -88,6 +89,7 @@ MACOS_MINIMUM_OS_VERSION = _MACOS_MINIMUM_OS_VERSION
 flutter_macos_app_xcframework = _flutter_macos_app_xcframework
 flutter_macos_engine_xcframework = _flutter_macos_engine_xcframework
 flutter_macos_plugin_xcframeworks = _flutter_macos_plugin_xcframeworks
+flutter_apple_xcframeworks_codesign = _flutter_apple_xcframeworks_codesign
 flutter_macos_code_asset_xcframeworks = _flutter_macos_code_asset_xcframeworks
 
 # Merges entitlement additions into a base entitlements file — the additive
@@ -753,6 +755,7 @@ def flutter_macos_xcframeworks(
         application,
         plugins = True,
         static_plugins = False,
+        codesign_identity = None,
         minimum_os_version = MACOS_MINIMUM_OS_VERSION,
         **kwargs):
     """The xcframeworks a host app built by Xcode embeds Flutter with, as `flutter build macos-framework` makes them.
@@ -766,8 +769,9 @@ def flutter_macos_xcframeworks(
     as upstream lays them out. `bazel run` writes that to
     `build/macos/framework/` in the package (`-- --output=<dir>` elsewhere),
     replacing that mode's directory, so a run per mode fills `Debug/`,
-    `Profile/` and `Release/`. The frameworks are not signed: Xcode signs them
-    when it embeds them.
+    `Profile/` and `Release/`. The frameworks are built unsigned; with
+    `codesign_identity` they are signed in a step of their own, as upstream
+    signs them (`flutter_apple_xcframeworks_codesign`).
 
     Args:
         name: The target: build it, or run it to export.
@@ -776,6 +780,9 @@ def flutter_macos_xcframeworks(
             host ships them itself (upstream's `--no-plugins`).
         static_plugins: Static plugin frameworks, linked and not embedded
             (upstream's `--static`).
+        codesign_identity: The identity to sign the xcframeworks with
+            (upstream's `--codesign-identity`), or `-` for ad hoc. Unset, they
+            are unsigned, and Xcode signs them when it embeds them.
         minimum_os_version: The minimum macOS version of the frameworks.
         **kwargs: `visibility`, `tags` and the like, for `name`.
     """
@@ -817,8 +824,18 @@ def flutter_macos_xcframeworks(
         )
         xcframeworks.append("_%s_plugins" % name)
         renamed[":_%s_registrant" % name] = "GeneratedPluginRegistrant.swift"
+    layout = name
+    if codesign_identity:
+        layout = "_%s_unsigned" % name
+        _flutter_apple_xcframeworks_codesign(
+            name = name,
+            xcframeworks = layout,
+            identity = codesign_identity,
+            **kwargs
+        )
+        kwargs = {"tags": internal_tags, "visibility": ["//visibility:private"]}
     flutter_apple_xcframeworks_layout(
-        name = name,
+        name = layout,
         platform = "macos",
         xcframeworks = xcframeworks,
         renamed_files = renamed,

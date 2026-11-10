@@ -16,6 +16,7 @@ exports_files(
     [
         "android_release.dart",
         "apple_frameworks.dart",
+        "apple_xcframeworks_codesign.dart",
         "assemble_directory.dart",
         "generate_asset_manifest.dart",
         "bundle_app.dart",
@@ -71,6 +72,17 @@ dart_binary(
     main = "apple_xcframeworks_export.dart",
     visibility = ["//flutter:__subpackages__"],
     deps = ["@rules_dart//dart/runfiles"],
+)
+
+dart_test(
+    name = "apple_xcframeworks_codesign_test",
+    srcs = [
+        "apple_frameworks.dart",
+        "apple_xcframeworks_codesign.dart",
+        "assemble_directory.dart",
+    ],
+    main = "test/apple_xcframeworks_codesign_test.dart",
+    deps = ["@dev_tool_deps//:test"],
 )
 
 dart_test(

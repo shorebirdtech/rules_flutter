@@ -895,9 +895,30 @@ flutter_macos_xcframeworks(
     tags = ["manual"],
 )
 
+# The same, signed ad hoc, as `--codesign-identity -` would.
+flutter_ios_xcframeworks(
+    name = "module_ios_signed",
+    application = ":add_to_app_module",
+    codesign_identity = "-",
+    tags = ["manual"],
+)
+
+flutter_macos_xcframeworks(
+    name = "module_macos_signed",
+    application = ":add_to_app_module",
+    codesign_identity = "-",
+    tags = ["manual"],
+)
+
 _ADD_TO_APP_PLATFORMS = [
     "ios",
     "macos",
+]
+
+# Unsigned, and signed ad hoc.
+_ADD_TO_APP_VARIANTS = [
+    "",
+    "_signed",
 ]
 
 # Each mode the tests check, and the compilation mode that builds it.
@@ -908,31 +929,34 @@ _ADD_TO_APP_MODES = {
 
 [
     apple_release_build(
-        name = "add_to_app_%s_%s" % (platform, mode),
+        name = "add_to_app_%s_%s%s" % (platform, mode, variant),
         compilation_mode = compilation_mode,
         sign = False,
         tags = ["manual"],
-        targets = [":module_" + platform],
+        targets = [":module_%s%s" % (platform, variant)],
     )
     for platform in _ADD_TO_APP_PLATFORMS
     for mode, compilation_mode in _ADD_TO_APP_MODES.items()
+    for variant in _ADD_TO_APP_VARIANTS
 ]
 
 [
     dart_test(
-        name = "add_to_app_%s_%s_test" % (platform, mode),
+        name = "add_to_app_%s_%s%s_test" % (platform, mode, variant),
         args = [
             "--platform=" + platform,
             "--mode=" + mode,
+            "--signed=" + ("true" if variant else "false"),
             "--plugins=audio_session,mixed_plugin,package_info_plus,shared_preferences_foundation,url_launcher_" + platform,
             "--code-assets=objective_c",
-            "module_" + platform,
+            "module_%s%s" % (platform, variant),
         ],
-        data = [":add_to_app_%s_%s" % (platform, mode)],
+        data = [":add_to_app_%s_%s%s" % (platform, mode, variant)],
         main = "test/add_to_app_apple_test.dart",
         target_compatible_with = ["@platforms//os:macos"],
         deps = ["@rules_flutter//tools/e2e_testing"],
     )
     for platform in _ADD_TO_APP_PLATFORMS
     for mode in _ADD_TO_APP_MODES
+    for variant in _ADD_TO_APP_VARIANTS
 ]

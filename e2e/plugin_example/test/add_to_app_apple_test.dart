@@ -32,6 +32,9 @@
 /// * iOS: `FlutterPluginRegistrant.xcframework`, a static framework that
 ///   defines `GeneratedPluginRegistrant` and none of the plugins it
 ///   registers, and the `GeneratedPluginRegistrant.h` and `.m` beside it.
+/// * With `--signed=true`, every xcframework's signature verifies as the
+///   export wrote it; Flutter's engine keeps Flutter's, the others are
+///   signed (ad hoc). Without, only Flutter's engine is signed.
 /// * `Flutter.xcframework` and `FlutterMacOS.xcframework`: Flutter's
 ///   signature verifies, so the copy is byte for byte and link for link the
 ///   one Flutter signed.
@@ -377,6 +380,41 @@ String _export(String name) {
   return output;
 }
 
+/// A signed layout: every xcframework's signature verifies as it was written
+/// out, links made again included; Flutter's engine keeps Flutter's
+/// (TeamIdentifier `S8QB4VV633`), the others are signed ad hoc. Unsigned:
+/// only the engine is signed.
+void _checkSignature(String xcframework, {required bool signed}) {
+  final name = xcframework.split('/').last;
+  final engine =
+      name == 'Flutter.xcframework' || name == 'FlutterMacOS.xcframework';
+  final details = Process.runSync('codesign', ['-dv', xcframework]);
+  final text = details.stderr.toString();
+  if (!signed && !engine) {
+    _check(
+      text.contains('not signed at all'),
+      '$name: signed in an unsigned build',
+    );
+    return;
+  }
+  final verify = Process.runSync('codesign', [
+    '--verify',
+    '--deep',
+    '--strict',
+    xcframework,
+  ]);
+  _check(
+    verify.exitCode == 0,
+    '$name: its signature does not verify:\n${verify.stderr}',
+  );
+  _check(
+    engine
+        ? text.contains('TeamIdentifier=S8QB4VV633')
+        : text.contains('adhoc'),
+    '$name: signed by the wrong identity:\n$text',
+  );
+}
+
 void main(List<String> args) {
   String? platform;
   String? mode;
@@ -385,11 +423,14 @@ void main(List<String> args) {
   final looseFiles = <String>{};
   final xcframeworks = <String>[];
   String? layout;
+  var signed = false;
   for (final arg in args) {
     if (arg.startsWith('--platform=')) {
       platform = arg.substring('--platform='.length);
     } else if (arg.startsWith('--mode=')) {
       mode = arg.substring('--mode='.length);
+    } else if (arg.startsWith('--signed=')) {
+      signed = arg == '--signed=true';
     } else if (arg.startsWith('--plugins=')) {
       plugins = arg.substring('--plugins='.length).split(',').toSet();
     } else if (arg.startsWith('--code-assets=')) {
@@ -467,6 +508,9 @@ void main(List<String> args) {
     looseFiles.length == loose.length && looseFiles.containsAll(loose),
     'the files beside the xcframeworks are $looseFiles, not $loose',
   );
+  for (final xcframework in xcframeworks) {
+    _checkSignature(xcframework, signed: signed);
+  }
   if (engine != null && pluginPaths.isNotEmpty) {
     _checkModules(pluginPaths, engine, platform);
   }

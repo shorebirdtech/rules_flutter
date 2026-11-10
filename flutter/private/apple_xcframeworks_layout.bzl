@@ -13,6 +13,24 @@ load("@rules_dart//dart:utils.bzl", "runfiles_path")
 load("//flutter/private:apple_add_to_app.bzl", "BUNDLE_ATTRS", "assemble_bundle")
 load("//flutter/private:exec_groups.bzl", "PORTABLE_EXEC_GROUPS")
 
+FlutterXCFrameworksLayoutInfo = provider(
+    doc = "An add-to-app layout of one build mode, as `flutter build <platform>-framework` writes it.",
+    fields = {
+        "tree": "File: the directory, `<Mode>/` with the xcframeworks and the files above it.",
+        "platform": "str: `ios` or `macos`.",
+        "mode": "str: `Debug`, `Profile` or `Release`.",
+    },
+)
+
+# What a rule whose target `bazel run` exports needs.
+EXPORT_ATTRS = {
+    "_export_tool": attr.label(
+        default = "//flutter/private/tools:apple_xcframeworks_export",
+        executable = True,
+        cfg = "target",
+    ),
+}
+
 def build_mode_directory(ctx):
     """`Debug`, `Profile` or `Release`: the mode of the configuration, as upstream names it.
 
@@ -64,12 +82,26 @@ def _layout_impl(ctx):
         progress_message = "Laying out the %s xcframeworks of %%{label}" % mode,
     )
 
+    return export_providers(ctx, tree, ctx.attr.platform, mode)
+
+def export_providers(ctx, tree, platform, mode):
+    """The providers of a layout `tree`: its files, and `bazel run` of it.
+
+    Args:
+        ctx: A rule context with `EXPORT_ATTRS`.
+        tree: The layout, `<Mode>/` and the files above it.
+        platform: `ios` or `macos`.
+        mode: `Debug`, `Profile` or `Release`.
+
+    Returns:
+        A list of providers.
+    """
     workspace = ctx.workspace_name
     config = ctx.actions.declare_file(ctx.label.name + ".xcframeworks_export.json")
     ctx.actions.write(config, json.encode_indent({
         "mode": mode,
         "package": ctx.label.package,
-        "platform": ctx.attr.platform,
+        "platform": platform,
         "tree": runfiles_path(tree, workspace),
     }))
     tool = ctx.attr._export_tool
@@ -85,6 +117,7 @@ def _layout_impl(ctx):
         RunEnvironmentInfo(environment = {
             "RULES_FLUTTER_XCFRAMEWORKS_CONFIG": runfiles_path(config, workspace),
         }),
+        FlutterXCFrameworksLayoutInfo(tree = tree, platform = platform, mode = mode),
     ]
 
 flutter_apple_xcframeworks_layout = rule(
@@ -109,13 +142,8 @@ flutter_apple_xcframeworks_layout = rule(
             doc = "Files placed above `<Mode>/` when the mode is debug.",
             allow_files = True,
         ),
-        "_export_tool": attr.label(
-            default = "//flutter/private/tools:apple_xcframeworks_export",
-            executable = True,
-            cfg = "target",
-        ),
         "_profile": attr.label(default = "//flutter:profile"),
-    }),
+    }, EXPORT_ATTRS),
     exec_groups = PORTABLE_EXEC_GROUPS,
     doc = """Lays out the xcframeworks of one build mode as `flutter build ios-framework` and
 `macos-framework` do: `<Mode>/` (the configuration's), and the files upstream writes

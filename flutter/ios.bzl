@@ -65,6 +65,7 @@ load("//flutter/private:app_version.bzl", "version_arg", "version_target_conflic
 load("//flutter/private:apple_app.bzl", "flutter_apple_app")
 load("//flutter/private:apple_engine.bzl", _IOS_ENGINE_XCFRAMEWORK = "IOS_ENGINE_XCFRAMEWORK")
 load("//flutter/private:apple_version_check.bzl", _flutter_apple_version_check = "flutter_apple_version_check")
+load("//flutter/private:apple_xcframeworks_codesign.bzl", _flutter_apple_xcframeworks_codesign = "flutter_apple_xcframeworks_codesign")
 load("//flutter/private:apple_xcframeworks_layout.bzl", "flutter_apple_xcframeworks_layout")
 load("//flutter/private:constants.bzl", _IOS_MINIMUM_OS_VERSION = "IOS_MINIMUM_OS_VERSION")
 load("//flutter/private:debug_build.bzl", _debug_build = "debug_build")
@@ -94,6 +95,7 @@ IOS_DEFAULT_MAIN_STORYBOARD = "@rules_flutter//flutter/private/runners/ios:Base.
 flutter_ios_app_xcframework = _flutter_ios_app_xcframework
 flutter_ios_engine_xcframework = _flutter_ios_engine_xcframework
 flutter_ios_plugin_xcframeworks = _flutter_ios_plugin_xcframeworks
+flutter_apple_xcframeworks_codesign = _flutter_apple_xcframeworks_codesign
 flutter_ios_code_asset_xcframeworks = _flutter_ios_code_asset_xcframeworks
 flutter_ios_registrant_xcframework = _flutter_ios_registrant_xcframework
 
@@ -874,6 +876,7 @@ def flutter_ios_xcframeworks(
         application,
         plugins = True,
         static_plugins = False,
+        codesign_identity = None,
         minimum_os_version = IOS_MINIMUM_OS_VERSION,
         **kwargs):
     """The xcframeworks a host app built by Xcode embeds Flutter with, as `flutter build ios-framework` makes them.
@@ -887,8 +890,9 @@ def flutter_ios_xcframeworks(
     as upstream lays them out. `bazel run` writes that to
     `build/ios/framework/` in the package (`-- --output=<dir>` elsewhere),
     replacing that mode's directory, so a run per mode fills `Debug/`,
-    `Profile/` and `Release/`. The frameworks are not signed: Xcode signs them
-    when it embeds them.
+    `Profile/` and `Release/`. The frameworks are built unsigned; with
+    `codesign_identity` they are signed in a step of their own, as upstream
+    signs them (`flutter_apple_xcframeworks_codesign`).
 
     Args:
         name: The target: build it, or run it to export.
@@ -897,6 +901,9 @@ def flutter_ios_xcframeworks(
             host ships them itself (upstream's `--no-plugins`).
         static_plugins: Static plugin frameworks, linked and not embedded
             (upstream's `--static`).
+        codesign_identity: The identity to sign the xcframeworks with
+            (upstream's `--codesign-identity`), or `-` for ad hoc. Unset, they
+            are unsigned, and Xcode signs them when it embeds them.
         minimum_os_version: The minimum iOS version of the frameworks.
         **kwargs: `visibility`, `tags` and the like, for `name`.
     """
@@ -938,8 +945,18 @@ def flutter_ios_xcframeworks(
             tags = internal_tags,
         )
         xcframeworks += ["_%s_plugins" % name, "_%s_registrant" % name]
+    layout = name
+    if codesign_identity:
+        layout = "_%s_unsigned" % name
+        _flutter_apple_xcframeworks_codesign(
+            name = name,
+            xcframeworks = layout,
+            identity = codesign_identity,
+            **kwargs
+        )
+        kwargs = {"tags": internal_tags, "visibility": ["//visibility:private"]}
     flutter_apple_xcframeworks_layout(
-        name = name,
+        name = layout,
         platform = "ios",
         xcframeworks = xcframeworks,
         renamed_files = {},
