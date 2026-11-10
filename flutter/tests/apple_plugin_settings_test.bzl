@@ -1,5 +1,8 @@
 """An Apple plugin's build settings, supplied by an overlay, reach its compile.
 
+A plugin's C-family sources are compiled with module autolinking on, as Xcode
+compiles them, so the SDK frameworks they import are linked into the app.
+
 `apple_plugin_fixture/` is a plugin in SwiftPM's layout whose behaviour depends
 on a define, as `permission_handler_apple`'s does: `FixturePlugin.feature` is
 `on` only when `FIXTURE_FEATURE` is set. Its private header uses `NS_ENUM`
@@ -17,7 +20,13 @@ def _define_reaches_the_compile_impl(ctx):
     env = analysistest.begin(ctx)
     compiles = [a for a in analysistest.target_actions(env) if a.mnemonic == "ObjcCompile"]
     asserts.equals(env, 1, len(compiles), [a.mnemonic for a in analysistest.target_actions(env)])
-    asserts.true(env, "-DFIXTURE_FEATURE" in compiles[0].argv, compiles[0].argv)
+    argv = compiles[0].argv
+    asserts.true(env, "-DFIXTURE_FEATURE" in argv, argv)
+
+    # Autolinking is on, as under Xcode: after the toolchain's `-fno-autolink`,
+    # which the last of the two overrides.
+    autolink = [i for i, a in enumerate(argv) if a in ("-fautolink", "-fno-autolink")]
+    asserts.true(env, autolink and argv[autolink[-1]] == "-fautolink", argv)
 
     # Only the header under `include/` is the module's; the private one is
     # compiled with the sources.

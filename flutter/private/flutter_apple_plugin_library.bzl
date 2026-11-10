@@ -28,6 +28,13 @@ load(":apple_engine.bzl", "IOS_ENGINE_XCFRAMEWORK", "MACOS_ENGINE_FRAMEWORK", "f
 _CLANG_SOURCE_EXTENSIONS = ("m", "mm", "c", "cc", "cpp", "cxx", "c++", "s", "S")
 _HEADER_EXTENSIONS = ("h", "hh", "hpp", "hxx", "h++", "inc")
 
+# Xcode compiles a plugin, from its Swift package or its podspec, with Clang's
+# module autolinking on (`CLANG_MODULES_AUTOLINK`): an SDK framework its sources
+# import, as `@import CoreTelephony;` or `#import <CoreTelephony/...>` does, is
+# linked into the app without the plugin naming it. apple_support's toolchain
+# turns autolinking off for every C-family compile, so it is turned back on here.
+_AUTOLINK = ["-fautolink"]
+
 def _extension(path):
     name = path.rsplit("/", 1)[-1]
     return name.rsplit(".", 1)[-1] if "." in name else ""
@@ -144,16 +151,13 @@ def flutter_apple_plugin_library(
             `#import "Foo.h"`); without the include path the .m's import
             fails with `'Foo.h' file not found`.
         sdk_frameworks: Apple SDK frameworks to link (e.g. `["AVFoundation"]`),
-            as a `Package.swift`'s `linkedFramework` does. Required when the
-            plugin's ObjC sources `#import <Foo/Bar.h>` against an Apple SDK
-            framework — Clang's `enable_modules` auto-link metadata
-            (`LC_LINKER_OPTION`) is stripped by Apple's `libtool`
-            static-archive step, so explicit declaration is the only
-            reliable path. A plugin built from its `Package.swift` gets its
-            `linkerSettings` without this; an overlay lists them here.
+            as a `Package.swift`'s `linkedFramework` does. A framework the
+            C-family sources import is linked without this, as Xcode links
+            it: the library compiles them with Clang's module autolinking on.
+            A plugin built from its `Package.swift` gets its `linkerSettings`
+            without this; an overlay lists them here.
         sdk_dylibs: Apple SDK dynamic libraries to link (e.g. `["c++"]`,
-            `["sqlite3"]`), as a `Package.swift`'s `linkedLibrary` does. Same
-            rationale as `sdk_frameworks`.
+            `["sqlite3"]`), as a `Package.swift`'s `linkedLibrary` does.
         clang_module: Whether a library without Swift sources is a Clang
             module named `module_name` itself, as a C-family target of a
             Swift package is, rather than a Swift module that re-exports one
@@ -238,7 +242,7 @@ def flutter_apple_plugin_library(
             includes = includes,
             module_name = module_name,
             enable_modules = True,
-            copts = copts + clang_copts,
+            copts = _AUTOLINK + copts + clang_copts,
             cxxopts = cxxopts,
             conlyopts = conlyopts,
             linkopts = sdk_linkopts + linkopts,
@@ -270,7 +274,7 @@ def flutter_apple_plugin_library(
             sdk_dylibs = sdk_dylibs,
             module_name = objc_module_name,
             enable_modules = True,
-            copts = copts + clang_copts,
+            copts = _AUTOLINK + copts + clang_copts,
             cxxopts = cxxopts,
             conlyopts = conlyopts,
             # Every object of the plugin is in the app, as Xcode links a
