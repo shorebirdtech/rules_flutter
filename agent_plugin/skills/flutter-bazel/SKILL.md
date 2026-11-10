@@ -242,6 +242,13 @@ Then look again: a screenshot, `getText`, or the semantics tree. A reply with
 `notShown`, or a read with `notRendering`, means the window is hidden or covered
 and is drawing nothing; see [reference/failures.md](reference/failures.md).
 
+The Dart MCP server (`dart mcp-server`) finds the session too, as it finds a
+`flutter run`: the run registers the app with a Dart Tooling Daemon, which
+`dart tooling-daemon --list` lists, and whose address is in the `app.dtd` event
+in `out`. Its `list_running_apps`, `hot_reload`, `hot_restart` and
+`get_runtime_errors` tools work on the app, and its reloads recompile with
+Bazel like `app.hotReload`. The channel is still what reads and drives the UI.
+
 ## 7. Read the logs
 
 The logs request above returns the last 200 lines:

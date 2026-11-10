@@ -309,6 +309,15 @@ class MachineProtocol {
     sendEvent('app.devTools', {'appId': appId, 'uri': uri});
   }
 
+  /// Send app.dtd event: the Dart Tooling Daemon [appId] is registered with.
+  ///
+  /// Upstream's event and fields (`daemon.dart`, sent beside `app.debugPort`
+  /// and `app.devTools`). It is how a `--machine` client learns the address a
+  /// DTD client, such as the Dart MCP server, connects to.
+  void appDtd(String appId, Uri uri) {
+    sendEvent('app.dtd', {'appId': appId, 'uri': uri.toString()});
+  }
+
   /// Send app.started event.
   void appStarted(String appId) {
     sendEvent('app.started', {'appId': appId});

@@ -7,6 +7,7 @@ _LIB_DEPS = [
     "@dev_tool_deps//:args",
     "@dev_tool_deps//:clock",
     "@dev_tool_deps//:dds",
+    "@dev_tool_deps//:dtd",
     "@dev_tool_deps//:dwds",
     "@dev_tool_deps//:http_multi_server",
     "@dev_tool_deps//:logging",
@@ -351,6 +352,10 @@ _UNIT_TESTS = {
     "test_lifetime_test": {"lifetime": True},
     "toolchain_info_test": {"deps": _PATH_DEP},
     "tool_services_test": {"fakes": True},
+    "tooling_daemon_test": {
+        "fakes": True,
+        "deps": ["@dev_tool_deps//:logging"],
+    },
     "vm_service_client_test": {
         "fakes": True,
         "deps": ["@dev_tool_deps//:fake_async"] + _PATH_DEP,
@@ -494,6 +499,7 @@ dart_binary(
     visibility = ["//visibility:private"],
     deps = _TEST_DEPS + _PATH_DEP + [
         "//tools/e2e_testing",
+        "@dev_tool_deps//:dtd",
         "@dev_tool_deps//:vm_service",
         "@rules_dart//dart/runfiles",
     ],

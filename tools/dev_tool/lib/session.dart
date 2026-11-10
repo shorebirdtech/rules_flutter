@@ -61,6 +61,11 @@ class DeviceSession {
   String? devToolsUrl;
   Process? devToolsProcess;
 
+  /// The Dart Tooling Daemon this app is registered with, or null when it is
+  /// registered with none. The DevTools this tool launches joins it, as
+  /// `flutter run`'s does, rather than starting one of its own.
+  Uri? dtdUri;
+
   /// The Dart Development Service **we** started on the app's raw VM service.
   /// Our [vmClient] and DevTools both connect through it (DDS multiplexes), so
   /// they do not evict each other.
@@ -276,6 +281,7 @@ class DeviceSession {
     required this.vmClient,
     required this.appId,
     this.dds,
+    this.dtdUri,
     this.onDied,
   }) : _appInstance = appInstance {
     if (vmClient != null && dds != null) markDebugReady();
@@ -861,7 +867,11 @@ Future<void> runInteractiveSession({
                   'URL; this one did not.',
                 );
               }
-              final devtools = await _launchDevTools(dartExecutable, dds.uri!);
+              final devtools = await _launchDevTools(
+                dartExecutable,
+                dds.uri!,
+                dtdUri: session.dtdUri,
+              );
               session.devToolsProcess = devtools.process;
               if (devtools.serverUrl == null) return;
               url = devToolsConnectUri(
@@ -1256,14 +1266,20 @@ Uri devToolsConnectUri(String serverUrl, Uri vmServiceWsUri) =>
 /// rather than spawning a bare `dart` keeps the DevTools we launch tied to the
 /// SDK the app was built with, and fails loudly when the toolchain is missing
 /// instead of picking up whatever happens to be on `PATH`.
+///
+/// [dtdUri] is the Dart Tooling Daemon the app is registered with. Without it
+/// the DevTools server starts a DTD of its own, which knows nothing of the app.
 Future<({Process process, String? serverUrl})> _launchDevTools(
   String dartExecutable,
-  Uri vmServiceUri,
-) async {
-  final process = await Process.start(
-    dartExecutable,
-    ['devtools', '--no-launch-browser', '--vm-uri=$vmServiceUri'],
-  );
+  Uri vmServiceUri, {
+  Uri? dtdUri,
+}) async {
+  final process = await Process.start(dartExecutable, [
+    'devtools',
+    '--no-launch-browser',
+    '--vm-uri=$vmServiceUri',
+    if (dtdUri != null) '--dtd-uri=$dtdUri',
+  ]);
 
   final completer = Completer<String?>();
   Timer? timeout;

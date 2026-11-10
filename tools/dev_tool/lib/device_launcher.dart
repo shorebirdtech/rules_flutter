@@ -20,6 +20,7 @@ import 'device.dart';
 import 'run_plan.dart';
 import 'session.dart';
 import 'session_host.dart';
+import 'tooling_daemon.dart';
 import 'vm_service_client.dart';
 
 /// A launch ended by the run's teardown while it was in flight.
@@ -379,6 +380,18 @@ class DeviceLauncher {
       }
     }
 
+    // Before `app.started`, as `flutter run`'s DDS registers it before the
+    // app is reported up: a client that finds the run by that event and then
+    // asks DTD for its apps finds this one.
+    Uri? dtdUri;
+    if (dds != null && vmClient != null) {
+      dtdUri = await host.toolingDaemon?.register(
+        appId: appId,
+        vmServiceWsUri: dds.wsUri!,
+        name: dtdAppName(device: device.name, target: plan.target),
+      );
+    }
+
     host.protocol.appStarted(appId);
     host.announceSession(appId);
     final deviceSession = DeviceSession(
@@ -387,6 +400,7 @@ class DeviceLauncher {
       vmClient: vmClient,
       appId: appId,
       dds: dds,
+      dtdUri: dtdUri,
       // An app that dies under a live run ends the run, failed, with the
       // platform's account of it. `fail` tears the run down, so the session
       // loop ends and the exit status is the account.

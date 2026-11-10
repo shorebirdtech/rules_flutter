@@ -26,6 +26,7 @@ import 'logging.dart';
 import 'machine_protocol.dart';
 import 'reload_pipeline.dart';
 import 'session.dart';
+import 'tooling_daemon.dart';
 import 'shutdown_signals.dart';
 import 'teardown.dart';
 import 'tool_services.dart';
@@ -80,6 +81,11 @@ class SessionHost {
       announce: (params) => announceReloadResult(protocol, params),
     ),
   );
+
+  /// The Dart Tooling Daemon this run registers its apps with, once the
+  /// command knows the toolchain's `dart`. Null for a run that serves no VM
+  /// service, and until then. See [RunToolingDaemon].
+  RunToolingDaemon? toolingDaemon;
 
   /// Owns everything created after `app.started`. See [Teardown].
   final Teardown teardown = Teardown();

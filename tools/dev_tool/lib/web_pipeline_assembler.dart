@@ -654,6 +654,13 @@ class WebPipelineAssembler {
             wsUri,
             httpUriFromWebSocketUri(wsUri),
           );
+          // DWDS's DDS serves DevTools, so it hosts a Dart Tooling Daemon and
+          // registers the page's VM service with it, as `flutter run`'s web
+          // runner relies on. This run only says where it is.
+          if (debugConnection.dtdUri case final dtd?) {
+            session.dtdUri = Uri.parse(dtd);
+            host.toolingDaemon?.announce(session.appId, session.dtdUri!);
+          }
 
           // DevTools comes from the DDS that DWDS started, already carrying
           // the VM service URI — no separate `dart devtools` process, and no

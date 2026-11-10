@@ -40,6 +40,7 @@ import 'web_options.dart';
 import 'session.dart';
 import 'session_host.dart';
 import 'temp_dir.dart';
+import 'tooling_daemon.dart';
 import 'web_pipeline_assembler.dart';
 
 export 'dev_tool_exception.dart' show DevToolException;
@@ -140,6 +141,14 @@ class RunCommand {
       'devtools',
       defaultsTo: true,
       help: 'Launch DevTools for each connected device.',
+    )
+    ..addFlag(
+      'print-dtd',
+      defaultsTo: false,
+      negatable: false,
+      help:
+          'Print the address of the Dart Tooling Daemon the app is '
+          'registered with. A --machine client reads it from app.dtd.',
     )
     // No `defaultsTo`, for the reason `cross-origin-isolation` has none: the
     // default depends on the target. A web app that ships WebAssembly only
@@ -390,6 +399,18 @@ class RunCommand {
       // launch-time engine arguments, so there is no later moment at which they
       // could be applied.
       final plan = await RunPlan.resolve(_results, logger, bazel: host.bazel);
+      // Started only when the first app registers, so a run that never gets a
+      // VM service never starts one.
+      host.toolingDaemon = RunToolingDaemon(
+        start: () => ToolingDaemon.start(
+          dartExecutable: plan.toolchain.dart,
+          workingDirectory: plan.workspace,
+        ),
+        teardown: host.teardown,
+        protocol: host.protocol,
+        logger: logger,
+        printUri: _results['print-dtd'] as bool,
+      );
       // The first things the plan settles that the command surface depends on.
       // Only a `-c dbg` native build carries the record `app.buildInfo` reads,
       // and only a run with a VM service can reach the `ext.rules_flutter.*`

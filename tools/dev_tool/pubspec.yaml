@@ -17,6 +17,8 @@ dependencies:
   args: ^2.4.0
   clock: ^1.1.1
   dds: ^5.4.0
+  # The Dart Tooling Daemon client a run registers its apps through.
+  dtd: ^4.0.0
   # 27.1.2 is where DWDS restarts a page in two phases
   # (`$dartHotRestartBeginDwds`, then `$dartHotRestartEndDwds`), which is the
   # `$dartReloadModifiedModules` contract `web_bootstrap.dart` implements.

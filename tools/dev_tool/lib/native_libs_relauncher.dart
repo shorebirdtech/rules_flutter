@@ -78,6 +78,13 @@ class Relauncher {
   /// app's DevTools still reloads through them. See [ToolServices].
   final ToolServices? services;
 
+  /// Told each relaunched app's new VM service, once its client is connected:
+  /// a relaunch is a new process, so whatever found the old one by its
+  /// address — the Dart Tooling Daemon's list of apps, chiefly — has to be
+  /// told the new one.
+  final Future<void> Function(DeviceSession session, Uri vmServiceWsUri)?
+  onReconnected;
+
   /// The fingerprint of what the running processes actually launched with.
   /// Advanced only after a successful relaunch, so a rebuild that fails leaves
   /// the next restart still knowing it has stale libraries.
@@ -114,6 +121,7 @@ class Relauncher {
     required this.assetsDir,
     required this.logger,
     this.services,
+    this.onReconnected,
     required Map<String, String> liveFingerprint,
     this.nativeLibs,
     this.patchedLibs,
@@ -323,14 +331,12 @@ class Relauncher {
       return false;
     }
 
-    protocol.appDebugPort(
-      session.appId,
-      uri.replace(
-        scheme: uri.scheme == 'https' ? 'wss' : 'ws',
-        path: '${uri.path}ws',
-      ),
-      uri,
+    final wsUri = uri.replace(
+      scheme: uri.scheme == 'https' ? 'wss' : 'ws',
+      path: '${uri.path}ws',
     );
+    protocol.appDebugPort(session.appId, wsUri, uri);
+    await onReconnected?.call(session, wsUri);
     if (assetsDir.isNotEmpty) {
       client.assetDirectory = assetsDir;
       client.devicePathsAreWindows = session.device.usesWindowsPaths;

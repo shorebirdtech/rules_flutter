@@ -49,6 +49,7 @@ import 'session.dart';
 import 'session_host.dart';
 import 'temp_dir.dart';
 import 'tool_services.dart';
+import 'tooling_daemon.dart';
 import 'toolchain_info.dart';
 import 'vm_service_client.dart';
 
@@ -942,6 +943,14 @@ class NativePipelineAssembler {
       logger: logger,
       // A relaunch is a restart, so this run reloads: the services go back on.
       services: host.toolServices,
+      onReconnected: (session, wsUri) async {
+        final dtdUri = await host.toolingDaemon?.register(
+          appId: session.appId,
+          vmServiceWsUri: wsUri,
+          name: dtdAppName(device: session.device.name, target: target),
+        );
+        if (dtdUri != null) session.dtdUri = dtdUri;
+      },
       liveFingerprint: fingerprint,
       nativeLibs: nativeLibs,
       patchedLibs: hotPatcher == null
