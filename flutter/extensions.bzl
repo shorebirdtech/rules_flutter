@@ -55,6 +55,12 @@ A repository whose slices are the engine contract's labels (see
 `@rules_flutter//flutter:engine.bzl`): the SDK's engine comes from it instead of
 the release. Root module only.
 """),
+    "allow_upgrade_by_dependencies": attr.bool(doc = """\
+Root module only. When False (the default) the root's `flutter_version` is used
+exactly, and a dependency asking for a newer release fails the build. When True,
+the highest version any module asks for is used. As `dart.toolchain`'s attribute
+of the same name.
+"""),
     "material_fonts_sha256": attr.string(doc = """\
 The checksum of the Material fonts archive a non-release framework expects, when
 its `bin/internal/material_fonts.version` names a revision no pinned release does.
@@ -64,12 +70,13 @@ its `bin/internal/material_fonts.version` names a revision no pinned release doe
 def _declared_sdks(module_ctx):
     """The SDKs the modules declare: a struct for each, by name."""
 
-    # The root module chooses each toolchain's Flutter version, as it chooses
-    # every toolchain: its own tag wins. A name the root does not declare takes
-    # the highest version the other modules ask for.
+    # The root module's version for a name is used exactly; a dependency asking
+    # for newer fails, unless the root sets `allow_upgrade_by_dependencies`.
+    # A name the root does not pin takes the highest version asked for.
     tags = {}
     requests = {}
     root_versions = {}
+    allow_upgrade = {}
     for mod in module_ctx.modules:
         for toolchain in mod.tags.toolchain:
             if toolchain.name != DEFAULT_SDK_NAME and not mod.is_root:
@@ -85,6 +92,13 @@ def _declared_sdks(module_ctx):
                         toolchain.flutter_version,
                     ))
                 root_versions[toolchain.name] = toolchain.flutter_version
+            if toolchain.allow_upgrade_by_dependencies:
+                if not mod.is_root:
+                    fail((
+                        "flutter.toolchain(name = \"{}\") in module {} sets allow_upgrade_by_dependencies. " +
+                        "Only the root module may: a library must not decide the SDK of the apps that use it."
+                    ).format(toolchain.name, mod.name))
+                allow_upgrade[toolchain.name] = True
             if (toolchain.framework or toolchain.engine) and not mod.is_root:
                 fail((
                     "flutter.toolchain(name = \"{}\") in module {} gives a framework or an engine. " +
@@ -116,7 +130,7 @@ def _declared_sdks(module_ctx):
             ).format(name))
         selected = None
         if versions:
-            selection = select_flutter_version(name, root_versions.get(name), requests[name])
+            selection = select_flutter_version(name, root_versions.get(name), requests[name], allow_upgrade.get(name, False))
             if selection.error:
                 fail(selection.error)
             selected = selection.version

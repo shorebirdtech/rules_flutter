@@ -60,7 +60,7 @@ flutter_pub.from_lock(
 use_repo(flutter_pub, "deps")
 ```
 
-`flutter.toolchain` downloads the Flutter SDK and engine. Your root module's `flutter_version` is the one built with, whatever version rules_flutter or another dependency declares; without one, the highest version a dependency declares is used. `flutter_pub.from_lock` reads your `pubspec.lock` and creates a repository, here named `deps`, with one target per package: `@deps//:flutter`, `@deps//:flutter_test`, `@deps//:collection`, and so on. See [Pub packages](#pub-packages). The two are separate extensions so that a lock `flutter_pub` refuses leaves the toolchain working, and with it the command that fixes the lock.
+`flutter.toolchain` downloads the Flutter SDK and engine. Your root module's `flutter_version` is the one built with. A dependency never gets an older release than it asks for, so if one asks for a newer release than your pin, the build fails and names it: raise your pin, or set `allow_upgrade_by_dependencies = True` on your `flutter.toolchain` to build with the highest version any module asks for. Without a root pin, the highest version asked for is used. `flutter_pub.from_lock` reads your `pubspec.lock` and creates a repository, here named `deps`, with one target per package: `@deps//:flutter`, `@deps//:flutter_test`, `@deps//:collection`, and so on. See [Pub packages](#pub-packages). The two are separate extensions so that a lock `flutter_pub` refuses leaves the toolchain working, and with it the command that fixes the lock.
 
 Some platforms need one more repository from the `flutter` extension. Add it to `use_repo(flutter, ...)` when you build for that platform:
 
