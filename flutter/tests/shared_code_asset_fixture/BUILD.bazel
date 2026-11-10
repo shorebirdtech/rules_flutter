@@ -8,9 +8,8 @@ out, not at what they contain.
 """
 
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("//flutter:android.bzl", "flutter_android_bundle")
-load("//flutter:defs.bzl", "flutter_application", "flutter_native_library")
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_application", "flutter_native_library")
 load("//flutter:ios.bzl", "flutter_ios_native_frameworks_gen")
 load("//flutter:macos.bzl", "flutter_macos_native_libs_gen")
 load("//flutter:native_assets.bzl", "flutter_native_asset")

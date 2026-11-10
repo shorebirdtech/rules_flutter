@@ -1,5 +1,4 @@
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
-load("//flutter:defs.bzl", "flutter_library", "flutter_native_library", "flutter_plugin")
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_library", "flutter_native_library", "flutter_plugin")
 
 # Things a web bundle may reach under two compilers at once, each with
 # something generated for `web_compiler_test.bzl` to find the configuration of.

@@ -1,4 +1,4 @@
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
+load("//flutter:defs.bzl", "dart_package_metadata")
 load("//flutter:integration_test.bzl", "flutter_android_app_integration_test", "flutter_android_device_runner", "flutter_android_emulator_runner", "flutter_android_system_image", "flutter_application_variant", "flutter_chrome_runner", "flutter_desktop_app_integration_test", "flutter_integration_bootstrap", "flutter_ios_app_integration_test", "flutter_ios_simulator_runner", "flutter_web_app_integration_test")
 load("//flutter:web.bzl", "flutter_web_bundle")
 load("//flutter/tests:fake_android_sdk.bzl", "fake_android_sdk")

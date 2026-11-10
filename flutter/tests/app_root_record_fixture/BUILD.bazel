@@ -3,8 +3,7 @@
 # and an app over a library at that root naming none. See
 # `//flutter/tests:app_root_record_test.bzl`.
 
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
-load("//flutter:defs.bzl", "flutter_library")
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_library")
 load("//flutter/tests:app_root_record_test.bzl", "app_record_probe")
 load("//flutter/tests/code_asset_fixture:stand_in_code_asset.bzl", "stand_in_code_asset")
 

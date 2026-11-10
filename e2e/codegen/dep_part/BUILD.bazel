@@ -1,5 +1,5 @@
-load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_codegen", "dart_package_metadata")
-load("@rules_flutter//flutter:defs.bzl", "flutter_library")
+load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_codegen")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_library")
 
 # Dependency package mixing a hand-written source with a generated `part`.
 # Consumed by //:app — exercises per-dependency source assembly and the dev

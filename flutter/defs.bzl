@@ -12,6 +12,9 @@ rules that compile Dart code, bundle assets, and run tests.
     target that flavor, as `flutter build --flavor` does: `appFlavor` is set and
     the pub assets and shaders whose `flavors:` name it are bundled. Declare one
     application per flavor; see the README's Flavors section.
+- `dart_package_metadata`: rules_dart's rule, re-exported. It states a package's facts
+    (its name, language version, licence) once, as `pubspec.yaml` does, and every target
+    of the package names it with `package`.
 - `flutter_library`: Collects Flutter Dart sources and assets into a reusable
     dependency. Wire into `flutter_application` via `deps`.
 - `flutter_plugin`: Declares a Flutter plugin with optional Dart registration
@@ -55,6 +58,7 @@ artifacts:
 - `@rules_flutter//flutter:web.bzl` — `flutter_web_app` + composable rules (takes source directly, not a flutter_application target)
 """
 
+load("@rules_dart//dart:defs.bzl", _dart_package_metadata = "dart_package_metadata")
 load("//flutter/private:flutter_aot_snapshot.bzl", _flutter_aot_snapshot = "flutter_aot_snapshot")
 load("//flutter/private:flutter_application.bzl", _flutter_application = "flutter_application")
 load("//flutter/private:flutter_asset_bundle.bzl", _flutter_asset_bundle = "flutter_asset_bundle")
@@ -129,6 +133,7 @@ def flutter_test(name, main, test_config = None, **kwargs):
             )
     _flutter_test(name = name, main = main, test_config = test_config, **kwargs)
 
+dart_package_metadata = _dart_package_metadata
 flutter_program_test = _flutter_program_test
 flutter_suite_program = _flutter_suite_program
 flutter_tester_binary = _flutter_tester_binary

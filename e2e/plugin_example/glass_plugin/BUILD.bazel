@@ -1,6 +1,5 @@
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_flutter//flutter:android.bzl", "flutter_android_engine", "flutter_android_plugin_library")
-load("@rules_flutter//flutter:defs.bzl", "flutter_plugin")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_plugin")
 load("@rules_flutter//flutter:macos.bzl", "flutter_apple_plugin_library")
 
 dart_package_metadata(

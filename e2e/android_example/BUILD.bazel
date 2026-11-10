@@ -4,7 +4,7 @@ load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("@rules_cc//cc:cc_import.bzl", "cc_import")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
-load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_analysis_test", "dart_code_asset", "dart_package_metadata", "dart_test")
+load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_analysis_test", "dart_code_asset", "dart_test")
 load(
     "@rules_flutter//flutter:android.bzl",
     "flutter_android_app",
@@ -14,7 +14,7 @@ load(
     "flutter_android_release",
     "flutter_android_runner_lib_gen",
 )
-load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_library")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application", "flutter_library")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_bundle")
 load("@rules_kotlin//kotlin:android.bzl", "kt_android_library")
 load(":aar.bzl", "android_archive")

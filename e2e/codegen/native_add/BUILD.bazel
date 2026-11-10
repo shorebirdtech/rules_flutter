@@ -14,7 +14,8 @@ hook-built library arrives.
 
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
-load("@rules_dart//dart:defs.bzl", "dart_code_asset", "dart_library", "dart_package_metadata")
+load("@rules_dart//dart:defs.bzl", "dart_code_asset", "dart_library")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata")
 
 # The header is this library's binding contract: the signatures live there, so a
 # change to it is a change to what a caller may call, and a change to the `.c`

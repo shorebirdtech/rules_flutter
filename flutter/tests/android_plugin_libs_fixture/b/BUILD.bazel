@@ -1,8 +1,7 @@
 """Plugin `plugin_b`, with an Android library."""
 
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_java//java:java_library.bzl", "java_library")
-load("//flutter:defs.bzl", "flutter_plugin")
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_plugin")
 
 package(default_visibility = ["//flutter/tests:__subpackages__"])
 

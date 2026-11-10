@@ -1,4 +1,5 @@
-load("@rules_dart//dart:defs.bzl", "dart_library", "dart_package_metadata")
+load("@rules_dart//dart:defs.bzl", "dart_library")
+load("//flutter:defs.bzl", "dart_package_metadata")
 
 dart_package_metadata(
     name = "pubspec-metadata",

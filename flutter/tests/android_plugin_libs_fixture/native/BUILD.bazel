@@ -1,9 +1,8 @@
 """Plugin `plugin_native`, whose Android library brings prebuilt native libraries."""
 
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_java//java:java_library.bzl", "java_library")
-load("//flutter:defs.bzl", "flutter_plugin")
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_plugin")
 load(":aar_like.bzl", "aar_like")
 
 package(default_visibility = ["//flutter/tests:__subpackages__"])

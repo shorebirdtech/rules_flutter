@@ -1,7 +1,8 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
-load("@rules_dart//dart:defs.bzl", "dart_code_asset", "dart_library", "dart_package_metadata")
+load("@rules_dart//dart:defs.bzl", "dart_code_asset", "dart_library")
+load("//flutter:defs.bzl", "dart_package_metadata")
 load("//flutter/tests:native_assets_test.bzl", "hook_check_probe", "legacy_dart_library")
 
 # A pub-package-shaped `dart_library` that owns a native code asset, exactly as

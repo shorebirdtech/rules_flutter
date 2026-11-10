@@ -9,9 +9,8 @@ Instantiated from `flutter/tests/app_version/BUILD.bazel`, beside its fixtures.
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("@build_bazel_rules_apple//apple:providers.bzl", "AppleBundleVersionInfo")
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("//flutter:android.bzl", "flutter_android_manifest_merge")
-load("//flutter:defs.bzl", "flutter_application")
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_application")
 load("//flutter:ios.bzl", "flutter_apple_bundle_version")
 load("//flutter:web.bzl", "flutter_web_bundle")
 load(

@@ -8,7 +8,8 @@ tree.
 
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
-load("@rules_dart//dart:defs.bzl", "dart_code_asset", "dart_library", "dart_package_metadata")
+load("@rules_dart//dart:defs.bzl", "dart_code_asset", "dart_library")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata")
 
 cc_library(
     name = "counter_cc",

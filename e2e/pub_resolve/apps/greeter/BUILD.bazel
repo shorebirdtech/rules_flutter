@@ -1,5 +1,5 @@
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata", "dart_test")
-load("@rules_flutter//flutter:defs.bzl", "flutter_test")
+load("@rules_dart//dart:defs.bzl", "dart_test")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_test")
 load("@rules_flutter//flutter:integration_test.bzl", "flutter_web_integration_test")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
 

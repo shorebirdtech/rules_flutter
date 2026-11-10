@@ -1,5 +1,4 @@
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
-load("//flutter:defs.bzl", "flutter_plugin")
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_plugin")
 load("//flutter:native_assets.bzl", "flutter_native_asset")
 
 # The other way a code asset reaches a test: declared with

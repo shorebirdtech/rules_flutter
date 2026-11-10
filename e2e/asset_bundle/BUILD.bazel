@@ -1,5 +1,4 @@
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
-load("@rules_flutter//flutter:defs.bzl", "flutter_asset_bundle")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_asset_bundle")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
 load("//tools:bundle.bzl", "bundled_app", "tree_of")
 

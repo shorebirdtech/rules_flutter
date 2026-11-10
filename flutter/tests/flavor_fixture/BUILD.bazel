@@ -1,5 +1,4 @@
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
-load("//flutter:defs.bzl", "flutter_library")
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_library")
 
 package(default_visibility = ["//flutter/tests:__pkg__"])
 

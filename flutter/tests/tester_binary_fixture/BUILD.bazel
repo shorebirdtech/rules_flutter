@@ -1,5 +1,4 @@
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
-load("//flutter:defs.bzl", "flutter_tester_binary")
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_tester_binary")
 
 # A constraint no execution platform has, standing in for the Apple ones an
 # app's Mac platform carries.

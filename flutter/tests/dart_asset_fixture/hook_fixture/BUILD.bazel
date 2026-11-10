@@ -1,5 +1,4 @@
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
-load("//flutter:defs.bzl", "flutter_library")
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_library")
 
 # A package that ships a build hook nothing replaces, as `flutter_pub.from_lock()`
 # records when it finds `hook/build.dart` and the curated registry has no entry

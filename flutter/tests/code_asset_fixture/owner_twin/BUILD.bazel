@@ -2,7 +2,8 @@
 two pub hubs can each supply one package: the same id and library as `owner/`'s,
 bare where `owner/`'s is wrapped."""
 
-load("@rules_dart//dart:defs.bzl", "dart_library", "dart_package_metadata")
+load("@rules_dart//dart:defs.bzl", "dart_library")
+load("//flutter:defs.bzl", "dart_package_metadata")
 
 package(default_visibility = ["//flutter/tests/code_asset_fixture:__pkg__"])
 

@@ -1,8 +1,7 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
-load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_plugin")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application", "flutter_plugin")
 load("@rules_flutter//flutter:native_assets.bzl", "flutter_data_asset", "flutter_native_asset")
 
 exports_files(["pubspec.lock"])

@@ -1,4 +1,5 @@
-load("@rules_dart//dart:defs.bzl", "dart_analysis_test", "dart_package_metadata")
+load("@rules_dart//dart:defs.bzl", "dart_analysis_test")
+load("//flutter:defs.bzl", "dart_package_metadata")
 load("//flutter:web.bzl", "flutter_web_bundle")
 
 # The guard on `flutter_web_bundle`'s `DartAnalyzableInfo`, in the root

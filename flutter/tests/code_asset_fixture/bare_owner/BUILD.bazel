@@ -1,7 +1,8 @@
 """The bare control of `owner/`: a package of its own whose code asset is a
 plain library with no wrapper."""
 
-load("@rules_dart//dart:defs.bzl", "dart_library", "dart_package_metadata")
+load("@rules_dart//dart:defs.bzl", "dart_library")
+load("//flutter:defs.bzl", "dart_package_metadata")
 
 package(default_visibility = ["//flutter/tests/code_asset_fixture:__pkg__"])
 

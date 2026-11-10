@@ -1,5 +1,4 @@
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
-load("//flutter:defs.bzl", "flutter_test")
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_test")
 
 # Four tests of one package, left `manual`; only the analysis tests build them.
 dart_package_metadata(

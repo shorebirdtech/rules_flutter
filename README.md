@@ -46,10 +46,11 @@ If `flutter build` works for you, here is what Bazel adds:
 ```starlark
 bazel_dep(name = "rules_flutter", version = "<latest from registry.bazel.build/modules/rules_flutter>")
 
-# Your BUILD files load `dart_package_metadata`, and `dart_library` if you have
-# plain Dart packages, from rules_dart: the version rules_flutter's own
-# MODULE.bazel names, or later.
-bazel_dep(name = "rules_dart", version = "<the version rules_flutter depends on>")
+# Your BUILD files load `dart_package_metadata` from rules_flutter. A project
+# that also loads rules_dart's own rules (`dart_library`, `dart_analysis_options`)
+# or names its flags needs this too, at the version rules_flutter's own
+# MODULE.bazel names, or later:
+# bazel_dep(name = "rules_dart", version = "<the version rules_flutter depends on>")
 
 flutter = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter")
 flutter.toolchain(flutter_version = "3.47.9")
@@ -165,8 +166,7 @@ rules_flutter's actions land the same with the flag on or off: `gen_snapshot` fo
 Start from a project made with `flutter create`. It has `lib/main.dart`, a `pubspec.yaml`, and one folder per platform. rules_flutter reads those files as they are. You add a `BUILD.bazel`:
 
 ```starlark
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
-load("@rules_flutter//flutter:defs.bzl", "flutter_application")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application")
 load("@rules_flutter//flutter:macos.bzl", "flutter_macos_app")
 
 dart_package_metadata(
@@ -1555,7 +1555,7 @@ flutter_windows_bundle(
 Run `flutter create --platforms=web .` first so `web/` has its `index.html`, `manifest.json`, and icons. Any of those that are missing are replaced by built-in templates. Add `flutter_web_sdk` to `use_repo`.
 
 ```starlark
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
 
 dart_package_metadata(
@@ -1667,7 +1667,7 @@ The files under `web/` are treated as templates and substituted the way `flutter
 <summary>Composable rules</summary>
 
 ```starlark
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_bundle")
 
 dart_package_metadata(
@@ -2255,8 +2255,7 @@ Two limits come from Flutter rather than from these rules:
 Use the two rules directly to run a program that something else compiled, with everything `flutter_test` gives a test: the `bazel test` result protocol, `@Tags` selection (`include_tags`, `exclude_tags`, `DART_TEST_TAGS`), JUnit output, golden comparison and `--update-goldens`, code assets, sharding and coverage:
 
 ```starlark
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
-load("@rules_flutter//flutter:defs.bzl", "flutter_suite_program", "flutter_program_test")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_program_test", "flutter_suite_program")
 
 dart_package_metadata(
     name = "pubspec-metadata",
@@ -2323,8 +2322,7 @@ Build it for the machine it runs on. `bazel run` does that, and a rule that runs
 macOS, Windows, Linux, the web (headless Chrome), Android devices and the iOS simulator are the platforms so far; Windows is [below](#windows-integration-tests), Linux [after it](#linux-integration-tests), the web [next](#web-integration-tests), Android [after that](#android-integration-tests) and iOS [last](#ios-simulator-integration-tests).
 
 ```starlark
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
-load("@rules_flutter//flutter:defs.bzl", "flutter_application")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application")
 load("@rules_flutter//flutter:integration_test.bzl", "flutter_macos_integration_test")
 
 dart_package_metadata(
@@ -2421,7 +2419,7 @@ The macro is Tier 1. Tier 2 is `flutter_integration_bootstrap`, `flutter_applica
 `flutter_web_integration_test` runs the same test file in headless Chrome. `flutter test` refuses web devices (flutter/flutter#66264), and `flutter drive -d chrome` reports only pass or fail; this reports each `testWidgets` as a case, as the other platforms do, with `--test_filter`, tags and `shard_count`.
 
 ```starlark
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata")
 load("@rules_flutter//flutter:integration_test.bzl", "flutter_web_integration_test")
 
 dart_package_metadata(
@@ -2686,7 +2684,8 @@ These are what `flutter_application` is made of. Most apps never need them.
 rules_dart provides `dart_codegen` and `dart_aggregate_codegen`, which replace `build_runner` with ordinary Bazel actions. They load from `@rules_dart//dart:defs.bzl`. A generated file goes into the consuming target's `srcs`, and the rules place it next to its hand-written sibling so a `part` directive resolves:
 
 ```starlark
-load("@rules_dart//dart:defs.bzl", "dart_aggregate_codegen", "dart_codegen", "dart_package_metadata")
+load("@rules_dart//dart:defs.bzl", "dart_aggregate_codegen", "dart_codegen")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata")
 
 dart_package_metadata(
     name = "pubspec-metadata",

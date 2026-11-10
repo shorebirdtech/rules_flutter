@@ -1,6 +1,5 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
-load("//flutter:defs.bzl", "flutter_library", "flutter_plugin")
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_library", "flutter_plugin")
 load("//flutter/tests:dart_resources_test.bzl", "dart_in_resources_fails_test", "missing_font_fails_test", "resources_probe")
 
 # One package; each target below is a separate subject of a test.

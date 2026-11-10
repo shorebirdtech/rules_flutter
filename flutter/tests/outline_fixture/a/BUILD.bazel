@@ -1,4 +1,5 @@
-load("@rules_dart//dart:defs.bzl", "dart_library", "dart_package_metadata")
+load("@rules_dart//dart:defs.bzl", "dart_library")
+load("//flutter:defs.bzl", "dart_package_metadata")
 load("//flutter/tests/outline_fixture:outline_cutoff.bzl", "variant_source")
 
 variant_source(

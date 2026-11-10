@@ -3,8 +3,8 @@ load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
 load("@rules_apple//apple:macos.bzl", "macos_application")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
-load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_analysis_test", "dart_package_metadata", "dart_test")
-load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_profile_build")
+load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_analysis_test", "dart_test")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application", "flutter_profile_build")
 load("@rules_flutter//flutter:integration_test.bzl", "flutter_application_variant")
 load(
     "@rules_flutter//flutter:macos.bzl",

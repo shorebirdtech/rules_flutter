@@ -1,7 +1,6 @@
 """Plugin `rusty`, whose macOS and Linux libraries its own build makes, as `flutter_pub_package` writes one."""
 
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
-load("//flutter:defs.bzl", "flutter_plugin")
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_plugin")
 load("//flutter/private:unbuilt_native_code.bzl", "flutter_unbuilt_plugin_library")
 
 package(default_visibility = ["//flutter/tests:__subpackages__"])

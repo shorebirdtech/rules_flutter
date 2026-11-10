@@ -5,8 +5,7 @@
 its iOS build does not.
 """
 
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
-load("//flutter:defs.bzl", "flutter_application")
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_application")
 load("//flutter:macos.bzl", "flutter_apple_plugins_aggregator")
 
 package(default_visibility = ["//flutter/tests:__subpackages__"])

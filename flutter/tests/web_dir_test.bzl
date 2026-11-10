@@ -1,7 +1,7 @@
 """Analysis tests for `web_dir`, the directory served at a web bundle's root."""
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
+load("//flutter:defs.bzl", "dart_package_metadata")
 load("//flutter:web.bzl", "flutter_web_app", "flutter_web_bundle")
 load(":action_content.bzl", "action_config")
 

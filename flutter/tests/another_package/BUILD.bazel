@@ -1,4 +1,4 @@
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
+load("//flutter:defs.bzl", "dart_package_metadata")
 
 # A package other than `//flutter/tests`'s, for a test naming the wrong one.
 dart_package_metadata(

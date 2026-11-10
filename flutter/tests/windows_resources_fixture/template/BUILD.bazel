@@ -1,5 +1,4 @@
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
-load("//flutter:defs.bzl", "flutter_application")
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_application")
 load("//flutter:windows.bzl", "flutter_windows_app")
 load("//flutter/tests:windows_resources_test.bzl", "windows_resources_test_suite", "windows_runner_title_test")
 

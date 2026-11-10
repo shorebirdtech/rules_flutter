@@ -5,8 +5,8 @@ makes its asset with no target of its own. Each reaches its own application
 only, so sharing a root is not a conflict. `bare_owner/` is the bare control,
 and `owner_twin/` the first package again, its asset bare."""
 
-load("@rules_dart//dart:defs.bzl", "dart_library", "dart_package_metadata")
-load("//flutter:defs.bzl", "flutter_plugin")
+load("@rules_dart//dart:defs.bzl", "dart_library")
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_plugin")
 load("//flutter/tests/code_asset_fixture:forwarding_package.bzl", "forwarding_package")
 load("//flutter/tests/code_asset_fixture:inline_asset_package.bzl", "inline_asset_package")
 

@@ -7,9 +7,8 @@ installed, and `plugin_ok` one that is. `plugin_native`'s library brings
 prebuilt native libraries, as an AAR's do.
 """
 
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("//flutter:android.bzl", "flutter_android_plugin_libs")
-load("//flutter:defs.bzl", "flutter_application")
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_application")
 load("//flutter/private:flutter_android_plugin_libs.bzl", "flutter_android_maven_report", "flutter_android_maven_requirements")
 
 package(default_visibility = ["//flutter/tests:__subpackages__"])

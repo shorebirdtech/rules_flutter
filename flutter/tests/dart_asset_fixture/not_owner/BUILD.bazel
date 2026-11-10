@@ -1,4 +1,4 @@
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
+load("//flutter:defs.bzl", "dart_package_metadata")
 
 # A code asset is owned by the package whose id namespaces it, and a package
 # declaring someone else's must be refused. The rule is rules_dart's, checked

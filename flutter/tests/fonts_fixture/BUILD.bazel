@@ -1,5 +1,4 @@
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
-load("//flutter:defs.bzl", "flutter_library", "flutter_plugin")
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_library", "flutter_plugin")
 load("//flutter/tests:flutter_fonts_test.bzl", "assets_owner_test", "font_mismatch_fails_test", "fonts_bundled_test")
 
 # The package the libraries below are targets of, each a separate subject of a
