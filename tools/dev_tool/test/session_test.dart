@@ -1093,7 +1093,7 @@ void main() {
           return {'message': 'Hot reload successful'};
         });
 
-      final fake = _FakeDirectoryWatcher('/root');
+      final fake = FakeDirectoryWatcher('/root');
       final watcher = SourceWatcher(
         root: '/root',
         debounce: const Duration(milliseconds: 5),
@@ -1345,31 +1345,6 @@ void main() {
       },
     );
   });
-}
-
-/// A [DirectoryWatcher] whose events a test decides.
-class _FakeDirectoryWatcher implements DirectoryWatcher {
-  @override
-  final String path;
-
-  final StreamController<WatchEvent> _events =
-      StreamController<WatchEvent>.broadcast();
-
-  _FakeDirectoryWatcher(this.path);
-
-  void emit(WatchEvent event) => _events.add(event);
-
-  @override
-  Stream<WatchEvent> get events => _events.stream;
-
-  @override
-  Future<void> get ready async {}
-
-  @override
-  bool get isReady => true;
-
-  @override
-  String get directory => path;
 }
 
 /// A DDS whose `shutdown()` never completes.

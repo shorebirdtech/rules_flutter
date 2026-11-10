@@ -1,6 +1,7 @@
 /// Integration-flavoured tests that wire the hot-reload subsystem
-/// end-to-end (CommandRunner + ReloadOrchestrator + SourceWatcher with a
-/// real DirectoryWatcher), using fakes for Compiler and AppInstance.
+/// end-to-end (CommandRunner + ReloadOrchestrator + SourceWatcher), using
+/// fakes for DirectoryWatcher, Compiler and AppInstance. That a real
+/// DirectoryWatcher delivers edits is `source_watcher_fs_test.dart`'s.
 ///
 /// The file watcher and a manual hotReload share the same
 /// CommandRunner.Pool(1) and AppliedVersions. A timed-out applyKernel
@@ -18,6 +19,7 @@ import 'package:flutter_bazel_dev_tool/hot_reload/source_watcher.dart';
 import 'package:flutter_bazel_dev_tool/hot_reload/workspace.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
+import 'package:watcher/watcher.dart';
 
 import 'fakes.dart';
 
@@ -242,69 +244,50 @@ void main() {
     );
 
     test(
-      'a real DirectoryWatcher firing on a tmp file results in orchestrator.reload running once',
+      'a watcher event for an edited file results in orchestrator.reload running once',
       () async {
-        // Slower test (uses real FSEvents/inotify). Generous timeout.
         final h = await _Harness.create();
         try {
           h.writeFile('main.dart', 'v1');
           h.seedApplied();
 
+          final fake = FakeDirectoryWatcher(h.tmp.path);
           final watcher = SourceWatcher(
             root: h.tmp.path,
             debounce: const Duration(milliseconds: 50),
+            watcherFactory: (_) => fake,
           );
           await watcher.start();
 
-          // Subscribe before producing the change. Only changes to the file
-          // under test reload: the primer below produces changes of its own.
-          final primed = Completer<void>();
-          final ranCompleter = Completer<void>();
-          final reloadResults = <Map<String, dynamic>>[];
+          final reloaded = Completer<Map<String, dynamic>>();
           final sub = watcher.changes.listen((change) async {
-            if (change.paths.any((p) => p.endsWith('primer.dart'))) {
-              if (!primed.isCompleted) primed.complete();
-            }
-            if (!change.paths.any((p) => p.endsWith('main.dart'))) return;
             final result = await h.runner.run('app.hotReload', {
               'invalidatedFiles': [
                 for (final p in change.paths)
                   if (h.resolver.uriFor(p) case final uri?) uri,
               ],
             });
-            reloadResults.add(result);
-            if (!ranCompleter.isCompleted) ranCompleter.complete();
+            reloaded.complete(result);
           });
 
-          // `ready` does not mean events are being delivered. On macOS,
-          // package:watcher completes it a fixed 200ms after starting the
-          // native watch (`watched_directory_tree.dart`), and on a loaded host
-          // a write made just after that can be lost outright. So prove the
-          // stream live first: write a primer until a change for it arrives.
-          // Each write is a fresh event, so this waits on delivery rather than
-          // on a guess at how long setup takes.
-          for (var n = 0; !primed.isCompleted; n++) {
-            h.writeFile('primer.dart', '// $n');
-            await Future.any([
-              primed.future,
-              Future<void>.delayed(const Duration(milliseconds: 500)),
-            ]);
-          }
           h.writeFile('main.dart', 'v2 longer');
+          fake.emit(
+            WatchEvent(
+              ChangeType.MODIFY,
+              p.join(h.tmp.path, 'lib', 'main.dart'),
+            ),
+          );
 
-          // The test's own timeout below is what reports a watcher that
-          // never delivers.
-          await ranCompleter.future;
+          final result = await reloaded.future;
           await sub.cancel();
           await watcher.stop();
 
-          expect(reloadResults, hasLength(1));
-          expect(reloadResults.first['outcome'], 'ReloadApplied');
+          expect(result['outcome'], 'ReloadApplied');
+          expect(h.compiler.recompileCalls, hasLength(1));
         } finally {
           await h.dispose();
         }
       },
-      timeout: const Timeout(Duration(seconds: 60)),
     );
   });
 }

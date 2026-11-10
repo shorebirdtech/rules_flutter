@@ -27,6 +27,7 @@ import 'package:flutter_bazel_dev_tool/mdns_vm_service_discovery.dart';
 import 'package:multicast_dns/multicast_dns.dart';
 import 'package:path/path.dart' as p;
 import 'package:vm_service/vm_service.dart';
+import 'package:watcher/watcher.dart';
 
 /// A stand-in for the VM's devFS HTTP endpoint: decodes the `dev_fs_uri_b64`
 /// header the way the VM does and writes the gzipped body under [root].
@@ -1845,4 +1846,33 @@ class FakeSimulatorLog {
     }
     return ProcessResult(0, 0, '', '');
   };
+}
+
+/// A [DirectoryWatcher] whose events the test decides, ready at once.
+class FakeDirectoryWatcher implements DirectoryWatcher {
+  @override
+  final String path;
+
+  final StreamController<WatchEvent> _events =
+      StreamController<WatchEvent>.broadcast();
+
+  FakeDirectoryWatcher(this.path);
+
+  @override
+  Stream<WatchEvent> get events => _events.stream;
+
+  @override
+  Future<void> get ready async {}
+
+  @override
+  bool get isReady => true;
+
+  @override
+  String get directory => path;
+
+  void emit(WatchEvent event) => _events.add(event);
+
+  void emitError(Object error) => _events.addError(error);
+
+  Future<void> closeStream() => _events.close();
 }

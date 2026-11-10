@@ -149,6 +149,7 @@ _PATH_DEP = ["@dev_tool_deps//:path"]
 _FAKES_DEPS = [
     "@dev_tool_deps//:multicast_dns",
     "@dev_tool_deps//:vm_service",
+    "@dev_tool_deps//:watcher",
 ] + _PATH_DEP
 
 _UNIT_TESTS = {
@@ -326,7 +327,7 @@ _UNIT_TESTS = {
     },
     "run_command_lifecycle_test": {
         "fakes": True,
-        "deps": _PATH_DEP,
+        "deps": _PATH_DEP + ["@dev_tool_deps//:watcher"],
     },
     "run_command_test": {},
     "run_plan_test": {"deps": ["@dev_tool_deps//:args"]},
@@ -351,7 +352,18 @@ _UNIT_TESTS = {
             "@dev_tool_deps//:watcher",
         ],
     },
-    "source_watcher_test": {"deps": ["@dev_tool_deps//:watcher"]},
+    "source_watcher_fs_test": {
+        # Its verdict rests on the OS delivering file events in time, which no
+        # platform bounds: macOS FSEvents stalls for a minute or more while
+        # other processes write heavily, as a full `bazel test //...` does.
+        # So it runs with `--config=deep`, on a machine left to itself.
+        "tags": ["deep"],
+        "deps": _PATH_DEP,
+    },
+    "source_watcher_test": {
+        "fakes": True,
+        "deps": ["@dev_tool_deps//:watcher"],
+    },
     "teardown_test": {},
     "temp_dir_test": {},
     "test_lifetime_test": {"lifetime": True},
@@ -420,6 +432,7 @@ _UNIT_TESTS = {
            (["test/e2e/macos_gui.dart"] if cfg.get("gui") else []),
     data = cfg.get("data", []),
     main = "test/%s.dart" % name,
+    tags = cfg.get("tags", []),
     target_compatible_with = cfg.get("target_compatible_with", []),
     # A test that imports a fakes package itself lists it too; each once.
     deps = {
