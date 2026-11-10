@@ -108,7 +108,7 @@ def _manifest_values_conflict_test_impl(ctx):
     asserts.equals(env, None, manifest_values_conflict(owner, {"appAuthRedirectScheme": "x"}, "2.0.0", "3"))
     asserts.equals(env, None, manifest_values_conflict(owner, {"versionCode": "9", "versionName": "9.0"}, None, None))
     for values, name, number, want in [
-        ({"applicationId": "a.b"}, None, None, "sets `applicationId` twice: in `manifest_values` and through `package_name`"),
+        ({"applicationId": "a.b"}, None, None, "sets `applicationId` twice: in `manifest_values` and through `application_id`"),
         ({"minSdkVersion": "21"}, None, None, "through `min_sdk_version`"),
         ({"targetSdkVersion": "35"}, None, None, "through `target_sdk_version`"),
         ({"versionCode": "9"}, None, "3", "sets `versionCode` twice: in `manifest_values` and through `build_number`"),

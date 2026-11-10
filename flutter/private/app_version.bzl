@@ -246,7 +246,7 @@ def version_target_conflict(owner, version, build_name, build_number):
 
 # The manifest_values keys flutter_android_app sets from its own arguments.
 _ANDROID_ALWAYS_SET = {
-    "applicationId": "package_name",
+    "applicationId": "application_id",
     "minSdkVersion": "min_sdk_version",
     "targetSdkVersion": "target_sdk_version",
 }

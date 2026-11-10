@@ -207,9 +207,9 @@ ios_application(
 
 flutter_android_app(
     name = "hello_world_android",
-    package_name = "com.example.helloworld",
     app_name = "Hello World",
     application = ":hello_world_app",
+    application_id = "com.example.helloworld",
 )
 
 # -- Other platforms -----------------------------------------------------------

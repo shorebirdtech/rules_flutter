@@ -303,8 +303,8 @@ flutter_windows_app(
 
 flutter_android_app(
     name = "plugin_android",
-    package_name = "com.example.plugin_example",
     application = ":plugin_app",
+    application_id = "com.example.plugin_example",
     proguard_specs = ["app_proguard.pro"],
 )
 
@@ -314,16 +314,16 @@ flutter_android_app(
 # runs R8 unless `proguard_specs` says otherwise.
 flutter_android_app(
     name = "package_info_only_android",
-    package_name = "com.example.package_info_only",
     application = ":package_info_only_app",
+    application_id = "com.example.package_info_only",
     namespace = "com.example.plugin_example",
     proguard_specs = [],
 )
 
 flutter_android_app(
     name = "package_info_only_r8_android",
-    package_name = "com.example.package_info_only.r8",
     application = ":package_info_only_app",
+    application_id = "com.example.package_info_only.r8",
     namespace = "com.example.plugin_example",
     proguard_specs = ["app_proguard.pro"],
 )

@@ -126,9 +126,9 @@ flutter_application(
 
 flutter_android_app(
     name = "app",
-    package_name = "com.example.flutterapp",
     app_bundle = "app_bundle",
     application = ":app_flutter",
+    application_id = "com.example.flutterapp",
     # `flutter create` grants INTERNET in the debug variant manifest only —
     # a *debugging* requirement for the Dart VM service, not the app's
     # network grant. A release APK built from the untouched scaffold cannot
@@ -156,8 +156,8 @@ flutter_android_release(
 # :verify_android_second_app_test.
 flutter_android_app(
     name = "second_app",
-    package_name = "com.example.flutterapp.second",
     application = ":app_flutter",
+    application_id = "com.example.flutterapp.second",
     build_name = "2.3.4",
     build_number = 42,
     # A placeholder of the app's own passes through to `android_binary`
@@ -171,9 +171,9 @@ flutter_android_app(
 
 flutter_android_app(
     name = "testonly_app",
-    package_name = "com.example.flutterapp.testonly",
     testonly = True,
     application = ":testonly_flutter",
+    application_id = "com.example.flutterapp.testonly",
     namespace = "com.example.flutterapp",
 )
 
@@ -230,7 +230,7 @@ aar_import(
 
 flutter_android_manifest_gen(
     name = "native_dep_manifest",
-    package_name = "com.example.flutterapp.nativedep",
+    application_id = "com.example.flutterapp.nativedep",
 )
 
 flutter_android_runner_lib_gen(
@@ -309,8 +309,8 @@ filegroup(
 
 flutter_android_manifest_gen(
     name = "bazel_runner_manifest",
-    package_name = "com.example.flutterapp.bazelrunner",
     app_name = "Flutter App (Bazel Runner)",
+    application_id = "com.example.flutterapp.bazelrunner",
 )
 
 flutter_android_runner_lib_gen(

@@ -653,7 +653,7 @@ def flutter_android_integration_test(
         name,
         src,
         application,
-        package_name,
+        application_id,
         deps = [],
         srcs = [],
         test_config = None,
@@ -705,7 +705,7 @@ def flutter_android_integration_test(
             `testWidgets`, calling the app's own `main()`.
         application: The `flutter_application` the test runs. It may be in another
             package.
-        package_name: The application id of the app, as `flutter_android_app`
+        application_id: The application id of the app, as `flutter_android_app`
             takes it.
         deps: What the test imports beyond the application's own `deps`. It must
             bring `integration_test` and `flutter_test` (`@<hub>//:integration_test`
@@ -762,7 +762,7 @@ def flutter_android_integration_test(
     flutter_android_app(
         name = app,
         application = program,
-        package_name = package_name,
+        application_id = application_id,
         testonly = True,
         **(private | android_app_kwargs)
     )

@@ -713,7 +713,7 @@ What `flavor` does, as `flutter build --flavor` does it:
 - A pub package's `flutter: assets:` or `flutter: shaders:` entry with `flavors: [paid, ...]` is bundled in builds of that flavor, and in no build of another flavor or of none.
 - `flutter_bazel run //:macos_paid` runs the paid flavor. There is no `--flavor` flag: the flavor is part of the target, and hot reload and hot restart keep it.
 
-What it does not do. Everything else that differs between flavors, the app id, name, icons, Info.plist, Android manifest and resources, window title, differs because the flavor's platform target sets it. Those are the attributes of the platform macros: `package_name`, `app_name`, `manifest` and `resources` for `flutter_android_app`; `bundle_id`, `app_name`, `info_plist`, `app_icons`, `resources` and `entitlements` for `flutter_ios_app` and `flutter_macos_app`; `app_name`, `gtk_app_id` and `window_title` for `flutter_linux_app`; `app_name` for `flutter_windows_app`; `app_name` and `web_dir` for `flutter_web_app`. rules_flutter adds no Gradle product flavors, Xcode schemes or CMake variables, and has no `default-flavor`: set `flavor` on the target.
+What it does not do. Everything else that differs between flavors, the app id, name, icons, Info.plist, Android manifest and resources, window title, differs because the flavor's platform target sets it. Those are the attributes of the platform macros: `application_id`, `app_name`, `manifest` and `resources` for `flutter_android_app`; `bundle_id`, `app_name`, `info_plist`, `app_icons`, `resources` and `entitlements` for `flutter_ios_app` and `flutter_macos_app`; `app_name`, `gtk_app_id` and `window_title` for `flutter_linux_app`; `app_name` for `flutter_windows_app`; `app_name` and `web_dir` for `flutter_web_app`. rules_flutter adds no Gradle product flavors, Xcode schemes or CMake variables, and has no `default-flavor`: set `flavor` on the target.
 
 - The app's own assets come from the target's `assets`, not its pubspec, so a flavor's own assets go in that flavor's target. A library's flavor-only assets go in a small library that only that flavor's application depends on.
 - `FLUTTER_APP_FLAVOR` cannot be set by hand: it is refused in `defines` and `--dart-define`, as `flutter build` refuses it.
@@ -1089,7 +1089,7 @@ load("@rules_flutter//flutter:android.bzl", "flutter_android_app")
 flutter_android_app(
     name = "my_app_android",
     application = ":my_app",
-    package_name = "com.example.myapp",
+    application_id = "com.example.myapp",
 )
 ```
 
@@ -1263,8 +1263,8 @@ It is a build-wide flag of rules_android's, so only your project can set it; `fl
 | Attribute | Description |
 |---|---|
 | `application` | A `flutter_application` target. Required. |
-| `package_name` | The Android package name, for example `"com.example.myapp"`. Required. |
-| `namespace` | The package the runner's code declares (Gradle's `namespace`). Relative class names in the manifest (`.MainActivity`, `.sub.Receiver`, `MainActivity`) are written out in full against it, as AGP does. Defaults to `package_name`. |
+| `application_id` | The application id, Gradle's `applicationId`, for example `"com.example.myapp"`. Required. |
+| `namespace` | The package the runner's code declares (Gradle's `namespace`). Relative class names in the manifest (`.MainActivity`, `.sub.Receiver`, `MainActivity`) are written out in full against it, as AGP does. Defaults to `application_id`. |
 | `app_name` | Display name. Defaults to the target name. |
 | `min_sdk_version` | Minimum Android SDK version. Defaults to 24, Flutter's `flutter.minSdkVersion` and the engine's own minimum. |
 | `target_sdk_version` | Target Android SDK version. |
@@ -1290,7 +1290,7 @@ load("@rules_flutter//flutter:android.bzl", "flutter_android_app", "flutter_andr
 flutter_android_app(
     name = "app",
     application = ":app_flutter",
-    package_name = "com.example.myapp",
+    application_id = "com.example.myapp",
     build_name = "1.2.3",
     build_number = 7,
     app_bundle = "app_bundle",
@@ -1358,7 +1358,7 @@ filegroup(
 )
 
 cc_library(name = "my_native_libs", srcs = [":my_native_libs_files"])
-flutter_android_manifest_gen(name = "my_manifest", package_name = "com.example.myapp")
+flutter_android_manifest_gen(name = "my_manifest", application_id = "com.example.myapp")
 
 flutter_android_runner_lib_gen(
     name = "my_runner",
@@ -1762,7 +1762,7 @@ flutter_ios_app(
 flutter_android_app(
     name = "my_app_android",
     application = ":my_app",
-    package_name = "com.example.myapp",
+    application_id = "com.example.myapp",
     permissions = ["android.permission.INTERNET"],
 )
 ```
@@ -2393,7 +2393,7 @@ flutter_android_integration_test(
     name = "app_android_test",
     src = "integration_test/app_test.dart",
     application = ":app_flutter",
-    package_name = "com.example.myapp",
+    application_id = "com.example.myapp",
     deps = [
         "@deps//:flutter_test",
         "@deps//:integration_test",
@@ -2415,7 +2415,7 @@ bazel test :app_android_test \
 - **`adb` is the SDK's own**, the `@androidsdk` repository rules_android resolves from `ANDROID_HOME`, which your `MODULE.bazel` already declares for building an APK, not one found on `PATH`, and the file the SDK has for the host the test runs on (`adb.exe` on Windows). The `aapt2` that reads the APK's package and launch activity is the one of that same SDK. `runner` takes a runner of your own: `flutter_android_emulator_runner(sdk = ..., emulator = ..., system_image = ...)`, whose `system_image` can be another `flutter_android_system_image` (another API level, say) and whose `cores` and `memory_mb` size the device, or `flutter_android_device_runner(sdk = ...)`.
 - **`abi`** (by default the emulator image's, or `arm64-v8a` on an attached device; `x86_64` and `armeabi-v7a` otherwise) is the ABI the app is built for, whatever `--@rules_android//flags:android_platforms` says: it has to be the one the device runs. An emulator runner whose image runs another fails analysis, naming both.
 - **`integration_test`'s Android library links into the app**, and its Gradle build asks for `androidx.test:runner`, `androidx.test:rules`, `androidx.test.espresso:espresso-core` and `com.google.guava:guava`. Name a version of each in the `rules_android_maven` install of your `MODULE.bazel` (Gradle's `1.2+`, `1.2+` and `3.3+` are ranges; analysis names whatever is missing, and `bazel run @<hub>//android:maven_artifacts` prints the block). Only the tests' apps link it: your own app does not.
-- **The app stays installed** on an attached device, as `flutter test` leaves it. `adb uninstall <package_name>` removes it.
+- **The app stays installed** on an attached device, as `flutter test` leaves it. `adb uninstall <application_id>` removes it.
 - **`env` is refused**: an app started by the device cannot be handed an environment. Pass `defines` to the application instead.
 - Results, `--test_filter`, tags, `shard_count`, and the failures (a failing case, an app that exits, a suite that registers nothing) are as on the other platforms.
 

@@ -39,8 +39,8 @@ flutter_ios_app(
 
 flutter_android_app(
     name = "glass_android",
-    package_name = "com.example.glassapp",
     application = ":glass_flutter",
+    application_id = "com.example.glassapp",
     tags = ["manual"],
 )
 

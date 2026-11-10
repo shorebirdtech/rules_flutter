@@ -12,7 +12,7 @@ Two tiers of API:
         flutter_android_app(
             name = "my_app_android",
             application = ":my_app",
-            package_name = "com.example.myapp",
+            application_id = "com.example.myapp",
             app_bundle = "my_app_bundle",
         )
 
@@ -43,7 +43,7 @@ Two tiers of API:
         filegroup(name = "my_native_libs_files", srcs = [":my_bundle"], output_group = "native_libs")
         cc_library(name = "my_native_libs", srcs = [":my_native_libs_files"])
         flutter_android_engine(name = "my_engine")
-        flutter_android_manifest_gen(name = "my_manifest", package_name = "com.example.myapp")
+        flutter_android_manifest_gen(name = "my_manifest", application_id = "com.example.myapp")
 
         flutter_android_runner_lib_gen(
             name = "my_runner",
@@ -388,7 +388,7 @@ def flutter_android_engine(name, neverlink = False, **kwargs):
 
 def flutter_android_manifest_gen(
         name,
-        package_name,
+        application_id,
         app_name = None,
         min_sdk_version = ANDROID_MIN_SDK_VERSION,
         target_sdk_version = ANDROID_TARGET_SDK_VERSION,
@@ -417,7 +417,7 @@ def flutter_android_manifest_gen(
     `flutter_android_permissions_manifest` +
     `flutter_android_manifest_merge`:
 
-        flutter_android_manifest_gen(name = "base", package_name = "...")
+        flutter_android_manifest_gen(name = "base", application_id = "...")
         flutter_android_permissions_manifest(
             name = "extra",
             permissions = ["android.permission.INTERNET"],
@@ -430,17 +430,18 @@ def flutter_android_manifest_gen(
 
     Args:
         name: Target name. Pass to android_binary manifest.
-        package_name: Android package name (e.g. "com.example.myapp").
-        app_name: Display name for the app. Defaults to package_name.
+        application_id: The application id, e.g. "com.example.myapp": the
+            manifest's `package`.
+        app_name: Display name for the app. Defaults to `application_id`.
         min_sdk_version: Minimum Android SDK version.
         target_sdk_version: Target Android SDK version.
         **kwargs: Additional arguments (e.g. visibility, tags).
     """
     tags = kwargs.pop("tags", ["manual"])
-    display_name = app_name or package_name
+    display_name = app_name or application_id
 
     substitutions = {
-        "PACKAGE_NAME": package_name,
+        "PACKAGE_NAME": application_id,
         "APP_NAME": display_name,
         "MIN_SDK_VERSION": min_sdk_version,
         "TARGET_SDK_VERSION": target_sdk_version,
@@ -586,7 +587,7 @@ def _variant_overlay(name, variant, manifest, base_manifest):
 def flutter_android_app(
         name,
         application,
-        package_name,
+        application_id,
         app_name = None,
         min_sdk_version = ANDROID_MIN_SDK_VERSION,
         target_sdk_version = ANDROID_TARGET_SDK_VERSION,
@@ -696,11 +697,11 @@ def flutter_android_app(
     Args:
         name: Target name (Bazel identifier). Produces an android_binary.
         application: A flutter_application target (required).
-        package_name: The application id, e.g. "com.example.myapp"
-            (required).
+        application_id: The application id, e.g. "com.example.myapp", as
+            Gradle's `applicationId` (required).
         namespace: The package the runner's code lives in, as Gradle's
             `namespace` (and AGP's R class package) in build.gradle.
-            Defaults to `package_name`, which `flutter create` sets equal
+            Defaults to `application_id`, which `flutter create` sets equal
             to it. Set it when the runner declares another package, e.g.
             one runner shipped under several application ids. The
             manifest's relative class names (`.MainActivity`,
@@ -747,7 +748,7 @@ def flutter_android_app(
         manifest_values: `android_binary`'s `manifest_values`: values for
             the manifest's `${...}` placeholders. The macro sets
             `applicationId`, `minSdkVersion` and `targetSdkVersion` from
-            `package_name`, `min_sdk_version` and `target_sdk_version`, so
+            `application_id`, `min_sdk_version` and `target_sdk_version`, so
             naming them here is an error. `versionCode` and `versionName`
             are allowed while `build_number` and `build_name` are unset.
             Other keys pass through. A dict, not a `select()`.
@@ -780,7 +781,7 @@ def flutter_android_app(
             `testonly` application would otherwise fail analysis.
     """
     display_name = app_name or name
-    namespace = namespace or package_name
+    namespace = namespace or application_id
     tags = kwargs.pop("tags", ["manual"])
     testonly = kwargs.pop("testonly", False)
     manifest_values = {} if manifest_values == None else manifest_values
@@ -793,7 +794,7 @@ def flutter_android_app(
     if conflict:
         fail(conflict)
     manifest_values = {
-        "applicationId": package_name,
+        "applicationId": application_id,
         "minSdkVersion": min_sdk_version,
         "targetSdkVersion": target_sdk_version,
     } | manifest_values
@@ -990,7 +991,7 @@ def flutter_android_app(
         # permission itself (see flutter_android_manifest_gen).
         flutter_android_manifest_gen(
             name = "__%s_manifest" % name,
-            package_name = package_name,
+            application_id = application_id,
             app_name = display_name,
             min_sdk_version = min_sdk_version,
             target_sdk_version = target_sdk_version,
@@ -1045,9 +1046,9 @@ def flutter_android_app(
     #
     # The same action writes the manifest's relative class names
     # (`.MainActivity`) in full against the namespace, as AGP does. Left
-    # relative, Android resolves them against `package_name`, the application
-    # id, which need not be the code's package: a second app shipping the
-    # same runner under its own id would name a class that does not exist.
+    # relative, Android resolves them against `application_id`, which need
+    # not be the code's package: a second app shipping the same runner under
+    # its own id would name a class that does not exist.
     #
     # And it sets the app's version on the manifest, from `build_name` and
     # `build_number`, and `android:extractNativeLibs="false"`: see step 10.
