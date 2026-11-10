@@ -74,6 +74,9 @@ dart_binary(
     ],
     compile_mode = "exe",
     main = "apple_xcframeworks_export.dart",
+    visibility = ["//flutter:__subpackages__"],
+    deps = ["@rules_dart//dart/runfiles"],
+)
 
 # The program behind `bazel run` of `flutter_android_aar`: writes the module's
 # Maven repository where `flutter build aar` does and prints the host's steps.

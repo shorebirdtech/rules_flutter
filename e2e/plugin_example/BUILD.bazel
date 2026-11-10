@@ -859,7 +859,7 @@ dart_test(
 
 # =============================================================================
 # Add-to-app: Apple
-# ======================================================================
+# =============================================================================
 #
 # The xcframeworks a host app built by Xcode links, as `flutter build
 # ios-framework` and `macos-framework` make them. `:add_to_app_*_test` checks
@@ -999,7 +999,10 @@ dart_analysis_test(
         ":add_to_app_ios_host_debug_test",
         ":add_to_app_macos_host_debug_test",
         ":add_to_app_macos_host_release_test",
-=======
+    ],
+)
+
+# =============================================================================
 # Add-to-app: Android
 #
 # `plugin_app` as a Flutter module for a Gradle-built host app: the local Maven
