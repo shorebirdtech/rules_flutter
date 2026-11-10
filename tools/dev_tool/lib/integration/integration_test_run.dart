@@ -133,7 +133,14 @@ Future<DeviceChoice> chooseDevice(
           chromePath: resolve(config.chromePath),
           startProcess: (exe, args) =>
               startIsolatedProcess(exe, args, browserEnvironment),
-        )..webOptions = _linuxHeadlessWebOptions,
+        )..webOptions = _unsandboxedHeadlessWebOptions,
+        () async => () async {},
+        chromePageConnector(),
+      );
+    case IntegrationFamily.web when os == 'macos':
+      return DeviceChoice(
+        WebDevice(chromePath: resolve(config.chromePath))
+          ..webOptions = _unsandboxedHeadlessWebOptions,
         () async => () async {},
         chromePageConnector(),
       );
@@ -378,13 +385,17 @@ const headlessWebOptions = WebOptions(
   enableExpressionEvaluation: false,
 );
 
-/// [headlessWebOptions] on a Linux host, where the browser runs without its
-/// sandbox, as upstream's headless Chrome always does. The sandbox needs the
-/// host set up for it: unprivileged user namespaces, which Ubuntu since 23.10
-/// denies to programs AppArmor has no profile for ("No usable sandbox!", on
-/// Ubuntu 24.04), or Chrome's set-user-ID helper installed by root. The page
-/// is the test's own.
-const _linuxHeadlessWebOptions = WebOptions(
+/// [headlessWebOptions] on a Linux or macOS host, where the browser runs
+/// without its own sandbox, as upstream's headless Chrome always does. On Linux
+/// the sandbox needs the host set up for it: unprivileged user namespaces,
+/// which Ubuntu since 23.10 denies to programs AppArmor has no profile for ("No
+/// usable sandbox!", on Ubuntu 24.04), or Chrome's set-user-ID helper installed
+/// by root. On macOS it is a Seatbelt profile each browser process applies to
+/// itself, which the kernel refuses inside Bazel's own (`sandbox-exec`) sandbox
+/// that the test runs in ("forbidden-sandbox-reinit"), and the browser's
+/// processes crash. The page is the test's own, and Bazel's sandbox is what
+/// confines the run.
+const _unsandboxedHeadlessWebOptions = WebOptions(
   server: WebServerOptions(crossOriginIsolation: true),
   browser: BrowserLaunchOptions(
     headless: true,

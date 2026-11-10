@@ -55,9 +55,15 @@ DESKTOP = "desktop"
 IOS_SIMULATOR = "ios_simulator"
 WEB = "web"
 
-# What a runner of every family asks of the test's placement: the app runs on
-# this machine, in this machine's session, so neither a remote executor nor
-# Bazel's sandbox can host the test.
+# What a runner of a desktop, Android or iOS simulator test asks of the test's
+# placement: the app runs on this machine, in this machine's session, or on a
+# device attached to it, so neither a remote executor nor Bazel's sandbox can
+# host the test.
+#
+# The web family asks for neither (`flutter_chrome_runner`): its browser is a
+# pinned headless shell that runs from the test's runfiles, on a profile and a
+# loopback port of its own, and needs no desktop session, so the test is
+# sandboxed and its result cached remotely like any other test.
 _EXECUTION_REQUIREMENTS = {
     "no-remote": "1",
     "no-sandbox": "1",
@@ -135,7 +141,7 @@ def _flutter_chrome_runner_impl(ctx):
             # The browser and what it needs beside itself: `chrome` is the file to
             # run and its `data` the libraries and resources it loads.
             runfiles = depset(transitive = [chrome_files, runtime_files]),
-            execution_requirements = dict(_EXECUTION_REQUIREMENTS),
+            execution_requirements = {},
             target_compatible_with = [],
         ),
         OutputGroupInfo(_validation = depset(validation)),
@@ -165,10 +171,12 @@ test runs. The default runner, `@rules_flutter//flutter/integration_test:chrome`
 is a pinned Chrome for Testing headless shell for the host.
 
 On Linux the browser loads the libraries of `linux_runtime` rather than the
-host's, and the build checks that it needs none the runtime lacks. It runs
-without its sandbox, as upstream's headless Chrome does: the sandbox needs the
-host set up for it (unprivileged user namespaces, which Ubuntu denies by
-default since 23.10, or Chrome's set-user-ID helper).""",
+host's, and the build checks that it needs none the runtime lacks. On Linux and
+macOS it runs without its own sandbox, as upstream's headless Chrome does: on
+Linux the sandbox needs the host set up for it (unprivileged user namespaces,
+which Ubuntu denies by default since 23.10, or Chrome's set-user-ID helper), and
+on macOS it cannot be applied inside Bazel's sandbox, which confines the test
+instead. The test asks for neither `no-sandbox` nor `no-remote`.""",
 )
 
 # The families whose app cannot be handed an environment, and what to call

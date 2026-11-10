@@ -157,8 +157,8 @@ def _web_rule_impl(ctx):
     asserts.equals(env, 1, len(bundles), "the bundle directory is among the app's files: %s" % config["appArtifacts"])
     target = analysistest.target_under_test(env)
     requirements = target[testing.ExecutionInfo].requirements
-    asserts.equals(env, "1", requirements.get("no-remote"))
-    asserts.equals(env, "1", requirements.get("no-sandbox"))
+    asserts.equals(env, None, requirements.get("no-remote"), "the browser is the runner's own, so the test can run remotely")
+    asserts.equals(env, None, requirements.get("no-sandbox"), "and needs no desktop session, so it can be sandboxed")
     return analysistest.end(env)
 
 _web_rule_test = analysistest.make(_web_rule_impl)
@@ -280,8 +280,7 @@ def _chrome_runner_impl(ctx):
     )
     brought = sorted([f.basename for f in runner.runfiles.to_list()])
     asserts.equals(env, ["chrome-headless-shell", "resources.pak"], brought, "the executable and the files beside it that it needs")
-    asserts.equals(env, "1", runner.execution_requirements.get("no-remote"))
-    asserts.equals(env, "1", runner.execution_requirements.get("no-sandbox"))
+    asserts.equals(env, {}, runner.execution_requirements, "a headless browser of its own needs neither the machine's session nor its filesystem")
     return analysistest.end(env)
 
 _chrome_runner_test = analysistest.make(_chrome_runner_impl)

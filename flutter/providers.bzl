@@ -224,7 +224,7 @@ FlutterIntegrationRunnerInfo = provider(
         "family": "string: `\"web\"`, `\"desktop\"`, `\"ios_simulator\"` or `\"android\"`. A test rule takes only a runner of its own family.",
         "launcher_config": "struct: JSON-able settings for the host runner, which are the family's own (Chrome's runfiles path, a simulator's device type and runtime, an emulator's image).",
         "runfiles": "depset[File]: what the runner needs at run time beside the app (a Chrome, an emulator, a system image).",
-        "execution_requirements": "dict: the test's `execution_requirements`. Always `no-remote` and `no-sandbox`: the app runs on this machine, in this machine's session.",
+        "execution_requirements": "dict: the test's `execution_requirements`. `no-remote` and `no-sandbox` for every family but web: the app runs on this machine, in this machine's session, or on a device attached to it. A web test runs a headless browser of its own and has neither.",
         "target_compatible_with": "list[Label]: the platforms the runner works on, which a macro puts on the test it declares.",
     },
 )

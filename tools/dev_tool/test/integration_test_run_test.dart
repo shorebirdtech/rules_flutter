@@ -308,6 +308,19 @@ void main() {
       );
     });
 
+    test('on macOS runs the browser without its own sandbox, which cannot be '
+        'applied inside Bazel\'s', () async {
+      final choice = await chooseDevice(
+        webConfig,
+        os: 'macos',
+        resolve: (path) => '/runfiles/$path',
+      );
+
+      final device = choice.device as WebDevice;
+      expect(device.webOptions!.browser.headless, isTrue);
+      expect(device.webOptions!.browser.browserFlags, ['--no-sandbox']);
+    });
+
     test('on Linux runs the browser with the runner\'s runtime and without '
         'its sandbox', () async {
       final linuxConfig = IntegrationRunnerConfig(
