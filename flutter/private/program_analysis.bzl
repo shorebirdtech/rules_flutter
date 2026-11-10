@@ -63,10 +63,23 @@ bundled_program_aspect = aspect(
 # the analyzer resolves `dart:ui`. An implicit attribute, because needing it is
 # a property of analyzing Flutter Dart, not a choice a BUILD file makes; it
 # reaches only `program_analyzable_info`, so no compile action's inputs change.
-PROGRAM_SKY_ENGINE_ATTR = attr.label(
-    default = Label("@flutter_sky_engine//:sky_engine"),
-    providers = [DartInfo],
-)
+def program_sky_engine_attr(cfg = "target"):
+    """The implicit `_sky_engine` attribute of a program rule.
+
+    Args:
+      cfg: The configuration `sky_engine` is built in. It must be the one the
+        rule's `deps` are built in: a library reaches `sky_engine` through
+        its own dependencies, and the analyzer reads one SDK, so a second
+        copy of it in another configuration is a second SDK.
+
+    Returns:
+      An `attr.label`.
+    """
+    return attr.label(
+        default = Label("@flutter_sky_engine//:sky_engine"),
+        providers = [DartInfo],
+        cfg = cfg,
+    )
 
 def staged_sources(targets):
     """The sources `targets` staged copies of, from their `StagedSourcesInfo`.
@@ -99,7 +112,7 @@ def program_analyzable_info(ctx, package, package_root, deps, files):
     for imports to resolve and checks only sources.
 
     Args:
-      ctx: The rule context. Reads `_sky_engine` (`PROGRAM_SKY_ENGINE_ATTR`),
+      ctx: The rule context. Reads `_sky_engine` (`program_sky_engine_attr`),
         which joins the analyzer's closure and nothing else.
       package: The program's `DartPackageMetadataInfo`.
       package_root: The package's root, as the compile path takes it.
@@ -111,12 +124,17 @@ def program_analyzable_info(ctx, package, package_root, deps, files):
       A `DartAnalyzableInfo`.
     """
     prefix = package_lib_prefix(package_root)
+
+    # A list when the rule gives the attribute a configuration transition.
+    sky_engine = ctx.attr._sky_engine
+    if type(sky_engine) == "list":
+        sky_engine = sky_engine[0]
     return dart_analyzable_info(
         label = ctx.label,
         # The declaration the compile path names, so the analyzer reads the
         # language version the compiler does.
         packages = [package_info_from_metadata(ctx.label, package, package_root)],
-        deps = deps + [ctx.attr._sky_engine],
+        deps = deps + [sky_engine],
         srcs = [f for f in files if f.short_path.startswith(prefix)],
         entry_srcs = [f for f in files if not f.short_path.startswith(prefix)],
     )

@@ -18,7 +18,7 @@ load("//flutter/private:flutter_shader_compile.bzl", "flutter_shader_compile_act
 load("//flutter/private:native_sources.bzl", "native_sources_aspect")
 load("//flutter/private:notices.bzl", "NOTICES_ATTRS", "additional_licenses_of", "flutter_notices_action", "notices_asset_key", "package_licenses_of")
 load("//flutter/private:plugin_registrant.bzl", "generate_dart_plugin_registrant", "generate_dev_plugin_registrants")
-load("//flutter/private:program_analysis.bzl", "PROGRAM_SKY_ENGINE_ATTR")
+load("//flutter/private:program_analysis.bzl", "program_sky_engine_attr")
 load("//flutter/private:sdk_defines.bzl", "program_version_dart_defines")
 load("//flutter/private:validation.bzl", "validate_dart_defines")
 
@@ -1482,7 +1482,7 @@ FLUTTER_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | {
         default = Label("//flutter/private/tools:generate_asset_manifest.dart"),
         allow_single_file = True,
     ),
-    "_sky_engine": PROGRAM_SKY_ENGINE_ATTR,
+    "_sky_engine": program_sky_engine_attr(),
 } | NOTICES_ATTRS | AGENT_EXTENSIONS_ATTR
 
 # What a `flutter_application` states about its program: the attributes

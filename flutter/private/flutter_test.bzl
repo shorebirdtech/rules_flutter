@@ -87,7 +87,7 @@ load("//flutter/private:flutter_compile.bzl", "flutter_kernel_compile")
 load("//flutter/private:flutter_module.bzl", "flutter_module_aspect")
 load("//flutter/private:flutter_native_assets.bzl", "CODE_ASSETS_DOC", "collect_bundled_code_asset_files", "resolve_native_assets", "write_native_assets_manifest")
 load("//flutter/private:flutter_program_test.bzl", "add_user_env", "program_environment", "track_widget_creation", _flutter_test_rule = "flutter_test")
-load("//flutter/private:program_analysis.bzl", "PROGRAM_SKY_ENGINE_ATTR", "program_analyzable_info")
+load("//flutter/private:program_analysis.bzl", "program_analyzable_info", "program_sky_engine_attr")
 load("//flutter/private:sdk_defines.bzl", "app_version_dart_defines")
 
 # The target's Flutter SDK, whose `flutter_tester` runs the test.
@@ -837,7 +837,7 @@ _PROGRAM_ATTRS["_golden_comparator_src"] = attr.label(
     allow_single_file = [".dart"],
 )
 
-_PROGRAM_ATTRS["_sky_engine"] = PROGRAM_SKY_ENGINE_ATTR
+_PROGRAM_ATTRS["_sky_engine"] = program_sky_engine_attr(_ENVIRONMENT.cfg)
 
 flutter_suite_program = rule(
     implementation = _flutter_suite_program_impl,
