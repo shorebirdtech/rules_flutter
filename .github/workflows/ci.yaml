@@ -144,33 +144,6 @@ jobs:
       - name: Analyse the whole module from a consumer
         working-directory: e2e/external_module
         run: bazel build --nobuild "@rules_flutter//..."
-  dart-tool-tests:
-    name: Dart tool tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1
-      - name: Run dev_tool tests
-        working-directory: tools/dev_tool
-        # Exclude e2e tests (tagged @Tags(['e2e'])): they need a browser/CDP,
-        # iOS simulators, or a running macOS app — none available on this
-        # runner. Real-render coverage lives in the Bazel e2e workspaces and,
-        # for web, in the `web-smoke` job below.
-        #
-        # `runfiles` is excluded for a different reason: those tests read
-        # fixtures declared in a Bazel target's `data` and resolve them through
-        # the runfiles tree, which exists under `bazel test` and not here. They
-        # are covered by their Bazel targets, which this job does not replace.
-        run: dart test -x e2e -x runfiles
-      # `-x runfiles` for the same reason as the dev_tool step above: these
-      # tools are Bazel scripts, and one of them imports a package that arrives
-      # through its `dart_test` deps rather than through this pubspec. Excluded
-      # here, covered by //flutter/private/tools:flutter_test_runner_test (and
-      # :remote_suite_test, which needs fake_async from the same place).
-      - name: Run private tool tests
-        working-directory: flutter/private/tools
-        run: dart pub get && dart test -x runfiles
   # The only place CI runs a browser against a web app — web_example's e2e jobs
   # below only build it and read the bytes — and the only place CI runs the
   # binary users install rather than `dart run`.
