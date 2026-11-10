@@ -6,8 +6,7 @@ file `flutter_pub.from_lock(swift_package_resolved = ...)` names, or
 `Package.resolved` beside the lock. See `swift_packages.bzl`.
 """
 
-# buildifier: disable=bzl-visibility
-load("@rules_dart//dart/private:common.bzl", "runfiles_path")
+load("@rules_dart//dart:utils.bzl", "runfiles_path")
 
 # buildifier: disable=bzl-visibility
 load("@rules_dart//dart/private:dart_compile.bzl", "dart_compile_action")

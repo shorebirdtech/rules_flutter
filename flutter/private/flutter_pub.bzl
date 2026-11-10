@@ -25,8 +25,7 @@ writes `pubspec.lock` and `.dart_tool/package_config.json` and does not produce
 from the build graph instead, so that file has no consumer here.
 """
 
-# buildifier: disable=bzl-visibility
-load("@rules_dart//dart/private:common.bzl", "runfiles_path")
+load("@rules_dart//dart:utils.bzl", "runfiles_path")
 
 # buildifier: disable=bzl-visibility
 load("@rules_dart//dart/private:dart_compile.bzl", "dart_compile_action")
