@@ -242,7 +242,7 @@ The kernel's entry point speaks the `package:test_api` `RemoteListener` protocol
         "icu_data": "File: the ICU data `flutter_tester` is given.",
         "display_path": "string: the suite's path in the runner's reports.",
         "source": "File: the test library's source, which the runner reads for its `@Tags` annotations.",
-        "coverage_libraries": "list[string]: the URI prefixes a coverage run reports: the test's own package and sources.",
+        "packages": "list[DartPackageInfo]: every package the program runs, its own included, by which `bazel coverage` finds the file of each library it reports.",
         "native_assets_manifest": "File: the Native Assets manifest the kernel was compiled with (`dart:ffi` `@Native` resolution).",
         "native_files": "list[string]: runfiles paths of the native-asset libraries the runner puts on the loader's search path (Windows); empty elsewhere.",
         "enable_impeller": "bool: whether the test renders with Impeller.",

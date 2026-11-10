@@ -1,0 +1,13 @@
+load("@rules_flutter//flutter:defs.bzl", "flutter_library")
+
+flutter_library(
+    name = "units",
+    package_name = "units",
+    srcs = ["lib/units.dart"],
+    visibility = ["//coverage:__subpackages__"],
+)
+
+exports_files(
+    ["lib/units.dart"],
+    visibility = ["//coverage:__subpackages__"],
+)

@@ -2169,6 +2169,7 @@ Bazel's test protocol applies, as it does to `dart_test`:
 - **Library annotations.** `@Skip`, `@Timeout`, `@TestOn` and `@OnPlatform` on the test library apply as under `flutter test`: `@Timeout` merges with the target's timeout, and a suite its `@TestOn` excludes passes with a note in the log. `@TestOn` and `@OnPlatform` are evaluated against runtime `vm` on the host's operating system, as `flutter test` does for every suite whatever the device, so an integration test on a browser or a phone is still `vm` on the host.
 - **No tests.** A suite that registers no test fails, as under `flutter test`; one whose every test is `testOn` another platform registers none here too.
 - **Results.** Each case is reported in the `test.xml` Bazel collects, so CI shows cases rather than one pass or fail per target.
+- **Coverage.** `bazel coverage --combined_report=lcov //...` collects the lines each `flutter_test` runs, as `flutter test --coverage` does, and Bazel merges them into one LCOV report (`$(bazel info output_path)/_coverage/_coverage_report.dat`; each test's own is `bazel-testlogs/<package>/<name>/coverage.dat`). It reports the `srcs` of the test and of every `flutter_library`, `dart_library` and `application` the test reaches, for the libraries `--instrumentation_filter` selects (by default those in the packages named on the command line), each file under its path in the workspace. The test's `main` is not reported, as for every Bazel test. Lines only: no function or branch counts.
 
 #### Golden files
 
@@ -2740,7 +2741,7 @@ sdk = ctx.toolchains["@rules_flutter//flutter:toolchain_type"].flutter_sdk_info
 | `tester`, `icu_data` | `File` | `flutter_tester` and its ICU data, for the platform the program is built for. |
 | `display_path` | `str` | The suite's path in the runner's reports. |
 | `source` | `File` | The test library's source, read for its `@Tags`. |
-| `coverage_libraries` | `list[str]` | The URI prefixes a coverage run reports. |
+| `packages` | `list[DartPackageInfo]` | Every package the program runs, its own included, by which `bazel coverage` finds the file of each library it reports. |
 | `native_assets_manifest` | `File` | The Native Assets manifest the kernel was compiled with. |
 | `native_files` | `list[str]` | Runfiles paths of native-asset libraries the runner puts on the loader's search path (Windows); empty elsewhere. |
 | `enable_impeller` | `bool` | Whether the test renders with Impeller. |

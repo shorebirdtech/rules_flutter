@@ -275,3 +275,18 @@ jobs:
       - name: bazel ${{ matrix.command }} ${{ matrix.targets }} (e2e/${{ matrix.workspace }})
         working-directory: e2e/${{ matrix.workspace }}
         run: bazel ${{ matrix.command }} ${{ matrix.targets }} ${{ matrix.command == 'test' && '--test_output=errors' || '' }}
+      # `bazel coverage` of a flutter_test, which `bazel test` never reaches:
+      # the merged report names the sources of the test's package and of a
+      # library in another by their workspace paths, and
+      # `--instrumentation_filter` narrows it to that library. On one system:
+      # what is checked is Bazel's coverage model, and the runner's collection
+      # is the same on every flutter_tester.
+      - name: bazel coverage, combined LCOV report (e2e/hello_world)
+        if: matrix.workspace == 'hello_world' && runner.os == 'Linux'
+        working-directory: e2e/hello_world
+        run: |
+          report="$(bazel info output_path)/_coverage/_coverage_report.dat"
+          bazel coverage --test_output=errors --combined_report=lcov //coverage/...
+          bazel run //coverage/check -- "$report" coverage/lib/shapes.dart coverage/units/lib/units.dart
+          bazel coverage --test_output=errors --combined_report=lcov --instrumentation_filter=//coverage/units //coverage/...
+          bazel run //coverage/check -- "$report" coverage/units/lib/units.dart

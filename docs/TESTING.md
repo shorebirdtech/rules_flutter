@@ -787,6 +787,10 @@ cd e2e/external_module && bazel build --nobuild "@rules_flutter//..."   # and an
 bazel run @overhead//preset -- --check                       # the generated .bazelrc preset is current
 cd e2e/dual_hub && bazel test //...
 cd e2e/hello_world && bazel test //...
+cd e2e/hello_world && bazel coverage --combined_report=lcov //coverage/... \
+  && bazel run //coverage/check -- "$(bazel info output_path)/_coverage/_coverage_report.dat" coverage/lib/shapes.dart coverage/units/lib/units.dart
+cd e2e/hello_world && bazel coverage --combined_report=lcov --instrumentation_filter=//coverage/units //coverage/... \
+  && bazel run //coverage/check -- "$(bazel info output_path)/_coverage/_coverage_report.dat" coverage/units/lib/units.dart
 cd e2e/codegen && bazel test //...
 cd e2e/ffi_example && bazel test //...
 cd e2e/ffi_plugin_example && bazel test //...
@@ -1146,7 +1150,7 @@ instead of extracting it.
 | Workspace | Key tests |
 |-----------|-----------|
 | smoke | Toolchain resolution for all platforms |
-| hello_world | Kernel, AOT, application, and per-platform bundle builds; flutter_test; on Linux and Windows, a profile-mode bundle whose AOT snapshot is a profile one (`verify_linux_profile_bundle_test`, `verify_windows_profile_bundle_test`); `reproducible_notices_<mode>_test`: each mode's `NOTICES.Z` gzip header names no host OS and no time (on every host, Windows included) |
+| hello_world | Kernel, AOT, application, and per-platform bundle builds; flutter_test; `bazel coverage` of a flutter_test (`//coverage/...`: workspace paths, a library in another package, `--instrumentation_filter`, the merged report; CI runs it on Linux); on Linux and Windows, a profile-mode bundle whose AOT snapshot is a profile one (`verify_linux_profile_bundle_test`, `verify_windows_profile_bundle_test`); `reproducible_notices_<mode>_test`: each mode's `NOTICES.Z` gzip header names no host OS and no time (on every host, Windows included) |
 | codegen | Per-file and aggregate dart_codegen, custom generators, hot-reload-with-codegen |
 | ffi_example | Both FFI mechanisms — Native Assets (`add_plugin`, `@Native` asset-id bind) and `native_deps` (`mul_plugin`, conventional-path open) — bundle structure on macOS/Linux plus manual runtime proof on iOS simulator and macOS |
 | ffi_plugin_example | FFI plugin build + macOS/Linux bundle structure with `libmultiply.dylib`/`.so` |
@@ -1963,6 +1967,7 @@ runner needs both).
 | Profile mode (`flutter:profile` selects, profile engine repos) | Root `//...`, macOS and a device by hand, hello_world `//...` on Linux and Windows (CI does this), and the profile run on the Linux and Windows VMs (§ Profile mode on Linux and Windows) |
 | Integration tests (`flutter/integration_test.bzl`, `flutter/private/flutter_integration_*.bzl`, `flutter/private/integration_test/support/`, `tools/dev_tool/lib/integration/`, `bin/integration_test_runner.dart`) | `e2e/integration_test` `//...` on each platform the change touches (macOS, with an unlocked screen, for macOS desktop; the Windows VM for Windows; macOS for web; for Android, the emulator tests on macOS, and on the attached phone with `--@rules_flutter//flutter/integration_test:android_device=attached` and `ANDROID_SERIAL` when the Android runner changed), dev_tool unit, plus the platform's row; for web, `e2e/web_example` `:render_test` and the Web support row |
 | The `flutter_test` runner and its suite protocol (`flutter/private/tools/flutter_test_runner.dart`, `flutter/private/tools/lib/`: tag selection, `--test_filter`, shards, the no-tests failure) | Root `//...`, `e2e/integration_test` `//...` (its `tags_*` and `no_tests_test` outcome tests, and `web_*`), dev_tool unit |
+| `bazel coverage` of a `flutter_test` (the runner's `CoverageRun` and `collectCoverage`, `COVERAGE_ATTRS` and `test_coverage` in `flutter_program_test.bzl`, a rule's `instrumented_files_info`) | Root `//...`, and in `e2e/hello_world` the coverage commands of § 3 |
 | `flutter_application_variant` (`flutter/private/flutter_application_variant.bzl`, `flutter_program_inputs` in `common.bzl`) | Root `//...`, macos_example `//...` and `bazel run //tools/dev_tool:e2e -- test/e2e/main_outside_lib_e2e_test.dart --plain-name="macOS"`, which reloads and restarts a variant; plus the macOS manual runtime test |
 | Dart compilation / AOT | hello_world, ffi_example, macos_example |
 | Asset bundling | hello_world, plugin_example |

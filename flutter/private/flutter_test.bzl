@@ -33,9 +33,12 @@ Wire-up:
      WebSocket harness, drives the `package:test` MultiChannel protocol, and
      reports per-test pass/fail.
 
-Coverage: when `bazel coverage` sets `COVERAGE_OUTPUT_FILE`, the runner
-launches `flutter_tester` with the VM service enabled and collects source
-reports via JSON-RPC, writing LCOV for the test's own package and sources.
+Coverage: under `bazel coverage` the runner launches `flutter_tester` with
+the VM service enabled, collects line coverage over it once the suite has run,
+and converts it with rules_dart's `coverage_converter` into an LCOV tracefile
+in `COVERAGE_DIR`, naming each file by its workspace path. Which files it
+reports is Bazel's `--instrumentation_filter`, over the test's `srcs` and every
+library it reaches; Bazel merges the tracefile with `_lcov_merger`.
 
 Usage:
     flutter_test(
@@ -212,15 +215,11 @@ def _kernel_root_path(short_path):
     # repository's `../<repo>/…` is `external/<repo>/…` there.
     return "external/" + short_path[3:] if short_path.startswith("../") else short_path
 
-# The schemes each compile mode names a test's own non-`package:` sources by:
-# the per-library link reads them through rules_dart's kernel roots, and the
-# whole-program compile mounts the exec root and the output root under the app
-# scheme. Both are the same wherever, and in whichever configuration, the
-# kernel is built.
-_MODULAR_SCHEME = "org-dartlang-root"
-
-def _own_source_uri(file, modular):
-    return "%s:///%s" % (_MODULAR_SCHEME if modular else APP_SCHEME, _kernel_root_path(file.short_path))
+def _app_source_uri(file):
+    # A source's URI under the app scheme, which the whole-program compile
+    # mounts the exec root and the output root under: the same wherever, and
+    # in whichever configuration, the kernel is built.
+    return "%s:///%s" % (APP_SCHEME, _kernel_root_path(file.short_path))
 
 def _exposes_package(deps, names):
     """True if any dep transitively exposes one of `names`."""
@@ -291,10 +290,15 @@ def _flutter_suite_program_impl(ctx):
             runfiles = program.info.runfiles,
         ),
         program.info,
+        # What `bazel coverage` reports: the test's `srcs` (its package's
+        # `lib/`) and every library it reaches, as `--instrumentation_filter`
+        # selects them. The test's `main` is the test, as a `dart_test`'s is
+        # under Bazel's default `--noinstrument_test_targets`.
         coverage_common.instrumented_files_info(
             ctx,
-            source_attributes = ["srcs", "main"],
-            dependency_attributes = ["deps"],
+            source_attributes = ["srcs"],
+            dependency_attributes = ["deps", "application"],
+            extensions = ["dart"],
         ),
     ] + program.providers
 
@@ -572,12 +576,7 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
         # Used in package:test report output.
         display_path = ctx.file.main.short_path,
         source = ctx.file.main,
-        # What a coverage run reports, one URI prefix a line: the test's own
-        # package and its own sources, as `flutter test --coverage` reports its
-        # package by default. The rule's generated bootstrap and comparator
-        # are not the user's code.
-        coverage_libraries = ["package:%s/" % inputs.package_name] +
-                             [_own_source_uri(f, modular) for f in [ctx.file.main] + ctx.files.srcs],
+        packages = packages,
         native_assets_manifest = native_assets_manifest,
         native_files = native_files,
         enable_impeller = ctx.attr.enable_impeller,
@@ -688,7 +687,7 @@ def _compile_whole_program(ctx, tools, deps, bootstrap, own_srcs, packages, nati
         # names a root given as a path by the sandbox it ran in, so the kernel
         # and every coverage report would carry a sandbox-specific `file://`
         # path to the test.
-        entrypoint_uri = _own_source_uri(bootstrap, modular = False),
+        entrypoint_uri = _app_source_uri(bootstrap),
         # The SDK's own describe it to the program, as a module's compile carries them.
         defines = executable_defines(ctx) + list(tools.sdk_defines),
         # Widgets know where they were built, as under `flutter test`: the

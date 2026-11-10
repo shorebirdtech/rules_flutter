@@ -9,10 +9,11 @@
 /// The protocol itself is `remote_suite.dart`'s; this file carries it over a
 /// WebSocket the bootstrap dials back on.
 ///
-/// Coverage: when `bazel coverage` sets `COVERAGE_OUTPUT_FILE`, the spawn
-/// switches to `--vm-service-port=0`. The runner pulls the VM service URI from
+/// Coverage: under `bazel coverage` ([CoverageRun]) the spawn switches to
+/// `--vm-service-port=0`. The runner pulls the VM service URI from
 /// flutter_tester's stdout and, once the suite has run and before it is told to
-/// close, collects source reports over the VM service JSON-RPC and writes LCOV.
+/// close, collects line coverage over the VM service JSON-RPC, which rules_dart's
+/// `coverage_converter` then turns into the LCOV tracefile Bazel merges.
 ///
 /// Goldens: `--update-goldens` (upstream's spelling) sets
 /// `FLUTTER_TEST_UPDATE_GOLDENS` in the tester's environment, which the
@@ -240,10 +241,7 @@ void main(List<String> args) async {
     exit(64);
   }
   final testPath = settings['FLUTTER_TEST_PATH'] ?? 'test.dart';
-  final coverageOutput = Platform.environment['COVERAGE_OUTPUT_FILE'];
-  final coverageLibraries =
-      settings['FLUTTER_TEST_COVERAGE_LIBRARIES']?.split('\n') ??
-      const <String>[];
+  final coverage = CoverageRun.of(r, settings, Platform.environment);
 
   final isTest = Platform.environment['FLUTTER_TEST_DILL'] != null;
   final TestSelection selection;
@@ -308,8 +306,7 @@ void main(List<String> args) async {
       dill: program.path,
       assetsDir: assetsDir,
       testPath: testPath,
-      coverageOutput: coverageOutput,
-      coverageLibraries: coverageLibraries,
+      coverage: coverage,
       updateGoldens: updateGoldens,
       selection: selection,
       metadata: annotations.handshakeMetadata(
@@ -422,8 +419,7 @@ Future<int> _runOnce({
   required String dill,
   required String? assetsDir,
   required String testPath,
-  required String? coverageOutput,
-  required List<String> coverageLibraries,
+  required CoverageRun? coverage,
   required bool updateGoldens,
   required TestSelection selection,
   required Map<String, Object?> metadata,
@@ -439,8 +435,7 @@ Future<int> _runOnce({
       dill: dill,
       assetsDir: assetsDir,
       testPath: testPath,
-      coverageOutput: coverageOutput,
-      coverageLibraries: coverageLibraries,
+      coverage: coverage,
       updateGoldens: updateGoldens,
       selection: selection,
       metadata: metadata,
@@ -563,8 +558,7 @@ class _Harness {
     required String dill,
     required String? assetsDir,
     required String testPath,
-    required String? coverageOutput,
-    required List<String> coverageLibraries,
+    required CoverageRun? coverage,
     required bool updateGoldens,
     required TestSelection selection,
     required Map<String, Object?> metadata,
@@ -572,13 +566,13 @@ class _Harness {
     required bool impeller,
     required Map<String, String> loader,
   }) async {
-    final enableVmService = coverageOutput != null;
+    final enableVmService = coverage != null;
     // Coverage does not start the tester paused, and `flutter test --coverage`
     // does not either. Nothing needs holding: the VM records coverage from
     // the first line `main()` runs, and collection happens before the suite
     // is told to close, while the isolate is still alive. Starting paused and
-    // resuming over the VM service hung one run in ten, measured on
-    // `:hello_coverage_test`: the resumed isolate sat idle inside the
+    // resuming over the VM service hung one run in ten, measured on a
+    // one-case suite: the resumed isolate sat idle inside the
     // bootstrap, never dialling the harness, until an unrelated VM service
     // request woke it. Unpaused, 80 runs in a row passed with identical
     // covered lines.
@@ -688,26 +682,24 @@ class _Harness {
     // isolate must still be alive when we fetch source reports.
     String? coverageError;
     Future<void> collect() async {
-      if (!enableVmService || coverageVmServiceUri == null) return;
+      if (coverage == null || coverageVmServiceUri == null) return;
       try {
         // Bounded inside Bazel's own budget, like the suite and each test: a
         // VM service that stops answering mid-collection would otherwise park
         // here until Bazel kills the target with no reason given. Not a fixed
         // bound: on a starved machine the tester gets a few percent of a core
         // and a collection that takes seconds idle takes minutes.
-        final lcov = await collectCoverage(
+        final hits = await collectCoverage(
           coverageVmServiceUri,
-          coverageLibraries,
         ).timeout(testCeiling(Platform.environment['TEST_TIMEOUT']));
-        // Every healthy run yields at least the test's own `main` file, which
-        // is always in scope, so an empty report means collection reached no
-        // source at all. Writing it
+        // Every healthy run reports at least the test's own `main` file, so
+        // nothing at all means collection reached no source. Converting it
         // would produce exactly the green-test-with-empty-LCOV outcome the
         // exit below exists to prevent.
-        if (lcov.isEmpty) {
+        if ((hits['coverage'] as List).isEmpty) {
           coverageError = 'collected no coverage records';
         } else {
-          await File(coverageOutput).writeAsString(lcov);
+          coverage.writeHits(hits);
         }
       } catch (e) {
         coverageError = 'failed to collect coverage: $e';
@@ -756,6 +748,17 @@ class _Harness {
     }
 
     stdout.writeln(outcome.summary());
+
+    // Converted whatever the outcome, as Bazel reports the coverage of a
+    // failing test too; only once collection succeeded, as a partial report
+    // reads as a complete one.
+    if (coverage != null && coverageError == null && coverage.collected) {
+      final converted = await coverage.convert();
+      if (converted != 0) {
+        coverageError = 'coverage_converter exited with $converted';
+        stderr.writeln('flutter_test (coverage): $coverageError');
+      }
+    }
 
     if (outcome.hasFailure) return 1;
     // A requested coverage run that produced no data is a failure — Bazel
@@ -849,18 +852,80 @@ final class DialBackTimedOut extends DialBack {
 }
 
 // ---------------------------------------------------------------------------
-// Coverage support — reuse the same VM service JSON-RPC scaffolding the old
-// `dart`-based runner had, but pointed at flutter_tester instead of the Dart
-// SDK binary.
+// Coverage support.
 
-/// Collects an LCOV report from every isolate the VM service lists, over the
-/// libraries whose URIs start with one of [libraryFilters].
+/// A run under `bazel coverage`: the VM's line coverage of the program,
+/// collected over flutter_tester's VM service into a scratch directory, and
+/// converted by rules_dart's `coverage_converter` into the LCOV tracefile in
+/// `COVERAGE_DIR` that Bazel's coverage runner merges.
 ///
-/// Scoped, as `flutter test --coverage` scopes to the test's own package by
-/// default: `forceCompile` compiles every library in scope and each script
-/// costs a round trip for its token table, so an unscoped report over the
-/// whole Flutter framework (some 1,000 scripts) costs seconds of CPU even
-/// for a test that touches none of it.
+/// The converter names each file by its workspace path and reports only the
+/// files Bazel instruments (`COVERAGE_MANIFEST`), which is how
+/// `--instrumentation_filter` reaches a `flutter_test`.
+class CoverageRun {
+  CoverageRun._(this.converter, this.sources, this.directory, this.hitmaps);
+
+  /// The run's coverage, when the test was built for coverage
+  /// (`FLUTTER_TEST_COVERAGE_CONVERTER`) and Bazel collects it
+  /// (`COVERAGE_DIR`): `bazel run` of a coverage build collects none.
+  static CoverageRun? of(
+    Runfiles runfiles,
+    Map<String, String> settings,
+    Map<String, String> environment,
+  ) {
+    final converter = settings['FLUTTER_TEST_COVERAGE_CONVERTER'];
+    final sources = settings['FLUTTER_TEST_COVERAGE_SOURCES'];
+    final directory = environment['COVERAGE_DIR'];
+    if (converter == null || sources == null || directory == null) return null;
+    final scratch = environment['TEST_TMPDIR'] ?? Directory.systemTemp.path;
+    return CoverageRun._(
+      runfiles.rlocation(converter),
+      runfiles.rlocation(sources),
+      directory,
+      Directory(scratch).createTempSync('flutter_test_coverage.').path,
+    );
+  }
+
+  /// `coverage_converter`.
+  final String converter;
+
+  /// The file naming each package's `lib/` directories, which it reads.
+  final String sources;
+
+  /// `COVERAGE_DIR`, where the tracefile goes.
+  final String directory;
+
+  /// Where the collected coverage goes before it is converted: not
+  /// `COVERAGE_DIR`, whose every file Bazel's coverage runner reads.
+  final String hitmaps;
+
+  /// Whether [writeHits] has written anything to convert.
+  bool collected = false;
+
+  /// Writes what [collectCoverage] returned, for [convert].
+  void writeHits(Map<String, Object?> hits) {
+    File('$hitmaps/flutter_tester.json').writeAsStringSync(json.encode(hits));
+    collected = true;
+  }
+
+  /// Converts the collected coverage into `COVERAGE_DIR/flutter_test.dat`,
+  /// with the converter's own messages on this process's; its exit status.
+  Future<int> convert() async {
+    final converting = await Process.start(converter, [
+      '--hitmaps=$hitmaps',
+      '--sources=$sources',
+      '--output=$directory/flutter_test.dat',
+    ], mode: ProcessStartMode.inheritStdio);
+    return converting.exitCode;
+  }
+}
+
+/// Collects the line coverage of every isolate group the VM service lists,
+/// as `package:coverage`'s `collect` reports it:
+/// `{"type": "CodeCoverage", "coverage": [{"source": <uri>, "hits":
+/// [line, count, ...]}]}`, a line that ran counted once and one that did not
+/// as 0. `dart:` libraries are left out; which of the rest are reported is
+/// the converter's to decide, from what Bazel instruments.
 ///
 /// Public so `flutter_test_runner_test.dart` can drive it against a fake VM
 /// service; nothing else in this script calls it from outside [main].
@@ -871,37 +936,70 @@ final class DialBackTimedOut extends DialBack {
 /// indistinguishable from a complete one once written, so a run that drops
 /// part of its coverage reads as a run that simply exercised less code. That
 /// sends someone to write tests that already exist, or passes a coverage bar
-/// that was never actually met.
-///
-/// Per-isolate failures must not be swallowed. A bare catch cannot tell an
-/// exited isolate from anything else, so it equally hides every RPC error and
-/// every `TypeError` thrown by
-/// [_formatLcov] casting a malformed report. And the scenario it named does
-/// not arise here: collection runs before the suite is told to close, so the
-/// isolates `getVM` just listed are alive by construction — measured at one
-/// isolate, collected without error, on the `hello_coverage_test` path that is
-/// the only coverage run in the repo.
-Future<String> collectCoverage(Uri httpUri, List<String> libraryFilters) async {
+/// that was never actually met. Collection runs before the suite is told to
+/// close, so the isolates `getVM` just listed are alive by construction.
+Future<Map<String, Object?>> collectCoverage(Uri httpUri) async {
   final ws = await _connectVmServiceWebSocket(httpUri);
   try {
     final rpc = _VmServiceRpc(ws);
     final vm = await rpc.call('getVM');
     final isolates = (vm['isolates'] as List?) ?? const [];
-    final lines = <String>[];
+    final entries = <Map<String, Object?>>[];
+    // Isolates of one group share their code and so their counters: one
+    // report per group, or every hit would count once per isolate.
+    final groups = <String>{};
     for (final iso in isolates) {
-      final id = (iso as Map)['id'] as String;
+      final ref = iso as Map;
+      final group = ref['isolateGroupId'] as String?;
+      if (group != null && !groups.add(group)) continue;
       final report = await rpc.call('getSourceReport', {
-        'isolateId': id,
+        'isolateId': ref['id'] as String,
         'reports': const ['Coverage'],
+        // Every function, run or not, so a line that never ran is reported
+        // as such rather than left out; by line rather than token position.
         'forceCompile': true,
-        'libraryFilters': libraryFilters,
+        'reportLines': true,
       });
-      await _formatLcov(report, lines, rpc, id);
+      entries.addAll(_hitEntries(report));
     }
-    return lines.join('\n');
+    return {'type': 'CodeCoverage', 'coverage': entries};
   } finally {
     await ws.close();
   }
+}
+
+/// [report]'s line coverage, one entry per script.
+List<Map<String, Object?>> _hitEntries(Map<String, dynamic> report) {
+  final scripts = (report['scripts'] as List?) ?? const [];
+  final ranges = (report['ranges'] as List?) ?? const [];
+  final uris = [for (final s in scripts) (s as Map)['uri'] as String];
+  final byScript = <int, Map<int, int>>{};
+  for (final range in ranges) {
+    final scriptIndex = (range as Map)['scriptIndex'] as int;
+    if (uris[scriptIndex].startsWith('dart:')) continue;
+    final coverage = (range['coverage'] as Map?)?.cast<String, dynamic>();
+    if (coverage == null) continue;
+    final lines = byScript.putIfAbsent(scriptIndex, () => {});
+    for (final line in (coverage['hits'] as List?)?.cast<int>() ?? const []) {
+      lines[line] = 1;
+    }
+    for (final line in (coverage['misses'] as List?)?.cast<int>() ?? const []) {
+      lines.putIfAbsent(line, () => 0);
+    }
+  }
+  return [
+    for (final MapEntry(key: index, value: lines) in byScript.entries)
+      if (lines.isNotEmpty)
+        {
+          'source': uris[index],
+          'hits': [
+            for (final line in lines.keys.toList()..sort()) ...[
+              line,
+              lines[line],
+            ],
+          ],
+        },
+  ];
 }
 
 Future<WebSocket> _connectVmServiceWebSocket(Uri httpUri) {
@@ -956,93 +1054,5 @@ class _VmServiceRpc {
 
   Future<void> close() async {
     await _sub.cancel();
-  }
-}
-
-Map<int, int> _buildTokenToLineMap(List<dynamic> tokenPosTable) {
-  final map = <int, int>{};
-  for (final entry in tokenPosTable) {
-    final row = entry as List;
-    if (row.isEmpty) continue;
-    final line = row[0] as int;
-    for (var i = 1; i < row.length; i += 2) {
-      map[row[i] as int] = line;
-    }
-  }
-  return map;
-}
-
-Future<void> _formatLcov(
-  Map<String, dynamic> report,
-  List<String> lines,
-  _VmServiceRpc rpc,
-  String isolateId,
-) async {
-  final scripts = (report['scripts'] as List?) ?? const [];
-  final ranges = (report['ranges'] as List?) ?? const [];
-
-  final scriptInfo = <int, ({String id, String uri})>{};
-  for (var i = 0; i < scripts.length; i++) {
-    final s = (scripts[i] as Map).cast<String, dynamic>();
-    scriptInfo[i] = (id: s['id'] as String, uri: s['uri'] as String);
-  }
-
-  final perScript = <int, ({List<int> hits, List<int> misses})>{};
-  for (final range in ranges) {
-    final scriptIndex = (range as Map)['scriptIndex'] as int?;
-    if (scriptIndex == null) continue;
-    final info = scriptInfo[scriptIndex];
-    if (info == null) continue;
-    if (info.uri.startsWith('dart:')) continue;
-    final coverage = (range['coverage'] as Map?)?.cast<String, dynamic>();
-    if (coverage == null) continue;
-    final entry = perScript.putIfAbsent(
-      scriptIndex,
-      () => (hits: <int>[], misses: <int>[]),
-    );
-    entry.hits.addAll((coverage['hits'] as List?)?.cast<int>() ?? const []);
-    entry.misses.addAll((coverage['misses'] as List?)?.cast<int>() ?? const []);
-  }
-
-  for (final entry in perScript.entries) {
-    final info = scriptInfo[entry.key]!;
-    final tokens = entry.value;
-
-    // Not guarded: a `getObject` that fails drops this script's every line
-    // from the report while the surrounding records still look complete, so
-    // the loss has to reach the caller. `tokenPosTable` being absent is the
-    // one silent skip left, and it is a documented-optional field rather than
-    // a failure — a script that reports no token table has no line numbers to
-    // attribute hits to.
-    final script = await rpc.call('getObject', {
-      'isolateId': isolateId,
-      'objectId': info.id,
-    });
-    final table = script['tokenPosTable'] as List?;
-    if (table == null) continue;
-    final tokenToLine = _buildTokenToLineMap(table);
-
-    final lineHits = <int, int>{};
-    for (final t in tokens.hits) {
-      final line = tokenToLine[t];
-      if (line != null) lineHits[line] = (lineHits[line] ?? 0) + 1;
-    }
-    for (final t in tokens.misses) {
-      final line = tokenToLine[t];
-      if (line != null) lineHits.putIfAbsent(line, () => 0);
-    }
-
-    if (lineHits.isEmpty) continue;
-
-    var path = info.uri;
-    if (path.startsWith('file://')) path = Uri.parse(path).toFilePath();
-
-    lines.add('SF:$path');
-    final sorted = lineHits.entries.toList()
-      ..sort((a, b) => a.key.compareTo(b.key));
-    for (final lh in sorted) {
-      lines.add('DA:${lh.key},${lh.value}');
-    }
-    lines.add('end_of_record');
   }
 }

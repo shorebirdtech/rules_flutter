@@ -1,0 +1,29 @@
+load("@rules_flutter//flutter:defs.bzl", "flutter_library", "flutter_test")
+
+# `bazel coverage --combined_report=lcov //coverage/...` reports this library
+# and `//coverage/units`, which the test reaches through it, by their paths in
+# the workspace; `//coverage/check` checks the report against the `// covered`
+# and `// uncovered` marks in their sources. With
+# `--instrumentation_filter=//coverage/units` it reports that library alone.
+flutter_library(
+    name = "shapes",
+    package_name = "shapes",
+    srcs = ["lib/shapes.dart"],
+    deps = ["//coverage/units"],
+)
+
+exports_files(
+    ["lib/shapes.dart"],
+    visibility = ["//coverage:__subpackages__"],
+)
+
+flutter_test(
+    name = "shapes_test",
+    package_name = "shapes",
+    size = "small",
+    main = "test/shapes_test.dart",
+    deps = [
+        ":shapes",
+        "@deps//:flutter_test",
+    ],
+)

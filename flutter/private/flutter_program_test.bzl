@@ -14,7 +14,7 @@ for the tests rules_apple's macro builds from two rules.
 """
 
 load("@rules_dart//dart:providers.bzl", "DartAnalyzableInfo")
-load("@rules_dart//dart:utils.bzl", "runfiles_path")
+load("@rules_dart//dart:utils.bzl", "COVERAGE_ATTRS", "runfiles_path", "test_coverage")
 load("//flutter:providers.bzl", "FlutterTestProgramInfo")
 load("//flutter/private:test_tags.bzl", "tag_selectors")
 
@@ -79,7 +79,6 @@ def _flutter_test_impl(ctx):
     )
 
     env = program_environment(info, ctx.workspace_name) | {
-        "FLUTTER_TEST_COVERAGE_LIBRARIES": "\n".join(info.coverage_libraries),
         # The test's source in the runfiles, which the runner reads for the
         # library annotations (`@Tags`) the way `flutter test` does.
         # FLUTTER_TEST_PATH stays the display path.
@@ -92,6 +91,14 @@ def _flutter_test_impl(ctx):
         selectors = tag_selectors(ctx, attr_name, "flutter_test")
         if selectors:
             env[key] = "\n".join(selectors)
+
+    # Under `bazel coverage`, what turns the VM's coverage of the program into
+    # the tracefile Bazel merges: rules_dart's converter, and where each
+    # package's `lib/` is.
+    coverage = test_coverage(ctx, info.packages)
+    if coverage:
+        env["FLUTTER_TEST_COVERAGE_CONVERTER"] = coverage.converter
+        env["FLUTTER_TEST_COVERAGE_SOURCES"] = coverage.sources
     add_user_env(ctx, "flutter_test", env)
 
     runfiles = info.runfiles.merge(tool[DefaultInfo].default_runfiles).merge(
@@ -99,6 +106,8 @@ def _flutter_test_impl(ctx):
     )
     for data_target in ctx.attr.data:
         runfiles = runfiles.merge(data_target[DefaultInfo].default_runfiles)
+    if coverage:
+        runfiles = runfiles.merge(coverage.runfiles)
 
     providers = [
         DefaultInfo(executable = executable, runfiles = runfiles),
@@ -181,7 +190,7 @@ flutter_test = rule(
             default = Label("//flutter/private/tools:flutter_test_runner"),
             cfg = "target",
         ),
-    },
+    } | COVERAGE_ATTRS,
     test = True,
     doc = """Runs a compiled Flutter test program under flutter_tester. This is \
 the rule behind `flutter_test` and `flutter_program_test`, which is how \

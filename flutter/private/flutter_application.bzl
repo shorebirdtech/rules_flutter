@@ -481,6 +481,16 @@ def flutter_application_build(ctx, inputs):
             windows_plugin_libraries = windows_plugin_libraries,
             android_libs = android_libs,
         ),
+        # What `bazel coverage` of a test compiled in this application
+        # reports of it: its sources and the libraries it reaches. A
+        # variant's `main` is what replaces the application's, an entry point
+        # of its own (an integration test's), so only its `srcs` are.
+        coverage_common.instrumented_files_info(
+            ctx,
+            source_attributes = ["srcs"] if hasattr(ctx.attr, "application") else ["srcs", "main"],
+            dependency_attributes = ["deps", "application"],
+            extensions = ["dart"],
+        ),
     ]
     providers.append(OutputGroupInfo(**output_groups))
     return providers

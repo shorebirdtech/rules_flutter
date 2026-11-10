@@ -576,27 +576,6 @@ flutter_test(
     ],
 )
 
-# Exercises: the coverage path through the runner, which `bazel test` alone
-# never reaches. `bazel coverage` spawns flutter_tester with its VM service
-# enabled, and the runner collects LCOV over it after the suite runs.
-# `COVERAGE_OUTPUT_FILE` is the runner's own trigger for that path, so setting
-# it exercises the real code under the canonical `bazel test //...` rather
-# than simulating it.
-#
-# The runner bounds collection just inside this timeout, so a hang is reported
-# with a reason rather than killed by Bazel as a bare TIMEOUT.
-flutter_test(
-    name = "hello_coverage_test",
-    package_name = "hello_world",
-    size = "small",
-    timeout = "moderate",
-    env = {"COVERAGE_OUTPUT_FILE": "coverage_probe.lcov"},
-    main = "hello_test.dart",
-    deps = [
-        "@deps//:flutter_test",
-    ],
-)
-
 # -- build_test targets verify that rules produce outputs without errors -------
 
 build_test(

@@ -19,7 +19,7 @@ import 'package:test/test.dart';
 // reachable from here and nowhere else — see their docstrings.
 import '../flutter_test_runner.dart' as runner;
 
-/// A VM service that answers exactly the three RPCs coverage collection makes.
+/// A VM service that answers exactly the two RPCs coverage collection makes.
 ///
 /// Real enough to be worth having: it speaks JSON-RPC over a real WebSocket on
 /// a real loopback port, so the transport, the framing, and the id/response
@@ -74,30 +74,28 @@ class _FakeVmService {
   Future<void> stop() => _server.close(force: true);
 }
 
-/// One isolate, one script, one hit on line 5 and one miss on line 7.
+/// One script with a hit on line 5 and a miss on line 7, and a `dart:` one.
 Map<String, dynamic> _oneScriptReport() => {
   'result': {
     'scripts': [
-      {'id': 'script-1', 'uri': 'file:///pkg/a.dart'},
+      {'id': 'script-1', 'uri': 'package:pkg/a.dart'},
+      {'id': 'script-2', 'uri': 'dart:core'},
     ],
     'ranges': [
       {
         'scriptIndex': 0,
         'coverage': {
-          'hits': [10],
-          'misses': [20],
+          'hits': [5],
+          'misses': [7],
         },
       },
-    ],
-  },
-};
-
-/// `[line, tokenPos, column, …]` — token 10 is line 5, token 20 is line 7.
-Map<String, dynamic> _tokenTable() => {
-  'result': {
-    'tokenPosTable': [
-      [5, 10, 1],
-      [7, 20, 1],
+      {
+        'scriptIndex': 1,
+        'coverage': {
+          'hits': [3],
+          'misses': const [],
+        },
+      },
     ],
   },
 };
@@ -115,37 +113,51 @@ void main() {
       },
     };
     vm.handlers['getSourceReport'] = _oneScriptReport;
-    vm.handlers['getObject'] = _tokenTable;
   });
 
   tearDown(() => vm.stop());
 
   group('collectCoverage', () {
-    test('renders hits and misses as LCOV line records', () async {
-      expect(
-        await runner.collectCoverage(vm.httpUri, const ['package:pkg/']),
-        // A file: URI read back as the host spells that path.
-        'SF:${Uri.parse('file:///pkg/a.dart').toFilePath()}\n'
-        'DA:5,1\n'
-        'DA:7,0\n'
-        'end_of_record',
-      );
+    test(
+      'reports each line as package:coverage does, leaving out dart:',
+      () async {
+        expect(await runner.collectCoverage(vm.httpUri), {
+          'type': 'CodeCoverage',
+          'coverage': [
+            {
+              'source': 'package:pkg/a.dart',
+              'hits': [5, 1, 7, 0],
+            },
+          ],
+        });
+      },
+    );
+
+    test('asks for every library, by line, compiled or not', () async {
+      await runner.collectCoverage(vm.httpUri);
+
+      final request = vm.requests['getSourceReport']!;
+      expect(request['libraryFilters'], isNull);
+      expect(request['reportLines'], isTrue);
+      expect(request['forceCompile'], isTrue);
     });
 
-    test('asks the VM for only the libraries in scope', () async {
-      await runner.collectCoverage(vm.httpUri, const [
-        'package:pkg/',
-        'org-dartlang-root:///test/a_test.dart',
-      ]);
+    test('reports an isolate group once', () async {
+      vm.handlers['getVM'] = () => {
+        'result': {
+          'isolates': [
+            {'id': 'iso-1', 'isolateGroupId': 'group-1'},
+            {'id': 'iso-2', 'isolateGroupId': 'group-1'},
+          ],
+        },
+      };
 
-      expect(vm.requests['getSourceReport']?['libraryFilters'], [
-        'package:pkg/',
-        'org-dartlang-root:///test/a_test.dart',
-      ]);
+      final hits = await runner.collectCoverage(vm.httpUri);
+      expect(hits['coverage'], hasLength(1));
     });
 
-    // These must raise rather than report: an LCOV file missing an isolate,
-    // or missing a file inside one, is indistinguishable downstream from a
+    // These must raise rather than report: a report missing an isolate, or
+    // missing a file inside one, is indistinguishable downstream from a
     // complete one, so the run reads as green with a coverage number that was
     // never measured. The empty-report check only catches losing everything.
 
@@ -157,7 +169,7 @@ void main() {
         };
 
         await expectLater(
-          runner.collectCoverage(vm.httpUri, const ['package:pkg/']),
+          runner.collectCoverage(vm.httpUri),
           throwsA(
             isA<StateError>().having(
               (e) => e.message,
@@ -169,43 +181,63 @@ void main() {
       },
     );
 
-    test('raises when a script token table is refused, rather than dropping '
-        'that file', () async {
-      vm.handlers['getObject'] = () => {
-        'error': {'code': -32602, 'message': 'object id expired'},
-      };
-
-      await expectLater(
-        runner.collectCoverage(vm.httpUri, const ['package:pkg/']),
-        throwsA(
-          isA<StateError>().having(
-            (e) => e.message,
-            'message',
-            allOf(contains('getObject'), contains('object id expired')),
-          ),
-        ),
-      );
-    });
-
     test(
       'raises on a malformed report instead of reading it as empty coverage',
       () async {
-        // A cast failure inside the LCOV formatter, not an RPC error.
         vm.handlers['getSourceReport'] = () => {
           'result': {
             'scripts': [
-              {'id': 42, 'uri': 'file:///pkg/a.dart'},
+              {'id': 'script-1', 'uri': 42},
             ],
             'ranges': const [],
           },
         };
 
         await expectLater(
-          runner.collectCoverage(vm.httpUri, const ['package:pkg/']),
+          runner.collectCoverage(vm.httpUri),
           throwsA(isA<TypeError>()),
         );
       },
     );
+  });
+
+  group('CoverageRun', () {
+    late Directory scratch;
+    setUp(() => scratch = Directory.systemTemp.createTempSync('coverage_run'));
+    tearDown(() => scratch.deleteSync(recursive: true));
+
+    final runfiles = Runfiles.create();
+    const built = {
+      'FLUTTER_TEST_COVERAGE_CONVERTER': '_main/converter',
+      'FLUTTER_TEST_COVERAGE_SOURCES': '_main/sources.json',
+    };
+
+    test('is none unless the test was built for coverage', () {
+      expect(
+        runner.CoverageRun.of(runfiles, const {}, {
+          'COVERAGE_DIR': scratch.path,
+        }),
+        isNull,
+      );
+    });
+
+    test('is none when Bazel collects none, as under bazel run', () {
+      expect(runner.CoverageRun.of(runfiles, built, const {}), isNull);
+    });
+
+    test('collects outside COVERAGE_DIR, which Bazel reads whole', () {
+      final coverageDir = Directory('${scratch.path}/coverage')..createSync();
+      final run = runner.CoverageRun.of(runfiles, built, {
+        'COVERAGE_DIR': coverageDir.path,
+        'TEST_TMPDIR': scratch.path,
+      })!;
+      run.writeHits({'type': 'CodeCoverage', 'coverage': const []});
+
+      expect(run.collected, isTrue);
+      expect(run.hitmaps, isNot(startsWith(coverageDir.path)));
+      expect(File('${run.hitmaps}/flutter_tester.json').existsSync(), isTrue);
+      expect(coverageDir.listSync(), isEmpty);
+    });
   });
 
   group('libraryPathEnvironment', () {

@@ -2,11 +2,12 @@
 
 A third-party rule that compiles a test provides `FlutterTestProgramInfo`, and
 `flutter_program_test` runs it with the runner's whole contract: the paths it
-reads from the environment, `@Tags` selection, the kernel list, and the
-coverage and source variables.
+reads from the environment, `@Tags` selection, the kernel list, the source
+variable, and under `bazel coverage` the converter.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
+load("@rules_dart//dart:utils.bzl", "dart_package_info")
 load("//flutter:defs.bzl", "flutter_program_test")
 load("//flutter:providers.bzl", "FlutterTestProgramInfo")
 
@@ -32,7 +33,7 @@ def _fake_program_impl(ctx):
             icu_data = icu,
             display_path = "pkg/fake_suite.dart",
             source = source,
-            coverage_libraries = ["package:fake/", "org-dartlang-root:///pkg/fake_suite.dart"],
+            packages = [dart_package_info(label = ctx.label, package_name = "fake", package_root = "pkg", language_version = "")],
             native_assets_manifest = None,
             native_files = ctx.attr.native_files,
             enable_impeller = ctx.attr.impeller,
@@ -68,7 +69,10 @@ def _runs_the_program_impl(ctx):
         asserts.true(env, environment.get(key, "").endswith(suffix), "%s is %s" % (key, environment.get(key)))
     asserts.equals(env, "pkg/fake_suite.dart", environment["FLUTTER_TEST_PATH"])
     asserts.equals(env, "", environment["FLUTTER_TEST_IMPELLER"])
-    asserts.equals(env, "package:fake/\norg-dartlang-root:///pkg/fake_suite.dart", environment["FLUTTER_TEST_COVERAGE_LIBRARIES"])
+
+    # Only a coverage build converts coverage.
+    asserts.false(env, "FLUTTER_TEST_COVERAGE_CONVERTER" in environment)
+    asserts.false(env, "FLUTTER_TEST_COVERAGE_SOURCES" in environment)
     asserts.equals(env, "wip", environment["FLUTTER_TEST_EXCLUDE_TAGS"])
     asserts.equals(env, "from_target", environment["EXTRA"])
     asserts.false(env, "FLUTTER_TEST_KERNEL_LIST" in environment)
@@ -96,6 +100,28 @@ def _refuses_its_own_keys_impl(ctx):
     env = analysistest.begin(ctx)
     asserts.expect_failure(env, "env key FLUTTER_TEST_PATH is set by the rule itself")
     return analysistest.end(env)
+
+def _converts_coverage_impl(ctx):
+    env = analysistest.begin(ctx)
+    target = analysistest.target_under_test(env)
+    environment = _environment(env)
+    converter = environment.get("FLUTTER_TEST_COVERAGE_CONVERTER", "")
+    sources = environment.get("FLUTTER_TEST_COVERAGE_SOURCES", "")
+    asserts.true(env, "coverage_converter" in converter, "FLUTTER_TEST_COVERAGE_CONVERTER is %s" % converter)
+    asserts.true(env, sources.endswith("/_runs_fake.coverage_sources.json"), "FLUTTER_TEST_COVERAGE_SOURCES is %s" % sources)
+
+    # Both reach the test, and the program's sources are what Bazel's
+    # instrumentation filter chooses from.
+    paths = [f.short_path for f in target[DefaultInfo].default_runfiles.files.to_list()]
+    asserts.true(env, any([p.endswith("_runs_fake.coverage_sources.json") for p in paths]), "no sources file in runfiles: %s" % paths)
+    asserts.true(env, any(["coverage_converter" in p for p in paths]), "no converter in runfiles: %s" % paths)
+    asserts.true(env, InstrumentedFilesInfo in target)
+    return analysistest.end(env)
+
+_converts_coverage_test = analysistest.make(
+    _converts_coverage_impl,
+    config_settings = {"//command_line_option:collect_code_coverage": True},
+)
 
 _refuses_its_own_keys_test = analysistest.make(_refuses_its_own_keys_impl, expect_failure = True)
 
@@ -141,11 +167,13 @@ def flutter_program_test_test_suite(name):
     _runs_the_program_test(name = name + "_runs_the_program", target_under_test = ":_runs_fake")
     _describes_a_list_test(name = name + "_describes_a_list", target_under_test = ":_runs_fake_list")
     _refuses_its_own_keys_test(name = name + "_refuses_its_own_keys", target_under_test = ":_overrides_key")
+    _converts_coverage_test(name = name + "_converts_coverage", target_under_test = ":_runs_fake")
     native.test_suite(
         name = name,
         tests = [
             ":" + name + "_runs_the_program",
             ":" + name + "_describes_a_list",
             ":" + name + "_refuses_its_own_keys",
+            ":" + name + "_converts_coverage",
         ],
     )

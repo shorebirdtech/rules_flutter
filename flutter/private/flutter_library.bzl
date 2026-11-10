@@ -516,6 +516,14 @@ def _flutter_library_impl(ctx):
             pub_shaders = extra_pub_shaders,
             additional_licenses = own_additional_licenses(ctx, package_name),
         ),
+        # The sources `bazel coverage` may report of this package, as
+        # `dart_library`'s.
+        coverage_common.instrumented_files_info(
+            ctx,
+            source_attributes = ["srcs"],
+            dependency_attributes = ["deps"],
+            extensions = ["dart"],
+        ),
     ]
 
 flutter_library = rule(
