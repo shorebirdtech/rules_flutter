@@ -270,19 +270,8 @@ ios_application(
 
 flutter_web_bundle(
     name = "plugin_web",
-    main = "lib/main.dart",
-    package = ":pubspec-metadata",
+    application = ":plugin_app",
     title = "Plugin Example",
-    deps = [
-        "//greeting_plugin",
-        "@deps//:audio_session",
-        "@deps//:flutter",
-        "@deps//:package_info_plus",
-        "@deps//:path_provider",
-        "@deps//:shared_preferences",
-        "@deps//:url_launcher",
-        "@rules_flutter//flutter:material_icons",
-    ],
 )
 
 flutter_linux_app(

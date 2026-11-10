@@ -28,6 +28,35 @@ load("//flutter/private:flutter_native_assets.bzl", "CODE_ASSETS_DOC", "collect_
 load("//flutter/private:native_sources.bzl", "collect_native_source_pairs")
 load("//flutter/private:program_analysis.bzl", "program_analyzable_info")
 
+_FLUTTER_TOOLCHAIN_TYPE = "@rules_flutter//flutter:toolchain_type"
+
+# What an application rule declares so it can be built for a web platform,
+# where it needs no Flutter toolchain of the target's (no toolchain targets
+# one: a web app compiles with its own host tools) and builds nothing.
+WEB_PLATFORM_CONSTRAINT_ATTRS = {
+    "_js_constraint": attr.label(default = "@rules_dart//dart/constraints:js"),
+    "_wasm_constraint": attr.label(default = "@rules_dart//dart/constraints:wasm"),
+}
+
+# The toolchains of an application rule. The Flutter one is optional for the
+# web platforms alone: `flutter_application_build` fails where it is missing
+# for any other.
+APPLICATION_TOOLCHAINS = [
+    config_common.toolchain_type(_FLUTTER_TOOLCHAIN_TYPE, mandatory = False),
+] + COPY_TO_DIRECTORY_TOOLCHAINS
+
+def is_web_platform(ctx):
+    """Whether `ctx`, carrying `WEB_PLATFORM_CONSTRAINT_ATTRS`, is built for a web platform.
+
+    Args:
+        ctx: Rule context.
+
+    Returns:
+        True for a platform with the `js` or `wasm` web compiler constraint.
+    """
+    return ctx.target_platform_has_constraint(ctx.attr._js_constraint[platform_common.ConstraintValueInfo]) or \
+           ctx.target_platform_has_constraint(ctx.attr._wasm_constraint[platform_common.ConstraintValueInfo])
+
 def flutter_application_build(ctx, inputs):
     """Builds the program `inputs` describes as the application `ctx` declares.
 
@@ -47,7 +76,17 @@ def flutter_application_build(ctx, inputs):
         The providers `flutter_application` returns, `FlutterApplicationInputsInfo`
         included.
     """
-    flutter_toolchain = ctx.toolchains["@rules_flutter//flutter:toolchain_type"]
+
+    # Built for a web platform, under a web app's split, the application is
+    # its program and nothing else: the web app compiles that with its own
+    # compilers (see `flutter_web_bundle`). Nothing native is built there, as
+    # `flutter build web` builds none of a shared app's native code.
+    if is_web_platform(ctx):
+        return [FlutterApplicationInputsInfo(inputs = inputs), DefaultInfo(files = depset())]
+
+    flutter_toolchain = ctx.toolchains[_FLUTTER_TOOLCHAIN_TYPE]
+    if flutter_toolchain == None:
+        fail("%s: no Flutter toolchain targets the platform this is built for. Rerun with `--toolchain_resolution_debug='@@rules_flutter+//flutter:toolchain_type'` to see why each registered one was rejected." % ctx.label)
     flutter_sdk_info = flutter_toolchain.flutter_sdk_info
 
     mode = flutter_build_mode(ctx)
@@ -526,6 +565,7 @@ flutter_application = rule(
             ),
         },
         PLATFORM_CONSTRAINT_ATTRS,
+        WEB_PLATFORM_CONSTRAINT_ATTRS,
         link_hook_runner_attr(),
         # Simulator-vs-device is an Apple *environment* constraint, not an OS
         # one, so it needs apple_support's own attrs on top of the OS set.
@@ -536,9 +576,7 @@ flutter_application = rule(
     ),
     # The target's toolchain is for its AOT compile and engine files; every
     # compile whose output does not depend on the target is `portable`.
-    toolchains = [
-        "@rules_flutter//flutter:toolchain_type",
-    ] + COPY_TO_DIRECTORY_TOOLCHAINS,
+    toolchains = APPLICATION_TOOLCHAINS,
     exec_groups = PORTABLE_EXEC_GROUPS,
-    doc = "Compiles a Flutter application to AOT native code + asset bundle (release) or kernel .dill + assets (debug).",
+    doc = "Compiles a Flutter application to AOT native code + asset bundle (release) or kernel .dill + assets (debug). A web app (`flutter_web_app`) builds it for its compilers' web platforms, where it compiles nothing and gives the web app its program (`FlutterApplicationInputsInfo`).",
 )

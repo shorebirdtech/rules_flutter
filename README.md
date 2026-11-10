@@ -657,13 +657,13 @@ The macros take `flutter create` output as it is. You do not need to edit the ge
 
 ### App version
 
-The Android, iOS, macOS, Windows and web app macros take `build_name` and `build_number`, Flutter's names for the version that `flutter build --build-name 2.3.4 --build-number 42` sets, and that a `pubspec.yaml` writes as `version: 2.3.4+42`. Unset, they are `flutter create`'s `1.0.0` and `1`. Each platform puts them where its own build does:
+`flutter_application` and the Android, iOS, macOS and Windows app macros take `build_name` and `build_number`, Flutter's names for the version that `flutter build --build-name 2.3.4 --build-number 42` sets, and that a `pubspec.yaml` writes as `version: 2.3.4+42`. Unset, they are `flutter create`'s `1.0.0` and `1`. Each platform puts them where its own build does:
 
 | Platform | `build_name` | `build_number` |
 |---|---|---|
 | Android | `versionName` | `versionCode`: a whole number from 1 to 2100000000 |
 | iOS, macOS | `CFBundleShortVersionString`: numbers separated by periods, padded to three as `flutter build` pads them (`2.3` is `2.3.0`) | `CFBundleVersion`: numbers separated by periods |
-| Web | `version` in `version.json` | `build_number` in `version.json` |
+| Web | `version` in `version.json`, from the application's | `build_number` in `version.json`, from the application's |
 | Windows | The executable's version, `<build_name>+<build_number>`, and the first three of its four file version numbers: `MAJOR.MINOR.PATCH`, with an optional `-prerelease` | The fourth file version number: a whole number. Each of the four is at most 65535 |
 
 Linux apps carry no version. A value the platform cannot use fails the build and says what it accepts, where `flutter build` would quietly change it (`0` to `1` on Android, `1.0-beta` to `1.0.0` on iOS, a build number of `1.2` to `0` on Windows).
@@ -687,7 +687,7 @@ On iOS and macOS, rules_apple's `apple_bundle_version` can instead read the vers
 
 ### Flavors
 
-A flavor is a target. Give `flutter_application` (or `flutter_web_app`) a `flavor`, and declare one application per flavor, with the platform target of each beside it:
+A flavor is a target. Give `flutter_application` a `flavor`, and declare one application per flavor, with the platform target of each beside it:
 
 ```starlark
 dart_package_metadata(
@@ -712,9 +712,8 @@ flutter_macos_app(
 
 flutter_web_app(
     name = "web_paid",
-    package = ":pubspec-metadata",
-    flavor = "paid",
-    deps = [...],
+    application = ":app_paid",
+    app_name = "My App Paid",
 )
 ```
 
@@ -1540,7 +1539,7 @@ flutter_windows_bundle(
 Run `flutter create --platforms=web .` first so `web/` has its `index.html`, `manifest.json`, and icons. Any of those that are missing are replaced by built-in templates. Add `flutter_web_sdk` to `use_repo`.
 
 ```starlark
-load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
 
 dart_package_metadata(
@@ -1548,25 +1547,39 @@ dart_package_metadata(
     package_name = "my_app",
 )
 
-flutter_web_app(
-    name = "my_app_web",
+flutter_application(
+    name = "app",
     package = ":pubspec-metadata",
     main = "lib/main.dart",
     deps = ["@deps//:flutter", "@rules_flutter//flutter:material_icons"],
+)
+
+flutter_web_app(
+    name = "my_app_web",
+    application = ":app",
     app_name = "My App",
 )
 ```
 
-Unlike the other platforms, the web macro takes `main` and `deps` directly rather than a `flutter_application`. Web compilation goes through dart2wasm or dart2js, which is a different pipeline from the AOT one.
+The web app takes its `application` like every other platform's, and one application serves them all: its `main`, `deps`, assets, shaders, `defines`, `flavor`, `build_name` and `build_number` are the web app's program and version. The web app compiles that program from source with dart2wasm and dart2js rather than from the application's AOT output, building it once for each compiler's web platform (see [Per-compiler code](#per-compiler-code)). The application's native parts, its AOT compile, `native_deps`, code assets and link hooks, are not built for the web, as `flutter build web` builds no native code; a web app serves WebAssembly modules through `native_modules` instead.
+
+An application whose code imports web-only libraries (`dart:js_interop`, `package:web`, `dart:ui_web`) without a conditional import cannot be built for the Dart VM, which `bazel build //...` otherwise does in its own configuration. Mark it web-only so `bazel build //...` skips it there, while each web app still builds it for its compilers:
+
+```starlark
+flutter_application(
+    name = "app",
+    ...
+    target_compatible_with = select({
+        "@rules_dart//dart/constraints:none": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+)
+```
 
 | Attribute | Description |
 |---|---|
-| `package` | The package's `dart_package_metadata`, which states its name (the `name:` of `pubspec.yaml`) and language version. Required. |
-| `deps` | `dart_library` or `flutter_library` targets. Required. |
-| `main` | The entry point. Defaults to `"lib/main.dart"`. It can sit outside the package's `lib/`; list any file it imports by relative path in `srcs`. |
+| `application` | The `flutter_application` (or `flutter_application_variant`) the web app is built from. Required. Its `build_name` and `build_number` are `version` and `build_number` in the bundle's `version.json`, which the web `package_info_plus` reads (see [App version](#app-version)). |
 | `app_name` | Used for the HTML title and manifest. Defaults to the target name. |
-| `build_name` | `version` in the bundle's `version.json`, which the web `package_info_plus` reads. Defaults to `"1.0.0"`. See [App version](#app-version). |
-| `build_number` | `build_number` in `version.json`. Defaults to `"1"`. |
 | `base_href` | Substituted for `$FLUTTER_BASE_HREF` in `web/index.html`. Defaults to `"/"`. `flutter_bazel run -d chrome` serves the app under it, as `flutter run` does. |
 | `extra_web_assets` | Extra files copied into the bundle root, for generated files the `web/` glob cannot see. |
 | `web_dir` | The directory the runner files are discovered in and served from at the bundle root. Defaults to `"web"`. Give each app its own, such as `"web_apps/reminders"`, to build several web apps from one package. `flutter_web_bundle` takes it too. |
@@ -1623,14 +1636,20 @@ dart_package_metadata(
     package_name = "app",
 )
 
-flutter_web_app(
+flutter_application(
     name = "app",
     package = ":pubspec-metadata",
+    main = "lib/main.dart",
     deps = ["//ids", "@deps//:flutter"],
+)
+
+flutter_web_app(
+    name = "app_web",
+    application = ":app",
 )
 ```
 
-The `select()` goes in a library, not in the bundle's `deps`: a `select()` is resolved in the configuration of the target that holds it, and the bundle's own is not yet a web platform's. The variants are separate libraries whose `dart_package_metadata` state the same `package_name`, each in a directory of its own, so the import is the same whichever is picked. `e2e/web_example/int64` is this app, which renders `Int64List max: 9223372036854775807` from the WebAssembly build and `List<int> max: 9007199254740991` from the JavaScript one.
+The `select()` goes in a library, not in the application's `deps`: a `select()` is resolved in the configuration of the target that holds it, and the application's own `deps` are read in the configuration the web app was asked for, not a web platform's. The variants are separate libraries whose `dart_package_metadata` state the same `package_name`, each in a directory of its own, so the import is the same whichever is picked. `e2e/web_example/int64` is this app, which renders `Int64List max: 9223372036854775807` from the WebAssembly build and `List<int> max: 9007199254740991` from the JavaScript one.
 
 What the bundle holds once comes from the primary compiler's version of the program (`dart2wasm` for the default `compiler`): the plugin registrant, the assets and shaders, and the icon tree-shaking scan. A dependency that differs by compiler should not differ in what plugins or assets it brings. An icon only the other compiler's variant uses is shaken out of the font unless `tree_shake_icons = False`.
 
@@ -1652,7 +1671,7 @@ The files under `web/` are treated as templates and substituted the way `flutter
 <summary>Composable rules</summary>
 
 ```starlark
-load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_bundle")
 
 dart_package_metadata(
@@ -1660,33 +1679,34 @@ dart_package_metadata(
     package_name = "my_app",
 )
 
+flutter_application(
+    name = "app",
+    package = ":pubspec-metadata",
+    main = "lib/main.dart",
+    deps = ["@deps//:flutter"],
+)
+
 # WASM, with a dart2js build beside it for browsers that cannot run WASM
 # (the default):
 flutter_web_bundle(
     name = "my_app_web",
-    package = ":pubspec-metadata",
-    main = "lib/main.dart",
-    deps = ["@deps//:flutter"],
+    application = ":app",
 )
 
 # WASM only, for an app dart2js cannot compile, served to every engine:
 flutter_web_bundle(
     name = "my_app_web_wasm",
-    package = ":pubspec-metadata",
-    main = "lib/main.dart",
+    application = ":app",
     js_fallback = False,
     wasm_browsers = ["blink", "gecko", "webkit"],
-    deps = ["@deps//:flutter"],
 )
 
 # JavaScript alone, for wider browser support:
 flutter_web_bundle(
     name = "my_app_web_js",
-    package = ":pubspec-metadata",
-    main = "lib/main.dart",
+    application = ":app",
     compiler = "dart2js",
     renderer = "canvaskit",
-    deps = ["@deps//:flutter"],
 )
 ```
 
@@ -1717,9 +1737,8 @@ The default renderer, fetched from `www.gstatic.com`, works in an isolated page 
 
 ```starlark
 flutter_web_app(
-    name = "app",
-    package = ":pubspec-metadata",
-    deps = [...],
+    name = "app_web",
+    application = ":app",
     cross_origin_embedder_policy = "credentialless",  # default "require-corp"
 )
 ```
@@ -2111,7 +2130,7 @@ A font is a file of the package whose `flutter_library` or `flutter_plugin` list
 
 ### flutter_application
 
-Compiles a Flutter app. In debug mode (`-c dbg`) it produces a kernel `.dill` for the JIT. Otherwise it produces AOT native code. Either way it also builds the `flutter_assets/` bundle. The platform macros consume its `FlutterApplicationInfo`.
+Compiles a Flutter app. In debug mode (`-c dbg`) it produces a kernel `.dill` for the JIT. Otherwise it produces AOT native code. Either way it also builds the `flutter_assets/` bundle. The platform macros consume its `FlutterApplicationInfo`, except the web app's, which compiles the application's program itself with the web compilers (see [Web](#web)).
 
 ```starlark
 dart_package_metadata(
@@ -2140,7 +2159,7 @@ flutter_application(
 | `srcs` | Other Dart sources in the app package, including generated ones. List here any file a `main` outside `lib/` imports by relative path. |
 | `deps` | `dart_library` or `flutter_library` targets. Add `@rules_flutter//flutter:material_icons` to bundle the Material icon font. |
 | `assets` | Asset files for the bundle, each under its path in the application's Bazel package (`assets/a.png`), wherever in the workspace that package is. That is the key `rootBundle` and `Image.asset` load it by, and the one `flutter run` gives it. A file from another package fails the build. |
-| `native_deps` | Shared libraries to bundle for `dart:ffi`. |
+| `native_deps` | Shared libraries to bundle for `dart:ffi`. A web app built over the application bundles none, as `flutter build web` builds no native code. |
 | `defines` | Dart environment defines, the `-D` flags. |
 | `obfuscate` | Obfuscate Dart symbols in the AOT output. Pair with `split_debug_info`. Default `False`. |
 | `split_debug_info` | Write debug info to a separate `.symbols` file. Default `False`. |
@@ -2447,36 +2466,27 @@ The macro is Tier 1. Tier 2 is `flutter_integration_bootstrap`, `flutter_applica
 `flutter_web_integration_test` runs the same test file in headless Chrome. `flutter test` refuses web devices (flutter/flutter#66264), and `flutter drive -d chrome` reports only pass or fail; this reports each `testWidgets` as a case, as the other platforms do, with `--test_filter`, tags and `shard_count`.
 
 ```starlark
-load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata")
 load("@rules_flutter//flutter:integration_test.bzl", "flutter_web_integration_test")
-
-dart_package_metadata(
-    name = "pubspec-metadata",
-    package_name = "my_app",
-)
 
 flutter_web_integration_test(
     name = "app_web_test",
     src = "integration_test/app_test.dart",
-    package = ":pubspec-metadata",
-    srcs = glob(["lib/**/*.dart"]),
-    assets = glob(["assets/**"]),
+    application = ":app_flutter",
     deps = [
-        "@deps//:flutter",
         "@deps//:flutter_test",
         "@deps//:integration_test",
     ],
 )
 ```
 
-A web app is its own program and takes the sources and `deps` the test compiles, not an `application` (`flutter_web_app` has none): the macro's `package`, `srcs`, `deps` and the rest (`assets`, `web_dir`, `base_href`, and the other `flutter_web_app` arguments) are `flutter_web_app`'s. The test's program is that app with the test as its `main`, built in debug mode whatever `-c` says, served from a directory of its own on the loopback and opened in a headless Chrome.
+It takes the `application` the test runs, as the other platforms' macros do, with `deps` the test imports beyond the application's and `srcs` it imports by relative path; the other `flutter_web_app` arguments (`web_dir`, `base_href`, and the rest) pass through. The test's program is the application with the test as its `main` (`flutter_application_variant`), built as a web app in debug mode whatever `-c` says, served from a directory of its own on the loopback and opened in a headless Chrome.
 
 - **The browser is pinned.** It is Chrome for Testing's headless shell (`@rules_flutter//flutter/integration_test:chrome`), downloaded by version and `sha256` for macOS (arm64, x64), Linux (x64, arm64) and Windows x64, so the page is drawn by the same browser wherever the test runs. Only the host's own is fetched, and only when a web integration test is analysed. A host with no pinned shell skips the test (`@platforms//:incompatible`); it is never run in another browser. `runner` takes a `flutter_chrome_runner` of your own. `bazel run @rules_flutter//tools/update_chrome_for_testing` prints a newer pin.
 - **The suite is driven over the browser's DevTools protocol**, which a web bundle has in place of a VM service: the page publishes a hook the host calls, and calls a binding the host added, so there is no port to open and no server of the page's own. The browser's profile is deleted when the test ends, and the browser is killed.
 - **A page that is lost fails the target, saying why**: the browser exiting (`Chrome exited with code 139`), the page crashing, or the connection closing; a page that never starts the suite fails at the test's timeout, naming the bootstrap it never reached.
 - **On Linux the browser loads the pinned Linux runtime's libraries** (see Linux integration tests), never the host's, and the build checks that it needs none the runtime lacks. It runs without its sandbox, as upstream's headless Chrome does: the sandbox needs unprivileged user namespaces, which Ubuntu denies by default since 23.10, or Chrome's set-user-ID helper installed by root. Windows is not verified yet.
 
-The macro is Tier 1. Tier 2 is `flutter_integration_bootstrap` (with `src_import = "relative"`: a web compile mounts no file-system root to name the test under), `flutter_web_app` or `flutter_web_bundle`, `flutter_web_app_integration_test` and `flutter_chrome_runner`, which the macro composes as `__<name>_bootstrap` and `__<name>_app`.
+The macro is Tier 1. Tier 2 is `flutter_integration_bootstrap` (with `src_import = "relative"`: a web compile mounts no file-system root to name the test under), `flutter_application_variant`, `flutter_web_app` or `flutter_web_bundle`, `flutter_web_app_integration_test` and `flutter_chrome_runner`, which the macro composes as `__<name>_bootstrap`, `__<name>_program` and `__<name>_app`.
 
 #### Android integration tests
 

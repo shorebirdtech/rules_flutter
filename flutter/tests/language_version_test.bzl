@@ -148,10 +148,15 @@ def _setup_fixtures():
         deps = ["//flutter/tests/flutter_test_analyze_fixture/fake_test_api"],
     )
 
+    flutter_application(
+        name = "_lv_web_app",
+        main = _MAIN,
+        package = ":pubspec-metadata",
+        tags = ["manual"],
+    )
     flutter_web_bundle(
         name = "_lv_web",
-        package = ":pubspec-metadata",
-        main = _MAIN,
+        application = ":_lv_web_app",
         tags = ["manual"],
     )
 

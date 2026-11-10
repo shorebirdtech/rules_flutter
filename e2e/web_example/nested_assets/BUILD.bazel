@@ -1,5 +1,5 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
-load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
 
 dart_package_metadata(
@@ -14,9 +14,8 @@ dart_package_metadata(
 # `packages/ui_kit/assets/greeting.txt`) are paths in their packages, so the dev
 # loop has to be told where in the workspace the files are to notice an edit:
 # `asset_reload_e2e_test` edits each and expects the running page to show it.
-flutter_web_app(
-    name = "nested_app",
-    app_name = "Nested assets",
+flutter_application(
+    name = "app",
     assets = glob(["assets/**"]),
     main = "lib/main.dart",
     package = ":pubspec-metadata",
@@ -25,6 +24,12 @@ flutter_web_app(
         "//nested_assets/ui_kit",
         "@deps//:flutter",
     ],
+)
+
+flutter_web_app(
+    name = "nested_app",
+    app_name = "Nested assets",
+    application = ":app",
 )
 
 build_test(

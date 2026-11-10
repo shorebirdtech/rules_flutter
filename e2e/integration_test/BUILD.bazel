@@ -723,40 +723,35 @@ _WEB_HOSTS = select({
 flutter_web_integration_test(
     name = "web_licences_test",
     src = "integration_test/licences_test.dart",
-    srcs = glob(["lib/**/*.dart"]),
-    package = ":pubspec-metadata",
+    application = ":app_flutter",
     target_compatible_with = _WEB_HOSTS,
-    deps = ["@deps//:flutter"] + _TEST_DEPS,
+    deps = _TEST_DEPS,
 )
 
 # The two tests of `:macos_pass_test`, in a browser: each is reported.
 flutter_web_integration_test(
     name = "web_pass_test",
     src = "integration_test/counter_test.dart",
-    srcs = glob(["lib/**/*.dart"]),
-    package = ":pubspec-metadata",
+    application = ":app_flutter",
     target_compatible_with = _WEB_HOSTS,
-    deps = ["@deps//:flutter"] + _TEST_DEPS,
+    deps = _TEST_DEPS,
 )
 
-# `appFlavor` in a browser: the web app's `flavor`, and null without one.
+# `appFlavor` in a browser: the application's `flavor`, and null without one.
 flutter_web_integration_test(
     name = "web_flavor_test",
     src = "integration_test/flavor_paid_test.dart",
-    srcs = glob(["lib/**/*.dart"]),
-    flavor = "paid",
-    package = ":pubspec-metadata",
+    application = ":app_flutter_paid",
     target_compatible_with = _WEB_HOSTS,
-    deps = ["@deps//:flutter"] + _TEST_DEPS,
+    deps = _TEST_DEPS,
 )
 
 flutter_web_integration_test(
     name = "web_no_flavor_test",
     src = "integration_test/flavor_none_test.dart",
-    srcs = glob(["lib/**/*.dart"]),
-    package = ":pubspec-metadata",
+    application = ":app_flutter",
     target_compatible_with = _WEB_HOSTS,
-    deps = ["@deps//:flutter"] + _TEST_DEPS,
+    deps = _TEST_DEPS,
 )
 
 # The library annotations in a browser: the platform they are read against is
@@ -764,21 +759,19 @@ flutter_web_integration_test(
 flutter_web_integration_test(
     name = "web_skip",
     src = "integration_test/skip_test.dart",
-    srcs = glob(["lib/**/*.dart"]),
-    package = ":pubspec-metadata",
+    application = ":app_flutter",
     tags = ["manual"],
     target_compatible_with = _WEB_HOSTS,
-    deps = ["@deps//:flutter"] + _TEST_DEPS,
+    deps = _TEST_DEPS,
 )
 
 flutter_web_integration_test(
     name = "web_test_on",
     src = "integration_test/test_on_test.dart",
-    srcs = glob(["lib/**/*.dart"]),
-    package = ":pubspec-metadata",
+    application = ":app_flutter",
     tags = ["manual"],
     target_compatible_with = _WEB_HOSTS,
-    deps = ["@deps//:flutter"] + _TEST_DEPS,
+    deps = _TEST_DEPS,
 )
 
 outcome_test(
@@ -814,11 +807,10 @@ outcome_test(
 flutter_web_integration_test(
     name = "web_red",
     src = "integration_test/failing_test.dart",
-    srcs = glob(["lib/**/*.dart"]),
-    package = ":pubspec-metadata",
+    application = ":app_flutter",
     tags = ["manual"],
     target_compatible_with = _WEB_HOSTS,
-    deps = ["@deps//:flutter"] + _TEST_DEPS,
+    deps = _TEST_DEPS,
 )
 
 # A failing integration test fails its target in a browser, and its JUnit report
@@ -839,11 +831,11 @@ outcome_test(
 flutter_web_integration_test(
     name = "web_golden_test",
     src = "integration_test/golden_test.dart",
-    srcs = glob(["lib/**/*.dart"]) + _GOLDEN_SRCS,
+    srcs = _GOLDEN_SRCS,
+    application = ":app_flutter",
     data = _GOLDENS,
-    package = ":pubspec-metadata",
     target_compatible_with = _WEB_HOSTS,
-    deps = ["@deps//:flutter"] + _TEST_DEPS,
+    deps = _TEST_DEPS,
 )
 
 # A golden test whose directory has a `flutter_test_config.dart`, which the
@@ -854,11 +846,11 @@ flutter_web_integration_test(
 flutter_web_integration_test(
     name = "web_golden_config_test",
     src = "integration_test/tolerant/golden_tolerant_test.dart",
-    srcs = glob(["lib/**/*.dart"]) + _GOLDEN_SRCS,
+    srcs = _GOLDEN_SRCS,
+    application = ":app_flutter",
     data = _TOLERANT_FILES,
-    package = ":pubspec-metadata",
     target_compatible_with = _WEB_HOSTS,
-    deps = ["@deps//:flutter"] + _TEST_DEPS,
+    deps = _TEST_DEPS,
 )
 
 # The swatch captured while the engine is still drawing the frames before it,
@@ -866,11 +858,11 @@ flutter_web_integration_test(
 flutter_web_integration_test(
     name = "web_golden_mid_frame_test",
     src = "integration_test/golden_mid_frame_test.dart",
-    srcs = glob(["lib/**/*.dart"]) + _GOLDEN_SRCS,
+    srcs = _GOLDEN_SRCS,
+    application = ":app_flutter",
     data = _GOLDENS,
-    package = ":pubspec-metadata",
     target_compatible_with = _WEB_HOSTS,
-    deps = ["@deps//:flutter"] + _TEST_DEPS,
+    deps = _TEST_DEPS,
 )
 
 # The swatch captured while the app draws frames that no `pump` asked for, as
@@ -879,23 +871,23 @@ flutter_web_integration_test(
 flutter_web_integration_test(
     name = "web_golden_live_frames_test",
     src = "integration_test/golden_live_frames_test.dart",
-    srcs = glob(["lib/**/*.dart"]) + _GOLDEN_SRCS,
+    srcs = _GOLDEN_SRCS,
+    application = ":app_flutter",
     data = _GOLDENS,
-    package = ":pubspec-metadata",
     target_compatible_with = _WEB_HOSTS,
-    deps = ["@deps//:flutter"] + _TEST_DEPS,
+    deps = _TEST_DEPS,
 )
 
 # `manual`, since it is meant to fail: the red twin below runs it.
 flutter_web_integration_test(
     name = "web_golden_mismatch",
     src = "integration_test/golden_mismatch_test.dart",
-    srcs = glob(["lib/**/*.dart"]) + _GOLDEN_SRCS,
+    srcs = _GOLDEN_SRCS,
+    application = ":app_flutter",
     data = _GOLDENS,
-    package = ":pubspec-metadata",
     tags = ["manual"],
     target_compatible_with = _WEB_HOSTS,
-    deps = ["@deps//:flutter"] + _TEST_DEPS,
+    deps = _TEST_DEPS,
 )
 
 outcome_test(
@@ -916,22 +908,20 @@ outcome_test(
 flutter_web_integration_test(
     name = "web_tags",
     src = "integration_test/tags_test.dart",
-    srcs = glob(["lib/**/*.dart"]),
-    package = ":pubspec-metadata",
+    application = ":app_flutter",
     tags = ["manual"],
     target_compatible_with = _WEB_HOSTS,
-    deps = ["@deps//:flutter"] + _TEST_DEPS,
+    deps = _TEST_DEPS,
 )
 
 flutter_web_integration_test(
     name = "web_tags_fixed_empty",
     src = "integration_test/tags_test.dart",
-    srcs = glob(["lib/**/*.dart"]),
+    application = ":app_flutter",
     include_tags = ["no_such_tag"],
-    package = ":pubspec-metadata",
     tags = ["manual"],
     target_compatible_with = _WEB_HOSTS,
-    deps = ["@deps//:flutter"] + _TEST_DEPS,
+    deps = _TEST_DEPS,
 )
 
 # `DART_TEST_TAGS` selects the tagged case of a test in a browser too.

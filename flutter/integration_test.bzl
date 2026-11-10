@@ -163,12 +163,14 @@ def _golden_service(name, deps, srcs, test_config, application = None, package =
         )
     return ":" + service
 
-def _program(name, src, application, deps, srcs, test_config):
+def _program(name, src, application, deps, srcs, test_config, src_import = None):
     """Declares the bootstrap and the variant that is the test's program.
 
     Returns the label of the program: the application with the bootstrap as its
     `main` and `src` among its sources. Both are the macro's own, named
-    `__<name>_…`, so the user never names them.
+    `__<name>_…`, so the user never names them. `src_import` is the
+    bootstrap's, for a web program: a web compile mounts no file-system root to
+    name the test under.
     """
     bootstrap = "__%s_bootstrap" % name
     program = "__%s_program" % name
@@ -181,7 +183,7 @@ def _program(name, src, application, deps, srcs, test_config):
         name = bootstrap,
         src = src,
         test_config = test_config,
-        **private
+        **(private | ({"src_import": src_import} if src_import else {}))
     )
     _flutter_application_variant(
         name = program,
@@ -523,7 +525,7 @@ def flutter_linux_integration_test(
 def flutter_web_integration_test(
         name,
         src,
-        package,
+        application,
         deps,
         srcs = [],
         test_config = None,
@@ -548,24 +550,25 @@ def flutter_web_integration_test(
     is a case in Bazel's test report, which `flutter drive -d chrome` cannot
     give. One target per test file, as upstream launches the app once per file.
 
-    The test's program is a web app of its own, built from the same sources as
-    the application it tests and so compiled again for each test; the Flutter
-    framework's and each package's kernels are shared.
+    The test's program is the application with the test as its `main`
+    (`flutter_application_variant`), built as a web app of its own and so
+    compiled again for each test.
 
-    Intermediate targets `__<name>_bootstrap` and `__<name>_app` are this macro's:
-    do not name them.
+    Intermediate targets `__<name>_bootstrap`, `__<name>_program` and
+    `__<name>_app` are this macro's: do not name them.
 
     Args:
         name: The test's name.
         src: The test file. Its `main` declares the tests, as for `flutter create`:
             `IntegrationTestWidgetsFlutterBinding.ensureInitialized()` and
             `testWidgets`, calling the app's own `main()`.
-        package: The `dart_package_metadata` of the app's Dart package, as
-            `flutter_web_app` takes it.
-        deps: The program's libraries: the app's own and what the test imports. It
-            must bring `integration_test` and `flutter_test` (`@<hub>//:integration_test`
-            and `@<hub>//:flutter_test`), which analysis fails without, naming them.
-        srcs: The app's Dart sources and the files `src` imports by relative path.
+        application: The `flutter_application` the test runs. It may be in another
+            package.
+        deps: What the test imports beyond the application's own `deps`. It must
+            bring `integration_test` and `flutter_test` (`@<hub>//:integration_test`
+            and `@<hub>//:flutter_test`) unless the application does, and analysis
+            fails without them, naming them.
+        srcs: The files `src` imports by relative path.
         test_config: The suite's `flutter_test_config.dart`. By default the one
             `flutter_test` would find for `src`, in this package.
         env: Environment variables for the host runner.
@@ -593,39 +596,24 @@ def flutter_web_integration_test(
         visibility: The test's visibility.
         target_compatible_with: The test's `target_compatible_with`. A host the pinned
             browser has no build for is incompatible whatever this says.
-        **web_app_kwargs: Passed to `flutter_web_app`: `assets`, `web_dir`, `base_href`,
-            and the rest. Not `main`, which is the test's program, nor `testonly`.
+        **web_app_kwargs: Passed to `flutter_web_app`: `web_dir`, `base_href`,
+            and the rest. Not `testonly`.
     """
     if test_config == None:
         test_config = _find_test_config(name, src)
 
-    bootstrap = "__%s_bootstrap" % name
     app = "__%s_app" % name
     private = {
         "tags": ["manual"],
         "testonly": True,
         "visibility": ["//visibility:private"],
     }
-    _flutter_integration_bootstrap(
-        name = bootstrap,
-        src = src,
-        test_config = test_config,
-        # A web compile mounts no file-system root to name the test under.
-        src_import = "relative",
-        deps = deps,
-        requires_packages = _REQUIRED_PACKAGES,
-        **private
-    )
+
+    # A web compile mounts no file-system root to name the test under.
+    program = _program(name, src, application, deps, srcs, test_config, src_import = "relative")
     flutter_web_app(
         name = app,
-        package = package,
-        main = ":%s.dart" % bootstrap,
-        # The test, what it imports, and its config.
-        srcs = srcs + [src] + ([test_config] if test_config else []),
-        # The bootstrap and the support library staged beside it are the rule's
-        # own files: what they import is not the user's `deps` to list.
-        unchecked_srcs = [":" + bootstrap],
-        deps = deps,
+        application = program,
         **(private | web_app_kwargs)
     )
 
@@ -636,8 +624,7 @@ def flutter_web_integration_test(
         name = name,
         app = ":" + app,
         src = src,
-        # The app's own sources are among `srcs`, in `package`.
-        golden_service = _golden_service(name, deps, srcs, test_config, package = package),
+        golden_service = _golden_service(name, deps, srcs, test_config, application = application),
         env = env,
         data = data,
         include_tags = include_tags,

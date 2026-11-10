@@ -19,10 +19,8 @@ bundled_app(
 
 flutter_web_app(
     name = "web_with_licences",
-    additional_licenses = ["licenses/THIRD_PARTY.txt"],
+    application = ":app_with_licences",
     js_fallback = False,
-    package = ":pubspec-metadata",
-    deps = ["@deps//:flutter"],
 )
 
 tree_of(

@@ -100,12 +100,7 @@ flutter_macos_app(
 
 flutter_web_app(
     name = "licences_web",
-    main = "lib/licences_main.dart",
-    package = ":pubspec-metadata",
-    deps = [
-        "@deps//:cupertino_icons",
-        "@deps//:flutter",
-    ],
+    application = ":licences_app",
 )
 
 # -- macOS desktop app --------------------------------------------------------
@@ -235,14 +230,7 @@ flutter_windows_app(
 
 flutter_web_app(
     name = "hello_world_web",
-    srcs = ["lib/common_widgets.dart"],
-    package = ":pubspec-metadata",
-    deps = [
-        "@deps//:cupertino_icons",
-        "@deps//:flutter",
-        "@deps//:flutter_localized_locales",
-        "@rules_flutter//flutter:material_icons",
-    ],
+    application = ":hello_world_app",
 )
 
 # -- Tests ---------------------------------------------------------------------

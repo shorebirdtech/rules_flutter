@@ -1,5 +1,5 @@
 load("@rules_dart//dart:defs.bzl", "dart_test")
-load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_test")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application", "flutter_test")
 load("@rules_flutter//flutter:integration_test.bzl", "flutter_web_integration_test")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
 
@@ -19,11 +19,17 @@ dart_package_metadata(
     package_name = "greeter",
 )
 
+flutter_application(
+    name = "app",
+    main = "lib/main.dart",
+    package = ":pubspec-metadata",
+    deps = _DEPS,
+)
+
 flutter_web_app(
     name = "greeter",
     app_name = "Greeter",
-    package = ":pubspec-metadata",
-    deps = _DEPS,
+    application = ":app",
 )
 
 # The greeting is the asset of one path package, joined to the number format of
@@ -42,14 +48,13 @@ flutter_test(
 flutter_web_integration_test(
     name = "render_test",
     src = "integration_test/render_test.dart",
-    srcs = glob(["lib/**/*.dart"]),
-    package = ":pubspec-metadata",
+    application = ":app",
     target_compatible_with = select({
         "@platforms//os:linux": [],
         "@platforms//os:macos": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
-    deps = _DEPS + [
+    deps = [
         "@deps//:flutter_test",
         "@deps//:integration_test",
     ],

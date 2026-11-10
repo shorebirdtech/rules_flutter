@@ -1,5 +1,5 @@
 load("@rules_dart//dart:defs.bzl", "dart_analysis_test")
-load("//flutter:defs.bzl", "dart_package_metadata")
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_application")
 load("//flutter:web.bzl", "flutter_web_bundle")
 
 # The guard on `flutter_web_bundle`'s `DartAnalyzableInfo`, in the root
@@ -37,8 +37,8 @@ dart_package_metadata(
     package_name = "flutter_web_analyze_fixture",
 )
 
-flutter_web_bundle(
-    name = "fixture_web",
+flutter_application(
+    name = "fixture_web_app",
     srcs = ["lib/greeting.dart"],
     main = "lib/main.dart",
     package = ":pubspec-metadata",
@@ -46,10 +46,22 @@ flutter_web_bundle(
 )
 
 flutter_web_bundle(
-    name = "root_main_fixture_web",
+    name = "fixture_web",
+    application = ":fixture_web_app",
+    tags = ["manual"],
+)
+
+flutter_application(
+    name = "root_main_fixture_web_app",
     srcs = ["lib/greeting.dart"],
     main = "boot.dart",
     package = ":pubspec-metadata",
+    tags = ["manual"],
+)
+
+flutter_web_bundle(
+    name = "root_main_fixture_web",
+    application = ":root_main_fixture_web_app",
     tags = ["manual"],
 )
 

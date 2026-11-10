@@ -1,4 +1,4 @@
-load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_asset_bundle")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application", "flutter_asset_bundle")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
 load("//tools:bundle.bzl", "bundled_app", "tree_of")
 
@@ -104,12 +104,8 @@ platform(
 
 flutter_web_app(
     name = "web_with_fx_platforms",
+    application = ":app_with_fx_platforms",
     js_fallback = False,
-    package = ":pubspec-metadata",
-    deps = [
-        "@deps//:flutter",
-        "@fx_platforms",
-    ],
 )
 
 tree_of(
@@ -157,13 +153,8 @@ bundled_app(
 # Web selects flavored assets like the other platforms.
 flutter_web_app(
     name = "web_with_fx_flavors_paid",
-    flavor = "paid",
+    application = ":app_with_fx_flavors_paid",
     js_fallback = False,
-    package = ":pubspec-metadata",
-    deps = [
-        "@deps//:flutter",
-        "@fx_flavors",
-    ],
 )
 
 tree_of(
@@ -195,14 +186,20 @@ bundled_app(
     }.items()
 ]
 
-flutter_web_app(
-    name = "web_with_fx_shaders",
-    js_fallback = False,
+flutter_application(
+    name = "web_with_fx_shaders_application",
+    main = "lib/main.dart",
     package = ":pubspec-metadata",
     deps = [
         "@deps//:flutter",
         "@fx_shaders",
     ],
+)
+
+flutter_web_app(
+    name = "web_with_fx_shaders",
+    application = ":web_with_fx_shaders_application",
+    js_fallback = False,
 )
 
 tree_of(
@@ -236,15 +233,8 @@ tree_of(
 
 flutter_web_app(
     name = "web_with_licence_fixtures",
+    application = ":app_with_licence_fixtures",
     js_fallback = False,
-    package = ":pubspec-metadata",
-    deps = [
-        "@deps//:flutter",
-        "@fx_licence_dart",
-        "@fx_licence_shared",
-        "@fx_nolicence",
-        "@fx_notices",
-    ],
 )
 
 # -- Two files for one key ----------------------------------------------------------

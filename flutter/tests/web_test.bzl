@@ -4,7 +4,7 @@ load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@rules_dart//dart:utils.bzl", "web_platform_config_settings")
-load("//flutter:defs.bzl", "dart_package_metadata")
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_application")
 load("//flutter:web.bzl", "flutter_web_bundle")
 load("//flutter/private:flutter_native_library.bzl", "flutter_native_library")
 load("//flutter/private:flutter_web_branch.bzl", "web_branches_target", "web_compile_branches")
@@ -1655,46 +1655,71 @@ def web_reserved_test_suite(name):
         package_name = "web_reserved",
         tags = ["manual"],
     )
+    flutter_application(
+        name = "_version_collision_app",
+        main = "main.dart",
+        package = ":pubspec-metadata",
+        tags = ["manual"],
+    )
     flutter_web_bundle(
         name = "_version_collision",
-        package = ":pubspec-metadata",
-        main = "main.dart",
+        application = ":_version_collision_app",
+        tags = ["manual"],
         web_assets = ["web/version.json"],
+    )
+    flutter_application(
+        name = "_canvaskit_collision_app",
+        main = "main.dart",
+        package = ":pubspec-metadata",
         tags = ["manual"],
     )
     flutter_web_bundle(
         name = "_canvaskit_collision",
-        package = ":pubspec-metadata",
-        main = "main.dart",
-        web_assets = ["web/canvaskit/canvaskit.js"],
+        application = ":_canvaskit_collision_app",
         tags = ["manual"],
+        web_assets = ["web/canvaskit/canvaskit.js"],
     )
 
     # The documented way to ship your own worker: `pwa = False` stops the rule
     # generating one, so the name is free.
+    flutter_application(
+        name = "_own_worker_app",
+        main = "main.dart",
+        package = ":pubspec-metadata",
+        tags = ["manual"],
+    )
     flutter_web_bundle(
         name = "_own_worker",
-        package = ":pubspec-metadata",
-        main = "main.dart",
+        application = ":_own_worker_app",
         pwa = False,
-        web_assets = ["web/flutter_service_worker.js"],
         tags = ["manual"],
+        web_assets = ["web/flutter_service_worker.js"],
     )
 
     # The same file with the rule still shipping a worker: two files, one name.
+    flutter_application(
+        name = "_own_worker_collides_app",
+        main = "main.dart",
+        package = ":pubspec-metadata",
+        tags = ["manual"],
+    )
     flutter_web_bundle(
         name = "_own_worker_collides",
-        package = ":pubspec-metadata",
-        main = "main.dart",
+        application = ":_own_worker_collides_app",
+        tags = ["manual"],
         web_assets = ["web/flutter_service_worker.js"],
+    )
+    flutter_application(
+        name = "_ordinary_asset_app",
+        main = "main.dart",
+        package = ":pubspec-metadata",
         tags = ["manual"],
     )
     flutter_web_bundle(
         name = "_ordinary_asset",
-        package = ":pubspec-metadata",
-        main = "main.dart",
-        web_assets = ["web/favicon.png"],
+        application = ":_ordinary_asset_app",
         tags = ["manual"],
+        web_assets = ["web/favicon.png"],
     )
 
     _reserved_file_collision_test(
@@ -1932,135 +1957,210 @@ def _setup_web_fixtures():
     real app has, so the build_tests below cover a nested-package web compile.
     `_web_pkg_root_main_fixture` is the one deliberate exception.
     """
+    flutter_application(
+        name = "_web_fixture_app",
+        defines = ["from.attr=1"],
+        main = "lib/web_fixture_main.dart",
+        package = ":pubspec-metadata",
+        tags = ["manual"],
+    )
     flutter_web_bundle(
         name = "_web_fixture",
-        package = ":pubspec-metadata",
-        main = "lib/web_fixture_main.dart",
-        defines = ["from.attr=1"],
+        application = ":_web_fixture_app",
         tags = ["manual"],
     )
 
     # The same app as a flavor's target.
-    flutter_web_bundle(
-        name = "_web_flavor_fixture",
-        package = ":pubspec-metadata",
-        main = "lib/web_fixture_main.dart",
+    flutter_application(
+        name = "_web_flavor_fixture_app",
         defines = ["from.attr=1"],
         flavor = "paid",
+        main = "lib/web_fixture_main.dart",
+        package = ":pubspec-metadata",
+        tags = ["manual"],
+    )
+    flutter_web_bundle(
+        name = "_web_flavor_fixture",
+        application = ":_web_flavor_fixture_app",
         tags = ["manual"],
     )
 
     # The same app with no JavaScript build beside the WASM one.
+    flutter_application(
+        name = "_web_wasm_only_fixture_app",
+        defines = ["from.attr=1"],
+        main = "lib/web_fixture_main.dart",
+        package = ":pubspec-metadata",
+        tags = ["manual"],
+    )
     flutter_web_bundle(
         name = "_web_wasm_only_fixture",
-        package = ":pubspec-metadata",
-        main = "lib/web_fixture_main.dart",
-        defines = ["from.attr=1"],
+        application = ":_web_wasm_only_fixture_app",
         js_fallback = False,
         tags = ["manual"],
     )
 
     # dart2js settings on a target that runs no dart2js, one fixture each so
     # the refusal is shown to name the attr that was set.
+    flutter_application(
+        name = "_web_minify_js_without_fallback_app",
+        main = "lib/web_fixture_main.dart",
+        package = ":pubspec-metadata",
+        tags = ["manual"],
+    )
     flutter_web_bundle(
         name = "_web_minify_js_without_fallback",
-        package = ":pubspec-metadata",
+        application = ":_web_minify_js_without_fallback_app",
         js_fallback = False,
-        main = "lib/web_fixture_main.dart",
         minify_js = "false",
+        tags = ["manual"],
+    )
+    flutter_application(
+        name = "_web_dump_info_without_fallback_app",
+        main = "lib/web_fixture_main.dart",
+        package = ":pubspec-metadata",
         tags = ["manual"],
     )
     flutter_web_bundle(
         name = "_web_dump_info_without_fallback",
-        package = ":pubspec-metadata",
-        js_fallback = False,
-        main = "lib/web_fixture_main.dart",
+        application = ":_web_dump_info_without_fallback_app",
         dump_info = True,
+        js_fallback = False,
         tags = ["manual"],
     )
 
     # The allow-list, and each way it is refused.
+    flutter_application(
+        name = "_web_wasm_browsers_fixture_app",
+        main = "lib/web_fixture_main.dart",
+        package = ":pubspec-metadata",
+        tags = ["manual"],
+    )
     flutter_web_bundle(
         name = "_web_wasm_browsers_fixture",
-        package = ":pubspec-metadata",
-        main = "lib/web_fixture_main.dart",
+        application = ":_web_wasm_browsers_fixture_app",
         tags = ["manual"],
         wasm_browsers = ["blink", "gecko", "webkit"],
     )
+    flutter_application(
+        name = "_web_wasm_browsers_unknown_app",
+        main = "lib/web_fixture_main.dart",
+        package = ":pubspec-metadata",
+        tags = ["manual"],
+    )
     flutter_web_bundle(
         name = "_web_wasm_browsers_unknown",
-        package = ":pubspec-metadata",
-        main = "lib/web_fixture_main.dart",
+        application = ":_web_wasm_browsers_unknown_app",
         tags = ["manual"],
         wasm_browsers = ["blink", "trident"],
     )
+    flutter_application(
+        name = "_web_wasm_browsers_on_js_app",
+        main = "lib/web_fixture_main.dart",
+        package = ":pubspec-metadata",
+        tags = ["manual"],
+    )
     flutter_web_bundle(
         name = "_web_wasm_browsers_on_js",
-        package = ":pubspec-metadata",
-        main = "lib/web_fixture_main.dart",
+        application = ":_web_wasm_browsers_on_js_app",
         compiler = "dart2js",
         renderer = "canvaskit",
         tags = ["manual"],
         wasm_browsers = ["blink"],
     )
+    flutter_application(
+        name = "_web_wasm_browsers_on_canvaskit_app",
+        main = "lib/web_fixture_main.dart",
+        package = ":pubspec-metadata",
+        tags = ["manual"],
+    )
     flutter_web_bundle(
         name = "_web_wasm_browsers_on_canvaskit",
-        package = ":pubspec-metadata",
-        main = "lib/web_fixture_main.dart",
+        application = ":_web_wasm_browsers_on_canvaskit_app",
         renderer = "canvaskit",
         tags = ["manual"],
         wasm_browsers = ["blink"],
     )
+    flutter_application(
+        name = "_web_wasm_browsers_own_bootstrap_app",
+        main = "lib/web_fixture_main.dart",
+        package = ":pubspec-metadata",
+        tags = ["manual"],
+    )
     flutter_web_bundle(
         name = "_web_wasm_browsers_own_bootstrap",
-        package = ":pubspec-metadata",
+        application = ":_web_wasm_browsers_own_bootstrap_app",
         bootstrap_js = "web_fixture_bootstrap.js",
-        main = "lib/web_fixture_main.dart",
         tags = ["manual"],
         wasm_browsers = ["blink"],
     )
 
     # CanvasKit-rendered builds: dart2js alone, and WASM that renders with it.
+    flutter_application(
+        name = "_web_js_fixture_app",
+        main = "lib/web_fixture_main.dart",
+        package = ":pubspec-metadata",
+        tags = ["manual"],
+    )
     flutter_web_bundle(
         name = "_web_js_fixture",
-        package = ":pubspec-metadata",
-        main = "lib/web_fixture_main.dart",
+        application = ":_web_js_fixture_app",
         compiler = "dart2js",
         renderer = "canvaskit",
         tags = ["manual"],
         use_local_canvaskit = True,
     )
+    flutter_application(
+        name = "_web_wasm_canvaskit_fixture_app",
+        main = "lib/web_fixture_main.dart",
+        package = ":pubspec-metadata",
+        tags = ["manual"],
+    )
     flutter_web_bundle(
         name = "_web_wasm_canvaskit_fixture",
-        package = ":pubspec-metadata",
-        main = "lib/web_fixture_main.dart",
+        application = ":_web_wasm_canvaskit_fixture_app",
         renderer = "canvaskit",
         tags = ["manual"],
         use_local_canvaskit = True,
     )
 
     # The renderer served from the bundle: WASM only, and with the JS build.
+    flutter_application(
+        name = "_web_local_fixture_app",
+        main = "lib/web_fixture_main.dart",
+        package = ":pubspec-metadata",
+        tags = ["manual"],
+    )
     flutter_web_bundle(
         name = "_web_local_fixture",
-        package = ":pubspec-metadata",
+        application = ":_web_local_fixture_app",
         js_fallback = False,
-        main = "lib/web_fixture_main.dart",
         tags = ["manual"],
         use_local_canvaskit = True,
     )
+    flutter_application(
+        name = "_web_fallback_local_fixture_app",
+        main = "lib/web_fixture_main.dart",
+        package = ":pubspec-metadata",
+        tags = ["manual"],
+    )
     flutter_web_bundle(
         name = "_web_fallback_local_fixture",
-        package = ":pubspec-metadata",
-        main = "lib/web_fixture_main.dart",
+        application = ":_web_fallback_local_fixture_app",
         tags = ["manual"],
         use_local_canvaskit = True,
     )
 
     # `js_fallback = False` where the whole bundle is JavaScript already.
+    flutter_application(
+        name = "_web_fallback_on_js_app",
+        main = "lib/web_fixture_main.dart",
+        package = ":pubspec-metadata",
+        tags = ["manual"],
+    )
     flutter_web_bundle(
         name = "_web_fallback_on_js",
-        package = ":pubspec-metadata",
-        main = "lib/web_fixture_main.dart",
+        application = ":_web_fallback_on_js_app",
         compiler = "dart2js",
         js_fallback = False,
         renderer = "canvaskit",
@@ -2079,31 +2179,46 @@ def _setup_web_fixtures():
 
     # A dependency with a package of its own and one with fonts, so a package
     # or a font family counted once per branch shows.
-    flutter_web_bundle(
-        name = "_web_branches_fixture",
-        package = ":pubspec-metadata",
+    flutter_application(
+        name = "_web_branches_fixture_app",
         main = "lib/web_fixture_main.dart",
+        package = ":pubspec-metadata",
+        tags = ["manual"],
         deps = [
             "//flutter:material_icons",
             "//flutter/tests/web_branches_dep",
         ],
+    )
+    flutter_web_bundle(
+        name = "_web_branches_fixture",
+        application = ":_web_branches_fixture_app",
         tags = ["manual"],
     )
 
     # A library whose dependency differs by compiler, so each compile can be
     # shown to read its own.
+    flutter_application(
+        name = "_web_variants_fixture_app",
+        main = "lib/web_fixture_main.dart",
+        package = ":pubspec-metadata",
+        tags = ["manual"],
+        deps = ["//flutter/tests/web_variants:select"],
+    )
     flutter_web_bundle(
         name = "_web_variants_fixture",
-        package = ":pubspec-metadata",
+        application = ":_web_variants_fixture_app",
+        tags = ["manual"],
+    )
+    flutter_application(
+        name = "_web_codegen_fixture_app",
+        srcs = [":_web_fixture_generated"],
         main = "lib/web_fixture_main.dart",
-        deps = ["//flutter/tests/web_variants:select"],
+        package = ":pubspec-metadata",
         tags = ["manual"],
     )
     flutter_web_bundle(
         name = "_web_codegen_fixture",
-        package = ":pubspec-metadata",
-        srcs = [":_web_fixture_generated"],
-        main = "lib/web_fixture_main.dart",
+        application = ":_web_codegen_fixture_app",
         tags = ["manual"],
     )
 
@@ -2127,10 +2242,15 @@ def _setup_web_fixtures():
         library = ":_web_fixture_module_wasm",
         tags = ["manual"],
     )
+    flutter_application(
+        name = "_web_native_module_fixture_app",
+        main = "lib/web_fixture_main.dart",
+        package = ":pubspec-metadata",
+        tags = ["manual"],
+    )
     flutter_web_bundle(
         name = "_web_native_module_fixture",
-        package = ":pubspec-metadata",
-        main = "lib/web_fixture_main.dart",
+        application = ":_web_native_module_fixture_app",
         native_modules = [":_web_fixture_module"],
         tags = ["manual"],
     )
@@ -2138,46 +2258,71 @@ def _setup_web_fixtures():
     # A `main` beside the package's `lib/` rather than inside it, which has no
     # `package:` URI at all; `_main_outside_lib_test` pins how the dev loop
     # reaches it instead.
+    flutter_application(
+        name = "_web_pkg_root_main_fixture_app",
+        main = "web_fixture_main.dart",
+        package = ":pubspec-metadata",
+        tags = ["manual"],
+    )
     flutter_web_bundle(
         name = "_web_pkg_root_main_fixture",
+        application = ":_web_pkg_root_main_fixture_app",
+        tags = ["manual"],
+    )
+    flutter_application(
+        name = "_web_map_fixture_app",
+        main = "lib/web_fixture_main.dart",
         package = ":pubspec-metadata",
-        main = "web_fixture_main.dart",
         tags = ["manual"],
     )
     flutter_web_bundle(
         name = "_web_map_fixture",
-        package = ":pubspec-metadata",
-        main = "lib/web_fixture_main.dart",
+        application = ":_web_map_fixture_app",
         source_maps = True,
         tags = ["manual"],
     )
 
     # Read from a `-c dbg` configuration, so the attr is what makes it a
     # profile build rather than the compilation mode agreeing by accident.
+    flutter_application(
+        name = "_web_profile_fixture_app",
+        main = "lib/web_fixture_main.dart",
+        package = ":pubspec-metadata",
+        tags = ["manual"],
+    )
     flutter_web_bundle(
         name = "_web_profile_fixture",
-        package = ":pubspec-metadata",
-        main = "lib/web_fixture_main.dart",
+        application = ":_web_profile_fixture_app",
         profile = True,
         tags = ["manual"],
     )
 
     # Opposite overrides on the two compilers, so neither can be satisfied by
     # an implementation that resolves one value and passes it to both.
+    flutter_application(
+        name = "_web_minify_fixture_app",
+        main = "lib/web_fixture_main.dart",
+        package = ":pubspec-metadata",
+        tags = ["manual"],
+    )
     flutter_web_bundle(
         name = "_web_minify_fixture",
-        package = ":pubspec-metadata",
-        main = "lib/web_fixture_main.dart",
+        application = ":_web_minify_fixture_app",
         minify_js = "true",
         minify_wasm = "false",
         tags = ["manual"],
     )
 
     # The dart2js-only flags, all on at once.
+    flutter_application(
+        name = "_web_js_flags_fixture_app",
+        main = "lib/web_fixture_main.dart",
+        package = ":pubspec-metadata",
+        tags = ["manual"],
+    )
     flutter_web_bundle(
         name = "_web_js_flags_fixture",
-        package = ":pubspec-metadata",
-        main = "lib/web_fixture_main.dart",
+        application = ":_web_js_flags_fixture_app",
         frequency_based_minification = False,
         native_null_assertions = False,
         tags = ["manual"],
@@ -2186,18 +2331,28 @@ def _setup_web_fixtures():
     # `test-experiment` is the SDK's own no-op experiment, declared for
     # exactly this: it exercises the flag path without pinning the fixture to
     # a language feature whose name changes when it ships.
+    flutter_application(
+        name = "_web_experiments_fixture_app",
+        main = "lib/web_fixture_main.dart",
+        package = ":pubspec-metadata",
+        tags = ["manual"],
+    )
     flutter_web_bundle(
         name = "_web_experiments_fixture",
-        package = ":pubspec-metadata",
-        main = "lib/web_fixture_main.dart",
+        application = ":_web_experiments_fixture_app",
         enable_experiments = ["test-experiment"],
         tags = ["manual"],
     )
 
+    flutter_application(
+        name = "_web_dump_info_fixture_app",
+        main = "lib/web_fixture_main.dart",
+        package = ":pubspec-metadata",
+        tags = ["manual"],
+    )
     flutter_web_bundle(
         name = "_web_dump_info_fixture",
-        package = ":pubspec-metadata",
-        main = "lib/web_fixture_main.dart",
+        application = ":_web_dump_info_fixture_app",
         dump_info = True,
         tags = ["manual"],
     )
@@ -2205,10 +2360,15 @@ def _setup_web_fixtures():
     # The same attr in JS-only mode. The tree the report is lifted out of is a
     # different target there (`_dart2js` rather than `_dart2js_fallback`), so
     # a path built from the wrong one fails only here.
+    flutter_application(
+        name = "_web_dump_info_js_fixture_app",
+        main = "lib/web_fixture_main.dart",
+        package = ":pubspec-metadata",
+        tags = ["manual"],
+    )
     flutter_web_bundle(
         name = "_web_dump_info_js_fixture",
-        package = ":pubspec-metadata",
-        main = "lib/web_fixture_main.dart",
+        application = ":_web_dump_info_js_fixture_app",
         compiler = "dart2js",
         dump_info = True,
         renderer = "canvaskit",
@@ -2216,10 +2376,15 @@ def _setup_web_fixtures():
     )
 
     # Both dev-config-carried settings, away from their defaults.
+    flutter_application(
+        name = "_web_dev_overrides_fixture_app",
+        main = "lib/web_fixture_main.dart",
+        package = ":pubspec-metadata",
+        tags = ["manual"],
+    )
     flutter_web_bundle(
         name = "_web_dev_overrides_fixture",
-        package = ":pubspec-metadata",
-        main = "lib/web_fixture_main.dart",
+        application = ":_web_dev_overrides_fixture_app",
         enable_experiments = ["test-experiment"],
         native_null_assertions = False,
         tags = ["manual"],
@@ -2227,28 +2392,43 @@ def _setup_web_fixtures():
 
     # Release is the only mode that would have stripped, so it is the only
     # one where turning the attr off can be told apart from the gate.
+    flutter_application(
+        name = "_web_no_strip_fixture_app",
+        main = "lib/web_fixture_main.dart",
+        package = ":pubspec-metadata",
+        tags = ["manual"],
+    )
     flutter_web_bundle(
         name = "_web_no_strip_fixture",
-        package = ":pubspec-metadata",
-        main = "lib/web_fixture_main.dart",
+        application = ":_web_no_strip_fixture_app",
         strip_wasm = False,
         tags = ["manual"],
     )
 
     # Wasm-only settings on a target that runs no wasm compile.
+    flutter_application(
+        name = "_web_strip_wasm_on_js_app",
+        main = "lib/web_fixture_main.dart",
+        package = ":pubspec-metadata",
+        tags = ["manual"],
+    )
     flutter_web_bundle(
         name = "_web_strip_wasm_on_js",
-        package = ":pubspec-metadata",
-        main = "lib/web_fixture_main.dart",
+        application = ":_web_strip_wasm_on_js_app",
         compiler = "dart2js",
         renderer = "canvaskit",
         strip_wasm = False,
         tags = ["manual"],
     )
+    flutter_application(
+        name = "_web_minify_wasm_on_js_app",
+        main = "lib/web_fixture_main.dart",
+        package = ":pubspec-metadata",
+        tags = ["manual"],
+    )
     flutter_web_bundle(
         name = "_web_minify_wasm_on_js",
-        package = ":pubspec-metadata",
-        main = "lib/web_fixture_main.dart",
+        application = ":_web_minify_wasm_on_js_app",
         compiler = "dart2js",
         minify_wasm = "false",
         renderer = "canvaskit",
@@ -2257,19 +2437,29 @@ def _setup_web_fixtures():
 
     # One compiler overridden and the other left alone, so a value that
     # reached both would fail on the one that was not asked.
+    flutter_application(
+        name = "_web_optimization_fixture_app",
+        main = "lib/web_fixture_main.dart",
+        package = ":pubspec-metadata",
+        tags = ["manual"],
+    )
     flutter_web_bundle(
         name = "_web_optimization_fixture",
-        package = ":pubspec-metadata",
-        main = "lib/web_fixture_main.dart",
+        application = ":_web_optimization_fixture_app",
         optimization_level_js = "3",
         tags = ["manual"],
     )
 
     # `"0"` on both, which is the value the old `if level > 0` guard dropped.
+    flutter_application(
+        name = "_web_optimization_zero_fixture_app",
+        main = "lib/web_fixture_main.dart",
+        package = ":pubspec-metadata",
+        tags = ["manual"],
+    )
     flutter_web_bundle(
         name = "_web_optimization_zero_fixture",
-        package = ":pubspec-metadata",
-        main = "lib/web_fixture_main.dart",
+        application = ":_web_optimization_zero_fixture_app",
         optimization_level_js = "0",
         optimization_level_wasm = "0",
         tags = ["manual"],
@@ -2278,10 +2468,15 @@ def _setup_web_fixtures():
     # A dart2js-only target that sets the dart2js settings, so the call site
     # that serves `compiler = "dart2js"` is pinned rather than only the
     # fallback call inside a dart2wasm target.
+    flutter_application(
+        name = "_web_js_only_settings_fixture_app",
+        main = "lib/web_fixture_main.dart",
+        package = ":pubspec-metadata",
+        tags = ["manual"],
+    )
     flutter_web_bundle(
         name = "_web_js_only_settings_fixture",
-        package = ":pubspec-metadata",
-        main = "lib/web_fixture_main.dart",
+        application = ":_web_js_only_settings_fixture_app",
         compiler = "dart2js",
         minify_js = "false",
         optimization_level_js = "3",
@@ -2289,10 +2484,15 @@ def _setup_web_fixtures():
         tags = ["manual"],
     )
 
+    flutter_application(
+        name = "_web_optimization_wasm_on_js_app",
+        main = "lib/web_fixture_main.dart",
+        package = ":pubspec-metadata",
+        tags = ["manual"],
+    )
     flutter_web_bundle(
         name = "_web_optimization_wasm_on_js",
-        package = ":pubspec-metadata",
-        main = "lib/web_fixture_main.dart",
+        application = ":_web_optimization_wasm_on_js_app",
         compiler = "dart2js",
         optimization_level_wasm = "0",
         renderer = "canvaskit",

@@ -169,16 +169,20 @@ def path_mapping_test_suite(name):
         main = _MAIN,
         tags = ["manual"],
     )
-    flutter_web_bundle(
-        name = name + "_web",
+    flutter_application(
+        name = name + "_web_app",
         package = ":pubspec-metadata",
         main = _MAIN,
         tags = ["manual"],
     )
     flutter_web_bundle(
+        name = name + "_web",
+        application = name + "_web_app",
+        tags = ["manual"],
+    )
+    flutter_web_bundle(
         name = name + "_web_js",
-        package = ":pubspec-metadata",
-        main = _MAIN,
+        application = name + "_web_app",
         compiler = "dart2js",
         tags = ["manual"],
     )

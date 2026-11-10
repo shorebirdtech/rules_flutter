@@ -1,4 +1,4 @@
-load("//flutter:defs.bzl", "dart_package_metadata")
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_application")
 load("//flutter:integration_test.bzl", "flutter_android_app_integration_test", "flutter_android_device_runner", "flutter_android_emulator_runner", "flutter_android_system_image", "flutter_application_variant", "flutter_chrome_runner", "flutter_desktop_app_integration_test", "flutter_integration_bootstrap", "flutter_ios_app_integration_test", "flutter_ios_simulator_runner", "flutter_web_app_integration_test")
 load("//flutter:web.bzl", "flutter_web_bundle")
 load("//flutter/tests:fake_android_sdk.bzl", "fake_android_sdk")
@@ -133,10 +133,16 @@ dart_package_metadata(
 )
 
 # A web bundle run by the web test rule, in the fake browser.
-flutter_web_bundle(
-    name = "web_app",
+flutter_application(
+    name = "web_program",
     main = "test/a_test.dart",
     package = ":pubspec-metadata",
+    tags = ["manual"],
+)
+
+flutter_web_bundle(
+    name = "web_app",
+    application = ":web_program",
     tags = ["manual"],
 )
 
@@ -149,14 +155,20 @@ flutter_web_app_integration_test(
 )
 
 # A web bundle with a file a rule wrote beside the user's, whose imports are not
-# checked against the bundle's `deps`.
-flutter_web_bundle(
-    name = "web_unchecked",
+# checked against the program's `deps`.
+flutter_application_variant(
+    name = "web_unchecked_program",
     srcs = ["test/b_test.dart"],
+    application = ":web_program",
     main = "test/a_test.dart",
-    package = ":pubspec-metadata",
     tags = ["manual"],
     unchecked_srcs = ["test/flutter_test_config.dart"],
+)
+
+flutter_web_bundle(
+    name = "web_unchecked",
+    application = ":web_unchecked_program",
+    tags = ["manual"],
 )
 
 # An SDK shaped as rules_android's: its `adb` is a different file on Windows.

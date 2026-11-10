@@ -2,12 +2,12 @@
 
 load("@apple_support//lib:apple_support.bzl", "apple_support")
 load("@bazel_skylib//lib:structs.bzl", "structs")
-load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "link_hook_runner_attr")
+load("@rules_dart//dart:utils.bzl", "link_hook_runner_attr", "web_compiler_reset")
 load("//flutter:providers.bzl", "FlutterApplicationInputsInfo")
 load("//flutter/private:code_asset_libraries.bzl", "code_asset_libraries_aspect")
 load("//flutter/private:common.bzl", "FLUTTER_APPLICATION_TOOL_ATTRS", "PLATFORM_CONSTRAINT_ATTRS", "flutter_deps_attr")
 load("//flutter/private:exec_groups.bzl", "PORTABLE_EXEC_GROUPS")
-load("//flutter/private:flutter_application.bzl", "flutter_application_build")
+load("//flutter/private:flutter_application.bzl", "APPLICATION_TOOLCHAINS", "WEB_PLATFORM_CONSTRAINT_ATTRS", "flutter_application_build")
 load("//flutter/private:program_analysis.bzl", "staged_sources")
 load("//flutter/private:required_packages.bzl", "check_required_packages")
 
@@ -37,7 +37,7 @@ def _flutter_application_variant_impl(ctx):
 
 flutter_application_variant = rule(
     implementation = _flutter_application_variant_impl,
-    attrs = FLUTTER_APPLICATION_TOOL_ATTRS | PLATFORM_CONSTRAINT_ATTRS | link_hook_runner_attr() | apple_support.platform_constraint_attrs() | {
+    attrs = FLUTTER_APPLICATION_TOOL_ATTRS | PLATFORM_CONSTRAINT_ATTRS | WEB_PLATFORM_CONSTRAINT_ATTRS | link_hook_runner_attr() | apple_support.platform_constraint_attrs() | {
         "application": attr.label(
             doc = "The `flutter_application` whose program this is a variant of.",
             mandatory = True,
@@ -47,6 +47,9 @@ flutter_application_variant = rule(
             doc = "The entry point, in place of the application's `main`. It may be anywhere: a file outside the application's `lib/` is compiled under the app scheme (`org-dartlang-app:///<workspace path>`), as an application's own `main` outside `lib/` is.",
             mandatory = True,
             allow_single_file = [".dart"],
+            # As the application's `main`: a written one is in the output
+            # directory of the web app's wrapper that imports it.
+            cfg = web_compiler_reset,
         ),
         "srcs": attr.label_list(
             doc = "Dart sources added to the application's.",
@@ -66,9 +69,7 @@ flutter_application_variant = rule(
             doc = "Dart packages the program must have, by name: analysis fails, naming the package and the hub target to add, if no dependency of the application or of `deps` brings one. For a program whose added sources import packages the application does not need, as an integration test's.",
         ),
     },
-    toolchains = [
-        "@rules_flutter//flutter:toolchain_type",
-    ] + COPY_TO_DIRECTORY_TOOLCHAINS,
+    toolchains = APPLICATION_TOOLCHAINS,
     exec_groups = PORTABLE_EXEC_GROUPS,
     doc = """The `flutter_application` `application`, rebuilt with another `main`.
 

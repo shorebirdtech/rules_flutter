@@ -922,7 +922,7 @@ variables must be exported too"):
 | `:macos_red_twin_test` | a failing integration test fails its target, and the JUnit report names the failing case with a `<failure>`. It wraps `:macos_red` (`manual`, since it is meant to fail) in `outcome_test`, which runs the wrapped test's own executable and passes only when it ends as the target says |
 | `:macos_crash_test` | an app that `exit(3)`s mid-test fails its target, and the output says `exited with code 3` |
 | `:macos_filter_test` | `--test_filter` runs one of the two cases of `:macos_pass_test` and no other |
-| `:macos_flavor_test`, `:macos_no_flavor_test`, `:web_flavor_test`, `:web_no_flavor_test` | `appFlavor` is `paid` in a test run as an application with `flavor = "paid"` (macOS, through the variant that inherits it; web, through `flutter_web_integration_test`'s `flavor`), and null in one without |
+| `:macos_flavor_test`, `:macos_no_flavor_test`, `:web_flavor_test`, `:web_no_flavor_test` | `appFlavor` is `paid` in a test run as an application with `flavor = "paid"` (on every platform, through the variant that inherits it from `:app_flutter_paid`), and null in one without |
 | `:windows_pass_test` | the same two tests in a Windows app's window, each reported: the suite is driven through the app's VM service |
 | `:windows_red_twin_test` | a failing integration test fails its target on Windows, and the JUnit report names the failing case. It wraps `:windows_red` (`manual`) in `outcome_test` |
 | `:windows_crash_test` | an app that `exit(3)`s mid-test fails its target, and the output says `The Windows app exited with code 3` |

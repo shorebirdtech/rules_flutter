@@ -4,11 +4,19 @@ Two tiers of API:
 
     Tier 1 — flutter_web_app (self-contained, recommended):
 
+        load("@rules_flutter//flutter:defs.bzl", "flutter_application")
         load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
+
+        flutter_application(
+            name = "app",
+            main = "lib/main.dart",
+            package = ":pubspec-metadata",
+            deps = ["@deps//:flutter"],
+        )
 
         flutter_web_app(
             name = "my_web_app",
-            deps = ["@deps//:flutter"],
+            application = ":app",
             app_name = "My App",
         )
 
@@ -26,8 +34,7 @@ Two tiers of API:
 
         flutter_web_bundle(
             name = "my_web_app",
-            main = "lib/main.dart",
-            deps = ["@deps//:flutter"],
+            application = ":app",
             # A template, not a finished file: `$FLUTTER_BASE_HREF` and
             # `{{...}}` variables are substituted the way `flutter build web`
             # substitutes them, so `flutter create` output works as-is.
@@ -38,14 +45,16 @@ Two tiers of API:
             web_assets = glob(["web/favicon.png", "web/icons/**"]),
         )
 
-Unlike other platform rules, web rules take `main` + `deps` (Dart source)
-directly — NOT a `flutter_application` target. This is because web compilation
-uses dart2wasm/dart2js which consume Dart source directly, so the compilation
-pipeline is structurally different from AOT platforms.
+Like every platform's app, a web app takes a `flutter_application` as its
+`application`: the program (its `main`, `deps`, assets, defines, flavor and
+version) is the application's, and one application can be built for every
+platform. The web app compiles that program from source with dart2wasm and
+dart2js, building it once per compiler for that compiler's web platform; the
+application's native parts (its AOT compile, `native_deps` and code assets)
+are not built for web, as `flutter build web` builds no native code.
 """
 
 load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
-load("//flutter/private:app_version.bzl", "version_arg")
 load("//flutter/private:flutter_web_application.bzl", _flutter_web_bundle_rule = "flutter_web_bundle")
 load("//flutter/private:flutter_web_branch.bzl", "flutter_web_branch", "web_branches_target")
 
@@ -69,21 +78,22 @@ def flutter_web_manifest_gen(name, app_name, **kwargs):
 
 # -- Low-level assembler (Tier 2) --------------------------------------------
 
-def flutter_web_bundle(name, main, package, deps = [], srcs = [], unchecked_srcs = [], web_sdk = None, tags = [], testonly = None, **kwargs):
+def flutter_web_bundle(name, application, web_sdk = None, tags = [], testonly = None, **kwargs):
     """Builds a Flutter web application (WASM or JS) with all deployment artifacts.
 
     This is the low-level assembler rule. For most projects, prefer
     flutter_web_app which auto-discovers runner files.
 
-    The bundle compiles its program once for each compiler it ships, and the
-    program may differ between them: each builds for its own web platform
-    (`wasm_platform`, `js_platform`). A library in `deps` picks a variant with
-    a `select()` on `@rules_dart//dart/constraints:wasm` or
-    `@rules_dart//dart/constraints:js` (dart2js, and DDC in a `-c dbg` build)
-    in its own `deps`; a `select()` in the bundle's `deps` would see no web
-    platform. See "Per-compiler code" in this repository's README. Everything the
-    bundle holds once (the plugin registrant, assets and shaders) is read from
-    the build it describes: the dart2wasm one for `compiler = "dart2wasm"`.
+    The bundle compiles its application's program once for each compiler it
+    ships, and the program may differ between them: each builds for its own
+    web platform (`wasm_platform`, `js_platform`). A library in the
+    application's `deps` picks a variant with a `select()` on
+    `@rules_dart//dart/constraints:wasm` or `@rules_dart//dart/constraints:js`
+    (dart2js, and DDC in a `-c dbg` build) in its own `deps`; a `select()` in
+    the application's `deps` would see no web platform. See "Per-compiler
+    code" in this repository's README. Everything the bundle holds once (the
+    plugin registrant, assets and shaders) is read from the build it
+    describes: the dart2wasm one for `compiler = "dart2wasm"`.
 
     This declares a target beside the bundle, `__<name>_branches`, which stages
     the program for each compiler: its package config and co-located sources.
@@ -91,15 +101,10 @@ def flutter_web_bundle(name, main, package, deps = [], srcs = [], unchecked_srcs
 
     Args:
         name: Target name.
-        main: The entrypoint `.dart` file.
-        package: The `dart_package_metadata` of the app's Dart package: its
-            name, language version and licence.
-        deps: The program's Dart and Flutter libraries.
-        srcs: The app's own Dart sources beside `main`.
-        unchecked_srcs: More Dart sources beside `main`, whose imports are not
-            checked against `deps`: files a rule wrote for the program, whose
-            imports are that rule's to get right. `main` is exempt when listed
-            here too.
+        application: The `flutter_application` (or `flutter_application_variant`)
+            whose program the bundle compiles: its `main`, `srcs`, `deps`,
+            `package`, assets, shaders, `defines`, `flavor`, `build_name` and
+            `build_number`.
         web_sdk: Optional web SDK repo name (e.g. "@my_flutter_web_sdk").
             Defaults to "@flutter_web_sdk".
         tags: Tags of the bundle and of its staging target.
@@ -116,21 +121,13 @@ def flutter_web_bundle(name, main, package, deps = [], srcs = [], unchecked_srcs
     flutter_web_branch(
         name = branches,
         bundle = str(native.package_relative_label(name)),
-        deps = deps,
-        srcs = srcs + unchecked_srcs,
-        main = main,
-        package = package,
+        application = application,
         tags = tags + ([] if "manual" in tags else ["manual"]),
         testonly = testonly,
         visibility = ["//visibility:private"],
     )
     _flutter_web_bundle_rule(
         name = name,
-        main = main,
-        package = package,
-        deps = deps,
-        srcs = srcs + unchecked_srcs,
-        unchecked_srcs = unchecked_srcs,
         branches = ":" + branches,
         tags = tags,
         testonly = testonly,
@@ -141,18 +138,14 @@ def flutter_web_bundle(name, main, package, deps = [], srcs = [], unchecked_srcs
 
 def flutter_web_app(
         name,
-        package,
-        deps,
-        main = "lib/main.dart",
+        application,
         app_name = None,
         base_href = "/",
         static_assets_url = "/",
         web_sdk = None,
         web_dir = "web",
-        build_name = None,
-        build_number = None,
         **kwargs):
-    """Builds a Flutter web application, auto-discovering runner files.
+    """Builds a Flutter web application from a flutter_application target, auto-discovering runner files.
 
     Discovers runner files from the conventional `web/` directory
     (as generated by `flutter create --platforms=web .`) and wires up
@@ -165,9 +158,10 @@ def flutter_web_app(
         web/index.html            the page (built-in default if absent)
         web/flutter_bootstrap.js  the loader script (built-in default if absent)
         web/manifest.json         (built-in default if absent)
-        web/version.json          (generated from `build_name` and
-                                  `build_number` if absent; setting either
-                                  with the file present is an error)
+        web/version.json          (generated from the application's
+                                  `build_name` and `build_number` if absent;
+                                  the application setting either with the
+                                  file present is an error)
 
     Everything else under `web/` is copied into the bundle root verbatim.
 
@@ -200,12 +194,13 @@ def flutter_web_app(
 
     Args:
         name: Target name.
-        package: The `dart_package_metadata` of the app's Dart package (the
-            Bazel stand-in for its `pubspec.yaml`). Required: its
-            `package_name` keys the web bootstrap's `package:` URI for `main`
-            and anchors codegen sibling co-location.
-        deps: dart_library or flutter_library dependencies.
-        main: The main .dart entry point (default "lib/main.dart").
+        application: The `flutter_application` the web app is built from, as
+            every platform's app takes it. Its `package` keys the web
+            bootstrap's `package:` URI for `main`; its `build_name` and
+            `build_number` are the generated version.json's `version` and
+            `build_number`, which `package_info_plus` reports; its `flavor`'s
+            `flavors:` assets are bundled, which `flutter build web` does not
+            do, as it has no `--flavor`.
         app_name: Application name for generated HTML/manifest (defaults to name).
         base_href: Value substituted for `$FLUTTER_BASE_HREF` in
             web/index.html (default "/"). Must start and end with "/".
@@ -217,18 +212,8 @@ def flutter_web_app(
             whose contents are served at the bundle root (default "web").
             An `index_html`, `bootstrap_js`, `manifest_json` or `version_json`
             passed explicitly wins over the discovered file.
-        build_name: The `version` of the generated version.json, as
-            `flutter build web --build-name`, which `package_info_plus`
-            reports. Defaults to `1.0.0`. May be a `select()`.
-        build_number: The `build_number` of the generated version.json, as
-            `flutter build web --build-number`. Defaults to `1`. May be a
-            `select()`.
         **kwargs: Additional arguments forwarded to flutter_web_bundle
-            (e.g. assets, shaders, defines, pwa, web_defines,
-            keep_placeholders, tags, visibility).
-            `flavor` is one of them: see `flutter_application`. The web app
-            bundles the flavor's `flavors:` assets, which `flutter build web`
-            does not do, as it has no `--flavor`.
+            (e.g. pwa, web_defines, keep_placeholders, tags, visibility).
             The compiler settings live there too and are forwarded the same
             way: `profile`, `js_fallback`, `wasm_browsers`, `optimization_level_js`,
             `optimization_level_wasm`, `minify_js`, `minify_wasm`,
@@ -297,16 +282,12 @@ def flutter_web_app(
 
     flutter_web_bundle(
         name = name,
-        package = package,
-        main = main,
-        deps = deps,
+        application = application,
         title = effective_app_name,
         base_href = base_href,
         static_assets_url = static_assets_url,
         web_assets = web_assets,
         web_dir = web_dir,
-        build_name = version_arg(build_name),
-        build_number = version_arg(build_number),
         web_sdk = web_sdk,
         pwa = pwa,
         tags = tags,

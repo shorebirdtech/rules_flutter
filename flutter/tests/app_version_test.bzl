@@ -391,10 +391,15 @@ def app_version_test_suite(name):
     )
 
     # Web.
+    flutter_application(
+        name = "_web_default_app",
+        main = "main.dart",
+        package = ":pubspec-metadata",
+        tags = ["manual"],
+    )
     flutter_web_bundle(
         name = "_web_default",
-        package = ":pubspec-metadata",
-        main = "main.dart",
+        application = ":_web_default_app",
         tags = ["manual"],
     )
     add(
@@ -404,12 +409,17 @@ def app_version_test_suite(name):
         version = "1.0.0",
         build_number = "1",
     )
-    flutter_web_bundle(
-        name = "_web_given",
-        package = ":pubspec-metadata",
-        main = "main.dart",
+    flutter_application(
+        name = "_web_given_app",
         build_name = "2.1.0-beta \"x\"",
         build_number = "42",
+        main = "main.dart",
+        package = ":pubspec-metadata",
+        tags = ["manual"],
+    )
+    flutter_web_bundle(
+        name = "_web_given",
+        application = ":_web_given_app",
         tags = ["manual"],
     )
     add(
@@ -419,19 +429,24 @@ def app_version_test_suite(name):
         version = "2.1.0-beta \"x\"",
         build_number = "42",
     )
+    flutter_application(
+        name = "_web_two_versions_app",
+        build_number = "42",
+        main = "main.dart",
+        package = ":pubspec-metadata",
+        tags = ["manual"],
+    )
     flutter_web_bundle(
         name = "_web_two_versions",
-        package = ":pubspec-metadata",
-        main = "main.dart",
-        version_json = "version.json",
-        build_number = "42",
+        application = ":_web_two_versions_app",
         tags = ["manual"],
+        version_json = "version.json",
     )
     add(
         _expect_failure_test,
         "web_two_versions",
         target_under_test = ":_web_two_versions",
-        messages = ["has two versions: the version.json in `version_json`", "and `build_number`"],
+        messages = ["has two versions: the version.json in `version_json`", "and the application's `build_number`"],
     )
 
     native.test_suite(name = name, tests = tests)

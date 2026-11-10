@@ -1,5 +1,5 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
-load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_app", "flutter_web_bundle")
 load(":icon_font_test.bzl", "icon_font_test")
 
@@ -25,18 +25,41 @@ dart_package_metadata(
     package_name = "web_interop",
 )
 
+# The programs import web-only libraries, which the Dart VM has not got, so
+# they are compatible with web platforms alone: `bazel build //...` skips them
+# in its own configuration, and each web app builds them for its compilers.
+_WEB_ONLY = select({
+    "@rules_dart//dart/constraints:none": ["@platforms//:incompatible"],
+    "//conditions:default": [],
+})
+
+flutter_application(
+    name = "interop",
+    srcs = _SRCS,
+    main = "lib/interop_main.dart",
+    package = ":pubspec-metadata",
+    target_compatible_with = _WEB_ONLY,
+    deps = _DEPS,
+)
+
 # An app whose own code imports `dart:js_interop`, `package:web` and
 # `dart:ui_web`, with icon tree shaking off so nothing but the two compilers
 # stands between the source and a bundle. The defaults: dart2wasm, with dart2js
 # beside it for browsers that cannot run WebAssembly, so one build covers both.
-flutter_web_app(
-    name = "interop_app_no_icon_shaking",
+flutter_application(
+    name = "interop_no_icon_shaking",
     srcs = _SRCS,
-    app_name = "Interop (all icons)",
     main = "lib/interop_main.dart",
     package = ":pubspec-metadata",
+    target_compatible_with = _WEB_ONLY,
     tree_shake_icons = False,
     deps = _DEPS,
+)
+
+flutter_web_app(
+    name = "interop_app_no_icon_shaking",
+    app_name = "Interop (all icons)",
+    application = ":interop_no_icon_shaking",
 )
 
 build_test(
@@ -46,16 +69,22 @@ build_test(
 
 # An app that picks an icon behind a web-only conditional import and gets
 # another from a web plugin; see `lib/glyph_main.dart`.
-flutter_web_app(
-    name = "glyph_app",
+flutter_application(
+    name = "glyph",
     srcs = _SRCS,
-    app_name = "Glyphs",
     main = "lib/glyph_main.dart",
     package = ":pubspec-metadata",
+    target_compatible_with = _WEB_ONLY,
     deps = _DEPS + [
         "//web_interop/icon_plugin",
         "@deps//:flutter_web_plugins",
     ],
+)
+
+flutter_web_app(
+    name = "glyph_app",
+    app_name = "Glyphs",
+    application = ":glyph",
 )
 
 # What the shipped icon font holds, by reading its character map. The code
@@ -83,32 +112,23 @@ icon_font_test(
 # which compiles `main` for the Dart VM, where `dart:js_interop` does not exist.
 flutter_web_app(
     name = "interop_app",
-    srcs = _SRCS,
     app_name = "Interop",
-    main = "lib/interop_main.dart",
-    package = ":pubspec-metadata",
-    deps = _DEPS,
+    application = ":interop",
 )
 
 flutter_web_app(
     name = "interop_app_wasm_only",
-    srcs = _SRCS,
     app_name = "Interop (WASM only)",
+    application = ":interop",
     js_fallback = False,
-    main = "lib/interop_main.dart",
-    package = ":pubspec-metadata",
-    deps = _DEPS,
 )
 
 flutter_web_bundle(
     name = "interop_app_dart2js",
-    srcs = _SRCS,
+    application = ":interop",
     compiler = "dart2js",
-    main = "lib/interop_main.dart",
-    package = ":pubspec-metadata",
     renderer = "canvaskit",
     title = "Interop (dart2js)",
-    deps = _DEPS,
 )
 
 build_test(

@@ -377,15 +377,13 @@ android_binary(
 )
 
 # =============================================================================
-# Web build — same Dart code, no native deps.
+# Web build — the same application. Its native libraries are not built for
+# the web, and its Dart reaches them behind conditional imports.
 # =============================================================================
 
 flutter_web_bundle(
     name = "app_web",
-    srcs = glob(["lib/**/*.dart"]),
-    main = "lib/main.dart",
-    package = ":pubspec-metadata",
-    deps = ["@deps//:flutter"],
+    application = ":app_flutter",
 )
 
 # =============================================================================

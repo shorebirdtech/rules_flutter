@@ -1,5 +1,5 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
-load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
 
 dart_package_metadata(
@@ -14,12 +14,18 @@ dart_package_metadata(
 # `compiler = "dart2wasm"` build it, because then nothing else compiles it.
 # (`//int64:int64_app` is the same program with a variant for each compiler,
 # which keeps the fallback.)
+flutter_application(
+    name = "app",
+    main = "lib/main.dart",
+    package = ":pubspec-metadata",
+    deps = ["@deps//:flutter"],
+)
+
 flutter_web_app(
     name = "wasm_only_app",
     app_name = "Int64List",
+    application = ":app",
     js_fallback = False,
-    package = ":pubspec-metadata",
-    deps = ["@deps//:flutter"],
 )
 
 build_test(

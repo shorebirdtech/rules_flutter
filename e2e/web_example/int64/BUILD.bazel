@@ -1,5 +1,5 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
-load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
 
 dart_package_metadata(
@@ -13,14 +13,20 @@ dart_package_metadata(
 # `lib/main.dart`, two programs: it renders `Int64List max: 9223372036854775807`
 # from the WebAssembly build and `List<int> max: 9007199254740991` from the
 # JavaScript one.
-flutter_web_app(
-    name = "int64_app",
-    app_name = "Int64 identifiers",
+flutter_application(
+    name = "app",
+    main = "lib/main.dart",
     package = ":pubspec-metadata",
     deps = [
         "//int64/ids",
         "@deps//:flutter",
     ],
+)
+
+flutter_web_app(
+    name = "int64_app",
+    app_name = "Int64 identifiers",
+    application = ":app",
 )
 
 # The same program with Chrome left out of the WebAssembly allow-list, so Chrome
@@ -29,14 +35,10 @@ flutter_web_app(
 flutter_web_app(
     name = "int64_app_js_fallback",
     app_name = "Int64 identifiers (JavaScript)",
-    package = ":pubspec-metadata",
+    application = ":app",
     wasm_browsers = [
         "gecko",
         "webkit",
-    ],
-    deps = [
-        "//int64/ids",
-        "@deps//:flutter",
     ],
 )
 

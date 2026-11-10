@@ -24,6 +24,7 @@ Built per compiler, which makes the check above mean something:
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("@rules_dart//dart:providers.bzl", "DartInfo")
 load("@rules_dart//dart:utils.bzl", "WEB_PLATFORM_SETTINGS", "web_platform_settings")
+load("//flutter:defs.bzl", "flutter_application")
 load("//flutter:web.bzl", "flutter_web_bundle")
 
 _RootsInfo = provider(
@@ -148,10 +149,15 @@ def web_compiler_test_suite(name):
         )
         tests.append(":" + test)
 
-    flutter_web_bundle(
-        name = name + "_wrong_platform_bundle",
+    flutter_application(
+        name = name + "_wrong_platform_app",
         package = ":pubspec-metadata",
         main = "lib/language_version_main.dart",
+        tags = ["manual"],
+    )
+    flutter_web_bundle(
+        name = name + "_wrong_platform_bundle",
+        application = name + "_wrong_platform_app",
         wasm_platform = "@rules_dart//dart/platforms:js",
         tags = ["manual"],
     )

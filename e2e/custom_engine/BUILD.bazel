@@ -109,19 +109,16 @@ flutter_windows_app(
 flutter_web_app(
     name = "web_app",
     app_name = "Custom Engine",
-    package = ":pubspec-metadata",
+    application = ":app_flutter",
     tags = ["manual"],
-    deps = ["@deps//:flutter"],
 )
 
 flutter_web_integration_test(
     name = "web_render_test",
     src = "integration_test/render_test.dart",
-    srcs = ["lib/main.dart"],
-    package = ":pubspec-metadata",
+    application = ":app_flutter",
     tags = ["manual"],
     deps = [
-        "@deps//:flutter",
         "@deps//:flutter_test",
         "@deps//:integration_test",
     ],

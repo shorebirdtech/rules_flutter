@@ -52,19 +52,16 @@ flutter_android_app(
 # skwasm: dart2wasm, the macro's renderer.
 flutter_web_app(
     name = "glass_web",
-    package = ":pubspec-metadata",
+    application = ":glass_flutter",
     tags = ["manual"],
-    deps = _DEPS,
 )
 
 # CanvasKit: dart2js.
 flutter_web_bundle(
     name = "glass_web_canvaskit",
+    application = ":glass_flutter",
     compiler = "dart2js",
-    main = "lib/main.dart",
-    package = ":pubspec-metadata",
     tags = ["manual"],
-    deps = _DEPS,
 )
 
 build_test(

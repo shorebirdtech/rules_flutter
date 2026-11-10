@@ -25,14 +25,14 @@ found and throws; the generated bootstrap shows a message instead).
 Both dart2wasm and dart2js take .dart source directly (not kernel .dill),
 so we skip the frontend_server kernel compilation step used by desktop/mobile.
 
-The program is built once for each compiler the bundle ships, so a dependency
-may differ between dart2wasm and dart2js (see `flutter_web_branch.bzl`). The
-macro in `web.bzl` declares the staging target each compiler's inputs come
-from, and `deps` is split the same way.
+The program is the bundle's `flutter_application`'s, built once for each
+compiler the bundle ships, so a dependency may differ between dart2wasm and
+dart2js (see `flutter_web_branch.bzl`). The macro in `web.bzl` declares the
+staging target each compiler's inputs come from, over the application.
 """
 
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
-load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "generate_dev_package_config", "import_check_validation", "resolve_package_identity")
+load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "generate_dev_package_config", "import_check_validation")
 load("//flutter:providers.bzl", "FlutterInfo", "FlutterNativeLibraryInfo", "FlutterSdkRecordInfo")
 load(
     "//flutter/private:app_entrypoint.bzl",
@@ -46,15 +46,12 @@ load(
 load("//flutter/private:app_version.bzl", "web_version")
 load(
     "//flutter/private:common.bzl",
-    "AGENT_EXTENSIONS_ATTR",
-    "FLUTTER_APPLICATION_ATTRS",
-    "KERNEL_COMPILE_ATTRS",
+    "FLUTTER_APPLICATION_TOOL_ATTRS",
     "asset_roots",
     "declare_flutter_assets_dir",
     "flavor_dart_defines",
     "flutter_build_assets",
     "flutter_compile_shaders",
-    "flutter_deps_attr",
     "make_web_wrapper_main_content",
     "merge_dart_defines",
     "resolve_dev_generated_sources",
@@ -80,7 +77,7 @@ load(
 )
 load("//flutter/private:path_mapping.bzl", "file_ref", "json_config_args")
 load("//flutter/private:plugin_registrant.bzl", "generate_dart_plugin_registrant")
-load("//flutter/private:program_analysis.bzl", "PROGRAM_SKY_ENGINE_ATTR", "program_analyzable_info", "staged_sources")
+load("//flutter/private:program_analysis.bzl", "program_analyzable_info")
 load("//flutter/private:sdk_defines.bzl", "program_version_dart_defines")
 load(
     "//flutter/private:validation.bzl",
@@ -387,16 +384,6 @@ def _flutter_web_bundle_impl(ctx):
     # checked against: the CDN has none for it.
     use_local_canvaskit = ctx.attr.use_local_canvaskit or sdk_record.record != None
 
-    # Merged once for all compile actions below (dart2wasm, dart2js, icon
-    # tree-shake kernel) and the dev-config emission: the user's defines and
-    # the flavor's, the app's version and the SDK's. There is no `build_info`
-    # on web to keep the flavor out of.
-    user_defines = merge_dart_defines(ctx) + flavor_dart_defines(ctx.attr.flavor) + program_version_dart_defines(
-        tools.sdk_defines,
-        ctx.attr.build_name,
-        ctx.attr.build_number,
-    )
-
     # The build mode drives the mode defines of every compile action below,
     # the same way the native kernel path switches on COMPILATION_MODE.
     mode = web_build_mode(ctx)
@@ -405,18 +392,6 @@ def _flutter_web_bundle_impl(ctx):
     # Step 1: Collect sources, generate package config, handle plugin registrant.
     # dart compile wasm/js take .dart source directly (not kernel .dill).
     #
-    # The app's own package root — the single answer to "what is
-    # `package:<self>/…` rooted at" for this target. Everything downstream
-    # that asks the question (package synthesis, the wrapper's import, the
-    # dev-config entrypoint, the analyzer's source split) takes it from here
-    # rather than deriving its own, which is how the compile path and the
-    # analysis path came to disagree: analysis derived it, compilation
-    # assumed `""`, and a nested app's `package:` URIs silently resolved
-    # against the workspace root instead of its own package.
-    # `package` is mandatory, so there is always a declaration.
-    identity = resolve_package_identity(ctx)
-    package_root = identity.metadata.package_root
-
     # Every reader of `deps` reads a named branch. Each compile takes its own
     # compiler's; everything the bundle holds once — the plugin registrant
     # every compile imports, the assets, the icon tree-shaker's kernel, the
@@ -436,8 +411,8 @@ def _flutter_web_bundle_impl(ctx):
             platform = getattr(ctx.attr, setting + "_platform")
             fail("%s: `%s_platform` is %s, which must carry @rules_dart//dart/constraints:%s; its web compiler is %s" % (ctx.label, setting, platform.label, setting, info.runtime))
         branch_inputs[branch] = struct(
-            # Absent when `deps` is empty: there is nothing to split.
-            deps = ctx.split_attr.deps.get(setting, []),
+            program = info.program,
+            deps = info.program.deps,
             srcs = info.srcs,
             packages = info.packages,
             config_file = info.config_file,
@@ -445,14 +420,38 @@ def _flutter_web_bundle_impl(ctx):
         )
     primary = branch_inputs[branches[0]]
 
+    # The application's program. Only its `deps` differ between branches, and
+    # each compile reads its own branch's; everything else is the same files
+    # and values in every branch.
+    program = primary.program
+
+    # The app's own package root, the application's: the single answer to
+    # "what is `package:<self>/…` rooted at" for this target. Everything
+    # downstream that asks the question (package synthesis, the wrapper's
+    # import, the dev-config entrypoint, the analyzer's source split) takes it
+    # from here rather than deriving its own, so the compile path and the
+    # analysis path cannot disagree on a nested app's `package:` URIs.
+    package_root = program.package_root
+    main = program.main
+
+    # Merged once for all compile actions below (dart2wasm, dart2js, icon
+    # tree-shake kernel) and the dev-config emission: the application's
+    # defines and the flavor's, the app's version and the SDK's. There is no
+    # `build_info` on web to keep the flavor out of.
+    user_defines = merge_dart_defines(ctx, program.defines) + flavor_dart_defines(program.flavor) + program_version_dart_defines(
+        tools.sdk_defines,
+        program.build_name,
+        program.build_number,
+    )
+
     # `synthesize_app_package` appends the app's own package last.
     # `unchecked_srcs` are files a rule wrote for the program, whose imports are
     # that rule's to get right and need not be the user's `deps`.
-    unchecked = ctx.files.unchecked_srcs
+    unchecked = program.unchecked_srcs
     import_checks = import_check_validation(
         ctx,
         ctx.executable._kernel_tool,
-        [f for f in [ctx.file.main] + ctx.files.srcs if f not in unchecked],
+        [f for f in [main] + program.srcs if f not in unchecked],
         primary.packages[-1],
         primary.deps,
     )
@@ -472,26 +471,26 @@ def _flutter_web_bundle_impl(ctx):
     ddc = branch_inputs.get("ddc")
     if ddc:
         dev_package_config = ctx.actions.declare_file(ctx.label.name + ".dev_package_config.json")
-        dev_pc = generate_dev_package_config(ddc.packages, ddc.srcs + [ctx.file.main], dev_package_config, scheme = APP_SCHEME)
+        dev_pc = generate_dev_package_config(ddc.packages, ddc.srcs + [main], dev_package_config, scheme = APP_SCHEME)
         ctx.actions.write(dev_package_config, dev_pc.content)
 
         # A `main` with no `package:` URI is imported by the dev loop's
         # synthetic entrypoint under the app scheme, from this root.
         dev_filesystem_roots = with_root(
             dev_pc.filesystem_roots,
-            app_main_location(identity.package_name, package_root, ctx.file.main).root,
+            app_main_location(program.package_name, package_root, main).root,
         )
         dev_filesystem_scheme = dev_pc.scheme
         dev_generated_source_uris = dev_pc.generated_source_uris
         dev_source_packages = dev_pc.source_packages
         dev_generated_sources = resolve_dev_generated_sources(
             dev_pc.generated_source_paths,
-            ddc.srcs + [ctx.file.main],
+            ddc.srcs + [main],
         )
 
         # The dev package_config's roots and the filesystem roots reach every
         # file the dev compiler may read.
-        dev_package_config_names = ddc.srcs + [ctx.file.main]
+        dev_package_config_names = ddc.srcs + [main]
 
     # Generate web wrapper main with ui_web.bootstrapEngine().
     # Flutter web ALWAYS needs this wrapper to properly initialize the engine
@@ -527,13 +526,13 @@ def _flutter_web_bundle_impl(ctx):
     # `rootUri`, so the user's `main.dart` is read from the assembled
     # directory and its relative imports find their colocated siblings.
     main_import = resolve_wrapper_main_import(
-        identity.package_name,
+        program.package_name,
         package_root,
-        ctx.file.main.short_path,
-        ctx.file.main.path,
+        main.short_path,
+        main.path,
         wrapper_depth,
     )
-    if not ctx.file.main.is_source and ctx.file.main.root.path == wrapper.root.path:
+    if not main.is_source and main.root.path == wrapper.root.path:
         # A `main` a rule wrote, in the directory the wrapper is in. Named from
         # that directory's root: its own path has the configuration in it, which
         # a path-mapped compile reads under another name.
@@ -541,7 +540,7 @@ def _flutter_web_bundle_impl(ctx):
         wrapper_path = wrapper.path[len(root) + 1:]
         main_import = compute_same_root_main_import(
             wrapper_path.rpartition("/")[0],
-            ctx.file.main.path[len(root) + 1:],
+            main.path[len(root) + 1:],
         )
     wrapper_content = make_web_wrapper_main_content(
         main_import,
@@ -550,7 +549,7 @@ def _flutter_web_bundle_impl(ctx):
     )
     ctx.actions.write(wrapper, wrapper_content)
     entrypoint = wrapper
-    extra_wrapper_srcs = [ctx.file.main, wrapper]
+    extra_wrapper_srcs = [main, wrapper]
     if registrant:
         extra_wrapper_srcs.append(registrant)
     if is_debug:
@@ -669,13 +668,13 @@ def _flutter_web_bundle_impl(ctx):
         builds = [_JS_BUILD]
 
     # Step 3: Shader compilation + asset bundle.
-    compiled_shaders = flutter_compile_shaders(ctx, tools, "web", primary.deps)
+    compiled_shaders = flutter_compile_shaders(ctx, tools, "web", primary.deps, program)
 
     # Icon tree shaking: compile a kernel .dill for const_finder analysis.
     # Web targets don't otherwise need a kernel (they use dart2wasm/dart2js),
     # so we compile one specifically for const_finder to analyze IconData constants.
     kernel_dill = None
-    if (ctx.attr.tree_shake_icons and not is_debug and
+    if (program.tree_shake_icons and not is_debug and
         tools.const_finder != None and tools.font_subset != None):
         kernel_dill = ctx.actions.declare_file(ctx.label.name + "_icon_tree_shaking.dill")
 
@@ -718,6 +717,7 @@ def _flutter_web_bundle_impl(ctx):
         # The engine measures an icon font's height with the space glyph, so
         # every subset keeps it, as flutter_tools' web icon shaking does.
         optional_code_points = [_SPACE_CODE_POINT],
+        inputs = program,
     )
 
     # Step 4: Pick the index.html and flutter_bootstrap.js *templates*.
@@ -762,17 +762,17 @@ def _flutter_web_bundle_impl(ctx):
 
     # Use user-provided version.json or generate from attrs.
     if ctx.file.version_json:
-        given = [a for a in ["build_name", "build_number"] if getattr(ctx.attr, a)]
+        given = [a for a in ["build_name", "build_number"] if getattr(program, a)]
         if given:
             fail((
                 "%s has two versions: the version.json in `version_json` (%s) " +
-                "and `%s`. Set the version in one of them; `flutter_web_app` " +
+                "and the application's `%s`. Set the version in one of them; `flutter_web_app` " +
                 "uses `<web_dir>/version.json` as `version_json` when it exists."
             ) % (ctx.label, ctx.file.version_json.short_path, "` and `".join(given)))
         version_json = ctx.file.version_json
     else:
-        app_name = identity.package_name
-        version = web_version(ctx.attr.build_name, ctx.attr.build_number)
+        app_name = program.package_name
+        version = web_version(program.build_name, program.build_number)
         version_json = ctx.actions.declare_file(ctx.label.name + "_version.json")
         ctx.actions.write(version_json, json.encode({
             "app_name": app_name,
@@ -1152,10 +1152,10 @@ def _flutter_web_bundle_impl(ctx):
     # dependency.
     analyzable_info = program_analyzable_info(
         ctx,
-        identity.metadata,
+        program.package,
         package_root,
         primary.deps,
-        [ctx.file.main] + ctx.files.srcs + staged_sources(ctx.attr.unchecked_srcs),
+        [main] + program.srcs + program.staged_sources,
     )
 
     # In debug mode, output DDC dev files alongside the web directory.
@@ -1206,7 +1206,7 @@ def _flutter_web_bundle_impl(ctx):
         # named some other app's entrypoint whenever the workspace root held
         # one, and the dev loop booted that program with nothing reporting a
         # mismatch.
-        app_entrypoint = app_main_location(identity.package_name, package_root, ctx.file.main).uri
+        app_entrypoint = app_main_location(program.package_name, package_root, main).uri
 
         # Declares every build output the config names; see `dev_config.bzl`.
         ddc_files.extend(write_dev_config(ctx, ctx.actions.declare_file(ctx.label.name + "_dev_config.json"), {
@@ -1272,8 +1272,8 @@ def _flutter_web_bundle_impl(ctx):
             "generatedSourcePaths": dev_generated_sources,
             "generatedSourceUris": dev_generated_source_uris,
             # See flutter_application's dev config.
-            "shaders": shader_sources(ctx, primary.deps, "web"),
-            "assetRoots": asset_roots(ctx, primary.deps),
+            "shaders": shader_sources(ctx, primary.deps, "web", program),
+            "assetRoots": asset_roots(ctx, primary.deps, program),
             # The native modules the page instantiates, and per module the files
             # its bindings were generated from. A reload cannot replace an
             # instantiated module any more than a process can replace a `dlopen`ed
@@ -1301,10 +1301,10 @@ def _flutter_web_bundle_impl(ctx):
             # beside it — with the URI the compiler keys each by. Empty for a
             # `main` with a `package:` URI.
             "appSources": app_scheme_sources(
-                identity.package_name,
+                program.package_name,
                 package_root,
-                ctx.file.main,
-                ctx.files.srcs,
+                main,
+                program.srcs,
             ),
         }))
 
@@ -1312,57 +1312,23 @@ def _flutter_web_bundle_impl(ctx):
 
     return [DefaultInfo(files = depset([output_dir, serving])), output_groups, analyzable_info]
 
-# The web-only additions to the shared compile bundle. Web builds don't use
-# native_deps, obfuscate, split_debug_info, extra_gen_snapshot_options, or
-# minimum_os_version, so those stay unnamed.
+# The tools and build settings an application carries, which the bundle
+# needs for itself to compile and bundle the application's program: what the
+# program is (its `main`, `deps`, assets, defines and the rest) is the
+# application's, read off `branches`.
 #
-# `profile` is deliberately NOT lifted from there either, even though the web
-# rule has one: the shared attr documents itself in gen_snapshot terms ("AOT
-# like release, but unstripped"), and a web build has no AOT step to describe.
-# It is redeclared below with the meaning it actually has here.
-# The compile inputs arrive as a bundle for the reason `KERNEL_COMPILE_ATTRS`
-# documents. This rule does not call `flutter_compile_kernel`, so omitting one
-# would not crash it — it would go quiet: the bundle is also what
-# `synthesize_app_package` and `dart_analyzable_info` read, and a
-# web build that drops one of those compiles the app against something other
-# than what it declared. That is exactly how `language_version` was lost here.
-_WEB_RELEVANT_KEYS = (
-    "assets",
-    "shaders",
-    "shader_includes",
-    "require_sksl_shaders",
-    "_shader_compile_tool",
-    "tree_shake_icons",
-    "additional_licenses",
-    "_asset_bundle_tool",
-    "_notices_tool",
-    "_engine_license",
-)
-_WEB_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | {
-    k: v
-    for k, v in FLUTTER_APPLICATION_ATTRS.items()
-    if k in _WEB_RELEVANT_KEYS
+# The program once per compiler: `branches` is the staging target the bundle
+# macro declares beside the bundle with its `application`, split on each
+# compiler's web platform, so each branch is one configuration of the program
+# and of the staging (package config, co-located sources) it compiles from.
+_WEB_APPLICATION_ATTRS = FLUTTER_APPLICATION_TOOL_ATTRS | {
+    "branches": attr.label(
+        doc = "The staging target `flutter_web_bundle` declares beside the bundle. Set by that macro; not for BUILD files.",
+        cfg = web_branches,
+        providers = [FlutterWebBranchInfo],
+        mandatory = True,
+    ),
 }
-
-_WEB_APPLICATION_ATTRS["_sky_engine"] = PROGRAM_SKY_ENGINE_ATTR
-
-_WEB_APPLICATION_ATTRS["unchecked_srcs"] = attr.label_list(
-    doc = "Dart sources among `srcs` whose imports are not checked against `deps`: files a rule wrote for the program (an integration test's bootstrap and support library), whose imports are that rule's to get right. `main` is exempt when listed here too. Set by the bundle macro from its `unchecked_srcs`.",
-    allow_files = [".dart"],
-)
-
-# The program once per compiler. `deps` is what the bundle reads its plugins,
-# assets and shaders from; `branches` is the staging target the bundle macro
-# declares beside it, which holds each compiler's package config and co-located
-# sources. Both take the same split, so a compiler's branch of each is one
-# configuration of the program.
-_WEB_APPLICATION_ATTRS["deps"] = flutter_deps_attr(cfg = web_branches)
-_WEB_APPLICATION_ATTRS["branches"] = attr.label(
-    doc = "The staging target `flutter_web_bundle` declares beside the bundle. Set by that macro; not for BUILD files.",
-    cfg = web_branches,
-    providers = [FlutterWebBranchInfo],
-    mandatory = True,
-)
 
 flutter_web_bundle = rule(
     implementation = _flutter_web_bundle_impl,
@@ -1672,19 +1638,11 @@ build knows which served file is a native module.
         ),
         "version_json": attr.label(
             doc = "User-provided version.json file. If not set, a version.json is generated from " +
-                  "the package_name + build_name + build_number attrs; setting either with this is an " +
-                  "error. The web `package_info_plus` " +
+                  "the application's package name, `build_name` and `build_number`; the application " +
+                  "setting either with this is an error. The web `package_info_plus` " +
                   "plugin (and similar PackageInfo-style web plugins) reads this file to populate " +
                   "appName/version/buildNumber/packageName at runtime.",
             allow_single_file = [".json"],
-        ),
-        "build_name": attr.string(
-            doc = "The `version` of the generated version.json, as `flutter build web --build-name`. " +
-                  "Empty is '1.0.0'.",
-        ),
-        "build_number": attr.string(
-            doc = "The `build_number` of the generated version.json, as `flutter build web " +
-                  "--build-number`. Empty is '1'.",
         ),
         "pwa": attr.bool(
             doc = "If True (default), ship flutter_service_worker.js and register it " +
@@ -1781,7 +1739,7 @@ build knows which served file is a native module.
             default = Label("//flutter/private/agent_extensions:web_bridge.dart"),
             allow_single_file = [".dart"],
         ),
-    }) | AGENT_EXTENSIONS_ATTR,
+    }),
     toolchains = ["@rules_flutter//flutter:toolchain_type"],
     exec_groups = PORTABLE_EXEC_GROUPS,
     doc = "Builds a Flutter web application (WASM or JS) with all deployment artifacts. Declared through the `flutter_web_bundle` macro in `web.bzl`, which adds the staging target `branches` names.",

@@ -146,11 +146,16 @@ def dev_config_test_suite(name):
         deps = ["//flutter/tests/dev_config_fixture:prebuilt"],
         tags = ["manual"],
     )
+    flutter_application(
+        name = "_dc_web_app",
+        main = "lib/web_fixture_main.dart",
+        package = ":pubspec-metadata",
+        tags = ["manual"],
+        deps = ["//flutter/tests/dev_config_fixture:prebuilt"],
+    )
     flutter_web_bundle(
         name = "_dc_web",
-        package = ":pubspec-metadata",
-        main = "lib/web_fixture_main.dart",
-        deps = ["//flutter/tests/dev_config_fixture:prebuilt"],
+        application = ":_dc_web_app",
         tags = ["manual"],
     )
     _declared_test(name = name + "_native", target_under_test = ":_dc_native")

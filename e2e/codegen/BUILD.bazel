@@ -397,21 +397,10 @@ flutter_native_library(
 
 flutter_web_bundle(
     name = "web_app",
-    srcs = [
-        "lib/user.dart",
-        ":user_json",
-    ],
+    application = ":app",
     compiler = "dart2js",
-    main = "lib/main.dart",
     native_modules = [":demo_module"],
-    package = ":pubspec-metadata",
     renderer = "canvaskit",
-    deps = [
-        "//dep_lib",
-        "//dep_part",
-        "@deps//:flutter",
-        "@rules_flutter//flutter:material_icons",
-    ],
 )
 
 build_test(

@@ -1,6 +1,6 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@rules_dart//dart:defs.bzl", "dart_test")
-load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_app", "flutter_web_bundle")
 
 # The templating surface, exercised by a real build.
@@ -18,19 +18,24 @@ dart_package_metadata(
     package_name = "custom_boot",
 )
 
+flutter_application(
+    name = "app",
+    main = "lib/main.dart",
+    package = ":pubspec-metadata",
+    deps = [
+        "@deps//:flutter",
+        "@rules_flutter//flutter:material_icons",
+    ],
+)
+
 # Tier 1 with both templates supplied: web/index.html carrying web_defines and
 # a preserved placeholder, and web/flutter_bootstrap.js carrying the built-ins.
 flutter_web_app(
     name = "custom_boot",
     app_name = "Custom Boot",
+    application = ":app",
     keep_placeholders = ["vueThing"],
-    main = "lib/main.dart",
-    package = ":pubspec-metadata",
     web_defines = {"API_URL": "https://api.example.com"},
-    deps = [
-        "@deps//:flutter",
-        "@rules_flutter//flutter:material_icons",
-    ],
 )
 
 # Tier 2 inlining the substituted bootstrap into the page.
@@ -43,14 +48,9 @@ flutter_web_app(
 # a dead reload key.
 flutter_web_bundle(
     name = "inline_boot",
+    application = ":app",
     index_html = "inline_index.html",
-    main = "lib/main.dart",
-    package = ":pubspec-metadata",
     title = "Inline Boot",
-    deps = [
-        "@deps//:flutter",
-        "@rules_flutter//flutter:material_icons",
-    ],
 )
 
 build_test(
