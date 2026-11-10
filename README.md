@@ -1488,6 +1488,31 @@ An App Bundle from these rules is rules_android's `android_application`, given t
 
 </details>
 
+#### Add-to-app: Android
+
+A native Android app can host Flutter in two ways. If Bazel builds the host app too, depend on the Flutter code directly, as `flutter_android_app` does. If Gradle builds it, the host consumes the Flutter module as a local Maven repository, which is what `flutter build aar` makes and what `flutter_android_aar` makes from a `flutter_application`: the module's AAR at `<package_name>:flutter_<mode>:<build_number>` and one AAR per plugin with Android code at `<plugin group>:<plugin>_<mode>:<build_number>`, with upstream's coordinates and POMs (the module's depends on Flutter's engine artifacts, `io.flutter:flutter_embedding_<mode>` and `io.flutter:<abi>_<mode>`, from `download.flutter.io`; each plugin's lists the Maven artifacts its Gradle build declares).
+
+```starlark
+load("@rules_flutter//flutter:android.bzl", "flutter_android_aar")
+
+flutter_android_aar(
+    name = "module_aar",
+    application = ":my_app",
+    package_name = "com.example.my_module",
+    # build_number = "1.0", abis = ["armeabi-v7a", "arm64-v8a", "x86_64"]: the defaults
+)
+```
+
+```sh
+# One mode per run, each added beside the others: debug, profile, release.
+bazel run -c dbg //:module_aar
+bazel run -c opt --@rules_flutter//flutter:profile //:module_aar
+bazel run -c opt //:module_aar
+# -> build/host/outputs/repo/ (or `-- --output=<dir>`)
+```
+
+Each run builds the command line's mode, writes it into `build/host/outputs/repo/` under the package, keeping what earlier runs of other modes wrote (each artifact's `maven-metadata.xml` lists them), and prints the host's steps, as `flutter build aar` does: add the repository and `https://storage.googleapis.com/download.flutter.io` to the host's repositories, depend on `debugImplementation '<package_name>:flutter_debug:1.0'` (and `profileImplementation`, `releaseImplementation`), and give the host a `profile` build type that is `initWith debug`. `bazel build //:module_aar` makes the repository of one mode in `bazel-bin` without writing anything. Unlike Gradle's, the repository has no `.module` files and no sources or javadoc jars. A plugin is published under the Maven group its `android/build.gradle` sets (`group = "..."`, which `flutter create` writes), and one that sets none fails the build. The composable rules are `flutter_android_module_aar`, `flutter_android_plugin_aars` and `flutter_android_maven_repo`.
+
 ### Linux
 
 Run `flutter create --platforms=linux .` first. If `linux/runner/` is missing, the rules use a built-in runner.

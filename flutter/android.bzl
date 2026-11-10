@@ -21,6 +21,15 @@ Two tiers of API:
         # appbundle` and `flutter build apk` do.
         flutter_android_release(name = "my_app_release", app_bundle = ":my_app_bundle")
 
+        # Add-to-app: the module as a local Maven repository for a Gradle-built
+        # host, as `flutter build aar` makes one. `bazel run` writes it to
+        # build/host/outputs/repo/ and prints the host's steps.
+        flutter_android_aar(
+            name = "my_module_aar",
+            application = ":my_app",
+            package_name = "com.example.my_module",
+        )
+
     Prerequisites: run `flutter create --platforms=android .` in your package to
     generate the conventional `android/app/src/main/` directory with
     AndroidManifest.xml, resources, and Kotlin sources. The macro handles everything
@@ -36,6 +45,9 @@ Two tiers of API:
             "flutter_android_engine",
             "flutter_android_manifest_gen",
             "flutter_android_manifest_merge",
+            "flutter_android_maven_repo",
+            "flutter_android_module_aar",
+            "flutter_android_plugin_aars",
             "flutter_android_release",
             "flutter_android_runner_lib_gen")
 
@@ -74,6 +86,19 @@ Two tiers of API:
 
         flutter_android_release(name = "my_release", app_bundle = ":my_bundle")
 
+    The add-to-app repository, `flutter_android_aar`, is these three over the
+    bundle and a registrant compiled against a `neverlink` engine:
+
+        flutter_android_module_aar(
+            name = "my_module",
+            bundle = ":my_bundle",
+            library = ":my_registrant",  # a kt_android_library of flutter_android_registrant
+            package_name = "com.example.my_module",
+            min_sdk_version = ANDROID_MIN_SDK_VERSION,
+        )
+        flutter_android_plugin_aars(name = "my_plugins", application = ":my_app")
+        flutter_android_maven_repo(name = "my_repo", module = ":my_module", plugins = ":my_plugins")
+
     rules_android runs R8 only for an `android_binary` with `proguard_specs`.
     `flutter_android_app` gives a release build
     `@rules_flutter//flutter:android_proguard_rules.pro`, as `flutter build
@@ -89,6 +114,7 @@ load("@rules_java//java:java_import.bzl", _java_import = "java_import")
 load("@rules_kotlin//kotlin:android.bzl", _kt_android_library = "kt_android_library")
 load("//flutter/private:app_version.bzl", "manifest_values_conflict", "version_arg")
 load("//flutter/private:constants.bzl", _ANDROID_MIN_SDK_VERSION = "ANDROID_MIN_SDK_VERSION", _ANDROID_TARGET_SDK_VERSION = "ANDROID_TARGET_SDK_VERSION")
+load("//flutter/private:flutter_android_aar.bzl", _DEFAULT_AAR_ABIS = "DEFAULT_AAR_ABIS", _flutter_android_maven_repo = "flutter_android_maven_repo", _flutter_android_module_aar = "flutter_android_module_aar", _flutter_android_plugin_aars = "flutter_android_plugin_aars")
 load("//flutter/private:flutter_android_application.bzl", _flutter_android_bundle = "flutter_android_bundle")
 load("//flutter/private:flutter_android_build.bzl", _flutter_android_build = "flutter_android_build")
 load("//flutter/private:flutter_android_bundle_install.bzl", _flutter_android_app_bundle = "flutter_android_app_bundle")
@@ -175,6 +201,13 @@ flutter_android_build = _flutter_android_build
 # every ABI. The key is read at run time from Flutter's `key.properties` and
 # never reaches the build graph. See flutter/private/flutter_android_release.bzl.
 flutter_android_release = _flutter_android_release
+
+# The AAR of a Flutter module (`flutter_<mode>`), the AARs of its plugins, and
+# the Maven repository of both, for a Gradle-built host app: the pieces of
+# `flutter_android_aar`. See flutter/private/flutter_android_aar.bzl.
+flutter_android_module_aar = _flutter_android_module_aar
+flutter_android_plugin_aars = _flutter_android_plugin_aars
+flutter_android_maven_repo = _flutter_android_maven_repo
 
 # Merges a variant AndroidManifest.xml overlay (e.g. flutter create's
 # android/app/src/debug/AndroidManifest.xml) into a base manifest — the
@@ -1160,3 +1193,130 @@ def flutter_android_app(
             testonly = testonly,
             visibility = kwargs.get("visibility"),
         )
+
+def flutter_android_aar(
+        name,
+        application,
+        package_name,
+        build_number = "1.0",
+        abis = _DEFAULT_AAR_ABIS,
+        min_sdk_version = ANDROID_MIN_SDK_VERSION,
+        **kwargs):
+    """A Flutter module as a local Maven repository, as `flutter build aar` makes one.
+
+    For a native Android app built with Gradle (add-to-app). The repository
+    holds the module's AAR, `<package_name>:flutter_<mode>:<build_number>`,
+    and one AAR per plugin with Android code, `<group>:<plugin>_<mode>:<build_number>`;
+    the module's POM depends on Flutter's engine artifacts
+    (`io.flutter:flutter_embedding_<mode>` and `io.flutter:<abi>_<mode>`) and
+    on the plugins'. See `flutter_android_maven_repo` for the layout.
+
+    The mode is the command line's: `-c dbg` is debug, `-c opt
+    --@rules_flutter//flutter:profile` profile, and otherwise release.
+    `bazel build` makes that mode's repository in `bazel-bin`; `bazel run`
+    adds it to `build/host/outputs/repo/` under the package (or
+    `-- --output=<dir>`), beside what runs in other modes wrote, and prints
+    the host app's steps:
+
+        flutter_android_aar(
+            name = "module_aar",
+            application = ":my_app",
+            package_name = "com.example.my_module",
+        )
+
+        bazel run -c dbg //:module_aar
+        bazel run -c opt //:module_aar
+
+    Args:
+        name: Target name: the `flutter_android_maven_repo`.
+        application: The module's `flutter_application`.
+        package_name: The module's Android package, `module.androidPackage`
+            of a `flutter create --template module` pubspec: the Maven group
+            of `flutter_<mode>`.
+        build_number: The version of every artifact, as `flutter build aar
+            --build-number`.
+        abis: The ABIs whose native libraries the module's AAR holds, as
+            `flutter build aar --target-platform`. Defaults to upstream's:
+            armeabi-v7a, arm64-v8a and x86_64.
+        min_sdk_version: The `minSdkVersion` of the module's manifest.
+        **kwargs: Common attributes of the repository target (`visibility`,
+            `testonly`, and `tags`, which every target the macro declares has
+            and defaults to `["manual"]`).
+    """
+    testonly = kwargs.get("testonly", False)
+    tags = kwargs.pop("tags", ["manual"])
+
+    flutter_android_bundle(
+        name = "__%s_bundle" % name,
+        application = application,
+        mobile_install_compatible = False,
+        tags = tags,
+        testonly = testonly,
+    )
+
+    # The registrant, compiled against the plugins' libraries and an engine it
+    # does not package: the host's engine comes from the module's POM.
+    maven = Label("@flutter_pub_android_maven//:requirements")
+    _flutter_android_plugin_libs(
+        name = "__%s_plugin_libs" % name,
+        deps = application,
+        maven = maven,
+        report = "//%s:%s_maven_artifacts" % (native.package_name(), name),
+        tags = tags,
+        testonly = testonly,
+    )
+    flutter_android_maven_artifacts(
+        name = "%s_maven_artifacts" % name,
+        application = application,
+        maven = maven,
+        tags = tags,
+        testonly = testonly,
+    )
+    _flutter_android_engine(
+        name = "__%s_engine" % name,
+        neverlink = True,
+        listenablefuture = False,
+        tags = tags,
+        testonly = testonly,
+    )
+    _flutter_android_registrant(
+        name = "__%s_registrant_src" % name,
+        application = application,
+        tags = tags,
+        testonly = testonly,
+    )
+    _kt_android_library(
+        name = "__%s_registrant" % name,
+        srcs = ["__%s_registrant_src" % name],
+        custom_package = "io.flutter.plugins",
+        tags = tags,
+        testonly = testonly,
+        deps = ["__%s_engine" % name, "__%s_plugin_libs" % name],
+    )
+
+    _flutter_android_module_aar(
+        name = "__%s_module" % name,
+        abis = abis,
+        bundle = "__%s_bundle" % name,
+        library = "__%s_registrant" % name,
+        min_sdk_version = min_sdk_version,
+        package_name = package_name,
+        tags = tags,
+        testonly = testonly,
+    )
+    _flutter_android_plugin_aars(
+        name = "__%s_plugins" % name,
+        abis = abis,
+        application = application,
+        maven = maven,
+        tags = tags,
+        testonly = testonly,
+    )
+    _flutter_android_maven_repo(
+        name = name,
+        tags = tags,
+        build_number = build_number,
+        module = "__%s_module" % name,
+        plugins = "__%s_plugins" % name,
+        **kwargs
+    )

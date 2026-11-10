@@ -133,8 +133,16 @@ def link_android_libs(libs):
         ))
     return providers
 
-def _shared_libraries(link_params):
-    """The shared libraries an `AndroidCcLinkParamsInfo` brings the APK."""
+def android_shared_libraries(link_params):
+    """The shared libraries an `AndroidCcLinkParamsInfo` brings the APK.
+
+    Args:
+        link_params: An `AndroidCcLinkParamsInfo`.
+
+    Returns:
+        A list of Files: the dynamic libraries of its linker inputs that have no
+        static library, which an APK packages as they are.
+    """
     return [
         lib.resolved_symlink_dynamic_library or lib.dynamic_library
         for linker_input in link_params.link_params.linking_context.linker_inputs.to_list()
@@ -156,7 +164,7 @@ def _native_libs_validation(ctx, libs):
         if AndroidNativeLibsInfo in lib:
             native.extend(lib[AndroidNativeLibsInfo].native_libs.to_list())
         if AndroidCcLinkParamsInfo in lib:
-            native.extend(_shared_libraries(lib[AndroidCcLinkParamsInfo]))
+            native.extend(android_shared_libraries(lib[AndroidCcLinkParamsInfo]))
     native = {f: None for f in native}.keys()
     if not native:
         return None

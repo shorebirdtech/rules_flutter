@@ -177,6 +177,7 @@ bzl_library(
     visibility = ["//visibility:public"],
     deps = [
         "//flutter/private:app_version",
+        "//flutter/private:flutter_android_aar",
         "//flutter/private:flutter_android_application",
         "//flutter/private:flutter_android_build",
         "//flutter/private:flutter_android_bundle_install",

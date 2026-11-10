@@ -16,32 +16,7 @@ The ABIs come from the dependency: a `flutter_android_build` names the
 platforms its targets are built for.
 """
 
-_PROFILE = str(Label("@rules_flutter//flutter:profile"))
-
-def _compilation_mode_impl(settings, attr):
-    # Profile mode is `-c opt` with the profile flag; the flag under any other
-    # mode selects nothing, so it is only ever set together with `opt`.
-    if attr.profile:
-        return {
-            "//command_line_option:compilation_mode": "opt",
-            _PROFILE: True,
-        }
-    return {
-        "//command_line_option:compilation_mode": attr.compilation_mode or settings["//command_line_option:compilation_mode"],
-        _PROFILE: settings[_PROFILE],
-    }
-
-_compilation_mode = transition(
-    implementation = _compilation_mode_impl,
-    inputs = [
-        "//command_line_option:compilation_mode",
-        _PROFILE,
-    ],
-    outputs = [
-        "//command_line_option:compilation_mode",
-        _PROFILE,
-    ],
-)
+load(":compilation_mode.bzl", "COMPILATION_MODE_ATTRS", "compilation_mode_transition")
 
 def _android_apk_impl(ctx):
     # A transition on the attribute delivers the dependency as a one-element
@@ -65,19 +40,9 @@ android_apk = rule(
     attrs = {
         "apk": attr.label(
             mandatory = True,
-            cfg = _compilation_mode,
+            cfg = compilation_mode_transition,
             doc = "An android_binary, or a flutter_android_build of one, whose APK to expose.",
         ),
-        "compilation_mode": attr.string(
-            values = ["", "dbg", "fastbuild", "opt"],
-            doc = "The compilation mode to build the APK in. Empty keeps the command line's.",
-        ),
-        "profile": attr.bool(
-            doc = "Build the APK in Flutter profile mode (`-c opt --@rules_flutter//flutter:profile`). Overrides `compilation_mode`.",
-        ),
-        "_allowlist_function_transition": attr.label(
-            default = "@bazel_tools//tools/allowlists/function_transition_allowlist",
-        ),
-    },
+    } | COMPILATION_MODE_ATTRS,
     doc = "Re-exposes an android_binary's signed APK as <name>.apk, optionally rebuilt in another compilation mode.",
 )

@@ -142,6 +142,62 @@ maven.install(
 )
 use_repo(maven, "rules_flutter_maven")
 
+# The POMs of the engine's Maven artifacts for Flutter 3.47.9 (engine
+# 89c39edf...), in debug and release, which the POM of `flutter_android_aar`'s
+# module names. `:verify_android_aar_resolves_test` resolves the repository's
+# coordinates against these, with no network at test time; bumping
+# `flutter_version` above means pinning the new engine's here too, and the test
+# names any coordinate that has no pin.
+http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
+
+http_file(
+    name = "flutter_maven_flutter_embedding_debug",
+    sha256 = "c23c23f58e2342076114b02d538da0f4ded875c8f18a85b99782d7686cd2e5dc",
+    url = "https://storage.googleapis.com/download.flutter.io/io/flutter/flutter_embedding_debug/1.0.0-89c39edfdfae2949f6806e4a315c0c08522238b7/flutter_embedding_debug-1.0.0-89c39edfdfae2949f6806e4a315c0c08522238b7.pom",
+)
+
+http_file(
+    name = "flutter_maven_armeabi_v7a_debug",
+    sha256 = "6c222cb55e31c15cf8f7256b5bc55a83a3c4746005023a2b27782231e0818762",
+    url = "https://storage.googleapis.com/download.flutter.io/io/flutter/armeabi_v7a_debug/1.0.0-89c39edfdfae2949f6806e4a315c0c08522238b7/armeabi_v7a_debug-1.0.0-89c39edfdfae2949f6806e4a315c0c08522238b7.pom",
+)
+
+http_file(
+    name = "flutter_maven_arm64_v8a_debug",
+    sha256 = "724369cda4ceff18c59519586f5c81be33b0eb56f7c8d40cf954907da063de36",
+    url = "https://storage.googleapis.com/download.flutter.io/io/flutter/arm64_v8a_debug/1.0.0-89c39edfdfae2949f6806e4a315c0c08522238b7/arm64_v8a_debug-1.0.0-89c39edfdfae2949f6806e4a315c0c08522238b7.pom",
+)
+
+http_file(
+    name = "flutter_maven_x86_64_debug",
+    sha256 = "21edc02e6bd8ba3c3884773720a7f049a0bd9bebfee7751b356ad5d0bc17cddf",
+    url = "https://storage.googleapis.com/download.flutter.io/io/flutter/x86_64_debug/1.0.0-89c39edfdfae2949f6806e4a315c0c08522238b7/x86_64_debug-1.0.0-89c39edfdfae2949f6806e4a315c0c08522238b7.pom",
+)
+
+http_file(
+    name = "flutter_maven_flutter_embedding_release",
+    sha256 = "41872988c39554cf793f38c7108bb303c86f6790aae5dcf4f8bf4144669e47f3",
+    url = "https://storage.googleapis.com/download.flutter.io/io/flutter/flutter_embedding_release/1.0.0-89c39edfdfae2949f6806e4a315c0c08522238b7/flutter_embedding_release-1.0.0-89c39edfdfae2949f6806e4a315c0c08522238b7.pom",
+)
+
+http_file(
+    name = "flutter_maven_armeabi_v7a_release",
+    sha256 = "2cf5f4d83df6ed9a1ab2ed6ac2bc19a55361b8de4d9293ce46ae5b4e1915a3f5",
+    url = "https://storage.googleapis.com/download.flutter.io/io/flutter/armeabi_v7a_release/1.0.0-89c39edfdfae2949f6806e4a315c0c08522238b7/armeabi_v7a_release-1.0.0-89c39edfdfae2949f6806e4a315c0c08522238b7.pom",
+)
+
+http_file(
+    name = "flutter_maven_arm64_v8a_release",
+    sha256 = "25c4fc9d44b64390189d3cea9d3cebdfab1a4eaca879c2f94b7107396871ab55",
+    url = "https://storage.googleapis.com/download.flutter.io/io/flutter/arm64_v8a_release/1.0.0-89c39edfdfae2949f6806e4a315c0c08522238b7/arm64_v8a_release-1.0.0-89c39edfdfae2949f6806e4a315c0c08522238b7.pom",
+)
+
+http_file(
+    name = "flutter_maven_x86_64_release",
+    sha256 = "2df17ceb4cfa0b9729d8e5876b77ec5a6d08bc33d66bd08d2818127d27155eee",
+    url = "https://storage.googleapis.com/download.flutter.io/io/flutter/x86_64_release/1.0.0-89c39edfdfae2949f6806e4a315c0c08522238b7/x86_64_release-1.0.0-89c39edfdfae2949f6806e4a315c0c08522238b7.pom",
+)
+
 # Hermetic C++ toolchain for Linux arm64 execution platforms, so a C++ tool
 # built for the exec platform (zipper, xmllint) can be compiled when Bazel runs
 # actions on a Linux arm64 worker. Only the Linux-exec, Linux-target toolchain

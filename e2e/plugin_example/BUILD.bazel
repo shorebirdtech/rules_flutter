@@ -3,7 +3,7 @@ load("@rules_apple//apple:ios.bzl", "ios_application")
 load("@rules_apple//apple:macos.bzl", "macos_application")
 load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
 load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_analysis_test", "dart_binary", "dart_test")
-load("@rules_flutter//flutter:android.bzl", "flutter_android_app", "flutter_android_build", "flutter_android_registrant")
+load("@rules_flutter//flutter:android.bzl", "flutter_android_aar", "flutter_android_app", "flutter_android_build", "flutter_android_registrant")
 load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application", "flutter_library")
 load(
     "@rules_flutter//flutter:ios.bzl",
@@ -42,6 +42,7 @@ load("@rules_flutter//tools/e2e_testing:device_profile.bzl", "device_profile")
 load(":android_apk.bzl", "android_apk")
 load(":desktop_link_libraries_test.bzl", "linux_link_libraries_test", "windows_link_libraries_test")
 load(":ignored_package_test.bzl", "ignored_package_test")
+load(":maven_repo_in_mode.bzl", "maven_repo_in_mode")
 
 exports_files(["pubspec.lock"])
 
@@ -858,7 +859,7 @@ dart_test(
 
 # =============================================================================
 # Add-to-app: Apple
-# =============================================================================
+# ======================================================================
 #
 # The xcframeworks a host app built by Xcode links, as `flutter build
 # ios-framework` and `macos-framework` make them. `:add_to_app_*_test` checks
@@ -998,5 +999,92 @@ dart_analysis_test(
         ":add_to_app_ios_host_debug_test",
         ":add_to_app_macos_host_debug_test",
         ":add_to_app_macos_host_release_test",
+=======
+# Add-to-app: Android
+#
+# `plugin_app` as a Flutter module for a Gradle-built host app: the local Maven
+# repository `flutter build aar` makes, in the configuration's mode.
+# `bazel run //:plugin_module_aar` writes it to build/host/outputs/repo/ and
+# prints the host's steps.
+# =============================================================================
+
+flutter_android_aar(
+    name = "plugin_module_aar",
+    package_name = "com.example.plugin_example.module",
+    application = ":plugin_app",
+)
+
+# A module of one plugin, `annotated_plugin`, whose Maven dependency
+# `flutter_pub.annotation` states, built for one ABI.
+flutter_android_aar(
+    name = "annotated_module_aar",
+    package_name = "com.example.plugin_example.module",
+    abis = ["arm64-v8a"],
+    application = ":annotated_app",
+)
+
+# The repository of each mode under a name of its own: release (the default
+# configuration) and debug.
+[
+    maven_repo_in_mode(
+        name = "plugin_module_repo_" + variant,
+        compilation_mode = mode,
+        repo = ":plugin_module_aar",
+        tags = ["android"],
+    )
+    for variant, mode in [
+        ("release", ""),
+        ("debug", "dbg"),
+    ]
+]
+
+# The repositories' paths, POMs and AARs, as `flutter build aar` writes them.
+dart_test(
+    name = "verify_android_aar_test",
+    data = [
+        ":annotated_module_aar",
+        ":plugin_module_repo_debug",
+        ":plugin_module_repo_release",
+        "@bazel_tools//tools/zip:zipper",
+    ],
+    env = {"ZIPPER_RUNFILE": "$(rlocationpath @bazel_tools//tools/zip:zipper)"},
+    main = "test/verify_android_aar_test.dart",
+    tags = ["android"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
+)
+
+# The engine POMs MODULE.bazel pins, which a host resolves the module's
+# `io.flutter` dependencies to.
+_FLUTTER_MAVEN_POMS = [
+    "@flutter_maven_%s_%s//file" % (artifact, mode)
+    for mode in [
+        "debug",
+        "release",
+    ]
+    for artifact in [
+        "flutter_embedding",
+        "armeabi_v7a",
+        "arm64_v8a",
+        "x86_64",
+    ]
+]
+
+# Every coordinate the repositories name resolves, with no Gradle and no
+# network: to the repository's own artifacts, the pinned engine POMs, or what
+# `@rules_flutter_maven`'s lock pins.
+dart_test(
+    name = "verify_android_aar_resolves_test",
+    data = [
+        ":annotated_module_aar",
+        ":plugin_module_repo_debug",
+        ":plugin_module_repo_release",
+        ":rules_flutter_maven_install.json",
+    ] + _FLUTTER_MAVEN_POMS,
+    env = {"FLUTTER_MAVEN_POMS": " ".join(["$(rlocationpath %s)" % pom for pom in _FLUTTER_MAVEN_POMS])},
+    main = "test/verify_android_aar_resolves_test.dart",
+    tags = ["android"],
+    deps = [
+        "@rules_dart//dart/runfiles",
+        "@rules_flutter//tools/e2e_testing",
     ],
 )

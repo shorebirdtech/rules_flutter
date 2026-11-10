@@ -432,6 +432,19 @@ bzl_library(
 )
 
 bzl_library(
+    name = "flutter_android_aar",
+    srcs = ["flutter_android_aar.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+    deps = [
+        ":common",
+        ":exec_groups",
+        ":host_platform_transition",
+        ":rule_edges",
+        "@rules_dart//dart:utils",
+    ],
+)
+
+bzl_library(
     name = "flutter_android_release",
     srcs = ["flutter_android_release.bzl"],
     visibility = ["//flutter:__subpackages__"],
