@@ -329,9 +329,9 @@ maven_dev.install(
 # an app using the generated localizations needs `intl` in its own.
 flutter_pub.from_lock(
     name = "dev_tool_deps",
+    # Each version here is a minimum: a consumer's lock ahead of these tools'
+    # builds the higher version, silently, and a tool that does not build
+    # against it is the tool's bug.
     lock = "//:pubspec.lock",
-    # A consumer's own locks may be ahead of these tools': it builds the higher
-    # version, and a tool that does not build against it is the tool's bug.
-    on_version_conflict = "upgrade",
 )
 use_repo(flutter_pub, "dev_tool_deps")

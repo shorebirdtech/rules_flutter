@@ -28,8 +28,7 @@ dart_binary(
 )
 
 # `clock` is 1.1.2 in `//hub_a` and 1.1.3 in `//hub_b`, which is the higher and
-# so the one version of the build: `hub_a` accepts it with
-# `on_version_conflict = "upgrade"`.
+# so the one version of the build: each lock's version is a minimum.
 dart_library(
     name = "upgraded",
     package_name = "upgraded",

@@ -465,7 +465,27 @@ bazel run @rules_flutter//flutter/pub -- get --directory tools/my_tool
 
 ### Several locks in one build
 
-Every package is one repository for the whole build, however many `flutter_pub.from_lock` tags list it: a hub (`@deps//:flutter`) is the set of aliases its own lock names. A build has one version of each package, the highest any lock records, and nothing is built below the version its lock records. By default a lock that is behind another on a package fails when the module is read, naming both locks and the fix, `bazel run @rules_flutter//flutter/pub -- upgrade --directory=<the lock's directory> <package>` from the workspace root. Only builds that use a hub fail: the toolchain comes from the other extension, so the fix runs. A lock whose constraints do not allow the higher version sets `on_version_conflict = "upgrade"` on its `flutter_pub.from_lock`, and its packages are built at it. The locks must otherwise agree: a package from different sources, registries or digests, or git commits, or `build_from_pubspec` directories, always fails. `resolve` and `ignore_hooks` apply to the whole build. rules_flutter's own tools are a lock of this kind (`on_version_conflict = "upgrade"`), so a release that moves them can put your lock behind: re-resolve it with the command above.
+Every package is one repository for the whole build, however many `flutter_pub.from_lock` tags list it: a hub (`@deps//:flutter`) is the set of aliases its own lock names. A build has one version of each package. Each lock's hosted entry is a request for at least that version, in whichever module the lock is, and the highest request is built, as Bazel's minimal version selection picks the highest version any module asks for. rules_flutter and rules_dart share this policy.
+
+Raising another module's lock says nothing: that is what a minimum means. When a lock of the root module is raised, the build prints a warning, as Bazel's `--check_direct_dependencies` does for a `bazel_dep`:
+
+```text
+Package "meta" is built at 1.17.0, newer than the root module asks for:
+  - 1.16.0, from the lock `//app:pubspec.lock`
+Raised by:
+  - 1.17.0, from the lock `//:pubspec.lock` in module `some_module`
+Each request is a minimum and the highest wins. Raise the root's to 1.17.0:
+  bazel run @rules_flutter//flutter/pub -- upgrade --directory=app meta
+or set `flutter_pub.settings(check_direct_dependencies = "off")` in the root module to stop this check.
+```
+
+Run the command from the workspace root; it runs even while the extension fails. The root module sets how this is reported, once:
+
+```starlark
+flutter_pub.settings(check_direct_dependencies = "error")  # "off", "warning" (the default) or "error"
+```
+
+At `"error"` the message fails every build that uses a hub. The toolchain comes from the other extension, so the fix still runs. The locks must otherwise agree, at every level: a package from different sources, registries or digests, or git commits, or `build_from_pubspec` directories, always fails. `resolve` applies to the whole build. Only the root module may use `flutter_pub.settings` and `ignore_hooks`: another module's fails the build. rules_flutter's own tools are a lock of another module in your build, so a release that moves them ahead of your lock raises it, with the warning above.
 
 ### Packages with build hooks
 
@@ -473,7 +493,7 @@ Some pub packages compile native code through a Dart `hook/build.dart` (Dart Nat
 
 - **Curated replacements.** rules_dart keeps a registry of Bazel-native equivalents (`@rules_dart//dart/ext:registry.bzl`). Where one exists, such as `sqlite3`, `flutter_pub.from_lock` attaches it automatically. An app that depends on `drift` gets `libsqlite3` without naming it.
 - **Overlays.** For a package with a hook and no curated entry, you can write a `BUILD.bazel.tpl` that reproduces what the hook builds. rules_flutter bundles overlays under `ext/`, and you can add your own with `flutter_pub.plugin_overlays(roots = [...])`. Authoring one is described in [docs/TESTING.md](docs/TESTING.md) under "Native Assets overlay authoring".
-- **Ignoring a hook.** If a package's native code is never reached in your app, say so: `flutter_pub.from_lock(ignore_hooks = ["<package>"])`.
+- **Ignoring a hook.** If a package's native code is never reached in your app, say so in the root module: `flutter_pub.from_lock(ignore_hooks = ["<package>"])`.
 
 A hook that nothing replaces is an error when `flutter_application` reaches it. The alternative would be a build that succeeds and then fails at runtime on an unresolved `@Native` symbol.
 

@@ -13,7 +13,7 @@ repositories, never the toolchains, and `bazel run @rules_flutter//flutter/pub`,
 which fixes the lock, still runs.
 """
 
-load("//flutter/private:pub_extension.bzl", "pub_cycle_tag", "pub_extension", "pub_from_lock_tag", "pub_plugin_overlays_tag")
+load("//flutter/private:pub_extension.bzl", "pub_cycle_tag", "pub_extension", "pub_from_lock_tag", "pub_plugin_overlays_tag", "pub_settings_tag")
 
 pub = module_extension(
     implementation = pub_extension,
@@ -21,6 +21,7 @@ pub = module_extension(
         "cycle": pub_cycle_tag,
         "from_lock": pub_from_lock_tag,
         "plugin_overlays": pub_plugin_overlays_tag,
+        "settings": pub_settings_tag,
     },
     os_dependent = False,
     arch_dependent = False,

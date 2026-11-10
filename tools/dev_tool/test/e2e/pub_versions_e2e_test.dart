@@ -6,17 +6,21 @@
 ///  1. Two hubs that list a package at one version share it: both labels reach
 ///     the one `flutter_pub_lib__<package>` repository, and no repository of
 ///     either hub's name exists.
-///  2. A lock behind another on a package fails when the module is read, at
-///     `on_version_conflict = "error"`, naming both locks, both versions, the
-///     package and the command that fixes it. A lock behind on several
-///     packages gets one command naming all of them. That command runs while
-///     the conflict stands (the toolchain it needs is another extension's), and
-///     after it the hub analyses. At `"upgrade"` it builds the higher version.
-///  3. Locks that disagree on where a package comes from, or on the digest of
-///     one version, fail naming both.
+///  2. Each lock's version is a minimum and the highest is built, in whichever
+///     module's lock it is. Raising another module's lock says nothing.
+///     Raising one of the root's own prints a warning naming both versions,
+///     both locks and the command that raises the root's;
+///     `flutter_pub.settings(check_direct_dependencies = ...)` silences it at
+///     `"off"` and makes it fail at `"error"`. That command runs while the
+///     failure stands (the toolchain it needs is another extension's), and
+///     after it the hub analyses.
+///  3. Locks that disagree on where a package comes from, on its registry, or
+///     on the digest of one version, fail naming both, at every level.
 ///  4. A package mapped with `resolve` is that target for every hub and the
 ///     locked package is never fetched; two different maps fail naming both.
 ///  5. Two tags of one name are one hub.
+///  6. Only the root may ignore a hook: a dependency module's `ignore_hooks`
+///     fails, so it cannot silence the root's programs.
 ///
 /// Package names no lock of this repository lists, so the repository's own
 /// tool lock (which every consumer build reads) does not take part.
@@ -34,7 +38,6 @@ const _otherHub = 'otherhub';
 
 FixtureHub _other(
   List<HostedPackage> hosted, {
-  String? onVersionConflict,
   String extraLockEntries = '',
   Map<String, String> resolve = const {},
   String name = _otherHub,
@@ -44,8 +47,34 @@ FixtureHub _other(
   hosted: hosted,
   extraLockEntries: extraLockEntries,
   resolve: resolve,
-  onVersionConflict: onVersionConflict,
 );
+
+const _depModule = 'depmod';
+
+/// A module the root depends on, whose one lock holds [hosted].
+FixtureModule _dependency(
+  List<HostedPackage> hosted, {
+  List<String> ignoreHooks = const [],
+}) => FixtureModule(
+  _depModule,
+  hubs: [
+    FixtureHub(
+      name: 'dephub',
+      lockPackage: '',
+      hosted: hosted,
+      ignoreHooks: ignoreHooks,
+    ),
+  ],
+);
+
+/// What the warning or error for a raised root lock says first.
+const _raised = 'newer than the root module asks for';
+
+/// The version of `vplain` the build fetched.
+Future<String> _builtPubspec(PubInputsWorkspace ws) async {
+  final spoke = await ws.spokeDirectory('vplain');
+  return File(p.join(spoke.path, 'pubspec.yaml')).readAsStringSync();
+}
 
 /// A `dart_library` for [name], at `<dir>/BUILD.bazel`.
 Map<String, String> _target(String dir, String name) => {
@@ -90,7 +119,66 @@ void main() {
   });
 
   test(
-    'a lock behind another at "error" fails when the module is read',
+    'raising a dependency module\'s lock builds the higher version, saying '
+    'nothing',
+    () async {
+      final ws = await PubInputsFixture(
+        hosted: [HostedPackage('vplain', version: '1.1.0')],
+        modules: [
+          _dependency([HostedPackage('vplain', version: '1.0.0')]),
+        ],
+      ).materialize();
+
+      final result = await ws.loadSpoke('vplain');
+      expect(result.succeeded, isTrue, reason: '$result');
+      expect(result.output, isNot(contains(_raised)), reason: '$result');
+      expect(await _builtPubspec(ws), contains('version: 1.1.0'));
+    },
+  );
+
+  for (final check in [null, 'off'])
+    test(
+      'a dependency module raising the root\'s lock builds the higher version'
+      '${check == null ? ', warning' : ', silently at "$check"'}',
+      () async {
+        final ws = await PubInputsFixture(
+          hosted: [HostedPackage('vplain', version: '1.0.0')],
+          checkDirectDependencies: check,
+          modules: [
+            _dependency([HostedPackage('vplain', version: '1.1.0')]),
+          ],
+        ).materialize();
+
+        final result = await ws.loadSpoke('vplain');
+        expect(result.succeeded, isTrue, reason: '$result');
+        if (check == null) {
+          expect(
+            result.output,
+            allOf(
+              contains('"vplain" is built at 1.1.0, $_raised'),
+              contains('1.0.0, from the lock `//:pubspec.lock`\n'),
+              contains(
+                '1.1.0, from the lock `//:pubspec.lock` in module `$_depModule`',
+              ),
+              contains(
+                'bazel run @rules_flutter//flutter/pub -- upgrade vplain',
+              ),
+              contains(
+                '`flutter_pub.settings(check_direct_dependencies = "off")`',
+              ),
+            ),
+            reason: '$result',
+          );
+        } else {
+          expect(result.output, isNot(contains(_raised)), reason: '$result');
+        }
+        expect(await _builtPubspec(ws), contains('version: 1.1.0'));
+      },
+    );
+
+  test(
+    'a root lock behind another of the root\'s builds the higher version, '
+    'warning',
     () async {
       final ws = await PubInputsFixture(
         hosted: [HostedPackage('vplain', version: '1.0.0')],
@@ -99,18 +187,40 @@ void main() {
         ],
       ).materialize();
 
+      final result = await ws.loadSpoke('vplain');
+      expect(result.succeeded, isTrue, reason: '$result');
+      expect(
+        result.output,
+        allOf(
+          contains('"vplain" is built at 1.1.0, $_raised'),
+          contains('1.1.0, from the lock `//other:pubspec.lock`'),
+        ),
+        reason: '$result',
+      );
+      expect(await _builtPubspec(ws), contains('version: 1.1.0'));
+    },
+  );
+
+  test(
+    'a raised root lock at "error" fails when the module is read',
+    () async {
+      final ws = await PubInputsFixture(
+        hosted: [HostedPackage('vplain', version: '1.0.0')],
+        checkDirectDependencies: 'error',
+        modules: [
+          _dependency([HostedPackage('vplain', version: '1.1.0')]),
+        ],
+      ).materialize();
+
       final result = await ws.query('@pubhub//:vplain');
       expect(result.succeeded, isFalse, reason: '$result');
       expect(
         result.output,
         allOf(
-          contains('"vplain" has conflicting versions'),
-          contains('1.0.0 (hub "pubhub"'),
-          contains('1.1.0 (hub "$_otherHub"'),
-          contains('//:pubspec.lock'),
-          contains('//other:pubspec.lock'),
+          contains('"vplain" is built at 1.1.0, $_raised'),
+          contains('1.0.0, from the lock `//:pubspec.lock`\n'),
+          contains('in module `$_depModule`'),
           contains('pub -- upgrade vplain'),
-          contains('on_version_conflict = "upgrade"'),
         ),
         reason: '$result',
       );
@@ -121,13 +231,14 @@ void main() {
   // own `pub` fails on the same conflict, and the command is what fixes it.
   for (final alsoRulesDart in [false, true])
     test(
-      'the command a version conflict names runs while the conflict stands, '
-      'and fixes it${alsoRulesDart ? ', with rules_dart\'s pub extension failing on the same locks' : ''}',
+      'the command a raised root lock names at "error" runs while the failure '
+      'stands, and fixes it${alsoRulesDart ? ', with rules_dart\'s pub extension failing on the same locks' : ''}',
       () async {
         final ws = await PubInputsFixture(
           http: true,
           lockPackage: 'app',
           rulesDartPubLocks: alsoRulesDart ? ['app', 'other'] : [],
+          checkDirectDependencies: 'error',
           hosted: [HostedPackage('vplain', version: '1.0.0')],
           files: {
             'app/pubspec.yaml':
@@ -197,97 +308,6 @@ void main() {
     );
 
   test(
-    'a lock behind on two packages is fixed by one command naming both',
-    () async {
-      HostedPackage pkg(String name, String version) => HostedPackage(
-        name,
-        version: version,
-        pubspec:
-            'name: $name\nversion: $version\nenvironment:\n  sdk: ^3.0.0\n',
-      );
-      final ws = await PubInputsFixture(
-        http: true,
-        lockPackage: 'app',
-        hosted: [pkg('vplain', '1.0.0'), pkg('vother', '1.0.0')],
-        files: {
-          'app/pubspec.yaml':
-              'name: app\n'
-              'environment:\n'
-              '  sdk: ^3.0.0\n'
-              'dependencies:\n'
-              '  vplain:\n'
-              '    hosted: "{{SERVER}}"\n'
-              '    version: ^1.0.0\n'
-              '  vother:\n'
-              '    hosted: "{{SERVER}}"\n'
-              '    version: ^1.0.0\n',
-        },
-        otherHubs: [
-          _other([pkg('vplain', '1.1.0'), pkg('vother', '1.1.0')]),
-        ],
-      ).materialize();
-
-      final conflict = await ws.query('@pubhub//:vplain');
-      expect(conflict.succeeded, isFalse, reason: '$conflict');
-      expect(conflict.output, contains('"vplain" has conflicting versions'));
-      expect(conflict.output, contains('"vother" has conflicting versions'));
-      final commands = RegExp(
-        r'^\s*bazel run (\S+) -- (.+)$',
-        multiLine: true,
-      ).allMatches(conflict.output).toList();
-      expect(commands, hasLength(1), reason: '$conflict');
-      expect(
-        commands.single.group(2),
-        allOf(contains('vother'), contains('vplain')),
-        reason: '$conflict',
-      );
-
-      final cache = Directory.systemTemp.createTempSync('pub_cache_');
-      addTearDown(() => cache.deleteSync(recursive: true));
-      final fixed = await ws.bazel(
-        [
-          'run',
-          commands.single.group(1)!,
-          '--',
-          ...commands.single.group(2)!.trim().split(RegExp(r'\s+')),
-        ],
-        environment: {'PUB_CACHE': cache.path},
-      );
-      expect(fixed.succeeded, isTrue, reason: '$fixed');
-      final lock = ws.file('app/pubspec.lock').readAsStringSync();
-      expect('version: "1.1.0"'.allMatches(lock), hasLength(2), reason: lock);
-
-      final analysed = await ws.bazel([
-        'build',
-        '--nobuild',
-        '@pubhub//:vplain',
-        '@pubhub//:vother',
-      ]);
-      expect(analysed.succeeded, isTrue, reason: '$analysed');
-    },
-  );
-
-  test(
-    'a lock behind another at "upgrade" builds the higher version',
-    () async {
-      final ws = await PubInputsFixture(
-        hosted: [HostedPackage('vplain', version: '1.0.0')],
-        onVersionConflict: 'upgrade',
-        otherHubs: [
-          _other([HostedPackage('vplain', version: '1.1.0')]),
-        ],
-      ).materialize();
-
-      final result = await ws.loadSpoke('vplain');
-      expect(result.succeeded, isTrue, reason: '$result');
-      final spoke = await ws.spokeDirectory('vplain');
-      final pubspec = File(p.join(spoke.path, 'pubspec.yaml'))
-          .readAsStringSync();
-      expect(pubspec, contains('version: 1.1.0'));
-    },
-  );
-
-  test(
     'a package hosted in one lock and in a repository in another fails',
     () async {
       final ws = await PubInputsFixture(
@@ -312,38 +332,81 @@ void main() {
     },
   );
 
-  test('one version with two digests fails, naming both', () async {
-    final plain = HostedPackage('vplain');
-    final ws = await PubInputsFixture(
-      hosted: [plain],
-      otherHubs: [
-        _other(
-          [],
-          extraLockEntries:
-              '  vplain:\n'
-              '    dependency: "direct main"\n'
-              '    description:\n'
-              '      name: vplain\n'
-              '      sha256: "${'ab' * 32}"\n'
-              '      url: "{{SERVER}}"\n'
-              '    source: hosted\n'
-              '    version: "1.0.0"\n',
-        ),
-      ],
-    ).materialize();
+  test(
+    'one version with two digests fails, naming both, at any level',
+    () async {
+      final plain = HostedPackage('vplain');
+      final ws = await PubInputsFixture(
+        hosted: [plain],
+        checkDirectDependencies: 'off',
+        otherHubs: [
+          _other(
+            [],
+            extraLockEntries:
+                '  vplain:\n'
+                '    dependency: "direct main"\n'
+                '    description:\n'
+                '      name: vplain\n'
+                '      sha256: "${'ab' * 32}"\n'
+                '      url: "{{SERVER}}"\n'
+                '    source: hosted\n'
+                '    version: "1.0.0"\n',
+          ),
+        ],
+      ).materialize();
 
-    final result = await ws.query('@pubhub//:vplain');
-    expect(result.succeeded, isFalse, reason: '$result');
-    expect(
-      result.output,
-      allOf(
-        contains('"vplain" 1.0.0 has different digests'),
-        contains('ab' * 32),
-        contains('//other:pubspec.lock'),
-      ),
-      reason: '$result',
-    );
-  });
+      final result = await ws.query('@pubhub//:vplain');
+      expect(result.succeeded, isFalse, reason: '$result');
+      expect(
+        result.output,
+        allOf(
+          contains('"vplain" 1.0.0 has conflicting sha256 digests'),
+          contains('ab' * 32),
+          contains('//other:pubspec.lock'),
+          contains(
+            'bazel run @rules_flutter//flutter/pub -- get --directory=other',
+          ),
+        ),
+        reason: '$result',
+      );
+    },
+  );
+
+  test(
+    'two registries for one package fail, naming both, at any level',
+    () async {
+      final ws = await PubInputsFixture(
+        hosted: [HostedPackage('vplain')],
+        checkDirectDependencies: 'off',
+        otherHubs: [
+          _other(
+            [],
+            extraLockEntries:
+                '  vplain:\n'
+                '    dependency: "direct main"\n'
+                '    description:\n'
+                '      name: vplain\n'
+                '      sha256: "${'ab' * 32}"\n'
+                '      url: "https://pub.example.invalid"\n'
+                '    source: hosted\n'
+                '    version: "1.1.0"\n',
+          ),
+        ],
+      ).materialize();
+
+      final result = await ws.query('@pubhub//:vplain');
+      expect(result.succeeded, isFalse, reason: '$result');
+      expect(
+        result.output,
+        allOf(
+          contains('"vplain" is fetched from different registries'),
+          contains('https://pub.example.invalid'),
+          contains('//other:pubspec.lock'),
+        ),
+        reason: '$result',
+      );
+    },
+  );
 
   test(
     'a mapped package is that target for every hub, never fetched',
@@ -393,6 +456,26 @@ void main() {
         contains('"vplain" is mapped to different targets'),
         contains('//mapped:vplain'),
         contains('//remapped:vplain'),
+      ),
+      reason: '$result',
+    );
+  });
+
+  test('a dependency module\'s ignore_hooks fails', () async {
+    final ws = await PubInputsFixture(
+      hosted: [HostedPackage('vplain')],
+      modules: [
+        _dependency([HostedPackage('vplain')], ignoreHooks: ['vplain']),
+      ],
+    ).materialize();
+
+    final result = await ws.query('@pubhub//:vplain');
+    expect(result.succeeded, isFalse, reason: '$result');
+    expect(
+      result.output,
+      allOf(
+        contains('Module `$_depModule` ignores the build hooks of `vplain`'),
+        contains('only the root module may do'),
       ),
       reason: '$result',
     );

@@ -9,16 +9,17 @@ locks state the same SDK constraint on purpose, so the packages derive the same
 
 `flutter_pub.from_lock` builds one repository per package for the whole build,
 at the highest version any lock records, so `@hub_a//:clock` and
-`@hub_b//:clock` are the same library at 1.1.3: `hub_a` is behind and says
-`on_version_conflict = "upgrade"`. `//:shared_libraries_test` proves they are
-one repository (two repositories at one version would build too), and
-`//:upgraded_bin` and `//:agreeing_bin` build over both. That a lock behind
-another at the default `"error"` fails when the module is read cannot be a
-target of a workspace whose hubs would all fail with it;
+`@hub_b//:clock` are the same library at 1.1.3: `hub_a` is behind, and as both
+locks are the root's, the build warns that its request was raised.
+`//:shared_libraries_test` proves they are one repository (two repositories at
+one version would build too), and `//:upgraded_bin` and `//:agreeing_bin` build
+over both. That a raised root lock fails under
+`flutter_pub.settings(check_direct_dependencies = "error")` cannot be a target
+of a workspace whose hubs would all fail with it;
 `tools/dev_tool/test/e2e/pub_versions_e2e_test.dart` holds that case.
 
-rules_flutter's own root workspace runs the same shape: its tools' lock is
-`dev_tool_deps`, at `"upgrade"`, beside whatever a consumer's lock adds.
+rules_flutter's own tools' lock, `dev_tool_deps`, is a lock of another module
+beside whatever a consumer's lock adds: raising it says nothing.
 """
 
 module(name = "dual_hub_e2e")
@@ -36,7 +37,6 @@ flutter_pub = use_extension("@rules_flutter//flutter/pub:extensions.bzl", "pub")
 flutter_pub.from_lock(
     name = "hub_a",
     lock = "//hub_a:pubspec.lock",
-    on_version_conflict = "upgrade",
 )
 flutter_pub.from_lock(
     name = "hub_b",

@@ -62,6 +62,7 @@ load(":pub_cycles_test.bzl", "pub_cycles_test_suite")
 load(":pub_lock_sdks_test.bzl", "pub_lock_sdks_test_suite")
 load(":pub_reconcile_test.bzl", "pub_reconcile_test_suite")
 load(":pub_resolve_test.bzl", "pub_resolve_test_suite")
+load(":pub_settings_test.bzl", "pub_settings_test_suite")
 load(":sdk_inputs_test.bzl", "sdk_inputs_test_suite")
 load(":shader_compile_test.bzl", "shader_compile_test_suite")
 load(":shared_code_asset_test.bzl", "shared_code_asset_test_suite")
@@ -151,6 +152,8 @@ pub_reconcile_test_suite(name = "pub_reconcile_test")
 pub_cycles_test_suite(name = "pub_cycles_test")
 
 pub_resolve_test_suite(name = "pub_resolve_test")
+
+pub_settings_test_suite(name = "pub_settings_test")
 
 toolchain_version_test_suite(name = "toolchain_version_test")
 

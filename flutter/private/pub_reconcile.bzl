@@ -3,7 +3,8 @@
 There is one repository per package for the whole build, so when more than one
 lock lists a package they must agree on what it is. `reconcile_package` decides,
 from the entries every lock has for the package, which one the build uses, or
-why none can be.
+why none can be. A hosted package's version is chosen by rules_dart's policy
+(`select_pub_version`): every lock's entry is a minimum and the highest wins.
 
 Every function here is pure and returns messages instead of calling `fail`: a
 unit test cannot catch `fail`. The extension joins the messages and fails.
@@ -16,11 +17,12 @@ An entry is a `struct` the extension makes of one lock entry:
   url is relative to it, else `""`), for a git package;
 * `directory` (absolute), for a `path` package built from its pubspec;
 * `reason`, for an ignored `path` package;
-* `hub`, `lock_label`, `on_version_conflict`: the tag it came from;
+* `hub`, `lock_label`: the tag it came from;
+* `module`, `is_root`: the module whose tag it is, and whether that is the root;
 * `lock_dir`: the lock's directory within its repository (its Bazel package).
 """
 
-load("@rules_dart//dart/pub:defs.bzl", "parse_semver")
+load("@rules_dart//dart/pub:pub_versions.bzl", "pub_version_request", "select_pub_version")
 load("//flutter/private:lock_entry_kind.bzl", "GIT", "HOSTED", "IGNORED", "LOCAL", "UNSUPPORTED")
 
 def pub_command(verb, lock_dir, packages = []):
@@ -44,18 +46,6 @@ def pub_command(verb, lock_dir, packages = []):
     if lock_dir:
         args.append("--directory=" + lock_dir)
     return " ".join(["bazel run @rules_flutter//flutter/pub --"] + args + packages)
-
-def pub_upgrade_command(lock_dir, packages = []):
-    """`pub_command` for `upgrade`.
-
-    Args:
-        lock_dir: The lock's directory relative to the workspace root.
-        packages: The packages to move forward; empty for all of them.
-
-    Returns:
-        The command line.
-    """
-    return pub_command("upgrade", lock_dir, packages)
 
 def _where(entry):
     return "hub \"{}\", {}".format(entry.hub, entry.lock_label)
@@ -82,116 +72,49 @@ def _kinds_error(name, entries):
         lines = "\n".join(["  - " + _describe(e) for e in entries]),
     )
 
-def _registry_and_digest_errors(name, entries):
-    first = entries[0]
-    for e in entries[1:]:
-        if e.url != first.url:
-            return [(
-                "Package \"{name}\" comes from different registries across flutter_pub.from_lock() locks:\n" +
-                "  - {a} ({a_where})\n" +
-                "  - {b} ({b_where})\n" +
-                "rules_flutter builds one copy of each package. Make the locks agree."
-            ).format(name = name, a = first.url, a_where = _where(first), b = e.url, b_where = _where(e))]
-    by_version = {}
-    for e in entries:
-        other = by_version.setdefault(e.version, e)
-        if e.sha256 != other.sha256:
-            return [(
-                "Package \"{name}\" {version} has different digests across flutter_pub.from_lock() locks:\n" +
-                "  - {a} ({a_where})\n" +
-                "  - {b} ({b_where})\n" +
-                "One version of a package is one archive. Re-resolve the locks."
-            ).format(name = name, version = e.version, a = other.sha256, a_where = _where(other), b = e.sha256, b_where = _where(e))]
-    return []
+def _where_version(entry):
+    # The label within its module, which the message names when it is not the root.
+    where = "the lock `//{}`".format(entry.lock_label.split("//", 1)[1])
+    if not entry.is_root:
+        where += " in module `{}`".format(entry.module)
+    return where
 
-def _version_error(name, entries, winner):
-    """`struct(errors, behind)`: the detail of one package's conflict, and the locks that are behind on it."""
-    behind = [e for e in entries if e.version != winner.version and e.on_version_conflict == "error"]
-    if not behind:
-        return struct(errors = [], behind = [])
-    locks = sorted({e.lock_label: True for e in behind}.keys())
-    return struct(
-        errors = [(
-            "Package \"{name}\" has conflicting versions across flutter_pub.from_lock() locks:\n" +
-            "{lines}\n\n" +
-            "rules_flutter builds one version of each package, the highest a lock records.\n" +
-            "{locks} pin{s} a lower one."
-        ).format(
-            name = name,
-            lines = "\n".join([
-                "  - {} ({}, on_version_conflict = \"{}\")".format(e.version, _where(e), e.on_version_conflict)
-                for e in entries
-            ]),
-            locks = ", ".join(locks),
-            s = "s" if len(locks) == 1 else "",
-        )],
-        behind = [struct(name = name, lock_label = e.lock_label, lock_dir = e.lock_dir) for e in behind],
-    )
+def _hosted_selection(name, entries, check):
+    """Picks a hosted package's entry with rules_dart's one version policy.
 
-def version_conflict_fix(behind):
-    """The one message that says how to fix every version conflict at once.
-
-    A lock that is behind on several packages is re-resolved by one command
-    naming all of them, so the fix is one run per lock, not one per package.
-
-    Args:
-        behind: The `behind` of every `reconcile_package` result, joined.
-
-    Returns:
-        The message; empty when nothing is behind.
-    """
-    if not behind:
-        return ""
-    packages = {}
-    dirs = {}
-    for b in behind:
-        packages.setdefault(b.lock_label, {})[b.name] = True
-        dirs[b.lock_label] = b.lock_dir
-    locks = sorted(packages.keys())
-    one = len(locks) == 1
-    return (
-        "To resolve:\n\n" +
-        "  1. (Preferred) Re-resolve {those} so the packages move forward, with the\n" +
-        "     toolchain that builds {them}, from the root of the workspace that holds {it}:\n" +
-        "{commands}\n\n" +
-        "  2. If {their} constraints forbid the higher versions, set on_version_conflict = \"upgrade\"\n" +
-        "     on {that}: {its} packages are then built at the higher versions."
-    ).format(
-        those = "that lock" if one else "those locks",
-        them = "it" if one else "them",
-        it = "it" if one else "each",
-        commands = "\n".join(["       " + pub_upgrade_command(dirs[lock], sorted(packages[lock].keys())) for lock in locks]),
-        their = "its" if one else "their",
-        that = "that flutter_pub.from_lock()" if one else "those flutter_pub.from_lock() tags",
-        its = "its" if one else "their",
-    )
-
-def pick_version(name, entries):
-    """The one policy for which version of a hosted package the build uses.
-
-    The highest version any lock records wins. A lock that records a lower one
-    is an error unless its tag set `on_version_conflict = "upgrade"`, which
-    accepts the higher version. Nothing is ever built below the version its
-    lock records. Another policy is a change to this function alone.
+    Every lock's entry is a request and the highest wins, as rules_dart's
+    `pub.from_lock` does. A lock of the root module whose request is raised is
+    reported at the root's `check`. Two entries of one version must pin one
+    digest, and every entry one registry.
 
     Args:
         name: The package's name.
-        entries: Its hosted entries, which agree on the registry and on the
-            digest of each version.
+        entries: Its hosted entries.
+        check: The root's `check_direct_dependencies`.
 
     Returns:
-        `struct(entry, errors, behind)`: the winning entry, the messages, and
-        the locks behind on the package (see `version_conflict_fix`).
+        `struct(entry, errors, warnings)`.
     """
-    winner = entries[0]
-    for e in entries[1:]:
-        if parse_semver(e.version) > parse_semver(winner.version):
-            winner = e
-    conflict = _version_error(name, entries, winner)
-    return struct(entry = winner, errors = conflict.errors, behind = conflict.behind)
+    requests = [
+        pub_version_request(
+            version = e.version,
+            sha256 = e.sha256,
+            url = e.url,
+            is_root = e.is_root,
+            where = _where_version(e),
+            upgrade = pub_command("upgrade", e.lock_dir, [name]),
+            refresh = pub_command("get", e.lock_dir),
+        )
+        for e in entries
+    ]
+    selection = select_pub_version(name, requests, check, settings = "flutter_pub.settings")
+    if selection.error:
+        return struct(entry = None, errors = [selection.error], warnings = [])
 
-def _hosted_errors(name, entries):
-    return _registry_and_digest_errors(name, entries)
+    # The first entry at the winning version, as the selection picks the first
+    # request at it.
+    winner = [e for e in entries if e.version == selection.request.version][0]
+    return struct(entry = winner, errors = [], warnings = [selection.warning] if selection.warning else [])
 
 def _git_key(entry):
     return (entry.git_url, entry.git_lock, entry.resolved_ref, entry.git_path)
@@ -222,35 +145,34 @@ def _local_errors(name, entries):
         )]
     return []
 
-def reconcile_package(name, entries):
+def reconcile_package(name, entries, check = "warning"):
     """Decides which of a package's lock entries the build uses.
 
     Args:
         name: The package's name.
         entries: Its entries, one per lock that lists it (see the file doc).
+        check: The root's `check_direct_dependencies`, for a hosted package
+            whose root lock is raised.
 
     Returns:
-        `struct(entry, errors, behind)`: `entry`, the one the build uses (None
-        when `errors` is set); `errors`, the messages, empty when the locks
-        agree; `behind`, what `version_conflict_fix` needs of a version conflict.
+        `struct(entry, errors, warnings)`: `entry`, the one the build uses
+        (None when `errors` is set); `errors`, the messages, empty when the
+        locks agree; `warnings`, the messages to print when they do.
     """
     kinds = {e.kind: True for e in entries}
     if len(kinds) > 1:
-        return struct(entry = None, errors = [_kinds_error(name, entries)], behind = [])
+        return struct(entry = None, errors = [_kinds_error(name, entries)], warnings = [])
     kind = entries[0].kind
     errors = []
     if kind == HOSTED:
-        errors = _hosted_errors(name, entries)
-        if not errors:
-            picked = pick_version(name, entries)
-            return struct(entry = None if picked.errors else picked.entry, errors = picked.errors, behind = picked.behind)
+        return _hosted_selection(name, entries, check)
     elif kind == GIT:
         errors = _git_errors(name, entries)
     elif kind == LOCAL:
         errors = _local_errors(name, entries)
     if errors:
-        return struct(entry = None, errors = errors, behind = [])
-    return struct(entry = entries[0], errors = [], behind = [])
+        return struct(entry = None, errors = errors, warnings = [])
+    return struct(entry = entries[0], errors = [], warnings = [])
 
 def sdk_pin_errors(flutter_version, sdk_pins, chosen, entries):
     """The places a build would use a package outside an SDK package's exact pin.
@@ -258,9 +180,8 @@ def sdk_pin_errors(flutter_version, sdk_pins, chosen, entries):
     Flutter's own packages depend on a few hosted packages at exactly one version
     (`flutter_test` on `test_api 0.7.12`). pub honours that for any app that uses
     them, but the build has one copy of each package and takes the highest any
-    lock records, so a lock that brings a higher one (whatever its
-    `on_version_conflict`) would build the SDK package against a version it
-    forbids.
+    lock records, so a lock that brings a higher one would build the SDK
+    package against a version it forbids.
 
     Args:
         flutter_version: The Flutter version that builds the SDK packages.

@@ -12,6 +12,7 @@ extension is identified by the file that defines it and its name.
 
 load("@rules_dart//dart/ext:registry.bzl", "curated_code_assets")
 load("@rules_dart//dart/pub:pub_lock_package.bzl", "check_pub_archive_sha256", "check_pub_git_resolved_ref", "is_relative_git_url")
+load("@rules_dart//dart/pub:pub_versions.bzl", "CHECK_LEVELS")
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_lock")
 load("//flutter/private:android_plugin_maven.bzl", "MAVEN_DEPS_FILE", "flutter_android_maven")
 load("//flutter/private:apple_app_settings_repo.bzl", "flutter_apple_app_settings")
@@ -30,8 +31,9 @@ load("//flutter/private:flutter_unsupported_package.bzl", "flutter_unsupported_p
 load("//flutter/private:lock_entry_kind.bzl", "ENGINE_PROVIDED", "FLUTTER_FRAMEWORK", "FLUTTER_SOURCE", "GIT", "HOSTED", "IGNORED", "LOCAL", "PATH", "UNSUPPORTED", "lock_entry_kind")
 load("//flutter/private:pub_cycles.bzl", "module_cycles", "plan_cycles")
 load("//flutter/private:pub_lock_sdks.bzl", "parse_lock_sdk_constraints")
-load("//flutter/private:pub_reconcile.bzl", "pub_command", "reconcile_package", "sdk_pin_errors", "unsupported_locks", "version_conflict_fix")
+load("//flutter/private:pub_reconcile.bzl", "pub_command", "reconcile_package", "sdk_pin_errors", "unsupported_locks")
 load("//flutter/private:pub_resolve.bzl", "path_package_directory", "resolve_errors", "resolve_failure", "resolved_targets")
+load("//flutter/private:pub_settings.bzl", "root_only_settings")
 load("//flutter/private:swift_packages.bzl", "declare_swift_packages")
 load("//flutter/private:versions.bzl", "flutter_sdk_exact_pins", "flutter_source_sha256")
 
@@ -55,8 +57,9 @@ the hub then holds the packages of all their locks, each aliased once.
 Every package is one repository for the whole build, however many hubs list it,
 so a name starting with `flutter_pub` is reserved. The locks that list a package
 must agree on its source and, for a git package, its commit. Hosted versions
-may differ: the build gets the highest, and `on_version_conflict` says whether a
-lock behind it fails or is upgraded. One version has one digest in every lock.
+may differ: each lock's version is a minimum and the build gets the highest any
+lock records, in any module (see `flutter_pub.settings`). One version has one
+digest in every lock.
 """,
         mandatory = True,
     ),
@@ -156,25 +159,6 @@ error.
 """,
         default = {},
     ),
-    "on_version_conflict": attr.string(
-        doc = """\
-What to do when another `flutter_pub.from_lock` lock brings a higher version of
-a package this lock lists. A build has one version of each package, the highest
-any lock records, and nothing is built below the version its lock records.
-
-`"error"` (the default) fails when the module is read, naming both locks and the
-fix (`bazel run @rules_flutter//flutter/pub -- upgrade --directory=<this lock's
-directory> <package>...`, from the workspace root, naming every package the lock is behind on), which runs while the locks
-disagree. `"upgrade"` accepts the higher version: this lock's packages are
-built at it. Use it for a lock whose constraints do not allow the version the
-other brings, or for a tool's own lock, which must not stop a consumer.
-
-A lock that lists the package from another source, registry or digest, or at
-another git commit, always fails.
-""",
-        default = "error",
-        values = ["error", "upgrade"],
-    ),
     "swift_package_resolved": attr.label(
         doc = """\
 The `Package.resolved` that pins the Swift packages this lock's Apple plugins
@@ -192,10 +176,35 @@ lock, and commit it. The files of all tags must agree on each package.
               "irrelevant to this build (its native code is never reached). " +
               "Suppresses the unreplaced-hook error for them, for the whole " +
               "build: the names of every tag are one set. This is a " +
-              "declaration you make deliberately; it is never a default.",
+              "declaration you make deliberately; it is never a default. Only " +
+              "the root module may set it: whether a hook matters depends on " +
+              "the programs the build makes, which are the root's.",
         default = [],
     ),
 })
+
+pub_settings_tag = tag_class(
+    attrs = {
+        "check_direct_dependencies": attr.string(
+            doc = "What to do when one of the root module's own requests (a hosted " +
+                  "entry of a lock the root passes to `flutter_pub.from_lock`) is raised " +
+                  "by a higher request elsewhere in the build: `warning` (the default) " +
+                  "prints the package, both versions, who raised it and the command that " +
+                  "raises the root's lock, `error` fails the build with that message, and " +
+                  "`off` says nothing. Raising another module's request is what a minimum " +
+                  "means and is never reported. Bazel's `--check_direct_dependencies` does " +
+                  "the same for `bazel_dep`.",
+            default = "warning",
+            values = CHECK_LEVELS,
+        ),
+    },
+    doc = "How the extension reports the build's version choices. Every hosted entry " +
+          "of every `flutter_pub.from_lock` lock, in any module, is a request for at " +
+          "least that version, and the highest is built, as Bazel's minimal version " +
+          "selection does for modules. Two requests of one version must pin one digest, " +
+          "and all of a package's requests one registry. Only the root module may use " +
+          "this tag, at most once.",
+)
 
 pub_cycle_tag = tag_class(
     attrs = {
@@ -317,8 +326,15 @@ def pub_extension(module_ctx):
     # Handle flutter_pub.from_lock() tags — resolve pubspec.lock with Flutter
     # SDK support. Every tag of every module is read first, because a package is
     # one repository for the whole build: the locks that list it must agree on
-    # it (`reconcile_package`), and a package any tag maps with `resolve` is
+    # it (`reconcile_package`), the highest version of a hosted package any
+    # lock records is built, and a package any tag maps with `resolve` is
     # that target for every hub.
+    # How a raised root lock is reported, and which hooks do not matter, are
+    # the root's to say: another module's statement of either fails.
+    settings = root_only_settings(module_ctx.modules)
+    if settings.error:
+        fail(settings.error)
+
     tags = []
     for mod in module_ctx.modules:
         for pub_tag in mod.tags.from_lock:
@@ -346,7 +362,7 @@ def pub_extension(module_ctx):
             # reads it: the real one, for a lock of a module whose repository
             # links to its source (`local_path_override`).
             lock_dir = str(module_ctx.path(pub_tag.lock).realpath.dirname)
-            tags.append(struct(tag = pub_tag, packages = lock_pkgs, flutter_constraint = flutter_constraint, lock_dir = lock_dir))
+            tags.append(struct(module = mod, tag = pub_tag, packages = lock_pkgs, flutter_constraint = flutter_constraint, lock_dir = lock_dir))
 
     cycles = [module_cycles(mod) for mod in module_ctx.modules]
     if not tags:
@@ -355,7 +371,7 @@ def pub_extension(module_ctx):
         if planned.error:
             fail(planned.error)
     else:
-        _declare_pub_packages(tags, sdks, user_overlay_roots, cycles)
+        _declare_pub_packages(tags, settings, sdks, user_overlay_roots, cycles)
         declare_swift_packages(module_ctx, [t.tag.swift_package_resolved for t in tags if t.tag.swift_package_resolved])
 
     return module_ctx.extension_metadata(reproducible = True)
@@ -416,21 +432,20 @@ def _hub_listing(hub_packages, package):
     """A hub that lists a package: its alias follows the selected SDK."""
     return [h for h in sorted(hub_packages.keys()) if package in hub_packages[h]][0]
 
-def _declare_pub_packages(tags, sdks, user_overlay_roots, cycles):
+def _declare_pub_packages(tags, settings, sdks, user_overlay_roots, cycles):
     """Declares the repositories of every `flutter_pub.from_lock()` tag: one per package.
 
     Args:
-        tags: One `struct(tag, packages)` per tag, `packages` being its parsed lock.
+        tags: One `struct(module, tag, packages)` per tag, `packages` being its parsed lock.
+        settings: The root's `root_only_settings`: the level for its raised
+            requests, and the packages whose hooks it declared irrelevant.
         sdks: The declared SDKs, by name. The default SDK's framework builds the
             build's Flutter SDK packages; another SDK with another framework
             has packages of its own.
         user_overlay_roots: The overlay roots every package is built with.
         cycles: Every module's `flutter_pub.cycle()` declarations (`module_cycles`).
     """
-    ignore_hooks = {}
-    for t in tags:
-        for pkg_name in t.tag.ignore_hooks:
-            ignore_hooks[pkg_name] = True
+    ignore_hooks = settings.ignore_hooks
 
     mapped = resolved_targets([struct(lock = t.tag.lock, hub = t.tag.name, resolve = t.tag.resolve) for t in tags])
     if mapped.errors:
@@ -480,21 +495,23 @@ def _declare_pub_packages(tags, sdks, user_overlay_roots, cycles):
                 hub = tag.name,
                 lock_label = str(tag.lock),
                 lock_dir = tag.lock.package,
-                on_version_conflict = tag.on_version_conflict,
+                module = t.module.name,
+                is_root = t.module.is_root,
                 **fields
             ))
 
     chosen = {}
     problems = []
-    behind = []
     for name in sorted(entries.keys()):
-        result = reconcile_package(name, entries[name])
+        result = reconcile_package(name, entries[name], settings.check)
         problems.extend(result.errors)
-        behind.extend(result.behind)
+        for warning in result.warnings:
+            # Bazel warns the same way when a module raises a `bazel_dep` of
+            # the root (`--check_direct_dependencies`).
+            # buildifier: disable=print
+            print(warning)
         chosen[name] = result.entry
     if problems:
-        if behind:
-            problems.append(version_conflict_fix(behind))
         fail("\n\n".join(problems))
 
     # A release's packages are held to the pins it records; another framework

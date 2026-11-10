@@ -1,0 +1,60 @@
+"""Unit tests for `root_only_settings`: the statements only the root module may make."""
+
+load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
+load("//flutter/private:pub_settings.bzl", "root_only_settings")
+
+def _module(name, is_root = False, settings = [], ignore_hooks = []):
+    return struct(
+        name = name,
+        is_root = is_root,
+        tags = struct(
+            settings = settings,
+            from_lock = [struct(ignore_hooks = ignore_hooks)],
+        ),
+    )
+
+def _the_root_states_its_settings_and_hooks_test_impl(ctx):
+    env = unittest.begin(ctx)
+
+    s = root_only_settings([_module("root", is_root = True), _module("dep")])
+    asserts.equals(env, None, s.error)
+    asserts.equals(env, "warning", s.check)
+    asserts.equals(env, {}, s.ignore_hooks)
+
+    s = root_only_settings([
+        _module("root", is_root = True, settings = [struct(check_direct_dependencies = "error")], ignore_hooks = ["objective_c"]),
+        _module("dep"),
+    ])
+    asserts.equals(env, None, s.error)
+    asserts.equals(env, "error", s.check)
+    asserts.equals(env, {"objective_c": True}, s.ignore_hooks)
+
+    return unittest.end(env)
+
+the_root_states_its_settings_and_hooks_test = unittest.make(_the_root_states_its_settings_and_hooks_test_impl)
+
+def _another_module_may_not_test_impl(ctx):
+    env = unittest.begin(ctx)
+
+    s = root_only_settings([_module("root", is_root = True), _module("dep", settings = [struct(check_direct_dependencies = "off")])])
+    asserts.true(env, "Module `dep` uses `flutter_pub.settings`" in s.error, s.error)
+
+    # A dependency's ignored hook would silence the root's programs, so it fails.
+    s = root_only_settings([_module("root", is_root = True), _module("dep", ignore_hooks = ["objective_c"])])
+    asserts.true(env, "Module `dep` ignores the build hooks of `objective_c`" in s.error, s.error)
+    asserts.equals(env, {}, s.ignore_hooks)
+
+    tag = struct(check_direct_dependencies = "off")
+    s = root_only_settings([_module("root", is_root = True, settings = [tag, tag])])
+    asserts.true(env, "uses `flutter_pub.settings` 2 times" in s.error, s.error)
+
+    return unittest.end(env)
+
+another_module_may_not_test = unittest.make(_another_module_may_not_test_impl)
+
+def pub_settings_test_suite(name):
+    unittest.suite(
+        name,
+        the_root_states_its_settings_and_hooks_test,
+        another_module_may_not_test,
+    )

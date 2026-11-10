@@ -232,7 +232,7 @@ class FixtureHub {
     this.hosted = const [],
     this.extraLockEntries = '',
     this.resolve = const {},
-    this.onVersionConflict,
+    this.ignoreHooks = const [],
   });
 
   /// The tag's `name`; the fixture's own hub name makes it the same hub.
@@ -246,8 +246,20 @@ class FixtureHub {
   final String extraLockEntries;
   final Map<String, String> resolve;
 
-  /// The tag's `on_version_conflict`; the default (`error`) when null.
-  final String? onVersionConflict;
+  /// The tag's `ignore_hooks`.
+  final List<String> ignoreHooks;
+}
+
+/// A module the fixture's root module depends on (`bazel_dep` with a
+/// `local_path_override`), in the directory of its [name], with
+/// `flutter_pub.from_lock()` tags of its own. A [FixtureHub]'s `lockPackage`
+/// is relative to the module, and its packages are served by the fixture's
+/// registry.
+class FixtureModule {
+  FixtureModule(this.name, {this.hubs = const []});
+
+  final String name;
+  final List<FixtureHub> hubs;
 }
 
 /// What goes into a [PubInputsWorkspace].
@@ -262,7 +274,8 @@ class PubInputsFixture {
     this.lockPackage = '',
     this.git = const [],
     this.otherHubs = const [],
-    this.onVersionConflict,
+    this.modules = const [],
+    this.checkDirectDependencies,
     this.http = false,
     this.rulesDartPubLocks = const [],
     this.buildFromPubspec = const [],
@@ -283,8 +296,9 @@ class PubInputsFixture {
   final Map<String, String> ignored;
 
   /// Lock packages (`''` for the root, or `other`) that rules_dart's own `pub`
-  /// extension also reads, as `pub.from_lock()` tags of one hub. Locks that
-  /// disagree on a package fail every repository of that extension.
+  /// extension also reads, as `pub.from_lock()` tags of one hub, under
+  /// `pub.settings(check_direct_dependencies = "error")`. Locks that disagree
+  /// on a package's version fail every repository of that extension.
   final List<String> rulesDartPubLocks;
 
   /// Whether the registry is served over HTTP, as pub's hosted API, rather
@@ -297,8 +311,12 @@ class PubInputsFixture {
   /// of its own.
   final List<FixtureHub> otherHubs;
 
-  /// The main tag's `on_version_conflict`; the default (`error`) when null.
-  final String? onVersionConflict;
+  /// Modules the root depends on, each with locks of its own.
+  final List<FixtureModule> modules;
+
+  /// The root's `flutter_pub.settings(check_direct_dependencies = ...)`;
+  /// no `settings` tag (so `warning`) when null.
+  final String? checkDirectDependencies;
 
   /// The hosted packages: archives are made and listed in the lock.
   final List<HostedPackage> hosted;
@@ -354,9 +372,12 @@ class PubInputsFixture {
     return out.toString();
   }
 
-  /// rules_dart's `pub` extension, with a `from_lock` tag per lock.
+  /// rules_dart's `pub` extension, with a `from_lock` tag per lock, refusing
+  /// a raised root lock.
   static String _rulesDartPubTags(List<String> lockPackages) => [
     'dart_pub = use_extension("@rules_dart//dart/pub:extensions.bzl", "pub")',
+    // Two locks at different versions are refused only at `error`.
+    'dart_pub.settings(check_direct_dependencies = "error")',
     for (final lock in lockPackages)
       'dart_pub.from_lock(name = "dartdeps", lock = "//$lock:pubspec.lock")',
     'use_repo(dart_pub, "dartdeps")',
@@ -366,10 +387,10 @@ class PubInputsFixture {
   static String _tag(
     String name,
     String lockPackage,
-    Map<String, String> resolve,
-    String? onVersionConflict, {
+    Map<String, String> resolve, {
     List<String> buildFromPubspec = const [],
     Map<String, String> ignored = const {},
+    List<String> ignoreHooks = const [],
   }) {
     final resolved = resolve.entries
         .map((e) => '${jsonEncode(e.key)}: ${jsonEncode(e.value)}')
@@ -382,11 +403,41 @@ class PubInputsFixture {
       if (buildFromPubspec.isNotEmpty)
         '    build_from_pubspec = ${jsonEncode(buildFromPubspec)},',
       if (ignored.isNotEmpty) '    ignored = ${jsonEncode(ignored)},',
-      if (onVersionConflict != null)
-        '    on_version_conflict = "$onVersionConflict",',
+      if (ignoreHooks.isNotEmpty)
+        '    ignore_hooks = ${jsonEncode(ignoreHooks)},',
       ')',
     ].join('\n');
   }
+
+  static String _hubTag(FixtureHub hub) => _tag(
+    hub.name,
+    hub.lockPackage,
+    hub.resolve,
+    ignoreHooks: hub.ignoreHooks,
+  );
+
+  /// The `MODULE.bazel` of a module the root depends on.
+  static String _moduleBazel(FixtureModule module) => [
+    'module(name = "${module.name}")',
+    'bazel_dep(name = "rules_flutter", version = "0.0.0")',
+    'flutter_pub = use_extension("@rules_flutter//flutter/pub:extensions.bzl", "pub")',
+    ...module.hubs.map(_hubTag),
+    '',
+  ].join('\n');
+
+  /// The lock and its `BUILD.bazel` of [hub], under [dir].
+  static Map<String, String> _hubFiles(
+    String dir,
+    FixtureHub hub,
+    String serverUrl,
+  ) => {
+    p.posix.join(dir, hub.lockPackage, 'BUILD.bazel'): '',
+    p.posix.join(dir, hub.lockPackage, 'pubspec.lock'): renderLock(
+      hub.hosted,
+      serverUrl,
+      extraEntries: hub.extraLockEntries.replaceAll('{{SERVER}}', serverUrl),
+    ),
+  };
 
   static final Expando<String> _digests = Expando<String>('sha256');
 
@@ -397,6 +448,8 @@ class PubInputsFixture {
     final archived = <HostedPackage>{
       ...hosted,
       for (final hub in otherHubs) ...hub.hosted,
+      for (final module in modules)
+        for (final hub in module.hubs) ...hub.hosted,
     };
     for (final package in archived) {
       final tree = await Directory.systemTemp.createTemp('pub_inputs_tree_');
@@ -504,14 +557,16 @@ local_path_override(
     module_name = "rules_flutter",
     path = ${jsonEncode(repo)},
 )
+${modules.map((m) => 'bazel_dep(name = "${m.name}", version = "0.0.0")\nlocal_path_override(module_name = "${m.name}", path = "${m.name}")').join('\n')}
 
 flutter = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter")
 flutter.toolchain(flutter_version = "$flutterVersion")
 
 flutter_pub = use_extension("@rules_flutter//flutter/pub:extensions.bzl", "pub")
 ${overlayRoots.isEmpty ? '' : 'flutter_pub.plugin_overlays(roots = ${jsonEncode(overlayRoots)})'}
-${_tag(pubHub, lockPackage, resolve, onVersionConflict, buildFromPubspec: buildFromPubspec, ignored: ignored)}
-${otherHubs.map((h) => _tag(h.name, h.lockPackage, h.resolve, h.onVersionConflict)).join('\n')}
+${checkDirectDependencies == null ? '' : 'flutter_pub.settings(check_direct_dependencies = "$checkDirectDependencies")'}
+${_tag(pubHub, lockPackage, resolve, buildFromPubspec: buildFromPubspec, ignored: ignored)}
+${otherHubs.map(_hubTag).join('\n')}
 ${cycles.map((c) => 'flutter_pub.cycle(packages = ${jsonEncode(c)})').join('\n')}
 ${rulesDartPubLocks.isEmpty ? '' : _rulesDartPubTags(rulesDartPubLocks)}
 use_repo(flutter_pub, ${{pubHub, for (final h in otherHubs) h.name}.map((n) => '"$n"').join(', ')}${spokeNames.map((n) => ', "flutter_pub__$n"').join()})
@@ -538,16 +593,14 @@ use_repo(flutter_pub, ${{pubHub, for (final h in otherHubs) h.name}.map((n) => '
         serverUrl,
         extraEntries: extraLockEntries + gitEntries.toString(),
       ),
-      for (final hub in otherHubs) ...{
-        p.posix.join(hub.lockPackage, 'BUILD.bazel'): '',
-        p.posix.join(hub.lockPackage, 'pubspec.lock'): renderLock(
-          hub.hosted,
-          serverUrl,
-          extraEntries: hub.extraLockEntries.replaceAll(
-            '{{SERVER}}',
-            serverUrl,
-          ),
-        ),
+      for (final hub in otherHubs) ..._hubFiles('', hub, serverUrl),
+      if (modules.isNotEmpty)
+        '.bazelignore': modules.map((m) => '${m.name}\n').join(),
+      for (final module in modules) ...{
+        p.posix.join(module.name, 'MODULE.bazel'): _moduleBazel(module),
+        p.posix.join(module.name, 'BUILD.bazel'): '',
+        for (final hub in module.hubs)
+          ..._hubFiles(module.name, hub, serverUrl),
       },
       for (final entry in files.entries)
         entry.key: entry.value.replaceAll('{{SERVER}}', serverUrl),
