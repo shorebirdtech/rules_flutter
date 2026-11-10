@@ -1,6 +1,6 @@
 load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
 load("@rules_dart//dart:defs.bzl", "dart_test")
-load(":outline_cutoff.bzl", "VARIANTS", "outline_cutoff_modules", "reads_outline_test")
+load(":outline_cutoff.bzl", "VARIANTS", "outline_cutoff_modules", "outline_sdks", "reads_outline_test")
 
 # Early cutoff of Flutter's per-library kernel modules: a library whose
 # function bodies change keeps the outline its dependents compile against, so
@@ -22,25 +22,36 @@ string_flag(
     for variant in VARIANTS
 ]
 
-outline_cutoff_modules(
-    name = "modules",
-    dependency = "//flutter/tests/outline_fixture/a",
-    dependent = "//flutter/tests/outline_fixture/b",
-)
+# Under one Flutter SDK for each Dart release a supported Flutter version
+# bundles, since each Dart's outline stripper reads only its own kernels:
+# `outline_cutoff_test_3_13_7` and so on.
+[
+    outline_cutoff_modules(
+        name = "modules_" + dart.replace(".", "_"),
+        dart_version = dart,
+        dependency = "//flutter/tests/outline_fixture/a",
+        dependent = "//flutter/tests/outline_fixture/b",
+        sdk = sdk,
+    )
+    for dart, sdk in outline_sdks().items()
+]
 
 reads_outline_test(
     name = "reads_outline_test",
     target_under_test = "//flutter/tests/outline_fixture/b",
 )
 
-dart_test(
-    name = "outline_cutoff_test",
-    size = "medium",
-    args = ["$(rlocationpath :modules)"],
-    data = [":modules"],
-    main = "outline_cutoff_test.dart",
-    deps = [
-        "@dev_tool_deps//:test",
-        "@rules_dart//dart/runfiles",
-    ],
-)
+[
+    dart_test(
+        name = "outline_cutoff_test_" + dart.replace(".", "_"),
+        size = "medium",
+        args = ["$(rlocationpath :modules_%s)" % dart.replace(".", "_")],
+        data = [":modules_" + dart.replace(".", "_")],
+        main = "outline_cutoff_test.dart",
+        deps = [
+            "@dev_tool_deps//:test",
+            "@rules_dart//dart/runfiles",
+        ],
+    )
+    for dart in outline_sdks()
+]

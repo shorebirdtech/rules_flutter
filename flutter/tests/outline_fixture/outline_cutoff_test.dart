@@ -33,6 +33,15 @@ void main(List<String> args) {
   final edits = (plan['edits'] as Map).cast<String, Map>();
   Map<String, String> edit(String name) => edits[name]!.cast<String, String>();
 
+  test('the modules are compiled by the Dart they are meant for', () {
+    expect(
+      File(
+        runfiles.rlocation(plan['sdk_dart_version'] as String),
+      ).readAsStringSync().trim(),
+      plan['dart_version'],
+    );
+  });
+
   test('a dependent compiles against an outline', () {
     expect(base['dependency_outlines'], endsWith('.outlines'));
   });

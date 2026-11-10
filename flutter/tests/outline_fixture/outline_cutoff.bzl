@@ -4,14 +4,43 @@ The modules compile against Flutter's SDK (`flutter_module_aspect`), whose
 `DartKernelSdkInfo` carries the outline tool, so a library's dependents compile
 against its outline, not its full kernel. The plan names the library's module,
 its outline and its dependent's module for the `base` sources and for each
-edit.
+edit, under the Flutter SDK `sdk` names, and that SDK's Dart version.
+
+The outline stripper is built on the `pkg/kernel` of one Dart release and reads
+that release's kernels, so the modules are built under one SDK for each Dart
+release a supported Flutter version bundles: `OUTLINE_SDKS`.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
 load("@rules_dart//dart:providers.bzl", "DartModuleInfo")
 load("//flutter/private:flutter_module.bzl", "flutter_module_aspect")
+load("//flutter/private:versions.bzl", "FLUTTER_VERSIONS")
 
+# The Flutter SDK the modules are built under for each Dart release, by Dart
+# version: `flutter`, the root's default, or one the root MODULE.bazel declares
+# for this fixture alone.
+OUTLINE_SDKS = {
+    "3.13.2": "outline_dart_3_13_2",
+    "3.13.4": "outline_dart_3_13_4",
+    "3.13.5": "outline_dart_3_13_5",
+    "3.13.7": "flutter",
+}
+
+def outline_sdks():
+    """`OUTLINE_SDKS`, failing if a supported Flutter version's Dart has no SDK in it.
+
+    Returns:
+      `OUTLINE_SDKS`.
+    """
+    missing = sorted({v.dart_version: None for v in FLUTTER_VERSIONS.values() if v.dart_version not in OUTLINE_SDKS})
+    if missing:
+        fail(("No Flutter SDK builds the outline fixture with Dart %s. For each, declare a " +
+              "flutter.toolchain() of a Flutter version bundling it with the root module's " +
+              "`flutter_outline` and name it in OUTLINE_SDKS.") % ", ".join(missing))
+    return OUTLINE_SDKS
+
+_SDK = str(Label("//flutter:sdk"))
 _VARIANT = str(Label("//flutter/tests/outline_fixture:variant"))
 _EDITS = ["body", "signature"]
 
@@ -43,12 +72,30 @@ _variants = transition(
     outputs = [_VARIANT],
 )
 
+def _sdk_impl(_settings, attr):
+    return {_SDK: attr.sdk}
+
+_sdk = transition(
+    implementation = _sdk_impl,
+    inputs = [],
+    outputs = [_SDK],
+)
+
+def _rlocation(ctx, file):
+    if file.short_path.startswith("../"):
+        return file.short_path[len("../"):]
+    return ctx.workspace_name + "/" + file.short_path
+
 def _own(target):
     # The target's own directories: the last of each postorder depset.
     info = target[DartModuleInfo]
     return struct(modules = info.modules.to_list()[-1], outlines = info.outlines.to_list()[-1])
 
 def _impl(ctx):
+    sdk = ctx.toolchains["//flutter:toolchain_type"].flutter_sdk_info
+    versions = [f for f in sdk.tool_files.to_list() if f.short_path.endswith("dart-sdk/version")]
+    if len(versions) != 1:
+        fail("%s: the %s SDK's Dart has no single `dart-sdk/version`: %s" % (ctx.label, sdk.sdk, versions))
     placed = {}
 
     # Every variant's copy of a directory has the same runfiles path, so each
@@ -59,7 +106,7 @@ def _impl(ctx):
             link = ctx.actions.declare_directory("%s/%s/%s" % (ctx.label.name, variant, tree.short_path))
             ctx.actions.symlink(output = link, target_file = tree)
             placed[key] = link
-        return ctx.workspace_name + "/" + placed[key].short_path
+        return _rlocation(ctx, placed[key])
 
     def describe(variant):
         dependency = _own(ctx.split_attr.dependency[variant])
@@ -72,10 +119,12 @@ def _impl(ctx):
 
     plan = ctx.actions.declare_file(ctx.label.name + ".json")
     ctx.actions.write(plan, json.encode_indent({
+        "dart_version": ctx.attr.dart_version,
+        "sdk_dart_version": _rlocation(ctx, versions[0]),
         "base": describe("base"),
         "edits": {edit: describe(edit) for edit in _EDITS},
     }))
-    return [DefaultInfo(files = depset([plan]), runfiles = ctx.runfiles(files = [plan] + placed.values()))]
+    return [DefaultInfo(files = depset([plan]), runfiles = ctx.runfiles(files = [plan, versions[0]] + placed.values()))]
 
 def _reads_outline_impl(ctx):
     env = analysistest.begin(ctx)
@@ -106,8 +155,12 @@ reads_outline_test = analysistest.make(
 
 outline_cutoff_modules = rule(
     implementation = _impl,
+    cfg = _sdk,
     attrs = {
+        "dart_version": attr.string(mandatory = True, doc = "The Dart version `sdk` bundles, which the test checks it does."),
         "dependency": attr.label(cfg = _variants, aspects = [flutter_module_aspect], doc = "The library that is edited."),
         "dependent": attr.label(cfg = _variants, aspects = [flutter_module_aspect], doc = "A library depending on `dependency`."),
+        "sdk": attr.string(mandatory = True, doc = "The Flutter SDK (`--@rules_flutter//flutter:sdk`) the modules are built under."),
     },
+    toolchains = ["//flutter:toolchain_type"],
 )

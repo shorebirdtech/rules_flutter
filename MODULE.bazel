@@ -117,6 +117,24 @@ use_repo(flutter, "flutter_android_emulator_darwin_aarch64", "flutter_android_em
 flutter_pub = use_extension("//flutter/pub:extensions.bzl", "pub")
 use_repo(flutter_pub, "flutter_gen_l10n", "flutter_pub_android_maven")
 
+# One more SDK for each Dart release a supported Flutter version bundles, besides
+# the default's, for //flutter/tests/outline_fixture: it builds the fixture
+# under each, so every Dart's outline stripper is tested on that Dart's kernels.
+# Repositories are fetched lazily, so only those tests download them.
+flutter_outline = use_extension("//flutter:extensions.bzl", "flutter", dev_dependency = True)
+flutter_outline.toolchain(
+    name = "outline_dart_3_13_2",
+    flutter_version = "3.47.2",
+)
+flutter_outline.toolchain(
+    name = "outline_dart_3_13_4",
+    flutter_version = "3.47.5",
+)
+flutter_outline.toolchain(
+    name = "outline_dart_3_13_5",
+    flutter_version = "3.47.7",
+)
+
 register_toolchains("@flutter_toolchains//:all")
 
 # AndroidX dependencies the Flutter Android embedding (flutter.jar) requires
