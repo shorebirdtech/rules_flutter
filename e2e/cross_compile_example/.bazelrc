@@ -24,7 +24,7 @@ try-import %workspace%/.bazelrc.user
 # here, not `test` as elsewhere: this workspace has no test targets, and
 # `bazel test //...` with none exits 4 however clean the checks are, so
 # `bazel build //...` is what runs them. The config line is `common` because
-# `bazel run` of `dart_fix`/`dart_format` reads it too.
+# `bazel run` of `@rules_dart//dart/fix` and `@rules_dart//dart/format` reads it too.
 build --aspects=@rules_dart//dart:analyze.bzl%dart_analyze
 build --output_groups=+dart_analyze
 build --output_groups=+dart_format

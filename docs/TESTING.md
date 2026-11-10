@@ -76,9 +76,11 @@ through the path the committed check actually takes.
 
 ### Never apply `dart fix` unreviewed
 
-There is deliberately no `dart_fix` target in this repo. If one is ever added,
-**the reviewed diff is the deliverable, not a green build** — never `bazel run`
-it and take the result.
+`bazel run @rules_dart//dart/fix -- <patterns>` writes the analyzer's fixes
+back into the tree. **The reviewed diff is the deliverable, not a green
+build**: never run it and commit the result unread. (`bazel run
+@rules_dart//dart/format -- <patterns>` is safe to apply as it stands: it writes
+exactly what the format check would otherwise fail on.)
 
 The reason: `avoid_redundant_argument_values` deletes `sourceRepository:` from
 `Runfiles.create` call sites. That argument is a

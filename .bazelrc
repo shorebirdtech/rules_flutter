@@ -10,8 +10,8 @@ common --config=ruleset
 # `dart analyze` and the `dart format` check run as an aspect over every Dart
 # target a `bazel test` names; any diagnostic, down to an info, fails the build.
 # Tag a target `no-dart-analyze` or `no-dart-format` to opt it out of one.
-# The config line is `common` because `bazel run` of `dart_fix`/`dart_format`
-# reads it too.
+# The config line is `common` because `bazel run` of `@rules_dart//dart/fix`
+# and `@rules_dart//dart/format` reads it too.
 test --aspects=@rules_dart//dart:analyze.bzl%dart_analyze
 test --output_groups=+dart_analyze
 test --output_groups=+dart_format
