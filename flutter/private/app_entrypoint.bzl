@@ -16,7 +16,7 @@ root-isolate launch (see plugin_registrant.bzl), which is what keeps it
 alive across hot restart.
 """
 
-load("@rules_dart//dart:utils.bzl", "colocate_packages", "generate_package_config")
+load("@rules_dart//dart:utils.bzl", "colocate_packages", "generate_package_config", "merged_package_record", "package_lib_prefix")
 
 # The file-system scheme a file with no `package:` URI is compiled under — a
 # `main` outside its package's `lib/`, and the generated plugin registrant. One
@@ -88,38 +88,15 @@ def app_main_location(package_name, package_root, main):
         return struct(uri = package_uri, root = None)
     return app_scheme_location(main)
 
-def package_lib_prefix(package_root):
-    """The `short_path` prefix holding a package's `package:`-reachable files.
-
-    A Dart package rooted at `package_root` exposes `<package_root>/lib/x.dart` as
-    `package:<name>/x.dart`; a workspace-rooted package (`package_root == ""`)
-    exposes `lib/x.dart`. Every question of the form "is this file reachable
-    as `package:<self>/…`, and under what suffix" is this prefix plus a
-    `startswith`, so the arithmetic is written once, here, and shared by the
-    compile path, the dev-config path and the analyzer's source split.
-
-    `package_root` always comes from `derive_package_root`, which speaks `short_path`
-    convention (`external/X` → `../X`). Paths tested against this prefix must
-    therefore be `short_path`s too — an exec path carries a `bazel-out/…`
-    prefix for a generated `main` and would not match.
-
-    Args:
-      package_root: The package's package root, from `derive_package_root`.
-
-    Returns:
-      The prefix, always ending in `/`.
-    """
-    return (package_root + "/lib/") if package_root else "lib/"
-
 def check_foreign_root_package(label, packages, package_name, package_root):
     """Checks that no dependency claims a *differently named* package at `package_root`.
 
-    `synthesize_app_package` drops every transitive record rooted where the app
-    is, because two Dart packages cannot share a root: the same `lib/x.dart`
-    would be reachable as `package:a/x.dart` and `package:b/x.dart`, which the
-    frontend treats as two libraries of one file.
+    `synthesize_app_package` replaces every record rooted where the app is
+    with the app's own, because two Dart packages cannot share a root: the
+    same `lib/x.dart` would be reachable as `package:a/x.dart` and
+    `package:b/x.dart`, which the frontend treats as two libraries of one file.
 
-    Dropping a record that carries the app's *own* name is the ordinary case and
+    Replacing a record that carries the app's *own* name is the ordinary case and
     stays silent — a `flutter_library` and the `flutter_test` beside it naming
     the same package are two Bazel targets contributing to one Dart package, and
     the synthesized record is what they collapse into.
@@ -163,33 +140,38 @@ def check_foreign_root_package(label, packages, package_name, package_root):
     )
 
 def synthesize_app_package(label, packages, package_name, package_root, language_version):
-    """Replace colliding transitive entries with the app's own package.
+    """Replace the records at the app's root with the app's own package.
 
     A `flutter_application` / `flutter_test` / `flutter_web_application` whose
-    own sources live under `lib/` is conceptually the root of its Dart
-    package — but any `dart_library` it depends on rooted at the same
-    directory exposes a `DartPackageInfo` with that same `package_root`, which
-    would collide with the app's mapping (two packages can't share a
-    `rootUri`). Drop those colliding transitive entries and append one fresh
-    entry for the app itself.
+    own sources live under `lib/` is the root of its Dart package, and any
+    `flutter_library` or `dart_library` it depends on rooted at the same
+    directory is that same package. One directory is one entry in a
+    `package_config.json`, so their records give way to one record for the
+    app: the app's statement merged with theirs by rules_dart's
+    `merged_package_record`. What the libraries state carries through: their
+    code assets, licence, hooks and version, so the app bundles the native
+    code and lists the licence of its own root library.
 
-    `package_root` is the app's own, from `derive_package_root`, not a bare `""`. They
-    agree for a workspace-rooted app and differ for one in a nested Bazel
-    package, where `""` claims the workspace root and makes
+    The language version is the app's when it states one. An app that states
+    none takes the version a library at its root states. When both state one
+    and they differ, the build fails naming both.
+
+    `package_root` is the app's own, from `derive_package_root`, not a bare
+    `""`. They agree for a workspace-rooted app and differ for one in a nested
+    Bazel package, where `""` claims the workspace root and makes
     `package:<self>/main.dart` resolve to a *different app's* `lib/main.dart`.
     See `package_lib_prefix`.
 
-    The filter is on `package_root`, not on `package_name`: every record at the
-    app's root is dropped, including one whose name differs from the app's.
-    Two packages rooted at the same directory cannot both be expressed in a
-    `package_config.json` regardless of what they are called, so there is no
-    shape here where keeping the foreign one would be right. A differently
-    named record is not a silent drop, though — `check_foreign_root_package`
-    fails the build and says what to do about it, because nothing downstream
-    can still explain the disappearance.
+    The selection is by `package_root`, not by `package_name`. Two packages
+    rooted at the same directory cannot both be expressed in a
+    `package_config.json` whatever they are called, so a differently named
+    record there cannot be kept, and it cannot be dropped silently either:
+    `check_foreign_root_package` fails the build and says what to do about
+    it, because nothing downstream can still explain the disappearance.
 
     Args:
-      label: The app/test rule's label, for the foreign-package message.
+      label: The app/test rule's label, recorded on the app's record and
+        named in errors.
       packages: List of `DartPackageInfo` (from `collect_packages`).
       package_name: The app's `package_name`. Always non-empty — every
         Flutter consumer rule declares it as a mandatory attribute.
@@ -201,8 +183,8 @@ def synthesize_app_package(label, packages, package_name, package_root, language
         came to accept the attribute and silently drop it.
 
     Returns:
-      The packages list with every entry at `package_root` replaced by one
-      synthesized app entry, carrying `language_version`.
+      The packages list with every entry at `package_root` replaced by the
+      app's own `DartPackageInfo`, last.
 
     Pub writes the root package's `languageVersion` from its own
     `environment.sdk` lower bound. An absent key is not "the default":
@@ -215,11 +197,10 @@ def synthesize_app_package(label, packages, package_name, package_root, language
     if err != None:
         fail(err)
 
-    return [p for p in packages if p.package_root != package_root] + [struct(
-        package_name = package_name,
-        package_root = package_root,
-        language_version = language_version,
-    )]
+    at_root = [p for p in packages if p.package_root == package_root]
+    return [p for p in packages if p.package_root != package_root] + [
+        merged_package_record(label, package_name, package_root, language_version, at_root),
+    ]
 
 def resolve_wrapper_main_import(package_name, package_root, main_short_path, main_path, wrapper_depth):
     """Import URI a generated wrapper should use to reach the user's `main`.

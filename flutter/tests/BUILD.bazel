@@ -7,6 +7,7 @@ load(":aot_options_test.bzl", "aot_file_flags_test_suite", "aot_no_strip_test_su
 load(":app_defines_test.bzl", "app_defines_test_suite")
 load(":app_entrypoint_test.bzl", "app_entrypoint_test_suite")
 load(":app_flavor_test.bzl", "app_flavor_test_suite")
+load(":app_root_record_test.bzl", "app_root_record_test_suite")
 load(":apple_engine_test.bzl", "apple_engine_test_suite")
 load(":apple_plugin_settings_test.bzl", "apple_plugin_settings_test_suite")
 load(":apple_version_check_test.bzl", "apple_version_check_test_suite")
@@ -89,6 +90,8 @@ artifact_urls_test_suite(name = "artifact_urls_test")
 toolchain_test_suite(name = "toolchain_test")
 
 common_test_suite(name = "common_test")
+
+app_root_record_test_suite(name = "app_root_record_test")
 
 asset_bundle_test_suite(name = "asset_bundle_test")
 

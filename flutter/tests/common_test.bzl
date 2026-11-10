@@ -1,12 +1,12 @@
 """Unit tests for app_entrypoint.bzl pure functions."""
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
+load("@rules_dart//dart:utils.bzl", "dart_package_info")
 load(
     "//flutter/private:app_entrypoint.bzl",
     "app_main_package_uri",
     "check_foreign_root_package",
     "compute_wrapper_main_import",
-    "package_lib_prefix",
     "resolve_wrapper_main_import",
     "synthesize_app_package",
 )
@@ -100,16 +100,6 @@ def _app_main_package_uri_none_test_impl(ctx):
 
     # No package name → None.
     asserts.equals(env, None, app_main_package_uri("", "", "lib/main.dart"))
-    return unittest.end(env)
-
-def _package_lib_prefix_test_impl(ctx):
-    """One prefix, shared by the compile path, the dev config and the analyzer split."""
-    env = unittest.begin(ctx)
-    asserts.equals(env, "lib/", package_lib_prefix(""))
-    asserts.equals(env, "custom_boot/lib/", package_lib_prefix("custom_boot"))
-
-    # External repos reach short_path space as `../X`; the prefix follows.
-    asserts.equals(env, "../my_repo/pkg/lib/", package_lib_prefix("../my_repo/pkg"))
     return unittest.end(env)
 
 def _resolve_wrapper_main_import_prefers_package_uri_test_impl(ctx):
@@ -209,8 +199,8 @@ def _synthesize_app_package_replaces_collision_test_impl(ctx):
     """A transitive entry at the app's own `package_root` collides and is dropped."""
     env = unittest.begin(ctx)
     packages = [
-        struct(package_name = "transitive", package_root = "../pub/transitive", language_version = ""),
-        struct(package_name = "my_app", package_root = "", language_version = ""),
+        dart_package_info(label = Label("//:dep"), package_name = "transitive", package_root = "../pub/transitive", language_version = ""),
+        dart_package_info(label = Label("//:dep"), package_name = "my_app", package_root = "", language_version = ""),
     ]
     result = synthesize_app_package("//:app", packages, "my_app", "", "")
     asserts.equals(env, 2, len(result))
@@ -229,8 +219,8 @@ def _synthesize_app_package_roots_at_its_own_package_test_impl(ctx):
     """
     env = unittest.begin(ctx)
     packages = [
-        struct(package_name = "root_lib", package_root = "", language_version = ""),
-        struct(package_name = "custom_boot", package_root = "custom_boot", language_version = ""),
+        dart_package_info(label = Label("//:dep"), package_name = "root_lib", package_root = "", language_version = ""),
+        dart_package_info(label = Label("//:dep"), package_name = "custom_boot", package_root = "custom_boot", language_version = ""),
     ]
     result = synthesize_app_package("//custom_boot:app", packages, "custom_boot", "custom_boot", "")
     asserts.equals(env, 2, len(result))
@@ -280,7 +270,6 @@ _t14_test = unittest.make(_check_foreign_root_package_reports_every_offender_tes
 
 _t7_test = unittest.make(_synthesize_app_package_replaces_collision_test_impl)
 _t8_test = unittest.make(_app_main_package_uri_answers_only_what_package_root_backs_test_impl)
-_t9_test = unittest.make(_package_lib_prefix_test_impl)
 _t10_test = unittest.make(_synthesize_app_package_roots_at_its_own_package_test_impl)
 
 def common_test_suite(name):
@@ -295,7 +284,6 @@ def common_test_suite(name):
         _t6_test,
         _t7_test,
         _t8_test,
-        _t9_test,
         _t10_test,
         _t11_test,
         _t12_test,

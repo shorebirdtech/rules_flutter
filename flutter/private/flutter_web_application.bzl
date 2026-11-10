@@ -33,7 +33,7 @@ from, and `deps` is split the same way.
 
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_dart//dart:providers.bzl", "DartInfo")
-load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "dart_analyzable_info_with_packages", "dart_package_info", "derive_package_root", "generate_dev_package_config", "import_check_validation")
+load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "dart_analyzable_info_with_packages", "dart_package_info", "derive_package_root", "generate_dev_package_config", "import_check_validation", "package_lib_prefix")
 load("//flutter:providers.bzl", "FlutterInfo", "FlutterNativeLibraryInfo", "FlutterSdkRecordInfo")
 load(
     "//flutter/private:app_entrypoint.bzl",
@@ -41,7 +41,6 @@ load(
     "app_main_location",
     "app_scheme_sources",
     "compute_same_root_main_import",
-    "package_lib_prefix",
     "resolve_wrapper_main_import",
     "with_root",
 )
