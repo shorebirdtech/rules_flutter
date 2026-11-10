@@ -125,7 +125,7 @@ Future<ToolchainPaths> resolveToolchainPaths(
       '$externalBase.\n'
       'Looked for: ${candidates.join(', ')}.\n'
       'That means $target resolves no rules_flutter toolchain — check that '
-      'the workspace registers one (`register_toolchains`) and that $target '
+      'rules_flutter is a dependency of the workspace and that $target '
       'is a Flutter target.',
     );
   }

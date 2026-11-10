@@ -18,8 +18,6 @@ use_repo(flutter, "flutter_macos_engine", "flutter_toolchains", "flutter_web_sdk
 flutter_pub = use_extension("@rules_flutter//flutter/pub:extensions.bzl", "pub")
 use_repo(flutter_pub, "dev_tool_deps")
 
-register_toolchains("@flutter_toolchains//:all")
-
 # Hermetic C++ toolchain for Linux arm64 execution platforms, so a C++ tool
 # built for the exec platform (zipper, xmllint) can be compiled when Bazel runs
 # actions on a Linux arm64 worker. Only the Linux-exec, Linux-target toolchain

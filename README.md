@@ -97,8 +97,6 @@ flutter = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter")
 flutter.toolchain(flutter_version = "3.47.9")
 use_repo(flutter, "flutter_toolchains")
 
-register_toolchains("@flutter_toolchains//:all")
-
 flutter_pub = use_extension("@rules_flutter//flutter/pub:extensions.bzl", "pub")
 flutter_pub.from_lock(
     name = "deps",

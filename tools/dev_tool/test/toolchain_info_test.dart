@@ -222,7 +222,7 @@ void main() {
               .having(
                 (e) => e.message,
                 'message',
-                contains('register_toolchains'),
+                contains('rules_flutter is a dependency'),
               )
               .having(
                 (e) => e.message,

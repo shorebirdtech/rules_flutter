@@ -105,8 +105,6 @@ flutter_pub.from_lock(
 )
 use_repo(flutter_pub, "deps")
 
-register_toolchains("@flutter_toolchains//:all")
-
 # The Linux bundle is cross-compiled from the Mac, as in e2e/cross_compile_example.
 register_toolchains(
     "@llvm//toolchain:macos_aarch64_to_linux_x86_64",

@@ -34,8 +34,6 @@ use_repo(flutter, "flutter_toolchains", "flutter_web_sdk")
 
 use_repo(flutter_pub, "deps")
 
-register_toolchains("@flutter_toolchains//:all")
-
 # The packages `//registry` holds, served as a pub registry and fetched by the
 # repository rule that fetches a pub.dev package.
 pub_registry = use_repo_rule("//tools:registry.bzl", "pub_registry")

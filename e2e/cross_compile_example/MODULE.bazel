@@ -25,8 +25,6 @@ use_repo(flutter, "flutter_toolchains")
 
 use_repo(flutter_pub, "deps")
 
-register_toolchains("@flutter_toolchains//:all")
-
 # Hermetic LLVM CC toolchains for the linux_x64 target this workspace builds,
 # from each Mac and Linux host and from a Linux arm64 remote worker. Only these
 # pairs, not `:all`, which would also claim macOS-target compiles from Apple's
