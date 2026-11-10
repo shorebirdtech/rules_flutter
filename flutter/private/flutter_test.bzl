@@ -63,9 +63,8 @@ cannot write there.
 """
 
 load("@bazel_skylib//lib:structs.bzl", "structs")
-load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo", "DartKernelSdkInfo")
-load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "KERNEL_LIST_ATTR", "KERNEL_TOOL_ATTR", "TRACK_CREATION_LOCATIONS_ATTR", "collect_modules", "collect_packages", "collect_transitive_srcs", "dart_entry_kernel_action", "dart_import_check_aspect", "dart_link_kernel_action", "executable_defines", "executable_defines_config", "import_check_validation", "kernel_list", "package_identity_attrs", "runfiles_path", "track_creation_locations")
+load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "KERNEL_LIST_ATTR", "KERNEL_TOOL_ATTR", "MODULAR_KERNEL_ATTR", "TRACK_CREATION_LOCATIONS_ATTR", "collect_modules", "collect_packages", "collect_transitive_srcs", "dart_entry_kernel_action", "dart_import_check_aspect", "dart_link_kernel_action", "executable_defines", "executable_defines_config", "import_check_validation", "kernel_list", "modular_kernel", "package_identity_attrs", "runfiles_path", "track_creation_locations")
 load("//flutter:providers.bzl", "FlutterApplicationInputsInfo", "FlutterTestProgramInfo")
 load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "synthesize_app_package")
 load("//flutter/private:application_libraries.bzl", "application_libraries", "application_libraries_aspect")
@@ -480,7 +479,7 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
     # `--@rules_dart//dart:modular_kernel=false` turns per-library compilation
     # off build-wide; the aspect then compiles nothing, and the test compiles
     # its whole program from source.
-    modular = ctx.attr._modular_kernel[BuildSettingInfo].value
+    modular = modular_kernel(ctx)
 
     # Per-target bootstrap. Imports the user's test by a path relative to the
     # bootstrap under the filesystem roots both compile modes mount, so the
@@ -762,6 +761,7 @@ _PROGRAM_ATTRS.update(_ENVIRONMENT.attrs)
 _PROGRAM_ATTRS.update(PLATFORM_CONSTRAINT_ATTRS)
 _PROGRAM_ATTRS.update(KERNEL_TOOL_ATTR)
 _PROGRAM_ATTRS.update(KERNEL_LIST_ATTR)
+_PROGRAM_ATTRS.update(MODULAR_KERNEL_ATTR)
 _PROGRAM_ATTRS.update(TRACK_CREATION_LOCATIONS_ATTR)
 
 # Each library in `deps` is compiled into a kernel module by the aspect, and its
@@ -811,11 +811,6 @@ _PROGRAM_ATTRS["code_assets"] = attr.label_list(
     doc = CODE_ASSETS_DOC,
     providers = [DartCodeAssetInfo],
     cfg = _ENVIRONMENT.cfg,
-)
-
-_PROGRAM_ATTRS["_modular_kernel"] = attr.label(
-    default = Label("@rules_dart//dart:modular_kernel"),
-    providers = [BuildSettingInfo],
 )
 
 # Built for the host the test's entry kernel compiles on: rules_dart compiles
