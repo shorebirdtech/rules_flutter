@@ -929,6 +929,8 @@ class NativePipelineAssembler {
       orchestrator: orchestrator,
       assetsDir: assetsDir,
       logger: logger,
+      // A relaunch is a restart, so this run reloads: the services go back on.
+      services: host.toolServices,
       liveFingerprint: fingerprint,
       nativeLibs: nativeLibs,
       patchedLibs: hotPatcher == null

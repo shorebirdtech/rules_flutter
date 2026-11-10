@@ -630,6 +630,52 @@ class FakeVmService implements VmService {
     );
   }
 
+  /// What this connection announced with `registerService`: service → alias.
+  final Map<String, String> registeredServices = {};
+
+  /// The handlers installed with `registerServiceCallback`, by service.
+  final Map<String, ServiceCallback> _serviceCallbacks = {};
+
+  @override
+  void registerServiceCallback(String service, ServiceCallback cb) {
+    // As the real one: one handler per name per connection.
+    if (_serviceCallbacks.containsKey(service)) {
+      throw Exception("Service '$service' already registered");
+    }
+    _serviceCallbacks[service] = cb;
+  }
+
+  @override
+  Future<Success> registerService(String service, String alias) async {
+    _checkAlive('registerService');
+    registeredServices[service] = alias;
+    return Success();
+  }
+
+  /// Call [service] as another client would through DDS, which forwards the
+  /// call to this connection: the handler's answer, or the error the real
+  /// `VmService` routing makes of what it threw (`_routeRequest`).
+  Future<Map<dynamic, dynamic>> callRegistered(
+    String service, [
+    Map<String, dynamic> params = const {},
+  ]) async {
+    final handler = _serviceCallbacks[service];
+    if (handler == null) {
+      return {
+        'error': RPCError(
+          service,
+          RPCErrorKind.kMethodNotFound.code,
+          "method not found '$service'",
+        ).toMap(),
+      };
+    }
+    try {
+      return await handler(params);
+    } on RPCError catch (e) {
+      return {'error': e.toMap()};
+    }
+  }
+
   @override
   Stream<Event> get onStdoutEvent => _stdoutController.stream;
 

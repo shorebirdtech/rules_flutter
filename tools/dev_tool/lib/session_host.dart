@@ -28,6 +28,7 @@ import 'reload_pipeline.dart';
 import 'session.dart';
 import 'shutdown_signals.dart';
 import 'teardown.dart';
+import 'tool_services.dart';
 
 class SessionHost {
   /// Every app this command is driving, in launch (or connect) order.
@@ -61,6 +62,23 @@ class SessionHost {
   late final MachineProtocol protocol = MachineProtocol(
     enabled: _isMachine,
     commandRunner: commandRunner,
+  );
+
+  /// The `reloadSources` and `hotRestart` services every VM service client of
+  /// this run registers, routed to this run's `app.hotReload` and
+  /// `app.restart`. See [ToolServices].
+  ///
+  /// Handed to a client only by a run that can reload: one with hot reload
+  /// off registers nothing, so DevTools hides buttons that could only fail.
+  late final ToolServices toolServices = ToolServices(
+    commands: commandRunner,
+    report: (action, result, {required method}) => reportReloadCommand(
+      action,
+      result,
+      sessionReportLog(protocol),
+      method: method,
+      announce: (params) => announceReloadResult(protocol, params),
+    ),
   );
 
   /// Owns everything created after `app.started`. See [Teardown].

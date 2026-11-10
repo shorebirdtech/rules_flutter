@@ -24,6 +24,7 @@ import 'native_libs_fingerprint.dart';
 import 'native_libs_watch.dart';
 import 'relaunch_outcome.dart';
 import 'session.dart';
+import 'tool_services.dart';
 import 'vm_service_client.dart';
 
 class Relauncher {
@@ -72,6 +73,11 @@ class Relauncher {
 
   final Logger logger;
 
+  /// What each reconnected VM client registers for the app's other clients —
+  /// the same services the launch's client registered, since a relaunched
+  /// app's DevTools still reloads through them. See [ToolServices].
+  final ToolServices? services;
+
   /// The fingerprint of what the running processes actually launched with.
   /// Advanced only after a successful relaunch, so a rebuild that fails leaves
   /// the next restart still knowing it has stale libraries.
@@ -107,6 +113,7 @@ class Relauncher {
     required this.orchestrator,
     required this.assetsDir,
     required this.logger,
+    this.services,
     required Map<String, String> liveFingerprint,
     this.nativeLibs,
     this.patchedLibs,
@@ -278,7 +285,7 @@ class Relauncher {
     Object? lastConnectFailure;
     if (uri != null) {
       for (var attempt = 0; attempt < 5; attempt++) {
-        client = VmServiceClient();
+        client = VmServiceClient(services: services);
         try {
           await client.connect(uri);
           break;

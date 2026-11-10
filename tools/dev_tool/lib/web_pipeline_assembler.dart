@@ -621,7 +621,18 @@ class WebPipelineAssembler {
           // websocket. Everything — our client, DevTools, DWDS's own client —
           // attaches there, and DDS multiplexes them.
           final wsUri = Uri.parse(debugConnection.uri);
-          final webClient = VmServiceClient();
+          // Claims hot reload on the DDS, as flutter_tools does. Without it a
+          // DevTools-initiated reload calls DWDS's raw `reloadSources`: no
+          // recompile from our frontend server, and a second concurrent
+          // reload that DWDS does not serialise. `reloadSources` only, as in
+          // `flutter_tools`' web runner: DWDS registers `hotRestart` on this
+          // DDS itself, and the restart path calls DWDS's. See
+          // [ToolServices.hotRestart].
+          final webClient = VmServiceClient(
+            services: plan.hotReloadOff == null
+                ? host.toolServices.withoutHotRestart()
+                : null,
+          );
           await webClient.connect(
             httpUriFromWebSocketUri(wsUri),
             createDevFS: false,
@@ -636,17 +647,6 @@ class WebPipelineAssembler {
             session.appId,
             wsUri,
             httpUriFromWebSocketUri(wsUri),
-          );
-
-          // Claim hot reload on the DDS, as flutter_tools does. Without it a
-          // DevTools-initiated reload bypasses us and calls DWDS's raw
-          // `reloadSources` directly — no recompile from our frontend
-          // server, and a second concurrent reload that DWDS does not
-          // serialise. Registering does not capture our own raw call: DDS
-          // resolves only namespaced (`sN.`) names against registrations.
-          await webVmService.registerService(
-            'reloadSources',
-            'rules_flutter dev_tool',
           );
 
           // DevTools comes from the DDS that DWDS started, already carrying

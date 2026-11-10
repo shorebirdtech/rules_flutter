@@ -14,6 +14,7 @@ import 'hot_reload/asset_bundle.dart' show touchesFonts;
 import 'hot_reload/flutter_error_report.dart';
 import 'logging.dart';
 import 'running_code.dart';
+import 'tool_services.dart';
 
 final _logger = Logger('dev_tool.vm_service');
 
@@ -389,8 +390,14 @@ class VmServiceClient {
   /// connection worked, and by a teardown this end chose.
   int _flaps = 0;
 
+  /// What this client registers on every connection it makes, for the app's
+  /// other VM service clients to call. Null registers nothing: a run that
+  /// cannot reload offers no reload, as `flutter_tools`' cold runner does not.
+  final ToolServices? services;
+
   VmServiceClient({
     VmServiceConnector? connector,
+    this.services,
     this.connectTimeout = const Duration(seconds: 30),
     this.disconnectTimeout = const Duration(seconds: 5),
     this.flapWindow = const Duration(seconds: 5),
@@ -487,6 +494,10 @@ class VmServiceClient {
     _setMainIsolate(found ?? _mainIsolateId ?? vm.isolates?.firstOrNull?.id);
 
     if (createDevFS) await _createDevFS();
+
+    // On every connection, re-dials included: a registration belongs to the
+    // connection that made it, and DDS drops it when that connection closes.
+    await services?.registerOn(svc);
 
     // Registered only now, after the handshake. Watching from the moment the
     // socket comes up would leave a watcher behind for a dial that died

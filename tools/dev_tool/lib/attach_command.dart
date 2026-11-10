@@ -235,7 +235,9 @@ class AttachCommand {
           'uri': uri.toString(),
         });
 
-        final vmClient = VmServiceClient();
+        // Attach always reloads (its session loop has no hot-off reason), so
+        // it always offers the services that reach that reload.
+        final vmClient = VmServiceClient(services: host.toolServices);
         try {
           await vmClient.connect(uri);
           // Registered on connect, not once the session is in `sessions`: this

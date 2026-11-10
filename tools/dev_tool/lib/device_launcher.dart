@@ -201,7 +201,9 @@ class DeviceLauncher {
           serviceUri,
         );
         for (var attempt = 0; attempt < 5; attempt++) {
-          vmClient = VmServiceClient();
+          vmClient = VmServiceClient(
+            services: plan.hotReloadOff == null ? host.toolServices : null,
+          );
           try {
             await vmClient.connect(serviceUri);
             plan.logger.info({

@@ -625,8 +625,33 @@ Future<ReloadResult> _compileAndApply({
   );
 }
 
-/// Report the result of a reload **nobody requested** — a keypress, or an edit
-/// the watcher picked up.
+/// Where a session's human-facing reports go.
+///
+/// In `--machine` mode stdout IS the JSON-RPC stream, so a line written there
+/// lands in the middle of what an editor is parsing; the report goes to the
+/// log instead. `report` as well as `text`: the JSON log format strips `text`
+/// as human-only, which would otherwise leave every one of these records in
+/// machine mode with no payload at all.
+void Function(String message) sessionReportLog(MachineProtocol protocol) =>
+    protocol.enabled
+    ? (msg) => _logger.info({
+        'message': 'session_report',
+        'text': msg,
+        'report': msg,
+      })
+    : (msg) => stdout.writeln(msg);
+
+/// The machine-readable half of [reportReloadCommand]'s report. A no-op
+/// outside `--machine` mode, like every other event.
+void announceReloadResult(
+  MachineProtocol protocol,
+  Map<String, dynamic> params,
+) => protocol.sendEvent('app.reloadResult', params);
+
+/// Report the result of a reload **nobody requested** — a keypress, an edit
+/// the watcher picked up, or a VM service client such as DevTools calling the
+/// `reloadSources` this tool registers (that client has its answer, but the
+/// terminal and a `--machine` client do not).
 ///
 /// The HTTP control channel hands this map back to its caller; the interactive
 /// session has no caller to hand it to, so it reports here instead. Pressing
@@ -798,24 +823,12 @@ Future<void> runInteractiveSession({
   void Function(bool lineMode)? setLineMode,
   Future<void>? shutdownSignal,
 }) async {
-  // In `--machine` mode stdout IS the JSON-RPC stream, so a human-facing line
-  // written there lands in the middle of what an editor is parsing. The
-  log ??= protocol.enabled
-      // `report` as well as `text`: the JSON log format strips `text` as
-      // human-only, which would otherwise leave every one of these records in
-      // machine mode with no payload at all — a line that says only that
-      // something was reported.
-      ? (msg) => _logger.info({
-          'message': 'session_report',
-          'text': msg,
-          'report': msg,
-        })
-      : (msg) => stdout.writeln(msg);
+  log ??= sessionReportLog(protocol);
 
   // The machine-readable half of the same report. A no-op outside `--machine`
   // mode, like every other event — the terminal reader has [log].
   void announce(Map<String, dynamic> params) =>
-      protocol.sendEvent('app.reloadResult', params);
+      announceReloadResult(protocol, params);
 
   // Launch DevTools once each session can serve it. Native is ready
   // immediately; web resolves when the browser connects, so this is wired as a

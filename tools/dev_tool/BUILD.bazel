@@ -350,6 +350,7 @@ _UNIT_TESTS = {
     "temp_dir_test": {},
     "test_lifetime_test": {"lifetime": True},
     "toolchain_info_test": {"deps": _PATH_DEP},
+    "tool_services_test": {"fakes": True},
     "vm_service_client_test": {
         "fakes": True,
         "deps": ["@dev_tool_deps//:fake_async"] + _PATH_DEP,
