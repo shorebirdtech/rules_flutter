@@ -120,13 +120,11 @@ void main() {
           'android_arch': str('arm64'),
           'release_sha256': str(digest),
           'debug_sha256': str(digest),
-          'profile_repo_name': str('profile_ok'),
         }),
         ProbeRepo('ios_ok', 'flutter_ios_engine_repo', {
           'engine_revision': str(revision),
           'release_sha256': str(digest),
           'debug_sha256': str(digest),
-          'profile_repo_name': str('profile_ok'),
         }),
         ProbeRepo('desktop_linux_ok', 'flutter_desktop_engine_repo', {
           'engine_revision': str(revision),

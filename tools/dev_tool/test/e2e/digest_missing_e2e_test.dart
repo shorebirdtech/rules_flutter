@@ -135,7 +135,6 @@ void main() {
             'engine_revision': str(revision),
             'android_arch': str('arm64'),
             'debug_sha256': str(digest),
-            'profile_repo_name': str('profile_blank'),
           }),
         ),
         add(
@@ -144,7 +143,6 @@ void main() {
             'engine_revision': str(revision),
             'android_arch': str('arm64'),
             'release_sha256': str(digest),
-            'profile_repo_name': str('profile_blank'),
           }),
         ),
         add(
@@ -152,7 +150,6 @@ void main() {
           ProbeRepo('ios_release_blank', 'flutter_ios_engine_repo', {
             'engine_revision': str(revision),
             'debug_sha256': str(digest),
-            'profile_repo_name': str('profile_blank'),
           }),
         ),
         add(
@@ -160,7 +157,6 @@ void main() {
           ProbeRepo('ios_debug_blank', 'flutter_ios_engine_repo', {
             'engine_revision': str(revision),
             'release_sha256': str(digest),
-            'profile_repo_name': str('profile_blank'),
           }),
         ),
         add(
