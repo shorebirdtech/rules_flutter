@@ -1,12 +1,15 @@
 /// Pub packages that depend on each other.
 ///
 /// Pub allows a dependency cycle (`dio` imports `dio_web_adapter`, which
-/// imports `dio`); Bazel does not. What must hold is the pub-side guarantee:
-/// a lock that pub resolved builds, whatever its packages import, and the
-/// result is what pub would give. Every package of a cycle is in the build at
-/// the version the lock names, whichever one an app depends on, and each
-/// member keeps what is its own: its assets bundle under `packages/<name>/`,
-/// its plugin registers once.
+/// imports `dio`); Bazel does not, so the packages of a cycle are built as one
+/// library, where the root module declares the cycle (`flutter_pub.cycle()`)
+/// or rules_dart curates it (`dio`'s). What must hold then is the pub-side
+/// guarantee: the result is what pub would give. Every package of a cycle is
+/// in the build at the version the lock names, whichever one an app depends
+/// on, and each member keeps what is its own: its assets bundle under
+/// `packages/<name>/`, its plugin registers once. An undeclared cycle, and a
+/// root declaration that is not exactly a cycle, fail naming the declaration
+/// to write.
 ///
 /// The generated workspace is the real `flutter_pub.from_lock()` hub over
 /// `file://` packages (`pub_inputs_fixture.dart`); the checks are analysis-time
@@ -179,6 +182,30 @@ void main() {
           // A package a plugin overlay builds whole, in a cycle.
           _package('overlaid', ['overlaid_peer']),
           _package('overlaid_peer', ['overlaid']),
+
+          // A cycle nothing declares.
+          _package('loose_a', ['loose_b']),
+          _package('loose_b', ['loose_a']),
+
+          // A cycle of three the root declares only two of.
+          _package('part_a', ['part_b']),
+          _package('part_b', ['part_c']),
+          _package('part_c', ['part_a']),
+
+          // Packages the root declares a cycle that is none: one depends on
+          // the other, and not back.
+          _package('stale_a', ['stale_b']),
+          _package('stale_b', []),
+        ],
+        cycles: [
+          ['pair_a', 'pair_b'],
+          ['ring_a', 'ring_b', 'ring_c'],
+          ['loop_plugin', 'loop_helper'],
+          ['mix_asset', 'mix_plain'],
+          ['icons_a', 'icons_b'],
+          ['overlaid', 'overlaid_peer'],
+          ['part_a', 'part_b'],
+          ['stale_a', 'stale_b'],
         ],
         overlayRoots: ['//overlays:BUILD.bazel'],
         files: {
@@ -200,7 +227,10 @@ void main() {
               '${_check('mix_via_plain', '@pubhub//:mix_plain', versions: {'mix_asset': '1.0.0', 'mix_plain': '1.0.0'}, assets: ['packages/mix_asset/assets/m.txt'])}'
               '${_check('icons_via_b', '@pubhub//:icons_b', versions: {'icons_a': '1.0.0', 'icons_b': '1.0.0'}, fonts: ['/MaterialIcons'])}'
               '${_check('overlaid_via_peer', '@pubhub//:overlaid_peer', versions: {})}'
-              '${_check('loop_via_helper', '@pubhub//:loop_helper', versions: {'loop_helper': '1.0.0', 'loop_plugin': '1.0.0'}, plugins: ['loop_plugin'])}',
+              '${_check('loop_via_helper', '@pubhub//:loop_helper', versions: {'loop_helper': '1.0.0', 'loop_plugin': '1.0.0'}, plugins: ['loop_plugin'])}'
+              '${_check('loose', '@pubhub//:loose_b', versions: {})}'
+              '${_check('part', '@pubhub//:part_a', versions: {})}'
+              '${_check('stale', '@pubhub//:stale_a', versions: {})}',
         },
       ).materialize();
     });
@@ -267,10 +297,94 @@ void main() {
         );
       },
     );
+
+    test(
+      'an undeclared cycle fails, naming it and the declaration to add',
+      () async {
+        final result = await ws.bazel(['build', '//:loose']);
+        expect(result.succeeded, isFalse, reason: '$result');
+        expect(
+          result.output,
+          contains('`loose_a` and `loose_b` depend on each other'),
+          reason: '$result',
+        );
+        expect(
+          result.output,
+          contains('flutter_pub.cycle(packages = ["loose_a", "loose_b"])'),
+          reason: '$result',
+        );
+      },
+    );
+
+    test(
+      'a root declaration of part of a cycle fails, giving the whole one',
+      () async {
+        final result = await ws.bazel(['build', '//:part']);
+        expect(result.succeeded, isFalse, reason: '$result');
+        expect(
+          result.output,
+          contains(
+            'flutter_pub.cycle(packages = ["part_a", "part_b"]), in the root '
+            'module, is not a dependency cycle',
+          ),
+          reason: '$result',
+        );
+        expect(
+          result.output,
+          contains(
+            'flutter_pub.cycle(packages = ["part_a", "part_b", "part_c"])',
+          ),
+          reason: '$result',
+        );
+      },
+    );
+
+    test('a root declaration of packages in no cycle fails', () async {
+      final result = await ws.bazel(['build', '//:stale']);
+      expect(result.succeeded, isFalse, reason: '$result');
+      expect(
+        result.output,
+        contains(
+          'flutter_pub.cycle(packages = ["stale_a", "stale_b"]), in the root '
+          'module, is not a dependency cycle',
+        ),
+        reason: '$result',
+      );
+      expect(result.output, contains('`stale_a` is in no cycle'));
+    });
+  });
+
+  group('declarations the module is read with', () {
+    test(
+      'a root declaration of a package the build does not build fails',
+      () async {
+        final ws = await PubInputsFixture(
+          hosted: [
+            _package('real_a', ['real_b']),
+            _package('real_b', ['real_a']),
+          ],
+          cycles: [
+            ['real_a', 'real_b', 'imagined'],
+          ],
+        ).materialize();
+        final result = await ws.query('@pubhub//:all');
+        expect(result.succeeded, isFalse, reason: '$result');
+        expect(
+          result.output,
+          contains(
+            'flutter_pub.cycle(packages = ["imagined", "real_a", "real_b"]), '
+            'in the root module, names packages this build does not build',
+          ),
+          reason: '$result',
+        );
+        expect(result.output, contains('`imagined`'), reason: '$result');
+      },
+    );
   });
 
   group('dio, which pub resolves with dio_web_adapter', () {
-    test('both packages are in the build at the locked versions', () async {
+    test('both packages are in the build at the locked versions, with no '
+        'declaration: rules_dart curates the cycle', () async {
       final ws = await PubInputsFixture(
         files: {
           'pubspec.lock': _dioLock,

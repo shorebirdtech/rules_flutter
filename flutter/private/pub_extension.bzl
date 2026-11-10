@@ -27,6 +27,7 @@ load("//flutter/private:flutter_resolved_package.bzl", "flutter_resolved_package
 load("//flutter/private:flutter_sdks_repo.bzl", "SDKS_FILE", "decode_sdks")
 load("//flutter/private:flutter_unsupported_package.bzl", "flutter_unsupported_package", "ignored_package_message", "unsupported_package_message")
 load("//flutter/private:lock_entry_kind.bzl", "ENGINE_PROVIDED", "FLUTTER_FRAMEWORK", "FLUTTER_SOURCE", "GIT", "HOSTED", "IGNORED", "LOCAL", "PATH", "UNSUPPORTED", "lock_entry_kind")
+load("//flutter/private:pub_cycles.bzl", "module_cycles", "plan_cycles")
 load("//flutter/private:pub_lock_sdks.bzl", "parse_lock_sdk_constraints")
 load("//flutter/private:pub_reconcile.bzl", "pub_command", "reconcile_package", "sdk_pin_errors", "unsupported_locks", "version_conflict_fix")
 load("//flutter/private:pub_resolve.bzl", "path_package_directory", "resolve_errors", "resolve_failure", "resolved_targets")
@@ -195,6 +196,27 @@ lock, and commit it. The files of all tags must agree on each package.
     ),
 })
 
+pub_cycle_tag = tag_class(
+    attrs = {
+        "packages": attr.string_list(
+            doc = "Every package of the cycle. Each must be one a " +
+                  "`flutter_pub.from_lock()` lock lists and the build builds, " +
+                  "and none may be in another `flutter_pub.cycle()` of the module.",
+            mandatory = True,
+        ),
+    },
+    doc = "Pub packages that depend on each other in a cycle, built as one library. " +
+          "Pub allows a cycle and Bazel does not, so a cycle builds only where it is " +
+          "declared; an undeclared one fails when it is planned, giving the declaration " +
+          "to write. Like versions, cycles are build-wide, and the root module decides: " +
+          "its declarations must each be exactly a cycle at the versions the build " +
+          "fetches, or the build fails (so a declaration cannot outlive its cycle). " +
+          "Another module's declarations, and rules_dart's curated ones " +
+          "(`curated_cycles()` in `@rules_dart//dart/ext:registry.bzl`, such as " +
+          "`dio` and `dio_web_adapter`), apply where they are exactly a cycle and are " +
+          "inert where they are not.",
+)
+
 pub_plugin_overlays_tag = tag_class(attrs = {
     "roots": attr.label_list(
         doc = "BUILD.bazel anchors for user-supplied overlay trees. Each " +
@@ -325,8 +347,14 @@ def pub_extension(module_ctx):
             lock_dir = str(module_ctx.path(pub_tag.lock).realpath.dirname)
             tags.append(struct(tag = pub_tag, packages = lock_pkgs, flutter_constraint = flutter_constraint, lock_dir = lock_dir))
 
-    if tags:
-        _declare_pub_packages(tags, sdks, user_overlay_roots)
+    cycles = [module_cycles(mod) for mod in module_ctx.modules]
+    if not tags:
+        # Nothing is built, so a root declaration names no package of a cycle.
+        planned = plan_cycles(cycles, built = {})
+        if planned.error:
+            fail(planned.error)
+    else:
+        _declare_pub_packages(tags, sdks, user_overlay_roots, cycles)
         declare_swift_packages(module_ctx, [t.tag.swift_package_resolved for t in tags if t.tag.swift_package_resolved])
 
     return module_ctx.extension_metadata(reproducible = True)
@@ -387,7 +415,7 @@ def _hub_listing(hub_packages, package):
     """A hub that lists a package: its alias follows the selected SDK."""
     return [h for h in sorted(hub_packages.keys()) if package in hub_packages[h]][0]
 
-def _declare_pub_packages(tags, sdks, user_overlay_roots):
+def _declare_pub_packages(tags, sdks, user_overlay_roots, cycles):
     """Declares the repositories of every `flutter_pub.from_lock()` tag: one per package.
 
     Args:
@@ -396,6 +424,7 @@ def _declare_pub_packages(tags, sdks, user_overlay_roots):
             build's Flutter SDK packages; another SDK with another framework
             has packages of its own.
         user_overlay_roots: The overlay roots every package is built with.
+        cycles: Every module's `flutter_pub.cycle()` declarations (`module_cycles`).
     """
     ignore_hooks = {}
     for t in tags:
@@ -481,6 +510,17 @@ def _declare_pub_packages(tags, sdks, user_overlay_roots):
         [name for name in mapped.targets if name not in chosen],
     )
 
+    why_not_built = {
+        FLUTTER_FRAMEWORK: "is `package:flutter`, which depends on no pub package",
+        IGNORED: "a lock names in `ignored`",
+        UNSUPPORTED: "a lock takes from a source rules_flutter does not build",
+    }
+    not_built = {name: why_not_built.get(e.kind, "the build does not build") for name, e in chosen.items() if name not in built}
+    not_built.update({name: "maps to %s with `resolve`, so a target of yours builds it" % t.target for name, t in mapped.targets.items()})
+    planned = plan_cycles(cycles, built, not_built)
+    if planned.error:
+        fail(planned.error)
+
     # What every repository plans against, stated once rather than on each of
     # them: the lock records each repository's attributes, so the package list
     # on every repository would grow it by the square of the package count.
@@ -499,6 +539,8 @@ def _declare_pub_packages(tags, sdks, user_overlay_roots):
         versions = {n: e.version for n, e in chosen.items() if e.kind in [HOSTED, GIT, LOCAL] and e.version},
         locks = sorted({str(t.tag.lock): True for t in tags}.keys()),
         flutter_constraints = {str(t.tag.lock): t.flutter_constraint for t in tags if t.flutter_constraint},
+        cycles = [" ".join(c) for c in planned.declared],
+        advisory_cycles = [" ".join(c) for c in planned.advisory],
     )
     flutter_pub_index(
         name = INDEX_REPO,

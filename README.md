@@ -253,6 +253,20 @@ A dependency with `git:` in `pubspec.yaml` is listed in `pubspec.lock` with `sou
 
 A package's `flutter: assets:` are bundled at `packages/<package>/<path>`, as `flutter build` bundles them. A listed image ships its resolution variants from the `<number>x/` directories beside it. A listed directory (a trailing slash) ships the files directly in it, and nothing from the directories below it. An entry with `platforms:` ships only in builds for those platforms, and an entry with `flavors:` ships only in a build of one of those flavors (an application's `flavor`), and in no build without one. Two entries that give one file different flavors fail the build, as `flutter build` does. A package's `flutter: shaders:` entries follow the same rules. A name with a space or a non-ASCII character is stored percent-encoded, the form the engine asks for, and listed in the manifest as written.
 
+#### Packages that depend on each other
+
+Pub allows packages to depend on each other in a cycle (`dio` and `dio_web_adapter` import each other); Bazel does not. Such packages are built as one library, so `@deps//:dio` and `@deps//:dio_web_adapter` both name it. Each package keeps its own name, language version, assets and plugin, so the app gets what `flutter build` would give it. A cycle is built this way only where it is declared:
+
+```starlark
+flutter_pub.cycle(packages = ["ping", "pong"])
+```
+
+- An undeclared cycle fails when something first builds one of its packages, naming every package in it and the `flutter_pub.cycle()` to add.
+- A declaration must name exactly one cycle at the versions the build uses. One that names packages in no cycle (a new release dropped the dependency, say), or only part of a cycle, fails the same way, so a declaration cannot outlive its cycle. One naming a package the build does not build from a lock (`package:flutter`, a package mapped with `resolve`) fails when the module is read.
+- Cycles apply to the whole build, as versions do, and the root module decides. Declarations by a module the root depends on apply where they name exactly a cycle and do nothing otherwise, since that module cannot fix what the root's versions made of them.
+- rules_dart declares the cycles of well-known packages itself (`curated_cycles()` in `@rules_dart//dart/ext:registry.bzl`; today `dio` and `dio_web_adapter`), so a lock with them needs no declaration. These apply the same way, and do nothing where the packages are not that cycle.
+- A package built from a plugin overlay cannot be in a cycle, and the build says so.
+
 #### Packages in your workspace (`path:` dependencies, forks)
 
 A `path:` dependency in `pubspec.yaml` is a package whose files are in your repository, and `pubspec.lock` lists it with `source: path`. Usually you build those files with a target of your own, and `resolve` tells the hub which one builds which package:

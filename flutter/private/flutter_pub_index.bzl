@@ -12,7 +12,8 @@ repositories, made by the one module extension:
   nothing but its own archive;
 * its library repository, `flutter_pub_lib__<package>` (`flutter_pub_library_repo`):
   the package's dependency cycle as one library, in the repository of the
-  cycle's first package by name, which the others alias.
+  cycle's first package by name, which the others alias. A cycle is built only
+  where it is declared (`flutter_pub.cycle()`, or rules_dart's curated ones).
 
 `package:flutter` (`flutter_framework_package`), the stub for a lock entry
 nothing supplies, and a package `flutter_pub.from_lock(resolve = ...)` maps to a
@@ -120,7 +121,7 @@ def read_index(ctx, prefix = SPOKE_PREFIX):
       prefix: The prefix of the index to read.
 
     Returns:
-      `struct(built, other, sdk_packages, main_prefix, sdk_prefix, via_hub, versions, locks, flutter_constraints)`:
+      `struct(built, other, sdk_packages, main_prefix, sdk_prefix, via_hub, versions, locks, flutter_constraints, cycles, advisory_cycles)`:
       `built`, a dict of the names of the built
       packages (hosted ones and Flutter SDK ones built from the Flutter
       source; each has a library repository); `other`, a dict of the names of
@@ -134,6 +135,9 @@ def read_index(ctx, prefix = SPOKE_PREFIX):
       selected SDK (`sdk_hubs`: a hub that lists each). `versions` is the version the build uses of
       each package the locks list, `locks` their labels, and
       `flutter_constraints` the `sdks: flutter` constraint of each.
+      `cycles` are the root module's `flutter_pub.cycle()` declarations and
+      `advisory_cycles` every other declaration that may apply (`pub_cycles.bzl`),
+      each a list of packages.
     """
     index = json.decode(read_sibling_file(ctx, index_repo(prefix), _INDEX_FILE))
     return struct(
@@ -147,6 +151,8 @@ def read_index(ctx, prefix = SPOKE_PREFIX):
         versions = index.get("versions", {}),
         locks = index.get("locks", []),
         flutter_constraints = index.get("flutter_constraints", {}),
+        cycles = index.get("cycles", []),
+        advisory_cycles = index.get("advisory_cycles", []),
     )
 
 def owner_prefix(index, package):
@@ -182,6 +188,8 @@ def _flutter_pub_index_impl(ctx):
         "versions": ctx.attr.versions,
         "locks": ctx.attr.locks,
         "flutter_constraints": ctx.attr.flutter_constraints,
+        "cycles": [c.split(" ") for c in ctx.attr.cycles],
+        "advisory_cycles": [c.split(" ") for c in ctx.attr.advisory_cycles],
     }))
     return ctx.repo_metadata(reproducible = True)
 
@@ -198,6 +206,8 @@ flutter_pub_index = repository_rule(
         "versions": attr.string_dict(doc = "The version the build uses of each package the locks list."),
         "locks": attr.string_list(doc = "The locks' labels, for messages."),
         "flutter_constraints": attr.string_dict(doc = "The `sdks: flutter` constraint of each lock, by its label."),
+        "cycles": attr.string_list(doc = "The root module's `flutter_pub.cycle()` declarations, each its packages joined by spaces: each must be exactly a cycle."),
+        "advisory_cycles": attr.string_list(doc = "Other modules' and rules_dart's curated cycle declarations whose packages are all built, each its packages joined by spaces: each applies where it is exactly a cycle."),
     },
     doc = "The packages the repositories of every `flutter_pub.from_lock()` lock plan against.",
 )

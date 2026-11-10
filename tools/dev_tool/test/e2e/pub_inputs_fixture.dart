@@ -267,7 +267,12 @@ class PubInputsFixture {
     this.rulesDartPubLocks = const [],
     this.buildFromPubspec = const [],
     this.ignored = const {},
+    this.cycles = const [],
   });
+
+  /// `flutter_pub.cycle(packages = [...])` tags of the root module: packages
+  /// that depend on each other, built as one library.
+  final List<List<String>> cycles;
 
   /// `flutter_pub.from_lock(build_from_pubspec = [...])`: `path` packages
   /// built from their directory.
@@ -507,6 +512,7 @@ flutter_pub = use_extension("@rules_flutter//flutter/pub:extensions.bzl", "pub")
 ${overlayRoots.isEmpty ? '' : 'flutter_pub.plugin_overlays(roots = ${jsonEncode(overlayRoots)})'}
 ${_tag(pubHub, lockPackage, resolve, onVersionConflict, buildFromPubspec: buildFromPubspec, ignored: ignored)}
 ${otherHubs.map((h) => _tag(h.name, h.lockPackage, h.resolve, h.onVersionConflict)).join('\n')}
+${cycles.map((c) => 'flutter_pub.cycle(packages = ${jsonEncode(c)})').join('\n')}
 ${rulesDartPubLocks.isEmpty ? '' : _rulesDartPubTags(rulesDartPubLocks)}
 use_repo(flutter_pub, ${{pubHub, for (final h in otherHubs) h.name}.map((n) => '"$n"').join(', ')}${spokeNames.map((n) => ', "flutter_pub__$n"').join()})
 ''';

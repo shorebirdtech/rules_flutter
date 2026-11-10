@@ -234,6 +234,12 @@ bzl_library(
 )
 
 bzl_library(
+    name = "pub_cycles",
+    srcs = ["pub_cycles.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+)
+
+bzl_library(
     name = "pub_resolve",
     srcs = ["pub_resolve.bzl"],
     visibility = ["//flutter:__subpackages__"],
@@ -265,7 +271,10 @@ bzl_library(
     name = "flutter_pub_library_repo",
     srcs = ["flutter_pub_library_repo.bzl"],
     visibility = ["//flutter:__subpackages__"],
-    deps = [":flutter_pub_index"],
+    deps = [
+        ":flutter_pub_index",
+        ":pub_cycles",
+    ],
 )
 
 bzl_library(
@@ -945,6 +954,7 @@ bzl_library(
         ":flutter_sdks_repo",
         ":flutter_unsupported_package",
         ":lock_entry_kind",
+        ":pub_cycles",
         ":pub_lock_sdks",
         ":pub_resolve",
         ":versions",

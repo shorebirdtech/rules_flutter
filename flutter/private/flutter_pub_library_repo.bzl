@@ -7,7 +7,10 @@ fetches only what building the package fetches anyway), and finds its
 dependency cycle with rules_dart's planning (`pub_graph.bzl`). Pub allows
 packages to depend on each other (`dio` and `dio_web_adapter` do), and Bazel
 does not, so a cycle is one library, in the library repository of its first
-package by name, which every other package of the cycle aliases.
+package by name, which every other package of the cycle aliases. A cycle is
+built only where it is declared (`flutter_pub.cycle()`, or rules_dart's
+curated ones, `pub_cycles.bzl`); an undeclared one fails, naming the
+declaration to write.
 
 The library is a `flutter_pub_library` over the members of the cycle, or
 rules_dart's `pub_library` when none of them has anything of Flutter's.
@@ -17,6 +20,7 @@ outside itself.
 
 load("@rules_dart//dart/pub:pub_graph.bzl", "dependency_cycle", "dependency_graph", "read_pubspec_dependencies")
 load("//flutter/private:flutter_pub_index.bzl", "MEMBER_FILE", "MEMBER_FLUTTER", "MEMBER_OVERLAY", "library_label", "library_repo", "owner_prefix", "read_index", "read_sibling_file", "source_repo")
+load("//flutter/private:pub_cycles.bzl", "DECLARE")
 
 _MATERIAL_ICONS = "@rules_flutter//flutter:material_icons"
 
@@ -147,7 +151,13 @@ def _flutter_pub_library_repo_impl(ctx):
         lambda p: [d for d in read_pubspec_dependencies(ctx, source_repo(p, owner_prefix(index, p))) if d in index.built or d in index.other],
         follow = index.built,
     )
-    cycle = dependency_cycle(graph, package)
+    cycle = dependency_cycle(
+        graph,
+        package,
+        declared = index.cycles,
+        advisory = index.advisory_cycles,
+        declare = DECLARE,
+    )
     if cycle.owner != package:
         ctx.file("BUILD.bazel", make_alias_build_content(
             package,
@@ -193,5 +203,5 @@ flutter_pub_library_repo = repository_rule(
         ),
         "package_name": attr.string(mandatory = True, doc = "The built package."),
     },
-    doc = "Plans a built package's library: its dependency cycle, built as one target.",
+    doc = "Plans a built package's library: its dependency cycle, built as one target where it is declared.",
 )
