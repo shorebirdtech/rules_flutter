@@ -65,6 +65,10 @@ jobs:
           cache-save: false
       - name: bazel test //...
         run: bazel test //... --test_output=errors
+      # The `deep` tier (.bazelrc): weekly, since its tests fetch extra SDKs.
+      - name: bazel test //... --config=deep
+        if: github.event_name == 'schedule'
+        run: bazel test //... --config=deep --test_output=errors
   # Every hook in .pre-commit-config.yaml, over every file, with the prek
   # overhead pins, as a commit runs them: one build puts overhead's tools in
   # .bazel_env, then the hooks run them without Bazel. Nothing else runs them

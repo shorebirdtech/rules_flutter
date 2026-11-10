@@ -32,7 +32,10 @@ Complete instructions for testing rules_flutter changes. Run **all applicable se
 
 ```sh
 bazel test //...
+bazel test //... --config=deep   # before a merge, and in a Flutter version bump
 ```
+
+Tests tagged `deep` are left out of a plain `bazel test` (`.bazelrc`). They are the heavy ones, or ones only a toolchain bump can break: today, the outline-cutoff tests of `//flutter/tests/outline_fixture` under each supported Dart release but the default's, each of which fetches another Flutter SDK (about 330 MB). CI runs them in its weekly run.
 
 ### Proving analysis covers a file
 

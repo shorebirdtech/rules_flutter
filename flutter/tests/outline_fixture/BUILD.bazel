@@ -48,10 +48,13 @@ reads_outline_test(
         args = ["$(rlocationpath :modules_%s)" % dart.replace(".", "_")],
         data = [":modules_" + dart.replace(".", "_")],
         main = "outline_cutoff_test.dart",
+        # Each SDK but the default fetches about 330 MB, so those run in the
+        # `deep` tier (`--config=deep`), before a merge and in a Flutter bump.
+        tags = [] if sdk == "flutter" else ["deep"],
         deps = [
             "@dev_tool_deps//:test",
             "@rules_dart//dart/runfiles",
         ],
     )
-    for dart in outline_sdks()
+    for dart, sdk in outline_sdks().items()
 ]
