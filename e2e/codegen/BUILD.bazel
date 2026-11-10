@@ -8,8 +8,8 @@ load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_appli
 load(
     "@rules_flutter//flutter:macos.bzl",
     "MACOS_MINIMUM_OS_VERSION",
+    "flutter_macos_app_framework_gen",
     "flutter_macos_engine",
-    "flutter_macos_framework_gen",
     "flutter_macos_info_plist_gen",
     "flutter_macos_menu_xib_gen",
     "flutter_macos_native_libs_gen",
@@ -145,7 +145,7 @@ flutter_native_library(
     library = "//native_add:native_add_shared",
 )
 
-flutter_macos_framework_gen(
+flutter_macos_app_framework_gen(
     name = "app_framework",
     application = ":app",
 )

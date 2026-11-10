@@ -769,14 +769,14 @@ The output is a `.app` bundle containing `FlutterMacOS.framework`, `App.framewor
 load("@rules_flutter//flutter:macos.bzl",
     "flutter_entitlements_merge",
     "flutter_macos_engine",
-    "flutter_macos_framework_gen",
+    "flutter_macos_app_framework_gen",
     "flutter_macos_info_plist_gen",
     "flutter_macos_menu_xib_gen",
     "flutter_macos_native_libs_gen",
     "flutter_macos_registrant_gen",
     "flutter_macos_runner_lib_gen")
 
-flutter_macos_framework_gen(name = "my_framework", application = ":my_app")
+flutter_macos_app_framework_gen(name = "my_framework", application = ":my_app")
 flutter_macos_registrant_gen(name = "my_registrant", application = ":my_app")
 flutter_macos_engine(name = "my_engine")
 flutter_macos_native_libs_gen(name = "my_native_libs", application = ":my_app")
@@ -854,13 +854,13 @@ flutter_ios_app(
 load("@rules_flutter//flutter:ios.bzl",
     "flutter_entitlements_merge",
     "flutter_ios_engine",
-    "flutter_ios_framework_gen",
+    "flutter_ios_app_framework_gen",
     "flutter_ios_info_plist_gen",
     "flutter_ios_native_frameworks_gen",
     "flutter_ios_registrant_gen",
     "flutter_ios_runner_lib_gen")
 
-flutter_ios_framework_gen(name = "my_framework", application = ":my_app")
+flutter_ios_app_framework_gen(name = "my_framework", application = ":my_app")
 flutter_ios_registrant_gen(name = "my_registrant", application = ":my_app")
 flutter_ios_engine(name = "my_engine")
 flutter_ios_info_plist_gen(name = "my_info_plist", app_name = "My App")

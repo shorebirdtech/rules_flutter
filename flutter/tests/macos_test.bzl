@@ -2,7 +2,7 @@
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
-load("//flutter/private:flutter_macos_application.bzl", "flutter_macos_framework", "flutter_macos_native_libs")
+load("//flutter/private:flutter_macos_application.bzl", "flutter_macos_app_framework", "flutter_macos_native_libs")
 load("//flutter/private:validation.bzl", "is_valid_bundle_id", "minimum_os_version_is_below")
 load(":apple_bundling.bzl", "fake_application", "outputs_under_target_dir_test", "strip_step_test")
 
@@ -270,7 +270,7 @@ def _bundling_tests(name):
         tags = ["manual"],
     )
     for app in [staged_app, name + "_fake_app_other"]:
-        flutter_macos_framework(
+        flutter_macos_app_framework(
             name = app + "_framework",
             application = app,
             tags = ["manual"],
@@ -305,7 +305,7 @@ def _bundling_tests(name):
             strip_aot = strip,
             tags = ["manual"],
         )
-        flutter_macos_framework(
+        flutter_macos_app_framework(
             name = name + "_release_framework" + suffix,
             application = name + "_fake_release" + suffix,
             tags = ["manual"],

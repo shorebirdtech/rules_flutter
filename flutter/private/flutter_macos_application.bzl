@@ -2,7 +2,7 @@
 
 Two rules:
 
-1. `flutter_macos_framework` — assembles the AOT dylib (release) or kernel
+1. `flutter_macos_app_framework` — assembles the AOT dylib (release) or kernel
    .dill (debug) into an App.framework with macOS directory structure.
    The framework is placed into the .app via additional_contents (NOT linked
    against the runner binary), matching how `flutter build macos` works.
@@ -10,7 +10,7 @@ Two rules:
 2. `flutter_macos_native_libs` — stages native .dylib files, flat under their
    basenames, for bundling via additional_contents.
 
-These are exported as `flutter_macos_framework_gen` and `flutter_macos_native_libs_gen`
+These are exported as `flutter_macos_app_framework_gen` and `flutter_macos_native_libs_gen`
 from flutter/macos.bzl.
 """
 
@@ -28,7 +28,7 @@ load("//flutter/private:assemble_directory.bzl", "ASSEMBLE_DIRECTORY_ATTRS", "as
 load("//flutter/private:exec_groups.bzl", "PORTABLE_EXEC_GROUPS", "portable_tools")
 load("//flutter/private:program_analysis.bzl", "bundled_program_info")
 
-# -- flutter_macos_framework (App.framework assembly) -------------------------
+# -- flutter_macos_app_framework (App.framework assembly) -------------------------
 
 _APP_FRAMEWORK_INFO_PLIST = """\
 <?xml version="1.0" encoding="UTF-8"?>
@@ -55,7 +55,7 @@ _APP_FRAMEWORK_INFO_PLIST = """\
 </plist>
 """
 
-def _flutter_macos_framework_impl(ctx):
+def _flutter_macos_app_framework_impl(ctx):
     """Assembles App.framework as a flat macOS framework (tree artifact).
 
     The layout has no `Versions/` directory and no symlinks:
@@ -100,7 +100,7 @@ def _flutter_macos_framework_impl(ctx):
 
     if not is_debug:
         if not app_info.aot_output:
-            fail("flutter_macos_framework requires an AOT build (not debug mode) or a kernel_dill in debug mode.")
+            fail("flutter_macos_app_framework requires an AOT build (not debug mode) or a kernel_dill in debug mode.")
 
         # Extract the dSYM and strip the binary, as `flutter build macos` does.
         # Not under the wrapper directory, which is all the bundle takes.
@@ -175,8 +175,8 @@ def _flutter_macos_framework_impl(ctx):
     # For the app to pass on to analysis (`flutter_apple_app`).
     return providers + bundled_program_info(ctx.attr.application)
 
-flutter_macos_framework = rule(
-    implementation = _flutter_macos_framework_impl,
+flutter_macos_app_framework = rule(
+    implementation = _flutter_macos_app_framework_impl,
     attrs = dicts.add(
         XCODE_TOOL_ATTRS,
         ASSEMBLE_DIRECTORY_ATTRS,

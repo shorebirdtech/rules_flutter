@@ -4,7 +4,7 @@ Produces the intermediate artifacts needed for an iOS .ipa:
 - Release (AOT): App.framework/App (Mach-O dylib) + Info.plist + flutter_assets/
 - Debug (JIT): App.framework/App (stub dylib) + Info.plist + flutter_assets/ (with kernel_blob.bin)
 
-The framework is packaged by flutter_ios_framework_gen (a macro in flutter/ios.bzl)
+The framework is packaged by flutter_ios_app_framework_gen (a macro in flutter/ios.bzl)
 which wraps it with apple_dynamic_framework_import for seamless integration
 with rules_apple's ios_application. Debug mode uses bundle_only=True to
 embed the framework without linking (stub binary is not loaded at runtime).
@@ -96,7 +96,7 @@ _APP_FRAMEWORK_INFO_PLIST = """\
 </plist>
 """
 
-def _flutter_ios_framework_impl(ctx):
+def _flutter_ios_app_framework_impl(ctx):
     """Assembles Flutter artifacts into App.framework individual files.
 
     Release mode (AOT): App binary (retagged via vtool) + Info.plist + flutter_assets.
@@ -115,7 +115,7 @@ def _flutter_ios_framework_impl(ctx):
     # Every output under a directory named after this target. Without it two
     # apps in one package would both declare `App.framework/Info.plist` and the
     # build would fail with conflicting actions — the same defect
-    # `flutter_macos_framework` names its wrapper directory to avoid, and the
+    # `flutter_macos_app_framework` names its wrapper directory to avoid, and the
     # shape `flutter_ios_native_frameworks` already uses for its plugin
     # frameworks.
     #
@@ -237,8 +237,8 @@ def _flutter_ios_framework_impl(ctx):
             OutputGroupInfo(dsym = depset()),
         ]
 
-flutter_ios_framework = rule(
-    implementation = _flutter_ios_framework_impl,
+flutter_ios_app_framework = rule(
+    implementation = _flutter_ios_app_framework_impl,
     attrs = dicts.add(
         apple_support.action_required_attrs(),
         apple_support.platform_constraint_attrs(),

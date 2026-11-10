@@ -11,8 +11,8 @@ load(
     "MACOS_MINIMUM_OS_VERSION",
     "flutter_apple_bundle_version",
     "flutter_macos_app",
+    "flutter_macos_app_framework_gen",
     "flutter_macos_engine",
-    "flutter_macos_framework_gen",
     "flutter_macos_info_plist_gen",
     "flutter_macos_menu_xib_gen",
     "flutter_macos_native_libs_gen",
@@ -163,7 +163,7 @@ flutter_macos_app(
 # Shared macOS targets (used by approaches 2 & 3)
 # =============================================================================
 
-flutter_macos_framework_gen(
+flutter_macos_app_framework_gen(
     name = "app_framework",
     application = ":app_flutter",
 )

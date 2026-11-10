@@ -8,8 +8,8 @@ load(
     "IOS_MINIMUM_OS_VERSION",
     "flutter_apple_bundle_version",
     "flutter_ios_app",
+    "flutter_ios_app_framework_gen",
     "flutter_ios_engine",
-    "flutter_ios_framework_gen",
     "flutter_ios_info_plist_gen",
     "flutter_ios_native_frameworks_gen",
     "flutter_ios_registrant_gen",
@@ -60,7 +60,7 @@ flutter_application(
 # Shared iOS targets (used by approaches 2 & 3)
 # =============================================================================
 
-flutter_ios_framework_gen(
+flutter_ios_app_framework_gen(
     name = "app_framework",
     application = ":app_flutter",
 )
@@ -527,7 +527,7 @@ flutter_library(
 # `App` the bundle embeds. Flutter's release mode is every `-c` but `dbg`.
 # =============================================================================
 
-flutter_ios_framework_gen(
+flutter_ios_app_framework_gen(
     name = "release_framework",
     application = ":app_flutter",
     tags = ["manual"],

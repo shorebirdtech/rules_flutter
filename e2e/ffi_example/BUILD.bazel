@@ -10,8 +10,8 @@ load(
     "@rules_flutter//flutter:ios.bzl",
     "IOS_DEFAULT_LAUNCH_STORYBOARD",
     "IOS_MINIMUM_OS_VERSION",
+    "flutter_ios_app_framework_gen",
     "flutter_ios_engine",
-    "flutter_ios_framework_gen",
     "flutter_ios_info_plist_gen",
     "flutter_ios_native_frameworks_gen",
     "flutter_ios_registrant_gen",
@@ -22,8 +22,8 @@ load("@rules_flutter//flutter:linux.bzl", "flutter_linux_app")
 load(
     "@rules_flutter//flutter:macos.bzl",
     "MACOS_MINIMUM_OS_VERSION",
+    "flutter_macos_app_framework_gen",
     "flutter_macos_engine",
-    "flutter_macos_framework_gen",
     "flutter_macos_info_plist_gen",
     "flutter_macos_menu_xib_gen",
     "flutter_macos_native_libs_gen",
@@ -311,7 +311,7 @@ flutter_application(
     ],
 )
 
-flutter_macos_framework_gen(
+flutter_macos_app_framework_gen(
     name = "ffi_macos_framework",
     application = ":ffi_app",
 )
@@ -373,7 +373,7 @@ macos_application(
 # Built with a fully Bazel-generated runner (no ios/Runner/ scaffolding).
 # =============================================================================
 
-flutter_ios_framework_gen(
+flutter_ios_app_framework_gen(
     name = "ffi_ios_framework",
     application = ":ffi_app",
 )

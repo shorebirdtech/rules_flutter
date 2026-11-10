@@ -1,7 +1,7 @@
 load("@rules_flutter//flutter:android.bzl", "flutter_android_app")
 load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application", "flutter_test")
 load("@rules_flutter//flutter:integration_test.bzl", "flutter_web_integration_test")
-load("@rules_flutter//flutter:ios.bzl", "IOS_MINIMUM_OS_VERSION", "flutter_ios_app", "flutter_ios_framework_gen", "flutter_ios_simulator_build")
+load("@rules_flutter//flutter:ios.bzl", "IOS_MINIMUM_OS_VERSION", "flutter_ios_app", "flutter_ios_app_framework_gen", "flutter_ios_simulator_build")
 load("@rules_flutter//flutter:linux.bzl", "flutter_linux_app")
 load("@rules_flutter//flutter:macos.bzl", "flutter_macos_app")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
@@ -57,7 +57,7 @@ flutter_ios_simulator_build(
     targets = [":ios_app"],
 )
 
-flutter_ios_framework_gen(
+flutter_ios_app_framework_gen(
     name = "ios_framework",
     application = ":ios_flutter",
     tags = ["manual"],

@@ -26,9 +26,9 @@ load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("//flutter:web.bzl", "flutter_web_bundle")
 load("//flutter/private:flutter_aot_snapshot.bzl", "flutter_aot_snapshot")
 load("//flutter/private:flutter_application.bzl", "flutter_application")
-load("//flutter/private:flutter_ios_application.bzl", "flutter_ios_framework")
+load("//flutter/private:flutter_ios_application.bzl", "flutter_ios_app_framework")
 load("//flutter/private:flutter_kernel.bzl", "flutter_kernel")
-load("//flutter/private:flutter_macos_application.bzl", "flutter_macos_framework", "flutter_macos_native_libs")
+load("//flutter/private:flutter_macos_application.bzl", "flutter_macos_app_framework", "flutter_macos_native_libs")
 load(":apple_bundling.bzl", "fake_application")
 
 _STRIP = "//command_line_option:experimental_output_paths"
@@ -190,12 +190,12 @@ def path_mapping_test_suite(name):
             native_libs = ["libadd.dylib"],
             tags = ["manual"],
         )
-        flutter_macos_framework(
+        flutter_macos_app_framework(
             name = name + "_macos_framework" + suffix,
             application = name + "_fake_app" + suffix,
             tags = ["manual"],
         )
-        flutter_ios_framework(
+        flutter_ios_app_framework(
             name = name + "_ios_framework" + suffix,
             application = name + "_fake_app" + suffix,
             tags = ["manual"],

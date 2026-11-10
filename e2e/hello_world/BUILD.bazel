@@ -9,8 +9,8 @@ load(
     "IOS_DEFAULT_LAUNCH_STORYBOARD",
     "IOS_MINIMUM_OS_VERSION",
     "flutter_ios_app",
+    "flutter_ios_app_framework_gen",
     "flutter_ios_engine",
-    "flutter_ios_framework_gen",
     "flutter_ios_info_plist_gen",
     "flutter_ios_native_frameworks_gen",
     "flutter_ios_registrant_gen",
@@ -141,7 +141,7 @@ flutter_ios_app(
 # credential — it is a different runner. Verifying a device build here does
 # not exercise `ios/Runner/`.
 
-flutter_ios_framework_gen(
+flutter_ios_app_framework_gen(
     name = "hello_world_ios_framework",
     application = ":hello_world_app",
 )

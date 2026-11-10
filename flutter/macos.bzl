@@ -24,14 +24,14 @@ Two tiers of API:
 
         load("@rules_flutter//flutter:macos.bzl",
             "flutter_macos_engine",
-            "flutter_macos_framework_gen",
+            "flutter_macos_app_framework_gen",
             "flutter_macos_info_plist_gen",
             "flutter_macos_menu_xib_gen",
             "flutter_macos_native_libs_gen",
             "flutter_macos_registrant_gen",
             "flutter_macos_runner_lib_gen")
 
-        flutter_macos_framework_gen(name = "my_framework", application = ":my_app")
+        flutter_macos_app_framework_gen(name = "my_framework", application = ":my_app")
         flutter_macos_registrant_gen(name = "my_registrant", application = ":my_app")
         flutter_macos_engine(name = "my_engine")
         flutter_macos_native_libs_gen(name = "my_native_libs", application = ":my_app")
@@ -69,7 +69,7 @@ load("//flutter/private:constants.bzl", _MACOS_MINIMUM_OS_VERSION = "MACOS_MINIM
 load("//flutter/private:flutter_apple_bundle_version.bzl", _flutter_apple_bundle_version = "flutter_apple_bundle_version")
 load("//flutter/private:flutter_apple_plugin_library.bzl", _flutter_apple_plugin_library_macro = "flutter_apple_plugin_library")
 load("//flutter/private:flutter_apple_plugins_aggregator.bzl", _flutter_apple_plugins_aggregator = "flutter_apple_plugins_aggregator")
-load("//flutter/private:flutter_macos_application.bzl", _flutter_macos_framework_rule = "flutter_macos_framework", _flutter_macos_native_libs_rule = "flutter_macos_native_libs", _flutter_macos_privacy_manifests_rule = "flutter_macos_privacy_manifests")
+load("//flutter/private:flutter_macos_application.bzl", _flutter_macos_app_framework_rule = "flutter_macos_app_framework", _flutter_macos_native_libs_rule = "flutter_macos_native_libs", _flutter_macos_privacy_manifests_rule = "flutter_macos_privacy_manifests")
 load("//flutter/private:flutter_macos_registrant.bzl", _flutter_macos_registrant_rule = "flutter_macos_registrant")
 load("//flutter/private:flutter_plist_merge.bzl", _flutter_entitlements_merge = "flutter_entitlements_merge", _flutter_plist_merge = "flutter_plist_merge")
 load("//flutter/private:runner_module.bzl", "runner_module_name")
@@ -97,8 +97,8 @@ flutter_apple_bundle_version = _flutter_apple_bundle_version
 # build (the host platform's configuration) is wrong everywhere and fails outright on
 # non-macOS hosts.
 
-def flutter_macos_framework_gen(name, **kwargs):
-    """Generates App.framework. See `flutter_macos_framework`.
+def flutter_macos_app_framework_gen(name, **kwargs):
+    """Generates App.framework. See `flutter_macos_app_framework`.
 
     Args:
         name: Target name.
@@ -106,7 +106,7 @@ def flutter_macos_framework_gen(name, **kwargs):
             `["manual"]` — build via the consuming `macos_application`.
     """
     tags = kwargs.pop("tags", ["manual"])
-    _flutter_macos_framework_rule(name = name, tags = tags, **kwargs)
+    _flutter_macos_app_framework_rule(name = name, tags = tags, **kwargs)
 
 def flutter_macos_registrant_gen(name, **kwargs):
     """Generates the macOS GeneratedPluginRegistrant. See `flutter_macos_registrant`.
@@ -500,7 +500,7 @@ def flutter_macos_app(
     )
 
     # 2. Assemble App.framework (flat layout with the AOT binary + flutter_assets).
-    _flutter_macos_framework_rule(
+    _flutter_macos_app_framework_rule(
         name = "__%s_app_framework" % name,
         application = application,
         tags = tags,

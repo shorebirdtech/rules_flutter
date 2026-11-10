@@ -2,7 +2,7 @@
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
-load("//flutter/private:flutter_ios_application.bzl", "flutter_ios_framework")
+load("//flutter/private:flutter_ios_application.bzl", "flutter_ios_app_framework")
 load("//flutter/private:ios_entitlements.bzl", "resolve_ios_entitlements")
 load(":apple_bundling.bzl", "fake_application", "outputs_under_target_dir_test", "strip_step_test")
 
@@ -76,7 +76,7 @@ def _bundling_tests(name):
             debug = True,
             tags = ["manual"],
         )
-        flutter_ios_framework(
+        flutter_ios_app_framework(
             name = name + app + "_framework",
             application = name + app,
             tags = ["manual"],
@@ -117,7 +117,7 @@ def _bundling_tests(name):
             strip_aot = strip,
             tags = ["manual"],
         )
-        flutter_ios_framework(
+        flutter_ios_app_framework(
             name = name + "_release_framework" + suffix,
             application = name + "_fake_release" + suffix,
             tags = ["manual"],

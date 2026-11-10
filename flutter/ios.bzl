@@ -24,12 +24,12 @@ Two tiers of API:
         load("@rules_flutter//flutter:ios.bzl",
             "IOS_DEFAULT_LAUNCH_STORYBOARD",
             "flutter_ios_engine",
-            "flutter_ios_framework_gen",
+            "flutter_ios_app_framework_gen",
             "flutter_ios_info_plist_gen",
             "flutter_ios_registrant_gen",
             "flutter_ios_runner_lib_gen")
 
-        flutter_ios_framework_gen(name = "my_framework", application = ":my_app")
+        flutter_ios_app_framework_gen(name = "my_framework", application = ":my_app")
         flutter_ios_registrant_gen(name = "my_registrant", application = ":my_app")
         flutter_ios_engine(name = "my_engine")
         flutter_ios_info_plist_gen(name = "my_info_plist", app_name = "My App")
@@ -70,7 +70,7 @@ load("//flutter/private:debug_build.bzl", _debug_build = "debug_build")
 load("//flutter/private:flutter_apple_bundle_version.bzl", _flutter_apple_bundle_version = "flutter_apple_bundle_version")
 load("//flutter/private:flutter_apple_plugin_library.bzl", _flutter_apple_plugin_library_macro = "flutter_apple_plugin_library")
 load("//flutter/private:flutter_apple_plugins_aggregator.bzl", _flutter_apple_plugins_aggregator = "flutter_apple_plugins_aggregator")
-load("//flutter/private:flutter_ios_application.bzl", _flutter_ios_application = "flutter_ios_application", _flutter_ios_framework_rule = "flutter_ios_framework", _flutter_ios_native_frameworks_rule = "flutter_ios_native_frameworks", _flutter_ios_privacy_manifests_rule = "flutter_ios_privacy_manifests")
+load("//flutter/private:flutter_ios_application.bzl", _flutter_ios_app_framework_rule = "flutter_ios_app_framework", _flutter_ios_application = "flutter_ios_application", _flutter_ios_native_frameworks_rule = "flutter_ios_native_frameworks", _flutter_ios_privacy_manifests_rule = "flutter_ios_privacy_manifests")
 load("//flutter/private:flutter_ios_registrant.bzl", _flutter_ios_registrant_rule = "flutter_ios_registrant")
 load("//flutter/private:flutter_plist_merge.bzl", _flutter_entitlements_merge = "flutter_entitlements_merge", _flutter_plist_merge = "flutter_plist_merge")
 load("//flutter/private:ios_entitlements.bzl", "resolve_ios_entitlements")
@@ -152,7 +152,7 @@ flutter_apple_plugin_library = _flutter_apple_plugin_library_macro
 # Swift modules + link inputs into the runner.
 flutter_apple_plugins_aggregator = _flutter_apple_plugins_aggregator
 
-def flutter_ios_framework_gen(name, application, minimum_os_version = IOS_MINIMUM_OS_VERSION, **kwargs):
+def flutter_ios_app_framework_gen(name, application, minimum_os_version = IOS_MINIMUM_OS_VERSION, **kwargs):
     """Generates App.framework and wraps it as apple_dynamic_framework_import.
 
     Chains: flutter_application → intermediates → framework assembly → import.
@@ -175,7 +175,7 @@ def flutter_ios_framework_gen(name, application, minimum_os_version = IOS_MINIMU
         tags = tags,
     )
 
-    _flutter_ios_framework_rule(
+    _flutter_ios_app_framework_rule(
         name = "__%s_framework" % name,
         application = "__%s_intermediates" % name,
         minimum_os_version = minimum_os_version,
@@ -577,7 +577,7 @@ def flutter_ios_app(
     )
 
     # 3. Assemble App.framework from the AOT dylib.
-    _flutter_ios_framework_rule(
+    _flutter_ios_app_framework_rule(
         name = "__%s_app_framework" % name,
         application = "__%s_intermediates" % name,
         minimum_os_version = minimum_os_version,

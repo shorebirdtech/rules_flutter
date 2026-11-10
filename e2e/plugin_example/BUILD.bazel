@@ -10,8 +10,8 @@ load(
     "IOS_DEFAULT_LAUNCH_STORYBOARD",
     "IOS_MINIMUM_OS_VERSION",
     "flutter_ios_app",
+    "flutter_ios_app_framework_gen",
     "flutter_ios_engine",
-    "flutter_ios_framework_gen",
     "flutter_ios_info_plist_gen",
     "flutter_ios_native_frameworks_gen",
     "flutter_ios_privacy_manifests_gen",
@@ -24,8 +24,8 @@ load(
     "@rules_flutter//flutter:macos.bzl",
     "MACOS_MINIMUM_OS_VERSION",
     "flutter_macos_app",
+    "flutter_macos_app_framework_gen",
     "flutter_macos_engine",
-    "flutter_macos_framework_gen",
     "flutter_macos_info_plist_gen",
     "flutter_macos_menu_xib_gen",
     "flutter_macos_native_libs_gen",
@@ -103,7 +103,7 @@ flutter_application(
 # macOS build
 # =============================================================================
 
-flutter_macos_framework_gen(
+flutter_macos_app_framework_gen(
     name = "plugin_macos_framework",
     application = ":plugin_app",
 )
@@ -171,7 +171,7 @@ macos_application(
 # iOS build
 # =============================================================================
 
-flutter_ios_framework_gen(
+flutter_ios_app_framework_gen(
     name = "plugin_ios_framework",
     application = ":plugin_app",
 )

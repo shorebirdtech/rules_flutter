@@ -18,7 +18,7 @@ output groups builds only what they hold:
         --output_groups=flutter_macos_bundle_parts,flutter_macos_native_libs
 
 `flutter_macos_bundle_parts` holds the application's `flutter_assets` tree, as
-the `flutter_macos_framework` that puts it into `App.framework` reads it.
+the `flutter_macos_app_framework` that puts it into `App.framework` reads it.
 
 `flutter_macos_native_libs` holds what the bundle's native code is made from:
 the libraries a `flutter_macos_native_libs` stages into `Contents/Frameworks`
@@ -54,7 +54,7 @@ def _flutter_macos_bundle_parts_aspect_impl(target, ctx):
     # too, and what they read of it is not what the bundle carries.
     app_info = _application_info(ctx)
     if app_info:
-        if ctx.rule.kind == "flutter_macos_framework":
+        if ctx.rule.kind == "flutter_macos_app_framework":
             assets.append(depset([app_info.flutter_assets]))
         elif ctx.rule.kind == "flutter_macos_native_libs":
             native_libs.append(depset(app_info.native_libs))

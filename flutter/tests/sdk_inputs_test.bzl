@@ -24,7 +24,7 @@ load("//flutter:web.bzl", "flutter_web_bundle")
 load("//flutter/private:flutter_aot_snapshot.bzl", "flutter_aot_snapshot")
 load("//flutter/private:flutter_application.bzl", "flutter_application")
 load("//flutter/private:flutter_kernel.bzl", "flutter_kernel")
-load("//flutter/private:flutter_macos_application.bzl", "flutter_macos_framework")
+load("//flutter/private:flutter_macos_application.bzl", "flutter_macos_app_framework")
 load(":apple_bundling.bzl", "fake_application")
 
 _WHOLE_PROGRAM = {str(Label("@rules_dart//dart:modular_kernel")): False}
@@ -201,7 +201,7 @@ def sdk_inputs_test_suite(name):
         native_libs = ["libadd.dylib"],
         tags = ["manual"],
     )
-    flutter_macos_framework(
+    flutter_macos_app_framework(
         name = name + "_macos_framework",
         application = name + "_fake_app",
         tags = ["manual"],
