@@ -2,7 +2,7 @@
 
 `flutter_engine_out_dirs` (local_sdk.bzl) reads the checkout; this module
 decides which out dir serves each desktop slice and writes the slice targets
-(docs/design/design_custom_engine.md, sections 5.1 and 7.2):
+(the labels of `engine_labels.bzl`):
 
 * `linux-<arch>/<mode>:engine`: `libflutter_linux_gtk.so` and the
   `flutter_linux/` headers of the out dir for that CPU and mode: `host_<mode>`

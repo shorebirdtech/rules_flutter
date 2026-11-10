@@ -2,7 +2,7 @@
 
 `engine/src/flutter/tools/gn` names an out dir `<target_os | host | wasm>_<runtime
 mode>[_sim][_unopt][_<cpu>]`, appending the CPU only when it differs from that
-platform's default (see docs/design/design_custom_engine.md, section 7.1). A
+platform's default. A
 name is only how the scan finds candidates: `args.gn` is the authority on what
 a directory holds.
 """

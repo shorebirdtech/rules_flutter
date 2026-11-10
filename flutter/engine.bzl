@@ -2,8 +2,8 @@
 
 An engine source is a repository. Each piece of an engine (a *slice*: one
 piece, for one platform, mode and architecture) is a target at a fixed label in
-it that returns one of the providers below; see docs/design/design_custom_engine.md,
-section 5, for the labels. A slice target can be anything that returns the
+it that returns one of the providers below; README.md, "Writing an engine
+source", lists the labels. A slice target can be anything that returns the
 provider: these rules over downloaded files, over symlinks into an out dir, an
 `alias` into another repository, or a target that builds the files.
 

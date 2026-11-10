@@ -1,6 +1,6 @@
 """The stock release's engine, as an engine source.
 
-A repository whose slices (docs/design/design_custom_engine.md, section 5) are
+A repository whose slices (the contract of `@rules_flutter//flutter:engine.bzl`) are
 rules over the files of the lazily fetched repositories that download the
 official artifacts: `<name>_<host>` (host tools), `<name>_desktop_engine_*`
 (the desktop engines and, for Linux and Windows, their gen_snapshot),

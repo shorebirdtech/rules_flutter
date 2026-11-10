@@ -4,7 +4,7 @@ A custom engine is built for one CPU, and an iOS one for one environment (the
 device or the simulator). The release's engines hold every one an app can be
 built for, so these checks pass for it; for a local engine they fail at
 analysis, naming the engine and what it holds, rather than at link time or at
-launch (docs/design/design_custom_engine.md, section 7.3).
+launch.
 """
 
 load("//flutter/private:constants.bzl", "ANDROID_ABI_FOR_ARCH")

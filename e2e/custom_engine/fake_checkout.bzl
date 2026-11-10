@@ -1,7 +1,7 @@
 """A stand-in for a flutter/flutter checkout with a built engine, made of the official artifacts.
 
 The release's artifacts are laid out the way a checkout and its engine out dirs
-hold them (`docs/design/design_custom_engine.md`, section 7.2), with `args.gn`
+hold them (README.md, "Custom engines and frameworks"), with `args.gn`
 files written to match, so the adapters read a tree they cannot tell from a
 developer's, and the binaries in it are real and run.
 

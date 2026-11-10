@@ -22,6 +22,7 @@ If `flutter build` works for you, here is what Bazel adds:
 - [Getting started](#getting-started)
 - [Dependencies](#dependencies): pub packages, build hooks, native code
 - [Building for each platform](#building-for-each-platform): macOS, iOS, Android, Linux, Windows, web, cross-compiling, release permissions
+- [Custom engines and frameworks](#custom-engines-and-frameworks): a local flutter/flutter checkout and its engine, provenance, writing an engine source
 - [Rules reference](#rules-reference): libraries, applications, tests, integration tests, plugins, code generation, providers
 - [The dev tool](#the-dev-tool): running apps, hot reload, driving an app from a script
 - [Examples](#examples)
@@ -1787,6 +1788,213 @@ unzip -oq bazel-bin/my_app_ios.ipa -d /tmp/ipa && \
 ```
 
 Remember that a plain `bazel build` is a release build, so it already takes the release side of each of these choices. `e2e/macos_example`, `e2e/android_example`, and `e2e/ios_example` each have a test that reads the built artifact this way.
+
+## Custom engines and frameworks
+
+By default an app builds against a Flutter release: its framework from the release's tag and its engine from the official artifacts. You can also build against a framework and an engine of your own, for example a flutter/flutter checkout and the engine you built in it, which is what `flutter run --local-engine` does upstream. Each such pairing is a named *SDK*, declared next to the release, and each build picks one.
+
+### Building against a local checkout
+
+Build the engine in the checkout as usual, with `engine/src/flutter/tools/gn` and `ninja`, then declare an SDK over it. The checkout's path is machine-local, so it never appears in `MODULE.bazel`:
+
+```starlark
+flutter = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter")
+
+# The release: what a build gets when it names no SDK.
+flutter.toolchain(flutter_version = "3.47.9")
+
+# The checkout's framework and engine, as the SDK named "local".
+flutter.toolchain(
+    name = "local",
+    engine = "@flutter_local_engine",
+    framework = "@flutter_local_framework",
+)
+
+local_framework = use_repo_rule("@rules_flutter//flutter:local_sdk.bzl", "flutter_checkout_framework")
+local_engine = use_repo_rule("@rules_flutter//flutter:local_sdk.bzl", "flutter_engine_out_dirs")
+
+local_framework(name = "flutter_local_framework")
+
+local_engine(name = "flutter_local_engine")
+```
+
+The path and the choice to use the SDK go in your untracked `.bazelrc.user`:
+
+```bazelrc
+common --repo_env=FLUTTER_CHECKOUT=/Users/me/src/flutter
+common --@rules_flutter//flutter:sdk=local
+```
+
+`flutter_checkout_framework` links the checkout's `packages/`, `bin/internal/` and `sky_engine` package, so an edit to the framework is seen by the next build. `flutter_engine_out_dirs` scans `engine/src/out`, reads each out dir's `args.gn` to learn what it holds, and links in the files each piece of the engine needs. A ninja rebuild changes a linked file, and the next build picks it up.
+
+Which out dir serves what, by the names `tools/gn` gives them (the CPU appears in a name only when it is not the platform's default, so an Apple silicon Mac's host build is `host_debug_arm64`):
+
+| Out dir | Serves |
+|---|---|
+| `host_debug[_unopt][_<cpu>]` | The host tools (the Dart SDK, `frontend_server`, `flutter_tester`, `impellerc`, ...) and the debug platform kernel; on a Mac, the debug macOS engine |
+| `host_profile...`, `host_release...` | That mode's macOS engine and `gen_snapshot` on a Mac, or that mode's Linux or Windows engine on those machines; `host_release` also gives the release platform kernel |
+| `ios_debug_sim[_unopt][_<cpu>]` | The iOS simulator engine, which is what debug means for iOS |
+| `ios_profile...`, `ios_release...` | The iOS device engine and its `gen_snapshot` |
+| `android_<mode>[_unopt][_<cpu>]` | The Android engine (`flutter.jar`) and, for profile and release, its `gen_snapshot` |
+| `linux_<mode>[_<cpu>]`, `win_<mode>[_<cpu>]` | A Linux or Windows engine built for a machine other than this one, for debug cross-builds |
+| `wasm_release` | The web SDK (`flutter_web_sdk/`, with `canvaskit/`) |
+
+Build only the out dirs your builds need. A `-c dbg` macOS app needs `host_debug_<cpu>`; a release one needs `host_release_<cpu>` too.
+
+If two out dirs fit the same slot (`host_debug_arm64` and `host_debug_unopt_arm64`, say), the build fails and lists them. Choose with `--repo_env=FLUTTER_LOCAL_ENGINES=host_debug_unopt_arm64,host_release_arm64`.
+
+The checkout also needs its Dart source, `engine/src/flutter/third_party/dart`, which `gclient sync` fetches. rules_dart compiles each library's dependents against an outline of it (its kernel without function bodies), so an edit inside a function body does not recompile them. The tool that makes outlines reads only the kernel format of the Dart it ships with, so a checkout engine's is built from that checkout's own `pkg/kernel`. Without the source, a build fails saying so and naming the two ways out: run `gclient sync`, or build with `--@rules_dart//dart:outline_kernel=false`.
+
+Programs built with a custom SDK get its own `FLUTTER_VERSION`, `FLUTTER_FRAMEWORK_REVISION`, `FLUTTER_ENGINE_REVISION` and `FLUTTER_DART_VERSION` defines, from the checkout's version and commit and the engine's `args.gn`. `flutter_test` runs under the selected SDK too: its modules compile against the checkout's platform kernel.
+
+You can also replace only one half. Give `flutter.toolchain` just `engine` or just `framework`, with `flutter_version` naming the release that supplies the other half. A framework whose `bin/internal/material_fonts.version` names a fonts revision no pinned release uses needs `material_fonts_sha256`.
+
+### Choosing the SDK per build
+
+`--@rules_flutter//flutter:sdk=<name>` picks the SDK. Leave it out and you get the release, which is named `flutter`. Put the flag in `.bazelrc.user` to make the checkout your default on one machine, or pass it on the command line for one build:
+
+```sh
+bazel build //:app --@rules_flutter//flutter:sdk=local
+```
+
+Each SDK's repositories are fetched only when a build selects it. Without `FLUTTER_CHECKOUT` set, the repositories still load, so `bazel query` works on a machine with no checkout, and a build that selects the SDK fails at analysis with the `.bazelrc.user` lines to add. A name no `flutter.toolchain()` declares fails, listing the ones that are declared. An SDK other than `flutter` can only be declared in the root module.
+
+All SDKs share one `pubspec.lock`. The `sdk: flutter` packages (`flutter`, `flutter_test`, ...) come from the selected SDK's framework. If what the checkout's pubspecs ask of a hosted package does not match the lock, or the lock needs a newer Flutter than the checkout is, the build fails naming each package and gives the command that re-resolves against that SDK:
+
+```sh
+bazel run --@rules_flutter//flutter:sdk=local @rules_flutter//flutter/pub -- get
+```
+
+### What the app records
+
+An app built with a custom SDK carries `flutter_sdk.json` beside its Flutter assets: in `App.framework/Resources/flutter_assets/` on macOS, `flutter_assets/` in iOS's `App.framework/`, `assets/flutter_assets/` in an APK, `data/flutter_assets/` in a Linux or Windows bundle, and `assets/` on the web. An app built with the release carries none, so release apps are unchanged.
+
+```json
+{
+  "engine": {
+    "<engine repository>//host/darwin-arm64:tools": {
+      "as_of": "gn",
+      "content_hash": "...",
+      "dart_version": "...",
+      "engine_version": "4f1c...",
+      "origin": "out_dir",
+      "out_dir": "host_debug_arm64"
+    },
+    "<engine repository>//macos/release:engine": { "out_dir": "host_release_arm64", "...": "..." }
+  },
+  "framework": {
+    "commit": "4f1c...",
+    "dirty": true,
+    "origin": "local",
+    "version": "3.50.0-1.0.pre-210"
+  },
+  "kernel": {"format": 138, "sdk_hash": "0000000000"},
+  "sdk": "local",
+  "snapshot_hash": "0451907c2eaa8467e848c0067bfe8ed4"
+}
+```
+
+- `framework` is the checkout: its version (from `bin/cache/flutter.version.json`, or `git describe --tags` without one), its commit, and whether it had uncommitted changes when the build read it.
+- `engine` has one entry for each piece the app was built from, keyed by the piece's label: the host tools, the platform kernel, the engine and, in profile and release, the `gen_snapshot`. `engine_version`, `content_hash` and `dart_version` are what `tools/gn` wrote into the out dir's `args.gn`. `as_of: "gn"` says so: that commit is the one checked out when `tools/gn` generated the directory, which can be older than the last `ninja` run.
+- `snapshot_hash` and `kernel` are the fingerprints the engine's Dart VM checks; see below. A web app has no `snapshot_hash`.
+- The record holds no path of the machine that built the app: the checkout's path and every absolute path are left out.
+
+### What fails, and how
+
+Every failure names what is missing or which artifacts disagree, and how to fix it.
+
+**A piece the out dirs do not have.** A build that needs an engine for a mode, platform or CPU the out dirs lack fails at analysis. The message names the piece, the out dirs it found, and the `tools/gn` and `ninja` commands that build the missing one. A mode is never served by another mode's engine: a debug engine cannot run AOT code, and a release engine rejects anything not compiled for release. Builds that do not need the missing piece are unaffected, so a checkout with only `host_debug_arm64` and its Dart source builds every `-c dbg` macOS app on an Apple silicon Mac.
+
+**An engine of the wrong CPU.** A locally built engine holds one CPU, where the release's macOS engine is universal. An app built for a CPU the engine lacks fails at analysis naming the engine, what it contains and what the build is for. An iOS app checks the same way for the device or simulator slice it needs, and an Android app for each ABI it carries.
+
+**Pieces built from different Darts.** Once per SDK, platform and mode, one action, `FlutterSdkCheck`, reads the fingerprints out of the artifacts, and every app of that combination depends on it, so it cannot be skipped. It fails the build when:
+
+- the engine's platform kernel and the Dart SDK's `vm_platform_strong.dill` have different kernel formats or SDK hashes;
+- in profile and release, `gen_snapshot` and the engine binary share no snapshot hash (the engine's VM refuses a snapshot whose hash is not its own);
+- the Dart SDK's `dartaotruntime` is of another Dart than the engine.
+
+For example:
+
+```
+The Flutter SDK does not match itself for release:
+  gen_snapshot  <engine repository>//macos-arm64/release:gen_snapshot_darwin-arm64
+                (.../macos-arm64/release/gen_snapshot)
+                snapshot hash 9f3c...
+  engine        <engine repository>//macos/release:engine
+                (.../macos/release/FlutterMacOS.framework/Versions/A/FlutterMacOS)
+                snapshot hash 0451...
+An engine only runs code compiled by a gen_snapshot from the same Dart. Rebuild both from one checkout.
+```
+
+A web SDK has no engine binary or `gen_snapshot`, so a web build checks only the kernel: each of the web SDK's platform dills against the Dart SDK. A web app of a custom engine loads its renderer from the web SDK rather than the CDN, which has nothing for an engine that is not a release, so a web SDK without `canvaskit/` fails too.
+
+**A checkout that is not one.** A `FLUTTER_CHECKOUT` without `packages/flutter/pubspec.yaml`, or without `engine/src/out`, fails when the repository is fetched, naming what is missing.
+
+### Writing an engine source
+
+`flutter_engine_out_dirs` is one *engine source*. Any repository that follows the same contract can be one, and `flutter.toolchain(engine = "@my_engine")` uses it the same way. The release's engine is written to this contract too.
+
+An engine source has a `flutter_engine.json` at its root and a target, a *slice*, at each of these labels. `<host>` is the machine the tools run on (`darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`, `windows-x64`); `<mode>` is `debug`, `profile` or `release`.
+
+| Label | Rule (provider) | Used by |
+|---|---|---|
+| `//:flutter_engine.json` | a file | `{"origin": ..., "description": ...}`, plus `engine_revision` and `dart_version` for the `FLUTTER_*` defines |
+| `//host/<host>:tools` | `flutter_host_tools` (`FlutterHostToolsInfo`) | every build whose actions run on `<host>` |
+| `//kernel/debug:platform` | `flutter_platform_kernel` (`FlutterPlatformKernelInfo`) | debug and profile Dart compiles |
+| `//kernel/release:platform` | `flutter_platform_kernel` | release Dart compiles |
+| `//kernel_outline:kernel_outline` | the outline tool, for example an `alias` to rules_dart's `dart_kernel_source(path = ...)` of the engine's Dart | builds with `--@rules_dart//dart:outline_kernel` (the default) |
+| `//macos/<mode>:engine` | `flutter_macos_engine_slice` (`FlutterEngineInfo`) | macOS apps |
+| `//ios/<mode>:engine` | `flutter_ios_engine_slice` | iOS apps; `debug` is the simulator engine |
+| `//android-<arch>/<mode>:engine` | `flutter_android_engine_slice` | Android apps; `<arch>` is `arm`, `arm64` or `x64` |
+| `//linux-<arch>/<mode>:engine` | `flutter_linux_engine_slice` | Linux apps; `<arch>` is `x64` or `arm64` |
+| `//windows-x64/<mode>:engine` | `flutter_windows_engine_slice` | Windows apps |
+| `//<target>/<mode>:gen_snapshot_<host>` | `flutter_gen_snapshot` (`FlutterGenSnapshotInfo`) | profile and release builds for `<target>` (`macos-<arch>`, `ios-arm64`, `android-<arch>`, `linux-<arch>`, `windows-x64`) run on `<host>` |
+| `//web:sdk` | `flutter_web_sdk` (`FlutterWebSdkInfo`) | web apps, with the files a web app names beside it in `//web` (`files`, `dart2js_platform.dill`, `dart2wasm_platform.dill`, `ddc_outline.dill`, `libraries.json`, `ddc_dart_sdk.js`, `ddc_module_loader.js`, `dart_stack_trace_mapper.js`) |
+
+The rules and providers load from `@rules_flutter//flutter:engine.bzl`, whose docstrings list every field. A slice can be anything that returns the provider: one of these rules over downloaded files, over symlinks into a build directory, an `alias` into another repository, or a target that builds the files. Every provider takes a `provenance` dict, which is what the app's record shows for that piece. Keep machine paths out of it: the record drops a `path` key and any value starting with `/`, and nothing else.
+
+Define every label, and make the ones you do not provide `flutter_missing_slice`s. A build that needs one fails at analysis with your message, and a build that does not is unaffected:
+
+```starlark
+load("@rules_flutter//flutter:engine.bzl", "flutter_macos_engine_slice", "flutter_missing_slice")
+
+# macos/release/BUILD.bazel
+filegroup(
+    name = "files",
+    srcs = glob(["FlutterMacOS.framework/**"]),
+)
+
+flutter_macos_engine_slice(
+    name = "engine",
+    mode = "release",
+    cpus = ["arm64"],
+    files = ":files",
+    binary = ":FlutterMacOS.framework/Versions/A/FlutterMacOS",
+    provenance = {"origin": "my_build", "commit": "4f1c..."},
+    visibility = ["//visibility:public"],
+)
+```
+
+```starlark
+# ios/release/BUILD.bazel
+flutter_missing_slice(
+    name = "engine",
+    message = "This engine has no iOS build. Build iOS apps with the release.",
+    visibility = ["//visibility:public"],
+)
+```
+
+`cpus` is what the CPU check reads, `binary` is the file whose snapshot hash the check reads (for Android, `flutter.jar` with `binary_entry = "lib/<abi>/libflutter.so"`), and an iOS slice lists its `xcframework_slices`. The same `FlutterSdkCheck` runs on your pieces as on a checkout's.
+
+A *framework source* is the other half: a repository whose root is a flutter/flutter tree, with `packages/`, `bin/internal/material_fonts.version`, the `sky_engine` package at `engine/src/flutter/sky/packages/sky_engine`, and a `flutter_framework.json` saying what it is: `{"version": "...", "commit": "...", "dirty": false, "origin": "..."}`.
+
+### Limitations
+
+- `flutter_engine_out_dirs` is tested against a stand-in checkout: `e2e/custom_engine` lays the official release's artifacts out the way a checkout's out dirs hold them, with matching `args.gn` files. The out dir layout and `args.gn` fields it reads follow `tools/gn`, but have not yet been checked against a real engine build.
+- A debug iOS build is a simulator build. There is no debug build for an iOS device from out dirs.
+- Engines and `gen_snapshot`s for macOS and iOS are read only on a Mac.
+- A desktop profile or release build uses the out dir's own `gen_snapshot`, which runs only on the machine it was built for, so those builds exist only for the machine's own platform. As with the release, release builds for another desktop OS do not cross-compile; debug builds do.
+- The only engine and framework sources rules_flutter ships are the release and a local checkout. Anything else, such as a fork's artifacts at a URL, needs a repository you write to the contract above.
 
 ## Rules reference
 

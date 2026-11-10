@@ -4,7 +4,7 @@
 links the web SDK of its `wasm_release` out dir (`flutter_web_sdk/`, the
 `--web` build of `tools/gn`, where flutter_tools'
 `CachedLocalWebSdkArtifacts` reads it) and writes the `web` package
-(docs/design/design_custom_engine.md, sections 5.1 and 7.2):
+(the labels of `engine_labels.bzl`):
 
 * `web:sdk`: the `flutter_web_sdk` slice, with the platform kernels the web
   compilers read and whether the out dir holds the renderers (`canvaskit/`).

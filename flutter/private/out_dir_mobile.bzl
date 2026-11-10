@@ -2,7 +2,7 @@
 
 `flutter_engine_out_dirs` (local_sdk.bzl) reads the checkout; this module
 decides which out dir serves each mobile slice and writes the slice targets
-(docs/design/design_custom_engine.md, sections 5.1 and 7.2):
+(the labels of `engine_labels.bzl`):
 
 * `ios/<mode>:engine`: `Flutter.xcframework` of `ios_<mode>[_unopt]` (device;
   profile and release) or `ios_debug_sim[_unopt][_<cpu>]` (the simulator, which

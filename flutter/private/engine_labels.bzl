@@ -1,7 +1,7 @@
 """The labels of the engine contract's slices.
 
 An engine source is a repository with its slices at these labels
-(docs/design/design_custom_engine.md, section 5.1). The toolchains of every SDK
+(`contract_slices` below; README.md, "Writing an engine source"). The toolchains of every SDK
 are written against them, so the stock release and any other source are used
 the same way.
 """
