@@ -1,3 +1,6 @@
+group = "com.example.annotated_plugin"
+version = "1.0-SNAPSHOT"
+
 plugins {
     id("com.android.library")
     id("kotlin-android")

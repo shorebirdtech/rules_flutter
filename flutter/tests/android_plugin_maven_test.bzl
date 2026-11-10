@@ -474,10 +474,43 @@ def _report_test_impl(ctx):
 
 report_test = unittest.make(_report_test_impl)
 
+def _group_and_configuration_test_impl(ctx):
+    env = unittest.begin(ctx)
+    r = parse_gradle_maven_dependencies("""
+group = "io.flutter.plugins.example"
+version = "1.0"
+android {
+    defaultConfig { group "not.the.project" }
+}
+dependencies {
+    api "a:b:1.0"
+    implementation("c:d:2.0")
+    runtimeOnly "e:f:3.0"
+    add("api", "g:h:4.0")
+}
+""")
+    asserts.equals(env, "io.flutter.plugins.example", r.group)
+    asserts.equals(
+        env,
+        [("api", "a:b"), ("implementation", "c:d"), ("runtimeOnly", "e:f"), ("api", "g:h")],
+        [(d.configuration, d.group + ":" + d.artifact) for d in r.deps],
+    )
+
+    # Groovy's call without `=`, and none at all.
+    asserts.equals(env, "com.example.x", parse_gradle_maven_dependencies("group 'com.example.x'\n").group)
+    asserts.equals(env, None, parse_gradle_maven_dependencies("version = '1.0'\n").group)
+
+    # A group that is not a literal is not read.
+    asserts.equals(env, None, parse_gradle_maven_dependencies("group = rootProject.group\n").group)
+    return unittest.end(env)
+
+group_and_configuration_test = unittest.make(_group_and_configuration_test_impl)
+
 def android_plugin_maven_test_suite(name):
     unittest.suite(
         name,
         shared_preferences_test,
+        group_and_configuration_test,
         groovy_and_variables_test,
         unsupported_forms_test,
         conditional_declarations_test,

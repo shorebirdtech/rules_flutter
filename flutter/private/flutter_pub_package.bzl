@@ -632,13 +632,14 @@ def _read_plugin_maven_deps(ctx):
 
     Reads the package's Gradle build file (`build.gradle`, else the `.kts`).
     Returns the parse result of `parse_gradle_maven_dependencies` (the
-    declared dependencies and the lines it did not check), with `script`, the
-    file's path in the package. All empty when the package has no Gradle
-    script.
+    plugin's Maven group, the declared dependencies and the lines it did not
+    check), with `script`, the file's path in the package. All empty when the
+    package has no Gradle script.
     """
     script = _android_gradle_script(ctx)
     parsed = parse_gradle_maven_dependencies(ctx.read(script) if script else "")
     return struct(
+        group = parsed.group,
         deps = parsed.deps,
         unread = parsed.unread,
         script = "android/" + script.basename if script else "",
@@ -649,6 +650,7 @@ def _maven_dep_dicts(parsed):
     return [
         {
             "kind": d.kind,
+            "configuration": d.configuration,
             "coordinate": d.group + ":" + d.artifact,
             "version": d.version,
             "line": d.line,
@@ -672,7 +674,7 @@ def _annotated_dicts(labels):
     """
     return [{"label": label, "name": label.rsplit("//:", 1)[1]} for label in labels]
 
-def _write_maven_deps(ctx, deps, unread, script, annotated = []):
+def _write_maven_deps(ctx, deps, unread, script, annotated = [], group = None):
     """Record the Maven dependencies the Android check of the hub reads.
 
     Written for every spoke, so `@flutter_pub_android_maven` can read
@@ -682,11 +684,14 @@ def _write_maven_deps(ctx, deps, unread, script, annotated = []):
     root of the spoke, as a package with no Android library has no `android/`
     package. `script` is the Gradle script's path in the package, which the
     warning about `unread` lines names. `annotated` are the labels the root's
-    `flutter_pub.annotation` added to the library.
+    `flutter_pub.annotation` added to the library. `group` is the Maven group
+    the Gradle build publishes the plugin under, which `flutter_android_aar`
+    publishes it under too, or None.
     """
     ctx.file(MAVEN_DEPS_FILE, json.encode({
         "package": ctx.attr.package_name,
         "version": ctx.attr.version,
+        "group": group,
         "script": script,
         "deps": deps,
         "unread": unread,
@@ -2319,11 +2324,13 @@ def _flutter_pub_package_impl(ctx):
         # what the overlay replaces, so they are not reported.
         overlay_maven_deps = []
         overlay_script = ""
+        overlay_group = None
         if overlay_android_content:
             overlay_parsed = _read_plugin_maven_deps(ctx)
             overlay_maven_deps = _maven_dep_dicts(overlay_parsed)
             overlay_script = overlay_parsed.script
-        _write_maven_deps(ctx, overlay_maven_deps, [], overlay_script)
+            overlay_group = overlay_parsed.group
+        _write_maven_deps(ctx, overlay_maven_deps, [], overlay_script, group = overlay_group)
         if overlay_android_content:
             ctx.file("android/BUILD.bazel", overlay_android_content)
         return ctx.repo_metadata(reproducible = not ctx.attr.directory)
@@ -2528,6 +2535,7 @@ def _flutter_pub_package_impl(ctx):
     maven_deps = []
     maven_unread = []
     maven_script = ""
+    maven_group = android_gradle_maven.group if android_gradle_maven else None
     if android_gradle_maven and not android_native_build:
         maven_deps = _maven_dep_dicts(android_gradle_maven)
         maven_unread = _unread_dicts(android_gradle_maven)
@@ -2544,7 +2552,7 @@ def _flutter_pub_package_impl(ctx):
             consumer_proguard_specs = android_consumer_proguard_specs,
             has_resources = android_has_resources,
         ))
-    _write_maven_deps(ctx, maven_deps, maven_unread, maven_script, list(ctx.attr.android_deps))
+    _write_maven_deps(ctx, maven_deps, maven_unread, maven_script, list(ctx.attr.android_deps), group = maven_group)
     return ctx.repo_metadata(reproducible = not ctx.attr.directory)
 
 flutter_pub_package = repository_rule(

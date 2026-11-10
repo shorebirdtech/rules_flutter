@@ -347,6 +347,17 @@ def _unconditional(blocks):
             return False
     return True
 
+def _group_declaration(text):
+    """The group a top-level `group = "x"` (or `group "x"`) statement sets, else None."""
+    if _leading_identifier(text) != "group":
+        return None
+    rest = text[len("group"):].strip()
+    if rest.startswith("="):
+        rest = rest[1:]
+    elif not rest or rest[0] not in "'\"":
+        return None
+    return _string_literal(rest)
+
 def parse_gradle_maven_dependencies(content):
     """Reads the Maven dependencies out of a Gradle build script.
 
@@ -373,8 +384,12 @@ def parse_gradle_maven_dependencies(content):
         content: The text of `build.gradle` or `build.gradle.kts`.
 
     Returns:
-        A struct. `deps` is a list of structs with `kind` (`"deps"`,
-        `"compile_only"` or `"runtime"`), `group`, `artifact`, `version` (a
+        A struct. `group` is the Maven group the script sets at its top level
+        (`group = "com.example.plugin"`), which Gradle publishes the plugin
+        under, or None when it sets none the reader can read. `deps` is a list
+        of structs with `kind` (`"deps"`, `"compile_only"` or `"runtime"`),
+        `configuration` (the Gradle configuration, such as `"api"` or
+        `"implementation"`), `group`, `artifact`, `version` (a
         string, or None when it is a variable the file does not define or a
         dynamic version, which get a presence-only check), `line` (the
         statement), `line_number` and `checked`. `unread` is a list of structs
@@ -394,7 +409,12 @@ def parse_gradle_maven_dependencies(content):
     deps = []
     unread = []
     blocks = []
+    plugin_group = None
     for t in tokens:
+        if t.kind == "statement" and not blocks:
+            declared = _group_declaration(t.text)
+            if declared:
+                plugin_group = declared
         if t.kind == "open":
             blocks.append(t.text)
             continue
@@ -465,6 +485,7 @@ def parse_gradle_maven_dependencies(content):
             unread.append(struct(line = original, line_number = t.line, why = "conditional"))
         deps.append(struct(
             kind = kind,
+            configuration = identifier,
             group = group,
             artifact = artifact,
             version = version,
@@ -472,7 +493,7 @@ def parse_gradle_maven_dependencies(content):
             line_number = t.line,
             checked = checked,
         ))
-    return struct(deps = deps, unread = unread)
+    return struct(group = plugin_group, deps = deps, unread = unread)
 
 def maven_target_name(group, artifact):
     """rules_jvm_external's target name for `group:artifact`.
@@ -663,6 +684,9 @@ def annotated_requirements(packages, resolved):
                 continue
             pkg["deps"].append({
                 "kind": "deps",
+                # What an annotation stands for is a dependency of the plugin's
+                # own, as Gradle's `implementation` declares one.
+                "configuration": "implementation",
                 "coordinate": coordinate,
                 "version": None,
                 "line": "flutter_pub.annotation(android_deps = [...])",
@@ -945,6 +969,11 @@ def _flutter_android_maven_impl(rctx):
         if line.strip()
     ]
     packages = [json.decode(rctx.read(rctx.path(label))) for label in rctx.attr.spokes]
+
+    # The Maven group each package's Gradle build publishes it under, which
+    # `flutter_android_aar` publishes the plugin's AAR under. Every package, as
+    # one with no Maven dependencies is published too.
+    groups = {p["package"]: p.get("group") for p in packages}
     annotated = annotated_requirements(packages, resolved)
     if annotated.errors:
         fail("\n\n".join(annotated.errors))
@@ -954,6 +983,7 @@ def _flutter_android_maven_impl(rctx):
     # picks the packages it links and no others. The build-wide report below is
     # for finding what a lock's plugins need all at once.
     requirements_json = json.encode({
+        "groups": groups,
         "repositories": repositories,
         "resolved": resolved,
         "packages": packages,
