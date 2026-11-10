@@ -1371,6 +1371,8 @@ android_binary(
 | `flutter_assets` | The `flutter_assets/` tree |
 | `mobile_install` | JNI-structured symlinks and assets for `bazel mobile-install` |
 
+An App Bundle from these rules is rules_android's `android_application`, given the same arguments as the `android_binary` and `bundle_config_file = "@rules_flutter//flutter:android_bundle_config.pb.json"`. `bazel build` of it works, and `flutter_android_release` signs it. `bazel run` of it does not install it: rules_android's run script looks for the JDK where the build ran, gives bundletool no `aapt2`, runs bundletool without the Kotlin runtime its `install-apks` needs, and takes `adb` from your PATH. To install a bundle on a device, declare the app with `flutter_android_app` and its `app_bundle`, whose `bazel run` takes all those tools from the build (see [Release: App Bundle and signing](#release-app-bundle-and-signing)), or install the APK, which `bazel run` of an `android_binary` does.
+
 </details>
 
 ### Linux
