@@ -116,7 +116,12 @@ def flutter_apple_plugin_library(
             module's public headers; the others are private to the ObjC
             compile, as SwiftPM treats them.
         module_name: Swift module name. Defaults to `name`.
-        platform: `"macos"` or `"ios"`. Picks the Flutter framework dep.
+        platform: `"macos"` or `"ios"`, which picks the Flutter framework
+            the sources compile against; or `"darwin"` for sources that build
+            for both (`sharedDarwinSource`), which compile against the
+            framework of the platform the build is for. List a `darwin`
+            library as the `lib` of both the plugin's `ios` and `macos`
+            `flutter_plugin_platform`.
         deps: Additional swift_library / cc_library deps: other plugins,
             other targets of the plugin's package. Both compiles see them.
         copts: Additional compile options, for both the Swift and the ObjC
@@ -172,8 +177,8 @@ def flutter_apple_plugin_library(
             is only built when something depends on it.
         **kwargs: Forwarded to the underlying swift_library.
     """
-    if platform not in ("macos", "ios"):
-        fail("flutter_apple_plugin_library: platform must be 'macos' or 'ios', got '%s'" % platform)
+    if platform not in ("macos", "ios", "darwin"):
+        fail("flutter_apple_plugin_library: platform must be 'macos', 'ios' or 'darwin', got '%s'" % platform)
 
     if tags == None:
         tags = ["manual"]
@@ -185,8 +190,16 @@ def flutter_apple_plugin_library(
     # registrant's `import <module>` resolves identically on each platform).
     # Without target_compatible_with, both swift_library targets analyze in
     # the same configuration and produce conflicting `<module>.swiftmodule`
-    # outputs. Constrain each to its OS so only one is reachable per build.
-    target_compatible_with = ["@platforms//os:%s" % platform]
+    # outputs. Constrain each to its OS so only one is reachable per build;
+    # a `darwin` library, the one of both, to either.
+    if platform == "darwin":
+        target_compatible_with = select({
+            Label("@platforms//os:ios"): [],
+            Label("@platforms//os:macos"): [],
+            "//conditions:default": [Label("@platforms//:incompatible")],
+        })
+    else:
+        target_compatible_with = ["@platforms//os:%s" % platform]
 
     swift_files, objc_files, headers, private_headers = _split_srcs(srcs, public_hdrs)
 
@@ -196,37 +209,55 @@ def flutter_apple_plugin_library(
     # brings in the framework headers. macOS ships a dynamic framework;
     # iOS ships an xcframework wrapper. The import is the build mode's
     # engine, the one the application bundles: an import of another mode's
-    # engine under the same framework name breaks the bundle.
-    framework_target = "_%s__flutter_framework" % name
-    if platform == "macos":
-        apple_dynamic_framework_import(
-            name = framework_target,
-            framework_imports = MACOS_ENGINE_FRAMEWORK,
-            tags = tags,
-            target_compatible_with = target_compatible_with,
-            visibility = ["//visibility:private"],
-        )
+    # engine under the same framework name breaks the bundle. A `darwin`
+    # library picks the engine of the platform it is built for.
+    framework_targets = {}
+    for os in (("macos", "ios") if platform == "darwin" else (platform,)):
+        framework_target = "_%s__flutter_framework%s" % (name, "_" + os if platform == "darwin" else "")
+        framework_targets[os] = ":" + framework_target
+        if os == "macos":
+            apple_dynamic_framework_import(
+                name = framework_target,
+                framework_imports = MACOS_ENGINE_FRAMEWORK,
+                tags = tags,
+                target_compatible_with = ["@platforms//os:macos"],
+                visibility = ["//visibility:private"],
+            )
+        else:
+            apple_dynamic_xcframework_import(
+                name = framework_target,
+                xcframework_imports = IOS_ENGINE_XCFRAMEWORK,
+                tags = tags,
+                target_compatible_with = ["@platforms//os:ios"],
+                visibility = ["//visibility:private"],
+            )
+    if platform == "darwin":
+        framework_deps = select({
+            Label("@platforms//os:ios"): [framework_targets["ios"]],
+            Label("@platforms//os:macos"): [framework_targets["macos"]],
+            "//conditions:default": [],
+        })
+        framework_files = select({
+            Label("@platforms//os:ios"): IOS_ENGINE_XCFRAMEWORK,
+            Label("@platforms//os:macos"): MACOS_ENGINE_FRAMEWORK,
+            "//conditions:default": [],
+        })
     else:
-        apple_dynamic_xcframework_import(
-            name = framework_target,
-            xcframework_imports = IOS_ENGINE_XCFRAMEWORK,
-            tags = tags,
-            target_compatible_with = target_compatible_with,
-            visibility = ["//visibility:private"],
-        )
+        framework_deps = [framework_targets[platform]]
+        framework_files = MACOS_ENGINE_FRAMEWORK if platform == "macos" else IOS_ENGINE_XCFRAMEWORK
 
-    swift_deps = [":" + framework_target] + list(deps)
+    swift_deps = framework_deps + list(deps)
 
     # The engine's module map, for C-family sources that `@import Flutter`.
     module_maps_target = "_%s__flutter_module_maps" % name
     flutter_engine_module_maps(
         name = module_maps_target,
-        framework = MACOS_ENGINE_FRAMEWORK if platform == "macos" else IOS_ENGINE_XCFRAMEWORK,
+        framework = framework_files,
         tags = tags,
         target_compatible_with = target_compatible_with,
         visibility = ["//visibility:private"],
     )
-    clang_deps = [":" + framework_target, ":" + module_maps_target] + list(deps)
+    clang_deps = framework_deps + [":" + module_maps_target] + list(deps)
 
     # The SDK frameworks and libraries are the plugin's to link whatever its
     # sources are in; a Swift-only plugin has no objc_library to carry them.
@@ -287,7 +318,7 @@ def flutter_apple_plugin_library(
             target_compatible_with = target_compatible_with,
             visibility = ["//visibility:private"],
         )
-        swift_deps.append(":" + objc_target)
+        swift_deps = swift_deps + [":" + objc_target]
 
     bridging_header = None
     extra_copts = []
