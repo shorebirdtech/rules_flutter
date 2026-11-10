@@ -321,7 +321,16 @@ refreshes its `MODULE.bazel.lock` as above. The root's lock is re-pinned the sam
 way, `bazel run //tools/maven_locks -- --refresh .`, and then every Android e2e
 lock the change reaches. Pinning resolves through Coursier, so it needs Maven
 Central and maven.google.com, and the `ANDROID_HOME` and `ANDROID_NDK_HOME` the
-workspace needs. Commit the changed lock with the change that made it stale. A new `maven.install` needs its lock
+workspace needs. Commit the changed lock with the change that made it stale.
+
+A re-pin of `plugin_example` that changes a version also takes its
+`test/gradle_module_metadata.json`: the Gradle module metadata of what the lock
+resolves, which `verify_android_maven_artifacts_test` reads in place of
+maven.google.com so that `//...` needs no network. The test fails naming each
+artifact the snapshot lacks; `bazel run //:record_gradle_module_metadata`
+records it again from the live repositories. `gradle_module_metadata_live_test`,
+in the workspace's `deep` tier, fails when the snapshot and the live metadata
+differ. A new `maven.install` needs its lock
 file to exist first (an empty file will do); the run then fills it.
 
 ## 2. dev_tool tests
@@ -780,6 +789,7 @@ cd e2e/codegen && bazel test //...
 cd e2e/ffi_example && bazel test //...
 cd e2e/ffi_plugin_example && bazel test //...
 cd e2e/plugin_example && bazel test //...
+cd e2e/plugin_example && bazel test //... --config=deep  # before a merge: the live Gradle metadata check
 cd e2e/macos_example && bazel test //...
 cd e2e/integration_test && bazel test //...  # macOS: needs an unlocked, awake desktop; Windows: `build //...`, its tests run on the VM (below)
 cd e2e/ios_example && bazel test //...
@@ -1968,7 +1978,7 @@ runner needs both).
 | A new or removed e2e workspace, or where one runs in CI (`tools/ci_matrix/e2e_matrix.dart`, `.github/workflows/ci.yaml`) | `bazel run //tools/ci_matrix` (fails on a gap) and `bazel test //tools/ci_matrix/...` |
 | A new package with a `BUILD` that loads a repo only development has (a dev dependency of `MODULE.bazel`), or a change to `ignore_directories` in `REPO.bazel` | `bazel run //tools/consumer_archive`, then `cd e2e/external_module` and both `bazel query "@rules_flutter//..."` and `bazel build --nobuild "@rules_flutter//..."` must succeed (the archive is committed state only, and omits what `.gitattributes` trims); put such a package in `ignore_directories` |
 | The bazelrc preset (`tools/preset.bazelrc`, or a bump of overhead) | `bazel run @overhead//preset`, then `bazel run @overhead//preset -- --check` |
-| Maven artifacts (a `maven.install` in any `MODULE.bazel`, or a bump of `rules_android` or `rules_jvm_external`) | `bazel run //tools/maven_locks -- --refresh` on every Android workspace (hello_world, plugin_example, android_example, custom_engine, integration_test) and `.`, then `bazel run @overhead//locks -- --refresh` on each — see "Maven lock files" in § 1 |
+| Maven artifacts (a `maven.install` in any `MODULE.bazel`, or a bump of `rules_android` or `rules_jvm_external`) | `bazel run //tools/maven_locks -- --refresh` on every Android workspace (hello_world, plugin_example, android_example, custom_engine, integration_test) and `.`, then `bazel run @overhead//locks -- --refresh` on each, and `bazel run //:record_gradle_module_metadata` in plugin_example if its lock changed — see "Maven lock files" in § 1 |
 | dev_tool (unit) | `bazel test //tools/dev_tool/...` (already covered by root `//...`) |
 | dev_tool (e2e) | `bazel run //tools/dev_tool:e2e`, see § 2 |
 | dev_tool reload paths (`run_command.dart`, `vm_service_client.dart`, `hot_reload/**`, `session.dart`, `reload_pipeline.dart`) | dev_tool unit + e2e **and** manual hot reload **and** hot restart — see "Hot reload / hot restart (manual)" |

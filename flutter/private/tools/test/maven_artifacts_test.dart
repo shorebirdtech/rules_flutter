@@ -190,4 +190,40 @@ void main() {
       );
     });
   });
+
+  group('snapshot', () {
+    final snapshot = <String, List<Constraint>?>{
+      'androidx.core:core:1.17.0': [
+        (coordinate: 'androidx.core:core-ktx', version: '1.17.0'),
+      ],
+      'androidx.activity:activity:1.9.0': [
+        (coordinate: 'androidx.activity:activity-ktx', version: '1.9.0'),
+        (coordinate: 'androidx.activity:activity-compose', version: '1.9.0'),
+      ],
+      'com.google.guava:guava:33.3.1-jre': null,
+      'g:a:1': [],
+    };
+
+    test('reads back what it writes', () {
+      final read = parseSnapshot(formatSnapshot(snapshot));
+      expect(read.keys, unorderedEquals(snapshot.keys));
+      for (final key in snapshot.keys) {
+        expect(read[key]?.toSet(), snapshot[key]?.toSet(), reason: key);
+      }
+    });
+
+    test('is laid out as prettier lays out JSON', () {
+      expect(formatSnapshot(snapshot), '''{
+  "androidx.activity:activity:1.9.0": [
+    "androidx.activity:activity-compose:1.9.0",
+    "androidx.activity:activity-ktx:1.9.0"
+  ],
+  "androidx.core:core:1.17.0": ["androidx.core:core-ktx:1.17.0"],
+  "com.google.guava:guava:33.3.1-jre": null,
+  "g:a:1": []
+}
+''');
+      expect(formatSnapshot({}), '{}\n');
+    });
+  });
 }

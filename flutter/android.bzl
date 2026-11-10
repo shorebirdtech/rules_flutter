@@ -241,7 +241,9 @@ def flutter_android_maven_artifacts(name, application, maven, **kwargs):
     that Gradle would raise: those whose versions the Gradle module metadata
     of another artifact aligns (androidx `activity` 1.9.0 asks for
     `activity-ktx` 1.9.0), which rules_jvm_external does not read. That
-    metadata it fetches from the install's repositories when it runs.
+    metadata it fetches from the install's repositories when it runs, or,
+    with `-- --metadata=<file>`, reads from a snapshot that
+    `-- --record=<file>` wrote.
     `flutter_android_app` declares one as `<name>_maven_artifacts`; declare
     this one for Tier-2 wiring.
 

@@ -8,6 +8,11 @@
 /// of it. Neither lists an artifact to raise for alignment: the install
 /// holds the -ktx companions at the versions their main artifacts' Gradle
 /// module metadata asks for.
+///
+/// The reports read that metadata from `test/gradle_module_metadata.json`,
+/// not from maven.google.com, so the test needs no network. After a re-pin
+/// that changes a version, the test fails naming what the snapshot lacks:
+/// `bazel run //:record_gradle_module_metadata` records it again.
 library;
 
 import 'dart:io';
@@ -15,11 +20,18 @@ import 'dart:io';
 import 'package:runfiles/runfiles.dart';
 
 /// Runs the program whose runfiles path is in `$<envName>_PROGRAM`, as
-/// `bazel run` does: with the runfiles path of its report in `$<envName>`.
+/// `bazel run` does: with the runfiles path of its report in `$<envName>`,
+/// and the metadata snapshot in place of the repositories.
 String _run(String envName) {
-  final program = Platform.environment['${envName}_PROGRAM']!;
-  final binary = Runfiles.create().rlocation(program);
-  final result = Process.runSync(binary, [Platform.environment[envName]!]);
+  final runfiles = Runfiles.create();
+  final binary = runfiles.rlocation(
+    Platform.environment['${envName}_PROGRAM']!,
+  );
+  final snapshot = runfiles.rlocation(Platform.environment['SNAPSHOT']!);
+  final result = Process.runSync(binary, [
+    Platform.environment[envName]!,
+    '--metadata=$snapshot',
+  ]);
   if (result.exitCode != 0) {
     stderr.writeln('$envName exited ${result.exitCode}\n${result.stderr}');
     exit(1);

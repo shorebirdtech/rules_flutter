@@ -2,7 +2,7 @@ load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@rules_apple//apple:ios.bzl", "ios_application")
 load("@rules_apple//apple:macos.bzl", "macos_application")
 load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
-load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_analysis_test", "dart_test")
+load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_analysis_test", "dart_binary", "dart_test")
 load("@rules_flutter//flutter:android.bzl", "flutter_android_app", "flutter_android_build", "flutter_android_registrant")
 load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_library")
 load(
@@ -571,25 +571,64 @@ ignored_package_test(
 
 # An app's `<name>_maven_artifacts` reports the Maven artifacts of the plugins
 # that app depends on and no others, and that the install needs no artifact
-# raised to align with another. It reads Gradle module metadata from the
-# install's Maven repositories.
+# raised to align with another. The reports read the Gradle module metadata of
+# the install's artifacts from a recorded snapshot rather than the install's
+# Maven repositories, so the test needs no network.
+_MAVEN_ARTIFACTS_REPORTS = [
+    ":__package_info_only_android_maven_artifacts_report",
+    ":__plugin_android_maven_artifacts_report",
+    ":package_info_only_android_maven_artifacts",
+    ":plugin_android_maven_artifacts",
+]
+
 dart_test(
     name = "verify_android_maven_artifacts_test",
-    data = [
-        ":__package_info_only_android_maven_artifacts_report",
-        ":__plugin_android_maven_artifacts_report",
-        ":package_info_only_android_maven_artifacts",
-        ":plugin_android_maven_artifacts",
-    ],
+    data = _MAVEN_ARTIFACTS_REPORTS + ["test/gradle_module_metadata.json"],
     env = {
         "ALL_PLUGINS_REPORT": "$(rlocationpath :__plugin_android_maven_artifacts_report)",
         "ALL_PLUGINS_REPORT_PROGRAM": "$(rlocationpath :plugin_android_maven_artifacts)",
         "ONE_PLUGIN_REPORT": "$(rlocationpath :__package_info_only_android_maven_artifacts_report)",
         "ONE_PLUGIN_REPORT_PROGRAM": "$(rlocationpath :package_info_only_android_maven_artifacts)",
+        "SNAPSHOT": "$(rlocationpath test/gradle_module_metadata.json)",
     },
     main = "test/verify_android_maven_artifacts_test.dart",
+    tags = ["android"],
+    deps = ["@rules_dart//dart/runfiles"],
+)
+
+# Each report program, then its report, for gradle_module_metadata.dart.
+_REPORT_ARGS = [
+    "$(rlocationpath :plugin_android_maven_artifacts)",
+    "$(rlocationpath :__plugin_android_maven_artifacts_report)",
+    "$(rlocationpath :package_info_only_android_maven_artifacts)",
+    "$(rlocationpath :__package_info_only_android_maven_artifacts_report)",
+]
+
+# Records the snapshot those reports read, from the live repositories, after a
+# re-pin that changes what @rules_android_maven resolves:
+#   bazel run //:record_gradle_module_metadata
+dart_binary(
+    name = "record_gradle_module_metadata",
+    args = ["record"] + _REPORT_ARGS,
+    data = _MAVEN_ARTIFACTS_REPORTS,
+    main = "test/gradle_module_metadata.dart",
+    deps = ["@rules_dart//dart/runfiles"],
+)
+
+# Whether the snapshot still matches the live repositories. In the `deep`
+# tier (.bazelrc): it needs the network, and published metadata should never
+# change.
+dart_test(
+    name = "gradle_module_metadata_live_test",
+    args = [
+        "check",
+        "--snapshot=$(rlocationpath test/gradle_module_metadata.json)",
+    ] + _REPORT_ARGS,
+    data = _MAVEN_ARTIFACTS_REPORTS + ["test/gradle_module_metadata.json"],
+    main = "test/gradle_module_metadata.dart",
     tags = [
         "android",
+        "deep",
         "requires-network",
     ],
     deps = ["@rules_dart//dart/runfiles"],

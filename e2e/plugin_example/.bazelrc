@@ -39,3 +39,9 @@ test --aspects=@rules_dart//dart:analyze.bzl%dart_analyze
 test --output_groups=+dart_analyze
 test --output_groups=+dart_format
 common --@rules_dart//dart:analysis_config=//:analysis_config
+
+# Tests tagged `deep` need the network (gradle_module_metadata_live_test) and
+# are left out by default, as in the repository root's .bazelrc. `--config=deep`
+# runs them too.
+test --test_tag_filters=-deep
+test:deep --test_tag_filters=

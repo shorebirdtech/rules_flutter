@@ -16,11 +16,23 @@
 ///   own `outdated` does, and raises what a constraint asks to raise, until
 ///   nothing changes.
 ///
-/// Usage: `maven_artifacts <runfiles path of the report's JSON>`, which
+/// Usage: `maven_artifacts <runfiles path of the report's JSON> [options]`.
 /// `flutter_android_maven` (every plugin of the build) and
-/// `flutter_android_maven_report` (an application's) write: `repo`, `app`
-/// (or null), `requirements` (coordinate to `version` and `declared_by`),
-/// `resolved` (coordinate to version) and `repositories`.
+/// `flutter_android_maven_report` (an application's) write that JSON:
+/// `repo`, `app` (or null), `requirements` (coordinate to `version` and
+/// `declared_by`), `resolved` (coordinate to version) and `repositories`.
+///
+/// Options, each a file path (relative to the directory `bazel run` was
+/// started in):
+///
+/// * `--metadata=<file>` reads the metadata from a snapshot that
+///   `--record` wrote instead of from the repositories, and fails if the
+///   snapshot lacks an artifact it needs. The output does not depend on the
+///   network then.
+/// * `--record=<file>` reads the metadata from the repositories, as without
+///   options, and adds what it read to the snapshot in the file, creating it
+///   if there is none. Recording several reports into one file that did not
+///   exist before gives the snapshot of them all.
 library;
 
 import 'dart:async';
@@ -235,6 +247,68 @@ Future<String?> moduleMetadata(
   return null;
 }
 
+/// Gradle module metadata recorded from the repositories: `group:artifact:
+/// version` to the constraints of that version's metadata (see
+/// [constraintsOf]), or to null when it was published without metadata.
+typedef Snapshot = Map<String, List<Constraint>?>;
+
+/// The [Snapshot] that [formatSnapshot] wrote as [json].
+Snapshot parseSnapshot(String json) => {
+  for (final MapEntry(:key, :value)
+      in (jsonDecode(json) as Map<String, Object?>).entries)
+    key: value == null
+        ? null
+        : [
+            for (final line in (value as List).cast<String>())
+              (
+                coordinate: line.substring(0, line.lastIndexOf(':')),
+                version: line.substring(line.lastIndexOf(':') + 1),
+              ),
+          ],
+};
+
+/// [snapshot] as JSON, sorted, each constraint as `group:artifact:version`.
+///
+/// The layout is the one prettier, which formats this repository's JSON,
+/// gives it: an array on its key's line when that fits in 80 columns, one
+/// element a line when it does not.
+String formatSnapshot(Snapshot snapshot) {
+  final keys = snapshot.keys.toList()..sort();
+  final entries = <String>[];
+  for (final (i, key) in keys.indexed) {
+    final comma = i == keys.length - 1 ? '' : ',';
+    final constraints = snapshot[key];
+    final head = '  ${jsonEncode(key)}: ';
+    if (constraints == null) {
+      entries.add('${head}null$comma');
+      continue;
+    }
+    final items = [
+      for (final c in constraints) jsonEncode('${c.coordinate}:${c.version}'),
+    ]..sort();
+    final inline = '$head[${items.join(', ')}]$comma';
+    entries.add(
+      inline.length <= 80
+          ? inline
+          : '$head[\n${items.map((item) => '    $item').join(',\n')}\n  ]$comma',
+    );
+  }
+  return entries.isEmpty ? '{}\n' : '{\n${entries.join('\n')}\n}\n';
+}
+
+/// An artifact whose metadata a snapshot does not hold.
+class NotInSnapshot implements Exception {
+  NotInSnapshot(this.snapshotPath, this.artifact);
+
+  final String snapshotPath;
+  final String artifact;
+
+  @override
+  String toString() =>
+      '$snapshotPath has no Gradle module metadata of $artifact. Record the '
+      'snapshot again with --record.';
+}
+
 /// Fetches [url] with [client]: the body, or null for a 404.
 ///
 /// Anything else (another status, no connection) throws: a report that left
@@ -363,12 +437,25 @@ int _compareTokens(Object? a, Object? b) {
 }
 
 Future<void> main(List<String> args) async {
-  if (args.length != 1) {
-    stderr.writeln('usage: maven_artifacts <runfiles path of the report>');
+  final options = <String, String>{};
+  final positional = <String>[];
+  for (final arg in args) {
+    final option = RegExp(r'^--(metadata|record)=(.+)$').firstMatch(arg);
+    if (option != null) {
+      options[option.group(1)!] = _fromWorkingDirectory(option.group(2)!);
+    } else {
+      positional.add(arg);
+    }
+  }
+  if (positional.length != 1 || options.length > 1) {
+    stderr.writeln(
+      'usage: maven_artifacts <runfiles path of the report> '
+      '[--metadata=<snapshot> | --record=<snapshot>]',
+    );
     exit(2);
   }
   final data = jsonDecode(
-    File(Runfiles.create().rlocation(args.single)).readAsStringSync(),
+    File(Runfiles.create().rlocation(positional.single)).readAsStringSync(),
   ) as Map<String, Object?>;
   final requirements = {
     for (final MapEntry(:key, :value)
@@ -392,10 +479,23 @@ Future<void> main(List<String> args) async {
     }
   }
 
+  final snapshotPath = options['metadata'];
+  final recordPath = options['record'];
+  final snapshot = snapshotPath == null
+      ? null
+      : parseSnapshot(File(snapshotPath).readAsStringSync());
+  final recorded = <String, List<Constraint>?>{};
   final client = HttpClient();
   final pool = _Pool(16);
   try {
     final aligned = await align(start, (coordinate, version) async {
+      final artifact = '$coordinate:$version';
+      if (snapshot != null) {
+        if (!snapshot.containsKey(artifact)) {
+          throw NotInSnapshot(snapshotPath!, artifact);
+        }
+        return snapshot[artifact] ?? const [];
+      }
       final json = await pool.run(
         () => moduleMetadata(
           coordinate,
@@ -404,8 +504,17 @@ Future<void> main(List<String> args) async {
           (url) => _get(client, url),
         ),
       );
-      return json == null ? const [] : constraintsOf(json);
+      final constraints = json == null ? null : constraintsOf(json);
+      recorded[artifact] = constraints;
+      return constraints ?? const [];
     });
+    if (recordPath != null) {
+      final file = File(recordPath);
+      final before = file.existsSync()
+          ? parseSnapshot(file.readAsStringSync())
+          : const <String, List<Constraint>?>{};
+      file.writeAsStringSync(formatSnapshot({...before, ...recorded}));
+    }
     stdout.write(
       formatReport(
         repo: data['repo'] as String,
@@ -415,6 +524,9 @@ Future<void> main(List<String> args) async {
         aligned: aligned,
       ),
     );
+  } on NotInSnapshot catch (e) {
+    stderr.writeln(e);
+    exitCode = 1;
   } on Exception catch (e) {
     stderr.writeln(
       'Could not read the Gradle module metadata of the artifacts '
@@ -424,4 +536,11 @@ Future<void> main(List<String> args) async {
   } finally {
     client.close(force: true);
   }
+}
+
+/// [path] as `bazel run` users mean it: relative to the directory they ran
+/// it in, not to the runfiles tree the program starts in.
+String _fromWorkingDirectory(String path) {
+  final base = Platform.environment['BUILD_WORKING_DIRECTORY'];
+  return base == null || File(path).isAbsolute ? path : '$base/$path';
 }
