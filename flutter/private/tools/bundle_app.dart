@@ -4,7 +4,8 @@
 /// Used by macOS, Linux, and Windows bundle rules to avoid platform-specific
 /// shell scripts.
 ///
-/// Config JSON schema:
+/// Config JSON schema (`output_dir` may be left out of a config with only
+/// `extracts`, whose destinations are declared outputs of their own):
 /// {
 ///   "output_dir": "/path/to/output",
 ///   "copies": [
@@ -42,10 +43,21 @@ Future<void> main(List<String> args) async {
 
   final config =
       json.decode(File(args[1]).readAsStringSync()) as Map<String, dynamic>;
-  final outputDir = config['output_dir'] as String;
-
-  // Ensure output directory exists.
-  Directory(outputDir).createSync(recursive: true);
+  final outputDir = config['output_dir'] as String?;
+  if (outputDir == null) {
+    final placed = [
+      for (final key in ['copies', 'copy_dirs', 'symlinks', 'write_files'])
+        if ((config[key] as List<dynamic>?)?.isNotEmpty ?? false) key,
+    ];
+    if (placed.isNotEmpty) {
+      throw ArgumentError(
+        'config has ${placed.join(', ')}, which place files in output_dir, '
+        'but no output_dir',
+      );
+    }
+  } else {
+    Directory(outputDir).createSync(recursive: true);
+  }
 
   // Process file copies.
   final copies = (config['copies'] as List<dynamic>?) ?? [];

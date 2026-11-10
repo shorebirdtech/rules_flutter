@@ -32,7 +32,7 @@ staging target each compiler's inputs come from, over the application.
 """
 
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
-load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "collect_packages", "collect_transitive_data_assets", "generate_dev_package_config", "import_check_validation")
+load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "PATH_MAPPING", "generate_dev_package_config", "import_check_validation", "link_hook_runner_attr")
 load("//flutter:providers.bzl", "FlutterInfo", "FlutterNativeLibraryInfo", "FlutterSdkRecordInfo")
 load(
     "//flutter/private:app_entrypoint.bzl",
@@ -54,7 +54,6 @@ load(
     "flutter_compile_shaders",
     "make_web_wrapper_main_content",
     "merge_dart_defines",
-    "own_package_outside_deps",
     "resolve_dev_generated_sources",
     "shader_sources",
 )
@@ -76,6 +75,7 @@ load(
     "flutter_web_icon_kernel_action",
     "web_build_mode",
 )
+load("//flutter/private:link_hooks.bzl", "link_hooks_plan", "program_data_assets")
 load("//flutter/private:path_mapping.bzl", "file_ref", "json_config_args")
 load("//flutter/private:plugin_registrant.bzl", "generate_dart_plugin_registrant")
 load("//flutter/private:program_analysis.bzl", "program_analyzable_info")
@@ -326,10 +326,37 @@ def _check_web_asset_dst(ctx, reserved, dst, short_path):
             "so this is refused instead: " + remedy,
         )
 
-def _own_data_assets(program, deps):
-    """The declared data assets of the program's own package that `deps` do not carry."""
-    own = own_package_outside_deps(program, collect_packages(deps))
-    return list(own.data_assets) if own != None else []
+def _extract_from_tree(ctx, tools, tree, name, output):
+    """Copies the file `name` out of the tree artifact `tree` to `output`.
+
+    For a file a compiler writes beside its output with no way to put it
+    elsewhere, which Bazel cannot declare inside the declared directory.
+
+    Args:
+        ctx: Rule context carrying `_bundle_tool`.
+        tools: `portable_tools(ctx)`.
+        tree: The tree artifact.
+        name: The file's path inside `tree`.
+        output: The declared File to copy it to.
+    """
+    refs = []
+    config = {"extracts": [{
+        "src": file_ref(refs, tree) + "/" + name,
+        "dst": file_ref(refs, output),
+    }]}
+    args = ctx.actions.args()
+    args.add(ctx.file._bundle_tool)
+    args.add("--config")
+    ctx.actions.run(
+        executable = tools.dart,
+        arguments = [args, json_config_args(ctx, config, refs)],
+        inputs = depset([tree, ctx.file._bundle_tool], transitive = [tools.sdk_files.run]),
+        outputs = [output],
+        mnemonic = "FlutterWebExtract",
+        exec_group = PORTABLE,
+        execution_requirements = PATH_MAPPING,
+        progress_message = "Extracting %s of %s" % (name, ctx.label),
+    )
 
 def _flutter_web_bundle_impl(ctx):
     renderer = web_renderer(ctx.attr.compiler, ctx.attr.renderer)
@@ -439,6 +466,14 @@ def _flutter_web_bundle_impl(ctx):
     # analysis path cannot disagree on a nested app's `package:` URIs.
     package_root = program.package_root
     main = program.main
+
+    # A release or profile build runs the packages' link hooks over the uses
+    # the primary compile records, as `flutter build web` does: its link step
+    # reads dart2wasm's uses, and dart2js's when there is no WebAssembly
+    # build. The hooks' assets are the bundle's, shared by both builds. A
+    # debug build links nothing and ships every declared data asset.
+    link_hooks = link_hooks_plan(ctx, program, primary.deps, links = not is_debug)
+    recorded_uses = ctx.actions.declare_file(ctx.label.name + ".recorded_uses.json") if link_hooks.runs else None
 
     # Merged once for all compile actions below (dart2wasm, dart2js, icon
     # tree-shake kernel) and the dev-config emission: the application's
@@ -611,6 +646,7 @@ def _flutter_web_bundle_impl(ctx):
             defines = user_defines,
             renderer = renderer,
             optimizing_cpus = ctx.attr._wasm_opt_cpus[BuildSettingInfo].value,
+            recorded_uses = recorded_uses,
         )
 
         builds = [_wasm_build(renderer)]
@@ -669,9 +705,18 @@ def _flutter_web_bundle_impl(ctx):
             source_maps = ctx.attr.source_maps,
             defines = user_defines,
             renderer = renderer,
+            write_resources = link_hooks.runs,
         )
         dart2js_dirs = [output_js_dir]
         builds = [_JS_BUILD]
+        if link_hooks.runs:
+            _extract_from_tree(
+                ctx,
+                tools,
+                output_js_dir,
+                "main.dart.js.resources.json",
+                recorded_uses,
+            )
 
     # Step 3: Shader compilation + asset bundle.
     compiled_shaders = flutter_compile_shaders(ctx, tools, "web", primary.deps, program)
@@ -710,6 +755,14 @@ def _flutter_web_bundle_impl(ctx):
             renderer = renderer,
         )
 
+    linked = program_data_assets(
+        ctx,
+        program,
+        primary.deps,
+        link_hooks,
+        recorded_uses,
+        name = ctx.label.name + "_link_hooks",
+    )
     flutter_assets = declare_flutter_assets_dir(ctx)
     flutter_build_assets(
         ctx,
@@ -723,13 +776,7 @@ def _flutter_web_bundle_impl(ctx):
         # The engine measures an icon font's height with the space glyph, so
         # every subset keeps it, as flutter_tools' web icon shaking does.
         optional_code_points = [_SPACE_CODE_POINT],
-        # The packages' declared data assets, as `flutter build web` bundles a
-        # build hook's. A web build runs no link hook, so a package with one
-        # ships all of its declared assets.
-        data_assets = depset(
-            collect_transitive_data_assets(primary.deps) +
-            _own_data_assets(program, primary.deps),
-        ),
+        data_assets = linked.assets,
         inputs = program,
     )
 
@@ -1102,7 +1149,11 @@ def _flutter_web_bundle_impl(ctx):
             # reads it, so it is lifted out below rather than deployed —
             # which is where this deliberately parts company with
             # `flutter build web`, whose build directory is also its output.
-            "exclude": ["*.deps", "*.info.json"],
+            #
+            # The recorded uses are the link hooks' input, lifted out of the
+            # tree before them; `flutter build web` keeps them out of its
+            # output too.
+            "exclude": ["*.deps", "*.info.json", "main.dart.js.resources.json"],
         })
 
     # The dump-info JSON, lifted out of the dart2js tree to a name of its own.
@@ -1155,7 +1206,7 @@ def _flutter_web_bundle_impl(ctx):
         dump_info = depset([dump_info_file] if dump_info_file else []),
         # The renderers' symbol maps, for the engine this bundle runs.
         symbols = depset(symbol_files),
-        _validation = import_checks,
+        _validation = depset(linked.validation_outputs, transitive = [import_checks]),
     )
 
     # What lets rules_dart's analysis check a web app: its `main` and `srcs`,
@@ -1345,7 +1396,7 @@ _WEB_APPLICATION_ATTRS = FLUTTER_APPLICATION_TOOL_ATTRS | {
 
 flutter_web_bundle = rule(
     implementation = _flutter_web_bundle_impl,
-    attrs = dict(_WEB_APPLICATION_ATTRS | WEB_PLATFORM_ATTRS, **{
+    attrs = dict(_WEB_APPLICATION_ATTRS | WEB_PLATFORM_ATTRS | link_hook_runner_attr(), **{
         "compiler": attr.string(
             doc = "Web compiler: 'dart2wasm' (default) or 'dart2js'. 'dart2wasm' " +
                   "builds WebAssembly, and by default a dart2js build beside it " +
@@ -1753,7 +1804,7 @@ build knows which served file is a native module.
             allow_single_file = [".dart"],
         ),
     }),
-    toolchains = ["@rules_flutter//flutter:toolchain_type"],
+    toolchains = ["@rules_flutter//flutter:toolchain_type"] + COPY_TO_DIRECTORY_TOOLCHAINS,
     exec_groups = PORTABLE_EXEC_GROUPS,
     doc = "Builds a Flutter web application (WASM or JS) with all deployment artifacts. Declared through the `flutter_web_bundle` macro in `web.bzl`, which adds the staging target `branches` names.",
 )

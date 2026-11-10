@@ -211,7 +211,8 @@ def flutter_dart2wasm_action(
         minify = "auto",
         enable_experiments = [],
         defines = [],
-        renderer = "skwasm"):
+        renderer = "skwasm",
+        recorded_uses = None):
     """Compiles Dart source to WebAssembly using dart2wasm.
 
     Args:
@@ -245,6 +246,9 @@ def flutter_dart2wasm_action(
         enable_experiments: Dart language experiments to enable.
         defines: Dart -D defines.
         renderer: Web renderer ("skwasm" or "canvaskit").
+        recorded_uses: Optional File the compiler writes the `@RecordUse`
+            uses to (`--recorded-uses`), as `flutter build web --wasm` has it
+            write them for the link hooks.
     """
     if optimizing_cpus < 1:
         fail("--@rules_flutter//flutter:wasm_opt_cpus must be at least 1, got %d" % optimizing_cpus)
@@ -299,6 +303,8 @@ def flutter_dart2wasm_action(
         args.add("-D" + d)
     for d in defines:
         args.add("-D" + d)
+    if recorded_uses != None:
+        args.add(recorded_uses, format = "--recorded-uses=%s")
 
     args.add("-o", output_wasm)
     args.add(main_dart)
@@ -313,7 +319,11 @@ def flutter_dart2wasm_action(
             direct = [main_dart, package_config, dart2wasm_platform_dill] + srcs,
             transitive = [sdk_files.dart2wasm],
         ),
-        outputs = [output_wasm, output_mjs] + ([output_source_map] if output_source_map != None else []),
+        outputs = [output_wasm, output_mjs] + [
+            f
+            for f in [output_source_map, recorded_uses]
+            if f != None
+        ],
         mnemonic = "FlutterDart2Wasm",
         exec_group = PORTABLE,
         # A `cpu:<n>` requirement sets the cores Bazel reserves, overriding
@@ -345,7 +355,8 @@ def flutter_dart2js_action(
         dump_info = False,
         source_maps = False,
         defines = [],
-        renderer = "canvaskit"):
+        renderer = "canvaskit",
+        write_resources = False):
     """Compiles Dart source to JavaScript using dart2js.
 
     Output is a tree artifact (directory) because dart2js may produce
@@ -385,6 +396,11 @@ def flutter_dart2js_action(
         source_maps: Whether to generate source maps.
         defines: Dart -D defines.
         renderer: Web renderer ("canvaskit" or "skwasm").
+        write_resources: Whether dart2js writes the `@RecordUse` uses it
+            records (`--write-resources`), as `flutter build web` has it write
+            them for the link hooks. dart2js puts them at
+            `main.dart.js.resources.json` in `output_dir`, with no way to name
+            another path.
     """
     args = ctx.actions.args()
     args.add("compile")
@@ -426,6 +442,8 @@ def flutter_dart2js_action(
         args.add("-D" + d)
     for d in defines:
         args.add("-D" + d)
+    if write_resources:
+        args.add("--write-resources")
 
     # Output into the directory — dart2js writes main.dart.js + *.part.js here.
     args.add_all("-o", [output_dir], map_each = _main_dart_js, expand_directories = False)

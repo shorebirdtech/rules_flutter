@@ -1,6 +1,7 @@
 load("@rules_dart//dart:defs.bzl", "dart_test")
 load("@rules_flutter//flutter:defs.bzl", "dart_data_asset", "dart_package_metadata", "flutter_application")
 load("@rules_flutter//flutter:macos.bzl", "flutter_macos_app")
+load("@rules_flutter//flutter:web.bzl", "flutter_web_bundle")
 
 exports_files(["pubspec.lock"])
 
@@ -66,10 +67,42 @@ flutter_application(
     ],
 )
 
+# The same app on the web, once per compiler `flutter build web` links for:
+# the link hooks run over the uses dart2wasm records, and over dart2js's when
+# the bundle has no WebAssembly build.
+flutter_web_bundle(
+    name = "web_wasm",
+    application = ":app",
+)
+
+flutter_web_bundle(
+    name = "web_js",
+    application = ":app",
+    compiler = "dart2js",
+)
+
+config_setting(
+    name = "debug",
+    values = {"compilation_mode": "dbg"},
+)
+
+# Release bundles hold what the hooks ship; debug ones, which link nothing,
+# every declared glyph and no index.
 dart_test(
     name = "bundle_test",
-    args = ["$(rlocationpaths :app)"],
-    data = [":app"],
+    args = select({
+        ":debug": ["--debug"],
+        "//conditions:default": [],
+    }) + [
+        "$(rlocationpaths :app)",
+        "$(rlocationpaths :web_wasm)",
+        "$(rlocationpaths :web_js)",
+    ],
+    data = [
+        ":app",
+        ":web_js",
+        ":web_wasm",
+    ],
     main = "bundle_test.dart",
     deps = ["@rules_dart//dart/runfiles"],
 )

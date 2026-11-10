@@ -1483,9 +1483,9 @@ FLUTTER_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | {
     ),
     "link_hook_assets": attr.string_list(
         doc = "Data assets the packages' link hooks emit, each " +
-              "`package:<package>/<name>`. In a release or profile build " +
-              "the compiler records the uses of `@RecordUse` classes " +
-              "(`--recorded-uses`), each listed package's `hook/link.dart` " +
+              "`package:<package>/<name>`. In a release or profile build, " +
+              "native or web, the compiler records the uses of `@RecordUse` " +
+              "classes, each listed package's `hook/link.dart` " +
               "runs over them, and the assets it emits are bundled at " +
               "`packages/<package>/<name>`, loadable with `rootBundle`. " +
               "A hook that emits an asset not listed, skips one that is, or " +

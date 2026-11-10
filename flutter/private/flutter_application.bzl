@@ -16,15 +16,16 @@ This rule produces outputs that platform-specific wrappers consume:
 load("@apple_support//lib:apple_support.bzl", "apple_support")
 load("@bazel_skylib//lib:dicts.bzl", "dicts")
 load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartPackageMetadataInfo")
-load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "collect_packages", "collect_transitive_data_assets", "dart_link_hook_actions", "link_hook_runner_attr")
+load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "link_hook_runner_attr")
 load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterApplicationInputsInfo", "FlutterInfo")
 load("//flutter/private:code_asset_libraries.bzl", "code_asset_libraries", "code_asset_libraries_aspect", "describe_code_asset_libraries")
-load("//flutter/private:common.bzl", "FLUTTER_APPLICATION_ATTRS", "PLATFORM_CONSTRAINT_ATTRS", "PROGRAM_PACKAGE_DOC", "asset_roots", "check_unreplaced_hooks", "collect_binding_contracts", "collect_native_libs", "declare_flutter_assets_dir", "detect_target_platform", "flutter_build_assets", "flutter_build_mode", "flutter_compile_kernel", "flutter_compile_shaders", "flutter_deps_attr", "flutter_program_inputs", "host_target_arch", "launch_build_args", "own_package_outside_deps", "shader_sources")
+load("//flutter/private:common.bzl", "FLUTTER_APPLICATION_ATTRS", "PLATFORM_CONSTRAINT_ATTRS", "PROGRAM_PACKAGE_DOC", "asset_roots", "check_unreplaced_hooks", "collect_binding_contracts", "collect_native_libs", "declare_flutter_assets_dir", "detect_target_platform", "flutter_build_assets", "flutter_build_mode", "flutter_compile_kernel", "flutter_compile_shaders", "flutter_deps_attr", "flutter_program_inputs", "host_target_arch", "launch_build_args", "shader_sources")
 load("//flutter/private:dev_config.bzl", "dev_config_file", "dev_search_roots", "dev_source_dir", "write_dev_config")
 load("//flutter/private:exec_groups.bzl", "PORTABLE_EXEC_GROUPS", "portable_tools")
 load("//flutter/private:flutter_aot_compile.bzl", "flutter_aot_elf_action", "flutter_aot_macho_action", "gen_snapshot_options")
 load("//flutter/private:flutter_info.bzl", "dedup_plugins")
 load("//flutter/private:flutter_native_assets.bzl", "CODE_ASSETS_DOC", "collect_bundled_code_asset_files", "resolve_native_assets", "write_native_assets_manifest")
+load("//flutter/private:link_hooks.bzl", "link_hooks_plan", "program_data_assets")
 load("//flutter/private:native_sources.bzl", "collect_native_source_pairs")
 load("//flutter/private:program_analysis.bzl", "program_analyzable_info")
 
@@ -175,19 +176,8 @@ def flutter_application_build(ctx, inputs):
     # every package with a link hook has it run then, whether or not it emits
     # anything: the hook decides which of its package's declared data assets
     # ship.
-    packages = collect_packages(inputs.deps)
-    own = own_package_outside_deps(inputs, packages)
-    run_link_hooks = not is_debug and (bool(inputs.link_hook_assets) or any([
-        getattr(pkg, "link_hook", None) != None
-        for pkg in packages
-    ]))
-    if not is_debug and own != None and own.link_hook != None:
-        fail(("%s: the package `%s` has a link hook, which runs only for a " +
-              "package a library in `deps` belongs to. Move the package's " +
-              "`lib/` sources into a `flutter_library` naming `%s`.") %
-             (ctx.label, own.package_name, own.label))
-    own_data_assets = list(own.data_assets) if own != None else []
-    recorded_uses = ctx.actions.declare_file(ctx.label.name + ".recorded_uses.json") if run_link_hooks else None
+    link_hooks = link_hooks_plan(ctx, inputs, inputs.deps, links = not is_debug)
+    recorded_uses = ctx.actions.declare_file(ctx.label.name + ".recorded_uses.json") if link_hooks.runs else None
 
     # Step 1: Kernel compilation (mode-aware: debug uses debug dill, no AOT).
     compilation = flutter_compile_kernel(
@@ -266,25 +256,17 @@ def flutter_application_build(ctx, inputs):
         native_libs.extend(depset(transitive = transitive_native_depsets).to_list())
 
     # Step 2b: the data assets the application ships, bundled under
-    # `flutter_assets/packages/<pkg>/<name>`. Linked, they are what the
-    # package link hooks emit over the recorded uses (the ids in
-    # `link_hook_assets`) and the declared assets of packages without a hook;
-    # a package's hook receives its own declared assets and decides which
-    # ship. Unlinked, they are every package's declared assets.
-    link_hook_validation = []
-    if not run_link_hooks:
-        data_assets = depset(collect_transitive_data_assets(inputs.deps) + own_data_assets)
-    else:
-        link = dart_link_hook_actions(
-            ctx,
-            runner = ctx.executable._link_hook_runner,
-            recorded_uses = recorded_uses,
-            deps = inputs.deps,
-            data_asset_ids = inputs.link_hook_assets,
-            name = ctx.label.name + "_link_hooks",
-        )
-        data_assets = depset(link.assets + own_data_assets)
-        link_hook_validation = link.validation_outputs
+    # `flutter_assets/packages/<pkg>/<name>`.
+    linked = program_data_assets(
+        ctx,
+        inputs,
+        inputs.deps,
+        link_hooks,
+        recorded_uses,
+        name = ctx.label.name + "_link_hooks",
+    )
+    data_assets = linked.assets
+    link_hook_validation = linked.validation_outputs
 
     # Step 3: Shader compilation + asset bundle. Pass data assets so the
     # bundler places them under flutter_assets/packages/<pkg>/<name>.
