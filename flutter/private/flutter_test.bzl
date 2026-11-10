@@ -64,8 +64,8 @@ cannot write there.
 
 load("@bazel_skylib//lib:structs.bzl", "structs")
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
-load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo", "DartKernelSdkInfo")
-load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "KERNEL_LIST_ATTR", "KERNEL_TOOL_ATTR", "TRACK_CREATION_LOCATIONS_ATTR", "collect_modules", "collect_packages", "collect_transitive_srcs", "dart_analyzable_info", "dart_entry_kernel_action", "dart_import_check_aspect", "dart_link_kernel_action", "executable_defines", "executable_defines_config", "import_check_validation", "kernel_list", "package_lib_prefix", "runfiles_path", "track_creation_locations")
+load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo", "DartKernelSdkInfo", "DartPackageMetadataInfo")
+load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "KERNEL_LIST_ATTR", "KERNEL_TOOL_ATTR", "TRACK_CREATION_LOCATIONS_ATTR", "collect_modules", "collect_packages", "collect_transitive_srcs", "dart_analyzable_info", "dart_entry_kernel_action", "dart_import_check_aspect", "dart_link_kernel_action", "executable_defines", "executable_defines_config", "import_check_validation", "kernel_list", "package_info_from_metadata", "package_lib_prefix", "runfiles_path", "track_creation_locations")
 load("//flutter:providers.bzl", "FlutterApplicationInputsInfo", "FlutterInfo", "FlutterTestProgramInfo")
 load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "synthesize_app_package")
 load("//flutter/private:application_libraries.bzl", "application_libraries", "application_libraries_aspect")
@@ -83,7 +83,6 @@ load(
 )
 load("//flutter/private:exec_groups.bzl", "FLUTTER_EXEC_TOOLS", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
 load("//flutter/private:flutter_compile.bzl", "flutter_kernel_compile")
-load("//flutter/private:flutter_library.bzl", "package_attr", "package_identity", "package_record")
 load("//flutter/private:flutter_module.bzl", "flutter_module_aspect")
 load("//flutter/private:flutter_native_assets.bzl", "CODE_ASSETS_DOC", "collect_bundled_code_asset_files", "resolve_native_assets", "write_native_assets_manifest")
 load("//flutter/private:flutter_program_test.bzl", "add_user_env", "program_environment", "track_widget_creation", _flutter_test_rule = "flutter_test")
@@ -633,7 +632,8 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
             label = ctx.label,
             # The same declaration the compile path above names, so analysis
             # reads the language version the compiler does.
-            packages = [package_record(ctx.label, package_identity(ctx, inputs.package))],
+            # The application's, for a test compiled in its package.
+            packages = [package_info_from_metadata(ctx.label, inputs.package, package_root)],
             deps = deps + [ctx.attr._sky_engine],
             # Split by path, as `flutter_web_application` does: a test built in
             # an application's package (`application`) can have its main in
@@ -829,12 +829,14 @@ _PROGRAM_ATTRS["application"] = attr.label(
     cfg = _ENVIRONMENT.cfg,
 )
 
-_PROGRAM_ATTRS["package"] = package_attr(
+_PROGRAM_ATTRS["package"] = attr.label(
+    providers = [DartPackageMetadataInfo],
     doc = "The `dart_package_metadata` of the Dart package the test is " +
           "compiled in (the Bazel stand-in for its `pubspec.yaml`), so " +
           "`package:<name>/…` resolves against `srcs` in that package's " +
-          "`lib/`, and the test's files take its `language_version`. Its " +
-          "directory is the package root, wherever the test's BUILD file is. " +
+          "`lib/`, and the test's files take its `language_version`. It is " +
+          "`pubspec-metadata` in the BUILD file at the package root, its " +
+          "directory, wherever the test's BUILD file is. " +
           "A test of a library *is* that library's package: name the " +
           "library's `dart_package_metadata`, and list the library's " +
           "sources in `srcs` or depend on it. Required, unless `application` " +

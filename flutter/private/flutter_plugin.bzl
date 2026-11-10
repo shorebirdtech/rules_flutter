@@ -27,13 +27,13 @@ load("@build_bazel_rules_apple//apple/internal/aspects:resource_aspect.bzl", "ap
 load("@build_bazel_rules_swift//swift:swift.bzl", "SwiftInfo")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@rules_dart//dart:providers.bzl", "DartInfo")
-load("@rules_dart//dart:utils.bzl", "WEB_COMPILER_INDEPENDENT_ATTR", "dart_info", "web_compiler_reset_when_independent")
+load("@rules_dart//dart:utils.bzl", "PACKAGE_IDENTITY_ATTRS", "WEB_COMPILER_INDEPENDENT_ATTR", "dart_info", "library_package", "web_compiler_reset_when_independent")
 load("@rules_java//java/common:java_info.bzl", "JavaInfo")
 load("//flutter:providers.bzl", "FlutterDataAssetInfo", "FlutterInfo", "FlutterNativeAssetInfo")
 load("//flutter/private:common.bzl", "collect_binding_contracts", "collect_native_libs")
 load("//flutter/private:flutter_desktop_plugin_info.bzl", "FlutterLinuxPluginInfo", "FlutterWindowsPluginInfo")
 load("//flutter/private:flutter_info.bzl", "flutter_info")
-load("//flutter/private:flutter_library.bzl", "ADDITIONAL_LICENSES_ATTR", "ASSET_FLAVORS_ATTR", "ASSET_PLATFORMS_ATTR", "LIBRARY_PACKAGE_DOC", "SHADER_FLAVORS_ATTR", "SHADER_PLATFORMS_ATTR", "SKY_ENGINE_ATTR", "build_pub_contributions", "flutter_analyzable_info", "own_additional_licenses", "package_attr", "package_identity", "package_record")
+load("//flutter/private:flutter_library.bzl", "ADDITIONAL_LICENSES_ATTR", "ASSET_FLAVORS_ATTR", "ASSET_PLATFORMS_ATTR", "SHADER_FLAVORS_ATTR", "SHADER_PLATFORMS_ATTR", "SKY_ENGINE_ATTR", "build_pub_contributions", "flutter_analyzable_info", "own_additional_licenses")
 load("//flutter/private:native_sources.bzl", "collect_native_source_pairs", "native_sources_aspect")
 load("//flutter/private:swiftpm_app_settings.bzl", "FlutterSwiftPMAppLibraryInfo")
 load("//flutter/private:unbuilt_native_code.bzl", "FlutterUnbuiltNativeCodeInfo")
@@ -257,10 +257,10 @@ def plugin_contributions(ctx, package_name, package_root, declares_plugin):
     )
 
 def _flutter_plugin_impl(ctx):
-    identity = package_identity(ctx)
-    package_name = identity.package_name
-    package_root = identity.package_root
-    package = package_record(ctx.label, identity)
+    declared = library_package(ctx, ctx.files.srcs, ctx.files.resources)
+    package_name = declared.package_name
+    package_root = declared.package_root
+    package = declared.record
 
     # A plugin contributes on more channels than a library does, but the shape
     # is the same: name what this target adds, and let each constructor merge
@@ -287,7 +287,7 @@ def _flutter_plugin_impl(ctx):
 # of a generated pub package (`flutter_pub_member`) takes too. The rest of
 # `flutter_plugin`'s are `deps` and `_sky_engine`: what a dependency cycle's
 # library states once for all of its members.
-PLUGIN_PACKAGE_ATTRS = {
+PLUGIN_PACKAGE_ATTRS = PACKAGE_IDENTITY_ATTRS | {
     "srcs": attr.label_list(
         doc = "Dart source files for the plugin's public API.",
         allow_files = [".dart"],
@@ -300,7 +300,6 @@ PLUGIN_PACKAGE_ATTRS = {
         doc = "Asset files to include: any file of this target's Dart package, keyed as `flutter_library.assets` is.",
         allow_files = True,
     ),
-    "package": package_attr(LIBRARY_PACKAGE_DOC),
     "additional_licenses": ADDITIONAL_LICENSES_ATTR,
     "platforms": attr.string_list(
         doc = "Platforms this plugin supports (android, ios, macos, linux, windows, web).",

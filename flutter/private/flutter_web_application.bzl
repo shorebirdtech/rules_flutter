@@ -33,7 +33,7 @@ from, and `deps` is split the same way.
 
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_dart//dart:providers.bzl", "DartInfo")
-load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "dart_analyzable_info", "generate_dev_package_config", "import_check_validation", "package_lib_prefix")
+load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "dart_analyzable_info", "generate_dev_package_config", "import_check_validation", "package_info_from_metadata", "package_lib_prefix", "resolve_package_identity")
 load("//flutter:providers.bzl", "FlutterInfo", "FlutterNativeLibraryInfo", "FlutterSdkRecordInfo")
 load(
     "//flutter/private:app_entrypoint.bzl",
@@ -64,7 +64,6 @@ load(
 load("//flutter/private:dev_config.bzl", "dev_config_file", "dev_search_roots", "dev_source_dir", "write_dev_config")
 load("//flutter/private:exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
 load("//flutter/private:flutter_info.bzl", "dedup_plugins")
-load("//flutter/private:flutter_library.bzl", "package_identity", "package_record")
 load(
     "//flutter/private:flutter_web_branch.bzl",
     "BRANCH_COMPILER",
@@ -414,8 +413,9 @@ def _flutter_web_bundle_impl(ctx):
     # analysis path came to disagree: analysis derived it, compilation
     # assumed `""`, and a nested app's `package:` URIs silently resolved
     # against the workspace root instead of its own package.
-    identity = package_identity(ctx)
-    package_root = identity.package_root
+    # `package` is mandatory, so there is always a declaration.
+    identity = resolve_package_identity(ctx)
+    package_root = identity.metadata.package_root
 
     # Every reader of `deps` reads a named branch. Each compile takes its own
     # compiler's; everything the bundle holds once — the plugin registrant
@@ -1176,7 +1176,7 @@ def _flutter_web_bundle_impl(ctx):
         label = ctx.label,
         # The declaration the compile path above names, so the analyzer and
         # the compiler agree on the version.
-        packages = [package_record(ctx.label, identity)],
+        packages = [package_info_from_metadata(ctx.label, identity.metadata, package_root)],
         deps = primary.deps + [ctx.attr._sky_engine],
         srcs = ctx.files.srcs + ([ctx.file.main] if main_in_package else []),
         entry_srcs = [] if main_in_package else [ctx.file.main],
