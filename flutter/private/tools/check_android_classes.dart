@@ -8,7 +8,10 @@
 /// mix that neither version is: Gradle resolves one version of each library
 /// instead, aligning the artifacts of one library through the version
 /// constraints of their Gradle module metadata. So the build fails, naming
-/// the jars.
+/// the jars. Two such jars can also be harmless (two copies of one interface
+/// either of which works, or a class shadowed on purpose), so the message
+/// names `--@rules_flutter//flutter:allow_duplicate_classes`, under which the
+/// rule passes no jars.
 ///
 /// Classes are compared by the CRC-32 of their bytes, which a jar's central
 /// directory records, so no class is read.
@@ -226,7 +229,15 @@ String? conflictMessage(
       'artifacts = [...])` and regenerate its lock file:',
     )
     ..writeln()
-    ..write('    REPIN=1 bazel run @rules_flutter_maven//:pin');
+    ..writeln('    REPIN=1 bazel run @rules_flutter_maven//:pin')
+    ..writeln()
+    ..writeln(
+      'Where either copy works, or the app shadows a library\'s class on '
+      'purpose, build with this, under which the deploy jar keeps the first '
+      'copy:',
+    )
+    ..writeln()
+    ..write('    --@rules_flutter//flutter:allow_duplicate_classes');
   return out.toString();
 }
 

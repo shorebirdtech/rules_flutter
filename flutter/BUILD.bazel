@@ -57,6 +57,21 @@ string_flag(
     visibility = ["//visibility:public"],
 )
 
+# Lets a `flutter_android_app` link jars that define one class with different
+# bytes, which otherwise fails its build. Two such jars can be harmless: two
+# copies of one interface either of which works, or a class an app shadows on
+# purpose. The app's deploy jar keeps the first copy of each class.
+#
+#   bazel build --@rules_flutter//flutter:allow_duplicate_classes //app
+#
+# The Android Gradle plugin's own check has the same switch,
+# `android.enableDuplicateClassesCheck=false`.
+bool_flag(
+    name = "allow_duplicate_classes",
+    build_setting_default = False,
+    visibility = ["//visibility:public"],
+)
+
 # Release mode: `-c opt` without the profile flag. Used by select() in macros.
 config_setting(
     name = "release",

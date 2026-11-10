@@ -162,6 +162,23 @@ void main() {
       expect(message, contains('bazel run //:app_maven_artifacts'));
       expect(message, contains('REPIN=1 bazel run @rules_flutter_maven//:pin'));
     });
+
+    test('names the switch that allows the duplicates', () {
+      final message = conflictMessage(
+        [
+          Conflict(
+            [Jar('a.jar', 'g:a:1'), Jar('b.jar', 'g:b:1')],
+            ['a/A.class'],
+          ),
+        ],
+        app: '//:app',
+        report: '//:app_maven_artifacts',
+      )!;
+      expect(
+        message,
+        contains('--@rules_flutter//flutter:allow_duplicate_classes'),
+      );
+    });
   });
 
   group('duplicateLibraries', () {

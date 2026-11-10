@@ -9,7 +9,10 @@ mix neither version is. Gradle resolves one version of each library and
 aligns companion artifacts through their Gradle module metadata;
 rules_jvm_external's resolution reads POMs only and does not. So
 `flutter_android_app` puts this check on its `android_binary`: building the app
-runs it, and a conflict fails the build naming both jars.
+runs it, and a conflict fails the build naming both jars. Two such jars can
+also be harmless (two copies of one interface either of which works, or a
+class shadowed on purpose), so `--@rules_flutter//flutter:allow_duplicate_classes`
+lets them through, as AGP's `android.enableDuplicateClassesCheck` does.
 
 Each rules_jvm_external repository is a resolution of its own, so a library
 (`group:artifact`) that reaches the app from two of them, a target of another
@@ -21,6 +24,7 @@ replaced by ours, by its label or, for a module the root does not edit, by a
 `maven.override` of that repository.
 """
 
+load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
 load("@rules_java//java/common:java_common.bzl", "java_common")
@@ -135,7 +139,10 @@ def _flutter_android_class_check_impl(ctx):
     args.add("--report", ctx.attr.report)
     args.add("--stamp", stamp)
     jar_list = jars.to_list()
-    for jar in jar_list:
+
+    # With duplicate classes allowed, no jar is compared, so none is read.
+    compared = depset() if ctx.attr._allow_duplicate_classes[BuildSettingInfo].value else jars
+    for jar in compared.to_list():
         args.add("--jar", jar)
         args.add(_origin(jar, coordinates))
 
@@ -152,7 +159,7 @@ def _flutter_android_class_check_impl(ctx):
         arguments = [tool, args],
         inputs = depset(
             direct = [ctx.file._tool],
-            transitive = [jars, tools.sdk_files.run],
+            transitive = [compared, tools.sdk_files.run],
         ),
         outputs = [stamp],
         mnemonic = "FlutterCheckAndroidClasses",
@@ -182,6 +189,10 @@ flutter_android_class_check = rule(
         "report": attr.string(
             doc = "The label of the app's `maven_artifacts` target, which the message points to.",
             mandatory = True,
+        ),
+        "_allow_duplicate_classes": attr.label(
+            default = "//flutter:allow_duplicate_classes",
+            providers = [BuildSettingInfo],
         ),
         "_tool": attr.label(
             default = "//flutter/private/tools:check_android_classes.dart",
