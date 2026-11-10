@@ -399,6 +399,9 @@ void main() {
             'origin': 'local',
             'path': '/Users/someone/src/flutter',
             'root': '/Users/someone/src/flutter',
+            'checkout': r'C:\Users\someone\flutter',
+            'cache': 'D:/cache/flutter',
+            'share': r'\\server\flutter',
           }),
         );
       expect(frameworkRecord(file.path), {

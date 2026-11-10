@@ -24,8 +24,16 @@ def _public(provenance):
     return {
         key: value
         for key, value in provenance.items()
-        if key != "path" and not value.startswith("/")
+        if key != "path" and not _is_absolute_path(value)
     }
+
+def _is_absolute_path(value):
+    """Whether a value is an absolute path on any host: POSIX, a Windows drive, or a UNC share."""
+    return (
+        value.startswith("/") or
+        value.startswith("\\\\") or
+        (len(value) > 2 and value[0].isalpha() and value[1] == ":" and value[2] in "/\\")
+    )
 
 def _flutter_sdk_record_impl(ctx):
     sdk = ctx.toolchains[_TOOLCHAIN_TYPE].flutter_sdk_info

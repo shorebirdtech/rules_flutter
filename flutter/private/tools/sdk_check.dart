@@ -579,7 +579,7 @@ Map<String, Object?> _sorted(Map<String, Object?> value) {
 
 /// The framework entry of the record: the `flutter_framework.json` at [path]
 /// less what names the machine it was read on (a `path` key, and any value that
-/// is an absolute path), since the record travels with the app.
+/// is an absolute path on any host), since the record travels with the app.
 Map<String, Object?> frameworkRecord(String path) {
   final Object? decoded = jsonDecode(File(path).readAsStringSync());
   if (decoded is! Map<String, Object?>) {
@@ -588,10 +588,17 @@ Map<String, Object?> frameworkRecord(String path) {
   return {
     for (final entry in decoded.entries)
       if (entry.key != 'path' &&
-          !(entry.value is String && (entry.value as String).startsWith('/')))
+          !(entry.value is String && _isAbsolutePath(entry.value as String)))
         entry.key: entry.value,
   };
 }
+
+/// Whether [value] is an absolute path on any host: POSIX (`/…`), a Windows
+/// drive (`C:\…`, `C:/…`) or a UNC share (`\\server\…`).
+bool _isAbsolutePath(String value) =>
+    value.startsWith('/') ||
+    value.startsWith(r'\\') ||
+    RegExp(r'^[A-Za-z]:[\\/]').hasMatch(value);
 
 /// The text written to `--record-out`.
 String encodeRecord(Map<String, Object?> record) =>
