@@ -113,8 +113,14 @@ const _diskCacheMaxSize = '50G';
 /// run cold.
 const _diskCacheMaxAge = '30d';
 
+/// Set to a rules_dart checkout to build generated workspaces against it
+/// instead of the module `.bazelrc.user` names (or the published pin), such as
+/// a snapshot of rules_dart's committed HEAD while its live tree is changing.
+/// See docs/TESTING.md, "Testing against another rules_dart".
+const rulesDartOverrideEnvVar = 'E2E_RULES_DART_OVERRIDE';
+
 /// The repository's `.bazelrc.user` as a generated workspace can use it, or
-/// null when the repository has none.
+/// null when the repository has none and [rulesDartOverrideEnvVar] is unset.
 ///
 /// On a developer machine that file points modules at sibling checkouts
 /// (`--override_module`), among them ones only the repository's own
@@ -122,10 +128,12 @@ const _diskCacheMaxAge = '30d';
 /// does not depend on ("the root module specifies overrides on nonexistent
 /// module(s)"), so a generated workspace takes the overrides of the modules
 /// its own `MODULE.bazel` ([moduleBazel]) names with `bazel_dep`, and nothing
-/// else of the file changes.
+/// else of the file changes. [rulesDartOverrideEnvVar], when set, replaces the
+/// file's override of rules_dart, or adds one.
 String? repositoryUserConfigFor(String repository, String moduleBazel) {
   final file = File(p.join(repository, '.bazelrc.user'));
-  if (!file.existsSync()) return null;
+  final rulesDart = Platform.environment[rulesDartOverrideEnvVar] ?? '';
+  if (!file.existsSync() && rulesDart.isEmpty) return null;
   final depends = {
     for (final m in RegExp(
       r'bazel_dep\(\s*name\s*=\s*"([^"]+)"',
@@ -133,13 +141,16 @@ String? repositoryUserConfigFor(String repository, String moduleBazel) {
       m.group(1)!,
   };
   final override = RegExp(r'^\s*\w+\s+--override_module=([^=\s]+)=');
-  return file
-      .readAsLinesSync()
-      .where((line) {
-        final module = override.firstMatch(line)?.group(1);
-        return module == null || depends.contains(module);
-      })
-      .join('\n');
+  final lines = file.existsSync() ? file.readAsLinesSync() : <String>[];
+  return [
+    ...lines.where((line) {
+      final module = override.firstMatch(line)?.group(1);
+      if (module == 'rules_dart' && rulesDart.isNotEmpty) return false;
+      return module == null || depends.contains(module);
+    }),
+    if (rulesDart.isNotEmpty && depends.contains('rules_dart'))
+      'common --override_module=rules_dart=${_rcPath(rulesDart)}',
+  ].join('\n');
 }
 
 /// A workspace copy that belongs to one test.

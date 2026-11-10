@@ -200,6 +200,23 @@ for a toolchain override locally. When the offending code is dead in this
 context, deleting it is the better answer, and should be commented as
 deliberate so nobody later "restores" it.
 
+### Testing against another rules_dart
+
+To build against a rules_dart other than the sibling checkout, such as its
+committed HEAD while that tree is being changed, export it to a directory and
+override the module there:
+
+    git -C ../rules_dart archive HEAD | tar -x -C /tmp/rules_dart_snapshot
+    bazel test --override_module=rules_dart=/tmp/rules_dart_snapshot //...
+
+The e2e tests that generate a workspace (`pub_inputs_fixture.dart`,
+`digest_probe.dart`) copy the repository's `.bazelrc.user` into it, so a
+command-line override does not reach them. Set `E2E_RULES_DART_OVERRIDE` to the
+directory instead; it replaces that file's rules_dart override, or adds one:
+
+    E2E_RULES_DART_OVERRIDE=/tmp/rules_dart_snapshot \
+      bazel run //tools/dev_tool:e2e -- test/e2e/pub_versions_e2e_test.dart
+
 ### Lock files
 
 Every `e2e/` workspace commits a `MODULE.bazel.lock`, and the committed
