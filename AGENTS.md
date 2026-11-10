@@ -78,3 +78,33 @@ not in a copy. What only one repository needs stays in that repository.
 This repository is public: it names only itself and the public projects it
 depends on or serves, never private ones, and a comment that came from a
 downstream report describes the behaviour, not who reported it.
+
+## Verification
+
+Work is done when you have seen it work, not when it builds. `bazel test`
+and `build_test` passing is necessary and not sufficient. Before calling a
+change done:
+
+1. Run `bazel test //...` in the root and in every e2e workspace the change
+   reaches.
+2. Run the web rendering checks of the e2e suite ([docs/TESTING.md](docs/TESTING.md) § 5).
+3. For web changes, read the output files (`bazel-bin/*/index.html` and the
+   like) and confirm what they contain.
+4. For macOS changes, run the runtime test:
+   `bazel test :verify_macos_app_test --test_tag_filters= --strategy=TestRunner=standalone`.
+5. For Linux and Windows changes, run the VM-based visual checks where you can.
+6. For changes to the dev tool's reload path (`tools/dev_tool/lib/run_command.dart`,
+   `vm_service_client.dart`, `hot_reload/**`, `session.dart`), check both hot
+   reload and hot restart by hand against `e2e/macos_example` through
+   `flutter_bazel`, as docs/TESTING.md's "Hot reload / hot restart (manual)"
+   describes.
+
+docs/TESTING.md's "Quick reference: what to test when" says which of these a
+change needs.
+
+Never run `bazel clean`: when Bazel seems to be the problem, the mistake is in
+what was asked of it. A failing test is investigated and fixed, whether or not
+your change caused it.
+
+Platform rules follow the two-tier pattern: a convenience macro (tier 1) over
+composable rules (tier 2).
