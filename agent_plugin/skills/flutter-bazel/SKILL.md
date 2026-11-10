@@ -19,6 +19,26 @@ The shape of a session: start the tool once, in the background, with its output
 in files. Read the channel's URL and token, and the app's id, from those files.
 Drive the app with `curl`. Reload after each edit. Shut it down at the end.
 
+## Bazel, not the `flutter` CLI
+
+In a rules_flutter workspace, Bazel builds everything, with the Flutter version
+`MODULE.bazel` pins. Advice written for `flutter` projects goes through Bazel
+here:
+
+- Tests: `bazel test //...`, or the `flutter_test` target you changed. Not
+  `flutter test`, and not the Dart MCP server's `run_tests`: both use whatever
+  Flutter the machine has, skip the code Bazel generates or maps in, and never
+  run the Bazel targets.
+- A new package: `bazel run @rules_flutter//flutter/pub -- add <package>`,
+  then add `@deps//:<package>` to the `deps` of the target that imports it
+  (`deps` being the name of the workspace's `flutter_pub.from_lock`).
+- Assets and fonts: the app target's `assets` in BUILD, not `flutter: assets:`
+  in its pubspec, which the build does not read. Material icons are
+  `@rules_flutter//flutter:material_icons` in `deps`, not
+  `uses-material-design`.
+- Reload and restart: through the session's channel (`app.hotReload`,
+  `app.restart`, below), which recompiles with Bazel.
+
 ## 1. Find the target, the tool and the device
 
 The target is the platform app, not the `flutter_application`:
