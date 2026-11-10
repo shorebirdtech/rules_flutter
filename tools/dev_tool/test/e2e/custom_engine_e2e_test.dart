@@ -413,7 +413,7 @@ void main() {
     // kernel, not the release's.
     final aquery = await _bazel([
       'aquery',
-      'mnemonic("DartEntryKernel|DartModule", //:widget_test)',
+      'mnemonic("DartEntryKernel|DartModule", deps(//:widget_test))',
       '${_sdkFlag}local',
       '--output=text',
     ]);
@@ -428,7 +428,7 @@ void main() {
     Future<String> defines(String sdk) async {
       final aquery = await _bazel([
         'aquery',
-        'mnemonic("DartEntryKernel", //:widget_test)',
+        'mnemonic("DartEntryKernel", deps(//:widget_test))',
         '$_sdkFlag$sdk',
         '--output=text',
       ]);
