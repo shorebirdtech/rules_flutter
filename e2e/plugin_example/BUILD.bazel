@@ -99,6 +99,21 @@ flutter_application(
     ],
 )
 
+# An app whose only Android plugin is `annotated_plugin`, whose Gradle build
+# declares a `platform(...)` entry that rules_flutter does not read. The
+# annotation in MODULE.bazel gives its Android library `androidx.browser`, which
+# its Kotlin compiles against, and its `annotated_android_maven_artifacts`
+# lists: `:verify_android_maven_artifacts_test`.
+flutter_application(
+    name = "annotated_app",
+    main = "lib/annotated_only.dart",
+    package = ":pubspec-metadata",
+    deps = [
+        "@deps//:annotated_plugin",
+        "@deps//:flutter",
+    ],
+)
+
 # =============================================================================
 # macOS build
 # =============================================================================
@@ -322,6 +337,20 @@ flutter_android_app(
     application_id = "com.example.package_info_only.r8",
     namespace = "com.example.plugin_example",
     proguard_specs = ["app_proguard.pro"],
+)
+
+flutter_android_app(
+    name = "annotated_android",
+    application = ":annotated_app",
+    application_id = "com.example.annotated",
+    namespace = "com.example.plugin_example",
+    proguard_specs = [],
+)
+
+flutter_android_build(
+    name = "annotated_arm64_build",
+    android_platforms = ["@rules_android//:arm64-v8a"],
+    targets = [":annotated_android"],
 )
 
 flutter_android_build(
@@ -577,15 +606,27 @@ ignored_package_test(
 # Maven repositories, so the test needs no network.
 _MAVEN_ARTIFACTS_REPORTS = [
     ":__package_info_only_android_maven_artifacts_report",
+    ":__annotated_android_maven_artifacts_report",
     ":__plugin_android_maven_artifacts_report",
+    ":annotated_android_maven_artifacts",
     ":package_info_only_android_maven_artifacts",
     ":plugin_android_maven_artifacts",
 ]
+
+# The Kotlin of `annotated_plugin` compiles against `androidx.browser`, which
+# nothing but its annotation gives it, so an APK of `annotated_app` links it.
+build_test(
+    name = "annotated_android_build_test",
+    tags = ["android"],
+    targets = [":annotated_arm64_build"],
+)
 
 dart_test(
     name = "verify_android_maven_artifacts_test",
     data = _MAVEN_ARTIFACTS_REPORTS + ["test/gradle_module_metadata.json"],
     env = {
+        "ANNOTATED_REPORT": "$(rlocationpath :__annotated_android_maven_artifacts_report)",
+        "ANNOTATED_REPORT_PROGRAM": "$(rlocationpath :annotated_android_maven_artifacts)",
         "ALL_PLUGINS_REPORT": "$(rlocationpath :__plugin_android_maven_artifacts_report)",
         "ALL_PLUGINS_REPORT_PROGRAM": "$(rlocationpath :plugin_android_maven_artifacts)",
         "ONE_PLUGIN_REPORT": "$(rlocationpath :__package_info_only_android_maven_artifacts_report)",

@@ -33,7 +33,7 @@ load("//flutter/private:pub_cycles.bzl", "module_cycles", "plan_cycles")
 load("//flutter/private:pub_lock_sdks.bzl", "parse_lock_sdk_constraints")
 load("//flutter/private:pub_reconcile.bzl", "pub_command", "reconcile_package", "sdk_pin_errors", "unsupported_locks")
 load("//flutter/private:pub_resolve.bzl", "path_package_directory", "resolve_errors", "resolve_failure", "resolved_targets")
-load("//flutter/private:pub_settings.bzl", "root_only_settings")
+load("//flutter/private:pub_settings.bzl", "root_annotations", "root_only_settings", "unknown_annotation")
 load("//flutter/private:swift_packages.bzl", "declare_swift_packages")
 load("//flutter/private:versions.bzl", "flutter_sdk_exact_pins", "flutter_source_sha256")
 
@@ -207,6 +207,32 @@ pub_settings_tag = tag_class(
           "this tag, at most once.",
 )
 
+pub_annotation_tag = tag_class(
+    attrs = {
+        "package": attr.string(
+            doc = "The pub package to annotate. A package one of the build's " +
+                  "`flutter_pub.from_lock` locks lists, and built by rules_flutter.",
+            mandatory = True,
+        ),
+        "android_deps": attr.label_list(
+            doc = "Artifacts of `@rules_flutter_maven` to add to the package's " +
+                  "generated Android library, for a plugin whose Gradle build " +
+                  "declares dependencies rules_flutter does not read (`platform(...)`, " +
+                  "`files(...)`, a version catalog). Each is linked, checked against " +
+                  "what `@rules_flutter_maven` resolves, and listed by the app's " +
+                  "`<app>_maven_artifacts` as the plugin's own Gradle ones are. The " +
+                  "package must be a plugin with Android sources that rules_flutter " +
+                  "generates the library of: not one with a `plugin_overlays` " +
+                  "`android/BUILD.bazel.tpl`, which lists its own dependencies.",
+            default = [],
+        ),
+    },
+    doc = "Adds to one pub package's generated targets what its own files cannot " +
+          "say, as `crate.annotation` does for a Rust crate. Only the root module " +
+          "may use this tag, once per package. A package no lock lists, or one " +
+          "the field cannot apply to, fails the build, naming it.",
+)
+
 pub_cycle_tag = tag_class(
     attrs = {
         "packages": attr.string_list(
@@ -336,6 +362,16 @@ def pub_extension(module_ctx):
     if settings.error:
         fail(settings.error)
 
+    # What a package is built with beyond its own files is the root's too.
+    annotations = root_annotations(
+        module_ctx.modules,
+        # `@rules_flutter_maven` is only read when an annotation needs it: a
+        # build that annotates nothing need not have it.
+        str(Label("@rules_flutter_maven//:_"))[:-1] if [m for m in module_ctx.modules if m.tags.annotation] else "",
+    )
+    if annotations.error:
+        fail(annotations.error)
+
     tags = []
     for mod in module_ctx.modules:
         for pub_tag in mod.tags.from_lock:
@@ -366,13 +402,15 @@ def pub_extension(module_ctx):
             tags.append(struct(module = mod, tag = pub_tag, packages = lock_pkgs, flutter_constraint = flutter_constraint, lock_dir = lock_dir))
 
     cycles = [module_cycles(mod) for mod in module_ctx.modules]
+    if not tags and annotations.by_package:
+        fail(unknown_annotation(annotations.by_package, []))
     if not tags:
         # Nothing is built, so a root declaration names no package of a cycle.
         planned = plan_cycles(cycles, built = {})
         if planned.error:
             fail(planned.error)
     else:
-        _declare_pub_packages(tags, settings, sdks, user_overlay_roots, cycles)
+        _declare_pub_packages(tags, settings, annotations.by_package, sdks, user_overlay_roots, cycles)
         declare_swift_packages(module_ctx, [t.tag.swift_package_resolved for t in tags if t.tag.swift_package_resolved])
 
     return module_ctx.extension_metadata(reproducible = True)
@@ -433,7 +471,7 @@ def _hub_listing(hub_packages, package):
     """A hub that lists a package: its alias follows the selected SDK."""
     return [h for h in sorted(hub_packages.keys()) if package in hub_packages[h]][0]
 
-def _declare_pub_packages(tags, settings, sdks, user_overlay_roots, cycles):
+def _declare_pub_packages(tags, settings, annotations, sdks, user_overlay_roots, cycles):
     """Declares the repositories of every `flutter_pub.from_lock()` tag: one per package.
 
     Args:
@@ -443,6 +481,7 @@ def _declare_pub_packages(tags, settings, sdks, user_overlay_roots, cycles):
         sdks: The declared SDKs, by name. The default SDK's framework builds the
             build's Flutter SDK packages; another SDK with another framework
             has packages of its own.
+        annotations: The root's `flutter_pub.annotation` fields, by package (`root_annotations`).
         user_overlay_roots: The overlay roots every package is built with.
         cycles: Every module's `flutter_pub.cycle()` declarations (`module_cycles`).
     """
@@ -514,6 +553,9 @@ def _declare_pub_packages(tags, settings, sdks, user_overlay_roots, cycles):
         chosen[name] = result.entry
     if problems:
         fail("\n\n".join(problems))
+    unknown = unknown_annotation(annotations, list(chosen.keys()) + list(mapped.targets.keys()))
+    if unknown:
+        fail(unknown)
 
     # A release's packages are held to the pins it records; another framework
     # has its constraints checked against the locks when its spokes are fetched.
@@ -536,6 +578,12 @@ def _declare_pub_packages(tags, settings, sdks, user_overlay_roots, cycles):
     }
     not_built = {name: why_not_built.get(e.kind, "the build does not build") for name, e in chosen.items() if name not in built}
     not_built.update({name: "maps to %s with `resolve`, so a target of yours builds it" % t.target for name, t in mapped.targets.items()})
+    for name in sorted(annotations.keys()):
+        if name in not_built:
+            fail((
+                "`flutter_pub.annotation(package = \"%s\")` names a package that %s, " +
+                "so it has no Android library to add dependencies to."
+            ) % (name, not_built[name]))
     planned = plan_cycles(cycles, built, not_built)
     if planned.error:
         fail(planned.error)
@@ -655,6 +703,7 @@ def _declare_pub_packages(tags, settings, sdks, user_overlay_roots, cycles):
                 # as pub's own would.
                 code_assets = curated_code_assets(name, e.version),
                 ignore_hook = name in ignore_hooks,
+                android_deps = annotations.get(name, {}).get("android_deps", []),
             )
         elif e.kind == GIT:
             flutter_pub_library_repo(name = library_repo(name), package_name = name)
@@ -671,6 +720,7 @@ def _declare_pub_packages(tags, settings, sdks, user_overlay_roots, cycles):
                 overlay_roots = overlay_roots,
                 code_assets = curated_code_assets(name, e.version),
                 ignore_hook = name in ignore_hooks,
+                android_deps = annotations.get(name, {}).get("android_deps", []),
             )
         elif e.kind == LOCAL:
             # The directory pub reads, built from its pubspec as a hosted
@@ -686,6 +736,7 @@ def _declare_pub_packages(tags, settings, sdks, user_overlay_roots, cycles):
                 overlay_roots = overlay_roots,
                 code_assets = curated_code_assets(name, e.version),
                 ignore_hook = name in ignore_hooks,
+                android_deps = annotations.get(name, {}).get("android_deps", []),
             )
         elif e.kind == FLUTTER_SOURCE:
             for prefix, sdk in reps.items():
@@ -703,6 +754,7 @@ def _declare_pub_packages(tags, settings, sdks, user_overlay_roots, cycles):
                     sdk = sdk.name,
                     prefix = prefix,
                     overlay_roots = overlay_roots,
+                    android_deps = annotations.get(name, {}).get("android_deps", []),
                 )
 
     # The build's Android Maven data: what every built spoke's Gradle build

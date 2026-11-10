@@ -43,6 +43,7 @@ void main() {
   final problems = <String>[];
   final all = _run('ALL_PLUGINS_REPORT');
   final one = _run('ONE_PLUGIN_REPORT');
+  final annotated = _run('ANNOTATED_REPORT');
 
   for (final (needle, why) in [
     ('androidx.datastore:datastore:', 'a shared_preferences_android artifact'),
@@ -57,6 +58,20 @@ void main() {
         'the app that uses package_info_plus alone lists $why:\n$one',
       );
     }
+  }
+
+  // `annotated_plugin`'s Gradle build declares only a `platform(...)` entry:
+  // what MODULE.bazel's `flutter_pub.annotation` adds is reported as if the
+  // build had declared it, for the app that links the plugin and no other.
+  if (!annotated.contains('androidx.browser:browser:') ||
+      !annotated.contains('package:annotated_plugin')) {
+    problems.add(
+      'the app of annotated_plugin does not list the artifact its '
+      'annotation adds, as declared by the plugin:\n$annotated',
+    );
+  }
+  if (one.contains('package:annotated_plugin')) {
+    problems.add('an app that does not link annotated_plugin lists it:\n$one');
   }
   if (all.contains('aligned with')) {
     problems.add(

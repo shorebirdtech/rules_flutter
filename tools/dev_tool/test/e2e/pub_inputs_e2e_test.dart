@@ -10,6 +10,7 @@
 @Tags(['e2e'])
 library;
 
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
@@ -217,6 +218,78 @@ void main() {
         isNot(contains('//:v2')),
         reason: 'the deleted overlay is still in use:\n$deleted',
       );
+    });
+  });
+
+  group('flutter_pub.annotation(android_deps)', () {
+    late PubInputsWorkspace ws;
+    setUpAll(() async {
+      ws = await PubInputsFixture(
+        hosted: [
+          // Its only dependency is in a form the Gradle reader does not read.
+          androidPlugin('bom_plugin', {
+            'android/build.gradle':
+                'android {\n    namespace = "dev.example.bom_plugin"\n}\n'
+                'dependencies {\n'
+                '    implementation platform("androidx.compose:compose-bom:2024.01.00")\n'
+                '}\n',
+          }),
+          HostedPackage('dart_only'),
+        ],
+        annotations: {
+          'bom_plugin': ['androidx_browser_browser'],
+          'dart_only': ['androidx_browser_browser'],
+        },
+      ).materialize();
+    });
+
+    test(
+      'adds the artifact to the plugin Android library and its record',
+      () async {
+        expect((await ws.loadSpoke('bom_plugin')).succeeded, isTrue);
+        final dir = await ws.spokeDirectory('bom_plugin');
+        final build = File(p.join(dir.path, 'android', 'BUILD.bazel'))
+            .readAsStringSync();
+        expect(
+          build,
+          contains('rules_flutter_maven//:androidx_browser_browser'),
+        );
+        final record = jsonDecode(
+          File(p.join(dir.path, 'flutter_android_maven_deps.json'))
+              .readAsStringSync(),
+        ) as Map<String, Object?>;
+        expect(
+          [for (final a in record['annotated']! as List) (a as Map)['name']],
+          ['androidx_browser_browser'],
+        );
+        expect(
+          (await recordedMavenDeps(ws, 'bom_plugin')).unread,
+          hasLength(1),
+        );
+      },
+    );
+
+    test(
+      'a package with no Android library refuses it, naming the package',
+      () async {
+        final result = await ws.loadSpoke('dart_only');
+        expect(result.succeeded, isFalse, reason: '$result');
+        expect(result.output, contains('package = "dart_only"'));
+        expect(result.output, contains('is not one'));
+      },
+    );
+
+    test('a package no lock lists fails the build, naming it', () async {
+      final other = await PubInputsFixture(
+        hosted: [HostedPackage('real')],
+        annotations: {
+          'imaginary': ['androidx_browser_browser'],
+        },
+      ).materialize();
+      final result = await other.loadSpoke('real');
+      expect(result.succeeded, isFalse, reason: '$result');
+      expect(result.output, contains('package = "imaginary"'));
+      expect(result.output, contains('no `flutter_pub.from_lock` lock lists'));
     });
   });
 

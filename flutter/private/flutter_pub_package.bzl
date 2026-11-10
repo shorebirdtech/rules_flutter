@@ -664,7 +664,15 @@ def _unread_dicts(parsed):
         for u in parsed.unread
     ]
 
-def _write_maven_deps(ctx, deps, unread, script):
+def _annotated_dicts(labels):
+    """The `flutter_pub.annotation` labels as the dicts `maven_deps.json` records.
+
+    The hub, which knows what `@rules_flutter_maven` resolved, turns each into
+    the artifact it stands for.
+    """
+    return [{"label": label, "name": label.rsplit("//:", 1)[1]} for label in labels]
+
+def _write_maven_deps(ctx, deps, unread, script, annotated = []):
     """Record the Maven dependencies the Android check of the hub reads.
 
     Written for every spoke, so `@flutter_pub_android_maven` can read
@@ -673,7 +681,8 @@ def _write_maven_deps(ctx, deps, unread, script):
     the dependencies its Gradle build declares and no unread lines. At the
     root of the spoke, as a package with no Android library has no `android/`
     package. `script` is the Gradle script's path in the package, which the
-    warning about `unread` lines names.
+    warning about `unread` lines names. `annotated` are the labels the root's
+    `flutter_pub.annotation` added to the library.
     """
     ctx.file(MAVEN_DEPS_FILE, json.encode({
         "package": ctx.attr.package_name,
@@ -681,6 +690,7 @@ def _write_maven_deps(ctx, deps, unread, script):
         "script": script,
         "deps": deps,
         "unread": unread,
+        "annotated": _annotated_dicts(annotated),
     }) + "\n")
 
 def _glob_block(srcs_dirs, extensions):
@@ -1476,6 +1486,7 @@ def make_android_subpackage_build_content(
         android_src_dir,
         java_package,
         maven_deps = [],
+        annotated_deps = [],
         android_manifest = "",
         consumer_proguard_specs = [],
         has_resources = False):
@@ -1529,6 +1540,10 @@ def make_android_subpackage_build_content(
             left out, so that the application's `flutter_android_plugin_libs`
             reports it, by name, with the rest the app needs, rather than
             Bazel failing on a label that does not exist.
+        annotated_deps: Labels of `@rules_flutter_maven` artifacts the root's
+            `flutter_pub.annotation` adds to the library's `deps`, for what
+            the plugin's Gradle build declares in a form the reader does not
+            read.
         android_manifest: Path to the plugin's
             `android/src/main/AndroidManifest.xml` if it ships one, or
             empty. When set, the generated `kt_android_library` declares
@@ -1680,6 +1695,9 @@ android_library(
 """
         if [d for d in maven_deps if d["kind"] == "runtime"]:
             runtime_deps_arg = "    runtime_deps = _maven.runtime_deps,\n"
+
+    if annotated_deps:
+        deps_expr += " + " + repr(annotated_deps)
 
     # BuildConfig.java stub — Gradle generates this implicitly per
     # plugin's namespace. rules_android does not, so we hand-emit one.
@@ -2279,6 +2297,13 @@ def _flutter_pub_package_impl(ctx):
             )
             break
 
+    if overlay_content and ctx.attr.android_deps:
+        fail((
+            "flutter_pub.annotation(package = \"{pkg}\") adds Android dependencies to the " +
+            "library rules_flutter generates, and the plugin overlay of {pkg} supplies its " +
+            "own targets. List those dependencies in the overlay's android/BUILD.bazel.tpl " +
+            "and remove the annotation."
+        ).format(pkg = ctx.attr.package_name))
     if overlay_content:
         ctx.file("BUILD.bazel", overlay_content)
         ctx.file(MEMBER_FILE, json.encode({"kind": MEMBER_OVERLAY, "material_icons": False, "android_lib": False}))
@@ -2491,6 +2516,15 @@ def _flutter_pub_package_impl(ctx):
     # reported here: the library is written as for the ones it read, and the
     # application that links the plugin warns, naming each line
     # (`flutter_android_plugin_libs`).
+    if ctx.attr.android_deps and not (android_src_dir or android_has_resources):
+        fail((
+            "flutter_pub.annotation(package = \"{pkg}\", android_deps = ...) needs a Flutter " +
+            "plugin with Android sources or resources whose Android library rules_flutter " +
+            "generates, and {pkg} {why}. Remove the annotation."
+        ).format(
+            pkg = ctx.attr.package_name,
+            why = ("has an Android library its own Gradle build makes, which rules_flutter cannot translate" if android_native_build else "is not one"),
+        ))
     maven_deps = []
     maven_unread = []
     maven_script = ""
@@ -2505,11 +2539,12 @@ def _flutter_pub_package_impl(ctx):
             android_src_dir = android_src_dir,
             java_package = android_java_package,
             maven_deps = maven_deps,
+            annotated_deps = list(ctx.attr.android_deps),
             android_manifest = android_manifest,
             consumer_proguard_specs = android_consumer_proguard_specs,
             has_resources = android_has_resources,
         ))
-    _write_maven_deps(ctx, maven_deps, maven_unread, maven_script)
+    _write_maven_deps(ctx, maven_deps, maven_unread, maven_script, list(ctx.attr.android_deps))
     return ctx.repo_metadata(reproducible = not ctx.attr.directory)
 
 flutter_pub_package = repository_rule(
@@ -2577,6 +2612,13 @@ flutter_pub_package = repository_rule(
                   "`drift` never names `sqlite3`. Attached to the generated " +
                   "package target rather than to the application, which is what " +
                   "makes them propagate the way pub's own assets do.",
+            default = [],
+        ),
+        "android_deps": attr.string_list(
+            doc = "Labels of `@rules_flutter_maven` artifacts to add to the " +
+                  "package's Android library, from the root's " +
+                  "`flutter_pub.annotation`. Written as the labels' canonical " +
+                  "strings, so the repository stays fetchable by the root's name for it.",
             default = [],
         ),
         "ignore_hook": attr.bool(

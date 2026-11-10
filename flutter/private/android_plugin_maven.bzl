@@ -622,6 +622,55 @@ def maven_labels(declared, resolved = None):
         runtime_deps = labels["runtime"],
     )
 
+def annotated_requirements(packages, resolved):
+    """Each package's `flutter_pub.annotation` artifacts as the declarations they stand for.
+
+    An annotation names the target of an artifact in `@rules_flutter_maven`;
+    the checks and the report work on `group:artifact`. The artifact is the
+    resolved one whose target that is, so a plugin's annotated dependency is a
+    requirement like one its Gradle build declares: present in the install,
+    reported, and checked for the duplicates of a second library.
+
+    Args:
+        packages: The decoded spokes' records (`package`, `deps`, `unread`
+            and `annotated`, a list of dicts with `label` and `name`).
+        resolved: Dict of `group:artifact` to the version resolved.
+
+    Returns:
+        `struct(packages, errors)`: the packages with each annotated artifact
+        added to `deps` (declared with no version, so any resolution meets it),
+        and the messages for annotations naming an artifact the install lacks.
+    """
+    by_name = {}
+    for coordinate in sorted(resolved.keys()):
+        group, artifact = coordinate.split(":")[:2]
+        by_name.setdefault(maven_target_name(group, artifact), coordinate)
+    out = []
+    errors = []
+    for pkg in packages:
+        pkg = dict(pkg)
+        pkg["deps"] = list(pkg["deps"])
+        for a in pkg.get("annotated", []):
+            coordinate = by_name.get(a["name"])
+            if coordinate == None:
+                errors.append((
+                    "flutter_pub.annotation(package = \"{package}\") adds `{label}`, " +
+                    "which is not an artifact @rules_flutter_maven resolves. Add the " +
+                    "artifact to the root module's " +
+                    '`maven.install(name = "rules_flutter_maven", artifacts = [...])` ' +
+                    "and regenerate its lock file, or correct the label."
+                ).format(package = pkg["package"], label = a["label"]))
+                continue
+            pkg["deps"].append({
+                "kind": "deps",
+                "coordinate": coordinate,
+                "version": None,
+                "line": "flutter_pub.annotation(android_deps = [...])",
+                "checked": True,
+            })
+        out.append(pkg)
+    return struct(packages = out, errors = errors)
+
 def merge_plugin_requirements(packages):
     """The version each Maven artifact must have for every plugin of the build.
 
@@ -724,13 +773,19 @@ def maven_warning_message(data, linked, app):
         The warning, or the empty string when there is nothing to say.
     """
     form = []
+    form_packages = []
     conditional = []
     for p in sorted(data["packages"], key = lambda p: p["package"]):
         if p["package"] not in linked:
             continue
         for kind, out in [("form", form), ("conditional", conditional)]:
+            # A plugin the root annotated has had its dependencies stated.
+            if kind == "form" and p.get("annotated"):
+                continue
             lines = [u for u in p["unread"] if u["why"] == kind]
             if lines:
+                if kind == "form":
+                    form_packages.append(p["package"])
                 out.append("    package:%s %s, %s\n%s" % (
                     p["package"],
                     p["version"],
@@ -746,12 +801,18 @@ def maven_warning_message(data, linked, app):
             "If a plugin's Android code then fails to compile, add the " +
             "artifacts it needs to the root module's " +
             '`maven.install(name = "rules_flutter_maven", artifacts = [...])` ' +
-            "and give the plugin an overlay (flutter_pub.plugin_overlays in " +
-            "MODULE.bazel): <root>/<package>/BUILD.bazel.tpl for the Dart side " +
-            "and <root>/<package>/android/BUILD.bazel.tpl, which declares the " +
-            "plugin's Android library with those @rules_flutter_maven deps. An " +
-            "android/BUILD.bazel.tpl is used only beside a BUILD.bazel.tpl."
-        ).format(app = app, groups = "\n".join(form)))
+            "and state them for that plugin in MODULE.bazel, once per package:\n\n" +
+            "{lines}\n\n" +
+            "A plugin that needs more than dependencies can have an overlay " +
+            "instead (flutter_pub.plugin_overlays)."
+        ).format(
+            app = app,
+            groups = "\n".join(form),
+            lines = "\n".join([
+                '    flutter_pub.annotation(package = "%s", android_deps = ["@rules_flutter_maven//:<artifact target>"])' % name
+                for name in form_packages
+            ]),
+        ))
     if conditional:
         parts.append((
             "{app} links Android plugins whose Gradle builds declare " +
@@ -884,7 +945,10 @@ def _flutter_android_maven_impl(rctx):
         if line.strip()
     ]
     packages = [json.decode(rctx.read(rctx.path(label))) for label in rctx.attr.spokes]
-    packages = [p for p in packages if p["deps"] or p["unread"]]
+    annotated = annotated_requirements(packages, resolved)
+    if annotated.errors:
+        fail("\n\n".join(annotated.errors))
+    packages = [p for p in annotated.packages if p["deps"] or p["unread"]]
 
     # The whole build's requirements, as an application's check reads them: it
     # picks the packages it links and no others. The build-wide report below is

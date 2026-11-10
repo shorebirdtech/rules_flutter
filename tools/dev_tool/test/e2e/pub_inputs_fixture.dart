@@ -281,7 +281,14 @@ class PubInputsFixture {
     this.buildFromPubspec = const [],
     this.ignored = const {},
     this.cycles = const [],
+    this.annotations = const {},
   });
+
+  /// `flutter_pub.annotation(package = ..., android_deps = [...])` tags of the
+  /// root module: package name to the `@rules_flutter_maven` targets it adds.
+  /// The root then also declares the `rules_flutter_maven` install, as an app
+  /// does, which only an annotation's label resolves through.
+  final Map<String, List<String>> annotations;
 
   /// `flutter_pub.cycle(packages = [...])` tags of the root module: packages
   /// that depend on each other, built as one library.
@@ -540,6 +547,10 @@ class PubInputsFixture {
       r'bazel_dep\(name\s*=\s*"bazel_skylib",\s*version\s*=\s*"([^"]+)"',
     );
 
+    final jvmExternal = pinned(
+      r'bazel_dep\(name\s*=\s*"rules_jvm_external",\s*version\s*=\s*"([^"]+)"',
+    );
+
     final spokeNames = {
       for (final package in archived) package.name,
       for (final package in git) package.name,
@@ -552,6 +563,7 @@ module(name = "pub_inputs_scratch")
 bazel_dep(name = "rules_flutter", version = "0.0.0")
 bazel_dep(name = "rules_dart", version = "$rulesDart")
 bazel_dep(name = "bazel_skylib", version = "$skylib")
+${annotations.isEmpty ? '' : 'bazel_dep(name = "rules_jvm_external", version = "$jvmExternal")'}
 
 local_path_override(
     module_name = "rules_flutter",
@@ -567,6 +579,8 @@ ${overlayRoots.isEmpty ? '' : 'flutter_pub.plugin_overlays(roots = ${jsonEncode(
 ${checkDirectDependencies == null ? '' : 'flutter_pub.settings(check_direct_dependencies = "$checkDirectDependencies")'}
 ${_tag(pubHub, lockPackage, resolve, buildFromPubspec: buildFromPubspec, ignored: ignored)}
 ${otherHubs.map(_hubTag).join('\n')}
+${annotations.entries.map((a) => 'flutter_pub.annotation(package = "${a.key}", android_deps = ${jsonEncode([for (final t in a.value) '@rules_flutter_maven//:$t'])})').join('\n')}
+${annotations.isEmpty ? '' : 'maven = use_extension("@rules_jvm_external//:extensions.bzl", "maven")\nmaven.install(name = "rules_flutter_maven", artifacts = [])\nuse_repo(maven, "rules_flutter_maven")'}
 ${cycles.map((c) => 'flutter_pub.cycle(packages = ${jsonEncode(c)})').join('\n')}
 ${rulesDartPubLocks.isEmpty ? '' : _rulesDartPubTags(rulesDartPubLocks)}
 use_repo(flutter_pub, ${{pubHub, for (final h in otherHubs) h.name}.map((n) => '"$n"').join(', ')}${spokeNames.map((n) => ', "flutter_pub__$n"').join()})

@@ -172,6 +172,20 @@ def _record_android_subpackage_test_impl(ctx):
 
 record_android_subpackage_test = unittest.make(_record_android_subpackage_test_impl)
 
+def _annotated_deps_test_impl(ctx):
+    """`flutter_pub.annotation(android_deps)` land in the library's `deps`."""
+    env = unittest.begin(ctx)
+
+    content = make_android_subpackage_build_content(
+        android_src_dir = "android/src/main",
+        java_package = "dev.example.annotated",
+        annotated_deps = ["@@maven//:androidx_browser_browser"],
+    )
+    asserts.true(env, '+ ["@@maven//:androidx_browser_browser"]' in content, content)
+    return unittest.end(env)
+
+annotated_deps_test = unittest.make(_annotated_deps_test_impl)
+
 def _resources_without_manifest_test_impl(ctx):
     """Resources force a manifest: synthesize one when the plugin ships none."""
     env = unittest.begin(ctx)
@@ -1041,6 +1055,7 @@ def flutter_pub_package_test_suite(name):
         parse_android_manifest_package_test,
         record_android_subpackage_test,
         resources_without_manifest_test,
+        annotated_deps_test,
         no_resources_subpackage_test,
         member_exports_android_lib_test,
         member_declares_fonts_and_platforms_test,

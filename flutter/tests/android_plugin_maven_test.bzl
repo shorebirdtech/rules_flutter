@@ -3,6 +3,7 @@
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load(
     "//flutter/private:android_plugin_maven.bzl",
+    "annotated_requirements",
     "artifacts_report",
     "compare_maven_versions",
     "format_maven_failure",
@@ -409,7 +410,7 @@ def _warning_message_test_impl(ctx):
         "    package:c 5.0, android/build.gradle\n        12: implementation(libs.x)\n        13: kapt(\"a:b:1\")",
         "    package:d 1.0, android/build.gradle\n        7: api(project(\":p\"))",
         "    package:d 1.0, android/build.gradle\n        9: implementation \"g:maybe:1.0\"",
-        "android/BUILD.bazel.tpl",
+        '    flutter_pub.annotation(package = "c", android_deps = ["@rules_flutter_maven//:<artifact target>"])',
         'maven.install(name = "rules_flutter_maven"',
     ]:
         asserts.true(env, needle in message, needle + " missing from:\n" + message)
@@ -419,6 +420,35 @@ def _warning_message_test_impl(ctx):
     return unittest.end(env)
 
 warning_message_test = unittest.make(_warning_message_test_impl)
+
+def _annotated_test_impl(ctx):
+    env = unittest.begin(ctx)
+    resolved = {"androidx.browser:browser": "1.9.0", "g:other": "1.0"}
+    label = {"label": "@@x//:androidx_browser_browser", "name": "androidx_browser_browser"}
+    pkg = _pkg("a", "1.0", [], [_unread(3, "implementation(platform(\"g:bom:1\"))")])
+    pkg["annotated"] = [label]
+
+    # The artifact joins the plugin's declarations, so it is checked, reported
+    # and linked as a Gradle-declared one is.
+    result = annotated_requirements([pkg], resolved)
+    asserts.equals(env, [], result.errors)
+    asserts.equals(env, ["androidx.browser:browser"], [d["coordinate"] for d in result.packages[0]["deps"]])
+    req = merge_plugin_requirements(result.packages)
+    asserts.equals(env, ["package:a 1.0"], req["androidx.browser:browser"]["declared_by"])
+    asserts.equals(env, [], maven_problems(req, resolved))
+
+    # What the install lacks is named with the package, not a missing target.
+    result = annotated_requirements([pkg], {"g:other": "1.0"})
+    asserts.equals(env, 1, len(result.errors))
+    for needle in ['package = "a"', "@@x//:androidx_browser_browser", "maven.install"]:
+        asserts.true(env, needle in result.errors[0], result.errors[0])
+
+    # The root stated this plugin's dependencies: no warning about its unread forms.
+    data = {"resolved": resolved, "packages": [pkg]}
+    asserts.equals(env, "", maven_warning_message(data, {"a": True}, "//:app"))
+    return unittest.end(env)
+
+annotated_test = unittest.make(_annotated_test_impl)
 
 def _report_test_impl(ctx):
     env = unittest.begin(ctx)
@@ -460,5 +490,6 @@ def android_plugin_maven_test_suite(name):
         problems_test,
         failure_message_test,
         warning_message_test,
+        annotated_test,
         report_test,
     )
