@@ -9,7 +9,16 @@
 /// With `--min-load-align`, every library's `PT_LOAD` segments must be aligned
 /// to at least that many bytes. A device with 16 KB pages refuses a library
 /// linked for 4 KB ones, and nothing else says so before the app dies on
-/// launch.
+/// launch. And its `PT_GNU_RELRO` segment, if any, must end on a page of that
+/// size or with the `PT_LOAD` segment that holds it, as Android's "Support
+/// 16 KB page sizes" guide requires: the linker makes the whole page holding
+/// the end of RELRO read-only, so writable data later in that page would
+/// crash the app with SIGSEGV when written.
+///
+/// An app that does not need 16 KB support (one for a fleet of 4 KB devices,
+/// or one Android 16 runs in page size compatibility mode) builds with
+/// `--@rules_flutter//flutter:allow_4kb_aligned_native_libraries`, under which
+/// the rule passes no `--min-load-align`; the message names it.
 ///
 /// A `.zip` argument stands for the `.so` files inside it: rules_android
 /// extracts the native libraries of an AAR into one.
@@ -62,6 +71,7 @@ String? elfProblem({
   if (error != null) {
     return 'ERROR: $path: $error.';
   }
+  final kb = minLoadAlign ~/ 1024;
   // rules_android_ndk 0.1.5 links every arm64 library with
   // `-Wl,-z,max-page-size=4096`; upstream's efc0c191 fixes it.
   const toolchain =
@@ -70,17 +80,102 @@ String? elfProblem({
       'its 16 KB fix (a `git_override` at efc0c191 or later, as the '
       'rules_flutter README\'s "16 KB memory pages" shows), or register a '
       'toolchain that links for 16 KB pages.';
+  final prebuilt =
+      "A prebuilt library, such as one inside a plugin's AAR, needs a release "
+      'of it that supports $kb KB page sizes. An app that does not need them '
+      '(one for devices with 4 KB pages only, or one that sets '
+      '`android:pageSizeCompat` so that Android 16 runs it in page size '
+      'compatibility mode) can build with '
+      '--@rules_flutter//flutter:allow_4kb_aligned_native_libraries.';
   if (align! < minLoadAlign) {
     return 'ERROR: $path is linked for ${align ~/ 1024} KB pages (its '
         'PT_LOAD segments are aligned to $align bytes). An $abi device with '
-        '${minLoadAlign ~/ 1024} KB pages, as Android 15 devices can have, '
-        'refuses to load it. Link it with '
-        '`-Wl,-z,max-page-size=$minLoadAlign`, as NDK r28 and later do by '
-        'default. $toolchain A prebuilt library, such as one inside a '
-        "plugin's AAR, needs a release of it that supports "
-        '${minLoadAlign ~/ 1024} KB page sizes.';
+        '$kb KB pages, as Android 15 devices can have, refuses to load it. '
+        'Link it with `-Wl,-z,max-page-size=$minLoadAlign`, as NDK r28 and '
+        'later do by default. $toolchain $prebuilt';
+  }
+  final relroEnd = misalignedRelroEnd(
+    Uint8List.fromList(bytes),
+    minLoadAlign,
+  );
+  if (relroEnd != null) {
+    return 'ERROR: $path ends its GNU_RELRO segment at '
+        '0x${relroEnd.toRadixString(16)}, inside a $kb KB page that holds '
+        'writable data after it. An $abi device with $kb KB pages makes that '
+        'whole page read-only once the library is relocated, and the app '
+        'crashes with SIGSEGV when it writes the data. Link it with '
+        '`-Wl,-z,max-page-size=$minLoadAlign` and '
+        '`-Wl,-z,common-page-size=$minLoadAlign`, or with NDK r28 or later. '
+        '$toolchain $prebuilt';
   }
   return null;
+}
+
+/// The end address of the `PT_GNU_RELRO` segment of the ELF file [bytes] when
+/// a device with [pageSize] pages would make writable data read-only with it;
+/// null when it would not.
+///
+/// It would not when there is no `PT_GNU_RELRO`, when RELRO ends on a page
+/// boundary, or when it ends where the `PT_LOAD` segment holding it ends, so
+/// that no writable data shares its last page: the three conditions of
+/// Android's "Support 16 KB page sizes" guide. [bytes] has program headers
+/// that [minLoadAlignment] has read.
+int? misalignedRelroEnd(Uint8List bytes, int pageSize) {
+  final segments = programHeaders(bytes);
+  for (final relro in segments.where((s) => s.type == ptGnuRelro)) {
+    final end = relro.vaddr + relro.memsz;
+    if (end % pageSize == 0) continue;
+    final holding = segments.where(
+      (s) =>
+          s.type == ptLoad &&
+          s.vaddr <= relro.vaddr &&
+          relro.vaddr < s.vaddr + s.memsz,
+    );
+    if (holding.any((load) => load.vaddr + load.memsz == end)) continue;
+    return end;
+  }
+  return null;
+}
+
+const ptLoad = 1;
+const ptGnuRelro = 0x6474e552;
+
+/// One program header of an ELF file.
+class ProgramHeader {
+  ProgramHeader(this.type, this.vaddr, this.memsz, this.align);
+
+  final int type;
+  final int vaddr;
+  final int memsz;
+  final int align;
+}
+
+/// The program headers of the ELF file [bytes], whose header and program
+/// header table [minLoadAlignment] has found readable.
+List<ProgramHeader> programHeaders(Uint8List bytes) {
+  final data = ByteData.sublistView(bytes);
+  final is64 = bytes[4] == 2;
+  final phoff = is64
+      ? data.getUint64(0x20, Endian.little)
+      : data.getUint32(0x1c, Endian.little);
+  final phentsize = data.getUint16(is64 ? 0x36 : 0x2a, Endian.little);
+  final phnum = data.getUint16(is64 ? 0x38 : 0x2c, Endian.little);
+  int word(int at) => is64
+      ? data.getUint64(at, Endian.little)
+      : data.getUint32(at, Endian.little);
+  final headers = <ProgramHeader>[];
+  for (var i = 0; i < phnum; i++) {
+    final at = phoff + i * phentsize;
+    headers.add(
+      ProgramHeader(
+        data.getUint32(at, Endian.little),
+        word(at + (is64 ? 0x10 : 0x08)), // p_vaddr
+        word(at + (is64 ? 0x28 : 0x14)), // p_memsz
+        word(at + (is64 ? 0x30 : 0x1c)), // p_align
+      ),
+    );
+  }
+  return headers;
 }
 
 /// The smallest `p_align` of the `PT_LOAD` segments of the ELF file [bytes],
@@ -89,7 +184,6 @@ String? elfProblem({
   final data = ByteData.sublistView(bytes);
   // e_ident[EI_CLASS]: 1 = ELF32, 2 = ELF64.
   final is64 = bytes[4] == 2;
-  const ptLoad = 1;
   final headerSize = is64 ? 64 : 52;
   if (bytes.length < headerSize) {
     return (null, 'it is shorter than an ELF header');
@@ -106,13 +200,9 @@ String? elfProblem({
     return (null, 'its program headers run past the end of the file');
   }
   int? min;
-  for (var i = 0; i < phnum; i++) {
-    final at = phoff + i * phentsize;
-    if (data.getUint32(at, Endian.little) != ptLoad) continue;
-    final align = is64
-        ? data.getUint64(at + 0x30, Endian.little)
-        : data.getUint32(at + 0x1c, Endian.little);
-    if (min == null || align < min) min = align;
+  for (final segment in programHeaders(bytes)) {
+    if (segment.type != ptLoad) continue;
+    if (min == null || segment.align < min) min = segment.align;
   }
   if (min == null) {
     return (null, 'it has no PT_LOAD segments');

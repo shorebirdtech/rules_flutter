@@ -7,17 +7,42 @@ import '../validate_android_elf.dart';
 
 /// A little-endian ELF64 file for [machine] whose one `PT_LOAD` segment is
 /// aligned to [align].
-List<int> elf64(int machine, {required int align}) {
-  final data = ByteData(64 + 0x38);
+List<int> elf64(int machine, {required int align}) =>
+    elf64Segments(machine, [Segment.load(0, 0x1000, align)]);
+
+/// A program header: its type, virtual address, size in memory and alignment.
+class Segment {
+  const Segment(this.type, this.vaddr, this.memsz, this.align);
+  const Segment.load(int vaddr, int memsz, int align)
+    : this(1, vaddr, memsz, align);
+  const Segment.relro(int vaddr, int memsz) : this(0x6474e552, vaddr, memsz, 1);
+
+  final int type;
+  final int vaddr;
+  final int memsz;
+  final int align;
+}
+
+/// A little-endian ELF64 file for [machine] with the program headers
+/// [segments].
+List<int> elf64Segments(int machine, List<Segment> segments) {
+  final data = ByteData(64 + 0x38 * segments.length);
   data.setUint32(0, 0x464c457f, Endian.little); // \x7fELF
   data.setUint8(4, 2); // ELFCLASS64
   data.setUint8(5, 1); // little-endian
   data.setUint16(18, machine, Endian.little);
   data.setUint64(0x20, 64, Endian.little); // e_phoff
   data.setUint16(0x36, 0x38, Endian.little); // e_phentsize
-  data.setUint16(0x38, 1, Endian.little); // e_phnum
-  data.setUint32(64, 1, Endian.little); // PT_LOAD
-  data.setUint64(64 + 0x30, align, Endian.little);
+  data.setUint16(0x38, segments.length, Endian.little); // e_phnum
+  for (final (i, segment) in segments.indexed) {
+    final at = 64 + 0x38 * i;
+    data.setUint32(at, segment.type, Endian.little);
+    data.setUint64(at + 0x10, segment.vaddr, Endian.little);
+    data.setUint64(at + 0x18, segment.vaddr, Endian.little);
+    data.setUint64(at + 0x20, segment.memsz, Endian.little);
+    data.setUint64(at + 0x28, segment.memsz, Endian.little);
+    data.setUint64(at + 0x30, segment.align, Endian.little);
+  }
   return data.buffer.asUint8List();
 }
 
@@ -131,6 +156,77 @@ void main() {
       expect(message, contains('-Wl,-z,max-page-size=16384'));
       expect(message, contains("plugin's AAR"));
       expect(message, contains('pin rules_android_ndk to a commit'));
+    });
+
+    test('names the switch that allows 4 KB alignment', () {
+      expect(
+        problem(elf64(arm64, align: 4096)),
+        contains(
+          '--@rules_flutter//flutter:allow_4kb_aligned_native_libraries',
+        ),
+      );
+    });
+
+    // The cases of "Check the RELRO security flag" in Android's "Support
+    // 16 KB page sizes" guide, with its examples' numbers.
+    const text = Segment.load(0, 0x0cfaf0, 0x4000);
+
+    test('refuses a GNU_RELRO that ends mid-page before writable data', () {
+      final message = problem(
+        elf64Segments(arm64, [
+          text,
+          const Segment.load(0xdfaf0, 0x04510, 0x4000),
+          const Segment.relro(0xdfaf0, 0x01510),
+        ]),
+      )!;
+      expect(message, startsWith('ERROR: libfoo.so'));
+      expect(message, contains('GNU_RELRO'));
+      expect(message, contains('0xe1000'));
+      expect(message, contains('-Wl,-z,common-page-size=16384'));
+      expect(
+        message,
+        contains(
+          '--@rules_flutter//flutter:allow_4kb_aligned_native_libraries',
+        ),
+      );
+    });
+
+    test('accepts a GNU_RELRO that ends on a 16 KB page', () {
+      expect(
+        problem(
+          elf64Segments(arm64, [
+            text,
+            const Segment.load(0xdfaf0, 0x03510, 0x4000),
+            const Segment.relro(0xdfaf0, 0x00510),
+          ]),
+        ),
+        isNull,
+      );
+    });
+
+    test('accepts a library without GNU_RELRO', () {
+      expect(
+        problem(
+          elf64Segments(arm64, [
+            const Segment.load(0, 0x680, 0x4000),
+            const Segment.load(0x4680, 0x1d8, 0x4000),
+          ]),
+        ),
+        isNull,
+      );
+    });
+
+    test('accepts a GNU_RELRO that ends with its LOAD segment', () {
+      expect(
+        problem(
+          elf64Segments(arm64, [
+            const Segment.load(0, 0x680, 0x4000),
+            const Segment.load(0x4680, 0x980, 0x4000),
+            const Segment.relro(0x4680, 0x980),
+          ]),
+        ),
+        isNull,
+      );
     });
 
     test('is not checked without a minimum', () {

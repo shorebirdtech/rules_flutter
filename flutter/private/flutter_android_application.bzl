@@ -56,6 +56,7 @@ bundle built for a platform that is not Android arm, arm64 or x86_64 fails with 
 flag to pass.
 """
 
+load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
 load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterSdkRecordInfo")
 load("//flutter/private:assemble_directory.bzl", "ASSEMBLE_DIRECTORY_ATTRS", "assemble_directory")
@@ -70,6 +71,10 @@ _PAGE_SIZE = 16384
 
 # The attributes `android_abi` and `validate_android_native_libs` read.
 ANDROID_NATIVE_LIBS_ATTRS = {
+    "_allow_4kb_aligned_native_libraries": attr.label(
+        default = "//flutter:allow_4kb_aligned_native_libraries",
+        providers = [BuildSettingInfo],
+    ),
     "_android_constraint": attr.label(default = "@platforms//os:android"),
     "_arm64_constraint": attr.label(default = "@platforms//cpu:aarch64"),
     "_armv7_constraint": attr.label(default = "@platforms//cpu:armv7"),
@@ -115,7 +120,8 @@ def validate_android_native_libs(ctx, tools, abi, libs, name):
     """Checks that a device of `abi` can load `libs`, in a build action.
 
     Each library must be an ELF shared object of the ABI's machine type and,
-    for a 64-bit ABI, have its segments aligned for 16 KB pages.
+    for a 64-bit ABI, have its segments aligned for 16 KB pages, unless
+    `--@rules_flutter//flutter:allow_4kb_aligned_native_libraries` is set.
 
     The check is a Dart script run by the exec-tools toolchain's `dart`, so it
     runs on any host.
@@ -139,7 +145,7 @@ def validate_android_native_libs(ctx, tools, abi, libs, name):
     args.add(ctx.file._validate_tool)
     args.add("--abi", abi)
     args.add("--machine", str(android_elf_machine_for_abi(abi)))
-    if abi in _SIXTEEN_KB_ABIS:
+    if abi in _SIXTEEN_KB_ABIS and not ctx.attr._allow_4kb_aligned_native_libraries[BuildSettingInfo].value:
         args.add("--min-load-align", str(_PAGE_SIZE))
     args.add("--stamp", validated)
     args.add_all(libs)

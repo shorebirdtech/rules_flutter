@@ -85,6 +85,16 @@ _arm64_test = analysistest.make(
     config_settings = _platform("@rules_android//:arm64-v8a") | _RELEASE,
 )
 
+# An app that runs only on 4 KB devices, or in Android 16's page size
+# compatibility mode, need not be 16 KB-aligned.
+_arm64_4kb_allowed_test = analysistest.make(
+    _libraries_impl,
+    attrs = _ATTRS,
+    config_settings = _platform("@rules_android//:arm64-v8a") | _RELEASE | {
+        str(Label("//flutter:allow_4kb_aligned_native_libraries")): True,
+    },
+)
+
 _armv7_test = analysistest.make(
     _libraries_impl,
     attrs = _ATTRS,
@@ -124,6 +134,15 @@ def android_bundle_test_suite(name):
         sixteen_kb = True,
         target_compatible_with = ["@platforms//os:macos"],
     )
+    _arm64_4kb_allowed_test(
+        name = name + "_arm64_4kb_allowed",
+        target_under_test = _BUNDLE,
+        abi = "arm64-v8a",
+        elf_machine = 183,
+        libraries = ["libapp.so", "libcombined.so"],
+        sixteen_kb = False,
+        target_compatible_with = ["@platforms//os:macos"],
+    )
     _armv7_test(
         name = name + "_armv7",
         target_under_test = _BUNDLE,
@@ -149,5 +168,5 @@ def android_bundle_test_suite(name):
     )
     native.test_suite(
         name = name,
-        tests = [name + "_arm64", name + "_armv7", name + "_x86_64", name + "_not_android"],
+        tests = [name + "_arm64", name + "_arm64_4kb_allowed", name + "_armv7", name + "_x86_64", name + "_not_android"],
     )

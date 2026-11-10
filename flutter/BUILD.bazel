@@ -72,6 +72,23 @@ bool_flag(
     visibility = ["//visibility:public"],
 )
 
+# Lets an Android app package native libraries for arm64-v8a and x86_64 that
+# are not aligned for 16 KB memory pages, which otherwise fails its build. An
+# app for a fleet of 4 KB-page devices does not need them, and Android 16 runs
+# a 4 KB-aligned app on a 16 KB device in page size compatibility mode, which
+# the manifest's `android:pageSizeCompat` turns on. Google Play requires 16 KB
+# support of apps that target Android 15 and later.
+#
+#   bazel build --@rules_flutter//flutter:allow_4kb_aligned_native_libraries //app
+#
+# The Android Gradle plugin does not fail on such a library; lint and the APK
+# Analyzer warn.
+bool_flag(
+    name = "allow_4kb_aligned_native_libraries",
+    build_setting_default = False,
+    visibility = ["//visibility:public"],
+)
+
 # Release mode: `-c opt` without the profile flag. Used by select() in macros.
 config_setting(
     name = "release",
