@@ -2,7 +2,7 @@
 
 A framework source is a repository whose root is a flutter/flutter tree:
 `packages/<name>/` for every
-`sdk: flutter` package, `packages/flutter_tools/`, the `sky_engine` package,
+`sdk: flutter` package, `packages/flutter_tools/`,
 `bin/internal/material_fonts.version`, and `flutter_framework.json`, which says
 what the tree is:
 

@@ -1878,7 +1878,7 @@ common --repo_env=FLUTTER_ENGINE=/Users/me/src/flutter/engine/src
 common --@rules_flutter//flutter:sdk=local
 ```
 
-`flutter_local_framework` links the checkout's `packages/`, `bin/internal/` and `sky_engine` package, so an edit to the framework is seen by the next build. `flutter_local_engine` scans `$FLUTTER_ENGINE/out`, reads each out dir's `args.gn` to learn what it holds, and links in the files each piece of the engine needs. A ninja rebuild changes a linked file, and the next build picks it up.
+`flutter_local_framework` links the checkout's `packages/` and `bin/internal/`, so an edit to the framework is seen by the next build. `flutter_local_engine` scans `$FLUTTER_ENGINE/out`, takes the `sky_engine` package from the host debug out dir's `gen/dart-pkg/sky_engine` (as flutter_tools does), reads each out dir's `args.gn` to learn what it holds, and links in the files each piece of the engine needs. A ninja rebuild changes a linked file, and the next build picks it up.
 
 Which out dir serves what, by the names `tools/gn` gives them (the CPU appears in a name only when it is not the platform's default, so an Apple silicon Mac's host build is `host_debug_arm64`):
 
@@ -1995,6 +1995,7 @@ An engine source has a `flutter_engine.json` at its root and a target, a *slice*
 | `//host/<host>:tools` | `flutter_host_tools` (`FlutterHostToolsInfo`) | every build whose actions run on `<host>` |
 | `//kernel/debug:platform` | `flutter_platform_kernel` (`FlutterPlatformKernelInfo`) | debug and profile Dart compiles |
 | `//kernel/release:platform` | `flutter_platform_kernel` | release Dart compiles |
+| `//sky_engine:pubspec.yaml` | a file: the `pubspec.yaml` of the engine's `sky_engine` package, the rest of the package beside it | resolving `pubspec.lock` against a framework source (`@rules_flutter//flutter/pub`) |
 | `//outline_tool:outline_tool` | the outline tool, for example an `alias` to the `:outline_tool` of a rules_dart `dart_kernel_source(path = ...)` of the engine's Dart | builds with `--@rules_dart//dart:outline_kernel` (the default) |
 | `//macos/<mode>:engine` | `flutter_macos_engine_slice` (`FlutterEngineInfo`) | macOS apps |
 | `//ios/<mode>:engine` | `flutter_ios_engine_slice` | iOS apps; `debug` is the simulator engine |
@@ -2039,7 +2040,7 @@ flutter_missing_slice(
 
 `cpus` is what the CPU check reads, `binary` is the file whose snapshot hash the check reads (for Android, `flutter.jar` with `binary_entry = "lib/<abi>/libflutter.so"`), and an iOS slice lists its `xcframework_slices`. The same `FlutterSdkCheck` runs on your pieces as on a checkout's.
 
-A *framework source* is the other half: a repository whose root is a flutter/flutter tree, with `packages/`, `bin/internal/material_fonts.version`, the `sky_engine` package at `engine/src/flutter/sky/packages/sky_engine`, and a `flutter_framework.json` saying what it is: `{"version": "...", "commit": "...", "dirty": false, "origin": "..."}`.
+A *framework source* is the other half: a repository whose root is a flutter/flutter tree, with `packages/`, `bin/internal/material_fonts.version`, and a `flutter_framework.json` saying what it is: `{"version": "...", "commit": "...", "dirty": false, "origin": "..."}`.
 
 ### Limitations
 

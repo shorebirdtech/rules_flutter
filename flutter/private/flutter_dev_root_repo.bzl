@@ -93,10 +93,16 @@ def _flutter_dev_root_repo_impl(repository_ctx):
         flutter_version = read_framework(repository_ctx)["version"]
         root = framework_root(repository_ctx)
         repository_ctx.symlink(root.get_child("packages"), "packages")
-        repository_ctx.symlink(
-            root.get_child("engine/src/flutter/sky/packages/sky_engine"),
-            "bin/cache/pkg/sky_engine",
-        )
+
+        # The engine's package, as flutter_tools takes it for any engine that
+        # is not the release's.
+        pubspec = repository_ctx.path(repository_ctx.attr.sky_engine)
+        if not pubspec.exists:
+            fail((
+                "The engine has no `sky_engine` package: {} does not exist. " +
+                "A local engine's host debug out dir holds it at gen/dart-pkg/sky_engine once built."
+            ).format(repository_ctx.attr.sky_engine))
+        repository_ctx.symlink(pubspec.dirname, "bin/cache/pkg/sky_engine")
     else:
         _extract_release(repository_ctx, flutter_version)
 
@@ -124,6 +130,10 @@ flutter_dev_root_repo = repository_rule(
         ),
         "framework_json": attr.label(
             doc = "The `flutter_framework.json` of a framework source to assemble the tree from, in place of the release tarball.",
+            allow_single_file = True,
+        ),
+        "sky_engine": attr.label(
+            doc = "The `pubspec.yaml` of the engine's `sky_engine` package, which a framework source's tree is given. Required with `framework_json`.",
             allow_single_file = True,
         ),
         "engine_revision": attr.string(

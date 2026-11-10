@@ -76,17 +76,15 @@ def _local_framework_impl(repository_ctx):
         fail("{}={} is not a flutter/flutter checkout: it has no packages/flutter/pubspec.yaml.".format(env, checkout))
 
     # The packages and the files the framework expects of its tree, linked so
-    # that an edit to the checkout is seen.
+    # that an edit to the checkout is seen. The `sky_engine` package is the
+    # engine's.
     repository_ctx.symlink(root.get_child("packages"), "packages")
     repository_ctx.watch_tree(root.get_child("packages"))
-    for linked in ["bin/internal", "engine/src/flutter/sky/packages/sky_engine"]:
-        source = root.get_child(linked.split("/")[0])
-        for part in linked.split("/")[1:]:
-            source = source.get_child(part)
-        if not source.exists:
-            fail("{}={} has no {}.".format(env, checkout, linked))
-        repository_ctx.symlink(source, linked)
-        repository_ctx.watch_tree(source)
+    internal = root.get_child("bin").get_child("internal")
+    if not internal.exists:
+        fail("{}={} has no bin/internal.".format(env, checkout))
+    repository_ctx.symlink(internal, "bin/internal")
+    repository_ctx.watch_tree(internal)
 
     # Which commit it is, and whether it is clean: the host's git, since only
     # git can say what a developer's own checkout is.
@@ -326,6 +324,16 @@ flutter_host_tools(
     visibility = ["//visibility:public"],
 )
 """.format(os = machine.os, arch = arch, prov = prov, exe = machine.exe)
+
+            # The `sky_engine` package, as flutter_tools takes it for a local
+            # engine: the host build's `gen/dart-pkg/sky_engine`. The framework
+            # source's pub tree reads it from here.
+            sky_engine = tools.get_child("gen").get_child("dart-pkg").get_child("sky_engine")
+            if sky_engine.exists:
+                repository_ctx.watch_tree(sky_engine)
+                for entry in sky_engine.readdir():
+                    repository_ctx.symlink(entry, "sky_engine/" + entry.basename)
+            repository_ctx.file("sky_engine/BUILD.bazel", 'exports_files(["pubspec.yaml"], visibility = ["//visibility:public"])\n')
 
             patched = tools.get_child("flutter_patched_sdk")
             if patched.exists:

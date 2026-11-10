@@ -117,7 +117,6 @@ def _windows_checkout(rctx, path, link, meta):
     dev_root = path("@flutter_dev_root_src//:bin/cache/flutter.version.json").dirname.dirname.dirname
 
     link(dev_root.get_child("packages"), "checkout/packages")
-    link(dev_root.get_child("bin").get_child("cache").get_child("pkg").get_child("sky_engine"), "checkout/engine/src/flutter/sky/packages/sky_engine")
     link(dev_root.get_child("bin").get_child("cache").get_child("flutter.version.json"), "checkout/bin/cache/flutter.version.json")
     rctx.file("checkout/bin/internal/material_fonts.version", meta.material_fonts_url.split("/")[-2] + "\n")
     rctx.file("checkout/CHECKOUT", "A stand-in for a flutter/flutter checkout.\n")
@@ -143,6 +142,7 @@ def _windows_checkout(rctx, path, link, meta):
             link(engine.get_child("gen_snapshot.exe"), out + "gen_snapshot/gen_snapshot.exe")
 
     debug = _OUT + "host_debug/"
+    link(dev_root.get_child("bin").get_child("cache").get_child("pkg").get_child("sky_engine"), debug + "gen/dart-pkg/sky_engine")
     link(dart_sdk, "checkout/engine/src/flutter/prebuilts/windows-x64/dart-sdk")
     for name in ["flutter_tester.exe", "icudtl.dat", "impellerc.exe", "shader_lib"]:
         link(host_tools.get_child(name), debug + name)
@@ -182,10 +182,9 @@ def _fake_checkout_impl(rctx):
     kernel_release = path("@flutter_stock_engine//kernel/release:flutter_patched_sdk_product/platform_strong.dill").dirname
     dev_root = path("@flutter_dev_root_src//:bin/cache/flutter.version.json").dirname.dirname.dirname
 
-    # The framework: packages/, what bin/internal holds, sky_engine, and the
-    # version a built checkout records.
+    # The framework: packages/, what bin/internal holds and the version a
+    # built checkout records. Its sky_engine is the host build's.
     link(dev_root.get_child("packages"), "checkout/packages")
-    link(dev_root.get_child("bin").get_child("cache").get_child("pkg").get_child("sky_engine"), "checkout/engine/src/flutter/sky/packages/sky_engine")
     link(dev_root.get_child("bin").get_child("cache").get_child("flutter.version.json"), "checkout/bin/cache/flutter.version.json")
     rctx.file("checkout/bin/internal/material_fonts.version", meta.material_fonts_url.split("/")[-2] + "\n")
     rctx.file("checkout/CHECKOUT", "A stand-in for a flutter/flutter checkout.\n")
@@ -221,6 +220,7 @@ def _fake_checkout_impl(rctx):
     link(dart_sdk, debug + "dart-sdk")
     for name in ["flutter_tester", "icudtl.dat", "impellerc", "shader_lib"]:
         link(host_tools.get_child(name), debug + name)
+    link(dev_root.get_child("bin").get_child("cache").get_child("pkg").get_child("sky_engine"), debug + "gen/dart-pkg/sky_engine")
     link(font_tools.get_child("font-subset"), debug + "font-subset")
     link(font_tools.get_child("const_finder.dart.snapshot"), debug + "gen/const_finder.dart.snapshot")
     for name in ["vm_isolate_snapshot.bin", "isolate_snapshot.bin"]:

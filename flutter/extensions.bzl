@@ -205,6 +205,9 @@ def _toolchain_extension(module_ctx):
             name = name + "_dev_root_src",
             flutter_version = sdk.version or "",
             framework_json = framework_json(sdk.framework) if sdk.framework else None,
+            sky_engine = (
+                "@@{}//sky_engine:pubspec.yaml".format(sdk.engine.repo_name) if sdk.engine else "@{}_sky_engine//sky_engine:pubspec.yaml".format(name)
+            ) if sdk.framework else None,
             engine_revision = FLUTTER_VERSIONS[sdk.version].engine_revision if released else "",
             sha256 = flutter_source_sha256(sdk.version) if released else "",
         )
