@@ -129,12 +129,8 @@ register_toolchains("@flutter_toolchains//:all")
 # deps in downstream workspaces — user modules inherit them and only declare
 # artifacts their own code uses.
 #
-# The lock file pins the merged artifacts (these, rules_android's, and nobody
-# else's) so jars are fetched by checksum and cached by Bazel instead of being
-# resolved through Coursier on every fresh output base. A user module that
-# declares its own install of this name replaces it and needs a lock of its
-# own. Regenerate with `REPIN=1 bazel run @rules_android_maven//:pin`; see
-# docs/TESTING.md, "Maven lock files".
+# A module that depends on rules_flutter declares its own install of this name,
+# with a lock of its own; the lock below is rules_flutter's, for its own builds.
 maven = use_extension("@rules_jvm_external//:extensions.bzl", "maven")
 maven.install(
     name = "rules_android_maven",
@@ -178,11 +174,6 @@ maven.install(
         "org.jetbrains.kotlin:kotlin-stdlib:2.1.20",
         "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0",
     ],
-    # Read when rules_flutter is the root module (its own tests); a module that
-    # depends on it lists the modules it accepts in its own install. rules_android
-    # adds its tool dependencies to this repository.
-    known_contributing_modules = ["rules_android"],
-    lock_file = "//:rules_android_maven_install.json",
     repositories = [
         "https://maven.google.com",
         "https://repo1.maven.org/maven2",
@@ -258,6 +249,27 @@ maven.artifact(
 ]
 
 use_repo(maven, "rules_android_maven")
+
+# The lock for rules_flutter's own builds, as the root module. A dev
+# dependency, so a module that depends on rules_flutter never sees it:
+# rules_jvm_external accepts one lock per repository unless the root declares
+# its own, and rules_android ships one for this repository too. The root's
+# last install tag of a name sets its lock and these attributes, so this tag
+# comes after the one above and repeats them. The lock pins the merged
+# artifacts, so jars are fetched by checksum; regenerate it with
+# `REPIN=1 bazel run @rules_android_maven//:pin` (docs/TESTING.md, "Maven lock
+# files").
+maven_dev = use_extension("@rules_jvm_external//:extensions.bzl", "maven", dev_dependency = True)
+maven_dev.install(
+    name = "rules_android_maven",
+    # rules_android adds its tool dependencies to this repository.
+    known_contributing_modules = ["rules_android"],
+    lock_file = "//:rules_android_maven_install.json",
+    repositories = [
+        "https://maven.google.com",
+        "https://repo1.maven.org/maven2",
+    ],
+)
 
 # Pub dependencies of every Dart tool in this repository: the dev tool, the rule
 # tools, the vendored `flutter gen-l10n` generator and the integration-test
