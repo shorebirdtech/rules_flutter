@@ -376,11 +376,11 @@ def flutter_ios_app(
         app_name: User-facing display name. Defaults to name.
         minimum_os_version: Minimum iOS version.
         info_plist: Override conventional ios/Runner/Info.plist. The macro
-            substitutes `$(PRODUCT_MODULE_NAME)` in the conventional plist
-            with the runner's module name; an overriding plist that spells
-            `UISceneDelegateClassName` out as `Runner.SceneDelegate` will not
-            find the scene delegate. Keep the `$(PRODUCT_MODULE_NAME)`
-            variable, or write `<name>.SceneDelegate`.
+            substitutes `$(PRODUCT_MODULE_NAME)` in either with the runner's
+            module name, and `$(DEVELOPMENT_LANGUAGE)` with `en`; a plist
+            that spells `UISceneDelegateClassName` out as
+            `Runner.SceneDelegate` will not find the scene delegate. Keep the
+            `$(PRODUCT_MODULE_NAME)` variable, or write `<name>.SceneDelegate`.
             The plist leaves `CFBundleShortVersionString` and
             `CFBundleVersion` to the app's version: a literal value there
             fails the build, and `$(FLUTTER_BUILD_NAME)` and
@@ -648,30 +648,27 @@ def flutter_ios_app(
     )
 
     # 8. Info.plist — preprocess to resolve Xcode variables that rules_apple
-    #    doesn't handle.
-    if not info_plist:
-        # A merge rather than a text template: the app's plist may be saved
-        # in binary form, which a text substitution would corrupt.
-        _flutter_plist_merge(
-            name = "__%s_info_plist" % name,
-            base = "ios/Runner/Info.plist",
-            mode = "supplement",
-            output_basename = "Info.plist",
-            substitutions = {
-                "$(DEVELOPMENT_LANGUAGE)": "en",
-                # UISceneDelegateClassName is <module>.SceneDelegate: the
-                # flutter create SceneDelegate carries no @objc, so its
-                # runtime name is module-qualified and must track module_name.
-                "$(PRODUCT_MODULE_NAME)": module_name,
-                # $(FLUTTER_BUILD_NAME) and $(FLUTTER_BUILD_NUMBER) stay:
-                # rules_apple replaces both keys with `version`'s values.
-            },
-            tags = tags,
-            testonly = testonly,
-        )
-        actual_info_plist = "__%s_info_plist" % name
-    else:
-        actual_info_plist = info_plist
+    #    doesn't handle, in the conventional plist or the one the app names.
+    #    A merge rather than a text template: the app's plist may be saved in
+    #    binary form, which a text substitution would corrupt.
+    _flutter_plist_merge(
+        name = "__%s_info_plist" % name,
+        base = info_plist or "ios/Runner/Info.plist",
+        mode = "supplement",
+        output_basename = "Info.plist",
+        substitutions = {
+            "$(DEVELOPMENT_LANGUAGE)": "en",
+            # UISceneDelegateClassName is <module>.SceneDelegate: the
+            # flutter create SceneDelegate carries no @objc, so its
+            # runtime name is module-qualified and must track module_name.
+            "$(PRODUCT_MODULE_NAME)": module_name,
+            # $(FLUTTER_BUILD_NAME) and $(FLUTTER_BUILD_NUMBER) stay:
+            # rules_apple replaces both keys with `version`'s values.
+        },
+        tags = tags,
+        testonly = testonly,
+    )
+    actual_info_plist = "__%s_info_plist" % name
 
     # 8b. The plist leaves the version keys to `build_name` and `build_number`:
     #     rules_apple replaces both, so a literal would be dropped silently.
