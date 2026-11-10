@@ -20,6 +20,7 @@ load("@build_bazel_rules_apple//apple/internal/aspects:resource_aspect.bzl", "ap
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("//flutter:providers.bzl", "FlutterPluginPlatformInfo")
 load("//flutter/private:constants.bzl", "PLUGIN_PLATFORMS")
+load("//flutter/private:flutter_apple_plugin_library.bzl", "module_headers_aspect")
 load("//flutter/private:flutter_desktop_plugin_info.bzl", "FlutterLinuxPluginInfo", "FlutterWindowsPluginInfo")
 load("//flutter/private:swiftpm_app_settings.bzl", "FlutterSwiftPMAppLibraryInfo")
 load("//flutter/private:unbuilt_native_code.bzl", "FlutterUnbuiltNativeCodeInfo")
@@ -111,7 +112,9 @@ flutter_plugin_platform_rule = rule(
             # The libraries' resources, as an app's bundling collects them from
             # its own dependencies: the runner links the libraries through the
             # aggregator, which carries them on (`flutter_apple_plugins_aggregator`).
-            aspects = [apple_resource_aspect],
+            # And the public headers of a module of Swift and Objective-C,
+            # for its add-to-app framework.
+            aspects = [apple_resource_aspect, module_headers_aspect],
         ),
     },
     doc = "The rule of `flutter_plugin_platform`, whose `lib` is analysed in every build it is reached in.",

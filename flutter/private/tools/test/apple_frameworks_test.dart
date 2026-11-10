@@ -151,47 +151,6 @@ void main() {
     expect(read('out/App.framework/App'), 'binary');
   });
 
-  test('replaces text in a copied file', () {
-    final header = write(
-      'in/M-Swift.h',
-      '@import Foundation;\n@import M_objc;\n',
-    );
-    expect(
-      assemble([
-        '--add-replacing',
-        'M.framework/Headers/M-Swift.h',
-        header,
-        '@import M_objc;',
-        '#import "M-umbrella.h"',
-      ]),
-      0,
-    );
-    expect(
-      read('out/M.framework/Headers/M-Swift.h'),
-      '@import Foundation;\n#import "M-umbrella.h"\n',
-    );
-  });
-
-  test('makes a mixed framework module interface', () {
-    expect(
-      frameworkInterface(
-        '// swift-interface-format-version: 1.0\n'
-            '// swift-module-flags: -module-name M\n'
-            'import Foundation\n'
-            'import M_objc\n'
-            'public func f(_ g: M_objc.Greeter, _ h: M_objcExtra.T)\n',
-        'M',
-        'M_objc',
-      ),
-      '// swift-interface-format-version: 1.0\n'
-      '// swift-module-flags: -module-name M\n'
-      '@_exported import M\n'
-      'import Foundation\n'
-      'import M\n'
-      'public func f(_ g: M.Greeter, _ h: M_objcExtra.T)\n',
-    );
-  });
-
   test('rejects an unknown argument', () {
     expect(assemble(['--bogus']), 64);
   });

@@ -150,11 +150,8 @@ def assemble_bundle(ctx, output, steps, mnemonic, progress_message):
         ctx: A rule context with `BUNDLE_ATTRS` and the `PORTABLE` exec group.
         output: The directory to fill.
         steps: Its contents, in order: `("file", name, file)`, `("tree", name,
-            directory)` (its contents), `("bundle", name, directory)` (a
-            framework or xcframework), `("replacing", name, file, from, to)` (a copy with text
-            replaced) or `("interface", name, file, module, rename)` (a Swift
-            module interface of a mixed framework module, `rename` the name
-            of its C-family half in it, or `-`).
+            directory)` (its contents) or `("bundle", name, directory)` (a
+            framework or xcframework).
         mnemonic: The action's mnemonic.
         progress_message: The action's progress message.
     """
@@ -167,12 +164,6 @@ def assemble_bundle(ctx, output, steps, mnemonic, progress_message):
     inputs = [tool] + ctx.files._apple_frameworks_imports
     for step in steps:
         kind = step[0]
-        if kind in ("replacing", "interface"):
-            args.add("--add-" + kind, step[1])
-            args.add(step[2])
-            args.add_all([step[3], step[4]])
-            inputs.append(step[2])
-            continue
         flag = {"file": "--add", "tree": "--add-tree", "bundle": "--add-bundle"}.get(kind)
         if not flag:
             fail("assemble_bundle: unknown step %r" % kind)

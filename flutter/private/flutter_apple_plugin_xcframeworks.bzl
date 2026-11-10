@@ -19,9 +19,7 @@ host imports:
 - an Objective-C plugin: its public headers in `Headers/`, under an umbrella
   header of the module map;
 - a plugin of both: one module of the two, the Swift part its `Swift`
-  submodule, as Xcode builds a mixed framework. rules_flutter compiles the
-  Objective-C half as a module of its own, `<module>_objc`, whose name the
-  Swift module interface and header are rewritten not to use.
+  submodule, as Xcode builds a mixed framework.
 
 Plus `Info.plist`, the plugin's privacy manifest and resource bundles, and
 in profile and release a dSYM.
@@ -123,9 +121,8 @@ def _plugin_module(entry):
         entry: An `apple_plugin_libraries` struct.
 
     Returns:
-        A struct of `name`, `objc_module` (the Objective-C half's own module
-        name, or None), `objc_headers` (public headers), `swift_header` (the
-        generated `-Swift.h`, or None), `swift` (the Swift module's
+        A struct of `name`, `objc_headers` (public headers), `swift_header`
+        (the generated `-Swift.h`, or None), `swift` (the Swift module's
         `swift` struct, or None).
     """
     name = entry.package
@@ -133,7 +130,6 @@ def _plugin_module(entry):
         # A C-family library that is its own module.
         return struct(
             name = name,
-            objc_module = None,
             objc_headers = entry.cc_info.compilation_context.direct_public_headers,
             swift_header = None,
             swift = None,
@@ -147,21 +143,19 @@ def _plugin_module(entry):
         for header in module.clang.compilation_context.direct_public_headers:
             if header.basename == name + "-Swift.h":
                 swift_header = header
-    objc = modules.get(name + "_objc")
-    objc_headers = []
-    if objc and objc.clang and objc.clang.compilation_context:
-        objc_headers = [
-            h
-            for h in objc.clang.compilation_context.direct_public_headers
-            if not h.basename.endswith("-Bridging-Header.h")
-        ]
-
-    # A Swift module with no generated header is the placeholder of an
-    # Objective-C plugin, which only re-exports the Objective-C module.
+    if getattr(entry, "module_headers", None) != None:
+        # One module of Swift and Objective-C.
+        objc_headers = entry.module_headers
+    else:
+        # An Objective-C plugin's Swift module re-exports its module of
+        # Objective-C, `<module>_objc`, and has no generated header.
+        objc = modules.get(name + "_objc")
+        objc_headers = []
+        if objc and objc.clang and objc.clang.compilation_context:
+            objc_headers = objc.clang.compilation_context.direct_public_headers
     return struct(
         name = name,
-        objc_module = objc.name if objc else None,
-        objc_headers = objc_headers,
+        objc_headers = [h for h in objc_headers if not h.basename.endswith("-Bridging-Header.h")],
         swift_header = swift_header,
         swift = module.swift if swift_header else None,
     )
@@ -435,15 +429,8 @@ def _framework_steps(ctx, slice, entry, module, binary):
             fail("%s: the plugin %s has no Swift module interface; it is compiled without library evolution" % (entry.label, entry.package))
         swift_header = "%s/Headers/%s-Swift.h" % (root, name)
         swiftmodule = "%s/Modules/%s.swiftmodule/%s" % (root, name, slice.triple)
-        if module.objc_headers:
-            # One module of both halves: the Swift interface imports the
-            # Objective-C half, which it may know by its own module name.
-            rename = module.objc_module or "-"
-            steps.append(("replacing", swift_header, module.swift_header, "@import %s;" % rename, '#import "%s-umbrella.h"' % name))
-            steps.append(("interface", swiftmodule + ".swiftinterface", interface, name, rename))
-        else:
-            steps.append(("file", swift_header, module.swift_header))
-            steps.append(("file", swiftmodule + ".swiftinterface", interface))
+        steps.append(("file", swift_header, module.swift_header))
+        steps.append(("file", swiftmodule + ".swiftinterface", interface))
         if module.swift.swiftdoc:
             steps.append(("file", swiftmodule + ".swiftdoc", module.swift.swiftdoc))
 

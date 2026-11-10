@@ -25,6 +25,7 @@ load("@rules_dart//dart:utils.bzl", "RUNTIME_INDEPENDENT_ATTR", "dart_info", "li
 load("@rules_java//java/common:java_info.bzl", "JavaInfo")
 load("//flutter:providers.bzl", "FlutterDataAssetInfo", "FlutterPluginPlatformInfo")
 load("//flutter/private:common.bzl", "collect_binding_contracts", "collect_native_libs")
+load("//flutter/private:flutter_apple_plugin_library.bzl", "FlutterAppleModuleHeadersInfo")
 load("//flutter/private:flutter_desktop_plugin_info.bzl", "FlutterLinuxPluginInfo", "FlutterWindowsPluginInfo")
 load("//flutter/private:flutter_font.bzl", "FONTS_ATTR")
 load("//flutter/private:flutter_info.bzl", "flutter_info")
@@ -121,6 +122,9 @@ def plugin_contributions(ctx, package_name, package_root, declares_plugin):
                 label = lib.label,
                 cc_info = lib[CcInfo] if CcInfo in lib else None,
                 swift_info = lib[SwiftInfo] if SwiftInfo in lib else None,
+                # A module of Swift and Objective-C both: its public
+                # Objective-C headers.
+                module_headers = lib[FlutterAppleModuleHeadersInfo].headers if FlutterAppleModuleHeadersInfo in lib else None,
                 # The library's resources (a Swift package target's resource
                 # bundle), for the app's bundle.
                 resource_info = apple_resource_info(lib),

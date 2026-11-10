@@ -1,5 +1,12 @@
 #import "MXDMixedPlugin.h"
 
+// How Flutter's plugin template imports the Swift half's generated header.
+#if __has_include(<mixed_plugin/mixed_plugin-Swift.h>)
+#import <mixed_plugin/mixed_plugin-Swift.h>
+#else
+#import "mixed_plugin-Swift.h"
+#endif
+
 @implementation MXDMixedPlugin
 
 + (void)registerWithRegistrar:(NSObject<FlutterPluginRegistrar> *)registrar {
@@ -19,7 +26,9 @@
 
 - (void)handleMethodCall:(FlutterMethodCall *)call result:(FlutterResult)result {
   if ([call.method isEqualToString:@"greeting"]) {
-    result([MXDMixedPlugin greeting]);
+    // The Swift half, which the Objective-C sees through its generated
+    // header.
+    result([MixedSwiftGreeter greeting]);
   } else {
     result(FlutterMethodNotImplemented);
   }

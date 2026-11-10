@@ -32,9 +32,13 @@ import 'package:rules_flutter_e2e_testing/runfiles_paths.dart';
 const _bundleId = 'com.example.addtoapp.host';
 const _timeout = Duration(seconds: 90);
 
+/// What the mixed plugin answers: its Objective-C half's greeting, which its
+/// Swift half passes on and its Objective-C half answers the channel with.
+const _mixedGreeting = 'Hello from Objective-C, through Swift';
+
 /// What the module and the host must report.
 const _expected = [
-  'mixed=Hello from Objective-C',
+  'mixed=$_mixedGreeting',
   'appName=HostApp',
   'launch=launch ok',
   'prefs=roundtrip ok',
@@ -233,7 +237,7 @@ Future<String> _runOnMac(String app, String screenshot) async {
             .transform(const LineSplitter())
             .asBroadcastStream()
           ..listen((l) {
-            if (l.contains('add_to_app_host Hello from Swift') &&
+            if (l.contains('add_to_app_host $_mixedGreeting') &&
                 !host.isCompleted) {
               host.complete();
             }

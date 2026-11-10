@@ -11,7 +11,7 @@ NS_ASSUME_NONNULL_BEGIN
 /// Answers `greeting` on the `mixed_plugin` channel.
 @interface MXDMixedPlugin : NSObject <FlutterPlugin>
 
-/// The greeting the channel answers with.
+/// The Objective-C half's greeting, which the Swift half's builds on.
 + (NSString *)greeting;
 
 @end
