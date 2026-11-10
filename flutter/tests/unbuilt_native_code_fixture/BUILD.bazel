@@ -12,14 +12,14 @@ load("//flutter:macos.bzl", "flutter_apple_plugins_aggregator")
 package(default_visibility = ["//flutter/tests:__subpackages__"])
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "app",
 )
 
 flutter_application(
     name = "app",
     main = "main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     tags = ["manual"],
     deps = ["//flutter/tests/unbuilt_native_code_fixture/rusty"],
 )

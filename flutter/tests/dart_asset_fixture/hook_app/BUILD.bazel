@@ -1,0 +1,33 @@
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
+load("//flutter:defs.bzl", "flutter_application", "flutter_test")
+
+package(default_visibility = ["//flutter/tests:__pkg__"])
+
+# Programs reaching the package whose hook nothing replaces, which must fail at
+# analysis. Left `manual` so only the analysistests that wrap them build them.
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "hook_app",
+)
+
+flutter_application(
+    name = "hook_app",
+    main = "main.dart",
+    package = ":pubspec-metadata",
+    tags = ["manual"],
+    deps = ["//flutter/tests/dart_asset_fixture/hook_fixture"],
+)
+
+# The hook check has to fire from `flutter_test`, not just from
+# `flutter_application`: a test is where an unresolved `@Native` symbol
+# actually gets debugged.
+flutter_test(
+    name = "hook_flutter_test",
+    main = "main.dart",
+    package = ":pubspec-metadata",
+    tags = ["manual"],
+    deps = [
+        "//flutter/tests/dart_asset_fixture:fake_test_api",
+        "//flutter/tests/dart_asset_fixture/hook_fixture",
+    ],
+)

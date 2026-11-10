@@ -50,14 +50,14 @@ cc_shared_library(
 )
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "ffi_plugin_example",
 )
 
 flutter_application(
     name = "ffi_plugin_app",
     main = "lib/main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "//multiply_plugin",
         "@deps//:flutter",
@@ -302,7 +302,7 @@ dart_analysis_config(
 flutter_library(
     name = "app_lib",
     srcs = glob(["lib/**/*.dart"]),
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "//multiply_plugin",
         "@deps//:flutter",

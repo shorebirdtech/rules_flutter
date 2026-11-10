@@ -5,8 +5,8 @@ that directory's Dart package, and a `flutter_library` rooted at the same
 directory is the same package, naming the same `dart_package_metadata`.
 `synthesize_app_package` puts one record in place of theirs. That record has to
 carry the package's code assets and licence, or the app neither bundles the
-library's native code nor lists its licence; and an app naming another
-declaration of the package than its library does fails.
+library's native code nor lists its licence; and an app over a library of its
+package that names no declaration fails, naming both.
 
 The probe calls `synthesize_app_package` on the records of its `deps`, as
 `flutter_application`, `flutter_test` and `flutter_web_bundle` do, and returns
@@ -45,11 +45,11 @@ app_record_probe = rule(
 def _keeps_root_library_facts_impl(ctx):
     env = analysistest.begin(ctx)
     record = analysistest.target_under_test(env)[AppRecordInfo].record
-    asserts.equals(env, "app_root_record", record.package_name)
+    asserts.equals(env, "app_root_record_fixture", record.package_name)
     asserts.equals(env, "flutter/tests/app_root_record_fixture", record.package_root)
     asserts.equals(
         env,
-        ["package:app_root_record/system"],
+        ["package:app_root_record_fixture/system"],
         [asset.asset_id for asset in record.code_assets],
         "the library's code asset is in the app's record",
     )
@@ -61,14 +61,14 @@ def _keeps_root_library_facts_impl(ctx):
 
 _keeps_root_library_facts_test = analysistest.make(_keeps_root_library_facts_impl)
 
-def _other_declaration_impl(ctx):
+def _undeclared_library_impl(ctx):
     env = analysistest.begin(ctx)
     asserts.expect_failure(env, "different `dart_package_metadata`")
-    asserts.expect_failure(env, "app_root_record_fixture:other_pubspec")
-    asserts.expect_failure(env, "app_root_record_fixture:pubspec")
+    asserts.expect_failure(env, "app_root_record_fixture:pubspec-metadata")
+    asserts.expect_failure(env, "none, named by @@//flutter/tests/app_root_record_fixture:undeclared_library")
     return analysistest.end(env)
 
-_other_declaration_test = analysistest.make(_other_declaration_impl, expect_failure = True)
+_undeclared_library_test = analysistest.make(_undeclared_library_impl, expect_failure = True)
 
 def app_root_record_test_suite(name):
     """The analysis tests over `//flutter/tests/app_root_record_fixture`.
@@ -81,14 +81,14 @@ def app_root_record_test_suite(name):
         name = name + "_keeps_root_library_facts",
         target_under_test = fixture + ":app",
     )
-    _other_declaration_test(
-        name = name + "_other_declaration",
-        target_under_test = fixture + ":app_other_declaration",
+    _undeclared_library_test(
+        name = name + "_undeclared_library",
+        target_under_test = fixture + ":app_over_undeclared_library",
     )
     native.test_suite(
         name = name,
         tests = [
             name + "_keeps_root_library_facts",
-            name + "_other_declaration",
+            name + "_undeclared_library",
         ],
     )

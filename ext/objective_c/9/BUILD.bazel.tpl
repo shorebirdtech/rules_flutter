@@ -26,7 +26,7 @@ load("@rules_flutter//flutter:defs.bzl", "flutter_plugin")
 load("@rules_flutter//flutter:native_assets.bzl", "flutter_native_asset")
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "{PKG}",
     language_version = "{LANGUAGE_VERSION}",
     {LICENSE}
@@ -50,7 +50,7 @@ flutter_plugin(
         "@platforms//os:ios": [":{PKG}_native_asset"],
         "//conditions:default": [],
     }),
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     platforms = [],
     visibility = ["//visibility:public"],
     deps = [

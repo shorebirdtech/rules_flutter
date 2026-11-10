@@ -2,7 +2,7 @@ load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_flutter//flutter:defs.bzl", "flutter_library")
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "ext_assets",
 )
 
@@ -10,6 +10,6 @@ flutter_library(
     name = "ext_assets",
     srcs = ["lib/ext_assets.dart"],
     assets = glob(["assets/**"]),
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     visibility = ["//visibility:public"],
 )

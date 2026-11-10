@@ -1,66 +1,22 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@bazel_skylib//rules:diff_test.bzl", "diff_test")
-load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_binary", "dart_library", "dart_package_metadata")
+load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options")
 
-# Two pub hubs, a library collecting a package from each, and binaries over it.
-# See MODULE.bazel for how the two locks differ.
+# Two pub hubs, and two packages, `//agreeing` and `//upgraded`, each a library
+# collecting a package from both hubs and a binary over it. See MODULE.bazel for
+# how the two locks differ.
 #
 # The binaries are the point, not decoration. rules_dart's duplicate-record check
 # runs wherever a package_config gets assembled (`dart_binary`, `dart_test`, ...);
 # `dart_library` itself accumulates records into depsets and never dedups, so a
 # `build_test` over a bare library proves nothing about it.
 
-dart_package_metadata(
-    name = "agreeing_pubspec",
-    package_name = "agreeing",
-)
-
-# `path` is 1.9.1 in both hubs, down to the same sha256.
-dart_library(
-    name = "agreeing",
-    srcs = ["lib/dual_hub.dart"],
-    package = ":agreeing_pubspec",
-    deps = [
-        "@hub_a//:path",
-        "@hub_b//:path",
-    ],
-)
-
-dart_binary(
-    name = "agreeing_bin",
-    main = "bin/main.dart",
-    deps = [":agreeing"],
-)
-
-dart_package_metadata(
-    name = "upgraded_pubspec",
-    package_name = "upgraded",
-)
-
-# `clock` is 1.1.2 in `//hub_a` and 1.1.3 in `//hub_b`, which is the higher and
-# so the one version of the build: each lock's version is a minimum.
-dart_library(
-    name = "upgraded",
-    srcs = ["lib/dual_hub.dart"],
-    package = ":upgraded_pubspec",
-    deps = [
-        "@hub_a//:clock",
-        "@hub_b//:clock",
-    ],
-)
-
-dart_binary(
-    name = "upgraded_bin",
-    main = "bin/main.dart",
-    deps = [":upgraded"],
-)
-
 build_test(
     name = "bins_test",
     size = "small",
     targets = [
-        ":agreeing_bin",
-        ":upgraded_bin",
+        "//agreeing:agreeing_bin",
+        "//upgraded:upgraded_bin",
     ],
 )
 

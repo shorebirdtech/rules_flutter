@@ -6,7 +6,7 @@ load("@rules_flutter//flutter:defs.bzl", "flutter_library")
 # tool resolving a generated part in a NON-app package.
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "dep_part",
 )
 
@@ -15,7 +15,7 @@ dart_codegen(
     src = "lib/settings.dart",
     generator = "tools/settings_generator.dart",
     output_suffixes = [".g.dart"],
-    package = ":pubspec",
+    package = ":pubspec-metadata",
 )
 
 flutter_library(
@@ -24,7 +24,7 @@ flutter_library(
         "lib/settings.dart",
         ":settings_gen",
     ],
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     visibility = ["//visibility:public"],
 )
 

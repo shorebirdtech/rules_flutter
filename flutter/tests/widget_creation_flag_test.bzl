@@ -16,11 +16,9 @@ compiled as one program, in its whole-program compile.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("//flutter/private:flutter_application.bzl", "flutter_application")
 load("//flutter/private:flutter_test.bzl", "flutter_test")
 
-_PACKAGE = "tracking_fixture"
 _MAIN = "lib/language_version_main.dart"
 _FLAG = "--track-creation-locations"
 _DBG = {"//command_line_option:compilation_mode": "dbg"}
@@ -115,27 +113,22 @@ def widget_creation_flag_test_suite(name):
     Args:
         name: The test_suite name.
     """
-    dart_package_metadata(
-        name = "_tracking_default_app_pubspec",
-        package_name = _PACKAGE,
-        tags = ["manual"],
-    )
     flutter_application(
         name = "_tracking_default_app",
-        package = ":_tracking_default_app_pubspec",
+        package = ":pubspec-metadata",
         main = _MAIN,
         tags = ["manual"],
     )
     flutter_application(
         name = "_tracking_off_app",
-        package = ":_tracking_default_app_pubspec",
+        package = ":pubspec-metadata",
         main = _MAIN,
         track_widget_creation = False,
         tags = ["manual"],
     )
     flutter_test(
         name = "_tracking_flutter_test",
-        package = ":_tracking_default_app_pubspec",
+        package = ":pubspec-metadata",
         main = _MAIN,
         tags = ["manual"],
         deps = ["//flutter/tests/flutter_test_analyze_fixture/fake_test_api"],

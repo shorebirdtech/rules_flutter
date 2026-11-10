@@ -90,13 +90,13 @@ def web_dir_test_suite(name):
         name: Prefix for the generated test targets.
     """
     dart_package_metadata(
-        name = "_bundle_pubspec",
+        name = "pubspec-metadata",
         package_name = "web_dir",
         tags = ["manual"],
     )
     flutter_web_bundle(
         name = "_bundle",
-        package = ":_bundle_pubspec",
+        package = ":pubspec-metadata",
         main = "main.dart",
         web_dir = "web_apps/second",
         web_assets = [
@@ -108,7 +108,7 @@ def web_dir_test_suite(name):
     )
     flutter_web_app(
         name = "_app",
-        package = ":_bundle_pubspec",
+        package = ":pubspec-metadata",
         main = "main.dart",
         deps = [],
         web_dir = "web_apps/second",
@@ -116,7 +116,7 @@ def web_dir_test_suite(name):
     )
     flutter_web_bundle(
         name = "_trailing_slash",
-        package = ":_bundle_pubspec",
+        package = ":pubspec-metadata",
         main = "main.dart",
         web_dir = "web_apps/second/",
         tags = ["manual"],

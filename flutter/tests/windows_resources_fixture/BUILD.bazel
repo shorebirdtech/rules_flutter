@@ -10,7 +10,7 @@ exports_files(
 )
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "windows_resources_fixture",
 )
 
@@ -21,7 +21,7 @@ flutter_application(
     build_name = "2.3.4",
     build_number = "7",
     main = "main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     tags = ["manual"],
     visibility = ["//flutter/tests/windows_resources_fixture:__subpackages__"],
 )

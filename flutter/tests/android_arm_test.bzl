@@ -7,7 +7,6 @@ the AOT compiler of its own CPU, run with the options flutter_tools gives a
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("//flutter/private:common.bzl", "ANDROID_ABIS")
 load("//flutter/private:flutter_aot_snapshot.bzl", "flutter_aot_snapshot")
 
@@ -93,14 +92,9 @@ def android_arm_test_suite(name):
     Args:
         name: The test_suite name.
     """
-    dart_package_metadata(
-        name = name + "_aot_target" + "_pubspec",
-        package_name = "android_arm_fixture",
-        tags = ["manual"],
-    )
     flutter_aot_snapshot(
         name = name + "_aot_target",
-        package = ":" + name + "_aot_target" + "_pubspec",
+        package = ":pubspec-metadata",
         main = "lib/language_version_main.dart",
         tags = ["manual"],
     )

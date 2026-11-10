@@ -19,7 +19,6 @@ action's tool:
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_dart//dart:toolchain.bzl", "SDK_FILE_SETS")
 load("//flutter:web.bzl", "flutter_web_bundle")
 load("//flutter/private:flutter_aot_snapshot.bzl", "flutter_aot_snapshot")
@@ -153,7 +152,6 @@ _takes_only_what_it_reads_whole_program_test = analysistest.make(
     config_settings = _WHOLE_PROGRAM,
 )
 
-_PACKAGE = "sdk_inputs_fixture"
 _MAIN = "lib/web_fixture_main.dart"
 
 def sdk_inputs_test_suite(name):
@@ -165,59 +163,34 @@ def sdk_inputs_test_suite(name):
     Args:
         name: The test_suite name.
     """
-    dart_package_metadata(
-        name = name + "_app" + "_pubspec",
-        package_name = _PACKAGE,
-        tags = ["manual"],
-    )
     flutter_application(
         name = name + "_app",
-        package = ":" + name + "_app" + "_pubspec",
+        package = ":pubspec-metadata",
         main = _MAIN,
         deps = ["//flutter/tests/resources_fixture:resources_library"],
         tags = ["manual"],
     )
-    dart_package_metadata(
-        name = name + "_kernel" + "_pubspec",
-        package_name = _PACKAGE,
-        tags = ["manual"],
-    )
     flutter_kernel(
         name = name + "_kernel",
-        package = ":" + name + "_kernel" + "_pubspec",
+        package = ":pubspec-metadata",
         main = _MAIN,
-        tags = ["manual"],
-    )
-    dart_package_metadata(
-        name = name + "_aot" + "_pubspec",
-        package_name = _PACKAGE,
         tags = ["manual"],
     )
     flutter_aot_snapshot(
         name = name + "_aot",
-        package = ":" + name + "_aot" + "_pubspec",
+        package = ":pubspec-metadata",
         main = _MAIN,
-        tags = ["manual"],
-    )
-    dart_package_metadata(
-        name = name + "_web" + "_pubspec",
-        package_name = _PACKAGE,
         tags = ["manual"],
     )
     flutter_web_bundle(
         name = name + "_web",
-        package = ":" + name + "_web" + "_pubspec",
+        package = ":pubspec-metadata",
         main = _MAIN,
-        tags = ["manual"],
-    )
-    dart_package_metadata(
-        name = name + "_web_js" + "_pubspec",
-        package_name = _PACKAGE,
         tags = ["manual"],
     )
     flutter_web_bundle(
         name = name + "_web_js",
-        package = ":" + name + "_web_js" + "_pubspec",
+        package = ":pubspec-metadata",
         main = _MAIN,
         compiler = "dart2js",
         tags = ["manual"],

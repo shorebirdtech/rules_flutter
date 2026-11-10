@@ -168,13 +168,13 @@ load("@rules_flutter//flutter:defs.bzl", "flutter_application")
 load("@rules_flutter//flutter:macos.bzl", "flutter_macos_app")
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "my_app",
 )
 
 flutter_application(
     name = "my_app",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     main = "lib/main.dart",
     srcs = glob(["lib/**/*.dart"]),
     assets = glob(["assets/**"]),
@@ -193,7 +193,7 @@ flutter_macos_app(
 
 `flutter_application` compiles the Dart code and bundles the assets. Each platform then has a macro, like `flutter_macos_app`, that wraps it in a runnable app. Two attributes deserve a note:
 
-- `dart_package_metadata` is the Bazel stand-in for `pubspec.yaml`: it states the package's facts once (its name, its language version, its licence), and every target of the package names it with `package`. Its `package_name` must match the `name:` field in `pubspec.yaml`. Hot reload and code generation both rely on it.
+- `dart_package_metadata` is the Bazel stand-in for `pubspec.yaml`: it states the package's facts once (its name, its language version, its licence), and every target of the package names it with `package`. A package has one, as it has one `pubspec.yaml`: it is always named `pubspec-metadata`, in the BUILD file at the package root (not one under `lib/`), and rules_dart refuses any other name or place. Its `package_name` must match the `name:` field in `pubspec.yaml`. Hot reload and code generation both rely on it. Where one program of the package needs a different native library than the package declares, its own `code_assets` replaces it (see [Choosing the library that serves an asset id](#choosing-the-library-that-serves-an-asset-id)); a second declaration is never the way.
 - `@rules_flutter//flutter:material_icons` bundles the Material icon font. Any app that uses Material widgets needs it in `deps`.
 
 Build it, or run it with hot reload:
@@ -237,7 +237,7 @@ To check a profile build from a test without those flags on the command line, wr
 ```starlark
 flutter_application(
     name = "my_app",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     main = "lib/main.dart",
     deps = [
         "@deps//:flutter",
@@ -519,13 +519,13 @@ cc_shared_library(
 )
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "my_app",
 )
 
 flutter_application(
     name = "my_app",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     main = "lib/main.dart",
     native_deps = [":my_native_lib"],
     deps = ["@deps//:flutter"],
@@ -536,7 +536,7 @@ If you would rather bind with `@Native(assetId: ...)` and let the Dart VM find t
 
 #### Choosing the library that serves an asset id
 
-A package that owns an asset id supplies its library through the `code_assets` of its `dart_package_metadata`. An application or a `flutter_test` can serve the id from a different library by naming one in its own `code_assets`, which replaces whatever its `deps` supply under that id, as on rules_dart's `dart_binary` and `dart_test`. Several ids can name one library. That is how two bridges linked into one shared library run against one copy of it:
+A package that owns an asset id supplies its library through the `code_assets` of its `dart_package_metadata`. An application or a `flutter_test` can serve the id from a different library by naming one in its own `code_assets`, which replaces whatever its `deps` supply under that id, as on rules_dart's `dart_binary` and `dart_test`. This is the place for a library that differs between programs of one package: the package has one declaration, so a second one stating other assets is refused. Several ids can name one library. That is how two bridges linked into one shared library run against one copy of it:
 
 ```starlark
 cc_shared_library(
@@ -589,7 +589,7 @@ flutter_native_library(
 )
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "my_bridge_bindings",
     code_assets = [":bridge"],
 )
@@ -597,7 +597,7 @@ dart_package_metadata(
 dart_library(
     name = "my_bridge_bindings",
     srcs = ["lib/bindings.dart"],
-    package = ":pubspec",
+    package = ":pubspec-metadata",
 )
 ```
 
@@ -688,13 +688,13 @@ A flavor is a target. Give `flutter_application` (or `flutter_web_app`) a `flavo
 
 ```starlark
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "my_app",
 )
 
 flutter_application(
     name = "app_paid",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     main = "lib/main.dart",
     flavor = "paid",
     deps = [...],
@@ -709,7 +709,7 @@ flutter_macos_app(
 
 flutter_web_app(
     name = "web_paid",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     flavor = "paid",
     deps = [...],
 )
@@ -1557,13 +1557,13 @@ load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "my_app",
 )
 
 flutter_web_app(
     name = "my_app_web",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     main = "lib/main.dart",
     deps = ["@deps//:flutter", "@rules_flutter//flutter:material_icons"],
     app_name = "My App",
@@ -1604,25 +1604,25 @@ A bundle compiles its program once for each compiler it ships: dart2wasm, dart2j
 # ids_typed/BUILD.bazel, and ids_js/BUILD.bazel the same with its own
 # lib/ids.dart: the same API, a different type.
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "ids",
 )
 
 flutter_library(
     name = "ids",  # typedef Ids = Int64List (in ids_js, List<int>)
     srcs = ["lib/ids.dart"],
-    package = ":pubspec",
+    package = ":pubspec-metadata",
 )
 
 # ids/BUILD.bazel
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "ids_select",
 )
 
 flutter_library(
     name = "ids",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = select({
         "@rules_dart//dart/constraints:js": ["//ids_js"],
         # dart2wasm, and a build for no web platform (the VM's).
@@ -1632,13 +1632,13 @@ flutter_library(
 
 # BUILD.bazel
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "app",
 )
 
 flutter_web_app(
     name = "app",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = ["//ids", "@deps//:flutter"],
 )
 ```
@@ -1669,7 +1669,7 @@ load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_bundle")
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "my_app",
 )
 
@@ -1677,7 +1677,7 @@ dart_package_metadata(
 # (the default):
 flutter_web_bundle(
     name = "my_app_web",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     main = "lib/main.dart",
     deps = ["@deps//:flutter"],
 )
@@ -1685,7 +1685,7 @@ flutter_web_bundle(
 # WASM only, for an app dart2js cannot compile, served to every engine:
 flutter_web_bundle(
     name = "my_app_web_wasm",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     main = "lib/main.dart",
     js_fallback = False,
     wasm_browsers = ["blink", "gecko", "webkit"],
@@ -1695,7 +1695,7 @@ flutter_web_bundle(
 # JavaScript alone, for wider browser support:
 flutter_web_bundle(
     name = "my_app_web_js",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     main = "lib/main.dart",
     compiler = "dart2js",
     renderer = "canvaskit",
@@ -1731,7 +1731,7 @@ The default renderer, fetched from `www.gstatic.com`, works in an isolated page 
 ```starlark
 flutter_web_app(
     name = "app",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [...],
     cross_origin_embedder_policy = "credentialless",  # default "require-corp"
 )
@@ -2054,7 +2054,7 @@ Collects Dart sources and assets for a Flutter package. It does not compile anyt
 
 ```starlark
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "my_lib",
 )
 
@@ -2063,7 +2063,7 @@ flutter_library(
     srcs = glob(["lib/**/*.dart"]),
     deps = ["@deps//:some_package"],
     assets = glob(["assets/**"]),
-    package = ":pubspec",
+    package = ":pubspec-metadata",
 )
 ```
 
@@ -2076,7 +2076,7 @@ flutter_library(
 | `font_files` | The font files of `fonts_json`, as `{file: path}`. |
 | `shaders` | The package's fragment shaders, mirroring `flutter: shaders:` in `pubspec.yaml`, keyed by their path from the package root as `assets` are. Bundled at `packages/<package_name>/<path>` in a program of another package and at `<path>` in a program of this package (its own `flutter_test`, or the application this is part of), as `flutter build` keys them, where `FragmentProgram.fromAsset` looks for them. |
 | `shader_includes` | Files the `shaders` may `#include`, such as `glob(["shaders/**/*.glsl"])`. A shader compiles with only its declared inputs, so an include not listed here is not found. |
-| `package` | The package's `dart_package_metadata`, which states its name, its language version (the `sdk:` constraint in `pubspec.yaml`), its version, its licence and its hooks. Its directory is the package root. Without it, the package is named for its root directory and states nothing else. |
+| `package` | The package's `dart_package_metadata`, `:pubspec-metadata` in the BUILD file at the package root, which states its name, its language version (the `sdk:` constraint in `pubspec.yaml`), its version, its licence and its hooks. Its directory is the package root, and `srcs` and `resources` must be under that root's `lib/`. Without it, the package is named for its root directory and states nothing else. |
 
 **Fonts fetched at run time.** `package:google_fonts` downloads fonts over the network when the app first draws them. In a `flutter_test`, whose test binding answers every HTTP request with an error, a widget drawing such a font fails, and an app offline falls back to another font. To ship the fonts instead, list their `.ttf` files (`Lato-Regular.ttf`, as Google Fonts names them) in a `flutter_library`'s `assets`, where `google_fonts` finds them by file name in the asset manifest, and set `GoogleFonts.config.allowRuntimeFetching = false` before `runApp`.
 
@@ -2086,13 +2086,13 @@ Compiles a Flutter app. In debug mode (`-c dbg`) it produces a kernel `.dill` fo
 
 ```starlark
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "my_app",
 )
 
 flutter_application(
     name = "my_app",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     main = "lib/main.dart",
     srcs = glob(["lib/**/*.dart"]),
     deps = [
@@ -2166,13 +2166,13 @@ Compiles and runs widget and unit tests on the Dart VM with Flutter's test engin
 
 ```starlark
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "my_app",
 )
 
 flutter_test(
     name = "widget_test",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     main = "test/widget_test.dart",
     srcs = glob(["lib/**/*.dart"]),
     deps = ["@deps//:flutter", "@deps//:flutter_test"],
@@ -2257,14 +2257,14 @@ load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_flutter//flutter:defs.bzl", "flutter_suite_program", "flutter_program_test")
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "my_app",
 )
 
 flutter_suite_program(
     name = "widget_program",
     testonly = True,
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     main = "test/widget_test.dart",
     data = glob(["test/goldens/**"]),
     deps = ["@deps//:flutter", "@deps//:flutter_test"],
@@ -2288,13 +2288,13 @@ Runs a program under `flutter_tester`, the headless engine `flutter_test` uses, 
 
 ```starlark
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "my_app",
 )
 
 flutter_tester_binary(
     name = "render",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     main = "tool/render.dart",
     enable_impeller = True,
     deps = ["//:my_app_lib", "@deps//:flutter", "@deps//:flutter_test"],
@@ -2326,13 +2326,13 @@ load("@rules_flutter//flutter:defs.bzl", "flutter_application")
 load("@rules_flutter//flutter:integration_test.bzl", "flutter_macos_integration_test")
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "my_app",
 )
 
 flutter_application(
     name = "app_flutter",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     main = "lib/main.dart",
     srcs = glob(["lib/**/*.dart"]),
     deps = ["@deps//:flutter"],
@@ -2423,14 +2423,14 @@ load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_flutter//flutter:integration_test.bzl", "flutter_web_integration_test")
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "my_app",
 )
 
 flutter_web_integration_test(
     name = "app_web_test",
     src = "integration_test/app_test.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     srcs = glob(["lib/**/*.dart"]),
     assets = glob(["assets/**"]),
     deps = [
@@ -2635,7 +2635,7 @@ A package can decide what it ships from how the app uses it. Mark a `final class
 ```starlark
 # symbols/BUILD.bazel
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "symbols",
     link_hook = "hook/link.dart",
 )
@@ -2643,20 +2643,20 @@ dart_package_metadata(
 flutter_plugin(
     name = "symbols",
     srcs = glob(["lib/**/*.dart"]),
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     platforms = [],
     deps = ["@deps//:data_assets", "@deps//:hooks", "@deps//:meta", "@deps//:record_use"],
 )
 
 # app/BUILD.bazel
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "app",
 )
 
 flutter_application(
     name = "app",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     link_hook_assets = ["package:symbols/index.json"],
     deps = ["//symbols", "@deps//:flutter"],
     # ...
@@ -2687,14 +2687,14 @@ rules_dart provides `dart_codegen` and `dart_aggregate_codegen`, which replace `
 load("@rules_dart//dart:defs.bzl", "dart_aggregate_codegen", "dart_codegen", "dart_package_metadata")
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "my_app",
 )
 
 # One output per input file, for example a json_serializable part.
 dart_codegen(
     name = "user_json",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     src = "lib/user.dart",
     generator = "tools/json_generator.dart",
     output_suffixes = [".g.dart"],
@@ -2703,7 +2703,7 @@ dart_codegen(
 # One output from all the inputs, for example a route registry.
 dart_aggregate_codegen(
     name = "registry",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     srcs = ["lib/model.dart", "lib/order.dart"],
     generator_script = "tools/aggregate_generator.dart",
     outputs = ["lib/registry.g.dart"],
@@ -2711,7 +2711,7 @@ dart_aggregate_codegen(
 
 flutter_application(
     name = "my_app",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     main = "lib/main.dart",
     srcs = ["lib/user.dart", ":user_json", ":registry"],
     deps = ["@deps//:flutter"],
@@ -2732,13 +2732,13 @@ go_router_codegen(
     name = "routes",
     srcs = ["lib/routes.dart"],
     annotation_dep = "@deps//:go_router",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = ["@deps//:flutter"],
 )
 
 flutter_application(
     name = "my_app",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     main = "lib/main.dart",
     srcs = ["lib/routes.dart", ":routes"],
     deps = ["@deps//:flutter", "@deps//:go_router"],
@@ -2771,7 +2771,7 @@ flutter_gen_l10n(
 
 flutter_test(
     name = "l10n_test",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     srcs = [":app_l10n"],
     main = "test/l10n_test.dart",
     deps = [

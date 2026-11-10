@@ -1,13 +1,13 @@
 load("@rules_dart//dart:defs.bzl", "dart_library", "dart_package_metadata")
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "web_variant",
 )
 
 dart_library(
     name = "variant",
     srcs = ["lib/web_variant.dart"],
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     visibility = ["//flutter/tests/web_variants:__pkg__"],
 )

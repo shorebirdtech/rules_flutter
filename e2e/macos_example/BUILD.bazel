@@ -96,7 +96,7 @@ dart_analysis_config(
 )
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "macos_example",
 )
 
@@ -106,7 +106,7 @@ dart_package_metadata(
 flutter_library(
     name = "app_lib",
     srcs = glob(["lib/**/*.dart"]),
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = _APP_DEPS + [
         # Supplies `lib/_embedder.yaml`, the only way the analyzer resolves
         # `dart:ui`. Without it every Flutter import fails to resolve.
@@ -126,7 +126,7 @@ flutter_application(
     build_number = "42",
     main = "lib/main.dart",
     native_deps = [":sub"],
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = _APP_DEPS,
 )
 
@@ -139,7 +139,7 @@ flutter_application(
     flavor = "paid",
     main = "lib/main.dart",
     native_deps = [":sub"],
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = _APP_DEPS,
 )
 
@@ -557,7 +557,7 @@ flutter_application(
     main = "lib/main.dart",
     native_deps = [":sub"],
     obfuscate = True,
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     split_debug_info = True,
     deps = _APP_DEPS,
 )
@@ -578,7 +578,7 @@ flutter_application(
     extra_gen_snapshot_options = ["--no-strip"],
     main = "lib/main.dart",
     native_deps = [":sub"],
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = _APP_DEPS,
 )
 

@@ -2,7 +2,7 @@ load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("//flutter:defs.bzl", "flutter_test")
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "code_asset_test",
 )
 
@@ -13,12 +13,12 @@ dart_package_metadata(
 flutter_test(
     name = "code_asset_flutter_test",
     main = "main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     tags = ["manual"],
     visibility = ["//flutter/tests:__pkg__"],
     deps = [
         "//flutter/tests/dart_asset_fixture:asset_fixture",
         "//flutter/tests/dart_asset_fixture:fake_test_api",
-        "//flutter/tests/dart_asset_fixture:plugin_asset_fixture",
+        "//flutter/tests/dart_asset_fixture/plugin_asset:plugin_asset_fixture",
     ],
 )

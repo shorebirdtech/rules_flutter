@@ -30,7 +30,7 @@ exports_files(["pubspec.lock"])
 # -- Advanced: low-level compilation rules (most users use flutter_application) --
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "hello_world",
 )
 
@@ -38,7 +38,7 @@ flutter_kernel(
     name = "hello_world",
     srcs = ["lib/common_widgets.dart"],
     main = "lib/main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:cupertino_icons",
         "@deps//:flutter",
@@ -51,7 +51,7 @@ flutter_aot_snapshot(
     name = "hello_world_aot",
     srcs = ["lib/common_widgets.dart"],
     main = "lib/main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:cupertino_icons",
         "@deps//:flutter",
@@ -70,7 +70,7 @@ flutter_application(
     name = "hello_world_app",
     srcs = ["lib/common_widgets.dart"],
     main = "lib/main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:cupertino_icons",
         "@deps//:flutter",
@@ -83,7 +83,7 @@ flutter_application(
 flutter_application(
     name = "licences_app",
     main = "lib/licences_main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:cupertino_icons",
         "@deps//:flutter",
@@ -101,7 +101,7 @@ flutter_macos_app(
 flutter_web_app(
     name = "licences_web",
     main = "lib/licences_main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:cupertino_icons",
         "@deps//:flutter",
@@ -236,7 +236,7 @@ flutter_windows_app(
 flutter_web_app(
     name = "hello_world_web",
     srcs = ["lib/common_widgets.dart"],
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:cupertino_icons",
         "@deps//:flutter",
@@ -258,7 +258,7 @@ flutter_test(
         "lib/main.dart",
     ],
     main = "test/widget_test.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:cupertino_icons",
         "@deps//:flutter",
@@ -273,7 +273,7 @@ flutter_test(
 flutter_test(
     name = "dependency_asset_keys_test",
     main = "test/dependency_asset_keys_test.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "//asset_keys",
         "@deps//:flutter",
@@ -286,7 +286,7 @@ flutter_test(
 flutter_test(
     name = "licences_test",
     main = "test/licences_test.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:cupertino_icons",
         "@deps//:flutter",
@@ -305,7 +305,7 @@ flutter_test(
         "lib/main.dart",
     ],
     main = "test/integration_binding_test.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:cupertino_icons",
         "@deps//:flutter",
@@ -331,7 +331,7 @@ build_test(
 flutter_test(
     name = "asserts_fire_test",
     main = "test/asserts/asserts_fire_test.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "//asserts_dep",
         "@deps//:flutter",
@@ -349,7 +349,7 @@ build_variant_tests(
 flutter_test(
     name = "widget_creation_test",
     main = "test/asserts/widget_creation_test.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:flutter",
         "@deps//:flutter_test",
@@ -367,7 +367,7 @@ flutter_test(
     name = "flavor_test",
     flavor = "paid",
     main = "test/flavor_test.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:flutter",
         "@deps//:flutter_test",
@@ -377,7 +377,7 @@ flutter_test(
 flutter_test(
     name = "no_flavor_test",
     main = "test/no_flavor_test.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:flutter",
         "@deps//:flutter_test",
@@ -397,7 +397,7 @@ flutter_test(
         "EXPECTED_FLUTTER_ENGINE_REVISION": "89c39edfdf",
     },
     main = "test/flutter_version_test.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:flutter",
         "@deps//:flutter_test",
@@ -423,7 +423,7 @@ build_variant_tests(
     flutter_test(
         name = "const_violation_%s_test" % where,
         main = "test/asserts/const_violation_%s_test.dart" % where,
-        package = ":pubspec",
+        package = ":pubspec-metadata",
         tags = ["manual"],
         deps = [
             "//asserts_dep",
@@ -447,7 +447,7 @@ flutter_test(
     name = "impeller_shader_test",
     enable_impeller = True,
     main = "test/impeller_shader_test.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     shaders = ["shaders/indexed.frag"],
     deps = [
         "@deps//:flutter",
@@ -462,7 +462,7 @@ flutter_tester_binary(
     name = "render_swatch",
     enable_impeller = True,
     main = "tool/render_swatch.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:flutter",
         "@deps//:flutter_test",
@@ -491,7 +491,7 @@ dart_test(
 flutter_test(
     name = "test_config_test",
     main = "test/configured/nested/test_config_test.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:flutter",
         "@deps//:flutter_test",
@@ -502,7 +502,7 @@ flutter_test(
 flutter_test(
     name = "test_config_label_test",
     main = "//:test/configured/nested/test_config_test.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:flutter",
         "@deps//:flutter_test",
@@ -512,7 +512,7 @@ flutter_test(
 flutter_test(
     name = "bazel_protocol_test",
     main = "test/bazel_protocol_test.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:flutter",
         "@deps//:flutter_test",
@@ -522,7 +522,7 @@ flutter_test(
 flutter_test(
     name = "bazel_protocol_sharded_test",
     main = "test/bazel_protocol_test.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     shard_count = 3,
     deps = [
         "@deps//:flutter",
@@ -540,7 +540,7 @@ flutter_test(
         "E2E_WINNER=attr",
     ],
     main = "test/dart_defines_test.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:flutter_test",
     ],
@@ -557,7 +557,7 @@ flutter_suite_program(
     testonly = True,
     data = glob(["test/goldens/**"]),
     main = "test/program_pair_test.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:flutter",
         "@deps//:flutter_test",
@@ -575,7 +575,7 @@ flutter_program_test(
 flutter_test(
     name = "hello_test",
     main = "hello_test.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:flutter_test",
     ],
@@ -765,7 +765,7 @@ dart_analysis_config(
 flutter_library(
     name = "app_lib",
     srcs = glob(["lib/**/*.dart"]),
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:cupertino_icons",
         "@deps//:flutter",

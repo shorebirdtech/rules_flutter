@@ -66,10 +66,10 @@ Map<String, String> pathPackage(
     '$dir/lib/$name.dart': 'int value = 1;\n',
     '$dir/BUILD.bazel':
         'load("@rules_dart//dart:defs.bzl", "dart_library", "dart_package_metadata")\n'
-        'dart_package_metadata(name = "pubspec", package_name = "$name")\n'
+        'dart_package_metadata(name = "pubspec-metadata", package_name = "$name")\n'
         'dart_library(\n'
         '    name = "${target.isEmpty ? name : target}",\n'
-        '    package = ":pubspec",\n'
+        '    package = ":pubspec-metadata",\n'
         '    srcs = glob(["lib/**/*.dart"]),\n'
         '    deps = [${deps.map((d) => '"$d"').join(', ')}],\n'
         '    visibility = ["//visibility:public"],\n'
@@ -202,10 +202,10 @@ void main() {
       files: {
         'BUILD.bazel':
             'load("@rules_dart//dart:defs.bzl", "dart_library", "dart_package_metadata")\n'
-            'dart_package_metadata(name = "pubspec", package_name = "app")\n'
+            'dart_package_metadata(name = "pubspec-metadata", package_name = "app")\n'
             'dart_library(\n'
             '    name = "app",\n'
-            '    package = ":pubspec",\n'
+            '    package = ":pubspec-metadata",\n'
             '    srcs = ["lib/app.dart"],\n'
             '    deps = ["//packages/greeting", "@pubhub//:uses_greeting"],\n'
             ')\n',
@@ -312,20 +312,20 @@ void main() {
       files: {
         'third_party/forkme/BUILD.bazel':
             'load("@rules_dart//dart:defs.bzl", "dart_library", "dart_package_metadata")\n'
-            'dart_package_metadata(name = "pubspec", package_name = "$packageName")\n'
+            'dart_package_metadata(name = "pubspec-metadata", package_name = "$packageName")\n'
             'dart_library(\n'
             '    name = "forkme_fork",\n'
-            '    package = ":pubspec",\n'
+            '    package = ":pubspec-metadata",\n'
             '    srcs = ["lib/forkme.dart"],\n'
             '    visibility = ["//visibility:public"],\n'
             ')\n',
         'third_party/forkme/lib/forkme.dart': 'int value = 2;\n',
         'BUILD.bazel':
             'load("@rules_dart//dart:defs.bzl", "dart_library", "dart_package_metadata")\n'
-            'dart_package_metadata(name = "pubspec", package_name = "app")\n'
+            'dart_package_metadata(name = "pubspec-metadata", package_name = "app")\n'
             'dart_library(\n'
             '    name = "app",\n'
-            '    package = ":pubspec",\n'
+            '    package = ":pubspec-metadata",\n'
             '    srcs = ["lib/app.dart"],\n'
             '    deps = ["@pubhub//:forkme", "@pubhub//:uses_fork"],\n'
             ')\n',

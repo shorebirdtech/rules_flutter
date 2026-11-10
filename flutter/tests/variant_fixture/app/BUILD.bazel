@@ -5,7 +5,7 @@ load("//flutter:integration_test.bzl", "flutter_application_variant")
 package(default_visibility = ["//flutter/tests:__subpackages__"])
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "variant_app",
 )
 
@@ -16,7 +16,7 @@ flutter_application(
     srcs = ["lib/helper.dart"],
     assets = ["assets/a.txt"],
     main = "lib/main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     tags = ["manual"],
     deps = ["//flutter/tests/variant_fixture/plugins/base:base_plugin"],
 )
@@ -35,6 +35,6 @@ flutter_application(
     name = "flavored_app",
     flavor = "paid",
     main = "lib/main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     tags = ["manual"],
 )

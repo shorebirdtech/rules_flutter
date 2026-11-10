@@ -29,6 +29,7 @@ The generated package carries its non-Dart `lib/` members (`_embedder.yaml`
 among them) as `dart_library`'s `resources`.
 """
 
+load("@rules_dart//dart:utils.bzl", "METADATA_TARGET_NAME")
 load("//flutter/private:pinned.bzl", "pinned")
 load(":artifact_urls.bzl", "engine_artifact_url")
 
@@ -52,7 +53,7 @@ exports_files(["LICENSE"], visibility = ["//visibility:public"])
 # literal `package:sky_engine/_embedder.yaml`, so this exact name is what makes
 # the lookup hit.
 dart_package_metadata(
-    name = "pubspec",
+    name = "{metadata}",
     package_name = "sky_engine",
 )
 
@@ -63,7 +64,7 @@ dart_package_metadata(
 dart_library(
     name = "sky_engine",
     srcs = glob(["lib/**/*.dart"]),
-    package = ":pubspec",
+    package = ":{metadata}",
     resources = glob(
         ["lib/**"],
         exclude = ["lib/**/*.dart"],
@@ -90,7 +91,7 @@ def _flutter_sky_engine_repo_impl(repository_ctx):
     # every source to live under `<package_root>/lib/`. Declared at the root, the
     # sources would be at `sky_engine/lib/...` against a `package_root` expecting
     # `lib/...`, and the rule rejects that outright.
-    repository_ctx.file("sky_engine/BUILD.bazel", _PACKAGE_BUILD_TEMPLATE)
+    repository_ctx.file("sky_engine/BUILD.bazel", _PACKAGE_BUILD_TEMPLATE.format(metadata = METADATA_TARGET_NAME))
 
     # …which would leave consumers writing `@flutter_sky_engine//sky_engine`,
     # naming the package twice. The alias buys back the obvious label.

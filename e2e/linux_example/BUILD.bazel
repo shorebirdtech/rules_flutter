@@ -13,14 +13,14 @@ load(
 exports_files(["pubspec.lock"])
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "linux_example",
 )
 
 flutter_application(
     name = "app_flutter",
     main = "lib/main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:flutter",
         "@rules_flutter//flutter:material_icons",
@@ -67,7 +67,7 @@ flutter_application(
     name = "testonly_flutter",
     testonly = True,
     main = "lib/testonly_main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = ["@deps//:flutter"],
 )
 
@@ -166,7 +166,7 @@ dart_analysis_config(
 flutter_library(
     name = "app_lib",
     srcs = glob(["lib/**/*.dart"]),
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:flutter",
         "@rules_flutter//flutter:material_icons",

@@ -13,7 +13,7 @@ load("@rules_flutter//flutter:web.bzl", "flutter_web_app", "flutter_web_bundle")
 # against its own package rather than the root's.
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "custom_boot",
 )
 
@@ -24,7 +24,7 @@ flutter_web_app(
     app_name = "Custom Boot",
     keep_placeholders = ["vueThing"],
     main = "lib/main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     web_defines = {"API_URL": "https://api.example.com"},
     deps = [
         "@deps//:flutter",
@@ -44,7 +44,7 @@ flutter_web_bundle(
     name = "inline_boot",
     index_html = "inline_index.html",
     main = "lib/main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     title = "Inline Boot",
     deps = [
         "@deps//:flutter",

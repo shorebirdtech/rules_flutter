@@ -32,7 +32,7 @@ load("//flutter:web.bzl", "flutter_web_bundle")
 # never runs.
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "flutter_web_analyze_fixture",
 )
 
@@ -40,7 +40,7 @@ flutter_web_bundle(
     name = "fixture_web",
     srcs = ["lib/greeting.dart"],
     main = "lib/main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     tags = ["manual"],
 )
 
@@ -48,7 +48,7 @@ flutter_web_bundle(
     name = "root_main_fixture_web",
     srcs = ["lib/greeting.dart"],
     main = "boot.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     tags = ["manual"],
 )
 

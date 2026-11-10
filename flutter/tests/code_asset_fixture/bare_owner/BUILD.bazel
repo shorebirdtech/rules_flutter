@@ -1,0 +1,18 @@
+"""The bare control of `owner/`: a package of its own whose code asset is a
+plain library with no wrapper."""
+
+load("@rules_dart//dart:defs.bzl", "dart_library", "dart_package_metadata")
+
+package(default_visibility = ["//flutter/tests/code_asset_fixture:__pkg__"])
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "bare_owner",
+    code_assets = ["//flutter/tests/code_asset_fixture:bare_code_asset"],
+)
+
+dart_library(
+    name = "bare_owner",
+    srcs = ["lib/owner.dart"],
+    package = ":pubspec-metadata",
+)

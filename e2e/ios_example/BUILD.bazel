@@ -30,7 +30,7 @@ exports_files(["pubspec.lock"])
 # =============================================================================
 
 dart_package_metadata(
-    name = "ios_example_pubspec",
+    name = "pubspec-metadata",
     package_name = "ios_example",
 )
 
@@ -49,7 +49,7 @@ flutter_application(
     build_number = "42",
     main = "lib/main.dart",
     minimum_os_version = IOS_MINIMUM_OS_VERSION,
-    package = ":ios_example_pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:flutter",
         "@rules_flutter//flutter:material_icons",
@@ -110,7 +110,7 @@ flutter_application(
     testonly = True,
     main = "lib/testonly_main.dart",
     minimum_os_version = IOS_MINIMUM_OS_VERSION,
-    package = ":ios_example_pubspec",
+    package = ":pubspec-metadata",
     deps = ["@deps//:flutter"],
 )
 
@@ -122,35 +122,28 @@ flutter_ios_app(
     tags = ["manual"],
 )
 
-dart_package_metadata(
-    name = "ios_example_second_pubspec",
-    package_name = "ios_example_second",
-)
-
-# A second app in the same package, built from a second application.
+# A second app in the same package, built from a second application of the
+# same Dart package.
 #
 # Regression guard for every output the pair would otherwise share: each app's
 # runner compiles into its own Swift module, and each App.framework is written
 # under its own target's directory. Either one hardcoded would make both apps
 # write one path and fail the build with conflicting actions.
 #
-# The second `flutter_application` is what gives the guard its teeth, and costs
-# the second Dart compile it looks like it costs. Pointing both apps at one
-# application gives the two App.frameworks identical inputs, so their actions
-# are identical, and Bazel shares identical actions instead of reporting a
-# conflict — which is exactly how this defect survived here until 2026-09.
-# Differing only in `minimum_os_version` does not work either: that attribute
-# is part of the configuration, so it separates the two into different output
-# directories where nothing can collide.
+# The second `flutter_application`, with an entry point of its own, is what
+# gives the guard its teeth, and costs the second Dart compile it looks like it
+# costs. Pointing both apps at one application gives the two App.frameworks
+# identical inputs, so their actions are identical, and Bazel shares identical
+# actions instead of reporting a conflict — which is exactly how this defect
+# survived here until 2026-09. Differing only in `minimum_os_version` does not
+# work either: that attribute is part of the configuration, so it separates the
+# two into different output directories where nothing can collide.
 flutter_application(
     name = "app_flutter_second",
-    main = "lib/main.dart",
+    main = "lib/second_main.dart",
     minimum_os_version = IOS_MINIMUM_OS_VERSION,
-    package = ":ios_example_second_pubspec",
-    deps = [
-        "@deps//:flutter",
-        "@rules_flutter//flutter:material_icons",
-    ],
+    package = ":pubspec-metadata",
+    deps = ["@deps//:flutter"],
 )
 
 flutter_ios_app(
@@ -348,7 +341,7 @@ flutter_application(
     name = "swiftpm_plugins_flutter",
     main = "lib/swiftpm_plugins_main.dart",
     minimum_os_version = IOS_MINIMUM_OS_VERSION,
-    package = ":ios_example_pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:ffi_dynamic_plugin",
         "@deps//:firebase_core",
@@ -507,7 +500,7 @@ dart_analysis_config(
 flutter_library(
     name = "app_lib",
     srcs = glob(["lib/**/*.dart"]),
-    package = ":ios_example_pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:audio_session",
         "@deps//:ffi_dynamic_plugin",
@@ -718,7 +711,7 @@ flutter_application(
     name = "permission_flutter",
     main = "lib/permission_main.dart",
     minimum_os_version = IOS_MINIMUM_OS_VERSION,
-    package = ":ios_example_pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:flutter",
         "@deps//:permission_handler",
@@ -739,7 +732,7 @@ flutter_application(
     name = "audio_session_flutter",
     main = "lib/audio_session_main.dart",
     minimum_os_version = IOS_MINIMUM_OS_VERSION,
-    package = ":ios_example_pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:audio_session",
         "@deps//:flutter",

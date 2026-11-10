@@ -1,6 +1,7 @@
 # A `flutter_library` at the root of an app's own directory, with a code asset
-# and a licence, an app at that root naming the same `dart_package_metadata`,
-# and one naming another. See `//flutter/tests:app_root_record_test.bzl`.
+# and a licence, and an app at that root naming the same `dart_package_metadata`;
+# and an app over a library at that root naming none. See
+# `//flutter/tests:app_root_record_test.bzl`.
 
 load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("//flutter:defs.bzl", "flutter_library")
@@ -11,14 +12,14 @@ package(default_visibility = ["//flutter/tests:__pkg__"])
 
 stand_in_code_asset(
     name = "system_asset",
-    asset_id = "package:app_root_record/system",
+    asset_id = "package:app_root_record_fixture/system",
     link_mode = "dynamic_loading_system",
-    system_uri = "libapp_root_record.so",
+    system_uri = "libapp_root_record_fixture.so",
 )
 
 dart_package_metadata(
-    name = "pubspec",
-    package_name = "app_root_record",
+    name = "pubspec-metadata",
+    package_name = "app_root_record_fixture",
     code_assets = [":system_asset"],
     language_version = "3.5",
     license_file = "LICENSE",
@@ -27,26 +28,27 @@ dart_package_metadata(
 flutter_library(
     name = "root_library",
     srcs = ["lib/root_record.dart"],
-    package = ":pubspec",
+    package = ":pubspec-metadata",
 )
 
 app_record_probe(
     name = "app",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [":root_library"],
 )
 
-# The same package declared a second time, at another language version.
-dart_package_metadata(
-    name = "other_pubspec",
-    package_name = "app_root_record",
-    language_version = "3.6",
+# A library of the directory's package that names no declaration: named after
+# the directory, as the package is, but stating none of its facts.
+flutter_library(
+    name = "undeclared_library",
+    srcs = ["lib/root_record.dart"],
+    tags = ["manual"],
 )
 
 # Fails analysis: only the analysistest that expects it builds it.
 app_record_probe(
-    name = "app_other_declaration",
-    package = ":other_pubspec",
+    name = "app_over_undeclared_library",
+    package = ":pubspec-metadata",
     tags = ["manual"],
-    deps = [":root_library"],
+    deps = [":undeclared_library"],
 )

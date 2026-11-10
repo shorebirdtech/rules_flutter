@@ -253,7 +253,7 @@ def _synthesize_app_package_carries_language_version_test_impl(ctx):
     env = unittest.begin(ctx)
 
     declared = DartPackageMetadataInfo(
-        label = Label("//:pubspec"),
+        label = Label("//:pubspec-metadata"),
         package_name = "my_app",
         package_root = "",
         language_version = "3.12",
@@ -265,7 +265,7 @@ def _synthesize_app_package_carries_language_version_test_impl(ctx):
     )
     stated = synthesize_app_package("//:app", [], "my_app", "", declared)
     asserts.equals(env, "3.12", stated[0].language_version)
-    asserts.equals(env, Label("//:pubspec"), stated[0].metadata)
+    asserts.equals(env, Label("//:pubspec-metadata"), stated[0].metadata)
 
     # An app naming no declaration states none — nothing here knows its
     # pubspec, and inventing a version would be worse than omitting one.

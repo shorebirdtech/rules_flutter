@@ -9,7 +9,6 @@ that build takes the flavor from the target.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("//flutter:defs.bzl", "flutter_application")
 load("//flutter/private:flutter_kernel.bzl", "flutter_kernel")
 load(":action_content.bzl", "written_json")
@@ -73,14 +72,9 @@ def app_flavor_test_suite(name):
     Args:
         name: The test suite name.
     """
-    dart_package_metadata(
-        name = "_flavor_app_pubspec",
-        package_name = "flavor_fixture",
-        tags = ["manual"],
-    )
     flutter_application(
         name = "_flavor_app",
-        package = ":_flavor_app_pubspec",
+        package = ":pubspec-metadata",
         flavor = "paid",
         defines = ["USER=1"],
         main = "web_fixture_main.dart",
@@ -88,13 +82,13 @@ def app_flavor_test_suite(name):
     )
     flutter_application(
         name = "_no_flavor_app",
-        package = ":_flavor_app_pubspec",
+        package = ":pubspec-metadata",
         main = "web_fixture_main.dart",
         tags = ["manual"],
     )
     flutter_kernel(
         name = "_flavor_kernel",
-        package = ":_flavor_app_pubspec",
+        package = ":pubspec-metadata",
         flavor = "paid",
         main = "web_fixture_main.dart",
         tags = ["manual"],

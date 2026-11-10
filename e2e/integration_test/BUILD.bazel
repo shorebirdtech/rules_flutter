@@ -19,7 +19,7 @@ dart_analysis_config(
 )
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "integration_test_example",
 )
 
@@ -28,7 +28,7 @@ dart_package_metadata(
 flutter_library(
     name = "app_lib",
     srcs = glob(["lib/**/*.dart"]),
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = ["@deps//:flutter"],
 )
 
@@ -46,7 +46,7 @@ flutter_library(
         "integration_test/**/*.dart",
         "test/**/*.dart",
     ]),
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         ":app_lib",
         "@deps//:flutter",
@@ -67,7 +67,7 @@ flutter_application(
     name = "app_flutter",
     srcs = glob(["lib/**/*.dart"]),
     main = "lib/main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = ["@deps//:flutter"],
 )
 
@@ -76,7 +76,7 @@ flutter_application(
     name = "app_flutter_paid",
     flavor = "paid",
     main = "lib/main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = ["@deps//:flutter"],
 )
 
@@ -123,7 +123,7 @@ _TAGS_TEST_DEPS = [
 flutter_test(
     name = "tags_test",
     main = "test/tags_test.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = _TAGS_TEST_DEPS,
 )
 
@@ -133,7 +133,7 @@ flutter_test(
     name = "tags_fixed",
     include_tags = ["golden"],
     main = "test/tags_test.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     tags = ["manual"],
     deps = _TAGS_TEST_DEPS,
 )
@@ -142,7 +142,7 @@ flutter_test(
     name = "tags_fixed_empty",
     include_tags = ["no_such_tag"],
     main = "test/tags_test.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     tags = ["manual"],
     deps = _TAGS_TEST_DEPS,
 )
@@ -150,7 +150,7 @@ flutter_test(
 flutter_test(
     name = "no_tests",
     main = "test/no_tests_test.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     tags = ["manual"],
     deps = _TAGS_TEST_DEPS,
 )
@@ -245,7 +245,7 @@ outcome_test(
     flutter_test(
         name = name,
         main = "test/%s_test.dart" % name,
-        package = ":pubspec",
+        package = ":pubspec-metadata",
         tags = ["manual"],
         deps = _TAGS_TEST_DEPS,
     )
@@ -731,7 +731,7 @@ flutter_web_integration_test(
     name = "web_licences_test",
     src = "integration_test/licences_test.dart",
     srcs = glob(["lib/**/*.dart"]),
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     target_compatible_with = _WEB_HOSTS,
     deps = ["@deps//:flutter"] + _TEST_DEPS,
 )
@@ -741,7 +741,7 @@ flutter_web_integration_test(
     name = "web_pass_test",
     src = "integration_test/counter_test.dart",
     srcs = glob(["lib/**/*.dart"]),
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     target_compatible_with = _WEB_HOSTS,
     deps = ["@deps//:flutter"] + _TEST_DEPS,
 )
@@ -752,7 +752,7 @@ flutter_web_integration_test(
     src = "integration_test/flavor_paid_test.dart",
     srcs = glob(["lib/**/*.dart"]),
     flavor = "paid",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     target_compatible_with = _WEB_HOSTS,
     deps = ["@deps//:flutter"] + _TEST_DEPS,
 )
@@ -761,7 +761,7 @@ flutter_web_integration_test(
     name = "web_no_flavor_test",
     src = "integration_test/flavor_none_test.dart",
     srcs = glob(["lib/**/*.dart"]),
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     target_compatible_with = _WEB_HOSTS,
     deps = ["@deps//:flutter"] + _TEST_DEPS,
 )
@@ -772,7 +772,7 @@ flutter_web_integration_test(
     name = "web_skip",
     src = "integration_test/skip_test.dart",
     srcs = glob(["lib/**/*.dart"]),
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     tags = ["manual"],
     target_compatible_with = _WEB_HOSTS,
     deps = ["@deps//:flutter"] + _TEST_DEPS,
@@ -782,7 +782,7 @@ flutter_web_integration_test(
     name = "web_test_on",
     src = "integration_test/test_on_test.dart",
     srcs = glob(["lib/**/*.dart"]),
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     tags = ["manual"],
     target_compatible_with = _WEB_HOSTS,
     deps = ["@deps//:flutter"] + _TEST_DEPS,
@@ -822,7 +822,7 @@ flutter_web_integration_test(
     name = "web_red",
     src = "integration_test/failing_test.dart",
     srcs = glob(["lib/**/*.dart"]),
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     tags = ["manual"],
     target_compatible_with = _WEB_HOSTS,
     deps = ["@deps//:flutter"] + _TEST_DEPS,
@@ -848,7 +848,7 @@ flutter_web_integration_test(
     src = "integration_test/golden_test.dart",
     srcs = glob(["lib/**/*.dart"]) + _GOLDEN_SRCS,
     data = _GOLDENS,
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     target_compatible_with = _WEB_HOSTS,
     deps = ["@deps//:flutter"] + _TEST_DEPS,
 )
@@ -863,7 +863,7 @@ flutter_web_integration_test(
     src = "integration_test/tolerant/golden_tolerant_test.dart",
     srcs = glob(["lib/**/*.dart"]) + _GOLDEN_SRCS,
     data = _TOLERANT_FILES,
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     target_compatible_with = _WEB_HOSTS,
     deps = ["@deps//:flutter"] + _TEST_DEPS,
 )
@@ -875,7 +875,7 @@ flutter_web_integration_test(
     src = "integration_test/golden_mid_frame_test.dart",
     srcs = glob(["lib/**/*.dart"]) + _GOLDEN_SRCS,
     data = _GOLDENS,
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     target_compatible_with = _WEB_HOSTS,
     deps = ["@deps//:flutter"] + _TEST_DEPS,
 )
@@ -888,7 +888,7 @@ flutter_web_integration_test(
     src = "integration_test/golden_live_frames_test.dart",
     srcs = glob(["lib/**/*.dart"]) + _GOLDEN_SRCS,
     data = _GOLDENS,
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     target_compatible_with = _WEB_HOSTS,
     deps = ["@deps//:flutter"] + _TEST_DEPS,
 )
@@ -899,7 +899,7 @@ flutter_web_integration_test(
     src = "integration_test/golden_mismatch_test.dart",
     srcs = glob(["lib/**/*.dart"]) + _GOLDEN_SRCS,
     data = _GOLDENS,
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     tags = ["manual"],
     target_compatible_with = _WEB_HOSTS,
     deps = ["@deps//:flutter"] + _TEST_DEPS,
@@ -924,7 +924,7 @@ flutter_web_integration_test(
     name = "web_tags",
     src = "integration_test/tags_test.dart",
     srcs = glob(["lib/**/*.dart"]),
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     tags = ["manual"],
     target_compatible_with = _WEB_HOSTS,
     deps = ["@deps//:flutter"] + _TEST_DEPS,
@@ -935,7 +935,7 @@ flutter_web_integration_test(
     src = "integration_test/tags_test.dart",
     srcs = glob(["lib/**/*.dart"]),
     include_tags = ["no_such_tag"],
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     tags = ["manual"],
     target_compatible_with = _WEB_HOSTS,
     deps = ["@deps//:flutter"] + _TEST_DEPS,

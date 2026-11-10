@@ -7,14 +7,14 @@ version and sources, so `package:<app>/…` in the test (or its
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_dart//dart:providers.bzl", "DartAnalyzableInfo")
 load("//flutter/private:flutter_application.bzl", "flutter_application")
 load("//flutter/private:flutter_test.bzl", "flutter_test")
 load(":action_content.bzl", "package_entry", "written_json")
+load(":tests_package.bzl", "TESTS_LANGUAGE_VERSION", "TESTS_PACKAGE")
 
-_PACKAGE = "fta_app"
-_LANGUAGE_VERSION = "3.12"
+_PACKAGE = TESTS_PACKAGE
+_LANGUAGE_VERSION = TESTS_LANGUAGE_VERSION
 _APP_MAIN = "lib/language_version_main.dart"
 _TEST_MAIN = "lib/web_fixture_main.dart"
 _FAKE_TEST_API = "//flutter/tests/flutter_test_analyze_fixture/fake_test_api"
@@ -67,15 +67,9 @@ def flutter_test_application_test_suite(name):
     Args:
         name: Prefix for the generated test targets and the suite itself.
     """
-    dart_package_metadata(
-        name = "_fta_application_pubspec",
-        package_name = _PACKAGE,
-        language_version = _LANGUAGE_VERSION,
-        tags = ["manual"],
-    )
     flutter_application(
         name = "_fta_application",
-        package = ":_fta_application_pubspec",
+        package = ":pubspec-metadata",
         main = _APP_MAIN,
         tags = ["manual"],
     )
@@ -86,15 +80,10 @@ def flutter_test_application_test_suite(name):
         tags = ["manual"],
         deps = [_FAKE_TEST_API],
     )
-    dart_package_metadata(
-        name = "_fta_other_package_pubspec",
-        package_name = "another_package",
-        tags = ["manual"],
-    )
     flutter_test(
         name = "_fta_other_package",
         application = ":_fta_application",
-        package = ":_fta_other_package_pubspec",
+        package = "//flutter/tests/another_package:pubspec-metadata",
         main = _TEST_MAIN,
         tags = ["manual"],
         deps = [_FAKE_TEST_API],

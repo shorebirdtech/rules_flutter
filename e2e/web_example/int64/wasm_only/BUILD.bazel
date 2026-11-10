@@ -3,7 +3,7 @@ load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "int64_wasm_only",
 )
 
@@ -18,7 +18,7 @@ flutter_web_app(
     name = "wasm_only_app",
     app_name = "Int64List",
     js_fallback = False,
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = ["@deps//:flutter"],
 )
 

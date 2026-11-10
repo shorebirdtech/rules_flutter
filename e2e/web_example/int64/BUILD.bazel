@@ -3,7 +3,7 @@ load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "int64",
 )
 
@@ -16,7 +16,7 @@ dart_package_metadata(
 flutter_web_app(
     name = "int64_app",
     app_name = "Int64 identifiers",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "//int64/ids",
         "@deps//:flutter",
@@ -29,7 +29,7 @@ flutter_web_app(
 flutter_web_app(
     name = "int64_app_js_fallback",
     app_name = "Int64 identifiers (JavaScript)",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     wasm_browsers = [
         "gecko",
         "webkit",

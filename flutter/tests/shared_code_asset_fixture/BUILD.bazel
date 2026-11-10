@@ -20,7 +20,7 @@ load("//flutter/tests/code_asset_fixture:stand_in_code_asset.bzl", "stand_in_cod
 package(default_visibility = ["//flutter/tests:__subpackages__"])
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "shared_app",
 )
 
@@ -140,7 +140,7 @@ _DEPS = [
         name = name,
         code_assets = code_assets,
         main = "main.dart",
-        package = ":pubspec",
+        package = ":pubspec-metadata",
         tags = ["manual"],
         deps = _DEPS,
     )
@@ -214,7 +214,7 @@ flutter_native_asset(
 flutter_application(
     name = "app_declared",
     main = "main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     tags = ["manual"],
     deps = [
         "//flutter/tests/shared_code_asset_fixture/a",

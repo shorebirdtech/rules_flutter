@@ -7,11 +7,9 @@ for the `tester` target too, so a flavored asset is in no test without one.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("//flutter/private:flutter_test.bzl", "flutter_test")
 load(":action_content.bzl", "action_config")
 
-_PACKAGE = "flavor_test_fixture"
 _MAIN = "lib/language_version_main.dart"
 _DEFINE = "FLUTTER_APP_FLAVOR=paid"
 
@@ -58,14 +56,9 @@ def flutter_test_flavor_test_suite(name):
     """
     for flavor in ["paid", ""]:
         suffix = "paid" if flavor else "none"
-        dart_package_metadata(
-            name = "_flavor_test_" + suffix + "_pubspec",
-            package_name = _PACKAGE,
-            tags = ["manual"],
-        )
         flutter_test(
             name = "_flavor_test_" + suffix,
-            package = ":" + "_flavor_test_" + suffix + "_pubspec",
+            package = ":pubspec-metadata",
             flavor = flavor,
             main = _MAIN,
             tags = ["manual"],

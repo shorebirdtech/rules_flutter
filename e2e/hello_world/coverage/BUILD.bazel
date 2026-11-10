@@ -2,7 +2,7 @@ load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_flutter//flutter:defs.bzl", "flutter_library", "flutter_test")
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "shapes",
 )
 
@@ -14,7 +14,7 @@ dart_package_metadata(
 flutter_library(
     name = "shapes",
     srcs = ["lib/shapes.dart"],
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = ["//coverage/units"],
 )
 
@@ -27,7 +27,7 @@ flutter_test(
     name = "shapes_test",
     size = "small",
     main = "test/shapes_test.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         ":shapes",
         "@deps//:flutter_test",

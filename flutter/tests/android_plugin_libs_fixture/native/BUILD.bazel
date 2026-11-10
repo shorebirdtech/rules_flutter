@@ -27,14 +27,14 @@ aar_like(
 )
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "plugin_native",
 )
 
 flutter_plugin(
     name = "plugin_native",
     srcs = ["lib/plugin_native.dart"],
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     tags = ["manual"],
     exports = [":lib_native"],
 )

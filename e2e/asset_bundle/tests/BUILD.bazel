@@ -4,14 +4,14 @@ load(":font_of_other_package_test.bzl", "font_of_other_package_test")
 load(":two_files_one_key_test.bzl", "two_files_one_key_test")
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "asset_bundle_checks",
 )
 
 dart_library(
     name = "bundle_check",
     srcs = ["lib/bundle_check.dart"],
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     visibility = ["//visibility:public"],
 )
 
@@ -338,18 +338,18 @@ font_of_other_package_test(
 # files its pubspec lists under `flutter: licenses:` come last, as they are.
 notices_test(
     name = "notices_list_the_programs_own_licences_test",
-    additional = ["//:licenses/THIRD_PARTY.txt"],
-    bundle = "//:app_with_licences_bundle",
-    own_license = "//:licenses/LICENSE",
-    package = "asset_bundle",
+    additional = ["//apps/licensed:licenses/THIRD_PARTY.txt"],
+    bundle = "//apps/licensed:app_with_licences_bundle",
+    own_license = "//apps/licensed:licenses/LICENSE",
+    package = "licensed_app",
 )
 
 notices_test(
     name = "notices_list_the_programs_own_licences_web_test",
-    additional = ["//:licenses/THIRD_PARTY.txt"],
-    bundle = "//:web_with_licences_bundle",
-    own_license = "//:licenses/LICENSE",
-    package = "asset_bundle",
+    additional = ["//apps/licensed:licenses/THIRD_PARTY.txt"],
+    bundle = "//apps/licensed:web_with_licences_bundle",
+    own_license = "//apps/licensed:licenses/LICENSE",
+    package = "licensed_app",
     subdir = "assets",
     web = True,
 )

@@ -32,7 +32,7 @@ _GENERATOR_SCRIPTS = [
 # dart_codegen is single-source, so each input file gets its own target.
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "codegen_e2e",
 )
 
@@ -41,7 +41,7 @@ dart_codegen(
     src = "lib/model.dart",
     generator = "tools/simple_generator.dart",
     output_suffixes = [".g.dart"],
-    package = ":pubspec",
+    package = ":pubspec-metadata",
 )
 
 dart_codegen(
@@ -49,7 +49,7 @@ dart_codegen(
     src = "lib/order.dart",
     generator = "tools/simple_generator.dart",
     output_suffixes = [".g.dart"],
-    package = ":pubspec",
+    package = ":pubspec-metadata",
 )
 
 # --- Aggregate codegen (dart_aggregate_codegen) ---
@@ -63,7 +63,7 @@ dart_aggregate_codegen(
     ],
     generator_script = "tools/aggregate_generator.dart",
     outputs = ["lib/registry.g.dart"],
-    package = ":pubspec",
+    package = ":pubspec-metadata",
 )
 
 # --- Flutter app consuming a generated part ---
@@ -76,7 +76,7 @@ dart_codegen(
     src = "lib/user.dart",
     generator = "tools/json_generator.dart",
     output_suffixes = [".g.dart"],
-    package = ":pubspec",
+    package = ":pubspec-metadata",
 )
 
 flutter_application(
@@ -94,7 +94,7 @@ flutter_application(
     # process cannot take it. `native_libs_reload_e2e_test.dart` drives both
     # directions off it.
     native_deps = [":native_add_lib"],
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "//dep_lib",
         "//dep_part",
@@ -249,7 +249,7 @@ flutter_test(
         ":user_json",
     ],
     main = "test/user_test.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:flutter",
         "@deps//:flutter_test",
@@ -265,7 +265,7 @@ go_router_codegen(
     name = "routes_gen",
     srcs = ["lib/routes.dart"],
     annotation_dep = "@deps//:go_router",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = ["@deps//:flutter"],
 )
 
@@ -276,7 +276,7 @@ flutter_test(
         ":routes_gen",
     ],
     main = "test/routes_test.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:flutter",
         "@deps//:flutter_test",
@@ -293,7 +293,7 @@ flutter_test(
 flutter_test(
     name = "native_asset_test",
     main = "test/native_asset_test.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "//native_add",
         "@deps//:flutter",
@@ -315,7 +315,7 @@ platform(
 flutter_test(
     name = "transitioned_native_asset_test_untransitioned",
     main = "test/transitioned_native_asset_test.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     # Fails untransitioned, by design; only the transition below runs it.
     tags = ["manual"],
     deps = [
@@ -338,7 +338,7 @@ platform_transition_test(
 flutter_tester_binary(
     name = "native_asset_program",
     main = "test/native_asset_test.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "//native_add",
         "@deps//:flutter",
@@ -368,7 +368,7 @@ flutter_test(
         "//shared_counter:test_combined",
     ],
     main = "test/shared_library_asset_test.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "//shared_counter",
         "@deps//:flutter",
@@ -404,7 +404,7 @@ flutter_web_bundle(
     compiler = "dart2js",
     main = "lib/main.dart",
     native_modules = [":demo_module"],
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     renderer = "canvaskit",
     deps = [
         "//dep_lib",
@@ -452,7 +452,7 @@ flutter_library(
         "lib/user.dart",
         ":user_json",
     ],
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "//dep_lib",
         "//dep_part",
@@ -478,7 +478,7 @@ dart_library(
         ":model_generated",
         ":order_generated",
     ],
-    package = ":pubspec",
+    package = ":pubspec-metadata",
 )
 
 # Analysis handles for the generator scripts.
@@ -522,7 +522,7 @@ flutter_test(
     name = "l10n_test",
     srcs = [":app_l10n"],
     main = "test/l10n_test.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:flutter",
         "@deps//:flutter_localizations",
@@ -538,7 +538,7 @@ flutter_test(
     name = "golden_test",
     data = glob(["test/goldens/**"]),
     main = "test/golden_test.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:flutter",
         "@deps//:flutter_test",
@@ -550,7 +550,7 @@ flutter_test(
 flutter_test(
     name = "golden_undeclared_test",
     main = "test/golden_undeclared_test.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:flutter",
         "@deps//:flutter_test",
@@ -564,7 +564,7 @@ flutter_test(
 flutter_test(
     name = "test_api_only_test",
     main = "test/test_api_only_test.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = ["@deps//:test_api"],
 )
 

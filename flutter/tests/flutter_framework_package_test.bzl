@@ -34,8 +34,8 @@ def _flutter_spoke_declares_its_language_version_test_impl(ctx):
     asserts.true(env, "\nflutter_framework_library(" in content, content)
 
     # Stated on the package's `dart_package_metadata`, which the library names.
-    asserts.true(env, '\ndart_package_metadata(\n    name = "pubspec",\n    package_name = "flutter",\n    language_version = "3.11",' in content, content)
-    asserts.true(env, '\n    package = ":pubspec",' in content, content)
+    asserts.true(env, '\ndart_package_metadata(\n    name = "pubspec-metadata",\n    package_name = "flutter",\n    language_version = "3.11",' in content, content)
+    asserts.true(env, '\n    package = ":pubspec-metadata",' in content, content)
 
     # The shader channel is what makes this spoke a flutter_framework_library
     # rather than a dart_library; adding a language version must not disturb it.

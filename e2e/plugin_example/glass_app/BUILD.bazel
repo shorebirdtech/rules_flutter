@@ -17,14 +17,14 @@ _DEPS = [
 ]
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "glass_app",
 )
 
 flutter_application(
     name = "glass_flutter",
     main = "lib/main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = _DEPS,
 )
 
@@ -52,7 +52,7 @@ flutter_android_app(
 # skwasm: dart2wasm, the macro's renderer.
 flutter_web_app(
     name = "glass_web",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     tags = ["manual"],
     deps = _DEPS,
 )
@@ -62,7 +62,7 @@ flutter_web_bundle(
     name = "glass_web_canvaskit",
     compiler = "dart2js",
     main = "lib/main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     tags = ["manual"],
     deps = _DEPS,
 )

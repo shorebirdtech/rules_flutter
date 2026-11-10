@@ -8,7 +8,6 @@ licence file contributes nothing.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("//flutter:defs.bzl", "flutter_application")
 load(":action_content.bzl", "action_config")
 
@@ -48,37 +47,19 @@ def notices_test_suite(name):
     Args:
         name: The test suite name.
     """
-    dart_package_metadata(
-        name = "_notices_app_pubspec",
-        package_name = "notices_app",
-        license_file = "//flutter/tests/notices_fixture:APP_LICENSE",
-        tags = ["manual"],
-    )
-    flutter_application(
-        name = "_notices_app",
-        package = ":_notices_app_pubspec",
-        main = "web_fixture_main.dart",
-        tags = ["manual"],
-        deps = [
-            "//flutter/tests/notices_fixture:notices_bare",
-            "//flutter/tests/notices_fixture:notices_flutter",
-        ],
-    )
-    dart_package_metadata(
-        name = "_plain_app_pubspec",
-        package_name = "plain_app",
-        tags = ["manual"],
-    )
+
+    # The app with no licence of its own is in this directory's package,
+    # which names none.
     flutter_application(
         name = "_plain_app",
-        package = ":_plain_app_pubspec",
+        package = ":pubspec-metadata",
         main = "web_fixture_main.dart",
         tags = ["manual"],
-        deps = ["//flutter/tests/notices_fixture:notices_bare"],
+        deps = ["//flutter/tests/notices_fixture/bare:notices_bare"],
     )
     _packages_test(
         name = name + "_packages",
-        target_under_test = ":_notices_app",
+        target_under_test = "//flutter/tests/notices_fixture:notices_app",
         expected = [
             "notices_dart=DART_LICENSE",
             "notices_flutter=FLUTTER_LICENSE",
@@ -87,7 +68,7 @@ def notices_test_suite(name):
     )
     _inputs_test(
         name = name + "_inputs",
-        target_under_test = ":_notices_app",
+        target_under_test = "//flutter/tests/notices_fixture:notices_app",
         expected = ["APP_LICENSE", "DART_LICENSE", "FLUTTER_LICENSE", _ENGINE],
     )
     _inputs_test(

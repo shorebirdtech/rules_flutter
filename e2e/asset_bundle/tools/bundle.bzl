@@ -41,7 +41,7 @@ app_bundle = rule(
     },
 )
 
-def bundled_app(name, assets = [], deps = [], package = "//:pubspec", main = "lib/main.dart", platform = None, **kwargs):
+def bundled_app(name, assets = [], deps = [], package = "//:pubspec-metadata", main = "lib/main.dart", platform = None, **kwargs):
     """A trivial application and, as `<name>_bundle`, the asset tree it builds.
 
     What the applications of this workspace differ in is where they sit, which

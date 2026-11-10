@@ -2,7 +2,7 @@ load("@rules_dart//dart:defs.bzl", "dart_analysis_test", "dart_package_metadata"
 load("//flutter:defs.bzl", "flutter_test")
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "flutter_test_analyze_fixture",
 )
 
@@ -43,7 +43,7 @@ flutter_test(
     name = "fixture_test",
     srcs = ["lib/counter.dart"],
     main = "test/counter_test.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     tags = ["manual"],
     deps = ["//flutter/tests/flutter_test_analyze_fixture/fake_test_api"],
 )

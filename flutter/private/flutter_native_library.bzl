@@ -158,7 +158,7 @@ flutter_native_library(
 )
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "my_bridge_bindings",
     code_assets = [":bridge"],
 )
@@ -166,7 +166,7 @@ dart_package_metadata(
 dart_library(
     name = "bindings",
     srcs = ["lib/bindings.dart"],
-    package = ":pubspec",
+    package = ":pubspec-metadata",
 )
 ```
 

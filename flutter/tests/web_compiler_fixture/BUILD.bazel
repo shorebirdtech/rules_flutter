@@ -3,7 +3,7 @@ load("//flutter:defs.bzl", "flutter_library", "flutter_native_library", "flutter
 
 # Things a web bundle may reach under two compilers at once, each with
 # something generated for `web_compiler_test.bzl` to find the configuration of.
-# `manual`: only that test builds them.
+# `manual`: only that test builds them. They are four targets of one package.
 
 [
     genrule(
@@ -27,6 +27,11 @@ genrule(
     tags = ["manual"],
 )
 
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "web_compiler_fixture",
+)
+
 flutter_native_library(
     name = "native_library",
     binding_contract = ["contract.txt"],
@@ -35,57 +40,37 @@ flutter_native_library(
     visibility = ["//flutter/tests:__pkg__"],
 )
 
-dart_package_metadata(
-    name = "web_compiler_library_pubspec",
-    package_name = "web_compiler_library",
-)
-
 # Not independent: it may `select()` by compiler, so it is built for each.
 flutter_library(
     name = "library",
     srcs = [":gen_library"],
-    package = ":web_compiler_library_pubspec",
+    package = ":pubspec-metadata",
     tags = ["manual"],
     visibility = ["//flutter/tests:__pkg__"],
-)
-
-dart_package_metadata(
-    name = "web_compiler_plugin_pubspec",
-    package_name = "web_compiler_plugin",
 )
 
 flutter_plugin(
     name = "plugin",
     srcs = [":gen_plugin"],
-    package = ":web_compiler_plugin_pubspec",
+    package = ":pubspec-metadata",
     tags = ["manual"],
     visibility = ["//flutter/tests:__pkg__"],
-)
-
-dart_package_metadata(
-    name = "web_compiler_independent_library_pubspec",
-    package_name = "web_compiler_independent_library",
 )
 
 # As every package from pub is.
 flutter_library(
     name = "independent_library",
     srcs = [":gen_independent_library"],
-    package = ":web_compiler_independent_library_pubspec",
+    package = ":pubspec-metadata",
     tags = ["manual"],
     visibility = ["//flutter/tests:__pkg__"],
     web_compiler_independent = True,
 )
 
-dart_package_metadata(
-    name = "web_compiler_independent_plugin_pubspec",
-    package_name = "web_compiler_independent_plugin",
-)
-
 flutter_plugin(
     name = "independent_plugin",
     srcs = [":gen_independent_plugin"],
-    package = ":web_compiler_independent_plugin_pubspec",
+    package = ":pubspec-metadata",
     tags = ["manual"],
     visibility = ["//flutter/tests:__pkg__"],
     web_compiler_independent = True,

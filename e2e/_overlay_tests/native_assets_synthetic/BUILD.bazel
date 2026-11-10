@@ -46,7 +46,7 @@ flutter_data_asset(
 )
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "native_assets_synthetic",
 )
 
@@ -68,7 +68,7 @@ flutter_plugin(
         "@platforms//os:macos": [":synthetic_native_asset_macos"],
         "//conditions:default": [],
     }),
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     platforms = [],
 )
 
@@ -76,7 +76,7 @@ flutter_plugin(
 flutter_application(
     name = "synthetic_app",
     main = "lib/main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         ":synthetic_glue",
         "@deps//:flutter",

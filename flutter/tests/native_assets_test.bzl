@@ -375,7 +375,7 @@ def native_assets_test_suite(name):
     # application must refuse to build and name the package.
     _expect_failure_test(
         name = name + "_unreplaced_hook",
-        target_under_test = "//flutter/tests/dart_asset_fixture:hook_app",
+        target_under_test = "//flutter/tests/dart_asset_fixture/hook_app",
         expected_substring = "hook_fixture (hook/build.dart)",
     )
 
@@ -384,7 +384,7 @@ def native_assets_test_suite(name):
     # other package fails on its own analysis, with no application involved.
     _expect_failure_test(
         name = name + "_misowned_code_asset",
-        target_under_test = "//flutter/tests/dart_asset_fixture:not_asset_fixture_pubspec",
+        target_under_test = "//flutter/tests/dart_asset_fixture/not_owner:pubspec-metadata",
         expected_substring = "is not namespaced to this package",
     )
 
@@ -394,7 +394,7 @@ def native_assets_test_suite(name):
     # unresolved symbol this exists to pre-empt.
     _expect_failure_test(
         name = name + "_unreplaced_hook_in_test",
-        target_under_test = "//flutter/tests/dart_asset_fixture:hook_flutter_test",
+        target_under_test = "//flutter/tests/dart_asset_fixture/hook_app:hook_flutter_test",
         expected_substring = "hook_fixture (hook/build.dart)",
     )
 

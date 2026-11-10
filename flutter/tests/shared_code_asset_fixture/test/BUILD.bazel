@@ -2,7 +2,7 @@ load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("//flutter:defs.bzl", "flutter_test")
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "shared_test",
 )
 
@@ -16,7 +16,7 @@ flutter_test(
         "//flutter/tests/shared_code_asset_fixture:b_combined",
     ],
     main = "main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     tags = ["manual"],
     visibility = ["//flutter/tests:__pkg__"],
     deps = [

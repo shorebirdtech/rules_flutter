@@ -6,7 +6,7 @@ load("@rules_flutter//flutter:defs.bzl", "flutter_library")
 # codegen shape in a non-app package.
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "dep_lib",
 )
 
@@ -15,7 +15,7 @@ dart_codegen(
     src = "lib/catalog.dart",
     generator = "tools/catalog_generator.dart",
     output_suffixes = [".g.dart"],
-    package = ":pubspec",
+    package = ":pubspec-metadata",
 )
 
 flutter_library(
@@ -24,7 +24,7 @@ flutter_library(
         "lib/catalog.dart",
         ":catalog_gen",
     ],
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     visibility = ["//visibility:public"],
 )
 

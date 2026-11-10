@@ -2,7 +2,7 @@ load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("//flutter:defs.bzl", "flutter_plugin")
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "shared_declares",
 )
 
@@ -11,7 +11,7 @@ flutter_plugin(
     name = "declares",
     srcs = ["lib/declares.dart"],
     native_assets = ["//flutter/tests/shared_code_asset_fixture:a_system"],
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     platforms = [
         "android",
         "ios",

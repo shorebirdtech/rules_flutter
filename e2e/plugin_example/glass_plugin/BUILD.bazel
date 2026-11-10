@@ -4,7 +4,7 @@ load("@rules_flutter//flutter:defs.bzl", "flutter_plugin")
 load("@rules_flutter//flutter:macos.bzl", "flutter_apple_plugin_library")
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "glass_plugin",
 )
 
@@ -22,7 +22,7 @@ flutter_plugin(
         "@platforms//os:ios": [":glass_plugin_apple_ios"],
         "//conditions:default": [],
     }),
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     platforms = [
         "android",
         "ios",

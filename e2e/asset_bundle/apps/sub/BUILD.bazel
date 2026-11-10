@@ -2,7 +2,7 @@ load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("//tools:bundle.bzl", "bundled_app")
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "sub_app",
 )
 
@@ -12,5 +12,5 @@ bundled_app(
         ["assets/**"],
         exclude = ["assets/extra/**"],
     ) + ["//apps/sub/assets/extra:x.txt"],
-    package = ":pubspec",
+    package = ":pubspec-metadata",
 )

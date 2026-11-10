@@ -81,10 +81,10 @@ Map<String, String> _target(String dir, String name) => {
   p.posix.join(dir, 'lib', '$name.dart'): 'int value = 1;\n',
   p.posix.join(dir, 'BUILD.bazel'):
       'load("@rules_dart//dart:defs.bzl", "dart_library", "dart_package_metadata")\n'
-      'dart_package_metadata(name = "pubspec", package_name = "$name")\n'
+      'dart_package_metadata(name = "pubspec-metadata", package_name = "$name")\n'
       'dart_library(\n'
       '    name = "$name",\n'
-      '    package = ":pubspec",\n'
+      '    package = ":pubspec-metadata",\n'
       '    srcs = glob(["lib/**/*.dart"]),\n'
       '    visibility = ["//visibility:public"],\n'
       ')\n',

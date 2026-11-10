@@ -17,7 +17,7 @@ to skip those rather than fail on them.
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
-load("@rules_dart//dart:defs.bzl", "dart_library", "dart_package_metadata")
+load("@rules_dart//dart:defs.bzl", "dart_library")
 load("@rules_dart//dart:providers.bzl", "DartInfo")
 load("@rules_dart//dart:utils.bzl", "dart_info_no_package")
 load("//flutter:providers.bzl", "FlutterInfo")
@@ -193,14 +193,9 @@ def flutter_info_test_suite(name):
         target_under_test = ":" + name + "_font_consumer",
     )
 
-    dart_package_metadata(
-        name = name + "_plain_dart_pubspec",
-        package_name = "plain_dart",
-        tags = ["manual"],
-    )
     dart_library(
         name = name + "_plain_dart",
-        package = ":" + name + "_plain_dart_pubspec",
+        package = ":pubspec-metadata",
         tags = ["manual"],
     )
     contributing_library(

@@ -12,14 +12,14 @@ java_library(
 )
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "plugin_a",
 )
 
 flutter_plugin(
     name = "plugin_a",
     srcs = ["lib/plugin_a.dart"],
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     tags = ["manual"],
     exports = [":lib_a"],
 )

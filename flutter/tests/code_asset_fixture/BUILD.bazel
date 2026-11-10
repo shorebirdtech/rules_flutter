@@ -18,6 +18,7 @@ load(":stand_in_code_asset.bzl", "stand_in_code_asset")
 
 package(default_visibility = [
     "//flutter/tests:__pkg__",
+    "//flutter/tests/code_asset_fixture/bare_owner:__pkg__",
     "//flutter/tests/code_asset_fixture/owner:__pkg__",
     "//flutter/tests/code_asset_fixture/owner_twin:__pkg__",
 ])
@@ -31,7 +32,7 @@ alias(
 )
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "code_asset_app",
 )
 
@@ -69,17 +70,17 @@ stand_in_code_asset(
     flutter_application(
         name = "app_" + owner,
         main = "main.dart",
-        package = ":pubspec",
+        package = ":pubspec-metadata",
         tags = ["manual"],
-        deps = ["//flutter/tests/code_asset_fixture/owner:" + owner],
+        deps = [package],
     )
-    for owner in [
-        "dart_owner",
-        "plugin_owner",
-        "bare_owner",
-        "forwarded_owner",
-        "inline_owner",
-    ]
+    for owner, package in {
+        "dart_owner": "//flutter/tests/code_asset_fixture/owner:dart_owner",
+        "plugin_owner": "//flutter/tests/code_asset_fixture/owner:plugin_owner",
+        "bare_owner": "//flutter/tests/code_asset_fixture/bare_owner",
+        "forwarded_owner": "//flutter/tests/code_asset_fixture/owner:forwarded_owner",
+        "inline_owner": "//flutter/tests/code_asset_fixture/owner:inline_owner",
+    }.items()
 ]
 
 # A variant of an application whose library arrives as a code asset: the
@@ -96,7 +97,7 @@ flutter_application_variant(
 flutter_application(
     name = "app_disagreeing_owners",
     main = "main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     tags = ["manual"],
     deps = [
         "//flutter/tests/code_asset_fixture/owner:dart_owner",

@@ -18,7 +18,7 @@ platform(
 )
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "tester_binary",
 )
 
@@ -26,7 +26,7 @@ dart_package_metadata(
 flutter_tester_binary(
     name = "tester_binary",
     main = "main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     tags = ["manual"],
     visibility = ["//flutter/tests:__pkg__"],
     deps = ["//flutter/tests/dart_asset_fixture:fake_test_api"],

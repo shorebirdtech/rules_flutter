@@ -627,18 +627,20 @@ def _members_name_their_package_metadata_test_impl(ctx):
     flutter = make_flutter_member_build_content("cupertino_icons", "3.4", [], "", version = "1.0.8")
     for content in [dart, flutter]:
         asserts.true(env, 'load("@rules_dart//dart:defs.bzl", "dart_package_metadata")' in content, content)
-        asserts.true(env, '\ndart_package_metadata(\n    name = "pubspec",\n' in content, content)
-        asserts.true(env, '\n    package = ":pubspec",' in content, content)
+        asserts.true(env, '\ndart_package_metadata(\n    name = "pubspec-metadata",\n' in content, content)
+        asserts.true(env, '\n    package = ":pubspec-metadata",' in content, content)
         asserts.false(env, "\n    package_name = " in content.split("dart_package_metadata(")[1].split(")\n")[1], content)
     asserts.true(env, '\n    package_name = "meta",\n    language_version = "3.4",\n    version = "1.17.0",' in dart, dart)
     asserts.true(env, '\n    build_hook = "hook/build.dart",' in dart, dart)
     asserts.true(env, '\n    link_hook = "hook/link.dart",' in dart, dart)
     asserts.true(env, '\n        "//:meta_asset",' in dart, dart)
 
-    # The package called `pubspec` has a library of that name.
+    # The package called `pubspec` has a library of that name, beside the
+    # declaration, whose name no package can have.
     named_pubspec = make_dart_member_build_content("pubspec", "3.4", [], "")
-    asserts.true(env, '\n    name = "pubspec_metadata",' in named_pubspec, named_pubspec)
-    asserts.true(env, '\n    package = ":pubspec_metadata",' in named_pubspec, named_pubspec)
+    asserts.true(env, '\n    name = "pubspec",' in named_pubspec, named_pubspec)
+    asserts.true(env, '\n    name = "pubspec-metadata",' in named_pubspec, named_pubspec)
+    asserts.true(env, '\n    package = ":pubspec-metadata",' in named_pubspec, named_pubspec)
 
     return unittest.end(env)
 

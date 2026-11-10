@@ -1,24 +1,19 @@
 load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("//flutter:defs.bzl", "flutter_test")
 
+# Four tests of one package, left `manual`; only the analysis tests build them.
 dart_package_metadata(
-    name = "plain_pubspec",
-    package_name = "plain",
+    name = "pubspec-metadata",
+    package_name = "test_tags_fixture",
 )
 
-# Left `manual`; only the analysis tests build them.
 flutter_test(
     name = "plain",
     main = "main.dart",
-    package = ":plain_pubspec",
+    package = ":pubspec-metadata",
     tags = ["manual"],
     visibility = ["//flutter/tests:__pkg__"],
     deps = ["//flutter/tests/dart_asset_fixture:fake_test_api"],
-)
-
-dart_package_metadata(
-    name = "tagged_pubspec",
-    package_name = "tagged",
 )
 
 flutter_test(
@@ -29,37 +24,27 @@ flutter_test(
         "b || c",
     ],
     main = "main.dart",
-    package = ":tagged_pubspec",
+    package = ":pubspec-metadata",
     tags = ["manual"],
     visibility = ["//flutter/tests:__pkg__"],
     deps = ["//flutter/tests/dart_asset_fixture:fake_test_api"],
-)
-
-dart_package_metadata(
-    name = "empty_entry_pubspec",
-    package_name = "empty_entry",
 )
 
 flutter_test(
     name = "empty_entry",
     include_tags = [""],
     main = "main.dart",
-    package = ":empty_entry_pubspec",
+    package = ":pubspec-metadata",
     tags = ["manual"],
     visibility = ["//flutter/tests:__pkg__"],
     deps = ["//flutter/tests/dart_asset_fixture:fake_test_api"],
-)
-
-dart_package_metadata(
-    name = "comma_entry_pubspec",
-    package_name = "comma_entry",
 )
 
 flutter_test(
     name = "comma_entry",
     include_tags = ["a,b"],
     main = "main.dart",
-    package = ":comma_entry_pubspec",
+    package = ":pubspec-metadata",
     tags = ["manual"],
     visibility = ["//flutter/tests:__pkg__"],
     deps = ["//flutter/tests/dart_asset_fixture:fake_test_api"],

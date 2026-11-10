@@ -6,7 +6,7 @@ load("@rules_flutter//flutter:ios.bzl", "flutter_ios_app", "flutter_ios_simulato
 load("@rules_flutter//flutter:macos.bzl", "flutter_macos_app")
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "impeller_shader_app",
 )
 
@@ -18,7 +18,7 @@ dart_package_metadata(
 flutter_application(
     name = "app_flutter",
     main = "lib/main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "//impeller_shader/pkg",
         "@deps//:flutter",
@@ -52,7 +52,7 @@ flutter_android_app(
 flutter_application(
     name = "app_flutter_sksl_required",
     main = "lib/main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     require_sksl_shaders = True,
     tags = ["manual"],
     deps = [

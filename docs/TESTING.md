@@ -1291,7 +1291,7 @@ Procedure:
 1. Locate the package's hook source under `~/Library/Caches/bazel/_bazel_<user>/.../external/*+flutter_pub__<pkg>/hook/build.dart`. Read what it builds (file glob, link mode, target platforms, copts).
 2. Reproduce the build with `cc_shared_library` + `objc_library` (Apple) / `cc_library` (other platforms). Set `shared_lib_name` to something *different* from the bundle filename — `flutter_native_asset` symlinks the cc output to `<bundle_filename>` in its own package, and matching names collide.
 3. Wrap the output in `flutter_native_asset(name = "<pkg>_native_asset", asset_id = "package:<pkg>/<basename>", link_mode = "dynamic_loading_bundle", library = ":_<pkg>_dylib", bundle_filename = "<basename>")`, constrained to the supported platforms with `target_compatible_with`. Platforms that need a different `bundle_filename` (`lib<x>.so`, `<x>.dll`) get their own target; platforms that agree on every attribute share one.
-4. Declare the package's facts on a `dart_package_metadata(name = "pubspec", package_name = "{PKG}", language_version = "{LANGUAGE_VERSION}", {LICENSE})`, and hang a `flutter_plugin(name = "<pkg>", package = ":pubspec", platforms = [], native_assets = select({...}))` over the assets. Even though the package is "pure Dart" from pub's perspective, the empty-`platforms` plugin shape is what carries the native-assets entry into `FlutterInfo` for the application's manifest. The `select()` is what decides which asset targets an application sees: list exactly the ones that belong to the platform being built, and `//conditions:default: []` for the rest. Two targets claiming the same `asset_id` in one build fail analysis.
+4. Declare the package's facts on a `dart_package_metadata(name = "pubspec-metadata", package_name = "{PKG}", language_version = "{LANGUAGE_VERSION}", {LICENSE})`, and hang a `flutter_plugin(name = "<pkg>", package = ":pubspec-metadata", platforms = [], native_assets = select({...}))` over the assets. Even though the package is "pure Dart" from pub's perspective, the empty-`platforms` plugin shape is what carries the native-assets entry into `FlutterInfo` for the application's manifest. The `select()` is what decides which asset targets an application sees: list exactly the ones that belong to the platform being built, and `//conditions:default: []` for the rest. Two targets claiming the same `asset_id` in one build fail analysis.
 5. Drop the template at `ext/<pkg>/<major>/BUILD.bazel.tpl`. The next `bazel run @rules_flutter//flutter/pub -- get` + Bazel build picks it up automatically.
 
 If the build fails at runtime with `Couldn't resolve native function "<symbol>"`, the most common cause is the `cc_shared_library`'s `install_name` not matching the asset id's basename — set `user_link_flags = ["-Wl,-install_name,@rpath/<basename>"]` on Apple targets. See `ext/objective_c/9/BUILD.bazel.tpl` for the canonical example.
@@ -2051,8 +2051,9 @@ hubs' `:clock` is the 1.1.3 library, and the build warns that one of the root's
 locks was raised.
 `bazel test //...` there covers:
 
-- `:bins_test` builds `:agreeing_bin` (`path` from both hubs) and
-  `:upgraded_bin` (`clock` from both). They are binaries because the
+- `:bins_test` builds `//agreeing:agreeing_bin` (`path` from both hubs) and
+  `//upgraded:upgraded_bin` (`clock` from both), each in a package of its own
+  directory. They are binaries because the
   duplicate-record check runs wherever a package_config is assembled
   (`collect_packages`: `dart_binary`, `dart_test`, `package_config`,
   `dart_web_application`, `dart_analysis_options`, the codegen `library_deps`

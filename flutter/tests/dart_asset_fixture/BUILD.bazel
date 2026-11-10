@@ -2,14 +2,13 @@ load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
 load("@rules_dart//dart:defs.bzl", "dart_code_asset", "dart_library", "dart_package_metadata")
-load("//flutter:defs.bzl", "flutter_application", "flutter_library", "flutter_plugin", "flutter_test")
-load("//flutter:native_assets.bzl", "flutter_native_asset")
 load("//flutter/tests:native_assets_test.bzl", "hook_check_probe", "legacy_dart_library")
 
 # A pub-package-shaped `dart_library` that owns a native code asset, exactly as
 # `pub.from_lock()` generates for a package with a curated `//dart/ext` entry.
 # Nothing here mentions Flutter — the point is that rules_flutter picks the
-# asset up off the Dart package graph without a `flutter_native_asset`.
+# asset up off the Dart package graph without a `flutter_native_asset`. The
+# other packages of the fixture are the directories below this one.
 
 cc_library(
     name = "empty",
@@ -24,7 +23,10 @@ cc_shared_library(
         "@platforms//os:windows": "asset_fixture.dll",
         "//conditions:default": "libasset_fixture.so",
     }),
-    visibility = ["//flutter/tests:__pkg__"],
+    visibility = [
+        "//flutter/tests:__pkg__",
+        "//flutter/tests/dart_asset_fixture/plugin_asset:__pkg__",
+    ],
     deps = [":empty"],
 )
 
@@ -32,10 +34,11 @@ dart_code_asset(
     name = "code_asset",
     asset_id = "package:asset_fixture/src/ffi/asset_fixture.g.dart",
     shared_library = ":asset_fixture_shared",
+    visibility = ["//flutter/tests/dart_asset_fixture/not_owner:__pkg__"],
 )
 
 dart_package_metadata(
-    name = "asset_fixture_pubspec",
+    name = "pubspec-metadata",
     package_name = "asset_fixture",
     code_assets = [":code_asset"],
 )
@@ -43,7 +46,7 @@ dart_package_metadata(
 dart_library(
     name = "asset_fixture",
     srcs = ["lib/fixture.dart"],
-    package = ":asset_fixture_pubspec",
+    package = ":pubspec-metadata",
     visibility = [
         "//flutter/tests:__pkg__",
         "//flutter/tests/dart_asset_fixture/code_asset_test:__pkg__",
@@ -51,54 +54,8 @@ dart_library(
     ],
 )
 
-# A code asset is owned by the package whose id namespaces it, and a package
-# declaring someone else's must be refused. The rule is rules_dart's, checked
-# where the asset is declared: the package's `dart_package_metadata`, which
-# every target of the package, Flutter's or Dart's, names. Left `manual` so only
-# the analysistest that wraps it builds it.
-dart_package_metadata(
-    name = "not_asset_fixture_pubspec",
-    package_name = "not_asset_fixture",
-    code_assets = [":code_asset"],
-    tags = ["manual"],
-    visibility = ["//flutter/tests:__pkg__"],
-)
-
-dart_package_metadata(
-    name = "hook_fixture_pubspec",
-    package_name = "hook_fixture",
-    build_hook = "hook/build.dart",
-)
-
-# The other half of the contract: a package that ships a build hook nothing
-# replaces, as `flutter_pub.from_lock()` records when it finds `hook/build.dart`
-# and the curated registry has no entry for that package at that version. Using
-# `flutter_library` rather than `dart_library` is deliberate — what is under
-# test is that rules_flutter's own package rule carries the flag onto
-# `DartPackageInfo` and up through `transitive_packages`.
-flutter_library(
-    name = "hook_fixture",
-    srcs = ["lib/hook_fixture.dart"],
-    package = ":hook_fixture_pubspec",
-)
-
-dart_package_metadata(
-    name = "hook_app_pubspec",
-    package_name = "hook_app",
-)
-
-# Reaching that package from an application must fail at analysis. Left
-# `manual` so only the analysistest that wraps it builds it.
-flutter_application(
-    name = "hook_app",
-    main = "hook_app_main.dart",
-    package = ":hook_app_pubspec",
-    tags = ["manual"],
-    visibility = ["//flutter/tests:__pkg__"],
-    deps = [":hook_fixture"],
-)
-
-# The tolerance side of the same check. A `DartPackageInfo` built against a
+# The tolerance side of the check that a package's build hook is replaced
+# (see `hook_fixture/`). A `DartPackageInfo` built against a
 # rules_dart predating `unreplaced_hook` has no such field, and reaching it
 # from an application must be a non-event: it cannot be an offender, because a
 # producer with no field could not have recorded a hook. Probed directly rather
@@ -128,29 +85,10 @@ legacy_dart_library(
     visibility = [
         "//flutter/tests/code_asset_fixture/test:__pkg__",
         "//flutter/tests/dart_asset_fixture/code_asset_test:__pkg__",
+        "//flutter/tests/dart_asset_fixture/hook_app:__pkg__",
         "//flutter/tests/shared_code_asset_fixture/test:__pkg__",
         "//flutter/tests/test_tags_fixture:__pkg__",
         "//flutter/tests/tester_binary_fixture:__pkg__",
-    ],
-)
-
-dart_package_metadata(
-    name = "hook_test_pubspec",
-    package_name = "hook_test",
-)
-
-# The hook check has to fire from `flutter_test`, not just from
-# `flutter_application` — a test is where an unresolved `@Native` symbol
-# actually gets debugged. Left `manual`; only the analysistest builds it.
-flutter_test(
-    name = "hook_flutter_test",
-    main = "hook_app_main.dart",
-    package = ":hook_test_pubspec",
-    tags = ["manual"],
-    visibility = ["//flutter/tests:__pkg__"],
-    deps = [
-        ":fake_test_api",
-        ":hook_fixture",
     ],
 )
 
@@ -159,7 +97,7 @@ flutter_test(
 hook_check_probe(
     name = "hook_fixture_is_an_offender",
     expect_offender = True,
-    deps = [":hook_fixture"],
+    deps = ["//flutter/tests/dart_asset_fixture/hook_fixture"],
 )
 
 build_test(
@@ -168,27 +106,4 @@ build_test(
         ":hook_fixture_is_an_offender",
         ":legacy_package_has_no_hook",
     ],
-)
-
-# The other way a code asset reaches a test: declared with
-# `flutter_native_asset` and propagated on `FlutterInfo` by a plugin.
-flutter_native_asset(
-    name = "plugin_asset",
-    asset_id = "package:plugin_asset_fixture/plugin_asset.dart",
-    bundle_filename = "libplugin_asset_fixture.dylib",
-    library = ":asset_fixture_shared",
-    link_mode = "dynamic_loading_bundle",
-)
-
-dart_package_metadata(
-    name = "plugin_asset_fixture_pubspec",
-    package_name = "plugin_asset_fixture",
-)
-
-flutter_plugin(
-    name = "plugin_asset_fixture",
-    srcs = ["lib/fixture.dart"],
-    native_assets = [":plugin_asset"],
-    package = ":plugin_asset_fixture_pubspec",
-    visibility = ["//flutter/tests/dart_asset_fixture/code_asset_test:__pkg__"],
 )

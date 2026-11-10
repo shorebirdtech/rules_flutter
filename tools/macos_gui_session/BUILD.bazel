@@ -1,7 +1,7 @@
 load("@rules_dart//dart:defs.bzl", "dart_library", "dart_package_metadata")
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "rules_flutter_macos_gui_session",
 )
 
@@ -12,7 +12,7 @@ dart_package_metadata(
 dart_library(
     name = "macos_gui_session",
     srcs = glob(["lib/**/*.dart"]),
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     # Public because `flutter_pub.from_lock(resolve = ...)` in MODULE.bazel maps
     # the dev tool's lock entry for this package to it, and the hub's repository
     # aliases it from outside this repository's packages.

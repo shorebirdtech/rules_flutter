@@ -82,7 +82,7 @@ cc_library(
 ]
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "android_example",
 )
 
@@ -99,7 +99,7 @@ flutter_application(
     ],
     main = "lib/main.dart",
     native_deps = [":add"],
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "//count_a",
         "//count_b",
@@ -116,7 +116,7 @@ flutter_application(
     testonly = True,
     srcs = glob(["lib/**/*.dart"]),
     main = "lib/testonly_main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = ["@deps//:flutter"],
 )
 
@@ -384,7 +384,7 @@ flutter_web_bundle(
     name = "app_web",
     srcs = glob(["lib/**/*.dart"]),
     main = "lib/main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = ["@deps//:flutter"],
 )
 
@@ -539,7 +539,7 @@ dart_analysis_config(
 flutter_library(
     name = "app_lib",
     srcs = glob(["lib/**/*.dart"]),
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:flutter",
     ],

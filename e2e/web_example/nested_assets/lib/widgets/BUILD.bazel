@@ -7,7 +7,7 @@ flutter_library(
     name = "widgets",
     srcs = ["banner.dart"],
     assets = ["banner.txt"],
-    package = "//nested_assets:pubspec",
+    package = "//nested_assets:pubspec-metadata",
     visibility = ["//nested_assets:__pkg__"],
     deps = ["@deps//:flutter"],
 )

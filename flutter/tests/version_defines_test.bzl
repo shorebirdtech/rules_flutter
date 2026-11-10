@@ -10,7 +10,6 @@ that sets one is refused, as `flutter_tools` refuses it.
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("@flutter_version_pin//:version.bzl", "FLUTTER_VERSION")
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("//flutter:defs.bzl", "flutter_application")
 load("//flutter/private:flutter_kernel.bzl", "flutter_kernel")
 load("//flutter/private:flutter_test.bzl", "flutter_test")
@@ -158,20 +157,15 @@ def version_defines_test_suite(name):
     Args:
         name: The test suite name.
     """
-    dart_package_metadata(
-        name = "_version_app_pubspec",
-        package_name = "flavor_fixture",
-        tags = ["manual"],
-    )
     flutter_application(
         name = "_version_app",
-        package = ":_version_app_pubspec",
+        package = ":pubspec-metadata",
         main = "web_fixture_main.dart",
         tags = ["manual"],
     )
     flutter_application(
         name = "_versioned_app",
-        package = ":_version_app_pubspec",
+        package = ":pubspec-metadata",
         build_name = "2.3.4",
         build_number = "7",
         defines = ["USER=1"],
@@ -180,18 +174,13 @@ def version_defines_test_suite(name):
     )
     flutter_kernel(
         name = "_version_kernel",
-        package = ":_version_app_pubspec",
+        package = ":pubspec-metadata",
         main = "web_fixture_main.dart",
-        tags = ["manual"],
-    )
-    dart_package_metadata(
-        name = "_version_test_pubspec",
-        package_name = "flavor_test_fixture",
         tags = ["manual"],
     )
     flutter_test(
         name = "_version_test",
-        package = ":_version_test_pubspec",
+        package = ":pubspec-metadata",
         main = "lib/language_version_main.dart",
         tags = ["manual"],
         deps = ["//flutter/tests/flutter_test_analyze_fixture/fake_test_api"],

@@ -21,7 +21,7 @@ _DEPS = [
 ]
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "web_interop",
 )
 
@@ -34,7 +34,7 @@ flutter_web_app(
     srcs = _SRCS,
     app_name = "Interop (all icons)",
     main = "lib/interop_main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     tree_shake_icons = False,
     deps = _DEPS,
 )
@@ -51,7 +51,7 @@ flutter_web_app(
     srcs = _SRCS,
     app_name = "Glyphs",
     main = "lib/glyph_main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = _DEPS + [
         "//web_interop/icon_plugin",
         "@deps//:flutter_web_plugins",
@@ -86,7 +86,7 @@ flutter_web_app(
     srcs = _SRCS,
     app_name = "Interop",
     main = "lib/interop_main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = _DEPS,
 )
 
@@ -96,7 +96,7 @@ flutter_web_app(
     app_name = "Interop (WASM only)",
     js_fallback = False,
     main = "lib/interop_main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = _DEPS,
 )
 
@@ -105,7 +105,7 @@ flutter_web_bundle(
     srcs = _SRCS,
     compiler = "dart2js",
     main = "lib/interop_main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     renderer = "canvaskit",
     title = "Interop (dart2js)",
     deps = _DEPS,

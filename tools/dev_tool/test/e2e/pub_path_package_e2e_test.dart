@@ -41,10 +41,10 @@ Map<String, String> _package(String dir) => {
 const _appBuild = {
   'BUILD.bazel':
       'load("@rules_dart//dart:defs.bzl", "dart_library", "dart_package_metadata")\n'
-      'dart_package_metadata(name = "pubspec", package_name = "app")\n'
+      'dart_package_metadata(name = "pubspec-metadata", package_name = "app")\n'
       'dart_library(\n'
       '    name = "app",\n'
-      '    package = ":pubspec",\n'
+      '    package = ":pubspec-metadata",\n'
       '    srcs = ["lib/app.dart"],\n'
       '    deps = ["@pubhub//:greeting"],\n'
       ')\n',

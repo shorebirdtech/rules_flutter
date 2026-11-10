@@ -32,7 +32,6 @@ compiler.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_dart//dart:providers.bzl", "DartAnalyzableInfo")
 load("//flutter:web.bzl", "flutter_web_bundle")
 load("//flutter/private:flutter_aot_snapshot.bzl", "flutter_aot_snapshot")
@@ -41,12 +40,11 @@ load("//flutter/private:flutter_kernel.bzl", "flutter_kernel")
 load("//flutter/private:flutter_test.bzl", "flutter_test")
 load("//flutter/private:flutter_web_branch.bzl", "web_branches_target")
 load(":action_content.bzl", "package_entry", "written_json")
+load(":tests_package.bzl", "TESTS_LANGUAGE_VERSION", "TESTS_PACKAGE")
 
-# The version the fixtures state. Deliberately not the SDK's own: a fixture
-# pinning the current version would pass whether or not the value was ever
-# forwarded, because the absent-key default is that same version.
-_LANGUAGE_VERSION = "3.12"
-_PACKAGE = "lv_fixture"
+# The version the fixtures' package states, deliberately not the SDK's own.
+_LANGUAGE_VERSION = TESTS_LANGUAGE_VERSION
+_PACKAGE = TESTS_PACKAGE
 _MAIN = "lib/language_version_main.dart"
 
 def _assert_config_states_version(env):
@@ -132,15 +130,9 @@ def _setup_fixtures():
     so none of these would compile. The tests read declared actions and
     providers, which analysis alone produces.
     """
-    dart_package_metadata(
-        name = "_lv_application_pubspec",
-        package_name = _PACKAGE,
-        language_version = _LANGUAGE_VERSION,
-        tags = ["manual"],
-    )
     flutter_application(
         name = "_lv_application",
-        package = ":_lv_application_pubspec",
+        package = ":pubspec-metadata",
         main = _MAIN,
         tags = ["manual"],
     )
@@ -150,7 +142,7 @@ def _setup_fixtures():
     # generated bootstrap it would emit has something to import.
     flutter_test(
         name = "_lv_flutter_test",
-        package = ":_lv_application_pubspec",
+        package = ":pubspec-metadata",
         main = _MAIN,
         tags = ["manual"],
         deps = ["//flutter/tests/flutter_test_analyze_fixture/fake_test_api"],
@@ -158,7 +150,7 @@ def _setup_fixtures():
 
     flutter_web_bundle(
         name = "_lv_web",
-        package = ":_lv_application_pubspec",
+        package = ":pubspec-metadata",
         main = _MAIN,
         tags = ["manual"],
     )
@@ -168,14 +160,14 @@ def _setup_fixtures():
     # is most of the test.
     flutter_kernel(
         name = "_lv_kernel",
-        package = ":_lv_application_pubspec",
+        package = ":pubspec-metadata",
         main = _MAIN,
         tags = ["manual"],
     )
 
     flutter_aot_snapshot(
         name = "_lv_aot",
-        package = ":_lv_application_pubspec",
+        package = ":pubspec-metadata",
         main = _MAIN,
         tags = ["manual"],
     )

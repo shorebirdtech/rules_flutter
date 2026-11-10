@@ -4,7 +4,7 @@ load("//flutter:defs.bzl", "flutter_library")
 exports_files(["pubspec.lock"])
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "integration_support_analysis",
 )
 
@@ -22,7 +22,7 @@ flutter_library(
         "//flutter/private/integration_test/support:_golden.dart",
         "//flutter/private/integration_test/support:integration_suite.dart",
     ],
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "@dev_tool_deps//:flutter_test",
         "@dev_tool_deps//:integration_test",

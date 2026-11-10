@@ -88,13 +88,13 @@ framework's and each package's kernels are shared with the application.
 
 ```starlark
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "my_app",
 )
 
 flutter_application(
     name = "app_flutter",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     main = "lib/main.dart",
     deps = ["@deps//:flutter"],
 )

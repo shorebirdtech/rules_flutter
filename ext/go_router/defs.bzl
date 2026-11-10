@@ -5,14 +5,14 @@
     go_router_codegen(
         name = "routes",
         srcs = ["lib/routes.dart"],
-        package = ":pubspec",
+        package = ":pubspec-metadata",
         deps = ["@pub_deps//:flutter"],
     )
 
     flutter_application(
         name = "app",
         srcs = ["lib/routes.dart", ":routes"],
-        package = ":pubspec",
+        package = ":pubspec-metadata",
         deps = ["@pub_deps//:flutter", "@pub_deps//:go_router"],
         ...
     )

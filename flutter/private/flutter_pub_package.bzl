@@ -49,6 +49,7 @@ using `pub_lock_package`. Both fetch and lay out the archive with rules_dart's
 for it.
 """
 
+load("@rules_dart//dart:utils.bzl", "METADATA_TARGET_NAME")
 load("@rules_dart//dart/pub:pub_graph.bzl", "write_pubspec_dependencies")
 load("@rules_dart//dart/pub:pub_lock_package.bzl", "fetch_pub_archive", "fetch_pub_git", "fetch_pub_path", "find_pub_license_file")
 load("@rules_dart//dart/pub:pubspec.bzl", "read_pubspec")
@@ -60,7 +61,7 @@ load("//flutter/private:cmake_link_libraries.bzl", "parse_cmake_link_libraries")
 load("//flutter/private:flutter_pub_index.bzl", "MEMBER_DART", "MEMBER_FILE", "MEMBER_FLUTTER", "MEMBER_OVERLAY", "library_label", "owner_prefix", "read_index", "sibling_path", "source_repo")
 load("//flutter/private:flutter_pubspec.bzl", "flutter_assets_block", "flutter_licenses_block", "flutter_manifest_errors", "flutter_plugin_block")
 load("//flutter/private:framework_source.bzl", "check_dependency_constraints", "link_framework_package", "unset_message", "write_unset_stub")
-load("//flutter/private:package_metadata_content.bzl", "PACKAGE_METADATA_LOAD", "make_package_metadata_content", "package_metadata_target")
+load("//flutter/private:package_metadata_content.bzl", "PACKAGE_METADATA_LOAD", "make_package_metadata_content")
 load("//flutter/private:pinned.bzl", "pinned")
 load("//flutter/private:swiftpm_manifest.bzl", "find_manifest_computations", "find_swiftpm_build_settings", "find_unsupported_swiftpm_dependencies")
 load(
@@ -1117,7 +1118,7 @@ pub_package_member(
         name = name,
         resources = _RESOURCES_GLOB_BLOCK,
         metadata = _member_metadata(name, language_version, code_assets, unreplaced_hook, version, license_file, link_hook),
-        metadata_target = package_metadata_target(name),
+        metadata_target = METADATA_TARGET_NAME,
     )
 
 def make_flutter_member_build_content(
@@ -1368,7 +1369,7 @@ flutter_pub_member(
 """.format(
         name = name,
         metadata = _member_metadata(name, language_version, code_assets, unreplaced_hook, version, license_file, link_hook),
-        metadata_target = package_metadata_target(name),
+        metadata_target = METADATA_TARGET_NAME,
         resources = _RESOURCES_GLOB_BLOCK,
         plugin_platforms_json_attr = "    plugin_platforms_json = {},\n".format(repr(plugin_platforms_json)) if plugin_platforms_json else "",
         extra_loads = "\n".join(extra_loads),

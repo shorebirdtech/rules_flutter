@@ -9,12 +9,10 @@ attribute, in each `-c` that builds Flutter's release mode.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("//flutter:providers.bzl", "FlutterApplicationInfo")
 load("//flutter/private:flutter_aot_snapshot.bzl", "flutter_aot_snapshot")
 load("//flutter/private:flutter_application.bzl", "flutter_application")
 
-_PACKAGE = "aot_options_fixture"
 _MAIN = "lib/language_version_main.dart"
 
 # A flag gen_snapshot never defined: analysis does not run it, and the test
@@ -138,14 +136,9 @@ def _instantiate(name, rules, fixtures, option):
     for rule_name in rules:
         for suffix, attrs in fixtures.items():
             fixture = "_%s_%s" % (rule_name, suffix)
-            dart_package_metadata(
-                name = fixture + "_pubspec",
-                package_name = _PACKAGE,
-                tags = ["manual"],
-            )
             _RULES[rule_name](
                 name = fixture,
-                package = ":%s_pubspec" % fixture,
+                package = ":pubspec-metadata",
                 main = _MAIN,
                 tags = ["manual"],
                 **attrs
@@ -227,14 +220,9 @@ def aot_resolve_dwarf_paths_test_suite(name, rules):
     for rule_name in rules:
         for suffix, flag in [("dashes", "--resolve-dwarf-paths"), ("underscores", "--resolve_dwarf_paths")]:
             fixture = "_%s_resolve_dwarf_paths_%s" % (rule_name, suffix)
-            dart_package_metadata(
-                name = fixture + "_pubspec",
-                package_name = _PACKAGE,
-                tags = ["manual"],
-            )
             _RULES[rule_name](
                 name = fixture,
-                package = ":%s_pubspec" % fixture,
+                package = ":pubspec-metadata",
                 main = _MAIN,
                 extra_gen_snapshot_options = [flag],
                 tags = ["manual"],

@@ -2,7 +2,7 @@ load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_flutter//flutter:defs.bzl", "flutter_library")
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "ui_kit",
 )
 
@@ -12,7 +12,7 @@ flutter_library(
     name = "ui_kit",
     srcs = ["lib/ui_kit.dart"],
     assets = glob(["assets/**"]),
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     visibility = ["//nested_assets:__pkg__"],
     deps = ["@deps//:flutter"],
 )

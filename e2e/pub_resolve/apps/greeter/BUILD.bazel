@@ -15,14 +15,14 @@ _DEPS = [
 ]
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "greeter",
 )
 
 flutter_web_app(
     name = "greeter",
     app_name = "Greeter",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = _DEPS,
 )
 
@@ -32,7 +32,7 @@ flutter_test(
     name = "greeter_test",
     srcs = ["lib/main.dart"],
     main = "test/greeter_test.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = _DEPS + ["@deps//:flutter_test"],
 )
 
@@ -43,7 +43,7 @@ flutter_web_integration_test(
     name = "render_test",
     src = "integration_test/render_test.dart",
     srcs = glob(["lib/**/*.dart"]),
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     target_compatible_with = select({
         "@platforms//os:linux": [],
         "@platforms//os:macos": [],

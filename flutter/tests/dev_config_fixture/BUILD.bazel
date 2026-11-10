@@ -9,13 +9,13 @@ source_tree(
 )
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "prebuilt",
 )
 
 dart_library(
     name = "prebuilt",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     srcs_dir = ":tree",
     tags = ["manual"],
     visibility = ["//flutter/tests:__pkg__"],

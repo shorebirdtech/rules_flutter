@@ -54,6 +54,7 @@ applies is a loud failure, where a rewrite would quietly drift.
    another dead-code cut, not a toolchain workaround — see the seventh patch.
 """
 
+load("@rules_dart//dart:utils.bzl", "METADATA_TARGET_NAME")
 load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url")
 load("//flutter/private:flutter_pub_index.bzl", "library_label", "read_index")
 load("//flutter/private:framework_source.bzl", "framework_root", "read_framework", "unset_message", "write_unset_stub")
@@ -138,7 +139,7 @@ def _flutter_gen_l10n_repo_impl(repository_ctx):
 load("@rules_dart//dart:defs.bzl", "dart_library", "dart_package_metadata")
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "{metadata}",
     package_name = "flutter_gen_l10n",
 )
 
@@ -150,14 +151,14 @@ dart_library(
     srcs = [
 {srcs}
     ],
-    package = ":pubspec",
+    package = ":{metadata}",
     deps = [
 {deps}
     ],
     web_compiler_independent = True,
     visibility = ["//visibility:public"],
 )
-""".format(version = version, srcs = srcs, deps = deps))
+""".format(version = version, srcs = srcs, deps = deps, metadata = METADATA_TARGET_NAME))
 
 flutter_gen_l10n_repo = repository_rule(
     implementation = _flutter_gen_l10n_repo_impl,

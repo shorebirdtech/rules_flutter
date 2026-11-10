@@ -12,8 +12,8 @@ at the highest version any lock records, so `@hub_a//:clock` and
 `@hub_b//:clock` are the same library at 1.1.3: `hub_a` is behind, and as both
 locks are the root's, the build warns that its request was raised.
 `//:shared_libraries_test` proves they are one repository (two repositories at
-one version would build too), and `//:upgraded_bin` and `//:agreeing_bin` build
-over both. That a raised root lock fails under
+one version would build too), and `//upgraded:upgraded_bin` and
+`//agreeing:agreeing_bin` build over both. That a raised root lock fails under
 `flutter_pub.settings(check_direct_dependencies = "error")` cannot be a target
 of a workspace whose hubs would all fail with it;
 `tools/dev_tool/test/e2e/pub_versions_e2e_test.dart` holds that case.

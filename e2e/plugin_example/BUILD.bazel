@@ -43,14 +43,14 @@ load(":ignored_package_test.bzl", "ignored_package_test")
 exports_files(["pubspec.lock"])
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "plugin_example",
 )
 
 flutter_application(
     name = "plugin_app",
     main = "lib/main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "//greeting_plugin",
         "@deps//:audio_session",
@@ -71,7 +71,7 @@ flutter_application(
 flutter_application(
     name = "integration_app",
     main = "lib/main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "//greeting_plugin",
         "@deps//:audio_session",
@@ -92,7 +92,7 @@ flutter_application(
 flutter_application(
     name = "package_info_only_app",
     main = "lib/package_info_only.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:flutter",
         "@deps//:package_info_plus",
@@ -271,7 +271,7 @@ ios_application(
 flutter_web_bundle(
     name = "plugin_web",
     main = "lib/main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     title = "Plugin Example",
     deps = [
         "//greeting_plugin",
@@ -758,7 +758,7 @@ dart_analysis_config(
 flutter_library(
     name = "app_lib",
     srcs = glob(["lib/**/*.dart"]),
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "//greeting_plugin",
         "@deps//:audio_session",
@@ -792,7 +792,7 @@ flutter_library(
 flutter_application(
     name = "location_app",
     main = "lib/location_main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:flutter",
         "@deps//:geolocator_apple",

@@ -1,0 +1,24 @@
+load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_library", "dart_package_metadata")
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "agreeing",
+)
+
+# `path` is 1.9.1 in both hubs, down to the same sha256.
+dart_library(
+    name = "agreeing",
+    srcs = ["lib/agreeing.dart"],
+    package = ":pubspec-metadata",
+    deps = [
+        "@hub_a//:path",
+        "@hub_b//:path",
+    ],
+)
+
+dart_binary(
+    name = "agreeing_bin",
+    main = "bin/main.dart",
+    visibility = ["//:__pkg__"],
+    deps = [":agreeing"],
+)

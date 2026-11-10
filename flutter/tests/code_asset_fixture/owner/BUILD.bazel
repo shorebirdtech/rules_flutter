@@ -1,9 +1,9 @@
 """The packages that own the fixture's code assets: one package built by a
 Flutter package rule and by a Dart package rule that knows nothing of Flutter,
-the bare control, a rule that forwards a package under an attribute of its own
-name, and one that makes its asset with no target of its own. Each reaches its
-own application only, so sharing a root is not a conflict. `owner_twin/` is the
-first package again, its asset bare."""
+a rule that forwards a package under an attribute of its own name, and one that
+makes its asset with no target of its own. Each reaches its own application
+only, so sharing a root is not a conflict. `bare_owner/` is the bare control,
+and `owner_twin/` the first package again, its asset bare."""
 
 load("@rules_dart//dart:defs.bzl", "dart_library", "dart_package_metadata")
 load("//flutter:defs.bzl", "flutter_plugin")
@@ -16,7 +16,7 @@ package(default_visibility = [
 ])
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "code_asset_owner",
     code_assets = ["//flutter/tests/code_asset_fixture:wrapped"],
 )
@@ -24,13 +24,13 @@ dart_package_metadata(
 dart_library(
     name = "dart_owner",
     srcs = ["lib/owner.dart"],
-    package = ":pubspec",
+    package = ":pubspec-metadata",
 )
 
 flutter_plugin(
     name = "plugin_owner",
     srcs = ["lib/owner.dart"],
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     platforms = [
         "android",
         "ios",
@@ -38,18 +38,6 @@ flutter_plugin(
         "macos",
         "windows",
     ],
-)
-
-dart_package_metadata(
-    name = "bare_owner_pubspec",
-    package_name = "bare_owner",
-    code_assets = ["//flutter/tests/code_asset_fixture:bare_code_asset"],
-)
-
-dart_library(
-    name = "bare_owner",
-    srcs = ["lib/owner.dart"],
-    package = ":bare_owner_pubspec",
 )
 
 forwarding_package(

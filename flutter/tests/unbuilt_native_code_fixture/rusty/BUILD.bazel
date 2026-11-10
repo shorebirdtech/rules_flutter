@@ -19,7 +19,7 @@ flutter_unbuilt_plugin_library(
 )
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "rusty",
 )
 
@@ -28,6 +28,6 @@ flutter_plugin(
     srcs = ["lib/rusty.dart"],
     apple_libs = [":rusty_apple_macos"],
     linux_libs = [":rusty_linux"],
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     tags = ["manual"],
 )

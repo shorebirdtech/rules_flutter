@@ -1,4 +1,5 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load(":android_arm_test.bzl", "android_arm_test_suite")
 load(":android_bundle_test.bzl", "android_bundle_test_suite")
 load(":android_listenablefuture_test.bzl", "android_listenablefuture_test_suite")
@@ -70,6 +71,7 @@ load(":swift_packages_test.bzl", "swift_packages_test_suite")
 load(":swiftpm_app_settings_test.bzl", "swiftpm_app_settings_test_suite")
 load(":swiftpm_manifest_test.bzl", "swiftpm_manifest_test_suite")
 load(":tester_binary_test.bzl", "tester_binary_test_suite")
+load(":tests_package.bzl", "TESTS_LANGUAGE_VERSION", "TESTS_PACKAGE")
 load(":toolchain_test.bzl", "toolchain_test_suite")
 load(":toolchain_version_test.bzl", "toolchain_version_test_suite")
 load(":toolchains_repo_test.bzl", "toolchains_repo_test_suite")
@@ -82,6 +84,14 @@ load(":web_compiler_test.bzl", "web_compiler_test_suite")
 load(":web_test.bzl", "web_test_suite")
 load(":widget_creation_flag_test.bzl", "widget_creation_flag_test_suite")
 load(":windows_resources_test.bzl", "windows_version_test_suite")
+
+# The package every fixture instantiated here is part of; see tests_package.bzl.
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = TESTS_PACKAGE,
+    language_version = TESTS_LANGUAGE_VERSION,
+    tags = ["manual"],
+)
 
 versions_test_suite(name = "versions_test")
 

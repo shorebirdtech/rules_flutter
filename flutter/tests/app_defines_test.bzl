@@ -7,7 +7,6 @@ frontend_server, which does not split, and this pins that.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("//flutter/private:flutter_application.bzl", "flutter_application")
 
 def _comma_test_impl(ctx):
@@ -36,14 +35,9 @@ def app_defines_test_suite(name):
     Args:
         name: The test suite name.
     """
-    dart_package_metadata(
-        name = "_defines_comma_app_pubspec",
-        package_name = "defines_fixture",
-        tags = ["manual"],
-    )
     flutter_application(
         name = "_defines_comma_app",
-        package = ":_defines_comma_app_pubspec",
+        package = ":pubspec-metadata",
         defines = ["ATTR_COMMA=a,b"],
         main = "web_fixture_main.dart",
         tags = ["manual"],

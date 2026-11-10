@@ -5,7 +5,7 @@ load("@rules_flutter//flutter:macos.bzl", "flutter_macos_app")
 exports_files(["pubspec.lock"])
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "link_hooks",
 )
 
@@ -16,7 +16,7 @@ flutter_application(
     name = "app",
     link_hook_assets = ["package:glyphs/glyphs/index.json"],
     main = "lib/main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "//glyphs",
         "@deps//:flutter",
@@ -39,7 +39,7 @@ flutter_application(
     name = "dynamic_app",
     link_hook_assets = ["package:glyphs/glyphs/index.json"],
     main = "lib/dynamic_main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     tags = ["manual"],
     deps = [
         "//glyphs",

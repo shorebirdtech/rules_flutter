@@ -2,7 +2,7 @@ load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_flutter//flutter:defs.bzl", "flutter_library")
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "int64_ids_select",
 )
 
@@ -18,7 +18,7 @@ dart_package_metadata(
 flutter_library(
     name = "ids",
     srcs = [],
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     visibility = ["//int64:__pkg__"],
     deps = select({
         "@rules_dart//dart/constraints:js": ["//int64/ids_js:ids"],

@@ -2,7 +2,7 @@ load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_flutter//flutter:defs.bzl", "flutter_library", "flutter_test")
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "asset_keys",
 )
 
@@ -14,7 +14,7 @@ flutter_library(
         "assets/k.txt",
         "assets/p.txt",
     ],
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     visibility = ["//visibility:public"],
     deps = ["@deps//:flutter"],
 )
@@ -25,7 +25,7 @@ flutter_library(
 flutter_test(
     name = "own_asset_keys_test",
     main = "test/own_asset_keys_test.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         ":asset_keys",
         "@deps//:flutter",

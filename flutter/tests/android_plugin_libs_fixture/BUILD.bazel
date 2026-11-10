@@ -14,16 +14,19 @@ load("//flutter/private:flutter_android_plugin_libs.bzl", "flutter_android_maven
 
 package(default_visibility = ["//flutter/tests:__subpackages__"])
 
+# The applications are four programs of one package, which differ in the
+# plugin each uses.
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "android_plugin_libs_fixture",
+)
+
 [
     [
-        dart_package_metadata(
-            name = "app_uses_%s_pubspec" % n,
-            package_name = "app_uses_" + n,
-        ),
         flutter_application(
             name = "app_uses_" + n,
             main = "main.dart",
-            package = ":app_uses_%s_pubspec" % n,
+            package = ":pubspec-metadata",
             tags = ["manual"],
             deps = ["//flutter/tests/android_plugin_libs_fixture/%s:plugin_%s" % (n, n)],
         ),
@@ -54,15 +57,10 @@ package(default_visibility = ["//flutter/tests:__subpackages__"])
     ]
 ]
 
-dart_package_metadata(
-    name = "app_uses_native_pubspec",
-    package_name = "app_uses_native",
-)
-
 flutter_application(
     name = "app_uses_native",
     main = "main.dart",
-    package = ":app_uses_native_pubspec",
+    package = ":pubspec-metadata",
     tags = ["manual"],
     deps = ["//flutter/tests/android_plugin_libs_fixture/native:plugin_native"],
 )

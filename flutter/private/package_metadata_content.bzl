@@ -1,21 +1,9 @@
 """The `dart_package_metadata` a generated BUILD file declares its package with."""
 
+load("@rules_dart//dart:utils.bzl", "METADATA_TARGET_NAME")
+
 # What a generated BUILD file loads the rule from.
 PACKAGE_METADATA_LOAD = 'load("@rules_dart//dart:defs.bzl", "dart_package_metadata")\n'
-
-def package_metadata_target(package_name):
-    """The name of the `dart_package_metadata` a generated package declares.
-
-    `pubspec`, as rules_dart's pub spokes name it, except for the package
-    named `pubspec`, whose library has that name.
-
-    Args:
-        package_name: The package's name.
-
-    Returns:
-        The target name.
-    """
-    return "pubspec_metadata" if package_name == "pubspec" else "pubspec"
 
 def _string_line(attr, value):
     return '    {} = "{}",\n'.format(attr, value) if value else ""
@@ -55,7 +43,7 @@ dart_package_metadata(
 {language_version}{version}{assets}{build_hook}{link_hook}{license}    visibility = ["{visibility}"],
 )
 """.format(
-        target = package_metadata_target(package_name),
+        target = METADATA_TARGET_NAME,
         name = package_name,
         language_version = _string_line("language_version", language_version),
         version = _string_line("version", version),

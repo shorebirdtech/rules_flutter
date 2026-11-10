@@ -7,13 +7,13 @@ variant_source(
 )
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "outline_a",
 )
 
 dart_library(
     name = "a",
     srcs = [":a_src"],
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     visibility = ["//flutter/tests/outline_fixture:__subpackages__"],
 )

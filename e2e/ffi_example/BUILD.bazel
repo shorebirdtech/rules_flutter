@@ -283,7 +283,7 @@ c_hot_patch(
 ]
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "ffi_example",
 )
 
@@ -294,7 +294,7 @@ flutter_application(
         ":count_b_native",
     ],
     main = "lib/main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "//add_plugin",
         "//count_a",
@@ -616,7 +616,7 @@ dart_analysis_config(
 flutter_library(
     name = "app_lib",
     srcs = glob(["lib/**/*.dart"]),
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "//add_plugin",
         "//count_a",

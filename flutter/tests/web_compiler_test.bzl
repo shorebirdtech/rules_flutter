@@ -22,7 +22,6 @@ Built per compiler, which makes the check above mean something:
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_dart//dart:providers.bzl", "DartInfo")
 load("@rules_dart//dart:utils.bzl", "WEB_PLATFORM_SETTINGS", "web_platform_settings")
 load("//flutter:web.bzl", "flutter_web_bundle")
@@ -149,14 +148,9 @@ def web_compiler_test_suite(name):
         )
         tests.append(":" + test)
 
-    dart_package_metadata(
-        name = name + "_wrong_platform_bundle" + "_pubspec",
-        package_name = "wrong_platform_fixture",
-        tags = ["manual"],
-    )
     flutter_web_bundle(
         name = name + "_wrong_platform_bundle",
-        package = ":" + name + "_wrong_platform_bundle" + "_pubspec",
+        package = ":pubspec-metadata",
         main = "lib/language_version_main.dart",
         wasm_platform = "@rules_dart//dart/platforms:js",
         tags = ["manual"],

@@ -4,7 +4,7 @@ load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("//flutter:defs.bzl", "flutter_test")
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "suite",
 )
 
@@ -18,7 +18,7 @@ flutter_test(
     size = "large",
     env = {"A": "b"},
     main = "main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     shard_count = 2,
     tags = [
         "manual",

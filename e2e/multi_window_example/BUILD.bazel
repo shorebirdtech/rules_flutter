@@ -33,7 +33,7 @@ exports_files(["pubspec.lock"])
 # =============================================================================
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "multi_window_example",
 )
 
@@ -43,7 +43,7 @@ flutter_application(
     name = "app_flutter",
     main = "lib/main.dart",
     minimum_os_version = "13.0",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:flutter",
         "@rules_flutter//flutter:material_icons",
@@ -248,7 +248,7 @@ dart_analysis_config(
 flutter_library(
     name = "app_lib",
     srcs = glob(["lib/**/*.dart"]),
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:flutter",
         "@rules_flutter//flutter:material_icons",

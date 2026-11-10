@@ -27,7 +27,7 @@ load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_flutter//flutter:defs.bzl", "flutter_plugin")
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "{PKG}",
     language_version = "{LANGUAGE_VERSION}",
     {LICENSE}
@@ -48,7 +48,7 @@ flutter_plugin(
         "@platforms//os:android": [":dartjni"],
         "//conditions:default": [],
     }),
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     plugin_platforms_json = "{\"android\":{\"ffiPlugin\":true,\"package\":\"com.github.dart_lang.jni\",\"pluginClass\":\"JniPlugin\"},\"linux\":{\"ffiPlugin\":true},\"windows\":{\"ffiPlugin\":true}}",
     visibility = ["//visibility:public"],
     deps = [

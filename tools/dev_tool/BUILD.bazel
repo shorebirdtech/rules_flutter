@@ -25,14 +25,14 @@ _LIB_DEPS = [
 ]
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "flutter_bazel_dev_tool",
 )
 
 dart_library(
     name = "lib",
     srcs = glob(["lib/**/*.dart"]),
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     visibility = ["//visibility:private"],
     deps = _LIB_DEPS,
 )

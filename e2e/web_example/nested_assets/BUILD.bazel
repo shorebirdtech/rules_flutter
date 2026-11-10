@@ -3,7 +3,7 @@ load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "nested_assets",
     visibility = ["//visibility:public"],
 )
@@ -19,7 +19,7 @@ flutter_web_app(
     app_name = "Nested assets",
     assets = glob(["assets/**"]),
     main = "lib/main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = [
         "//nested_assets/lib/widgets",
         "//nested_assets/ui_kit",

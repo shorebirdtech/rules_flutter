@@ -1,0 +1,14 @@
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
+
+# A code asset is owned by the package whose id namespaces it, and a package
+# declaring someone else's must be refused. The rule is rules_dart's, checked
+# where the asset is declared: the package's `dart_package_metadata`, which
+# every target of the package, Flutter's or Dart's, names. Left `manual` so only
+# the analysistest that wraps it builds it.
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "not_asset_fixture",
+    code_assets = ["//flutter/tests/dart_asset_fixture:code_asset"],
+    tags = ["manual"],
+    visibility = ["//flutter/tests:__pkg__"],
+)

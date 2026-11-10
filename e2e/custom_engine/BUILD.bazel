@@ -12,14 +12,14 @@ load("@rules_flutter//tools/e2e_testing:apple_release_build.bzl", "apple_release
 exports_files(["pubspec.lock"])
 
 dart_package_metadata(
-    name = "pubspec",
+    name = "pubspec-metadata",
     package_name = "custom_engine",
 )
 
 flutter_application(
     name = "app_flutter",
     main = "lib/main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = ["@deps//:flutter"],
 )
 
@@ -40,7 +40,7 @@ flutter_application(
     name = "ios_flutter",
     main = "lib/main.dart",
     minimum_os_version = IOS_MINIMUM_OS_VERSION,
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = ["@deps//:flutter"],
 )
 
@@ -75,7 +75,7 @@ apple_release_build(
 flutter_application(
     name = "android_flutter",
     main = "lib/main.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     deps = ["@deps//:flutter"],
 )
 
@@ -109,7 +109,7 @@ flutter_windows_app(
 flutter_web_app(
     name = "web_app",
     app_name = "Custom Engine",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     tags = ["manual"],
     deps = ["@deps//:flutter"],
 )
@@ -118,7 +118,7 @@ flutter_web_integration_test(
     name = "web_render_test",
     src = "integration_test/render_test.dart",
     srcs = ["lib/main.dart"],
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     tags = ["manual"],
     deps = [
         "@deps//:flutter",
@@ -133,7 +133,7 @@ flutter_test(
     name = "widget_test",
     srcs = ["lib/main.dart"],
     main = "test/widget_test.dart",
-    package = ":pubspec",
+    package = ":pubspec-metadata",
     tags = ["manual"],
     deps = [
         "@deps//:flutter",
