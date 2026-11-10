@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter_bazel_dev_tool/command_report.dart';
 import 'package:flutter_bazel_dev_tool/hot_reload/app_instance.dart';
 import 'package:flutter_bazel_dev_tool/hot_reload/applied_versions.dart';
 import 'package:flutter_bazel_dev_tool/hot_reload/compiler.dart';
@@ -9,6 +10,7 @@ import 'package:flutter_bazel_dev_tool/hot_reload/source_uri_resolver.dart';
 import 'package:flutter_bazel_dev_tool/hot_reload/reload_orchestrator.dart';
 import 'package:flutter_bazel_dev_tool/hot_reload/session_reloader.dart';
 import 'package:flutter_bazel_dev_tool/hot_reload/workspace.dart';
+import 'package:flutter_bazel_dev_tool/outcome_renderer.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
@@ -572,6 +574,35 @@ void main() {
         // further changes, so next reload is a no-op.
         final second = await orchestrator.reload(targets: [app]);
         expect(second, isA<ReloadNoChange>());
+      },
+    );
+
+    test(
+      'a restart after a reload that delivered the edit is never empty',
+      () async {
+        // The reload already gave the app every file disk has, so a per-file
+        // comparison finds nothing new. The restart still compiled the whole
+        // program and re-ran `main()` on it, losing the state a reload kept.
+        writeFile('main.dart', 'v1');
+        seedApplied();
+        final orchestrator = makeOrchestrator();
+        writeFile('main.dart', 'v2 longer');
+        expect(
+          await orchestrator.reload(targets: [app]),
+          isA<ReloadApplied>().having((o) => o.isEmpty, 'isEmpty', isFalse),
+        );
+
+        final restart = await orchestrator.restart(targets: [app]);
+        expect(
+          restart,
+          isA<ReloadApplied>().having((o) => o.isEmpty, 'isEmpty', isFalse),
+        );
+        expect(
+          toWire(
+            CommandReport(verb: 'Restart', outcome: restart),
+          )['runningCode'],
+          'updated',
+        );
       },
     );
 

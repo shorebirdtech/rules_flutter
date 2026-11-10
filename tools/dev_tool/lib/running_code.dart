@@ -21,20 +21,21 @@ enum RunningCode {
   ///
   /// Three shapes reach it. Nothing was ever sent — a refusal, a pre-compile
   /// rebuild that broke, a compile that produced no delta. A delivery was
-  /// demonstrably refused before it took effect (`ApplyFailed`). Or a delivery
-  /// completed and carried nothing new: an empty delta, where every file the
-  /// compiler was asked for was byte-identical to what the app already had.
+  /// demonstrably refused before it took effect (`ApplyFailed`). Or a hot
+  /// reload completed and carried nothing new: an empty delta, where every file
+  /// the compiler was asked for was byte-identical to what the app already had.
   ///
-  /// That last one reaches an app, and a **restart** with an empty delta reaches
-  /// it hard — `runInView` re-runs `main()`, so the state is wiped and the
-  /// screen can change while the code does not. It is still this value, because
-  /// the question is what code is loaded and nothing else. This does not mean
-  /// "nothing happened", and no consumer may read it that way: the sentence it
-  /// gates is about the program, not about what is on screen.
+  /// A restart that completed is never this value, whatever it sent — see
+  /// [updated].
   unchanged,
 
   /// The VM took the code. It may be unhappy about it — see `AppliedThenThrew`
   /// — but it is running it.
+  ///
+  /// Every completed restart lands here, even one whose files all match what
+  /// the last reload sent. It loaded the whole program into a new isolate and
+  /// ran `main()` on it, so initializers a reload never re-runs ran again and
+  /// the state is gone: the app is running a program it was not running before.
   updated,
 
   /// Nobody said, and nothing here may guess. A device that never answered

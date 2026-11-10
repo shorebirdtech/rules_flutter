@@ -37,11 +37,16 @@ sealed class ReloadOutcome {
 /// The compile and apply both succeeded.
 ///
 /// [filesRecompiled] is the union, across the targets that needed work, of
-/// what each was sent. [isEmpty] is true when every one of those files was
+/// what each was sent. [isEmpty] is true when a reload's files were all
 /// byte-identical (per `Version`) to what the target already had — i.e. the
 /// caller declared files that turned out clean. Distinguishable from
 /// [ReloadNoChange], which is returned only when no target had anything to
 /// recompile in the first place.
+///
+/// A restart is never empty. It compiles the whole program and runs it in a
+/// fresh isolate, as `flutter run`'s does, so it changes what is running even
+/// when every file matches what the last reload sent: static and top-level
+/// initializers run again, and the state a reload kept is gone.
 class ReloadApplied extends ReloadOutcome {
   final Set<String> filesRecompiled;
   final bool isEmpty;
@@ -229,10 +234,15 @@ class ReloadOrchestrator {
       return const ReloadNoChange();
     }
 
-    // Judged before anything is applied, against the still-old records.
-    final isEmpty = working.every(
-      (u) => work[u]!.every((f) => snap.versionOf(f) == u.applied.versionOf(f)),
-    );
+    // Judged before anything is applied, against the still-old records. Only
+    // a reload can be empty — see [ReloadApplied].
+    final isEmpty =
+        !isRestart &&
+        working.every(
+          (u) => work[u]!.every(
+            (f) => snap.versionOf(f) == u.applied.versionOf(f),
+          ),
+        );
 
     // Said per phase, not per target: the targets run side by side, and a line
     // each would be an interleaving to untangle.

@@ -226,8 +226,9 @@ Reply fields:
 - `runningCode`: `updated` or `unchanged`, what the app is now running.
 - `message`: one sentence, safe to quote in a report.
 - `filesRecompiled`, `isEmpty`: what was compiled; `isEmpty: true` and
-  "(no changes detected)" mean the tool saw no edit. Check the file was saved
-  and is part of the target.
+  "(no changes detected)" mean a reload saw no edit. Check the file was saved
+  and is part of the target. A restart is never empty: it re-runs the whole
+  program, so it answers `runningCode: updated`.
 - `error`: compile diagnostics when `succeeded` is false.
 - `notShown`: per app, why the new code is not on screen yet (window hidden).
 - `relaunched`, `nativeLibsChanged`, `launch`, `ready`: a restart that replaced
