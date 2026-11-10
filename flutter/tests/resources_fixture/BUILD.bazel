@@ -5,18 +5,18 @@ load("//flutter/tests:dart_resources_test.bzl", "dart_in_resources_fails_test", 
 # A library whose lib/ holds a Dart source, a YAML file, and a shader. The
 # shader is deliberately listed on BOTH channels: `resources` says it is part
 # of the package's lib/ tree (package:-URI addressable, staged wherever the
-# whole package is), `pkg_shaders` says it is compiled and bundled into
+# whole package is), `shaders` says it is compiled and bundled into
 # flutter_assets. The two have different destinations, so a lib/ shader is
 # legitimately both — this fixture pins that coexistence.
 flutter_library(
     name = "resources_library",
     package_name = "resources_fixture",
     srcs = ["lib/fixture.dart"],
-    pkg_shaders = {"lib/glow.frag": "lib/glow.frag"},
     resources = [
         "lib/data.yaml",
         "lib/glow.frag",
     ],
+    shaders = ["lib/glow.frag"],
     # The path-mapping test compiles this library's shader.
     visibility = ["//flutter/tests:__pkg__"],
 )

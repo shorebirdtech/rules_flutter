@@ -4,8 +4,10 @@ load("@rules_flutter//flutter:defs.bzl", "flutter_library", "flutter_test")
 flutter_library(
     name = "asset_keys",
     srcs = ["lib/asset_keys.dart"],
-    assets = ["assets/k.txt"],
-    pkg_assets = {"assets/p.txt": "assets/p.txt"},
+    assets = [
+        "assets/k.txt",
+        "assets/p.txt",
+    ],
     visibility = ["//visibility:public"],
     deps = ["@deps//:flutter"],
 )

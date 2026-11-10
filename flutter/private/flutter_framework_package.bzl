@@ -9,7 +9,8 @@ others (`flutter_test`, `integration_test`, ...) are built from the same source
 tarball by `flutter_pub_package`, as a hosted package is built from its archive.
 The framework cannot be: its shaders (`lib/src/material/shaders/*.frag`) are
 declared in no pubspec (flutter_tools hardcodes them), so they reach the bundle
-through `flutter_library.shaders`, not the pub-asset channel.
+through `flutter_framework_library.framework_shaders`, not the pub-asset
+channel.
 
 Like a pub spoke, this spoke declares the language version the package's own
 `environment.sdk` implies, which is what pub writes for it too. Omitting it is
@@ -29,8 +30,8 @@ _PACKAGE = "flutter"
 def make_flutter_framework_build_content(deps, language_version, license_file = ""):
     """Generate BUILD content for the framework spoke.
 
-    The package uses flutter_library (not dart_library) so that its shader
-    source files are propagated transitively via FlutterInfo.
+    The package is a `flutter_framework_library` (not a dart_library) so
+    that its shader source files are propagated transitively via FlutterInfo.
 
     `lib/` is partitioned into `srcs` + `resources`, the same shape
     rules_dart's pub spokes use: everything under lib/ is addressable as
@@ -38,7 +39,7 @@ def make_flutter_framework_build_content(deps, language_version, license_file = 
     lib/analysis_options.yaml and lib/fix_data/*.yaml), so the non-Dart
     remainder rides `DartInfo.transitive_resources` rather than being
     dropped. The ink_sparkle .frag appears on both channels by design:
-    `shaders` routes it through the impellerc compile into flutter_assets,
+    `framework_shaders` routes it through the impellerc compile into flutter_assets,
     `resources` keeps it a member of the staged package tree.
 
     Args:
@@ -56,9 +57,9 @@ def make_flutter_framework_build_content(deps, language_version, license_file = 
         deps_block = "    deps = [\n{}\n    ],\n".format("\n".join(dep_lines))
 
     return """\
-load("@rules_flutter//flutter:defs.bzl", "flutter_library")
+load("@rules_flutter//flutter/private:flutter_library.bzl", "flutter_framework_library")
 
-flutter_library(
+flutter_framework_library(
     name = "{name}",
     srcs = glob(["lib/**/*.dart"]),
     resources = glob(
@@ -66,7 +67,7 @@ flutter_library(
         exclude = ["lib/**/*.dart"],
         allow_empty = True,
     ),
-    shaders = glob(["lib/src/material/shaders/*.frag"]),
+    framework_shaders = glob(["lib/src/material/shaders/*.frag"]),
 {deps}    package_name = "{name}",
     language_version = "{language_version}",
     web_compiler_independent = True,

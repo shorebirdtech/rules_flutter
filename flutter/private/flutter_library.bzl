@@ -78,32 +78,6 @@ def asset_key(entry, path, program_root):
         return path
     return "packages/{}/{}".format(entry.package_name, path)
 
-def own_asset_contributions(ctx, package_name, package_root):
-    """The `pub_assets` entries for the `assets` of a library or plugin.
-
-    Each is the library's package's, at its path from the package root; the
-    program that bundles it decides its key (see `asset_key`).
-
-    Args:
-        ctx: Rule context, with an `assets` attr.
-        package_name: The Dart package name of the library.
-        package_root: Its package root, from `derive_package_root`.
-
-    Returns:
-        List of `pub_assets` structs.
-    """
-    return [
-        struct(
-            package_name = package_name,
-            package_root = package_root,
-            asset_path = path_in_package(ctx.label, package_root, f),
-            file = f,
-            platforms = (),
-            flavors = (),
-        )
-        for f in ctx.files.assets
-    ]
-
 LICENSE_FILE_ATTR = attr.label(
     doc = "The package's licence: the `NOTICES` or `LICENSE` file at its root, as `flutter build` reads it. " +
           "An application that depends on the package lists it in its `NOTICES`, under the package's name.",
@@ -130,47 +104,28 @@ def own_additional_licenses(ctx, package_name):
         return []
     return [struct(package_name = package_name, files = tuple(ctx.files.additional_licenses))]
 
-def build_pub_contributions(package_name, package_root, fonts_json, font_files_dict, pkg_assets_dict, pkg_shaders_dict, shader_includes = [], pkg_asset_platforms = {}, pkg_shader_platforms = {}, pkg_asset_flavors = {}, pkg_shader_flavors = {}):
-    """Build pub_fonts/pub_assets/pub_shaders contribution structs from rule attrs.
+def build_pub_contributions(ctx, package_name, package_root):
+    """The fonts, assets and shaders a library or plugin bundles, as `FlutterInfo` contributions.
 
-    Decodes the JSON-encoded font declarations and walks the file dicts,
-    producing the contribution structs that `build_flutter_providers` accepts
-    as `extra_pub_fonts` / `extra_pub_assets` / `extra_pub_shaders`.
+    Decodes the JSON-encoded font declarations and keys each asset and shader
+    by its path from the package root, producing the contribution structs
+    that `flutter_info` takes as `pub_fonts` / `pub_assets` / `pub_shaders`.
 
     Args:
+        ctx: The rule context of a `flutter_library`, `flutter_plugin` or
+            `flutter_pub_member`. Reads `fonts_json`, `font_files`, `assets`,
+            `shaders`, `shader_includes`, and the platforms and flavors the
+            assets and shaders are restricted to.
         package_name: str — the Dart package the contributions are of.
         package_root: str — that package's root, from `derive_package_root`. A
             program whose own package this is bundles them bare, any other
             under `packages/<package_name>/` (see `asset_key`).
-        fonts_json: str — JSON-encoded list of
-            `{family: str, fonts: [{asset: str, weight: int?, style: str?}]}`.
-            Empty string when the rule declares no fonts.
-        font_files_dict: dict[Target, str] — `ctx.attr.font_files`. Each
-            target must resolve to exactly one File. The string value is the
-            package-relative asset path matching an entry in fonts_json.
-        pkg_assets_dict: dict[Target, str] — `ctx.attr.pkg_assets`. Same
-            shape, for non-font assets.
-        pkg_shaders_dict: dict[Target, str] — `ctx.attr.pkg_shaders`. Same
-            shape, for shaders.
-        shader_includes: list[File] — `ctx.files.shader_includes`, the files
-            this package's shaders may `#include`. Each shader carries them
-            as `includes` to its compile.
-        pkg_asset_platforms: dict[str, list[str]] — `ctx.attr.pkg_asset_platforms`.
-            For the assets of `pkg_assets_dict` that ship on some platforms
-            only, the path and the platforms. An asset not here ships on all.
-        pkg_shader_platforms: dict[str, list[str]] — `ctx.attr.pkg_shader_platforms`,
-            the same for the shaders of `pkg_shaders_dict`.
-        pkg_asset_flavors: dict[str, list[str]] — `ctx.attr.pkg_asset_flavors`.
-            For the assets of `pkg_assets_dict` that ship in some flavors only,
-            the path and the flavors. An asset not here ships in every build.
-        pkg_shader_flavors: dict[str, list[str]] — `ctx.attr.pkg_shader_flavors`,
-            the same for the shaders of `pkg_shaders_dict`.
 
     Returns:
-        Tuple of (extra_pub_fonts, extra_pub_assets, extra_pub_shaders) lists.
+        Tuple of (pub_fonts, pub_assets, pub_shaders) lists.
     """
     path_to_file = {}
-    for target, asset_path in font_files_dict.items():
+    for target, asset_path in ctx.attr.font_files.items():
         files = target.files.to_list()
         if len(files) != 1:
             fail("font_files entry %s must resolve to exactly one File; got %d" % (target.label, len(files)))
@@ -180,8 +135,8 @@ def build_pub_contributions(package_name, package_root, fonts_json, font_files_d
 
     extra_pub_fonts = []
     named_assets = {}
-    if fonts_json:
-        decoded = json.decode(fonts_json)
+    if ctx.attr.fonts_json:
+        decoded = json.decode(ctx.attr.fonts_json)
 
         # Tuples (not lists) inside the struct because depset elements must
         # be fully immutable — mutable fields propagate to the struct's
@@ -192,7 +147,7 @@ def build_pub_contributions(package_name, package_root, fonts_json, font_files_d
             for font in family_entry.get("fonts", []):
                 asset_path = font.get("asset", "")
                 if asset_path not in path_to_file:
-                    fail("fonts_json names font asset \"%s\" but font_files does not provide it. List its file in font_files, even if pkg_assets also has it." % asset_path)
+                    fail("fonts_json names font asset \"%s\" but font_files does not provide it. List its file in font_files, even if `assets` also has it." % asset_path)
                 named_assets[asset_path] = True
                 fonts_list.append(struct(
                     asset_path = asset_path,
@@ -212,34 +167,48 @@ def build_pub_contributions(package_name, package_root, fonts_json, font_files_d
         if asset_path not in named_assets:
             fail("font_files provides font asset \"%s\" but fonts_json does not name it" % asset_path)
 
+    asset_platforms = ctx.attr.pkg_asset_platforms
+    asset_flavors = ctx.attr.pkg_asset_flavors
     extra_pub_assets = []
-    for target, asset_path in pkg_assets_dict.items():
-        files = target.files.to_list()
-        if len(files) != 1:
-            fail("pkg_assets entry %s must resolve to exactly one File; got %d" % (target.label, len(files)))
+    for f in ctx.files.assets:
+        asset_path = path_in_package(ctx.label, package_root, f)
         extra_pub_assets.append(struct(
             package_name = package_name,
             package_root = package_root,
             asset_path = asset_path,
-            file = files[0],
-            platforms = tuple(pkg_asset_platforms.get(asset_path, [])),
-            flavors = tuple(pkg_asset_flavors.get(asset_path, [])),
+            file = f,
+            platforms = tuple(asset_platforms.get(asset_path, [])),
+            flavors = tuple(asset_flavors.get(asset_path, [])),
         ))
 
+    shader_platforms = ctx.attr.pkg_shader_platforms
+    shader_flavors = ctx.attr.pkg_shader_flavors
     extra_pub_shaders = []
-    for target, shader_path in pkg_shaders_dict.items():
-        files = target.files.to_list()
-        if len(files) != 1:
-            fail("pkg_shaders entry %s must resolve to exactly one File; got %d" % (target.label, len(files)))
+    for f in ctx.files.shaders:
+        shader_path = path_in_package(ctx.label, package_root, f)
         extra_pub_shaders.append(struct(
             package_name = package_name,
             package_root = package_root,
             shader_path = shader_path,
-            file = files[0],
-            includes = tuple(shader_includes),
-            platforms = tuple(pkg_shader_platforms.get(shader_path, [])),
-            flavors = tuple(pkg_shader_flavors.get(shader_path, [])),
+            file = f,
+            includes = tuple(ctx.files.shader_includes),
+            platforms = tuple(shader_platforms.get(shader_path, [])),
+            flavors = tuple(shader_flavors.get(shader_path, [])),
         ))
+
+    # A restriction of a path the target does not list would restrict
+    # nothing: a misspelt path would ship everywhere, silently.
+    asset_paths = [entry.asset_path for entry in extra_pub_assets]
+    shader_paths = [entry.shader_path for entry in extra_pub_shaders]
+    for attr_name, restricted, paths, listing in [
+        ("pkg_asset_platforms", asset_platforms, asset_paths, "assets"),
+        ("pkg_asset_flavors", asset_flavors, asset_paths, "assets"),
+        ("pkg_shader_platforms", shader_platforms, shader_paths, "shaders"),
+        ("pkg_shader_flavors", shader_flavors, shader_paths, "shaders"),
+    ]:
+        for path in restricted:
+            if path not in paths:
+                fail("%s: `%s` names %s, which is not the path of any file of its `%s` %s." % (ctx.label, attr_name, repr(path), listing, paths))
 
     return (extra_pub_fonts, extra_pub_assets, extra_pub_shaders)
 
@@ -346,19 +315,19 @@ def aggregate_pub_contributions(deps, target_platform = None, flavor = "", progr
     return (fonts, copies, unlisted_copies)
 
 PKG_SHADER_PLATFORMS_ATTR = attr.string_list_dict(
-    doc = "For a shader of `pkg_shaders` that ships on some platforms only (a `platforms:` entry of `flutter: shaders:`), its package-relative path and the platforms (`android`, `ios`, `linux`, `macos`, `windows`, `web`). A shader not listed here ships on every platform.",
+    doc = "For a shader of `shaders` that ships on some platforms only (a `platforms:` entry of `flutter: shaders:`), its package-relative path and the platforms (`android`, `ios`, `linux`, `macos`, `windows`, `web`). A shader not listed here ships on every platform.",
 )
 
 PKG_SHADER_FLAVORS_ATTR = attr.string_list_dict(
-    doc = "For a shader of `pkg_shaders` that ships in some flavors only (a `flavors:` entry of `flutter: shaders:`), its package-relative path and the flavors. A shader not listed here ships in every build.",
+    doc = "For a shader of `shaders` that ships in some flavors only (a `flavors:` entry of `flutter: shaders:`), its package-relative path and the flavors. A shader not listed here ships in every build.",
 )
 
 PKG_ASSET_FLAVORS_ATTR = attr.string_list_dict(
-    doc = "For an asset of `pkg_assets` that ships in some flavors only (a `flavors:` entry of `flutter: assets:`), its package-relative path and the flavors. An asset not listed here ships in every build.",
+    doc = "For an asset of `assets` that ships in some flavors only (a `flavors:` entry of `flutter: assets:`), its package-relative path and the flavors. An asset not listed here ships in every build.",
 )
 
 PKG_ASSET_PLATFORMS_ATTR = attr.string_list_dict(
-    doc = "For an asset of `pkg_assets` that ships on some platforms only (a `platforms:` entry of `flutter: assets:`), its package-relative path and the platforms (`android`, `ios`, `linux`, `macos`, `windows`, `web`). An asset not listed here ships on every platform.",
+    doc = "For an asset of `assets` that ships on some platforms only (a `platforms:` entry of `flutter: assets:`), its package-relative path and the platforms (`android`, `ios`, `linux`, `macos`, `windows`, `web`). An asset not listed here ships on every platform.",
 )
 
 # Analysis-only: `package:sky_engine`'s `lib/_embedder.yaml` is the only way the
@@ -448,25 +417,11 @@ def _flutter_library_impl(ctx):
     # Every asset, font and shader is of the Dart package in DartInfo, by name
     # and root, so `package:` imports and asset keys cannot disagree. Each
     # program decides from the root whether it is its own package's.
-    extra_pub_fonts, extra_pub_assets, extra_pub_shaders = build_pub_contributions(
-        package_name,
-        package_root,
-        ctx.attr.fonts_json,
-        ctx.attr.font_files,
-        ctx.attr.pkg_assets,
-        ctx.attr.pkg_shaders,
-        ctx.files.shader_includes,
-        ctx.attr.pkg_asset_platforms,
-        ctx.attr.pkg_shader_platforms,
-        ctx.attr.pkg_asset_flavors,
-        ctx.attr.pkg_shader_flavors,
-    )
+    extra_pub_fonts, extra_pub_assets, extra_pub_shaders = build_pub_contributions(ctx, package_name, package_root)
 
     # `resources` names the non-Dart remainder of `lib/`; a Dart source there
     # is a mis-filed `srcs` entry, and identical paths with identical
     # extensions would otherwise collide silently. Mirrors `dart_library`.
-    extra_pub_assets.extend(own_asset_contributions(ctx, package_name, package_root))
-
     for f in ctx.files.resources:
         if f.extension == "dart":
             fail(
@@ -484,7 +439,7 @@ def _flutter_library_impl(ctx):
     # says a file is part of the package's `lib/` tree — addressable as
     # `package:<name>/<path>`, staged wherever the whole package is staged
     # (the analyzer's project tree, `dart_test`/`dart_binary` runfiles).
-    # `pkg_assets`/`pkg_shaders`/`font_files` say a file is transformed and
+    # `assets`/`shaders`/`font_files` say a file is transformed and
     # bundled into flutter_assets. A shader under `lib/` is legitimately both.
     #
     # Code assets go on the package record, which is what makes them propagate
@@ -510,7 +465,7 @@ def _flutter_library_impl(ctx):
         flutter_analyzable_info(ctx, package),
         flutter_info(
             deps = ctx.attr.deps,
-            shader_srcs = ctx.files.shaders,
+            shader_srcs = getattr(ctx.files, "framework_shaders", []),
             pub_fonts = extra_pub_fonts,
             pub_assets = extra_pub_assets,
             pub_shaders = extra_pub_shaders,
@@ -526,93 +481,99 @@ def _flutter_library_impl(ctx):
         ),
     ]
 
+_LIBRARY_ATTRS = {
+    "srcs": attr.label_list(
+        doc = "Dart source files for this library.",
+        allow_files = [".dart"],
+        mandatory = True,
+    ),
+    "deps": attr.label_list(
+        doc = "Other `dart_library` or `flutter_library` targets this library depends on.",
+        providers = [DartInfo],
+    ),
+    "resources": attr.label_list(
+        doc = "Non-Dart files this package ships inside `lib/` — part of its published surface, but never compiled. Anything under `lib/` is addressable as `package:<name>/<path>` whatever its extension, so these are members of the package: they ride `DartInfo.transitive_resources` and are staged wherever the whole package is staged (the analyzer's project tree, `dart_test`/`dart_binary` runfiles), mirroring `dart_library`. Orthogonal to `assets`/`shaders`/`font_files`, which name flutter_assets bundle contributions — a `lib/` shader is legitimately both. `.dart` files belong in `srcs`.",
+        allow_files = True,
+    ),
+    "assets": attr.label_list(
+        doc = "Flutter asset files (images, fonts, etc.) declared in pubspec.yaml: any file of this target's Dart package. The path of each is its path from the package root (the directory above `lib/`), as the pubspec lists it. A program of another package bundles it at `packages/<package_name>/<path>`; a program of this package (its own `flutter_test`, or the application whose code this is) bundles it at `<path>`, as `flutter build` keys what a pubspec lists.",
+        allow_files = True,
+    ),
+    "shaders": attr.label_list(
+        doc = "The package's fragment shaders, mirroring `flutter: shaders:` in pubspec.yaml: any file of this target's Dart package, compiled with impellerc. The path of each is its path from the package root, as the pubspec lists it. A program of another package bundles it at `packages/<package_name>/<path>`; a program of this package (its own `flutter_test`, or the application whose code this is) bundles it at `<path>`, as `flutter build` keys them and where `FragmentProgram.fromAsset` looks.",
+        allow_files = True,
+    ),
+    "package_name": attr.string(
+        doc = "The Dart package name. If omitted, defaults to the last component of the Bazel package path.",
+    ),
+    "code_assets": attr.label_list(
+        doc = "`dart_code_asset` targets standing in for this package's " +
+              "`hook/build.dart` output. Declared on the owning package " +
+              "rather than on the consuming application so they propagate " +
+              "the way pub's own do — depending on the package is enough.",
+        providers = [DartCodeAssetInfo],
+    ),
+    "unreplaced_hook": attr.string(
+        doc = "Path of a build hook this package ships that nothing " +
+              "replaces, or empty. Recorded at repo generation; the " +
+              "application that depends on the package fails on it.",
+    ),
+    "version": attr.string(
+        doc = "The package's own version, as resolved by pub (e.g. `2.2.0`). " +
+              "Set automatically by the generated pub spokes; leave it empty on " +
+              "hand-written targets, which have no resolved version to state. " +
+              "Mirrors `dart_library`'s attribute, and has its one use: when a " +
+              "single package name arrives from two hubs, two records stating " +
+              "different versions fail the build instead of the first one " +
+              "silently standing in for the second. An empty version never " +
+              "conflicts.",
+    ),
+    "link_hook": LINK_HOOK_ATTR,
+    "language_version": attr.string(
+        doc = "Dart language version (`<major>.<minor>`) for this package's `package_config.json` entry. Mirrors `dart_library`'s attribute. Empty string means defer to the toolchain default.",
+    ),
+    "fonts_json": attr.string(
+        doc = "JSON-encoded list of font-family declarations (mirrors `flutter.fonts` in pubspec.yaml). Each entry: `{family: str, fonts: [{asset: str, weight: int?, style: str?}]}`. The `asset` paths are package-relative and must each match a value in `font_files`. A program of another package prefixes the family and the asset paths with `packages/<package_name>/`, under the Dart package name (`package_name`, or the name derived from the BUILD file's path); a program of this package keeps them as declared. An `asset` of `packages/<other>/<path>` whose file is not at that path in this package names a font of the package `<other>`: it stays at that path, as in a pubspec, and `font_files` gives the label of its file.",
+        default = "",
+    ),
+    "font_files": attr.label_keyed_string_dict(
+        doc = "Map of font File label -> package-relative asset path. The string value must match an `asset` field in `fonts_json`. A program of another package bundles it at `packages/<package_name>/<path>`; a program of this package (its own `flutter_test`, or the application whose code this is) bundles it at `<path>`, as `flutter build` keys what a pubspec lists.",
+        allow_files = True,
+    ),
+    "license_file": LICENSE_FILE_ATTR,
+    "additional_licenses": ADDITIONAL_LICENSES_ATTR,
+    "pkg_asset_platforms": PKG_ASSET_PLATFORMS_ATTR,
+    "pkg_shader_platforms": PKG_SHADER_PLATFORMS_ATTR,
+    "pkg_asset_flavors": PKG_ASSET_FLAVORS_ATTR,
+    "pkg_shader_flavors": PKG_SHADER_FLAVORS_ATTR,
+    "_sky_engine": SKY_ENGINE_ATTR,
+    "shader_includes": attr.label_list(
+        doc = "Files this package's `shaders` may `#include` (e.g. " +
+              "`glob([\"shaders/**/*.glsl\"])`). A shader compiles in a " +
+              "sandbox holding only its declared inputs, so an include " +
+              "not listed here is not found.",
+        allow_files = True,
+    ),
+} | WEB_COMPILER_INDEPENDENT_ATTR
+
 flutter_library = rule(
     implementation = _flutter_library_impl,
     # A library reached under a web bundle's compilers is configured once for
     # each, unless it says `web_compiler_independent` (every generated pub and
     # SDK package does), which builds it once with no web compiler.
     cfg = web_compiler_reset_when_independent,
-    attrs = {
-        "srcs": attr.label_list(
-            doc = "Dart source files for this library.",
-            allow_files = [".dart"],
-            mandatory = True,
-        ),
-        "deps": attr.label_list(
-            doc = "Other `dart_library` or `flutter_library` targets this library depends on.",
-            providers = [DartInfo],
-        ),
-        "resources": attr.label_list(
-            doc = "Non-Dart files this package ships inside `lib/` — part of its published surface, but never compiled. Anything under `lib/` is addressable as `package:<name>/<path>` whatever its extension, so these are members of the package: they ride `DartInfo.transitive_resources` and are staged wherever the whole package is staged (the analyzer's project tree, `dart_test`/`dart_binary` runfiles), mirroring `dart_library`. Orthogonal to `pkg_assets`/`pkg_shaders`/`font_files`, which name flutter_assets bundle contributions — a `lib/` shader is legitimately both. `.dart` files belong in `srcs`.",
-            allow_files = True,
-        ),
-        "assets": attr.label_list(
-            doc = "Flutter asset files (images, fonts, etc.) declared in pubspec.yaml: any file of this target's Dart package. The path of each is its path from the package root (the directory above `lib/`), as the pubspec lists it. A program of another package bundles it at `packages/<package_name>/<path>`; a program of this package (its own `flutter_test`, or the application whose code this is) bundles it at `<path>`, as `flutter build` keys what a pubspec lists.",
-            allow_files = True,
-        ),
-        "shaders": attr.label_list(
-            doc = "The Flutter framework's own shaders (.frag/.glsl), compiled per platform and bundled at `shaders/<file name>`, unlisted in the asset manifest, as flutter_tools bundles the framework's. A package's shaders belong in `pkg_shaders`.",
+    attrs = _LIBRARY_ATTRS,
+    doc = "Collects Flutter sources and assets, propagates DartInfo and FlutterInfo. Does not compile.",
+)
+
+flutter_framework_library = rule(
+    implementation = _flutter_library_impl,
+    cfg = web_compiler_reset_when_independent,
+    attrs = _LIBRARY_ATTRS | {
+        "framework_shaders": attr.label_list(
+            doc = "The Flutter framework's own shaders, compiled per platform and bundled at `shaders/<file name>`, unlisted in the asset manifest, as flutter_tools bundles them. No pubspec declares them: flutter_tools hardcodes them.",
             allow_files = [".frag", ".glsl"],
         ),
-        "package_name": attr.string(
-            doc = "The Dart package name. If omitted, defaults to the last component of the Bazel package path.",
-        ),
-        "code_assets": attr.label_list(
-            doc = "`dart_code_asset` targets standing in for this package's " +
-                  "`hook/build.dart` output. Declared on the owning package " +
-                  "rather than on the consuming application so they propagate " +
-                  "the way pub's own do — depending on the package is enough.",
-            providers = [DartCodeAssetInfo],
-        ),
-        "unreplaced_hook": attr.string(
-            doc = "Path of a build hook this package ships that nothing " +
-                  "replaces, or empty. Recorded at repo generation; the " +
-                  "application that depends on the package fails on it.",
-        ),
-        "version": attr.string(
-            doc = "The package's own version, as resolved by pub (e.g. `2.2.0`). " +
-                  "Set automatically by the generated pub spokes; leave it empty on " +
-                  "hand-written targets, which have no resolved version to state. " +
-                  "Mirrors `dart_library`'s attribute, and has its one use: when a " +
-                  "single package name arrives from two hubs, two records stating " +
-                  "different versions fail the build instead of the first one " +
-                  "silently standing in for the second. An empty version never " +
-                  "conflicts.",
-        ),
-        "link_hook": LINK_HOOK_ATTR,
-        "language_version": attr.string(
-            doc = "Dart language version (`<major>.<minor>`) for this package's `package_config.json` entry. Mirrors `dart_library`'s attribute. Empty string means defer to the toolchain default.",
-        ),
-        "fonts_json": attr.string(
-            doc = "JSON-encoded list of font-family declarations (mirrors `flutter.fonts` in pubspec.yaml). Each entry: `{family: str, fonts: [{asset: str, weight: int?, style: str?}]}`. The `asset` paths are package-relative and must each match a value in `font_files`. A program of another package prefixes the family and the asset paths with `packages/<package_name>/`, under the Dart package name (`package_name`, or the name derived from the BUILD file's path); a program of this package keeps them as declared. An `asset` of `packages/<other>/<path>` whose file is not at that path in this package names a font of the package `<other>`: it stays at that path, as in a pubspec, and `font_files` gives the label of its file.",
-            default = "",
-        ),
-        "font_files": attr.label_keyed_string_dict(
-            doc = "Map of font File label -> package-relative asset path. The string value must match an `asset` field in `fonts_json`. A program of another package bundles it at `packages/<package_name>/<path>`; a program of this package (its own `flutter_test`, or the application whose code this is) bundles it at `<path>`, as `flutter build` keys what a pubspec lists.",
-            allow_files = True,
-        ),
-        "pkg_assets": attr.label_keyed_string_dict(
-            doc = "Map of asset File label -> package-relative path (mirrors `flutter.assets` in pubspec.yaml). A program of another package bundles it at `packages/<package_name>/<path>`; a program of this package (its own `flutter_test`, or the application whose code this is) bundles it at `<path>`, as `flutter build` keys what a pubspec lists. Listed in AssetManifest.",
-            allow_files = True,
-        ),
-        "license_file": LICENSE_FILE_ATTR,
-        "additional_licenses": ADDITIONAL_LICENSES_ATTR,
-        "pkg_asset_platforms": PKG_ASSET_PLATFORMS_ATTR,
-        "pkg_shader_platforms": PKG_SHADER_PLATFORMS_ATTR,
-        "pkg_asset_flavors": PKG_ASSET_FLAVORS_ATTR,
-        "pkg_shader_flavors": PKG_SHADER_FLAVORS_ATTR,
-        "_sky_engine": SKY_ENGINE_ATTR,
-        "shader_includes": attr.label_list(
-            doc = "Files this package's `pkg_shaders` may `#include` (e.g. " +
-                  "`glob([\"shaders/**/*.glsl\"])`). A shader compiles in a " +
-                  "sandbox holding only its declared inputs, so an include " +
-                  "not listed here is not found.",
-            allow_files = True,
-        ),
-        "pkg_shaders": attr.label_keyed_string_dict(
-            doc = "Map of shader File label -> package-relative path (mirrors `flutter.shaders` in pubspec.yaml). Routed through the impellerc compile. A program of another package bundles it at `packages/<package_name>/<path>`; a program of this package (its own `flutter_test`, or the application whose code this is) bundles it at `<path>`, as `flutter build` keys what a pubspec lists.",
-            allow_files = True,
-        ),
-    } | WEB_COMPILER_INDEPENDENT_ATTR,
-    doc = "Collects Flutter sources and assets, propagates DartInfo and FlutterInfo. Does not compile.",
+    },
+    doc = "`package:flutter`, the framework: a `flutter_library` that also bundles the framework's own shaders. Only the framework's spoke repository declares one.",
 )

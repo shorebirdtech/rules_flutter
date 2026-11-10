@@ -48,7 +48,7 @@ fonts_bundled_test = analysistest.make(
     },
 )
 
-def _pkg_assets_owner_test_impl(ctx):
+def _assets_owner_test_impl(ctx):
     env = analysistest.begin(ctx)
     target = analysistest.target_under_test(env)
     owned = sorted([
@@ -60,7 +60,7 @@ def _pkg_assets_owner_test_impl(ctx):
 
 # `assets` lists each asset as `<package>:<path>`; the bundle keys it
 # `packages/<package>/<path>`.
-pkg_assets_owner_test = analysistest.make(
-    _pkg_assets_owner_test_impl,
+assets_owner_test = analysistest.make(
+    _assets_owner_test_impl,
     attrs = {"assets": attr.string_list(mandatory = True)},
 )

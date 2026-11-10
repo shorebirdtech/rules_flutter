@@ -4,11 +4,13 @@ flutter_library(
     name = "widgets",
     package_name = "own",
     srcs = ["widgets.dart"],
-    assets = ["w.txt"],
+    assets = [
+        "pa.txt",
+        "w.txt",
+    ],
     font_files = {"f.ttf": "lib/widgets/f.ttf"},
     fonts_json = '[{"family":"OwnFont","fonts":[{"asset":"lib/widgets/f.ttf"}]}]',
-    pkg_assets = {"pa.txt": "lib/widgets/pa.txt"},
-    pkg_shaders = {"s.frag": "lib/widgets/s.frag"},
+    shaders = ["s.frag"],
     visibility = ["//apps/own:__pkg__"],
     deps = ["@deps//:flutter"],
 )

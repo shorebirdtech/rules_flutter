@@ -23,7 +23,7 @@ load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("//flutter/private:flutter_framework_package.bzl", "make_flutter_framework_build_content")
 
 def _flutter_spoke_declares_its_language_version_test_impl(ctx):
-    """`package:flutter` builds a flutter_library carrying the derived version."""
+    """`package:flutter` builds a flutter_framework_library carrying the derived version."""
     env = unittest.begin(ctx)
 
     content = make_flutter_framework_build_content(
@@ -31,12 +31,12 @@ def _flutter_spoke_declares_its_language_version_test_impl(ctx):
         language_version = "3.11",
     )
 
-    asserts.true(env, "flutter_library(" in content, content)
+    asserts.true(env, "\nflutter_framework_library(" in content, content)
     asserts.true(env, 'language_version = "3.11",' in content, content)
 
-    # The shader channel is what makes this spoke a flutter_library rather
-    # than a dart_library; adding a language version must not disturb it.
-    asserts.true(env, 'shaders = glob(["lib/src/material/shaders/*.frag"])' in content, content)
+    # The shader channel is what makes this spoke a flutter_framework_library
+    # rather than a dart_library; adding a language version must not disturb it.
+    asserts.true(env, 'framework_shaders = glob(["lib/src/material/shaders/*.frag"])' in content, content)
     asserts.true(env, '"@flutter_pub__meta//:meta",' in content, content)
 
     # An SDK package is the same under every web compiler.

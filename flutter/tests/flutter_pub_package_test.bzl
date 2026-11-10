@@ -326,8 +326,8 @@ def _spokes_state_their_resolved_version_test_impl(ctx):
         unreplaced_hook = "",
         fonts_json_str = "",
         font_files = {},
-        pkg_assets = {},
-        pkg_shaders = {},
+        assets = [],
+        shaders = [],
         version = "1.0.8",
     )
     asserts.true(env, '\n    version = "1.0.8",' in library, library)
@@ -376,8 +376,8 @@ def _spoke_without_a_version_states_none_test_impl(ctx):
         unreplaced_hook = "",
         fonts_json_str = "",
         font_files = {},
-        pkg_assets = {},
-        pkg_shaders = {},
+        assets = [],
+        shaders = [],
     )
 
     # The newline and indent matter: a bare `"version = "` also matches
@@ -418,7 +418,7 @@ def _library_spoke_carries_resources_test_impl(ctx):
 
     The two channels coexist by design: `resources` says the file is part
     of the package's `lib/` tree (staged wherever the whole package is),
-    while `pkg_assets`/`pkg_shaders` say it is bundled into flutter_assets.
+    while `assets`/`shaders` say it is bundled into flutter_assets.
     A shader under `lib/` is legitimately both.
     """
     env = unittest.begin(ctx)
@@ -430,12 +430,12 @@ def _library_spoke_carries_resources_test_impl(ctx):
         unreplaced_hook = "",
         fonts_json_str = "",
         font_files = {},
-        pkg_assets = {},
-        pkg_shaders = {":lib/glow.frag": "lib/glow.frag"},
+        assets = [],
+        shaders = [":lib/glow.frag"],
     )
 
     asserts.true(env, _RESOURCES_GLOB in content, content)
-    asserts.true(env, "pkg_shaders" in content, content)
+    asserts.true(env, "\n    shaders = [" in content, content)
 
     return unittest.end(env)
 
@@ -459,8 +459,8 @@ def _file_names_are_written_as_string_literals_test_impl(ctx):
             unreplaced_hook = "",
             fonts_json_str = "",
             font_files = {":" + name: name},
-            pkg_assets = {":" + name: name},
-            pkg_shaders = {":" + name: name},
+            assets = [":" + name],
+            shaders = [":" + name],
         ),
         make_flutter_member_build_content(
             name = "p",
@@ -473,7 +473,7 @@ def _file_names_are_written_as_string_literals_test_impl(ctx):
             apple_ios_privacy_manifests = [],
             linux_src_dir = "",
             windows_src_dir = "",
-            pkg_assets = {":" + name: name},
+            assets = [":" + name],
         ),
     ]:
         asserts.true(env, repr(":" + name) in content or repr(name) in content, content)
@@ -492,7 +492,7 @@ def _spoke_with_shaders_declares_their_includes_test_impl(ctx):
     """
     env = unittest.begin(ctx)
 
-    def content(pkg_shaders):
+    def content(shaders):
         return make_flutter_member_build_content(
             name = "shader_pkg",
             language_version = "3.4",
@@ -500,14 +500,14 @@ def _spoke_with_shaders_declares_their_includes_test_impl(ctx):
             unreplaced_hook = "",
             fonts_json_str = "",
             font_files = {},
-            pkg_assets = {},
-            pkg_shaders = pkg_shaders,
+            assets = [],
+            shaders = shaders,
         )
 
-    with_shaders = content({":shaders/glow.frag": "shaders/glow.frag"})
+    with_shaders = content([":shaders/glow.frag"])
     asserts.true(env, "shader_includes = glob(" in with_shaders, with_shaders)
     asserts.true(env, '"**/*.glsl"' in with_shaders, with_shaders)
-    asserts.false(env, "shader_includes" in content({}))
+    asserts.false(env, "shader_includes" in content([]))
 
     return unittest.end(env)
 
@@ -781,8 +781,8 @@ def _platform_restricted_assets_are_stated_in_the_spoke_test_impl(ctx):
         unreplaced_hook = "",
         fonts_json_str = "",
         font_files = {},
-        pkg_assets = {":assets/a.txt": "assets/a.txt", ":assets/b.txt": "assets/b.txt"},
-        pkg_shaders = {},
+        assets = [":assets/a.txt", ":assets/b.txt"],
+        shaders = [],
         pkg_asset_platforms = {"assets/a.txt": ["android", "web"]},
     )
 
@@ -807,8 +807,8 @@ def _platform_restricted_shaders_are_stated_in_the_spoke_test_impl(ctx):
         unreplaced_hook = "",
         fonts_json_str = "",
         font_files = {},
-        pkg_assets = {},
-        pkg_shaders = {":shaders/a.frag": "shaders/a.frag", ":shaders/b.frag": "shaders/b.frag"},
+        assets = [],
+        shaders = [":shaders/a.frag", ":shaders/b.frag"],
         pkg_shader_platforms = {"shaders/a.frag": ["android", "web"]},
     )
 
@@ -833,8 +833,8 @@ def _flavor_restricted_assets_are_stated_in_the_spoke_test_impl(ctx):
         unreplaced_hook = "",
         fonts_json_str = "",
         font_files = {},
-        pkg_assets = {":assets/a.txt": "assets/a.txt", ":assets/b.txt": "assets/b.txt"},
-        pkg_shaders = {},
+        assets = [":assets/a.txt", ":assets/b.txt"],
+        shaders = [],
         pkg_asset_flavors = {"assets/a.txt": ["paid", "premium"]},
     )
 
@@ -859,8 +859,8 @@ def _flavor_restricted_shaders_are_stated_in_the_spoke_test_impl(ctx):
         unreplaced_hook = "",
         fonts_json_str = "",
         font_files = {},
-        pkg_assets = {},
-        pkg_shaders = {":shaders/a.frag": "shaders/a.frag", ":shaders/b.frag": "shaders/b.frag"},
+        assets = [],
+        shaders = [":shaders/a.frag", ":shaders/b.frag"],
         pkg_shader_flavors = {"shaders/a.frag": ["paid", "premium"]},
     )
 

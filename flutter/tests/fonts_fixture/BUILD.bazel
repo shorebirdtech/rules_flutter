@@ -1,5 +1,5 @@
 load("//flutter:defs.bzl", "flutter_library", "flutter_plugin")
-load("//flutter/tests:flutter_fonts_test.bzl", "font_mismatch_fails_test", "fonts_bundled_test", "pkg_assets_owner_test")
+load("//flutter/tests:flutter_fonts_test.bzl", "assets_owner_test", "font_mismatch_fails_test", "fonts_bundled_test")
 
 flutter_library(
     name = "two_fonts",
@@ -40,13 +40,13 @@ fonts_bundled_test(
 )
 
 # No `package_name`: the Dart package name derived from the BUILD file's path
-# is the one the fonts and `pkg_assets` are bundled under, as `assets` is.
+# is the one the fonts and `assets` are bundled under.
 flutter_library(
     name = "derived_name",
     srcs = ["lib/fixture.dart"],
+    assets = ["fonts/Bold.ttf"],
     font_files = {"fonts/Regular.ttf": "fonts/Regular.ttf"},
     fonts_json = '[{"family":"F","fonts":[{"asset":"fonts/Regular.ttf"}]}]',
-    pkg_assets = {"fonts/Bold.ttf": "assets/p.txt"},
     tags = ["manual"],
 )
 
@@ -58,10 +58,10 @@ fonts_bundled_test(
     target_under_test = ":derived_name",
 )
 
-pkg_assets_owner_test(
+assets_owner_test(
     name = "derived_name_assets_test",
     size = "small",
-    assets = ["fonts_fixture:assets/p.txt"],
+    assets = ["fonts_fixture:fonts/Bold.ttf"],
     target_under_test = ":derived_name",
 )
 

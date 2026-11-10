@@ -5,7 +5,7 @@
 /// shaders — one as a `Paint.shader`, one as an `ImageFilter.shader` inside a
 /// `BackdropFilter` — reads the pixels back, calls the plugin's Swift or
 /// Kotlin, and prints its verdict as one `glass_results` line. That covers
-/// the package's `pkg_shaders` reaching each platform's bundle at
+/// the package's `shaders` reaching each platform's bundle at
 /// `packages/glass_plugin/`, compiled for that platform's renderer, and a
 /// workspace plugin's native code being registered.
 ///

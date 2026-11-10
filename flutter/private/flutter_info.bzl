@@ -70,7 +70,8 @@ def flutter_info(
     Args:
       deps: Targets whose `FlutterInfo` contributions are merged in. Entries
         without one are ignored.
-      shader_srcs: Raw shader sources (`.frag`/`.glsl`) this target ships.
+      shader_srcs: The Flutter framework's own shader sources (`.frag`/`.glsl`),
+        which only `package:flutter` ships.
       plugins: Plugin metadata structs this target declares. Deduplicated by
         name against the dependencies' plugins, this target's first.
       native_libs: Shared libraries this target contributes, typically from a

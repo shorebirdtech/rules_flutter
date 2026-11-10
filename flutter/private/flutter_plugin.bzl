@@ -33,7 +33,7 @@ load("//flutter:providers.bzl", "FlutterDataAssetInfo", "FlutterInfo", "FlutterN
 load("//flutter/private:common.bzl", "collect_binding_contracts", "collect_native_libs")
 load("//flutter/private:flutter_desktop_plugin_info.bzl", "FlutterLinuxPluginInfo", "FlutterWindowsPluginInfo")
 load("//flutter/private:flutter_info.bzl", "LINK_HOOK_ATTR", "flutter_info")
-load("//flutter/private:flutter_library.bzl", "ADDITIONAL_LICENSES_ATTR", "LICENSE_FILE_ATTR", "PKG_ASSET_FLAVORS_ATTR", "PKG_ASSET_PLATFORMS_ATTR", "PKG_SHADER_FLAVORS_ATTR", "PKG_SHADER_PLATFORMS_ATTR", "SKY_ENGINE_ATTR", "build_pub_contributions", "flutter_analyzable_info", "flutter_package_record", "own_additional_licenses", "own_asset_contributions")
+load("//flutter/private:flutter_library.bzl", "ADDITIONAL_LICENSES_ATTR", "LICENSE_FILE_ATTR", "PKG_ASSET_FLAVORS_ATTR", "PKG_ASSET_PLATFORMS_ATTR", "PKG_SHADER_FLAVORS_ATTR", "PKG_SHADER_PLATFORMS_ATTR", "SKY_ENGINE_ATTR", "build_pub_contributions", "flutter_analyzable_info", "flutter_package_record", "own_additional_licenses")
 load("//flutter/private:native_sources.bzl", "collect_native_source_pairs", "native_sources_aspect")
 load("//flutter/private:unbuilt_native_code.bzl", "FlutterUnbuiltNativeCodeInfo")
 
@@ -221,20 +221,7 @@ def plugin_contributions(ctx, package_name, package_root, declares_plugin):
     # Pub-package asset contributions (fonts/assets/shaders from the parsed
     # flutter:-block, applicable to plugins that also ship icon fonts or
     # bundled assets — same shape as flutter_library), of the Dart package.
-    extra_pub_fonts, extra_pub_assets, extra_pub_shaders = build_pub_contributions(
-        package_name,
-        package_root,
-        ctx.attr.fonts_json,
-        ctx.attr.font_files,
-        ctx.attr.pkg_assets,
-        ctx.attr.pkg_shaders,
-        ctx.files.shader_includes,
-        ctx.attr.pkg_asset_platforms,
-        ctx.attr.pkg_shader_platforms,
-        ctx.attr.pkg_asset_flavors,
-        ctx.attr.pkg_shader_flavors,
-    )
-    extra_pub_assets.extend(own_asset_contributions(ctx, package_name, package_root))
+    extra_pub_fonts, extra_pub_assets, extra_pub_shaders = build_pub_contributions(ctx, package_name, package_root)
 
     # `resources` names the non-Dart remainder of `lib/`; a Dart source there
     # is a mis-filed `srcs` entry, and identical paths with identical
@@ -276,9 +263,9 @@ def _flutter_plugin_impl(ctx):
 
     # A plugin contributes on more channels than a library does, but the shape
     # is the same: name what this target adds, and let each constructor merge
-    # the dependencies. `shaders` is absent here — a plugin has no such
-    # attribute — which is a thing the caller simply does not say, rather than
-    # something the merge has to probe for.
+    # the dependencies. `shader_srcs`, the framework's own shaders, is absent
+    # here — only `package:flutter` has them — which is a thing the caller
+    # simply does not say, rather than something the merge has to probe for.
     return [
         DefaultInfo(files = depset(ctx.files.srcs + ctx.files.resources)),
         dart_info(
@@ -305,7 +292,7 @@ PLUGIN_PACKAGE_ATTRS = {
         allow_files = [".dart"],
     ),
     "resources": attr.label_list(
-        doc = "Non-Dart files this package ships inside `lib/` — part of its published surface, but never compiled (a web plugin's bundled JS/wasm, templates, YAML). Anything under `lib/` is addressable as `package:<name>/<path>` whatever its extension, so these are members of the package: they ride `DartInfo.transitive_resources` and are staged wherever the whole package is staged, mirroring `dart_library`. Orthogonal to `pkg_assets`/`pkg_shaders`/`font_files`, which name flutter_assets bundle contributions. `.dart` files belong in `srcs`.",
+        doc = "Non-Dart files this package ships inside `lib/` — part of its published surface, but never compiled (a web plugin's bundled JS/wasm, templates, YAML). Anything under `lib/` is addressable as `package:<name>/<path>` whatever its extension, so these are members of the package: they ride `DartInfo.transitive_resources` and are staged wherever the whole package is staged, mirroring `dart_library`. Orthogonal to `assets`/`shaders`/`font_files`, which name flutter_assets bundle contributions. `.dart` files belong in `srcs`.",
         allow_files = True,
     ),
     "assets": attr.label_list(
@@ -406,23 +393,19 @@ PLUGIN_PACKAGE_ATTRS = {
         doc = "Map of font File label -> package-relative asset path. Same shape as `flutter_library.font_files`.",
         allow_files = True,
     ),
-    "pkg_assets": attr.label_keyed_string_dict(
-        doc = "Map of asset File label -> package-relative path (mirrors `flutter.assets`). Same shape as `flutter_library.pkg_assets`.",
-        allow_files = True,
-    ),
     "pkg_asset_platforms": PKG_ASSET_PLATFORMS_ATTR,
     "pkg_shader_platforms": PKG_SHADER_PLATFORMS_ATTR,
     "pkg_asset_flavors": PKG_ASSET_FLAVORS_ATTR,
     "pkg_shader_flavors": PKG_SHADER_FLAVORS_ATTR,
     "shader_includes": attr.label_list(
-        doc = "Files this package's `pkg_shaders` may `#include` (e.g. " +
+        doc = "Files this package's `shaders` may `#include` (e.g. " +
               "`glob([\"shaders/**/*.glsl\"])`). A shader compiles in a " +
               "sandbox holding only its declared inputs, so an include " +
               "not listed here is not found.",
         allow_files = True,
     ),
-    "pkg_shaders": attr.label_keyed_string_dict(
-        doc = "Map of shader File label -> package-relative path (mirrors `flutter.shaders`). Same shape as `flutter_library.pkg_shaders`.",
+    "shaders": attr.label_list(
+        doc = "The package's fragment shaders, mirroring `flutter: shaders:`: any file of this target's Dart package, keyed as `flutter_library.shaders` is.",
         allow_files = True,
     ),
 }

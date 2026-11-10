@@ -7,10 +7,10 @@ flutter_library(
     name = "flavor_lib",
     package_name = "flavor_test_lib",
     srcs = ["flavor_pkg.dart"],
+    assets = [
+        "assets/all.txt",
+        "assets/paid.txt",
+    ],
     pkg_asset_flavors = {"assets/paid.txt": ["paid"]},
-    pkg_assets = {
-        ":all.txt": "assets/all.txt",
-        ":paid.txt": "assets/paid.txt",
-    },
     tags = ["manual"],
 )

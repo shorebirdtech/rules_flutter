@@ -2034,12 +2034,11 @@ flutter_library(
 |---|---|
 | `srcs` | Dart source files. Required. |
 | `deps` | `dart_library` or `flutter_library` targets. |
-| `assets` | Asset files: images, fonts, and so on, from anywhere in the Dart package. Bundled at `packages/<package_name>/<path>` in a program of another package and at `<path>` in a program of this package (its own `flutter_test`, or the application this is part of), as `flutter build` keys them. The path is the file's path from the package root, the directory above `lib/`. |
+| `assets` | Asset files: images, fonts, and so on, from anywhere in the Dart package. Bundled at `packages/<package_name>/<path>` in a program of another package and at `<path>` in a program of this package (its own `flutter_test`, or the application this is part of), as `flutter build` keys them. The path is the file's path from the package root, the directory above `lib/`, so a file listed here is one of the package's: to bundle a file from elsewhere (another package, or a generated file) at a path of this package, put it at that path with a rule of this package, such as `copy_file`, and list that. |
 | `fonts_json` | The package's font families, as the JSON form of `flutter: fonts:` in `pubspec.yaml`: `'[{"family": "Inter", "fonts": [{"asset": "fonts/Inter-Regular.ttf"}, {"asset": "fonts/Inter-Bold.ttf", "weight": 700}]}]'`. Each `asset` is a path from the package root and must be a value in `font_files`. A program of another package sees the family as `packages/<package_name>/<family>`. |
 | `font_files` | The font files of `fonts_json`, as `{file: path}`. |
-| `pkg_shaders` | The package's fragment shaders, as `{file: path}` mirroring `flutter: shaders:` in `pubspec.yaml`. Bundled at `packages/<package_name>/<path>` in a program of another package and at `<path>` in a program of this package (its own `flutter_test`, or the application this is part of), as `flutter build` keys them, where `FragmentProgram.fromAsset` looks for them. |
-| `shader_includes` | Files the `pkg_shaders` may `#include`, such as `glob(["shaders/**/*.glsl"])`. A shader compiles with only its declared inputs, so an include not listed here is not found. |
-| `shaders` | Shaders bundled at `shaders/<file name>`, as Flutter's own are. A package's own shaders go in `pkg_shaders`. |
+| `shaders` | The package's fragment shaders, mirroring `flutter: shaders:` in `pubspec.yaml`, keyed by their path from the package root as `assets` are. Bundled at `packages/<package_name>/<path>` in a program of another package and at `<path>` in a program of this package (its own `flutter_test`, or the application this is part of), as `flutter build` keys them, where `FragmentProgram.fromAsset` looks for them. |
+| `shader_includes` | Files the `shaders` may `#include`, such as `glob(["shaders/**/*.glsl"])`. A shader compiles with only its declared inputs, so an include not listed here is not found. |
 | `package_name` | The Dart package name. Defaults to the last component of the Bazel package path. |
 | `language_version` | The Dart language version, matching the `sdk:` constraint in `pubspec.yaml`. |
 
@@ -2553,7 +2552,7 @@ flutter_plugin(
 | `native_deps` | Shared libraries bundled for `dart:ffi`. |
 | `native_assets` | `flutter_native_asset` targets, usually inside a `select()` on platform. |
 | `assets`, `resources` | Asset and resource files. An asset is keyed as on `flutter_library`. |
-| `pkg_shaders`, `shader_includes` | The package's fragment shaders and what they `#include`, as on `flutter_library`. |
+| `shaders`, `shader_includes` | The package's fragment shaders and what they `#include`, as on `flutter_library`. |
 | `package_name`, `language_version`, `version` | The package's name, language version, and version. |
 | `link_hook` | The package's `hook/link.dart`. See [Link hooks](#link-hooks). `flutter_library` takes it too. |
 | `license_file` | The package's `NOTICES` or `LICENSE` file, as `flutter build` reads it from the package root. Programs that depend on the package list it in their `NOTICES`. `flutter_library` takes it too. |

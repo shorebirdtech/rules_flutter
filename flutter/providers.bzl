@@ -121,7 +121,7 @@ rules that produce `FlutterInfo`. Constructing it here means enumerating and \
 merging each field by hand, and a field left empty rather than forwarded \
 silently discards every dependency's contribution.""",
     fields = {
-        "shader_srcs": "depset[File]: Raw shader source files (.frag/.glsl) to compile per-platform.",
+        "shader_srcs": "depset[File]: The Flutter framework's own shader sources (.frag/.glsl), compiled per platform and bundled at `shaders/<file name>`. A package's shaders are `pub_shaders`.",
         "plugins": "list[struct]: Plugin metadata. Each struct has: name (str), platforms (dict of platform -> {pluginClass, dartPluginClass, package}).",
         "transitive_native_libs": "depset[File]: Shared libs from plugin native_deps, merged transitively.",
         "native_lib_sources": "depset[struct]: Per library, the first-party sources it is built from — `native_deps` entries and Native Asset libraries alike. Each struct has: library (File), sources (tuple[File]). A hot reload stats these to notice that a library went stale in an app whose reload runs no build of its own; see `native_sources.bzl`.",
