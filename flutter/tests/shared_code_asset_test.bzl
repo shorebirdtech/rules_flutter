@@ -254,6 +254,7 @@ opt_mode = rule(
 def _resolve_probe_impl(ctx):
     resolved = resolve_native_assets(
         ctx,
+        package = None,
         deps = ctx.attr.deps,
         code_assets = [t[DartCodeAssetInfo] for t in ctx.attr.code_assets],
     )

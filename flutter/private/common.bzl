@@ -7,7 +7,7 @@ flutter_application, flutter_android_bundle, and flutter_ios_application.
 
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_dart//dart:providers.bzl", "DartInfo")
-load("@rules_dart//dart:utils.bzl", "KERNEL_TOOL_ATTR", "collect_packages", "collect_transitive_srcs", "dart_import_check_aspect", "generate_dev_package_config", "import_check_validation", "package_identity_attrs", "resolve_package_identity", "runtime_reset")
+load("@rules_dart//dart:utils.bzl", "KERNEL_TOOL_ATTR", "collect_packages", "collect_transitive_srcs", "dart_import_check_aspect", "generate_dev_package_config", "import_check_validation", "package_identity_attrs", "package_info_from_metadata", "package_lib_prefix", "resolve_package_identity", "runtime_reset")
 load("//flutter:providers.bzl", "FlutterInfo", "FlutterNativeLibraryInfo")
 load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "app_main_location", "app_scheme_files", "app_scheme_location", "app_scheme_sources", "synthesize_app_package", "with_root")
 load("//flutter/private:flutter_asset_bundle.bzl", "flutter_asset_bundle_action")
@@ -732,26 +732,46 @@ def declare_flutter_assets_dir(ctx):
     """
     return ctx.actions.declare_directory(ctx.label.name + "_flutter_assets")
 
-def own_package_outside_deps(inputs, packages):
-    """A program's own package, when no library in its `deps` carries it.
+def program_package(inputs):
+    """A program's own package record, as rules_dart's program helpers take it.
 
-    The program's package is in the closure of its `deps` only when a library
-    there names its declaration. What the package declares (its data assets)
-    belongs to the program either way, as a root package's build hook's
-    assets do.
+    The program's own package is one of its packages exactly as a
+    dependency's is, whether or not a library in its `deps` names the same
+    declaration: its code and data assets ship and its link hook runs. A
+    library of the package in `deps` merges into this record.
 
     Args:
         inputs: The program, from `flutter_program_inputs`.
-        packages: `collect_packages` of `inputs.deps`.
 
     Returns:
-        The program's `DartPackageMetadataInfo`, or None when it names none or
-        a library in `deps` carries it.
+        The program's `DartPackageInfo`, or None for a program naming no
+        `dart_package_metadata`.
     """
-    own = inputs.package
-    if own == None or any([pkg.package_name == own.package_name for pkg in packages]):
+    if inputs.package == None:
         return None
-    return own
+    return package_info_from_metadata(inputs.label, inputs.package, inputs.package_root)
+
+def program_package_files(inputs):
+    """A program's own files under its package's `lib/`.
+
+    What the package's link hook may import, as any package's hook imports
+    its own `lib/`. The program's other files (a `main` outside `lib/`, say)
+    are no part of what `package:<self>/` resolves to.
+
+    Args:
+        inputs: The program, from `flutter_program_inputs`.
+
+    Returns:
+        List of Files; empty for a program in no package.
+    """
+    if inputs.package == None:
+        return []
+    prefix = package_lib_prefix(inputs.package_root)
+    return [
+        f
+        for f in ([inputs.main] if inputs.main else []) + inputs.srcs
+        if f.short_path.startswith(prefix)
+    ]
 
 def flutter_build_assets(ctx, tools, output_dir, deps, target_platform, compiled_shaders = struct(listed = [], unlisted = []), kernel_dill = None, is_debug = False, data_assets = None, optional_code_points = [], inputs = None):
     """Run the shared asset bundling step.

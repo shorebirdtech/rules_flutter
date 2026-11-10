@@ -8,39 +8,34 @@ debug build runs no hook and ships every package's declared assets. What
 differs between targets is only which compile records the uses.
 """
 
-load("@rules_dart//dart:utils.bzl", "collect_packages", "collect_transitive_data_assets", "dart_link_hook_actions")
-load("//flutter/private:common.bzl", "own_package_outside_deps")
+load("@rules_dart//dart:utils.bzl", "collect_transitive_data_assets", "dart_link_hook_actions", "program_packages")
+load("//flutter/private:common.bzl", "program_package", "program_package_files")
 
-def link_hooks_plan(ctx, program, deps, links):
+def link_hooks_plan(program, deps, links):
     """Whether a program's link hooks run, decided before its compile.
 
     The compile that records the uses has to be told to, so this is asked
     first, and `program_data_assets` takes the answer after.
 
+    Every package of the program counts, its own among them: a link hook
+    of the app's package runs whether or not a library of that package is
+    in `deps`, as upstream's hooks runner plans the root package with the
+    rest.
+
     Args:
-        ctx: Rule context, for messages.
         program: The program, from `flutter_program_inputs`.
         deps: The `deps` whose closure is linked (a web branch's, on web).
         links: Whether the build mode links: not a debug build.
 
     Returns:
         A struct: `runs` (bool: the compile records uses and the hooks run
-        over them) and `own_data_assets` (the declared data assets of the
-        program's own package when no library in `deps` carries it).
+        over them).
     """
-    packages = collect_packages(deps)
-    own = own_package_outside_deps(program, packages)
-    if links and own != None and own.link_hook != None:
-        fail(("%s: the package `%s` has a link hook, which runs only for a " +
-              "package a library in `deps` belongs to. Move the package's " +
-              "`lib/` sources into a `flutter_library` naming `%s`.") %
-             (ctx.label, own.package_name, own.label))
     return struct(
         runs = links and (bool(program.link_hook_assets) or any([
             getattr(pkg, "link_hook", None) != None
-            for pkg in packages
+            for pkg in program_packages(program_package(program), deps)
         ])),
-        own_data_assets = list(own.data_assets) if own != None else [],
     )
 
 def program_data_assets(ctx, program, deps, plan, recorded_uses, name):
@@ -49,7 +44,7 @@ def program_data_assets(ctx, program, deps, plan, recorded_uses, name):
     Linked, they are what the package link hooks emit over `recorded_uses`
     (the ids in `link_hook_assets`) and the declared assets of packages
     without a hook; unlinked, every package's declared assets. The program's
-    own package's declared assets ship either way.
+    own package is one of its packages either way.
 
     Args:
         ctx: Rule context carrying `link_hook_runner_attr()`, the
@@ -68,18 +63,20 @@ def program_data_assets(ctx, program, deps, plan, recorded_uses, name):
     """
     if not plan.runs:
         return struct(
-            assets = depset(collect_transitive_data_assets(deps) + plan.own_data_assets),
+            assets = depset(collect_transitive_data_assets(program_package(program), deps)),
             validation_outputs = [],
         )
     link = dart_link_hook_actions(
         ctx,
         runner = ctx.executable._link_hook_runner,
         recorded_uses = recorded_uses,
+        package = program_package(program),
+        package_files = program_package_files(program),
         deps = deps,
         data_asset_ids = program.link_hook_assets,
         name = name,
     )
     return struct(
-        assets = depset(link.assets + plan.own_data_assets),
+        assets = depset(link.assets),
         validation_outputs = link.validation_outputs,
     )

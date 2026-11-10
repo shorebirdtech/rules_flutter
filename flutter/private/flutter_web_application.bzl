@@ -472,7 +472,7 @@ def _flutter_web_bundle_impl(ctx):
     # reads dart2wasm's uses, and dart2js's when there is no WebAssembly
     # build. The hooks' assets are the bundle's, shared by both builds. A
     # debug build links nothing and ships every declared data asset.
-    link_hooks = link_hooks_plan(ctx, program, primary.deps, links = not is_debug)
+    link_hooks = link_hooks_plan(program, primary.deps, links = not is_debug)
     recorded_uses = ctx.actions.declare_file(ctx.label.name + ".recorded_uses.json") if link_hooks.runs else None
 
     # Merged once for all compile actions below (dart2wasm, dart2js, icon

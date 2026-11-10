@@ -80,6 +80,7 @@ load(
     "flutter_build_assets",
     "flutter_compile_shaders",
     "flutter_program_inputs",
+    "program_package",
 )
 load("//flutter/private:exec_groups.bzl", "FLUTTER_EXEC_TOOLS", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
 load("//flutter/private:flutter_compile.bzl", "flutter_kernel_compile")
@@ -419,9 +420,9 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
     # graph. See `resolve_native_assets`.
     native_assets_list = resolve_native_assets(
         ctx,
+        package = program_package(inputs),
         deps = deps,
         code_assets = [target[DartCodeAssetInfo] for target in inputs.code_assets],
-        package = inputs.package,
     ).assets
 
     native_assets_manifest = ctx.actions.declare_file(ctx.label.name + ".native_assets.json")

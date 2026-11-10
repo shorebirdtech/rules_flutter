@@ -19,7 +19,7 @@ load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartPackageMetadat
 load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "link_hook_runner_attr")
 load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterApplicationInputsInfo", "FlutterInfo")
 load("//flutter/private:code_asset_libraries.bzl", "code_asset_libraries", "code_asset_libraries_aspect", "describe_code_asset_libraries")
-load("//flutter/private:common.bzl", "FLUTTER_APPLICATION_ATTRS", "PLATFORM_CONSTRAINT_ATTRS", "PROGRAM_PACKAGE_DOC", "asset_roots", "check_unreplaced_hooks", "collect_binding_contracts", "collect_native_libs", "declare_flutter_assets_dir", "detect_target_platform", "flutter_build_assets", "flutter_build_mode", "flutter_compile_kernel", "flutter_compile_shaders", "flutter_deps_attr", "flutter_program_inputs", "host_target_arch", "launch_build_args", "shader_sources")
+load("//flutter/private:common.bzl", "FLUTTER_APPLICATION_ATTRS", "PLATFORM_CONSTRAINT_ATTRS", "PROGRAM_PACKAGE_DOC", "asset_roots", "check_unreplaced_hooks", "collect_binding_contracts", "collect_native_libs", "declare_flutter_assets_dir", "detect_target_platform", "flutter_build_assets", "flutter_build_mode", "flutter_compile_kernel", "flutter_compile_shaders", "flutter_deps_attr", "flutter_program_inputs", "host_target_arch", "launch_build_args", "program_package", "shader_sources")
 load("//flutter/private:dev_config.bzl", "dev_config_file", "dev_search_roots", "dev_source_dir", "write_dev_config")
 load("//flutter/private:exec_groups.bzl", "PORTABLE_EXEC_GROUPS", "portable_tools")
 load("//flutter/private:flutter_aot_compile.bzl", "flutter_aot_elf_action", "flutter_aot_macho_action", "gen_snapshot_options")
@@ -144,9 +144,9 @@ def flutter_application_build(ctx, inputs):
     # `--native-assets`. See `resolve_native_assets`.
     resolved_assets = resolve_native_assets(
         ctx,
+        package = program_package(inputs),
         deps = inputs.deps,
         code_assets = [target[DartCodeAssetInfo] for target in inputs.code_assets],
-        package = inputs.package,
     )
     native_assets_list = resolved_assets.assets
 
@@ -176,7 +176,7 @@ def flutter_application_build(ctx, inputs):
     # every package with a link hook has it run then, whether or not it emits
     # anything: the hook decides which of its package's declared data assets
     # ship.
-    link_hooks = link_hooks_plan(ctx, inputs, inputs.deps, links = not is_debug)
+    link_hooks = link_hooks_plan(inputs, inputs.deps, links = not is_debug)
     recorded_uses = ctx.actions.declare_file(ctx.label.name + ".recorded_uses.json") if link_hooks.runs else None
 
     # Step 1: Kernel compilation (mode-aware: debug uses debug dill, no AOT).

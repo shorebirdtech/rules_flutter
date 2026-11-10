@@ -72,6 +72,7 @@ def _manifest_probe_impl(ctx):
         output_file = output,
         native_assets = resolve_native_assets(
             ctx,
+            package = None,
             deps = [],
             code_assets = [dep[DartCodeAssetInfo] for dep in ctx.attr.code_assets],
         ).assets,
@@ -385,7 +386,7 @@ hook_check_probe = rule(
 # runs the bridge over a real `dart_library` graph and reports what it lifted.
 
 def _bridge_probe_impl(ctx):
-    lifted = resolve_native_assets(ctx, ctx.attr.deps, []).assets
+    lifted = resolve_native_assets(ctx, None, ctx.attr.deps, []).assets
     ids = sorted([a.asset_id for a in lifted])
     if ids != sorted(ctx.attr.expected_asset_ids):
         fail("%s: expected %s, bridged %s" % (ctx.label, sorted(ctx.attr.expected_asset_ids), ids))
