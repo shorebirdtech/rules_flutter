@@ -17,6 +17,26 @@ void main() {
     });
   });
 
+  group('archiveProblems', () {
+    const attributes = '/e2e/a/ export-ignore\n/e2e/x.json export-ignore\n';
+
+    test('accepts a filter that leaves out every entry but smoke', () {
+      expect(archiveProblems(['a/', 'x.json', 'smoke/'], attributes), isEmpty);
+    });
+
+    test('names an entry the archive would ship', () {
+      expect(archiveProblems(['a/', 'x.json', 'b/'], attributes), [
+        contains('e2e/b/ has no `/e2e/b/ export-ignore` line'),
+      ]);
+    });
+
+    test('names a line for an entry that does not exist', () {
+      expect(archiveProblems(['a/'], attributes), [
+        contains('export-ignores /e2e/x.json, which does not exist'),
+      ]);
+    });
+  });
+
   group('matrixProblems', () {
     const ok = E2eWorkspace(
       'a',

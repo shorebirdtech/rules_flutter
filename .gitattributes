@@ -36,7 +36,6 @@
 /e2e/_linux_test/ export-ignore
 /e2e/_macos_test/ export-ignore
 /e2e/_overlay_tests/ export-ignore
-/e2e/_playwright/ export-ignore
 /e2e/_windows_test/ export-ignore
 /e2e/package.json export-ignore
 /e2e/package-lock.json export-ignore
@@ -44,6 +43,7 @@
 /e2e/asset_bundle/ export-ignore
 /e2e/codegen/ export-ignore
 /e2e/cross_compile_example/ export-ignore
+/e2e/custom_engine/ export-ignore
 /e2e/dual_hub/ export-ignore
 /e2e/external_module/ export-ignore
 /e2e/ffi_example/ export-ignore

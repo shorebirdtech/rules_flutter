@@ -541,3 +541,41 @@ List<String> targetProblems(
   }
   return problems..sort();
 }
+
+/// The entries of `e2e/` the release archive keeps: `smoke`, which
+/// `.bcr/presubmit.yml` names as its `module_path`.
+const archivedE2eEntries = {'smoke'};
+
+/// What is wrong with [gitattributes] as the release archive's filter of
+/// `e2e/`, whose top-level entries are [entries] (names, with a trailing `/`
+/// for a directory); empty when nothing is. Every entry but
+/// [archivedE2eEntries] needs its own `export-ignore` line, and a line for an
+/// entry that does not exist is stale.
+List<String> archiveProblems(Iterable<String> entries, String gitattributes) {
+  final ignored = <String>{
+    for (final line in gitattributes.split('\n'))
+      if (RegExp(r'^/e2e/([^/\s]+/?)\s+export-ignore\s*$')
+              .firstMatch(line.trim())
+          case final match?)
+        match.group(1)!,
+  };
+  final problems = <String>[];
+  for (final entry in entries) {
+    final name = entry.endsWith('/')
+        ? entry.substring(0, entry.length - 1)
+        : entry;
+    if (archivedE2eEntries.contains(name)) continue;
+    if (!ignored.contains(entry)) {
+      problems.add(
+        'e2e/$entry has no `/e2e/$entry export-ignore` line in .gitattributes, '
+        'so the release archive ships it',
+      );
+    }
+  }
+  for (final entry in ignored.difference(entries.toSet())) {
+    problems.add(
+      '.gitattributes export-ignores /e2e/$entry, which does not exist',
+    );
+  }
+  return problems..sort();
+}
