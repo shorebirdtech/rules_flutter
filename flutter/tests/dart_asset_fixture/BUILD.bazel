@@ -71,6 +71,9 @@ legacy_dart_library(
     name = "legacy_package",
     package_name = "legacy_package",
     srcs = ["lib/fixture.dart"],
+    # A hand-built `DartInfo` carries no analyzer summaries, so analysis
+    # against them refuses it. Its source is a placeholder.
+    tags = ["no-dart-analyze"],
 )
 
 hook_check_probe(
@@ -88,6 +91,8 @@ legacy_dart_library(
     name = "fake_test_api",
     package_name = "test_api",
     srcs = ["lib/fixture.dart"],
+    # As `:legacy_package`.
+    tags = ["no-dart-analyze"],
     visibility = [
         "//flutter/tests/code_asset_fixture/test:__pkg__",
         "//flutter/tests/dart_asset_fixture/code_asset_test:__pkg__",

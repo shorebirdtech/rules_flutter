@@ -21,7 +21,7 @@ library:
 load("@build_bazel_rules_swift//swift:swift.bzl", "SwiftInfo")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@rules_dart//dart:providers.bzl", "DartInfo")
-load("@rules_dart//dart:utils.bzl", "RUNTIME_INDEPENDENT_ATTR", "dart_info", "library_package", "package_identity_attrs", "runtime_reset_when_independent")
+load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "PORTABLE_EXEC_GROUPS", "RUNTIME_INDEPENDENT_ATTR", "SUMMARY_ATTRS", "dart_info", "library_package", "package_identity_attrs", "runtime_reset_when_independent")
 load("@rules_java//java/common:java_info.bzl", "JavaInfo")
 load("//flutter:providers.bzl", "FlutterDataAssetInfo", "FlutterPluginPlatformInfo")
 load("//flutter/private:common.bzl", "collect_binding_contracts", "collect_native_libs")
@@ -220,11 +220,12 @@ def _flutter_plugin_impl(ctx):
     return [
         DefaultInfo(files = depset(ctx.files.srcs + ctx.files.resources)),
         dart_info(
-            label = ctx.label,
+            ctx = ctx,
             packages = [package],
             deps = ctx.attr.deps,
             srcs = ctx.files.srcs,
             resources = ctx.files.resources,
+            analysis_deps = [ctx.attr._sky_engine],
         ),
         flutter_analyzable_info(ctx, package),
         flutter_info(
@@ -300,6 +301,8 @@ flutter_plugin = rule(
             doc = "Dart/Flutter library dependencies.",
             providers = [DartInfo],
         ),
-    } | RUNTIME_INDEPENDENT_ATTR,
+    } | RUNTIME_INDEPENDENT_ATTR | SUMMARY_ATTRS,
+    exec_groups = PORTABLE_EXEC_GROUPS,
+    toolchains = COPY_TO_DIRECTORY_TOOLCHAINS,
     doc = "Declares a Flutter plugin with platform metadata and optional native dependencies.",
 )

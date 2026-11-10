@@ -1,7 +1,7 @@
 """Implementation of the flutter_library rule."""
 
 load("@rules_dart//dart:providers.bzl", "DartInfo")
-load("@rules_dart//dart:utils.bzl", "RUNTIME_INDEPENDENT_ATTR", "dart_analyzable_info", "dart_info", "derive_package_root", "library_package", "package_identity_attrs", "runtime_reset_when_independent")
+load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "PORTABLE_EXEC_GROUPS", "RUNTIME_INDEPENDENT_ATTR", "SUMMARY_ATTRS", "dart_analyzable_info", "dart_info", "derive_package_root", "library_package", "package_identity_attrs", "runtime_reset_when_independent")
 load("//flutter:providers.bzl", "FlutterFontFamilyInfo", "FlutterInfo")
 load("//flutter/private:flutter_font.bzl", "FONTS_ATTR")
 load("//flutter/private:flutter_info.bzl", "flutter_info")
@@ -293,7 +293,9 @@ ASSET_PLATFORMS_ATTR = attr.string_list_dict(
 )
 
 # Analysis-only: `package:sky_engine`'s `lib/_embedder.yaml` is the only way the
-# analyzer resolves `dart:ui`. Reaches `flutter_analyzable_info` alone.
+# analyzer resolves `dart:ui`. Reaches `flutter_analyzable_info` and the
+# library's analyzer summary (`dart_info(analysis_deps = ...)`) alone, so no
+# compile action's inputs change.
 SKY_ENGINE_ATTR = attr.label(
     doc = "Analysis-only: supplies `lib/_embedder.yaml`, the only way the analyzer resolves `dart:ui`.",
     default = Label("@flutter_sky_engine//:sky_engine"),
@@ -387,11 +389,12 @@ def _flutter_library_impl(ctx):
             ),
         ),
         dart_info(
-            label = ctx.label,
+            ctx = ctx,
             packages = [package],
             deps = ctx.attr.deps,
             srcs = ctx.files.srcs,
             resources = ctx.files.resources,
+            analysis_deps = [ctx.attr._sky_engine],
         ),
         flutter_analyzable_info(ctx, package),
         flutter_info(
@@ -448,7 +451,7 @@ _LIBRARY_ATTRS = package_identity_attrs() | {
               "not listed here is not found.",
         allow_files = True,
     ),
-} | RUNTIME_INDEPENDENT_ATTR
+} | RUNTIME_INDEPENDENT_ATTR | SUMMARY_ATTRS
 
 flutter_library = rule(
     implementation = _flutter_library_impl,
@@ -457,6 +460,8 @@ flutter_library = rule(
     # SDK package does), which builds it once with no web compiler.
     cfg = runtime_reset_when_independent,
     attrs = _LIBRARY_ATTRS,
+    exec_groups = PORTABLE_EXEC_GROUPS,
+    toolchains = COPY_TO_DIRECTORY_TOOLCHAINS,
     doc = "Collects Flutter sources and assets, propagates DartInfo and FlutterInfo. Does not compile.",
 )
 
@@ -469,5 +474,7 @@ flutter_framework_library = rule(
             allow_files = [".frag", ".glsl"],
         ),
     },
+    exec_groups = PORTABLE_EXEC_GROUPS,
+    toolchains = COPY_TO_DIRECTORY_TOOLCHAINS,
     doc = "`package:flutter`, the framework: a `flutter_library` that also bundles the framework's own shaders. Only the framework's spoke repository declares one.",
 )

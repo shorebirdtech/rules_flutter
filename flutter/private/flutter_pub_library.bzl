@@ -24,7 +24,7 @@ which a pure-Dart package is, so one cycle can mix packages of both kinds.
 """
 
 load("@rules_dart//dart:providers.bzl", "DartInfo", "DartPackageMetadataInfo")
-load("@rules_dart//dart:utils.bzl", "dart_info", "package_identity_attrs", "runtime_reset")
+load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "PORTABLE_EXEC_GROUPS", "SUMMARY_ATTRS", "dart_info", "package_identity_attrs", "runtime_reset")
 load("@rules_dart//dart/pub:pub_library.bzl", "DartPackageMemberInfo", "dart_package_member_info")
 load("@rules_java//java/common:java_info.bzl", "JavaInfo")
 load("//flutter/private:flutter_info.bzl", "flutter_info")
@@ -107,11 +107,12 @@ def _flutter_pub_library_impl(ctx):
             runfiles = ctx.runfiles(files = srcs + resources),
         ),
         dart_info(
-            label = ctx.label,
+            ctx = ctx,
             packages = packages,
             srcs = srcs,
             resources = resources,
             deps = ctx.attr.deps,
+            analysis_deps = [ctx.attr._sky_engine],
         ),
         flutter_analyzable_info_of_packages(ctx, packages, srcs, resources),
         flutter_info(deps = ctx.attr.deps, **contributions),
@@ -137,6 +138,8 @@ flutter_pub_library = rule(
             doc = "The members' Android libraries, under a `select()` on Android as theirs are. Named `exports` so that rules_android's dex aspect, which follows `deps`, `exports` and `runtime_deps`, reaches them from an APK that depends on this library through `flutter_android_plugin_libs`. What reaches `FlutterInfo` is the members' own.",
         ),
         "_sky_engine": SKY_ENGINE_ATTR,
-    },
+    } | SUMMARY_ATTRS,
+    exec_groups = PORTABLE_EXEC_GROUPS,
+    toolchains = COPY_TO_DIRECTORY_TOOLCHAINS,
     doc = "A Flutter pub package as a library: its dependency cycle's packages, built as one target.",
 )
