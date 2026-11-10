@@ -38,7 +38,7 @@ Map<String, dynamic> buildInfoJson({String compilationMode = 'dbg'}) => {
   'label': '@@//:app_flutter',
   'compilationMode': compilationMode,
   'platformBuildArgs': <String>[],
-  'dartDefines': <String>['E2E_MESSAGE=from,the,app'],
+  'extraDartDefines': <String>['E2E_MESSAGE=from,the,app'],
   'assetsDir': 'bazel-out/darwin_arm64-dbg/bin/app_flutter_flutter_assets',
   'targetPlatform': 'macos',
   'nativeAssetsManifest': '',
@@ -56,7 +56,7 @@ void main() {
     bool withVmService = true,
     bool shuttingDown = false,
     bool extensionRegistered = true,
-    List<String> userBuildArgs = const [],
+    List<String> sessionBuildArgs = const [],
     List<List<String>>? bazelCalls,
   }) async {
     final logger = Logger('test.native_pipeline_assembler');
@@ -116,7 +116,7 @@ void main() {
       workspace: _noWorkspace,
       target: '//:app',
       configDevice: _StubDevice(),
-      userBuildArgs: userBuildArgs,
+      sessionBuildArgs: sessionBuildArgs,
       host: host,
       pipeline: pipeline,
       logger: logger,
@@ -126,13 +126,13 @@ void main() {
   }
 
   group('NativePipelineAssembler', () {
-    // `--config` reaches the pipeline as flags in `userBuildArgs`, so the dev
+    // `--config` reaches the pipeline as flags in `sessionBuildArgs`, so the dev
     // build's cquery sees the configuration the initial build used.
     test('asks bazel about the dev build with the user\'s configs', () async {
       final calls = <List<String>>[];
       await assembleAgainst(
         buildInfo: buildInfoJson(),
-        userBuildArgs: userBazelFlags(
+        sessionBuildArgs: userBazelFlags(
           configs: ['a', 'b'],
           buildArgs: ['--jobs=4'],
         ),

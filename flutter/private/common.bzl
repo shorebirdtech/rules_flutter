@@ -424,7 +424,8 @@ def flutter_compile_kernel(ctx, tools, aot = None, target_platform = None, nativ
     # that describe the app and the SDK. Surfaced in the return struct so
     # dev-config writers can replay it on the dev tool's frontend_server; the
     # build mode's `dart.vm.*` keys are the runtime's, not in it.
-    user_defines = merge_dart_defines(ctx, inputs.defines)
+    flag_defines = flag_dart_defines(ctx, inputs.defines)
+    user_defines = list(inputs.defines) + flag_defines
     program_defines = user_defines + flavor_dart_defines(inputs.flavor) + program_version_dart_defines(
         tools.sdk_defines,
         inputs.build_name,
@@ -449,10 +450,11 @@ def flutter_compile_kernel(ctx, tools, aot = None, target_platform = None, nativ
             "label": str(ctx.label),
             "compilationMode": ctx.var["COMPILATION_MODE"],
             "platformBuildArgs": platform_build_args,
-            # The user's defines alone, not the flavor's: the dev tool passes
-            # them back as `extra_dart_defines` to a build of this label, which
-            # takes the flavor from the target and refuses the reserved key.
-            "dartDefines": user_defines,
+            # The `extra_dart_defines` flag's value alone: the dev tool passes
+            # back as that flag whatever of it a build of this label in its own
+            # options does not already have. The target supplies its `defines`,
+            # flavor and versions itself, and refuses the reserved keys.
+            "extraDartDefines": flag_defines,
             "assetsDir": assets_dir.path,
             # The platform this kernel was compiled for. The dev tool's own
             # build runs in the host platform's configuration, so only the app can say

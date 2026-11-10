@@ -51,20 +51,22 @@ def _dev_loop_impl(ctx):
     info = [a for a in kernel.argv if a.startswith(_BUILD_INFO)]
     asserts.equals(env, 1, len(info), "expected the build_info define: %s" % kernel.argv)
     if info:
-        replayed = json.decode(info[0][len(_BUILD_INFO):])["dartDefines"]
-        asserts.equals(env, ["USER=1"], replayed, "the app's report leaves the flavor to the target")
+        replayed = json.decode(info[0][len(_BUILD_INFO):])["extraDartDefines"]
+        asserts.equals(env, ["FLAG=2"], replayed, "the app's report holds the flag alone: the target has its defines and flavor")
 
     config = written_json(env, "_dev_config.json")
     if config != None:
         asserts.equals(
             env,
-            ["USER=1", "FLUTTER_APP_FLAVOR=paid"] + pinned_version_defines(),
+            ["USER=1", "FLAG=2", "FLUTTER_APP_FLAVOR=paid"] + pinned_version_defines(),
             config["dartDefines"],
             "the dev tool replays the flavor on every reload and restart",
         )
     return analysistest.end(env)
 
-_dev_loop_test = analysistest.make(_dev_loop_impl, config_settings = _DBG)
+_dev_loop_test = analysistest.make(_dev_loop_impl, config_settings = _DBG | {
+    str(Label("@rules_dart//dart:extra_dart_defines")): ["FLAG=2"],
+})
 
 def app_flavor_test_suite(name):
     """Fixtures and tests for `flavor` on an application and a kernel target.

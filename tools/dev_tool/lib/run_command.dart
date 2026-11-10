@@ -601,7 +601,7 @@ class RunCommand {
           workspace: workspace,
           target: target,
           configDevice: devices.first,
-          userBuildArgs: plan.userBuildArgs,
+          sessionBuildArgs: plan.sessionBuildArgs,
           host: host,
           pipeline: pipeline,
           logger: logger,

@@ -402,7 +402,7 @@ class AttachCommand {
         workspace: workspace,
         target: target,
         configDevice: sessions.first.device,
-        userBuildArgs: userBuildArgs,
+        sessionBuildArgs: userBuildArgs,
         host: host,
         pipeline: pipeline,
         logger: logger,

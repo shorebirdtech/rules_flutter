@@ -94,14 +94,18 @@ class NativePipelineAssembler {
   /// attach needs.
   final Device configDevice;
 
-  /// The user's `--build-arg` values.
+  /// The bazel flags of the command, but for the device's: the user's
+  /// `--config`s and `--build-arg`s, and on `run` its `--dart-define`s and
+  /// mode flags, in the order the app's own build took them.
   ///
-  /// These reach every bazel invocation of the session, dev build included.
-  /// They cannot be recovered from the running app — a build arg is not
-  /// recorded anywhere in the binary — so on `attach` the user has to pass the
-  /// same ones the run used. Omitting them changes the configuration, which
-  /// the assets-tree check then reports by name.
-  final List<String> userBuildArgs;
+  /// These reach every bazel invocation of the session, dev build included, so
+  /// on `run` each is in exactly the options of the build that launched the
+  /// app, and Bazel keeps that build's analysis. A `--build-arg` cannot be
+  /// recovered from the running app, since nothing in the binary records it,
+  /// so on `attach` the user has to pass the same ones the run used. Omitting
+  /// them changes the configuration, which the assets-tree check then reports
+  /// by name. The app's defines it does recover: see [_replayedDefines].
+  final List<String> sessionBuildArgs;
 
   final SessionHost host;
   final ReloadPipeline pipeline;
@@ -123,7 +127,7 @@ class NativePipelineAssembler {
     required this.workspace,
     required this.target,
     required this.configDevice,
-    this.userBuildArgs = const [],
+    this.sessionBuildArgs = const [],
     required this.host,
     required this.pipeline,
     required this.logger,
@@ -139,24 +143,31 @@ class NativePipelineAssembler {
   /// be a bug to fix, not a case to fall back from.
   late final BuildInfo _info;
 
-  /// The bazel flags that produce the *dev* outputs: the dev config, the dev
-  /// package config, the regenerated codegen sources.
+  /// The `--dart-define`s the app was built with that [sessionBuildArgs] and
+  /// the workspace's `.bazelrc` do not already apply, as flags.
   ///
   /// The defines come from the app rather than from a flag the user repeats,
   /// which is what makes them right on both routes in: the dev config's
-  /// `dartDefines` (the user's defines, the flavor's `FLUTTER_APP_FLAVOR` and the
-  /// app and SDK version ones)
-  /// are what the resident frontend_server replays as `-D` on
-  /// every recompile, so a dev build that did not know the app's defines
-  /// produces an app that loses them at the first reload.
+  /// `dartDefines` (the user's defines, the flavor's `FLUTTER_APP_FLAVOR` and
+  /// the app and SDK version ones) are what the resident frontend_server
+  /// replays as `-D` on every recompile, so a dev build that did not know the
+  /// app's defines produces an app that loses them at the first reload.
   ///
-  /// Deliberately not [BuildInfo.buildArgs]: the platform flags that value
-  /// carries put a build in the app's *launch* configuration, and these outputs
-  /// are read from the configuration this command builds them in.
+  /// Only the ones missing, because a define applied twice changes the
+  /// options and so throws away Bazel's analysis of the app. On `run` none
+  /// are: [sessionBuildArgs] carries the run's own `--dart-define`s.
+  late final List<String> _replayedDefines;
+
+  /// The bazel flags that produce the *dev* outputs: the dev config, the dev
+  /// package config, the regenerated codegen sources.
+  ///
+  /// Deliberately not [BuildInfo.platformBuildArgs]: the platform flags that
+  /// value carries put a build in the app's *launch* configuration, and these
+  /// outputs are read from the configuration this command builds them in.
   List<String> get _devArgs => [
     ...configDevice.buildArgs,
-    ...dartDefineFlags(_info.dartDefines),
-    ...userBuildArgs,
+    ...sessionBuildArgs,
+    ..._replayedDefines,
   ];
 
   /// The flags the running app says produced it, used by every bazel
@@ -167,7 +178,11 @@ class NativePipelineAssembler {
   /// configuration. Keeping one list per purpose is what stops the tracked
   /// tree and the rebuilt tree from drifting apart when a user passes
   /// `--build-arg`.
-  List<String> get _launchArgs => _info.buildArgs(extra: userBuildArgs);
+  List<String> get _launchArgs => [
+    ..._info.platformBuildArgs,
+    ...sessionBuildArgs,
+    ..._replayedDefines,
+  ];
 
   /// Assemble, or settle [ReloadPipeline.ready] with the reason it could not be.
   ///
@@ -306,7 +321,7 @@ class NativePipelineAssembler {
       workspace: workspace,
       target: target,
       configDevice: configDevice,
-      userBuildArgs: userBuildArgs,
+      sessionBuildArgs: sessionBuildArgs,
       host: host,
       pipeline: pipeline,
       logger: logger,
@@ -340,6 +355,16 @@ class NativePipelineAssembler {
     // frontend_server replays on every recompile — read any later and the first
     // reload compiles against defines the app does not have.
     _info = await _readBuildInfo(client);
+    _replayedDefines = dartDefineFlags(
+      definesToReplay(
+        applied: await host.bazel.cqueryExtraDartDefines(
+          workspace: workspace,
+          compilationMode: 'dbg',
+          extraArgs: [...configDevice.buildArgs, ...sessionBuildArgs],
+        ),
+        built: _info.extraDartDefines,
+      ),
+    );
 
     // Build the flutter_application target directly to materialize its
     // DefaultInfo — the hot-reload `_dev_config.json` + dev

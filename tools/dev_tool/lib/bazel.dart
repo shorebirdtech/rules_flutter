@@ -263,6 +263,37 @@ List<String> dartDefineFlags(List<String> dartDefines) => [
     '--@rules_dart//dart:extra_dart_defines=$define',
 ];
 
+/// The cquery [Bazel.cqueryExtraDartDefines] runs, but for the options.
+///
+/// `config(…, target)` keeps the answer to the top-level configuration, the one
+/// a build's own flags make. Starlark flags are keyed by their canonical label in
+/// `build_options`, which is the setting's own `str(target.label)`; one that is
+/// at its default is not there at all.
+const extraDartDefinesQuery = [
+  'cquery',
+  'config(@rules_dart//dart:extra_dart_defines, target)',
+  '--output=starlark',
+  '--starlark:expr=json.encode(build_options(target).get(str(target.label), []))',
+];
+
+/// The defines [extraDartDefinesQuery] printed: one JSON list of strings.
+List<String> extraDartDefinesFrom(String stdout) {
+  final lines = [
+    for (final line in LineSplitter.split(stdout))
+      if (line.trim().isNotEmpty) line.trim(),
+  ];
+  if (lines.length == 1) {
+    final decoded = jsonDecode(lines.single);
+    if (decoded is List && decoded.every((d) => d is String)) {
+      return decoded.cast<String>();
+    }
+  }
+  throw DevToolException(
+    'bazel cquery for the value of --@rules_dart//dart:extra_dart_defines '
+    'printed something other than one list of defines:\n$stdout',
+  );
+}
+
 /// Maps `--config` values to the `--config=<name>` flags every bazel
 /// invocation of a run must carry. Bazel reads the named config out of the
 /// workspace's own `.bazelrc` files; this tool never parses them.
@@ -889,6 +920,33 @@ class Bazel {
       for (final line in LineSplitter.split(result.stdout as String))
         if (line.trim().isNotEmpty) line.trim(),
     ];
+  }
+
+  /// The value Bazel's options give `--@rules_dart//dart:extra_dart_defines`
+  /// in the configuration [compilationMode] and [extraArgs] make, with every
+  /// `.bazelrc` line applied: what a build in exactly those options compiles
+  /// with.
+  ///
+  /// A cquery in the options of the build after it, so asking keeps Bazel's
+  /// analysis cache.
+  Future<List<String>> cqueryExtraDartDefines({
+    required String workspace,
+    String? compilationMode,
+    List<String> extraArgs = const [],
+  }) async {
+    final args = [
+      ...extraDartDefinesQuery,
+      if (compilationMode != null) ...['-c', compilationMode],
+      ...extraArgs,
+    ];
+    final result = await run(args, workingDirectory: workspace);
+    if (result.exitCode != 0) {
+      throw BazelInvocationFailure(
+        command: args.join(' '),
+        diagnostics: (result.stderr as String).trim(),
+      );
+    }
+    return extraDartDefinesFrom(result.stdout as String);
   }
 
   /// What the web bundle [target] names says about itself, or null when

@@ -80,19 +80,18 @@ class RunPlan {
   /// Every extra bazel argument, platform flags included. One list, because a
   /// build and the cquery that reads its outputs have to agree exactly.
   ///
-  /// The `--dart-define` flags live here and nowhere else. This is the build
-  /// that bakes them into the app; every later invocation of the run reads them
-  /// back off the running app instead of being told a second time.
+  /// [sessionBuildArgs], then the device's flags.
   final List<String> extraArgs;
 
-  /// The user's raw `--config` and `--build-arg` values, as bazel flags.
+  /// Every bazel flag of the run but the device's: the user's `--config` and
+  /// `--build-arg` values, the `--dart-define`s and the mode's flags.
   ///
   /// Kept apart from [extraArgs] because the dev-loop builds need them without
   /// the device flags: a bare build of the flutter_application resolves in the
   /// host platform's configuration, while these change it wherever they are
-  /// applied. Only the user knows they were passed, and nothing in the app
-  /// records them.
-  final List<String> userBuildArgs;
+  /// applied. The dev loop builds in exactly these, so Bazel keeps the analysis
+  /// of the build that launched the app.
+  final List<String> sessionBuildArgs;
 
   /// `opt` in profile mode, `dbg` with hot reload, else whatever `-c` said.
   /// An explicit `-c` naming any other mode is refused, not overridden.
@@ -131,7 +130,7 @@ class RunPlan {
   RunPlan._({
     required this.target,
     required this.extraArgs,
-    required this.userBuildArgs,
+    required this.sessionBuildArgs,
     required this.compilationMode,
     required this.devices,
     required this.workspace,
@@ -520,7 +519,7 @@ class RunPlan {
     return RunPlan._(
       target: target,
       extraArgs: extraArgs,
-      userBuildArgs: userBuildArgs,
+      sessionBuildArgs: runFlags,
       compilationMode: compilationMode,
       devices: devices,
       workspace: workspace,

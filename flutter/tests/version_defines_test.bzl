@@ -3,8 +3,8 @@
 `appBuildName`, `appBuildNumber` and `FlutterVersion` read them as
 `String.fromEnvironment`, and read null without. They are in every compile, in
 the dev config's `dartDefines` that the dev tool replays on every reload and
-restart, and not in the `build_info` the app reports, whose `dartDefines` the
-dev tool passes back as flags to a build of the same target. A `defines` entry
+restart, and not in the `build_info` the app reports, whose `extraDartDefines`
+the dev tool passes back as flags to a build of the same target. A `defines` entry
 that sets one is refused, as `flutter_tools` refuses it.
 """
 
@@ -116,19 +116,21 @@ def _dev_loop_impl(ctx):
     info = [a for a in kernel.argv if a.startswith(_BUILD_INFO)]
     asserts.equals(env, 1, len(info), "expected the build_info define: %s" % kernel.argv)
     if info:
-        replayed = json.decode(info[0][len(_BUILD_INFO):])["dartDefines"]
-        asserts.equals(env, ["USER=1"], replayed, "the app's report leaves the version to the target")
+        replayed = json.decode(info[0][len(_BUILD_INFO):])["extraDartDefines"]
+        asserts.equals(env, ["FLAG=2"], replayed, "the app's report holds the flag alone: the target has its defines and versions")
     config = written_json(env, "_dev_config.json")
     if config != None:
         asserts.equals(
             env,
-            ["USER=1"] + pinned_version_defines("2.3.4", "7"),
+            ["USER=1", "FLAG=2"] + pinned_version_defines("2.3.4", "7"),
             config["dartDefines"],
             "the dev tool replays the version on every reload and restart",
         )
     return analysistest.end(env)
 
-_dev_loop_test = analysistest.make(_dev_loop_impl, config_settings = _DBG)
+_dev_loop_test = analysistest.make(_dev_loop_impl, config_settings = _DBG | {
+    str(Label("@rules_dart//dart:extra_dart_defines")): ["FLAG=2"],
+})
 
 def _test_compile_impl(ctx):
     env = analysistest.begin(ctx)

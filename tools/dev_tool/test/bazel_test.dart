@@ -331,6 +331,28 @@ void main() {
     });
   });
 
+  group('extraDartDefinesFrom', () {
+    test('reads the one list the query prints', () {
+      expect(
+        extraDartDefinesFrom('["E2E_FLAG=from_flag","MSG=a,b"]\n'),
+        ['E2E_FLAG=from_flag', 'MSG=a,b'],
+      );
+      expect(extraDartDefinesFrom('[]\n'), isEmpty);
+    });
+
+    test('refuses anything but one list of strings', () {
+      // Two lines are two configurations, which `config(…, target)` exists to
+      // rule out: either could be the build's.
+      for (final stdout in ['', '[]\n[]\n', '{}\n', '[1]\n']) {
+        expect(
+          () => extraDartDefinesFrom(stdout),
+          throwsA(isA<DevToolException>()),
+          reason: stdout,
+        );
+      }
+    });
+  });
+
   // A run is stopped with a signal or `daemon.shutdown`, and either can land
   // while a bazel command is running — the launch build, a codegen rebuild on
   // reload, a first `bazel fetch` of the toolchain. Left alone, that command
@@ -611,6 +633,28 @@ void main() {
       await fake.bazel.close();
 
       expect(fake.interrupted, isEmpty);
+    });
+
+    test('cqueryExtraDartDefines asks in the build\'s own options', () async {
+      final fake = fakeBazel();
+      final defines = fake.bazel.cqueryExtraDartDefines(
+        workspace: '/ws',
+        compilationMode: 'dbg',
+        extraArgs: const ['--config=a'],
+      );
+      await pumpEventQueue();
+      final process = fake.processes.single;
+      await process.outputAttached;
+      process.emitStdout('["A=1"]\n');
+      process.complete(0);
+
+      expect(await defines, ['A=1']);
+      expect(fake.spawned.single.args, [
+        ...extraDartDefinesQuery,
+        '-c',
+        'dbg',
+        '--config=a',
+      ]);
     });
 
     group('cqueryWebBundleFacts', () {
