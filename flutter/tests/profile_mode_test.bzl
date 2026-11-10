@@ -30,7 +30,7 @@ def _action(env, mnemonics):
     asserts.equals(env, 1, len(actions), "expected exactly one of %s" % (mnemonics,))
     return actions[0] if actions else None
 
-def _assert_mode(env, profile, application, os):
+def _assert_mode(env, profile, os):
     kernel = _action(env, ["DartKernel"])
     aot = _action(env, ["FlutterAotMacho", "FlutterAotElf"])
     if kernel == None or aot == None:
@@ -49,10 +49,9 @@ def _assert_mode(env, profile, application, os):
     for uri in ["dart:ui", "package:flutter"]:
         asserts.true(env, "--delete-tostring-package-uri=" + uri in kernel.argv, "toString of %s deleted" % uri)
 
-    # An application knows its OS and compiles for it, as `flutter build`
-    # does; the AOT target does not say which it is for.
-    if application:
-        asserts.true(env, "--target-os " + os in argv, "compiled for the target OS: " + argv)
+    # The kernel is compiled for the OS the artifact runs on, as `flutter
+    # build` does.
+    asserts.true(env, "--target-os " + os in argv, "compiled for the target OS: " + argv)
 
     # The profile gen_snapshot lives in a repo of its own, fetched only for a
     # profile build.
@@ -64,7 +63,7 @@ def _assert_mode(env, profile, application, os):
     )
 
 def _target_os(ctx):
-    """The OS the fixture application is built for: the one the test runs on."""
+    """The OS the fixtures are built for: the one the test runs on."""
     for os in ["macos", "linux", "windows"]:
         if ctx.target_platform_has_constraint(getattr(ctx.attr, "_" + os)[platform_common.ConstraintValueInfo]):
             return os
@@ -72,12 +71,12 @@ def _target_os(ctx):
 
 def _profile_test_impl(ctx):
     env = analysistest.begin(ctx)
-    _assert_mode(env, profile = True, application = ctx.attr.application, os = _target_os(ctx))
+    _assert_mode(env, profile = True, os = _target_os(ctx))
     return analysistest.end(env)
 
 def _release_test_impl(ctx):
     env = analysistest.begin(ctx)
-    _assert_mode(env, profile = False, application = ctx.attr.application, os = _target_os(ctx))
+    _assert_mode(env, profile = False, os = _target_os(ctx))
     return analysistest.end(env)
 
 def _refused_test_impl(ctx):
@@ -86,7 +85,6 @@ def _refused_test_impl(ctx):
     return analysistest.end(env)
 
 _FIXTURE = {
-    "application": attr.bool(mandatory = True),
     "_linux": attr.label(default = "@platforms//os:linux"),
     "_macos": attr.label(default = "@platforms//os:macos"),
     "_windows": attr.label(default = "@platforms//os:windows"),
@@ -183,10 +181,7 @@ def profile_mode_test_suite(name):
             ("refused_fastbuild", _refused_fastbuild_test),
         ]:
             test_name = "%s%s_%s_test" % (name, fixture, suffix)
-            if suffix in ("profile", "release", "debug"):
-                rule(name = test_name, target_under_test = ":" + fixture, application = fixture == "_profile_application")
-            else:
-                rule(name = test_name, target_under_test = ":" + fixture)
+            rule(name = test_name, target_under_test = ":" + fixture)
             tests.append(":" + test_name)
 
     flutter_profile_build(

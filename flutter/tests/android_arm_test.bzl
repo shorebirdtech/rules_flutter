@@ -42,6 +42,19 @@ def _gen_snapshot_impl(ctx):
             flag in argv,
             "%s for android-%s: %s" % (flag, ctx.attr.cpu, argv),
         )
+
+    # The release kernel is compiled for Android and drops the framework's
+    # `toString` bodies, as `flutter build apk` compiles it.
+    kernels = [a for a in analysistest.target_actions(env) if a.mnemonic == "DartKernel"]
+    asserts.equals(env, 1, len(kernels), "expected exactly one kernel compile")
+    if kernels:
+        kernel_argv = " ".join(kernels[0].argv)
+        for flag in [
+            "--target-os android",
+            "--delete-tostring-package-uri=dart:ui",
+            "--delete-tostring-package-uri=package:flutter",
+        ]:
+            asserts.true(env, flag in kernel_argv, "%s in the kernel compile: %s" % (flag, kernel_argv))
     return analysistest.end(env)
 
 _ATTRS = {"cpu": attr.string(mandatory = True)}

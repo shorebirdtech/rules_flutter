@@ -13,7 +13,7 @@ platforms (ELF .so).
 """
 
 load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS")
-load("//flutter/private:common.bzl", "FLUTTER_APPLICATION_ATTRS", "KERNEL_COMPILE_ATTRS", "PLATFORM_CONSTRAINT_ATTRS", "flutter_build_mode", "flutter_compile_kernel")
+load("//flutter/private:common.bzl", "FLUTTER_APPLICATION_ATTRS", "KERNEL_COMPILE_ATTRS", "PLATFORM_CONSTRAINT_ATTRS", "detect_target_platform", "flutter_build_mode", "flutter_compile_kernel")
 load("//flutter/private:exec_groups.bzl", "PORTABLE_EXEC_GROUPS", "portable_tools")
 load("//flutter/private:flutter_aot_compile.bzl", "flutter_aot_elf_action", "flutter_aot_macho_action", "gen_snapshot_options")
 
@@ -23,11 +23,28 @@ def _flutter_aot_target_impl(ctx):
 
     is_debug = flutter_build_mode(ctx) == "debug"
 
+    def _has(constraint):
+        return ctx.target_platform_has_constraint(getattr(ctx.attr, constraint)[platform_common.ConstraintValueInfo])
+
+    is_ios = _has("_ios_constraint")
+    is_macos = _has("_macos_constraint")
+
+    # The artifact runs on one OS, as `flutter build`'s does: the AOT kernel
+    # is compiled for it (`--target-os`), and only that OS's plugins register.
+    target_platform = detect_target_platform(
+        is_ios,
+        is_macos,
+        _has("_linux_constraint"),
+        _has("_windows_constraint"),
+        _has("_android_constraint"),
+    )
+
     # Step 1: Kernel compilation.
     compilation = flutter_compile_kernel(
         ctx,
         portable_tools(ctx),
         aot = not is_debug,
+        target_platform = target_platform,
     )
     kernel_dill = compilation.kernel_dill
     output_groups = {"_validation": compilation.import_checks}
@@ -37,13 +54,6 @@ def _flutter_aot_target_impl(ctx):
         return [DefaultInfo(files = depset([kernel_dill])), OutputGroupInfo(**output_groups)]
 
     # Step 2: AOT compile — choose format based on target platform.
-    is_ios = ctx.target_platform_has_constraint(
-        ctx.attr._ios_constraint[platform_common.ConstraintValueInfo],
-    )
-    is_macos = ctx.target_platform_has_constraint(
-        ctx.attr._macos_constraint[platform_common.ConstraintValueInfo],
-    )
-
     options = gen_snapshot_options(ctx)
     if options.debug_info:
         output_groups["debug_info"] = depset([options.debug_info])
