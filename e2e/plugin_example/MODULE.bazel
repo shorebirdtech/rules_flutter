@@ -39,7 +39,7 @@ flutter_pub.from_lock(
     lock = "//:pubspec.lock",
 )
 
-use_repo(flutter, "flutter_ios_engine", "flutter_macos_engine", "flutter_toolchains", "flutter_web_sdk")
+use_repo(flutter, "flutter_ios_engine", "flutter_macos_engine", "flutter_web_sdk")
 
 use_repo(flutter_pub, "deps")
 

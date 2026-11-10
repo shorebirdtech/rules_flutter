@@ -31,6 +31,6 @@ flutter_pub.from_lock(
     },
 )
 
-use_repo(flutter, "flutter_toolchains", "flutter_web_sdk")
+use_repo(flutter, "flutter_web_sdk")
 
 use_repo(flutter_pub, "deps")

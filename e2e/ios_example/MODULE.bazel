@@ -35,7 +35,7 @@ flutter_pub.from_lock(
     swift_package_resolved = "//:Package.resolved",
 )
 
-use_repo(flutter, "flutter_ios_engine", "flutter_toolchains")
+use_repo(flutter, "flutter_ios_engine")
 
 use_repo(flutter_pub, "deps")
 

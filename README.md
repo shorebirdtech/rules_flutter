@@ -95,7 +95,6 @@ bazel_dep(name = "rules_flutter", version = "<latest from registry.bazel.build/m
 
 flutter = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter")
 flutter.toolchain(flutter_version = "3.47.9")
-use_repo(flutter, "flutter_toolchains")
 
 flutter_pub = use_extension("@rules_flutter//flutter/pub:extensions.bzl", "pub")
 flutter_pub.from_lock(
@@ -1166,7 +1165,6 @@ git_override(
     remote = "https://github.com/bazelbuild/rules_android_ndk.git",
 )
 
-use_repo(flutter, "flutter_toolchains")
 use_repo(flutter_pub, "deps")
 
 android = use_extension("@hermetic_android_toolchains//:extensions.bzl", "android", dev_dependency = True)
