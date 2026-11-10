@@ -72,16 +72,13 @@ void main() {
           'a $kind file named ${entry.key} is declared under its name',
           () async {
             final package = '${kind}_${entry.key}';
-            final build = await ws.bazel([
-              'query',
-              '--output=build',
-              '@flutter_pub__$package//:$package',
-            ]);
-            expect(build.succeeded, isTrue, reason: '$build');
+            final declared = await ws.declaredFiles(kind, package);
+            expect(declared.succeeded, isTrue, reason: '$declared');
             expect(
-              build.output,
-              contains(entry.value),
-              reason: 'the file is not in the package target:\n$build',
+              declared.stdout,
+              contains('@flutter_pub__$package//:${kind}s/${entry.value}\n'),
+              reason:
+                  'the package target does not declare the file:\n$declared',
             );
           },
         );

@@ -130,16 +130,15 @@ void main() {
               reason: 'a file name ran as code in the spoke:\n$result',
             );
             if (result.succeeded) {
-              final build = await ws.bazel([
-                'query',
-                '--output=build',
-                '@flutter_pub__$package//:$package',
-              ]);
+              final declared = await ws.declaredFiles(kind, package);
               expect(
-                build.output,
-                contains(fragment),
+                declared.stdout,
+                contains(
+                  '@flutter_pub__$package//:${kind}s/${entry.value.$1}\n',
+                ),
                 reason:
-                    'the package loads but its BUILD has lost the file:\n$build',
+                    'the package loads but its target has lost the file:\n'
+                    '$declared',
               );
               return;
             }

@@ -192,6 +192,20 @@ class PubInputsWorkspace {
   Future<BazelResult> loadSpoke(String package) =>
       query('${spoke(package)}//:all');
 
+  /// The files [package]'s target declares as `assets`, or as the fonts of
+  /// its font families for `font`, one label a line.
+  Future<BazelResult> declaredFiles(String kind, String package) {
+    final target = '${spoke(package)}//:$package';
+    return bazel([
+      'query',
+      switch (kind) {
+        'asset' => 'labels(assets, $target)',
+        'font' => 'labels(fonts, labels(fonts, $target))',
+        _ => throw ArgumentError.value(kind, 'kind'),
+      },
+    ]);
+  }
+
   /// Where Bazel keeps the fetched files of [package]'s spoke.
   Future<Directory> spokeDirectory(String package) async {
     final base = await bazel(['info', 'output_base']);
