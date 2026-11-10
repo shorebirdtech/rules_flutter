@@ -198,7 +198,7 @@ def flutter_application_build(ctx, inputs):
                 file_flags = options.file_flags,
                 debug_info = debug_info_output,
                 object = aot_object,
-                min_os_version = inputs.min_os_version if inputs.min_os_version else None,
+                minimum_os_version = inputs.minimum_os_version if inputs.minimum_os_version else None,
             )
         else:
             aot_output = ctx.actions.declare_file(ctx.label.name + ".so")

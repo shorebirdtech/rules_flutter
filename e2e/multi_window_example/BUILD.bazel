@@ -38,7 +38,7 @@ flutter_application(
     name = "app_flutter",
     package_name = "multi_window_example",
     main = "lib/main.dart",
-    min_os_version = "13.0",
+    minimum_os_version = "13.0",
     deps = [
         "@deps//:flutter",
         "@rules_flutter//flutter:material_icons",

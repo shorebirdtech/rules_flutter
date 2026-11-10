@@ -1342,7 +1342,7 @@ def _flutter_web_bundle_impl(ctx):
 
 # The web-only additions to the shared compile bundle. Web builds don't use
 # native_deps, obfuscate, split_debug_info, extra_gen_snapshot_options, or
-# min_os_version, so those stay unnamed.
+# minimum_os_version, so those stay unnamed.
 #
 # `profile` is deliberately NOT lifted from there either, even though the web
 # rule has one: the shared attr documents itself in gen_snapshot terms ("AOT

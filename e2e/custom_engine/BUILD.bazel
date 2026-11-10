@@ -34,7 +34,7 @@ flutter_application(
     name = "ios_flutter",
     package_name = "custom_engine",
     main = "lib/main.dart",
-    min_os_version = IOS_MINIMUM_OS_VERSION,
+    minimum_os_version = IOS_MINIMUM_OS_VERSION,
     deps = ["@deps//:flutter"],
 )
 

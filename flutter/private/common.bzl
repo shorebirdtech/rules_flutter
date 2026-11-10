@@ -1274,7 +1274,7 @@ def flutter_program_inputs(ctx):
         code_assets = list(getattr(ctx.attr, "code_assets", [])),
         link_hook_assets = list(getattr(ctx.attr, "link_hook_assets", [])),
         track_widget_creation = getattr(ctx.attr, "track_widget_creation", False),
-        min_os_version = getattr(ctx.attr, "min_os_version", ""),
+        minimum_os_version = getattr(ctx.attr, "minimum_os_version", ""),
         obfuscate = getattr(ctx.attr, "obfuscate", False),
         split_debug_info = getattr(ctx.attr, "split_debug_info", False),
         extra_gen_snapshot_options = list(getattr(ctx.attr, "extra_gen_snapshot_options", [])),
@@ -1452,7 +1452,7 @@ FLUTTER_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | {
               "licences: what `flutter: licenses:` lists in the program's `pubspec.yaml`.",
         allow_files = True,
     ),
-    "min_os_version": attr.string(
+    "minimum_os_version": attr.string(
         doc = "Minimum OS deployment target for Apple platforms (iOS/macOS). " +
               "Passed to gen_snapshot as --macho-min-os-version. " +
               "Platform-specific bundle rules set appropriate defaults.",
@@ -1480,7 +1480,7 @@ FLUTTER_PROGRAM_ATTR_NAMES = [
     "license_file",
     "link_hook_assets",
     "main",
-    "min_os_version",
+    "minimum_os_version",
     "native_deps",
     "obfuscate",
     "package_name",

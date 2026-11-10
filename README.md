@@ -2085,7 +2085,7 @@ flutter_application(
 | `link_hook_assets` | The data assets packages' link hooks emit, each `package:<package>/<name>`. See [Link hooks](#link-hooks). |
 | `license_file` | The program's own licence, the `NOTICES` or `LICENSE` file at the root of its package. `NOTICES.Z` (`NOTICES` on the web) lists it under `package_name`, with the licence of every package in `deps` (each `flutter_library`, `flutter_plugin`, `dart_library` and pub package states its own as `license_file`) and the Flutter engine's, which every program ships. |
 | `additional_licenses` | The files the pubspec's `flutter: licenses:` lists. They are appended to `NOTICES.Z` as they are, after the sorted entries. |
-| `min_os_version` | Minimum Apple deployment target, passed to `gen_snapshot` as `--macho-min-os-version`. |
+| `minimum_os_version` | Minimum Apple deployment target, passed to `gen_snapshot` as `--macho-min-os-version`. |
 
 **Defines from the command line.** The repeatable flag `--@rules_flutter//flutter:extra_dart_defines=KEY=VALUE` adds a define to every Dart compile: native kernel, `flutter_test`, dart2wasm, and dart2js. Each occurrence of the flag is one define, so values may contain commas, except in a `flutter_test`: its dependencies are compiled one library at a time by the SDK's `kernel_worker`, which splits every value on commas, so a comma there is refused at analysis. When a key is set both by the flag and by the `defines` attribute, the flag wins. The keys `dart.vm.profile` and `dart.vm.product` are set by the build from the compilation mode and cannot be passed. The dev tool's `--dart-define` forwards to this flag and replays the defines on hot reload and restart, matching `flutter run --dart-define`.
 

@@ -192,7 +192,7 @@ def flutter_aot_macho_action(
         debug_info = None,
         object = None,
         install_name = "@rpath/App.framework/App",
-        min_os_version = None,
+        minimum_os_version = None,
         rpath = "@executable_path/Frameworks,@loader_path/Frameworks"):
     """AOT compile to Mach-O dylib. Used for macOS and iOS.
 
@@ -216,13 +216,13 @@ def flutter_aot_macho_action(
             (`--macho-object`). The dylib's debugging map points at it, and
             `dsymutil` reads the dSYM out of it.
         install_name: Mach-O LC_ID_DYLIB install name.
-        min_os_version: Minimum OS deployment target (e.g. "15.0" for iOS, "12.0" for macOS).
+        minimum_os_version: Minimum OS deployment target (e.g. "15.0" for iOS, "12.0" for macOS).
         rpath: Comma-separated rpath entries for LC_RPATH.
     """
     macho_flags = list(extra_flags)
     macho_flags.append("--macho-install-name=" + install_name)
-    if min_os_version:
-        macho_flags.append("--macho-min-os-version=" + min_os_version)
+    if minimum_os_version:
+        macho_flags.append("--macho-min-os-version=" + minimum_os_version)
     if rpath:
         macho_flags.append("--macho-rpath=" + rpath)
     _flutter_aot_action(ctx, gen_snapshot, kernel_dill, output, "app-aot-macho-dylib", "--macho", False, macho_flags, file_flags, debug_info, object, mnemonic = "FlutterAotMacho")
