@@ -167,8 +167,8 @@ def build_pub_contributions(ctx, package_name, package_root):
         if asset_path not in named_assets:
             fail("font_files provides font asset \"%s\" but fonts_json does not name it" % asset_path)
 
-    asset_platforms = ctx.attr.pkg_asset_platforms
-    asset_flavors = ctx.attr.pkg_asset_flavors
+    asset_platforms = ctx.attr.asset_platforms
+    asset_flavors = ctx.attr.asset_flavors
     extra_pub_assets = []
     for f in ctx.files.assets:
         asset_path = path_in_package(ctx.label, package_root, f)
@@ -181,8 +181,8 @@ def build_pub_contributions(ctx, package_name, package_root):
             flavors = tuple(asset_flavors.get(asset_path, [])),
         ))
 
-    shader_platforms = ctx.attr.pkg_shader_platforms
-    shader_flavors = ctx.attr.pkg_shader_flavors
+    shader_platforms = ctx.attr.shader_platforms
+    shader_flavors = ctx.attr.shader_flavors
     extra_pub_shaders = []
     for f in ctx.files.shaders:
         shader_path = path_in_package(ctx.label, package_root, f)
@@ -201,10 +201,10 @@ def build_pub_contributions(ctx, package_name, package_root):
     asset_paths = [entry.asset_path for entry in extra_pub_assets]
     shader_paths = [entry.shader_path for entry in extra_pub_shaders]
     for attr_name, restricted, paths, listing in [
-        ("pkg_asset_platforms", asset_platforms, asset_paths, "assets"),
-        ("pkg_asset_flavors", asset_flavors, asset_paths, "assets"),
-        ("pkg_shader_platforms", shader_platforms, shader_paths, "shaders"),
-        ("pkg_shader_flavors", shader_flavors, shader_paths, "shaders"),
+        ("asset_platforms", asset_platforms, asset_paths, "assets"),
+        ("asset_flavors", asset_flavors, asset_paths, "assets"),
+        ("shader_platforms", shader_platforms, shader_paths, "shaders"),
+        ("shader_flavors", shader_flavors, shader_paths, "shaders"),
     ]:
         for path in restricted:
             if path not in paths:
@@ -314,19 +314,19 @@ def aggregate_pub_contributions(deps, target_platform = None, flavor = "", progr
 
     return (fonts, copies, unlisted_copies)
 
-PKG_SHADER_PLATFORMS_ATTR = attr.string_list_dict(
+SHADER_PLATFORMS_ATTR = attr.string_list_dict(
     doc = "For a shader of `shaders` that ships on some platforms only (a `platforms:` entry of `flutter: shaders:`), its package-relative path and the platforms (`android`, `ios`, `linux`, `macos`, `windows`, `web`). A shader not listed here ships on every platform.",
 )
 
-PKG_SHADER_FLAVORS_ATTR = attr.string_list_dict(
+SHADER_FLAVORS_ATTR = attr.string_list_dict(
     doc = "For a shader of `shaders` that ships in some flavors only (a `flavors:` entry of `flutter: shaders:`), its package-relative path and the flavors. A shader not listed here ships in every build.",
 )
 
-PKG_ASSET_FLAVORS_ATTR = attr.string_list_dict(
+ASSET_FLAVORS_ATTR = attr.string_list_dict(
     doc = "For an asset of `assets` that ships in some flavors only (a `flavors:` entry of `flutter: assets:`), its package-relative path and the flavors. An asset not listed here ships in every build.",
 )
 
-PKG_ASSET_PLATFORMS_ATTR = attr.string_list_dict(
+ASSET_PLATFORMS_ATTR = attr.string_list_dict(
     doc = "For an asset of `assets` that ships on some platforms only (a `platforms:` entry of `flutter: assets:`), its package-relative path and the platforms (`android`, `ios`, `linux`, `macos`, `windows`, `web`). An asset not listed here ships on every platform.",
 )
 
@@ -542,10 +542,10 @@ _LIBRARY_ATTRS = {
     ),
     "license_file": LICENSE_FILE_ATTR,
     "additional_licenses": ADDITIONAL_LICENSES_ATTR,
-    "pkg_asset_platforms": PKG_ASSET_PLATFORMS_ATTR,
-    "pkg_shader_platforms": PKG_SHADER_PLATFORMS_ATTR,
-    "pkg_asset_flavors": PKG_ASSET_FLAVORS_ATTR,
-    "pkg_shader_flavors": PKG_SHADER_FLAVORS_ATTR,
+    "asset_platforms": ASSET_PLATFORMS_ATTR,
+    "shader_platforms": SHADER_PLATFORMS_ATTR,
+    "asset_flavors": ASSET_FLAVORS_ATTR,
+    "shader_flavors": SHADER_FLAVORS_ATTR,
     "_sky_engine": SKY_ENGINE_ATTR,
     "shader_includes": attr.label_list(
         doc = "Files this package's `shaders` may `#include` (e.g. " +

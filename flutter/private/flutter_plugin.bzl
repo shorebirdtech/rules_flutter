@@ -33,7 +33,7 @@ load("//flutter:providers.bzl", "FlutterDataAssetInfo", "FlutterInfo", "FlutterN
 load("//flutter/private:common.bzl", "collect_binding_contracts", "collect_native_libs")
 load("//flutter/private:flutter_desktop_plugin_info.bzl", "FlutterLinuxPluginInfo", "FlutterWindowsPluginInfo")
 load("//flutter/private:flutter_info.bzl", "LINK_HOOK_ATTR", "flutter_info")
-load("//flutter/private:flutter_library.bzl", "ADDITIONAL_LICENSES_ATTR", "LICENSE_FILE_ATTR", "PKG_ASSET_FLAVORS_ATTR", "PKG_ASSET_PLATFORMS_ATTR", "PKG_SHADER_FLAVORS_ATTR", "PKG_SHADER_PLATFORMS_ATTR", "SKY_ENGINE_ATTR", "build_pub_contributions", "flutter_analyzable_info", "flutter_package_record", "own_additional_licenses")
+load("//flutter/private:flutter_library.bzl", "ADDITIONAL_LICENSES_ATTR", "ASSET_FLAVORS_ATTR", "ASSET_PLATFORMS_ATTR", "LICENSE_FILE_ATTR", "SHADER_FLAVORS_ATTR", "SHADER_PLATFORMS_ATTR", "SKY_ENGINE_ATTR", "build_pub_contributions", "flutter_analyzable_info", "flutter_package_record", "own_additional_licenses")
 load("//flutter/private:native_sources.bzl", "collect_native_source_pairs", "native_sources_aspect")
 load("//flutter/private:unbuilt_native_code.bzl", "FlutterUnbuiltNativeCodeInfo")
 
@@ -393,10 +393,10 @@ PLUGIN_PACKAGE_ATTRS = {
         doc = "Map of font File label -> package-relative asset path. Same shape as `flutter_library.font_files`.",
         allow_files = True,
     ),
-    "pkg_asset_platforms": PKG_ASSET_PLATFORMS_ATTR,
-    "pkg_shader_platforms": PKG_SHADER_PLATFORMS_ATTR,
-    "pkg_asset_flavors": PKG_ASSET_FLAVORS_ATTR,
-    "pkg_shader_flavors": PKG_SHADER_FLAVORS_ATTR,
+    "asset_platforms": ASSET_PLATFORMS_ATTR,
+    "shader_platforms": SHADER_PLATFORMS_ATTR,
+    "asset_flavors": ASSET_FLAVORS_ATTR,
+    "shader_flavors": SHADER_FLAVORS_ATTR,
     "shader_includes": attr.label_list(
         doc = "Files this package's `shaders` may `#include` (e.g. " +
               "`glob([\"shaders/**/*.glsl\"])`). A shader compiles in a " +

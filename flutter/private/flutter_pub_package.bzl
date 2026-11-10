@@ -1015,7 +1015,7 @@ _SHADER_INCLUDES_GLOB = """    shader_includes = glob(
         allow_empty = True,
     ),"""
 
-def _format_pub_asset_attrs(fonts_json_str, font_files, assets, shaders, pkg_asset_platforms = {}, pkg_shader_platforms = {}, pkg_asset_flavors = {}, pkg_shader_flavors = {}, additional_licenses = []):
+def _format_pub_asset_attrs(fonts_json_str, font_files, assets, shaders, asset_platforms = {}, shader_platforms = {}, asset_flavors = {}, shader_flavors = {}, additional_licenses = []):
     """Render the four pub-asset attrs as BUILD source, omitting empty ones."""
     parts = []
     if fonts_json_str:
@@ -1024,18 +1024,18 @@ def _format_pub_asset_attrs(fonts_json_str, font_files, assets, shaders, pkg_ass
         parts.append("    font_files = {},".format(_format_label_dict_literal(font_files)))
     if assets:
         parts.append("    assets = {},".format(_format_label_list_literal(assets)))
-    if pkg_asset_platforms:
-        parts.append("    pkg_asset_platforms = {},".format(_format_list_dict_literal(pkg_asset_platforms)))
-    if pkg_asset_flavors:
-        parts.append("    pkg_asset_flavors = {},".format(_format_list_dict_literal(pkg_asset_flavors)))
+    if asset_platforms:
+        parts.append("    asset_platforms = {},".format(_format_list_dict_literal(asset_platforms)))
+    if asset_flavors:
+        parts.append("    asset_flavors = {},".format(_format_list_dict_literal(asset_flavors)))
     if shaders:
         parts.append("    shaders = {},".format(_format_label_list_literal(shaders)))
     if additional_licenses:
         parts.append("    additional_licenses = {},".format(repr(additional_licenses)))
-    if pkg_shader_platforms:
-        parts.append("    pkg_shader_platforms = {},".format(_format_list_dict_literal(pkg_shader_platforms)))
-    if pkg_shader_flavors:
-        parts.append("    pkg_shader_flavors = {},".format(_format_list_dict_literal(pkg_shader_flavors)))
+    if shader_platforms:
+        parts.append("    shader_platforms = {},".format(_format_list_dict_literal(shader_platforms)))
+    if shader_flavors:
+        parts.append("    shader_flavors = {},".format(_format_list_dict_literal(shader_flavors)))
     if shaders:
         # What the shaders may `#include`: a package's GLSL anywhere in it,
         # since an include can reach `../`.
@@ -1159,11 +1159,11 @@ def make_flutter_member_build_content(
         version = "",
         linux_link = None,
         windows_link = None,
-        pkg_asset_platforms = {},
-        pkg_shader_platforms = {},
+        asset_platforms = {},
+        shader_platforms = {},
         additional_licenses = [],
-        pkg_asset_flavors = {},
-        pkg_shader_flavors = {},
+        asset_flavors = {},
+        shader_flavors = {},
         has_android_lib = False,
         unbuilt_native_code = {},
         license_file = ""):
@@ -1210,14 +1210,14 @@ def make_flutter_member_build_content(
         fonts_json_str: JSON-encoded `flutter.fonts` declarations, or "".
         font_files: Dict of font file label -> package-relative path.
         assets: Labels of the package's asset files.
-        pkg_asset_platforms: Dict of package-relative asset path -> the platforms
+        asset_platforms: Dict of package-relative asset path -> the platforms
             it ships on, for the assets a `platforms:` entry restricts.
-        pkg_asset_flavors: Dict of package-relative asset path -> the flavors
+        asset_flavors: Dict of package-relative asset path -> the flavors
             it ships in, for the assets a `flavors:` entry restricts.
         shaders: Labels of the package's shader files.
-        pkg_shader_platforms: Dict of package-relative shader path -> the
+        shader_platforms: Dict of package-relative shader path -> the
             platforms it ships on, for the shaders a `platforms:` entry restricts.
-        pkg_shader_flavors: Dict of package-relative shader path -> the flavors
+        shader_flavors: Dict of package-relative shader path -> the flavors
             it ships in, for the shaders a `flavors:` entry restricts.
         version: The resolved package version this spoke was fetched at, or
             empty. Emitted only when known, matching
@@ -1368,7 +1368,7 @@ flutter_unbuilt_plugin_library(
             ios_lines = ios_lines,
         )
 
-    pub_attrs = _format_pub_asset_attrs(fonts_json_str, font_files, assets, shaders, pkg_asset_platforms, pkg_shader_platforms, additional_licenses = additional_licenses, pkg_asset_flavors = pkg_asset_flavors, pkg_shader_flavors = pkg_shader_flavors)
+    pub_attrs = _format_pub_asset_attrs(fonts_json_str, font_files, assets, shaders, asset_platforms, shader_platforms, additional_licenses = additional_licenses, asset_flavors = asset_flavors, shader_flavors = shader_flavors)
 
     # The `lib/` glob is `allow_empty`: a pub package can be only assets or native
     # code, with no Dart.
@@ -2161,8 +2161,8 @@ def _flutter_pub_package_impl(ctx):
     bundled_assets = _build_assets(ctx, ctx.attr.package_name, asset_block.assets, flavors)
     bundled_shaders = _build_shaders(ctx.attr.package_name, asset_block.shaders, flavors)
     flavored = flavors.flavors()
-    pkg_asset_flavors = {p: f for p, f in flavored.items() if ":" + p in bundled_assets.labels}
-    pkg_shader_flavors = {p: f for p, f in flavored.items() if ":" + p in bundled_shaders.labels}
+    asset_flavors = {p: f for p, f in flavored.items() if ":" + p in bundled_assets.labels}
+    shader_flavors = {p: f for p, f in flavored.items() if ":" + p in bundled_shaders.labels}
     has_asset_contributions = (
         bool(asset_block.fonts) or bool(asset_block.assets) or bool(asset_block.shaders)
     )
@@ -2323,12 +2323,12 @@ def _flutter_pub_package_impl(ctx):
             fonts_json_str = fonts_json_str,
             font_files = font_files,
             assets = bundled_assets.labels,
-            pkg_asset_platforms = bundled_assets.platforms,
+            asset_platforms = bundled_assets.platforms,
             shaders = bundled_shaders.labels,
-            pkg_shader_platforms = bundled_shaders.platforms,
+            shader_platforms = bundled_shaders.platforms,
             additional_licenses = additional_licenses,
-            pkg_asset_flavors = pkg_asset_flavors,
-            pkg_shader_flavors = pkg_shader_flavors,
+            asset_flavors = asset_flavors,
+            shader_flavors = shader_flavors,
             linux_link = linux_link,
             windows_link = windows_link,
             has_android_lib = bool(android_src_dir or android_has_resources or android_native_build),
@@ -2354,12 +2354,12 @@ def _flutter_pub_package_impl(ctx):
             fonts_json_str = fonts_json_str,
             font_files = font_files,
             assets = bundled_assets.labels,
-            pkg_asset_platforms = bundled_assets.platforms,
+            asset_platforms = bundled_assets.platforms,
             shaders = bundled_shaders.labels,
-            pkg_shader_platforms = bundled_shaders.platforms,
+            shader_platforms = bundled_shaders.platforms,
             additional_licenses = additional_licenses,
-            pkg_asset_flavors = pkg_asset_flavors,
-            pkg_shader_flavors = pkg_shader_flavors,
+            asset_flavors = asset_flavors,
+            shader_flavors = shader_flavors,
         )
         android_src_dir = ""
         android_java_package = ""

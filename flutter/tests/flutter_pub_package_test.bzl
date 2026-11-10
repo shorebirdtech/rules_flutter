@@ -783,10 +783,10 @@ def _platform_restricted_assets_are_stated_in_the_spoke_test_impl(ctx):
         font_files = {},
         assets = [":assets/a.txt", ":assets/b.txt"],
         shaders = [],
-        pkg_asset_platforms = {"assets/a.txt": ["android", "web"]},
+        asset_platforms = {"assets/a.txt": ["android", "web"]},
     )
 
-    asserts.true(env, "pkg_asset_platforms" in content, content)
+    asserts.true(env, "asset_platforms" in content, content)
     asserts.true(env, '"assets/a.txt": ["android", "web"]' in content, content)
     asserts.false(env, '"assets/b.txt": [' in content, content)
 
@@ -809,10 +809,10 @@ def _platform_restricted_shaders_are_stated_in_the_spoke_test_impl(ctx):
         font_files = {},
         assets = [],
         shaders = [":shaders/a.frag", ":shaders/b.frag"],
-        pkg_shader_platforms = {"shaders/a.frag": ["android", "web"]},
+        shader_platforms = {"shaders/a.frag": ["android", "web"]},
     )
 
-    asserts.true(env, "pkg_shader_platforms" in content, content)
+    asserts.true(env, "shader_platforms" in content, content)
     asserts.true(env, '"shaders/a.frag": ["android", "web"]' in content, content)
     asserts.false(env, '"shaders/b.frag": [' in content, content)
 
@@ -835,10 +835,10 @@ def _flavor_restricted_assets_are_stated_in_the_spoke_test_impl(ctx):
         font_files = {},
         assets = [":assets/a.txt", ":assets/b.txt"],
         shaders = [],
-        pkg_asset_flavors = {"assets/a.txt": ["paid", "premium"]},
+        asset_flavors = {"assets/a.txt": ["paid", "premium"]},
     )
 
-    asserts.true(env, "pkg_asset_flavors" in content, content)
+    asserts.true(env, "asset_flavors" in content, content)
     asserts.true(env, '"assets/a.txt": ["paid", "premium"]' in content, content)
     asserts.false(env, '"assets/b.txt": [' in content, content)
 
@@ -861,10 +861,10 @@ def _flavor_restricted_shaders_are_stated_in_the_spoke_test_impl(ctx):
         font_files = {},
         assets = [],
         shaders = [":shaders/a.frag", ":shaders/b.frag"],
-        pkg_shader_flavors = {"shaders/a.frag": ["paid", "premium"]},
+        shader_flavors = {"shaders/a.frag": ["paid", "premium"]},
     )
 
-    asserts.true(env, "pkg_shader_flavors" in content, content)
+    asserts.true(env, "shader_flavors" in content, content)
     asserts.true(env, '"shaders/a.frag": ["paid", "premium"]' in content, content)
     asserts.false(env, '"shaders/b.frag": [' in content, content)
 
