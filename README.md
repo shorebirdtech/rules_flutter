@@ -75,6 +75,33 @@ The macOS and iOS engine repositories name the engine of the build mode directly
 
 Static analysis needs nothing extra. rules_dart's analysis resolves `dart:ui` in a `flutter_library`, `flutter_plugin` or `flutter_test` through the `sky_engine` package, which those rules add to the analyzer's closure themselves. Their compiled output does not change.
 
+**Analysis and lints.** Static analysis is rules_dart's `dart_analyze` aspect, which `.bazelrc` turns on for `bazel test`; nothing runs without it. A lint set such as `flutter_lints` reaches the analyzer through a `dart_analysis_options` target, not through `deps`:
+
+```starlark
+# BUILD.bazel, beside analysis_options.yaml (`include: package:flutter_lints/flutter.yaml`)
+load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options")
+
+dart_analysis_options(
+    name = "options",
+    src = "analysis_options.yaml",
+    deps = ["@deps//:flutter_lints"],  # the package its `include:` names
+)
+
+dart_analysis_config(
+    name = "analysis_config",
+    options = [":options"],
+)
+```
+
+```
+# .bazelrc
+test --aspects=@rules_dart//dart:analyze.bzl%dart_analyze
+test --output_groups=+dart_analyze
+common --@rules_dart//dart:analysis_config=//:analysis_config
+```
+
+`bazel test //...` then fails on any analyzer finding. [`e2e/android_example`](e2e/android_example/BUILD.bazel) is set up this way.
+
 ### .bazelrc
 
 Two settings are required. Paste them into your project's `.bazelrc`:
@@ -1786,11 +1813,15 @@ flutter_library(
 | `srcs` | Dart source files. Required. |
 | `deps` | `dart_library` or `flutter_library` targets. |
 | `assets` | Asset files: images, fonts, and so on, from anywhere in the Dart package. Bundled at `packages/<package_name>/<path>` in a program of another package and at `<path>` in a program of this package (its own `flutter_test`, or the application this is part of), as `flutter build` keys them. The path is the file's path from the package root, the directory above `lib/`. |
+| `fonts_json` | The package's font families, as the JSON form of `flutter: fonts:` in `pubspec.yaml`: `'[{"family": "Inter", "fonts": [{"asset": "fonts/Inter-Regular.ttf"}, {"asset": "fonts/Inter-Bold.ttf", "weight": 700}]}]'`. Each `asset` is a path from the package root and must be a value in `font_files`. A program of another package sees the family as `packages/<package_name>/<family>`. |
+| `font_files` | The font files of `fonts_json`, as `{file: path}`. |
 | `pkg_shaders` | The package's fragment shaders, as `{file: path}` mirroring `flutter: shaders:` in `pubspec.yaml`. Bundled at `packages/<package_name>/<path>` in a program of another package and at `<path>` in a program of this package (its own `flutter_test`, or the application this is part of), as `flutter build` keys them, where `FragmentProgram.fromAsset` looks for them. |
 | `shader_includes` | Files the `pkg_shaders` may `#include`, such as `glob(["shaders/**/*.glsl"])`. A shader compiles with only its declared inputs, so an include not listed here is not found. |
 | `shaders` | Shaders bundled at `shaders/<file name>`, as Flutter's own are. A package's own shaders go in `pkg_shaders`. |
 | `package_name` | The Dart package name. Defaults to the last component of the Bazel package path. |
 | `language_version` | The Dart language version, matching the `sdk:` constraint in `pubspec.yaml`. |
+
+**Fonts fetched at run time.** `package:google_fonts` downloads fonts over the network when the app first draws them. In a `flutter_test`, whose test binding answers every HTTP request with an error, a widget drawing such a font fails, and an app offline falls back to another font. To ship the fonts instead, list their `.ttf` files (`Lato-Regular.ttf`, as Google Fonts names them) in a `flutter_library`'s `assets`, where `google_fonts` finds them by file name in the asset manifest, and set `GoogleFonts.config.allowRuntimeFetching = false` before `runApp`.
 
 ### flutter_application
 
