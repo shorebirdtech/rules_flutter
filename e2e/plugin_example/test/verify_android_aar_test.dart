@@ -290,11 +290,21 @@ void _verifyRepo(
     );
   }
   final manifest = File('${aar.path}/AndroidManifest.xml').readAsStringSync();
-  check.expect(
-    "$label: the module manifest's package is $modulePackage",
-    condition: manifest.contains('package="$modulePackage"'),
-    detail: manifest,
-  );
+  check
+    ..expect(
+      "$label: the module manifest's package is $modulePackage",
+      condition: manifest.contains('package="$modulePackage"'),
+      detail: manifest,
+    )
+    // As upstream's module template has it: a debug build's Dart VM service
+    // listens on a socket.
+    ..expect(
+      '$label: the module manifest asks for INTERNET',
+      condition: manifest.contains(
+        '<uses-permission android:name="android.permission.INTERNET" />',
+      ),
+      detail: manifest,
+    );
   final classes = _files(_extract(scratch, '${aar.path}/classes.jar'));
   const registrant = 'io/flutter/plugins/GeneratedPluginRegistrant.class';
   check.expect(

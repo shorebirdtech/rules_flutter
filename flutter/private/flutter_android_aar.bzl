@@ -233,12 +233,25 @@ def _flutter_android_module_aar_impl(ctx):
               "engine's Maven artifacts by it (`io.flutter:flutter_embedding_<mode>:1.0.0-<revision>`), " +
               "which exist for released engines only.") % ctx.label)
 
+    # What the manifest of upstream's module template (`.android/Flutter/src/
+    # main/AndroidManifest.xml`) declares, in every mode: the Dart VM service
+    # of a debug build listens on a socket, which needs INTERNET.
     manifest = ctx.actions.declare_file(ctx.label.name + "/AndroidManifest.xml")
     ctx.actions.write(manifest, (
         "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" +
         "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n" +
+        "    xmlns:tools=\"http://schemas.android.com/tools\"\n" +
         "    package=\"{package}\">\n\n" +
         "    <uses-sdk android:minSdkVersion=\"{min_sdk}\" />\n\n" +
+        "    <uses-permission android:name=\"android.permission.INTERNET\" />\n\n" +
+        "    <application tools:node=\"merge\">\n" +
+        "        <meta-data\n" +
+        "            android:name=\"flutterProjectType\"\n" +
+        "            android:value=\"module\" />\n" +
+        "        <meta-data\n" +
+        "            android:name=\"flutterEmbedding\"\n" +
+        "            android:value=\"2\" />\n" +
+        "    </application>\n\n" +
         "</manifest>\n"
     ).format(package = ctx.attr.package_name, min_sdk = ctx.attr.min_sdk_version))
 
