@@ -150,7 +150,7 @@ common --incompatible_auto_exec_groups
 common --@@rules_python+//python/config_settings:bootstrap_impl=script
 ```
 
-rules_flutter's actions land the same with the flag on or off: `gen_snapshot` for iOS and macOS, Xcode tools and signing run on a Mac; kernel compiles, asset and shader bundling and web compiles run on any host with the Flutter SDK; stripping the Android engine runs on the machine running Bazel, where its NDK is. An Android app needs fixes to rulesets it builds with, because rules_android 0.8.1, protobuf and rules_go have actions the flag rejects or places on the wrong host, and rules_android_ndk 0.1.5 lets any execution platform run the local NDK's clang. [`e2e/android_example`](e2e/android_example/MODULE.bazel) is set up this way: copy its `single_version_override` patches for rules_android, protobuf and rules_go, and its patch for rules_android_ndk, into your own `MODULE.bazel`.
+rules_flutter's actions land the same with the flag on or off: `gen_snapshot` for iOS and macOS, Xcode tools and signing run on a Mac; kernel compiles, asset and shader bundling and web compiles run on any host with the Flutter SDK; stripping the Android engine runs on the machine running Bazel, where its NDK is. An Android app needs fixes to rulesets it builds with, because rules_android 0.8.1, protobuf and rules_go have actions the flag rejects or places on the wrong host, and rules_android_ndk 0.1.5 lets any execution platform run the local NDK's clang. [`e2e/android_example`](e2e/android_example/MODULE.bazel) is set up this way: copy its `single_version_override` patches for rules_android, protobuf and rules_go, and its patch for rules_android_ndk, into your own `MODULE.bazel`. Of those, `rules_android_no_initial_heap.patch` is not about remote execution: every Android build on a Windows host needs it (see **Building on Windows** under [Android](#android)).
 
 ### Your first app
 
@@ -915,8 +915,6 @@ bazel build //:my_app_ios_device -c opt --ios_multi_cpus=arm64 \
     --features=disable_legacy_signing \
     --output_groups=+combined_dossier_zip
 ```
-
-If you build with `--incompatible_auto_exec_groups` (see **Remote execution** under [.bazelrc](#bazelrc)), add `--noincompatible_auto_exec_groups` to this command: rules_apple 5.2.0's action that assembles the unsigned archive has no toolchain set and fails analysis under that flag.
 
 The dossier holds what rules_apple's `dossier_codesigningtool` needs to sign the bundle on a machine that has the identity. The profile is still required, because it supplies the bundle's `embedded.mobileprovision` and its entitlements. `--no-codesign` differs here: Xcode leaves the profile out as well, and rules_apple's sign-later model has no equivalent.
 
