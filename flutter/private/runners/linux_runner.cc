@@ -36,8 +36,13 @@ static void on_activate(GtkApplication *app) {
 }
 
 int main(int argc, char *argv[]) {
+  // As `flutter create`'s runner does: the id names the app to the desktop
+  // (its .desktop file and window class), and the app is not unique, so a
+  // second app sharing an id starts its own window instead of activating the
+  // first.
+  g_set_prgname(GTK_APP_ID);
   g_autoptr(GtkApplication) app =
-      gtk_application_new(GTK_APP_ID, G_APPLICATION_FLAGS_NONE);
+      gtk_application_new(GTK_APP_ID, G_APPLICATION_NON_UNIQUE);
   g_signal_connect(app, "activate", G_CALLBACK(on_activate), NULL);
   return g_application_run(G_APPLICATION(app), argc, argv);
 }
