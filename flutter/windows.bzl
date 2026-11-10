@@ -90,7 +90,7 @@ flutter_windows_resources = _flutter_windows_resources
 # Public wrapper that bundles a Flutter plugin's Windows C++ sources for the
 # runner to compile + link. For pub.dev plugins, flutter_pub_package emits
 # this automatically; expose it here so users can wire a monorepo plugin's
-# BUILD.bazel without going through the ext/ overlay system.
+# BUILD.bazel without going through the flutter/ext/ overlay system.
 flutter_windows_plugin_library = _flutter_windows_plugin_library
 
 def flutter_windows_runner_lib_gen(name, engine, registrant, application = None, srcs = [], hdrs = [], resources = [], manifest = None, **kwargs):

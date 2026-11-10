@@ -3,7 +3,7 @@ load("@rules_dart//dart:defs.bzl", "dart_code_asset")
 load("//flutter:defs.bzl", "dart_package_metadata", "flutter_plugin")
 
 # A code asset carried by a `flutter_plugin` rather than a plain
-# `dart_library`: the plugin's `dart_package_metadata` owns it, as an `ext/`
+# `dart_library`: the plugin's `dart_package_metadata` owns it, as an `flutter/ext/`
 # overlay's does.
 cc_shared_library(
     name = "plugin_asset_shared",

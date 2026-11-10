@@ -4,7 +4,7 @@
 /// Property: whatever the build mode, a plugin that reads
 /// `BuildConfig.LIBRARY_PACKAGE_NAME` gets its own namespace, and each way
 /// the stub is produced (generated for a hub plugin, written out by hand for
-/// an `ext/` overlay) yields a `BuildConfig` in its plugin's package.
+/// an `flutter/ext/` overlay) yields a `BuildConfig` in its plugin's package.
 ///
 /// What the class says about the mode is checked by
 /// `verify_android_build_config_mode_test`.

@@ -431,7 +431,7 @@ Some plugins make a library with their platform's build system rather than from 
 
 An app built without the library would fail at run time when the plugin loads it, so the build for that platform fails instead, naming the package, the platform and the mechanism. Builds for the plugin's other platforms are unaffected. To build the app, build the library with Bazel (a `rust_shared_library` of `rules_rust` for a Rust crate, a `cc_shared_library` for C or C++) and give the package a target that lists it in `native_deps`, in either of two ways:
 
-- A plugin overlay (`flutter_pub.plugin_overlays`): a `BUILD.bazel.tpl` for the package whose `flutter_plugin` lists the library. `@rules_flutter//ext/jni` does this for `package:jni`.
+- A plugin overlay (`flutter_pub.plugin_overlays`): a `BUILD.bazel.tpl` for the package whose `flutter_plugin` lists the library. `@rules_flutter//flutter/ext/jni` does this for `package:jni`.
 - A `flutter_plugin` of your own, which `flutter_pub.from_lock(resolve = {"<package>": "//your:target"})` puts in place of the package (see "Packages in your workspace").
 
 ### Apple plugins built from their Package.swift
@@ -553,7 +553,7 @@ At `"error"` the message fails every build that uses a hub. The toolchain comes 
 Some pub packages compile native code through a Dart `hook/build.dart` (Dart Native Assets). Bazel does not run those hooks. Instead:
 
 - **Curated replacements.** rules_dart keeps a registry of Bazel-native equivalents (`@rules_dart//dart/ext:registry.bzl`). Where one exists, such as `sqlite3`, `flutter_pub.from_lock` attaches it automatically. An app that depends on `drift` gets `libsqlite3` without naming it.
-- **Overlays.** For a package with a hook and no curated entry, you can write a `BUILD.bazel.tpl` that reproduces what the hook builds. rules_flutter bundles overlays under `ext/`, and you can add your own with `flutter_pub.plugin_overlays(roots = [...])`. Authoring one is described in [docs/TESTING.md](docs/TESTING.md) under "Native Assets overlay authoring". An overlay is also a way to give a plugin Android dependencies rules_flutter does not read, but `flutter_pub.annotation(android_deps = ...)` says that in a few lines and keeps the generated library (see [Plugins' Maven dependencies](#plugins-maven-dependencies)).
+- **Overlays.** For a package with a hook and no curated entry, you can write a `BUILD.bazel.tpl` that reproduces what the hook builds. rules_flutter bundles overlays under `flutter/ext/`, and you can add your own with `flutter_pub.plugin_overlays(roots = [...])`. Authoring one is described in [docs/TESTING.md](docs/TESTING.md) under "Native Assets overlay authoring". An overlay is also a way to give a plugin Android dependencies rules_flutter does not read, but `flutter_pub.annotation(android_deps = ...)` says that in a few lines and keeps the generated library (see [Plugins' Maven dependencies](#plugins-maven-dependencies)).
 - **Ignoring a hook.** If a package's native code is never reached in your app, say so in the root module: `flutter_pub.from_lock(ignore_hooks = ["<package>"])`.
 
 A hook that nothing replaces is an error when `flutter_application` reaches it. The alternative would be a build that succeeds and then fails at runtime on an unresolved `@Native` symbol.
@@ -2987,7 +2987,7 @@ flutter_application(
 rules_dart ships macros for pure-Dart builders such as json_serializable and freezed, written on its builder API (`@rules_dart//dart/ext:defs.bzl`). go_router_builder states a Flutter constraint, so rules_flutter ships it: `go_router_codegen` writes the `<src>.g.dart` part of each source that declares `@TypedGoRoute` routes, as `dart run build_runner build` would. The builder comes from rules_flutter's own lock; your lock needs `go_router`, which the generated code and your sources import.
 
 ```starlark
-load("@rules_flutter//ext/go_router:defs.bzl", "go_router_codegen")
+load("@rules_flutter//flutter/ext/go_router:defs.bzl", "go_router_codegen")
 
 # lib/routes.dart declares `part 'routes.g.dart';`.
 go_router_codegen(
@@ -3010,7 +3010,7 @@ flutter_application(
 `annotation_dep` names your `go_router` library; it is `@pub_deps//:go_router` unless you set it, so a hub named `pub_deps` can leave it out. `config` takes the builder's options as JSON, as `build.yaml` states them. For Gazelle to write these targets, register the builder in the BUILD file at your repository's root:
 
 ```starlark
-# gazelle:dart_builder TypedGoRoute macro=@rules_flutter//ext/go_router:defs.bzl%go_router_codegen shim=@rules_flutter//ext/go_router:shim produces=.go_router.g.part runtime_dep=@pub_deps//:go_router key=go_router_builder:go_router_builder
+# gazelle:dart_builder TypedGoRoute macro=@rules_flutter//flutter/ext/go_router:defs.bzl%go_router_codegen shim=@rules_flutter//flutter/ext/go_router:shim produces=.go_router.g.part runtime_dep=@pub_deps//:go_router key=go_router_builder:go_router_builder
 ```
 
 `runtime_dep` names the same library as `annotation_dep`: with the hub `deps`, `runtime_dep=@deps//:go_router`.

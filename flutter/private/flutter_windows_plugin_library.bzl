@@ -6,7 +6,7 @@ Wraps the plugin's Windows source layout (`windows/*.cpp`,
 engine + Windows SDK include paths.
 
 Public Tier-2 API: re-exported from `flutter/windows.bzl` so users can
-wire a monorepo plugin's BUILD.bazel without going through the `ext/`
+wire a monorepo plugin's BUILD.bazel without going through the `flutter/ext/`
 overlay system. For pub.dev plugins, `flutter_pub_package` emits this
 automatically when `windows/**/*.{cc,cpp,c,h,hh,hpp}` sources are
 detected.

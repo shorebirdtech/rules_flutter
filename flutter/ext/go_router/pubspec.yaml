@@ -1,11 +1,11 @@
-# The packages `@rules_flutter//ext/go_router:shim` is built from: the
+# The packages `@rules_flutter//flutter/ext/go_router:shim` is built from: the
 # go_router_builder Builder and the shim runner rules_dart's
 # `builder_shim_library` compiles (`analyzer`, `build`, ...), at versions
 # rules_dart's `dart/ext/pubspec.yaml` allows. `rules_flutter_go_router_builder`
 # in MODULE.bazel reads the lock beside this file. go_router_builder states a
 # Flutter constraint, so resolve it with the Flutter toolchain:
 #
-#   bazel run //flutter/pub -- get --directory ext/go_router
+#   bazel run //flutter/pub -- get --directory flutter/ext/go_router
 name: rules_flutter_go_router_builder
 publish_to: none
 

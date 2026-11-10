@@ -70,7 +70,7 @@ flutter_linux_registrant_gen = _flutter_linux_registrant
 # Public wrapper that bundles a Flutter plugin's Linux C++ sources for the
 # runner to compile + link. For pub.dev plugins, flutter_pub_package emits
 # this automatically; expose it here so users can wire a monorepo plugin's
-# BUILD.bazel without going through the ext/ overlay system.
+# BUILD.bazel without going through the flutter/ext/ overlay system.
 flutter_linux_plugin_library = _flutter_linux_plugin_library
 
 def flutter_linux_runner_lib_gen(name, engine, registrant, application_id, application = None, window_title = "Flutter", srcs = [], hdrs = [], **kwargs):

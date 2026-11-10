@@ -569,7 +569,7 @@ def _overlay_substitutes_the_language_version_test_impl(ctx):
     The package's own `environment.sdk` is the single source of truth; the
     spoke derives from it and substitutes here. A template that spelled the
     version out would be a second declaration of the same fact, and the
-    version ladder makes the two drift silently: `ext/objective_c/9/` matches
+    version ladder makes the two drift silently: `flutter/ext/objective_c/9/` matches
     every 9.x, so a release that raises the SDK floor keeps the stale literal.
     """
     env = unittest.begin(ctx)
@@ -757,7 +757,7 @@ def _hardcoded_overlay_dependency_is_rejected_test_impl(ctx):
     This is the check that would have caught the `objective_c` break:
     9.5.0 dropped `native_toolchain_c` from its `dependencies`, so the lock
     stopped carrying it and the hub stopped creating the spoke, while
-    `ext/objective_c/9/` — one directory for the whole major — kept asking
+    `flutter/ext/objective_c/9/` — one directory for the whole major — kept asking
     for `@<hub>__native_toolchain_c` (a repository per hub, as it was then). The build died on an unknown repo
     naming neither `objective_c` nor the overlay that referenced it.
     """
@@ -1030,8 +1030,8 @@ def _removed_hub_placeholder_is_refused_test_impl(ctx):
 
     asserts.true(env, has_removed_hub_placeholder('    deps = ["@{HUB_NAME}__x//:x"],'))
     asserts.false(env, has_removed_hub_placeholder("    deps = [\n        {DEPS}\n    ],"))
-    message = removed_hub_placeholder_error("ext/x/1/BUILD.bazel.tpl")
-    for fragment in ["ext/x/1/BUILD.bazel.tpl", "{HUB_NAME}", "is gone", "{DEPS}"]:
+    message = removed_hub_placeholder_error("flutter/ext/x/1/BUILD.bazel.tpl")
+    for fragment in ["flutter/ext/x/1/BUILD.bazel.tpl", "{HUB_NAME}", "is gone", "{DEPS}"]:
         asserts.true(env, fragment in message, fragment + " not in " + message)
 
     return unittest.end(env)

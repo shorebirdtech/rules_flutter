@@ -140,7 +140,7 @@ def unbuilt_native_code_message(package, version, platform, mechanism):
         "Build the library with Bazel (a `rust_shared_library` of rules_rust for a Rust crate, " +
         "a `cc_shared_library` for C or C++) and give {pkg} a target that lists it in `native_deps`: " +
         "a plugin overlay for {pkg} (`flutter_pub.plugin_overlays` in MODULE.bazel; " +
-        "@rules_flutter//ext/jni is one), or a `flutter_plugin` of your own that " +
+        "@rules_flutter//flutter/ext/jni is one), or a `flutter_plugin` of your own that " +
         "`flutter_pub.from_lock(resolve = ...)` maps the package to."
     ).format(
         pkg = package,

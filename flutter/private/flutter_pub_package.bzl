@@ -1829,7 +1829,7 @@ def find_hardcoded_language_version(content):
     `{LANGUAGE_VERSION}`. A template that writes the version out instead is a
     second declaration of the same fact, and the one that wins — the overlay
     replaces generated content wholesale. The two then drift silently,
-    because the overlay ladder is version-ranged: `ext/objective_c/9/` serves
+    because the overlay ladder is version-ranged: `flutter/ext/objective_c/9/` serves
     every 9.x, so a release that raises the SDK floor keeps the old literal.
 
     Args:
@@ -1868,7 +1868,7 @@ def find_hardcoded_hub_dep(content):
     The two then drift on the package's next release, and the drift is not
     a stale-but-working list: `objective_c` 9.5.0 dropped `native_toolchain_c`
     from `dependencies` (its build hook stopped using it), so the lock stopped
-    carrying that package, while `ext/objective_c/9/` — one directory for the
+    carrying that package, while `flutter/ext/objective_c/9/` — one directory for the
     whole major — kept asking for `@<hub>__native_toolchain_c`. The build died
     on an unknown repo naming neither `objective_c` nor the overlay.
 
@@ -2274,7 +2274,7 @@ def _flutter_pub_package_impl(ctx):
     unreplaced_hook = hooks.unreplaced_hook
 
     # Try overlays first (user-supplied roots win over the bundled
-    # `@rules_flutter//ext/` tree). On match, the overlay replaces
+    # `@rules_flutter//flutter/ext/` tree). On match, the overlay replaces
     # auto-generation entirely; the user takes responsibility for the
     # spoke's BUILD content.
     overlay_content = ""
@@ -2639,11 +2639,11 @@ flutter_pub_package = repository_rule(
         ),
         "overlay_roots": attr.label_list(
             doc = "BUILD.bazel anchors for overlay trees. Each label points at " +
-                  "an `ext/BUILD.bazel` (or equivalent) that anchors a directory " +
+                  "a `flutter/ext/BUILD.bazel` (or equivalent) that anchors a directory " +
                   "tree of `<package>/<version>/BUILD.bazel.tpl` overrides. The " +
                   "rule walks the roots in order and uses the first match. " +
                   "User-supplied roots come before the bundled " +
-                  "`@rules_flutter//ext:BUILD.bazel`.",
+                  "`@rules_flutter//flutter/ext:BUILD.bazel`.",
             allow_files = True,
             default = [],
         ),

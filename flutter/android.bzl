@@ -256,7 +256,7 @@ def flutter_android_permissions_manifest(name, permissions, **kwargs):
 # Public wrapper that compiles a Flutter plugin's Android Kotlin/Java sources
 # into a kt_android_library. For pub.dev plugins, flutter_pub_package emits
 # this automatically; expose it here so users can wire a monorepo plugin's
-# BUILD.bazel without going through the ext/ overlay system.
+# BUILD.bazel without going through the flutter/ext/ overlay system.
 flutter_android_plugin_library = _flutter_android_plugin_library
 
 # Links the Android libraries of the plugins a flutter_application depends on,

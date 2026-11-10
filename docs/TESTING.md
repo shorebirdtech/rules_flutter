@@ -1156,7 +1156,7 @@ instead of extracting it.
 |-----------|-----------|
 | smoke | Toolchain resolution for all platforms |
 | hello_world | Kernel, AOT, application, and per-platform bundle builds; flutter_test; `bazel coverage` of a flutter_test (`//coverage/...`: workspace paths, a library in another package, `--instrumentation_filter`, the merged report; CI runs it on Linux); on Linux and Windows, a profile-mode bundle whose AOT snapshot is a profile one (`verify_linux_profile_bundle_test`, `verify_windows_profile_bundle_test`); `reproducible_notices_<mode>_test`: each mode's `NOTICES.Z` gzip header names no host OS and no time (on every host, Windows included) |
-| codegen | Per-file and aggregate dart_codegen, custom generators, hot-reload-with-codegen; `go_router_codegen` (`@rules_flutter//ext/go_router`) writing the routes `:routes_test` drives |
+| codegen | Per-file and aggregate dart_codegen, custom generators, hot-reload-with-codegen; `go_router_codegen` (`@rules_flutter//flutter/ext/go_router`) writing the routes `:routes_test` drives |
 | ffi_example | Both FFI mechanisms — Native Assets (`add_plugin`, `@Native` asset-id bind) and `native_deps` (`mul_plugin`, conventional-path open) — bundle structure on macOS/Linux plus manual runtime proof on iOS simulator and macOS |
 | ffi_plugin_example | FFI plugin build + macOS/Linux bundle structure with `libmultiply.dylib`/`.so` |
 | plugin_example | Real pub.dev plugins (`path_provider`, `url_launcher`, `package_info_plus`) plus the hand-written `:greeting_plugin` regression case; per-platform bundle builds; web plugin assertions via the e2e suite; macOS runtime verifier asserting the four plugin-result strings. See **Plugin verification matrix** below. |
@@ -1172,7 +1172,7 @@ instead of extracting it.
 
 ### Plugin verification matrix
 
-`e2e/plugin_example` exercises real pub.dev plugins — `path_provider` (federated, SwiftPM Apple, **jnigen Android** — path_provider_android ≥ 2.3 calls Java through `package:jni`, whose C support library `libdartjni.so` is built from source by the bundled `ext/jni` overlay and packaged at `lib/<abi>/` — pure-Dart Linux/Windows), `url_launcher` (federated, SwiftPM Apple, Kotlin Android, real C++ Linux/Windows, web Dart), `package_info_plus` (monolithic, every platform including web), `shared_preferences` (federated; its Android Gradle build declares `androidx.datastore` and `androidx.preference`, which must come from the workspace's `rules_flutter_maven` install; every platform including web), `audio_session` (curated `ext/` overlay), and `record_android` 1.5.1 (Android-only federated implementation used without its umbrella — regression case for a plugin that ships `android/src/main/res/` resources referenced as `R.drawable.ic_mic` and declares **no** Gradle dependencies, compiling purely against the embedding's exported androidx classpath) — plus the hand-written `:greeting_plugin` (regression case for pure-Bazel-deps plugins). `lib/main.dart` resolves a string from each plugin and renders + emits them on a single `plugin_example_results …` log line. Each platform's e2e check asserts the line is correct; empty/null/error content fails loudly.
+`e2e/plugin_example` exercises real pub.dev plugins — `path_provider` (federated, SwiftPM Apple, **jnigen Android** — path_provider_android ≥ 2.3 calls Java through `package:jni`, whose C support library `libdartjni.so` is built from source by the bundled `flutter/ext/jni` overlay and packaged at `lib/<abi>/` — pure-Dart Linux/Windows), `url_launcher` (federated, SwiftPM Apple, Kotlin Android, real C++ Linux/Windows, web Dart), `package_info_plus` (monolithic, every platform including web), `shared_preferences` (federated; its Android Gradle build declares `androidx.datastore` and `androidx.preference`, which must come from the workspace's `rules_flutter_maven` install; every platform including web), `audio_session` (curated `flutter/ext/` overlay), and `record_android` 1.5.1 (Android-only federated implementation used without its umbrella — regression case for a plugin that ships `android/src/main/res/` resources referenced as `R.drawable.ic_mic` and declares **no** Gradle dependencies, compiling purely against the embedding's exported androidx classpath) — plus the hand-written `:greeting_plugin` (regression case for pure-Bazel-deps plugins). `lib/main.dart` resolves a string from each plugin and renders + emits them on a single `plugin_example_results …` log line. Each platform's e2e check asserts the line is correct; empty/null/error content fails loudly.
 
 | Assertion | Source | Expected |
 |---|---|---|
@@ -1212,7 +1212,7 @@ for arbitrary Gradle native builds; instead:
    `select({"@platforms//os:android": …})`. The library flows through the
    existing transitive native-libs pathway into the APK's
    `lib/<abi>/`, for each ABI built, subject to the same ELF/ABI machine
-   validation as every other packaged library. `ext/jni/1/` is the
+   validation as every other packaged library. `flutter/ext/jni/1/` is the
    canonical example (note `shared_lib_name` must yield the exact filename
    `System.loadLibrary` resolves).
 2. Packages declaring `externalNativeBuild` that no overlay handles fail
@@ -1256,7 +1256,7 @@ Not every case has a cycle's answer. A package built from an overlay is its own 
 
 ### Native Assets overlay authoring
 
-Pub packages that ship a `hooks/build.dart` Dart-Native-Assets build hook (e.g. `package:objective_c`) and have no curated entry get translated to Bazel-native equivalents under `ext/<pkg>/<major>/BUILD.bazel.tpl`. The template is loaded by `flutter_pub_package` for any package whose name + major version matches. It replaces the package's whole target in its source repository (`flutter_pub__<pkg>`), and the package's library is that target; for that reason a package built from an overlay cannot be in a dependency cycle (see "Pub dependency cycles"), and the fetch of its library says so.
+Pub packages that ship a `hooks/build.dart` Dart-Native-Assets build hook (e.g. `package:objective_c`) and have no curated entry get translated to Bazel-native equivalents under `flutter/ext/<pkg>/<major>/BUILD.bazel.tpl`. The template is loaded by `flutter_pub_package` for any package whose name + major version matches. It replaces the package's whole target in its source repository (`flutter_pub__<pkg>`), and the package's library is that target; for that reason a package built from an overlay cannot be in a dependency cycle (see "Pub dependency cycles"), and the fetch of its library says so.
 
 Template substitutions: `{PKG}` (the package name), `{VERSION}` (the resolved version), `{LANGUAGE_VERSION}` (derived from the package's own `environment.sdk`), `{DEPS}` (the package's dependencies, as the labels of their libraries, intersected with the lock), and `{LICENSE}` (the `license_file = "LICENSE",` line of the package's `dart_package_metadata`, or nothing for a package with no `NOTICES` or `LICENSE`).
 
@@ -1269,7 +1269,7 @@ Three of those are mandatory (the first two as values a template must not write 
 
 * `{LICENSE}` — written on its own line among the attributes of the template's `dart_package_metadata`. An overlay replaces the generated target wholesale, so a template without it drops the package's licence from every program's `NOTICES`; the fetch fails.
 
-The first two exist because a template directory serves a whole version range, so a hand-written copy drifts on the package's next release with no build error to catch it. `objective_c` 9.5.0 is the worked example: its hook stopped using `native_toolchain_c`, so the package dropped it from `dependencies`, the lock stopped carrying it, the hub stopped creating the package's repositories — and `ext/objective_c/9/`, which serves all of 9.x, was still asking for `@<hub>__native_toolchain_c` (then a repository per hub). Consumers got an unknown-repo error naming neither `objective_c` nor the overlay.
+The first two exist because a template directory serves a whole version range, so a hand-written copy drifts on the package's next release with no build error to catch it. `objective_c` 9.5.0 is the worked example: its hook stopped using `native_toolchain_c`, so the package dropped it from `dependencies`, the lock stopped carrying it, the hub stopped creating the package's repositories — and `flutter/ext/objective_c/9/`, which serves all of 9.x, was still asking for `@<hub>__native_toolchain_c` (then a repository per hub). Consumers got an unknown-repo error naming neither `objective_c` nor the overlay.
 
 For the same reason, prefer a `glob()` over a named source file when the file's existence varies across the range the directory serves — `test/util.c` in the `objective_c` overlay, which 9.5.0 deleted.
 
@@ -1279,9 +1279,9 @@ Procedure:
 2. Reproduce the build with `cc_shared_library` + `objc_library` (Apple) / `cc_library` (other platforms). Set `shared_lib_name` to the file name the library ships under (`<basename>`): the application bundles it under that name, and on iOS wraps it in a framework named after it.
 3. Wrap the output in rules_dart's `dart_code_asset(name = "<pkg>_native_asset", asset_id = "package:<pkg>/<basename>", shared_library = ":_<pkg>_dylib")`, constrained to the supported platforms with `target_compatible_with`. Platforms whose libraries differ in name (`lib<x>.so`, `<x>.dll`) set `shared_lib_name` with a `select()`.
 4. Declare the package's facts on a `dart_package_metadata(name = "pubspec-metadata", package_name = "{PKG}", code_assets = select({...}), language_version = "{LANGUAGE_VERSION}", {LICENSE})`, and hang a `flutter_plugin(name = "<pkg>", package = ":pubspec-metadata", platforms = [])` over it; the empty `platforms` is right for a package that is "pure Dart" from pub's perspective. `code_assets` stands in for the hook: every program that depends on the package gets its assets, as under `flutter build`. The `select()` decides which asset targets an application sees: list exactly the ones that belong to the platform being built, and `//conditions:default: []` for the rest.
-5. Drop the template at `ext/<pkg>/<major>/BUILD.bazel.tpl`. The next `bazel run @rules_flutter//flutter/pub -- get` + Bazel build picks it up automatically.
+5. Drop the template at `flutter/ext/<pkg>/<major>/BUILD.bazel.tpl`. The next `bazel run @rules_flutter//flutter/pub -- get` + Bazel build picks it up automatically.
 
-If the build fails at runtime with `Couldn't resolve native function "<symbol>"`, the most common cause is the `cc_shared_library`'s `install_name` not matching the asset id's basename — set `user_link_flags = ["-Wl,-install_name,@rpath/<basename>"]` on Apple targets. See `ext/objective_c/9/BUILD.bazel.tpl` for the canonical example.
+If the build fails at runtime with `Couldn't resolve native function "<symbol>"`, the most common cause is the `cc_shared_library`'s `install_name` not matching the asset id's basename — set `user_link_flags = ["-Wl,-install_name,@rpath/<basename>"]` on Apple targets. See `flutter/ext/objective_c/9/BUILD.bazel.tpl` for the canonical example.
 
 ## 4. Manual tests
 

@@ -394,7 +394,7 @@ void main() {
         // shared_preferences' web implementation (localStorage).
         expect(summary, contains('prefs=roundtrip ok'));
 
-        // The curated `ext/` overlay packages: audio_session reaches web
+        // The curated `flutter/ext/` overlay packages: audio_session reaches web
         // through the overlay's own Dart, and record_android is Android-only
         // and must say so rather than throw.
         expect(summary, contains('audioSession=web: not supported'));

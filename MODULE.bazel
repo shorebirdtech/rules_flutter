@@ -222,7 +222,7 @@ maven.install(
         "androidx.window:window:1.3.0",
         "androidx.window:window-java:1.3.0",
         "com.getkeepsafe.relinker:relinker:1.4.5",
-        # The bundled `ext/jni` overlay's Java support classes implement
+        # The bundled `flutter/ext/jni` overlay's Java support classes implement
         # kotlin.coroutines.Continuation (PortContinuation returns
         # Dispatchers.getIO()), so every workspace using a jnigen-based
         # plugin needs these on the plugin's compile classpath and in the
@@ -341,7 +341,7 @@ flutter_pub.from_lock(
 )
 use_repo(flutter_pub, "dev_tool_deps")
 
-# The packages go_router_builder's shim (`//ext/go_router:shim`) is built from,
+# The packages go_router_builder's shim (`//flutter/ext/go_router:shim`) is built from,
 # for the apps that use `go_router_codegen`. rules_dart's extension, as
 # rules_dart builds its own builders' shims: they are tools of the build, with
 # nothing of Flutter's. Hub names are global to the extension, so this one is
@@ -351,6 +351,6 @@ use_repo(flutter_pub, "dev_tool_deps")
 dart_pub = use_extension("@rules_dart//dart/pub:extensions.bzl", "pub")
 dart_pub.from_lock(
     name = "rules_flutter_go_router_builder",
-    lock = "//ext/go_router:pubspec.lock",
+    lock = "//flutter/ext/go_router:pubspec.lock",
 )
 use_repo(dart_pub, "rules_flutter_go_router_builder")

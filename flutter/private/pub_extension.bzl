@@ -257,10 +257,10 @@ pub_cycle_tag = tag_class(
 pub_plugin_overlays_tag = tag_class(attrs = {
     "roots": attr.label_list(
         doc = "BUILD.bazel anchors for user-supplied overlay trees. Each " +
-              "label points at an `ext/BUILD.bazel` (or equivalent) that " +
+              "label points at a `flutter/ext/BUILD.bazel` (or equivalent) that " +
               "anchors a directory tree of `<package>/<version>/BUILD.bazel.tpl` " +
               "overrides. flutter_pub_package walks user roots first, then the " +
-              "bundled `@rules_flutter//ext:BUILD.bazel`. A template declares " +
+              "bundled `@rules_flutter//flutter/ext:BUILD.bazel`. A template declares " +
               "its language version and its dependencies by placeholder " +
               "(`{LANGUAGE_VERSION}`, `{DEPS}`), never by hand; see " +
               "docs/TESTING.md \"Native Assets overlay authoring\".",
@@ -342,7 +342,7 @@ def pub_extension(module_ctx):
     # Collect user-supplied overlay roots from
     # `flutter_pub.plugin_overlays(...)` tags. They're applied to every
     # flutter_pub_package invocation in the order seen, then the bundled
-    # `@rules_flutter//ext` root. This makes any pub plugin user-fixable locally
+    # `@rules_flutter//flutter/ext` root. This makes any pub plugin user-fixable locally
     # — drop a `<workspace>/plugin_overlays/<pkg>/<major>/BUILD.bazel.tpl` and
     # register the root in MODULE.bazel; the next build picks it up.
     user_overlay_roots = []
@@ -637,7 +637,7 @@ def _declare_pub_packages(tags, settings, annotations, sdks, user_overlay_roots,
             lock = target.lock,
         )
 
-    overlay_roots = user_overlay_roots + ["@rules_flutter//ext:BUILD.bazel"]
+    overlay_roots = user_overlay_roots + ["@rules_flutter//flutter/ext:BUILD.bazel"]
 
     # Create a source repo and a library repo for each built package. They are
     # all routed through flutter_pub_package — the `flutter pub get` analog —
@@ -651,7 +651,7 @@ def _declare_pub_packages(tags, settings, annotations, sdks, user_overlay_roots,
     #
     # Each Flutter SDK package other than `package:flutter` is built from
     # `packages/<name>` of the one pinned Flutter source exactly as a hosted
-    # package is built from its archive, `ext/` overlays (keyed
+    # package is built from its archive, `flutter/ext/` overlays (keyed
     # `<package>/0.0.0`) and library repository included. `package:flutter` has
     # a rule of its own (its shaders are declared in no pubspec).
     reps = _framework_representatives(sdks, prefixes)

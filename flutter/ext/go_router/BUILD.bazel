@@ -3,7 +3,7 @@
 # rules_flutter ships it rather than rules_dart, on rules_dart's builder API.
 #
 # This directory is also where an overlay for the pub package `go_router`
-# would go (`<version>/BUILD.bazel.tpl`, see //ext:BUILD.bazel); it has none.
+# would go (`<version>/BUILD.bazel.tpl`, see //flutter/ext:BUILD.bazel); it has none.
 
 load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
 load("@rules_dart//dart:defs.bzl", "dart_binary")

@@ -9,7 +9,7 @@ C-family sources alone is an `objc_library`.
 
 Public Tier-2 API: re-exported from `flutter/macos.bzl` and
 `flutter/ios.bzl` so users can wire a monorepo plugin's BUILD.bazel
-without going through the `ext/` overlay system.
+without going through the `flutter/ext/` overlay system.
 
 Usage:
 

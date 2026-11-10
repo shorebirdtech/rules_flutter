@@ -158,7 +158,7 @@ def flutter_macos_privacy_manifests_gen(name, **kwargs):
 
 # Public wrapper that compiles a Flutter plugin's macOS Apple sources into a
 # swift_library. Use directly to wire a monorepo plugin's BUILD.bazel without
-# going through the ext/ overlay system; for pub.dev plugins, flutter_pub_package
+# going through the flutter/ext/ overlay system; for pub.dev plugins, flutter_pub_package
 # emits this automatically.
 flutter_apple_plugin_library = _flutter_apple_plugin_library_macro
 

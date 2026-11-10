@@ -5,7 +5,7 @@ a custom provider so the Linux runner's `cc_common.compile()` can fold
 them in with the right Flutter Linux engine + GTK3 sysroot include paths.
 
 Public Tier-2 API: re-exported from `flutter/linux.bzl` so users can
-wire a monorepo plugin's BUILD.bazel without going through the `ext/`
+wire a monorepo plugin's BUILD.bazel without going through the `flutter/ext/`
 overlay system. For pub.dev plugins, `flutter_pub_package` emits this
 automatically when `linux/**/*.{cc,cpp,c,h,hh,hpp}` sources are
 detected.

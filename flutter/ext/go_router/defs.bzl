@@ -1,6 +1,6 @@
 """`go_router_codegen`: go_router_builder's routes for `@TypedGoRoute` classes.
 
-    load("@rules_flutter//ext/go_router:defs.bzl", "go_router_codegen")
+    load("@rules_flutter//flutter/ext/go_router:defs.bzl", "go_router_codegen")
 
     go_router_codegen(
         name = "routes",
@@ -46,7 +46,7 @@ def go_router_codegen(
     shared_part_codegen(
         name = name,
         srcs = srcs,
-        shim = Label("//ext/go_router:shim"),
+        shim = Label("//flutter/ext/go_router:shim"),
         part_suffix = ".go_router.g.part",
         annotation_dep = annotation_dep,
         deps = deps,

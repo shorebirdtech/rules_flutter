@@ -1,4 +1,4 @@
-# Anchor file for the `ext/` overlay tree.
+# Anchor file for the `flutter/ext/` overlay tree.
 # `flutter_pub_package` resolves this label to compute the overlay root
 # and then walks subdirectories looking for `<pkg>/<ver>/BUILD.bazel.tpl`
 # templates.

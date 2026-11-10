@@ -5,7 +5,7 @@
 /// `LIBRARY_PACKAGE_NAME` of its own package. The classes are read from the
 /// dex of an APK of each mode, built from the pub plugins of
 /// `plugin_example`: generated for the hub's plugins and written out by hand
-/// for the `ext/` overlays of `package:jni` and `audio_session`.
+/// for the `flutter/ext/` overlays of `package:jni` and `audio_session`.
 /// `app_proguard.pro` keeps every `BuildConfig`, which R8 would otherwise
 /// inline and drop.
 library;
@@ -98,9 +98,9 @@ const androidBuildModes = [
 /// the engine's mode) and `com.getkeepsafe.relinker`'s (a Maven library,
 /// prebuilt in release).
 const pluginBuildConfigPackages = {
-  'com.github.dart_lang.jni': 'ext/jni overlay',
+  'com.github.dart_lang.jni': 'flutter/ext/jni overlay',
   'com.github.dart_lang.jni_flutter': 'generated for a hub plugin',
-  'com.ryanheise.audio_session': 'ext/audio_session overlay',
+  'com.ryanheise.audio_session': 'flutter/ext/audio_session overlay',
   'com.llfbandit.record': 'generated for a hub plugin with resources',
   'dev.fluttercommunity.plus.packageinfo': 'generated for a hub plugin',
   'io.flutter.plugins.sharedpreferences':
