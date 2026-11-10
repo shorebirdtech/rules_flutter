@@ -244,14 +244,23 @@ void main() {
     });
 
     test('declares its assets and fonts under their names', () async {
+      // The member names its assets, and its fonts through the font family
+      // targets the spoke generates beside it, so read those too.
       final build = await ws.bazel([
         'query',
         '--output=build',
-        '@flutter_pub__flow_assets//:flow_assets',
+        'deps(@flutter_pub__flow_assets//:flow_assets) '
+            'intersect @flutter_pub__flow_assets//:*',
       ]);
       expect(build.succeeded, isTrue, reason: '$build');
-      for (final file in ['assets/a.txt', 'assets/b.txt', 'fonts/f.ttf']) {
-        expect(build.output, contains(file), reason: '$build');
+      for (final text in [
+        'assets/a.txt',
+        'assets/b.txt',
+        'fonts/f.ttf',
+        'family = "F"',
+        'weight = 700',
+      ]) {
+        expect(build.output, contains(text), reason: '$build');
       }
     });
 
