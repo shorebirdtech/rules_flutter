@@ -185,8 +185,6 @@ const e2eWorkspaces = <E2eWorkspace>[
           'flutter_tester_binary',
     },
   ),
-  // Expected to fail on Linux until fixed: the `flutter create` Linux runner
-  // reads APPLICATION_ID, which `linux_runner_defines` does not define.
   E2eWorkspace(
     'plugin_example',
     runs: {
