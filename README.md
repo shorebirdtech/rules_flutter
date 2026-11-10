@@ -1860,22 +1860,25 @@ flutter.toolchain(
     framework = "@flutter_local_framework",
 )
 
-local_framework = use_repo_rule("@rules_flutter//flutter:local_sdk.bzl", "flutter_checkout_framework")
-local_engine = use_repo_rule("@rules_flutter//flutter:local_sdk.bzl", "flutter_engine_out_dirs")
+local_framework = use_repo_rule("@rules_flutter//flutter:local_sdk.bzl", "flutter_local_framework")
+local_engine = use_repo_rule("@rules_flutter//flutter:local_sdk.bzl", "flutter_local_engine")
 
 local_framework(name = "flutter_local_framework")
 
 local_engine(name = "flutter_local_engine")
 ```
 
-The path and the choice to use the SDK go in your untracked `.bazelrc.user`:
+The repositories these rules make load `@rules_dart`, so the module that declares them has a `bazel_dep` on rules_dart.
+
+The paths and the choice to use the SDK go in your untracked `.bazelrc.user`. `FLUTTER_CHECKOUT` is the flutter/flutter checkout. `FLUTTER_ENGINE` is the engine's source directory, which flutter_tools reads under the same name (it is the default of `--local-engine-src-path`): usually the checkout's `engine/src`, and the directory whose `out` holds the built out dirs. The engine is read from `FLUTTER_ENGINE` alone, never derived from `FLUTTER_CHECKOUT`, so an engine built elsewhere works with any checkout's framework.
 
 ```bazelrc
 common --repo_env=FLUTTER_CHECKOUT=/Users/me/src/flutter
+common --repo_env=FLUTTER_ENGINE=/Users/me/src/flutter/engine/src
 common --@rules_flutter//flutter:sdk=local
 ```
 
-`flutter_checkout_framework` links the checkout's `packages/`, `bin/internal/` and `sky_engine` package, so an edit to the framework is seen by the next build. `flutter_engine_out_dirs` scans `engine/src/out`, reads each out dir's `args.gn` to learn what it holds, and links in the files each piece of the engine needs. A ninja rebuild changes a linked file, and the next build picks it up.
+`flutter_local_framework` links the checkout's `packages/`, `bin/internal/` and `sky_engine` package, so an edit to the framework is seen by the next build. `flutter_local_engine` scans `$FLUTTER_ENGINE/out`, reads each out dir's `args.gn` to learn what it holds, and links in the files each piece of the engine needs. A ninja rebuild changes a linked file, and the next build picks it up.
 
 Which out dir serves what, by the names `tools/gn` gives them (the CPU appears in a name only when it is not the platform's default, so an Apple silicon Mac's host build is `host_debug_arm64`):
 
@@ -1893,7 +1896,7 @@ Build only the out dirs your builds need. A `-c dbg` macOS app needs `host_debug
 
 If two out dirs fit the same slot (`host_debug_arm64` and `host_debug_unopt_arm64`, say), the build fails and lists them. Choose with `--repo_env=FLUTTER_LOCAL_ENGINES=host_debug_unopt_arm64,host_release_arm64`.
 
-The checkout also needs its Dart source, `engine/src/flutter/third_party/dart`, which `gclient sync` fetches. rules_dart compiles each library's dependents against an outline of it (its kernel without function bodies), so an edit inside a function body does not recompile them. The tool that makes outlines reads only the kernel format of the Dart it ships with, so a checkout engine's is built from that checkout's own `pkg/kernel`. Without the source, a build fails saying so and naming the two ways out: run `gclient sync`, or build with `--@rules_dart//dart:outline_kernel=false`.
+The engine source directory also needs its Dart source, `flutter/third_party/dart`, which `gclient sync` fetches. rules_dart compiles each library's dependents against an outline of it (its kernel without function bodies), so an edit inside a function body does not recompile them. The tool that makes outlines reads only the kernel format of the Dart it ships with, so an engine built from a checkout is built from that checkout's own `pkg/kernel`. Without the source, a build fails saying so and naming the two ways out: run `gclient sync`, or build with `--@rules_dart//dart:outline_kernel=false`.
 
 Programs built with a custom SDK get its own `FLUTTER_VERSION`, `FLUTTER_FRAMEWORK_REVISION`, `FLUTTER_ENGINE_REVISION` and `FLUTTER_DART_VERSION` defines, from the checkout's version and commit and the engine's `args.gn`. `flutter_test` runs under the selected SDK too: its modules compile against the checkout's platform kernel.
 
@@ -1907,7 +1910,7 @@ You can also replace only one half. Give `flutter.toolchain` just `engine` or ju
 bazel build //:app --@rules_flutter//flutter:sdk=local
 ```
 
-Each SDK's repositories are fetched only when a build selects it. Without `FLUTTER_CHECKOUT` set, the repositories still load, so `bazel query` works on a machine with no checkout, and a build that selects the SDK fails at analysis with the `.bazelrc.user` lines to add. A name no `flutter.toolchain()` declares fails, listing the ones that are declared. An SDK other than `flutter` can only be declared in the root module.
+Each SDK's repositories are fetched only when a build selects it. Without `FLUTTER_CHECKOUT` and `FLUTTER_ENGINE` set, the repositories still load, so `bazel query` works on a machine with no checkout, and a build that selects the SDK fails at analysis with the `.bazelrc.user` lines to add. A name no `flutter.toolchain()` declares fails, listing the ones that are declared. An SDK other than `flutter` can only be declared in the root module.
 
 All SDKs share one `pubspec.lock`. The `sdk: flutter` packages (`flutter`, `flutter_test`, ...) come from the selected SDK's framework. If what the checkout's pubspecs ask of a hosted package does not match the lock, or the lock needs a newer Flutter than the checkout is, the build fails naming each package and gives the command that re-resolves against that SDK:
 
@@ -1978,11 +1981,11 @@ An engine only runs code compiled by a gen_snapshot from the same Dart. Rebuild 
 
 A web SDK has no engine binary or `gen_snapshot`, so a web build checks only the kernel: each of the web SDK's platform dills against the Dart SDK. A web app of a custom engine loads its renderer from the web SDK rather than the CDN, which has nothing for an engine that is not a release, so a web SDK without `canvaskit/` fails too.
 
-**A checkout that is not one.** A `FLUTTER_CHECKOUT` without `packages/flutter/pubspec.yaml`, or without `engine/src/out`, fails when the repository is fetched, naming what is missing.
+**A checkout that is not one.** A `FLUTTER_CHECKOUT` without `packages/flutter/pubspec.yaml`, or a `FLUTTER_ENGINE` without `out`, fails when the repository is fetched, naming what is missing.
 
 ### Writing an engine source
 
-`flutter_engine_out_dirs` is one *engine source*. Any repository that follows the same contract can be one, and `flutter.toolchain(engine = "@my_engine")` uses it the same way. The release's engine is written to this contract too.
+`flutter_local_engine` is one *engine source*. Any repository that follows the same contract can be one, and `flutter.toolchain(engine = "@my_engine")` uses it the same way. The release's engine is written to this contract too.
 
 An engine source has a `flutter_engine.json` at its root and a target, a *slice*, at each of these labels. `<host>` is the machine the tools run on (`darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`, `windows-x64`); `<mode>` is `debug`, `profile` or `release`.
 
@@ -2040,7 +2043,7 @@ A *framework source* is the other half: a repository whose root is a flutter/flu
 
 ### Limitations
 
-- `flutter_engine_out_dirs` is tested against a stand-in checkout: `e2e/custom_engine` lays the official release's artifacts out the way a checkout's out dirs hold them, with matching `args.gn` files. The out dir layout and `args.gn` fields it reads follow `tools/gn`, but have not yet been checked against a real engine build.
+- `flutter_local_engine` is tested against a stand-in checkout: `e2e/custom_engine` lays the official release's artifacts out the way a checkout's out dirs hold them, with matching `args.gn` files. The out dir layout and `args.gn` fields it reads follow `tools/gn`, but have not yet been checked against a real engine build.
 - A debug iOS build is a simulator build. There is no debug build for an iOS device from out dirs.
 - Engines and `gen_snapshot`s for macOS and iOS are read only on a Mac.
 - A desktop profile or release build uses the out dir's own `gen_snapshot`, which runs only on the machine it was built for, so those builds exist only for the machine's own platform. As with the release, release builds for another desktop OS do not cross-compile; debug builds do.

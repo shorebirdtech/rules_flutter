@@ -10,7 +10,7 @@
 ///  2. The release's apps carry no such file.
 ///  3. A gen_snapshot of another Dart than the engine's fails the build, naming
 ///     both and their hashes.
-///  4. A checkout given by `--repo_env=FLUTTER_CHECKOUT` works; not set, the
+///  4. A checkout given by `--repo_env=FLUTTER_CHECKOUT` and `FLUTTER_ENGINE` works; not set, the
 ///     repositories still load (`bazel query`) and a build that selects the SDK
 ///     says what to set.
 ///  5. The iOS simulator app (debug) and the iOS device framework (release) are
@@ -595,7 +595,7 @@ void main() {
       expect(query.exitCode, 0, reason: '${query.stderr}');
       final build = await _bazel(['build', app, '${_sdkFlag}env']);
       expect(build.exitCode, isNot(0));
-      expect('${build.stderr}', contains('FLUTTER_CHECKOUT is not set'));
+      expect('${build.stderr}', contains('FLUTTER_ENGINE is not set'));
     },
   );
 }

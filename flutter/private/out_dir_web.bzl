@@ -1,6 +1,6 @@
 """The web SDK slice of an engine checkout's out dirs.
 
-`flutter_engine_out_dirs` (local_sdk.bzl) reads the checkout; this module
+`flutter_local_engine` (local_sdk.bzl) reads the checkout; this module
 links the web SDK of its `wasm_release` out dir (`flutter_web_sdk/`, the
 `--web` build of `tools/gn`, where flutter_tools'
 `CachedLocalWebSdkArtifacts` reads it) and writes the `web` package

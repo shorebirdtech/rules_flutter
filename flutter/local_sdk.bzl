@@ -2,24 +2,29 @@
 
 The engine is built outside Bazel (`et`, or `tools/gn` and ninja, in the
 developer's checkout), and these repository rules point at it, like a precompiled
-`protoc`: `flutter_engine_out_dirs` is an engine source (the contract of
-`@rules_flutter//flutter:engine.bzl`) over the out dirs, and
-`flutter_checkout_framework` is a framework source over the checkout's packages.
+`protoc`: `flutter_local_engine` is an engine source (the contract of
+`@rules_flutter//flutter:engine.bzl`) over the out dirs of an engine source
+directory, and `flutter_local_framework` is a framework source over a checkout's
+packages.
 
-The checkout's path is machine-local, so it never appears in MODULE.bazel. The
-committed MODULE.bazel declares the SDK without a path; the path and the choice
-to use the SDK live in the untracked `.bazelrc.user`:
+The paths are machine-local, so they never appear in MODULE.bazel. The
+committed MODULE.bazel declares the SDK without a path; the paths and the choice
+to use the SDK live in the untracked `.bazelrc.user`. `FLUTTER_CHECKOUT` is the
+flutter/flutter checkout, and `FLUTTER_ENGINE` is the engine's source directory,
+as flutter_tools reads it (the default of `--local-engine-src-path`), usually
+`<checkout>/engine/src`:
 
 ```
 common --repo_env=FLUTTER_CHECKOUT=/Users/me/src/flutter
+common --repo_env=FLUTTER_ENGINE=/Users/me/src/flutter/engine/src
 common --@rules_flutter//flutter:sdk=local
 ```
 
 MODULE.bazel:
 
 ```starlark
-local_framework = use_repo_rule("@rules_flutter//flutter:local_sdk.bzl", "flutter_checkout_framework")
-local_engine = use_repo_rule("@rules_flutter//flutter:local_sdk.bzl", "flutter_engine_out_dirs")
+local_framework = use_repo_rule("@rules_flutter//flutter:local_sdk.bzl", "flutter_local_framework")
+local_engine = use_repo_rule("@rules_flutter//flutter:local_sdk.bzl", "flutter_local_engine")
 local_framework(name = "flutter_local_framework")
 local_engine(name = "flutter_local_engine")
 
@@ -27,7 +32,7 @@ flutter = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter")
 flutter.toolchain(name = "local", framework = "@flutter_local_framework", engine = "@flutter_local_engine")
 ```
 
-Nothing is read until a build selects the SDK. Where the variable is not set the
+Nothing is read until a build selects the SDK. Where a variable is not set the
 repositories still load, with targets that fail when something uses them, so
 `bazel query` works on a machine without a checkout.
 
@@ -45,33 +50,26 @@ load("//flutter/private:out_dir_web.bzl", "web_slices")
 
 _ENGINE_LOAD = 'load("@rules_flutter//flutter:engine.bzl", "flutter_android_engine_slice", "flutter_gen_snapshot", "flutter_host_tools", "flutter_ios_engine_slice", "flutter_linux_engine_slice", "flutter_macos_engine_slice", "flutter_missing_slice", "flutter_platform_kernel", "flutter_web_sdk", "flutter_windows_engine_slice")\n'
 
-def _unset_message(env):
+def _unset_message(env, what, example):
     return (
-        "{env} is not set. Point it at a flutter/flutter checkout whose engine is built in " +
-        "engine/src/out, and select the SDK, in .bazelrc.user:\n" +
-        "    common --repo_env={env}=/path/to/flutter\n" +
+        "{env} is not set. Point it at {what}, and select the SDK, in .bazelrc.user:\n" +
+        "    common --repo_env={env}={example}\n" +
         "    common --@rules_flutter//flutter:sdk=<the SDK's name>"
-    ).format(env = env)
+    ).format(env = env, what = what, example = example)
 
-def _checkout_path(repository_ctx, env):
-    """The checkout's path: the directory of the file `checkout` names, or the environment variable's value."""
-    if repository_ctx.attr.checkout:
-        return str(repository_ctx.path(repository_ctx.attr.checkout).dirname)
+def _source_path(repository_ctx, env, label):
+    """A directory's path: the directory of the file `label` names, or the environment variable's value."""
+    if label:
+        return str(repository_ctx.path(label).dirname)
     return repository_ctx.getenv(env)
 
-_CHECKOUT_ATTR = attr.label(
-    doc = "A file at the root of a checkout that another repository lays out, in place of the " +
-          "environment variable: for a checkout that Bazel itself produces, such as the stand-in a test builds " +
-          "from the official artifacts.",
-    allow_single_file = True,
-)
-
-def _checkout_framework_impl(repository_ctx):
+def _local_framework_impl(repository_ctx):
     env = repository_ctx.attr.path_env
     repository_ctx.file("BUILD.bazel", 'exports_files(["%s"], visibility = ["//visibility:public"])\n' % FRAMEWORK_JSON)
-    checkout = _checkout_path(repository_ctx, env)
+    checkout = _source_path(repository_ctx, env, repository_ctx.attr.checkout)
     if not checkout:
-        repository_ctx.file(FRAMEWORK_JSON, json.encode({"unset": _unset_message(env)}) + "\n")
+        unset = _unset_message(env, "a flutter/flutter checkout", "/path/to/flutter")
+        repository_ctx.file(FRAMEWORK_JSON, json.encode({"unset": unset}) + "\n")
         return
     root = repository_ctx.path(checkout)
     if not root.get_child("packages").get_child("flutter").get_child("pubspec.yaml").exists:
@@ -125,15 +123,20 @@ def _checkout_framework_impl(repository_ctx):
         "path": checkout,
     }) + "\n")
 
-flutter_checkout_framework = repository_rule(
-    _checkout_framework_impl,
+flutter_local_framework = repository_rule(
+    _local_framework_impl,
     doc = "A framework source (`flutter_framework.json`, `packages/`, ...) over a flutter/flutter checkout whose path an environment variable gives.",
     attrs = {
         "path_env": attr.string(
             doc = "The environment variable holding the checkout's path. Set it with `--repo_env`.",
             default = "FLUTTER_CHECKOUT",
         ),
-        "checkout": _CHECKOUT_ATTR,
+        "checkout": attr.label(
+            doc = "A file at the root of a checkout that another repository lays out, in place of the " +
+                  "environment variable: for a checkout that Bazel itself produces, such as the stand-in a test builds " +
+                  "from the official artifacts.",
+            allow_single_file = True,
+        ),
     },
     local = True,
 )
@@ -154,9 +157,9 @@ def _gen_snapshot_file(out, cpu):
             return found
     return None
 
-def _engine_out_dirs_impl(repository_ctx):
+def _local_engine_impl(repository_ctx):
     path_env = repository_ctx.attr.path_env
-    checkout = _checkout_path(repository_ctx, path_env)
+    engine_src = _source_path(repository_ctx, path_env, repository_ctx.attr.src)
     pins = [n.strip() for n in (repository_ctx.getenv(repository_ctx.attr.engines_env) or "").split(",") if n.strip()]
 
     # What the engine is, for the defines programs get: its commit as gn
@@ -173,8 +176,8 @@ def _engine_out_dirs_impl(repository_ctx):
     root_build = ""
 
     machine = machine_of(repository_ctx)
-    if not checkout:
-        default_reason = _unset_message(path_env)
+    if not engine_src:
+        default_reason = _unset_message(path_env, "the engine's source directory, `engine/src` of a flutter/flutter checkout, in which the engine is built in `out`", "/path/to/flutter/engine/src")
     elif machine == None:
         default_reason = "The engine out dirs are read on macOS, Linux and Windows machines; this one is {} on {}.".format(repository_ctx.os.name, repository_ctx.os.arch)
     else:
@@ -182,10 +185,10 @@ def _engine_out_dirs_impl(repository_ctx):
         cpu = arch
         host = machine.key
         os_label = {"macos": "macOS", "linux": "Linux", "windows": "Windows"}[machine.os]
-        src = repository_ctx.path(checkout).get_child("engine").get_child("src")
+        src = repository_ctx.path(engine_src)
         out_root = src.get_child("out")
         if not out_root.exists:
-            fail("{}={} has no engine/src/out: build the engine in it first.".format(path_env, checkout))
+            fail("{}={} has no out: build the engine in it first.".format(path_env, engine_src))
         repository_ctx.watch(out_root)
 
         # Candidates: the directories whose name `tools/gn` could have produced
@@ -425,7 +428,7 @@ alias(
             reasons[("outline_tool", "outline_tool")] = (
                 "{}={} has no Dart source at {}, which outline compiles build their stripper from: " +
                 "run `gclient sync` in the checkout, or build with --@rules_dart//dart:outline_kernel=false."
-            ).format(path_env, checkout, dart_src)
+            ).format(path_env, engine_src, dart_src)
 
         # A Mac builds the Apple platforms.
         if machine.os != "macos":
@@ -471,19 +474,24 @@ flutter_platform_kernel(
 )
 """.format(top = top, prov = prov)
 
-flutter_engine_out_dirs = repository_rule(
-    _engine_out_dirs_impl,
-    doc = "An engine source (the contract of `@rules_flutter//flutter:engine.bzl`) over the out dirs of a checkout whose path an environment variable gives: the host tools, the platform kernels, the engines of macOS, iOS, Android, Linux and Windows, their gen_snapshots, and the web SDK. A slice no out dir provides is a missing slice that says why.",
+flutter_local_engine = repository_rule(
+    _local_engine_impl,
+    doc = "An engine source (the contract of `@rules_flutter//flutter:engine.bzl`) over the out dirs of an engine source directory (`engine/src`, as flutter_tools reads `FLUTTER_ENGINE`) whose path an environment variable gives: the host tools, the platform kernels, the engines of macOS, iOS, Android, Linux and Windows, their gen_snapshots, and the web SDK. A slice no out dir provides is a missing slice that says why.",
     attrs = {
         "path_env": attr.string(
-            doc = "The environment variable holding the checkout's path. Set it with `--repo_env`.",
-            default = "FLUTTER_CHECKOUT",
+            doc = "The environment variable holding the engine source directory's path. Set it with `--repo_env`.",
+            default = "FLUTTER_ENGINE",
         ),
         "engines_env": attr.string(
             doc = "The environment variable naming the out dirs to use, when a slot has more than one candidate.",
             default = "FLUTTER_LOCAL_ENGINES",
         ),
-        "checkout": _CHECKOUT_ATTR,
+        "src": attr.label(
+            doc = "A file at the root of an engine source directory that another repository lays out, in place of the " +
+                  "environment variable: for an engine that Bazel itself produces, such as the stand-in a test builds " +
+                  "from the official artifacts.",
+            allow_single_file = True,
+        ),
     },
     local = True,
 )

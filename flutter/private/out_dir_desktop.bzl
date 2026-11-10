@@ -1,6 +1,6 @@
 """The Linux and Windows slices of an engine checkout's out dirs.
 
-`flutter_engine_out_dirs` (local_sdk.bzl) reads the checkout; this module
+`flutter_local_engine` (local_sdk.bzl) reads the checkout; this module
 decides which out dir serves each desktop slice and writes the slice targets
 (the labels of `engine_labels.bzl`):
 

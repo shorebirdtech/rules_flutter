@@ -121,6 +121,7 @@ def _windows_checkout(rctx, path, link, meta):
     link(dev_root.get_child("bin").get_child("cache").get_child("flutter.version.json"), "checkout/bin/cache/flutter.version.json")
     rctx.file("checkout/bin/internal/material_fonts.version", meta.material_fonts_url.split("/")[-2] + "\n")
     rctx.file("checkout/CHECKOUT", "A stand-in for a flutter/flutter checkout.\n")
+    rctx.file("checkout/engine/src/ENGINE_SRC", "A stand-in for a checkout's engine source directory.\n")
     _dart_source(path, link)
 
     for mode in ["debug", "profile", "release"]:
@@ -152,7 +153,7 @@ def _windows_checkout(rctx, path, link, meta):
     link(kernel_debug, debug + "flutter_patched_sdk")
     link(kernel_release, _OUT + "host_release/flutter_patched_sdk")
     _web_out_dir(rctx, path, link, meta.engine_revision, False)
-    rctx.file("BUILD.bazel", 'exports_files(glob(["checkout/CHECKOUT"]))\n')
+    rctx.file("BUILD.bazel", 'exports_files(glob(["checkout/CHECKOUT", "checkout/engine/src/ENGINE_SRC"]))\n')
 
 def _fake_checkout_impl(rctx):
     def path(label):
@@ -188,6 +189,7 @@ def _fake_checkout_impl(rctx):
     link(dev_root.get_child("bin").get_child("cache").get_child("flutter.version.json"), "checkout/bin/cache/flutter.version.json")
     rctx.file("checkout/bin/internal/material_fonts.version", meta.material_fonts_url.split("/")[-2] + "\n")
     rctx.file("checkout/CHECKOUT", "A stand-in for a flutter/flutter checkout.\n")
+    rctx.file("checkout/engine/src/ENGINE_SRC", "A stand-in for a checkout's engine source directory.\n")
     _dart_source(path, link)
 
     # The release gen_snapshot, or another release's.
@@ -250,7 +252,7 @@ def _fake_checkout_impl(rctx):
     _desktop_out_dirs(rctx, path, link, meta.engine_revision, on_linux)
     _web_out_dir(rctx, path, link, meta.engine_revision, rctx.attr.web_kernel_format_mismatch)
 
-    rctx.file("BUILD.bazel", 'exports_files(glob(["checkout/CHECKOUT"]))\n')
+    rctx.file("BUILD.bazel", 'exports_files(glob(["checkout/CHECKOUT", "checkout/engine/src/ENGINE_SRC"]))\n')
 
 def _desktop_out_dirs(rctx, path, link, revision, on_linux):
     """The Linux and Windows out dirs: the official engines, laid out as ninja leaves them.

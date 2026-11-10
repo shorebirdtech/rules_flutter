@@ -46,7 +46,8 @@ flutter.toolchain(
 )
 
 # A checkout whose path is given the way a developer gives it: with
-# --repo_env=FLUTTER_CHECKOUT. Not set, the repositories still load.
+# --repo_env=FLUTTER_CHECKOUT and --repo_env=FLUTTER_ENGINE. Not set, the
+# repositories still load.
 flutter.toolchain(
     name = "env",
     engine = "@env_engine",
@@ -194,30 +195,30 @@ fake_checkout(
     web_kernel_format_mismatch = True,
 )
 
-checkout_framework = use_repo_rule("@rules_flutter//flutter:local_sdk.bzl", "flutter_checkout_framework")
+local_framework = use_repo_rule("@rules_flutter//flutter:local_sdk.bzl", "flutter_local_framework")
 
-engine_out_dirs = use_repo_rule("@rules_flutter//flutter:local_sdk.bzl", "flutter_engine_out_dirs")
+local_engine = use_repo_rule("@rules_flutter//flutter:local_sdk.bzl", "flutter_local_engine")
 
-checkout_framework(
+local_framework(
     name = "local_framework",
     checkout = "@fake_checkout//:checkout/CHECKOUT",
 )
 
-engine_out_dirs(
+local_engine(
     name = "local_engine",
-    checkout = "@fake_checkout//:checkout/CHECKOUT",
+    src = "@fake_checkout//:checkout/engine/src/ENGINE_SRC",
 )
 
-checkout_framework(
+local_framework(
     name = "mismatched_framework",
     checkout = "@fake_checkout_mismatched//:checkout/CHECKOUT",
 )
 
-engine_out_dirs(
+local_engine(
     name = "mismatched_engine",
-    checkout = "@fake_checkout_mismatched//:checkout/CHECKOUT",
+    src = "@fake_checkout_mismatched//:checkout/engine/src/ENGINE_SRC",
 )
 
-checkout_framework(name = "env_framework")
+local_framework(name = "env_framework")
 
-engine_out_dirs(name = "env_engine")
+local_engine(name = "env_engine")
