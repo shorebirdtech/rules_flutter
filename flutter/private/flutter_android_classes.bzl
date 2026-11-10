@@ -1,4 +1,5 @@
-"""Checks that no two jars an Android app links define one class differently.
+"""Checks that no two jars an Android app links define one class differently,
+and that no Maven library reaches it from two repositories.
 
 `android_binary` puts every jar that reaches it into the app's deploy jar,
 the classes it dexes, keeping the first copy of each class. When two jars
@@ -9,6 +10,15 @@ aligns companion artifacts through their Gradle module metadata;
 rules_jvm_external's resolution reads POMs only and does not. So
 `flutter_android_app` puts this check on its `android_binary`: building the app
 runs it, and a conflict fails the build naming both jars.
+
+Each rules_jvm_external repository is a resolution of its own, so a library
+(`group:artifact`) that reaches the app from two of them, a target of another
+repository where one of `@rules_flutter_maven` belonged, is two copies whose
+versions are picked apart. The check fails on that too, naming both targets.
+It has no switch: two repositories' copies of one library in one app are
+never what Gradle builds, and a target of the other repository can always be
+replaced by ours, by its label or, for a module the root does not edit, by a
+`maven.override` of that repository.
 """
 
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
@@ -124,9 +134,18 @@ def _flutter_android_class_check_impl(ctx):
     args.add("--app", ctx.attr.app)
     args.add("--report", ctx.attr.report)
     args.add("--stamp", stamp)
-    for jar in jars.to_list():
+    jar_list = jars.to_list()
+    for jar in jar_list:
         args.add("--jar", jar)
         args.add(_origin(jar, coordinates))
+
+    # The Maven libraries those jars are, for the check that each comes from
+    # one repository.
+    for jar in jar_list:
+        owner = str(jar.owner)
+        if owner in coordinates:
+            args.add("--maven", owner)
+            args.add(coordinates[owner])
     tools = portable_tools(ctx)
     ctx.actions.run(
         executable = tools.dart,
@@ -170,5 +189,5 @@ flutter_android_class_check = rule(
         ),
     },
     exec_groups = PORTABLE_EXEC_GROUPS,
-    doc = "Fails the build when two jars an Android app links define one class differently. A dependency of the app's `android_binary` that links nothing.",
+    doc = "Fails the build when two jars an Android app links define one class differently, or one Maven library reaches it from two repositories. A dependency of the app's `android_binary` that links nothing.",
 )

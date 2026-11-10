@@ -1,4 +1,5 @@
-/// Checks that no two jars an Android app links define one class differently.
+/// Checks that no two jars an Android app links define one class differently,
+/// and that no Maven library reaches the app from two repositories.
 ///
 /// An app's deploy jar, the classes it dexes, takes every jar that reaches
 /// `android_binary` and keeps the first copy of each class. Two jars that
@@ -22,6 +23,14 @@
 ///   module descriptor and multi-release copies, which are not classes an
 ///   Android app loads.
 ///
+/// Nor may one Maven library, a `group:artifact` (with its packaging and
+/// classifier, if any), reach the app from two rules_jvm_external
+/// repositories. Each repository is a resolution of its own, so the app would
+/// carry two copies at versions picked apart: equal today, they part when
+/// either is re-pinned. Gradle resolves one version of each library for an
+/// app, and `@rules_flutter_maven` is that one resolution. The build fails
+/// naming the library and both targets.
+///
 /// On success the tool writes `--stamp`, which the build requires so that a
 /// conflict fails the build.
 ///
@@ -34,7 +43,10 @@
 /// where the params file holds, one per line: `--app <label>`,
 /// `--report <label>`, `--stamp <file>`, then for each jar `--jar <file>
 /// <origin>`, in the order the deploy jar takes them; `<origin>` names the
-/// jar in the message (its Maven coordinates, or its target).
+/// jar in the message (its Maven coordinates, or its target). Then for each
+/// of those jars that rules_jvm_external imported, `--maven <target>
+/// <coordinates>`: the target the jar comes from, and its Maven coordinates
+/// (`group:artifact[:packaging[:classifier]]:version`).
 library;
 
 import 'dart:io';
@@ -59,6 +71,86 @@ class Conflict {
 
   /// The classes they define differently, sorted.
   final List<String> classes;
+}
+
+/// One Maven library the app links, as a rules_jvm_external repository
+/// imported it.
+class MavenLibrary {
+  MavenLibrary(this.target, this.coordinates);
+
+  /// The label of the target that imports it, canonical
+  /// (`@@<repository>//:<name>`).
+  final String target;
+
+  /// `group:artifact[:packaging[:classifier]]:version`.
+  final String coordinates;
+
+  /// The library: its coordinates without the version.
+  String get library => coordinates.substring(0, coordinates.lastIndexOf(':'));
+
+  /// The repository of [target].
+  String get repository {
+    final end = target.indexOf('//');
+    return end < 0 ? '' : target.substring(0, end).replaceAll('@', '');
+  }
+}
+
+/// The libraries that reach the app from more than one repository: each
+/// library's imports, one per repository, in the order given, by library.
+Map<String, List<MavenLibrary>> duplicateLibraries(
+  List<MavenLibrary> libraries,
+) {
+  final byLibrary = <String, Map<String, MavenLibrary>>{};
+  for (final library in libraries) {
+    (byLibrary[library.library] ??= {}).putIfAbsent(
+      library.repository,
+      () => library,
+    );
+  }
+  return {
+    for (final key in byLibrary.keys.toList()..sort())
+      if (byLibrary[key]!.length > 1) key: byLibrary[key]!.values.toList(),
+  };
+}
+
+/// The message the build fails with for [found], or null when it is empty.
+String? duplicateMessage(
+  Map<String, List<MavenLibrary>> found, {
+  required String app,
+}) {
+  if (found.isEmpty) return null;
+  final out = StringBuffer()
+    ..writeln(
+      '$app links Maven libraries from more than one repository. Each '
+      'repository resolves its versions on its own, so the app carries two '
+      'copies of each library, at versions that part when either is '
+      're-pinned.',
+    );
+  for (final MapEntry(key: library, value: imports) in found.entries) {
+    out
+      ..writeln()
+      ..writeln('    $library');
+    for (final import in imports) {
+      out.writeln('        ${import.coordinates} from ${import.target}');
+    }
+  }
+  out
+    ..writeln()
+    ..writeln(
+      'An app\'s Android libraries come from @rules_flutter_maven, one '
+      'resolution for the app, as Gradle makes one. Depend on the '
+      'library\'s @rules_flutter_maven target in place of the other, adding '
+      'the artifact to the root module\'s `maven.install(name = '
+      '"rules_flutter_maven", artifacts = [...])` if it lacks it. Where the '
+      'other target belongs to a module you do not edit, have the root '
+      'module send that repository\'s copy to ours:',
+    )
+    ..writeln()
+    ..write(
+      '    maven.override(name = "<its repository>", coordinates = '
+      '"<group:artifact>", target = "@rules_flutter_maven//:<target>")',
+    );
+  return out.toString();
 }
 
 /// Whether [name], an entry of a jar, is a class the check compares.
@@ -193,6 +285,7 @@ int run(List<String> args) {
   String? report;
   String? stamp;
   final jars = <Jar>[];
+  final libraries = <MavenLibrary>[];
   for (var i = 0; i < args.length; i++) {
     switch (args[i]) {
       case '--app':
@@ -203,6 +296,9 @@ int run(List<String> args) {
         stamp = args[++i];
       case '--jar':
         jars.add(Jar(args[i + 1], args[i + 2]));
+        i += 2;
+      case '--maven':
+        libraries.add(MavenLibrary(args[i + 1], args[i + 2]));
         i += 2;
       default:
         stderr.writeln('check_android_classes: unknown argument ${args[i]}');
@@ -224,13 +320,12 @@ int run(List<String> args) {
       return 1;
     }
   }
-  final message = conflictMessage(
-    conflicts(jars, entries),
-    app: app,
-    report: report,
-  );
-  if (message != null) {
-    stderr.writeln(message);
+  final messages = [
+    duplicateMessage(duplicateLibraries(libraries), app: app),
+    conflictMessage(conflicts(jars, entries), app: app, report: report),
+  ].nonNulls;
+  if (messages.isNotEmpty) {
+    stderr.writeln(messages.join('\n\n'));
     return 1;
   }
   File(stamp).writeAsStringSync('');

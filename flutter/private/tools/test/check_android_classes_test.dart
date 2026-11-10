@@ -164,6 +164,63 @@ void main() {
     });
   });
 
+  group('duplicateLibraries', () {
+    const ours = '@@rules_jvm_external++maven+rules_flutter_maven';
+    const other = '@@rules_jvm_external++maven+maven';
+
+    test('finds a library that two repositories import', () {
+      final found = duplicateLibraries([
+        MavenLibrary('$ours//:androidx_core_core', 'androidx.core:core:1.17.0'),
+        MavenLibrary(
+          '$ours//:androidx_fragment_fragment',
+          'androidx.fragment:fragment:1.8.9',
+        ),
+        MavenLibrary(
+          '$other//:androidx_core_core',
+          'androidx.core:core:1.17.0',
+        ),
+      ]);
+      expect(found.keys, ['androidx.core:core']);
+      expect(found['androidx.core:core']!.map((l) => l.target), [
+        '$ours//:androidx_core_core',
+        '$other//:androidx_core_core',
+      ]);
+    });
+
+    test('finds none in one repository, or two classifiers of a library', () {
+      expect(
+        duplicateLibraries([
+          MavenLibrary('$ours//:a', 'g:a:1.0'),
+          MavenLibrary('$ours//:a', 'g:a:1.0'),
+          MavenLibrary('$other//:a_natives', 'g:a:jar:natives:1.0'),
+        ]),
+        isEmpty,
+      );
+    });
+  });
+
+  group('duplicateMessage', () {
+    test('is null without duplicates', () {
+      expect(duplicateMessage({}, app: '//:app'), isNull);
+    });
+
+    test('names the library, both targets, and how to fix it', () {
+      final message = duplicateMessage({
+        'androidx.core:core': [
+          MavenLibrary('@@r//:androidx_core_core', 'androidx.core:core:1.17.0'),
+          MavenLibrary('@@m//:androidx_core_core', 'androidx.core:core:1.13.1'),
+        ],
+      }, app: '//:app')!;
+      expect(message, contains('//:app links Maven libraries'));
+      expect(message, contains('    androidx.core:core\n'));
+      expect(
+        message,
+        contains('androidx.core:core:1.13.1 from @@m//:androidx_core_core'),
+      );
+      expect(message, contains('maven.override(name = "<its repository>"'));
+    });
+  });
+
   group('run', () {
     late Directory dir;
     setUp(() => dir = Directory.systemTemp.createTempSync('classes'));
@@ -210,6 +267,28 @@ void main() {
         'a/A.class': [2],
       });
       expect(run(params(['--jar', a, 'a', '--jar', b, 'b'])), 1);
+      expect(File('${dir.path}/stamp').existsSync(), isFalse);
+    });
+
+    test('fails without a stamp when two repositories import a library', () {
+      final a = write('a.jar', {
+        'a/A.class': [1],
+      });
+      final b = write('b.jar', {
+        'a/A.class': [1],
+      });
+      final args = [
+        ...['--jar', a, 'g:a:1.0', '--jar', b, 'g:a:1.0'],
+        ...[
+          '--maven',
+          '@@r//:g_a',
+          'g:a:1.0',
+          '--maven',
+          '@@m//:g_a',
+          'g:a:1.0',
+        ],
+      ];
+      expect(run(params(args)), 1);
       expect(File('${dir.path}/stamp').existsSync(), isFalse);
     });
   });
