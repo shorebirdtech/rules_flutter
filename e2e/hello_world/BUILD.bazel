@@ -222,7 +222,7 @@ flutter_android_app(
 flutter_linux_app(
     name = "hello_world_linux",
     application = ":hello_world_app",
-    gtk_app_id = "com.example.helloworld",
+    application_id = "com.example.helloworld",
     # On non-Linux hosts, use --platforms=@rules_flutter//flutter/platforms:linux_x64 -c dbg
     target_compatible_with = ["@platforms//os:linux"],
 )

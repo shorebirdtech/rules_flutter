@@ -414,6 +414,7 @@ def flutter_linux_integration_test(
         name,
         src,
         application,
+        application_id,
         deps = [],
         srcs = [],
         test_config = None,
@@ -447,6 +448,8 @@ def flutter_linux_integration_test(
             `testWidgets`, calling the app's own `main()`.
         application: The `flutter_application` the test runs. It may be in another
             package.
+        application_id: The app's `application_id`, as `flutter_linux_app` takes it.
+            Required.
         deps: What the test imports beyond the application's own `deps`. It must
             bring `integration_test` and `flutter_test` (`@<hub>//:integration_test`
             and `@<hub>//:flutter_test`), which analysis fails without, naming them.
@@ -476,8 +479,7 @@ def flutter_linux_integration_test(
             among the shards.
         flaky: The test's `flaky`.
         visibility: The test's visibility.
-        **linux_app_kwargs: Passed to `flutter_linux_app`: `app_name`, `gtk_app_id`,
-            and the rest.
+        **linux_app_kwargs: Passed to `flutter_linux_app`: `app_name` and the rest.
     """
     if test_config == None:
         test_config = _find_test_config(name, src)
@@ -487,6 +489,7 @@ def flutter_linux_integration_test(
     flutter_linux_app(
         name = app,
         application = program,
+        application_id = application_id,
         tags = ["manual"],
         testonly = True,
         visibility = ["//visibility:private"],

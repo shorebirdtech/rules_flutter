@@ -288,6 +288,7 @@ flutter_web_bundle(
 flutter_linux_app(
     name = "plugin_linux",
     application = ":plugin_app",
+    application_id = "com.example.plugin_example.plugin_linux",
     target_compatible_with = ["@platforms//os:linux"],
 )
 

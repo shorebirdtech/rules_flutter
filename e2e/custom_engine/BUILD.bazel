@@ -90,6 +90,7 @@ flutter_android_app(
 flutter_linux_app(
     name = "linux_app",
     application = ":app_flutter",
+    application_id = "com.example.custom_engine.linux_app",
     tags = ["manual"],
 )
 

@@ -144,23 +144,21 @@ def _c_string_literal(value):
     escaped = value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
     return "\"" + escaped + "\""
 
-def linux_runner_defines(gtk_app_id, window_title):
+def linux_runner_defines(application_id, window_title):
     """The local defines a Linux runner reads.
 
     `APPLICATION_ID` is what `flutter create`'s runner reads (its CMake defines
-    it from the project's GTK application id); `GTK_APP_ID` is the name the
-    built-in runner uses. Both carry `gtk_app_id`.
+    it from the project's application id), and the built-in runner reads it too.
 
     Args:
-      gtk_app_id: GTK application identifier.
+      application_id: The application identifier GTK names the app by.
       window_title: Title of the runner's window.
 
     Returns:
       A list of `NAME=value` strings for `cc_common.compile(local_defines=...)`.
     """
     return [
-        "GTK_APP_ID=" + _c_string_literal(gtk_app_id),
-        "APPLICATION_ID=" + _c_string_literal(gtk_app_id),
+        "APPLICATION_ID=" + _c_string_literal(application_id),
         "WINDOW_TITLE=" + _c_string_literal(window_title),
     ]
 
@@ -203,7 +201,7 @@ def _flutter_linux_runner_lib_impl(ctx):
         runner_srcs = runner_srcs,
         runner_hdrs = runner_hdrs,
         engine_files = engine_files,
-        defines = linux_runner_defines(ctx.attr.gtk_app_id, ctx.attr.window_title),
+        defines = linux_runner_defines(ctx.attr.application_id, ctx.attr.window_title),
         registrant_srcs = registrant_srcs,
         registrant_hdrs = registrant_hdrs,
         linux_sysroot = flutter_sdk_info.linux_sysroot,
@@ -396,9 +394,11 @@ flutter_linux_runner_lib = rule(
             doc = "Custom runner C++ header files.",
             allow_files = [".h", ".hpp"],
         ),
-        "gtk_app_id": attr.string(
-            doc = "GTK application identifier (e.g. 'com.example.myapp').",
-            default = "com.example.flutter",
+        "application_id": attr.string(
+            doc = "The application identifier GTK names the app by (e.g. 'com.example.myapp'): " +
+                  "the `APPLICATION_ID` define of the runner. The desktop identifies the app by it, " +
+                  "so each app has its own.",
+            mandatory = True,
         ),
         "window_title": attr.string(
             doc = "Title of the built-in runner's window. A runner from `srcs` " +

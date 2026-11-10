@@ -422,6 +422,7 @@ ios_application(
 flutter_linux_app(
     name = "ffi_linux",
     application = ":ffi_app",
+    application_id = "com.example.ffi_example.ffi_linux",
     target_compatible_with = ["@platforms//os:linux"],
 )
 

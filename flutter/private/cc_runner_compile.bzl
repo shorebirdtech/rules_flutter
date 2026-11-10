@@ -37,7 +37,7 @@ def compile_and_link_runner(
         engine_include_dir: Directory string for engine headers (-I path).
         extra_compile_flags: Additional compiler flags.
         extra_link_flags: Additional linker flags (e.g., -Wl,-rpath).
-        extra_defines: Local defines (e.g., GTK_APP_ID, NDEBUG).
+        extra_defines: Local defines (e.g., APPLICATION_ID, NDEBUG).
         additional_srcs: Additional source files to compile (e.g., native registrant).
         system_include_dirs: System include directories passed to cc_common.compile(system_includes=...).
         additional_inputs: Additional input files (e.g., sysroot files).

@@ -12,7 +12,7 @@ Two tiers of API:
         flutter_linux_app(
             name = "my_linux_app",
             application = ":my_app",
-            gtk_app_id = "com.example.myapp",
+            application_id = "com.example.myapp",
         )
 
     Prerequisites: run `flutter create --platforms=linux .` to generate
@@ -33,7 +33,7 @@ Two tiers of API:
             name = "my_runner",
             engine = ":flutter_engine",
             registrant = ":app_registrant",
-            gtk_app_id = "com.example.myapp",
+            application_id = "com.example.myapp",
         )
 
         flutter_linux_bundle(
@@ -73,7 +73,7 @@ flutter_linux_registrant_gen = _flutter_linux_registrant
 # BUILD.bazel without going through the ext/ overlay system.
 flutter_linux_plugin_library = _flutter_linux_plugin_library
 
-def flutter_linux_runner_lib_gen(name, engine, registrant, application = None, gtk_app_id = "com.example.flutter", window_title = "Flutter", srcs = [], hdrs = [], **kwargs):
+def flutter_linux_runner_lib_gen(name, engine, registrant, application_id, application = None, window_title = "Flutter", srcs = [], hdrs = [], **kwargs):
     """Compiles a GTK Linux runner binary from template or custom sources.
 
     Uses the Chromium sysroot for hermetic GTK3 compilation, enabling
@@ -89,10 +89,12 @@ def flutter_linux_runner_lib_gen(name, engine, registrant, application = None, g
         name: Target name (produces an executable).
         engine: A flutter_linux_engine target.
         registrant: A flutter_linux_registrant_gen target.
+        application_id: The application identifier GTK names the app by (e.g.
+            "com.example.myapp"), as `flutter create`'s `APPLICATION_ID`. Required: the
+            desktop identifies an app by it, so each app has its own.
         application: A flutter_application target. Required to wire pub
             plugins' Linux C++ sources into the runner; optional only for
             legacy Tier-2 setups with no native plugins.
-        gtk_app_id: GTK application identifier (default "com.example.flutter").
         window_title: Title of the built-in runner's window (default
             "Flutter"). Custom `srcs` set their own title.
         srcs: Custom C++ sources (empty = use built-in template).
@@ -104,7 +106,7 @@ def flutter_linux_runner_lib_gen(name, engine, registrant, application = None, g
         engine = engine,
         registrant = registrant,
         application = application,
-        gtk_app_id = gtk_app_id,
+        application_id = application_id,
         window_title = window_title,
         srcs = srcs if srcs else [],
         hdrs = hdrs if hdrs else [],
@@ -136,8 +138,8 @@ def flutter_linux_bundle(name, application, runner, **kwargs):
 def flutter_linux_app(
         name,
         application,
+        application_id,
         app_name = None,
-        gtk_app_id = "com.example.flutter",
         window_title = None,
         **kwargs):
     """Builds a Flutter Linux application directory from a flutter_application target.
@@ -152,8 +154,10 @@ def flutter_linux_app(
     Args:
         name: Target name (Bazel identifier).
         application: A flutter_application target (required).
+        application_id: The application identifier GTK names the app by (e.g.
+            "com.example.myapp"), as `flutter create`'s `APPLICATION_ID`. Required: the
+            desktop identifies an app by it, so each app has its own.
         app_name: Bundle/binary name (defaults to target name).
-        gtk_app_id: GTK application identifier (default "com.example.flutter").
         window_title: Title of the window (defaults to `app_name`, then the
             target name). Used by the built-in runner; a `linux/runner/`
             from `flutter create` sets its own title in `my_application.cc`.
@@ -216,7 +220,7 @@ def flutter_linux_app(
         engine = "__%s_engine" % name,
         registrant = "__%s_registrant" % name,
         application = application,
-        gtk_app_id = gtk_app_id,
+        application_id = application_id,
         window_title = window_title or app_name or name,
         srcs = runner_srcs if runner_srcs else [],
         hdrs = runner_hdrs if runner_hdrs else [],

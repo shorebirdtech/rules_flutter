@@ -56,7 +56,7 @@ flutter_linux_registrant_gen(
 flutter_linux_app(
     name = "app",
     application = ":app_flutter",
-    gtk_app_id = "com.example.linuxexample",
+    application_id = "com.example.linuxexample",
     target_compatible_with = ["@platforms//os:linux"],
 )
 
@@ -75,6 +75,7 @@ flutter_linux_app(
     name = "testonly_app",
     testonly = True,
     application = ":testonly_flutter",
+    application_id = "com.example.linuxexample.testonly",
     tags = ["manual"],
     target_compatible_with = ["@platforms//os:linux"],
 )
@@ -88,8 +89,8 @@ flutter_linux_app(
 
 flutter_linux_runner_lib_gen(
     name = "bazel_runner",
+    application_id = "com.example.linuxexample.bazelrunner",
     engine = ":flutter_engine",
-    gtk_app_id = "com.example.linuxexample",
     registrant = ":app_registrant",
     window_title = "Linux Example",
 )

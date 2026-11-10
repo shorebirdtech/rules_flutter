@@ -603,6 +603,7 @@ flutter_linux_integration_test(
     name = "linux_pass_test",
     src = "integration_test/counter_test.dart",
     application = ":app_flutter",
+    application_id = "com.example.integration_test.linux_pass_test",
     deps = _TEST_DEPS,
 )
 
@@ -622,6 +623,7 @@ flutter_linux_integration_test(
     name = "linux_red",
     src = "integration_test/failing_test.dart",
     application = ":app_flutter",
+    application_id = "com.example.integration_test.linux_red",
     tags = ["manual"],
     deps = _TEST_DEPS,
 )
@@ -644,6 +646,7 @@ flutter_linux_integration_test(
     name = "linux_crash",
     src = "integration_test/crash_test.dart",
     application = ":app_flutter",
+    application_id = "com.example.integration_test.linux_crash",
     tags = ["manual"],
     deps = _TEST_DEPS,
 )
@@ -675,6 +678,7 @@ flutter_linux_integration_test(
     src = "integration_test/golden_test.dart",
     srcs = _GOLDEN_SRCS,
     application = ":app_flutter",
+    application_id = "com.example.integration_test.linux_golden_test",
     data = _GOLDENS,
     deps = _TEST_DEPS,
 )
@@ -685,6 +689,7 @@ flutter_linux_integration_test(
     src = "integration_test/golden_mismatch_test.dart",
     srcs = _GOLDEN_SRCS,
     application = ":app_flutter",
+    application_id = "com.example.integration_test.linux_golden_mismatch",
     data = _GOLDENS,
     tags = ["manual"],
     deps = _TEST_DEPS,

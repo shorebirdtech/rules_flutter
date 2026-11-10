@@ -723,7 +723,7 @@ What `flavor` does, as `flutter build --flavor` does it:
 - A pub package's `flutter: assets:` or `flutter: shaders:` entry with `flavors: [paid, ...]` is bundled in builds of that flavor, and in no build of another flavor or of none.
 - `flutter_bazel run //:macos_paid` runs the paid flavor. There is no `--flavor` flag: the flavor is part of the target, and hot reload and hot restart keep it.
 
-What it does not do. Everything else that differs between flavors, the app id, name, icons, Info.plist, Android manifest and resources, window title, differs because the flavor's platform target sets it. Those are the attributes of the platform macros: `application_id`, `app_name`, `manifest` and `resources` for `flutter_android_app`; `bundle_id`, `app_name`, `info_plist`, `app_icons`, `resources` and `entitlements` for `flutter_ios_app` and `flutter_macos_app`; `app_name`, `gtk_app_id` and `window_title` for `flutter_linux_app`; `app_name` for `flutter_windows_app`; `app_name` and `web_dir` for `flutter_web_app`. rules_flutter adds no Gradle product flavors, Xcode schemes or CMake variables, and has no `default-flavor`: set `flavor` on the target.
+What it does not do. Everything else that differs between flavors, the app id, name, icons, Info.plist, Android manifest and resources, window title, differs because the flavor's platform target sets it. Those are the attributes of the platform macros: `application_id`, `app_name`, `manifest` and `resources` for `flutter_android_app`; `bundle_id`, `app_name`, `info_plist`, `app_icons`, `resources` and `entitlements` for `flutter_ios_app` and `flutter_macos_app`; `application_id`, `app_name` and `window_title` for `flutter_linux_app`; `app_name` for `flutter_windows_app`; `app_name` and `web_dir` for `flutter_web_app`. rules_flutter adds no Gradle product flavors, Xcode schemes or CMake variables, and has no `default-flavor`: set `flavor` on the target.
 
 - The app's own assets come from the target's `assets`, not its pubspec, so a flavor's own assets go in that flavor's target. A library's flavor-only assets go in a small library that only that flavor's application depends on.
 - `FLUTTER_APP_FLAVOR` cannot be set by hand: it is refused in `defines` and `--dart-define`, as `flutter build` refuses it.
@@ -1409,7 +1409,7 @@ load("@rules_flutter//flutter:linux.bzl", "flutter_linux_app")
 flutter_linux_app(
     name = "my_app_linux",
     application = ":my_app",
-    gtk_app_id = "com.example.myapp",
+    application_id = "com.example.myapp",
 )
 ```
 
@@ -1417,7 +1417,7 @@ flutter_linux_app(
 |---|---|
 | `application` | A `flutter_application` target. Required. |
 | `app_name` | Binary name. Defaults to the target name. |
-| `gtk_app_id` | GTK application id. Defaults to `"com.example.flutter"`. |
+| `application_id` | The application id GTK names the app by, as `flutter create`'s `APPLICATION_ID`. Required: the desktop identifies an app by it, so each app has its own. |
 | `window_title` | Window title. Defaults to `app_name`, then the target name. A `linux/runner/` from `flutter create` sets its own title and ignores this. |
 
 The output directory:
@@ -1459,7 +1459,7 @@ flutter_linux_runner_lib_gen(
     name = "my_runner",
     engine = ":flutter_engine",
     registrant = ":app_registrant",
-    gtk_app_id = "com.example.myapp",
+    application_id = "com.example.myapp",
 )
 
 flutter_linux_bundle(
@@ -2391,7 +2391,7 @@ The macro is Tier 1. Tier 2 is `flutter_integration_bootstrap`, `flutter_applica
 
 #### Linux integration tests
 
-`flutter_linux_integration_test` runs the same test file on Linux: the application with the test as its program is built as a Linux bundle in debug mode, started on an X server the test starts for itself, and its suite driven over its VM service, as `flutter test integration_test/app_test.dart -d linux` does. It is the Windows macro, passing `flutter_linux_app`'s arguments (`app_name`, `gtk_app_id`).
+`flutter_linux_integration_test` runs the same test file on Linux: the application with the test as its program is built as a Linux bundle in debug mode, started on an X server the test starts for itself, and its suite driven over its VM service, as `flutter test integration_test/app_test.dart -d linux` does. It is the Windows macro, passing `flutter_linux_app`'s arguments (`application_id`, `app_name`).
 
 ```starlark
 load("@rules_flutter//flutter:integration_test.bzl", "flutter_linux_integration_test")
@@ -2400,6 +2400,7 @@ flutter_linux_integration_test(
     name = "app_linux_test",
     src = "integration_test/app_test.dart",
     application = ":app_flutter",
+    application_id = "com.example.app_linux_test",
     deps = [
         "@deps//:flutter_test",
         "@deps//:integration_test",

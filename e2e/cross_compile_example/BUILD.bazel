@@ -28,6 +28,7 @@ flutter_application(
 flutter_linux_app(
     name = "cross_linux",
     application = ":cross_app",
+    application_id = "com.example.cross_compile.cross_linux",
 )
 
 # The workspace's lint ruleset, bundled with the pub package whose YAML its
