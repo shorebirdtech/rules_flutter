@@ -51,11 +51,6 @@ const androidSdkPresenceQuery =
     'attr(name, "^(adb|aapt2)\$", '
     'siblings(labels(actual, $androidSdkPackage:sdk)))';
 
-/// The configuration the tools are built in: the host's, whatever the run
-/// builds for, because they run here. It is `--platforms`'s default value, so
-/// the build is the one a bare `bazel build` of them makes.
-const androidSdkToolFlags = ['--platforms=@bazel_tools//tools:host_platform'];
-
 /// Where an Android run gets its SDK tools.
 abstract class AndroidSdk {
   const AndroidSdk();
@@ -83,16 +78,27 @@ class WorkspaceAndroidSdk extends AndroidSdk {
   final String workspace;
   final BazelRunner _runBazel;
 
-  /// The user's own bazel flags (`--config`, `--build-arg`), which can be what
-  /// makes the workspace load at all.
-  final List<String> userFlags;
+  /// The user's `--config` flags, which can be what makes the workspace load
+  /// at all. The query and `bazel info` take these alone: a `--build-arg` can
+  /// be an option only `bazel build` knows, which `bazel query` refuses.
+  final List<String> configFlags;
+
+  /// The options the run builds its app with, but for the device's own (an
+  /// Android device's ABI, which it takes `adb` to ask).
+  ///
+  /// The tools are built and found in exactly these: Bazel keeps one set of
+  /// options' analysis, and a command in any other throws it away, so the
+  /// app's next build would analyse its whole graph again. The tools reach the
+  /// host platform through their own targets' transition, whatever these say.
+  final List<String> buildFlags;
 
   Future<AndroidSdkTools?>? _tools;
 
   WorkspaceAndroidSdk({
     required this.workspace,
     required BazelRunner runBazel,
-    this.userFlags = const [],
+    this.configFlags = const [],
+    this.buildFlags = const [],
   }) : _runBazel = runBazel;
 
   /// Built the first time it is asked; a failed query or build throws a
@@ -121,7 +127,7 @@ class WorkspaceAndroidSdk extends AndroidSdk {
     final presence = await _bazel([
       'query',
       androidSdkPresenceQuery,
-      ...userFlags,
+      ...configFlags,
     ], what: 'ask whether the workspace has an Android SDK');
     final present = LineSplitter.split(
       presence,
@@ -134,27 +140,28 @@ class WorkspaceAndroidSdk extends AndroidSdk {
       );
     }
 
-    final flags = [...userFlags, ...androidSdkToolFlags];
     await _bazel([
       'build',
-      ...flags,
+      ...buildFlags,
       ...androidSdkToolLabels,
     ], what: 'build the Android SDK\'s adb and aapt2');
     final paths = await _bazel([
       'cquery',
       'set(${androidSdkToolLabels.join(' ')})',
-      ...flags,
+      ...buildFlags,
       '--output=starlark',
       '--starlark:expr=str(target.label) + " " + '
           'providers(target)["FilesToRunProvider"].executable.path',
     ], what: 'find the Android SDK\'s adb and aapt2');
-    final roots = await _bazel([
+    final executionRoot = await _bazel([
       'info',
-      'output_base',
       'execution_root',
-      ...userFlags,
-    ], what: 'find the output base');
-    return androidSdkToolsFrom(cquery: paths, info: roots);
+      ...configFlags,
+    ], what: 'find the execution root');
+    return androidSdkToolsFrom(
+      cquery: paths,
+      executionRoot: executionRoot.trim(),
+    );
   }
 
   Future<String> _bazel(List<String> args, {required String what}) async {
@@ -174,29 +181,19 @@ class WorkspaceAndroidSdk extends AndroidSdk {
 }
 
 /// [AndroidSdkTools] from the cquery's `<label> <execroot-relative path>`
-/// lines and `bazel info output_base execution_root`.
+/// lines and the [executionRoot] `bazel info execution_root` answers.
 ///
-/// An external repository's source file (`external/<repo>/…`) lives under the
-/// output base, where its repository is; a built file (`bazel-out/…`) under
-/// the execution root. The execution root holds a link to a repository only
-/// while an action needs one, so it is not where a source file is looked for.
+/// The paths are the `host_tool` targets' own links, built files under the
+/// execution root, each with the runfiles a runner script such as the
+/// hermetic SDK's `aapt2` reads.
 AndroidSdkTools androidSdkToolsFrom({
   required String cquery,
-  required String info,
+  required String executionRoot,
 }) {
-  final roots = <String, String>{};
-  for (final line in LineSplitter.split(info)) {
-    final colon = line.indexOf(': ');
-    if (colon > 0) {
-      roots[line.substring(0, colon)] = line.substring(colon + 2).trim();
-    }
-  }
-  final outputBase = roots['output_base'];
-  final executionRoot = roots['execution_root'];
-  if (outputBase == null || executionRoot == null) {
+  if (!p.isAbsolute(executionRoot)) {
     throw DevToolException(
-      '`bazel info output_base execution_root` answered something '
-      'unreadable:\n$info',
+      '`bazel info execution_root` answered something that is not a path: '
+      '$executionRoot',
     );
   }
   String? adb;
@@ -206,20 +203,12 @@ AndroidSdkTools androidSdkToolsFrom({
     final space = trimmed.lastIndexOf(' ');
     if (space < 0) continue;
     final label = trimmed.substring(0, space);
-    final relative = trimmed.substring(space + 1);
-    final absolute = p.isAbsolute(relative)
-        ? relative
-        : relative.startsWith('external/')
-        ? p.join(outputBase, relative)
-        : p.join(executionRoot, relative);
-    // The labels are the aliases' actual targets, so they are told apart by
-    // what they are called: `…/adb` or `…:adb` (`adb.exe` on Windows), and
-    // `aapt2`, `aapt2_binary` or `aapt2.exe`.
-    final name = label.split(RegExp('[:/]')).last;
-    if (name.startsWith('aapt2')) {
-      aapt2 = absolute;
-    } else if (name.startsWith('adb')) {
-      adb = absolute;
+    final absolute = p.join(executionRoot, trimmed.substring(space + 1));
+    switch (label.substring(label.lastIndexOf(':') + 1)) {
+      case 'adb':
+        adb = absolute;
+      case 'aapt2':
+        aapt2 = absolute;
     }
   }
   if (adb == null || aapt2 == null) {

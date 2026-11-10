@@ -6,6 +6,11 @@
 # `ANDROID_HOME`, `android_sdk_repository` writes a repository whose `sdk` is a
 # plain filegroup and which has neither tool. `manual`, as the targets of
 # `@androidsdk` are: they are named, not swept up by `//...`.
+#
+# `adb` and `aapt2` are built for the host in whatever options the run builds
+# its app with (see host_tool.bzl).
+
+load(":host_tool.bzl", "host_tool")
 
 alias(
     name = "sdk",
@@ -14,16 +19,16 @@ alias(
     visibility = ["//visibility:public"],
 )
 
-alias(
+host_tool(
     name = "adb",
-    actual = "@androidsdk//:adb",
     tags = ["manual"],
+    tool = "@androidsdk//:adb",
     visibility = ["//visibility:public"],
 )
 
-alias(
+host_tool(
     name = "aapt2",
-    actual = "@androidsdk//:aapt2",
     tags = ["manual"],
+    tool = "@androidsdk//:aapt2",
     visibility = ["//visibility:public"],
 )

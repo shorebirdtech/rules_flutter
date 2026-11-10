@@ -351,15 +351,31 @@ class RunPlan {
       buildArgs: results['build-arg'] as List<String>,
     );
 
+    // Every option the build takes but the device's own, which only the
+    // device can say.
+    final runFlags = [
+      ...userBuildArgs,
+      ...defineFlags,
+      ...modeBuildFlags(profileMode: profileMode),
+    ];
+
     // Devices next — they dictate the platform build flags. Only an Android
     // device builds anything here (the workspace's adb and aapt2), so an id
-    // that names no device is refused at once.
+    // that names no device is refused at once. The tools build in the run's
+    // own options so that the app's build after it keeps Bazel's analysis
+    // cache: they differ only by the device's flags, and by none at all when
+    // the workspace already builds for the device's ABI.
+    final configFlags = bazelConfigFlags(results['config'] as List<String>);
     final devices = await resolveDevices(
       results['device'] as List<String>,
       androidSdk: WorkspaceAndroidSdk(
         workspace: workspace,
         runBazel: bazel.run,
-        userFlags: userBuildArgs,
+        configFlags: configFlags,
+        buildFlags: [
+          if (compilationMode != null) ...['-c', compilationMode],
+          ...runFlags,
+        ],
       ),
     );
 
@@ -375,12 +391,7 @@ class RunPlan {
     // With the flags the run will build with, because the fetch analyses the
     // target: see [resolveToolchainPaths]. The profile flag is among them, so
     // the toolchain is resolved in the configuration the build will use.
-    final extraArgs = [
-      ...userBuildArgs,
-      ...defineFlags,
-      ...devices.first.buildArgs,
-      ...modeBuildFlags(profileMode: profileMode),
-    ];
+    final extraArgs = [...runFlags, ...devices.first.buildArgs];
     final toolchain = await resolveToolchainPaths(
       target,
       workspace: workspace,

@@ -4,19 +4,17 @@ import 'package:flutter_bazel_dev_tool/android_sdk.dart';
 import 'package:flutter_bazel_dev_tool/dev_tool_exception.dart';
 import 'package:test/test.dart';
 
-const _outputBase = '/ob';
 const _executionRoot = '/ob/execroot/_main';
-const _info = 'output_base: $_outputBase\nexecution_root: $_executionRoot\n';
 
-/// The hermetic SDK's answer: adb a source file of the platform's repository,
-/// aapt2 a built `sh_binary`.
+/// What the cquery of the `host_tool` targets answers: their links, built for
+/// the host.
 const _cquery =
-    '@@hermetic_android_toolchains++android+androidsdk_darwin//:aapt2_binary '
-    'bazel-out/darwin_arm64-fastbuild/bin/external/'
-    'hermetic_android_toolchains++android+androidsdk_darwin/aapt2_binary\n'
-    '@@hermetic_android_toolchains++android+androidsdk_darwin//:platform-tools/darwin/adb '
-    'external/hermetic_android_toolchains++android+androidsdk_darwin/'
-    'platform-tools/darwin/adb\n';
+    '@@rules_flutter+//tools/dev_tool/android_sdk:aapt2 '
+    'bazel-out/darwin_arm64-dbg/bin/external/rules_flutter+/tools/dev_tool/'
+    'android_sdk/aapt2/aapt2_binary\n'
+    '@@rules_flutter+//tools/dev_tool/android_sdk:adb '
+    'bazel-out/darwin_arm64-dbg/bin/external/rules_flutter+/tools/dev_tool/'
+    'android_sdk/adb/adb\n';
 
 /// A bazel that answers each command from [answers], keyed by its first
 /// argument, and records what it was asked.
@@ -65,46 +63,51 @@ void main() {
       },
     );
 
-    test('builds adb and aapt2 for the host, and finds them', () async {
-      final bazel = _FakeBazel({
-        'query': _ok('@androidsdk//:aapt2\n@androidsdk//:adb\n'),
-        'cquery': _ok(_cquery),
-        'info': _ok(_info),
-      });
-      final sdk = WorkspaceAndroidSdk(
-        workspace: '/ws',
-        runBazel: bazel.run,
-        userFlags: ['--config=ci'],
-      );
-      final tools = (await sdk.find())!;
-      expect(
-        tools.adb,
-        '$_outputBase/external/'
-        'hermetic_android_toolchains++android+androidsdk_darwin/'
-        'platform-tools/darwin/adb',
-      );
-      expect(
-        tools.aapt2,
-        '$_executionRoot/bazel-out/darwin_arm64-fastbuild/bin/external/'
-        'hermetic_android_toolchains++android+androidsdk_darwin/aapt2_binary',
-      );
-      expect(bazel.commands, ['query', 'build', 'cquery', 'info']);
-      final build = bazel.calls[1];
-      expect(build, containsAll(androidSdkToolLabels));
-      expect(build, containsAll(['--config=ci', ...androidSdkToolFlags]));
-      // The cquery is in the build's configuration, so it reads the files
-      // the build made.
-      expect(
-        bazel.calls[2],
-        containsAll(['--config=ci', ...androidSdkToolFlags]),
-      );
-    });
+    test(
+      'builds adb and aapt2 in the run\'s options, and finds them',
+      () async {
+        final bazel = _FakeBazel({
+          'query': _ok('@androidsdk//:aapt2\n@androidsdk//:adb\n'),
+          'cquery': _ok(_cquery),
+          'info': _ok('$_executionRoot\n'),
+        });
+        const runFlags = ['-c', 'dbg', '--config=ci', '--copt=-O1'];
+        final sdk = WorkspaceAndroidSdk(
+          workspace: '/ws',
+          runBazel: bazel.run,
+          configFlags: ['--config=ci'],
+          buildFlags: runFlags,
+        );
+        final tools = (await sdk.find())!;
+        expect(
+          tools.adb,
+          '$_executionRoot/bazel-out/darwin_arm64-dbg/bin/external/'
+          'rules_flutter+/tools/dev_tool/android_sdk/adb/adb',
+        );
+        expect(
+          tools.aapt2,
+          '$_executionRoot/bazel-out/darwin_arm64-dbg/bin/external/'
+          'rules_flutter+/tools/dev_tool/android_sdk/aapt2/aapt2_binary',
+        );
+        expect(bazel.commands, ['query', 'build', 'cquery', 'info']);
+        // The query and `bazel info` take the configs alone: `bazel query`
+        // refuses a build-only option such as `--copt`.
+        expect(bazel.calls[0].skip(2), ['--config=ci']);
+        expect(bazel.calls[3].skip(2), ['--config=ci']);
+        // The build and the cquery are in exactly the run's options, so that
+        // neither throws away the analysis of the app's build. The cquery reads
+        // the files the build made.
+        expect(bazel.calls[1], ['build', ...runFlags, ...androidSdkToolLabels]);
+        expect(bazel.calls[2].sublist(2, 2 + runFlags.length), runFlags);
+        expect(bazel.calls[2].skip(2 + runFlags.length), hasLength(2));
+      },
+    );
 
     test('asks once per run', () async {
       final bazel = _FakeBazel({
         'query': _ok('@androidsdk//:aapt2\n@androidsdk//:adb\n'),
         'cquery': _ok(_cquery),
-        'info': _ok(_info),
+        'info': _ok('$_executionRoot\n'),
       });
       final sdk = WorkspaceAndroidSdk(workspace: '/ws', runBazel: bazel.run);
       await sdk.find();
@@ -136,28 +139,14 @@ void main() {
   });
 
   group('androidSdkToolsFrom', () {
-    test('reads an installed SDK, whose aapt2 is a built runner', () {
-      final tools = androidSdkToolsFrom(
-        cquery:
-            '@@rules_android++android_sdk_repository_extension+androidsdk//:aapt2_binary '
-            'bazel-out/darwin_arm64-fastbuild/bin/external/'
-            'rules_android++android_sdk_repository_extension+androidsdk/aapt2_binary\n'
-            '@@rules_android++android_sdk_repository_extension+androidsdk//:platform-tools/adb '
-            'external/rules_android++android_sdk_repository_extension+androidsdk/'
-            'platform-tools/adb\n',
-        info: _info,
-      );
-      expect(tools.adb, endsWith('androidsdk/platform-tools/adb'));
-      expect(tools.adb, startsWith('$_outputBase/external/'));
-      expect(tools.aapt2, startsWith('$_executionRoot/bazel-out/'));
-    });
-
     test('reads Windows executables', () {
       final tools = androidSdkToolsFrom(
         cquery:
-            '@@sdk//:build-tools/35.0.0/aapt2.exe external/sdk/build-tools/35.0.0/aapt2.exe\n'
-            '@@sdk//:platform-tools/adb.exe external/sdk/platform-tools/adb.exe\n',
-        info: _info,
+            '@@rules_flutter+//tools/dev_tool/android_sdk:aapt2 '
+            'bazel-out/x64_windows-dbg/bin/aapt2/aapt2.exe\n'
+            '@@rules_flutter+//tools/dev_tool/android_sdk:adb '
+            'bazel-out/x64_windows-dbg/bin/adb/adb.exe\n',
+        executionRoot: _executionRoot,
       );
       expect(tools.adb, endsWith('adb.exe'));
       expect(tools.aapt2, endsWith('aapt2.exe'));
@@ -167,8 +156,9 @@ void main() {
       expect(
         () => androidSdkToolsFrom(
           cquery:
-              '@@sdk//:platform-tools/adb external/sdk/platform-tools/adb\n',
-          info: _info,
+              '@@rules_flutter+//tools/dev_tool/android_sdk:adb '
+              'bazel-out/x/bin/adb/adb\n',
+          executionRoot: _executionRoot,
         ),
         throwsA(isA<DevToolException>()),
       );
