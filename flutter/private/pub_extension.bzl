@@ -52,8 +52,9 @@ the hub then holds the packages of all their locks, each aliased once.
 
 Every package is one repository for the whole build, however many hubs list it,
 so a name starting with `flutter_pub` is reserved. The locks that list a package
-must agree on it: the same source and, for a hosted package, the same version and
-digest (for a git package, the same commit).
+must agree on its source and, for a git package, its commit. Hosted versions
+may differ: the build gets the highest, and `on_version_conflict` says whether a
+lock behind it fails or is upgraded. One version has one digest in every lock.
 """,
         mandatory = True,
     ),
