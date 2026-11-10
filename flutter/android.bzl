@@ -47,7 +47,7 @@ Two tiers of API:
 
         flutter_android_runner_lib_gen(
             name = "my_runner",
-            package_name = "com.example.myapp",
+            namespace = "com.example.myapp",
             engine = ":my_engine",
         )
 
@@ -493,7 +493,7 @@ def flutter_android_manifest_gen(
 
 def flutter_android_runner_lib_gen(
         name,
-        package_name,
+        namespace,
         engine,
         manifest = None,
         **kwargs):
@@ -509,8 +509,9 @@ def flutter_android_runner_lib_gen(
 
     Args:
         name: Target name. Add to android_binary deps.
-        package_name: Android package name (e.g. "com.example.myapp").
-            Used for template substitution in MainActivity.kt.
+        namespace: The Kotlin package of the generated Activity, as Gradle's
+            `namespace` (e.g. "com.example.myapp"). Also the library manifest's
+            package and label.
         engine: A flutter_android_engine target (flutter.jar).
         manifest: AndroidManifest.xml for the library. If not provided,
             a minimal one is generated.
@@ -524,7 +525,7 @@ def flutter_android_runner_lib_gen(
         template = "@rules_flutter//flutter/private/runners/android:MainActivity.kt",
         out = "__%s_runner/MainActivity.kt" % name,
         substitutions = {
-            "PACKAGE_NAME": package_name,
+            "PACKAGE_NAME": namespace,
         },
         tags = tags,
     )
@@ -537,8 +538,8 @@ def flutter_android_runner_lib_gen(
             template = "@rules_flutter//flutter/private/runners/android:AndroidManifest.xml",
             out = "__%s_lib_manifest/AndroidManifest.xml" % name,
             substitutions = {
-                "PACKAGE_NAME": package_name,
-                "APP_NAME": package_name,
+                "PACKAGE_NAME": namespace,
+                "APP_NAME": namespace,
                 "MIN_SDK_VERSION": ANDROID_MIN_SDK_VERSION,
                 "TARGET_SDK_VERSION": ANDROID_TARGET_SDK_VERSION,
                 # Never a permission here: this is a LIBRARY manifest, and

@@ -240,8 +240,8 @@ flutter_android_manifest_gen(
 
 flutter_android_runner_lib_gen(
     name = "native_dep_runner_lib",
-    package_name = "com.example.flutterapp.nativedep",
     engine = ":app_engine",
+    namespace = "com.example.flutterapp.nativedep",
 )
 
 # The Tier 2 runner with `extra_native` listed on the `android_binary` itself,
@@ -309,7 +309,7 @@ filegroup(
 # Approach 2: Bazel-generated runner (flutter_android_runner_lib_gen)
 #
 # For users without `flutter create` output. Uses template manifest and
-# Kotlin MainActivity from rules_flutter. Only needs package_name.
+# Kotlin MainActivity from rules_flutter. Only needs a namespace.
 # =============================================================================
 
 flutter_android_manifest_gen(
@@ -320,8 +320,8 @@ flutter_android_manifest_gen(
 
 flutter_android_runner_lib_gen(
     name = "bazel_runner_lib",
-    package_name = "com.example.flutterapp.bazelrunner",
     engine = ":app_engine",
+    namespace = "com.example.flutterapp.bazelrunner",
 )
 
 android_binary(

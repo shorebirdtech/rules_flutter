@@ -1372,7 +1372,7 @@ flutter_android_manifest_gen(name = "my_manifest", application_id = "com.example
 
 flutter_android_runner_lib_gen(
     name = "my_runner",
-    package_name = "com.example.myapp",
+    namespace = "com.example.myapp",
     engine = ":my_engine",
 )
 
