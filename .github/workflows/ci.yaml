@@ -65,11 +65,6 @@ jobs:
           cache-save: false
       - name: bazel test //...
         run: bazel test //... --test_output=errors
-      # The bazelrc preset `.bazelrc` imports is generated in its own
-      # workspace, which the root sweep does not reach (tools/preset/MODULE.bazel).
-      - name: bazel test //... (tools/preset)
-        working-directory: tools/preset
-        run: bazel test //... --test_output=errors
   # Every hook in .pre-commit-config.yaml, over every file, with the prek
   # overhead pins, as a commit runs them: one build puts overhead's tools in
   # .bazel_env, then the hooks run them without Bazel. Nothing else runs them
@@ -110,6 +105,8 @@ jobs:
       - name: Extract the release archive
         run: bazel run //tools/consumer_archive
       - run: bazel run @overhead//locks
+      - name: bazelrc preset
+        run: bazel run @overhead//preset -- --check
   # A module that depends on rules_flutter must be able to list all of it, as
   # tools and IDE plugins do with `@rules_flutter//...`, from the release
   # archive it gets. Development tooling

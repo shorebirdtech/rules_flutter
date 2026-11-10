@@ -28,7 +28,6 @@
 /.typos.toml export-ignore
 /dev/ export-ignore
 /references/ export-ignore
-/tools/preset/ export-ignore
 /tools/ci_matrix/ export-ignore
 /tools/e2e_copy_guard/ export-ignore
 /flutter/tests/ export-ignore

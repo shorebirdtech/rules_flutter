@@ -72,8 +72,6 @@ bazel_dep(name = "rules_swift_package_manager", version = "1.25.0")
 # rules_cc, apple_support, bazel_skylib and the Apple rules above.
 bazel_dep(name = "rules_license", version = "1.0.0")
 
-bazel_dep(name = "bazelrc-preset.bzl", version = "1.10.0", dev_dependency = True)
-
 # The development tooling rules_flutter shares with the repositories built on
 # rules_dart (the commit policy, release notes, tool pins, lock checks): the
 # `overhead/` module of rules_dart. `bazel run @overhead//changelog:check`, say.

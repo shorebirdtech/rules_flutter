@@ -23,7 +23,7 @@ common --foo
     });
 
     test('keeps imports of other files', () {
-      const rc = 'import %workspace%/tools/preset/preset.bazelrc\n';
+      const rc = 'import %workspace%/tools/preset.bazelrc\n';
       expect(withoutUserRc(rc), rc);
     });
   });

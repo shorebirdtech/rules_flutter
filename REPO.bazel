@@ -9,13 +9,11 @@ repo(
 # Not packages of this module, here or in a consumer's copy of it: the
 # end-to-end workspaces, each its own Bazel project; the checkout's own state,
 # `.bazel_env` included, which in a worktree links to the main checkout's tools
-# in another output base, so Bazel would read their runfiles as packages; and
-# the packages that need a repo only development has.
+# in another output base, so Bazel would read their runfiles as packages.
 ignore_directories([
     "bazel-*",
     ".bazel_env",
     ".claude",
     "e2e",
     "references",
-    "tools/preset",
 ])
