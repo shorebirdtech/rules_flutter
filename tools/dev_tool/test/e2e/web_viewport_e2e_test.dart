@@ -62,7 +62,7 @@ void main() {
         final restart = await dt.sendCommand(
           7,
           'app.restart',
-          params: {'appId': dt.appId},
+          params: {'appId': dt.appId, 'fullRestart': true},
         );
         expect(restart['error'], isNull, reason: 'app.restart: $restart');
         await dt.nativeScreenshotWhenOnScreen(dt.appId!);

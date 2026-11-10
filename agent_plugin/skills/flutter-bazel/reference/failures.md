@@ -49,8 +49,8 @@ grep '^{' /tmp/flutter_bazel.Ab12Cd/err | jq -r '.text // .line // empty' | tail
 | `Hot reload successful (no changes detected)` | The tool saw no edit. Was the file saved, and is it in the target's `srcs` or a dependency? |
 | `succeeded: true` with `notShown` | The new code is live but the window is hidden or covered, so nothing has repainted. |
 | `Hot reload is still starting up.` | The tool already waited 90 seconds for reload to be set up, and nothing was working on it. Sending it again waits as long for the same answer. Read the last lines of `err` for why reload never came up. |
-| The change does not show after a successful reload | The edit is in code a reload does not re-run: `main()`, `initState` of a widget already mounted, a global or static initializer already read. Use `app.restart`. |
-| `Hot reload withheld: …` and `nativeLibsStale` | A native library changed in a way a reload cannot deliver. Use `app.restart`, which relaunches the app. |
+| The change does not show after a successful reload | The edit is in code a reload does not re-run: `main()`, `initState` of a widget already mounted, a global or static initializer already read. Use `app.restart` with `fullRestart: true`. |
+| `Hot reload withheld: …` and `nativeLibsStale` | A native library changed in a way a reload cannot deliver. Use `app.restart` with `fullRestart: true`, which relaunches the app. |
 
 A failed reload never ends the session. Keep the session; fix the code.
 

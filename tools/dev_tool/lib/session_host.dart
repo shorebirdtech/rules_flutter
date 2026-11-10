@@ -246,21 +246,58 @@ class SessionHost {
   /// The single place either command is registered, for `run` and `attach`
   /// alike.
   ///
-  /// `fullRestart: false` is the machine protocol's way of asking for a reload
-  /// through the restart command, which is what a `flutter run`-shaped client
-  /// sends; it dispatches to [ReloadPipeline.hotReload].
+  /// `app.restart` follows upstream's `flutter run --machine` contract: a
+  /// missing `fullRestart` means `false`, a hot reload, so a client written
+  /// for `flutter run` does not lose state. `fullRestart: true` is the restart.
+  /// `app.hotReload` stays as the explicit form of the same reload.
   void registerReloadCommands(ReloadPipeline pipeline) {
     commandRunner.register(
       'app.hotReload',
       pipeline.hotReload,
       longRunning: true,
     );
-    commandRunner.register('app.restart', (params) async {
-      final fullRestart = params['fullRestart'] as bool? ?? true;
-      return fullRestart
-          ? pipeline.restart(params)
-          : pipeline.hotReload(params);
-    }, longRunning: true);
+    commandRunner.register(
+      'app.restart',
+      restartCommand(restart: pipeline.restart, hotReload: pipeline.hotReload),
+      longRunning: true,
+    );
+  }
+
+  /// The `app.restart` handler: [restart] when `fullRestart` is `true`,
+  /// [hotReload] otherwise.
+  ///
+  /// Upstream's `app.restart` also takes `pause`, `reason` and `debounce`.
+  /// `reason` only labels the restart in upstream's analytics and `debounce`
+  /// merges requests that arrive within 50 ms of each other; this tool's
+  /// command runner already runs one reload or restart at a time, so both are
+  /// accepted and have no effect. `pause: true` asks for the isolate to be left
+  /// paused after the reload, which this tool does not do, so it is refused
+  /// rather than ignored: a client that asked for it would otherwise believe
+  /// it got it.
+  static CommandHandler restartCommand({
+    required CommandHandler restart,
+    required CommandHandler hotReload,
+  }) {
+    return (params) async {
+      final fullRestart = _boolParam(params, 'fullRestart');
+      if (_boolParam(params, 'pause')) {
+        throw const CommandFailure.badRequest(
+          "'pause: true' is not supported: flutter_bazel does not leave the "
+          'isolate paused after a reload or restart.',
+        );
+      }
+      return fullRestart ? restart(params) : hotReload(params);
+    };
+  }
+
+  static bool _boolParam(Map<String, dynamic> params, String name) {
+    final value = params[name];
+    if (value != null && value is! bool) {
+      throw CommandFailure.badRequest(
+        "Invalid '$name': $value; expected a bool",
+      );
+    }
+    return value as bool? ?? false;
   }
 
   /// Register the commands that do not depend on a reload pipeline: stopping

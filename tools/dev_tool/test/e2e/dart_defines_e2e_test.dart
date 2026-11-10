@@ -105,7 +105,10 @@ void main() {
     // A restart rebuilds with the run's flags too; a v3 edit that renders with
     // the same prefix shows the restart saw the same configuration.
     appMain.writeAsStringSync(appMainOrig.replaceFirst(" v1'", " v3'"));
-    final restart = await dt.httpCommand('app.restart', {'appId': appId});
+    final restart = await dt.httpCommand('app.restart', {
+      'appId': appId,
+      'fullRestart': true,
+    });
     expect(
       restart['error'],
       isNull,

@@ -15,6 +15,7 @@ class _Commands {
   final runner = CommandRunner();
   final calls = <String>[];
   Map<String, dynamic> reloadAnswer = {'message': 'Reloaded'};
+  Map<String, dynamic>? restartParams;
   Map<String, dynamic> restartAnswer = {'message': 'Restarted'};
   Object? reloadThrows;
 
@@ -26,6 +27,7 @@ class _Commands {
     });
     runner.register('app.restart', (params) async {
       calls.add('app.restart');
+      restartParams = params;
       return restartAnswer;
     });
   }
@@ -132,6 +134,9 @@ void main() {
         'isolateId': 'iso-1',
       });
       expect(commands.calls, ['app.restart']);
+      // The VM service's `hotRestart` is a restart, which `app.restart` is
+      // only when asked.
+      expect(commands.restartParams, {'fullRestart': true});
       expect(answer, {
         'result': {'type': 'Success'},
       });

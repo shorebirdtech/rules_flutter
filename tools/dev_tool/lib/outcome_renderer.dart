@@ -444,11 +444,11 @@ String _staleCodeClause(CommandReport report, List<String> libs) =>
 /// something the reader will not see.
 String _remedy(CommandReport report) => switch (report.nativeRemedy!) {
   NativeRemedy.restart =>
-    'A restart (R, or `app.restart`) delivers it: it relaunches the app when '
+    'A restart (R, or `app.restart` with `fullRestart: true`) delivers it: it relaunches the app when '
         'the native code the app runs differs from what the tree builds, and '
         'otherwise restarts it in place.',
   NativeRemedy.pageRestart =>
-    'A restart (R, or `app.restart`) delivers it: the page re-runs `main()`, '
+    'A restart (R, or `app.restart` with `fullRestart: true`) delivers it: the page re-runs `main()`, '
         'which fetches the module again.',
   NativeRemedy.relaunchByHand =>
     'A restart cannot deliver it: this run attached to an app it did not '

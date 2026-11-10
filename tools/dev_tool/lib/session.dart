@@ -1086,7 +1086,7 @@ Future<void> runInteractiveSession({
         if (hotReloadUnavailable == null) log('Performing hot restart...');
         reportReloadCommand(
           'Hot restart',
-          await commandRunner.run('app.restart', {}),
+          await commandRunner.run('app.restart', {'fullRestart': true}),
           log,
           method: 'app.restart',
           announce: announce,

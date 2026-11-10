@@ -56,9 +56,10 @@
 ///
 /// Commands (IDE → tool):
 ///   app.hotReload          — hot reload
-///   app.restart            — hot restart. `fullRestart: false` asks for a
-///                            reload through this command, which is what a
-///                            `flutter run`-shaped client sends.
+///   app.restart            — as upstream's `flutter run --machine`: a hot
+///                            reload, or with `fullRestart: true` a hot
+///                            restart. `pause`, `reason` and `debounce` are
+///                            accepted; only `pause: true` is refused.
 ///   app.stop               — stop the app
 ///   daemon.shutdown        — shut down the dev tool
 ///

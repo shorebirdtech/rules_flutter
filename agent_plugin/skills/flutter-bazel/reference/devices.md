@@ -106,11 +106,11 @@ VM service. A debug bundle (`--wasm`, or `--no-hot -c dbg`) carries the agent
 extensions and a page bridge, and the tool drives them over the browser's
 DevTools protocol, so the widget commands work as they do on the default dev
 loop. Hot reload does not: dart2wasm cannot swap code into a running module,
-so `R` or `app.restart` rebuilds and reloads the page. A `--profile` or
+so `R` or `app.restart` with `fullRestart: true` rebuilds and reloads the page. A `--profile` or
 release bundle compiles the extensions out: the widget commands are absent
 from `/commands` (an `agent_surface_unavailable` record on stderr says so), and
 the run still offers `app.pressKey`, logs, `screenshot/native` and
-`app.restart`.
+`app.restart` with `fullRestart: true`.
 
 For a phone-sized web layout, start with `--web-viewport 393x660@3`, or call
 `app.setViewport` with `{"width":393,"height":660}` once the browser is up. The

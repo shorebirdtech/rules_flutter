@@ -96,7 +96,9 @@ void main() {
     test('answers with the strategy\'s own verdict on the reload', () async {
       assemble();
 
-      final reply = await host.commandRunner.run('app.restart', {});
+      final reply = await host.commandRunner.run('app.restart', {
+        'fullRestart': true,
+      });
 
       // Not a refusal and not a hand-built map: the rebuild is attempted and
       // falls over, and what the reply carries is what the strategy says about
@@ -108,13 +110,25 @@ void main() {
       expect(reply['elapsedMs'], isA<int>());
     });
 
+    test('without fullRestart it is the refused hot reload, as upstream\'s '
+        'is a reload', () async {
+      assemble();
+
+      final reply = await host.commandRunner.run('app.restart', {});
+
+      expect(reply['error'], contains('Hot reload is not available'));
+      expect(reply['succeeded'], isFalse);
+    });
+
     test(
       'replaces the pipeline-backed handler rather than sitting behind it',
       () async {
         registerPipelineHandlers();
         assemble();
 
-        final reply = await host.commandRunner.run('app.restart', {});
+        final reply = await host.commandRunner.run('app.restart', {
+          'fullRestart': true,
+        });
 
         expect(reply['error'], isNot(contains(_pipelineSentinel)));
         expect(reply['error'], contains('WASM hot restart failed'));
@@ -141,7 +155,7 @@ void main() {
       () async {
         assemble();
 
-        await host.commandRunner.run('app.restart', {});
+        await host.commandRunner.run('app.restart', {'fullRestart': true});
 
         expect(
           [for (final l in lines) l['phase']],
@@ -204,7 +218,7 @@ void main() {
         containsPair('error', _pipelineSentinel),
       );
       expect(
-        await host.commandRunner.run('app.restart', {}),
+        await host.commandRunner.run('app.restart', {'fullRestart': true}),
         containsPair('error', _pipelineSentinel),
       );
     });

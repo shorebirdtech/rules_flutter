@@ -234,7 +234,7 @@ reload again; the session does not need restarting.
 A reload keeps the app's state and re-runs `build` methods. It does not re-run
 `main()`, `initState` of widgets already on screen, or initializers of globals
 and static fields that have already been read. When the edit is in one of those,
-use `app.restart` with the same params, which re-runs `main()` and loses state.
+use `app.restart` with the same params plus `"fullRestart": true`, which re-runs `main()` and loses state. Without `fullRestart`, `app.restart` is a hot reload, as in `flutter run --machine`.
 A restart also picks up changed native code, relaunching the process if it has
 to; the channel, token and `appId` stay the same.
 

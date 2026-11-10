@@ -409,7 +409,10 @@ Future<Map<String, dynamic>> _reload(DevToolProcess dt, String appId) async {
 }
 
 Future<Map<String, dynamic>> _restart(DevToolProcess dt, String appId) async {
-  final response = await dt.httpCommand('app.restart', {'appId': appId});
+  final response = await dt.httpCommand('app.restart', {
+    'appId': appId,
+    'fullRestart': true,
+  });
   final result = response['result'] as Map<String, dynamic>?;
   expect(result, isNotNull, reason: 'app.restart: ${response['error']}');
   return result!;

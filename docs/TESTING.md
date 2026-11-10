@@ -1420,11 +1420,11 @@ Verify all four:
    `{"error":"No frontend server available"}`.
 2. **Hot reload**: edit `lib/main.dart` visible text → `app.hotReload` →
    screenshot shows the new text.
-3. **Hot restart**: edit again → `app.restart` → screenshot shows the
+3. **Hot restart**: edit again → `app.restart` with `fullRestart: true` → screenshot shows the
    change. Hot restart re-runs `main()` (engine `runInView`), so it must also
    reflect a change made *inside `main()`* (e.g. a value computed there) that a
    hot reload deliberately does NOT — verify a `main()`-level edit too.
-4. **Agent surface after restart**: after `app.restart`, `app.getText` must
+4. **Agent surface after restart**: after a full `app.restart`, `app.getText` must
    still succeed. On native the `ext.rules_flutter.*` extensions are registered
    by the generated plugin registrant the engine invokes before `main()` on
    every root-isolate launch; if this errors with `Unknown method`, the
@@ -1478,7 +1478,7 @@ is reload-observable. Verify:
   `waitFor` that finds nothing answers with a top-level `error` and **no**
   `result`, so any check shaped `response['result']?['error'] == null` reads a
   miss as a pass.
-- **Hot restart over codegen**: edit the `User(...)` in `main()` → `app.restart` →
+- **Hot restart over codegen**: edit the `User(...)` in `main()` → `app.restart` with `fullRestart: true` →
   the change renders and all generated code (app + deps) still resolves.
 - **Dependency source edit**: edit a dep's hand-written source (e.g.
   `dep_part/lib/settings.dart`) → reload → renders. This exercises the

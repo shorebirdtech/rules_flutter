@@ -8,6 +8,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter_bazel_dev_tool/command_failure.dart';
 import 'package:flutter_bazel_dev_tool/command_report.dart';
 import 'package:flutter_bazel_dev_tool/compiler_config.dart';
 import 'package:flutter_bazel_dev_tool/device.dart' as device;
@@ -200,6 +201,10 @@ class _Harness {
       host.commandRunner.run('app.hotReload', params ?? {});
 
   Future<Map<String, dynamic>> restart([Map<String, dynamic>? params]) =>
+      host.commandRunner.run('app.restart', {'fullRestart': true, ...?params});
+
+  /// `app.restart` exactly as the client sent it, defaults and all.
+  Future<Map<String, dynamic>> restartAsSent([Map<String, dynamic>? params]) =>
       host.commandRunner.run('app.restart', params ?? {});
 }
 
@@ -682,20 +687,72 @@ void main() {
       );
     });
 
-    // `fullRestart: false` is how a flutter-run-shaped client asks for a reload
-    // through the restart command. Dispatching it to `restart` would do a full
-    // recompile and re-run `main()` for what the client asked to be a reload.
-    test('app.restart with fullRestart:false is a hot reload', () async {
+    // Upstream's `app.restart` reloads unless `fullRestart` is true, so a client
+    // written for `flutter run --machine` keeps its state. Dispatching it to
+    // `restart` would do a full recompile and re-run `main()` for what the
+    // client asked to be a reload.
+    for (final params in <Map<String, dynamic>>[
+      {},
+      {'fullRestart': false},
+      {'reason': 'saved', 'debounce': true, 'pause': false},
+    ]) {
+      test('app.restart with $params is a hot reload', () async {
+        final h = await _Harness.create();
+        addTearDown(h.dispose);
+        h.writeSource('main.dart', 'void main() {}');
+        h.seedApplied();
+        h.pipeline.ready.signalReady();
+
+        final response = await h.restartAsSent(params);
+
+        expect(response['message'], contains('Hot reload'));
+        expect(h.compiler.fullCompileCalls, isEmpty);
+      });
+    }
+
+    test('app.restart with fullRestart:true restarts, whatever else it '
+        'carries', () async {
       final h = await _Harness.create();
       addTearDown(h.dispose);
       h.writeSource('main.dart', 'void main() {}');
       h.seedApplied();
       h.pipeline.ready.signalReady();
 
-      final response = await h.restart({'fullRestart': false});
+      final response = await h.restartAsSent({
+        'fullRestart': true,
+        'reason': 'saved',
+        'debounce': true,
+      });
 
-      expect(response['message'], contains('Hot reload'));
-      expect(h.compiler.fullCompileCalls, isEmpty);
+      expect(response['message'], 'Restart successful');
+    });
+
+    test('app.restart with pause:true is refused, not ignored', () async {
+      final h = await _Harness.create();
+      addTearDown(h.dispose);
+      h.pipeline.ready.signalReady();
+
+      await expectLater(
+        h.restartAsSent({'pause': true}),
+        throwsA(
+          isA<CommandFailure>().having(
+            (e) => e.message,
+            'message',
+            contains('pause'),
+          ),
+        ),
+      );
+    });
+
+    test('app.restart with a non-bool fullRestart is refused', () async {
+      final h = await _Harness.create();
+      addTearDown(h.dispose);
+      h.pipeline.ready.signalReady();
+
+      await expectLater(
+        h.restartAsSent({'fullRestart': 'yes'}),
+        throwsA(isA<CommandFailure>()),
+      );
     });
   });
 

@@ -82,7 +82,10 @@ void main() {
           ),
         );
         final seen = dt.stderrLines.length;
-        final restart = await dt.httpCommand('app.restart', {'appId': appId});
+        final restart = await dt.httpCommand('app.restart', {
+          'appId': appId,
+          'fullRestart': true,
+        });
         final result = restart['result'] as Map<String, dynamic>?;
         expect(result, isNotNull, reason: 'app.restart: ${restart['error']}');
         expect(
@@ -130,7 +133,10 @@ void main() {
         original.replaceFirst('return a + b;', 'return a + b + 1;'),
       );
       final seen = dt.stderrLines.length;
-      final restart = await dt.httpCommand('app.restart', {'appId': appId});
+      final restart = await dt.httpCommand('app.restart', {
+        'appId': appId,
+        'fullRestart': true,
+      });
       final result = restart['result'] as Map<String, dynamic>?;
       expect(result, isNotNull, reason: 'app.restart: ${restart['error']}');
       expect(
@@ -157,7 +163,10 @@ void main() {
       // changed and builds no APK.
       await dt.waitForAppLog('android_example shared=');
       final afterRelaunch = dt.stderrLines.length;
-      final again = await dt.httpCommand('app.restart', {'appId': appId});
+      final again = await dt.httpCommand('app.restart', {
+        'appId': appId,
+        'fullRestart': true,
+      });
       expect(
         (again['result'] as Map<String, dynamic>?)?['relaunched'],
         isNot(isTrue),
@@ -189,7 +198,10 @@ void main() {
         extra.writeAsStringSync(
           original.replaceFirst('return 1;', 'return 2;'),
         );
-        final restart = await dt.httpCommand('app.restart', {'appId': appId});
+        final restart = await dt.httpCommand('app.restart', {
+          'appId': appId,
+          'fullRestart': true,
+        });
         final result = restart['result'] as Map<String, dynamic>?;
         expect(result, isNotNull, reason: 'app.restart: ${restart['error']}');
         expect(
@@ -219,7 +231,10 @@ void main() {
       expect((await dt.httpLogs(appId))['launch'], 1);
 
       aar.writeAsStringSync(original.replaceFirst('return 1;', 'return 2;'));
-      final restart = await dt.httpCommand('app.restart', {'appId': appId});
+      final restart = await dt.httpCommand('app.restart', {
+        'appId': appId,
+        'fullRestart': true,
+      });
       final result = restart['result'] as Map<String, dynamic>?;
       expect(result, isNotNull, reason: 'app.restart: ${restart['error']}');
       expect(
@@ -248,7 +263,10 @@ void main() {
       // Bytes after the end of an ELF file are never read, so the library
       // still loads and only its content differs.
       prebuilt.writeAsBytesSync([...original, 0]);
-      final restart = await dt.httpCommand('app.restart', {'appId': appId});
+      final restart = await dt.httpCommand('app.restart', {
+        'appId': appId,
+        'fullRestart': true,
+      });
       final result = restart['result'] as Map<String, dynamic>?;
       expect(result, isNotNull, reason: 'app.restart: ${restart['error']}');
       expect(
@@ -277,7 +295,10 @@ void main() {
       expect((await dt.httpLogs(appId))['launch'], 1);
 
       archive.writeAsBytesSync(next.readAsBytesSync());
-      final restart = await dt.httpCommand('app.restart', {'appId': appId});
+      final restart = await dt.httpCommand('app.restart', {
+        'appId': appId,
+        'fullRestart': true,
+      });
       final result = restart['result'] as Map<String, dynamic>?;
       expect(result, isNotNull, reason: 'app.restart: ${restart['error']}');
       expect(

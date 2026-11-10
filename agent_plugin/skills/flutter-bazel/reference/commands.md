@@ -216,7 +216,7 @@ the first frame wait for it, so you do not need to poll for readiness after
 | Method | Params | Notes |
 |---|---|---|
 | `app.hotReload` | `appId` (optional: omit for every app) | Long-running. |
-| `app.restart` | `appId`; `fullRestart: false` makes it a reload | Long-running. Re-runs `main()`. |
+| `app.restart` | `appId`; `fullRestart: true` for a restart | Long-running. Without `fullRestart` it is a hot reload, as in `flutter run --machine`; with `true` it re-runs `main()`. `pause: true` is refused; `reason` and `debounce` are accepted and have no effect. |
 | `app.stop` | `appId` (required) | Stops one app; the tool keeps running other devices. |
 | `daemon.shutdown` | none | Ends the run: every app, the compiler, the browser, the tool. |
 

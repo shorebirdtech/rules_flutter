@@ -903,68 +903,67 @@ class WasmPipelineAssembler {
     );
     pipeline.strategy = strategy;
 
+    Future<Map<String, dynamic>> restart(
+      Map<String, dynamic> params,
+    ) => pipeline.logged('Restart', (params) async {
+      // Never stdout from inside a handler: in machine mode that is the
+      // protocol channel. `app.progress` already announces the start.
+      logger.info({
+        'message': 'wasm_restart_started',
+        'text': 'Performing WASM hot restart...',
+      });
+      final stopwatch = Stopwatch()..start();
+      // Dummy CompileResult — WASM doesn't use the frontend server.
+      final outcome = await strategy.applyRestart(
+        CompileResult(dillPath: '', success: true),
+        host.sessions,
+      );
+      stopwatch.stop();
+      // Both arms through the one renderer. This is not a refusal — the page
+      // reload was attempted and `outcome` is the strategy's own verdict on
+      // it, which is exactly what `CommandReport.strategy` is for. Deciding
+      // success here and building two maps by hand would leave the success arm
+      // with no `succeeded` key and the failure arm with no `runningCode`: a
+      // rejected reload cannot promise the page kept its old code, and only the
+      // strategy knows that.
+      return toWire(
+        CommandReport(
+          verb: 'Restart',
+          strategy: outcome,
+          elapsed: stopwatch.elapsed,
+        ),
+      );
+    }, params);
+
+    Future<Map<String, dynamic>> hotReload(
+      Map<String, dynamic> params,
+    ) => pipeline.logged('Hot reload', (params) async {
+      // The one refusal in this file, and the strongest case for `unavailable`
+      // there is: dart2wasm in this Dart SDK has no incremental compiler and
+      // no way to swap code into a running module, so this run can never hot
+      // reload — which is precisely what a client is entitled to conclude from
+      // the field. Upstream `flutter run --wasm` turns a reload into a restart;
+      // this tool refuses instead of silently restarting. It also stops before a compiler or a browser
+      // is touched, so `runningCode: unchanged` is provable rather than
+      // asserted.
+      return toWire(
+        CommandReport(
+          verb: 'Hot reload',
+          unavailable:
+              'Hot reload is not available in WASM mode: dart2wasm in this '
+              'Dart SDK has no incremental compiler and no way to swap code '
+              'into a running module. Upstream `flutter run --wasm` restarts '
+              'on reload; this tool refuses rather than silently restarting. '
+              'Restart with R (or app.restart with fullRestart: true) to rebuild and reload the page.',
+        ),
+      );
+    }, params);
+
+    host.commandRunner.register('app.hotReload', hotReload, longRunning: true);
     host.commandRunner.register(
       'app.restart',
+      SessionHost.restartCommand(restart: restart, hotReload: hotReload),
       longRunning: true,
-      (
-        params,
-      ) => pipeline.logged('Restart', (params) async {
-        // Never stdout from inside a handler: in machine mode that is the
-        // protocol channel. `app.progress` already announces the start.
-        logger.info({
-          'message': 'wasm_restart_started',
-          'text': 'Performing WASM hot restart...',
-        });
-        final stopwatch = Stopwatch()..start();
-        // Dummy CompileResult — WASM doesn't use the frontend server.
-        final outcome = await strategy.applyRestart(
-          CompileResult(dillPath: '', success: true),
-          host.sessions,
-        );
-        stopwatch.stop();
-        // Both arms through the one renderer. This is not a refusal — the page
-        // reload was attempted and `outcome` is the strategy's own verdict on
-        // it, which is exactly what `CommandReport.strategy` is for. Deciding
-        // success here and building two maps by hand would leave the success arm
-        // with no `succeeded` key and the failure arm with no `runningCode`: a
-        // rejected reload cannot promise the page kept its old code, and only the
-        // strategy knows that.
-        return toWire(
-          CommandReport(
-            verb: 'Restart',
-            strategy: outcome,
-            elapsed: stopwatch.elapsed,
-          ),
-        );
-      }, params),
-    );
-
-    host.commandRunner.register(
-      'app.hotReload',
-      longRunning: true,
-      (
-        params,
-      ) => pipeline.logged('Hot reload', (params) async {
-        // The one refusal in this file, and the strongest case for `unavailable`
-        // there is: dart2wasm in this Dart SDK has no incremental compiler and
-        // no way to swap code into a running module, so this run can never hot
-        // reload — which is precisely what a client is entitled to conclude from
-        // the field. Upstream `flutter run --wasm` turns a reload into a restart;
-        // this tool refuses instead of silently restarting. It also stops before a compiler or a browser
-        // is touched, so `runningCode: unchanged` is provable rather than
-        // asserted.
-        return toWire(
-          CommandReport(
-            verb: 'Hot reload',
-            unavailable:
-                'Hot reload is not available in WASM mode: dart2wasm in this '
-                'Dart SDK has no incremental compiler and no way to swap code '
-                'into a running module. Upstream `flutter run --wasm` restarts '
-                'on reload; this tool refuses rather than silently restarting. '
-                'Restart with R (or app.restart) to rebuild and reload the page.',
-          ),
-        );
-      }, params),
     );
   }
 }

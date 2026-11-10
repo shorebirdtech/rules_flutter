@@ -139,6 +139,7 @@ void main() {
             'app.restart',
             params: {
               'appId': appId,
+              'fullRestart': true,
             },
           );
           expect(
@@ -192,7 +193,7 @@ void main() {
           final restart = await dt.sendCommand(
             9,
             'app.restart',
-            params: {'appId': appId},
+            params: {'appId': appId, 'fullRestart': true},
           );
           final result = restart['result'] as Map<String, dynamic>? ?? {};
           expect(result['succeeded'], isTrue, reason: '$restart');
@@ -503,6 +504,7 @@ void main() {
             'app.restart',
             params: {
               'appId': appId,
+              'fullRestart': true,
             },
           );
           expect(

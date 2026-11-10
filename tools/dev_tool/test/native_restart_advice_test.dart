@@ -431,7 +431,9 @@ void main() {
           Uint8List? running = world.image();
 
           Future<Map<String, dynamic>> run(String method) =>
-              host.commandRunner.run(method, {});
+              host.commandRunner.run(method, {
+                if (method == 'app.restart') 'fullRestart': true,
+              });
 
           bool clean(Map<String, dynamic> reply) =>
               reply['succeeded'] == true &&

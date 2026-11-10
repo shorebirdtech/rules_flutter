@@ -161,7 +161,7 @@ void main() {
         final restart = await dt.sendCommand(
           3,
           'app.restart',
-          params: {'appId': appId},
+          params: {'appId': appId, 'fullRestart': true},
         );
         expect(
           restart['error'],

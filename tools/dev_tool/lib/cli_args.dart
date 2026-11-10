@@ -46,7 +46,7 @@ String topLevelUsage(ArgParser parser) => [
   '',
   'Machine protocol commands (--machine):',
   '  app.hotReload    Recompile and hot reload all devices',
-  '  app.restart      Hot restart all devices',
+  '  app.restart      Hot reload; with fullRestart: true, hot restart',
   '  app.stop         Stop the app',
   '  daemon.shutdown  Shut down the dev tool',
   '  app.*            The agent commands, such as app.tap and',

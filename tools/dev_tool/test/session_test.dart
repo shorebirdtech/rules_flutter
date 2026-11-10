@@ -387,6 +387,7 @@ void main() {
       timeout: Timeout(Duration(seconds: 10)),
       () async {
         final dispatched = <String>[];
+        Map<String, dynamic>? restartParams;
         final commandRunner = CommandRunner()
           ..register('app.hotReload', (params) async {
             dispatched.add('app.hotReload');
@@ -394,6 +395,7 @@ void main() {
           })
           ..register('app.restart', (params) async {
             dispatched.add('app.restart');
+            restartParams = params;
             return {'error': '`--no-hot` was passed'};
           });
 
@@ -430,6 +432,11 @@ void main() {
           reason:
               'swallowing the key leaves the user with no answer at all; '
               'the handler is where the reason lives',
+        );
+        expect(
+          restartParams,
+          {'fullRestart': true},
+          reason: 'R is a restart, which app.restart only is when asked',
         );
         expect(
           logs,

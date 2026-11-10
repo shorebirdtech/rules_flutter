@@ -316,7 +316,10 @@ Future<Map<String, dynamic>> _command(
   String method,
   String appId,
 ) async {
-  final response = await dt.httpCommand(method, {'appId': appId});
+  final response = await dt.httpCommand(method, {
+    'appId': appId,
+    if (method == 'app.restart') 'fullRestart': true,
+  });
   final result = response['result'] as Map<String, dynamic>?;
   expect(result, isNotNull, reason: '$method: ${response['error']}');
   return result!;

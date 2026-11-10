@@ -233,7 +233,10 @@ void main() {
 
       // A restart reloads the page: state is gone and the bridge is installed
       // afresh, which the next command has to wait for and find.
-      final restart = await dt.httpCommand('app.restart', {'appId': appId});
+      final restart = await dt.httpCommand('app.restart', {
+        'appId': appId,
+        'fullRestart': true,
+      });
       expect(
         restart['error'],
         isNull,

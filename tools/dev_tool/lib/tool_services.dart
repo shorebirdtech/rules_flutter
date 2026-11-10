@@ -239,6 +239,7 @@ class ToolServices {
       action: 'Hot restart',
       command: 'app.restart',
       unable: 'Unable to restart',
+      params: const {'fullRestart': true},
     );
   }
 
@@ -250,10 +251,11 @@ class ToolServices {
     required String action,
     required String command,
     required String unable,
+    Map<String, dynamic> params = const {},
   }) async {
     Map<String, dynamic> result;
     try {
-      result = await _commands.run(command, const {});
+      result = await _commands.run(command, params);
     } on CommandFailure catch (e) {
       // A refusal is the same answer as a reload that failed, to a client
       // that only asked whether it worked.

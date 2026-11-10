@@ -104,6 +104,7 @@ void main() {
 
             final restart = await dt.httpCommand('app.restart', {
               'appId': appId,
+              'fullRestart': true,
             });
             final result = restart['result'] as Map<String, dynamic>?;
             expect(
@@ -230,6 +231,7 @@ void main() {
             );
             final restart = await dt.httpCommand('app.restart', {
               'appId': appId,
+              'fullRestart': true,
             });
             final result = restart['result'] as Map<String, dynamic>?;
             expect(
@@ -300,6 +302,7 @@ void main() {
             final seen = dt.stderrLines.length;
             final restart = await dt.httpCommand('app.restart', {
               'appId': appId,
+              'fullRestart': true,
             });
             final result = restart['result'] as Map<String, dynamic>?;
             expect(

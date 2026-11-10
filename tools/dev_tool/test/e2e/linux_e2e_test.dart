@@ -74,7 +74,10 @@ void main() {
         main.writeAsStringSync(
           original.replaceFirst(_greeting, '$_greeting restarted'),
         );
-        final restart = await dt.httpCommand('app.restart', {'appId': appId});
+        final restart = await dt.httpCommand('app.restart', {
+          'appId': appId,
+          'fullRestart': true,
+        });
         final restarted = restart['result'] as Map<String, dynamic>?;
         expect(restarted, isNotNull, reason: 'app.restart: $restart');
         expect(restarted!['succeeded'], isTrue, reason: '$restarted');
