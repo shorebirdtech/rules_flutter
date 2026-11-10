@@ -35,7 +35,7 @@ bazel test //...
 bazel test //... --config=deep   # before a merge, and in a Flutter version bump
 ```
 
-Tests tagged `deep` are left out of a plain `bazel test` (`.bazelrc`). They are the heavy ones, or ones only a toolchain bump can break: today, the outline-cutoff tests of `//flutter/tests/outline_fixture` under each supported Dart release but the default's, each of which fetches another Flutter SDK (about 330 MB); and `//tools/dev_tool:source_watcher_fs_test`, the one dev tool test over the platform's real file watcher, whose verdict rests on the OS delivering file events in time (macOS FSEvents stops delivering for a minute or more while other processes write heavily, as a plain `bazel test //...` does, so run it on a machine left to itself). CI runs them in its weekly run.
+Tests tagged `deep` are left out of a plain `bazel test` (`.bazelrc`), from building as well as from running, and so are the targets only they build, which carry the tag too: a test only filtered out of running would still be built, and its downloads fetched. They are the heavy ones, or ones only a toolchain bump can break: today, the outline-cutoff tests of `//flutter/tests/outline_fixture` under each supported Dart release but the default's, each of which fetches another Flutter SDK (about 330 MB); and `//tools/dev_tool:source_watcher_fs_test`, the one dev tool test over the platform's real file watcher, whose verdict rests on the OS delivering file events in time (macOS FSEvents stops delivering for a minute or more while other processes write heavily, as a plain `bazel test //...` does, so run it on a machine left to itself). CI runs them in its weekly run.
 
 ### Proving analysis covers a file
 

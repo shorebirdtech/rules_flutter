@@ -34,6 +34,9 @@ string_flag(
         dependency = "//flutter/tests/outline_fixture/a",
         dependent = "//flutter/tests/outline_fixture/b",
         sdk = sdk,
+        # Building them fetches the SDK, so those but the default's are in the
+        # `deep` tier with their tests.
+        tags = [] if sdk == "flutter" else ["deep"],
     )
     for dart, sdk in outline_sdks().items()
 ]

@@ -17,11 +17,15 @@ test --output_groups=+dart_analyze
 test --output_groups=+dart_format
 common --@rules_dart//dart:analysis_config=//dev:analysis_config
 
-# Tests tagged `deep` are heavy (each fetches another Flutter SDK, say) or guard
-# what only a toolchain bump can break, and are left out by default.
-# `--config=deep` runs them too: before a merge, in a Flutter version bump
-# (docs/CHORES.md), and in the weekly CI run.
+# Targets tagged `deep` are heavy (each fetches another Flutter SDK, say) or
+# guard what only a toolchain bump can break, and are left out by default,
+# from building as well as from running: a test that is only filtered out of
+# running is still built, and what it needs fetched. `--config=deep` takes
+# them in: before a merge, in a Flutter version bump (docs/CHORES.md), and in
+# the weekly CI run.
+build --build_tag_filters=-deep
 test --test_tag_filters=-deep
+build:deep --build_tag_filters=
 test:deep --test_tag_filters=
 
 # Bazel settings that apply to this repository.
