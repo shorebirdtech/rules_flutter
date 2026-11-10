@@ -65,7 +65,7 @@ cannot write there.
 load("@bazel_skylib//lib:structs.bzl", "structs")
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo", "DartKernelSdkInfo")
-load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "KERNEL_LIST_ATTR", "KERNEL_TOOL_ATTR", "TRACK_CREATION_LOCATIONS_ATTR", "collect_modules", "collect_packages", "collect_transitive_srcs", "dart_analyzable_info_with_packages", "dart_entry_kernel_action", "dart_import_check_aspect", "dart_link_kernel_action", "dart_package_info", "derive_package_root", "executable_defines", "executable_defines_config", "import_check_validation", "kernel_list", "runfiles_path", "track_creation_locations")
+load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "KERNEL_LIST_ATTR", "KERNEL_TOOL_ATTR", "TRACK_CREATION_LOCATIONS_ATTR", "collect_modules", "collect_packages", "collect_transitive_srcs", "dart_analyzable_info", "dart_entry_kernel_action", "dart_import_check_aspect", "dart_link_kernel_action", "dart_package_info", "derive_package_root", "executable_defines", "executable_defines_config", "import_check_validation", "kernel_list", "package_lib_prefix", "runfiles_path", "track_creation_locations")
 load("//flutter:providers.bzl", "FlutterApplicationInputsInfo", "FlutterInfo", "FlutterTestProgramInfo")
 load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "synthesize_app_package")
 load("//flutter/private:application_libraries.bzl", "application_libraries", "application_libraries_aspect")
@@ -602,8 +602,8 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
         # Deliberately not offered as a `DartInfo`: `deps` requires one, and a
         # test is not a dependency.
         #
-        # Built by `dart_analyzable_info_with_packages` rather than
-        # `dart_analyzable_info`, because a `flutter_test` is not package-less
+        # Built by `dart_analyzable_info` rather than
+        # `dart_analyzable_info_no_package`, because a `flutter_test` is not package-less
         # the way a `dart_test` is: it declares `package_name`, and its `srcs`
         # are that package's `lib/`. The compile path already says so —
         # `synthesize_app_package` registers the same root record so
@@ -611,8 +611,8 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
         # other constructor nests instead reports every such import as
         # `uri_does_not_exist`, blaming a line that is correct.
         #
-        # Hence the source split: `srcs` is the `main` outside any `lib/`, and
-        # `package_srcs` the `lib/` files reachable as `package:<self>/…`.
+        # Hence the source split: `entry_srcs` is a `main` outside any `lib/`,
+        # and `srcs` the `lib/` files reachable as `package:<self>/…`.
         #
         # `package_root` comes from `derive_package_root`, the same call the compile
         # path above now passes to `synthesize_app_package`. The two used to
@@ -625,7 +625,7 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
         # supplies; the analyzer resolves it only by following the
         # package_config to `package:sky_engine`'s `lib/_embedder.yaml`, so
         # analysis genuinely needs an entry compilation does not.
-        dart_analyzable_info_with_packages(
+        dart_analyzable_info(
             label = ctx.label,
             packages = [dart_package_info(
                 label = ctx.label,
@@ -637,8 +637,11 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
                 language_version = inputs.language_version,
             )],
             deps = deps + [ctx.attr._sky_engine],
-            srcs = entry_files,
-            package_srcs = inputs.srcs,
+            # Split by path, as `flutter_web_application` does: a test built in
+            # an application's package (`application`) can have its main in
+            # that package's `lib/`, where `package:<self>/…` reaches it.
+            srcs = inputs.srcs + [f for f in entry_files if f.short_path.startswith(package_lib_prefix(package_root))],
+            entry_srcs = [f for f in entry_files if not f.short_path.startswith(package_lib_prefix(package_root))],
         ),
     ])
 

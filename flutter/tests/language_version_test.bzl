@@ -24,7 +24,7 @@ Both failure modes are covered by the same assertion:
     quietly compiled under the SDK's version.
 
 The two analyzer-side rules get a second assertion. They also publish a
-package record through `dart_analyzable_info_with_packages`, and that call
+package record through `dart_analyzable_info`, and that call
 drops the value independently of the compile path's — `flutter_test` dropped
 it in both places, and fixing only the one the config test catches would
 leave `dart analyze` running against a different language version than the

@@ -1,7 +1,7 @@
 """Implementation of the flutter_library rule."""
 
 load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo")
-load("@rules_dart//dart:utils.bzl", "WEB_COMPILER_INDEPENDENT_ATTR", "dart_analyzable_info_with_packages", "dart_info", "dart_package_info", "derive_package_name", "derive_package_root", "web_compiler_reset_when_independent")
+load("@rules_dart//dart:utils.bzl", "WEB_COMPILER_INDEPENDENT_ATTR", "dart_analyzable_info", "dart_info", "dart_package_info", "derive_package_name", "derive_package_root", "web_compiler_reset_when_independent")
 load("//flutter:providers.bzl", "FlutterInfo")
 load("//flutter/private:flutter_info.bzl", "LINK_HOOK_ATTR", "flutter_info")
 
@@ -397,11 +397,11 @@ def flutter_analyzable_info_of_packages(ctx, packages, srcs, resources):
     Returns:
       A `DartAnalyzableInfo`.
     """
-    return dart_analyzable_info_with_packages(
+    return dart_analyzable_info(
         label = ctx.label,
         packages = packages,
         deps = ctx.attr.deps + [ctx.attr._sky_engine],
-        package_srcs = srcs,
+        srcs = srcs,
         resources = resources,
     )
 
