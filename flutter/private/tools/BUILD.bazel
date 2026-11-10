@@ -14,6 +14,8 @@ load(":sdk_record_mode.bzl", "record_in_mode")
 # by nothing** — the test is what carries it, not this list.
 exports_files(
     [
+        "android_aar.dart",
+        "android_maven_repo.dart",
         "android_release.dart",
         "apple_frameworks.dart",
         "apple_xcframeworks_codesign.dart",
@@ -26,6 +28,7 @@ exports_files(
         "compile_shader.dart",
         "libraries_spec.dart",
         "linux_runtime.dart",
+        "maven_repo.dart",
         "merge_android_manifests.dart",
         "merge_plists.dart",
         "plist_binary.dart",
@@ -34,6 +37,7 @@ exports_files(
         "swiftpm_app_settings.dart",
         "validate_android_elf.dart",
         "web_template.dart",
+        "zip_archive.dart",
         # Exported for its unit test's `srcs`, not for a build action: unlike
         # its neighbours this one is a `dart_binary` main (below), and rules
         # reach it through that target rather than by file label.
@@ -70,6 +74,14 @@ dart_binary(
     ],
     compile_mode = "exe",
     main = "apple_xcframeworks_export.dart",
+
+# The program behind `bazel run` of `flutter_android_aar`: writes the module's
+# Maven repository where `flutter build aar` does and prints the host's steps.
+dart_binary(
+    name = "android_aar_install",
+    srcs = ["maven_repo.dart"],
+    compile_mode = "exe",
+    main = "android_aar_install.dart",
     visibility = ["//flutter:__subpackages__"],
     deps = ["@rules_dart//dart/runfiles"],
 )
@@ -196,7 +208,8 @@ dart_binary(
 # declares (MODULE.bazel `flutter_pub.from_lock(name = "dev_tool_deps")`),
 # resolved with every other tool of this repository by the root pub workspace.
 #
-# The value is the tool plus whatever that tool imports beyond `package:test`.
+# The value is the tool (or a list of it and the scripts it imports) plus what
+# it imports beyond `package:test`.
 _UNIT_TESTS = {
     "assemble_directory_test": (
         "assemble_directory.dart",
@@ -205,6 +218,27 @@ _UNIT_TESTS = {
     "android_bundle_install_test": (
         "android_bundle_install.dart",
         ["@rules_dart//dart/runfiles"],
+    ),
+    "android_aar_test": (
+        [
+            "android_aar.dart",
+            "zip_archive.dart",
+        ],
+        [],
+    ),
+    "android_aar_install_test": (
+        [
+            "android_aar_install.dart",
+            "maven_repo.dart",
+        ],
+        ["@rules_dart//dart/runfiles"],
+    ),
+    "android_maven_repo_test": (
+        [
+            "android_maven_repo.dart",
+            "maven_repo.dart",
+        ],
+        [],
     ),
     "android_release_test": (
         "android_release.dart",
@@ -253,7 +287,7 @@ _UNIT_TESTS = {
 
 [dart_test(
     name = name,
-    srcs = [tool] if tool else [],
+    srcs = (tool if type(tool) == "list" else [tool]) if tool else [],
     main = "test/%s.dart" % name,
     deps = ["@dev_tool_deps//:test"] + extra_deps,
 ) for name, (tool, extra_deps) in _UNIT_TESTS.items()]
