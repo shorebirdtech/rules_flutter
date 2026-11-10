@@ -32,7 +32,7 @@ staging target each compiler's inputs come from, over the application.
 """
 
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
-load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "generate_dev_package_config", "import_check_validation")
+load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "collect_packages", "collect_transitive_data_assets", "generate_dev_package_config", "import_check_validation")
 load("//flutter:providers.bzl", "FlutterInfo", "FlutterNativeLibraryInfo", "FlutterSdkRecordInfo")
 load(
     "//flutter/private:app_entrypoint.bzl",
@@ -54,6 +54,7 @@ load(
     "flutter_compile_shaders",
     "make_web_wrapper_main_content",
     "merge_dart_defines",
+    "own_package_outside_deps",
     "resolve_dev_generated_sources",
     "shader_sources",
 )
@@ -324,6 +325,11 @@ def _check_web_asset_dst(ctx, reserved, dst, short_path):
             "generates. Bundling both writes one over the other with no error, " +
             "so this is refused instead: " + remedy,
         )
+
+def _own_data_assets(program, deps):
+    """The declared data assets of the program's own package that `deps` do not carry."""
+    own = own_package_outside_deps(program, collect_packages(deps))
+    return list(own.data_assets) if own != None else []
 
 def _flutter_web_bundle_impl(ctx):
     renderer = web_renderer(ctx.attr.compiler, ctx.attr.renderer)
@@ -717,6 +723,13 @@ def _flutter_web_bundle_impl(ctx):
         # The engine measures an icon font's height with the space glyph, so
         # every subset keeps it, as flutter_tools' web icon shaking does.
         optional_code_points = [_SPACE_CODE_POINT],
+        # The packages' declared data assets, as `flutter build web` bundles a
+        # build hook's. A web build runs no link hook, so a package with one
+        # ships all of its declared assets.
+        data_assets = depset(
+            collect_transitive_data_assets(primary.deps) +
+            _own_data_assets(program, primary.deps),
+        ),
         inputs = program,
     )
 

@@ -130,7 +130,6 @@ silently discards every dependency's contribution.""",
         "linux_plugin_libraries": "depset[struct]: Linux plugin source bundles. Each struct has: label (Label), srcs (depset[File]), hdrs (depset[File]), include_dirs (depset[str]), linkopts (list[str]), link_errors (list[str]), package (str). The Linux runner folds these into its compile and link.",
         "windows_plugin_libraries": "depset[struct]: Windows plugin source bundles. Each struct has: label (Label), srcs (depset[File]), hdrs (depset[File]), include_dirs (depset[str]), linkopts (list[str]), link_errors (list[str]), package (str). The Windows runner folds these into its compile and link.",
         "apple_privacy_manifests": "depset[File]: Apple `PrivacyInfo.xcprivacy` files contributed by transitive plugins. Apple requires every framework to ship one since iOS 17.4 / macOS 14.4; the macOS / iOS application rules bundle them into `Contents/Resources/<pkg>/PrivacyInfo.xcprivacy` (or the iOS analog) so App Store submission's privacy aggregator picks them up.",
-        "data_assets": "depset[FlutterDataAssetInfo]: Per-package Native Assets `DataAsset` declarations contributed by transitive `flutter_data_asset` rules.",
         "pub_fonts": "depset[struct]: Per-package font declarations from pub `flutter.fonts`. Each struct has: package_name (str — empty string sentinel for non-package contributions like the toolchain MaterialIcons target), package_root (str — the package's root, the directory above `lib/`, as a short_path; None for a non-package contribution), family (str), fonts (tuple[struct(asset_path, of_other_package, file, weight, style)] — each font's path from the package root, or the `packages/<other>/<path>` of a font of another package, whether it is one, and its File). A program keys the family and each font `packages/<pkg>/<...>` unless the package is its own (its root is the program's) or a non-package contribution; a font of another package keeps its path.",
         "pub_assets": "depset[struct]: Per-package asset files: a pub package's `flutter.assets`, and the `assets` of a `flutter_library` or `flutter_plugin`. Each struct has: package_name (str — empty sentinel for non-package), package_root (str — the package's root as a short_path), asset_path (str — the path from the package root, as a pubspec lists it), file (File), platforms (tuple[str] — the platforms its `platforms:` entry restricts it to; empty for all), flavors (tuple[str]). A program bundles each at `packages/<pkg>/<asset_path>`, or at bare `asset_path` when the package is its own (its root is the program's) or the package_name is empty, as `flutter build` keys a dependency's assets and the program's own.",
         "pub_shaders": "depset[struct]: Per-package shader files from pub `flutter.shaders`. Same shape as pub_assets (with `shader_path` for `asset_path`, and `platforms` likewise), plus `includes` (the files the shader may `#include`), and routed through the shader compile pipeline before bundling.",
@@ -190,16 +189,6 @@ makes a rebuilt copy of it stop a hot reload rather than merely be reported.
     },
 )
 
-FlutterDataAssetInfo = provider(
-    doc = "A single Native Assets `DataAsset` declaration captured by `flutter_data_asset`.",
-    fields = {
-        "asset_id": "str: The Dart asset id (e.g. `package:my_pkg/blob.bin`).",
-        "package": "str: The pub package name (parsed from `asset_id`).",
-        "name": "str: The within-package asset name (everything after the package).",
-        "file": "File: The on-disk asset file. Bundled at `flutter_assets/packages/<package>/<name>`.",
-    },
-)
-
 FlutterApplicationInfo = provider(
     doc = "Outputs of the Flutter application compilation pipeline.",
     fields = {
@@ -213,7 +202,7 @@ FlutterApplicationInfo = provider(
         "is_debug": "bool: True if built in debug/JIT mode.",
         "native_assets_manifest": "File or None: The `native_assets.json` manifest passed to the frontend_server via `--native-assets`. Always emitted (empty manifest when there are no Native Assets).",
         "bundled_code_assets": "depset[File]: Native-Assets `CodeAsset` library files (.dylib/.so/.dll) to embed in the platform bundle. Each platform application rule reads this and threads the files into the platform's existing embedding mechanism.",
-        "bundled_data_assets": "depset[FlutterDataAssetInfo]: Native-Assets `DataAsset` declarations to bundle under `flutter_assets/packages/<pkg>/<name>`.",
+        "bundled_data_assets": "depset[struct]: The data assets bundled under `flutter_assets/packages/<pkg>/<name>`, each as rules_dart's `DartDataAssetInfo.assets` holds one: the packages' declared ones, or after linking what the link hooks emit and the declared ones of packages without a hook.",
         "apple_privacy_manifests": "depset[File]: Aggregated Apple `PrivacyInfo.xcprivacy` files from transitive plugins. The macOS / iOS application rules thread these into `additional_contents` of the bundle so Apple's App Store submission validator sees the merged privacy declaration.",
         "plugins": "list[struct]: Deduplicated plugin metadata aggregated from the application's whole dependency graph. Each struct has: name (str), platforms (dict of platform -> FlutterPluginPlatformInfo). The per-platform registrant generators read this to emit `GeneratedPluginRegistrant`.",
         "apple_plugin_libraries": "depset[struct]: Aggregated Apple plugin swift_libraries, same shape as `FlutterInfo.apple_plugin_libraries`. Read by the runner aggregator to merge per-platform link/compile inputs.",

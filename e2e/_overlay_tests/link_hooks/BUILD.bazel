@@ -1,20 +1,34 @@
 load("@rules_dart//dart:defs.bzl", "dart_test")
-load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application")
+load("@rules_flutter//flutter:defs.bzl", "dart_data_asset", "dart_package_metadata", "flutter_application")
 load("@rules_flutter//flutter:macos.bzl", "flutter_macos_app")
 
 exports_files(["pubspec.lock"])
 
+# A data asset of the app's own package, which has no link hook: it ships as
+# declared, linked or not.
+dart_data_asset(
+    name = "greeting",
+    src = "greeting.txt",
+    asset_id = "package:link_hooks/greeting.txt",
+)
+
 dart_package_metadata(
     name = "pubspec-metadata",
     package_name = "link_hooks",
+    data_assets = [":greeting"],
 )
 
 # `glyphs`' link hook runs over the uses the release compile records and emits
 # the index of glyphs the app constructs, bundled at
-# `flutter_assets/packages/glyphs/glyphs/index.json`.
+# `flutter_assets/packages/glyphs/glyphs/index.json`, and the declared glyphs
+# it constructs (`heart` and `star`, not `moon`).
 flutter_application(
     name = "app",
-    link_hook_assets = ["package:glyphs/glyphs/index.json"],
+    link_hook_assets = [
+        "package:glyphs/glyphs/heart.txt",
+        "package:glyphs/glyphs/index.json",
+        "package:glyphs/glyphs/star.txt",
+    ],
     main = "lib/main.dart",
     package = ":pubspec-metadata",
     deps = [
@@ -37,7 +51,11 @@ flutter_macos_app(
 # builds it and checks the hook's message reaches the user.
 flutter_application(
     name = "dynamic_app",
-    link_hook_assets = ["package:glyphs/glyphs/index.json"],
+    link_hook_assets = [
+        "package:glyphs/glyphs/heart.txt",
+        "package:glyphs/glyphs/index.json",
+        "package:glyphs/glyphs/star.txt",
+    ],
     main = "lib/dynamic_main.dart",
     package = ":pubspec-metadata",
     tags = ["manual"],

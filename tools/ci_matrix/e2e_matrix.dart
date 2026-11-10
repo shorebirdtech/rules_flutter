@@ -367,9 +367,10 @@ const e2eWorkspaces = <E2eWorkspace>[
     '_overlay_tests/link_hooks',
     runs: {
       Os.linux:
-          'package link hooks over the uses a release compile records, and the '
-          'hook\'s asset in the bundle: platform-neutral, so one run, on the '
-          'cheapest runner',
+          'package link hooks over the uses a release compile records, the '
+          'hook\'s assets in the bundle, and the declared data assets it '
+          'drops and keeps: platform-neutral, so one run, on the cheapest '
+          'runner',
     },
     skips: {
       Os.macos: 'platform-neutral; Linux runs it',
@@ -381,16 +382,15 @@ const e2eWorkspaces = <E2eWorkspace>[
     runs: {
       Os.macos:
           'a dart_code_asset over a hand-linked dylib with its own install '
-          'name, on the app package\'s own metadata, and a flutter_data_asset '
-          '(built nowhere else) reaching the app through an otherwise empty '
-          'flutter_plugin',
+          'name, and a dart_data_asset in the bundle, both declared on the app '
+          'package\'s own metadata, which no library in deps names',
     },
     skips: {
       Os.linux:
-          'its one test includes the macOS-only dylib, so it is incompatible '
+          'its tests build the macOS-only dylib, so they are incompatible '
           'here and nothing runs',
       Os.windows:
-          'its one test includes the macOS-only dylib, so it is incompatible '
+          'its tests build the macOS-only dylib, so they are incompatible '
           'here and nothing runs',
     },
   ),

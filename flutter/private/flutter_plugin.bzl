@@ -23,7 +23,7 @@ load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@rules_dart//dart:providers.bzl", "DartInfo")
 load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "PORTABLE_EXEC_GROUPS", "RUNTIME_INDEPENDENT_ATTR", "SUMMARY_ATTRS", "dart_info", "library_package", "package_identity_attrs", "runtime_reset_when_independent")
 load("@rules_java//java/common:java_info.bzl", "JavaInfo")
-load("//flutter:providers.bzl", "FlutterDataAssetInfo", "FlutterPluginPlatformInfo")
+load("//flutter:providers.bzl", "FlutterPluginPlatformInfo")
 load("//flutter/private:common.bzl", "collect_binding_contracts", "collect_native_libs")
 load("//flutter/private:flutter_apple_plugin_library.bzl", "FlutterAppleModuleHeadersInfo")
 load("//flutter/private:flutter_desktop_plugin_info.bzl", "FlutterLinuxPluginInfo", "FlutterWindowsPluginInfo")
@@ -154,15 +154,6 @@ def plugin_contributions(ctx, package_name, package_root, declares_plugin):
             package = package_name,
         ))
 
-    extra_data_assets = []
-    for dep in ctx.attr.data_assets:
-        if FlutterDataAssetInfo not in dep:
-            fail(
-                "flutter_plugin: data_assets entry %s must provide " % dep.label +
-                "FlutterDataAssetInfo (use flutter_data_asset).",
-            )
-        extra_data_assets.append(dep[FlutterDataAssetInfo])
-
     extra_apple_privacy_manifests = list(ctx.files.apple_privacy_files)
 
     # The plugin's Android library, when this build selected one. Only an
@@ -198,7 +189,6 @@ def plugin_contributions(ctx, package_name, package_root, declares_plugin):
         linux_plugin_libraries = extra_linux_plugin_libraries,
         windows_plugin_libraries = extra_windows_plugin_libraries,
         apple_privacy_manifests = extra_apple_privacy_manifests,
-        data_assets = extra_data_assets,
         pub_fonts = extra_pub_fonts,
         pub_assets = extra_pub_assets,
         pub_shaders = extra_pub_shaders,
@@ -263,10 +253,6 @@ PLUGIN_PACKAGE_ATTRS = package_identity_attrs() | {
     "exports": attr.label_list(
         doc = "The plugin's Android libraries: a `flutter_android_plugin_library` or a `kt_android_library`, anything with `JavaInfo`. Its registration is the `android` entry of `platforms`. An Android app links the libraries of the plugins it depends on, and no others. Set this with `select()` on `@platforms//os:android`, with an empty list as the default, so that only an Android build loads and analyses it: `select({\"@platforms//os:android\": [\"//android:lib\"], \"//conditions:default\": []})`. Named `exports`, as a Java library's re-exported dependencies are, because rules_android dexes an APK's libraries one at a time by an aspect that follows `deps`, `exports` and `runtime_deps` and nothing else, so only an `exports` edge makes the library visible to it.",
         providers = [JavaInfo],
-    ),
-    "data_assets": attr.label_list(
-        doc = "Native Assets `DataAsset` declarations (each a `flutter_data_asset` target). Propagated through `FlutterInfo.data_assets` and bundled at `flutter_assets/packages/<pkg>/<name>` by `flutter_application`.",
-        providers = [FlutterDataAssetInfo],
     ),
     "apple_privacy_files": attr.label_list(
         doc = "`PrivacyInfo.xcprivacy` files this plugin contributes to the iOS / macOS app bundle. Apple requires every framework to ship a privacy manifest since iOS 17.4 / macOS 14.4; the App Store submission validator walks the bundle and aggregates them. Propagated through `FlutterInfo.apple_privacy_manifests` and threaded into the platform application bundle's `Resources/<pkg>/PrivacyInfo.xcprivacy` slot. Auto-detected by `flutter_pub_package` from both layouts pub plugins use (`Sources/<pkg>/PrivacyInfo.xcprivacy` and `Sources/<pkg>/Resources/PrivacyInfo.xcprivacy`).",

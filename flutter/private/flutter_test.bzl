@@ -422,6 +422,7 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
         ctx,
         deps = deps,
         code_assets = [target[DartCodeAssetInfo] for target in inputs.code_assets],
+        package = inputs.package,
     ).assets
 
     native_assets_manifest = ctx.actions.declare_file(ctx.label.name + ".native_assets.json")

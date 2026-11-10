@@ -259,6 +259,7 @@ def _synthesize_app_package_carries_language_version_test_impl(ctx):
         language_version = "3.12",
         version = "",
         code_assets = (),
+        data_assets = (),
         unreplaced_hook = "",
         link_hook = None,
         license_file = None,

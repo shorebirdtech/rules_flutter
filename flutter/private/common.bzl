@@ -730,6 +730,27 @@ def declare_flutter_assets_dir(ctx):
     """
     return ctx.actions.declare_directory(ctx.label.name + "_flutter_assets")
 
+def own_package_outside_deps(inputs, packages):
+    """A program's own package, when no library in its `deps` carries it.
+
+    The program's package is in the closure of its `deps` only when a library
+    there names its declaration. What the package declares (its data assets)
+    belongs to the program either way, as a root package's build hook's
+    assets do.
+
+    Args:
+        inputs: The program, from `flutter_program_inputs`.
+        packages: `collect_packages` of `inputs.deps`.
+
+    Returns:
+        The program's `DartPackageMetadataInfo`, or None when it names none or
+        a library in `deps` carries it.
+    """
+    own = inputs.package
+    if own == None or any([pkg.package_name == own.package_name for pkg in packages]):
+        return None
+    return own
+
 def flutter_build_assets(ctx, tools, output_dir, deps, target_platform, compiled_shaders = struct(listed = [], unlisted = []), kernel_dill = None, is_debug = False, data_assets = None, optional_code_points = [], inputs = None):
     """Run the shared asset bundling step.
 
@@ -755,7 +776,9 @@ def flutter_build_assets(ctx, tools, output_dir, deps, target_platform, compiled
         compiled_shaders: What `flutter_compile_shaders` made.
         kernel_dill: The compiled kernel .dill File (needed for icon tree shaking).
         is_debug: Whether this is a debug build (icon tree shaking is skipped in debug).
-        data_assets: Optional depset[FlutterDataAssetInfo]. Each entry is
+        data_assets: Optional depset of data assets, each a
+            `struct(package, name, file)` as `DartDataAssetInfo.assets` holds
+            one. Each is
             placed at `flutter_assets/packages/<package>/<name>` and listed in
             the asset manifest under that key, as flutter_tools bundles a
             hook's data asset.
@@ -1280,7 +1303,8 @@ def flutter_program_inputs(ctx, metadata = None):
         (`unchecked_srcs`, among `srcs`, are not checked against `deps`;
         `staged_sources` are the sources of staged copies among them, which
         analysis checks in their place); `deps`,
-        `native_deps` and `code_assets` are Targets; the rest, `flavor`
+        `native_deps` and `code_assets` are Targets, as is `package_target`,
+        the `package` Target (None for a rule naming none); the rest, `flavor`
         among them, are as the attributes of `flutter_application` of the same
         names.
     """
@@ -1292,6 +1316,7 @@ def flutter_program_inputs(ctx, metadata = None):
         unchecked_srcs = [],
         staged_sources = [],
         deps = getattr(ctx.attr, "deps", []),
+        package_target = getattr(ctx.attr, "package", None),
         defines = list(getattr(ctx.attr, "defines", [])),
         flavor = getattr(ctx.attr, "flavor", ""),
         build_name = getattr(ctx.attr, "build_name", ""),
@@ -1317,6 +1342,28 @@ def flutter_program_inputs(ctx, metadata = None):
         extra_gen_snapshot_options = list(getattr(ctx.attr, "extra_gen_snapshot_options", [])),
     )
 
+# The `package` of a program, the doc of `KERNEL_COMPILE_ATTRS`' own. A rule
+# that applies an aspect to the declaration (to reach what it declares)
+# redeclares the attribute with this doc.
+PROGRAM_PACKAGE_DOC = (
+    "The `dart_package_metadata` declaring the program's own Dart " +
+    "package, the Bazel stand-in for its `pubspec.yaml`. Required: " +
+    "its `package_name` keys the kernel's libraries under stable " +
+    "`package:` URIs (hot-reload parity with the dev tool) and " +
+    "resolves `package:<self>/...` imports; its `language_version` " +
+    "is the program's own, as pub derives it from " +
+    "`environment.sdk` (left unset, the program's sources compile " +
+    "at the SDK's current version, newer than `flutter build` " +
+    "would allow); its `license_file` is listed in `NOTICES.Z` " +
+    "under the package's name. It is `:pubspec-metadata` in the " +
+    "BUILD file at the package root, its directory, which `srcs` " +
+    "(its `lib/`) and the keys of `assets` are relative to.\n\n" +
+    "The `flutter_library` targets of the same package — the app's " +
+    "own `lib/`, beside it — name the same declaration. Two Dart " +
+    "packages cannot share a directory, so a dependency declaring " +
+    "a different package at the program's root is refused."
+)
+
 # The attrs `flutter_compile_kernel` reads off its caller's `ctx`. Every rule
 # that calls it spreads this bundle wholesale rather than naming the members,
 # because naming them is what let the contract break: `flutter_compile_kernel`
@@ -1334,22 +1381,7 @@ def flutter_program_inputs(ctx, metadata = None):
 # not by every kernel compile.
 KERNEL_COMPILE_ATTRS = package_identity_attrs(
     mandatory = True,
-    doc = "The `dart_package_metadata` declaring the program's own Dart " +
-          "package, the Bazel stand-in for its `pubspec.yaml`. Required: " +
-          "its `package_name` keys the kernel's libraries under stable " +
-          "`package:` URIs (hot-reload parity with the dev tool) and " +
-          "resolves `package:<self>/...` imports; its `language_version` " +
-          "is the program's own, as pub derives it from " +
-          "`environment.sdk` (left unset, the program's sources compile " +
-          "at the SDK's current version, newer than `flutter build` " +
-          "would allow); its `license_file` is listed in `NOTICES.Z` " +
-          "under the package's name. It is `:pubspec-metadata` in the " +
-          "BUILD file at the package root, its directory, which `srcs` " +
-          "(its `lib/`) and the keys of `assets` are relative to.\n\n" +
-          "The `flutter_library` targets of the same package — the app's " +
-          "own `lib/`, beside it — name the same declaration. Two Dart " +
-          "packages cannot share a directory, so a dependency declaring " +
-          "a different package at the program's root is refused.",
+    doc = PROGRAM_PACKAGE_DOC,
 ) | {
     "main": attr.label(
         doc = "The main .dart entry point.",
@@ -1459,8 +1491,10 @@ FLUTTER_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | {
               "A hook that emits an asset not listed, skips one that is, or " +
               "reports an error fails the build with its own message. Every " +
               "package with a link hook in `deps` runs, so list the assets " +
-              "of each. Debug builds run no hook and bundle none: load what " +
-              "the hook would index on demand there. Empty runs no hook.",
+              "of each; a hook receives its package's declared data assets " +
+              "and ships only those it emits. Debug builds run no hook and " +
+              "ship every package's declared data assets: load what the hook " +
+              "would index on demand there.",
     ),
     "tree_shake_icons": attr.bool(
         doc = "If True, tree-shake icon fonts to only include used glyphs. " +

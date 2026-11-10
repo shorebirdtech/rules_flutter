@@ -1,7 +1,7 @@
 """The `FlutterInfo` constructor.
 
-`FlutterInfo` is built by several rules — `flutter_library`, `flutter_plugin`,
-`flutter_data_asset` and `flutter_material_icons`.
+`FlutterInfo` is built by several rules — `flutter_library`, `flutter_plugin`
+and `flutter_material_icons`.
 Construction goes through here so no caller decides how a field merges: a rule
 that does not contribute on a channel must still forward its dependencies'
 values, and writing `depset()` instead silently drops them.
@@ -50,7 +50,6 @@ def flutter_info(
         linux_plugin_libraries = [],
         windows_plugin_libraries = [],
         apple_privacy_manifests = [],
-        data_assets = [],
         pub_fonts = [],
         pub_assets = [],
         pub_shaders = [],
@@ -86,7 +85,6 @@ def flutter_info(
         (`label`, `srcs`, `hdrs`, `include_dirs`, `package`).
       windows_plugin_libraries: Windows plugin source bundles, same shape.
       apple_privacy_manifests: `PrivacyInfo.xcprivacy` files this target ships.
-      data_assets: `FlutterDataAssetInfo` providers this target declares.
       pub_fonts: Font contribution structs from a pub `flutter.fonts` block.
       pub_assets: Asset contribution structs from a pub `flutter.assets` block.
       pub_shaders: Shader contribution structs from a `flutter.shaders` block.
@@ -148,10 +146,6 @@ def flutter_info(
         apple_privacy_manifests = depset(
             direct = apple_privacy_manifests,
             transitive = [info.apple_privacy_manifests for info in dep_infos],
-        ),
-        data_assets = depset(
-            direct = data_assets,
-            transitive = [info.data_assets for info in dep_infos],
         ),
         pub_fonts = depset(
             direct = pub_fonts,

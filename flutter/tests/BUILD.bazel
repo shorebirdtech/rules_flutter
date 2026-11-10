@@ -19,6 +19,7 @@ load(":asset_bundle_test.bzl", "asset_bundle_test_suite")
 load(":cmake_link_libraries_test.bzl", "cmake_link_libraries_test_suite")
 load(":code_asset_native_library_test.bzl", "code_asset_native_library_test_suite")
 load(":common_test.bzl", "common_test_suite")
+load(":data_asset_test.bzl", "data_asset_test_suite")
 load(":desktop_plugin_link_test.bzl", "desktop_plugin_link_test_suite")
 load(":dev_config_test.bzl", "dev_config_test_suite")
 load(":download_digests_test.bzl", "download_digests_test_suite")
@@ -105,6 +106,8 @@ artifact_urls_test_suite(name = "artifact_urls_test")
 toolchain_test_suite(name = "toolchain_test")
 
 common_test_suite(name = "common_test")
+
+data_asset_test_suite(name = "data_asset_test")
 
 app_root_record_test_suite(name = "app_root_record_test")
 

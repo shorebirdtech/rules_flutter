@@ -1340,6 +1340,18 @@ bazel test :verify_windows_runtime_test --test_tag_filters= --strategy=TestRunne
 bundling (`flutter_ios_native_frameworks`, `flutter_macos_native_libs`), or
 kernel compilation flags.
 
+`e2e/_overlay_tests/native_assets_synthetic` checks the same at runtime for
+assets its app's own package declares: a `dart_code_asset` and a
+`dart_data_asset`, the second read with `rootBundle`. The app prints
+`native_assets_synthetic canary=0x42424242 blob=native-assets-synthetic-data-blob-v1`
+before `runApp`. Run it in both modes:
+
+```sh
+cd e2e/_overlay_tests/native_assets_synthetic
+bazel test :verify_macos_app_test --test_tag_filters= --strategy=TestRunner=standalone
+bazel test :verify_macos_app_test -c dbg --test_tag_filters= --strategy=TestRunner=standalone
+```
+
 ### macOS visual verification
 
 Launches the app binary directly, captures stdout/stderr, takes a screenshot, and prints structured JSON output. The screenshot file can be opened for visual verification.
@@ -1971,7 +1983,8 @@ runner needs both).
 | Asset bundling | hello_world, plugin_example |
 | Shader compilation, bundling or hot reload, or how a workspace plugin is wired | `glass_plugin_e2e_test.dart` on every platform it covers, and by hand: `bazel build //impeller_shader:app_flutter_sksl_required` in plugin_example must **fail**, saying the shader does not compile for Skia |
 | Web support | web_example `//...` (a WASM-only bundle, an `Int64List` app that keeps the dart2js fallback through a per-compiler `select()`, and `:render_test`, the render check in headless Chrome) + `web_smoke_e2e_test.dart` (render) + `web_per_compiler_e2e_test.dart` (both programs of a per-compiler app, in Chrome) + `plugin_example_e2e_test.dart` (plugins on web) + `native_libs_reload_e2e_test.dart`'s web group if the change touches `native_modules` or the web reload arms |
-| FFI / native deps / native assets | ffi_example (incl. manual iOS-sim + macOS runtime tests), ffi_plugin_example |
+| FFI / native deps / native assets | ffi_example (incl. manual iOS-sim + macOS runtime tests), ffi_plugin_example, `_overlay_tests/native_assets_synthetic` (incl. its manual `:verify_macos_app_test`, in debug and release) |
+| Data assets and link hooks (`dart_data_asset` handling, `link_hook_assets`, `flutter_build_assets`' data assets) | root `//flutter/tests:data_asset_test`, `_overlay_tests/native_assets_synthetic` `//...` with and without `-c dbg` plus its `:verify_macos_app_test`, `_overlay_tests/link_hooks` `//...` |
 | Plugins | plugin_example, ffi_plugin_example |
 | Apple add-to-app (`flutter/private/apple_add_to_app.bzl`, `flutter_apple_xcframeworks.bzl`, `flutter_apple_plugin_xcframeworks.bzl`, `flutter_apple_registrant.bzl`, `apple_xcframeworks_*.bzl`, `flutter_plugin.bzl`'s Apple entries, `flutter_apple_plugin_library.bzl`, the `apple_*` tools) | Root `//flutter/private/tools/...`, plugin_example's `:add_to_app_{ios,macos}_{debug,release}[_signed]_test` (layout, modules, signatures, Swift package), **and** its `manual` Xcode hosts with a booted simulator and an unlocked screen: `bazel test :add_to_app_ios_host_debug_test :add_to_app_macos_host_debug_test :add_to_app_macos_host_release_test --test_tag_filters=`, whose screenshots are in each test's `test.outputs/` |
 | Android release (`flutter_android_release`, `flutter_android_app`'s `app_bundle`/`bundle_config`/`proguard_specs`, `flutter/android_proguard_rules.pro`, `flutter/android_bundle_config.pb.json`, `release_transition.bzl`, `android_release.dart`, `flutter_android_bundle_install.bzl`, `android_bundle_install.dart`) | Root `//...` (`android_release_test`), android_example `//...` (`verify_android_release_test` signs with a key it makes), plugin_example `//...` for an R8 change, **and** "Android release (manual)" in § 4: both signed installs render on the phone |

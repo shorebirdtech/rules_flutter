@@ -1,7 +1,7 @@
 """Analysis-time validation tests for the Native Assets rules.
 
-These tests specify the documented contract of `flutter_data_asset` and of
-the manifest an application writes from its code assets: invalid
+These tests specify the documented contract of the manifest an application
+writes from its code assets: invalid
 configurations must fail at analysis time, not silently produce something
 that breaks at runtime.
 
@@ -15,7 +15,6 @@ fix.
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("@rules_dart//dart:defs.bzl", "dart_code_asset")
 load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo", "DartPackageInfo")
-load("//flutter:native_assets.bzl", "flutter_data_asset")
 load("//flutter/private:common.bzl", "check_unreplaced_hooks")
 load("//flutter/private:flutter_native_assets.bzl", "native_asset_framework_name", "native_assets_target_string", "resolve_native_assets", "write_native_assets_manifest")
 
@@ -209,12 +208,6 @@ def _setup_failure_targets():
     them out of `bazel test //...` glob expansion — they're only built
     by the analysistests that wrap them.
     """
-    flutter_data_asset(
-        name = "_data_bad_id",
-        asset_id = "not-a-package-id",
-        file = "BUILD.bazel",
-        tags = ["manual"],
-    )
 
     # A bundled library, probed under both layouts. An application e2e only
     # reaches the bundle one, so without these the runfiles layout is only
@@ -251,12 +244,6 @@ def native_assets_test_suite(name):
       name: The test_suite target name.
     """
     _setup_failure_targets()
-
-    _expect_failure_test(
-        name = name + "_data_asset_id_format",
-        target_under_test = ":_data_bad_id",
-        expected_substring = "must start with `package:`",
-    )
 
     # The counterpart to the bridge probe below: an asset that never arrives
     # because the package's hook has no Bazel replacement. Silence here means
@@ -327,7 +314,6 @@ def native_assets_test_suite(name):
     native.test_suite(
         name = name,
         tests = [
-            ":" + name + "_data_asset_id_format",
             ":" + name + "_unreplaced_hook",
             ":" + name + "_misowned_code_asset",
             ":" + name + "_unreplaced_hook_in_test",

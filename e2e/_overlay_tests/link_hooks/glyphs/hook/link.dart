@@ -1,5 +1,6 @@
-// Writes the index of glyphs the application uses, and fails the build on any
-// glyph constructed at run time.
+// Writes the index of glyphs the application uses, ships the declared glyph
+// assets it uses and no others, and fails the build on any glyph constructed
+// at run time.
 import 'dart:io';
 
 import 'package:data_assets/data_assets.dart';
@@ -41,5 +42,10 @@ Future<void> main(List<String> args) async {
         file: index,
       ),
     );
+    for (final glyph in input.assets.data) {
+      if (names.contains(glyph.name.split('/').last.split('.').first)) {
+        output.assets.data.add(glyph);
+      }
+    }
   });
 }

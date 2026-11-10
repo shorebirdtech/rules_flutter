@@ -558,6 +558,26 @@ Some pub packages compile native code through a Dart `hook/build.dart` (Dart Nat
 
 A hook that nothing replaces is an error when `flutter_application` reaches it. The alternative would be a build that succeeds and then fails at runtime on an unresolved `@Native` symbol.
 
+#### Data assets
+
+A hook can also emit data assets: files the program reads by id. Declare each with `dart_data_asset` (rules_dart's, re-exported from `@rules_flutter//flutter:defs.bzl`), and name it in the `data_assets` of the package's `dart_package_metadata`, which counts as replacing the hook as `code_assets` does. The id is `package:<package>/<name>`, and `<package>` must be the declaring package.
+
+```starlark
+dart_data_asset(
+    name = "glyph_index",
+    src = "data/index.json",
+    asset_id = "package:glyphs/glyphs/index.json",
+)
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "glyphs",
+    data_assets = [":glyph_index"],
+)
+```
+
+Every application that reaches the package bundles each asset at `flutter_assets/packages/<package>/<name>` and lists it in `AssetManifest`, so `rootBundle.load('packages/glyphs/glyphs/index.json')` reads it, as `flutter build` bundles a hook's data asset. The application's own package counts too, whether or not a library in its `deps` names its declaration. Web builds bundle them as well. In a release or profile build, a package with a link hook receives its declared assets and ships only those the hook emits (see [Link hooks](#link-hooks)); a debug build runs no hook and ships them all. `e2e/_overlay_tests/native_assets_synthetic` loads one in a running app.
+
 ### Native code from Bazel
 
 A Flutter app can depend on native code built by any Bazel rule that produces a shared library: `rules_cc`, `rules_rust`, and so on. List the library in `native_deps` and it is bundled beside the app, where `dart:ffi` can open it:
@@ -1783,7 +1803,7 @@ The `select()` goes in a library, not in the application's `deps`: a `select()` 
 
 What the bundle holds once comes from the primary compiler's version of the program (`dart2wasm` for the default `compiler`): the plugin registrant, the assets and shaders, and the icon tree-shaking scan. A dependency that differs by compiler should not differ in what plugins or assets it brings. An icon only the other compiler's variant uses is shaken out of the font unless `tree_shake_icons = False`.
 
-These are built once, however many compilers reach them: pub packages (and Flutter SDK packages), anything a `flutter_library` or `flutter_plugin` marks `runtime_independent = True`, `flutter_native_library`, `dart_code_asset`, `flutter_data_asset`, `flutter_gen_l10n`, and `dart_codegen` and its siblings. Code generation therefore cannot vary by compiler; a generator that needs to emit a variant per compiler emits both, and the library above chooses. Only the first-party libraries on the path from the bundle to a `select()` are analysed once per compiler, and a library has no action, so that costs analysis time only.
+These are built once, however many compilers reach them: pub packages (and Flutter SDK packages), anything a `flutter_library` or `flutter_plugin` marks `runtime_independent = True`, `flutter_native_library`, `dart_code_asset`, `dart_data_asset`, `flutter_gen_l10n`, and `dart_codegen` and its siblings. Code generation therefore cannot vary by compiler; a generator that needs to emit a variant per compiler emits both, and the library above chooses. Only the first-party libraries on the path from the bundle to a `select()` are analysed once per compiler, and a library has no action, so that costs analysis time only.
 
 A library that has no variant outside the web says so with `target_compatible_with = select({"@rules_dart//dart/constraints:js": [], "@rules_dart//dart/constraints:wasm": [], "//conditions:default": ["@platforms//:incompatible"]})`, as in rules_dart, so `bazel build //...` skips it rather than failing on it.
 
@@ -2861,11 +2881,10 @@ A platform has a `plugin_class`, a `dart_plugin_class`, `ffi_plugin` or a `defau
 | `platforms` | A `flutter_plugin_platform` for each platform the plugin registers on. |
 | `exports` | The plugin's Android library, in a `select()` on `@platforms//os:android`. Android apps that depend on the plugin link it. It is here rather than on the `android` platform because rules_android's dexing reaches a library through `exports` and no other attribute. |
 | `native_deps` | Shared libraries bundled for `dart:ffi`. |
-| `data_assets` | `flutter_data_asset` targets, bundled at `flutter_assets/packages/<package>/<name>`. |
 | `assets`, `resources` | Asset and resource files. An asset is keyed as on `flutter_library`. |
 | `shaders`, `shader_includes` | The package's fragment shaders and what they `#include`, as on `flutter_library`. |
 | `fonts` | The package's font families, as on `flutter_library`. |
-| `package` | The package's `dart_package_metadata`, as on `flutter_library`. It states the package's name, language version and version, its `hook/link.dart` (see [Link hooks](#link-hooks)) and its `NOTICES` or `LICENSE` file, as `flutter build` reads it from the package root: programs that depend on the package list that file in their `NOTICES`. |
+| `package` | The package's `dart_package_metadata`, as on `flutter_library`. It states the package's name, language version and version, its code and data assets (see [Data assets](#data-assets)), its `hook/link.dart` (see [Link hooks](#link-hooks)) and its `NOTICES` or `LICENSE` file, as `flutter build` reads it from the package root: programs that depend on the package list that file in their `NOTICES`. |
 
 A plugin's native code is its own target. Swift goes in a `flutter_apple_plugin_library`, the `lib` of the `ios` or `macos` platform; one with `platform = "darwin"` compiles for whichever of the two the build is for, so a plugin whose sources are shared (`sharedDarwinSource`) names the one library as the `lib` of both. Kotlin or Java goes in a `flutter_android_plugin_library`, passed as `exports` in a `select()` on `@platforms//os:android` (an empty list otherwise). Every Android app that depends on the plugin then links it, as it links a pub plugin's library: `flutter_android_app` packages it, registers its plugin class and merges its `manifest` (receivers, services, permissions) into the app's. It gets a generated `BuildConfig` in its `java_package`, with `DEBUG` and `BUILD_TYPE` as Gradle's would be in the build's mode. Its `flutter_engine` is a `flutter_android_engine(neverlink = True)`: the plugin compiles against the engine and the app ships its own, of the app's ABI. `e2e/plugin_example/glass_plugin` shows both, with shaders.
 
@@ -2906,9 +2925,9 @@ flutter_application(
 )
 ```
 
-Keep the hook file out of `srcs`. Bazel names every output before anything runs, so the application lists each asset its packages' hooks emit. A hook that emits an asset not listed, skips one that is, or reports an error fails the build with its own message. An application that sets `link_hook_assets` runs the hook of every package in its `deps` that has one.
+Keep the hook file out of `srcs`. Bazel names every output before anything runs, so the application lists each asset its packages' hooks emit. A hook that emits an asset not listed, skips one that is, or reports an error fails the build with its own message.
 
-In a release or profile build the kernel compile records the uses (`--recorded-uses`), each hook runs over them, and the assets are bundled at `flutter_assets/packages/<package>/<name>`, listed in `AssetManifest`, and loaded with `rootBundle.load('packages/<package>/<name>')`. Debug builds are JIT compiles, which record nothing: no hook runs and no asset is bundled, so load what the hook would have indexed on demand there. `e2e/_overlay_tests/link_hooks` is a working example, including the failing case.
+In a release or profile build the kernel compile records the uses (`--recorded-uses`), and the hook of every package in `deps` that has one runs over them, as `flutter build` runs them. A hook receives its package's declared [data assets](#data-assets) (`LinkInput.assets.data`) and ships only those it emits, so it can drop what the app does not use; the declared assets of packages without a hook ship as they are. What ships is bundled at `flutter_assets/packages/<package>/<name>`, listed in `AssetManifest`, and loaded with `rootBundle.load('packages/<package>/<name>')`. Debug builds are JIT compiles, which record nothing: no hook runs, every declared data asset ships, and nothing a hook would write does, so load what the hook would have indexed on demand there. A link hook runs only for a package a library in `deps` belongs to: a release build of an application whose own package has one, with no library naming it, fails. `e2e/_overlay_tests/link_hooks` is a working example, including the failing case.
 
 ### Lower-level rules
 
@@ -2920,7 +2939,6 @@ These are what `flutter_application` is made of. Most apps never need them.
 | `flutter_aot_snapshot` | Compiles Dart to an AOT shared library (`.so` on Linux and Android, `.dylib` on macOS) with `gen_snapshot`. |
 | `flutter_asset_bundle` | Builds the `flutter_assets/` tree: `AssetManifest.bin`, `FontManifest.json`, `NOTICES.Z`, and the asset files. |
 | `flutter_native_library` | Pairs a native library with its binding contract. See [Hot reload across a native rebuild](#hot-reload-across-a-native-rebuild). |
-| `flutter_data_asset` | Declares a Dart data asset, from `@rules_flutter//flutter:native_assets.bzl`. It is bundled at `flutter_assets/packages/<package>/<name>`. A code asset is rules_dart's `dart_code_asset`. |
 
 ### Code generation
 

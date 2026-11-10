@@ -15,6 +15,10 @@ rules that compile Dart code, bundle assets, and run tests.
 - `dart_package_metadata`: rules_dart's rule, re-exported. It states a package's facts
     (its name, language version, licence) once, as `pubspec.yaml` does, and every target
     of the package names it with `package`.
+- `dart_data_asset`: rules_dart's rule, re-exported. It binds a file to a data-asset id,
+    `package:<package>/<name>`, for the `data_assets` of the owning package's
+    `dart_package_metadata`. An application bundles it at
+    `flutter_assets/packages/<package>/<name>`, where `rootBundle` loads it.
 - `flutter_library`: Collects Flutter Dart sources and assets into a reusable
     dependency. Wire into `flutter_application` via `deps`.
 - `flutter_font_family` and `flutter_font`: A font family a library or plugin
@@ -62,7 +66,7 @@ artifacts:
 - `@rules_flutter//flutter:web.bzl` — `flutter_web_app` + composable rules
 """
 
-load("@rules_dart//dart:defs.bzl", _dart_package_metadata = "dart_package_metadata")
+load("@rules_dart//dart:defs.bzl", _dart_data_asset = "dart_data_asset", _dart_package_metadata = "dart_package_metadata")
 load("//flutter/private:flutter_aot_snapshot.bzl", _flutter_aot_snapshot = "flutter_aot_snapshot")
 load("//flutter/private:flutter_application.bzl", _flutter_application = "flutter_application")
 load("//flutter/private:flutter_asset_bundle.bzl", _flutter_asset_bundle = "flutter_asset_bundle")
@@ -142,6 +146,7 @@ def flutter_test(name, main, test_config = None, **kwargs):
             )
     _flutter_test(name = name, main = main, test_config = test_config, **kwargs)
 
+dart_data_asset = _dart_data_asset
 dart_package_metadata = _dart_package_metadata
 flutter_program_test = _flutter_program_test
 flutter_suite_program = _flutter_suite_program

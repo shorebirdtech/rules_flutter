@@ -262,7 +262,7 @@ def collect_bundled_code_asset_files(native_assets):
         if asset.link_mode == "dynamic_loading_bundle" and asset.file != None
     ])
 
-def resolve_native_assets(ctx, deps, code_assets):
+def resolve_native_assets(ctx, deps, code_assets, package = None):
     """The one asset per id a program loads, with each library staged once.
 
     Assets arrive two ways, and on a shared id the more deliberate one wins:
@@ -272,7 +272,8 @@ def resolve_native_assets(ctx, deps, code_assets):
         rules_dart's `dart_binary` and `dart_test` give their `code_assets` the
         same meaning;
       * owned by a Dart package (its `dart_package_metadata`'s `code_assets`)
-        and lifted off the package graph.
+        and lifted off the package graph, the program's own package among
+        them.
 
     Two packages claiming one id with different libraries fail, as in
     rules_dart, unless the target names the one to use: the Dart VM resolves
@@ -298,6 +299,9 @@ def resolve_native_assets(ctx, deps, code_assets):
       ctx: The consuming rule's context.
       deps: Targets whose Dart packages may carry code assets.
       code_assets: `DartCodeAssetInfo` the target names itself.
+      package: The `DartPackageMetadataInfo` of the program's own package, or
+        None. Its `code_assets` count as a package's, whether or not a
+        library in `deps` names the same declaration.
 
     Returns:
       A struct with `assets`, every asset the program loads, one per id, each
@@ -308,7 +312,8 @@ def resolve_native_assets(ctx, deps, code_assets):
     """
     resolved = resolve_code_assets(
         ctx.label,
-        collect_transitive_code_assets([dep for dep in deps if DartInfo in dep]),
+        collect_transitive_code_assets([dep for dep in deps if DartInfo in dep]) +
+        (list(package.code_assets) if package != None else []),
         code_assets,
     )
     return struct(
