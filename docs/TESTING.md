@@ -1169,7 +1169,7 @@ instead of extracting it.
 |-----------|-----------|
 | smoke | Toolchain resolution for all platforms |
 | hello_world | Kernel, AOT, application, and per-platform bundle builds; flutter_test; `bazel coverage` of a flutter_test (`//coverage/...`: workspace paths, a library in another package, `--instrumentation_filter`, the merged report; CI runs it on Linux); on Linux and Windows, a profile-mode bundle whose AOT snapshot is a profile one (`verify_linux_profile_bundle_test`, `verify_windows_profile_bundle_test`); `reproducible_notices_<mode>_test`: each mode's `NOTICES.Z` gzip header names no host OS and no time (on every host, Windows included) |
-| codegen | Per-file and aggregate dart_codegen, custom generators, hot-reload-with-codegen |
+| codegen | Per-file and aggregate dart_codegen, custom generators, hot-reload-with-codegen; `go_router_codegen` (`@rules_flutter//ext/go_router`) writing the routes `:routes_test` drives |
 | ffi_example | Both FFI mechanisms — Native Assets (`add_plugin`, `@Native` asset-id bind) and `native_deps` (`mul_plugin`, conventional-path open) — bundle structure on macOS/Linux plus manual runtime proof on iOS simulator and macOS |
 | ffi_plugin_example | FFI plugin build + macOS/Linux bundle structure with `libmultiply.dylib`/`.so` |
 | plugin_example | Real pub.dev plugins (`path_provider`, `url_launcher`, `package_info_plus`) plus the hand-written `:greeting_plugin` regression case; per-platform bundle builds; web plugin assertions via the e2e suite; macOS runtime verifier asserting the four plugin-result strings. See **Plugin verification matrix** below. |

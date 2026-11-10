@@ -335,3 +335,17 @@ flutter_pub.from_lock(
     lock = "//:pubspec.lock",
 )
 use_repo(flutter_pub, "dev_tool_deps")
+
+# The packages go_router_builder's shim (`//ext/go_router:shim`) is built from,
+# for the apps that use `go_router_codegen`. rules_dart's extension, as
+# rules_dart builds its own builders' shims: they are tools of the build, with
+# nothing of Flutter's. Hub names are global to the extension, so this one is
+# named for rules_flutter. A package it shares with rules_dart's own builder
+# lock, or any other lock of this extension, is built at the highest version
+# any of them asks for.
+dart_pub = use_extension("@rules_dart//dart/pub:extensions.bzl", "pub")
+dart_pub.from_lock(
+    name = "rules_flutter_go_router_builder",
+    lock = "//ext/go_router:pubspec.lock",
+)
+use_repo(dart_pub, "rules_flutter_go_router_builder")

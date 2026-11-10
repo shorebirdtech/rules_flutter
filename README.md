@@ -2720,6 +2720,39 @@ flutter_application(
 
 `e2e/codegen` is the worked example, including generated code in dependency packages and hot reload over regenerated sources.
 
+#### go_router_builder
+
+rules_dart ships macros for pure-Dart builders such as json_serializable and freezed, written on its builder API (`@rules_dart//dart/ext:defs.bzl`). go_router_builder states a Flutter constraint, so rules_flutter ships it: `go_router_codegen` writes the `<src>.g.dart` part of each source that declares `@TypedGoRoute` routes, as `dart run build_runner build` would. The builder comes from rules_flutter's own lock; your lock needs `go_router`, which the generated code and your sources import.
+
+```starlark
+load("@rules_flutter//ext/go_router:defs.bzl", "go_router_codegen")
+
+# lib/routes.dart declares `part 'routes.g.dart';`.
+go_router_codegen(
+    name = "routes",
+    srcs = ["lib/routes.dart"],
+    annotation_dep = "@deps//:go_router",
+    package = ":pubspec",
+    deps = ["@deps//:flutter"],
+)
+
+flutter_application(
+    name = "my_app",
+    package = ":pubspec",
+    main = "lib/main.dart",
+    srcs = ["lib/routes.dart", ":routes"],
+    deps = ["@deps//:flutter", "@deps//:go_router"],
+)
+```
+
+`annotation_dep` names your `go_router` library; it is `@pub_deps//:go_router` unless you set it, so a hub named `pub_deps` can leave it out. `config` takes the builder's options as JSON, as `build.yaml` states them. For Gazelle to write these targets, register the builder in the BUILD file at your repository's root:
+
+```starlark
+# gazelle:dart_builder TypedGoRoute macro=@rules_flutter//ext/go_router:defs.bzl%go_router_codegen shim=@rules_flutter//ext/go_router:shim produces=.go_router.g.part runtime_dep=@pub_deps//:go_router key=go_router_builder:go_router_builder
+```
+
+`runtime_dep` names the same library as `annotation_dep`: with the hub `deps`, `runtime_dep=@deps//:go_router`.
+
 #### flutter_gen_l10n
 
 Generates `AppLocalizations` from `.arb` files, the equivalent of `flutter gen-l10n`.

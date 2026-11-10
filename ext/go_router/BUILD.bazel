@@ -1,0 +1,38 @@
+# go_router_builder under Bazel: the shim binary `go_router_codegen` runs, and
+# the macro. go_router_builder is a pub package with a Flutter constraint, so
+# rules_flutter ships it rather than rules_dart, on rules_dart's builder API.
+#
+# This directory is also where an overlay for the pub package `go_router`
+# would go (`<version>/BUILD.bazel.tpl`, see //ext:BUILD.bazel); it has none.
+
+load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
+load("@rules_dart//dart:defs.bzl", "dart_binary")
+load("@rules_dart//dart/ext:defs.bzl", "builder_shim_library")
+
+# rules_dart's shim runner, built against the packages the builder resolves
+# with, so the binary has one `analyzer` and one `build`.
+builder_shim_library(
+    name = "builder_shim",
+    pub_hub = "@rules_flutter_go_router_builder",
+)
+
+# A SharedPartBuilder: writes a `.go_router.g.part` shard, which rules_dart's
+# combining shim merges into `<src>.g.dart`.
+dart_binary(
+    name = "shim",
+    srcs = ["shim.dart"],
+    code_assets_from_deps = False,
+    main = "shim.dart",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":builder_shim",
+        "@rules_flutter_go_router_builder//:go_router_builder",
+    ],
+)
+
+bzl_library(
+    name = "defs",
+    srcs = ["defs.bzl"],
+    visibility = ["//visibility:public"],
+    deps = ["@rules_dart//dart/ext:defs"],
+)

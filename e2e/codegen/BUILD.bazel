@@ -3,6 +3,7 @@ load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@rules_apple//apple:macos.bzl", "macos_application")
 load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
 load("@rules_dart//dart:defs.bzl", "dart_aggregate_codegen", "dart_analysis_config", "dart_analysis_options", "dart_binary", "dart_codegen", "dart_library", "dart_package_metadata")
+load("@rules_flutter//ext/go_router:defs.bzl", "go_router_codegen")
 load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_gen_l10n", "flutter_library", "flutter_native_library", "flutter_test", "flutter_tester_binary")
 load(
     "@rules_flutter//flutter:macos.bzl",
@@ -252,6 +253,34 @@ flutter_test(
     deps = [
         "@deps//:flutter",
         "@deps//:flutter_test",
+    ],
+)
+
+# --- A builder rules_flutter ships: go_router_builder ---
+# lib/routes.dart declares `@TypedGoRoute` routes and `part 'routes.g.dart'`;
+# `go_router_codegen` runs the builder, which resolves go_router's and
+# Flutter's types, and the test drives the routes it writes in a router.
+
+go_router_codegen(
+    name = "routes_gen",
+    srcs = ["lib/routes.dart"],
+    annotation_dep = "@deps//:go_router",
+    package = ":pubspec",
+    deps = ["@deps//:flutter"],
+)
+
+flutter_test(
+    name = "routes_test",
+    srcs = [
+        "lib/routes.dart",
+        ":routes_gen",
+    ],
+    main = "test/routes_test.dart",
+    package = ":pubspec",
+    deps = [
+        "@deps//:flutter",
+        "@deps//:flutter_test",
+        "@deps//:go_router",
     ],
 )
 
