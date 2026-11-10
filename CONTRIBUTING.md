@@ -32,11 +32,8 @@ The flag is there because bazel_env 0.10.0 fails analysis under
 `--incompatible_auto_exec_groups`, which `.bazelrc` sets; it costs the next
 build a re-analysis, not a rebuild.
 
-Worktrees that Claude Code makes need nothing more: `.claude/settings.json`
-links their `.bazel_env` to the main checkout's and starts them from your
-local `HEAD`, and `.worktreeinclude` copies `.bazelrc.user` and `tools/bazel`
-into them. A worktree you make yourself with `git worktree add` runs the
-command above in the worktree.
+A worktree made with `git worktree add` runs the command above in the
+worktree.
 
 CI builds `.bazel_env` and runs the hooks from it. To run every check through
 `bazel run` instead, without `.bazel_env`:
