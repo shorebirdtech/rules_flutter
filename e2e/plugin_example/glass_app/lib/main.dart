@@ -20,7 +20,9 @@ const _tint = Color(0xFFFF00FF);
 /// Red, which the invert filter should turn cyan.
 const _backdrop = Color(0xFFFF0000);
 
+/// The app: one page that draws with the shaders and reports what it saw.
 class GlassApp extends StatelessWidget {
+  /// Creates the app.
   const GlassApp({super.key});
 
   @override
@@ -38,8 +40,8 @@ class _GlassPage extends StatefulWidget {
 }
 
 class _GlassPageState extends State<_GlassPage> {
-  final _paintKey = GlobalKey();
-  final _filterKey = GlobalKey();
+  final GlobalKey _paintKey = GlobalKey();
+  final GlobalKey _filterKey = GlobalKey();
   GlassShaders? _shaders;
   ui.ImageFilter? _filter;
   String _paint = 'pending';
