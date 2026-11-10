@@ -28,6 +28,9 @@
 ///   plugin with a Swift interface, type-check against each slice.
 /// * One xcframework per code asset of `--code-assets`: on iOS a framework
 ///   per slice, on macOS the library itself.
+/// * iOS: `FlutterPluginRegistrant.xcframework`, a static framework that
+///   defines `GeneratedPluginRegistrant` and none of the plugins it
+///   registers, and the `GeneratedPluginRegistrant.h` and `.m` beside it.
 /// * `Flutter.xcframework` and `FlutterMacOS.xcframework`: Flutter's
 ///   signature verifies, so the copy is byte for byte and link for link the
 ///   one Flutter signed.
@@ -327,11 +330,33 @@ void _checkModules(
   }
 }
 
+void _checkRegistrant(String xcframework) {
+  for (final MapEntry(key: id, value: library) in _libraries(
+    xcframework,
+  ).entries) {
+    final binary = '$xcframework/$id/${library['BinaryPath']}';
+    _check(
+      _run('file', [binary]).contains('ar archive'),
+      'FlutterPluginRegistrant $id: not a static archive',
+    );
+    final defined = _run('nm', ['-U', binary]);
+    _check(
+      defined.contains(r'_OBJC_CLASS_$_GeneratedPluginRegistrant'),
+      'FlutterPluginRegistrant $id: does not define GeneratedPluginRegistrant',
+    );
+    _check(
+      !defined.contains(r'_OBJC_CLASS_$_MXDMixedPlugin'),
+      'FlutterPluginRegistrant $id: holds plugin code',
+    );
+  }
+}
+
 void main(List<String> args) {
   String? platform;
   String? mode;
   var plugins = <String>{};
   var codeAssets = <String>{};
+  final looseFiles = <String>{};
   final xcframeworks = <String>[];
   for (final arg in args) {
     if (arg.startsWith('--platform=')) {
@@ -342,6 +367,8 @@ void main(List<String> args) {
       plugins = arg.substring('--plugins='.length).split(',').toSet();
     } else if (arg.startsWith('--code-assets=')) {
       codeAssets = arg.substring('--code-assets='.length).split(',').toSet();
+    } else if (!arg.endsWith('.xcframework')) {
+      looseFiles.add(arg.split('/').last);
     } else {
       // Its `Info.plist` links to the file the build wrote, whose directory
       // has the links.
@@ -372,6 +399,8 @@ void main(List<String> args) {
     switch (name) {
       case 'App':
         _checkApp(xcframework, platform, mode);
+      case 'FlutterPluginRegistrant' when platform == 'ios':
+        _checkRegistrant(xcframework);
       case 'Flutter' || 'FlutterMacOS':
         engine = xcframework;
         _checkEngine(xcframework, platform);
@@ -384,9 +413,23 @@ void main(List<String> args) {
         _failures.add('$name.xcframework: not expected');
     }
   }
-  for (final name in {...plugins, ...codeAssets}.difference(found)) {
+  final expected = {
+    'App',
+    if (platform == 'ios') ...{'Flutter', 'FlutterPluginRegistrant'},
+    if (platform == 'macos') 'FlutterMacOS',
+    ...plugins,
+    ...codeAssets,
+  };
+  for (final name in expected.difference(found)) {
     _failures.add('$name.xcframework: missing');
   }
+  final loose = platform == 'ios'
+      ? {'GeneratedPluginRegistrant.h', 'GeneratedPluginRegistrant.m'}
+      : <String>{};
+  _check(
+    looseFiles.length == loose.length && looseFiles.containsAll(loose),
+    'the files beside the xcframeworks are $looseFiles, not $loose',
+  );
   if (engine != null && pluginPaths.isNotEmpty) {
     _checkModules(pluginPaths, engine, platform);
   }

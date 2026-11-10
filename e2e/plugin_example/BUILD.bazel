@@ -20,6 +20,7 @@ load(
     "flutter_ios_plugin_xcframeworks",
     "flutter_ios_privacy_manifests_gen",
     "flutter_ios_registrant_gen",
+    "flutter_ios_registrant_xcframework",
     "flutter_ios_runner_lib_gen",
     "flutter_ios_simulator_build_test",
 )
@@ -932,6 +933,13 @@ flutter_ios_code_asset_xcframeworks(
     tags = ["manual"],
 )
 
+flutter_ios_registrant_xcframework(
+    name = "add_to_app_ios_registrant",
+    application = ":add_to_app_module",
+    plugins = ":add_to_app_ios_plugins",
+    tags = ["manual"],
+)
+
 flutter_macos_plugin_xcframeworks(
     name = "add_to_app_macos_plugins",
     application = ":add_to_app_module",
@@ -955,7 +963,7 @@ flutter_macos_code_asset_xcframeworks(
             ":add_to_app_%s_engine" % platform,
             ":add_to_app_%s_plugins" % platform,
             ":add_to_app_%s_code_assets" % platform,
-        ],
+        ] + ([":add_to_app_ios_registrant"] if platform == "ios" else []),
     )
     for platform in _ADD_TO_APP_PLATFORMS
     for mode, compilation_mode in _ADD_TO_APP_MODES.items()

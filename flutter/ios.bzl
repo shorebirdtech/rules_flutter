@@ -71,6 +71,7 @@ load("//flutter/private:flutter_apple_bundle_version.bzl", _flutter_apple_bundle
 load("//flutter/private:flutter_apple_plugin_library.bzl", _flutter_apple_plugin_library_macro = "flutter_apple_plugin_library")
 load("//flutter/private:flutter_apple_plugin_xcframeworks.bzl", _flutter_ios_code_asset_xcframeworks = "flutter_ios_code_asset_xcframeworks", _flutter_ios_plugin_xcframeworks = "flutter_ios_plugin_xcframeworks")
 load("//flutter/private:flutter_apple_plugins_aggregator.bzl", _flutter_apple_plugins_aggregator = "flutter_apple_plugins_aggregator")
+load("//flutter/private:flutter_apple_registrant.bzl", _flutter_ios_registrant_xcframework = "flutter_ios_registrant_xcframework")
 load("//flutter/private:flutter_apple_xcframeworks.bzl", _flutter_ios_app_xcframework = "flutter_ios_app_xcframework", _flutter_ios_engine_xcframework = "flutter_ios_engine_xcframework")
 load("//flutter/private:flutter_ios_application.bzl", _flutter_ios_app_framework_rule = "flutter_ios_app_framework", _flutter_ios_application = "flutter_ios_application", _flutter_ios_native_frameworks_rule = "flutter_ios_native_frameworks", _flutter_ios_privacy_manifests_rule = "flutter_ios_privacy_manifests")
 load("//flutter/private:flutter_ios_registrant.bzl", _flutter_ios_registrant_rule = "flutter_ios_registrant")
@@ -87,12 +88,13 @@ IOS_DEFAULT_MAIN_STORYBOARD = "@rules_flutter//flutter/private/runners/ios:Base.
 
 # Add-to-app, for a host app built by Xcode (see README, "Add-to-app"): the
 # application's App.xcframework, a copy of Flutter's own engine xcframework, an
-# xcframework per plugin and per code asset, in the build mode of the
-# configuration.
+# xcframework per plugin and per code asset, and the plugin registrant, in the
+# build mode of the configuration.
 flutter_ios_app_xcframework = _flutter_ios_app_xcframework
 flutter_ios_engine_xcframework = _flutter_ios_engine_xcframework
 flutter_ios_plugin_xcframeworks = _flutter_ios_plugin_xcframeworks
 flutter_ios_code_asset_xcframeworks = _flutter_ios_code_asset_xcframeworks
+flutter_ios_registrant_xcframework = _flutter_ios_registrant_xcframework
 
 # Merges entitlement additions into a base entitlements file — the additive
 # seam rules_apple's single-file `entitlements` attribute does not provide.
