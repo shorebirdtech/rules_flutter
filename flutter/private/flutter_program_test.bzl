@@ -93,9 +93,10 @@ def _flutter_test_impl(ctx):
             env[key] = "\n".join(selectors)
 
     # Under `bazel coverage`, what turns the VM's coverage of the program into
-    # the tracefile Bazel merges: rules_dart's converter, and where each
-    # package's `lib/` is.
-    coverage = test_coverage(ctx, info.packages)
+    # the tracefile Bazel merges: rules_dart's converter, where each package's
+    # `lib/` is, and the sources whose `coverage:ignore` comments it honours.
+    # This rule has no sources of its own: the program it runs reports them.
+    coverage = test_coverage(ctx, info.packages, [], [ctx.attr.program])
     if coverage:
         env["FLUTTER_TEST_COVERAGE_CONVERTER"] = coverage.converter
         env["FLUTTER_TEST_COVERAGE_SOURCES"] = coverage.sources
