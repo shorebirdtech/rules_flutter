@@ -30,6 +30,7 @@ load("//flutter/private:constants.bzl", "IOS_MINIMUM_OS_VERSION")
 load("//flutter/private:exec_groups.bzl", "PORTABLE_EXEC_GROUPS", "portable_tools")
 load("//flutter/private:flutter_native_assets.bzl", "native_asset_framework_name")
 load("//flutter/private:mobile_engine_check.bzl", "check_ios_engine")
+load("//flutter/private:program_analysis.bzl", "bundled_program_info")
 
 def _flutter_ios_application_impl(ctx):
     """Bundles Flutter compilation outputs for iOS packaging."""
@@ -364,7 +365,8 @@ def _flutter_ios_native_frameworks_impl(ctx):
             deps = [],
             framework_imports = framework_files,
         ),
-    ]
+        # For the app to pass on to analysis (`flutter_apple_app`).
+    ] + bundled_program_info(ctx.attr.application)
 
 flutter_ios_native_frameworks = rule(
     implementation = _flutter_ios_native_frameworks_impl,

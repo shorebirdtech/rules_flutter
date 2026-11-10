@@ -5,6 +5,7 @@ target platform the iOS rules must still cope with.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
+load("@rules_dart//dart:providers.bzl", "DartAnalyzableInfo")
 
 def _analyses_impl(ctx):
     env = analysistest.begin(ctx)
@@ -25,6 +26,26 @@ def _skipped_impl(ctx):
          "should be skipped.") % analysistest.target_under_test(env).label,
     )
     return analysistest.end(env)
+
+def _program_impl(ctx):
+    env = analysistest.begin(ctx)
+    target = analysistest.target_under_test(env)
+    asserts.true(env, DartAnalyzableInfo in target, "the app passes on its program's DartAnalyzableInfo")
+    if DartAnalyzableInfo in target:
+        info = target[DartAnalyzableInfo]
+        paths = [f.short_path for f in info.entry_srcs.to_list() + info.dart_info.srcs]
+        asserts.true(
+            env,
+            ctx.attr.main in paths,
+            "the program's files include its main, %s: %s" % (ctx.attr.main, paths),
+        )
+    return analysistest.end(env)
+
+_program_dbg_test = analysistest.make(
+    _program_impl,
+    attrs = {"main": attr.string(mandatory = True)},
+    config_settings = {"//command_line_option:compilation_mode": "dbg"},
+)
 
 # The `-c` and `--@rules_flutter//flutter:profile` pairs a command line can
 # carry. The simulator wrappers build debug mode whatever the pair, so each one
@@ -102,6 +123,20 @@ def analyses_test(name, target):
         target: The target that must be compatible.
     """
     _analyses_dbg_test(name = name, target_under_test = target)
+
+def program_test(name, target, main):
+    """A test that `target`, an app, analyses in `-c dbg` and passes on its program.
+
+    Like `analyses_test`, it passes by being skipped if `target` is
+    incompatible with the platform.
+
+    Args:
+        name: The test's name.
+        target: The app.
+        main: The workspace path of the program's `main`, which must be among
+            the files it passes on.
+    """
+    _program_dbg_test(name = name, target_under_test = target, main = main)
 
 def skipped_test(name, target, on_linux = False):
     """A test that passes only by being skipped: `target` is incompatible.

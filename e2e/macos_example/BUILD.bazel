@@ -19,7 +19,7 @@ load(
     "flutter_macos_registrant_gen",
     "flutter_macos_runner_lib_gen",
 )
-load("@rules_flutter//tools/e2e_testing:apple_analysis_test.bzl", "analyses_test", "skipped_test")
+load("@rules_flutter//tools/e2e_testing:apple_analysis_test.bzl", "analyses_test", "program_test", "skipped_test")
 load("@rules_flutter//tools/e2e_testing:apple_release_build.bzl", "apple_release_build")
 load("@rules_flutter//tools/e2e_testing:device_profile.bzl", "device_flag", "device_profile")
 load("@rules_swift//swift:swift.bzl", "swift_library")
@@ -621,6 +621,13 @@ flutter_macos_app(
 # the same app where it is compatible, and passes by analysing.
 analyses_test(
     name = "macos_app_control_test",
+    target = ":app",
+)
+
+# The app passes on its program, as its bundle builds it, for analysis.
+program_test(
+    name = "macos_app_program_test",
+    main = "lib/main.dart",
     target = ":app",
 )
 

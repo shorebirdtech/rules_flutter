@@ -7,7 +7,7 @@ of them says which files are its own, and `StagedSourcesInfo` is how a rule
 that stages copies of source files into a program names the sources.
 """
 
-load("@rules_dart//dart:providers.bzl", "DartInfo")
+load("@rules_dart//dart:providers.bzl", "DartAnalyzableInfo", "DartInfo")
 load("@rules_dart//dart:utils.bzl", "dart_analyzable_info", "package_info_from_metadata", "package_lib_prefix")
 
 StagedSourcesInfo = provider(
@@ -17,6 +17,46 @@ StagedSourcesInfo = provider(
     fields = {
         "sources": "Depset of source Files, each staged under the same basename beside its siblings, so their relative imports resolve alike.",
     },
+)
+
+BundledProgramInfo = provider(
+    doc = "The program a part of a platform's app bundle is built from, for " +
+          "the app to pass on to rules_dart's analysis when the bundle rule " +
+          "(rules_apple's) passes on nothing of its contents'.",
+    fields = {
+        "info": "The program's `DartAnalyzableInfo`.",
+    },
+)
+
+def bundled_program_info(application):
+    """The `BundledProgramInfo` of a bundle part built from `application`, if it is a program.
+
+    Args:
+      application: The part's `flutter_application` (or variant) Target.
+
+    Returns:
+      A list of one `BundledProgramInfo`, or none.
+    """
+    if DartAnalyzableInfo not in application:
+        return []
+    return [BundledProgramInfo(info = application[DartAnalyzableInfo])]
+
+def _bundled_program_aspect_impl(_target, ctx):
+    # The parts of the bundle, as the bundle rule configured them, so the
+    # program found is the one the app ships. Each part that has one names the
+    # same application.
+    attrs = ctx.rule.attr
+    parts = list(getattr(attrs, "deps", [])) + list(getattr(attrs, "additional_contents", {}).keys())
+    for part in parts:
+        if BundledProgramInfo in part:
+            return [part[BundledProgramInfo]]
+    return []
+
+# Applied to an Apple bundle alone, without propagating: it reads the
+# `BundledProgramInfo` of the bundle's direct parts.
+bundled_program_aspect = aspect(
+    implementation = _bundled_program_aspect_impl,
+    doc = "Finds the program among an app bundle's direct parts (`deps`, `additional_contents`).",
 )
 
 # Analysis-only. `package:sky_engine`'s `lib/_embedder.yaml` is the whole of how

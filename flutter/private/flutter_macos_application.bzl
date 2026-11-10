@@ -26,6 +26,7 @@ load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterSdkRecordInfo"
 load("//flutter/private:apple_xcode.bzl", "XCODE_TOOL_ATTRS", "XCODE_TOOL_FRAGMENTS", "XCODE_TOOL_TOOLCHAINS", "declare_dsym", "split_and_strip_aot_binary")
 load("//flutter/private:assemble_directory.bzl", "ASSEMBLE_DIRECTORY_ATTRS", "assemble_directory")
 load("//flutter/private:exec_groups.bzl", "PORTABLE_EXEC_GROUPS", "portable_tools")
+load("//flutter/private:program_analysis.bzl", "bundled_program_info")
 
 # -- flutter_macos_framework (App.framework assembly) -------------------------
 
@@ -170,7 +171,9 @@ def _flutter_macos_framework_impl(ctx):
             deps = [],
             dsyms = dsym_files,
         ))
-    return providers
+
+    # For the app to pass on to analysis (`flutter_apple_app`).
+    return providers + bundled_program_info(ctx.attr.application)
 
 flutter_macos_framework = rule(
     implementation = _flutter_macos_framework_impl,

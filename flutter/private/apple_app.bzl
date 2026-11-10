@@ -22,7 +22,7 @@ load(
     "IosApplicationBundleInfo",
     "MacosApplicationBundleInfo",
 )
-load("@rules_dart//dart:providers.bzl", "DartAnalyzableInfo")
+load("//flutter/private:program_analysis.bzl", "BundledProgramInfo", "bundled_program_aspect")
 
 # What a rules_apple application provides that something downstream reads: a
 # test host takes the bundle info, `bazel run` the executable, and a dSYM
@@ -71,8 +71,9 @@ def _impl(ctx):
         OutputGroupInfo(**groups),
     ] + [app[provider] for provider in _FORWARDED if provider in app and provider != OutputGroupInfo] + (
         # The program's own Dart files, for rules_dart's analysis: the
-        # rules_apple bundle does not pass on what its contents provide.
-        [ctx.attr.application[DartAnalyzableInfo]] if ctx.attr.application and DartAnalyzableInfo in ctx.attr.application else []
+        # rules_apple bundle does not pass on what its contents provide, so
+        # `bundled_program_aspect` reads them off the bundle's parts.
+        [app[BundledProgramInfo].info] if BundledProgramInfo in app else []
     )
 
 flutter_apple_app = rule(
@@ -82,13 +83,7 @@ flutter_apple_app = rule(
             doc = "The rules_apple application. Not built for this target's platform: it sets its own.",
             mandatory = True,
             providers = [AppleBundleInfo],
-        ),
-        "application": attr.label(
-            doc = "Internal plumbing, set by `flutter_ios_app` and `flutter_macos_app`: " +
-                  "the `flutter_application` (or variant) inside the bundle, whose " +
-                  "`DartAnalyzableInfo` this target returns so rules_dart's analysis " +
-                  "checks the program's own files under the name the user gives the app.",
-            providers = [DartAnalyzableInfo],
+            aspects = [bundled_program_aspect],
         ),
         "validations": attr.label_list(
             doc = "Checks that must pass for the app to build: targets whose files are validation outputs.",

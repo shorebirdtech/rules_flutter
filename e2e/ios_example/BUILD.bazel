@@ -17,7 +17,7 @@ load(
     "flutter_ios_simulator_build",
     "flutter_ios_simulator_build_test",
 )
-load("@rules_flutter//tools/e2e_testing:apple_analysis_test.bzl", "analyses_test", "command_line_tests", "skipped_test")
+load("@rules_flutter//tools/e2e_testing:apple_analysis_test.bzl", "analyses_test", "command_line_tests", "program_test", "skipped_test")
 load("@rules_flutter//tools/e2e_testing:apple_release_build.bzl", "apple_release_build")
 load("@rules_flutter//tools/e2e_testing:device_profile.bzl", "device_profile")
 load("@rules_swift//swift:swift.bzl", "swift_library")
@@ -649,6 +649,35 @@ flutter_ios_app(
     application = ":app_flutter",
     bundle_id = "com.rulesflutter.ios.example.windowsonly",
     target_compatible_with = ["@platforms//os:windows"],
+)
+
+# Property: an iOS app over an application with an iOS-only dependency is
+# built for iOS and passes on its program for analysis, rather than being
+# skipped: nothing configures its application for any platform but the
+# bundle's. A regression shows as this test SKIPPED, not FAILED, since Bazel
+# skips a test of an incompatible target; `bazel build //:ios_only_app` says
+# so outright.
+flutter_application(
+    name = "ios_only_flutter",
+    main = "lib/testonly_main.dart",
+    minimum_os_version = IOS_MINIMUM_OS_VERSION,
+    package = ":pubspec-metadata",
+    deps = [
+        "//ios_only",
+        "@deps//:flutter",
+    ],
+)
+
+flutter_ios_app(
+    name = "ios_only_app",
+    application = ":ios_only_flutter",
+    bundle_id = "com.rulesflutter.ios.example.iosonly",
+)
+
+program_test(
+    name = "ios_only_app_program_test",
+    main = "lib/testonly_main.dart",
+    target = ":ios_only_app",
 )
 
 analyses_test(

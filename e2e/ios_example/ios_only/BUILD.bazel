@@ -1,0 +1,18 @@
+load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
+load("@rules_flutter//flutter:defs.bzl", "flutter_library")
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "ios_only",
+)
+
+# A library for iOS only, as a plugin with no other platform's code would be:
+# the `flutter_ios_app` over an application that depends on it is still an iOS
+# app, built and analyzed for iOS (`//:ios_only_app_analyses_test`).
+flutter_library(
+    name = "ios_only",
+    srcs = ["lib/ios_only.dart"],
+    package = ":pubspec-metadata",
+    target_compatible_with = ["@platforms//os:ios"],
+    visibility = ["//:__pkg__"],
+)
