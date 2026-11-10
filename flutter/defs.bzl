@@ -36,9 +36,9 @@ rules that compile Dart code, bundle assets, and run tests.
 Most users don't need these directly. `flutter_application` composes them
 internally. They are exported for advanced use cases like custom pipelines.
 
-- `flutter_kernel_target`: Runs the Flutter frontend compiler to produce a
+- `flutter_kernel`: Runs the Flutter frontend compiler to produce a
     kernel .dill file from Dart sources.
-- `flutter_aot_target`: Runs gen_snapshot to AOT-compile a kernel .dill into
+- `flutter_aot_snapshot`: Runs gen_snapshot to AOT-compile a kernel .dill into
     native code (ELF .so or Mach-O dylib).
 - `flutter_asset_bundle`: Bundles Flutter assets (images, fonts, shaders)
     into a flutter_assets/ tree artifact.
@@ -55,11 +55,11 @@ artifacts:
 - `@rules_flutter//flutter:web.bzl` — `flutter_web_app` + composable rules (takes source directly, not a flutter_application target)
 """
 
-load("//flutter/private:flutter_aot_target.bzl", _flutter_aot_target = "flutter_aot_target")
+load("//flutter/private:flutter_aot_snapshot.bzl", _flutter_aot_snapshot = "flutter_aot_snapshot")
 load("//flutter/private:flutter_application.bzl", _flutter_application = "flutter_application")
 load("//flutter/private:flutter_asset_bundle.bzl", _flutter_asset_bundle = "flutter_asset_bundle")
 load("//flutter/private:flutter_gen_l10n.bzl", _flutter_gen_l10n = "flutter_gen_l10n")
-load("//flutter/private:flutter_kernel_target.bzl", _flutter_kernel_target = "flutter_kernel_target")
+load("//flutter/private:flutter_kernel.bzl", _flutter_kernel = "flutter_kernel")
 load("//flutter/private:flutter_library.bzl", _flutter_library = "flutter_library")
 load("//flutter/private:flutter_native_library.bzl", _flutter_native_library = "flutter_native_library")
 load("//flutter/private:flutter_plugin.bzl", _flutter_plugin = "flutter_plugin")
@@ -68,7 +68,7 @@ load("//flutter/private:flutter_program_test.bzl", _flutter_program_test = "flut
 load("//flutter/private:flutter_test.bzl", _flutter_suite_program = "flutter_suite_program", _flutter_test = "flutter_test", _flutter_tester_binary = "flutter_tester_binary")
 load("//flutter/private:test_config.bzl", "find_test_config")
 
-flutter_aot_target = _flutter_aot_target
+flutter_aot_snapshot = _flutter_aot_snapshot
 
 def flutter_application(name, package_name = "", **kwargs):
     """Compiles a Flutter application with stable package: URIs for hot reload.
@@ -95,7 +95,7 @@ def flutter_application(name, package_name = "", **kwargs):
 
 flutter_asset_bundle = _flutter_asset_bundle
 flutter_gen_l10n = _flutter_gen_l10n
-flutter_kernel_target = _flutter_kernel_target
+flutter_kernel = _flutter_kernel
 flutter_library = _flutter_library
 flutter_native_library = _flutter_native_library
 flutter_plugin = _flutter_plugin

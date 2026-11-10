@@ -21,9 +21,9 @@ action's tool:
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("@rules_dart//dart:toolchain.bzl", "SDK_FILE_SETS")
 load("//flutter:web.bzl", "flutter_web_bundle")
-load("//flutter/private:flutter_aot_target.bzl", "flutter_aot_target")
+load("//flutter/private:flutter_aot_snapshot.bzl", "flutter_aot_snapshot")
 load("//flutter/private:flutter_application.bzl", "flutter_application")
-load("//flutter/private:flutter_kernel_target.bzl", "flutter_kernel_target")
+load("//flutter/private:flutter_kernel.bzl", "flutter_kernel")
 load("//flutter/private:flutter_macos_application.bzl", "flutter_macos_framework")
 load(":apple_bundling.bzl", "fake_application")
 
@@ -171,13 +171,13 @@ def sdk_inputs_test_suite(name):
         deps = ["//flutter/tests/resources_fixture:resources_library"],
         tags = ["manual"],
     )
-    flutter_kernel_target(
+    flutter_kernel(
         name = name + "_kernel",
         package_name = _PACKAGE,
         main = _MAIN,
         tags = ["manual"],
     )
-    flutter_aot_target(
+    flutter_aot_snapshot(
         name = name + "_aot",
         package_name = _PACKAGE,
         main = _MAIN,

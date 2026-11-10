@@ -247,13 +247,13 @@ def flutter_compile_kernel(ctx, tools, aot = None, target_platform = None, nativ
             (the `trackWidgetCreation` of the debug `rules_flutter.build_info`
             record). Passed rather than read off `ctx.attr`,
             because the rules calling this do not share one attribute set —
-            `flutter_kernel_target` has no such attr — and a rule that has no
+            `flutter_kernel` has no such attr — and a rule that has no
             opinion should say `False` rather than be probed for one.
         assets_dir: The declared `flutter_assets/` tree artifact, from
             `declare_flutter_assets_dir`. Supplying it is what makes a debug
             build carry `rules_flutter.build_info`; the rules with no asset
-            bundle of their own (`flutter_kernel_target`,
-            `flutter_aot_target`) leave it None and emit no define, because
+            bundle of their own (`flutter_kernel`,
+            `flutter_aot_snapshot`) leave it None and emit no define, because
             an app with no assets tree has nothing for the dev tool to watch.
         platform_build_args: Flags from `launch_build_args`, recorded in
             `build_info` so an attaching dev tool can reproduce this
@@ -1284,8 +1284,8 @@ def flutter_program_inputs(ctx):
 # that calls it spreads this bundle wholesale rather than naming the members,
 # because naming them is what let the contract break: `flutter_compile_kernel`
 # reaches into `ctx.attr.language_version` on whatever context it is handed,
-# and the two callers that built a narrowed attr surface — `flutter_aot_target`
-# cherry-picking from `FLUTTER_APPLICATION_ATTRS`, `flutter_kernel_target`
+# and the two callers that built a narrowed attr surface — `flutter_aot_snapshot`
+# cherry-picking from `FLUTTER_APPLICATION_ATTRS`, `flutter_kernel`
 # hand-rolling a near-copy that had already drifted — simply did not have it.
 # One failed at analysis, the other silently; a caller that spreads the bundle
 # can omit nothing.

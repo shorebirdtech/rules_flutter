@@ -9,7 +9,7 @@ actions the rule declares.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
-load("//flutter/private:flutter_aot_target.bzl", "flutter_aot_target")
+load("//flutter/private:flutter_aot_snapshot.bzl", "flutter_aot_snapshot")
 load("//flutter/private:flutter_application.bzl", "flutter_application")
 load("//flutter/private:flutter_profile_build.bzl", "flutter_profile_build")
 
@@ -164,7 +164,7 @@ def profile_mode_test_suite(name):
         main = _MAIN,
         tags = ["manual"],
     )
-    flutter_aot_target(
+    flutter_aot_snapshot(
         name = "_profile_aot",
         package_name = _PACKAGE,
         main = _MAIN,

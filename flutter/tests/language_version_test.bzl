@@ -15,7 +15,7 @@ green. The assertion has to start at the rule's attr and end at the bytes.
 
 Both failure modes are covered by the same assertion:
 
-  * `flutter_kernel_target` and `flutter_aot_target` never declared the attr
+  * `flutter_kernel` and `flutter_aot_snapshot` never declared the attr
     while `flutter_compile_kernel` read it off their `ctx`, so they failed at
     analysis — `//:hello_world` and `//:hello_world_aot` in `e2e/hello_world`
     could not be built at all;
@@ -34,9 +34,9 @@ compiler.
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("@rules_dart//dart:providers.bzl", "DartAnalyzableInfo")
 load("//flutter:web.bzl", "flutter_web_bundle")
-load("//flutter/private:flutter_aot_target.bzl", "flutter_aot_target")
+load("//flutter/private:flutter_aot_snapshot.bzl", "flutter_aot_snapshot")
 load("//flutter/private:flutter_application.bzl", "flutter_application")
-load("//flutter/private:flutter_kernel_target.bzl", "flutter_kernel_target")
+load("//flutter/private:flutter_kernel.bzl", "flutter_kernel")
 load("//flutter/private:flutter_test.bzl", "flutter_test")
 load("//flutter/private:flutter_web_branch.bzl", "web_branches_target")
 load(":action_content.bzl", "package_entry", "written_json")
@@ -162,7 +162,7 @@ def _setup_fixtures():
     # The two low-level rules. Both build a narrowed attr surface of their own,
     # and both failed at analysis rather than silently — declaring the fixture
     # is most of the test.
-    flutter_kernel_target(
+    flutter_kernel(
         name = "_lv_kernel",
         package_name = _PACKAGE,
         language_version = _LANGUAGE_VERSION,
@@ -170,7 +170,7 @@ def _setup_fixtures():
         tags = ["manual"],
     )
 
-    flutter_aot_target(
+    flutter_aot_snapshot(
         name = "_lv_aot",
         package_name = _PACKAGE,
         language_version = _LANGUAGE_VERSION,

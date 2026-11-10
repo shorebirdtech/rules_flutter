@@ -17,7 +17,7 @@ load("//flutter/private:common.bzl", "FLUTTER_APPLICATION_ATTRS", "KERNEL_COMPIL
 load("//flutter/private:exec_groups.bzl", "PORTABLE_EXEC_GROUPS", "portable_tools")
 load("//flutter/private:flutter_aot_compile.bzl", "flutter_aot_elf_action", "flutter_aot_macho_action", "gen_snapshot_options")
 
-def _flutter_aot_target_impl(ctx):
+def _flutter_aot_snapshot_impl(ctx):
     flutter_toolchain = ctx.toolchains["@rules_flutter//flutter:toolchain_type"]
     flutter_sdk_info = flutter_toolchain.flutter_sdk_info
 
@@ -103,8 +103,8 @@ _AOT_ATTRS = KERNEL_COMPILE_ATTRS | {k: v for k, v in FLUTTER_APPLICATION_ATTRS.
     "extra_gen_snapshot_options",
 )}
 
-flutter_aot_target = rule(
-    implementation = _flutter_aot_target_impl,
+flutter_aot_snapshot = rule(
+    implementation = _flutter_aot_snapshot_impl,
     attrs = dict(_AOT_ATTRS, **PLATFORM_CONSTRAINT_ATTRS),
     # The target's toolchain is for gen_snapshot; the kernel is `portable`.
     toolchains = [

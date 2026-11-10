@@ -7,7 +7,7 @@ load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS")
 load("//flutter/private:common.bzl", "AGENT_EXTENSIONS_ATTR", "KERNEL_COMPILE_ATTRS", "flutter_compile_kernel")
 load("//flutter/private:exec_groups.bzl", "PORTABLE_EXEC_GROUPS", "portable_tools")
 
-def _flutter_kernel_target_impl(ctx):
+def _flutter_kernel_impl(ctx):
     # flutter_compile_kernel handles mode-aware platform dill selection.
     # If the user explicitly requests AOT, force it regardless of mode.
     # None lets flutter_compile_kernel decide based on COMPILATION_MODE;
@@ -20,8 +20,8 @@ def _flutter_kernel_target_impl(ctx):
         OutputGroupInfo(_validation = compilation.import_checks),
     ]
 
-flutter_kernel_target = rule(
-    implementation = _flutter_kernel_target_impl,
+flutter_kernel = rule(
+    implementation = _flutter_kernel_impl,
     # The compile inputs come from the shared bundle rather than a copy of it,
     # so this rule cannot drift from what `flutter_compile_kernel` reads.
     attrs = KERNEL_COMPILE_ATTRS | {

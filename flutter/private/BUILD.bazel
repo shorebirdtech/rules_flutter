@@ -598,8 +598,8 @@ bzl_library(
 )
 
 bzl_library(
-    name = "flutter_aot_target",
-    srcs = ["flutter_aot_target.bzl"],
+    name = "flutter_aot_snapshot",
+    srcs = ["flutter_aot_snapshot.bzl"],
     visibility = ["//flutter:__subpackages__"],
     deps = [
         ":common",
@@ -711,8 +711,8 @@ bzl_library(
 )
 
 bzl_library(
-    name = "flutter_kernel_target",
-    srcs = ["flutter_kernel_target.bzl"],
+    name = "flutter_kernel",
+    srcs = ["flutter_kernel.bzl"],
     visibility = ["//flutter:__subpackages__"],
     deps = [
         ":common",

@@ -3,7 +3,7 @@ load("@rules_apple//apple:ios.bzl", "ios_application")
 load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
 load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_test")
 load("@rules_flutter//flutter:android.bzl", "flutter_android_app")
-load("@rules_flutter//flutter:defs.bzl", "flutter_aot_target", "flutter_application", "flutter_asset_bundle", "flutter_kernel_target", "flutter_library", "flutter_profile_build", "flutter_program_test", "flutter_suite_program", "flutter_test", "flutter_tester_binary")
+load("@rules_flutter//flutter:defs.bzl", "flutter_aot_snapshot", "flutter_application", "flutter_asset_bundle", "flutter_kernel", "flutter_library", "flutter_profile_build", "flutter_program_test", "flutter_suite_program", "flutter_test", "flutter_tester_binary")
 load(
     "@rules_flutter//flutter:ios.bzl",
     "IOS_DEFAULT_LAUNCH_STORYBOARD",
@@ -29,7 +29,7 @@ exports_files(["pubspec.lock"])
 
 # -- Advanced: low-level compilation rules (most users use flutter_application) --
 
-flutter_kernel_target(
+flutter_kernel(
     name = "hello_world",
     package_name = "hello_world",
     srcs = ["lib/common_widgets.dart"],
@@ -42,7 +42,7 @@ flutter_kernel_target(
     ],
 )
 
-flutter_aot_target(
+flutter_aot_snapshot(
     name = "hello_world_aot",
     package_name = "hello_world",
     srcs = ["lib/common_widgets.dart"],

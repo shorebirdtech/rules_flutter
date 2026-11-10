@@ -207,7 +207,7 @@ Bazel's compilation mode flag selects how the Dart is compiled:
 
 Note that a plain `bazel build` is a release build, not a debug one. That matters for [permissions](#release-builds-and-permissions).
 
-On iOS and macOS a release or profile build strips `App.framework/App` of its local symbols, as `flutter build ios` and `flutter build macos` do, and keeps them in a dSYM. The dSYM has the binary's UUID, so a crash reporter symbolicates the shipped app with it. It is in the `dsyms` output group of the app target: `bazel build //:app --output_groups=+dsyms`. `extra_gen_snapshot_options = ["--no-strip"]` keeps the local symbols in the binary, as it does for `flutter build`; the dSYM is still made. Keep it with each release. A dSYM of an `obfuscate = True` app holds the unobfuscated Dart names (`gen_snapshot` warns of it), so keep it out of the shipped app. `flutter_aot_target` on an Apple platform is not stripped, and its object is in the `macho_object` output group.
+On iOS and macOS a release or profile build strips `App.framework/App` of its local symbols, as `flutter build ios` and `flutter build macos` do, and keeps them in a dSYM. The dSYM has the binary's UUID, so a crash reporter symbolicates the shipped app with it. It is in the `dsyms` output group of the app target: `bazel build //:app --output_groups=+dsyms`. `extra_gen_snapshot_options = ["--no-strip"]` keeps the local symbols in the binary, as it does for `flutter build`; the dSYM is still made. Keep it with each release. A dSYM of an `obfuscate = True` app holds the unobfuscated Dart names (`gen_snapshot` warns of it), so keep it out of the shipped app. `flutter_aot_snapshot` on an Apple platform is not stripped, and its object is in the `macho_object` output group.
 
 Profile mode is `flutter run --profile`: release-speed code that still serves the Dart VM service, so DevTools can record timelines and CPU profiles. It has no hot reload. Profile uses its own engine and gen_snapshot on every platform, downloaded the first time a profile build needs them, because the engine refuses a snapshot compiled for a different mode. The flag needs `-c opt`, and the build fails if it is set with any other `-c`. Like upstream Flutter, there is no profile mode for the iOS simulator: build profile for a physical device. A `.bazelrc` config saves typing:
 
@@ -2592,8 +2592,8 @@ These are what `flutter_application` is made of. Most apps never need them.
 
 | Rule | What it does |
 |---|---|
-| `flutter_kernel_target` | Compiles Dart to a kernel `.dill` with Flutter's patched platform kernel. |
-| `flutter_aot_target` | Compiles Dart to an AOT shared library (`.so` on Linux and Android, `.dylib` on macOS) with `gen_snapshot`. |
+| `flutter_kernel` | Compiles Dart to a kernel `.dill` with Flutter's patched platform kernel. |
+| `flutter_aot_snapshot` | Compiles Dart to an AOT shared library (`.so` on Linux and Android, `.dylib` on macOS) with `gen_snapshot`. |
 | `flutter_asset_bundle` | Builds the `flutter_assets/` tree: `AssetManifest.bin`, `FontManifest.json`, `NOTICES.Z`, and the asset files. |
 | `flutter_native_library` | Pairs a native library with its binding contract. See [Hot reload across a native rebuild](#hot-reload-across-a-native-rebuild). |
 | `flutter_native_asset`, `flutter_data_asset` | Declare Dart Native Assets, from `@rules_flutter//flutter:native_assets.bzl`. A data asset is bundled at `flutter_assets/packages/<package>/<name>`. |

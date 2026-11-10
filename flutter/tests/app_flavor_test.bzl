@@ -10,7 +10,7 @@ that build takes the flavor from the target.
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("//flutter:defs.bzl", "flutter_application")
-load("//flutter/private:flutter_kernel_target.bzl", "flutter_kernel_target")
+load("//flutter/private:flutter_kernel.bzl", "flutter_kernel")
 load(":action_content.bzl", "written_json")
 load(":version_defines_test.bzl", "pinned_version_defines")
 
@@ -86,7 +86,7 @@ def app_flavor_test_suite(name):
         main = "web_fixture_main.dart",
         tags = ["manual"],
     )
-    flutter_kernel_target(
+    flutter_kernel(
         name = "_flavor_kernel",
         package_name = "flavor_fixture",
         flavor = "paid",

@@ -11,7 +11,7 @@ that sets one is refused, as `flutter_tools` refuses it.
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("@flutter_version_pin//:version.bzl", "FLUTTER_VERSION")
 load("//flutter:defs.bzl", "flutter_application")
-load("//flutter/private:flutter_kernel_target.bzl", "flutter_kernel_target")
+load("//flutter/private:flutter_kernel.bzl", "flutter_kernel")
 load("//flutter/private:flutter_test.bzl", "flutter_test")
 load("//flutter/private:sdk_defines.bzl", "VERSION_DEFINE_KEYS", "sdk_dart_defines", "version_dart_defines")
 load("//flutter/private:validation.bzl", "is_valid_dart_define")
@@ -172,7 +172,7 @@ def version_defines_test_suite(name):
         main = "web_fixture_main.dart",
         tags = ["manual"],
     )
-    flutter_kernel_target(
+    flutter_kernel(
         name = "_version_kernel",
         package_name = "flavor_fixture",
         main = "web_fixture_main.dart",

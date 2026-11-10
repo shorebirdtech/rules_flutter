@@ -8,7 +8,7 @@ the AOT compiler of its own CPU, run with the options flutter_tools gives a
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("//flutter/private:common.bzl", "ANDROID_ABIS")
-load("//flutter/private:flutter_aot_target.bzl", "flutter_aot_target")
+load("//flutter/private:flutter_aot_snapshot.bzl", "flutter_aot_snapshot")
 
 # What flutter_tools gives gen_snapshot for android-arm (`base/build.dart`):
 # softfp, because Android armv7 devices have no hard-float ABI, and no integer
@@ -92,7 +92,7 @@ def android_arm_test_suite(name):
     Args:
         name: The test_suite name.
     """
-    flutter_aot_target(
+    flutter_aot_snapshot(
         name = name + "_aot_target",
         package_name = "android_arm_fixture",
         main = "lib/language_version_main.dart",

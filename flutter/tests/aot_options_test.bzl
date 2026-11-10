@@ -1,7 +1,7 @@
 """Every gen_snapshot option a target declares reaches gen_snapshot.
 
 `obfuscate`, `split_debug_info` and `extra_gen_snapshot_options` are attributes
-of both `flutter_application` and `flutter_aot_target`. A user who sets one has
+of both `flutter_application` and `flutter_aot_snapshot`. A user who sets one has
 asked for something specific of the snapshot; an attribute a rule declares and
 does not act on gives the user a build that is not the one they asked for, with
 no error. These tests read the gen_snapshot action each rule declares, for each
@@ -10,7 +10,7 @@ attribute, in each `-c` that builds Flutter's release mode.
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("//flutter:providers.bzl", "FlutterApplicationInfo")
-load("//flutter/private:flutter_aot_target.bzl", "flutter_aot_target")
+load("//flutter/private:flutter_aot_snapshot.bzl", "flutter_aot_snapshot")
 load("//flutter/private:flutter_application.bzl", "flutter_application")
 
 _PACKAGE = "aot_options_fixture"
@@ -128,7 +128,7 @@ _OPTIONS = {
 }
 
 _RULES = {
-    "aot_target": flutter_aot_target,
+    "aot_target": flutter_aot_snapshot,
     "application": flutter_application,
 }
 

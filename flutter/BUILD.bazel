@@ -115,10 +115,10 @@ bzl_library(
     srcs = ["defs.bzl"],
     visibility = ["//visibility:public"],
     deps = [
-        "//flutter/private:flutter_aot_target",
+        "//flutter/private:flutter_aot_snapshot",
         "//flutter/private:flutter_application",
         "//flutter/private:flutter_asset_bundle",
-        "//flutter/private:flutter_kernel_target",
+        "//flutter/private:flutter_kernel",
         "//flutter/private:flutter_library",
         "//flutter/private:flutter_plugin",
         "//flutter/private:flutter_profile_build",
