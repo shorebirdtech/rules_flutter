@@ -3,8 +3,8 @@
 // failure is a compile error ("Constant evaluation error"). A `flutter_test`
 // has to refuse it the same way, or code `flutter test` rejects ships here.
 //
-// `manual`: building `//:const_violation_entry_test` is expected to FAIL; see
-// the comment on it in BUILD.bazel.
+// Compiling `//:const_violation_entry` is expected to FAIL, and
+// `//:const_violation_entry_test` passes only when it does; see BUILD.bazel.
 import 'package:assert_dep/guarded.dart';
 import 'package:flutter_test/flutter_test.dart';
 

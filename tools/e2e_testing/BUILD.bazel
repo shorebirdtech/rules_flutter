@@ -1,4 +1,4 @@
-load("@rules_dart//dart:defs.bzl", "dart_library", "dart_package_metadata", "dart_test")
+load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_library", "dart_package_metadata", "dart_test")
 
 # The target platform of a Linux machine, for the tests of what a build there
 # skips.
@@ -63,4 +63,22 @@ dart_test(
         ":e2e_testing",
         "@dev_tool_deps//:test",
     ],
+)
+
+# The executable of `compile_fail_test` (compile_fail_test.bzl).
+dart_binary(
+    name = "compile_fail_runner",
+    testonly = True,
+    compile_mode = "exe",
+    main = "compile_fail_runner.dart",
+    visibility = ["//visibility:public"],
+    deps = ["@rules_dart//dart/runfiles"],
+)
+
+# Records an action's command line for `compile_fail_test`.
+dart_binary(
+    name = "compile_fail_command",
+    compile_mode = "exe",
+    main = "compile_fail_command.dart",
+    visibility = ["//visibility:public"],
 )

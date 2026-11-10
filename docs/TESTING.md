@@ -1981,7 +1981,7 @@ runner needs both).
 | `flutter_application_variant` (`flutter/private/flutter_application_variant.bzl`, `flutter_program_inputs` in `common.bzl`) | Root `//...`, macos_example `//...` and `bazel run //tools/dev_tool:e2e -- test/e2e/main_outside_lib_e2e_test.dart --plain-name="macOS"`, which reloads and restarts a variant; plus the macOS manual runtime test |
 | Dart compilation / AOT | hello_world, ffi_example, macos_example |
 | Asset bundling | hello_world, plugin_example |
-| Shader compilation, bundling or hot reload, or how a workspace plugin is wired | `glass_plugin_e2e_test.dart` on every platform it covers, and by hand: `bazel build //impeller_shader:app_flutter_sksl_required` in plugin_example must **fail**, saying the shader does not compile for Skia |
+| Shader compilation, bundling or hot reload, or how a workspace plugin is wired | `glass_plugin_e2e_test.dart` on every platform it covers, and plugin_example's `//impeller_shader:app_flutter_sksl_required_test`: with SkSL required, the shader compile of `:app_flutter_sksl_required` (`manual`, since it does not build) fails, saying the shader does not compile for Skia |
 | Web support | web_example `//...` (a WASM-only bundle, an `Int64List` app that keeps the dart2js fallback through a per-compiler `select()`, and `:render_test`, the render check in headless Chrome) + `web_smoke_e2e_test.dart` (render) + `web_per_compiler_e2e_test.dart` (both programs of a per-compiler app, in Chrome) + `plugin_example_e2e_test.dart` (plugins on web) + `native_libs_reload_e2e_test.dart`'s web group if the change touches `native_modules` or the web reload arms |
 | FFI / native deps / native assets | ffi_example (incl. manual iOS-sim + macOS runtime tests), ffi_plugin_example, `_overlay_tests/native_assets_synthetic` (incl. its manual `:verify_macos_app_test`, in debug and release) |
 | Data assets and link hooks (`dart_data_asset` handling, `link_hook_assets`, `flutter_build_assets`' data assets) | root `//flutter/tests:data_asset_test`, `_overlay_tests/native_assets_synthetic` `//...` with and without `-c dbg` plus its `:verify_macos_app_test`, `_overlay_tests/link_hooks` `//...` with and without `-c dbg` |
@@ -2105,21 +2105,14 @@ runfiles hold nothing from the Dart SDK or the patched SDK, which only a compile
 opens.
 
 A constant that breaks a `const` constructor's `assert` must not compile, as
-under `flutter test`; a build cannot be a passing test, so the two targets are
-`manual` and are checked by hand:
+under `flutter test`. The programs that hold one, `//:const_violation_entry`
+(the constant in the test's own file) and `//:const_violation_dep` (in a
+library it depends on, which in the modular build compiles apart), are
+`manual`, since they do not build. These tests run their compile instead:
 
-```sh
-cd e2e/hello_world
-for flags in "" "-c dbg" "--@rules_dart//dart:modular_kernel=false" \
-    "-c dbg --@rules_dart//dart:modular_kernel=false"; do
-  bazel build //:const_violation_entry_test //:const_violation_dep_test $flags --keep_going
-done
-```
-
-Every one of the eight builds must fail with `Constant evaluation error` and
-`This assertion failed with message: Positive: -1 is not positive`. `_entry`
-holds the constant in the test's own file and `_dep` in a library it depends on,
-which in the modular build compile in different programs.
+| Test | What it validates |
+|---|---|
+| `//:const_violation_entry_test` and `//:const_violation_dep_test`, with `_dbg`, `_whole_program` and `_dbg_whole_program` of each (`build_variant_tests`) | the program's compile fails with `Constant evaluation error` and `This assertion failed with message: Positive: -1 is not positive`, in each of the four builds: the entry compile (`DartEntryKernel`) in the modular build, which fails with the error the library's own module compile recorded, and the whole-program compile (`DartKernel`) without it. Each is a `compile_fail_test` (`tools/e2e_testing/compile_fail_test.bzl`), which runs the target's own action at test time, over its declared inputs, and goes red when the compile succeeds or fails otherwise |
 
 ### Golden regeneration (manual)
 

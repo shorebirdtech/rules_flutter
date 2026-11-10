@@ -21,6 +21,7 @@ load("@rules_flutter//flutter:linux.bzl", "flutter_linux_app")
 load("@rules_flutter//flutter:macos.bzl", "flutter_macos_app")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
 load("@rules_flutter//flutter:windows.bzl", "flutter_windows_app")
+load("@rules_flutter//tools/e2e_testing:compile_fail_test.bzl", "compile_fail_test")
 load("@rules_flutter//tools/e2e_testing:device_profile.bzl", "device_profile")
 load(":build_in_mode.bzl", "build_in_mode")
 load(":build_variant_test.bzl", "build_variant_tests")
@@ -403,21 +404,45 @@ build_variant_tests(
 )
 
 # Constants that break a `const` constructor's assertion. `flutter test` fails
-# to compile a test that holds one, so building each of these MUST FAIL, with a
-# "Constant evaluation error" naming the assertion. They are `manual` because a
-# failing build has no place in `bazel test //...`; docs/TESTING.md (the
-# "`flutter_test` build modes" section) says how to check them.
+# to compile a test that holds one, so compiling each of these programs MUST
+# FAIL, with a "Constant evaluation error" naming the assertion. The programs
+# are `manual`, since they do not build; each `_test` runs the compile that
+# fails and passes only when it fails so, and `_builds` does that in each of
+# the four builds. `_entry` holds the constant in the test's own file, `_dep`
+# in a library it depends on: in the modular build that library's compile
+# records the error, and the entry compile of the program that reaches it
+# fails with it.
 [
-    flutter_test(
-        name = "const_violation_%s_test" % where,
-        main = "test/asserts/const_violation_%s_test.dart" % where,
-        package = ":pubspec-metadata",
-        tags = ["manual"],
-        deps = [
-            "//asserts_dep",
-            "//asserts_violation_dep",
-            "@deps//:flutter_test",
-        ],
+    (
+        flutter_suite_program(
+            name = "const_violation_%s" % where,
+            testonly = True,
+            main = "test/asserts/const_violation_%s_test.dart" % where,
+            package = ":pubspec-metadata",
+            tags = ["manual"],
+            deps = [
+                "//asserts_dep",
+                "//asserts_violation_dep",
+                "@deps//:flutter_test",
+            ],
+        ),
+        compile_fail_test(
+            name = "const_violation_%s_test" % where,
+            size = "small",
+            mnemonics = [
+                "DartEntryKernel",
+                "DartKernel",
+            ],
+            output_contains = [
+                "Constant evaluation error",
+                "This assertion failed with message: Positive: -1 is not positive",
+            ],
+            target = ":const_violation_%s" % where,
+        ),
+        build_variant_tests(
+            name = "const_violation_%s_builds" % where,
+            test = ":const_violation_%s_test" % where,
+        ),
     )
     for where in [
         "entry",
