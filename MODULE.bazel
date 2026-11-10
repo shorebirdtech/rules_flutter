@@ -162,6 +162,11 @@ maven.install(
     artifacts = [
         "androidx.annotation:annotation:1.9.1",
         "androidx.core:core:1.17.0",
+        # core's Gradle module metadata constrains core-ktx to its own
+        # version, as Gradle builds it. Coursier reads only POMs: without this
+        # line it resolves the 1.13.1 savedstate asks for, beside core 1.17.0.
+        # An app's `bazel run //:<app>_maven_artifacts` prints such lines.
+        "androidx.core:core-ktx:1.17.0",
         "androidx.exifinterface:exifinterface:1.4.1",
         "androidx.fragment:fragment:1.8.9",
         "androidx.lifecycle:lifecycle-common:2.10.0",

@@ -3,6 +3,7 @@
   "__INPUT_ARTIFACTS_HASH": {
     "androidx.annotation:annotation": 1204500264,
     "androidx.core:core": -1281591424,
+    "androidx.core:core-ktx": -647332258,
     "androidx.databinding:databinding-compiler": 783253192,
     "androidx.exifinterface:exifinterface": 41463659,
     "androidx.fragment:fragment": -1178212687,
@@ -75,7 +76,7 @@
     "repositories": 1670674627
   },
   "__RESOLVED_ARTIFACTS_HASH": {
-    "androidx.activity:activity:aar": -848933800,
+    "androidx.activity:activity:aar": 222373884,
     "androidx.annotation:annotation": -2082996707,
     "androidx.annotation:annotation-experimental:aar": 168543031,
     "androidx.annotation:annotation-jvm": -39777951,
@@ -84,7 +85,7 @@
     "androidx.collection:collection": -1087439336,
     "androidx.collection:collection-jvm": -1421045810,
     "androidx.concurrent:concurrent-futures": 551606466,
-    "androidx.core:core-ktx:aar": 220685060,
+    "androidx.core:core-ktx:aar": -127288295,
     "androidx.core:core-viewtree:aar": 1111248771,
     "androidx.core:core:aar": 1142483071,
     "androidx.customview:customview:aar": -1322104005,
@@ -92,7 +93,7 @@
     "androidx.databinding:databinding-compiler": -2105522138,
     "androidx.databinding:databinding-compiler-common": 1584890784,
     "androidx.exifinterface:exifinterface:aar": 1546188260,
-    "androidx.fragment:fragment:aar": 1600324912,
+    "androidx.fragment:fragment:aar": 181472669,
     "androidx.interpolator:interpolator:aar": 834659242,
     "androidx.lifecycle:lifecycle-common": -786128806,
     "androidx.lifecycle:lifecycle-common-jvm": 1310013890,
@@ -102,8 +103,8 @@
     "androidx.lifecycle:lifecycle-runtime-android:aar": -1773216762,
     "androidx.lifecycle:lifecycle-runtime:aar": -1255237177,
     "androidx.lifecycle:lifecycle-viewmodel-android:aar": -1032202532,
-    "androidx.lifecycle:lifecycle-viewmodel-savedstate-android:aar": -386903543,
-    "androidx.lifecycle:lifecycle-viewmodel-savedstate:aar": -1705328926,
+    "androidx.lifecycle:lifecycle-viewmodel-savedstate-android:aar": 429232461,
+    "androidx.lifecycle:lifecycle-viewmodel-savedstate:aar": -887280140,
     "androidx.lifecycle:lifecycle-viewmodel:aar": 1799610248,
     "androidx.loader:loader:aar": -1294739762,
     "androidx.privacysandbox.tools:tools": -446868883,
@@ -111,8 +112,8 @@
     "androidx.privacysandbox.tools:tools-apipackager": 1728193327,
     "androidx.privacysandbox.tools:tools-core": 639218536,
     "androidx.profileinstaller:profileinstaller:aar": -1116914238,
-    "androidx.savedstate:savedstate-android:aar": 24904009,
-    "androidx.savedstate:savedstate:aar": -1052176563,
+    "androidx.savedstate:savedstate-android:aar": 1344555221,
+    "androidx.savedstate:savedstate:aar": 99172749,
     "androidx.startup:startup-runtime:aar": 1840587120,
     "androidx.test.espresso:espresso-idling-resource:aar": -419264045,
     "androidx.test.ext:junit:aar": 14109065,
@@ -387,9 +388,9 @@
     },
     "androidx.core:core-ktx:aar": {
       "shasums": {
-        "jar": "19ba50d094c7368ede1b4ccf1195ceb83e35970736593f823e5af716f8d05d70"
+        "jar": "4d23190b8623b8abb3c5247a0a7727eca347062d026335c427a09e82711b15f8"
       },
-      "version": "1.13.1"
+      "version": "1.17.0"
     },
     "androidx.core:core-viewtree:aar": {
       "shasums": {
@@ -2833,16 +2834,88 @@
     ]
   },
   "packages": {
+    "androidx.activity:activity:aar": [
+      "androidx.activity",
+      "androidx.activity.contextaware",
+      "androidx.activity.result",
+      "androidx.activity.result.contract"
+    ],
+    "androidx.annotation:annotation-experimental:aar": [
+      "androidx.annotation",
+      "androidx.annotation.experimental"
+    ],
     "androidx.annotation:annotation-jvm": ["androidx.annotation"],
     "androidx.arch.core:core-common": [
       "androidx.arch.core.internal",
       "androidx.arch.core.util"
     ],
+    "androidx.arch.core:core-runtime:aar": ["androidx.arch.core.executor"],
     "androidx.collection:collection-jvm": [
       "androidx.collection",
       "androidx.collection.internal"
     ],
     "androidx.concurrent:concurrent-futures": ["androidx.concurrent.futures"],
+    "androidx.core:core-ktx:aar": [
+      "androidx.core.animation",
+      "androidx.core.content",
+      "androidx.core.content.res",
+      "androidx.core.database",
+      "androidx.core.database.sqlite",
+      "androidx.core.graphics",
+      "androidx.core.graphics.drawable",
+      "androidx.core.location",
+      "androidx.core.net",
+      "androidx.core.os",
+      "androidx.core.text",
+      "androidx.core.transition",
+      "androidx.core.util",
+      "androidx.core.view",
+      "androidx.core.widget"
+    ],
+    "androidx.core:core-viewtree:aar": ["androidx.core.viewtree"],
+    "androidx.core:core:aar": [
+      "android.support.v4.app",
+      "android.support.v4.graphics.drawable",
+      "android.support.v4.os",
+      "androidx.core.accessibilityservice",
+      "androidx.core.app",
+      "androidx.core.app.unusedapprestrictions",
+      "androidx.core.content",
+      "androidx.core.content.pm",
+      "androidx.core.content.res",
+      "androidx.core.database",
+      "androidx.core.database.sqlite",
+      "androidx.core.flagging",
+      "androidx.core.graphics",
+      "androidx.core.graphics.drawable",
+      "androidx.core.hardware.display",
+      "androidx.core.hardware.fingerprint",
+      "androidx.core.internal.view",
+      "androidx.core.location",
+      "androidx.core.math",
+      "androidx.core.net",
+      "androidx.core.os",
+      "androidx.core.provider",
+      "androidx.core.service.quicksettings",
+      "androidx.core.telephony",
+      "androidx.core.telephony.mbms",
+      "androidx.core.text",
+      "androidx.core.text.method",
+      "androidx.core.text.util",
+      "androidx.core.util",
+      "androidx.core.view",
+      "androidx.core.view.accessibility",
+      "androidx.core.view.animation",
+      "androidx.core.view.autofill",
+      "androidx.core.view.contentcapture",
+      "androidx.core.view.inputmethod",
+      "androidx.core.view.insets",
+      "androidx.core.widget"
+    ],
+    "androidx.customview:customview:aar": [
+      "androidx.customview.view",
+      "androidx.customview.widget"
+    ],
     "androidx.databinding:databinding-common": ["androidx.databinding"],
     "androidx.databinding:databinding-compiler": [
       "android.databinding.annotationprocessor",
@@ -2873,7 +2946,34 @@
       "android.databinding.tool.util",
       "android.databinding.tool.writer"
     ],
+    "androidx.exifinterface:exifinterface:aar": [
+      "androidx.exifinterface.media"
+    ],
+    "androidx.fragment:fragment:aar": [
+      "androidx.fragment.app",
+      "androidx.fragment.app.strictmode"
+    ],
+    "androidx.interpolator:interpolator:aar": [
+      "androidx.interpolator.view.animation"
+    ],
     "androidx.lifecycle:lifecycle-common-jvm": ["androidx.lifecycle"],
+    "androidx.lifecycle:lifecycle-livedata-core:aar": ["androidx.lifecycle"],
+    "androidx.lifecycle:lifecycle-livedata:aar": ["androidx.lifecycle"],
+    "androidx.lifecycle:lifecycle-runtime-android:aar": ["androidx.lifecycle"],
+    "androidx.lifecycle:lifecycle-viewmodel-android:aar": [
+      "androidx.lifecycle",
+      "androidx.lifecycle.viewmodel",
+      "androidx.lifecycle.viewmodel.internal"
+    ],
+    "androidx.lifecycle:lifecycle-viewmodel-savedstate-android:aar": [
+      "androidx.lifecycle",
+      "androidx.lifecycle.internal",
+      "androidx.lifecycle.serialization"
+    ],
+    "androidx.loader:loader:aar": [
+      "androidx.loader.app",
+      "androidx.loader.content"
+    ],
     "androidx.privacysandbox.tools:tools": [
       "androidx.privacysandbox.tools",
       "androidx.privacysandbox.tools.internal"
@@ -2892,6 +2992,95 @@
       "androidx.privacysandbox.tools.core.model",
       "androidx.privacysandbox.tools.core.proto",
       "androidx.privacysandbox.tools.core.validator"
+    ],
+    "androidx.profileinstaller:profileinstaller:aar": [
+      "androidx.profileinstaller"
+    ],
+    "androidx.savedstate:savedstate-android:aar": [
+      "androidx.savedstate",
+      "androidx.savedstate.internal",
+      "androidx.savedstate.serialization",
+      "androidx.savedstate.serialization.serializers"
+    ],
+    "androidx.startup:startup-runtime:aar": ["androidx.startup"],
+    "androidx.test.espresso:espresso-idling-resource:aar": [
+      "androidx.test.espresso",
+      "androidx.test.espresso.idling"
+    ],
+    "androidx.test.ext:junit:aar": [
+      "androidx.test.ext.junit.rules",
+      "androidx.test.ext.junit.runners"
+    ],
+    "androidx.test.services:storage:aar": [
+      "androidx.test.services.storage",
+      "androidx.test.services.storage.file",
+      "androidx.test.services.storage.internal"
+    ],
+    "androidx.test:annotation:aar": ["androidx.test.annotation"],
+    "androidx.test:core:aar": [
+      "androidx.test.core.app",
+      "androidx.test.core.content.pm",
+      "androidx.test.core.graphics",
+      "androidx.test.core.internal.os",
+      "androidx.test.core.os",
+      "androidx.test.core.view"
+    ],
+    "androidx.test:monitor:aar": [
+      "androidx.test",
+      "androidx.test.annotation",
+      "androidx.test.internal.platform",
+      "androidx.test.internal.platform.app",
+      "androidx.test.internal.platform.content",
+      "androidx.test.internal.platform.os",
+      "androidx.test.internal.platform.reflect",
+      "androidx.test.internal.platform.util",
+      "androidx.test.internal.runner",
+      "androidx.test.internal.runner.hidden",
+      "androidx.test.internal.runner.intent",
+      "androidx.test.internal.runner.intercepting",
+      "androidx.test.internal.runner.lifecycle",
+      "androidx.test.internal.util",
+      "androidx.test.platform",
+      "androidx.test.platform.app",
+      "androidx.test.platform.concurrent",
+      "androidx.test.platform.device",
+      "androidx.test.platform.graphics",
+      "androidx.test.platform.io",
+      "androidx.test.platform.tracing",
+      "androidx.test.platform.ui",
+      "androidx.test.platform.view.inspector",
+      "androidx.test.runner",
+      "androidx.test.runner.intent",
+      "androidx.test.runner.intercepting",
+      "androidx.test.runner.lifecycle"
+    ],
+    "androidx.tracing:tracing:aar": ["androidx.tracing"],
+    "androidx.versionedparcelable:versionedparcelable:aar": [
+      "androidx.versionedparcelable"
+    ],
+    "androidx.viewpager:viewpager:aar": ["androidx.viewpager.widget"],
+    "androidx.window.extensions.core:core:aar": [
+      "androidx.window.extensions.core.util.function"
+    ],
+    "androidx.window:window-java:aar": [
+      "androidx.window.java.area",
+      "androidx.window.java.core",
+      "androidx.window.java.embedding",
+      "androidx.window.java.layout"
+    ],
+    "androidx.window:window:aar": [
+      "androidx.window",
+      "androidx.window.area",
+      "androidx.window.area.reflectionguard",
+      "androidx.window.area.utils",
+      "androidx.window.core",
+      "androidx.window.embedding",
+      "androidx.window.layout",
+      "androidx.window.layout.adapter",
+      "androidx.window.layout.adapter.extensions",
+      "androidx.window.layout.adapter.sidecar",
+      "androidx.window.layout.util",
+      "androidx.window.reflection"
     ],
     "com.almworks.sqlite4java:sqlite4java": [
       "com.almworks.sqlite4java",
@@ -3706,6 +3895,10 @@
       "com.beust.jcommander.internal",
       "com.beust.jcommander.parser",
       "com.beust.jcommander.validators"
+    ],
+    "com.getkeepsafe.relinker:relinker:aar": [
+      "com.getkeepsafe.relinker",
+      "com.getkeepsafe.relinker.elf"
     ],
     "com.github.ben-manes.caffeine:caffeine": [
       "com.github.benmanes.caffeine.cache",

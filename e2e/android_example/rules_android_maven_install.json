@@ -3,6 +3,7 @@
   "__INPUT_ARTIFACTS_HASH": {
     "androidx.annotation:annotation": 1204500264,
     "androidx.core:core": -1281591424,
+    "androidx.core:core-ktx": -647332258,
     "androidx.databinding:databinding-compiler": 783253192,
     "androidx.exifinterface:exifinterface": 41463659,
     "androidx.fragment:fragment": -1178212687,
@@ -75,7 +76,7 @@
     "repositories": 1670674627
   },
   "__RESOLVED_ARTIFACTS_HASH": {
-    "androidx.activity:activity:aar": -848933800,
+    "androidx.activity:activity:aar": 222373884,
     "androidx.annotation:annotation": -2082996707,
     "androidx.annotation:annotation-experimental:aar": 168543031,
     "androidx.annotation:annotation-jvm": -39777951,
@@ -84,7 +85,7 @@
     "androidx.collection:collection": -1087439336,
     "androidx.collection:collection-jvm": -1421045810,
     "androidx.concurrent:concurrent-futures": 551606466,
-    "androidx.core:core-ktx:aar": 220685060,
+    "androidx.core:core-ktx:aar": -127288295,
     "androidx.core:core-viewtree:aar": 1111248771,
     "androidx.core:core:aar": 1142483071,
     "androidx.customview:customview:aar": -1322104005,
@@ -92,7 +93,7 @@
     "androidx.databinding:databinding-compiler": -2105522138,
     "androidx.databinding:databinding-compiler-common": 1584890784,
     "androidx.exifinterface:exifinterface:aar": 1546188260,
-    "androidx.fragment:fragment:aar": 1600324912,
+    "androidx.fragment:fragment:aar": 181472669,
     "androidx.interpolator:interpolator:aar": 834659242,
     "androidx.lifecycle:lifecycle-common": -786128806,
     "androidx.lifecycle:lifecycle-common-jvm": 1310013890,
@@ -102,8 +103,8 @@
     "androidx.lifecycle:lifecycle-runtime-android:aar": -1773216762,
     "androidx.lifecycle:lifecycle-runtime:aar": -1255237177,
     "androidx.lifecycle:lifecycle-viewmodel-android:aar": -1032202532,
-    "androidx.lifecycle:lifecycle-viewmodel-savedstate-android:aar": -386903543,
-    "androidx.lifecycle:lifecycle-viewmodel-savedstate:aar": -1705328926,
+    "androidx.lifecycle:lifecycle-viewmodel-savedstate-android:aar": 429232461,
+    "androidx.lifecycle:lifecycle-viewmodel-savedstate:aar": -887280140,
     "androidx.lifecycle:lifecycle-viewmodel:aar": 1799610248,
     "androidx.loader:loader:aar": -1294739762,
     "androidx.privacysandbox.tools:tools": -446868883,
@@ -111,8 +112,8 @@
     "androidx.privacysandbox.tools:tools-apipackager": 1728193327,
     "androidx.privacysandbox.tools:tools-core": 639218536,
     "androidx.profileinstaller:profileinstaller:aar": -1116914238,
-    "androidx.savedstate:savedstate-android:aar": 24904009,
-    "androidx.savedstate:savedstate:aar": -1052176563,
+    "androidx.savedstate:savedstate-android:aar": 1344555221,
+    "androidx.savedstate:savedstate:aar": 99172749,
     "androidx.startup:startup-runtime:aar": 1840587120,
     "androidx.test.espresso:espresso-idling-resource:aar": -419264045,
     "androidx.test.ext:junit:aar": 14109065,
@@ -387,9 +388,9 @@
     },
     "androidx.core:core-ktx:aar": {
       "shasums": {
-        "jar": "19ba50d094c7368ede1b4ccf1195ceb83e35970736593f823e5af716f8d05d70"
+        "jar": "4d23190b8623b8abb3c5247a0a7727eca347062d026335c427a09e82711b15f8"
       },
-      "version": "1.13.1"
+      "version": "1.17.0"
     },
     "androidx.core:core-viewtree:aar": {
       "shasums": {
