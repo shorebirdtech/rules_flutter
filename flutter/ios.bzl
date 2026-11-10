@@ -391,9 +391,10 @@ def flutter_ios_app(
             `$(PRODUCT_MODULE_NAME)` variable, or write `<name>.SceneDelegate`.
             The plist leaves `CFBundleShortVersionString` and
             `CFBundleVersion` to the app's version: a literal value there
-            fails the build, and `$(FLUTTER_BUILD_NAME)` and
-            `$(FLUTTER_BUILD_NUMBER)`, as `flutter create` writes them, or
-            no key at all, pass.
+            that differs from it fails the build. No key, the version
+            itself, `$(FLUTTER_BUILD_NAME)` and `$(FLUTTER_BUILD_NUMBER)` as
+            `flutter create` writes them, and Xcode's `$(MARKETING_VERSION)`
+            and `$(CURRENT_PROJECT_VERSION)` pass.
         version: An `apple_bundle_version` (or `flutter_apple_bundle_version`)
             target, rules_apple's own way to set the version, for example
             from `--embed_label`. Setting it with `build_name` or
@@ -693,18 +694,6 @@ def flutter_ios_app(
         # and they are not. It depends on nothing that is.
     )
 
-    # 8b. The plist leaves the version keys to `build_name` and `build_number`:
-    #     rules_apple replaces both, so a literal would be dropped silently.
-    _flutter_apple_version_check(
-        name = "__%s_version_check" % name,
-        plist = actual_info_plist,
-        plist_name = "ios/Runner/Info.plist" if not info_plist else "",
-        app_label = str(native.package_relative_label(name)),
-        rule_name = "flutter_ios_app",
-        tags = tags,
-        testonly = testonly,
-    )
-
     # 9. Version, from `build_name` and `build_number` unless the app names
     #    its own.
     if not version:
@@ -717,6 +706,19 @@ def flutter_ios_app(
             testonly = testonly,
         )
         version = ":%s" % ("__%s_version" % name)
+
+    # 9b. The plist leaves the version keys to the version: rules_apple
+    #     replaces both, so a literal that differs would be dropped silently.
+    _flutter_apple_version_check(
+        name = "__%s_version_check" % name,
+        plist = actual_info_plist,
+        plist_name = "ios/Runner/Info.plist" if not info_plist else "",
+        app_label = str(native.package_relative_label(name)),
+        version = version,
+        rule_name = "flutter_ios_app",
+        tags = tags,
+        testonly = testonly,
+    )
 
     # 10. Resolve launch storyboard.
     actual_launch_storyboard = launch_storyboard

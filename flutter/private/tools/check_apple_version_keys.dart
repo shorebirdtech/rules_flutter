@@ -3,14 +3,18 @@
 ///
 /// `flutter_ios_app` and `flutter_macos_app` always give rules_apple a version,
 /// and rules_apple then replaces `CFBundleShortVersionString` and
-/// `CFBundleVersion` in the Info.plist with it. A literal in the plist, such as
-/// `<string>3.1</string>`, would be dropped without a word. So the build fails
+/// `CFBundleVersion` in the Info.plist with the values its version file names.
+/// A literal in the plist that differs, such as `<string>3.1</string>` when the
+/// version is `3.1.0`, would be dropped without a word. So the build fails
 /// instead, and says what to set.
 ///
-/// The keys are allowed absent, or set to the variable `flutter create` writes
-/// (`$(FLUTTER_BUILD_NAME)` and `$(FLUTTER_BUILD_NUMBER)`, in the iOS and the
-/// macOS template alike) or its `${...}` spelling. The plist may be XML or
-/// binary.
+/// A key passes when it is absent; when it is a version variable, either the
+/// one `flutter create` writes (`$(FLUTTER_BUILD_NAME)` and
+/// `$(FLUTTER_BUILD_NUMBER)`, in the iOS and the macOS template alike) or
+/// Xcode's own (`$(MARKETING_VERSION)` and `$(CURRENT_PROJECT_VERSION)`), in
+/// either spelling; when it already is the value the version gives it; and
+/// when the version file does not name it, since rules_apple then keeps the
+/// plist's value. The plist may be XML or binary.
 ///
 /// On success the tool writes `--stamp`, which the build requires so that a
 /// plist that fails the check fails the build.
@@ -20,24 +24,40 @@
 ///
 /// Usage:
 ///   dart check_apple_version_keys.dart --plist <file> --name <shown name>
-///       --app <label> --rule <macro> --stamp <file>
+///       --version-file <rules_apple version file> --app <label>
+///       --rule <macro> --stamp <file>
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
 import 'merge_plists.dart';
 
-/// A version key's variable, and the macro argument that sets the key.
+/// A version key: the variables that stand for it, the field of rules_apple's
+/// version file that sets it, and the macro argument that sets that field.
 class VersionKey {
   final String key;
-  final String variable;
+
+  /// The variable `flutter create` writes, then Xcode's own.
+  final List<String> variables;
+  final String versionField;
   final String argument;
 
-  const VersionKey(this.key, this.variable, this.argument);
+  const VersionKey(this.key, this.variables, this.versionField, this.argument);
 }
 
 const versionKeys = [
-  VersionKey('CFBundleShortVersionString', 'FLUTTER_BUILD_NAME', 'build_name'),
-  VersionKey('CFBundleVersion', 'FLUTTER_BUILD_NUMBER', 'build_number'),
+  VersionKey(
+    'CFBundleShortVersionString',
+    ['FLUTTER_BUILD_NAME', 'MARKETING_VERSION'],
+    'short_version_string',
+    'build_name',
+  ),
+  VersionKey(
+    'CFBundleVersion',
+    ['FLUTTER_BUILD_NUMBER', 'CURRENT_PROJECT_VERSION'],
+    'build_version',
+    'build_number',
+  ),
 ];
 
 /// A value read from a plist: its [text] when it is a string, and how to show
@@ -101,10 +121,12 @@ bool isVariable(String value, String variable) =>
 
 /// The problems with the version keys of the plist whose bytes are [bytes], one
 /// message each; empty when it is good. [name] is the plist as the user knows it,
-/// [app] the app's label and [rule] the macro that declares it.
+/// [version] the decoded version file rules_apple reads, [app] the app's label
+/// and [rule] the macro that declares it.
 List<String> versionKeyProblems({
   required Uint8List bytes,
   required String name,
+  required Map<String, Object?> version,
   required String app,
   required String rule,
 }) {
@@ -113,18 +135,25 @@ List<String> versionKeyProblems({
   final problems = <String>[];
   for (final k in versionKeys) {
     final value = values[k.key];
-    if (value == null ||
-        (value.text != null && isVariable(value.text!, k.variable))) {
+    final replacement = version[k.versionField];
+    // rules_apple sets a key only when the version file gives it a value.
+    if (value == null || replacement is! String || replacement.isEmpty) {
+      continue;
+    }
+    final text = value.text;
+    if (text != null &&
+        (text == replacement ||
+            k.variables.any((variable) => isVariable(text, variable)))) {
       continue;
     }
     problems.add(
       'ERROR: $name sets ${k.key} to ${value.shown}, and $app would '
-      'silently drop it: $rule gives rules_apple a version that replaces '
-      '${k.key}.\n'
+      'silently replace it with "$replacement": $rule gives rules_apple a '
+      'version that sets ${k.key}.\n'
       '  To set the version, pass `${k.argument}` to $rule (or `version` '
       'with an apple_bundle_version target), and delete ${k.key} from the '
-      'plist or leave it as \$(${k.variable}), as `flutter create` writes '
-      'it.',
+      'plist or leave it as \$(${k.variables.first}), as `flutter create` '
+      'writes it.',
     );
   }
   return problems;
@@ -140,7 +169,14 @@ int run(List<String> args) {
     }
     options[args[i].substring(2)] = args[i + 1];
   }
-  for (final required in ['plist', 'name', 'app', 'rule', 'stamp']) {
+  for (final required in [
+    'plist',
+    'name',
+    'version-file',
+    'app',
+    'rule',
+    'stamp',
+  ]) {
     if (!options.containsKey(required)) {
       stderr.writeln('ERROR: missing --$required.');
       return 2;
@@ -151,6 +187,9 @@ int run(List<String> args) {
     problems = versionKeyProblems(
       bytes: File(options['plist']!).readAsBytesSync(),
       name: options['name']!,
+      version: jsonDecode(
+        File(options['version-file']!).readAsStringSync(),
+      ) as Map<String, Object?>,
       app: options['app']!,
       rule: options['rule']!,
     );

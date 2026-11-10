@@ -9,6 +9,7 @@ stamp is required, which is asserted here.
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("//flutter/private:apple_version_check.bzl", "flutter_apple_version_check")
+load("//flutter/private:flutter_apple_bundle_version.bzl", "flutter_apple_bundle_version")
 
 def _check_test_impl(ctx):
     env = analysistest.begin(ctx)
@@ -26,6 +27,15 @@ def _check_test_impl(ctx):
     asserts.true(env, argv[argv.index("--plist") + 1].endswith(ctx.attr.plist), argv)
     asserts.equals(env, "macos/Runner/Info.plist", argv[argv.index("--name") + 1])
     asserts.equals(env, "flutter_macos_app", argv[argv.index("--rule") + 1])
+
+    # The app's version, which an equal literal may match.
+    version_file = argv[argv.index("--version-file") + 1]
+    asserts.true(env, version_file.endswith("_version_check_version.bundle_version"), argv)
+    asserts.true(
+        env,
+        "_version_check_version.bundle_version" in [f.basename for f in actions[0].inputs.to_list()],
+        "the version file is an input",
+    )
     asserts.true(env, argv[argv.index("--app") + 1].endswith(":app"), argv)
 
     asserts.equals(
@@ -55,6 +65,12 @@ def apple_version_check_test_suite(name):
     Args:
         name: The test_suite target name.
     """
+    flutter_apple_bundle_version(
+        name = "_version_check_version",
+        build_name = "3.1.0",
+        build_number = "42",
+        tags = ["manual"],
+    )
     tests = []
     for fixture in ["FlutterCreate", "Literal"]:
         flutter_apple_version_check(
@@ -62,6 +78,7 @@ def apple_version_check_test_suite(name):
             plist = "apple_version_check/%s.plist" % fixture,
             plist_name = "macos/Runner/Info.plist",
             app_label = "//flutter/tests:app",
+            version = ":_version_check_version",
             rule_name = "flutter_macos_app",
             tags = ["manual"],
         )

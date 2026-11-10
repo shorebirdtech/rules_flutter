@@ -55,13 +55,24 @@ Uint8List _hex(String hex) => Uint8List.fromList([
     int.parse(hex.substring(i, i + 2), radix: 16),
 ]);
 
-List<String> _problems(Object plist) => versionKeyProblems(
+/// The version file an app with the default `build_name` and `build_number`
+/// gives rules_apple.
+const _defaultVersion = {
+  'build_version': '1',
+  'short_version_string': '1.0.0',
+};
+
+List<String> _problems(
+  Object plist, {
+  Map<String, Object?> version = _defaultVersion,
+}) => versionKeyProblems(
   bytes: plist is Uint8List
       ? plist
       : Uint8List.fromList((plist as String).codeUnits),
   name: 'ios/Runner/Info.plist',
   app: '//app:app',
   rule: 'flutter_ios_app',
+  version: version,
 );
 
 void main() {
@@ -121,14 +132,60 @@ void main() {
       expect(problems, hasLength(2));
     });
 
-    test("rejects another variable: it is not upstream's", () {
+    test("accepts Xcode's own version variables", () {
+      expect(
+        _problems(
+          _plist(
+            '<key>CFBundleShortVersionString</key><string>\$(MARKETING_VERSION)</string>'
+            '<key>CFBundleVersion</key><string>\${CURRENT_PROJECT_VERSION}</string>',
+          ),
+        ),
+        isEmpty,
+      );
+    });
+
+    test('rejects a variable that is not a version', () {
       final problems = _problems(
         _flutterCreate.replaceFirst(
           '\$(FLUTTER_BUILD_NAME)',
-          '\$(MARKETING_VERSION)',
+          '\$(PRODUCT_NAME)',
         ),
       );
-      expect(problems.single, contains(r'"$(MARKETING_VERSION)"'));
+      expect(problems.single, contains(r'"$(PRODUCT_NAME)"'));
+    });
+
+    test("accepts literals that are the app's version", () {
+      expect(
+        _problems(
+          _flutterCreate
+              .replaceFirst('\$(FLUTTER_BUILD_NAME)', '3.1.0')
+              .replaceFirst('\$(FLUTTER_BUILD_NUMBER)', '42'),
+          version: {'build_version': '42', 'short_version_string': '3.1.0'},
+        ),
+        isEmpty,
+      );
+    });
+
+    test('rejects a literal the version would change, naming both', () {
+      final problems = _problems(
+        _flutterCreate.replaceFirst('\$(FLUTTER_BUILD_NAME)', '3.1'),
+        version: {'build_version': '1', 'short_version_string': '3.1.0'},
+      );
+      expect(problems.single, contains('"3.1"'));
+      expect(problems.single, contains('"3.1.0"'));
+    });
+
+    test('accepts a literal in a key the version leaves alone', () {
+      // rules_apple sets only the keys its version file names, so a
+      // `apple_bundle_version` without `short_version_string` keeps the
+      // plist's CFBundleShortVersionString.
+      expect(
+        _problems(
+          _flutterCreate.replaceFirst('\$(FLUTTER_BUILD_NAME)', '3.1'),
+          version: {'build_version': '7'},
+        ),
+        isEmpty,
+      );
     });
 
     test('rejects an empty value and a value that is not a string', () {
@@ -180,7 +237,14 @@ void main() {
 
     int check(String plistText, {String name = 'macos/Runner/Info.plist'}) {
       File('${dir.path}/Info.plist').writeAsStringSync(plistText);
+      File(
+        '${dir.path}/version.json',
+      ).writeAsStringSync(
+        '{"build_version": "42", "short_version_string": "3.1.0"}',
+      );
       return run([
+        '--version-file',
+        '${dir.path}/version.json',
         '--plist',
         '${dir.path}/Info.plist',
         '--name',
@@ -205,6 +269,17 @@ void main() {
         1,
       );
       expect(File('${dir.path}/stamp').existsSync(), isFalse);
+    });
+
+    test("reads the app's version from the version file", () {
+      expect(
+        check(_flutterCreate.replaceFirst('\$(FLUTTER_BUILD_NUMBER)', '42')),
+        0,
+      );
+      expect(
+        check(_flutterCreate.replaceFirst('\$(FLUTTER_BUILD_NUMBER)', '43')),
+        1,
+      );
     });
 
     test('fails on text that is not a plist', () {
