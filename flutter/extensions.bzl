@@ -28,10 +28,10 @@ load("//flutter/private:flutter_sdk_toolchains_repo.bzl", "flutter_sdk_toolchain
 load("//flutter/private:flutter_sdks_repo.bzl", "encode_sdks", "flutter_sdks_repo")
 load("//flutter/private:linux_runtime_pins.bzl", "LINUX_RUNTIME")
 load("//flutter/private:pub_extension.bzl", "DEFAULT_SDK_NAME", "framework_json")
+load("//flutter/private:repositories.bzl", "flutter_register_toolchains")
 load("//flutter/private:toolchain_version.bzl", "select_flutter_version")
 load("//flutter/private:toolchains_repo.bzl", "flutter_toolchains_repo", "sdk_repo_name")
 load("//flutter/private:versions.bzl", "ANDROID_EMULATOR", "ANDROID_SYSTEM_IMAGE", "CHROME_FOR_TESTING", "FLUTTER_VERSIONS", "flutter_source_sha256", "require_supported_flutter_version")
-load(":repositories.bzl", "flutter_register_toolchains")
 
 flutter_toolchain = tag_class(attrs = {
     "name": attr.string(doc = """\

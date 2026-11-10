@@ -181,6 +181,29 @@ bzl_library(
 )
 
 bzl_library(
+    name = "repositories",
+    srcs = ["repositories.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+    deps = [
+        ":artifact_urls",
+        ":engine_helpers",
+        ":flutter_android_engine_repo",
+        ":flutter_cross_repo",
+        ":flutter_desktop_engine_repo",
+        ":flutter_dev_root_repo",
+        ":flutter_ios_engine_repo",
+        ":flutter_profile_repo",
+        ":flutter_sdk_toolchains_repo",
+        ":flutter_sky_engine_repo",
+        ":flutter_stock_engine_repo",
+        ":flutter_web_sdk_repo",
+        ":pinned",
+        ":toolchains_repo",
+        ":versions",
+    ],
+)
+
+bzl_library(
     name = "asset_variants",
     srcs = ["asset_variants.bzl"],
     visibility = ["//flutter:__subpackages__"],

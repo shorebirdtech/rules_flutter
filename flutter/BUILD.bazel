@@ -220,9 +220,9 @@ bzl_library(
     srcs = ["extensions.bzl"],
     visibility = ["//visibility:public"],
     deps = [
-        ":repositories",
         "//flutter/private:flutter_sdks_repo",
         "//flutter/private:pub_extension",
+        "//flutter/private:repositories",
         "//flutter/private:toolchain_version",
     ],
 )
@@ -237,29 +237,6 @@ bzl_library(
     name = "providers",
     srcs = ["providers.bzl"],
     visibility = ["//visibility:public"],
-)
-
-bzl_library(
-    name = "repositories",
-    srcs = ["repositories.bzl"],
-    visibility = ["//visibility:public"],
-    deps = [
-        "//flutter/private:artifact_urls",
-        "//flutter/private:engine_helpers",
-        "//flutter/private:flutter_android_engine_repo",
-        "//flutter/private:flutter_cross_repo",
-        "//flutter/private:flutter_desktop_engine_repo",
-        "//flutter/private:flutter_dev_root_repo",
-        "//flutter/private:flutter_ios_engine_repo",
-        "//flutter/private:flutter_profile_repo",
-        "//flutter/private:flutter_sdk_toolchains_repo",
-        "//flutter/private:flutter_sky_engine_repo",
-        "//flutter/private:flutter_stock_engine_repo",
-        "//flutter/private:flutter_web_sdk_repo",
-        "//flutter/private:pinned",
-        "//flutter/private:toolchains_repo",
-        "//flutter/private:versions",
-    ],
 )
 
 bzl_library(

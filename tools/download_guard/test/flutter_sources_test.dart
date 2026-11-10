@@ -44,7 +44,7 @@ void main() {
     expect(
       files,
       containsAll([
-        'flutter/repositories.bzl',
+        'flutter/private/repositories.bzl',
         'flutter/private/flutter_web_sdk_repo.bzl',
         'flutter/private/flutter_pub_package.bzl',
         'flutter/private/flutter_framework_package.bzl',
