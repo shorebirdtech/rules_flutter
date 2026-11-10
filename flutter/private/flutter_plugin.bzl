@@ -23,7 +23,7 @@ load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@rules_dart//dart:providers.bzl", "DartInfo")
 load("@rules_dart//dart:utils.bzl", "WEB_COMPILER_INDEPENDENT_ATTR", "dart_info", "library_package", "package_identity_attrs", "web_compiler_reset_when_independent")
 load("@rules_java//java/common:java_info.bzl", "JavaInfo")
-load("//flutter:providers.bzl", "FlutterDataAssetInfo", "FlutterInfo", "FlutterNativeAssetInfo", "FlutterPluginPlatformInfo")
+load("//flutter:providers.bzl", "FlutterDataAssetInfo", "FlutterPluginPlatformInfo")
 load("//flutter/private:common.bzl", "collect_binding_contracts", "collect_native_libs")
 load("//flutter/private:flutter_desktop_plugin_info.bzl", "FlutterLinuxPluginInfo", "FlutterWindowsPluginInfo")
 load("//flutter/private:flutter_font.bzl", "FONTS_ATTR")
@@ -97,14 +97,10 @@ def plugin_contributions(ctx, package_name, package_root, declares_plugin):
     # the app is where the dev config that a reload reads is written.
     binding_contracts = collect_binding_contracts(ctx.attr.native_deps)
 
-    # `native_deps` and the Native Assets alike: an asset's own rule pairs the
-    # library it declares with its sources, on its `FlutterInfo`.
-    native_lib_sources = collect_native_source_pairs(ctx.attr.native_deps) + [
-        pair
-        for dep in ctx.attr.native_assets
-        if FlutterInfo in dep
-        for pair in dep[FlutterInfo].native_lib_sources.to_list()
-    ]
+    # What each `native_deps` library is built from. A code asset's sources
+    # are found by the application, off the asset's own target; see
+    # `code_asset_libraries.bzl`.
+    native_lib_sources = collect_native_source_pairs(ctx.attr.native_deps)
 
     # Each platform's native library, which `flutter_plugin_platform` gives
     # only to a build for that platform: the iOS and macOS libraries of one
@@ -151,16 +147,6 @@ def plugin_contributions(ctx, package_name, package_root, declares_plugin):
             package = package_name,
         ))
 
-    # Native Assets contributed by this plugin (or its parent ext/ overlay).
-    extra_native_assets = []
-    for dep in ctx.attr.native_assets:
-        if FlutterNativeAssetInfo not in dep:
-            fail(
-                "flutter_plugin: native_assets entry %s must provide " % dep.label +
-                "FlutterNativeAssetInfo (use flutter_native_asset).",
-            )
-        extra_native_assets.append(dep[FlutterNativeAssetInfo])
-
     extra_data_assets = []
     for dep in ctx.attr.data_assets:
         if FlutterDataAssetInfo not in dep:
@@ -204,7 +190,6 @@ def plugin_contributions(ctx, package_name, package_root, declares_plugin):
         linux_plugin_libraries = extra_linux_plugin_libraries,
         windows_plugin_libraries = extra_windows_plugin_libraries,
         apple_privacy_manifests = extra_apple_privacy_manifests,
-        native_assets = extra_native_assets,
         data_assets = extra_data_assets,
         pub_fonts = extra_pub_fonts,
         pub_assets = extra_pub_assets,
@@ -269,10 +254,6 @@ PLUGIN_PACKAGE_ATTRS = package_identity_attrs() | {
     "exports": attr.label_list(
         doc = "The plugin's Android libraries: a `flutter_android_plugin_library` or a `kt_android_library`, anything with `JavaInfo`. Its registration is the `android` entry of `platforms`. An Android app links the libraries of the plugins it depends on, and no others. Set this with `select()` on `@platforms//os:android`, with an empty list as the default, so that only an Android build loads and analyses it: `select({\"@platforms//os:android\": [\"//android:lib\"], \"//conditions:default\": []})`. Named `exports`, as a Java library's re-exported dependencies are, because rules_android dexes an APK's libraries one at a time by an aspect that follows `deps`, `exports` and `runtime_deps` and nothing else, so only an `exports` edge makes the library visible to it.",
         providers = [JavaInfo],
-    ),
-    "native_assets": attr.label_list(
-        doc = "Native Assets `CodeAsset` declarations (each a `flutter_native_asset` target). Propagated through `FlutterInfo.native_assets` and aggregated by `flutter_application` into the `--native-assets` manifest. Declare per-platform asset sets with `select()`: this is what routes each asset to the applications built for its platform, and listing two targets with the same `asset_id` in one configuration fails analysis.",
-        providers = [FlutterNativeAssetInfo],
     ),
     "data_assets": attr.label_list(
         doc = "Native Assets `DataAsset` declarations (each a `flutter_data_asset` target). Propagated through `FlutterInfo.data_assets` and bundled at `flutter_assets/packages/<pkg>/<name>` by `flutter_application`.",

@@ -544,7 +544,7 @@ flutter_application(
 )
 ```
 
-If you would rather bind with `@Native(assetId: ...)` and let the Dart VM find the library, declare it as a Native Asset with `flutter_native_asset` from `@rules_flutter//flutter:native_assets.bzl`, and carry it on a `flutter_plugin`. `e2e/ffi_example` shows both styles side by side.
+If you would rather bind with `@Native(assetId: ...)` and let the Dart VM find the library, declare it as a code asset with rules_dart's `dart_code_asset` and name it in the `code_assets` of the package's `dart_package_metadata`, as a pub package's build hook would supply it. Every program that depends on the package then bundles the library under its file name, wrapped in a framework on iOS, and maps the id to it. `e2e/ffi_example` shows both styles side by side.
 
 #### Choosing the library that serves an asset id
 
@@ -1662,7 +1662,7 @@ The `select()` goes in a library, not in the application's `deps`: a `select()` 
 
 What the bundle holds once comes from the primary compiler's version of the program (`dart2wasm` for the default `compiler`): the plugin registrant, the assets and shaders, and the icon tree-shaking scan. A dependency that differs by compiler should not differ in what plugins or assets it brings. An icon only the other compiler's variant uses is shaken out of the font unless `tree_shake_icons = False`.
 
-These are built once, however many compilers reach them: pub packages (and Flutter SDK packages), anything a `flutter_library` or `flutter_plugin` marks `web_compiler_independent = True`, `flutter_native_library`, `flutter_native_asset`, `flutter_data_asset`, `flutter_gen_l10n`, and `dart_codegen` and its siblings. Code generation therefore cannot vary by compiler; a generator that needs to emit a variant per compiler emits both, and the library above chooses. Only the first-party libraries on the path from the bundle to a `select()` are analysed once per compiler, and a library has no action, so that costs analysis time only.
+These are built once, however many compilers reach them: pub packages (and Flutter SDK packages), anything a `flutter_library` or `flutter_plugin` marks `web_compiler_independent = True`, `flutter_native_library`, `dart_code_asset`, `flutter_data_asset`, `flutter_gen_l10n`, and `dart_codegen` and its siblings. Code generation therefore cannot vary by compiler; a generator that needs to emit a variant per compiler emits both, and the library above chooses. Only the first-party libraries on the path from the bundle to a `select()` are analysed once per compiler, and a library has no action, so that costs analysis time only.
 
 A library that has no variant outside the web says so with `target_compatible_with = select({"@rules_dart//dart/constraints:js": [], "@rules_dart//dart/constraints:wasm": [], "//conditions:default": ["@platforms//:incompatible"]})`, as in rules_dart, so `bazel build //...` skips it rather than failing on it.
 
@@ -2694,7 +2694,7 @@ A platform has a `plugin_class`, a `dart_plugin_class`, `ffi_plugin` or a `defau
 | `platforms` | A `flutter_plugin_platform` for each platform the plugin registers on. |
 | `exports` | The plugin's Android library, in a `select()` on `@platforms//os:android`. Android apps that depend on the plugin link it. It is here rather than on the `android` platform because rules_android's dexing reaches a library through `exports` and no other attribute. |
 | `native_deps` | Shared libraries bundled for `dart:ffi`. |
-| `native_assets` | `flutter_native_asset` targets, usually inside a `select()` on platform. |
+| `data_assets` | `flutter_data_asset` targets, bundled at `flutter_assets/packages/<package>/<name>`. |
 | `assets`, `resources` | Asset and resource files. An asset is keyed as on `flutter_library`. |
 | `shaders`, `shader_includes` | The package's fragment shaders and what they `#include`, as on `flutter_library`. |
 | `fonts` | The package's font families, as on `flutter_library`. |
@@ -2753,7 +2753,7 @@ These are what `flutter_application` is made of. Most apps never need them.
 | `flutter_aot_snapshot` | Compiles Dart to an AOT shared library (`.so` on Linux and Android, `.dylib` on macOS) with `gen_snapshot`. |
 | `flutter_asset_bundle` | Builds the `flutter_assets/` tree: `AssetManifest.bin`, `FontManifest.json`, `NOTICES.Z`, and the asset files. |
 | `flutter_native_library` | Pairs a native library with its binding contract. See [Hot reload across a native rebuild](#hot-reload-across-a-native-rebuild). |
-| `flutter_native_asset`, `flutter_data_asset` | Declare Dart Native Assets, from `@rules_flutter//flutter:native_assets.bzl`. A data asset is bundled at `flutter_assets/packages/<package>/<name>`. |
+| `flutter_data_asset` | Declares a Dart data asset, from `@rules_flutter//flutter:native_assets.bzl`. It is bundled at `flutter_assets/packages/<package>/<name>`. A code asset is rules_dart's `dart_code_asset`. |
 
 ### Code generation
 

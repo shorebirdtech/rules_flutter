@@ -3,7 +3,7 @@
 `contributing_library` stands in for `flutter_library` / `flutter_plugin`: a
 rule that contributes on several channels at once and reaches `FlutterInfo`
 only through the constructor. `single_channel_library` stands in for
-`flutter_native_asset` / `flutter_data_asset` / `flutter_material_icons`, which
+`flutter_data_asset` / `flutter_material_icons`, which
 contribute on exactly one channel and forward nothing.
 
 The claim under test: a caller gets every dependency's contribution on every
@@ -128,7 +128,7 @@ def _single_channel_test_impl(ctx):
     # reads them all off every dep, so a missing one is an analysis error and an
     # empty one is the honest "contributes nothing here".
     asserts.equals(env, [], info.plugins)
-    asserts.equals(env, [], info.native_assets.to_list())
+    asserts.equals(env, [], info.data_assets.to_list())
     asserts.equals(env, [], info.apple_privacy_manifests.to_list())
 
     return analysistest.end(env)

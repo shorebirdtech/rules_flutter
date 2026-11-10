@@ -380,9 +380,10 @@ const e2eWorkspaces = <E2eWorkspace>[
     '_overlay_tests/native_assets_synthetic',
     runs: {
       Os.macos:
-          'a flutter_native_asset over a hand-linked dylib with its own install '
-          'name, and a flutter_data_asset (built nowhere else), reaching an app '
-          'through an otherwise empty flutter_plugin',
+          'a dart_code_asset over a hand-linked dylib with its own install '
+          'name, on the app package\'s own metadata, and a flutter_data_asset '
+          '(built nowhere else) reaching the app through an otherwise empty '
+          'flutter_plugin',
     },
     skips: {
       Os.linux:

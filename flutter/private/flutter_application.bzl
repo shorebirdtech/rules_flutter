@@ -136,31 +136,25 @@ def flutter_application_build(ctx, inputs):
     if hook_err != None:
         fail(hook_err)
 
-    # Aggregate transitive Native Assets so the manifest exists before
-    # kernel compile (the frontend_server reads it via --native-assets).
-    transitive_native_asset_depsets = []
-    transitive_data_asset_depsets = []
-    for dep in inputs.deps:
-        if FlutterInfo not in dep:
-            continue
-        info = dep[FlutterInfo]
-        transitive_native_asset_depsets.append(info.native_assets)
-        transitive_data_asset_depsets.append(info.data_assets)
-    transitive_native_assets = depset(transitive = transitive_native_asset_depsets)
-    transitive_data_assets = depset(transitive = transitive_data_asset_depsets)
+    # The data assets packages declare, bundled under
+    # `flutter_assets/packages/<pkg>/<name>` with what the link hooks emit.
+    transitive_data_assets = depset(transitive = [
+        dep[FlutterInfo].data_assets
+        for dep in inputs.deps
+        if FlutterInfo in dep
+    ])
 
-    # Plus any code assets rules_dart propagated through the Dart package
-    # graph — a pub package that owns a native library contributes it just by
-    # being depended on — and those this target names in `code_assets`, which
-    # replace whatever arrives under their ids. See `resolve_native_assets`.
+    # The code assets the Dart package graph carries — a package that owns a
+    # native library contributes it just by being depended on — and those this
+    # target names in `code_assets`, which replace whatever arrives under their
+    # ids. Resolved before the kernel compile, which reads the manifest through
+    # `--native-assets`. See `resolve_native_assets`.
     resolved_assets = resolve_native_assets(
         ctx,
-        declared = transitive_native_assets.to_list(),
         deps = inputs.deps,
         code_assets = [target[DartCodeAssetInfo] for target in inputs.code_assets],
     )
     native_assets_list = resolved_assets.assets
-    lifted_code_assets = resolved_assets.lifted
 
     target_arch = host_target_arch(ctx, flutter_sdk_info)
     native_assets_manifest_file = ctx.actions.declare_file(ctx.label.name + ".native_assets.json")
@@ -363,7 +357,7 @@ def flutter_application_build(ctx, inputs):
     # `code_asset_libraries.bzl`.
     describe_code_asset_libraries(
         ctx.label,
-        lifted_code_assets,
+        native_assets_list,
         code_asset_libraries(
             inputs.deps,
             inputs.code_assets,

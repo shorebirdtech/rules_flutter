@@ -124,13 +124,12 @@ silently discards every dependency's contribution.""",
         "shader_srcs": "depset[File]: The Flutter framework's own shader sources (.frag/.glsl), compiled per platform and bundled at `shaders/<file name>`. A package's shaders are `pub_shaders`.",
         "plugins": "list[struct]: Plugin metadata. Each struct has: name (str), platforms (dict of platform -> FlutterPluginPlatformInfo).",
         "transitive_native_libs": "depset[File]: Shared libs from plugin native_deps, merged transitively.",
-        "native_lib_sources": "depset[struct]: Per library, the first-party sources it is built from — `native_deps` entries and Native Asset libraries alike. Each struct has: library (File), sources (tuple[File]). A hot reload stats these to notice that a library went stale in an app whose reload runs no build of its own; see `native_sources.bzl`.",
+        "native_lib_sources": "depset[struct]: Per `native_deps` library, the first-party sources it is built from (a code asset's are found by `code_asset_libraries.bzl`). Each struct has: library (File), sources (tuple[File]). A hot reload stats these to notice that a library went stale in an app whose reload runs no build of its own; see `native_sources.bzl`.",
         "binding_contracts": "depset[struct]: Per-library binding contracts contributed by transitive `flutter_native_library` wrappers in a plugin's `native_deps`. Each struct has: library (File), contract (tuple[File]). Paired rather than flattened because the dev tool's question is per library — a rebuilt library whose contract is unchanged may still take an increment, and one with no contract may not.",
         "apple_plugin_libraries": "depset[struct]: Apple plugin swift_libraries. Each struct has: platform (str: 'macos' | 'ios'), label (Label), cc_info (CcInfo or None), swift_info (SwiftInfo or None), package (str: pub package name). Used by the runner aggregator to merge per-platform link/compile inputs.",
         "linux_plugin_libraries": "depset[struct]: Linux plugin source bundles. Each struct has: label (Label), srcs (depset[File]), hdrs (depset[File]), include_dirs (depset[str]), linkopts (list[str]), link_errors (list[str]), package (str). The Linux runner folds these into its compile and link.",
         "windows_plugin_libraries": "depset[struct]: Windows plugin source bundles. Each struct has: label (Label), srcs (depset[File]), hdrs (depset[File]), include_dirs (depset[str]), linkopts (list[str]), link_errors (list[str]), package (str). The Windows runner folds these into its compile and link.",
         "apple_privacy_manifests": "depset[File]: Apple `PrivacyInfo.xcprivacy` files contributed by transitive plugins. Apple requires every framework to ship one since iOS 17.4 / macOS 14.4; the macOS / iOS application rules bundle them into `Contents/Resources/<pkg>/PrivacyInfo.xcprivacy` (or the iOS analog) so App Store submission's privacy aggregator picks them up.",
-        "native_assets": "depset[FlutterNativeAssetInfo]: Per-target Native Assets `CodeAsset` declarations contributed by transitive `flutter_native_asset` rules.",
         "data_assets": "depset[FlutterDataAssetInfo]: Per-package Native Assets `DataAsset` declarations contributed by transitive `flutter_data_asset` rules.",
         "pub_fonts": "depset[struct]: Per-package font declarations from pub `flutter.fonts`. Each struct has: package_name (str — empty string sentinel for non-package contributions like the toolchain MaterialIcons target), package_root (str — the package's root, the directory above `lib/`, as a short_path; None for a non-package contribution), family (str), fonts (tuple[struct(asset_path, of_other_package, file, weight, style)] — each font's path from the package root, or the `packages/<other>/<path>` of a font of another package, whether it is one, and its File). A program keys the family and each font `packages/<pkg>/<...>` unless the package is its own (its root is the program's) or a non-package contribution; a font of another package keeps its path.",
         "pub_assets": "depset[struct]: Per-package asset files: a pub package's `flutter.assets`, and the `assets` of a `flutter_library` or `flutter_plugin`. Each struct has: package_name (str — empty sentinel for non-package), package_root (str — the package's root as a short_path), asset_path (str — the path from the package root, as a pubspec lists it), file (File), platforms (tuple[str] — the platforms its `platforms:` entry restricts it to; empty for all), flavors (tuple[str]). A program bundles each at `packages/<pkg>/<asset_path>`, or at bare `asset_path` when the package is its own (its root is the program's) or the package_name is empty, as `flutter build` keys a dependency's assets and the program's own.",
@@ -170,17 +169,6 @@ FlutterPluginPlatformInfo = provider(
         "default_package": "str: `default_package`, the package that implements a federated plugin on this platform; empty for none.",
         "package": "str: `package`, the Java package of an Android `plugin_class`; empty for none.",
         "lib": "Target or None: The platform's native library, analysed only in a build for that platform.",
-    },
-)
-
-FlutterNativeAssetInfo = provider(
-    doc = "A single Native Assets `CodeAsset` declaration captured by `flutter_native_asset`.",
-    fields = {
-        "asset_id": "str: The Dart asset id (e.g. `package:objective_c/objective_c.dylib`).",
-        "link_mode": "str: One of `dynamic_loading_bundle`, `dynamic_loading_system`, `dynamic_loading_executable`, `dynamic_loading_process`.",
-        "file": "File or None: The shared library to bundle into the application. None for non-bundled link modes.",
-        "bundle_filename": "str: Filename inside the platform bundle slot (e.g. `objective_c.dylib`). Empty for non-bundled link modes.",
-        "system_uri": "str: System library URI for `dynamic_loading_system`. Empty otherwise.",
     },
 )
 

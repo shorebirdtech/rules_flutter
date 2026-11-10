@@ -8,12 +8,12 @@ load("//flutter/tests:native_assets_test.bzl", "hook_check_probe", "legacy_dart_
 # A pub-package-shaped `dart_library` that owns a native code asset, exactly as
 # `pub.from_lock()` generates for a package with a curated `//dart/ext` entry.
 # Nothing here mentions Flutter — the point is that rules_flutter picks the
-# asset up off the Dart package graph without a `flutter_native_asset`. The
-# other packages of the fixture are the directories below this one.
+# asset up off the Dart package graph. The other packages of the fixture are the directories below this one.
 
 cc_library(
     name = "empty",
     srcs = ["empty.cc"],
+    visibility = ["//flutter/tests/dart_asset_fixture/plugin_asset:__pkg__"],
 )
 
 cc_shared_library(
@@ -24,10 +24,15 @@ cc_shared_library(
         "@platforms//os:windows": "asset_fixture.dll",
         "//conditions:default": "libasset_fixture.so",
     }),
-    visibility = [
-        "//flutter/tests:__pkg__",
-        "//flutter/tests/dart_asset_fixture/plugin_asset:__pkg__",
-    ],
+    deps = [":empty"],
+)
+
+# The library the manifest-layout probes in `native_assets_test.bzl` stage,
+# under one name on every host so the paths they expect are fixed.
+cc_shared_library(
+    name = "layout_probe_shared",
+    shared_lib_name = "liblayout_probe.dylib",
+    visibility = ["//flutter/tests:__pkg__"],
     deps = [":empty"],
 )
 

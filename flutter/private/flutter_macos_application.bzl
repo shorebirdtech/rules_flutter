@@ -212,7 +212,7 @@ def _flutter_macos_native_libs_impl(ctx):
 
     Includes both the legacy `native_libs` set (from `native_deps`-style
     FFI cc_library targets) and the modern `bundled_code_assets` set
-    contributed by `flutter_native_asset(link_mode = "dynamic_loading_bundle")`.
+    of `dart_code_asset(link_mode = "dynamic_loading_bundle")` libraries.
     rules_apple's `additional_contents = {target: "Frameworks"}` machinery
     code-signs the dylibs as part of the outer `macos_application` build —
     no bespoke codesign action needed here.

@@ -66,7 +66,7 @@ load("@bazel_skylib//lib:structs.bzl", "structs")
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo", "DartKernelSdkInfo")
 load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "KERNEL_LIST_ATTR", "KERNEL_TOOL_ATTR", "TRACK_CREATION_LOCATIONS_ATTR", "collect_modules", "collect_packages", "collect_transitive_srcs", "dart_entry_kernel_action", "dart_import_check_aspect", "dart_link_kernel_action", "executable_defines", "executable_defines_config", "import_check_validation", "kernel_list", "package_identity_attrs", "runfiles_path", "track_creation_locations")
-load("//flutter:providers.bzl", "FlutterApplicationInputsInfo", "FlutterInfo", "FlutterTestProgramInfo")
+load("//flutter:providers.bzl", "FlutterApplicationInputsInfo", "FlutterTestProgramInfo")
 load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "synthesize_app_package")
 load("//flutter/private:application_libraries.bzl", "application_libraries", "application_libraries_aspect")
 load(
@@ -415,17 +415,11 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
     if hook_err != None:
         fail(hook_err)
 
-    # Native Assets reach a test the same ways they reach an application:
-    # named in `code_assets`, declared with `flutter_native_asset` and
-    # propagated on `FlutterInfo`, or owned by a pub package and lifted off the
-    # Dart package graph. See `resolve_native_assets`.
+    # Code assets reach a test the same ways they reach an application: named
+    # in `code_assets`, or owned by a package and lifted off the Dart package
+    # graph. See `resolve_native_assets`.
     native_assets_list = resolve_native_assets(
         ctx,
-        declared = depset(transitive = [
-            dep[FlutterInfo].native_assets
-            for dep in deps
-            if FlutterInfo in dep
-        ]).to_list(),
         deps = deps,
         code_assets = [target[DartCodeAssetInfo] for target in inputs.code_assets],
     ).assets
@@ -552,11 +546,10 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
 
     runfiles = ctx.runfiles(
         # The bundled native-asset libraries ship here, at the runfiles-relative
-        # paths the manifest names. Both arms re-declare the library into an
-        # output namespace of their own first — `flutter_native_asset` under
-        # its `bundle_filename`, `resolve_native_assets` under this rule's —
-        # so what lands in runfiles is the File the manifest points at rather
-        # than the `_solib_<arch>/` original.
+        # paths the manifest names. `resolve_native_assets` re-declares each
+        # library under this rule's name first, so what lands in runfiles is
+        # the File the manifest points at rather than the `_solib_<arch>/`
+        # original.
         files = [
             kernel_dill,
             runner_tools.flutter_tester,

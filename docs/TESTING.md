@@ -1289,9 +1289,9 @@ For the same reason, prefer a `glob()` over a named source file when the file's 
 Procedure:
 
 1. Locate the package's hook source under `~/Library/Caches/bazel/_bazel_<user>/.../external/*+flutter_pub__<pkg>/hook/build.dart`. Read what it builds (file glob, link mode, target platforms, copts).
-2. Reproduce the build with `cc_shared_library` + `objc_library` (Apple) / `cc_library` (other platforms). Set `shared_lib_name` to something *different* from the bundle filename — `flutter_native_asset` symlinks the cc output to `<bundle_filename>` in its own package, and matching names collide.
-3. Wrap the output in `flutter_native_asset(name = "<pkg>_native_asset", asset_id = "package:<pkg>/<basename>", link_mode = "dynamic_loading_bundle", library = ":_<pkg>_dylib", bundle_filename = "<basename>")`, constrained to the supported platforms with `target_compatible_with`. Platforms that need a different `bundle_filename` (`lib<x>.so`, `<x>.dll`) get their own target; platforms that agree on every attribute share one.
-4. Declare the package's facts on a `dart_package_metadata(name = "pubspec-metadata", package_name = "{PKG}", language_version = "{LANGUAGE_VERSION}", {LICENSE})`, and hang a `flutter_plugin(name = "<pkg>", package = ":pubspec-metadata", platforms = [], native_assets = select({...}))` over the assets. Even though the package is "pure Dart" from pub's perspective, the empty-`platforms` plugin shape is what carries the native-assets entry into `FlutterInfo` for the application's manifest. The `select()` is what decides which asset targets an application sees: list exactly the ones that belong to the platform being built, and `//conditions:default: []` for the rest. Two targets claiming the same `asset_id` in one build fail analysis.
+2. Reproduce the build with `cc_shared_library` + `objc_library` (Apple) / `cc_library` (other platforms). Set `shared_lib_name` to the file name the library ships under (`<basename>`): the application bundles it under that name, and on iOS wraps it in a framework named after it.
+3. Wrap the output in rules_dart's `dart_code_asset(name = "<pkg>_native_asset", asset_id = "package:<pkg>/<basename>", shared_library = ":_<pkg>_dylib")`, constrained to the supported platforms with `target_compatible_with`. Platforms whose libraries differ in name (`lib<x>.so`, `<x>.dll`) set `shared_lib_name` with a `select()`.
+4. Declare the package's facts on a `dart_package_metadata(name = "pubspec-metadata", package_name = "{PKG}", code_assets = select({...}), language_version = "{LANGUAGE_VERSION}", {LICENSE})`, and hang a `flutter_plugin(name = "<pkg>", package = ":pubspec-metadata", platforms = [])` over it; the empty `platforms` is right for a package that is "pure Dart" from pub's perspective. `code_assets` stands in for the hook: every program that depends on the package gets its assets, as under `flutter build`. The `select()` decides which asset targets an application sees: list exactly the ones that belong to the platform being built, and `//conditions:default: []` for the rest.
 5. Drop the template at `ext/<pkg>/<major>/BUILD.bazel.tpl`. The next `bazel run @rules_flutter//flutter/pub -- get` + Bazel build picks it up automatically.
 
 If the build fails at runtime with `Couldn't resolve native function "<symbol>"`, the most common cause is the `cc_shared_library`'s `install_name` not matching the asset id's basename — set `user_link_flags = ["-Wl,-install_name,@rpath/<basename>"]` on Apple targets. See `ext/objective_c/9/BUILD.bazel.tpl` for the canonical example.
@@ -1329,7 +1329,7 @@ Before the hold existed, a sleeping display produced the old "Grant accessibilit
 ### FFI runtime tests (iOS simulator, macOS, Linux, Windows)
 
 Behavioral verification that both native-library mechanisms work at runtime:
-`add()` binds via `@Native` asset-id resolution (`flutter_native_asset` →
+`add()` binds via `@Native` asset-id resolution (`dart_code_asset` →
 `--native-assets` kernel manifest), `mul()` raw-opens its conventional path
 (`native_deps`). The app writes
 `ffi_example_result add(3,4)=7 mul(3,4)=12` to its temp dir; the tests read
@@ -1349,7 +1349,7 @@ bazel test :verify_windows_runtime_test --test_tag_filters= --strategy=TestRunne
 ```
 
 **When to run:** After any change to native-assets manifest emission
-(`flutter_native_assets.bzl`, `flutter_native_asset.bzl`), native-library
+(`flutter_native_assets.bzl`), native-library
 bundling (`flutter_ios_native_frameworks`, `flutter_macos_native_libs`), or
 kernel compilation flags.
 

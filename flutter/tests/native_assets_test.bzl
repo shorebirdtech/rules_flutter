@@ -1,8 +1,9 @@
 """Analysis-time validation tests for the Native Assets rules.
 
-These tests specify the documented contract of `flutter_native_asset` /
-`flutter_data_asset`: invalid configurations must fail at analysis time,
-not silently produce something that breaks at runtime.
+These tests specify the documented contract of `flutter_data_asset` and of
+the manifest an application writes from its code assets: invalid
+configurations must fail at analysis time, not silently produce something
+that breaks at runtime.
 
 Each test uses `analysistest.make(expect_failure = True)` and pairs the
 target under test with an `asserts.expect_failure(env, "<substring>")`
@@ -12,9 +13,9 @@ fix.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
-load("@rules_dart//dart:providers.bzl", "DartInfo", "DartPackageInfo")
-load("//flutter:native_assets.bzl", "flutter_data_asset", "flutter_native_asset")
-load("//flutter:providers.bzl", "FlutterNativeAssetInfo")
+load("@rules_dart//dart:defs.bzl", "dart_code_asset")
+load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo", "DartPackageInfo")
+load("//flutter:native_assets.bzl", "flutter_data_asset")
 load("//flutter/private:common.bzl", "check_unreplaced_hooks")
 load("//flutter/private:flutter_native_assets.bzl", "native_asset_framework_name", "native_assets_target_string", "resolve_native_assets", "write_native_assets_manifest")
 
@@ -52,51 +53,14 @@ def _framework_name_impl(ctx):
     asserts.equals(env, "libfoo", native_asset_framework_name("libfoo"))
     return unittest.end(env)
 
-def _identical_assets_dedup_impl(ctx):
-    """Pin how identical asset declarations behave in the propagation depset.
-
-    `FlutterInfo.native_assets` is a depset of these providers, so two
-    targets declaring byte-identical assets collapse to one element before
-    the manifest writer ever sees them. That is why the duplicate-id
-    `fail()` catches *conflicting* declarations rather than repeated ones.
-    """
-    env = unittest.begin(ctx)
-
-    def executable_asset():
-        return FlutterNativeAssetInfo(
-            asset_id = "package:foo/foo.dart",
-            link_mode = "dynamic_loading_executable",
-            file = None,
-            bundle_filename = "",
-            system_uri = "",
-        )
-
-    asserts.equals(env, 1, len(depset([executable_asset(), executable_asset()]).to_list()))
-
-    # Conflicting declarations stay distinct, so they still reach the
-    # writer as two entries and trip its duplicate-id check.
-    conflicting = [
-        FlutterNativeAssetInfo(
-            asset_id = "package:foo/foo.dart",
-            link_mode = "dynamic_loading_system",
-            file = None,
-            bundle_filename = "",
-            system_uri = uri,
-        )
-        for uri in ["libfoo.so.1", "libfoo.so.2"]
-    ]
-    asserts.equals(env, 2, len(depset(conflicting).to_list()))
-    return unittest.end(env)
-
 _target_string_t0_test = unittest.make(_target_string_macos_arm64_impl)
 _target_string_t1_test = unittest.make(_target_string_unknown_impl)
 _framework_name_test = unittest.make(_framework_name_impl)
-_identical_assets_dedup_test = unittest.make(_identical_assets_dedup_impl)
 
 # -- Manifest probe ----------------------------------------------------
 
 def _manifest_probe_impl(ctx):
-    """Run the manifest writer over `assets` for a fixed (os, arch) pair.
+    """Resolve `code_assets` and write their manifest for a fixed (os, arch) pair.
 
     `write_native_assets_manifest` needs a rule context, so exercising
     its analysis-time contract needs a rule to host it. This one stands
@@ -107,7 +71,11 @@ def _manifest_probe_impl(ctx):
     write_native_assets_manifest(
         ctx = ctx,
         output_file = output,
-        native_assets = [dep[FlutterNativeAssetInfo] for dep in ctx.attr.assets],
+        native_assets = resolve_native_assets(
+            ctx,
+            deps = [],
+            code_assets = [dep[DartCodeAssetInfo] for dep in ctx.attr.code_assets],
+        ).assets,
         target_os = ctx.attr.target_os,
         target_arch = ctx.attr.target_arch,
         layout = ctx.attr.layout,
@@ -117,7 +85,7 @@ def _manifest_probe_impl(ctx):
 _manifest_probe = rule(
     implementation = _manifest_probe_impl,
     attrs = {
-        "assets": attr.label_list(providers = [FlutterNativeAssetInfo]),
+        "code_assets": attr.label_list(providers = [DartCodeAssetInfo]),
         "layout": attr.string(default = "bundle"),
         "target_arch": attr.string(mandatory = True),
         "target_os": attr.string(mandatory = True),
@@ -241,28 +209,6 @@ def _setup_failure_targets():
     them out of `bazel test //...` glob expansion — they're only built
     by the analysistests that wrap them.
     """
-    flutter_native_asset(
-        name = "_static_link_mode",
-        asset_id = "package:foo/foo.dylib",
-        link_mode = "static",
-        tags = ["manual"],
-    )
-
-    flutter_native_asset(
-        name = "_bundle_missing_library",
-        asset_id = "package:foo/foo.dylib",
-        link_mode = "dynamic_loading_bundle",
-        bundle_filename = "foo.dylib",
-        tags = ["manual"],
-    )
-
-    flutter_native_asset(
-        name = "_system_missing_uri",
-        asset_id = "package:foo/foo.dylib",
-        link_mode = "dynamic_loading_system",
-        tags = ["manual"],
-    )
-
     flutter_data_asset(
         name = "_data_bad_id",
         asset_id = "not-a-package-id",
@@ -270,52 +216,19 @@ def _setup_failure_targets():
         tags = ["manual"],
     )
 
-    # Two declarations of one asset id reaching a single application:
-    # the manifest can only carry one entry per id, so this must break
-    # loudly instead of letting one silently shadow the other.
-    flutter_native_asset(
-        name = "_duplicate_id_a",
-        asset_id = "package:foo/foo.dylib",
-        link_mode = "dynamic_loading_system",
-        system_uri = "libfoo.so.1",
-        tags = ["manual"],
-    )
-
-    flutter_native_asset(
-        name = "_duplicate_id_b",
-        asset_id = "package:foo/foo.dylib",
-        link_mode = "dynamic_loading_system",
-        system_uri = "libfoo.so.2",
-        tags = ["manual"],
-    )
-
-    _manifest_probe(
-        name = "_duplicate_asset_ids",
-        assets = [
-            ":_duplicate_id_a",
-            ":_duplicate_id_b",
-        ],
-        target_arch = "arm64",
-        target_os = "macos",
-        tags = ["manual"],
-    )
-
-    # A `flutter_native_asset`-declared bundled library, probed under both
-    # layouts. This is the arm the Native Assets e2e does not reach — that one
-    # goes through `resolve_native_assets` — so without these the runfiles
-    # layout is only ever exercised for bridged assets.
-    flutter_native_asset(
+    # A bundled library, probed under both layouts. An application e2e only
+    # reaches the bundle one, so without these the runfiles layout is only
+    # exercised through a `flutter_test`.
+    dart_code_asset(
         name = "_layout_asset",
         asset_id = "package:layout/layout.dart",
-        library = "//flutter/tests/dart_asset_fixture:asset_fixture_shared",
-        bundle_filename = "liblayout_probe.dylib",
-        link_mode = "dynamic_loading_bundle",
+        shared_library = "//flutter/tests/dart_asset_fixture:layout_probe_shared",
         tags = ["manual"],
     )
 
     _manifest_probe(
         name = "_layout_bundle",
-        assets = [":_layout_asset"],
+        code_assets = [":_layout_asset"],
         layout = "bundle",
         target_arch = "arm64",
         target_os = "macos",
@@ -324,7 +237,7 @@ def _setup_failure_targets():
 
     _manifest_probe(
         name = "_layout_runfiles",
-        assets = [":_layout_asset"],
+        code_assets = [":_layout_asset"],
         layout = "runfiles",
         target_arch = "arm64",
         target_os = "macos",
@@ -340,33 +253,9 @@ def native_assets_test_suite(name):
     _setup_failure_targets()
 
     _expect_failure_test(
-        name = name + "_static_fails",
-        target_under_test = ":_static_link_mode",
-        expected_substring = "link_mode = \"static\"",
-    )
-
-    _expect_failure_test(
-        name = name + "_bundle_requires_library",
-        target_under_test = ":_bundle_missing_library",
-        expected_substring = "requires `library = ",
-    )
-
-    _expect_failure_test(
-        name = name + "_system_requires_uri",
-        target_under_test = ":_system_missing_uri",
-        expected_substring = "requires `system_uri",
-    )
-
-    _expect_failure_test(
         name = name + "_data_asset_id_format",
         target_under_test = ":_data_bad_id",
         expected_substring = "must start with `package:`",
-    )
-
-    _expect_failure_test(
-        name = name + "_duplicate_asset_ids",
-        target_under_test = ":_duplicate_asset_ids",
-        expected_substring = "duplicate native asset id \"package:foo/foo.dylib\"",
     )
 
     # The counterpart to the bridge probe below: an asset that never arrives
@@ -418,7 +307,7 @@ def native_assets_test_suite(name):
         name = name + "_runfiles_layout_path",
         size = "small",
         target_under_test = ":_layout_runfiles",
-        expected_substrings = ["\"flutter/tests/liblayout_probe.dylib\""],
+        expected_substrings = ["\"flutter/tests/_layout_runfiles_code_assets/liblayout_probe.dylib\""],
     )
 
     # A test loads the libraries `deps` builds for its target.
@@ -433,17 +322,12 @@ def native_assets_test_suite(name):
         _target_string_t0_test,
         _target_string_t1_test,
         _framework_name_test,
-        _identical_assets_dedup_test,
     )
 
     native.test_suite(
         name = name,
         tests = [
-            ":" + name + "_static_fails",
-            ":" + name + "_bundle_requires_library",
-            ":" + name + "_system_requires_uri",
             ":" + name + "_data_asset_id_format",
-            ":" + name + "_duplicate_asset_ids",
             ":" + name + "_unreplaced_hook",
             ":" + name + "_misowned_code_asset",
             ":" + name + "_unreplaced_hook_in_test",
@@ -511,11 +395,11 @@ hook_check_probe = rule(
 # --- resolve_native_assets ---
 #
 # Assets rules_dart propagates on `DartPackageInfo.code_assets` must reach the
-# application without anyone writing a `flutter_native_asset`. The probe below
+# application from the package graph alone. The probe below
 # runs the bridge over a real `dart_library` graph and reports what it lifted.
 
 def _bridge_probe_impl(ctx):
-    lifted = resolve_native_assets(ctx, [], ctx.attr.deps, []).lifted
+    lifted = resolve_native_assets(ctx, ctx.attr.deps, []).assets
     ids = sorted([a.asset_id for a in lifted])
     if ids != sorted(ctx.attr.expected_asset_ids):
         fail("%s: expected %s, bridged %s" % (ctx.label, sorted(ctx.attr.expected_asset_ids), ids))

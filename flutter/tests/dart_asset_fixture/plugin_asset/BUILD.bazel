@@ -1,25 +1,36 @@
+load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
+load("@rules_dart//dart:defs.bzl", "dart_code_asset")
 load("//flutter:defs.bzl", "dart_package_metadata", "flutter_plugin")
-load("//flutter:native_assets.bzl", "flutter_native_asset")
 
-# The other way a code asset reaches a test: declared with
-# `flutter_native_asset` and propagated on `FlutterInfo` by a plugin.
-flutter_native_asset(
+# A code asset carried by a `flutter_plugin` rather than a plain
+# `dart_library`: the plugin's `dart_package_metadata` owns it, as an `ext/`
+# overlay's does.
+cc_shared_library(
+    name = "plugin_asset_shared",
+    shared_lib_name = select({
+        "@platforms//os:ios": "libplugin_asset_fixture.dylib",
+        "@platforms//os:macos": "libplugin_asset_fixture.dylib",
+        "@platforms//os:windows": "plugin_asset_fixture.dll",
+        "//conditions:default": "libplugin_asset_fixture.so",
+    }),
+    deps = ["//flutter/tests/dart_asset_fixture:empty"],
+)
+
+dart_code_asset(
     name = "plugin_asset",
     asset_id = "package:plugin_asset_fixture/plugin_asset.dart",
-    bundle_filename = "libplugin_asset_fixture.dylib",
-    library = "//flutter/tests/dart_asset_fixture:asset_fixture_shared",
-    link_mode = "dynamic_loading_bundle",
+    shared_library = ":plugin_asset_shared",
 )
 
 dart_package_metadata(
     name = "pubspec-metadata",
     package_name = "plugin_asset_fixture",
+    code_assets = [":plugin_asset"],
 )
 
 flutter_plugin(
     name = "plugin_asset_fixture",
     srcs = ["lib/fixture.dart"],
-    native_assets = [":plugin_asset"],
     package = ":pubspec-metadata",
     visibility = ["//flutter/tests/dart_asset_fixture/code_asset_test:__pkg__"],
 )

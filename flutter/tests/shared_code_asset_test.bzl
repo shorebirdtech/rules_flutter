@@ -254,7 +254,6 @@ opt_mode = rule(
 def _resolve_probe_impl(ctx):
     resolved = resolve_native_assets(
         ctx,
-        declared = [],
         deps = ctx.attr.deps,
         code_assets = [t[DartCodeAssetInfo] for t in ctx.attr.code_assets],
     )
@@ -476,14 +475,14 @@ def shared_code_asset_test_suite(name):
     )
     tests.append(name + "_two_configurations_refused")
 
-    # An id a `flutter_native_asset` declares is not loaded from the packages
-    # below, so their disagreeing about it is no conflict, in a debug build's
-    # description of its libraries as in the resolution.
+    # An id the application names in its `code_assets` is not loaded from the
+    # packages below, so their disagreeing about it is no conflict, in a debug
+    # build's description of its libraries as in the resolution.
     _builds_debug_test(
-        name = name + "_conflict_resolved_by_declaring",
-        target_under_test = _FIXTURE + "app_declared",
+        name = name + "_conflict_named_in_a_debug_app",
+        target_under_test = _FIXTURE + "app_conflict_named",
         target_compatible_with = ["@platforms//os:macos"],
     )
-    tests.append(name + "_conflict_resolved_by_declaring")
+    tests.append(name + "_conflict_named_in_a_debug_app")
 
     native.test_suite(name = name, tests = tests)

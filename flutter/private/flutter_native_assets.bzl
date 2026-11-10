@@ -45,7 +45,7 @@ discretion.
 
 load("@rules_dart//dart:providers.bzl", "DartInfo")
 load("@rules_dart//dart:utils.bzl", "collect_transitive_code_assets", "resolve_code_assets")
-load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterNativeAssetInfo")
+load("//flutter:providers.bzl", "FlutterApplicationInfo")
 
 # Map (target_os, arch) → the Target string Dart's
 # `Target.fromArchitectureAndOS` would produce. Keep this mirrored
@@ -73,7 +73,7 @@ CODE_ASSETS_DOC = """Code assets this program loads, each replacing the asset `d
 Each entry provides `DartCodeAssetInfo`: a `dart_code_asset`, a
 `flutter_native_library` wrapping one, or any rule that provides it. An entry is
 this program's choice of library for its asset id, so it replaces whatever the
-packages in `deps` (or a `flutter_native_asset`) supply under that id, as
+packages in `deps` supply under that id, as
 `code_assets` does on rules_dart's `dart_binary` and `dart_test`. Ids no entry
 names keep the asset `deps` supply.
 
@@ -188,15 +188,9 @@ def write_native_assets_manifest(
         layout = "bundle"):
     """Write the canonical `--native-assets` JSON manifest.
 
-    Groups `native_assets` (a list of `FlutterNativeAssetInfo`) under the
-    Dart Target string for the platform being built and serializes the
-    result to `output_file`.
-
-    Asset ids are unique within a manifest: an id claimed by two
-    *differing* declarations fails the build rather than letting one
-    shadow the other. Byte-identical declarations never reach here —
-    they collapse earlier, in the `FlutterInfo.native_assets` depset —
-    so a repeated asset reached through a diamond is not an error.
+    Groups `native_assets` (from `resolve_native_assets`, one per asset id)
+    under the Dart Target string for the platform being built and serializes
+    the result to `output_file`.
 
     When the input list is empty, the manifest is still written but with
     an empty `native-assets` map — keeping the frontend_server
@@ -205,7 +199,7 @@ def write_native_assets_manifest(
     Args:
       ctx: Rule context. Used only for `ctx.actions.write`.
       output_file: The File to write the manifest into.
-      native_assets: Iterable of `FlutterNativeAssetInfo` providers.
+      native_assets: The assets `resolve_native_assets` returns.
       target_os: Target OS string (`macos`, `ios`, `linux`, `windows`,
         `android`). Empty string means "no platform context" — emits
         an empty manifest.
@@ -224,17 +218,6 @@ def write_native_assets_manifest(
 
     section = {}
     for asset in native_assets:
-        if asset.asset_id in section:
-            fail(
-                "flutter_native_assets_manifest: duplicate native asset id %r. " % asset.asset_id +
-                "Two `flutter_native_asset` targets in this application's " +
-                "dependency graph claim the same id, so both the manifest " +
-                "entry and the bundled library would be whichever one the " +
-                "aggregator happened to visit last. Declare the per-platform " +
-                "variants under a `select()` on " +
-                "`flutter_plugin(native_assets = ...)` so exactly one of them " +
-                "reaches the application in any given configuration.",
-            )
         section[asset.asset_id] = _path_list_for(asset, target_os, layout)
 
     # Assets in the graph with no resolvable `<os>_<arch>` key means the
@@ -267,7 +250,7 @@ def collect_bundled_code_asset_files(native_assets):
     link modes contribute manifest entries only — no files to bundle.
 
     Args:
-      native_assets: Iterable of `FlutterNativeAssetInfo` providers.
+      native_assets: The assets `resolve_native_assets` returns.
 
     Returns:
       A `depset[File]` carrying every shared library that needs to be
@@ -279,17 +262,17 @@ def collect_bundled_code_asset_files(native_assets):
         if asset.link_mode == "dynamic_loading_bundle" and asset.file != None
     ])
 
-def resolve_native_assets(ctx, declared, deps, code_assets):
+def resolve_native_assets(ctx, deps, code_assets):
     """The one asset per id a program loads, with each library staged once.
 
-    Assets arrive three ways, and on a shared id the more deliberate one wins:
+    Assets arrive two ways, and on a shared id the more deliberate one wins:
 
       * named in the consuming target's own `code_assets` — a choice made for
         this program, so it replaces whatever arrives under its id below.
         rules_dart's `dart_binary` and `dart_test` give their `code_assets` the
         same meaning;
-      * declared with `flutter_native_asset` and propagated on `FlutterInfo`;
-      * owned by a Dart package and lifted off the package graph.
+      * owned by a Dart package (its `dart_package_metadata`'s `code_assets`)
+        and lifted off the package graph.
 
     Two packages claiming one id with different libraries fail, as in
     rules_dart, unless the target names the one to use: the Dart VM resolves
@@ -313,36 +296,28 @@ def resolve_native_assets(ctx, declared, deps, code_assets):
 
     Args:
       ctx: The consuming rule's context.
-      declared: `FlutterNativeAssetInfo` from `flutter_native_asset`
-        declarations reaching the target.
       deps: Targets whose Dart packages may carry code assets.
       code_assets: `DartCodeAssetInfo` the target names itself.
 
     Returns:
-      A struct with `assets`, every `FlutterNativeAssetInfo` the program loads,
-      one per id; `lifted`, the subset that came from `DartCodeAssetInfo`
-      (lifted or named) rather than from `flutter_native_asset`; and
-      `libraries`, each lifted id's library as built, before staging (None for
-      an asset with no library).
+      A struct with `assets`, every asset the program loads, one per id, each
+      a struct of `asset_id`, `link_mode`, `file` (the staged library, or
+      None), `bundle_filename` (its basename, or empty) and `system_uri`; and
+      `libraries`, each id's library as built, before staging (None for an
+      asset with no library).
     """
-    named = {asset.asset_id: True for asset in code_assets}
-    declared = [asset for asset in declared if asset.asset_id not in named]
-    declared_ids = {asset.asset_id: True for asset in declared}
-    transitive = collect_transitive_code_assets([dep for dep in deps if DartInfo in dep])
     resolved = resolve_code_assets(
         ctx.label,
-        [asset for asset in transitive if asset.asset_id not in declared_ids],
+        collect_transitive_code_assets([dep for dep in deps if DartInfo in dep]),
         code_assets,
     )
-    lifted = _stage_code_assets(ctx, resolved)
     return struct(
-        assets = declared + lifted,
-        lifted = lifted,
+        assets = _stage_code_assets(ctx, resolved),
         libraries = {asset.asset_id: asset.dynamic_library for asset in resolved},
     )
 
 def _stage_code_assets(ctx, assets):
-    """`FlutterNativeAssetInfo` for `assets`, each distinct library linked once."""
+    """The assets as `resolve_native_assets` returns them, each distinct library linked once."""
     links = {}
     by_basename = {}
     staged = []
@@ -376,7 +351,7 @@ def _stage_code_assets(ctx, assets):
                         "this target's `code_assets`."
                     ) % (ctx.label, library.basename, other.library.owner, library.owner))
                 links[library] = link
-        staged.append(FlutterNativeAssetInfo(
+        staged.append(struct(
             asset_id = asset.asset_id,
             link_mode = asset.link_mode,
             file = link,

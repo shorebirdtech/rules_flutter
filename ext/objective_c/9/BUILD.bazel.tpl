@@ -21,35 +21,34 @@
 
 load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
 load("@rules_cc//cc:objc_library.bzl", "objc_library")
-load("@rules_dart//dart:defs.bzl", "dart_package_metadata")
+load("@rules_dart//dart:defs.bzl", "dart_code_asset", "dart_package_metadata")
 load("@rules_flutter//flutter:defs.bzl", "flutter_plugin")
-load("@rules_flutter//flutter:native_assets.bzl", "flutter_native_asset")
 
+# The package owns its dylib as a code asset, as its `hook/build.dart` would
+# have it: consumers pick up the dylib and its manifest entry simply by
+# depending on `@<hub>//:objective_c` like any other pub package.
 dart_package_metadata(
     name = "pubspec-metadata",
     package_name = "{PKG}",
+    code_assets = select({
+        "@platforms//os:macos": [":{PKG}_native_asset"],
+        "@platforms//os:ios": [":{PKG}_native_asset"],
+        "//conditions:default": [],
+    }),
     language_version = "{LANGUAGE_VERSION}",
     {LICENSE}
     visibility = ["//visibility:public"],
 )
 
 # `objective_c` is a pure-Dart support library — there's no
-# `flutter.plugin` block in pubspec.yaml. We use `flutter_plugin` with
-# an empty `platforms` list anyway so the spoke can carry the
-# `native_assets` attribute that anchors the manifest entry. Consumers
-# transitively pick up the dylib + manifest entry simply by depending
-# on `@<hub>//:objective_c` like any other pub package.
+# `flutter.plugin` block in pubspec.yaml — so its `flutter_plugin` has an
+# empty `platforms` list.
 flutter_plugin(
     name = "{PKG}",
     srcs = glob(
         ["lib/**/*.dart"],
         allow_empty = True,
     ),
-    native_assets = select({
-        "@platforms//os:macos": [":{PKG}_native_asset"],
-        "@platforms//os:ios": [":{PKG}_native_asset"],
-        "//conditions:default": [],
-    }),
     package = ":pubspec-metadata",
     platforms = [],
     visibility = ["//visibility:public"],
@@ -107,11 +106,9 @@ objc_library(
 
 cc_shared_library(
     name = "_{PKG}_dylib",
-    # Use a distinct filename — `flutter_native_asset` symlinks this
-    # to `objective_c.dylib` in its own package and that's what lands
-    # in `Contents/Frameworks/`. Collapsing both names into one collides
-    # because the rules live in the same Bazel package.
-    shared_lib_name = "_{PKG}_internal.dylib",
+    # The name it lands under: loose in `Contents/Frameworks/` on macOS,
+    # and `objective_c.framework/objective_c` on iOS.
+    shared_lib_name = "objective_c.dylib",
     target_compatible_with = select({
         "@platforms//os:macos": [],
         "@platforms//os:ios": [],
@@ -145,12 +142,10 @@ cc_shared_library(
     deps = [":_{PKG}_objc"],
 )
 
-flutter_native_asset(
+dart_code_asset(
     name = "{PKG}_native_asset",
     asset_id = "package:{PKG}/objective_c.dylib",
-    bundle_filename = "objective_c.dylib",
-    library = ":_{PKG}_dylib",
-    link_mode = "dynamic_loading_bundle",
+    shared_library = ":_{PKG}_dylib",
     target_compatible_with = select({
         "@platforms//os:macos": [],
         "@platforms//os:ios": [],

@@ -198,8 +198,7 @@ def describe_code_asset_libraries(label, assets, records, binding_contracts, nat
 
     Args:
         label: The application's label, for error messages.
-        assets: The `FlutterNativeAssetInfo` the application staged from code
-            assets.
+        assets: The assets `resolve_native_assets` staged.
         records: From `code_asset_libraries`.
         binding_contracts: dict[str, list[File]], bundled path to contract
             Files; updated in place.
