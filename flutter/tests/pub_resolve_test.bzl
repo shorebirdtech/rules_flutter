@@ -89,6 +89,16 @@ def _an_unmapped_path_package_is_refused_test_impl(ctx):
 
     return unittest.end(env)
 
+def _a_lock_that_says_relative_false_is_not_relative_test_impl(ctx):
+    """The lock reader gives `relative: false` as the string "False", which Starlark holds true."""
+    env = unittest.begin(ctx)
+
+    errors = _errors([_path_entry("greeting", "/abs/packages/greeting", relative = "false")], {})
+    asserts.equals(env, 1, len(errors))
+    _mentions(env, errors[0], ["resolve = {\"greeting\": \"//...\"}"])
+
+    return unittest.end(env)
+
 def _a_path_package_built_from_its_pubspec_or_ignored_is_named_test_impl(ctx):
     env = unittest.begin(ctx)
 
@@ -333,6 +343,7 @@ def _every_mistake_is_reported_test_impl(ctx):
 _resolves_paths_relative_to_the_lock_test = unittest.make(_resolves_paths_relative_to_the_lock_test_impl)
 _an_exact_map_has_no_errors_test = unittest.make(_an_exact_map_has_no_errors_test_impl)
 _an_unmapped_path_package_is_refused_test = unittest.make(_an_unmapped_path_package_is_refused_test_impl)
+_a_lock_that_says_relative_false_is_not_relative_test = unittest.make(_a_lock_that_says_relative_false_is_not_relative_test_impl)
 _a_mapped_name_the_lock_lacks_is_refused_test = unittest.make(_a_mapped_name_the_lock_lacks_is_refused_test_impl)
 _hosted_git_and_sdk_entries_may_be_mapped_test = unittest.make(_hosted_git_and_sdk_entries_may_be_mapped_test_impl)
 _unmapped_hosted_entries_need_nothing_test = unittest.make(_unmapped_hosted_entries_need_nothing_test_impl)
@@ -350,6 +361,7 @@ def pub_resolve_test_suite(name):
         _resolves_paths_relative_to_the_lock_test,
         _an_exact_map_has_no_errors_test,
         _an_unmapped_path_package_is_refused_test,
+        _a_lock_that_says_relative_false_is_not_relative_test,
         _a_mapped_name_the_lock_lacks_is_refused_test,
         _hosted_git_and_sdk_entries_may_be_mapped_test,
         _unmapped_hosted_entries_need_nothing_test,
