@@ -605,7 +605,7 @@ def _flutter_web_bundle_impl(ctx):
             enable_experiments = ctx.attr.enable_experiments,
             defines = user_defines,
             renderer = renderer,
-            optimizing_cores = ctx.attr._wasm_opt_cores[BuildSettingInfo].value,
+            optimizing_cpus = ctx.attr._wasm_opt_cpus[BuildSettingInfo].value,
         )
 
         builds = [_wasm_build(renderer)]
@@ -1732,7 +1732,7 @@ build knows which served file is a native module.
                   "needs that origin allowed (or the fonts bundled) whatever this is set to.",
             default = False,
         ),
-        "_wasm_opt_cores": attr.label(default = Label("//flutter:wasm_opt_cores")),
+        "_wasm_opt_cpus": attr.label(default = Label("//flutter:wasm_opt_cpus")),
         "_dart2wasm_platform_dill": attr.label(
             default = Label("@flutter_web_sdk//:web-sdk/kernel/dart2wasm_platform.dill"),
             allow_single_file = True,

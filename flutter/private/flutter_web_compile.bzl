@@ -184,7 +184,7 @@ def web_renderer_defines(renderer):
 # The memory reservation covers a small app; a larger program needs more. An
 # optimizing dart2wasm (`-O1` and up) hands the module to Binaryen's
 # wasm-opt, which optimizes on several threads, so it reserves
-# `//flutter:wasm_opt_cores` CPUs. wasm-opt starts a thread per core unless
+# `//flutter:wasm_opt_cpus` CPUs. wasm-opt starts a thread per core unless
 # BINARYEN_CORES caps it, so the action caps it at what it reserves.
 # Everything else stays within about one core.
 def _web_compiler_resources(_os, _inputs):
@@ -204,7 +204,7 @@ def flutter_dart2wasm_action(
         output_wasm,
         output_mjs,
         mode,
-        optimizing_cores,
+        optimizing_cpus,
         output_source_map = None,
         strip_wasm = True,
         optimization_level = "auto",
@@ -230,8 +230,8 @@ def flutter_dart2wasm_action(
         mode: A `web_build_mode` value; selects the mode defines and, in
             debug, enables asserts (upstream `WasmCompilerConfig` does the
             same for debug builds).
-        optimizing_cores: The cores an optimizing compile reserves and its
-            wasm-opt may use; `//flutter:wasm_opt_cores`.
+        optimizing_cpus: The CPUs an optimizing compile reserves and its
+            wasm-opt may use; `//flutter:wasm_opt_cpus`.
         output_source_map: Output .wasm.map File, or None to disable source
             maps. dart2wasm writes the map at `<output_wasm>.map`, so the
             declared File must sit exactly there.
@@ -246,8 +246,8 @@ def flutter_dart2wasm_action(
         defines: Dart -D defines.
         renderer: Web renderer ("skwasm" or "canvaskit").
     """
-    if optimizing_cores < 1:
-        fail("--@rules_flutter//flutter:wasm_opt_cores must be at least 1, got %d" % optimizing_cores)
+    if optimizing_cpus < 1:
+        fail("--@rules_flutter//flutter:wasm_opt_cpus must be at least 1, got %d" % optimizing_cpus)
     if output_source_map != None and output_source_map.path != output_wasm.path + ".map":
         fail("output_source_map must be declared at <output_wasm>.map " +
              "(dart2wasm writes it there): got %s for %s" %
@@ -304,7 +304,7 @@ def flutter_dart2wasm_action(
     args.add(main_dart)
 
     home = sdk_action(**(
-        {"BINARYEN_CORES": str(optimizing_cores)} if level > 0 else {}
+        {"BINARYEN_CORES": str(optimizing_cpus)} if level > 0 else {}
     ))
     ctx.actions.run(
         executable = dart,
@@ -320,7 +320,7 @@ def flutter_dart2wasm_action(
         # the resource set's, and unlike the resource set it can come from a
         # flag.
         execution_requirements = home["execution_requirements"] | (
-            {"cpu:%d" % optimizing_cores: ""} if level > 0 else {}
+            {"cpu:%d" % optimizing_cpus: ""} if level > 0 else {}
         ),
         resource_set = _web_compiler_resources,
         progress_message = "Compiling Flutter to WASM %s" % ctx.label,

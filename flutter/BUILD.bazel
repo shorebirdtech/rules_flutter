@@ -79,12 +79,12 @@ exports_files(
     visibility = ["//visibility:public"],
 )
 
-# The cores an optimizing dart2wasm (`-O1` and up) reserves, and the threads
+# The CPUs an optimizing dart2wasm (`-O1` and up) reserves, and the threads
 # its Binaryen wasm-opt may use. Fewer lets more compiles run at once on a
 # machine where CPUs are scarce; more makes a single compile finish sooner:
-#   bazel build //app --@rules_flutter//flutter:wasm_opt_cores=2
+#   bazel build //app --@rules_flutter//flutter:wasm_opt_cpus=2
 int_flag(
-    name = "wasm_opt_cores",
+    name = "wasm_opt_cpus",
     build_setting_default = 4,
     visibility = ["//visibility:public"],
 )
