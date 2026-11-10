@@ -41,6 +41,7 @@ load("@rules_flutter//tools/e2e_testing:apple_release_build.bzl", "apple_release
 load("@rules_flutter//tools/e2e_testing:device_profile.bzl", "device_profile")
 load(":android_apk.bzl", "android_apk")
 load(":desktop_link_libraries_test.bzl", "linux_link_libraries_test", "windows_link_libraries_test")
+load(":gradle_host.bzl", "gradle_host_config")
 load(":ignored_package_test.bzl", "ignored_package_test")
 load(":maven_repo_in_mode.bzl", "maven_repo_in_mode")
 
@@ -1031,16 +1032,18 @@ flutter_android_aar(
 )
 
 # The repository of each mode under a name of its own: release (the default
-# configuration) and debug.
+# configuration), profile and debug.
 [
     maven_repo_in_mode(
         name = "plugin_module_repo_" + variant,
         compilation_mode = mode,
+        profile = variant == "profile",
         repo = ":plugin_module_aar",
         tags = ["android"],
     )
     for variant, mode in [
         ("release", ""),
+        ("profile", ""),
         ("debug", "dbg"),
     ]
 ]
@@ -1095,5 +1098,93 @@ dart_test(
     deps = [
         "@rules_dart//dart/runfiles",
         "@rules_flutter//tools/e2e_testing",
+    ],
+)
+
+# A native host app built by Gradle (add_to_app_host/android), taking the
+# module from the repositories above as Flutter's add-to-app guide shows.
+# The Gradle distribution, the JDK, the Android SDK and every Maven artifact
+# the build resolves are pinned and downloaded by Bazel (MODULE.bazel), and
+# Gradle runs offline.
+_GRADLE_HOST_PROJECT = glob(
+    ["add_to_app_host/android/**"],
+    exclude = ["add_to_app_host/android/gradle_repository.json"],
+)
+
+_GRADLE_HOST_MODULE_REPOSITORIES = [
+    ":plugin_module_repo_debug",
+    ":plugin_module_repo_profile",
+    ":plugin_module_repo_release",
+]
+
+gradle_host_config(
+    name = "gradle_host_offline",
+    maven_repository = "@gradle_host_maven//:files",
+    module_repositories = _GRADLE_HOST_MODULE_REPOSITORIES,
+    project = _GRADLE_HOST_PROJECT,
+    settings = "add_to_app_host/android/settings.gradle",
+    tags = [
+        "android",
+        "deep",
+    ],
+)
+
+# Builds the host's debug, profile and release APKs and checks each one's
+# native libraries per ABI, dexed classes and merged manifest. In the `deep`
+# tier (.bazelrc): it downloads Gradle, the Android Gradle plugin and the
+# engine's Maven artifacts, and takes minutes.
+dart_test(
+    name = "gradle_host_test",
+    size = "medium",
+    srcs = ["test/gradle_host.dart"],
+    args = ["$(rlocationpath :gradle_host_offline)"],
+    data = [
+        ":gradle_host_offline",
+        "@bazel_tools//tools/zip:zipper",
+    ],
+    env = {"ZIPPER_RUNFILE": "$(rlocationpath @bazel_tools//tools/zip:zipper)"},
+    main = "test/gradle_host_test.dart",
+    tags = [
+        "android",
+        "block-network",
+        "deep",
+    ],
+    deps = [
+        "@rules_dart//dart/runfiles",
+        "@rules_flutter//tools/e2e_testing",
+    ],
+)
+
+# The same build against the remote repositories, which records the lock of
+# `@gradle_host_maven`: `bazel run --config=deep //:record_gradle_host_repository`.
+gradle_host_config(
+    name = "gradle_host_online",
+    module_repositories = _GRADLE_HOST_MODULE_REPOSITORIES,
+    project = _GRADLE_HOST_PROJECT,
+    remote_repositories = [
+        "https://maven.google.com",
+        "https://repo1.maven.org/maven2",
+        "https://storage.googleapis.com/download.flutter.io",
+    ],
+    settings = "add_to_app_host/android/settings.gradle",
+    tags = [
+        "android",
+        "deep",
+    ],
+)
+
+dart_binary(
+    name = "record_gradle_host_repository",
+    srcs = ["test/gradle_host.dart"],
+    args = ["$(rlocationpath :gradle_host_online)"],
+    data = [":gradle_host_online"],
+    main = "test/record_gradle_host_repository.dart",
+    tags = [
+        "android",
+        "deep",
+    ],
+    deps = [
+        "@deps//:crypto",
+        "@rules_dart//dart/runfiles",
     ],
 )
