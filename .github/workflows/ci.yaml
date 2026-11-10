@@ -197,12 +197,6 @@ jobs:
       # line so each workspace keeps Bazel's own per-workspace default.
       - name: Keep one output base per workspace
         run: sed -i '/^startup --output_base=/d' ~/.bazelrc
-      # The test process itself resolves this package's pubspec, and dwds
-      # requires a Dart newer than the runner's default. The tool under test
-      # runs on the hermetic Flutter toolchain either way.
-      - uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1
-        with:
-          sdk: 3.13.0
       - name: Install xvfb
         run: sudo apt-get update && sudo apt-get install -y xvfb
       # Ubuntu 24.04 sets kernel.apparmor_restrict_unprivileged_userns=1, which
@@ -216,14 +210,14 @@ jobs:
       # exactly how the dev tool resolves it on Linux (host_tools.dart) — no
       # CHROME_EXECUTABLE needed. xvfb gives that Chrome a display.
       #
-      # Run through tool/e2e.dart rather than `dart test` directly: `dart test`
+      # Run through the e2e runner rather than `dart test` directly: `dart test`
       # exits 0 when every selected test skipped, so a skip gate would take this
       # job green having executed nothing. The runner reads the JSON result
       # stream and fails unless a verdict was reached, nothing failed, and at
       # least one test ran. It supplies `--tags=e2e` and `--concurrency=1`
-      # itself and resolves tools/dev_tool from its own location.
+      # itself, and runs the suite on the toolchain's Dart.
       - name: Web smoke
-        run: xvfb-run -a dart run tools/dev_tool/tool/e2e.dart test/e2e/web_smoke_e2e_test.dart
+        run: xvfb-run -a bazel run //tools/dev_tool:e2e -- test/e2e/web_smoke_e2e_test.dart
   # The jobs of `e2e` below: one per workspace and operating system, from the
   # table in tools/ci_matrix/e2e_matrix.dart. The same run checks that the table
   # lists every workspace under e2e/ and says, for each system, what the

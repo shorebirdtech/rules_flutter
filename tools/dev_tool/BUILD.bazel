@@ -434,7 +434,7 @@ dart_test(
     name = "e2e_runner_test",
     srcs = ["tool/e2e.dart"],
     main = "test/e2e_runner_test.dart",
-    deps = _TEST_DEPS,
+    deps = _TEST_DEPS + ["@rules_dart//dart/runfiles"],
 )
 
 # The Dart in this package that belongs to no package's `lib/` and to no test
@@ -479,9 +479,7 @@ dart_test(
 # imports a package missing from `deps` fails this target loudly, as an
 # unresolved import, which is the intended way to learn it needs one.
 #
-# Not a target to run: `bazel run` on it would start the real e2e suite from a
-# runfiles directory. Run the suite the documented way, with
-# `dart run tools/dev_tool/tool/e2e.dart`.
+# Not the target to run the suite with: that is `:e2e`, below.
 dart_binary(
     name = "loose_sources",
     srcs = glob(["test/e2e/**/*.dart"]) + glob(
@@ -497,5 +495,30 @@ dart_binary(
     deps = _TEST_DEPS + _PATH_DEP + [
         "//tools/e2e_testing",
         "@dev_tool_deps//:vm_service",
+        "@rules_dart//dart/runfiles",
     ],
+)
+
+# The e2e suite's entry: `bazel run //tools/dev_tool:e2e -- [dart test args]`.
+#
+# `kernel`, so the VM running `tool/e2e.dart` is the toolchain's `dart`, and the
+# runner starts `dart test` on that same VM. `@rules_dart//dart` in `data`
+# declares the rest of its SDK (`dart test` needs pub and the front end, which a
+# kernel's own runfiles leave out). `@flutter_dev_root` is the `FLUTTER_ROOT`
+# pub resolves the workspace's `sdk: flutter` packages against. The runner works
+# on the source tree through `BUILD_WORKSPACE_DIRECTORY`, not on these runfiles,
+# and the suite's own Bazel commands run after the outer `bazel run` has
+# released the workspace.
+dart_binary(
+    name = "e2e",
+    args = ["--flutter-version-manifest=$(rlocationpath @flutter_dev_root//:version_manifest)"],
+    compile_mode = "kernel",
+    data = [
+        "@flutter_dev_root//:dev_root",
+        "@flutter_dev_root//:version_manifest",
+        "@rules_dart//dart",
+    ],
+    main = "tool/e2e.dart",
+    visibility = ["//visibility:private"],
+    deps = ["@rules_dart//dart/runfiles"],
 )
