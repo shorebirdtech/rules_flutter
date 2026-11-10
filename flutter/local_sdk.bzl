@@ -35,6 +35,7 @@ When the out dirs of a slot are ambiguous (both `host_debug_arm64` and
 `host_debug_unopt_arm64`), pin one with `--repo_env=FLUTTER_LOCAL_ENGINES=host_debug_unopt_arm64,host_release_arm64`.
 """
 
+load("@rules_dart//dart:repositories.bzl", "fetch_dart_kernel_source")
 load("//flutter/private:engine_labels.bzl", "contract_slices", "native_target")
 load("//flutter/private:engine_out_dirs.bzl", "dict_text", "effective_cpu", "first_existing", "link_files_into", "link_into", "machine_of", "out_dir_provenance", "parse_args_gn", "parse_out_dir_name", "select_out_dir")
 load("//flutter/private:framework_source.bzl", "FRAMEWORK_JSON")
@@ -404,6 +405,27 @@ flutter_gen_snapshot(
         provided.update(web.provided)
         reasons.update(web.reasons)
         root_build += web.root_build
+
+        # The outline stripper, built from the checkout's own Dart source: only
+        # it reads the kernels this engine's compiler writes. Used with
+        # `--@rules_dart//dart:outline_kernel`, the default.
+        dart_src = src.get_child("flutter").get_child("third_party").get_child("dart")
+        kernel_pubspec = dart_src.get_child("pkg").get_child("kernel").get_child("pubspec.yaml")
+        repository_ctx.watch(kernel_pubspec)
+        if kernel_pubspec.exists:
+            kernel = fetch_dart_kernel_source(repository_ctx, str(dart_src), "kernel_outline/src")
+            provided[("kernel_outline", "kernel_outline")] = """
+alias(
+    name = "kernel_outline",
+    actual = "{}",
+    visibility = ["//visibility:public"],
+)
+""".format(kernel.outline_tool)
+        else:
+            reasons[("kernel_outline", "kernel_outline")] = (
+                "{}={} has no Dart source at {}, which outline compiles build their stripper from: " +
+                "run `gclient sync` in the checkout, or build with --@rules_dart//dart:outline_kernel=false."
+            ).format(path_env, checkout, dart_src)
 
         # A Mac builds the Apple platforms.
         if machine.os != "macos":

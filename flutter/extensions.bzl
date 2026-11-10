@@ -26,7 +26,6 @@ load("//flutter/private:flutter_linux_runtime_repo.bzl", "flutter_linux_runtime_
 load("//flutter/private:flutter_material_fonts_repo.bzl", "flutter_material_fonts_repo")
 load("//flutter/private:flutter_sdk_toolchains_repo.bzl", "flutter_sdk_toolchains_repo")
 load("//flutter/private:flutter_sdks_repo.bzl", "encode_sdks", "flutter_sdks_repo")
-load("//flutter/private:kernel_outline_unavailable_repo.bzl", "kernel_outline_unavailable_repo")
 load("//flutter/private:linux_runtime_pins.bzl", "LINUX_RUNTIME")
 load("//flutter/private:pub_extension.bzl", "DEFAULT_SDK_NAME", "framework_json")
 load("//flutter/private:toolchain_version.bzl", "select_flutter_version")
@@ -170,6 +169,7 @@ def _register_sdk(sdk):
 def _toolchain_extension(module_ctx):
     sdks = _declared_sdks(module_ctx)
     engine_prefixes = {}
+    outline_packages = {}
     for name in sorted(sdks.keys()):
         sdk = sdks[name]
         engine_prefixes[name] = _register_sdk(sdk)
@@ -186,19 +186,18 @@ def _toolchain_extension(module_ctx):
             sha256 = flutter_source_sha256(sdk.version) if released else "",
         )
 
-        # The outline stripper for this SDK's Dart, built from that Dart
-        # release's own `pkg/kernel`: only it reads the kernels this SDK's
-        # compiler writes. Fetched only with `--@rules_dart//dart:outline_kernel`.
+        # The outline stripper for this SDK's Dart. A release engine's is
+        # built from that Dart release's pinned source; a custom engine
+        # provides its own (the contract's `//kernel_outline:kernel_outline`).
+        # Fetched only with `--@rules_dart//dart:outline_kernel`.
         if sdk.engine == None:
             dart_kernel_source(
                 name = name + "_kernel_outline_src",
                 dart_version = FLUTTER_VERSIONS[sdk.version].dart_version,
             )
+            outline_packages[name] = "@{}_kernel_outline_src//".format(name)
         else:
-            kernel_outline_unavailable_repo(
-                name = name + "_kernel_outline_src",
-                reason = "{} of the Flutter toolchain \"{}\"".format(sdk.engine, name),
-            )
+            outline_packages[name] = _label_prefix(sdk.engine) + "//kernel_outline"
 
     # The repositories rules_flutter and its users name by fixed names, each
     # an alias into the selected SDK's own.
@@ -228,8 +227,8 @@ def _toolchain_extension(module_ctx):
         )
     flutter_face_repo(
         name = "flutter_kernel_outline",
-        sdks = {name: "@{}_kernel_outline_src".format(name) for name in sdks},
-        targets = {"kernel_outline": "{prefix}//:kernel_outline"},
+        sdks = outline_packages,
+        targets = {"kernel_outline": "{prefix}:kernel_outline"},
     )
     flutter_face_repo(
         name = "flutter_dev_root",

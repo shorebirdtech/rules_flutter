@@ -88,6 +88,16 @@ def _xcframework_info(identifier, architecture, simulator):
         variant = "\n\t\t\t<key>SupportedPlatformVariant</key>\n\t\t\t<string>simulator</string>" if simulator else "",
     )
 
+def _dart_source(path, link):
+    """The Dart source a synced checkout has at engine/src/flutter/third_party/dart, as far as outline compiles read it.
+
+    The release Dart's `pkg/kernel` and `pkg/_fe_analyzer_shared`, from the
+    release SDK's outline repository: the stand-in's compiler is the release's.
+    """
+    dart_source = path("@flutter_kernel_outline_src//:kernel/pubspec.yaml").dirname.dirname
+    for package in ["kernel", "_fe_analyzer_shared"]:
+        link(dart_source.get_child(package), "checkout/engine/src/flutter/third_party/dart/pkg/" + package)
+
 def _windows_checkout(rctx, path, link, meta):
     """A checkout built on an x86_64 Windows machine: its host build holds the engine too.
 
@@ -111,6 +121,7 @@ def _windows_checkout(rctx, path, link, meta):
     link(dev_root.get_child("bin").get_child("cache").get_child("flutter.version.json"), "checkout/bin/cache/flutter.version.json")
     rctx.file("checkout/bin/internal/material_fonts.version", meta.material_fonts_url.split("/")[-2] + "\n")
     rctx.file("checkout/CHECKOUT", "A stand-in for a flutter/flutter checkout.\n")
+    _dart_source(path, link)
 
     for mode in ["debug", "profile", "release"]:
         engine = path("@flutter_desktop_engine_windows-x64_{}//:engine/flutter_windows.dll".format(mode)).dirname
@@ -177,6 +188,7 @@ def _fake_checkout_impl(rctx):
     link(dev_root.get_child("bin").get_child("cache").get_child("flutter.version.json"), "checkout/bin/cache/flutter.version.json")
     rctx.file("checkout/bin/internal/material_fonts.version", meta.material_fonts_url.split("/")[-2] + "\n")
     rctx.file("checkout/CHECKOUT", "A stand-in for a flutter/flutter checkout.\n")
+    _dart_source(path, link)
 
     # The release gen_snapshot, or another release's.
     release_gen = path("@flutter_desktop_engine_linux-x64_release//:engine/gen_snapshot") if on_linux else path("@flutter_darwin-arm64//:host-tools-release/gen_snapshot")

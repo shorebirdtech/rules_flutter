@@ -29,9 +29,4 @@ common --@rules_android//flags:android_platforms=@rules_android//:arm64-v8a
 # (README, "Android").
 common --@rules_android//flags:desugar_java8_libs=false
 
-# The custom engines' Dart SDKs have no outline stripper (rules_dart builds one
-# only from a released Dart's source), so a build with one of them fails with
-# outlines on. Compile dependents against full kernels.
-common --@rules_dart//dart:outline_kernel=false
-
 try-import %workspace%/.bazelrc.user
