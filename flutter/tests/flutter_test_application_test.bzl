@@ -102,7 +102,7 @@ def flutter_test_application_test_suite(name):
     _refused_test(
         name = name + "_other_package",
         target_under_test = ":_fta_other_package.program",
-        message = "is not the package of `application`",
+        message = "Drop `package`, or name the same declaration.",
     )
     _refused_test(
         name = name + "_no_package",

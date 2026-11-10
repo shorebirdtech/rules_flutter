@@ -64,8 +64,8 @@ cannot write there.
 
 load("@bazel_skylib//lib:structs.bzl", "structs")
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
-load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo", "DartKernelSdkInfo", "DartPackageMetadataInfo")
-load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "KERNEL_LIST_ATTR", "KERNEL_TOOL_ATTR", "TRACK_CREATION_LOCATIONS_ATTR", "collect_modules", "collect_packages", "collect_transitive_srcs", "dart_analyzable_info", "dart_entry_kernel_action", "dart_import_check_aspect", "dart_link_kernel_action", "executable_defines", "executable_defines_config", "import_check_validation", "kernel_list", "package_info_from_metadata", "package_lib_prefix", "runfiles_path", "track_creation_locations")
+load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo", "DartKernelSdkInfo")
+load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "KERNEL_LIST_ATTR", "KERNEL_TOOL_ATTR", "TRACK_CREATION_LOCATIONS_ATTR", "collect_modules", "collect_packages", "collect_transitive_srcs", "dart_analyzable_info", "dart_entry_kernel_action", "dart_import_check_aspect", "dart_link_kernel_action", "executable_defines", "executable_defines_config", "import_check_validation", "kernel_list", "package_identity_attrs", "package_info_from_metadata", "package_lib_prefix", "runfiles_path", "track_creation_locations")
 load("//flutter:providers.bzl", "FlutterApplicationInputsInfo", "FlutterInfo", "FlutterTestProgramInfo")
 load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "synthesize_app_package")
 load("//flutter/private:application_libraries.bzl", "application_libraries", "application_libraries_aspect")
@@ -315,8 +315,10 @@ def _target_arch(ctx):
 # the bundle keys every asset by the one package it is in.
 _APPLICATION_BUNDLE_FIELDS = ["assets", "shaders", "shader_includes", "additional_licenses"]
 
-# What a test of an `application` takes from it as the package it is compiled in.
-_APPLICATION_PACKAGE_FIELDS = ["label", "package", "package_name", "package_root", "language_version", "license_file"]
+# What a test of an `application` takes from it beyond the package it is
+# compiled in, which `flutter_program_inputs` resolves from the application's
+# declaration: the label the program is built for.
+_APPLICATION_PACKAGE_FIELDS = ["label"]
 
 def _test_inputs(ctx, kind):
     """The program the test compiles, as `flutter_program_inputs` describes one.
@@ -330,11 +332,15 @@ def _test_inputs(ctx, kind):
     import, as in `flutter_application_variant`. The test's `defines`,
     `flavor` and compile settings are its own.
     """
-    own = flutter_program_inputs(ctx)
 
     # A list, empty or of one: the attribute has a transition.
     application = getattr(ctx.attr, "application", [])
     application = application[0] if application else None
+
+    # The application's package is the test's; a `package` the test names
+    # too must be the same declaration, which `resolve_package_identity` checks.
+    app = application[FlutterApplicationInputsInfo].inputs if application else None
+    own = flutter_program_inputs(ctx, metadata = app.package if app else None)
     if application == None:
         if own.package == None:
             fail((
@@ -343,13 +349,6 @@ def _test_inputs(ctx, kind):
                 "compiled in. Or name the `application` whose package it is."
             ).format(kind = kind, label = ctx.label))
         return own
-    app = application[FlutterApplicationInputsInfo].inputs
-    if own.package != None and own.package.label != app.package.label:
-        fail((
-            "{kind} {label}: `package` {own} is not the package of " +
-            "`application` {app_label}, {app}, which the test is compiled in. " +
-            "Leave `package` out."
-        ).format(kind = kind, label = ctx.label, own = own.package.label, app_label = application.label, app = app.package.label))
     for field in _APPLICATION_BUNDLE_FIELDS:
         if getattr(own, field):
             fail((
@@ -829,8 +828,7 @@ _PROGRAM_ATTRS["application"] = attr.label(
     cfg = _ENVIRONMENT.cfg,
 )
 
-_PROGRAM_ATTRS["package"] = attr.label(
-    providers = [DartPackageMetadataInfo],
+_PROGRAM_ATTRS.update(package_identity_attrs(
     doc = "The `dart_package_metadata` of the Dart package the test is " +
           "compiled in (the Bazel stand-in for its `pubspec.yaml`), so " +
           "`package:<name>/…` resolves against `srcs` in that package's " +
@@ -841,7 +839,7 @@ _PROGRAM_ATTRS["package"] = attr.label(
           "library's `dart_package_metadata`, and list the library's " +
           "sources in `srcs` or depend on it. Required, unless `application` " +
           "names the package.",
-)
+))
 
 _PROGRAM_ATTRS["code_assets"] = attr.label_list(
     doc = CODE_ASSETS_DOC,

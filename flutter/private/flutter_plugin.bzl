@@ -27,7 +27,7 @@ load("@build_bazel_rules_apple//apple/internal/aspects:resource_aspect.bzl", "ap
 load("@build_bazel_rules_swift//swift:swift.bzl", "SwiftInfo")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@rules_dart//dart:providers.bzl", "DartInfo")
-load("@rules_dart//dart:utils.bzl", "PACKAGE_IDENTITY_ATTRS", "WEB_COMPILER_INDEPENDENT_ATTR", "dart_info", "library_package", "web_compiler_reset_when_independent")
+load("@rules_dart//dart:utils.bzl", "WEB_COMPILER_INDEPENDENT_ATTR", "dart_info", "library_package", "package_identity_attrs", "web_compiler_reset_when_independent")
 load("@rules_java//java/common:java_info.bzl", "JavaInfo")
 load("//flutter:providers.bzl", "FlutterDataAssetInfo", "FlutterInfo", "FlutterNativeAssetInfo")
 load("//flutter/private:common.bzl", "collect_binding_contracts", "collect_native_libs")
@@ -287,7 +287,7 @@ def _flutter_plugin_impl(ctx):
 # of a generated pub package (`flutter_pub_member`) takes too. The rest of
 # `flutter_plugin`'s are `deps` and `_sky_engine`: what a dependency cycle's
 # library states once for all of its members.
-PLUGIN_PACKAGE_ATTRS = PACKAGE_IDENTITY_ATTRS | {
+PLUGIN_PACKAGE_ATTRS = package_identity_attrs() | {
     "srcs": attr.label_list(
         doc = "Dart source files for the plugin's public API.",
         allow_files = [".dart"],

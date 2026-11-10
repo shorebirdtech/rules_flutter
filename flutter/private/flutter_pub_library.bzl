@@ -24,7 +24,7 @@ which a pure-Dart package is, so one cycle can mix packages of both kinds.
 """
 
 load("@rules_dart//dart:providers.bzl", "DartInfo", "DartPackageMetadataInfo")
-load("@rules_dart//dart:utils.bzl", "dart_info", "web_compiler_reset")
+load("@rules_dart//dart:utils.bzl", "dart_info", "package_identity_attrs", "web_compiler_reset")
 load("@rules_dart//dart/pub:pub_library.bzl", "DartPackageMemberInfo", "dart_package_member_info")
 load("@rules_java//java/common:java_info.bzl", "JavaInfo")
 load("//flutter/private:flutter_info.bzl", "flutter_info")
@@ -68,13 +68,10 @@ def _flutter_pub_member_impl(ctx):
 
 flutter_pub_member = rule(
     implementation = _flutter_pub_member_impl,
-    attrs = PLUGIN_PACKAGE_ATTRS | {
-        "package": attr.label(
-            mandatory = True,
-            providers = [DartPackageMetadataInfo],
-            doc = "The package's `dart_package_metadata`, which states its facts.",
-        ),
-    },
+    attrs = PLUGIN_PACKAGE_ATTRS | package_identity_attrs(
+        mandatory = True,
+        doc = "The package's `dart_package_metadata`, which states its facts.",
+    ),
     doc = "One Flutter pub package's files and facts, which a `flutter_pub_library` builds; not a library by itself. A plugin when `plugin_platforms_json` says so; otherwise it contributes only its assets, fonts and shaders.",
 )
 

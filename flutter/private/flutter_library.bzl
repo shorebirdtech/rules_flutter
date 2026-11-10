@@ -1,7 +1,7 @@
 """Implementation of the flutter_library rule."""
 
 load("@rules_dart//dart:providers.bzl", "DartInfo")
-load("@rules_dart//dart:utils.bzl", "PACKAGE_IDENTITY_ATTRS", "WEB_COMPILER_INDEPENDENT_ATTR", "dart_analyzable_info", "dart_info", "derive_package_root", "library_package", "web_compiler_reset_when_independent")
+load("@rules_dart//dart:utils.bzl", "WEB_COMPILER_INDEPENDENT_ATTR", "dart_analyzable_info", "dart_info", "derive_package_root", "library_package", "package_identity_attrs", "web_compiler_reset_when_independent")
 load("//flutter:providers.bzl", "FlutterInfo")
 load("//flutter/private:flutter_info.bzl", "flutter_info")
 
@@ -448,7 +448,7 @@ def _flutter_library_impl(ctx):
         ),
     ]
 
-_LIBRARY_ATTRS = PACKAGE_IDENTITY_ATTRS | {
+_LIBRARY_ATTRS = package_identity_attrs() | {
     "srcs": attr.label_list(
         doc = "Dart source files for this library.",
         allow_files = [".dart"],

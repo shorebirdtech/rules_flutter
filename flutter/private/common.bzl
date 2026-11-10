@@ -6,8 +6,8 @@ flutter_application, flutter_android_bundle, and flutter_ios_application.
 """
 
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
-load("@rules_dart//dart:providers.bzl", "DartInfo", "DartPackageMetadataInfo")
-load("@rules_dart//dart:utils.bzl", "KERNEL_TOOL_ATTR", "collect_packages", "collect_transitive_srcs", "dart_import_check_aspect", "generate_dev_package_config", "import_check_validation", "resolve_package_identity")
+load("@rules_dart//dart:providers.bzl", "DartInfo")
+load("@rules_dart//dart:utils.bzl", "KERNEL_TOOL_ATTR", "collect_packages", "collect_transitive_srcs", "dart_import_check_aspect", "generate_dev_package_config", "import_check_validation", "package_identity_attrs", "resolve_package_identity")
 load("//flutter:providers.bzl", "FlutterInfo", "FlutterNativeLibraryInfo")
 load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "app_main_location", "app_scheme_files", "app_scheme_location", "app_scheme_sources", "synthesize_app_package", "with_root")
 load("//flutter/private:flutter_asset_bundle.bzl", "flutter_asset_bundle_action")
@@ -1224,7 +1224,7 @@ def flutter_deps_attr(aspects = [], **kwargs):
         **kwargs
     )
 
-def flutter_program_inputs(ctx):
+def flutter_program_inputs(ctx, metadata = None):
     """The Flutter program a rule compiles, read off its attributes.
 
     What the compile and bundling helpers (`flutter_compile_kernel`,
@@ -1240,6 +1240,10 @@ def flutter_program_inputs(ctx):
 
     Args:
         ctx: Rule context.
+        metadata: The `DartPackageMetadataInfo` of the package the program is
+            in, when it comes from elsewhere than `ctx`'s `package` (a test
+            compiled in its application's package). A `package` the rule also
+            names must be the same declaration.
 
     Returns:
         A struct. `label` is the target the program is built for, and
@@ -1253,8 +1257,7 @@ def flutter_program_inputs(ctx):
         among them, are as the attributes of `flutter_application` of the same
         names.
     """
-    identity = resolve_package_identity(ctx)
-    metadata = identity.metadata
+    identity = resolve_package_identity(ctx, metadata = metadata)
     return struct(
         label = ctx.label,
         main = getattr(ctx.file, "main", None),
@@ -1265,15 +1268,15 @@ def flutter_program_inputs(ctx):
         flavor = getattr(ctx.attr, "flavor", ""),
         build_name = getattr(ctx.attr, "build_name", ""),
         build_number = getattr(ctx.attr, "build_number", ""),
-        package = metadata,
+        package = identity.metadata,
         package_name = identity.package_name,
-        package_root = metadata.package_root if metadata else package_root_of(ctx),
+        package_root = identity.package_root,
         language_version = identity.language_version,
         assets = list(getattr(ctx.files, "assets", [])),
         shaders = list(getattr(ctx.files, "shaders", [])),
         shader_includes = list(getattr(ctx.files, "shader_includes", [])),
         require_sksl_shaders = getattr(ctx.attr, "require_sksl_shaders", False),
-        license_file = metadata.license_file if metadata else None,
+        license_file = identity.license_file,
         additional_licenses = list(getattr(ctx.files, "additional_licenses", [])),
         tree_shake_icons = getattr(ctx.attr, "tree_shake_icons", False),
         native_deps = list(getattr(ctx.attr, "native_deps", [])),
@@ -1301,31 +1304,29 @@ def flutter_program_inputs(ctx):
 # docstring gives — the callers genuinely disagree about whether they have one
 # — and `_agent_extensions_src` is declared by the rules that inject the agent,
 # not by every kernel compile.
-KERNEL_COMPILE_ATTRS = {
+KERNEL_COMPILE_ATTRS = package_identity_attrs(
+    mandatory = True,
+    doc = "The `dart_package_metadata` declaring the program's own Dart " +
+          "package, the Bazel stand-in for its `pubspec.yaml`. Required: " +
+          "its `package_name` keys the kernel's libraries under stable " +
+          "`package:` URIs (hot-reload parity with the dev tool) and " +
+          "resolves `package:<self>/...` imports; its `language_version` " +
+          "is the program's own, as pub derives it from " +
+          "`environment.sdk` (left unset, the program's sources compile " +
+          "at the SDK's current version, newer than `flutter build` " +
+          "would allow); its `license_file` is listed in `NOTICES.Z` " +
+          "under the package's name. It is `:pubspec-metadata` in the " +
+          "BUILD file at the package root, its directory, which `srcs` " +
+          "(its `lib/`) and the keys of `assets` are relative to.\n\n" +
+          "The `flutter_library` targets of the same package — the app's " +
+          "own `lib/`, beside it — name the same declaration. Two Dart " +
+          "packages cannot share a directory, so a dependency declaring " +
+          "a different package at the program's root is refused.",
+) | {
     "main": attr.label(
         doc = "The main .dart entry point.",
         mandatory = True,
         allow_single_file = [".dart"],
-    ),
-    "package": attr.label(
-        providers = [DartPackageMetadataInfo],
-        doc = "The `dart_package_metadata` declaring the program's own Dart " +
-              "package, the Bazel stand-in for its `pubspec.yaml`. Required: " +
-              "its `package_name` keys the kernel's libraries under stable " +
-              "`package:` URIs (hot-reload parity with the dev tool) and " +
-              "resolves `package:<self>/...` imports; its `language_version` " +
-              "is the program's own, as pub derives it from " +
-              "`environment.sdk` (left unset, the program's sources compile " +
-              "at the SDK's current version, newer than `flutter build` " +
-              "would allow); its `license_file` is listed in `NOTICES.Z` " +
-              "under the package's name. It is `:pubspec-metadata` in the " +
-              "BUILD file at the package root, its directory, which `srcs` " +
-              "(its `lib/`) and the keys of `assets` are relative to.\n\n" +
-              "The `flutter_library` targets of the same package — the app's " +
-              "own `lib/`, beside it — name the same declaration. Two Dart " +
-              "packages cannot share a directory, so a dependency declaring " +
-              "a different package at the program's root is refused.",
-        mandatory = True,
     ),
     "srcs": attr.label_list(
         doc = "Additional Dart source files.",

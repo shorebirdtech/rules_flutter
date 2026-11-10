@@ -15,7 +15,7 @@ the app's own record.
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("@rules_dart//dart:providers.bzl", "DartInfo", "DartPackageMetadataInfo")
-load("@rules_dart//dart:utils.bzl", "collect_packages")
+load("@rules_dart//dart:utils.bzl", "collect_packages", "package_identity_attrs")
 load("//flutter/private:app_entrypoint.bzl", "synthesize_app_package")
 
 AppRecordInfo = provider(
@@ -36,9 +36,8 @@ def _app_record_probe_impl(ctx):
 
 app_record_probe = rule(
     implementation = _app_record_probe_impl,
-    attrs = {
+    attrs = package_identity_attrs(mandatory = True) | {
         "deps": attr.label_list(providers = [DartInfo]),
-        "package": attr.label(providers = [DartPackageMetadataInfo], mandatory = True),
     },
 )
 

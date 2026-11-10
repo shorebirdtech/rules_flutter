@@ -29,6 +29,7 @@ load(
     "WEB_PLATFORM_SETTINGS",
     "collect_packages",
     "collect_transitive_srcs",
+    "package_identity_attrs",
     "web_platform_settings",
 )
 load("//flutter/private:app_entrypoint.bzl", "compile_package_config", "synthesize_app_package")
@@ -173,11 +174,10 @@ def _flutter_web_branch_impl(ctx):
 
 flutter_web_branch = rule(
     implementation = _flutter_web_branch_impl,
-    attrs = {
+    attrs = package_identity_attrs(mandatory = True) | {
         "deps": attr.label_list(providers = [DartInfo]),
         "srcs": attr.label_list(allow_files = [".dart"]),
         "main": attr.label(allow_single_file = [".dart"], mandatory = True),
-        "package": attr.label(providers = [DartPackageMetadataInfo], mandatory = True),
         "bundle": attr.string(
             doc = "The bundle this stages, for the messages that name it.",
             mandatory = True,
