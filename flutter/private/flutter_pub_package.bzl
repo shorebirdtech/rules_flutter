@@ -61,7 +61,7 @@ load("//flutter/private:flutter_pub_index.bzl", "MEMBER_DART", "MEMBER_FILE", "M
 load("//flutter/private:flutter_pubspec.bzl", "flutter_assets_block", "flutter_licenses_block", "flutter_manifest_errors", "flutter_plugin_block")
 load("//flutter/private:framework_source.bzl", "check_dependency_constraints", "link_framework_package", "unset_message", "write_unset_stub")
 load("//flutter/private:pinned.bzl", "pinned")
-load("//flutter/private:swiftpm_manifest.bzl", "find_unsupported_swiftpm_dependencies")
+load("//flutter/private:swiftpm_manifest.bzl", "find_manifest_computations", "find_swiftpm_build_settings", "find_unsupported_swiftpm_dependencies")
 load(
     "//flutter/private:unbuilt_native_code.bzl",
     "cmake_native_build",
@@ -2255,6 +2255,14 @@ def _flutter_pub_package_impl(ctx):
                 "manifest_dir": manifest_dir,
                 "srcs_dirs": [] if manifest_dir else srcs_dirs,
             }
+
+            # A manifest that can compute its defines from what surrounds the
+            # build, and sets some, is evaluated for each app
+            # (`swiftpm_app_settings.bzl`).
+            if manifest_dir:
+                manifest = ctx.read(manifest_dir + "/Package.swift")
+                if find_manifest_computations(manifest) and find_swiftpm_build_settings(manifest):
+                    apple_layouts[platform]["app_settings"] = True
             apple_privacy_manifests[platform] = _detect_apple_privacy_manifests(ctx, srcs_dirs)
         if apple_layouts:
             ctx.file(APPLE_PLUGIN_FILE, json.encode({"platforms": apple_layouts}))

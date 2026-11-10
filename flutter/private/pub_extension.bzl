@@ -14,12 +14,13 @@ load("@rules_dart//dart/ext:registry.bzl", "curated_code_assets")
 load("@rules_dart//dart/pub:pub_lock_package.bzl", "check_pub_archive_sha256", "check_pub_git_resolved_ref", "is_relative_git_url")
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_lock")
 load("//flutter/private:android_plugin_maven.bzl", "MAVEN_DEPS_FILE", "flutter_android_maven")
+load("//flutter/private:apple_app_settings_repo.bzl", "flutter_apple_app_settings")
 load("//flutter/private:apple_plugin_repo.bzl", "apple_repo", "flutter_apple_plugin_repo")
 load("//flutter/private:flutter_face_repo.bzl", "flutter_face_repo")
 load("//flutter/private:flutter_framework_package.bzl", "flutter_framework_package")
 load("//flutter/private:flutter_gen_l10n_repo.bzl", "flutter_gen_l10n_repo")
 load("//flutter/private:flutter_pub_goldens.bzl", "flutter_pub_goldens")
-load("//flutter/private:flutter_pub_index.bzl", "ANDROID_MAVEN_REPO", "GOLDENS_REPO", "INDEX_REPO", "SPOKE_PREFIX", "flutter_pub_index", "index_repo", "library_repo", "sdk_prefix", "source_repo")
+load("//flutter/private:flutter_pub_index.bzl", "ANDROID_MAVEN_REPO", "APPLE_APP_SETTINGS_REPO", "GOLDENS_REPO", "INDEX_REPO", "SPOKE_PREFIX", "flutter_pub_index", "index_repo", "library_repo", "sdk_prefix", "source_repo")
 load("//flutter/private:flutter_pub_library_repo.bzl", "flutter_pub_library_repo")
 load("//flutter/private:flutter_pub_lock_hub.bzl", "flutter_pub_lock_hub")
 load("//flutter/private:flutter_pub_package.bzl", "flutter_pub_package")
@@ -697,6 +698,13 @@ def _declare_pub_packages(tags, sdks, user_overlay_roots, cycles):
             "@{}//:{}".format(source_repo(name), MAVEN_DEPS_FILE)
             for name in sorted(built.keys())
         ],
+    )
+
+    # The build's Apple plugins whose Package.swift decides its defines from
+    # the app, which an Apple app builds for itself.
+    flutter_apple_app_settings(
+        name = APPLE_APP_SETTINGS_REPO,
+        packages = sorted(apple_repos.keys()),
     )
 
     if "flutter_test" in built:

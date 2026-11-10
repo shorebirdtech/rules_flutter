@@ -35,6 +35,7 @@ load("//flutter/private:flutter_desktop_plugin_info.bzl", "FlutterLinuxPluginInf
 load("//flutter/private:flutter_info.bzl", "LINK_HOOK_ATTR", "flutter_info")
 load("//flutter/private:flutter_library.bzl", "ADDITIONAL_LICENSES_ATTR", "ASSET_FLAVORS_ATTR", "ASSET_PLATFORMS_ATTR", "LICENSE_FILE_ATTR", "SHADER_FLAVORS_ATTR", "SHADER_PLATFORMS_ATTR", "SKY_ENGINE_ATTR", "build_pub_contributions", "flutter_analyzable_info", "flutter_package_record", "own_additional_licenses")
 load("//flutter/private:native_sources.bzl", "collect_native_source_pairs", "native_sources_aspect")
+load("//flutter/private:swiftpm_app_settings.bzl", "FlutterSwiftPMAppLibraryInfo")
 load("//flutter/private:unbuilt_native_code.bzl", "FlutterUnbuiltNativeCodeInfo")
 
 def build_plugin_struct(name, plugin_platforms):
@@ -148,6 +149,9 @@ def plugin_contributions(ctx, package_name, package_root, declares_plugin):
             resource_info = lib[AppleResourceInfo] if AppleResourceInfo in lib else None,
             unbuilt_native_code = _unbuilt_native_code(lib),
             package = package_name,
+            # A library its Package.swift gives defines from the app, which
+            # the app's aggregator builds for itself (`swiftpm_app_settings.bzl`).
+            app_library = lib[FlutterSwiftPMAppLibraryInfo].library if FlutterSwiftPMAppLibraryInfo in lib else None,
         ))
 
     # Pull source bundles from linux + windows plugin libraries so the
@@ -358,8 +362,8 @@ PLUGIN_PACKAGE_ATTRS = {
         providers = [JavaInfo],
     ),
     "apple_libs": attr.label_list(
-        doc = "Per-platform Apple swift_library targets (typically `flutter_apple_plugin_library`s) carrying the plugin's macOS / iOS native code. Each label's name must contain `macos` or `ios` so the runner aggregator can route it. Set this via `select()` on the target platform so only one platform's swift_library analyzes per build — both with the same module name in the same configuration would conflict on the produced `<module>.swiftmodule` output. A generated pub package may name a `flutter_unbuilt_plugin_library` instead, which fails the build of that platform (see `unbuilt_native_code.bzl`).",
-        providers = [[CcInfo], [FlutterUnbuiltNativeCodeInfo]],
+        doc = "Per-platform Apple swift_library targets (typically `flutter_apple_plugin_library`s) carrying the plugin's macOS / iOS native code. Each label's name must contain `macos` or `ios` so the runner aggregator can route it. Set this via `select()` on the target platform so only one platform's swift_library analyzes per build — both with the same module name in the same configuration would conflict on the produced `<module>.swiftmodule` output. A generated pub package may name a `flutter_unbuilt_plugin_library` instead, which fails the build of that platform (see `unbuilt_native_code.bzl`), or a `flutter_swiftpm_app_library`, which stands for a library each app builds for itself (see `swiftpm_app_settings.bzl`).",
+        providers = [[CcInfo], [FlutterUnbuiltNativeCodeInfo], [FlutterSwiftPMAppLibraryInfo]],
         # The libraries' resources, as an app's bundling collects them from
         # its own dependencies: the runner links the libraries through the
         # aggregator, which carries them on (`flutter_apple_plugins_aggregator`).

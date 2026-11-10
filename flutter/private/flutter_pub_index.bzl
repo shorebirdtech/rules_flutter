@@ -41,6 +41,7 @@ SPOKE_PREFIX = "flutter_pub"
 # The one index repository, and the build-wide repositories beside the packages.
 INDEX_REPO = "flutter_pub_index"
 ANDROID_MAVEN_REPO = "flutter_pub_android_maven"
+APPLE_APP_SETTINGS_REPO = "flutter_pub_apple_app_settings"
 GOLDENS_REPO = "flutter_pub_goldens"
 
 # The file each source repository writes: what its library repository needs to

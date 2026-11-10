@@ -211,7 +211,7 @@ def flutter_macos_menu_xib_gen(name, app_name, **kwargs):
         **kwargs
     )
 
-def flutter_macos_runner_lib_gen(name, registrant, engine, application = None, module_name = "Runner", **kwargs):
+def flutter_macos_runner_lib_gen(name, registrant, engine, application = None, module_name = "Runner", info_plist = None, swift_package_environment = {}, **kwargs):
     """Generates a swift_library for the default macOS runner.
 
     Uses template AppDelegate.swift and MainFlutterWindow.swift from
@@ -231,6 +231,11 @@ def flutter_macos_runner_lib_gen(name, registrant, engine, application = None, m
             plugins' macOS Swift modules + link inputs into the runner;
             optional only for legacy Tier-2 setups with no native plugins.
         module_name: Swift module name (default "Runner").
+        info_plist: The app's Info.plist, which a plugin whose Package.swift
+            decides its defines from the app reads (`flutter_macos_app`'s
+            `swift_package_environment`). Unset, such a manifest sees an
+            empty one.
+        swift_package_environment: As `flutter_macos_app`'s.
         **kwargs: Additional arguments passed to swift_library.
     """
     tags = kwargs.pop("tags", ["manual"])
@@ -241,6 +246,8 @@ def flutter_macos_runner_lib_gen(name, registrant, engine, application = None, m
         _flutter_apple_plugins_aggregator(
             name = aggregator_name,
             application = application,
+            info_plist = info_plist,
+            swift_package_environment = swift_package_environment,
             platform = "macos",
             tags = tags,
             visibility = ["//visibility:private"],
@@ -278,6 +285,7 @@ def flutter_macos_app(
         app_icons = None,
         resources = [],
         runner_deps = [],
+        swift_package_environment = {},
         **kwargs):
     """Builds a Flutter macOS .app bundle from a flutter_application target.
 
@@ -379,6 +387,15 @@ def flutter_macos_app(
             **kwargs. For App Intents, pass the library here *and* to
             rules_apple's `app_intents` (which passes through **kwargs):
             `app_intents` only extracts the metadata, it does not link.
+        swift_package_environment: The environment in which the
+            `Package.swift` of each plugin that decides its defines from the
+            app is evaluated, as the shell's environment is under `flutter
+            build`: `{"AUDIO_SESSION_MICROPHONE": "1"}` for what
+            audio_session's README says to export. Such a manifest is
+            evaluated for this app, also seeing the app's Info.plist (see
+            the README's "Apple plugins built from their Package.swift").
+            Nothing else reads it, and the shell's environment does not
+            reach the manifests.
         **kwargs: Passed through to macos_application, except `target_compatible_with`
             and `visibility`, which are the named target's, and `testonly`, which
             every target the macro declares has, since one that depends on a
@@ -523,10 +540,15 @@ def flutter_macos_app(
     # 5b. Aggregate Apple plugin libraries from the application's transitive
     # FlutterInfo so the runner's swift_library imports + links each pub
     # plugin's Swift module.
+    # A plugin whose Package.swift decides its defines from the app reads the
+    # Info.plist the app is built from: the app's own, before the icon step
+    # below, which only drops an empty key.
     _flutter_apple_plugins_aggregator(
         name = "__%s_apple_plugins" % name,
         application = application,
+        info_plist = info_plist or "__%s_info_plist" % name,
         platform = "macos",
+        swift_package_environment = swift_package_environment,
         tags = tags,
         testonly = testonly,
     )
@@ -613,7 +635,9 @@ def flutter_macos_app(
                 "$(PRODUCT_COPYRIGHT)": "",
             },
             tags = tags,
-            testonly = testonly,
+            # Not `testonly` even in a testonly app: the plugins whose
+            # Package.swift reads the app read it (`swift_package_environment`),
+            # and they are not. It depends on nothing that is.
         )
         actual_info_plist = "__%s_info_plist" % name
     else:

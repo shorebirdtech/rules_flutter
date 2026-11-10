@@ -413,71 +413,33 @@ flutter_pub.from_lock(
 
 Run it again after a change to `pubspec.lock` that changes a plugin's Swift dependencies. An iOS or macOS app that links a plugin whose package depends on a package the file does not pin fails at analysis, naming the package and the command. Each pinned package is fetched only when an iOS or macOS build needs it.
 
-Some manifests rules_flutter cannot honour this way, and an iOS or macOS app that links such a plugin fails at analysis, saying why. Other platforms are unaffected.
+A C-family source is compiled with Clang's module autolinking on, as Xcode compiles it, so an SDK framework the plugin imports and does not name (`permission_handler_apple`'s `CoreTelephony`) is linked into the app.
 
-- A library product of several targets none of which is named after the plugin (Flutter imports the module of that name), a binary target, or a setting rules_flutter does not apply.
-- Settings the manifest can compute from what surrounds the build. A manifest that imports more than `PackageDescription`, or reads its `Context`, and sets `.define` or `.unsafeFlags` can compute them from your app or your environment, and rules_flutter evaluates it where it sees neither. `permission_handler_apple` reads your app's `Info.plist` and turns on a permission's code only when the plist declares its usage description: `NSCameraUsageDescription` sets `PERMISSION_CAMERA=1`. Built without its defines, the plugin compiles and reports every permission as denied, even one the user granted. `geolocator_apple` is the exception: rules_flutter bundles an overlay for it that builds it as `flutter build` does without the `BYPASS_PERMISSION_LOCATION_ALWAYS` environment variable.
+Some manifests rules_flutter cannot honour this way, and an iOS or macOS app that links such a plugin fails at analysis, saying why: a library product of several targets none of which is named after the plugin (Flutter imports the module of that name), a binary target, or a setting rules_flutter does not apply. Other platforms are unaffected. Give such a plugin an overlay (`flutter_pub.plugin_overlays`) whose `flutter_apple_plugin_library` builds it.
 
-Supply the settings your app needs with a plugin overlay. Point `flutter_pub.plugin_overlays` at a directory, and write the package's `BUILD.bazel.tpl` under its major version. For `permission_handler_apple` 9.x in an app that asks for the camera and notifications:
+#### Plugins whose Package.swift reads the app
 
-```starlark
-# MODULE.bazel
-flutter_pub.plugin_overlays(roots = ["//overlays:BUILD.bazel"])  # an empty overlays/BUILD.bazel
-```
+Some manifests compute their defines from what surrounds the build. `permission_handler_apple` finds the app it is built for and turns on a permission's code only when the app's `Info.plist` has its usage description: `NSCameraUsageDescription` gives `PERMISSION_CAMERA=1`. `audio_session` reads the environment variable `AUDIO_SESSION_MICROPHONE`, and `geolocator_apple` reads `BYPASS_PERMISSION_LOCATION_ALWAYS`. Under `flutter build`, Xcode evaluates such a manifest once per app, from the app's folder, in the shell's environment.
+
+rules_flutter does the same for each app, during the build. A manifest that imports more than `PackageDescription`, or reads its `Context`, and sets `.define`s is evaluated again for each iOS or macOS app that links the plugin. It sees a stand-in of the app's folder, as it would under Xcode: a `pubspec.yaml`, and in `ios/` (or `macos/`) an Xcode project whose `INFOPLIST_FILE` is the Info.plist the app is built from (its `info_plist`, or `ios/Runner/Info.plist`). Its environment is the app's `swift_package_environment`, and nothing else from your shell:
 
 ```starlark
-# overlays/permission_handler_apple/9/BUILD.bazel.tpl
-load("@rules_flutter//flutter:defs.bzl", "flutter_plugin")
-load("@rules_flutter//flutter:ios.bzl", "flutter_apple_plugin_library")
-
-flutter_plugin(
-    name = "{PKG}",
-    srcs = glob(["lib/**/*.dart"], allow_empty = True),
-    apple_libs = select({
-        "@platforms//os:ios": [":{PKG}_apple_ios"],
-        "//conditions:default": [],
-    }),
-    apple_privacy_files = select({
-        "@platforms//os:ios": ["ios/{PKG}/Sources/{PKG}/PrivacyInfo.xcprivacy"],
-        "//conditions:default": [],
-    }),
-    language_version = "{LANGUAGE_VERSION}",
-    package_name = "{PKG}",
-    {LICENSE}
-    plugin_platforms_json = "{\"ios\":{\"pluginClass\":\"PermissionHandlerPlugin\"}}",
-    visibility = ["//visibility:public"],
-    deps = [
-        {DEPS}
-    ],
-)
-
-_SRC = "ios/{PKG}/Sources/{PKG}"
-
-flutter_apple_plugin_library(
-    name = "{PKG}_apple_ios",
-    srcs = glob([_SRC + "/**/*.m", _SRC + "/**/*.h"]),
-    # One define per permission whose usage description Info.plist declares.
-    copts = [
-        "-DPERMISSION_CAMERA",
-        "-DPERMISSION_NOTIFICATIONS",
-    ],
-    # The manifest's headerSearchPath settings.
-    includes = [
-        _SRC,
-        _SRC + "/strategies",
-        _SRC + "/util",
-        _SRC + "/include/{PKG}",
-    ],
-    module_name = "{PKG}",
-    platform = "ios",
-    sdk_frameworks = ["AVFoundation", "CoreTelephony", "UserNotifications"],
-    visibility = ["//visibility:public"],
+flutter_ios_app(
+    name = "app",
+    application = ":app_flutter",
+    bundle_id = "com.example.app",
+    # What audio_session's README says to export before `flutter build`.
+    swift_package_environment = {"AUDIO_SESSION_MICROPHONE": "1"},
 )
 ```
 
-- `copts` reaches both the Objective-C and the Swift compile, so write a define as `-DNAME`, which Clang reads as `NAME=1`. Swift warns about a define with a value and drops the value.
-- `sdk_frameworks` lists the frameworks the enabled code links. A permission you turn on can need another (`Photos`, `Contacts`, `EventKit`, `CoreLocation`...); a missing one fails the link, naming the symbol.
-- The overlay replaces everything rules_flutter would generate for the package, and serves every version under its major-version directory. Check it when you upgrade the plugin.
+`flutter_macos_app` takes the same attribute. Set what the plugin's README says to export: the dict is the environment of every such manifest of the app, as the shell is under Xcode, so the manifest still decides what each variable does. An app whose Info.plist explains the camera gets permission_handler's camera code and no other permission's, with no attribute at all.
+
+The defines are the only part of such a manifest that may depend on the app. Its sources, header search paths, dependencies and other settings are read once, when the plugin is fetched, and an evaluation for an app that gives anything else differently fails the build, naming the difference.
+
+Each such plugin is compiled once per distinct pair of Info.plist and environment: two apps with the same plist target and the same environment share it, and a third gets its own. A separate build of a plugin also gets its own copy of the C and Swift tools it is compiled with, built once and then cached. A workspace with several apps can avoid that copy with `--incompatible_exclude_starlark_flags_from_exec_config` in its `.bazelrc`; Bazel 9.3 accepts the flag, though `bazel help` does not list it yet.
+
+What the stand-in folder leaves out is the rest of your app's tree, so a manifest that reads other files of the app does not find them. permission_handler's `permission_handler.yaml` flavors are one: in Bazel, a flavor is an app target of its own with its own Info.plist, which is what that file emulates.
 
 ### Regenerating pubspec.lock
 

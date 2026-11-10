@@ -66,6 +66,7 @@ load(":sdk_inputs_test.bzl", "sdk_inputs_test_suite")
 load(":shader_compile_test.bzl", "shader_compile_test_suite")
 load(":shared_code_asset_test.bzl", "shared_code_asset_test_suite")
 load(":swift_packages_test.bzl", "swift_packages_test_suite")
+load(":swiftpm_app_settings_test.bzl", "swiftpm_app_settings_test_suite")
 load(":swiftpm_manifest_test.bzl", "swiftpm_manifest_test_suite")
 load(":tester_binary_test.bzl", "tester_binary_test_suite")
 load(":toolchain_test.bzl", "toolchain_test_suite")
@@ -124,6 +125,8 @@ android_plugin_libs_test_suite(name = "android_plugin_libs_test")
 android_listenablefuture_test_suite(name = "android_listenablefuture_test")
 
 android_plugin_maven_test_suite(name = "android_plugin_maven_test")
+
+swiftpm_app_settings_test_suite(name = "swiftpm_app_settings_test")
 
 swiftpm_manifest_test_suite(name = "swiftpm_manifest_test")
 

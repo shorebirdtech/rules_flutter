@@ -29,6 +29,7 @@ exports_files(
         "plist_binary.dart",
         "sdk_check.dart",
         "strip_native_libs.dart",
+        "swiftpm_app_settings.dart",
         "validate_android_elf.dart",
         "web_template.dart",
         # Exported for its unit test's `srcs`, not for a build action: unlike
@@ -176,6 +177,7 @@ _UNIT_TESTS = {
     "merge_android_manifests_test": ("merge_android_manifests.dart", []),
     "sdk_check_test": ("sdk_check.dart", []),
     "strip_native_libs_test": ("strip_native_libs.dart", []),
+    "swiftpm_app_settings_test": ("swiftpm_app_settings.dart", []),
     "web_template_test": ("web_template.dart", []),
     "flutter_test_runner_test": (
         "flutter_test_runner.dart",

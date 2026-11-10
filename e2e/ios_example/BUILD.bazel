@@ -499,11 +499,14 @@ flutter_library(
     package_name = "ios_example",
     srcs = glob(["lib/**/*.dart"]),
     deps = [
+        "@deps//:audio_session",
         "@deps//:ffi_dynamic_plugin",
         "@deps//:firebase_core",
         "@deps//:flutter",
         "@deps//:flutter_qjs_next",
+        "@deps//:geolocator_apple",
         "@deps//:libremidi_flutter",
+        "@deps//:permission_handler",
         "@deps//:resource_plugin",
         "@deps//:script_phase_plugin",
         "@deps//:swift6_plugin",
@@ -690,6 +693,74 @@ dart_test(
     name = "verify_ios_release_ffi_symbols_test",
     data = [":swiftpm_plugins_app_release"],
     main = "test/verify_ios_release_ffi_symbols_test.dart",
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
+)
+
+# =============================================================================
+# Plugins whose Package.swift decides its defines from the app
+# =============================================================================
+
+# permission_handler_apple compiles in each permission whose usage description
+# the app's Info.plist has. This app's plist explains the camera and nothing
+# else, so the camera's code is in it and the microphone's is not.
+flutter_application(
+    name = "permission_flutter",
+    package_name = "ios_example",
+    main = "lib/permission_main.dart",
+    minimum_os_version = IOS_MINIMUM_OS_VERSION,
+    deps = [
+        "@deps//:flutter",
+        "@deps//:permission_handler",
+    ],
+)
+
+flutter_ios_app(
+    name = "permission_app",
+    application = ":permission_flutter",
+    bundle_id = "com.rulesflutter.ios.example.permission",
+    info_plist = "app_settings/Info.plist",
+    tags = ["manual"],
+)
+
+# audio_session and geolocator_apple read an environment variable each, which
+# the app sets for their manifests, as a shell would under `flutter build`.
+flutter_application(
+    name = "audio_session_flutter",
+    package_name = "ios_example",
+    main = "lib/audio_session_main.dart",
+    minimum_os_version = IOS_MINIMUM_OS_VERSION,
+    deps = [
+        "@deps//:audio_session",
+        "@deps//:flutter",
+        "@deps//:geolocator_apple",
+    ],
+)
+
+flutter_ios_app(
+    name = "audio_session_app",
+    application = ":audio_session_flutter",
+    bundle_id = "com.rulesflutter.ios.example.audiosession",
+    swift_package_environment = {
+        "AUDIO_SESSION_MICROPHONE": "1",
+        "BYPASS_PERMISSION_LOCATION_ALWAYS": "1",
+    },
+    tags = ["manual"],
+)
+
+flutter_ios_simulator_build(
+    name = "app_settings_simulator",
+    testonly = True,
+    targets = [
+        ":audio_session_app",
+        ":permission_app",
+    ],
+)
+
+dart_test(
+    name = "verify_ios_app_settings_plugins_test",
+    data = [":app_settings_simulator"],
+    main = "test/verify_ios_app_settings_plugins_test.dart",
     target_compatible_with = ["@platforms//os:macos"],
     deps = ["@rules_flutter//tools/e2e_testing"],
 )

@@ -1,4 +1,5 @@
 load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
+load("@bazel_skylib//rules:common_settings.bzl", "string_list_flag")
 load("@rules_java//java:java_library.bzl", "java_library")
 load(":flutter_module.bzl", "flutter_kernel_sdk")
 load(":flutter_sdk_record.bzl", "flutter_sdk_record", "flutter_web_sdk_record")
@@ -39,6 +40,22 @@ config_setting(
 config_setting(
     name = "swiftpm_release",
     values = {"compilation_mode": "opt"},
+    visibility = ["//visibility:public"],
+)
+
+# The app a plugin's `Package.swift` is evaluated for, when the manifest decides
+# its settings from the app (`swiftpm_app_settings.bzl`): the app's Info.plist
+# and the environment the app gives its manifests. An Apple app's plugin
+# aggregator sets both, on the edge to the libraries of such plugins only.
+label_flag(
+    name = "swiftpm_app_info_plist",
+    build_setting_default = ":swiftpm_no_app_Info.plist",
+    visibility = ["//visibility:public"],
+)
+
+string_list_flag(
+    name = "swiftpm_app_environment",
+    build_setting_default = [],
     visibility = ["//visibility:public"],
 )
 

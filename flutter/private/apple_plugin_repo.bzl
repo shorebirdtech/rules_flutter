@@ -17,14 +17,12 @@ evaluate a manifest.
 
 load(":flutter_pub_index.bzl", "SPOKE_PREFIX", "sibling_path", "source_repo")
 load(":swift_packages.bzl", "SWIFT_PACKAGES_FILE", "SWIFT_PACKAGES_REPO", "swift_product_label")
+load(":swiftpm_app_settings.bzl", "defines_header_name")
 load(
     ":swiftpm_manifest.bzl",
     "CONFIGURATIONS",
     "SWIFTPM_HEADER_EXTENSIONS",
     "SWIFTPM_SOURCE_EXTENSIONS",
-    "build_settings_message",
-    "find_manifest_computations",
-    "find_swiftpm_build_settings",
     "shell_quote_copt",
     "swift_package_message",
     "swift_package_targets",
@@ -271,8 +269,16 @@ apple_resource_bundle(
     )
     return struct(build = build, srcs = srcs, data = [":" + bundle], includes = includes, clang_copts = clang_copts)
 
-def _swift_package_library(ctx, package, platform, target, main, manifest_dir, products, dynamic):
+def _swift_package_library(ctx, package, platform, target, main, manifest_dir, products, dynamic, app_settings = None):
     """A `flutter_apple_plugin_library` of `target` (`swift_package_targets`).
+
+    With `app_settings`, a struct of `manifest` and `reference` (the
+    manifest's fetch-time dump), the package's manifest decides its defines
+    from the app: `target` has none of its own here, and takes them from a
+    `flutter_swiftpm_app_settings` of its own, and the plugin's module is
+    `<package>_apple_<platform>__app`, which the
+    `flutter_swiftpm_app_library` named `<package>_apple_<platform>` stands
+    for (`swiftpm_app_settings.bzl`).
 
     The plugin's module is named after the plugin, as its registrant imports
     it; each other target is a module named after itself, a Clang module
@@ -307,7 +313,30 @@ def _swift_package_library(ctx, package, platform, target, main, manifest_dir, p
         public_hdrs = _patterns(ctx, target.public_headers, SWIFTPM_HEADER_EXTENSIONS)
 
     label = _target_label(package, platform, target.name, main)
+    if app_settings and target.name == main:
+        label += APP_LIBRARY_SUFFIX
     resources = _resource_bundle(ctx, label, target)
+
+    # The defines, for each app, of a manifest that decides them from it.
+    settings_build = ""
+    settings_deps = []
+    settings_clang = []
+    settings_swift = []
+    settings_inputs = []
+    if app_settings:
+        settings = label + "__defines"
+        settings_build = _APP_SETTINGS.format(
+            name = settings,
+            manifest = app_settings.manifest,
+            reference = app_settings.reference,
+            package = package,
+            target = target.name,
+            platform = platform,
+        )
+        settings_deps = [":" + settings]
+        settings_clang = ["-include", defines_header_name(settings)]
+        settings_swift = ["@$(execpath :{})".format(settings)]
+        settings_inputs = [":" + settings]
 
     # The plugin's module of a `.dynamic` product is wrapped: the library is
     # `<label>_unkept`, and `<label>` is what keeps its symbols.
@@ -328,7 +357,7 @@ def _swift_package_library(ctx, package, platform, target, main, manifest_dir, p
         name = label,
         library = library,
     ) if kept else ""
-    return resources.build + """
+    return resources.build + settings_build + """
 flutter_apple_plugin_library(
     name = "{library}",
     srcs = glob({srcs}, exclude = {exclude}, allow_empty = True) + {resource_srcs},
@@ -336,10 +365,11 @@ flutter_apple_plugin_library(
     public_hdrs = glob({public_hdrs}, exclude = {exclude}, allow_empty = True),
     textual_hdrs = glob({textual_hdrs}, exclude = {own}, allow_empty = True) + glob({own_textual}, exclude = {srcs} + {exclude}, allow_empty = True),
     includes = {includes},
-    clang_copts = {resource_copts} + {clang_copts},
+    clang_copts = {resource_copts} + {settings_clang} + {clang_copts},
     cxxopts = {cxxopts},
     conlyopts = {conlyopts},
-    swift_copts = {swift_copts},
+    swift_copts = {settings_swift} + {swift_copts},
+    swiftc_inputs = {settings_inputs},
     linkopts = {linkopts},
     deps = {deps},
     module_name = "{module}",
@@ -356,7 +386,10 @@ flutter_apple_plugin_library(
         module = package if target.name == main else target.name,
         clang_module = target.name != main,
         swift_language_mode = repr(target.swift_language_mode),
-        deps = repr([":" + _target_label(package, platform, d, main) for d in target.deps] + products),
+        deps = repr([":" + _target_label(package, platform, d, main) for d in target.deps] + products + settings_deps),
+        settings_clang = repr(settings_clang),
+        settings_swift = repr(settings_swift),
+        settings_inputs = repr(settings_inputs),
         platform = platform,
         srcs = repr(srcs),
         exclude = repr(exclude),
@@ -371,6 +404,45 @@ flutter_apple_plugin_library(
         swift_copts = _configured(target.swift_copts, _make_variables_escaped),
         linkopts = _configured(linkopts, _make_variables_escaped),
     ) + kept_build
+
+# What the plugin's module of a library whose defines come from the app is
+# named: `<package>_apple_<platform>` is the marker that stands for it.
+APP_LIBRARY_SUFFIX = "__app"
+
+_APP_SETTINGS = """
+flutter_swiftpm_app_settings(
+    name = "{name}",
+    manifest = "{manifest}",
+    manifest_path = "{manifest}",
+    reference = "{reference}",
+    package = "{package}",
+    target = "{target}",
+    platform = "{platform}",
+    configuration = select({{
+        "@rules_flutter//flutter/private:swiftpm_release": "release",
+        "//conditions:default": "debug",
+    }}),
+    tags = ["manual"],
+)
+"""
+
+_APP_LIBRARY = """
+flutter_swiftpm_app_library(
+    name = "{name}",
+    library = "{name}{suffix}",
+    visibility = ["//visibility:public"],
+)
+"""
+
+# A library whose defines come from the app, and which cannot be built: the
+# stand-in is both what `apple_libs` names and what the build's list holds.
+_APP_LIBRARY_STAND_IN = """
+alias(
+    name = "{name}{suffix}",
+    actual = ":{name}",
+    visibility = ["//visibility:public"],
+)
+"""
 
 _KEPT_SYMBOLS = """
 flutter_apple_kept_symbols(
@@ -469,22 +541,20 @@ def _apple_plugin_repo_impl(ctx):
             targets.append(_legacy_library(package, platform, layout))
             continue
         manifest = manifest_dir + "/Package.swift"
-        content = ctx.read(plugin_root.get_child(manifest))
-        computations = find_manifest_computations(content)
-        settings = find_swiftpm_build_settings(content)
-        if computations and settings:
-            targets.append(_stand_in(package, platform, build_settings_message(
-                package,
-                ctx.attr.version,
-                platform,
-                manifest,
-                settings,
-                computations,
-            )))
-            continue
+
+        # A manifest that decides its defines from the app is evaluated for
+        # each app in the build, and here only for the rest of what it says.
+        app_settings = None
+        if layout.get("app_settings"):
+            app_settings = struct(
+                manifest = manifest,
+                reference = "_swiftpm/{}_{}.json".format(package, platform),
+            )
         if manifest_dir not in dumps:
             dumps[manifest_dir] = _dump_package(ctx, plugin_root.get_child(manifest_dir))
-        built = swift_package_targets(dumps[manifest_dir], package, platform, manifest_dir)
+        if app_settings:
+            ctx.file(app_settings.reference, json.encode(dumps[manifest_dir]))
+        built = swift_package_targets(dumps[manifest_dir], package, platform, manifest_dir, defines = not app_settings)
         if built.problems:
             targets.append(_stand_in(package, platform, swift_package_message(
                 package,
@@ -493,6 +563,8 @@ def _apple_plugin_repo_impl(ctx):
                 manifest,
                 built.problems,
             )))
+            if app_settings:
+                targets.append(_APP_LIBRARY_STAND_IN.format(name = "{}_apple_{}".format(package, platform), suffix = APP_LIBRARY_SUFFIX))
             continue
 
         # The remote packages' products, from the repositories of their pins.
@@ -515,15 +587,20 @@ def _apple_plugin_repo_impl(ctx):
                 unpinned,
                 swift_packages.resolved,
             )))
+            if app_settings:
+                targets.append(_APP_LIBRARY_STAND_IN.format(name = "{}_apple_{}".format(package, platform), suffix = APP_LIBRARY_SUFFIX))
             continue
         for target in built.targets:
             products = [swift_product_label(identity, product) for identity, product in target.remote_products]
-            targets.append(_swift_package_library(ctx, package, platform, target, built.main, manifest_dir, products, built.dynamic))
+            targets.append(_swift_package_library(ctx, package, platform, target, built.main, manifest_dir, products, built.dynamic, app_settings))
+        if app_settings:
+            targets.append(_APP_LIBRARY.format(name = "{}_apple_{}".format(package, platform), suffix = APP_LIBRARY_SUFFIX))
 
     ctx.file("BUILD.bazel", """\
 load("@build_bazel_rules_apple//apple:resources.bzl", "apple_resource_bundle")
 load("@rules_flutter//flutter:macos.bzl", "flutter_apple_plugin_library")
 load("@rules_flutter//flutter/private:flutter_apple_kept_symbols.bzl", "flutter_apple_kept_symbols")
+load("@rules_flutter//flutter/private:swiftpm_app_settings.bzl", "flutter_swiftpm_app_library", "flutter_swiftpm_app_settings")
 load("@rules_flutter//flutter/private:unbuilt_native_code.bzl", "flutter_unbuilt_plugin_library")
 {targets}{manifests}""".format(
         targets = "".join(targets),

@@ -22,5 +22,8 @@ dependencies:
   ffi_dynamic_plugin:
     path: path_packages/ffi_dynamic_plugin
   video_player_avfoundation: 2.12.3
+  permission_handler: 13.0.2
+  audio_session: 0.2.4
+  geolocator_apple: 2.4.3
 dev_dependencies:
   very_good_analysis: ^10.3.0

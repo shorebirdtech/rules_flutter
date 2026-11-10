@@ -23,6 +23,7 @@ load("@rules_flutter//flutter:linux.bzl", "flutter_linux_app")
 load(
     "@rules_flutter//flutter:macos.bzl",
     "MACOS_MINIMUM_OS_VERSION",
+    "flutter_macos_app",
     "flutter_macos_engine",
     "flutter_macos_framework_gen",
     "flutter_macos_info_plist_gen",
@@ -757,6 +758,7 @@ flutter_library(
         "//greeting_plugin",
         "@deps//:audio_session",
         "@deps//:flutter",
+        "@deps//:geolocator_apple",
         "@deps//:package_info_plus",
         "@deps//:path_provider",
         "@deps//:record_android",
@@ -774,3 +776,37 @@ flutter_library(
 # //e2e/hello_world:widget_test. Plugin registration is verified here against
 # real artifacts instead: the APK and runtime verifiers above, and
 # playwright/web.spec.js for web.
+
+# =============================================================================
+# A plugin whose Package.swift decides its defines from the app, on macOS
+# =============================================================================
+
+# geolocator_apple leaves out its check for an "always" location description
+# when its manifest's environment has BYPASS_PERMISSION_LOCATION_ALWAYS=1,
+# which this app sets for it: :verify_macos_app_settings_test.
+flutter_application(
+    name = "location_app",
+    package_name = "plugin_example",
+    main = "lib/location_main.dart",
+    deps = [
+        "@deps//:flutter",
+        "@deps//:geolocator_apple",
+    ],
+)
+
+flutter_macos_app(
+    name = "location_macos",
+    application = ":location_app",
+    bundle_id = "com.example.plugin.location",
+    swift_package_environment = {"BYPASS_PERMISSION_LOCATION_ALWAYS": "1"},
+    tags = ["manual"],
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
+dart_test(
+    name = "verify_macos_app_settings_test",
+    data = [":location_macos"],
+    main = "test/verify_macos_app_settings_test.dart",
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
+)

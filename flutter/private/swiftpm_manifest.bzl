@@ -32,7 +32,9 @@ permission's code only when the plist declares its usage description, so
 built without its defines every permission reports `denied`, and nothing
 fails. Evaluated in the plugin's repository, such a manifest computes them for
 no app at all. `find_manifest_computations` says whether a manifest can, and
-`find_swiftpm_build_settings` lists the settings for the message.
+`find_swiftpm_build_settings` whether it sets any: a manifest that does both is
+evaluated again for each app, which its defines are taken from
+(`swiftpm_app_settings.bzl`).
 """
 
 def _strip_comments(text):
@@ -342,41 +344,6 @@ def find_manifest_computations(content):
 
 _IMPORT_KINDS = ("struct", "class", "enum", "protocol", "func", "var", "let", "typealias")
 
-def build_settings_message(package, version, platform, manifest, settings, computations):
-    """Why the `platform` build of an app linking `package` stops, and what to do.
-
-    Args:
-        package: The pub package's name.
-        version: Its version.
-        platform: `"ios"` or `"macos"`.
-        manifest: The manifest that sets the settings, relative to the plugin's root.
-        settings: What `find_swiftpm_build_settings` found in it.
-        computations: What `find_manifest_computations` found in it.
-
-    Returns:
-        The message.
-    """
-    return (
-        "package:{pkg} {version} sets build settings in {manifest} that rules_flutter " +
-        "cannot supply:\n    {settings}\n" +
-        "The manifest can compute them from what surrounds the build ({computations}), " +
-        "and rules_flutter evaluates it in the plugin's own repository, where it sees " +
-        "neither your app nor your environment. A plugin built without the settings " +
-        "your app needs can compile and still behave differently " +
-        "(permission_handler_apple, for one, reports every permission as denied), so " +
-        "the {platform} build stops here. Give {pkg} a plugin overlay " +
-        "(`flutter_pub.plugin_overlays` in MODULE.bazel) whose " +
-        "`flutter_apple_plugin_library` sets what your app needs, a define as `-D<NAME>` " +
-        "in `copts`. See \"Apple plugins built from their Package.swift\" in rules_flutter's README."
-    ).format(
-        pkg = package,
-        version = version,
-        manifest = manifest,
-        settings = "\n    ".join(settings),
-        computations = ", ".join(computations),
-        platform = {"ios": "iOS", "macos": "macOS"}[platform],
-    )
-
 # The file extensions SwiftPM compiles in a target, and the headers beside them.
 SWIFTPM_SOURCE_EXTENSIONS = ("swift", "c", "m", "mm", "cc", "cpp", "cxx", "c++", "s", "S")
 SWIFTPM_HEADER_EXTENSIONS = ("h", "hh", "hpp", "hxx", "h++")
@@ -521,7 +488,7 @@ def _version_key(version):
     """`"5.10.1"` as `[5, 10, 1]`, for comparing."""
     return [int(p) if p.isdigit() else 0 for p in version.split(".")]
 
-def _target_build(dump, target, deps, platform, manifest_dir, problems):
+def _target_build(dump, target, deps, platform, manifest_dir, problems, defines):
     """How one regular target of the package is built; None after a problem."""
     name = target.get("name")
     count = len(problems)
@@ -576,6 +543,9 @@ def _target_build(dump, target, deps, platform, manifest_dir, problems):
         if configuration not in CONFIGURATIONS:
             problems.append("a setting of its target `{}` depends on the configuration `{}`".format(name, configuration))
         elif "define" in kind:
+            if not defines:
+                continue
+
             # SwiftPM gathers a target's C and C++ defines into one list,
             # which every C-family compile of the target gets.
             attr = "swift_copts" if tool == "swift" else "clang_copts"
@@ -632,7 +602,7 @@ def _target_build(dump, target, deps, platform, manifest_dir, problems):
         **settings
     )
 
-def swift_package_targets(dump, package_name, platform, manifest_dir):
+def swift_package_targets(dump, package_name, platform, manifest_dir, defines = True):
     """What a plugin's `Package.swift` says its `platform` library is built from.
 
     Flutter links a plugin's Swift package through its library product named
@@ -650,6 +620,9 @@ def swift_package_targets(dump, package_name, platform, manifest_dir):
         manifest_dir: The directory holding the manifest, relative to the
             plugin's root (`ios/foo`); the paths returned are relative to the
             plugin's root too.
+        defines: Whether the settings hold the manifest's defines. False
+            for a manifest that decides them from the app, whose defines
+            come from its evaluation for each app (`swiftpm_app_settings.bzl`).
 
     Returns:
         A struct with `problems`, what keeps rules_flutter from building the
@@ -732,7 +705,7 @@ def swift_package_targets(dump, package_name, platform, manifest_dir):
         if target.get("type") != "regular":
             problems.append("its target `{}` is a {} target, which rules_flutter does not build".format(name, target.get("type")))
             continue
-        build = _target_build(dump, target, deps[name], platform, manifest_dir, problems)
+        build = _target_build(dump, target, deps[name], platform, manifest_dir, problems, defines)
         if build:
             built.append(build)
     if problems:

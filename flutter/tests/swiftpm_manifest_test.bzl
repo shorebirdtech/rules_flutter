@@ -3,7 +3,6 @@
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load(
     "//flutter/private:swiftpm_manifest.bzl",
-    "build_settings_message",
     "find_manifest_computations",
     "find_swiftpm_build_settings",
     "find_unsupported_swiftpm_dependencies",
@@ -168,28 +167,25 @@ let package = Package(
 
 literal_settings_test = unittest.make(_literal_settings_test_impl)
 
-def _build_settings_message_test_impl(ctx):
+def _app_defines_test_impl(ctx):
     env = unittest.begin(ctx)
-    message = build_settings_message(
-        "permission_handler_apple",
-        "9.6.5",
-        "ios",
-        "ios/permission_handler_apple/Package.swift",
-        ["define PERMISSION_CAMERA = enabled(\"PERMISSION_CAMERA\")", "define PERMISSION_PHOTOS = x"],
-        ["import Foundation"],
-    )
-    for fragment in [
-        "package:permission_handler_apple 9.6.5 sets build settings in ios/permission_handler_apple/Package.swift",
-        "\n    define PERMISSION_CAMERA = enabled(\"PERMISSION_CAMERA\")\n    define PERMISSION_PHOTOS = x\n",
-        "from what surrounds the build (import Foundation)",
-        "the iOS build stops here",
-        "flutter_pub.plugin_overlays",
-        "`-D<NAME>`",
-    ]:
-        asserts.true(env, fragment in message, fragment + " not in " + message)
+
+    # A manifest that decides its defines from the app: the target is built
+    # without them, and with the rest of its settings.
+    built = swift_package_targets(_dump([_target(
+        settings = [
+            {"kind": {"define": {"_0": "PERMISSION_CAMERA=0"}}, "tool": "c"},
+            {"kind": {"define": {"_0": "FEATURE"}}, "tool": "swift"},
+            {"kind": {"unsafeFlags": {"_0": ["-fno-objc-arc"]}}, "tool": "c"},
+        ],
+    )]), "foo", "ios", "ios/foo", defines = False)
+    asserts.equals(env, [], built.problems)
+    target = built.targets[0]
+    asserts.equals(env, ["-fno-objc-arc"], target.clang_copts[""])
+    asserts.equals(env, [], target.swift_copts[""])
     return unittest.end(env)
 
-build_settings_message_test = unittest.make(_build_settings_message_test_impl)
+app_defines_test = unittest.make(_app_defines_test_impl)
 
 def _computations_test_impl(ctx):
     env = unittest.begin(ctx)
@@ -553,7 +549,7 @@ def swiftpm_manifest_test_suite(name):
         no_settings_test,
         computed_defines_test,
         literal_settings_test,
-        build_settings_message_test,
+        app_defines_test,
         computations_test,
         shell_quote_copt_test,
         swift_package_target_test,

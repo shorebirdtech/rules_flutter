@@ -325,6 +325,7 @@ def flutter_apple_plugin_library(
     if swift_language_mode not in (None, "5", "6"):
         fail("flutter_apple_plugin_library: swift_language_mode must be \"5\" or \"6\", got %r" % swift_language_mode)
     features = list(kwargs.pop("features", []))
+    swiftc_inputs = list(kwargs.pop("swiftc_inputs", []))
     if swift_language_mode == "6":
         features.append("swift.enable_v6")
 
@@ -337,7 +338,7 @@ def flutter_apple_plugin_library(
         copts = copts + swift_copts + extra_copts,
         linkopts = sdk_linkopts + linkopts,
         deps = swift_deps,
-        swiftc_inputs = [bridging_header] if bridging_header else [],
+        swiftc_inputs = swiftc_inputs + ([bridging_header] if bridging_header else []),
         tags = tags,
         target_compatible_with = target_compatible_with,
         visibility = visibility,

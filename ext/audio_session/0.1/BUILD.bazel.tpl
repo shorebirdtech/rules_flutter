@@ -1,19 +1,16 @@
 # Bazel-native overlay for `package:audio_session` 0.1.x.
 #
 # audio_session's iOS / macOS sources `#import <AVFoundation/AVFoundation.h>`
-# and reference symbols like `_AVAudioSessionCategorySoloAmbient` that live
-# in Apple's AVFoundation framework. The plugin doesn't declare the
-# framework in its podspec or Package.swift — it relies on Clang's
-# `enable_modules` auto-link to emit the linker hint, which Bazel's
-# apple_support deliberately suppresses with `-fno-autolink`. The
-# Bazel-canonical answer for `objc_library` + Apple SDK framework is
-# explicit `sdk_frameworks`, which rules_apple's own examples use
-# uniformly. This overlay supplies it.
+# without the plugin declaring the framework, and this overlay names it in
+# `sdk_frameworks`. It sets no `AUDIO_SESSION_MICROPHONE`, which the 0.1.x
+# manifests default to 1, so it builds the plugin without its microphone code.
+# Later versions are built from their Package.swift for each app, which
+# `swift_package_environment` sets the variable for.
 #
 # Placeholders (PKG, VERSION, LANGUAGE_VERSION, DEPS, LICENSE — written in
 # braces below, and deliberately not in this comment, because substitution
 # rewrites comment text too) are injected by `flutter_pub_package`'s
-# `_resolve_overlay_template`. The overlay sits under `0/`, so any 0.x
+# `_resolve_overlay_template`. The overlay sits under `0.1/`, so any 0.1.x
 # audio_session version routes here.
 
 load("@rules_flutter//flutter:defs.bzl", "flutter_plugin")
