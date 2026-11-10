@@ -1,4 +1,4 @@
-load("//flutter:integration_test.bzl", "flutter_android_app_integration_test", "flutter_android_device_runner", "flutter_android_emulator_runner", "flutter_android_system_image", "flutter_application_variant", "flutter_chrome_runner", "flutter_desktop_integration_test", "flutter_integration_bootstrap", "flutter_ios_app_integration_test", "flutter_ios_simulator_runner", "flutter_web_bundle_integration_test")
+load("//flutter:integration_test.bzl", "flutter_android_app_integration_test", "flutter_android_device_runner", "flutter_android_emulator_runner", "flutter_android_system_image", "flutter_application_variant", "flutter_chrome_runner", "flutter_desktop_app_integration_test", "flutter_integration_bootstrap", "flutter_ios_app_integration_test", "flutter_ios_simulator_runner", "flutter_web_app_integration_test")
 load("//flutter:web.bzl", "flutter_web_bundle")
 load("//flutter/tests:fake_android_sdk.bzl", "fake_android_sdk")
 load("//flutter/tests:flutter_integration_test_test.bzl", "android_probe_targets", "stub_golden_service", "stub_runner")
@@ -41,7 +41,7 @@ stub_runner(
     tags = ["manual"],
 )
 
-flutter_desktop_integration_test(
+flutter_desktop_app_integration_test(
     name = "desktop_test",
     src = "test/a_test.dart",
     app = "//flutter/tests/variant_fixture/app",
@@ -55,7 +55,7 @@ stub_golden_service(
 )
 
 # A test given the comparator of its goldens, and the source they are relative to.
-flutter_desktop_integration_test(
+flutter_desktop_app_integration_test(
     name = "desktop_test_with_goldens",
     src = "test/a_test.dart",
     app = "//flutter/tests/variant_fixture/app",
@@ -64,7 +64,7 @@ flutter_desktop_integration_test(
 )
 
 # A test given tag selectors.
-flutter_desktop_integration_test(
+flutter_desktop_app_integration_test(
     name = "desktop_test_with_tags",
     src = "test/a_test.dart",
     app = "//flutter/tests/variant_fixture/app",
@@ -77,7 +77,7 @@ flutter_desktop_integration_test(
 )
 
 # A test given an empty tag selector.
-flutter_desktop_integration_test(
+flutter_desktop_app_integration_test(
     name = "desktop_test_with_an_empty_tag",
     src = "test/a_test.dart",
     app = "//flutter/tests/variant_fixture/app",
@@ -86,7 +86,7 @@ flutter_desktop_integration_test(
 )
 
 # A test given a runner of another family.
-flutter_desktop_integration_test(
+flutter_desktop_app_integration_test(
     name = "desktop_test_on_a_web_runner",
     src = "test/a_test.dart",
     app = "//flutter/tests/variant_fixture/app",
@@ -134,7 +134,7 @@ flutter_web_bundle(
     tags = ["manual"],
 )
 
-flutter_web_bundle_integration_test(
+flutter_web_app_integration_test(
     name = "web_test",
     src = "test/a_test.dart",
     app = ":web_app",

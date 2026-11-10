@@ -22,9 +22,9 @@ Tier 2, the composable rules:
 - `flutter_integration_bootstrap`: the program an integration test file runs as.
 - `flutter_application_variant`: a `flutter_application` rebuilt with another
   `main`, plus extra `srcs`, `deps` and `defines`.
-- `flutter_desktop_integration_test`: runs a desktop app on the host's desktop.
+- `flutter_desktop_app_integration_test`: runs a desktop app on the host's desktop.
 - `flutter_desktop_runner`: where it runs, and on Linux the runtime it runs with.
-- `flutter_web_bundle_integration_test`: runs a web bundle in a headless Chrome.
+- `flutter_web_app_integration_test`: runs a web bundle in a headless Chrome.
 - `flutter_chrome_runner`: a headless Chrome of its own, where a web test runs.
 - `flutter_linux_runtime`: on Linux, the X server, GTK, Mesa and libraries a
   runner runs the app or browser with, from pinned Debian packages.
@@ -47,18 +47,18 @@ load("//flutter:windows.bzl", "flutter_windows_app")
 load("//flutter/private:flutter_android_emulator.bzl", _flutter_android_system_image = "flutter_android_system_image")
 load("//flutter/private:flutter_application_variant.bzl", _flutter_application_variant = "flutter_application_variant")
 load("//flutter/private:flutter_integration_bootstrap.bzl", _flutter_integration_bootstrap = "flutter_integration_bootstrap")
-load("//flutter/private:flutter_integration_test.bzl", _flutter_android_app_integration_test = "flutter_android_app_integration_test", _flutter_android_device_runner = "flutter_android_device_runner", _flutter_android_emulator_runner = "flutter_android_emulator_runner", _flutter_chrome_runner = "flutter_chrome_runner", _flutter_desktop_integration_test = "flutter_desktop_integration_test", _flutter_desktop_runner = "flutter_desktop_runner", _flutter_ios_app_integration_test = "flutter_ios_app_integration_test", _flutter_ios_simulator_runner = "flutter_ios_simulator_runner", _flutter_web_bundle_integration_test = "flutter_web_bundle_integration_test")
+load("//flutter/private:flutter_integration_test.bzl", _flutter_android_app_integration_test = "flutter_android_app_integration_test", _flutter_android_device_runner = "flutter_android_device_runner", _flutter_android_emulator_runner = "flutter_android_emulator_runner", _flutter_chrome_runner = "flutter_chrome_runner", _flutter_desktop_app_integration_test = "flutter_desktop_app_integration_test", _flutter_desktop_runner = "flutter_desktop_runner", _flutter_ios_app_integration_test = "flutter_ios_app_integration_test", _flutter_ios_simulator_runner = "flutter_ios_simulator_runner", _flutter_web_app_integration_test = "flutter_web_app_integration_test")
 load("//flutter/private:flutter_linux_runtime.bzl", _flutter_linux_runtime = "flutter_linux_runtime")
 load("//flutter/private:flutter_test.bzl", _flutter_test = "flutter_test")
 load("//flutter/private:test_config.bzl", "find_test_config")
 
 flutter_application_variant = _flutter_application_variant
 flutter_integration_bootstrap = _flutter_integration_bootstrap
-flutter_desktop_integration_test = _flutter_desktop_integration_test
+flutter_desktop_app_integration_test = _flutter_desktop_app_integration_test
 flutter_desktop_runner = _flutter_desktop_runner
 flutter_chrome_runner = _flutter_chrome_runner
 flutter_linux_runtime = _flutter_linux_runtime
-flutter_web_bundle_integration_test = _flutter_web_bundle_integration_test
+flutter_web_app_integration_test = _flutter_web_app_integration_test
 flutter_android_app_integration_test = _flutter_android_app_integration_test
 flutter_android_device_runner = _flutter_android_device_runner
 flutter_android_emulator_runner = _flutter_android_emulator_runner
@@ -285,7 +285,7 @@ def flutter_macos_integration_test(
     test_kwargs = {}
     if runner != None:
         test_kwargs["runner"] = runner
-    _flutter_desktop_integration_test(
+    _flutter_desktop_app_integration_test(
         name = name,
         app = ":" + app,
         src = src,
@@ -391,7 +391,7 @@ def flutter_windows_integration_test(
     test_kwargs = {}
     if runner != None:
         test_kwargs["runner"] = runner
-    _flutter_desktop_integration_test(
+    _flutter_desktop_app_integration_test(
         name = name,
         app = ":" + app,
         src = src,
@@ -498,7 +498,7 @@ def flutter_linux_integration_test(
     test_kwargs = {}
     if runner != None:
         test_kwargs["runner"] = runner
-    _flutter_desktop_integration_test(
+    _flutter_desktop_app_integration_test(
         name = name,
         app = ":" + app,
         src = src,
@@ -629,7 +629,7 @@ def flutter_web_integration_test(
     test_kwargs = {}
     if runner != None:
         test_kwargs["runner"] = runner
-    _flutter_web_bundle_integration_test(
+    _flutter_web_app_integration_test(
         name = name,
         app = ":" + app,
         src = src,

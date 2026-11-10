@@ -507,11 +507,11 @@ def _test_attrs(default_runner, cfg = dbg_transition):
         ),
     }
 
-def _flutter_desktop_integration_test_impl(ctx):
+def _flutter_desktop_app_integration_test_impl(ctx):
     return integration_test_impl(ctx, DESKTOP)
 
-flutter_desktop_integration_test = rule(
-    implementation = _flutter_desktop_integration_test_impl,
+flutter_desktop_app_integration_test = rule(
+    implementation = _flutter_desktop_app_integration_test_impl,
     attrs = _test_attrs("//flutter/integration_test:desktop"),
     test = True,
     doc = """Runs the desktop app `app` (`flutter_macos_app`, `flutter_windows_app` or `flutter_linux_app`) on the host and reports the integration test suite it runs.
@@ -530,11 +530,11 @@ draws on an X server the test starts for itself, with the runner's
 `linux_runtime` in place of the host's libraries, and needs no desktop session.""",
 )
 
-def _flutter_web_bundle_integration_test_impl(ctx):
+def _flutter_web_app_integration_test_impl(ctx):
     return integration_test_impl(ctx, WEB)
 
-flutter_web_bundle_integration_test = rule(
-    implementation = _flutter_web_bundle_integration_test_impl,
+flutter_web_app_integration_test = rule(
+    implementation = _flutter_web_app_integration_test_impl,
     attrs = _test_attrs("//flutter/integration_test:chrome"),
     test = True,
     doc = """Runs the web bundle `app` (`flutter_web_app` or `flutter_web_bundle`) in the runner's headless Chrome and reports the integration test suite it runs.

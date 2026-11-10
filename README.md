@@ -2299,7 +2299,7 @@ flutter_macos_integration_test(
 - **`env` reaches the runner and the app's process.** `data` is available to the test at run time.
 - **Goldens work as in `flutter_test`**: `matchesGoldenFile('goldens/x.png')` reads `goldens/x.png` from the directory of `src`, so the goldens are `data` (`data = glob(["integration_test/goldens/**"])`). The picture is sent from the app to the host, which compares it with the same comparator `flutter_test` uses (a `flutter_tester` it starts for it), on every platform, an app on a phone or in a browser included. A mismatch fails the test, naming the golden and how far it is off, and leaves the pictures of the failure in the target's undeclared outputs (`bazel-testlogs/<target>/test.outputs/failures/`). `bazel run :app_test -- --update-goldens` writes the goldens into the source tree instead of comparing, naming each file it wrote. A golden is a function of the platform that rendered it: keep one per platform (the test chooses the path), and do not commit one whose rendering depends on the machine's fonts.
 
-The macro is Tier 1. Tier 2 is `flutter_integration_bootstrap` (the program a test file runs as), `flutter_application_variant`, `flutter_macos_app`, `flutter_desktop_integration_test` and `flutter_desktop_runner`, which the macro composes as `__<name>_bootstrap`, `__<name>_program` and `__<name>_app` (the macro's own targets, which you do not name).
+The macro is Tier 1. Tier 2 is `flutter_integration_bootstrap` (the program a test file runs as), `flutter_application_variant`, `flutter_macos_app`, `flutter_desktop_app_integration_test` and `flutter_desktop_runner`, which the macro composes as `__<name>_bootstrap`, `__<name>_program` and `__<name>_app` (the macro's own targets, which you do not name).
 
 #### Windows integration tests
 
@@ -2324,7 +2324,7 @@ flutter_windows_integration_test(
 - **Per-test results, `--test_filter`, tags, `shard_count`, `env`, `data`, goldens and the failures** (a failing case, an app that exits, a suite that registers nothing) are as on macOS; an app that exits says `The Windows app exited with code 3 …`. `bazel run :app_windows_test -- --update-goldens` writes the goldens, the Windows one in `goldens/windows/`.
 - **Use a short output base.** Windows limits a path to 260 characters and a Flutter bundle is deep: `bazel --output_base=C:/b test ...`.
 
-The macro is Tier 1. Tier 2 is `flutter_integration_bootstrap`, `flutter_application_variant`, `flutter_windows_app`, `flutter_desktop_integration_test` and `flutter_desktop_runner`, which the macro composes as `__<name>_bootstrap`, `__<name>_program` and `__<name>_app`.
+The macro is Tier 1. Tier 2 is `flutter_integration_bootstrap`, `flutter_application_variant`, `flutter_windows_app`, `flutter_desktop_app_integration_test` and `flutter_desktop_runner`, which the macro composes as `__<name>_bootstrap`, `__<name>_program` and `__<name>_app`.
 
 #### Linux integration tests
 
@@ -2349,7 +2349,7 @@ flutter_linux_integration_test(
 - **Each test has a screen of its own**, so tests run at once without a lock and never draw on your desktop.
 - **Per-test results, `--test_filter`, tags, `shard_count`, `env`, `data`, goldens and the failures** are as on macOS; an app that exits says `The Linux app exited with code 3 …`. `bazel run :app_linux_test -- --update-goldens` writes the goldens, the Linux one in `goldens/linux/`.
 
-The macro is Tier 1. Tier 2 is `flutter_integration_bootstrap`, `flutter_application_variant`, `flutter_linux_app`, `flutter_desktop_integration_test` and `flutter_desktop_runner`, whose `linux_runtime` is the runtime (`@flutter_linux_runtime_amd64//:runtime` or `_arm64`, a `flutter_linux_runtime`). `bazel run @rules_flutter//tools/update_linux_runtime -- <snapshot>` re-pins the runtime at a snapshot.debian.org timestamp.
+The macro is Tier 1. Tier 2 is `flutter_integration_bootstrap`, `flutter_application_variant`, `flutter_linux_app`, `flutter_desktop_app_integration_test` and `flutter_desktop_runner`, whose `linux_runtime` is the runtime (`@flutter_linux_runtime_amd64//:runtime` or `_arm64`, a `flutter_linux_runtime`). `bazel run @rules_flutter//tools/update_linux_runtime -- <snapshot>` re-pins the runtime at a snapshot.debian.org timestamp.
 
 #### Web integration tests
 
@@ -2379,7 +2379,7 @@ A web app is its own program and takes the sources and `deps` the test compiles,
 - **A page that is lost fails the target, saying why**: the browser exiting (`Chrome exited with code 139`), the page crashing, or the connection closing; a page that never starts the suite fails at the test's timeout, naming the bootstrap it never reached.
 - **On Linux the browser loads the pinned Linux runtime's libraries** (see Linux integration tests), never the host's, and the build checks that it needs none the runtime lacks. It runs without its sandbox, as upstream's headless Chrome does: the sandbox needs unprivileged user namespaces, which Ubuntu denies by default since 23.10, or Chrome's set-user-ID helper installed by root. Windows is not verified yet.
 
-The macro is Tier 1. Tier 2 is `flutter_integration_bootstrap` (with `src_import = "relative"`: a web compile mounts no file-system root to name the test under), `flutter_web_app` or `flutter_web_bundle`, `flutter_web_bundle_integration_test` and `flutter_chrome_runner`, which the macro composes as `__<name>_bootstrap` and `__<name>_app`.
+The macro is Tier 1. Tier 2 is `flutter_integration_bootstrap` (with `src_import = "relative"`: a web compile mounts no file-system root to name the test under), `flutter_web_app` or `flutter_web_bundle`, `flutter_web_app_integration_test` and `flutter_chrome_runner`, which the macro composes as `__<name>_bootstrap` and `__<name>_app`.
 
 #### Android integration tests
 
@@ -2953,7 +2953,7 @@ The endpoints speak plain HTTP/1.1, so `curl -s "$URI/..."` works. If your `curl
 
 The set of commands is not fixed when a client connects. It grows through the run and describes this run rather than the tool. A web run gains `app.setViewport` once the browser is up and never offers `app.buildInfo`, because only a `-c dbg` native build carries the record that command reads. The widget-driving commands are offered once the tool knows the run carries the agent extensions, which is every native run, the DDC dev loop on the web, and any web bundle built in debug (`--wasm`, or `--no-hot -c dbg`). They answer once the app is reachable, which on the web and on an iPhone is well after `app.started`. `app.pressKey` is offered on every run, since a web bundle without the extensions can still take keys through the browser. So re-read `/commands` rather than caching the first answer. `longRunning` marks commands that rebuild or recompile before answering; those deserve a generous timeout and are the ones `app.progress` events are emitted for.
 
-A `--machine` client does not need the endpoint. It receives the list in `daemon.connected` and again in every `daemon.commandsChanged`. `daemon.connected` also carries `protocolVersion`. The protocol stream is also the only place for things the channel cannot push: `app.devTools` carries the DevTools URL, `app.debugPort` the VM service's `port`, `wsUri`, and `baseUri`, and `app.webLaunchUrl` the address a web run is served at. The browser the tool launches uses a scratch profile and may be headless, so that URL is how you open the page in your own browser. The full event list is the header comment of `tools/dev_tool/lib/machine_protocol.dart`.
+A `--machine` client does not need the endpoint. It receives the list in `daemon.connected` and again in every `daemon.commandsChanged`. `daemon.connected` also carries `protocolVersion`. The protocol stream is also the only place for things the channel cannot push: `app.devTools` carries the DevTools URL, `app.debugPort` the VM service's `port`, `wsUri`, and `baseUri`, `app.dtd` the Dart Tooling Daemon the app is registered with, and `app.webLaunchUrl` the address a web run is served at. The browser the tool launches uses a scratch profile and may be headless, so that URL is how you open the page in your own browser. The full event list is the header comment of `tools/dev_tool/lib/machine_protocol.dart`.
 
 **Driving the browser yourself.** `app.webLaunchUrl` also carries the browser's DevTools protocol endpoint: `cdpPort`, and `webSocketDebuggerUrl` for the app's page. The same two fields are on the `web_app_url` log record, for a client reading stderr. Chrome picks the port, so nothing else tells you where it is. With it you can send your own `Input.dispatchKeyEvent`, `Runtime.evaluate` or trace. The page URL is the one listed when the browser came up. It survived a `--wasm` hot restart when we checked, but if it stops answering, re-read `http://127.0.0.1:<cdpPort>/json` and pick the `page` target on the app's origin, as the tool does before each of its own uses. Chrome takes several DevTools clients at once, so yours does not displace the tool's.
 
@@ -3248,6 +3248,8 @@ Stop the app with daemon.shutdown at the end of the session.
 ```
 
 Adjust the target and device to your project. With the long form of the command in place of `fl`, this works without bazel_env. The screenshot endpoint waits for the app to settle, so a capture taken straight after a tap or a reload shows the result; see [Screenshots](#screenshots).
+
+**Flutter's own agent tools find the app too.** Like `flutter run`, a run starts a Dart Tooling Daemon (DTD) and registers each app's VM service with it. So the Dart MCP server (`dart mcp-server`) and other DTD clients find a `flutter_bazel` run the way they find a `flutter run` one: `dart tooling-daemon --list` lists the run's DTD, and the server's `list_running_apps` and `dtd` tools show the app. Its `hot_reload` and `hot_restart` go through the tool's own reload, so they recompile with Bazel like `app.hotReload` does, and `get_runtime_errors` reads the app's errors. A `--machine` client gets the DTD's address from the `app.dtd` event; in a terminal, `--print-dtd` prints it. The DTD stops when the run ends. Use the MCP server only for these running-app tools: its `run_tests`, `launch_app` and `pub` use the machine's Flutter, not the one the workspace builds with.
 
 ## Examples
 
