@@ -160,7 +160,11 @@ def _record_android_subpackage_test_impl(ctx):
     # The androidx compile baseline comes from the engine target's exports
     # (mirroring the Flutter embedding POM), not from a per-plugin list —
     # a dep-less build.gradle still compiles against NotificationCompat etc.
-    asserts.true(env, '":_engine",' in content, content)
+    # One engine target for every plugin, and the BuildConfig compiled with
+    # the plugin's own sources, as Gradle compiles it in the module.
+    asserts.true(env, '["@rules_flutter//flutter/private/android:plugin_engine"]' in content, content)
+    asserts.true(env, '+ [":_build_config"],' in content, content)
+    asserts.false(env, "flutter_android_engine(" in content, content)
     asserts.false(
         env,
         "@rules_flutter_maven//:androidx" in content,
@@ -246,7 +250,7 @@ def _no_resources_subpackage_test_impl(ctx):
         'load("@rules_flutter//flutter/private:android_plugin_maven.bzl", "maven_labels")',
         "_maven = maven_labels(",
         ", RESOLVED)",
-        "deps = [\":_engine\", \":_build_config\"] + _maven.deps + [\":_compile_only\"],",
+        "deps = [\"@rules_flutter//flutter/private/android:plugin_engine\"] + _maven.deps + [\":_compile_only\"],",
         "runtime_deps = _maven.runtime_deps,",
         "exports = _maven.compile_only,",
         "neverlink = True,",

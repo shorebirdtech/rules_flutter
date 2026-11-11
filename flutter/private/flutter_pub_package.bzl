@@ -1508,7 +1508,8 @@ def make_android_subpackage_build_content(
     analyses the member's `exports`. Non-Android workspaces never trigger
     it and don't pay the `@rules_android` / `@rules_kotlin` cost.
 
-    The `_engine` target gives the plugin's Kotlin/Java source access to
+    `@rules_flutter//flutter/private/android:plugin_engine`, one target every
+    plugin shares, gives the plugin's Kotlin/Java source access to
     the FlutterPlugin SPI on the compile classpath. It is `neverlink`, as
     Gradle gives a plugin the embedding with `compileOnly`: the app
     packages its own engine, of each ABI of
@@ -1524,8 +1525,8 @@ def make_android_subpackage_build_content(
 
     BuildConfig.java is generated from the plugin's `java_package`. Many
     Flutter plugins reference `BuildConfig.DEBUG`, which Gradle synthesizes
-    automatically; rules_android does not. `android_build_config` emits it,
-    with `DEBUG` and `BUILD_TYPE` as Gradle's would be in the build's mode
+    automatically; rules_android does not. `android_build_config` emits it
+    into the library's `srcs`, as Gradle compiles it with the module, with `DEBUG` and `BUILD_TYPE` as Gradle's would be in the build's mode
     (debug: true and `debug`, profile: true and `profile`, release: false
     and `release`).
 
@@ -1666,12 +1667,12 @@ write_file(
         spec_lines = ", ".join([repr(path) for path in consumer_proguard_specs])
         proguard_specs_arg = "    proguard_specs = [%s],\n" % spec_lines
 
-    # Base deps every plugin spoke gets: the engine (which carries the
+    # The dep every plugin spoke gets: the engine, which carries the
     # FlutterPlugin SPI plus the embedding's androidx compile classpath
-    # via its exports) and the BuildConfig stub. The plugin's own Maven
+    # via its exports. The plugin's own Maven
     # artifacts come from `@rules_flutter_maven`, checked by the application
     # that links this library (see `flutter_android_plugin_libs`).
-    deps_expr = '[":_engine", ":_build_config"]'
+    deps_expr = '["@rules_flutter//flutter/private/android:plugin_engine"]'
     maven_loads = ""
     maven_call = ""
     compile_only_target = ""
@@ -1712,23 +1713,12 @@ android_library(
     bc_package = java_package if java_package else "_unknown"
 
     return """\
-{maven_loads}{write_file_load}load("@rules_flutter//flutter:android.bzl", "flutter_android_engine")
-load("@rules_flutter//flutter/private:android_build_config.bzl", "android_build_config")
+{maven_loads}{write_file_load}load("@rules_flutter//flutter/private:android_build_config.bzl", "android_build_config")
 load("@rules_kotlin//kotlin:android.bzl", "kt_android_library")
 {maven_call}
-# Private engine target — gives the plugin's Kotlin/Java the FlutterPlugin
-# SPI plus the embedding's androidx dependencies (via the engine's
-# exports) on the compile classpath. Always arm64; Java bytecode is
-# ABI-independent. neverlink, so the APK carries only the app's engine, of
-# each ABI of --@rules_android//flags:android_platforms.
-flutter_android_engine(
-    name = "_engine",
-    neverlink = True,
-    visibility = ["//visibility:private"],
-)
-
-# BuildConfig for the plugin's namespace, which Gradle generates and
-# rules_android does not. DEBUG and BUILD_TYPE follow the build mode.
+# BuildConfig for the plugin's namespace, which Gradle generates and compiles
+# with the module's sources, and rules_android does not. DEBUG and
+# BUILD_TYPE follow the build mode.
 android_build_config(
     name = "_build_config",
     package = "{bc_package}",
@@ -1736,7 +1726,7 @@ android_build_config(
 {synthesized_manifest}{compile_only_target}
 kt_android_library(
     name = "lib",
-    srcs = {srcs},
+    srcs = {srcs} + [":_build_config"],
 {custom_package}{manifest}{resource_files}{proguard_specs}{runtime_deps}    visibility = ["//visibility:public"],
     deps = {deps},
 )

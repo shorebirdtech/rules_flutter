@@ -17,8 +17,6 @@ The mode is the configuration's, as for the engine: `-c dbg` is debug,
 `-c opt --@rules_flutter//flutter:profile` is profile, anything else release.
 """
 
-load("@rules_java//java:java_library.bzl", "java_library")
-
 _SOURCE = """\
 package {package};
 
@@ -61,18 +59,20 @@ _android_build_config_src = rule(
 )
 
 def android_build_config(name, package, tags = None):
-    """Declares a `java_library` named `name` holding the `BuildConfig` of `package`.
+    """Declares `name`, the `BuildConfig.java` of `package`, for a library's `srcs`.
 
+    Gradle compiles the class it generates with the module's own sources, so
+    it goes in the `srcs` of the plugin's library, not a library of its own.
     Its `DEBUG` and `BUILD_TYPE` follow the build mode of the configuration it
     is built in: see the file's docstring.
 
     Args:
-        name: Name of the `java_library`. The generated source is `<name>_src`.
+        name: Name of the target that writes the source.
         package: The plugin's Android namespace.
-        tags: Tags for both targets.
+        tags: Tags for the target.
     """
     _android_build_config_src(
-        name = name + "_src",
+        name = name,
         package = package,
         debug = select({
             "@rules_flutter//flutter/private:dbg": True,
@@ -84,12 +84,6 @@ def android_build_config(name, package, tags = None):
             "@rules_flutter//flutter/private:profile": "profile",
             "//conditions:default": "release",
         }),
-        tags = tags,
-        visibility = ["//visibility:private"],
-    )
-    java_library(
-        name = name,
-        srcs = [":" + name + "_src"],
         tags = tags,
         visibility = ["//visibility:private"],
     )

@@ -94,13 +94,13 @@ def flutter_android_plugin_library(
         tags = tags,
     )
 
-    plugin_deps = list(deps) + [":" + build_config]
+    plugin_deps = list(deps)
     if flutter_engine:
         plugin_deps.append(flutter_engine)
 
     kt_android_library(
         name = name,
-        srcs = srcs,
+        srcs = srcs + [":" + build_config],
         custom_package = java_package,
         manifest = actual_manifest,
         deps = plugin_deps,
