@@ -6,6 +6,176 @@ Bazel rules for building Flutter apps.
 
 rules_flutter compiles Dart to kernel or AOT native code, bundles assets, and packages the result for macOS, iOS, Android, Linux, Windows, and the web. It builds on [rules_dart](https://github.com/aran/rules_dart) for Dart compilation and hands platform packaging to the rulesets that already do it well: `rules_apple`, `rules_android`, and friends. It also ships a dev tool, `flutter_bazel`, that gives you hot reload, hot restart, and an HTTP channel for driving a running app from a script.
 
+## What's New
+
+### Migrating from 0.0.8
+
+Each step names the old API and the new one. The commit that carries that
+change's `Changelog:` line, and the sections below, give the details. rules_dart
+changed too: also follow its
+[migration guide](https://github.com/aran/rules_dart#migrating-from-08) for the
+rules_dart rules and flags you use directly.
+
+**MODULE.bazel**
+
+1. Bazel 9.2 or newer; Flutter 3.47.x (3.41 and 3.44 are dropped).
+2. `flutter.pub(name, lock)` → `flutter_pub = use_extension("@rules_flutter//flutter/pub:extensions.bzl", "pub")`,
+   then `flutter_pub.from_lock(name, lock)` and `use_repo(flutter_pub, ...)`.
+   `flutter.plugin_overlays` → `flutter_pub.plugin_overlays`. The pub runner
+   is `bazel run @rules_flutter//flutter/pub`.
+3. `register_toolchains("@flutter_toolchains//:all")` and
+   `use_repo(flutter, "flutter_toolchains")` → delete both; rules_flutter
+   registers its toolchains. `@rules_flutter//flutter:repositories.bzl` is
+   removed.
+4. `use_repo(flutter, "flutter_android_engine_arm64")` (or `_x64`) → delete;
+   no Android engine repository is named.
+5. `flutter_pub.from_lock(on_version_conflict = ...)` → removed; the highest
+   version any module's lock records is built. A dependency asking for a newer
+   Flutter than the root's `flutter_version` fails, unless the root sets
+   `flutter.toolchain(allow_upgrade_by_dependencies = True)`.
+6. A lock with `path` packages (or a hosted/git package to build from your own
+   targets) → `flutter_pub.from_lock(resolve = {...})`. Packages that depend on
+   each other → `flutter_pub.cycle()` (the error gives it). A lock entry
+   without `sha256` now fails; regenerate the lock.
+7. Overlay templates: `{HUB_NAME}` → `{DEPS}`; facts go in a
+   `dart_package_metadata(name = "pubspec-metadata", ...)` the plugin names,
+   with `{LICENSE}` there.
+8. Android: installed SDK/NDK → `hermetic_android_toolchains` (see
+   [Android](#android)), or keep the installed ones with
+   `configure(api_level = ...)` pinned. Keep `rules_flutter`'s `bazel_dep`
+   above `rules_android`'s.
+9. Android Maven: a `maven.install(name = "rules_android_maven")` carrying
+   plugin artifacts → `maven.install(name = "rules_flutter_maven")`, pinned
+   with `REPIN=1 bazel run @rules_flutter_maven//:pin`. An app whose plugins
+   declare no Maven artifacts needs no install.
+   `bazel run @<hub>//android:maven_artifacts` lists what the plugins need.
+10. Apple plugins that use remote Swift packages →
+    `flutter_pub.from_lock(swift_package_resolved = ...)`, written by
+    `bazel run @<hub>//swift:resolve`.
+11. Local engine: `flutter_engine_out_dirs` → `flutter_local_engine`,
+    `flutter_checkout_framework` → `flutter_local_framework`,
+    `FLUTTER_CHECKOUT` → `FLUTTER_ENGINE`. An engine source provides its
+    outline tool at `//outline_tool:outline_tool`.
+12. Engine repository targets follow the build mode: `engine_library`,
+    `Flutter_xcframework` and Android's `stripped` are the current mode's. To
+    pin release, use `engine_release_library`, `Flutter_xcframework_release`,
+    `release_stripped`.
+
+**Package metadata** (every package with Flutter targets)
+
+13. `package_name`, `language_version`, `version`, `license_file`,
+    `link_hook`, `code_assets`, `unreplaced_hook` (was
+    `has_unreplaced_hook`) on `flutter_library`, `flutter_plugin`, app, test
+    and web rules → one `dart_package_metadata(name = "pubspec-metadata", ...)`
+    at the package root, loaded from `@rules_flutter//flutter:defs.bzl`, and
+    `package = ":pubspec-metadata"` on each target. `flutter_application` no
+    longer names the package after the target.
+14. `flutter_library`/`flutter_plugin` `srcs` and `resources` must be under
+    their package's `lib/`; generated `srcs` must come from that package's own
+    codegen.
+15. `flutter_native_asset` and `flutter_plugin.native_assets` →
+    rules_dart's `dart_code_asset` in the metadata's `code_assets`.
+    `flutter_data_asset` and `flutter_plugin.data_assets` →
+    `dart_data_asset` in the metadata's `data_assets`.
+
+**Assets, fonts, shaders**
+
+16. `pkg_assets` → `assets`; `pkg_shaders` → `shaders`;
+    `pkg_asset_platforms`/`pkg_asset_flavors`/`pkg_shader_platforms`/
+    `pkg_shader_flavors` → the names without `pkg_`. A restriction naming no
+    listed file fails.
+17. Asset keys are the path in the package (`assets/a.png`), not the workspace
+    path; a library's assets bundle at `packages/<name>/<path>`, except in the
+    program of that same package. Fix `rootBundle`/`AssetImage` keys that
+    assumed the old layout.
+18. `fonts_json` + `font_files` → `flutter_font_family` and `flutter_font`
+    targets listed in `fonts`.
+19. `license_files` → `license_file` (on the metadata) and
+    `additional_licenses`.
+20. Icon tree shaking fails on a non-constant `IconData` and matches fonts by
+    exact path, as `flutter build` does.
+
+**Plugins**
+
+21. `flutter_plugin.plugin_class`, `dart_plugin_class`, `android_package`,
+    `plugin_platforms_json`, `apple_libs`, `linux_libs`, `windows_libs` →
+    one `flutter_plugin_platform(platform = ..., plugin_class = ..., lib = ...)`
+    per platform, listed in `flutter_plugin.platforms`. Android's Java package
+    is `package`; an add-to-app AAR needs `group`.
+22. `all_android_plugin_libs` → removed; an overlay lists its Android library
+    in `exports`.
+23. `flutter_apple_plugin_library.clang_module` → removed; an Objective-C
+    plugin is one module named `module_name`. A `Package.swift` setting
+    defines rules_flutter cannot supply fails the app.
+
+**Apps**
+
+24. `flutter_android_app.package_name`, `flutter_android_manifest_gen.package_name`,
+    `flutter_android_integration_test.package_name` → `application_id`.
+    `flutter_android_runner_lib_gen.package_name` → `namespace`.
+25. `flutter_android_app(android_abi)` → `--android_platforms`;
+    `pub_hub_name` → removed. `flutter_android_release.apksigner` takes the
+    SDK's `apksigner` `java_binary`.
+26. Android builds now fail on two jars defining one class differently
+    (`--@rules_flutter//flutter:allow_duplicate_classes`) and on native
+    libraries aligned for 4 KB pages
+    (`--@rules_flutter//flutter:allow_4kb_aligned_native_libraries`).
+27. `flutter_linux_app.gtk_app_id` → `application_id`, now required.
+28. `flutter_application.min_os_version` → `minimum_os_version`.
+29. `flutter_web_bundle.app_version`/`app_build_number` → `build_name`/
+    `build_number` (all app macros take these; iOS and macOS default to 1.0.0
+    (1)).
+30. `flutter_web_app`/`flutter_web_bundle(main, deps, ...)` →
+    `application = ":<flutter_application>"`; `flutter_web_integration_test`
+    likewise. They take `js_platform`/`wasm_platform`. Per-compiler `select`s
+    use `@rules_dart//dart/constraints:js` and `:wasm`; a web-only app's
+    `:none` → `@rules_dart//dart/constraints:vm`.
+31. `flutter_web_bundle.track_widget_creation` → removed (debug apps track it
+    by default). A web bundle has `canvaskit/` only with `use_local_canvaskit`
+    or in debug; `.symbols` maps → `--output_groups=symbols`.
+32. `flutter_ios_framework`/`flutter_macos_framework` →
+    `flutter_ios_app_framework`/`flutter_macos_app_framework`.
+33. `flutter_ios_app_integration_test.sim_cpu` → removed; simulator builds are
+    `sim_arm64` only. A `flutter_ios_app` device build needs
+    `provisioning_profile`.
+34. `flutter_application.split_debug_info`/`.obfuscate` →
+    `--@rules_dart//dart:split_debug_info` and
+    `--@rules_flutter//flutter:obfuscate`; obfuscating needs split debug info.
+    `extra_gen_snapshot_options` refuses `--resolve-dwarf-paths`.
+
+**Flags and tests**
+
+35. `--@rules_flutter//flutter:extra_dart_defines` →
+    `--@rules_dart//dart:extra_dart_defines`.
+    `--@rules_flutter//flutter:wasm_opt_cores` → `wasm_opt_cpus`.
+36. `flutter_desktop_integration_test` → `flutter_desktop_app_integration_test`;
+    `flutter_web_bundle_integration_test` → `flutter_web_app_integration_test`.
+    Integration test rules require `src`.
+37. `flutter_suite_program` → `flutter_test_program`. A `flutter_test` suite
+    that registers no test now fails. A library's `data` reaches its tests'
+    runfiles.
+38. `go_router_library` (rules_dart) → `go_router_codegen` from
+    `@rules_flutter//flutter/ext/go_router:defs.bzl`.
+
+**Dev tool**
+
+39. `flutter_bazel --config <mode>` → `--compilation_mode` (`-c` unchanged);
+    `--config` now passes a Bazel config.
+40. `app.restart` without `fullRestart` → hot reload; pass
+    `fullRestart: true` to restart.
+
+**Rule authors**
+
+41. `flutter_kernel_target` → `flutter_kernel`; `flutter_aot_target` →
+    `flutter_aot_snapshot`; `host_transition` → `host_platform_transition`;
+    the `flutter_dev_files` aspect → `flutter_dev_files_aspect`.
+42. `FlutterInfo.asset_dirs` → `pub_assets`; `FlutterInfo.native_assets`,
+    `FlutterNativeAssetInfo`, `FlutterDataAssetInfo`,
+    `FlutterInfo.data_assets` → rules_dart's code and data assets;
+    `FlutterApplicationInfo.package_config` → removed;
+    `FlutterExecToolsInfo.tool_files` → `FlutterSdkInfo.sdk_files`;
+    `FlutterTestProgramInfo.coverage_libraries` → `packages`.
+
 ## Road to 1.0
 
 This project is getting dangerously close to being good. It's still a beta, but
