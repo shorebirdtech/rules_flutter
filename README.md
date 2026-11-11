@@ -3144,7 +3144,7 @@ dart_codegen(
     name = "user_json",
     package = ":pubspec-metadata",
     src = "lib/user.dart",
-    generator = "tools/json_generator.dart",
+    generator = "//tools:json_generator",
     output_suffixes = [".g.dart"],
 )
 
@@ -3153,7 +3153,7 @@ dart_aggregate_codegen(
     name = "registry",
     package = ":pubspec-metadata",
     srcs = ["lib/model.dart", "lib/order.dart"],
-    generator_script = "tools/aggregate_generator.dart",
+    generator = "//tools:aggregate_generator",
     outputs = ["lib/registry.g.dart"],
 )
 
@@ -3165,6 +3165,55 @@ flutter_application(
     deps = ["@deps//:flutter"],
 )
 ```
+
+A `generator` is a target: a `dart_binary` whose `main` hands a `package:build` `Builder` to rules_dart's shim runner, which speaks the rules' command line and runs as a persistent worker. It is built for the execution platform. The Builder reads its input with `buildStep.readAsString(buildStep.inputId)` and writes the file the rule declared, `buildStep.allowedOutputs.single`; an aggregate Builder finds the other sources with `buildStep.findAssets`. The rule's `config` reaches the factory as `options.config`.
+
+```dart
+// tools/json_generator.dart
+import 'package:build/build.dart';
+import 'package:rules_dart_ext/worker_entry.dart';
+
+Future<void> main(List<String> args) => shimMain(args, (_) => _JsonBuilder());
+
+class _JsonBuilder implements Builder {
+  @override
+  Map<String, List<String>> get buildExtensions => const {
+    '.dart': ['.g.dart'],
+  };
+
+  @override
+  Future<void> build(BuildStep buildStep) async {
+    final source = await buildStep.readAsString(buildStep.inputId);
+    // ... derive the output from `source` ...
+    await buildStep.writeAsString(buildStep.allowedOutputs.single, output);
+  }
+}
+```
+
+```starlark
+# tools/BUILD.bazel
+load("@rules_dart//dart:defs.bzl", "dart_binary")
+load("@rules_dart//dart/ext:defs.bzl", "builder_shim_library")
+
+builder_shim_library(
+    name = "builder_shim",
+    pub_hub = "@generator_pub_deps",
+)
+
+dart_binary(
+    name = "json_generator",
+    srcs = ["json_generator.dart"],
+    code_assets_from_packages = False,
+    main = "json_generator.dart",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":builder_shim",
+        "@generator_pub_deps//:build",
+    ],
+)
+```
+
+`generator_pub_deps` is a hub of its own, from a `pubspec.lock` beside the generators (`dart_pub = use_extension("@rules_dart//dart/pub:extensions.bzl", "pub")`, then `dart_pub.from_lock(name = "generator_pub_deps", lock = "//tools:pubspec.lock")`). It must resolve `analyzer`, `args`, `bazel_worker`, `build`, `crypto`, `glob`, `logging`, `package_config`, `path`, `pub_semver` and `yaml`, which the shim runner links; `e2e/codegen/tools/pubspec.yaml` lists them.
 
 `e2e/codegen` is the worked example, including generated code in dependency packages and hot reload over regenerated sources.
 

@@ -30,6 +30,16 @@ use_repo(flutter, "flutter_macos_engine", "flutter_web_sdk")
 
 use_repo(flutter_pub, "deps")
 
+# The generators' own pub resolution (`//tools:pubspec.lock`): `package:build`
+# and the packages rules_dart's shim runner links. They are tools of the build,
+# so rules_dart's extension supplies them rather than the Flutter one.
+dart_pub = use_extension("@rules_dart//dart/pub:extensions.bzl", "pub")
+dart_pub.from_lock(
+    name = "generator_pub_deps",
+    lock = "//tools:pubspec.lock",
+)
+use_repo(dart_pub, "generator_pub_deps")
+
 # Hermetic C++ toolchain for Linux arm64 execution platforms, so a C++ tool
 # built for the exec platform (zipper, xmllint) can be compiled when Bazel runs
 # actions on a Linux arm64 worker. Only the Linux-exec, Linux-target toolchain

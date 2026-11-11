@@ -1,43 +1,37 @@
-/// Per-file code generator for dart_codegen rule.
+/// Per-file code generator for the `dart_codegen` rule.
 ///
-/// Interface: `dart simple_generator.dart --input <path> --output <path>`
-///
-/// Reads a .dart source file, finds class definitions and their fields,
-/// and generates a companion file with toDebugString() extensions.
+/// A `package:build` Builder behind rules_dart's shim runner. Reads a `.dart`
+/// source file, finds class definitions and their fields, and generates a
+/// companion `part of` file with `toDebugString()` extensions.
 library;
 
-import 'dart:io';
+import 'package:build/build.dart';
+import 'package:rules_dart_ext/worker_entry.dart';
 
-void main(List<String> args) {
-  String? inputPath;
-  String? outputPath;
+Future<void> main(List<String> args) => shimMain(args, (_) => _SimpleBuilder());
 
-  for (var i = 0; i < args.length; i++) {
-    if (args[i] == '--input' && i + 1 < args.length) {
-      inputPath = args[i + 1];
-    } else if (args[i] == '--output' && i + 1 < args.length) {
-      outputPath = args[i + 1];
-    }
-  }
+class _SimpleBuilder implements Builder {
+  // The shim takes the outputs from the rule's declared ones.
+  @override
+  Map<String, List<String>> get buildExtensions => const {
+    '.dart': ['.g.dart'],
+  };
 
-  if (inputPath == null || outputPath == null) {
-    stderr.writeln(
-      'Usage: dart simple_generator.dart --input <file> --output <file>',
+  @override
+  Future<void> build(BuildStep buildStep) async {
+    final source = await buildStep.readAsString(buildStep.inputId);
+    final fileName = buildStep.inputId.pathSegments.last;
+    await buildStep.writeAsString(
+      buildStep.allowedOutputs.single,
+      _generateForSource(source, fileName),
     );
-    exit(1);
   }
-
-  final source = File(inputPath).readAsStringSync();
-  final generated = generateForSource(source, inputPath);
-  File(outputPath).writeAsStringSync(generated);
 }
 
 /// Parse classes and fields from [source] and return generated code.
-String generateForSource(String source, String inputPath) {
+String _generateForSource(String source, String fileName) {
   final classPattern = RegExp(r'^class\s+(\w+)', multiLine: true);
   final fieldPattern = RegExp(r'final\s+\w+\s+(\w+);');
-
-  final fileName = Uri.file(inputPath).pathSegments.last;
 
   final buffer = StringBuffer()
     ..writeln('// GENERATED CODE - DO NOT MODIFY BY HAND')
