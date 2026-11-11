@@ -5,6 +5,13 @@ load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_test")
 # on every operating system. The workflow's `plan` job runs the same file with
 # plain `dart run`.
 #   bazel run //tools/ci_matrix
+# `tools/vm/run_e2e.dart` imports the table by relative path, to run on a VM what
+# CI runs on that system.
+exports_files(
+    ["e2e_matrix.dart"],
+    visibility = ["//tools:__subpackages__"],
+)
+
 dart_binary(
     name = "ci_matrix",
     srcs = [

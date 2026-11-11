@@ -15,7 +15,7 @@ load("@rules_dart//dart:defs.bzl", "dart_binary")
 # `//tools/dev_tool:loose_sources` already make this move.
 #
 # `main` has to be one of them and the four entrypoints are coequal —
-# `run_e2e.dart` roots the handle because it is the largest and mirrors the CI
+# `run_e2e.dart` roots the handle because it is the largest and reads the CI
 # matrix, but nothing turns on that choice. The `glob` is what carries
 # coverage: `DartAnalyzableInfo` is `[main] + srcs`, and the analyzer reports
 # on every file staged into the project whether or not `main` imports it, so
@@ -36,13 +36,14 @@ load("@rules_dart//dart:defs.bzl", "dart_binary")
 # are unimported. No `deps`: every file here imports `dart:*` and its
 # siblings, nothing from pub. A script that grows a pub import fails this
 # target loudly, as an unresolved import, which is the intended way to learn it
-# needs one.
+# needs one. `run_e2e.dart` imports the CI matrix (`e2e_matrix.dart`, which has
+# no imports of its own) by relative path, so that file is in `srcs`.
 dart_binary(
     name = "vm_scripts",
     srcs = glob(
         ["*.dart"],
         exclude = ["run_e2e.dart"],
-    ),
+    ) + ["//tools/ci_matrix:e2e_matrix.dart"],
     compile_mode = "kernel",
     main = "run_e2e.dart",
     visibility = ["//visibility:private"],

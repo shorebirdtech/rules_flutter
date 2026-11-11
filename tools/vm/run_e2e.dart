@@ -6,7 +6,9 @@
 ///       [--rules-dart=../rules_dart]
 ///
 /// Transfers the committed working tree to the VM, extracts it, then runs
-/// `bazel test //...` in each folder, mirroring `.github/workflows/ci.yaml`.
+/// in each folder what `.github/workflows/ci.yaml` runs there, which
+/// `tools/ci_matrix/e2e_matrix.dart` says: the workspaces that run on the VM's
+/// system, each with its Bazel command and targets (`bazel test //...` for most).
 /// With `--rules-dart`, that checkout's committed HEAD goes over too and every
 /// folder builds against it (`--override_module`, for rules_dart and, in the
 /// root, its `overhead`), as a local `.bazelrc.user` does; without it, the
@@ -24,21 +26,52 @@ library;
 import 'dart:async';
 import 'dart:io';
 
+import '../ci_matrix/e2e_matrix.dart';
 import 'gcloud.dart';
 
-/// The default folder matrix, mirroring the `e2e` job in
-/// `.github/workflows/ci.yaml`. `.` is the root module (Starlark unit tests).
-/// Override with `--folders=` to scope a run (e.g. just the Linux or Windows
-/// subset).
-const _ciFolders = [
-  '.',
-  'e2e/smoke',
-  'e2e/hello_world',
-  'e2e/ffi_example',
-  'e2e/plugin_example',
-  'e2e/ffi_plugin_example',
-  'e2e/codegen',
+/// What to run in one folder: the Bazel [command] on [targets].
+class _Folder {
+  const _Folder(this.path, {this.command = 'test', this.targets = '//...'});
+
+  /// The repository-relative path; `.` is the root module (Starlark unit
+  /// tests).
+  final String path;
+  final String command;
+  final String targets;
+}
+
+/// The default folders: the root module, then every workspace the e2e matrix
+/// (`tools/ci_matrix/e2e_matrix.dart`, the one table the `e2e` job in
+/// `.github/workflows/ci.yaml` is built from) runs on [os], each with the
+/// command and targets CI gives it there. Override with `--folders=` to scope a
+/// run.
+List<_Folder> _ciFolders(Os os, String repoRoot) => [
+  const _Folder('.'),
+  for (final workspace in e2eWorkspaces)
+    if (workspace.runs.containsKey(os)) _matrixFolder(workspace, os, repoRoot),
 ];
+
+_Folder _matrixFolder(E2eWorkspace workspace, Os os, String repoRoot) {
+  final build = File('$repoRoot/e2e/${workspace.name}/BUILD.bazel');
+  return _Folder(
+    'e2e/${workspace.name}',
+    command: workspace.commandOn(os),
+    targets: workspace
+        .targetsOn(os, build.existsSync() ? build.readAsStringSync() : '')
+        .join(' '),
+  );
+}
+
+/// The folder a `--folders=` entry names: the matrix's command and targets
+/// when it is a workspace that runs on [os], and `bazel test //...` otherwise.
+_Folder _namedFolder(String path, Os os, String repoRoot) {
+  for (final workspace in e2eWorkspaces) {
+    if (path == 'e2e/${workspace.name}' && workspace.runs.containsKey(os)) {
+      return _matrixFolder(workspace, os, repoRoot);
+    }
+  }
+  return _Folder(path);
+}
 
 /// Per-folder timeout. The first folder pays for the hermetic Flutter SDK +
 /// engine download; later folders re-fetch (separate output bases).
@@ -74,11 +107,14 @@ Future<void> main(List<String> args) async {
   final rulesDartArg = args
       .firstWhere((a) => a.startsWith('--rules-dart='), orElse: () => '')
       .replaceFirst('--rules-dart=', '');
-  final folders = foldersArg.isEmpty
-      ? _ciFolders
-      : foldersArg.split(',').map((s) => s.trim()).toList();
-
   final repoRoot = _repoRoot();
+  final os = isWindows ? Os.windows : Os.linux;
+  final folders = foldersArg.isEmpty
+      ? _ciFolders(os, repoRoot)
+      : [
+          for (final path in foldersArg.split(','))
+            _namedFolder(path.trim(), os, repoRoot),
+        ];
   _warnIfDirty(repoRoot);
 
   // 1. Package the committed tree.
@@ -181,7 +217,7 @@ Future<void> main(List<String> args) async {
   // 3. Run each folder.
   final results = <_FolderResult>[];
   for (final folder in folders) {
-    stdout.writeln('\n=== $folder ===');
+    stdout.writeln('\n=== ${folder.path} ===');
     final result = await _runFolder(
       vmName,
       folder,
@@ -191,7 +227,8 @@ Future<void> main(List<String> args) async {
     );
     results.add(result);
     stdout.writeln(
-      '${result.pass ? "PASS" : "FAIL"} $folder (exit ${result.exitCode})',
+      '${result.pass ? "PASS" : "FAIL"} ${folder.path} '
+      '(exit ${result.exitCode})',
     );
     if (!result.pass && !keepGoing) {
       stdout.writeln('Stopping (use --keep-going to run the rest).');
@@ -219,11 +256,11 @@ Future<void> main(List<String> args) async {
   exit(1);
 }
 
-/// Runs `bazel test //...` in [folder] and maps the exit code: 0 (success) and
-/// 4 (no test targets) pass; anything else fails.
+/// Runs [folder]'s Bazel command and maps the exit code: 0 (success) and 4 (no
+/// test targets) pass; anything else fails.
 Future<_FolderResult> _runFolder(
   String vmName,
-  String folder, {
+  _Folder folder, {
   required int index,
   required bool isWindows,
   required bool overrideRulesDart,
@@ -233,41 +270,49 @@ Future<_FolderResult> _runFolder(
   final rulesDart = isWindows ? 'C:/rules_dart' : '\$HOME/rules_dart';
   final overrides = overrideRulesDart
       ? '--override_module=rules_dart=$rulesDart '
-            '${folder == '.' ? '--override_module=overhead=$rulesDart/overhead ' : ''}'
+            '${folder.path == '.' ? '--override_module=overhead=$rulesDart/overhead ' : ''}'
             '--lockfile_mode=off '
       : '';
+  // `build` takes no test flags.
+  final testFlags = folder.command == 'test' ? '--test_output=errors ' : '';
   final String command;
   if (isWindows) {
-    final winFolder = folder == '.'
+    final winFolder = folder.path == '.'
         ? 'C:\\rf\\rules_flutter'
-        : 'C:\\rf\\rules_flutter\\${folder.replaceAll('/', '\\')}';
+        : 'C:\\rf\\rules_flutter\\${folder.path.replaceAll('/', '\\')}';
     // /v:on enables delayed expansion so !errorlevel! is bazel's real exit, not
     // the parse-time value. --output_base keeps paths under MAX_PATH.
     command =
         'cmd /v:on /c "cd /d $winFolder && '
         'bazel --output_base=$_winOutputRoot/$index '
-        'test --test_output=errors $overrides//... & '
+        '${folder.command} $testFlags$overrides${folder.targets} & '
         'echo RF_EXIT=!errorlevel!"';
   } else {
-    final dir = folder == '.'
+    final dir = folder.path == '.'
         ? '\$HOME/rf/rules_flutter'
-        : '\$HOME/rf/rules_flutter/$folder';
+        : '\$HOME/rf/rules_flutter/${folder.path}';
     command =
         "bash -lc 'cd $dir && "
-        "bazel test --test_output=errors $overrides//...; echo RF_EXIT=\$?'";
+        "bazel ${folder.command} $testFlags$overrides${folder.targets}; "
+        "echo RF_EXIT=\$?'";
   }
 
   final ProcessResult result;
   try {
     result = await sshExec(vmName, command).timeout(_folderTimeout);
   } on TimeoutException {
-    return _FolderResult(folder, -2, false, 'TIMEOUT after $_folderTimeout');
+    return _FolderResult(
+      folder.path,
+      -2,
+      false,
+      'TIMEOUT after $_folderTimeout',
+    );
   }
 
   final combined = '${result.stdout}\n${result.stderr}';
   final exitCode = _parseRfExit(result.stdout.toString());
   final pass = exitCode == 0 || exitCode == 4;
-  return _FolderResult(folder, exitCode, pass, _tail(combined));
+  return _FolderResult(folder.path, exitCode, pass, _tail(combined));
 }
 
 /// Waits until the VM's toolchain (bazel + C compiler) is installed.

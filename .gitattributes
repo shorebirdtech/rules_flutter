@@ -10,7 +10,7 @@
 #
 # Packages that exist to test this repository (`/flutter/tests/`) or read what
 # only a checkout has (`/tools/ci_matrix/` the CI workflow, `/tools/e2e_copy_guard/`
-# the e2e workspaces) are excluded too: in a consumer's copy of the module they
+# the e2e workspaces, `/tools/vm/` the CI matrix) are excluded too: in a consumer's copy of the module they
 # would not load. `bazel run //tools/consumer_archive` and building
 # `@rules_flutter//...` from `e2e/external_module` checks that.
 #
@@ -30,6 +30,7 @@
 /references/ export-ignore
 /tools/ci_matrix/ export-ignore
 /tools/e2e_copy_guard/ export-ignore
+/tools/vm/ export-ignore
 /flutter/tests/ export-ignore
 /renovate.json export-ignore
 /e2e/_compare/ export-ignore
