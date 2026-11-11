@@ -29,7 +29,7 @@ load("//flutter/private:flutter_apple_plugin_library.bzl", "FlutterAppleModuleHe
 load("//flutter/private:flutter_desktop_plugin_info.bzl", "FlutterLinuxPluginInfo", "FlutterWindowsPluginInfo")
 load("//flutter/private:flutter_font.bzl", "FONTS_ATTR")
 load("//flutter/private:flutter_info.bzl", "flutter_info")
-load("//flutter/private:flutter_library.bzl", "ADDITIONAL_LICENSES_ATTR", "ASSET_FLAVORS_ATTR", "ASSET_PLATFORMS_ATTR", "SHADER_FLAVORS_ATTR", "SHADER_PLATFORMS_ATTR", "SKY_ENGINE_ATTR", "build_pub_contributions", "flutter_analyzable_info", "own_additional_licenses")
+load("//flutter/private:flutter_library.bzl", "ADDITIONAL_LICENSES_ATTR", "ASSET_FLAVORS_ATTR", "ASSET_PLATFORMS_ATTR", "LIBRARY_DATA_ATTR", "SHADER_FLAVORS_ATTR", "SHADER_PLATFORMS_ATTR", "SKY_ENGINE_ATTR", "build_pub_contributions", "flutter_analyzable_info", "own_additional_licenses")
 load("//flutter/private:flutter_plugin_platform.bzl", "apple_resource_info", "plugin_platforms_of")
 load("//flutter/private:native_sources.bzl", "collect_native_source_pairs", "native_sources_aspect")
 load("//flutter/private:swiftpm_app_settings.bzl", "FlutterSwiftPMAppLibraryInfo")
@@ -207,16 +207,21 @@ def _flutter_plugin_impl(ctx):
     # the dependencies. `shader_srcs`, the framework's own shaders, is absent
     # here — only `package:flutter` has them — which is a thing the caller
     # simply does not say, rather than something the merge has to probe for.
+    info = dart_info(
+        ctx = ctx,
+        packages = [package],
+        deps = ctx.attr.deps,
+        srcs = ctx.files.srcs,
+        resources = ctx.files.resources,
+        analysis_deps = [ctx.attr._sky_engine],
+        data = ctx.attr.data,
+    )
     return [
-        DefaultInfo(files = depset(ctx.files.srcs + ctx.files.resources)),
-        dart_info(
-            ctx = ctx,
-            packages = [package],
-            deps = ctx.attr.deps,
-            srcs = ctx.files.srcs,
-            resources = ctx.files.resources,
-            analysis_deps = [ctx.attr._sky_engine],
+        DefaultInfo(
+            files = depset(ctx.files.srcs + ctx.files.resources),
+            runfiles = info.runfiles,
         ),
+        info,
         flutter_analyzable_info(ctx, package),
         flutter_info(
             deps = ctx.attr.deps,
@@ -283,6 +288,7 @@ flutter_plugin = rule(
     cfg = runtime_reset_when_independent,
     attrs = PLUGIN_PACKAGE_ATTRS | {
         "_sky_engine": SKY_ENGINE_ATTR,
+        "data": LIBRARY_DATA_ATTR,
         "deps": attr.label_list(
             doc = "Dart/Flutter library dependencies.",
             providers = [DartInfo],

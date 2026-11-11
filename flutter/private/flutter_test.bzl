@@ -569,6 +569,15 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
     for data_target in ctx.attr.data:
         runfiles = runfiles.merge(data_target[DefaultInfo].default_runfiles)
 
+    # What the libraries the program reaches need at run time (a
+    # `dart_library`'s or `flutter_library`'s `data`), as rules_dart's
+    # `dart_test` carries it. `getattr`: a hand-built `DartInfo` may lack it.
+    runfiles = runfiles.merge_all([
+        dep[DartInfo].runfiles
+        for dep in deps
+        if getattr(dep[DartInfo], "runfiles", None) != None
+    ])
+
     info = FlutterTestProgramInfo(
         kernel = kernel_dill,
         kernel_list = bool(as_kernel_list),

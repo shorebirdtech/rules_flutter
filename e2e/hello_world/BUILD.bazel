@@ -333,6 +333,19 @@ build_variant_tests(
     test = ":asserts_fire_test",
 )
 
+# A library's `data`, and that of the libraries under it, is in the runfiles of
+# the test that reaches it. See test/library_data_test.dart.
+flutter_test(
+    name = "library_data_test",
+    main = "test/library_data_test.dart",
+    package = ":pubspec-metadata",
+    deps = [
+        "//data_dep",
+        "@deps//:flutter_test",
+        "@rules_dart//dart/runfiles",
+    ],
+)
+
 # Widget creation locations are tracked in a `flutter_test`, as under
 # `flutter test`, in the same four builds. See test/asserts/widget_creation_test.dart.
 flutter_test(

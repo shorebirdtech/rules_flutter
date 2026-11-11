@@ -381,21 +381,24 @@ def _flutter_library_impl(ctx):
     # (`DartCodeAssetInfo`) and enforces that each asset id is namespaced to the
     # package declaring it; everything Flutter adds — bundle filename, the
     # per-platform bundle slot — is applied later by the application rule.
+    info = dart_info(
+        ctx = ctx,
+        packages = [package],
+        deps = ctx.attr.deps,
+        srcs = ctx.files.srcs,
+        resources = ctx.files.resources,
+        analysis_deps = [ctx.attr._sky_engine],
+        data = ctx.attr.data,
+    )
+    runfiles = ctx.runfiles(
+        files = ctx.files.srcs + ctx.files.resources + ctx.files.assets,
+    )
     return [
         DefaultInfo(
             files = depset(ctx.files.srcs + ctx.files.resources),
-            runfiles = ctx.runfiles(
-                files = ctx.files.srcs + ctx.files.resources + ctx.files.assets,
-            ),
+            runfiles = runfiles.merge(info.runfiles) if info.runfiles != None else runfiles,
         ),
-        dart_info(
-            ctx = ctx,
-            packages = [package],
-            deps = ctx.attr.deps,
-            srcs = ctx.files.srcs,
-            resources = ctx.files.resources,
-            analysis_deps = [ctx.attr._sky_engine],
-        ),
+        info,
         flutter_analyzable_info(ctx, package),
         flutter_info(
             deps = ctx.attr.deps,
@@ -414,6 +417,21 @@ def _flutter_library_impl(ctx):
             extensions = ["dart"],
         ),
     ]
+
+# A library's `data`, as `dart_library`'s: the runfiles of whatever runs it on
+# the host, never what an application ships.
+LIBRARY_DATA_ATTR = attr.label_list(
+    doc = "Files the library needs at run time when it runs on the host, " +
+          "outside its package's `lib/`: a fixture, a model, a tool it runs. " +
+          "Never compile inputs. With their own runfiles they join the " +
+          "runfiles of every `flutter_test`, `flutter_tester_binary` and " +
+          "rules_dart `dart_test`/`dart_binary` that reaches this library, " +
+          "as `dart_library.data` does, and are found there with `rlocation`. " +
+          "An application does not ship them, any more than `flutter build` " +
+          "ships a package file its pubspec does not list as an asset: what " +
+          "an app loads at run time is one of `assets`.",
+    allow_files = True,
+)
 
 _LIBRARY_ATTRS = package_identity_attrs() | {
     "srcs": attr.label_list(
@@ -437,6 +455,7 @@ _LIBRARY_ATTRS = package_identity_attrs() | {
         doc = "The package's fragment shaders, mirroring `flutter: shaders:` in pubspec.yaml: any file of this target's Dart package, compiled with impellerc. The path of each is its path from the package root, as the pubspec lists it. A program of another package bundles it at `packages/<package_name>/<path>`; a program of this package (its own `flutter_test`, or the application whose code this is) bundles it at `<path>`, as `flutter build` keys them and where `FragmentProgram.fromAsset` looks.",
         allow_files = True,
     ),
+    "data": LIBRARY_DATA_ATTR,
     "fonts": FONTS_ATTR,
     "additional_licenses": ADDITIONAL_LICENSES_ATTR,
     "asset_platforms": ASSET_PLATFORMS_ATTR,
