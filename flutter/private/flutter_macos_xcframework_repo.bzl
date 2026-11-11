@@ -30,6 +30,10 @@ exports_files(
 )
 """)
 
+    # Pinned downloads and files written from the attributes alone, so Bazel
+    # keeps one copy in its repository contents cache for every output base.
+    return repository_ctx.repo_metadata(reproducible = True)
+
 flutter_macos_xcframework_repo = repository_rule(
     _flutter_macos_xcframework_repo_impl,
     doc = "Downloads Flutter's signed FlutterMacOS.xcframework (`framework.zip`) of one build mode.",

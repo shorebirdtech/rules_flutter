@@ -46,6 +46,10 @@ def _flutter_desktop_engine_repo_impl(repository_ctx):
         engine_filegroup = engine_filegroup_for_os(target_os, mode),
     ))
 
+    # Pinned downloads and files written from the attributes alone, so Bazel
+    # keeps one copy in its repository contents cache for every output base.
+    return repository_ctx.repo_metadata(reproducible = True)
+
 # The files a slice names besides the engine's filegroup: the binary whose
 # snapshot hash is read, and the gen_snapshot an archive bundles (only the
 # Linux and Windows profile and release ones do).

@@ -344,6 +344,10 @@ def _flutter_stock_engine_repo_impl(repository_ctx):
     for path, text in stock_engine_packages(name, provenance).items():
         repository_ctx.file(path + "/BUILD.bazel", _LOAD + text)
 
+    # Pinned downloads and files written from the attributes alone, so Bazel
+    # keeps one copy in its repository contents cache for every output base.
+    return repository_ctx.repo_metadata(reproducible = True)
+
 flutter_stock_engine_repo = repository_rule(
     _flutter_stock_engine_repo_impl,
     doc = "The stock release's engine as an engine source: slices over the lazily fetched artifact repositories.",

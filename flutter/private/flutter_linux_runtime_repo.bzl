@@ -114,6 +114,10 @@ def _flutter_linux_runtime_repo_impl(repository_ctx):
         floor = repr(repository_ctx.attr.floor),
     ))
 
+    # Pinned downloads and files written from the attributes alone, so Bazel
+    # keeps one copy in its repository contents cache for every output base.
+    return repository_ctx.repo_metadata(reproducible = True)
+
 flutter_linux_runtime_repo = repository_rule(
     _flutter_linux_runtime_repo_impl,
     doc = "Downloads and unpacks the pinned Debian packages of the Linux integration-test runtime for one architecture.",

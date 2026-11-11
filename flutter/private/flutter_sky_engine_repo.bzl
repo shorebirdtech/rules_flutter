@@ -97,6 +97,10 @@ def _flutter_sky_engine_repo_impl(repository_ctx):
     # naming the package twice. The alias buys back the obvious label.
     repository_ctx.file("BUILD.bazel", _ROOT_BUILD_TEMPLATE)
 
+    # Pinned downloads and files written from the attributes alone, so Bazel
+    # keeps one copy in its repository contents cache for every output base.
+    return repository_ctx.repo_metadata(reproducible = True)
+
 flutter_sky_engine_repo = repository_rule(
     _flutter_sky_engine_repo_impl,
     doc = "Downloads the `sky_engine` package, whose `lib/_embedder.yaml` is how the analyzer resolves `dart:ui` and the rest of Flutter's `dart:` libraries.",
