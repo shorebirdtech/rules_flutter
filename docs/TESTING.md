@@ -1317,6 +1317,84 @@ Before the hold existed, a sleeping display produced the old "Grant accessibilit
 
 `e2e/_macos_test/verify_macos_app.dart` (below) holds the display the same way and prints the same diagnosis when no window appears. It carries its own copy of the probe because `tools/vm` copies that directory alone to bare machines.
 
+### Running GUI tests on another Mac
+
+The tests and runs that open windows can open them on a second Mac, so they do
+not take over the screen of the one you build on. Bazel, the builds and the dev
+tool stay here; only the finished program runs there. The other Mac needs the
+same OS and CPU as this one (it is checked), an unlocked screen, and ssh access
+without a password prompt (`ssh -o BatchMode=yes <host> true` succeeds). Nothing
+is built or installed on it.
+
+**A `verify_*_test` (or any test) on the other Mac:** run it under
+`//tools/e2e_testing:ssh_test_runner`.
+
+```sh
+cd e2e/macos_example
+bazel test :verify_macos_app_test --test_tag_filters= --strategy=TestRunner=standalone \
+  --run_under=@rules_flutter//tools/e2e_testing:ssh_test_runner \
+  --test_env=RULES_FLUTTER_TEST_HOST=<ssh destination>
+```
+
+Bazel starts the runner in the test's place. The runner copies the test's
+runfiles to a fresh temporary directory on the host (`rsync --copy-unsafe-links`,
+about 100 MB for `verify_macos_app_test`, and the runfiles manifest is rewritten
+to point at the copies), runs the test's command there with the environment
+Bazel gave it, its paths moved into that directory (`TMPDIR` too, so an
+unpacked bundle goes with it), streams the output to the test log, copies back
+what the test wrote under its test-log directory, and removes the directory.
+The exit code is the test's. A timeout or Ctrl-C stops the test's process
+group on the host before the runner exits. The same flags work for
+`e2e/plugin_example` and `e2e/_overlay_tests/native_assets_synthetic` (add
+`-c dbg` for that one's second mode). A host name belongs in your
+`.bazelrc.user`, not in a checked-in file, for example as
+`test:gui_host --run_under=@rules_flutter//tools/e2e_testing:ssh_test_runner --test_env=RULES_FLUTTER_TEST_HOST=<host>`.
+
+**A dev tool web run whose Chrome opens on the other Mac:** point
+`CHROME_EXECUTABLE` at `//tools/e2e_testing:ssh_chrome`.
+
+```sh
+bazel build //tools/dev_tool:flutter_bazel //tools/e2e_testing:ssh_chrome
+cd e2e/web_example
+CHROME_EXECUTABLE=../../bazel-bin/tools/e2e_testing/ssh_chrome \
+RULES_FLUTTER_CHROME_HOST=<ssh destination> \
+  ../../bazel-bin/tools/dev_tool/flutter_bazel run -t :app_wasm -d chrome --machine
+```
+
+The dev tool starts `ssh_chrome` with Chrome's command line. It runs the host's
+Chrome over ssh on a fresh profile there, forwards the dev server's port to the
+host's loopback (`ssh -R`), so the page loads from the same
+`http://localhost:<port>` URL, and forwards Chrome's debugging port back
+(`ssh -L`), so the port Chrome announces answers here. Hot reload, hot restart,
+the agent commands and CDP screenshots go through those forwards. Stopping the
+run quits that Chrome and removes its profile. To see the page, capture the
+host's screen: `ssh <host> screencapture -x /tmp/shot.png`, then copy it back.
+
+**What cannot run there:** the dev tool's macOS-desktop runs. `MacOSDevice`
+starts the bundle on the machine the tool runs on, reads its VM service address
+from the app's output and captures it with a local helper, so a hot reload or
+restart check of a macOS app has to run where the tool and its builds are.
+The same holds for the macOS cases of the dev tool's e2e suite (§2). Its web
+cases find Chrome the same way, through `CHROME_EXECUTABLE`, but the suite has
+not yet been run with `ssh_chrome`. Its iOS-simulator cases open no window on
+this Mac if the simulator is booted with `xcrun simctl boot` and Simulator.app
+is left closed.
+
+**An iOS simulator app on the other Mac:** build it here and install it there.
+The simulator runs debug builds only, so build with `-c dbg`:
+
+```sh
+cd e2e/plugin_example
+bazel build -c dbg --ios_multi_cpus=sim_arm64 :plugin_ios
+scp bazel-bin/plugin_ios.ipa <host>:/tmp/ && ssh <host> 'cd /tmp && unzip -oq plugin_ios.ipa &&
+  xcrun simctl boot <udid>; xcrun simctl bootstatus <udid> -b;
+  xcrun simctl install <udid> Payload/plugin_ios.app && xcrun simctl launch <udid> com.example.plugin'
+ssh <host> 'xcrun simctl spawn <udid> log show --last 2m --predicate "process == \"plugin_ios\"" | grep plugin_example_results'
+```
+
+The app is built for iOS 15.0 and later, so an older simulator runtime on the
+host than the one Xcode here ships is fine.
+
 ### FFI runtime tests (iOS simulator, macOS, Linux, Windows)
 
 Behavioral verification that both native-library mechanisms work at runtime:

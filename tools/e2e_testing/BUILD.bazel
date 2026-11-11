@@ -82,3 +82,28 @@ dart_binary(
     main = "compile_fail_command.dart",
     visibility = ["//visibility:public"],
 )
+
+# Runs a test on another machine over ssh, given as `--run_under`: the GUI
+# tests build here and open their windows on the host named by
+# `--test_env=RULES_FLUTTER_TEST_HOST=<ssh destination>`. docs/TESTING.md,
+# "Running GUI tests on another Mac".
+dart_binary(
+    name = "ssh_test_runner",
+    testonly = True,
+    compile_mode = "exe",
+    main = "ssh_test_runner.dart",
+    visibility = ["//visibility:public"],
+    deps = [":e2e_testing"],
+)
+
+# Chrome on another Mac for a web run of the dev tool here, given as
+# `CHROME_EXECUTABLE` with `RULES_FLUTTER_CHROME_HOST=<ssh destination>`.
+# docs/TESTING.md, "Running GUI tests on another Mac".
+dart_binary(
+    name = "ssh_chrome",
+    testonly = True,
+    compile_mode = "exe",
+    main = "ssh_chrome.dart",
+    visibility = ["//visibility:public"],
+    deps = [":e2e_testing"],
+)
