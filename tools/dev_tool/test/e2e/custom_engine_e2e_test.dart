@@ -593,9 +593,17 @@ void main() {
         '--output=label_kind',
       ]);
       expect(query.exitCode, 0, reason: '${query.stderr}');
-      final build = await _bazel(['build', app, '${_sdkFlag}env']);
+      // Both are unset, and which target Bazel analyses first is not fixed:
+      // with --keep_going the build names each.
+      final build = await _bazel([
+        'build',
+        app,
+        '${_sdkFlag}env',
+        '--keep_going',
+      ]);
       expect(build.exitCode, isNot(0));
       expect('${build.stderr}', contains('FLUTTER_ENGINE is not set'));
+      expect('${build.stderr}', contains('FLUTTER_CHECKOUT is not set'));
     },
   );
 }
