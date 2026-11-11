@@ -1,14 +1,14 @@
 """The run half of a Flutter test: runs a compiled test program under flutter_tester.
 
 `flutter_program_test` takes any target that provides `FlutterTestProgramInfo`
-(`flutter_suite_program` is one) and runs it as a Bazel test. It speaks the same
+(`flutter_test_program` is one) and runs it as a Bazel test. It speaks the same
 `package:test_api` `RemoteListener` protocol `flutter test` does and reports
 through the Bazel test protocol: the XML report, JUnit, `@Tags` selection
 (`include_tags`, `exclude_tags`, `DART_TEST_TAGS`), golden comparison,
 `--update-goldens` under `bazel run`, sharding and coverage.
 
 The rule is bound to the name `flutter_test` here, and not to
-`flutter_program_test`, so that `kind(flutter_test, ...)` finds every test
+`flutter_program_test`, so that `kind("^flutter_test rule$", ...)` finds every test
 `flutter_test` and `flutter_program_test` declare, as `ios_unit_test` is found
 for the tests rules_apple's macro builds from two rules.
 """
@@ -149,7 +149,7 @@ flutter_test = rule(
     attrs = {
         "program": attr.label(
             doc = "The compiled test program to run: a target that provides " +
-                  "`FlutterTestProgramInfo`, such as a `flutter_suite_program`.",
+                  "`FlutterTestProgramInfo`, such as a `flutter_test_program`.",
             providers = [FlutterTestProgramInfo],
             mandatory = True,
         ),
@@ -195,7 +195,7 @@ flutter_test = rule(
     test = True,
     doc = """Runs a compiled Flutter test program under flutter_tester. This is \
 the rule behind `flutter_test` and `flutter_program_test`, which is how \
-`kind(flutter_test, ...)` finds every Flutter test.
+`kind("^flutter_test rule$", ...)` finds every Flutter test.
 
 The runner, flutter_tester and the program are built for the target platform, \
 and like any Bazel test the run is placed on an execution platform matching \
@@ -207,7 +207,7 @@ def flutter_program_test(name, program, **kwargs):
     """Runs a compiled Flutter test program under flutter_tester.
 
     Tier 2 of the test rules: runs the program of any target that provides
-    `FlutterTestProgramInfo` (`flutter_suite_program` does, and so can a rule
+    `FlutterTestProgramInfo` (`flutter_test_program` does, and so can a rule
     that compiles tests its own way) as a Bazel test, with everything
     `flutter_test` gives a test it compiles: the `package:test` result
     protocol, `@Tags` selection (`include_tags`, `exclude_tags`,

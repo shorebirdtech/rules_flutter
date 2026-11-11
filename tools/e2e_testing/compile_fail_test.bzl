@@ -214,7 +214,7 @@ compile_fail_test = rule(
         "mnemonics": attr.string_list(
             doc = "The mnemonics of the actions to run: every action of `target` with one of " +
                   "them runs. More than one where flags choose the compile: a " +
-                  "`flutter_suite_program` compiles its entry point in `DartEntryKernel` in the " +
+                  "`flutter_test_program` compiles its entry point in `DartEntryKernel` in the " +
                   "modular build and its whole program in `DartKernel` with " +
                   "`--@rules_dart//dart:modular_kernel=false`.",
             mandatory = True,

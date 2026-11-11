@@ -2490,21 +2490,21 @@ Two limits come from Flutter rather than from these rules:
 - **Goldens are host-specific.** Font rendering and antialiasing differ between operating systems, so a PNG generated on macOS may not match on Linux or Windows. Regenerate on the platform that checks them, or keep per-OS golden directories.
 - **Replacing the comparator disables regeneration.** If a test assigns its own `goldenFileComparator`, `--update-goldens` calls that object's `update()`, which for `LocalFileComparator` writes into runfiles. The run passes, prints nothing, and leaves the source PNG unchanged.
 
-### flutter_suite_program and flutter_program_test
+### flutter_test_program and flutter_program_test
 
-`flutter_test` is a macro over two rules. `flutter_suite_program` compiles the test and returns a `FlutterTestProgramInfo` (below); `flutter_program_test` runs any target that returns one. `flutter_test(name = "x", ...)` declares a `flutter_suite_program` named `x.program` and the test `x`, so everything above holds as before: the attributes of both rules are `flutter_test`'s, a compile attribute (`main`, `srcs`, `deps`, `package`, `application`, `flavor`, `enable_impeller`, `test_config`, ...) goes to the program, a run attribute (`include_tags`, `exclude_tags`, `env`, `size`, `timeout`, `shard_count`, `args`) to the test, and `data`, `tags`, `visibility` and the platform constraints to both. The test's kind is `flutter_test` whichever way it is declared, so `bazel query 'kind(flutter_test, //...)'` lists every test and nothing else. The program is a target of its own, of kind `flutter_suite_program`.
+`flutter_test` is a macro over two rules. `flutter_test_program` compiles the test and returns a `FlutterTestProgramInfo` (below); `flutter_program_test` runs any target that returns one. `flutter_test(name = "x", ...)` declares a `flutter_test_program` named `x.program` and the test `x`, so everything above holds as before: the attributes of both rules are `flutter_test`'s, a compile attribute (`main`, `srcs`, `deps`, `package`, `application`, `flavor`, `enable_impeller`, `test_config`, ...) goes to the program, a run attribute (`include_tags`, `exclude_tags`, `env`, `size`, `timeout`, `shard_count`, `args`) to the test, and `data`, `tags`, `visibility` and the platform constraints to both. The test's kind is `flutter_test` whichever way it is declared, so `bazel query 'kind("^flutter_test rule$", //...)'` lists exactly the Flutter tests. `kind` takes an unanchored regular expression over the string `<rule> rule`, so the pattern is anchored: unanchored `flutter_test` also matches `flutter_test_program` and `flutter_tester_binary`. The program is a target of its own, of kind `flutter_test_program`.
 
 Use the two rules directly to run a program that something else compiled, with everything `flutter_test` gives a test: the `bazel test` result protocol, `@Tags` selection (`include_tags`, `exclude_tags`, `DART_TEST_TAGS`), JUnit output, golden comparison and `--update-goldens`, code assets, sharding and coverage:
 
 ```starlark
-load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_program_test", "flutter_suite_program")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_program_test", "flutter_test_program")
 
 dart_package_metadata(
     name = "pubspec-metadata",
     package_name = "my_app",
 )
 
-flutter_suite_program(
+flutter_test_program(
     name = "widget_program",
     testonly = True,
     package = ":pubspec-metadata",
@@ -2521,9 +2521,9 @@ flutter_program_test(
 )
 ```
 
-`flutter_suite_program` takes the compile attributes of `flutter_test` (and `data`, which its runfiles carry) and builds, but does not run, the kernel, the `flutter_assets` tree, the code assets and the Native Assets manifest. Mark it `testonly`, as `flutter_test` does. `flutter_program_test` takes `program`, `data`, `env`, `include_tags`, `exclude_tags` and the usual test attributes.
+`flutter_test_program` takes the compile attributes of `flutter_test` (and `data`, which its runfiles carry) and builds, but does not run, the kernel, the `flutter_assets` tree, the code assets and the Native Assets manifest. Mark it `testonly`, as `flutter_test` does. `flutter_program_test` takes `program`, `data`, `env`, `include_tags`, `exclude_tags` and the usual test attributes.
 
-A rule that compiles tests its own way returns `FlutterTestProgramInfo` and `flutter_program_test` runs it. The program must be a kernel whose entry point speaks the `package:test_api` `RemoteListener` protocol over the WebSocket at `FLUTTER_TEST_HARNESS_PORT`, as the bootstrap `flutter_suite_program` generates does, and its `source` is the library the runner reads `@Tags` from. The golden-file comparator is installed by that bootstrap, so a program from another compile has to install one for `matchesGoldenFile` to compare anything.
+A rule that compiles tests its own way returns `FlutterTestProgramInfo` and `flutter_program_test` runs it. The program must be a kernel whose entry point speaks the `package:test_api` `RemoteListener` protocol over the WebSocket at `FLUTTER_TEST_HARNESS_PORT`, as the bootstrap `flutter_test_program` generates does, and its `source` is the library the runner reads `@Tags` from. The golden-file comparator is installed by that bootstrap, so a program from another compile has to install one for `matchesGoldenFile` to compare anything.
 
 ### flutter_tester_binary
 
@@ -3112,7 +3112,7 @@ sdk = ctx.toolchains["@rules_flutter//flutter:toolchain_type"].flutter_sdk_info
 
 **`FlutterApplicationInputsInfo`** is carried by `flutter_application` and `flutter_application_variant`. Its one field, `inputs`, is the program the application was built from, which `flutter_application_variant` changes and builds again.
 
-**`FlutterTestProgramInfo`** is returned by `flutter_suite_program` and read by `flutter_program_test`: a compiled Flutter test and what the runner needs beside it.
+**`FlutterTestProgramInfo`** is returned by `flutter_test_program` and read by `flutter_program_test`: a compiled Flutter test and what the runner needs beside it.
 
 | Field | Type | Description |
 |---|---|---|

@@ -7,10 +7,10 @@ dart_package_metadata(
     package_name = "suite",
 )
 
-# `flutter_test` is a macro over `flutter_suite_program` and
+# `flutter_test` is a macro over `flutter_test_program` and
 # `flutter_program_test`. These queries are what a user's `kind(...)` sees:
 # the test `suite` is still a `flutter_test` and is the one that is a test, so
-# `bazel query 'kind(flutter_test, ...)'`, unanchored, finds exactly the tests, and
+# `bazel query 'kind("^flutter_test rule$", ...)'` finds exactly the tests, and
 # the attributes only a test has (`size`, `shard_count`) are on it alone.
 flutter_test(
     name = "suite",
@@ -28,14 +28,14 @@ flutter_test(
 
 genquery(
     name = "tests",
-    expression = "kind(flutter_test, set(//flutter/tests/test_pair_fixture:suite //flutter/tests/test_pair_fixture:suite.program))",
+    expression = "kind('^flutter_test rule$', set(//flutter/tests/test_pair_fixture:suite //flutter/tests/test_pair_fixture:suite.program))",
     opts = ["--output=label_kind"],
     scope = [":suite"],
 )
 
 genquery(
     name = "programs",
-    expression = "kind('flutter_suite_program rule', set(//flutter/tests/test_pair_fixture:suite //flutter/tests/test_pair_fixture:suite.program))",
+    expression = "kind('^flutter_test_program rule$', set(//flutter/tests/test_pair_fixture:suite //flutter/tests/test_pair_fixture:suite.program))",
     opts = ["--output=label_kind"],
     scope = [":suite"],
 )
@@ -67,7 +67,7 @@ write_file(
     name = "expected_programs",
     out = "expected_programs.txt",
     content = [
-        "flutter_suite_program rule //flutter/tests/test_pair_fixture:suite.program",
+        "flutter_test_program rule //flutter/tests/test_pair_fixture:suite.program",
         "",
     ],
 )

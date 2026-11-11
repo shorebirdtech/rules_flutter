@@ -1,4 +1,4 @@
-// Run through the Tier-2 pair, `flutter_suite_program` and
+// Run through the Tier-2 pair, `flutter_test_program` and
 // `flutter_program_test`, as a program compiled elsewhere would be: a golden
 // comparison against a declared PNG, and `@Tags` selection.
 //

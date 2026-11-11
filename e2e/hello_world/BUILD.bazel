@@ -3,7 +3,7 @@ load("@rules_apple//apple:ios.bzl", "ios_application")
 load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
 load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_test")
 load("@rules_flutter//flutter:android.bzl", "flutter_android_app")
-load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_aot_snapshot", "flutter_application", "flutter_asset_bundle", "flutter_kernel", "flutter_library", "flutter_profile_build", "flutter_program_test", "flutter_suite_program", "flutter_test", "flutter_tester_binary")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_aot_snapshot", "flutter_application", "flutter_asset_bundle", "flutter_kernel", "flutter_library", "flutter_profile_build", "flutter_program_test", "flutter_test", "flutter_test_program", "flutter_tester_binary")
 load(
     "@rules_flutter//flutter:ios.bzl",
     "IOS_DEFAULT_LAUNCH_STORYBOARD",
@@ -414,7 +414,7 @@ build_variant_tests(
 # fails with it.
 [
     (
-        flutter_suite_program(
+        flutter_test_program(
             name = "const_violation_%s" % where,
             testonly = True,
             main = "test/asserts/const_violation_%s_test.dart" % where,
@@ -559,13 +559,13 @@ flutter_test(
     ],
 )
 
-# The Tier-2 pair: `flutter_suite_program` compiles and `flutter_program_test`
+# The Tier-2 pair: `flutter_test_program` compiles and `flutter_program_test`
 # runs the program it provides, as it would run one compiled by another rule.
 # Through the pair: the suite protocol, a golden compared against a declared PNG
 # (`data` on the program) and `@Tags` selection (`exclude_tags` drops the case
 # that fails). Regenerate the golden with
 # `bazel run //:program_pair_test -- --update-goldens`.
-flutter_suite_program(
+flutter_test_program(
     name = "program_pair_program",
     testonly = True,
     data = glob(["test/goldens/**"]),

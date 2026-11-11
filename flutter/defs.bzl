@@ -28,7 +28,7 @@ rules that compile Dart code, bundle assets, and run tests.
     for each platform it registers on (its pubspec's `flutter: plugin:
     platforms:`) and optional native shared library dependencies.
 - `flutter_test`: Runs Flutter widget tests using the flutter_tester runtime. It
-    declares a `flutter_suite_program` (compiles the test, returns
+    declares a `flutter_test_program` (compiles the test, returns
     `FlutterTestProgramInfo`) and a `flutter_program_test` (runs any such program).
 - `flutter_application_variant` (`@rules_flutter//flutter:integration_test.bzl`): A
     `flutter_application` rebuilt with another `main`, for a test driver or an
@@ -79,7 +79,7 @@ load("//flutter/private:flutter_plugin.bzl", _flutter_plugin = "flutter_plugin")
 load("//flutter/private:flutter_plugin_platform.bzl", _flutter_plugin_platform = "flutter_plugin_platform")
 load("//flutter/private:flutter_profile_build.bzl", _flutter_profile_build = "flutter_profile_build")
 load("//flutter/private:flutter_program_test.bzl", _flutter_program_test = "flutter_program_test")
-load("//flutter/private:flutter_test.bzl", _flutter_suite_program = "flutter_suite_program", _flutter_test = "flutter_test", _flutter_tester_binary = "flutter_tester_binary")
+load("//flutter/private:flutter_test.bzl", _flutter_test = "flutter_test", _flutter_test_program = "flutter_test_program", _flutter_tester_binary = "flutter_tester_binary")
 load("//flutter/private:test_config.bzl", "find_test_config")
 
 flutter_aot_snapshot = _flutter_aot_snapshot
@@ -149,5 +149,5 @@ def flutter_test(name, main, test_config = None, **kwargs):
 dart_data_asset = _dart_data_asset
 dart_package_metadata = _dart_package_metadata
 flutter_program_test = _flutter_program_test
-flutter_suite_program = _flutter_suite_program
+flutter_test_program = _flutter_test_program
 flutter_tester_binary = _flutter_tester_binary

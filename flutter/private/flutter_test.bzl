@@ -1,6 +1,6 @@
-"""Flutter test rules: `flutter_suite_program` compiles, `flutter_test` declares a test.
+"""Flutter test rules: `flutter_test_program` compiles, `flutter_test` declares a test.
 
-`flutter_suite_program` compiles a Flutter test entry point to a kernel `.dill`
+`flutter_test_program` compiles a Flutter test entry point to a kernel `.dill`
 (`FlutterTestProgramInfo`), and `flutter_program_test`
 (`flutter_program_test.bzl`) runs a program under `flutter_tester`, the
 headless Flutter engine. `flutter_test` is the macro that declares both. Tests interact with the test
@@ -250,7 +250,7 @@ def _can_bootstrap(deps):
 def _has_flutter_test(deps):
     return _exposes_package(deps, ["flutter_test"])
 
-def _flutter_suite_program_impl(ctx):
+def _flutter_test_program_impl(ctx):
     # The flutter_tester that runs the test: the target's, as everything the
     # test runs is. The compiles are `portable`.
     runner_tools = ctx.toolchains[_FLUTTER_TOOLCHAIN].flutter_sdk_info
@@ -274,7 +274,7 @@ def _flutter_suite_program_impl(ctx):
     target_arch = _target_arch(ctx)
     if runner_tools.flutter_tester == None:
         fail((
-            "flutter_suite_program {label}: Flutter ships no flutter_tester for " +
+            "flutter_test_program {label}: Flutter ships no flutter_tester for " +
             "{os}, the target platform; build the test for a desktop " +
             "platform with `--platforms` or a platform transition."
         ).format(label = ctx.label, os = target_platform))
@@ -284,7 +284,7 @@ def _flutter_suite_program_impl(ctx):
     # Windows has no such tree by default, only a manifest, so a test there
     # finds its libraries by name on PATH, as a `flutter_tester_binary` does.
     layout = "library_path" if target_platform == "windows" else "runfiles"
-    program = _program(ctx, "flutter_suite_program", runner_tools, target_platform, target_arch, layout)
+    program = _program(ctx, "flutter_test_program", runner_tools, target_platform, target_arch, layout)
 
     return [
         DefaultInfo(
@@ -836,8 +836,8 @@ _PROGRAM_ATTRS["_golden_comparator_src"] = attr.label(
 
 _PROGRAM_ATTRS["_sky_engine"] = program_sky_engine_attr(_ENVIRONMENT.cfg)
 
-flutter_suite_program = rule(
-    implementation = _flutter_suite_program_impl,
+flutter_test_program = rule(
+    implementation = _flutter_test_program_impl,
     attrs = _PROGRAM_ATTRS,
     cfg = track_widget_creation,
     # The compiles are `portable`.
@@ -1005,7 +1005,7 @@ _SHARED_ATTRS = [
 def flutter_test(name, **kwargs):
     """Compiles a Flutter widget test, then runs it under flutter_tester.
 
-    Tier 1 of the test rules: declares a `flutter_suite_program` named
+    Tier 1 of the test rules: declares a `flutter_test_program` named
     `<name>.program` that compiles the test, and the
     test `<name>` that runs it, whose kind is `flutter_test`. Every attribute
     of either rule, and of a Bazel test, can be given here: the compile's
@@ -1017,7 +1017,7 @@ def flutter_test(name, **kwargs):
 
     Args:
         name: Test name.
-        **kwargs: The attributes of `flutter_suite_program` and
+        **kwargs: The attributes of `flutter_test_program` and
             `flutter_program_test`, and the common ones of a test.
     """
     program = {"testonly": True}
@@ -1035,5 +1035,5 @@ def flutter_test(name, **kwargs):
                 target.setdefault(key, {})[group] = constraints
         elif key != "testonly":
             program[key] = value
-    flutter_suite_program(name = name + ".program", **program)
+    flutter_test_program(name = name + ".program", **program)
     _flutter_test_rule(name = name, **test)
