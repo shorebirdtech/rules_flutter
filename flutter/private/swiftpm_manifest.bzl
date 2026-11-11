@@ -439,11 +439,15 @@ def _package_dependencies(dump):
                     found[name.lower()] = info
     return found
 
-def _remote_products(target, packages, platform, problems):
+def _remote_products(target, targets, packages, platform, problems):
     """The products of remote packages `target` depends on for `platform`.
 
     A product of a package on the file system is the Flutter framework or a
     sibling plugin, which pubspec.yaml makes a dependency of the plugin.
+
+    A dependency by name alone (`"Foo"`, `.byName(name: "Foo")`) is a target
+    of the package when it has one of that name, and otherwise the product
+    `Foo` of the package named `Foo`, as SwiftPM resolves it.
 
     Returns:
         A list of `(identity, product)`.
@@ -451,6 +455,9 @@ def _remote_products(target, packages, platform, problems):
     found = []
     for dep in target.get("dependencies", []):
         value = dep.get("product")
+        by_name = dep.get("byName")
+        if not value and by_name and by_name[0] not in targets:
+            value = [by_name[0], by_name[0], by_name[-1]]
         if not value:
             continue
         product, package = value[0], value[1]
@@ -458,7 +465,9 @@ def _remote_products(target, packages, platform, problems):
         if condition and condition.get("platformNames") and platform not in condition["platformNames"]:
             continue
         info = packages.get(package) or packages.get((package or "").lower())
-        if info == None:
+        if info == None and by_name:
+            problems.append("its target `{}` depends on `{}`, which is neither a target of the package nor a package it declares".format(target.get("name"), product))
+        elif info == None:
             problems.append("its target `{}` depends on `{}` of the package `{}`, which it does not declare".format(target.get("name"), product, package))
         elif info.kind == "sourceControl":
             if (info.identity, product) not in found:
@@ -585,7 +594,8 @@ def _target_build(dump, target, deps, platform, manifest_dir, problems, defines)
     if dump.get("cxxLanguageStandard"):
         settings["cxxopts"][""].append("-std=" + dump["cxxLanguageStandard"])
 
-    remote_products = _remote_products(target, _package_dependencies(dump), platform, problems)
+    targets = [t.get("name") for t in dump.get("targets", [])]
+    remote_products = _remote_products(target, targets, _package_dependencies(dump), platform, problems)
     swift_language_mode = _swift_language_mode(dump, target_mode)
     if swift_language_mode not in _SWIFT_LANGUAGE_MODES:
         problems.append("its target `{}` is Swift {}, and rules_flutter compiles Swift 5 and 6".format(name, swift_language_mode))

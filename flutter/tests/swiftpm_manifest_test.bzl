@@ -444,6 +444,39 @@ def _remote_products_test_impl(ctx):
         ])],
         dependencies = dependencies,
     ), "foo", "ios", "ios/foo").problems)
+
+    # A dependency by name alone: a target of the package when it has one of
+    # that name, else the product of that name of the package of that name,
+    # whatever the case of its identity, for the platforms it holds on.
+    built = swift_package_targets(_dump(
+        [
+            _target(dependencies = [
+                {"byName": ["FirebaseCore", None]},
+                {"byName": ["foo_objc", None]},
+                {"byName": ["FlutterFramework", None]},
+                {"byName": ["firebase-ios-sdk", {"platformNames": ["ios"]}]},
+                {"byName": ["firebase-ios-sdk", {"platformNames": ["macos"]}]},
+            ]),
+            _target(name = "foo_objc", dependencies = []),
+        ],
+        dependencies = dependencies + [{"sourceControl": [{
+            "identity": "firebasecore",
+            "location": {"remote": [{"urlString": "https://example.com/FirebaseCore"}]},
+        }]}],
+    ), "foo", "ios", "ios/foo")
+    asserts.equals(env, [], built.problems)
+    asserts.equals(env, [
+        ("firebasecore", "FirebaseCore"),
+        ("firebase-ios-sdk", "firebase-ios-sdk"),
+    ], [t for t in built.targets if t.name == "foo"][0].remote_products)
+
+    # A name that is neither fails rather than being left out.
+    asserts.equals(env, [
+        "its target `foo` depends on `Nowhere`, which is neither a target of the package nor a package it declares",
+    ], swift_package_targets(_dump(
+        [_target(dependencies = [{"byName": ["Nowhere", None]}])],
+        dependencies = dependencies,
+    ), "foo", "ios", "ios/foo").problems)
     return unittest.end(env)
 
 remote_products_test = unittest.make(_remote_products_test_impl)
