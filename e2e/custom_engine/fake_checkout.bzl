@@ -329,7 +329,7 @@ def _mobile_out_dirs(rctx, path, link, revision, other_gen):
     # are the profile and release ones. Each xcframework holds one platform
     # directory, as one out dir's `flutter_framework` target makes it.
     ios = {
-        "debug": ("ios_debug_sim_arm64", "ios-arm64-simulator", "@flutter_stock_ios_engine//:debug/Flutter.xcframework/ios-arm64_x86_64-simulator/Flutter.framework/Flutter"),
+        "debug": ("ios_debug_sim_arm64", "ios-arm64-simulator", "@flutter_stock_ios_engine_debug//:Flutter.xcframework/ios-arm64_x86_64-simulator/Flutter.framework/Flutter"),
         "profile": ("ios_profile", "ios-arm64", "@flutter_ios_engine_profile//:Flutter.xcframework/ios-arm64/Flutter.framework/Flutter"),
         "release": ("ios_release", "ios-arm64", "@flutter_stock_ios_engine//:Flutter.xcframework/ios-arm64/Flutter.framework/Flutter"),
     }

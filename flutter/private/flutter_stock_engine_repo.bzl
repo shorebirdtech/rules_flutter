@@ -9,7 +9,8 @@ gen_snapshot) and the macOS profile repositories. The slice targets name those
 files by label, so fetching this repository fetches only the patched SDK; a
 slice's files are fetched when a build uses it.
 
-iOS and Android engines are the lazily fetched `<name>_stock_ios_engine` and
+iOS and Android engines are the lazily fetched `<name>_stock_ios_engine`
+(release), `<name>_stock_ios_engine_debug` and
 `<name>_stock_android_engine_<arch>` repositories' files, with the profile
 engines in repositories of their own.
 
@@ -136,14 +137,14 @@ def _ios_engine(name, mode, provenance):
     """The iOS engine of one mode: the simulator's under debug, the device's otherwise."""
     stock = "{}_stock_ios_engine".format(name)
     if mode == "debug":
-        files = "@{}//:Flutter_xcframework_debug".format(stock)
-        binary = "@{}//:debug/Flutter.xcframework/ios-arm64_x86_64-simulator/Flutter.framework/Flutter".format(stock)
+        files = "@{}_debug//:Flutter_xcframework".format(stock)
+        binary = "@{}_debug//:Flutter.xcframework/ios-arm64_x86_64-simulator/Flutter.framework/Flutter".format(stock)
     elif mode == "profile":
         profile = "{}_ios_engine_profile".format(name)
         files = "@{}//:Flutter_xcframework_profile".format(profile)
         binary = "@{}//:Flutter.xcframework/ios-arm64/Flutter.framework/Flutter".format(profile)
     else:
-        files = "@{}//:Flutter_xcframework_release".format(stock)
+        files = "@{}//:Flutter_xcframework".format(stock)
         binary = "@{}//:Flutter.xcframework/ios-arm64/Flutter.framework/Flutter".format(stock)
     return """flutter_ios_engine_slice(
     name = "engine",

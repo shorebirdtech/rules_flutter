@@ -149,14 +149,14 @@ void main() {
           'ios-release/artifacts.zip',
           ProbeRepo('ios_release_blank', 'flutter_ios_engine_repo', {
             'engine_revision': str(revision),
-            'debug_sha256': str(digest),
+            'mode': str('release'),
           }),
         ),
         add(
           'ios/artifacts.zip',
           ProbeRepo('ios_debug_blank', 'flutter_ios_engine_repo', {
             'engine_revision': str(revision),
-            'release_sha256': str(digest),
+            'mode': str('debug'),
           }),
         ),
         add(

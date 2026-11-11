@@ -123,8 +123,13 @@ void main() {
         }),
         ProbeRepo('ios_ok', 'flutter_ios_engine_repo', {
           'engine_revision': str(revision),
-          'release_sha256': str(digest),
-          'debug_sha256': str(digest),
+          'mode': str('release'),
+          'sha256': str(digest),
+        }),
+        ProbeRepo('ios_debug_ok', 'flutter_ios_engine_repo', {
+          'engine_revision': str(revision),
+          'mode': str('debug'),
+          'sha256': str(digest),
         }),
         ProbeRepo('desktop_linux_ok', 'flutter_desktop_engine_repo', {
           'engine_revision': str(revision),
@@ -182,6 +187,7 @@ void main() {
       'profile_ok',
       'android_ok',
       'ios_ok',
+      'ios_debug_ok',
       'desktop_linux_ok',
       'desktop_windows_ok',
       'cross_ok',

@@ -315,15 +315,21 @@ def flutter_register_toolchains(name, flutter_version, framework_json = "", fram
                 build_file_content = _ANDROID_PROFILE_ENGINE_BUILD,
             )
 
-    # iOS engine repo (lazy — only downloaded when iOS targets are built).
-    # One repo carries both the release engine (device, AOT) and the debug
-    # engine (simulator, JIT); the stock engine source's slices are over its
-    # files and the profile engine's below.
+    # The iOS engines, a repository per mode, so a build fetches only the
+    # engine of the mode it builds: the release engine (device, AOT, with the
+    # iOS gen_snapshot) and the debug engine (simulator, JIT). The stock engine
+    # source's slices are over their files and the profile engine's below.
     flutter_ios_engine_repo(
         name = name + "_stock_ios_engine",
         engine_revision = meta.engine_revision,
-        release_sha256 = checksums.get(ios_engine_artifact_path("release"), ""),
-        debug_sha256 = checksums.get(ios_engine_artifact_path("debug"), ""),
+        mode = "release",
+        sha256 = checksums.get(ios_engine_artifact_path("release"), ""),
+    )
+    flutter_ios_engine_repo(
+        name = name + "_stock_ios_engine_debug",
+        engine_revision = meta.engine_revision,
+        mode = "debug",
+        sha256 = checksums.get(ios_engine_artifact_path("debug"), ""),
     )
 
     # The iOS profile engine and its gen_snapshot, apart so only a profile

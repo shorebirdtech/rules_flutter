@@ -13,8 +13,8 @@ MODE_FLAGS = {
 def engine_mode_of(path):
     """The build mode of the engine that holds the file at `path`.
 
-    Debug engines sit in their own directory of the release repo (macOS and
-    iOS, and the host SDK repos) or in a repo of their own (the desktop
+    Debug engines sit in their own directory of the release repo (macOS,
+    and the host SDK repos) or in a repo of their own (iOS, and the desktop
     engines of a cross toolchain); the profile engine is a repo of its own,
     laid out like the release one.
 
@@ -26,7 +26,7 @@ def engine_mode_of(path):
     """
     if "_profile/" in path:
         return "profile"
-    if "/engine-debug/" in path or "/debug/Flutter.xcframework/" in path or "_debug/" in path:
+    if "/engine-debug/" in path or "_debug/" in path:
         return "debug"
     return "release"
 
