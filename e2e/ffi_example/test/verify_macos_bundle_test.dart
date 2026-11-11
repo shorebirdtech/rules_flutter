@@ -32,6 +32,10 @@ void main() {
       ..exists(
         'combined code-asset dylib libcounter.dylib exists',
         '${bundle.frameworks}/libcounter.dylib',
+      )
+      ..exists(
+        'prebuilt code-asset dylib libnegate.dylib exists',
+        '${bundle.frameworks}/libnegate.dylib',
       );
     // The app serves both packages' ids from `libcounter.dylib`, so the
     // standalone libraries the packages declare for themselves stay out.

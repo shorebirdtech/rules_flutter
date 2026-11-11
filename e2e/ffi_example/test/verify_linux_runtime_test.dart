@@ -24,7 +24,8 @@
 /// (XAUTHORITY must pass through or GTK fails with "Authorization required".)
 ///
 /// Pass criteria: the app writes
-/// `ffi_example_result add(3,4)=7 mul(3,4)=12 sqlite=HELLO shared=2` to `$TMPDIR/ffi_result.txt`.
+/// `ffi_example_result add(3,4)=7 mul(3,4)=12 sqlite=HELLO shared=2
+/// negate(5)=-5` to `$TMPDIR/ffi_result.txt`.
 library;
 
 import 'dart:io';
@@ -33,7 +34,8 @@ import 'package:rules_flutter_e2e_testing/marker_run.dart';
 import 'package:rules_flutter_e2e_testing/runfiles_paths.dart';
 
 const _marker =
-    'ffi_example_result add(3,4)=7 mul(3,4)=12 sqlite=HELLO shared=2';
+    'ffi_example_result add(3,4)=7 mul(3,4)=12 sqlite=HELLO shared=2 '
+    'negate(5)=-5';
 // Software rendering on a GPU-less VM is slow to first frame; main() runs
 // well before that, but boot the whole engine generously.
 const _timeout = Duration(seconds: 60);
@@ -53,8 +55,9 @@ Future<void> main() async {
       forwardOutput: true,
     );
     stdout.writeln(
-      'PASS: @Native asset bind (add), raw filename open (mul) and '
-      'the curated sqlite3 code asset all worked at runtime.',
+      'PASS: @Native asset bind (add), raw filename open (mul), '
+      'the curated sqlite3 code asset and the prebuilt one (negate) all '
+      'worked at runtime.',
     );
   } finally {
     markerDir.deleteSync(recursive: true);

@@ -180,6 +180,33 @@ flutter_native_library(
     visibility = ["//sub_asset:__pkg__"],
 )
 
+# A prebuilt library: a plain file with no `CcSharedLibraryInfo`, as a vendored
+# `.so`/`.dylib`/`.dll` or an `http_file` is. Taken from a `cc_shared_library`
+# so it is built for whichever platform the app is, with no checked-in binary.
+# It reaches the app as the code asset of `//prebuilt_asset`.
+cc_library(
+    name = "negate_cc",
+    srcs = ["native/negate.c"],
+)
+
+cc_shared_library(
+    name = "negate",
+    deps = [":negate_cc"],
+)
+
+filegroup(
+    name = "negate_prebuilt",
+    srcs = [":negate"],
+    output_group = "main_shared_library_output",
+)
+
+dart_code_asset(
+    name = "negate_asset",
+    asset_id = "package:prebuilt_asset/negate",
+    shared_library = ":negate_prebuilt",
+    visibility = ["//prebuilt_asset:__pkg__"],
+)
+
 # One counter, bound by two packages under two asset ids. Each package declares
 # a standalone library of its own (`counter_a`, `counter_b`); the app serves
 # both ids from the combined `counter` instead, which it bundles once, so the
@@ -300,6 +327,7 @@ flutter_application(
         "//count_a",
         "//count_b",
         "//mul_plugin",
+        "//prebuilt_asset",
         "//sub_asset",
         # No code asset is named anywhere in this workspace. drift pulls
         # package:sqlite3, and the curated registry attaches sqlite3's
@@ -623,6 +651,7 @@ flutter_library(
         "//count_a",
         "//count_b",
         "//mul_plugin",
+        "//prebuilt_asset",
         "//sub_asset",
         "@deps//:drift",
         "@deps//:flutter",

@@ -26,6 +26,11 @@ void main() {
       'combined code-asset lib libcounter.so',
       bundle.lib('libcounter.so'),
       nonEmpty: true,
+    )
+    ..exists(
+      'prebuilt code-asset lib libnegate.so',
+      bundle.lib('libnegate.so'),
+      nonEmpty: true,
     );
   // The app serves both packages' ids from `libcounter.so`, so the standalone
   // libraries the packages declare for themselves stay out.

@@ -21,7 +21,8 @@
 ///   bazel test :verify_ios_simulator_test --test_tag_filters=
 ///
 /// Pass criteria: after launch the app writes
-/// `ffi_example_result add(3,4)=7 mul(3,4)=12 sqlite=HELLO shared=2` to
+/// `ffi_example_result add(3,4)=7 mul(3,4)=12 sqlite=HELLO shared=2
+/// negate(5)=-5` to
 /// `tmp/ffi_result.txt` in its sandbox — written in main() only if all three
 /// calls succeeded via the bundled native libraries. The test reads the file
 /// back through `simctl get_app_container` (a deterministic signal that
@@ -40,7 +41,8 @@ import 'package:rules_flutter_e2e_testing/ios_bundle.dart';
 
 const _bundleId = 'com.example.ffi';
 const _marker =
-    'ffi_example_result add(3,4)=7 mul(3,4)=12 sqlite=HELLO shared=2';
+    'ffi_example_result add(3,4)=7 mul(3,4)=12 sqlite=HELLO shared=2 '
+    'negate(5)=-5';
 const _resultFile = 'tmp/ffi_result.txt';
 const _timeout = Duration(seconds: 60);
 
@@ -132,8 +134,9 @@ void _runOnSimulator(String appPath) {
     exit(1);
   }
   print(
-    'PASS: @Native asset bind (add), raw framework open (mul) and '
-    'the curated sqlite3 code asset all worked at runtime.',
+    'PASS: @Native asset bind (add), raw framework open (mul), '
+    'the curated sqlite3 code asset and the prebuilt one (negate) all '
+    'worked at runtime.',
   );
 }
 

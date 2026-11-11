@@ -20,6 +20,11 @@ void main() {
       'combined code-asset lib counter.dll',
       bundle.file('counter.dll'),
       nonEmpty: true,
+    )
+    ..exists(
+      'prebuilt code-asset lib negate.dll',
+      bundle.file('negate.dll'),
+      nonEmpty: true,
     );
   // The app serves both packages' ids from `counter.dll`, so the standalone
   // libraries the packages declare for themselves stay out.

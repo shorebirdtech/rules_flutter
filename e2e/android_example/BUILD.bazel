@@ -81,6 +81,33 @@ cc_library(
     ]
 ]
 
+# A prebuilt library: a plain file with no `CcSharedLibraryInfo`, as a vendored
+# `.so` or an `http_file` is. Taken from a `cc_shared_library` so it is built
+# for each ABI the APK carries, with no checked-in binary per ABI. It reaches
+# the app as the code asset of `//prebuilt_asset`; see `lib/negate_ffi.dart`.
+cc_library(
+    name = "negate_cc",
+    srcs = ["native/negate.c"],
+)
+
+cc_shared_library(
+    name = "negate",
+    deps = [":negate_cc"],
+)
+
+filegroup(
+    name = "negate_prebuilt",
+    srcs = [":negate"],
+    output_group = "main_shared_library_output",
+)
+
+dart_code_asset(
+    name = "negate_asset",
+    asset_id = "package:prebuilt_asset/negate",
+    shared_library = ":negate_prebuilt",
+    visibility = ["//prebuilt_asset:__pkg__"],
+)
+
 dart_package_metadata(
     name = "pubspec-metadata",
     package_name = "android_example",
@@ -103,6 +130,7 @@ flutter_application(
     deps = [
         "//count_a",
         "//count_b",
+        "//prebuilt_asset",
         "@deps//:flutter",
         "@rules_flutter//flutter:material_icons",
     ],

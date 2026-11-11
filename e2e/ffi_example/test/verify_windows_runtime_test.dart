@@ -21,7 +21,8 @@
 ///     --strategy=TestRunner=standalone
 ///
 /// Pass criteria: the app writes
-/// `ffi_example_result add(3,4)=7 mul(3,4)=12 sqlite=HELLO shared=2` to `%TMP%\ffi_result.txt`.
+/// `ffi_example_result add(3,4)=7 mul(3,4)=12 sqlite=HELLO shared=2
+/// negate(5)=-5` to `%TMP%\ffi_result.txt`.
 library;
 
 import 'dart:io';
@@ -30,7 +31,8 @@ import 'package:rules_flutter_e2e_testing/marker_run.dart';
 import 'package:rules_flutter_e2e_testing/runfiles_paths.dart';
 
 const _marker =
-    'ffi_example_result add(3,4)=7 mul(3,4)=12 sqlite=HELLO shared=2';
+    'ffi_example_result add(3,4)=7 mul(3,4)=12 sqlite=HELLO shared=2 '
+    'negate(5)=-5';
 const _timeout = Duration(seconds: 60);
 
 Future<void> main() async {
@@ -50,8 +52,9 @@ Future<void> main() async {
       forwardOutput: true,
     );
     stdout.writeln(
-      'PASS: @Native asset bind (add), raw filename open (mul) and '
-      'the curated sqlite3 code asset all worked at runtime.',
+      'PASS: @Native asset bind (add), raw filename open (mul), '
+      'the curated sqlite3 code asset and the prebuilt one (negate) all '
+      'worked at runtime.',
     );
   } finally {
     try {

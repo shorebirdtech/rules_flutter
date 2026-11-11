@@ -61,6 +61,10 @@ void main() {
       '${apk.path}/lib/arm64-v8a/libadd.so',
     )
     ..exists(
+      'libnegate.so exists (arm64-v8a, a prebuilt code asset)',
+      '${apk.path}/lib/arm64-v8a/libnegate.so',
+    )
+    ..exists(
       'flutter_assets directory exists',
       '${apk.path}/assets/flutter_assets',
     )

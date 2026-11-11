@@ -1397,12 +1397,15 @@ host than the one Xcode here ships is fine.
 
 ### FFI runtime tests (iOS simulator, macOS, Linux, Windows)
 
-Behavioral verification that both native-library mechanisms work at runtime:
+Behavioral verification that the native-library mechanisms work at runtime:
 `add()` binds via `@Native` asset-id resolution (`dart_code_asset` →
 `--native-assets` kernel manifest), `mul()` raw-opens its conventional path
-(`native_deps`). The app writes
-`ffi_example_result add(3,4)=7 mul(3,4)=12` to its temp dir; the tests read
-it back (via `simctl get_app_container` on iOS).
+(`native_deps`), sqlite3 arrives as a pub package's code asset, two asset ids
+share one counter library, and `negate()` comes from a code asset whose library
+is a prebuilt file. The app writes
+`ffi_example_result add(3,4)=7 mul(3,4)=12 sqlite=HELLO shared=2 negate(5)=-5`
+to its temp dir; the tests read it back (via `simctl get_app_container` on
+iOS).
 
 ```sh
 cd e2e/ffi_example

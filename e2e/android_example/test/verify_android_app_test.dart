@@ -15,6 +15,8 @@
 /// - The app logs `android_example shared=2`: one bump through each of two
 ///   asset ids the app serves from one library moved one count, so both ids
 ///   reached one loaded image of it (two copies would log `shared=1`)
+/// - The app logs `android_example negate(5)=-5`: the code asset whose library
+///   is a prebuilt file, not a `cc_shared_library`, loaded
 library;
 
 // This script's diagnostics are its product: it reports what it found in
@@ -30,6 +32,7 @@ const _packageName = 'com.example.flutterapp';
 const _timeout = Duration(seconds: 30);
 const _stabilityWindow = Duration(seconds: 10);
 const _sharedMarker = 'android_example shared=';
+const _negateMarker = 'android_example negate(5)=';
 
 Future<void> main() async {
   final app = AdbApp.fromRunfiles('app.apk', packageName: _packageName)
@@ -54,6 +57,11 @@ Future<void> main() async {
       ? null
       : sharedLines.last.split(_sharedMarker).last.trim();
   print('Shared counter: ${shared ?? '(not logged)'}');
+  final negateLines = app.logLines(_negateMarker, tag: 'flutter');
+  final negated = negateLines.isEmpty
+      ? null
+      : negateLines.last.split(_negateMarker).last.trim();
+  print('Prebuilt negate(5): ${negated ?? '(not logged)'}');
 
   app
     ..screenshot('android_screenshot')
@@ -74,6 +82,15 @@ Future<void> main() async {
       'FAIL: expected "${_sharedMarker}2" in logcat, got '
       '${shared == null ? 'no such line' : '"$_sharedMarker$shared"'}: the '
       'two asset ids did not reach one image of the shared library',
+    );
+    exit(1);
+  }
+
+  if (negated != '-5') {
+    stderr.writeln(
+      'FAIL: expected "$_negateMarker-5" in logcat, got '
+      '${negated == null ? 'no such line' : '"$_negateMarker$negated"'}: the '
+      'code asset whose library is a prebuilt file did not load',
     );
     exit(1);
   }
