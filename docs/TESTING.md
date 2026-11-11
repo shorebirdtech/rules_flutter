@@ -1159,7 +1159,7 @@ instead of extracting it.
 | Workspace | Key tests |
 |-----------|-----------|
 | smoke | Toolchain resolution for all platforms |
-| hello_world | Kernel, AOT, application, and per-platform bundle builds; flutter_test; `bazel coverage` of a flutter_test (`//coverage/...`: workspace paths, a library in another package, `--instrumentation_filter`, the merged report; CI runs it on Linux); on Linux and Windows, a profile-mode bundle whose AOT snapshot is a profile one (`verify_linux_profile_bundle_test`, `verify_windows_profile_bundle_test`); `reproducible_notices_<mode>_test`: each mode's `NOTICES.Z` gzip header names no host OS and no time (on every host, Windows included) |
+| hello_world | Kernel, AOT, application, and per-platform bundle builds; flutter_test; `bazel coverage` of a flutter_test (`//coverage/...`: workspace paths, a library in another package, `--instrumentation_filter`, the merged report; CI runs it on Linux); on Linux, Windows and macOS, a profile-mode bundle whose AOT snapshot is a profile one (`verify_linux_profile_bundle_test`, `verify_windows_profile_bundle_test`, `verify_macos_profile_bundle_test`); `reproducible_notices_<mode>_test`: each mode's `NOTICES.Z` gzip header names no host OS and no time (on every host, Windows included) |
 | codegen | Per-file and aggregate dart_codegen, custom generators, hot-reload-with-codegen; `go_router_codegen` (`@rules_flutter//flutter/ext/go_router`) writing the routes `:routes_test` drives |
 | ffi_example | Both FFI mechanisms — Native Assets (`add_plugin`, `@Native` asset-id bind) and `native_deps` (`mul_plugin`, conventional-path open) — bundle structure on macOS/Linux plus manual runtime proof on iOS simulator and macOS |
 | ffi_plugin_example | FFI plugin build + macOS/Linux bundle structure with `libmultiply.dylib`/`.so` |
@@ -1994,6 +1994,10 @@ checks the snapshot. The Dart VM records the mode it was built for at the start
 of every AOT snapshot: `release` from Flutter's profile `gen_snapshot`,
 `product` from its release one. The test fails unless the bundle's `libapp.so`
 (Linux) or `data/app.so` (Windows) says `release`.
+
+On macOS, `bazel test //...` in `e2e/hello_world` runs
+`verify_macos_profile_bundle_test`, the same check on `hello_world_macos`'s
+`App.framework/App`, wherever that workspace's tests run on a Mac.
 
 CI does not start the app, so it does not show that the VM service answers or
 that the main isolate lists the `ext.flutter.profile*` extensions; the manual

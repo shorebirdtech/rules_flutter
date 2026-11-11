@@ -652,6 +652,31 @@ build_test(
     targets = [":hello_world_web"],
 )
 
+# -- Profile mode on macOS ------------------------------------------------------
+#
+# The macOS app built with `-c opt --@rules_flutter//flutter:profile`, whatever
+# the command line says, and a check that its App.framework holds a profile AOT
+# snapshot.
+
+flutter_profile_build(
+    name = "hello_world_macos_profile",
+    tags = ["manual"],
+    target_compatible_with = ["@platforms//os:macos"],
+    targets = [":hello_world_macos"],
+)
+
+dart_test(
+    name = "verify_macos_profile_bundle_test",
+    args = [
+        "hello_world_macos.zip",
+        "'Hello World'",
+    ],
+    data = [":hello_world_macos_profile"],
+    main = "test/verify_macos_profile_bundle_test.dart",
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
+)
+
 # -- Profile mode on Linux and Windows -----------------------------------------
 #
 # The desktop bundles built with `-c opt --@rules_flutter//flutter:profile`,
