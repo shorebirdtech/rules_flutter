@@ -1001,11 +1001,11 @@ dart_package_metadata(
 
 Every application that reaches the package bundles each asset at `flutter_assets/packages/<package>/<name>` and lists it in `AssetManifest`, as `flutter build` bundles a hook's data asset. So `rootBundle.load('packages/glyphs/glyphs/index.json')` reads it. The application's own package counts too, whether or not a library in its `deps` names the declaration. Web builds bundle them as well, under the bundle's `assets/`.
 
-A debug build runs no hooks and ships every declared asset. In a release or profile build, native or web, a package with a link hook receives its declared assets and ships only those the hook emits (see [Link hooks](#link-hooks)). `e2e/_overlay_tests/native_assets_synthetic` loads one in a running app.
+A debug build runs no hooks and ships every declared asset. In a release or profile build, native or web, a package with a link hook receives its declared assets and ships only those the hook emits (see [Link hooks](#link-hooks)). `e2e/package_assets/own_assets` loads one in a running app.
 
 ### Link hooks
 
-A package can choose what it ships from how the app uses it, as with `flutter build`. Mark a `final class` with `@RecordUse()` from `package:meta` (1.19 or later). Then write a `hook/link.dart` that reads the recorded uses with `package:record_use` and emits data assets with `package:data_assets`. The hook may import pure Dart from its own package's `lib/`, but not Flutter. This is [`e2e/_overlay_tests/link_hooks`](e2e/_overlay_tests/link_hooks), where the hook ships only the glyphs the app constructs:
+A package can choose what it ships from how the app uses it, as with `flutter build`. Mark a `final class` with `@RecordUse()` from `package:meta` (1.19 or later). Then write a `hook/link.dart` that reads the recorded uses with `package:record_use` and emits data assets with `package:data_assets`. The hook may import pure Dart from its own package's `lib/`, but not Flutter. This is [`e2e/package_assets`](e2e/package_assets), where the hook ships only the glyphs the app constructs:
 
 ```starlark
 # glyphs/BUILD.bazel
@@ -3305,7 +3305,7 @@ A platform needs a `plugin_class`, a `dart_plugin_class`, `ffi_plugin` or a `def
 
 A plugin's native code is a target of its own. Swift goes in a `flutter_apple_plugin_library`. Kotlin or Java goes in a `flutter_android_plugin_library`, whose `flutter_engine` is a `flutter_android_engine(neverlink = True)`: the plugin compiles against the engine, and each app ships an engine for its own ABI. An Android app that depends on the plugin packages the library, registers its plugin class, and merges its `manifest` (receivers, services, permissions) into the app's. The library gets a `BuildConfig` in its `java_package`, with `DEBUG` and `BUILD_TYPE` as Gradle would set them for the build's mode.
 
-More plugins in the examples: [`e2e/plugin_example/greeting_plugin`](e2e/plugin_example/greeting_plugin/BUILD.bazel) has a Dart plugin class and no native code, [`e2e/ffi_plugin_example`](e2e/ffi_plugin_example/multiply_plugin/BUILD.bazel) a Dart plugin class with `native_deps`, and [`e2e/ffi_example`](e2e/ffi_example) plugins built on Native Assets.
+More plugins in the examples: [`e2e/plugin_example/greeting_plugin`](e2e/plugin_example/greeting_plugin/BUILD.bazel) has a Dart plugin class and no native code. [`e2e/ffi_example`](e2e/ffi_example) has plugins built on Native Assets, and [`multiply_plugin`](e2e/ffi_example/multiply_plugin/BUILD.bazel) there has a Dart plugin class with `native_deps`.
 
 ### flutter_application_variant
 
@@ -4746,23 +4746,20 @@ The `e2e/` directory holds working workspaces, each with its own tests:
 | `e2e/hello_world` | A minimal app on every platform: kernel, AOT, assets, tests, profile builds, macOS, iOS, Android, Linux, Windows and web. |
 | `e2e/asset_bundle` | Every asset a pubspec declares reaching the bundle under the key, variants and platforms `flutter build` gives it. |
 | `e2e/codegen` | Per-file and aggregate code generation, generated code in dependency packages, and hot reload over generated sources. |
-| `e2e/ffi_example` | Native code as Dart Native Assets and as `native_deps`, side by side, and native hot patching. |
-| `e2e/ffi_plugin_example` | A `flutter_plugin` with a Dart plugin class and `native_deps`. |
+| `e2e/ffi_example` | Every way a Flutter app carries native code: Dart Native Assets, `native_deps`, and a `flutter_plugin` with a Dart plugin class and `native_deps` (`plugin_class`), plus native hot patching. |
 | `e2e/plugin_example` | Pub plugins from the hub, plugins that register a Dart class or a native one, and Android plugin Maven dependencies. |
 | `e2e/pub_resolve` | A monorepo app whose `path:` packages, and a fork of a hosted one, are workspace targets mapped with `resolve`. |
 | `e2e/dual_hub` | Two pub hubs in one workspace that differ on a package version: one repository per package, at the higher version. |
 | `e2e/macos_example` | A full macOS app with bundle structure checks. |
 | `e2e/ios_example` | An iOS app. Requires Xcode. |
 | `e2e/android_example` | An Android APK built three ways, with APK content checks. |
-| `e2e/linux_example` | A Linux app built three ways, with bundle checks. |
-| `e2e/windows_example` | A Windows app built three ways, with bundle checks. |
+| `e2e/desktop_example` | One app built for Linux and for Windows, each three ways, with bundle checks. |
 | `e2e/web_example` | WASM-with-JavaScript-fallback, WASM-only and JavaScript web builds with `web_assets`, and a WASM-only app dart2js can't compile. |
 | `e2e/cross_compile_example` | A Linux bundle cross-compiled from macOS. |
 | `e2e/multi_window_example` | Multi-window macOS and multi-scene iOS with `FlutterEngineGroup`. |
 | `e2e/integration_test` | `package:integration_test` suites run in a real app, reported per test. |
 | `e2e/custom_engine` | Builds against a local Flutter checkout and its engine, chosen per build. |
-| `e2e/_overlay_tests/native_assets_synthetic` | The Native Assets pipeline end to end, with a code asset and a data asset. |
-| `e2e/_overlay_tests/link_hooks` | Package link hooks deciding which assets ship. |
+| `e2e/package_assets` | An app's own package's assets: link hooks deciding which data assets ship, and the Native Assets pipeline end to end with a code asset and a data asset (`own_assets`). |
 | `e2e/external_module` | The published module, from its release archive: every target lists and analyses. |
 
 [docs/TESTING.md](docs/TESTING.md) describes how the repository itself is tested, including the manual checks that need a display or a device.
