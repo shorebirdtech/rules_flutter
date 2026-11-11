@@ -1137,34 +1137,57 @@ On the web the same wrapper goes in `flutter_web_bundle`'s `native_modules`, whi
 
 ## Building for each platform
 
-Every platform has two levels of API:
+Each platform has a macro, such as `flutter_macos_app`, that turns a `flutter_application` into an app for that platform. It reads the runner files `flutter create` wrote, such as `macos/Runner/`, as they are, so you don't edit them. Most apps need nothing else.
 
-- **A convenience macro** such as `flutter_macos_app`. It finds the runner files `flutter create` wrote, wires up every internal target, and is what most apps should use.
-- **Composable rules** such as `flutter_macos_runner_lib_gen`, for when you need control over a piece the macro decides for you. Each platform section shows them in a collapsed block.
+When you need control over a piece the macro decides for you, the same work is available as separate rules, such as `flutter_macos_runner_lib_gen`, that you wire into rules_apple, rules_android or rules_cc yourself. Each platform section lists them in a collapsed block.
 
-The macros take `flutter create` output as it is. You do not need to edit the generated `Runner` folders.
+The iOS, macOS and Android macros tag the app `manual` unless you pass `tags`, so `bazel build //...` skips it and you build it by name. The Linux, Windows and web macros don't. An iOS or macOS app whose `tags` leave out `manual` is built by `//...` on a Mac, and reported as skipped on any other host, such as a Linux CI runner.
 
 ### App version
 
-`flutter_application` and the Android, iOS, macOS and Windows app macros take `build_name` and `build_number`, Flutter's names for the version that `flutter build --build-name 2.3.4 --build-number 42` sets, and that a `pubspec.yaml` writes as `version: 2.3.4+42`. Unset, they are `flutter create`'s `1.0.0` and `1`. Each platform puts them where its own build does:
+A Flutter project keeps its version in `pubspec.yaml`, or passes it to `flutter build`:
+
+```yaml
+# pubspec.yaml
+version: 2.3.4+42
+```
+
+```sh
+flutter build ios --build-name 2.3.4 --build-number 42
+```
+
+Here it is two attributes of the `flutter_application`:
+
+```starlark
+flutter_application(
+    name = "my_app",
+    # ...
+    build_name = "2.3.4",
+    build_number = "42",
+)
+```
+
+Left out, they are `flutter create`'s `1.0.0` and `1`. The program reads them as `appBuildName` and `appBuildNumber` from `package:flutter/services.dart`, and every platform app built over the application puts them where that platform's own build does:
 
 | Platform | `build_name` | `build_number` |
 |---|---|---|
 | Android | `versionName` | `versionCode`: a whole number from 1 to 2100000000 |
 | iOS, macOS | `CFBundleShortVersionString`: numbers separated by periods, padded to three as `flutter build` pads them (`2.3` is `2.3.0`) | `CFBundleVersion`: numbers separated by periods |
-| Web | `version` in `version.json`, from the application's | `build_number` in `version.json`, from the application's |
-| Windows | The executable's version, `<build_name>+<build_number>`, and the first three of its four file version numbers: `MAJOR.MINOR.PATCH`, with an optional `-prerelease` | The fourth file version number: a whole number. Each of the four is at most 65535 |
+| Web | `version` in `version.json` | `build_number` in `version.json` |
+| Windows | The executable's version, `<build_name>+<build_number>`, and the first three of its four file version numbers: `MAJOR.MINOR.PATCH`, with an optional `-prerelease` | The fourth file version number: a whole number |
 
-Linux apps carry no version. A value the platform cannot use fails the build and says what it accepts, where `flutter build` would quietly change it (`0` to `1` on Android, `1.0-beta` to `1.0.0` on iOS, a build number of `1.2` to `0` on Windows).
+On iOS and macOS each key takes at most four numbers and 18 characters. On Windows each of the four file version numbers is at most 65535. Linux apps carry no version.
 
-Each platform's own way of setting the version still works: `version` (an `apple_bundle_version`) on iOS and macOS, `manifest_values` or an `android:versionCode` in your own manifest on Android, `version_json` (or `web/version.json`) on web. Setting a field both ways is an error, rather than one value silently winning.
+A value the platform can't use fails the build and says what the platform accepts. `flutter build` would change it without telling you: `0` becomes `1` on Android, `1.0-beta` becomes `1.0.0` on iOS, and a build number of `1.2` becomes `0` on Windows.
 
-rules_flutter has no flag for a release version. Give the arguments a `select()` over a flag of your own, whose `None` keeps the default:
+`flutter_android_app`, `flutter_ios_app`, `flutter_macos_app` and `flutter_windows_app` also take `build_name` and `build_number`. These must match the application's, or the build fails: the bundle would report one version and the program another. [`e2e/ios_example`](e2e/ios_example/BUILD.bazel) sets the same values on both.
+
+rules_flutter has no flag for a release version. To vary the version by build, give the application's arguments a `select()` over a `config_setting` of your own. `None` keeps the default:
 
 ```starlark
-flutter_android_app(
-    name = "my_app_android",
-    ...
+flutter_application(
+    name = "my_app",
+    # ...
     build_number = select({
         ":release": "42",
         "//conditions:default": None,
@@ -1172,11 +1195,25 @@ flutter_android_app(
 )
 ```
 
-On iOS and macOS, rules_apple's `apple_bundle_version` can instead read the version from `bazel build --embed_label=...`; pass it as `version`.
+Each platform's own way of setting the version works too:
+
+- **iOS, macOS:** `version`, an `apple_bundle_version` or `flutter_apple_bundle_version` target, the way to give the app's extensions its version (see [App extensions](#app-extensions)). Its values must be the application's, or the app's build fails. A `flutter_apple_bundle_version` given the same `application` takes them. rules_apple's `apple_bundle_version` can read the version from `bazel build --embed_label=...`, and the label must then give the application's version.
+- **Android:** `android:versionCode` and `android:versionName` in your own manifest, or `versionCode` and `versionName` in `manifest_values`. Each must be the application's, or the build fails.
+- **Web:** `version_json`, or a `web/version.json`, which `flutter_web_app` picks up, in place of the application's version.
+
+Use one way for each field. A `version.json` beside an application that sets a version fails the build, and so does `version` beside the macro's own `build_name` or `build_number`, or a `manifest_values` key beside the matching argument. A `version.json` isn't compared with an application that sets no version, though: the bundle then reports the file's version and `appBuildName` reports `1.0.0`.
+
+On iOS and macOS, the `Info.plist` leaves the two version keys to the app's version. A literal `CFBundleShortVersionString` or `CFBundleVersion` that differs from it fails the build. The `$(FLUTTER_BUILD_NAME)` and `$(FLUTTER_BUILD_NUMBER)` that `flutter create` writes are fine, and so are Xcode's `$(MARKETING_VERSION)` and `$(CURRENT_PROJECT_VERSION)`.
 
 ### Flavors
 
-A flavor is a target. Give `flutter_application` a `flavor`, and declare one application per flavor, with the platform target of each beside it:
+With `flutter build`, a flavor is a flag, backed by Gradle product flavors and Xcode schemes:
+
+```sh
+flutter run --flavor paid
+```
+
+Here a flavor is a target. Give a `flutter_application` a `flavor`, declare one application per flavor, and put the platform targets of each beside it. This mirrors [`e2e/integration_test`](e2e/integration_test/BUILD.bazel):
 
 ```starlark
 dart_package_metadata(
@@ -1195,7 +1232,7 @@ flutter_application(
 flutter_macos_app(
     name = "macos_paid",
     application = ":app_paid",
-    bundle_id = "com.example.myapp.paid",   # per-flavor app id: an ordinary attribute
+    bundle_id = "com.example.myapp.paid",
     app_name = "My App Paid",
 )
 
@@ -1206,22 +1243,31 @@ flutter_web_app(
 )
 ```
 
-What `flavor` does, as `flutter build --flavor` does it:
+`flavor` does what `flutter build --flavor` does in the Dart program:
 
-- `appFlavor` (`package:flutter/services.dart`) is `'paid'` in the app. Without `flavor` it is `null`.
-- A pub package's `flutter: assets:` or `flutter: shaders:` entry with `flavors: [paid, ...]` is bundled in builds of that flavor, and in no build of another flavor or of none.
-- `flutter_bazel run //:macos_paid` runs the paid flavor. There is no `--flavor` flag: the flavor is part of the target, and hot reload and hot restart keep it.
+- `appFlavor` (`package:flutter/services.dart`) is `'paid'`. Without `flavor` it is `null`. You can't set `FLUTTER_APP_FLAVOR` yourself: `defines` and `--dart-define` refuse it, as `flutter build` does.
+- A pub package's `flutter: assets:` or `flutter: shaders:` entry with `flavors: [paid, ...]` is bundled into builds of that flavor, and left out of every other build, including those with no flavor.
+- `flutter_bazel run -t //:macos_paid -d macos` runs the paid flavor. There is no `--flavor` flag, because the flavor is part of the target. Hot reload and hot restart keep it.
 
-What it does not do. Everything else that differs between flavors, the app id, name, icons, Info.plist, Android manifest and resources, window title, differs because the flavor's platform target sets it. Those are the attributes of the platform macros: `application_id`, `app_name`, `manifest` and `resources` for `flutter_android_app`; `bundle_id`, `app_name`, `info_plist`, `app_icons`, `resources` and `entitlements` for `flutter_ios_app` and `flutter_macos_app`; `application_id`, `app_name` and `window_title` for `flutter_linux_app`; `app_name` for `flutter_windows_app`; `app_name` and `web_dir` for `flutter_web_app`. rules_flutter adds no Gradle product flavors, Xcode schemes or CMake variables, and has no `default-flavor`: set `flavor` on the target.
+Everything else that differs between flavors is an attribute of that flavor's platform target:
 
-- The app's own assets come from the target's `assets`, not its pubspec, so a flavor's own assets go in that flavor's target. A library's flavor-only assets go in a small library that only that flavor's application depends on.
-- `FLUTTER_APP_FLAVOR` cannot be set by hand: it is refused in `defines` and `--dart-define`, as `flutter build` refuses it.
-- Web bundles a flavor's `flavors:` assets and shaders like the other platforms. `flutter build web` has no `--flavor` and bundles none, so this is a deliberate difference.
-- `flutter_test` takes `flavor` too, as `flutter test --flavor` does: `appFlavor` is set, and the pub assets and shaders whose `flavors:` name it are bundled for the test. Without it, a test sees no `appFlavor` and no `flavors:` entry.
+| Macro | Attributes that usually differ per flavor |
+|---|---|
+| `flutter_android_app` | `application_id`, `app_name`, `manifest`, `resources` |
+| `flutter_ios_app`, `flutter_macos_app` | `bundle_id`, `app_name`, `info_plist`, `app_icons`, `resources`, `entitlements` |
+| `flutter_linux_app` | `application_id`, `app_name`, `window_title` |
+| `flutter_windows_app` | `app_name` |
+| `flutter_web_app` | `app_name`, `web_dir` |
+
+rules_flutter adds no Gradle product flavors, Xcode schemes or CMake variables, and doesn't read `default-flavor` from the pubspec. A few more differences from `flutter build`:
+
+- The app's own assets come from the application's `assets`, not from its pubspec, so a flavor's own assets go in that flavor's application. A library's flavor-only assets go in a small library that only that flavor's application depends on.
+- Web bundles a flavor's `flavors:` assets and shaders, like the other platforms. `flutter build web` has no `--flavor` and bundles none of them.
+- `flutter_test` takes `flavor` too, as `flutter test --flavor` does. The test sees `appFlavor`, and gets the pub assets and shaders whose `flavors:` name it. Without it, a test sees no `appFlavor` and no `flavors:` entry.
 
 ### macOS
 
-Requires Xcode. Run `flutter create --platforms=macos .` first so `macos/Runner/` exists.
+You need Xcode. Run `flutter create --platforms=macos .` first, so that `macos/Runner/` exists.
 
 ```starlark
 load("@rules_flutter//flutter:macos.bzl", "flutter_macos_app")
@@ -1234,34 +1280,44 @@ flutter_macos_app(
 )
 ```
 
+```sh
+bazel build //:my_app_macos
+bazel run @rules_flutter//tools/dev_tool:flutter_bazel -- run -t //:my_app_macos -d macos
+```
+
+The output is a `.app` bundle holding `FlutterMacOS.framework`, `App.framework` and `flutter_assets/`, and a `my_app_macos.zip` of it.
+
 | Attribute | Description |
 |---|---|
 | `application` | A `flutter_application` target. Required. |
-| `bundle_id` | The macOS bundle identifier. Required. |
-| `app_name` | Display name for the menu bar and window title. Defaults to the target name. |
-| `minimum_os_version` | Defaults to `"12.0"`, which is what the prebuilt engine is built for. A lower value is refused rather than warned about. |
-| `info_plist` | Replaces the discovered `macos/Runner/Info.plist`. |
-| `build_name` | `CFBundleShortVersionString`. Defaults to `"1.0.0"`. See [App version](#app-version). |
-| `build_number` | `CFBundleVersion`. Defaults to `"1"`. |
-| `version` | An `apple_bundle_version` or `flutter_apple_bundle_version` target, in place of `build_name` and `build_number`. |
-| `entitlements` | Replaces the entitlements wiring. By default the macro finds `macos/Runner/DebugProfile.entitlements` and `Release.entitlements` and picks one by compilation mode. |
-| `additional_entitlements` | Entitlement plist files merged into the selected base in every compilation mode. See [Release builds and permissions](#release-builds-and-permissions). |
+| `bundle_id` | The bundle identifier, as Xcode's `PRODUCT_BUNDLE_IDENTIFIER`. Required. |
+| `app_name` | The bundle's name (`<app_name>.app`, and `$(PRODUCT_NAME)` in the `Info.plist`), which is the name in the menu bar and window title. Defaults to the target name. |
+| `minimum_os_version` | Defaults to `"12.0"`, the macOS the prebuilt engine is built for. A lower value fails the build. |
+| `info_plist` | Used in place of `macos/Runner/Info.plist`. |
+| `build_name`, `build_number`, `version` | See [App version](#app-version). |
+| `entitlements` | Used in place of the `flutter create` pair. By default the macro uses `macos/Runner/DebugProfile.entitlements` for debug and profile builds and `Release.entitlements` for the rest, as the Xcode project does. It fails if either file is missing. |
+| `additional_entitlements` | Entitlement files merged into whichever file the build uses, in every mode. See [Release builds and permissions](#release-builds-and-permissions). |
 | `app_icons` | Defaults to the `AppIcon.appiconset` in `macos/Runner/Assets.xcassets`. See [App icons](#app-icons). |
 | `runner_deps` | `swift_library` targets linked into the runner. See [App Intents](#app-intents). |
 
-The output is a `.app` bundle containing `FlutterMacOS.framework`, `App.framework`, and `flutter_assets/`. The target you name is a thin one in front of `macos_application`: `bazel build //...` skips the app on any platform but macOS (a Linux CI runner), and a `target_compatible_with` you pass is kept beside that. The archive is `<name>.zip`.
+Other arguments, such as `extensions` and `app_intents`, pass through to rules_apple's `macos_application`.
 
 <details>
 <summary>Composable rules</summary>
 
+These are the pieces the macro assembles. This mirrors the Bazel-generated runner in [`e2e/macos_example`](e2e/macos_example/BUILD.bazel), which needs no `macos/Runner/`.
+
 ```starlark
+load("@rules_apple//apple:macos.bzl", "macos_application")
 load("@rules_flutter//flutter:macos.bzl",
+    "MACOS_MINIMUM_OS_VERSION",
     "flutter_entitlements_merge",
     "flutter_macos_engine",
     "flutter_macos_app_framework_gen",
     "flutter_macos_info_plist_gen",
     "flutter_macos_menu_xib_gen",
     "flutter_macos_native_libs_gen",
+    "flutter_macos_privacy_manifests_gen",
     "flutter_macos_registrant_gen",
     "flutter_macos_runner_lib_gen")
 
@@ -1269,17 +1325,20 @@ flutter_macos_app_framework_gen(name = "my_framework", application = ":my_app")
 flutter_macos_registrant_gen(name = "my_registrant", application = ":my_app")
 flutter_macos_engine(name = "my_engine")
 flutter_macos_native_libs_gen(name = "my_native_libs", application = ":my_app")
+flutter_macos_privacy_manifests_gen(name = "my_privacy_manifests", application = ":my_app")
 flutter_macos_info_plist_gen(name = "my_info_plist", app_name = "My App")
 flutter_macos_menu_xib_gen(name = "my_menu_xib", app_name = "My App")
 
 flutter_macos_runner_lib_gen(
     name = "my_runner",
+    # Links the app's plugins into the runner.
+    application = ":my_app",
     registrant = ":my_registrant",
     engine = ":my_engine",
 )
 
-# rules_apple's `entitlements` takes one file. This merges additions into it.
-# Additions only; a key present in both with different values is an error.
+# rules_apple's `entitlements` takes one file. This merges more keys into it.
+# A key in both files with different values fails the build.
 # Also exported from flutter:ios.bzl.
 flutter_entitlements_merge(
     name = "my_entitlements",
@@ -1290,10 +1349,13 @@ flutter_entitlements_merge(
 macos_application(
     name = "my_macos_app",
     bundle_id = "com.example.myapp",
+    minimum_os_version = MACOS_MINIMUM_OS_VERSION,
     additional_contents = {
         ":my_framework": "Frameworks",
         ":my_native_libs": "Frameworks",
+        ":my_privacy_manifests": "Resources",
     },
+    entitlements = ":my_entitlements",
     infoplists = [":my_info_plist"],
     resources = [":my_menu_xib"],
     deps = [":my_runner"],
@@ -1304,7 +1366,7 @@ macos_application(
 
 ### iOS
 
-Requires Xcode. Run `flutter create --platforms=ios .` first so `ios/Runner/` exists.
+You need Xcode on a Mac with Apple silicon. Run `flutter create --platforms=ios .` first, so that `ios/Runner/` exists.
 
 ```starlark
 load("@rules_flutter//flutter:ios.bzl", "flutter_ios_app")
@@ -1316,57 +1378,77 @@ flutter_ios_app(
 )
 ```
 
+On an Apple silicon Mac, an iOS build is for the simulator unless you ask for a device. The simulator runs debug builds only, so build it with `-c dbg`. `flutter_bazel` does that for you, and runs the app in the simulator that is booted:
+
+```sh
+bazel build -c dbg //:my_app_ios
+bazel run @rules_flutter//tools/dev_tool:flutter_bazel -- run -t //:my_app_ios -d ios-simulator
+```
+
+The output is a `.app` bundle and a `my_app_ios.ipa` of it. A simulator build needs no signing. A device build does: see [Running on an iOS device](#running-on-an-ios-device).
+
 | Attribute | Description |
 |---|---|
 | `application` | A `flutter_application` target. Required. |
-| `bundle_id` | The iOS bundle identifier. Required. |
-| `families` | Device families. Defaults to `["iphone"]`, unlike `flutter create` (iPhone and iPad). An iPhone-only app runs in a small window on iPadOS. Adding `"ipad"` needs an icon set without the 76x76@1x iPad icon `flutter create` generates, which `actool` rejects. |
-| `app_name` | Display name. Defaults to the target name. |
-| `minimum_os_version` | Defaults to `"15.0"`, which is what the prebuilt engine is built for. A lower value is refused rather than warned about. |
-| `info_plist` | Replaces the discovered `ios/Runner/Info.plist`. |
-| `build_name` | `CFBundleShortVersionString`. Defaults to `"1.0.0"`. See [App version](#app-version). |
-| `build_number` | `CFBundleVersion`. Defaults to `"1"`. |
-| `version` | An `apple_bundle_version` or `flutter_apple_bundle_version` target, in place of `build_name` and `build_number`. |
-| `launch_storyboard` | Replaces the launch storyboard. |
-| `entitlements` | Replaces the entitlements wiring. By default the macro uses `ios/Runner/Runner.entitlements` if it exists. An app with no entitlements file is fine. |
-| `additional_entitlements` | Entitlement plist files merged into the base in every compilation mode. Works even when the app has no entitlements file. See [Release builds and permissions](#release-builds-and-permissions). |
-| `provisioning_profile` | A `.mobileprovision` file, usually a `local_provisioning_profile` target. Required for device builds, unused by simulator builds. See [Running on an iOS device](#running-on-an-ios-device). |
+| `bundle_id` | The bundle identifier, as Xcode's `PRODUCT_BUNDLE_IDENTIFIER`. Required. |
+| `families` | Device families. Defaults to `["iphone"]`, where `flutter create` targets iPhone and iPad. An iPhone-only app runs in a small window on iPadOS. To add `"ipad"`, first remove the 76x76@1x icon from the icon set `flutter create` writes, because `actool` rejects it for an iPad app. |
+| `app_name` | The bundle's name (`<app_name>.app`, and `$(PRODUCT_NAME)` in the `Info.plist`). Defaults to the target name. The name under the icon is the `CFBundleDisplayName` in `ios/Runner/Info.plist`. |
+| `minimum_os_version` | Defaults to `"15.0"`, the iOS the prebuilt engine is built for. A lower value fails the build. |
+| `info_plist` | Used in place of `ios/Runner/Info.plist`. Keep `UISceneDelegateClassName` as `$(PRODUCT_MODULE_NAME).SceneDelegate`, as `flutter create` writes it: the runner's module is named after the target, so `Runner.SceneDelegate` isn't found. |
+| `build_name`, `build_number`, `version` | See [App version](#app-version). |
+| `launch_storyboard` | Used in place of `ios/Runner/Base.lproj/LaunchScreen.storyboard`. |
+| `entitlements` | Used in place of `ios/Runner/Runner.entitlements`, which the macro uses if it exists. `flutter create` writes none, and an app without one is fine. `False` ships none even if the file exists (see [Running on an iOS device](#running-on-an-ios-device)). |
+| `additional_entitlements` | Entitlement files merged into the app's, in every mode. With no `Runner.entitlements`, they are the app's entitlements. See [Release builds and permissions](#release-builds-and-permissions). |
+| `provisioning_profile` | The profile a device build is signed with, usually a `local_provisioning_profile` target. Required for a device build, unused by a simulator build. |
 | `app_icons` | Defaults to the `AppIcon.appiconset` in `ios/Runner/Assets.xcassets`. See [App icons](#app-icons). |
 | `runner_deps` | `swift_library` targets linked into the runner. See [App Intents](#app-intents). |
 
-`rules_apple`'s `ios_application` handles the transition to iOS arm64. The target you name is a thin one in front of it that keeps the platform of the build: `bazel build //...` skips the app on a platform that is neither macOS nor iOS (a Linux CI runner), and a `target_compatible_with` you pass is kept beside that. The archive is `<name>.ipa`.
+Other arguments, such as `extensions` and `app_intents`, pass through to rules_apple's `ios_application`.
+
+Debug and profile builds add `NSBonjourServices` and `NSLocalNetworkUsageDescription` to the `Info.plist`, so the engine can advertise the Dart VM service on the local network, as `flutter build` does. Release builds leave them out. If the app needs local network access itself, declare both in `ios/Runner/Info.plist`. Your values are kept in every mode, and the VM service's entry is added to your `NSBonjourServices`.
 
 <details>
 <summary>Composable rules</summary>
 
+These are the pieces the macro assembles. This mirrors the Bazel-generated runner in [`e2e/ios_example`](e2e/ios_example/BUILD.bazel), which needs no `ios/Runner/`.
+
 ```starlark
+load("@rules_apple//apple:ios.bzl", "ios_application")
 load("@rules_flutter//flutter:ios.bzl",
+    "IOS_DEFAULT_LAUNCH_STORYBOARD",
+    "IOS_MINIMUM_OS_VERSION",
     "flutter_entitlements_merge",
     "flutter_ios_engine",
     "flutter_ios_app_framework_gen",
     "flutter_ios_dropped_frameworks_gen",
     "flutter_ios_info_plist_gen",
     "flutter_ios_native_frameworks_gen",
+    "flutter_ios_privacy_manifests_gen",
     "flutter_ios_registrant_gen",
     "flutter_ios_runner_lib_gen")
 
 flutter_ios_app_framework_gen(name = "my_framework", application = ":my_app")
 flutter_ios_registrant_gen(name = "my_registrant", application = ":my_app")
 flutter_ios_engine(name = "my_engine")
+flutter_ios_privacy_manifests_gen(name = "my_privacy_manifests", application = ":my_app")
+
+# Debug and profile builds also get the VM service's Info.plist keys.
 flutter_ios_info_plist_gen(name = "my_info_plist", app_name = "My App")
 
-# Frameworks for the app's Native Assets and `native_deps` libraries. If you
-# leave this out of `deps` below, the app builds and renders normally and
-# then fails every native call at runtime.
+# Frameworks for the app's native assets and `native_deps` libraries. Leave
+# this out of `deps` below and the app builds and renders, then fails every
+# native call at runtime.
 flutter_ios_native_frameworks_gen(name = "my_native_frameworks", application = ":my_app")
 
-# Those frameworks are every code asset that could ship. Outside debug, a link
-# hook may drop some: the app carries their list, and the post-processor
-# removes them before the app is signed.
+# The frameworks above are every code asset that could ship. Outside debug
+# builds, a link hook may drop some. The app carries the list, and the
+# post-processor removes them before the app is signed.
 flutter_ios_dropped_frameworks_gen(name = "my_dropped_frameworks", application = ":my_app")
 
 flutter_ios_runner_lib_gen(
     name = "my_runner",
+    # Links the app's plugins into the runner.
+    application = ":my_app",
     registrant = ":my_registrant",
     engine = ":my_engine",
 )
@@ -1375,8 +1457,10 @@ ios_application(
     name = "my_ios_app",
     bundle_id = "com.example.myapp",
     families = ["iphone"],
-    minimum_os_version = "15.0",
-    resources = select({
+    minimum_os_version = IOS_MINIMUM_OS_VERSION,
+    infoplists = [":my_info_plist"],
+    launch_storyboard = IOS_DEFAULT_LAUNCH_STORYBOARD,
+    resources = [":my_privacy_manifests"] + select({
         "@rules_flutter//flutter/private:dbg": [],
         "//conditions:default": [":my_dropped_frameworks"],
     }),
@@ -1392,10 +1476,22 @@ ios_application(
 
 #### Running on an iOS device
 
-Simulator builds need no code signing. Device builds need a provisioning profile, which is per-developer and should stay out of version control. `flutter_ios_app` takes it directly:
+In Xcode you pick a team and a provisioning profile under Signing & Capabilities. Here the profile is an attribute of the app, `provisioning_profile`, and Xcode is still how you get one.
+
+**Getting a profile.** You need a development profile that covers your `bundle_id` and lists your device, installed in `~/Library/Developer/Xcode/UserData/Provisioning Profiles/`. Getting one is an Apple Developer account operation, and the rules can't do it for you. Create it in the developer portal and double-click the download, or let Xcode's automatic signing make it from any project with the same bundle id:
+
+```sh
+xcodebuild -project <some>.xcodeproj -scheme <scheme> -configuration Debug \
+  -destination generic/platform=iOS \
+  -allowProvisioningUpdates -allowProvisioningDeviceRegistration build
+```
+
+The project can be a scratch one. The app you build with Bazel has no `.xcodeproj` and doesn't need one. `-allowProvisioningDeviceRegistration` adds the connected device to the profile.
+
+**Naming the profile.** rules_apple's `local_provisioning_profile` finds an installed profile by its `Name`:
 
 ```starlark
-# In a git-ignored //device package, so the credential stays local.
+# device/BUILD.bazel, in a git-ignored //device package
 load("@rules_apple//apple:apple.bzl", "local_provisioning_profile")
 
 local_provisioning_profile(
@@ -1404,6 +1500,18 @@ local_provisioning_profile(
     tags = ["manual"],
 )
 ```
+
+The name isn't always `iOS Team Provisioning Profile: <bundle id>`. When Xcode covers your bundle id with the team's wildcard profile, as it does for the examples here, the name is `iOS Team Provisioning Profile: *`. To list the names of the profiles you have:
+
+```sh
+for f in ~/Library/Developer/Xcode/UserData/Provisioning\ Profiles/*.mobileprovision; do
+  security cms -D -i "$f" | plutil -extract Name raw -
+done
+```
+
+If several profiles have the name, rules_apple takes the newest. Its `team_id` attribute picks one team's. It doesn't skip expired profiles. Free "Personal Team" profiles expire after seven days, so when a device refuses an app that built, make a fresh profile the same way. A build that fails with `no provisioning profile was found named '...'` has no profile of that name at all.
+
+**The device target.** Keep the device app in your committed BUILD file, beside the simulator one. The only difference is the profile:
 
 ```starlark
 flutter_ios_app(
@@ -1414,46 +1522,36 @@ flutter_ios_app(
 )
 ```
 
-That is the only difference from the simulator target, unless the app ships entitlements its profile cannot grant — see below. `flutter_ios_app` is tagged `manual` by default, so `bazel build //...` on a fresh clone does not try to load the missing `//device` package. `bazel query 'deps(//...)'` still follows the label of a `manual` target into it, so a repository that wants that query to work on a fresh clone points `provisioning_profile` at a `label_flag` whose default is a target that fails with setup steps, and sets the flag to `//device:profile` in `.bazelrc.user`. `e2e/hello_world` does this.
+Put only the `local_provisioning_profile` in the git-ignored package, because it is the one fact that differs between developers. A whole device app in an ignored package is invisible to review and CI, and drifts from the simulator app. If you assemble the app from the composable rules, give the device `ios_application` the same `deps` as the simulator one.
 
-Keep the app target in the committed BUILD file and put only the `local_provisioning_profile` in `//device`. The profile is the one genuinely per-developer fact. If the whole device app lives in a git-ignored package it is invisible to review and CI, and it drifts. Two of this repository's own examples once had a device app that had quietly diverged from its committed simulator twin. The same advice applies if you assemble the app from the composable rules: give the device `ios_application` the same `deps` as the simulator one.
+Without `provisioning_profile`, a device build fails during analysis. That holds for a build you don't sign as well (see "Signing later" below), because rules_apple takes the bundle's `embedded.mobileprovision` and entitlements from the profile.
 
-Then run it:
+`flutter_ios_app` is `manual` by default, so `bazel build //...` on a fresh clone doesn't load the missing `//device` package. `bazel query 'deps(//...)'` still follows the label into it. If you want that query to work on a fresh clone, point `provisioning_profile` at a `label_flag` whose default target fails with the setup steps, and set the flag to `//device:profile` in `.bazelrc.user`. [`e2e/ios_example`](e2e/ios_example/BUILD.bazel) does this.
+
+**Running it.** `-d ios` runs on the attached device, and `-d ios:<id>` on a particular one. [`flutter_bazel devices`](#choosing-a-device) lists each device with its id. The tool builds the app for the device with `-c dbg`:
 
 ```sh
 bazel run @rules_flutter//tools/dev_tool:flutter_bazel -- run -t //:my_app_ios_device -d ios
 ```
 
-Each iOS example ships a `device.example/` folder. Copy it to a git-ignored `device/`, set your bundle id, and add `common --//:device_profile=//device:profile` to the example's `.bazelrc.user`.
-
-**Finding the profile's name.** `profile_name` matches the profile's `Name` field, and that is not always `iOS Team Provisioning Profile: <bundle id>`. Xcode mints a per-bundle-id profile only for an App ID registered in the developer portal. For an unregistered id, which most example and scratch apps have, automatic signing issues the team wildcard profile, `iOS Team Provisioning Profile: *`, and that is what covers your bundle id. List what you have:
+To build it yourself, ask for the device's CPU:
 
 ```sh
-for f in ~/Library/Developer/Xcode/UserData/Provisioning\ Profiles/*.mobileprovision; do
-  security cms -D -i "$f" | plutil -extract Name raw -
-done
+bazel build //:my_app_ios_device -c opt --ios_multi_cpus=arm64
 ```
 
-Without `provisioning_profile`, a device build fails at analysis, and the message says that rules_apple needs the profile even for an app it does not sign in that build.
+The first time a new app runs, the device asks for Local Network permission. Allow it, or `flutter_bazel` can't find the app's VM service. [Physical iOS devices](#physical-ios-devices) covers how the tool connects and what to check when it can't.
 
-**Signing later.** `flutter build ios --no-codesign` builds an app with no signing identity at hand, for a CI that signs elsewhere. The equivalent here is rules_apple's sign-later flow. Build the device app with `--features=disable_legacy_signing`, which leaves the `.ipa` unsigned, and take the `combined_dossier_zip` output group:
+Each iOS example in `e2e/` has a `device.example/` folder. Copy it to `device/`, rename `device/BUILD.bazel.example` to `device/BUILD.bazel`, set `profile_name` to your profile's name, and add `common --//:device_profile=//device:profile` to the example's `.bazelrc.user`.
 
-```sh
-bazel build //:my_app_ios_device -c opt --ios_multi_cpus=arm64 \
-    --features=disable_legacy_signing \
-    --output_groups=+combined_dossier_zip
-```
-
-The dossier holds what rules_apple's `dossier_codesigningtool` needs to sign the bundle on a machine that has the identity. The profile is still required, because it supplies the bundle's `embedded.mobileprovision` and its entitlements. `--no-codesign` differs here: Xcode leaves the profile out as well, and rules_apple's sign-later model has no equivalent.
-
-**Entitlements your profile cannot grant.** A simulator build is ad-hoc signed and validates nothing. A device build is signed against the profile, and an entitlement the profile does not grant fails it:
+**Entitlements your profile can't grant.** A simulator build isn't checked against a profile. A device build is signed against one, and an entitlement the profile doesn't grant fails it:
 
 ```
-Target "//:my_app_ios_device" uses entitlements with the "aps-environment" key,
+Target "@@//:__my_app_ios_device_app" uses entitlements with the "aps-environment" key,
 but the profile does not have this key
 ```
 
-`aps-environment` is the common one. Xcode writes it into `ios/Runner/Runner.entitlements` the moment Push Notifications is enabled, it stays there long after the code that used it is gone, and a team wildcard profile can never grant it — push requires a registered App ID. The message names the profile, so the file is the last place you look, and `flutter_ios_app` discovers it silently because it is on disk. Pass `entitlements = False` on the device target to ship none:
+The target it names is the rules_apple app behind yours. `aps-environment` is the usual cause. Xcode writes it into `ios/Runner/Runner.entitlements` when you turn on Push Notifications, it stays after the code that used it is gone, and a team wildcard profile can't grant it, because push needs a registered App ID. `flutter_ios_app` picks the file up because it is on disk, so nothing in your BUILD file mentions it. Pass `entitlements = False` on the device target to ship none:
 
 ```starlark
 flutter_ios_app(
@@ -1465,57 +1563,57 @@ flutter_ios_app(
 )
 ```
 
-Deleting the file is the wrong fix. It is the app's real answer for the profile that *does* grant push, and Xcode will write it again.
+Don't delete the file. It is the right entitlements for a profile that does grant push, and Xcode will write it again.
 
-**Getting a profile.** This is an Apple Developer account operation, and the rules cannot do it for you. You need a development profile whose App ID matches your `bundle_id`, installed under `~/Library/Developer/Xcode/UserData/Provisioning Profiles/`. Either create the App ID and a profile in the developer portal, download it, and double-click it, or let Xcode do it from any project with the right bundle id and automatic signing:
+**Signing later.** `flutter build ios --no-codesign` builds an app with no signing identity at hand, for a CI that signs elsewhere. The equivalent here is rules_apple's sign-later flow. Build the device app with `--features=disable_legacy_signing`, which leaves the `.ipa` unsigned, and take the `combined_dossier_zip` output group:
 
 ```sh
-xcodebuild -project <some>.xcodeproj -scheme <scheme> -configuration Debug \
-  -destination generic/platform=iOS \
-  -allowProvisioningUpdates -allowProvisioningDeviceRegistration build
+bazel build //:my_app_ios_device -c opt --ios_multi_cpus=arm64 \
+    --features=disable_legacy_signing \
+    --output_groups=+combined_dossier_zip
 ```
 
-The project can be a scratch project. It does not need to be the app you build with Bazel, which has no `.xcodeproj` at all. Free "Personal Team" profiles expire after about seven days. When a build fails with "no provisioning profile was found named …", mint a fresh one.
+The dossier holds what rules_apple's `dossier_codesigningtool` needs to sign the bundle on a machine that has the identity. The profile is still required, because it supplies the bundle's `embedded.mobileprovision` and entitlements. Xcode's `--no-codesign` leaves the profile out too, and rules_apple has no equivalent of that.
 
 #### Checking an iOS release build
 
-There is no way to run a release iOS build without a signing credential. That matters because release-only problems, such as [missing permissions](#release-builds-and-permissions), show up when you run the app, not when you read the code.
+You can't run a release iOS build without a provisioning profile, because only a device runs one. That matters because release-only problems, such as [missing permissions](#release-builds-and-permissions), show up when the app runs, not when you read the code.
 
 - **Device, `-c opt`.** The real thing. Needs a provisioning profile.
-- **Simulator, `-c opt`.** Refused at analysis: "The iOS simulator runs debug builds only". So is the default `fastbuild`. The simulator engine runs kernel under the JIT and cannot load an AOT snapshot, so such a bundle would install, launch, and show a blank white screen with only `Engine run configuration was invalid` in the system log. `flutter build ios --simulator --release` refuses it too.
+- **Simulator, `-c opt`, or the default `fastbuild`.** Fails during analysis with "The iOS simulator runs debug builds only". The simulator engine runs kernel under the JIT and can't load an AOT snapshot, so the app would launch to a blank white screen, with only `Engine run configuration was invalid` in the system log. `flutter build ios --simulator --release` refuses it too.
 
-Use `-c dbg` on the simulator and a device for release. A test that needs a simulator bundle under a plain `bazel test //...` gets one from `flutter_ios_simulator_build`, which builds its `targets` with `-c dbg` whatever the command line says. Name it in a test's `data`, or use `flutter_ios_simulator_build_test` in place of a `build_test`:
+So use `-c dbg` on the simulator, and a device for release. A test that needs a simulator app under a plain `bazel test //...` gets one from `flutter_ios_simulator_build`, which builds its `targets` with `-c dbg` whatever the command line says. Name it in a test's `data`, or use `flutter_ios_simulator_build_test` in place of a `build_test`:
 
 ```starlark
 load("@rules_flutter//flutter:ios.bzl", "flutter_ios_simulator_build_test")
 
 flutter_ios_simulator_build_test(
     name = "ios_app_build_test",
-    targets = [":app_ios"],
+    targets = [":my_app_ios"],
 )
 ```
 
 ### App icons
 
-On Apple platforms the icon comes from an asset catalog. `actool` compiles the catalog and needs to be told which set inside it is the app icon, which is what `rules_apple`'s `app_icons` attribute does and what listing the same PNGs under `resources` cannot. `flutter_ios_app` and `flutter_macos_app` find the `AppIcon.appiconset` that `flutter create` wrote and forward it, so an app that never mentions its icon ships the one in its tree, the same as `flutter build`.
+`flutter_ios_app` and `flutter_macos_app` ship the icon in your tree, as `flutter build` does. They pass the `AppIcon.appiconset` from `ios/Runner/Assets.xcassets` or `macos/Runner/Assets.xcassets` to rules_apple's `app_icons`, which tells `actool` which set in the catalog is the app icon. Listing the same PNGs under `resources` doesn't do that.
 
-To ship a different icon, pass `app_icons` the files of an `.appiconset` or of an Icon Composer `.icon` bundle. `rules_apple` 4.5+ generates the older sizes from an `.icon` bundle. Name one or the other, not both. `app_icons = []` ships no icon.
+To ship a different icon, pass `app_icons` the files of an `.appiconset`, or of an Icon Composer `.icon` bundle. An `.icon` bundle needs Xcode 26 or later. Name one or the other: rules_apple fails a build given both. With `minimum_os_version` at 26 or above, rules_apple accepts only an `.icon` bundle. `app_icons = []` ships no icon.
 
-Discovery is per platform, and a missing catalog is not an error. A tree made with `flutter create --platforms=ios .` has `ios/Runner/Assets.xcassets` and no macOS counterpart, so the iOS app gets its icon and the macOS app gets the placeholder. If one platform shows your icon and the other does not, check for the catalog first.
+If `Assets.xcassets/AppIcon.appiconset` is missing from `ios/Runner/` or `macos/Runner/`, that app ships the generic icon, with no warning. If one platform shows your icon and the other doesn't, check that platform's catalog first.
 
-macOS icons use the platform's own grid rather than a full-bleed square: the rounded shape sits inset to roughly 824 of the 1024-point canvas, which is what makes it line up with other Dock icons. The rules pass the catalog through untouched.
+A macOS icon follows Apple's grid: the rounded shape sits inset at about 824 points of the 1024-point canvas, so that it lines up with other Dock icons. A full-bleed square looks too big. The rules pass the catalog through as it is.
 
-One `flutter create` quirk is handled for you on macOS. Its `Info.plist` declares `CFBundleIconFile` as an empty string for Xcode to fill in, while `macos_application` generates its own value from the catalog, and Apple's plisttool refuses two different values for one key. The macro drops the empty placeholder. A plist that names a real icon file is left alone, and will still conflict if you also pass `app_icons`.
+The `Info.plist` `flutter create` writes for macOS has an empty `CFBundleIconFile` for Xcode to fill in. `macos_application` writes its own value from the catalog, and rules_apple refuses two different values for one key, so the macro drops the empty one. A plist that names a real icon file is left alone, and fails the build if you also have an icon set.
 
 ### App Intents
 
-To ship App Intents, give the Swift library to two attributes. `runner_deps` links it into the runner, so its code is in the binary. rules_apple's `app_intents` (which passes through `**kwargs`) extracts the metadata into the bundle: `Contents/Resources/Metadata.appintents` on macOS, `Metadata.appintents` at the bundle root on iOS. `app_intents` does not link the library, and `runner_deps` does not extract anything, so an app that gives it to only one ships either metadata with no code or code that the system never learns about.
+To ship App Intents, give the Swift library to two attributes. `runner_deps` links it into the runner, so its code is in the binary. rules_apple's `app_intents`, which the macros pass through, extracts its metadata into the bundle: `Contents/Resources/Metadata.appintents` on macOS, `Metadata.appintents` at the bundle root on iOS. Each does only its own half. Given to only one, the app ships metadata with no code, or code the system never learns about.
 
 ```starlark
 swift_library(
     name = "intents",
     srcs = ["Intents/PingIntent.swift"],
-    # rules_apple's aspect refuses a library that does not name the framework.
+    # rules_apple's app_intents fails a library that doesn't link AppIntents.
     linkopts = ["-Wl,-framework,AppIntents"],
     module_name = "Intents",
 )
@@ -1528,22 +1626,23 @@ flutter_macos_app(
 )
 ```
 
-`e2e/macos_example` and `e2e/ios_example` each build such an app and check the bundle names the intent and the binary links it. When `appintentsmetadataprocessor` fails on a schema validation error, rules_apple's wrapper reports `version.json.sorted: No such file or directory` and hides the processor's own message. Run the processor by hand to read the real error.
+[`e2e/macos_example`](e2e/macos_example/BUILD.bazel) and [`e2e/ios_example`](e2e/ios_example/BUILD.bazel) each build such an app, and check that the bundle's metadata names the intent and the binary links it.
+
+When `appintentsmetadataprocessor` fails on a schema validation error, rules_apple's wrapper reports `version.json.sorted: No such file or directory` and hides the processor's own message. Run the processor by hand to read it.
 
 ### App extensions
 
-Widgets, Control Center controls, share extensions and other app extensions are written in Swift and built with rules_apple's `ios_extension` or `macos_extension`. `flutter_ios_app` and `flutter_macos_app` pass `extensions` through to `ios_application` and `macos_application`, which embed each `.appex` in `PlugIns/` (iOS) or `Contents/PlugIns/` (macOS). Flutter does not run inside an extension: an extension cannot link the Flutter engine or Dart code from these rules. Share data with the app through an App Group instead.
+Widgets, Control Center controls, share extensions and other app extensions are written in Swift and built with rules_apple's `ios_extension` or `macos_extension`. Pass them to `flutter_ios_app` or `flutter_macos_app` as `extensions`, and rules_apple embeds each `.appex` in `PlugIns/` on iOS or `Contents/PlugIns/` on macOS. Flutter doesn't run in an extension: an extension can't link the Flutter engine or Dart code from these rules. To share data with the app, use an App Group.
 
 ```starlark
 load("@rules_apple//apple:ios.bzl", "ios_extension")
 load("@rules_flutter//flutter:ios.bzl", "flutter_apple_bundle_version", "flutter_ios_app")
 load("@rules_swift//swift:swift.bzl", "swift_library")
 
-# The version of the app and its extension.
+# The application's version, for the app and its extension.
 flutter_apple_bundle_version(
     name = "version",
-    build_name = "2.3.4",
-    build_number = "42",
+    application = ":my_app",
 )
 
 swift_library(
@@ -1575,22 +1674,32 @@ flutter_ios_app(
 )
 ```
 
-What the extension needs:
+What an extension needs:
 
-- **A version equal to the app's.** rules_apple gives an extension no version unless you pass one, and the system expects an extension's version to match its app's. Declare the version once, with `flutter_apple_bundle_version` (from `flutter:ios.bzl` or `flutter:macos.bzl`, taking `build_name` and `build_number`) or rules_apple's `apple_bundle_version`, and pass it as the `version` of the app and of each extension.
+- **The app's version.** rules_apple gives an extension no version unless you pass one, and the system expects an extension's version to match its app's. Declare the version once and pass it as the `version` of the app and of each extension. `flutter_apple_bundle_version`, from `flutter:ios.bzl` or `flutter:macos.bzl`, takes the version of the `application` you give it, so the bundles and `appBuildName` agree. rules_apple's `apple_bundle_version` works too, if it gives the application's version: the app's build fails on any other.
 - **A bundle id under the app's**, such as `com.example.myapp.widgets`.
-- **An Info.plist with the bundle keys.** Besides `NSExtension` and its `NSExtensionPointIdentifier`, give `CFBundleName` (`$(PRODUCT_NAME)`), `CFBundleExecutable` (`$(EXECUTABLE_NAME)`), `CFBundleIdentifier` (`$(PRODUCT_BUNDLE_IDENTIFIER)`) and `CFBundlePackageType` `XPC!`. Without them the simulator refuses to install the app.
-- **Its App Intents.** A control's button, an interactive widget or a configurable widget runs an App Intent in the extension, so give the library to the extension's `app_intents` as well as its `deps`. rules_apple 5.4.0's `macos_extension` has no `app_intents` attribute. `e2e/macos_example/patches/` has a patch that adds it; apply it with `single_version_override(module_name = "rules_apple", version = "5.4.0", patch_strip = 1, patches = [...])`. Overrides only apply in the root module, so an app needs the override in its own `MODULE.bazel`; it does not come with rules_flutter.
-- **On macOS, a sandbox.** macOS loads a widget or share extension only if its entitlements include `com.apple.security.app-sandbox`.
-- **Visibility** to the package of the app target, if it lives elsewhere. `flutter_ios_app` and `flutter_macos_app` must sit in the package that holds `ios/Runner/` or `macos/Runner/`.
+- **An Info.plist with the bundle keys.** Besides `NSExtension` and its `NSExtensionPointIdentifier`, give `CFBundleName` (`$(PRODUCT_NAME)`), `CFBundleExecutable` (`$(EXECUTABLE_NAME)`), `CFBundleIdentifier` (`$(PRODUCT_BUNDLE_IDENTIFIER)`) and a `CFBundlePackageType` of `XPC!`. Without them the simulator refuses to install the app.
+- **Its App Intents.** A control's button, an interactive widget and a configurable widget each run an App Intent in the extension, so give the library to the extension's `app_intents` as well as its `deps`. rules_apple 5.4.0's `macos_extension` has no `app_intents` attribute. [`e2e/macos_example/patches/`](e2e/macos_example/patches/) has a patch that adds it. Apply it in your own `MODULE.bazel` with `single_version_override(module_name = "rules_apple", version = "5.4.0", patch_strip = 1, patches = [...])`. It doesn't come with rules_flutter, because only the root module's overrides apply.
+- **On macOS, the sandbox.** macOS loads a widget or share extension only if its entitlements include `com.apple.security.app-sandbox`.
+- **Visibility** to the app's package, if the extension lives elsewhere. `flutter_ios_app` and `flutter_macos_app` have to sit in the package that holds `ios/Runner/` or `macos/Runner/`.
 
-An extension can have a higher `minimum_os_version` than the app. rules_apple accepts that without comment and each bundle records its own minimum, so the system skips the extension on an older OS. Control Center controls need iOS 18 or macOS 26; either raise the extension's minimum or include the control in the `WidgetBundle` behind `if #available`, as the examples do.
+An extension can have a higher `minimum_os_version` than its app. Each bundle records its own minimum, and the system leaves the extension out on an older OS. Control Center controls need iOS 18 or macOS 26. Either raise the extension's minimum to that, or include the control in the `WidgetBundle` behind `if #available`, as the examples do.
 
-**App Groups.** Give each extension an `entitlements` file with `com.apple.security.application-groups`, and merge the same file into the app with `additional_entitlements`. A simulator build is not checked against anything, so the group works there. On macOS, the `group.` form needs a provisioning profile that lists the group, and the team-prefixed form (`<TEAM ID>.name`) needs a signature from that team, which a team wildcard profile gives without listing any group. An app signed ad hoc gets neither: it builds, and its extensions register, but writes into the group container are refused.
+**App Groups.** Give each extension an `entitlements` file with `com.apple.security.application-groups`, and merge the same file into the app with `additional_entitlements`. A simulator build isn't checked against a profile, so the group works there.
 
-**Signing.** rules_apple signs each extension in its own target, so the app's `provisioning_profile` does not reach its extensions. Give each extension its own `provisioning_profile`. On macOS, an extension without one is signed with the build's `--@rules_apple//apple/build_settings:signing_certificate_name`, and with none set, ad hoc, so it has no team and loses its App Group even inside a team-signed app. A profile can only grant an App Group if it is made for an explicit App ID that has the group, so a device build with groups needs an App ID and a profile for the app and for each extension, registered in the developer portal. The team wildcard profile (`iOS Team Provisioning Profile: *`) covers any bundle id but grants no App Group, and a device build that asks for an entitlement its profile lacks fails. `e2e/ios_example` has a device variant, `:app_extensions_device`, signed with the wildcard; it leaves the App Group out of the app and its extensions for that reason. On macOS the wildcard is enough with a team-prefixed group: `e2e/macos_example`'s `:app_extensions_team` gives the app and each extension the `Mac Team Provisioning Profile: *` wildcard, and the app writes into its group container. Its profile and group live in a git-ignored `//device` package made from `device.example/`, because the group carries the team id; the app reaches them through the `//:device_profile` and `//:device_app_group` flags, which `.bazelrc.user` sets to `//device:profile` and `//device:AppGroup.entitlements`. A macOS `local_provisioning_profile` needs `profile_extension = ".provisionprofile"`; rules_apple otherwise looks for a `.mobileprovision`. `codesign --verify --deep --strict` passes on an app whose extension was signed ad hoc, so it does not catch a missing profile; compare `TeamIdentifier` across the bundles instead, as `:verify_macos_team_signing_test` does.
+On a device, and on macOS, the group depends on how each bundle is signed:
 
-`e2e/ios_example` and `e2e/macos_example` each build an app with a widget extension holding a widget and a control, and a share extension, and check where each lands, what each declares, and that all share one App Group.
+- A profile grants an App Group only if it was made for an explicit App ID that has the group. So an iOS device build with a group needs an App ID and a profile for the app and for each extension, registered in the developer portal.
+- The team wildcard profile, `iOS Team Provisioning Profile: *`, covers any bundle id but grants no App Group, and a device build that asks for an entitlement its profile lacks fails. [`e2e/ios_example`](e2e/ios_example/BUILD.bazel)'s device variant, `:app_extensions_device`, is signed with the wildcard, and leaves the group out of the app and its extensions for that reason.
+- On macOS, a `group.` identifier needs a profile that lists the group. A team-prefixed one, `<TEAM ID>.name`, needs only a signature from that team, which the wildcard `Mac Team Provisioning Profile: *` gives. An app signed ad hoc gets neither: it builds and its extensions register, but writes into the group container are refused.
+
+**Signing extensions.** rules_apple signs each extension as its own target, so the app's `provisioning_profile` doesn't reach its extensions. Give each extension its own `provisioning_profile`. On macOS, an extension without one is signed with the build's `--@rules_apple//apple/build_settings:signing_certificate_name`, or ad hoc if that isn't set. Then it has no team, and loses its App Group even inside a team-signed app. `codesign --verify --deep --strict` passes on such an app, so it doesn't catch a missing profile. Compare `TeamIdentifier` across the bundles instead.
+
+A macOS `local_provisioning_profile` needs `profile_extension = ".provisionprofile"`. Without it, rules_apple looks for a `.mobileprovision`.
+
+[`e2e/macos_example`](e2e/macos_example/BUILD.bazel)'s `:app_extensions_team` shows the team-prefixed group working. The app and each extension are signed with the Mac wildcard, and the app writes into its group container, which `:verify_macos_team_signing_test` checks. Because the group carries the team id, its profile and entitlements file live in a git-ignored `//device` package made from `device.example/`. The app reaches them through the `//:device_profile` and `//:device_app_group` flags, which `.bazelrc.user` sets to `//device:profile` and `//device:AppGroup.entitlements`.
+
+`e2e/ios_example` and `e2e/macos_example` each build an app with a widget extension, holding a widget and a control, and a share extension. They check where each extension lands, what each declares, and that all of them share one App Group.
 
 ### Android
 
