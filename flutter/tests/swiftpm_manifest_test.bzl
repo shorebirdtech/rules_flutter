@@ -323,6 +323,17 @@ def _swift_package_target_test_impl(ctx):
     asserts.equals(env, "darwin/foo", target.dir)
     asserts.equals(env, ["darwin/foo/Sources/foo/Plugin.mm", "darwin/foo/Sources/foo/cpp"], target.sources)
     asserts.equals(env, "darwin/foo/Sources/foo", target.public_headers)
+
+    # An empty `path` is the package's root and an empty `publicHeadersPath`
+    # the target's directory, as SwiftPM reads them; a missing one is the default.
+    target = swift_package_targets(_dump([_target(path = "", publicHeadersPath = "")]), "foo", "ios", "ios/foo").targets[0]
+    asserts.equals(env, "ios/foo", target.dir)
+    asserts.equals(env, "ios/foo", target.public_headers)
+    target = swift_package_targets(_dump([_target(path = "Sources/foo/", publicHeadersPath = "")]), "foo", "ios", "ios/foo").targets[0]
+    asserts.equals(env, "ios/foo/Sources/foo", target.public_headers)
+    target = swift_package_targets(_dump([_target()]), "foo", "ios", "ios/foo").targets[0]
+    asserts.equals(env, "ios/foo/Sources/foo", target.dir)
+    asserts.equals(env, "ios/foo/Sources/foo/include", target.public_headers)
     return unittest.end(env)
 
 swift_package_target_test = unittest.make(_swift_package_target_test_impl)

@@ -492,7 +492,11 @@ def _target_build(dump, target, deps, platform, manifest_dir, problems, defines)
     """How one regular target of the package is built; None after a problem."""
     name = target.get("name")
     count = len(problems)
-    target_dir = _join(manifest_dir, target.get("path") or ("Sources/" + name))
+
+    # An empty `path` or `publicHeadersPath` is the directory it is relative
+    # to, as SwiftPM reads it; only a missing one takes the default.
+    path = target.get("path")
+    target_dir = _join(manifest_dir, "Sources/" + name if path == None else path)
     if target_dir == None or not (target_dir + "/").startswith(manifest_dir + "/"):
         problems.append("its target `{}` is outside the package".format(name))
         return None
@@ -506,7 +510,8 @@ def _target_build(dump, target, deps, platform, manifest_dir, problems, defines)
 
     sources = [within(p, "the source") for p in (target.get("sources") or ["."])]
     exclude = [within(p, "the excluded path") for p in target.get("exclude", [])]
-    public_headers = within(target.get("publicHeadersPath") or "include", "the public header path")
+    public_headers_path = target.get("publicHeadersPath")
+    public_headers = within("include" if public_headers_path == None else public_headers_path, "the public header path")
 
     # A build tool plugin runs code at build time (cargokit's builds a Rust
     # crate), which rules_flutter does not.
