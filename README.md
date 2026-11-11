@@ -1746,54 +1746,95 @@ A macOS `local_provisioning_profile` needs `profile_extension = ".provisionprofi
 
 ### Android
 
-Run `flutter create --platforms=android .` first so `android/app/src/main/` exists with its manifest, resources, and Kotlin sources.
+`flutter_android_app` builds an APK from your `flutter_application`. It reads `android/app/src/main/` as `flutter create --platforms=android .` writes it: the manifest, the resources and the Kotlin or Java runner. Without that directory it generates a manifest whose activity is Flutter's own `FlutterActivity`.
+
+Here are the parts of `android/app/build.gradle.kts` that matter to the build:
+
+```kotlin
+// android/app/build.gradle.kts
+android {
+    namespace = "com.example.my_app"
+    compileSdk = flutter.compileSdkVersion
+    ndkVersion = flutter.ndkVersion
+
+    defaultConfig {
+        applicationId = "com.example.my_app"
+        minSdk = flutter.minSdkVersion
+        targetSdk = flutter.targetSdkVersion
+        versionCode = flutter.versionCode
+        versionName = flutter.versionName
+    }
+}
+```
+
+And the same app in Bazel:
 
 ```starlark
+# BUILD.bazel
 load("@rules_flutter//flutter:android.bzl", "flutter_android_app")
 
 flutter_android_app(
     name = "my_app_android",
     application = ":my_app",
-    application_id = "com.example.myapp",
+    application_id = "com.example.my_app",   # applicationId
+    # Optional. namespace; defaults to application_id.
+    namespace = "com.example.my_app",
+    # Optional. minSdk; defaults to 24, as flutter.minSdkVersion.
+    min_sdk_version = "24",
+    # Optional. targetSdk; defaults to 35.
+    target_sdk_version = "35",
 )
 ```
 
-Add these to `MODULE.bazel`:
+`versionCode` and `versionName` come from the `flutter_application`'s `build_number` and `build_name`, as Gradle takes them from the pubspec's `version:` (see [App version](#app-version)). `compileSdk` and `ndkVersion` are set once for the whole build in `MODULE.bazel`, as the next section shows.
+
+Build it for an arm64 phone, or run it on a connected device with hot reload:
+
+```sh
+bazel build //:my_app_android \
+    --@rules_android//flags:android_platforms=@rules_android//:arm64-v8a
+bazel run @rules_flutter//tools/dev_tool:flutter_bazel -- run -t //:my_app_android -d android
+```
+
+The APK is `bazel-bin/my_app_android.apk`. `flutter_android_app` is tagged `manual` by default, so `bazel build //...` skips it. Build it by name, or pass `tags = []`. [Choosing ABIs](#choosing-abis) explains the platform flag, and how to set it once in `.bazelrc`.
+
+#### Setting up the Android SDK and NDK
+
+Add these lines to `MODULE.bazel`, below `rules_flutter`'s `bazel_dep`:
 
 ```starlark
 bazel_dep(name = "rules_android", version = "0.8.1")
 bazel_dep(name = "rules_android_ndk", version = "0.1.5")
-bazel_dep(name = "hermetic_android_toolchains", version = "0.5.0", dev_dependency = True)
 
 # rules_android_ndk 0.1.5 links arm64 libraries for 4 KB pages: see "16 KB
-# pages" below.
+# memory pages" below.
 git_override(
     module_name = "rules_android_ndk",
     commit = "9946c72d5b617115d34dc2efb334f829c558a87b",
     remote = "https://github.com/bazelbuild/rules_android_ndk.git",
 )
 
-use_repo(flutter_pub, "deps")
+bazel_dep(name = "hermetic_android_toolchains", version = "0.5.0", dev_dependency = True)
 
 android = use_extension("@hermetic_android_toolchains//:extensions.bzl", "android", dev_dependency = True)
 
-# The Android platform the app compiles against, and the build tools.
+# compileSdk, and the build tools.
 android.sdk(
     build_tools_version = "35.0.0",
     version = "35",
 )
 
-# The NDK CC toolchain, used for native and FFI deps built for Android and
-# to strip the engine's native libraries, as a Gradle build does. `api_level`
-# is your app's `min_sdk_version` (24 unless you set it).
+# ndkVersion. The NDK builds your C/C++ code for Android and strips the engine's
+# native libraries, as a Gradle build does. `api_level` is your app's
+# `min_sdk_version`.
 android.ndk(
     api_level = 24,
     version = "r28c",
 )
 use_repo(android, "androidndk", "androidsdk")
 
-# Every module's `@androidsdk` and `@androidndk` (rules_android's,
-# rules_android_ndk's, rules_flutter's) are these.
+# Make every module's `@androidsdk` and `@androidndk` (rules_android's,
+# rules_android_ndk's, rules_flutter's) these two.
 rules_android_sdk = use_extension(
     "@rules_android//rules/android_sdk_repository:rule.bzl",
     "android_sdk_repository_extension",
@@ -1815,32 +1856,36 @@ register_toolchains(
 )
 ```
 
-and, once you have read and accepted the licences of the Android SDK and NDK, these to `.bazelrc`, naming the versions you accepted:
+Then read the licences of the Android SDK and NDK. Once you accept them, add these lines to `.bazelrc`, naming the versions you accepted:
 
 ```bazelrc
 common --repo_env=ACCEPTED_ANDROID_SDK_LICENSE_VERSION=35
 common --repo_env=ACCEPTED_ANDROID_NDK_LICENSE_VERSION=r28c
 ```
 
-The androidx and Kotlin jars the app links come pinned by rules_flutter's own lock, so an app whose plugins declare no Maven artifacts needs nothing more. See **Maven dependencies** below for one whose plugins, or whose own Android code, do.
-
-**The SDK and NDK.** [hermetic_android_toolchains](https://github.com/keith/hermetic_android_toolchains) downloads the SDK platform, build tools, platform tools and NDK of the versions you name, each checked against its checksum, so nothing needs to be installed and every machine and CI runner builds with the same tools. It does so for macOS, Linux x86_64 and Windows x86_64 hosts, the hosts Google publishes the NDK for. `r28c` (28.2.13676358) is the NDK Flutter's Gradle plugin builds with. Without the licence lines, the build stops during fetch, saying which line to add:
+Without them, the build stops while fetching and names the line to add:
 
 ```
-Before using the hermetic Android SDK toolchain you must read and accept the
-license for the current version. Once you have done so, add this in your
-'.bazelrc':
+Before using the hermetic Android SDK toolchain you must read and accept the license for the current version. Once you have done so, add this in your '.bazelrc':
 
 common --repo_env=ACCEPTED_ANDROID_SDK_LICENSE_VERSION=35
+
+Current ACCEPTED_ANDROID_SDK_LICENSE_VERSION value was unset.
 ```
 
-On a Mac the downloads are about 1.1 GB, 950 MB of it the NDK, which unpacks to 2.8 GB. Bazel keeps the archives in its repository cache and the unpacked NDK in its repository contents cache, which every workspace on the machine shares; each workspace's output base holds its own 350 MB copy of the SDK.
+[hermetic_android_toolchains](https://github.com/keith/hermetic_android_toolchains) downloads the SDK platform, build tools, platform tools and NDK of the versions you name, and checks each against its checksum. Nothing needs to be installed, and every machine and CI runner builds with the same tools. It has downloads for macOS, Linux x86_64 and Windows x86_64 hosts, the hosts Google publishes the NDK for. `r28c` (28.2.13676358) is the NDK Flutter's Gradle plugin builds with.
 
-**Order of the `bazel_dep` lines.** Keep `rules_flutter`'s above `rules_android`'s, as here. rules_android builds some of its tools from Go, with the first Go SDK the module graph declares: your module's own, then each dependency's in the order your `MODULE.bazel` names them. rules_flutter declares one new enough for the Gazelle the graph resolves; rules_android's own, Go 1.22.4, is not, and with rules_android named first, every Android build fails during analysis with `go: go.work requires go >= 1.24.12 (running go 1.22.4; GOTOOLCHAIN=local)`. A `go_sdk.download` in your own `MODULE.bazel` takes precedence over both.
+On a Mac the downloads are about 1.1 GB, 950 MB of it the NDK, which unpacks to 2.8 GB. Bazel keeps the archives in its repository cache and the unpacked NDK in its repository contents cache, which every workspace on the machine shares. Each workspace's output base holds its own 350 MB copy of the SDK.
 
-**NDK `api_level`.** Set it to the app's `min_sdk_version`, as Gradle compiles native code at `minSdkVersion`. Your `cc_library` code (an FFI library, a plugin's C code) is built against it, and at a higher level can call functions that older devices lack: such a library installs, and then fails to load there with an unresolved symbol. hermetic_android_toolchains defaults to 31.
+**Keep `rules_flutter`'s `bazel_dep` above `rules_android`'s.** rules_android builds some of its tools with Go, using the first Go SDK the module graph declares: your module's own, then each dependency's in the order your `MODULE.bazel` names them. rules_flutter declares a Go new enough for the Gazelle in the graph. rules_android declares Go 1.22.4, which is too old. With rules_android named first, every Android build fails during analysis with `go: go.work requires go >= 1.24.12 (running go 1.22.4; GOTOOLCHAIN=local)`. A `go_sdk.download` in your own `MODULE.bazel` takes precedence over both.
 
-**An installed SDK and NDK instead.** rules_android and rules_android_ndk can take the SDK and NDK installed on the machine, found through two environment variables. In `MODULE.bazel`, in place of everything from `hermetic_android_toolchains` down:
+**Set the NDK's `api_level` to the app's `min_sdk_version`**, as Gradle compiles native code at `minSdk`. Your `cc_library` code (an FFI library, a plugin's C code) is built against that level. At a higher level it can call functions that older devices lack. Such a library installs on an older device, then fails to load there with an unresolved symbol. hermetic_android_toolchains defaults to 31.
+
+The androidx and Kotlin jars the app links come pinned by rules_flutter's own lock. An app whose plugins declare no Maven artifacts needs nothing more. [Maven dependencies](#maven-dependencies) covers one whose plugins, or whose own Android code, do.
+
+#### Using an installed SDK and NDK
+
+rules_android and rules_android_ndk can use an SDK and NDK installed on the machine instead, found through environment variables. In `MODULE.bazel`, replace everything from `hermetic_android_toolchains` down with:
 
 ```starlark
 android_ndk_repository_extension = use_extension(
@@ -1854,8 +1899,7 @@ use_repo(android_ndk_repository_extension, "androidndk")
 
 register_toolchains("@androidndk//:all")
 
-# The Android platform the app compiles against, rather than the newest one
-# installed on the machine.
+# compileSdk. Without it, the newest Android platform installed on the machine.
 android_sdk_repository_extension = use_extension(
     "@rules_android//rules/android_sdk_repository:rule.bzl",
     "android_sdk_repository_extension",
@@ -1864,28 +1908,23 @@ android_sdk_repository_extension.configure(api_level = 35)
 use_repo(android_sdk_repository_extension, "androidsdk")
 ```
 
-Without `configure(api_level = ...)`, rules_android compiles against the newest Android platform installed on the machine, so two machines can build the same app differently: a newer `android.jar` can, for instance, mark a method a plugin's Kotlin calls `@Nullable` and fail its compile. Name a platform you have installed. rules_android_ndk's `api_level` defaults to 31, and the root module's `configure` is the one that counts; a dependency's is ignored. Both variables are read by repository rules while Bazel fetches:
+Set the SDK's `api_level` to a platform you have installed. Left out, rules_android compiles against the newest one on the machine, so two machines can build the same app differently. A newer `android.jar` can, for instance, mark a method `@Nullable` that a plugin's Kotlin calls, and fail its compile. rules_android_ndk's `api_level` defaults to 31. Only the root module's `configure` counts. A dependency's is ignored.
+
+Bazel reads two variables while it fetches:
 
 | Variable | Value | Read by |
 |---|---|---|
-| `ANDROID_HOME` | The SDK root, for example `~/Library/Android/sdk`. | `rules_android` |
-| `ANDROID_NDK_HOME` | A versioned NDK directory, for example `$ANDROID_HOME/ndk/28.2.13676358`. | `rules_android_ndk` |
+| `ANDROID_HOME` | The SDK root, for example `~/Library/Android/sdk`. | rules_android |
+| `ANDROID_NDK_HOME` | A versioned NDK directory, for example `$ANDROID_HOME/ndk/28.2.13676358`. | rules_android_ndk |
 
-`ANDROID_NDK_HOME` has to name the versioned directory, not the `ndk/` folder above it. Pointing at the parent fails with a message that mentions neither the variable nor the mistake:
+`ANDROID_NDK_HOME` has to name the versioned directory, not the `ndk/` folder above it. The parent fails with a message that mentions neither the variable nor the mistake:
 
 ```
 Error in readdir: can't readdir(), not a directory:
   .../Android/sdk/ndk/toolchains/llvm/prebuilt/darwin-x86_64
 ```
 
-Exporting the variables in your shell works. To put them in `.bazelrc`, use `--repo_env`. `--action_env` only reaches build actions, and repository rules never see it:
-
-```bazelrc
-common --repo_env=ANDROID_HOME=/path/to/Android/sdk
-common --repo_env=ANDROID_NDK_HOME=/path/to/Android/sdk/ndk/28.2.13676358
-```
-
-With `ANDROID_NDK_HOME` unset, the build stops during fetch:
+With `ANDROID_NDK_HOME` unset, the build stops while fetching:
 
 ```
 ERROR: An error occurred during the fetch of repository
@@ -1894,9 +1933,62 @@ ERROR: An error occurred during the fetch of repository
   path attribute of android_ndk_repository must be set.
 ```
 
-**Building on Windows.** rules_android 0.8.1 starts its tool JVMs with an initial heap as large as their cap (`-Xms3G` for resource processing, `-Xms8g` for desugaring, D8 and R8), and a JVM commits its initial heap as it starts. Windows counts that against RAM plus the pagefile whether or not the JVM uses it, so on a 16 GB machine a few of them running at once fail the build with `There is insufficient memory for the Java Runtime Environment to continue` and `The paging file is too small for this operation to complete`. Apply `rules_android_no_initial_heap.patch` from [`e2e/android_example/patches/`](e2e/android_example/patches/) in your `single_version_override` of rules_android, as that workspace's `MODULE.bazel` does. It keeps each heap cap and drops only the initial sizes. macOS and Linux build without it.
+You can export the variables in your shell. To set them in `.bazelrc`, use `--repo_env`. `--action_env` reaches only build actions, which run after the fetch:
 
-**Maven dependencies.** The androidx and Kotlin jars the runner and plugins compile against come from `@rules_flutter_maven`, rules_flutter's own rules_jvm_external repository: one resolution of the app's Android libraries, as Gradle makes one per app. rules_flutter declares the embedding's artifacts in it with a lock of its own, and an app that needs no others uses that lock: each jar is fetched by checksum and kept in Bazel's repository cache, so a fresh output base or CI runner does not download it again.
+```bazelrc
+common --repo_env=ANDROID_HOME=/path/to/Android/sdk
+common --repo_env=ANDROID_NDK_HOME=/path/to/Android/sdk/ndk/28.2.13676358
+```
+
+For [remote execution](#remote-execution), use the downloaded NDK. An installed NDK's toolchains match any execution platform.
+
+#### Building on Windows
+
+rules_android 0.8.1 starts its tool JVMs with an initial heap as large as their cap: `-Xms3G` for resource processing, and `-Xms8g` for desugaring, D8 and R8. A JVM commits its initial heap as it starts. Windows counts that against RAM plus the pagefile whether or not the JVM uses it, so on a 16 GB machine a few of these JVMs at once fail the build with `There is insufficient memory for the Java Runtime Environment to continue` and `The paging file is too small for this operation to complete`.
+
+Apply `rules_android_no_initial_heap.patch` from [`e2e/android_example/patches/`](e2e/android_example/patches/) in a `single_version_override` of rules_android, as [`e2e/android_example/MODULE.bazel`](e2e/android_example/MODULE.bazel) does. The patch keeps each heap cap and drops only the initial sizes. macOS and Linux build without it.
+
+#### Choosing ABIs
+
+An APK's ABIs are the platforms of `--@rules_android//flags:android_platforms`, as for any rules_android `android_binary`. One platform builds an APK for that ABI. Several build one APK for all of them, like the fat APK `flutter build apk` makes.
+
+```sh
+# arm64 phones
+bazel build //:my_app_android \
+    --@rules_android//flags:android_platforms=@rules_android//:arm64-v8a
+
+# x86_64 emulators
+bazel build //:my_app_android \
+    --@rules_android//flags:android_platforms=@rules_android//:x86_64
+
+# 32-bit ARM phones
+bazel build //:my_app_android \
+    --@rules_android//flags:android_platforms=@rules_android//:armeabi-v7a
+
+# one APK for all three, as `flutter build apk` makes by default
+bazel build //:my_app_android \
+    --@rules_android//flags:android_platforms=@rules_android//:armeabi-v7a,@rules_android//:arm64-v8a,@rules_android//:x86_64
+```
+
+`android_binary` builds its dependencies once for each platform, and packages what each build brings. So the Flutter engine, the app's `libapp.so`, the native libraries in your plugins' AARs and any C/C++ deps each arrive for every ABI.
+
+Name the platforms exactly as shown. rules_android reads the flag and resolves each label from its own repository, so a platform of your own repository, or one of `@rules_flutter`, is not found. rules_android packages a platform's native libraries into `lib/<platform name>/`, which is why its platforms are named for their ABI. The flag names `@rules_android`, so your root `MODULE.bazel` needs the `bazel_dep` on rules_android from the setup above. The engine for each ABI comes with rules_flutter, and nothing of it goes in your `use_repo`.
+
+Put the platforms you usually build for in `.bazelrc`, with a config for the others:
+
+```bazelrc
+common --@rules_android//flags:android_platforms=@rules_android//:arm64-v8a
+common:android-emulator --@rules_android//flags:android_platforms=@rules_android//:x86_64
+common:android-fat --@rules_android//flags:android_platforms=@rules_android//:armeabi-v7a,@rules_android//:arm64-v8a,@rules_android//:x86_64
+```
+
+Without the flag, rules_android builds for `--platforms`, which is your machine. The engine and the Flutter bundle are incompatible with it, so the build fails with "incompatible", naming the platform that did not satisfy the constraint. `bazel build //...` skips them instead, along with whatever depends on them. `flutter_bazel run -d android` asks the device for its ABI and passes the matching platform itself.
+
+To build an app for fixed ABIs whatever the command line says, as a test of the APK does, wrap it in [`flutter_android_build`](#flutter_android_build).
+
+#### Maven dependencies
+
+The androidx and Kotlin jars the runner and plugins compile against come from `@rules_flutter_maven`, rules_flutter's own rules_jvm_external repository. It is one resolution of the app's Android libraries, as Gradle makes one per app. rules_flutter declares the embedding's artifacts in it, with a lock of its own. An app that needs no other artifacts uses that lock. Each jar is fetched by checksum and kept in Bazel's repository cache, so a fresh output base or CI runner doesn't download it again.
 
 When your plugins declare Maven artifacts, or your own Android code (a `kt_android_library` beside the app, say) needs some, declare an install of the same name in your root `MODULE.bazel`, with the artifacts and a lock file of your own:
 
@@ -1917,79 +2009,78 @@ maven.install(
 use_repo(maven, "rules_flutter_maven")
 ```
 
-Then create the lock and fill it: `touch rules_flutter_maven_install.json && REPIN=1 bazel run @rules_flutter_maven//:pin`. rules_jvm_external merges your artifacts with rules_flutter's into the one resolution and the lock pins both; your code depends on them as `@rules_flutter_maven//:androidx_browser_browser`, the labels rules_jvm_external gives every artifact. Depend on no other repository's copy of a library the app links: the build fails when one Maven library reaches the app from two repositories (see [Plugins' Maven dependencies](#plugins-maven-dependencies)). `known_contributing_modules` lists the other modules whose artifacts join yours. Without it rules_jvm_external prints a notice naming them each time it evaluates the extension, and with it only the listed modules contribute: a module you add later that declares artifacts for `rules_flutter_maven` has to be added to the list. `repositories` replaces the default, Maven Central alone, which lacks the androidx artifacts.
-
-Run `REPIN=1 bazel run @rules_flutter_maven//:pin` again after changing the artifacts, or bumping rules_flutter: Bazel fails the build until you do. rules_android's own tools resolve in its own repository, `@rules_android_maven`, with the lock it ships, and need nothing from you. [`e2e/plugin_example/MODULE.bazel`](e2e/plugin_example/MODULE.bazel) is a worked example for plugins, and [`e2e/android_example/MODULE.bazel`](e2e/android_example/MODULE.bazel) for an app's own Kotlin code.
-
-**ABIs.** The ABIs of the APK are the platforms of `--@rules_android//flags:android_platforms`, as for any rules_android `android_binary`. One platform builds an APK for that ABI; several build one APK for all of them, like the fat APK `flutter build apk` makes. The Flutter engine, the app's `libapp.so`, the native libraries of the AARs your plugins bring and any C/C++ deps are each packaged for every ABI, from one mechanism: `android_binary` builds its dependencies once for each platform and packages what each build brings.
+Then create the lock and fill it:
 
 ```sh
-# arm64 phones
-bazel build //:my_app_android \
-    --@rules_android//flags:android_platforms=@rules_android//:arm64-v8a
-
-# x86_64 emulators
-bazel build //:my_app_android \
-    --@rules_android//flags:android_platforms=@rules_android//:x86_64
-
-# 32-bit ARM phones
-bazel build //:my_app_android \
-    --@rules_android//flags:android_platforms=@rules_android//:armeabi-v7a
-
-# one APK for all three, as `flutter build apk`'s default
-bazel build //:my_app_android \
-    --@rules_android//flags:android_platforms=@rules_android//:armeabi-v7a,@rules_android//:arm64-v8a,@rules_android//:x86_64
+touch rules_flutter_maven_install.json
+REPIN=1 bazel run @rules_flutter_maven//:pin
 ```
 
-The platforms are rules_android's own, `@rules_android//:armeabi-v7a`, `@rules_android//:arm64-v8a` and `@rules_android//:x86_64`, and are named for their ABI because rules_android packages a platform's native libraries into `lib/<platform name>/`. Write them as shown: the flag's value is read by rules_android, which resolves the label from its own repository, so a platform of your own repository, or `@rules_flutter//...`, is not found. The engine of each ABI comes with rules_flutter; nothing of it goes in your `use_repo`.
+rules_jvm_external merges your artifacts with rules_flutter's into the one resolution, and the lock pins both. Your code depends on them by the labels rules_jvm_external gives every artifact, such as `@rules_flutter_maven//:androidx_browser_browser`. Don't depend on another repository's copy of a library the app links. The build fails when one Maven library reaches the app from two repositories (see [Plugins' Maven dependencies](#plugins-maven-dependencies)).
 
-The flag is rules_android's Starlark flag, which rules_android reads first. The short `--android_platforms` also works: rules_android aliases it to that flag (`flag_alias`), and Bazel's native option of the same name is what rules_android falls back to while it exists. The long form names `@rules_android` on the command line, so your root `MODULE.bazel` needs `bazel_dep(name = "rules_android", version = "0.8.1")`.
+- `known_contributing_modules` lists the other modules whose artifacts join yours. Without it, rules_jvm_external prints a notice naming them each time it evaluates the extension. With it, only the listed modules contribute, so a module you add later that declares artifacts for `rules_flutter_maven` has to be added to the list.
+- `repositories` replaces the default, which is Maven Central alone and lacks the androidx artifacts.
 
-Put the platforms you usually build for in your `.bazelrc`, with a config for the others:
+Run `REPIN=1 bazel run @rules_flutter_maven//:pin` again after you change the artifacts or bump rules_flutter. The build fails until you do. rules_android's own tools resolve in its own repository, `@rules_android_maven`, with the lock it ships, and need nothing from you. [`e2e/plugin_example/MODULE.bazel`](e2e/plugin_example/MODULE.bazel) is a worked example for plugins, and [`e2e/android_example/MODULE.bazel`](e2e/android_example/MODULE.bazel) for an app's own Kotlin code.
 
-```bazelrc
-common --@rules_android//flags:android_platforms=@rules_android//:arm64-v8a
-common:android-emulator --@rules_android//flags:android_platforms=@rules_android//:x86_64
-common:android-fat --@rules_android//flags:android_platforms=@rules_android//:armeabi-v7a,@rules_android//:arm64-v8a,@rules_android//:x86_64
-```
+#### Core library desugaring
 
-With no `--@rules_android//flags:android_platforms`, rules_android builds for `--platforms`, your machine's, and the engine and the bundle are incompatible with it: building the app fails with "incompatible", naming the platform that did not satisfy the constraint. `bazel build //...` on such a platform skips them, and whatever depends on them, with nothing to tag. `flutter_bazel run -d <android device>` asks the device its ABI and passes the matching platform itself.
-
-To build an app for fixed ABIs whatever the command line says, wrap it in [`flutter_android_build`](#flutter_android_build), as a test of the APK for one ABI, or for both, does.
-
-**Core library desugaring.** rules_android turns core library desugaring on for every `android_binary` unless told otherwise: calls to `java.time`, `java.util.stream` and the other Java APIs newer than the app's minimum SDK are rewritten onto a backport (desugar_jdk_libs, the `j$.*` classes), and the whole backport goes into the APK and the App Bundle, about 2.6 MB of dex, unshrunk even when R8 shrinks the rest. A Flutter app built with Gradle has none of it, because core library desugaring is off until the app sets `isCoreLibraryDesugaringEnabled`, and the Flutter embedding and the androidx libraries it uses do not need it at minimum SDK 24. Turn it off in your `.bazelrc`:
+A Gradle-built Flutter app has no core library desugaring: it is off until the app sets `isCoreLibraryDesugaringEnabled`. rules_android turns it on for every `android_binary` unless told otherwise. It rewrites calls to `java.time`, `java.util.stream` and other Java APIs newer than the app's minimum SDK onto a backport (desugar_jdk_libs, the `j$.*` classes). The whole backport goes into the APK and the App Bundle, about 2.6 MB of dex, and R8 doesn't shrink it. The Flutter embedding and the androidx libraries it uses don't need it at minimum SDK 24. Turn it off in `.bazelrc`:
 
 ```bazelrc
 common --@rules_android//flags:desugar_java8_libs=false
 ```
 
-It is a build-wide flag of rules_android's, so only your project can set it; `flutter_android_app` cannot. Leave it on if your own Android code, or a plugin's, calls one of those APIs: a plugin that does says in its setup to enable `isCoreLibraryDesugaringEnabled`.
+It is a build-wide rules_android flag, so your project sets it and `flutter_android_app` can't. Leave it on if your own Android code or a plugin's calls one of those APIs. A plugin that does tells you in its setup to enable `isCoreLibraryDesugaringEnabled`.
 
-**16 KB pages.** Devices with 16 KB memory pages, which Android 15 introduced, refuse a native library whose segments are aligned for 4 KB ones, and the app dies on launch. A Gradle build gets 16 KB alignment from NDK r28 and later. Bazel links an Android app's C/C++ code with the Android C/C++ toolchain, and rules_flutter leaves the alignment to it. rules_android_ndk 0.1.5's toolchain, which the downloaded NDK's toolchains are made from too, links every arm64 library for 4 KB pages; upstream fixed it in commit `efc0c191`, which no release has yet. Until one does, pin rules_android_ndk to a commit of its main branch with the fix, with the `git_override` the `MODULE.bazel` lines above carry. For arm64-v8a and x86_64 the build checks the native libraries the application and its plugins bring, prebuilt ones inside the plugins' AARs included, and fails naming any that is aligned for 4 KB pages, or whose `GNU_RELRO` segment ends partway through a 16 KB page that holds writable data after it (such a library loads, and crashes when it writes that data), the two checks of Android's [16 KB page size guide](https://developer.android.com/guide/practices/page-sizes). A 16 KB-aligned library loads on a 4 KB device too. An app that does not need 16 KB support, because it runs only on 4 KB devices or sets `android:pageSizeCompat` for Android 16's page size compatibility mode, can build with `--@rules_flutter//flutter:allow_4kb_aligned_native_libraries`, which turns both checks off. Google Play requires 16 KB support of apps that target Android 15 or later.
+#### 16 KB memory pages
+
+Android 15 introduced devices with 16 KB memory pages. Such a device refuses a native library whose segments are aligned for 4 KB pages, and the app dies on launch. Google Play requires 16 KB support of apps that target Android 15 or later. A Gradle build gets 16 KB alignment from NDK r28 and later.
+
+Bazel links an Android app's C/C++ code (the application's `native_deps`, its code assets, its plugins' native code and the `cc_library` targets in `deps`) with the Android C/C++ toolchain, and rules_flutter leaves the alignment to it. rules_android_ndk 0.1.5's toolchain, which the downloaded NDK's toolchains are also made from, links every arm64 library for 4 KB pages, whatever the NDK. Upstream fixed it in commit `efc0c191`, which no release has yet. Until one does, pin rules_android_ndk to a commit of its main branch that has the fix, below its `bazel_dep` in `MODULE.bazel`, as [Setting up the Android SDK and NDK](#setting-up-the-android-sdk-and-ndk) does:
+
+```starlark
+git_override(
+    module_name = "rules_android_ndk",
+    commit = "9946c72d5b617115d34dc2efb334f829c558a87b",
+    remote = "https://github.com/bazelbuild/rules_android_ndk.git",
+)
+```
+
+Drop it once you depend on a release with the fix. A toolchain of your own that links for 16 KB pages does as well. A 16 KB-aligned library loads on a 4 KB device too.
+
+For arm64-v8a and x86_64, the build checks the native libraries the application and its plugins bring, including prebuilt ones inside the plugins' AARs. It fails, naming the library, when one is aligned for 4 KB pages, or when its `GNU_RELRO` segment ends partway through a 16 KB page that holds writable data after it. Such a library loads, then crashes when it writes that data. These are the two checks of Android's [16 KB page size guide](https://developer.android.com/guide/practices/page-sizes). With rules_android_ndk 0.1.5 as released, any C/C++ code an Android app builds fails the first.
+
+An app that doesn't need 16 KB support can turn both checks off with `--@rules_flutter//flutter:allow_4kb_aligned_native_libraries`. That is an app that runs only on 4 KB devices, or one that sets `android:pageSizeCompat` for Android 16's page size compatibility mode.
+
+#### `flutter_android_app` attributes
 
 | Attribute | Description |
 |---|---|
 | `application` | A `flutter_application` target. Required. |
 | `application_id` | The application id, Gradle's `applicationId`, for example `"com.example.myapp"`. Required. |
-| `namespace` | The package the runner's code declares (Gradle's `namespace`). Relative class names in the manifest (`.MainActivity`, `.sub.Receiver`, `MainActivity`) are written out in full against it, as AGP does. Defaults to `application_id`. |
-| `app_name` | Display name. Defaults to the target name. |
-| `min_sdk_version` | Minimum Android SDK version. Defaults to 24, Flutter's `flutter.minSdkVersion` and the engine's own minimum. |
-| `target_sdk_version` | Target Android SDK version. |
-| `build_name` | `versionName`. Defaults to `"1.0.0"`. See [App version](#app-version). |
-| `build_number` | `versionCode`. Defaults to `"1"`. |
-| `manifest_values` | Values for `${...}` placeholders in the manifest, as `android_binary` takes them. `applicationId`, `minSdkVersion` and `targetSdkVersion` come from the attributes above and cannot be set here; `versionCode` and `versionName` only while `build_number` and `build_name` are unset. |
-| `manifest` | A manifest you wrote yourself, used verbatim. Placeholders like `${applicationName}` are not substituted, so do not pass `flutter create`'s own manifest here; let the macro discover that one. |
-| `debug_manifest` | A variant manifest whose permissions merge into `-c dbg` builds only. `None` (default) discovers `android/app/src/debug/AndroidManifest.xml`. A label overrides discovery. `False` disables variant handling. |
-| `profile_manifest` | The same for profile builds. `None` (default) discovers `android/app/src/profile/AndroidManifest.xml`. |
-| `permissions` | Permission names added to the manifest in every compilation mode, for example `["android.permission.INTERNET"]`. See [Release builds and permissions](#release-builds-and-permissions). |
-| `multidex` | Defaults to `"native"`. |
-| `proguard_specs` | The R8 configuration. By default a release build (`-c opt` without `--@rules_flutter//flutter:profile`) is shrunk with R8, resources too, as `flutter build apk --release` shrinks it: [`@rules_flutter//flutter:android_proguard_rules.pro`](flutter/android_proguard_rules.pro) (the Android Gradle plugin's `proguard-android-optimize.txt` and Flutter's own rules), then `android/app/proguard-rules.pro` if you have one. Debug and profile builds are not shrunk. A list replaces the whole default in every compilation mode; `[]` turns R8 off. |
-| `app_bundle` | Also declare an App Bundle of the app under this name. See [Release: App Bundle and signing](#release-app-bundle-and-signing). |
-| `bundle_config` | The bundletool `BundleConfig` of `app_bundle`. Defaults to [`@rules_flutter//flutter:android_bundle_config.pb.json`](flutter/android_bundle_config.pb.json), the Android Gradle plugin's: split by ABI, screen density and language, native libraries and dex stored uncompressed, the libraries 16 KB-aligned. |
+| `namespace` | The package the runner's code declares, Gradle's `namespace`. Relative class names in the manifest (`.MainActivity`, `.sub.Receiver`, `MainActivity`) are written out in full against it, as AGP does. Defaults to `application_id`. |
+| `app_name` | The `android:label` of the manifest the macro generates when there is no `android/app/src/main/AndroidManifest.xml`. Defaults to the target name. A `flutter create` manifest sets its own label, and this is unused. |
+| `min_sdk_version` | Gradle's `minSdk`. Defaults to `"24"`, Flutter's `flutter.minSdkVersion` and the engine's own minimum. |
+| `target_sdk_version` | Gradle's `targetSdk`. Defaults to `"35"`. |
+| `build_name` | `versionName`. Defaults to the `flutter_application`'s, which defaults to `"1.0.0"`. See [App version](#app-version). |
+| `build_number` | `versionCode`. Defaults to the `flutter_application`'s, which defaults to `"1"`. |
+| `manifest_values` | Values for `${...}` placeholders in the manifest, as `android_binary` takes them. `applicationId`, `minSdkVersion` and `targetSdkVersion` come from the attributes above and can't be set here. `versionCode` and `versionName` can, while `build_number` and `build_name` are unset, and must then be the `flutter_application`'s. |
+| `manifest` | A manifest you wrote yourself, used as it is. Its `${...}` placeholders, such as `${applicationName}`, are not substituted, so don't pass `flutter create`'s manifest here. The macro finds that one itself. With `manifest`, the macro also doesn't look for resources or runner sources under `android/app/src/main/`. |
+| `debug_manifest` | A variant manifest whose permissions are merged into `-c dbg` builds only. `None` (the default) uses `android/app/src/debug/AndroidManifest.xml` if it exists. A label uses that file instead. `False` turns variant handling off. |
+| `profile_manifest` | The same for profile builds, from `android/app/src/profile/AndroidManifest.xml`. |
+| `permissions` | Permissions added to the manifest in every compilation mode, for example `["android.permission.INTERNET"]`. See [Release builds and permissions](#release-builds-and-permissions). |
+| `resources` | Resource files added to those found under `android/app/src/main/res/`. |
+| `deps` | Android libraries linked into the APK, such as a `kt_android_library` of your own. A plugin written in the workspace goes here as its `flutter_android_plugin_library`. The plugin registrant compiles against these too, so the plugin is both packaged and registered. Pub plugins arrive through the pub repository instead. |
+| `proguard_specs` | The R8 configuration. By default a release build (`-c opt` without `--@rules_flutter//flutter:profile`) is shrunk with R8, resources too, as `flutter build apk --release` shrinks it. The rules are [`@rules_flutter//flutter:android_proguard_rules.pro`](flutter/android_proguard_rules.pro) (the Android Gradle plugin's `proguard-android-optimize.txt` and Flutter's own rules), then `android/app/proguard-rules.pro` if you have one. Debug and profile builds aren't shrunk. A list replaces the whole default in every compilation mode, and `[]` turns R8 off. |
+| `app_bundle` | Also declares an App Bundle of the app under this name. See [Release: App Bundle and signing](#release-app-bundle-and-signing). |
+| `bundle_config` | The bundletool `BundleConfig` of `app_bundle`. Defaults to [`@rules_flutter//flutter:android_bundle_config.pb.json`](flutter/android_bundle_config.pb.json), the Android Gradle plugin's: split by ABI, screen density and language, with native libraries and dex stored uncompressed and the libraries 16 KB-aligned. |
+
+Other arguments, such as `visibility` or `shrink_resources`, pass through to `android_binary`.
 
 #### Release: App Bundle and signing
 
-`flutter build appbundle` and `flutter build apk --release` have one counterpart: an App Bundle declared by `flutter_android_app`, and a [`flutter_android_release`](#flutter_android_release) target that signs it with your upload key.
+`flutter build appbundle` and `flutter build apk --release` have one counterpart in two parts: an App Bundle that `flutter_android_app` declares, and a [`flutter_android_release`](#flutter_android_release) target that signs it with your upload key.
 
 ```starlark
 load("@rules_flutter//flutter:android.bzl", "flutter_android_app", "flutter_android_release")
@@ -1998,8 +2089,6 @@ flutter_android_app(
     name = "app",
     application = ":app_flutter",
     application_id = "com.example.myapp",
-    build_name = "1.2.3",
-    build_number = 7,
     app_bundle = "app_bundle",
 )
 
@@ -2010,7 +2099,7 @@ flutter_android_release(
 ```
 
 ```sh
-# First time only: make the upload keystore android/key.properties describes.
+# First time only: make the upload keystore that android/key.properties describes.
 bazel run //:app_release -- create-key
 
 # Each release: build, sign and check the bundle and the APK.
@@ -2019,42 +2108,52 @@ bazel run //:app_release
 # -> build/app/outputs/flutter-apk/app-release.apk
 ```
 
-- `:app_bundle` is built by rules_android's `android_application`, from the same arguments as `:app`. `bazel build //:app_bundle` makes `app_bundle_unsigned.aab` for the ABIs and compilation mode of the command line, like the APK.
-- `bazel run //:app_release` builds the bundle in release mode (`-c opt`, not profile) for armeabi-v7a, arm64-v8a and x86_64, whatever the command line says, as `flutter build appbundle` builds every ABI. Its `android_platforms` attribute changes the ABIs.
-- Signing happens when the program runs, not in a build action. The keystore and its passwords never reach Bazel: no attribute, action input, command line or cache entry holds them. rules_android has no release signing of its own, by design.
-- The key comes from `android/key.properties` under the target's package, the file Flutter's deployment guide has you write:
+`bazel run //:app_release` builds the bundle in release mode (`-c opt`, not profile) for armeabi-v7a, arm64-v8a and x86_64, whatever the command line says, as `flutter build appbundle` builds every ABI. Its `android_platforms` attribute changes the ABIs. Raise the app's `build_number` for each upload, because Play refuses a version code it has seen.
 
-  ```properties
-  storePassword=...
-  keyPassword=...
-  keyAlias=upload
-  storeFile=/Users/me/keys/upload-keystore.jks
-  ```
+The key comes from `android/key.properties` under the target's package, the file Flutter's deployment guide has you write:
 
-  A relative `storeFile` is relative to `android/app/`, as in Gradle. Never commit the file or the keystore (`flutter create`'s `android/.gitignore` already ignores `key.properties` and `*.jks`). On CI, write the file from your secret store before `bazel run`. `--key-properties=<path>` reads another file, and `--output-dir=<dir>` writes `app-release.aab` and `app-release.apk` there instead.
-- `create-key` makes the keystore `storeFile` names (PKCS12, RSA 2048, valid 10000 days, the values in Flutter's guide), with the JDK Bazel already has, so you need no Java installed. It refuses to replace an existing keystore. Back up the keystore and its password: a lost upload key can be reset through Play Console, but only by asking.
-- With Play App Signing, the bundle you upload is signed with the upload key, and Google signs the APKs it serves with the app signing key it keeps. `app-release.apk` is for distribution outside Play; it is the APK of the same release build, signed with the same key (by the Android SDK's `apksigner`, which `flutter_android_release` takes from `@androidsdk`), so it will not update a copy installed from Play. As in Gradle's, its native libraries are stored uncompressed and 16 KB-aligned.
-- Raise `build_number` for each upload: Play refuses a version code it has seen.
+```properties
+storePassword=...
+keyPassword=...
+keyAlias=upload
+storeFile=/Users/me/keys/upload-keystore.jks
+```
 
-`bazel run //:app_bundle` installs the bundle on the device `ANDROID_SERIAL` names (or the only one connected), through bundletool and signed with the debug key. The JDK, bundletool, `aapt2` and `adb` all come from the build, so nothing needs to be on your PATH.
+A relative `storeFile` is relative to `android/app/`, as in Gradle. Never commit the file or the keystore. `flutter create`'s `android/.gitignore` already ignores `key.properties` and `*.jks`. On CI, write the file from your secret store before `bazel run`. `--key-properties=<path>` reads another file, and `--output-dir=<dir>` writes `app-release.aab` and `app-release.apk` there instead.
 
-A release bundle carries R8's mapping (`BUNDLE-METADATA/com.android.tools.build.obfuscation/proguard.map`), from which Play deobfuscates the Java and Kotlin frames of crash reports, as a Gradle-built bundle does.
+Signing happens when the program runs, not in a build action, so the keystore and its passwords never reach Bazel. No attribute, action input, command line or cache entry holds them. rules_android itself signs only with debug keys.
+
+`create-key` makes the keystore `storeFile` names: PKCS12, RSA 2048, valid for 10000 days, the values in Flutter's guide. It uses the JDK Bazel already has, so you need no Java installed. It refuses to replace an existing keystore. Back up the keystore and its password. A lost upload key can be reset through Play Console, but only by asking Google.
+
+With Play App Signing, the bundle you upload is signed with the upload key, and Google signs the APKs it serves with the app signing key it keeps. `app-release.apk` is for distribution outside Play. It is the APK of the same release build, signed with the same key by the Android SDK's `apksigner` (which `flutter_android_release` takes from `@androidsdk`), so it won't update a copy installed from Play. As in a Gradle build, its native libraries are stored uncompressed and 16 KB-aligned.
+
+A release bundle carries R8's mapping, `BUNDLE-METADATA/com.android.tools.build.obfuscation/proguard.map`, from which Play deobfuscates the Java and Kotlin frames of crash reports, as it does for a Gradle-built bundle.
+
+The bundle on its own is rules_android's `android_application`, built from the same arguments as the APK. `bazel build //:app_bundle` makes `app_bundle_unsigned.aab` for the ABIs and compilation mode of the command line, as for the APK. `bazel run //:app_bundle` installs it, signed with the debug key, through bundletool on the device `ANDROID_SERIAL` names, or the only one connected. The JDK, bundletool, `aapt2` and `adb` all come from the build, so nothing needs to be on your PATH.
 
 <details>
 <summary>Composable rules</summary>
+
+`flutter_android_app` is these rules and rules_android's `android_binary`. [`e2e/android_example`](e2e/android_example/BUILD.bazel) builds an app this way as `:app_bazel_runner`.
 
 ```starlark
 load("@rules_flutter//flutter:android.bzl",
     "flutter_android_bundle",
     "flutter_android_engine",
     "flutter_android_manifest_gen",
-    "flutter_android_manifest_merge",
-    "flutter_android_permissions_manifest",
     "flutter_android_runner_lib_gen")
 load("@rules_android//android:rules.bzl", "android_binary")
 
+# The Flutter application's native libraries and its flutter_assets tree.
 flutter_android_bundle(name = "my_bundle", application = ":my_app")
 flutter_android_engine(name = "my_engine")
+
+# The flutter_assets tree at assets/flutter_assets/, as the APK holds it.
+filegroup(
+    name = "my_flutter_assets",
+    srcs = [":my_bundle"],
+    output_group = "mobile_install",
+)
 
 flutter_android_manifest_gen(name = "my_manifest", application_id = "com.example.myapp")
 
@@ -2067,31 +2166,35 @@ flutter_android_runner_lib_gen(
 android_binary(
     name = "my_apk",
     manifest = ":my_manifest",
-    multidex = "native",
+    custom_package = "com.example.myapp",
+    assets = [":my_flutter_assets"],
+    assets_dir = "assets",
     # Stored uncompressed, as the manifest's android:extractNativeLibs="false"
-    # requires: Android refuses to install the APK otherwise.
+    # requires. Android refuses to install the APK otherwise.
     nocompress_extensions = [".so"],
-    # The bundle gives android_binary its native libraries, for each ABI, as
-    # an aar_import does.
+    # The bundle gives android_binary its native libraries for each ABI, as an
+    # aar_import does.
     deps = [":my_bundle", ":my_engine", ":my_runner"],
 )
 ```
 
-`flutter_android_bundle` output groups:
+`flutter_android_bundle` provides `AndroidNativeLibsInfo`, so it goes in `android_binary`'s `deps`, where `android_binary` builds it once for each ABI. Its output groups:
 
 | Group | Contents |
 |---|---|
-| `native_libs` | One zip of `lib/<abi>/` entries, stored: `libapp.so` (AOT code), the `native_deps` libraries and the code assets that ship. The bundle provides it to `android_binary` as `AndroidNativeLibsInfo` |
+| `native_libs` | One zip of `lib/<abi>/` entries, stored: `libapp.so` (the AOT code), the `native_deps` libraries and the code assets that ship. The bundle provides it to `android_binary` as `AndroidNativeLibsInfo` |
 | `flutter_assets` | The `flutter_assets/` tree |
 | `mobile_install` | The `flutter_assets/` tree at `assets/flutter_assets/`, for an `android_binary`'s `assets` with `assets_dir = "assets"` (with `mobile_install_compatible`, the default). No native libraries: they are `native_libs` |
 
-An App Bundle from these rules is rules_android's `android_application`, given the same arguments as the `android_binary` and `bundle_config_file = "@rules_flutter//flutter:android_bundle_config.pb.json"`. `bazel build` of it works, and `flutter_android_release` signs it. `bazel run` of it does not install it: rules_android's run script looks for the JDK where the build ran, gives bundletool no `aapt2`, runs bundletool without the Kotlin runtime its `install-apks` needs, and takes `adb` from your PATH. To install a bundle on a device, declare the app with `flutter_android_app` and its `app_bundle`, whose `bazel run` takes all those tools from the build (see [Release: App Bundle and signing](#release-app-bundle-and-signing)), or install the APK, which `bazel run` of an `android_binary` does.
+The other Tier 2 rules are `flutter_android_manifest_merge` and `flutter_android_permissions_manifest`, which add a variant manifest's or a list's permissions to a manifest, and `flutter_android_plugin_libs`, `flutter_android_registrant` and `flutter_android_plugin_library`, which wire in plugins.
+
+An App Bundle from these rules is rules_android's `android_application`, given the same arguments as the `android_binary` and `bundle_config_file = "@rules_flutter//flutter:android_bundle_config.pb.json"`. `bazel build` of it works, and `flutter_android_release` signs it. `bazel run` of it doesn't install it: rules_android's run script looks for the JDK where the build ran, gives bundletool no `aapt2`, runs bundletool without the Kotlin runtime its `install-apks` needs, and takes `adb` from your PATH. To install a bundle on a device, declare the app with `flutter_android_app` and its `app_bundle`, whose `bazel run` takes all those tools from the build, or install the APK, which `bazel run` of an `android_binary` does.
 
 </details>
 
 #### Add-to-app: Android
 
-A native Android app can host Flutter in two ways. If Bazel builds the host app too, depend on the Flutter code directly, as `flutter_android_app` does. If Gradle builds it, the host consumes the Flutter module as a local Maven repository, which is what `flutter build aar` makes and what `flutter_android_aar` makes from a `flutter_application`: the module's AAR at `<package_name>:flutter_<mode>:<build_number>` and one AAR per plugin with Android code at `<plugin group>:<plugin>_<mode>:<build_number>`, with upstream's coordinates and POMs (the module's depends on Flutter's engine artifacts, `io.flutter:flutter_embedding_<mode>` and `io.flutter:<abi>_<mode>`, from `download.flutter.io`; each plugin's lists the Maven artifacts its Gradle build declares).
+A native Android app can host Flutter in two ways. If Bazel builds the host app too, depend on the Flutter code directly, as `flutter_android_app` does. If Gradle builds it, the host takes the Flutter module as a local Maven repository. That is what `flutter build aar` makes, and what `flutter_android_aar` makes from a `flutter_application`:
 
 ```starlark
 load("@rules_flutter//flutter:android.bzl", "flutter_android_aar")
@@ -2100,23 +2203,45 @@ flutter_android_aar(
     name = "module_aar",
     application = ":my_app",
     package_name = "com.example.my_module",
-    # build_number = "1.0", abis = ["armeabi-v7a", "arm64-v8a", "x86_64"]: the defaults
+    # Optional, with their defaults:
+    # build_number = "1.0",
+    # abis = ["armeabi-v7a", "arm64-v8a", "x86_64"],
+    # min_sdk_version = "24",
 )
 ```
 
+Each run builds one mode, the command line's, and adds it to `build/host/outputs/repo/` under the package beside what earlier runs of other modes wrote. Run it once per mode the host uses:
+
 ```sh
-# One mode per run, each added beside the others: debug, profile, release.
-bazel run -c dbg //:module_aar
-bazel run -c opt --@rules_flutter//flutter:profile //:module_aar
-bazel run -c opt //:module_aar
+bazel run -c dbg //:module_aar                                      # debug
+bazel run -c opt --@rules_flutter//flutter:profile //:module_aar    # profile
+bazel run -c opt //:module_aar                                      # release
 # -> build/host/outputs/repo/ (or `-- --output=<dir>`)
 ```
 
-Each run builds the command line's mode, writes it into `build/host/outputs/repo/` under the package, keeping what earlier runs of other modes wrote (each artifact's `maven-metadata.xml` lists them), and prints the host's steps, as `flutter build aar` does: add the repository and `https://storage.googleapis.com/download.flutter.io` to the host's repositories, depend on `debugImplementation '<package_name>:flutter_debug:1.0'` (and `profileImplementation`, `releaseImplementation`), and give the host a `profile` build type that is `initWith debug`. `bazel build //:module_aar` makes the repository of one mode in `bazel-bin` without writing anything. The module's manifest asks for `android.permission.INTERNET`, as upstream's module template does, which a debug host's Dart VM service needs. Unlike Gradle's, the repository has no `.module` files and no sources or javadoc jars. A plugin is published under the `group` of its Android `flutter_plugin_platform`. A pub plugin's is the Maven group its `android/build.gradle` sets (`group = "..."`, which `flutter create` writes); a plugin written in the workspace must set `group` itself (`flutter_plugin_platform(platform = "android", group = "com.example.my_plugin", ...)`). There is no default, as a wrong group would publish under someone else's coordinates, and a plugin with none fails the build, naming it. Every artifact, plugins' too, has the build number as its version, as `flutter build aar` sets it. The composable rules are `flutter_android_module_aar`, `flutter_android_plugin_aars` and `flutter_android_maven_repo`.
+Like `flutter build aar`, each run then prints the host's steps:
+
+1. Add the repository and `https://storage.googleapis.com/download.flutter.io` to the host's repositories.
+2. Depend on `debugImplementation '<package_name>:flutter_debug:1.0'`, and `profileImplementation` and `releaseImplementation` likewise.
+3. Give the host a `profile` build type that is `initWith debug`.
+
+`bazel build //:module_aar` makes the repository of one mode in `bazel-bin`, without writing anything into the source tree.
+
+The repository has upstream's coordinates and POMs:
+
+- The module's AAR is `<package_name>:flutter_<mode>:<build_number>`. Its POM depends on Flutter's engine artifacts from `download.flutter.io`, `io.flutter:flutter_embedding_<mode>` and `io.flutter:<abi>_<mode>`.
+- Each plugin with Android code has an AAR at `<plugin group>:<plugin>_<mode>:<build_number>`. Its POM lists the Maven artifacts its Gradle build declares.
+- Every artifact, plugins' included, has the build number as its version, as `flutter build aar` sets it. Each artifact's `maven-metadata.xml` lists the modes written so far.
+
+A pub plugin is published under the Maven group its `android/build.gradle` sets (`group = "..."`, which `flutter create` writes). A plugin written in your workspace sets `group` on its Android `flutter_plugin_platform`: `flutter_plugin_platform(platform = "android", group = "com.example.my_plugin", ...)`. There is no default, since a wrong group would publish under someone else's coordinates. A plugin with no group fails the build, naming the plugin.
+
+The module's manifest asks for `android.permission.INTERNET`, as upstream's module template does, because a debug host's Dart VM service needs it. Unlike Gradle's repository, this one has no `.module` files and no sources or javadoc jars.
+
+The composable rules are `flutter_android_module_aar`, `flutter_android_plugin_aars` and `flutter_android_maven_repo`.
 
 ### Linux
 
-Run `flutter create --platforms=linux .` first. If `linux/runner/` is missing, the rules use a built-in runner.
+`flutter_linux_app` builds a Linux app directory from your `flutter_application`. It reads `linux/runner/` as `flutter create --platforms=linux .` writes it. Without that directory, it uses a built-in GTK runner.
 
 ```starlark
 load("@rules_flutter//flutter:linux.bzl", "flutter_linux_app")
@@ -2131,11 +2256,11 @@ flutter_linux_app(
 | Attribute | Description |
 |---|---|
 | `application` | A `flutter_application` target. Required. |
-| `app_name` | Binary name. Defaults to the target name. |
-| `application_id` | The application id GTK names the app by, as `flutter create`'s `APPLICATION_ID`. Required: the desktop identifies an app by it, so each app has its own. |
-| `window_title` | Window title. Defaults to `app_name`, then the target name. A `linux/runner/` from `flutter create` sets its own title and ignores this. |
+| `application_id` | The application id GTK names the app by, `flutter create`'s `APPLICATION_ID`. Required: the desktop identifies an app by it, so each app needs its own. |
+| `app_name` | The name of the directory and the executable. Defaults to the target name. |
+| `window_title` | The built-in runner's window title. Defaults to `app_name`, then the target name. A `linux/runner/` from `flutter create` sets its own title, and this is unused. |
 
-The output directory:
+Linux apps carry no version. The output directory, here for `app_name = "my_app"`:
 
 ```
 my_app/
@@ -2149,9 +2274,9 @@ my_app/
     icudtl.dat               ICU data
 ```
 
-**GTK3 and your C++ toolchain.** rules_flutter ships its own hermetic sysroot for the GTK3 headers and libraries, and links those libraries as explicit files. It adds no `-L` and no `-lgtk-3` flags. Your toolchain's `--sysroot` stays the only owner of libc, libm, and the rest of the C runtime. This matters because a Debian sysroot's `libm.so` is a linker script with absolute paths that `lld` rewrites only for scripts under `--sysroot`; a second sysroot on the search path would break `-lm` with a "no such file" error naming a file that exists.
+**GTK and your C++ toolchain.** rules_flutter brings its own sysroot for the GTK3 headers and libraries, so the build machine needs no GTK installed. It links those libraries as files, with no `-L` or `-lgtk-3` flags, so your toolchain's `--sysroot` stays the only source of libc, libm and the rest of the C runtime. This matters because the GTK sysroot's `libm.so` is a linker script with absolute paths, which `lld` rewrites only for scripts under `--sysroot`. If that directory were on the library search path, `-lm` would fail with "no such file", naming a file that exists.
 
-**Cross-compiling from macOS** works in debug mode only, because Flutter publishes no cross-compiling `gen_snapshot` for desktop targets. See [Cross-compiling](#cross-compiling).
+**From a Mac**, you need an LLVM cross-toolchain, and you can build only in debug mode, because Flutter publishes no `gen_snapshot` that compiles for Linux on a Mac. See [Cross-compiling](#cross-compiling).
 
 ```sh
 bazel build //:my_app_linux -c dbg --platforms=@rules_flutter//flutter/platforms:linux_x64
@@ -2175,6 +2300,12 @@ flutter_linux_runner_lib_gen(
     engine = ":flutter_engine",
     registrant = ":app_registrant",
     application_id = "com.example.myapp",
+    # Compiles the plugins' Linux C++ into the runner. Optional for an app
+    # with no native plugins.
+    application = ":my_app",
+    # Optional. Your own runner sources; the built-in runner without them.
+    # srcs = glob(["linux/runner/*.cc"]),
+    # hdrs = glob(["linux/runner/*.h"]),
 )
 
 flutter_linux_bundle(
@@ -2188,7 +2319,7 @@ flutter_linux_bundle(
 
 ### Windows
 
-Run `flutter create --platforms=windows .` first. If `windows/runner/` is missing, the rules use a built-in runner.
+`flutter_windows_app` builds a Windows app directory from your `flutter_application`. It reads `windows/runner/` as `flutter create --platforms=windows .` writes it. Without that directory, it uses a built-in Win32 runner.
 
 ```starlark
 load("@rules_flutter//flutter:windows.bzl", "flutter_windows_app")
@@ -2202,22 +2333,23 @@ flutter_windows_app(
 | Attribute | Description |
 |---|---|
 | `application` | A `flutter_application` target. Required. |
-| `app_name` | Binary name. Defaults to the target name. |
-| `build_name` | The version, `MAJOR.MINOR.PATCH`. Defaults to `"1.0.0"`. See [App version](#app-version). |
-| `build_number` | The fourth version number. Defaults to `"1"`. |
+| `app_name` | The name of the directory and the executable, and the built-in runner's window title. Defaults to the target name. |
+| `build_name` | The version, `MAJOR.MINOR.PATCH`. Defaults to the `flutter_application`'s, which defaults to `"1.0.0"`. See [App version](#app-version). |
+| `build_number` | The fourth version number. Defaults to the `flutter_application`'s, which defaults to `"1"`. |
 
-The executable carries what `windows/runner/` gives it, as with `flutter build windows`: `Runner.rc` is compiled into its icon and version information (`build_name+build_number`, with the file version `MAJOR.MINOR.PATCH.BUILD`), and `runner.exe.manifest` is embedded. The built-in runner has the `flutter create` icon and manifest.
+As with `flutter build windows`, the executable carries what `windows/runner/` gives it. `Runner.rc` is compiled into its icon and version information: the version `build_name+build_number`, and the file version `MAJOR.MINOR.PATCH.BUILD`. `runner.exe.manifest` is embedded. The built-in runner has the `flutter create` icon and manifest.
 
-Compiling `Runner.rc` takes a Windows resource compiler, registered for Bazel's `@bazel_tools//tools/res:toolchain_type`. On a Windows host with Visual Studio Build Tools, Bazel registers the Windows SDK's `rc.exe` itself, so there is nothing to do. Building for Windows from another host fails until your `MODULE.bazel` registers one, such as `llvm-rc`, wrapped in `windows_resource_compiler_toolchain` from `@bazel_tools//tools/res:winsdk_toolchain.bzl`; rules_flutter registers none, so the choice stays with your module.
+Compiling `Runner.rc` takes a Windows resource compiler, registered for Bazel's `@bazel_tools//tools/res:toolchain_type`. On a Windows host with Visual Studio Build Tools, Bazel registers the Windows SDK's `rc.exe` itself, so there is nothing to do. From another host, the build fails until your `MODULE.bazel` registers one, such as `llvm-rc`, wrapped in `windows_resource_compiler_toolchain` from `@bazel_tools//tools/res:winsdk_toolchain.bzl`. rules_flutter registers none, so the choice stays with your module. From another host you also need a C++ cross-toolchain, and you can build only in debug mode (see [Cross-compiling](#cross-compiling)).
 
-The output directory:
+The output directory, here for `app_name = "my_app"`:
 
 ```
 my_app/
   my_app.exe             Win32 runner executable
   flutter_windows.dll    Flutter engine
-  app.so                 AOT-compiled Dart, as ELF
+  *.dll                  native plugin libraries, if any
   data/
+    app.so               AOT-compiled Dart, as ELF
     flutter_assets/      fonts, images, shaders, asset manifest
     icudtl.dat           ICU data
 ```
@@ -2248,6 +2380,9 @@ flutter_windows_runner_lib_gen(
     name = "my_runner",
     engine = ":flutter_engine",
     registrant = ":app_registrant",
+    # Compiles the plugins' Windows C++ into the runner. Optional for an app
+    # with no native plugins.
+    application = ":my_app",
     srcs = glob(["windows/runner/*.cpp"]),
     hdrs = glob(["windows/runner/*.h"]),
     resources = [":my_resources"],
@@ -2267,38 +2402,38 @@ flutter_windows_bundle(
 
 ### Web
 
-Run `flutter create --platforms=web .` first so `web/` has its `index.html`, `manifest.json`, and icons. Any of those that are missing are replaced by built-in templates.
+`flutter_web_app` builds a web bundle from your `flutter_application`, as `flutter build web --wasm` does. It reads `web/` as `flutter create --platforms=web .` writes it.
 
 ```starlark
-load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
-
-dart_package_metadata(
-    name = "pubspec-metadata",
-    package_name = "my_app",
-)
-
-flutter_application(
-    name = "app",
-    package = ":pubspec-metadata",
-    main = "lib/main.dart",
-    deps = ["@deps//:flutter", "@rules_flutter//flutter:material_icons"],
-)
 
 flutter_web_app(
     name = "my_app_web",
-    application = ":app",
+    application = ":my_app",
+    # Optional. The page title and the manifest's name; defaults to the
+    # target name.
     app_name = "My App",
 )
 ```
 
-The web app takes its `application` like every other platform's, and one application serves them all: its `main`, `deps`, assets, shaders, `defines`, `flavor`, `build_name` and `build_number` are the web app's program and version. The web app compiles that program from source with dart2wasm and dart2js rather than from the application's AOT output, building it once for each compiler's web platform (see [Per-compiler code](#per-compiler-code)). The application's native parts, its AOT compile, `native_deps` and code assets, are not built for the web, as `flutter build web` builds no native code (its packages' link hooks do run, over the web compile's recorded uses; see [Link hooks](#link-hooks)); a web app serves WebAssembly modules through `native_modules` instead.
+Build it, or run it in Chrome with hot reload:
 
-An application whose code imports web-only libraries (`dart:js_interop`, `package:web`, `dart:ui_web`) without a conditional import cannot be built for the Dart VM, which `bazel build //...` otherwise does in its own configuration. Mark it web-only so `bazel build //...` skips it there, while each web app still builds it for its compilers:
+```sh
+bazel build //:my_app_web
+bazel run @rules_flutter//tools/dev_tool:flutter_bazel -- run -t //:my_app_web -d chrome
+```
+
+The bundle is the directory `bazel-bin/my_app_web_web/`. Serve it as you would `build/web/`.
+
+The files under `web/` are templates, substituted as `flutter build web` substitutes them, so `flutter create` output works unchanged. `web/index.html`, `web/flutter_bootstrap.js` and `web/manifest.json` are used when present, and built-in defaults take their place when not. `web/version.json` is used when present, and generated from the application's version when not. Everything else under `web/` is copied to the bundle's root.
+
+One application serves every platform, and the web app takes its program and version from it: `main`, `deps`, assets, shaders, `defines`, `flavor`, `build_name` and `build_number`. It compiles that program from source with dart2wasm and dart2js. It doesn't use the application's AOT output, and it builds the program once for each compiler's web platform (see [Per-compiler code](#per-compiler-code)). As with `flutter build web`, nothing native is built: not the AOT compile, the `native_deps` or the code assets. The packages' link hooks do run, over what the web compile records using (see [Link hooks](#link-hooks)). A web app ships WebAssembly modules through `native_modules` instead.
+
+`bazel build //...` also builds the application for the Dart VM, in a configuration of its own. An application whose code imports web-only libraries (`dart:js_interop`, `package:web`, `dart:ui_web`) without a conditional import fails there. Mark it web-only, so that `bazel build //...` skips it on the VM, while each web app still builds it for its compilers:
 
 ```starlark
 flutter_application(
-    name = "app",
+    name = "my_app",
     ...
     target_compatible_with = select({
         "@rules_dart//dart/constraints:vm": ["@platforms//:incompatible"],
@@ -2310,29 +2445,84 @@ flutter_application(
 | Attribute | Description |
 |---|---|
 | `application` | The `flutter_application` (or `flutter_application_variant`) the web app is built from. Required. Its `build_name` and `build_number` are `version` and `build_number` in the bundle's `version.json`, which the web `package_info_plus` reads (see [App version](#app-version)). |
-| `app_name` | Used for the HTML title and manifest. Defaults to the target name. |
-| `base_href` | Substituted for `$FLUTTER_BASE_HREF` in `web/index.html`. Defaults to `"/"`. `flutter_bazel run -d chrome` serves the app under it, as `flutter run` does. |
-| `extra_web_assets` | Extra files copied into the bundle root, for generated files the `web/` glob cannot see. |
-| `web_dir` | The directory the runner files are discovered in and served from at the bundle root. Defaults to `"web"`. Give each app its own, such as `"web_apps/reminders"`, to build several web apps from one package. `flutter_web_bundle` takes it too. |
-| `pwa` | Ship `flutter_service_worker.js` and register it. Defaults to `True`. The worker adds no offline caching. Like `flutter build web`, which [deprecated its caching worker](https://github.com/flutter/flutter/issues/156910), it unregisters itself and reloads its clients, which frees visitors still holding a caching worker from an older deployment. |
+| `app_name` | The HTML title and the manifest's name. Defaults to the target name. |
+| `base_href` | Substituted for `$FLUTTER_BASE_HREF` in `web/index.html`. Must start and end with `/`. Defaults to `"/"`. `flutter_bazel run -d chrome` serves the app under it, as `flutter run` does. |
+| `static_assets_url` | Substituted for `$FLUTTER_STATIC_ASSETS_URL` in `web/index.html`. Must end with `/`. Defaults to `"/"`, as in `flutter build web`. |
+| `web_dir` | The directory the `web/` files are read from. Defaults to `"web"`. Give each app its own, such as `"web_apps/reminders"`, to build several web apps from one package. |
+| `extra_web_assets` | Files copied to the bundle's root beside those of `web_dir`, for generated files a glob can't see. |
+| `pwa` | Ship `flutter_service_worker.js` and register it. Defaults to `True`. Like the worker of `flutter build web`, which [deprecated its caching worker](https://github.com/flutter/flutter/issues/156910), it caches nothing. It unregisters itself and reloads its pages, which frees visitors still running a caching worker from an older deployment. To ship a worker of your own, set `pwa = False`. |
+| `wasm_browsers`, `js_fallback` | Which browsers get the WebAssembly build. See below. |
+| `cross_origin_embedder_policy` | See [Cross-origin isolation](#cross-origin-isolation). |
+| `use_local_canvaskit` | Ship the renderer in the bundle and load it from there. See below. |
+| `web_sdk` | Another web SDK repository, such as `"@my_flutter_web_sdk"`. |
 
-The macro always compiles with dart2wasm and renders with skwasm. Compiler settings such as `optimization_level_wasm` and `minify_wasm` pass through to `flutter_web_bundle`. For dart2js or CanvasKit, use `flutter_web_bundle` directly.
+The compiler settings pass through to `flutter_web_bundle`: `profile`, `optimization_level_wasm`, `minify_wasm`, `strip_wasm`, `optimization_level_js`, `minify_js`, `frequency_based_minification`, `dump_info`, `native_null_assertions`, `enable_experiments` and `source_maps`, as do `web_defines` and `keep_placeholders`.
 
-The built bundle has two builds, as `flutter build web --wasm` does: `main.dart.wasm` (with `main.dart.mjs`) rendered by skwasm, and `main.dart.js` rendered by CanvasKit. The bootstrap lists the WASM build first. Flutter's loader (`flutter.js`) picks the first entry the browser can run, so a browser that cannot run WASM gets the JavaScript build. A browser cannot run the WASM build when it lacks WasmGC, or when, because the renderer is skwasm, its engine is not allowed to use it. `flutter.js` allows skwasm on Chromium only by default (its `wasmAllowList` is `blink: true, gecko: false, webkit: false`), so Firefox and Safari run the JavaScript build unless you allow them. Measured: Safari 27 loaded `main.dart.js` from a default bundle and rendered it.
+`flutter_web_app` always compiles with dart2wasm and renders with skwasm. For dart2js alone, or CanvasKit, use `flutter_web_bundle` directly (see the composable rules below).
 
-Two settings change that:
+**Which browsers run WebAssembly.** The bundle has two builds, as `flutter build web --wasm` makes: `main.dart.wasm` (with `main.dart.mjs`), rendered by skwasm, and `main.dart.js`, rendered by CanvasKit. Flutter's loader, `flutter.js`, runs the first build the browser can, and the WebAssembly build comes first. A browser can't run it if it lacks WasmGC, or if skwasm isn't allowed in its engine. `flutter.js` allows skwasm in Chromium only by default (its `wasmAllowList` is `blink: true, gecko: false, webkit: false`), so Firefox and Safari run the JavaScript build. We measured Safari 27 loading `main.dart.js` from a default bundle and rendering it.
 
-- `wasm_browsers` names the engines allowed to run the skwasm build: `wasm_browsers = ["blink", "gecko", "webkit"]` serves WebAssembly to Chrome and Edge (`blink`), Firefox (`gecko`) and Safari (`webkit`). Exactly the engines named are allowed. Unset is Flutter's default. It is your judgement of those browsers' skwasm support, not something the rule decides (Safari 27 loaded `main.dart.wasm` and rendered it with `wasm_browsers` naming `webkit`). It sets `wasmAllowList` in the generated bootstrap, so it is refused alongside a `bootstrap_js` of your own (pass `config: {wasmAllowList: {...}}` to `_flutter.loader.load` there) and wherever there is no skwasm build (`compiler = "dart2js"`, `renderer = "canvaskit"`).
-- `js_fallback = False` makes the bundle WebAssembly only: no dart2js compile runs, and nothing the rule generates refers to `main.dart.js`. That is for an app that cannot compile under dart2js. `flutter_bazel run -d chrome` then runs such an app under dart2wasm rather than DDC, since DDC compiles JavaScript the app never ships (see `--wasm` below); JavaScript is otherwise for the dev loop, which compiles with DDC. Code that only works under WebAssembly then builds: dart2js refuses the largest 64-bit integer literal at compile time and throws on `Int64List` at runtime, and the default build fails on the first (`e2e/web_example/int64/wasm_only` is an app that uses both, with `js_fallback = False`). If only part of the app needs WebAssembly, give dart2js its own variant of that part instead and keep the fallback (see Per-compiler code below). `js_fallback = False` also halves the compile work, and `optimization_level_js`, `minify_js`, `frequency_based_minification` and `dump_info` are refused, since nothing would run them.
+Two attributes change that:
 
-The cost of `js_fallback = False` is the browsers that cannot run WASM, and under the default allow-list that is Firefox and Safari. The loader logs `Flutter Web: no compatible build found for this browser.` and rejects the promise `_flutter.loader.load` returns. The generated `flutter_bootstrap.js` catches that and shows "This app could not start. It is built for WebAssembly only, so it needs a browser that can run it." on the page, where the loader alone would leave the page as `index.html` left it, with no app and no word why. A bundle with the JavaScript build shows a plainer "could not start" message for any load failure. (A `bootstrap_js` of your own gets none of this unless it does the same.) Combining `js_fallback = False` with `wasm_browsers` naming the engines you want is the usual WASM-only deployment.
+- `wasm_browsers` names the engines allowed to run the skwasm build. `wasm_browsers = ["blink", "gecko", "webkit"]` serves WebAssembly to Chrome and Edge (`blink`), Firefox (`gecko`) and Safari (`webkit`). Exactly the engines you name are allowed, and unset is Flutter's default. Whether skwasm works well enough in a browser is your judgement, not the rule's. (We measured Safari 27 loading `main.dart.wasm` and rendering it, with `wasm_browsers` naming `webkit`.) The attribute sets `wasmAllowList` in the generated bootstrap. So it is refused alongside a `bootstrap_js` of your own, where you pass `config: {wasmAllowList: {...}}` to `_flutter.loader.load` instead. It is also refused where there is no skwasm build (`compiler = "dart2js"`, `renderer = "canvaskit"`).
+- `js_fallback = False` makes the bundle WebAssembly only. No dart2js compile runs, and nothing the rule generates refers to `main.dart.js`. It is for an app that can't compile under dart2js. dart2js refuses the largest 64-bit integer literal at compile time and throws on `Int64List` at runtime, and the default build fails on the first. `e2e/web_example/int64/wasm_only` is an app that uses both, with `js_fallback = False`. If only part of the app needs WebAssembly, keep the fallback and give dart2js its own variant of that part instead (see [Per-compiler code](#per-compiler-code)).
+
+`js_fallback = False` also changes the dev loop. `flutter_bazel run -d chrome` normally compiles with DDC, which produces JavaScript. A WebAssembly-only app would never ship that, so `flutter_bazel run` builds it with dart2wasm instead (see `--wasm` under [The dev tool](#the-dev-tool)). It halves the compile work. `optimization_level_js`, `minify_js`, `frequency_based_minification` and `dump_info` are refused, since nothing would use them.
+
+What `js_fallback = False` costs is the browsers that can't run WebAssembly, which under the default allow-list are Firefox and Safari. There, the loader logs `Flutter Web: no compatible build found for this browser.` and rejects the promise `_flutter.loader.load` returns. The loader alone would leave the page as `index.html` left it, with no app and no word why. The generated `flutter_bootstrap.js` catches the rejection and shows "This app could not start. It is built for WebAssembly only, so it needs a browser that can run it." A bundle with the JavaScript build shows a plainer "could not start" message for any load failure. A `bootstrap_js` of your own gets neither unless it does the same. The usual WebAssembly-only deployment is `js_fallback = False` with `wasm_browsers` naming the engines you want.
+
+**The renderer files.** By default `flutter.js` fetches the renderer from `www.gstatic.com` and never reads a local copy, so the bundle doesn't ship one. Two things put a `canvaskit/` directory in it: `use_local_canvaskit = True`, which also tells the loader to read it, and a debug build, whose dev loop renders with CanvasKit served from there. A `bootstrap_js` of your own that points `canvasKitBaseUrl` at the bundle must set `use_local_canvaskit = True` too, or the directory won't be there.
+
+The loader never switches between skwasm and CanvasKit, with or without cross-origin isolation. (Without it, skwasm runs single-threaded from the same `skwasm.js` and `skwasm.wasm`.) So the directory holds only what the builds load. A WebAssembly-only skwasm bundle has `skwasm*` and `wimp*` and no CanvasKit (Safari and Firefox load `skwasm_heavy*`). A CanvasKit bundle has the reverse, and a bundle with both builds has both.
+
+The renderer's `.symbols` files are emscripten's function-name maps. Nothing fetches them: we watched the dev loop and release runs, skwasm and CanvasKit, request by request. So they aren't shipped. To symbolize a crash, `bazel build //my:app --output_groups=symbols` links the ones for this bundle's engine under `bazel-bin/my/<name>_symbols/canvaskit/`.
+
+**Compile CPUs.** An optimizing wasm compile (`-O1` and up, the default outside debug) reserves 4 CPUs, and its optimizer uses no more. `--@rules_flutter//flutter:wasm_opt_cpus=N` changes both. Fewer lets several web apps compile at once where Bazel has few CPUs to hand out. More makes one compile finish sooner. The output is the same either way.
+
+<details>
+<summary>Composable rules</summary>
+
+`flutter_web_bundle` is the rule `flutter_web_app` wraps. It takes the `web/` files as attributes (`index_html`, `bootstrap_js`, `manifest_json`, `version_json`, `web_assets`) and lets you choose the compiler and renderer.
+
+```starlark
+load("@rules_flutter//flutter:web.bzl", "flutter_web_bundle")
+
+# WebAssembly, with a dart2js build beside it for browsers that can't run
+# WebAssembly (the default):
+flutter_web_bundle(
+    name = "my_app_web",
+    application = ":my_app",
+)
+
+# WebAssembly only, for an app dart2js can't compile, served to every engine:
+flutter_web_bundle(
+    name = "my_app_web_wasm",
+    application = ":my_app",
+    js_fallback = False,
+    wasm_browsers = ["blink", "gecko", "webkit"],
+)
+
+# JavaScript alone:
+flutter_web_bundle(
+    name = "my_app_web_js",
+    application = ":my_app",
+    compiler = "dart2js",
+    renderer = "canvaskit",
+)
+```
+
+</details>
 
 #### Per-compiler code
 
-A bundle compiles its program once for each compiler it ships: dart2wasm, dart2js for the fallback, and DDC for `flutter_bazel run -d chrome` (DDC compiles what dart2js does, so a debug bundle has two versions of the program at most). The program can differ between them. Dart's own way to do that is a conditional import on `dart.library.js_interop`, but it cannot give dart2js and dart2wasm different declared types or different files. For that, each compiler builds its dependencies for its own web platform, one carrying the constraint value `@rules_dart//dart/constraints:wasm` or `:js`, and a library picks its variant with a `select()` on those in its `deps`. This is [rules_dart's mechanism](https://github.com/aran/rules_dart#per-compiler-code); a Flutter app uses it through `flutter_library` and `flutter_plugin` the same way.
+A bundle compiles its program once for each compiler it uses: dart2wasm, dart2js for the fallback, and DDC for `flutter_bazel run -d chrome`. DDC compiles what dart2js does, so a debug bundle has at most two versions of the program.
+
+The program can differ between them. Dart's own way is a conditional import on `dart.library.js_interop`, but that can't give dart2js and dart2wasm different declared types, or different files. For that, each compiler builds its dependencies for its own web platform. One carries the constraint value `@rules_dart//dart/constraints:wasm`, the other `:js`. A library picks its variant with a `select()` on those in its `deps`. This is [rules_dart's mechanism](https://github.com/aran/rules_dart#per-compiler-code), and a Flutter app uses it through `flutter_library` and `flutter_plugin` the same way.
+
+Here a library `ids` is `Int64List` under WebAssembly and `List<int>` under JavaScript. `e2e/web_example/int64` is this app:
 
 ```starlark
-# ids_typed/BUILD.bazel, and ids_js/BUILD.bazel the same with its own
+# ids_typed/BUILD.bazel. ids_js/BUILD.bazel is the same, with its own
 # lib/ids.dart: the same API, a different type.
 dart_package_metadata(
     name = "pubspec-metadata",
@@ -2380,91 +2570,54 @@ flutter_web_app(
 )
 ```
 
-The `select()` goes in a library, not in the application's `deps`: a `select()` is resolved in the configuration of the target that holds it, and the application's own `deps` are read in the configuration the web app was asked for, not a web platform's. The variants are separate libraries whose `dart_package_metadata` state the same `package_name`, each in a directory of its own, so the import is the same whichever is picked. `e2e/web_example/int64` is this app, which renders `Int64List max: 9223372036854775807` from the WebAssembly build and `List<int> max: 9007199254740991` from the JavaScript one.
+It renders `Int64List max: 9223372036854775807` from the WebAssembly build and `List<int> max: 9007199254740991` from the JavaScript one.
 
-What the bundle holds once comes from the primary compiler's version of the program (`dart2wasm` for the default `compiler`): the plugin registrant, the assets and shaders, and the icon tree-shaking scan. A dependency that differs by compiler should not differ in what plugins or assets it brings. An icon only the other compiler's variant uses is shaken out of the font unless `tree_shake_icons = False`.
+The variants are separate libraries, each in a directory of its own, whose `dart_package_metadata` give the same `package_name`. So the import is the same whichever is picked.
 
-These are built once, however many compilers reach them: pub packages (and Flutter SDK packages), anything a `flutter_library` or `flutter_plugin` marks `runtime_independent = True`, `flutter_native_library`, `dart_code_asset`, `dart_data_asset`, `flutter_gen_l10n`, and `dart_codegen` and its siblings. Code generation therefore cannot vary by compiler; a generator that needs to emit a variant per compiler emits both, and the library above chooses. Only the first-party libraries on the path from the bundle to a `select()` are analysed once per compiler, and a library has no action, so that costs analysis time only.
+The `select()` goes in a library, not in the application's `deps`. A `select()` is resolved in the configuration of the target that holds it. The application's own `deps` are read in the configuration the web app was asked for, which isn't a web platform's.
 
-A library that has no variant outside the web says so with `target_compatible_with = select({"@rules_dart//dart/constraints:vm": ["@platforms//:incompatible"], "//conditions:default": []})`, as in rules_dart, so `bazel build //...` skips it rather than failing on it.
+What the bundle holds once comes from the primary compiler's version of the program, which is dart2wasm's for the default `compiler`: the plugin registrant, the assets and shaders, and the scan that tree-shakes icons. So a dependency that differs by compiler shouldn't differ in the plugins or assets it brings. An icon that only the other compiler's variant uses is shaken out of the font, unless `tree_shake_icons = False`.
 
-The platforms are rules_dart's `@rules_dart//dart/platforms:js` and `:wasm`, which carry only that constraint. A bundle builds for others when its `js_platform` or `wasm_platform` names them; each must carry the matching constraint, and the bundle refuses one that does not.
+Some targets are built once, however many compilers reach them:
 
-A bundle has a `canvaskit/` directory of renderer files only when something loads it. By default `flutter.js` fetches the renderer from `www.gstatic.com` and never reads a local copy, so the directory would be dead weight and is not shipped. Two things put it there: `use_local_canvaskit = True`, which also tells the loader to read it, and a debug build, whose dev loop renders with CanvasKit served from it. A `bootstrap_js` of your own that points `canvasKitBaseUrl` at the bundle must set `use_local_canvaskit = True` too, or the directory is not there to load; one attribute states "this bundle serves its own renderer" for both routes, where a second could disagree with the files it ships.
+- pub packages, and the Flutter SDK's packages;
+- a `flutter_library` or `flutter_plugin` marked `runtime_independent = True`;
+- `flutter_native_library`, `dart_code_asset` and `dart_data_asset`;
+- `flutter_gen_l10n`, and `dart_codegen` and its siblings.
 
-What the directory holds depends on the builds. The loader never falls from skwasm to CanvasKit or back, in or out of cross-origin isolation (skwasm runs single-threaded from the same `skwasm.js` and `skwasm.wasm` when the page is not isolated), so a WASM-only skwasm bundle carries `skwasm*` (Safari and Firefox load `skwasm_heavy*`) and `wimp*` and no CanvasKit, a CanvasKit bundle the reverse, and a bundle with both builds both. The `.symbols` files beside them are emscripten's function-name maps, and nothing fetches them (the dev loop and release runs, skwasm and CanvasKit, were watched request by request), so they are never shipped. They are an output group instead: `bazel build //my:app --output_groups=symbols` links them under `bazel-bin/my/<name>_symbols/canvaskit/`, for the engine this bundle runs, when you need to symbolize a crash.
+So code generation can't vary by compiler. A generator that needs a variant per compiler emits both, and a library above it chooses. Only the first-party libraries on the path from the bundle to a `select()` are analysed once per compiler. A library has no action of its own, so that costs analysis time only.
 
-An optimizing wasm compile (`-O1` and up, the default outside debug) reserves 4 CPUs, and its optimizer uses no more. `--@rules_flutter//flutter:wasm_opt_cpus=N` changes both. Fewer lets several web apps compile at once where Bazel has few CPUs to hand out; more makes one compile finish sooner. The output is the same either way.
-
-The files under `web/` are treated as templates and substituted the way `flutter build web` substitutes them, so raw `flutter create` output works unchanged: `web/index.html`, `web/flutter_bootstrap.js`, `web/manifest.json`, and `web/version.json` are each discovered when present, and everything else under `web/` is copied into the bundle root.
-
-<details>
-<summary>Composable rules</summary>
+A library that has no variant outside the web says so as in rules_dart, so that `bazel build //...` skips it rather than failing on it:
 
 ```starlark
-load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application")
-load("@rules_flutter//flutter:web.bzl", "flutter_web_bundle")
-
-dart_package_metadata(
-    name = "pubspec-metadata",
-    package_name = "my_app",
-)
-
-flutter_application(
-    name = "app",
-    package = ":pubspec-metadata",
-    main = "lib/main.dart",
-    deps = ["@deps//:flutter"],
-)
-
-# WASM, with a dart2js build beside it for browsers that cannot run WASM
-# (the default):
-flutter_web_bundle(
-    name = "my_app_web",
-    application = ":app",
-)
-
-# WASM only, for an app dart2js cannot compile, served to every engine:
-flutter_web_bundle(
-    name = "my_app_web_wasm",
-    application = ":app",
-    js_fallback = False,
-    wasm_browsers = ["blink", "gecko", "webkit"],
-)
-
-# JavaScript alone, for wider browser support:
-flutter_web_bundle(
-    name = "my_app_web_js",
-    application = ":app",
-    compiler = "dart2js",
-    renderer = "canvaskit",
-)
+target_compatible_with = select({
+    "@rules_dart//dart/constraints:vm": ["@platforms//:incompatible"],
+    "//conditions:default": [],
+}),
 ```
 
-</details>
+The platforms are rules_dart's `@rules_dart//dart/platforms:js` and `:wasm`, which carry only that constraint. A bundle builds for other platforms when its `js_platform` or `wasm_platform` names them. Each must carry the matching constraint, and the bundle refuses one that doesn't.
 
 #### Content-Security-Policy
 
 A `<meta http-equiv="Content-Security-Policy">` in `web/index.html` applies both to the built bundle and to the dev loop (`flutter_bazel run -d chrome`), because the dev loop serves the same page. Measured on `e2e/web_example` with Flutter 3.47:
 
-| Policy | Built bundle (WASM) | Dev loop (DDC) |
+| Policy | Built bundle (WebAssembly) | Dev loop (DDC) |
 |---|---|---|
 | `script-src 'self' 'wasm-unsafe-eval'` | Renders | Blank page |
 | `script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'` | Renders | Renders |
 
-The dev loop needs `'unsafe-inline'`. Adding `'unsafe-eval'` instead changes nothing. The failure is silent: DWDS connects, the VM service answers, every module loads, no CSP violation reaches the console, and the app never paints. `connect-src 'self' ws: wss:` is enough for the dev loop's WebSocket.
+The dev loop needs `'unsafe-inline'`, and `'unsafe-eval'` instead doesn't help. The failure is silent: DWDS connects, the VM service answers, every module loads, no CSP violation reaches the console, and the app never paints. `connect-src 'self' ws: wss:` is enough for the dev loop's WebSocket.
 
 A bundle served under `default-src 'self'` or `script-src 'self'` must also serve its own renderer, with `use_local_canvaskit = True`. Otherwise the engine's import of `skwasm.js` from `www.gstatic.com` is blocked, the loader rejects, and the page shows the bootstrap's "could not start" message instead of the app. Flutter's font fallback from `fonts.gstatic.com` is blocked too, which is harmless unless the app needs those glyphs.
 
-A page that is also cross-origin isolated (see below) needs `worker-src 'self' blob:` beside that policy. Multi-threaded skwasm starts its worker from a `blob:` URL, a policy with `script-src 'self'` and no `worker-src` refuses it, and the page stays blank with nothing in the way of a message (measured in Chrome 156 with a local renderer: blank without the `worker-src`, rendered with it).
+A page that is also cross-origin isolated (see below) needs `worker-src 'self' blob:` beside that policy. Multi-threaded skwasm starts its worker from a `blob:` URL. A policy with `script-src 'self'` and no `worker-src` refuses it, and the page stays blank with no message. We measured this in Chrome 156 with a local renderer: blank without the `worker-src`, rendered with it.
 
-So a policy strict enough to be useful cannot live in `web/index.html` today, because the dev loop reads the same file. If you need one, compose `flutter_web_bundle` directly with a generated `index_html` for the production bundle.
+So a policy strict enough to be useful can't live in `web/index.html` today, because the dev loop reads the same file. If you need one, use `flutter_web_bundle` directly, with a generated `index_html` for the production bundle.
 
 #### Cross-origin isolation
 
-skwasm runs its renderer on threads only in a cross-origin-isolated page, which needs two response headers: `Cross-Origin-Opener-Policy: same-origin` and a `Cross-Origin-Embedder-Policy`. `flutter_bazel run --wasm` sends both, and so must whatever serves the deployed bundle. The embedder policy is the app's choice, set once on the target:
-
-The default renderer, fetched from `www.gstatic.com`, works in an isolated page and runs multi-threaded: the CDN answers with `Access-Control-Allow-Origin: *` and `Cross-Origin-Resource-Policy: cross-origin`, and skwasm's worker is a same-origin `blob:` that imports the CDN script as a module. Measured under `require-corp` in Chrome 156 and Safari 27, release builds: the app rendered and a worker started with the CDN renderer and with `use_local_canvaskit`, and without isolation neither starts a worker and the loader warns that skwasm runs single-threaded. So `use_local_canvaskit` is for air-gapped hosts and strict policies, not for threading.
+skwasm runs its renderer on threads only in a cross-origin-isolated page. That needs two response headers: `Cross-Origin-Opener-Policy: same-origin` and a `Cross-Origin-Embedder-Policy`. `flutter_bazel run --wasm` sends both, and whatever serves the deployed bundle must too. The embedder policy is the app's choice, set once on the target:
 
 ```starlark
 flutter_web_app(
@@ -2474,44 +2627,48 @@ flutter_web_app(
 )
 ```
 
-- **`require-corp`** (the default) isolates the page in every browser. It blocks a cross-origin subresource, such as an image from a CDN, unless that response carries a `Cross-Origin-Resource-Policy` header or is fetched with CORS. Flutter's own load of the skwasm renderer from `www.gstatic.com` passes.
-- **`credentialless`** loads such subresources without cookies instead of blocking them. Chrome and Firefox isolate the page under it; Safari does not, so skwasm runs single-threaded there. Upstream `flutter run` always sends this one.
+- **`require-corp`** (the default) isolates the page in every browser. It blocks a cross-origin subresource, such as an image from a CDN, unless the response carries a `Cross-Origin-Resource-Policy` header or is fetched with CORS. Flutter's own load of the skwasm renderer from `www.gstatic.com` passes.
+- **`credentialless`** loads such subresources without cookies instead of blocking them. Chrome and Firefox isolate the page under it. Safari doesn't, so skwasm runs single-threaded there. Upstream `flutter run` always sends this one.
 
-The dev tool reads the value from `<bundle>.serving.json`, which the build writes beside the bundle directory rather than inside it, so it is not deployed. `--no-cross-origin-isolation` turns both headers off for a run, and `--web-header` can then set your own.
+The default renderer from `www.gstatic.com` works in an isolated page and runs multi-threaded. The CDN answers with `Access-Control-Allow-Origin: *` and `Cross-Origin-Resource-Policy: cross-origin`, and skwasm's worker is a same-origin `blob:` that imports the CDN script as a module. We measured release builds under `require-corp` in Chrome 156 and Safari 27. With the CDN renderer and with `use_local_canvaskit`, the app rendered and a worker started. Without isolation, neither started a worker, and the loader warned that skwasm runs single-threaded. So `use_local_canvaskit` is for air-gapped hosts and strict policies, not for threading.
+
+The dev tool reads the policy from `<bundle>.serving.json`, which the build writes beside the bundle directory rather than inside it, so it isn't deployed. `--no-cross-origin-isolation` turns both headers off for a run, and `--web-header` can then set your own.
 
 ### Cross-compiling
 
-`gen_snapshot`, the AOT compiler, runs on the host and produces code for the target. Flutter publishes a different binary per host and target pair, and not every pair exists.
+`gen_snapshot`, the AOT compiler, runs on the build machine and produces code for the target. Flutter publishes a separate binary for each pair of host and target, and not every pair exists. A debug build compiles to kernel instead, so it needs no `gen_snapshot`.
 
-| Host | Target | AOT (release) | JIT (debug) | Notes |
+| Host | Target | Release (AOT) | Debug (JIT) | Notes |
 |---|---|:---:|:---:|---|
-| macOS | macOS | Yes | Yes | Native build |
-| macOS | iOS | Yes | Yes | `rules_apple` handles the transition |
-| macOS | Android | Yes | Yes | The Android rules handle the transition |
+| macOS | macOS | Yes | Yes | |
+| macOS | iOS | Yes | Yes | rules_apple handles the transition |
+| macOS | Android | Yes | Yes | rules_android handles the transition |
 | macOS | Linux | No | Yes | Needs an LLVM cross-toolchain |
-| macOS | Windows | No | Yes | Needs a Windows cross-toolchain |
-| macOS | Web | Yes | n/a | Web uses dart2wasm or dart2js, not gen_snapshot |
-| Linux | Linux | Yes | Yes | Native build |
-| Linux | Android | Yes | Yes | The Android rules handle the transition |
-| Linux | iOS | No | No | Needs Xcode |
-| Linux | Web | Yes | n/a | |
-| Windows | Windows | Yes | Yes | Native build |
-| Windows | Android | Yes | Yes | The Android rules handle the transition |
-| Windows | Web | Yes | n/a | |
+| macOS | Windows | No | Yes | Needs a Windows cross-toolchain and resource compiler |
+| macOS | Web | Yes | Yes | Web uses dart2wasm, dart2js and DDC, not `gen_snapshot` |
+| Linux | Linux | Yes | Yes | |
+| Linux | Android | Yes | Yes | rules_android handles the transition |
+| Linux | iOS, macOS | No | No | Needs Xcode |
+| Linux | Web | Yes | Yes | |
+| Windows | Windows | Yes | Yes | |
+| Windows | Android | Yes | Yes | rules_android handles the transition |
+| Windows | Web | Yes | Yes | |
 
-The gap is desktop to desktop: there is no release cross-compile from macOS to Linux or Windows, because Flutter does not publish those `gen_snapshot` binaries. Build debug bundles across, or build release natively on the target.
+The gap is from one desktop OS to another. Flutter publishes no `gen_snapshot` that compiles for Linux or Windows on another OS, so build debug bundles across, or build release on the target OS. [`e2e/cross_compile_example`](e2e/cross_compile_example/MODULE.bazel) builds a Linux bundle on a Mac with the `llvm` module's toolchains.
 
 ### Release builds and permissions
 
-`flutter create`'s scaffold grants network access in debug and profile builds only, and these rules reproduce that. An app that reaches the network under `-c dbg` can be offline under `-c opt` with no build error, no exception, and nothing in its log. The same shape exists on every platform, because in every case the debug-only grant is for the Dart VM service, not for the app:
+`flutter create`'s scaffold grants network access in debug and profile builds only, and these rules do the same. So an app that reaches the network under `-c dbg` can be offline under `-c opt`, with no build error, no exception and nothing in its log. Each platform's debug-only grant is there for the Dart VM service, not for the app:
 
-| Platform | What debug has that release does not | Why |
+| Platform | What debug has that release doesn't | Why |
 |---|---|---|
-| macOS | `com.apple.security.network.server` and `com.apple.security.cs.allow-jit` in `DebugProfile.entitlements`, which profile builds use too. `Release.entitlements` has only `app-sandbox`. | The sandbox must let the VM service bind and the JIT map executable pages. |
-| Android | `android.permission.INTERNET`, from `android/app/src/debug/AndroidManifest.xml` (and `src/profile/` in profile builds). | Android enforces `INTERNET` at the kernel level. Without it the VM service cannot bind even a loopback socket. |
-| iOS | `NSBonjourServices` and `NSLocalNetworkUsageDescription`, merged in by these rules for non-release builds. | The engine advertises the VM service over mDNS. |
+| macOS | `com.apple.security.network.server` and `com.apple.security.cs.allow-jit` in `DebugProfile.entitlements`, which profile builds use too. `Release.entitlements` has only `app-sandbox`. | The sandbox must let the VM service bind, and let the JIT map executable pages. |
+| Android | `android.permission.INTERNET`, from `android/app/src/debug/AndroidManifest.xml` (and `src/profile/` in profile builds). | Android enforces `INTERNET` in the kernel. Without it the VM service can't bind even a loopback socket. |
+| iOS | `NSBonjourServices` and `NSLocalNetworkUsageDescription`, which these rules add to non-release builds. | The engine advertises the VM service over mDNS. |
 
-An app that uses the network for itself has to say so once, in a way that applies to every compilation mode:
+Remember that a plain `bazel build` is a release build, so it takes the release side of each row.
+
+An app that uses the network for itself says so once, in a way that applies to every compilation mode:
 
 ```starlark
 flutter_macos_app(
@@ -2551,13 +2708,13 @@ where `entitlements/Network.entitlements` is an ordinary plist:
 </plist>
 ```
 
-These attributes add to whichever base file the compilation mode selected, so one declaration covers debug and release, and the `flutter create` files stay untouched. A key the base already has with the same value is deduplicated, so declaring `network.server` above is safe even though `DebugProfile.entitlements` already grants it. A key the base has with a different value is an error naming the key and both files.
+These attributes add to whichever base file the compilation mode selects, so one declaration covers debug and release, and the `flutter create` files stay untouched. A key the base already has with the same value is merged into one, so declaring `network.server` is safe even though `DebugProfile.entitlements` grants it. A key the base has with a different value is an error naming the key and both files.
 
-Note that `com.apple.security.network.client` is in neither scaffold file. Most Flutter apps go through `NSURLSession`, which the sandbox exempts. A raw socket is not exempt, so if you open one, you need this key.
+`com.apple.security.network.client` is in neither scaffold file. Most Flutter apps reach the network through `NSURLSession`, which the sandbox exempts. A raw socket isn't exempt, so if you open one, you need this key.
 
-**iOS local network privacy.** iOS 14 and later gate LAN access behind `NSLocalNetworkUsageDescription` and `NSBonjourServices`. The rules add both to non-release builds for the VM service and drop them in release. An app that needs LAN access for itself declares them in `ios/Runner/Info.plist`, where they survive into `-c opt`. The rules merge the VM service keys into that file, keeping your usage description and adding `_dartVmService._tcp` to your Bonjour list. The iOS simulator does not enforce local network privacy, so only a physical device tells you whether these keys are right.
+**iOS local network privacy.** Since iOS 14, LAN access needs `NSLocalNetworkUsageDescription` and `NSBonjourServices`. The rules add both to non-release builds for the VM service, and leave them out in release. An app that needs LAN access for itself declares them in `ios/Runner/Info.plist`, where they survive into `-c opt`. In non-release builds the rules merge their keys into that file, keeping your usage description and adding `_dartVmService._tcp` to your Bonjour list. The iOS simulator doesn't enforce local network privacy, so only a physical device tells you whether these keys are right.
 
-**Check the artifact.** A `build_test` cannot see any of this. Read the built app:
+**Check the built app.** A `build_test` can't see any of this. Read the built artifact:
 
 ```sh
 # macOS: the entitlements codesign embedded
@@ -2572,11 +2729,13 @@ unzip -oq bazel-bin/my_app_ios.ipa -d /tmp/ipa && \
   plutil -p "/tmp/ipa/Payload/my_app_ios.app/Info.plist"
 ```
 
-Remember that a plain `bazel build` is a release build, so it already takes the release side of each of these choices. `e2e/macos_example`, `e2e/android_example`, and `e2e/ios_example` each have a test that reads the built artifact this way.
+`e2e/macos_example`, `e2e/android_example` and `e2e/ios_example` each have a test that reads the built artifact this way.
 
 ### Add-to-app: iOS and macOS
 
-A native app built **with Bazel** embeds Flutter through the Tier 2 rules of `flutter/ios.bzl` and `flutter/macos.bzl` (`flutter_ios_app_framework_gen`, `flutter_ios_engine`, ...) in its own `ios_application` or `macos_application`. A native app built **with Xcode** takes Flutter as xcframeworks instead, as `flutter build ios-framework` and `flutter build macos-framework` make them:
+A native app built with Bazel embeds Flutter through the Tier 2 rules of `flutter/ios.bzl` and `flutter/macos.bzl` (`flutter_ios_app_framework_gen`, `flutter_ios_engine` and the rest) in its own `ios_application` or `macos_application`.
+
+A native app built with Xcode takes Flutter as xcframeworks instead, as `flutter build ios-framework` and `flutter build macos-framework` make them:
 
 ```starlark
 load("@rules_flutter//flutter:ios.bzl", "flutter_ios_xcframeworks")
@@ -2587,45 +2746,53 @@ flutter_ios_xcframeworks(
 )
 ```
 
+Each build makes one mode, the configuration's. `bazel run` writes it to `build/ios/framework/<Mode>/` in the package (`-- --output=<dir>` writes elsewhere). It replaces what an earlier run wrote for that mode, and says which other modes are from earlier runs.
+
 ```sh
 bazel run //:module_ios -c dbg                                     # build/ios/framework/Debug/
 bazel run //:module_ios -c opt --@rules_flutter//flutter:profile   # .../Profile/
 bazel run //:module_ios -c opt                                     # .../Release/
 ```
 
-Each build makes one mode, the configuration's, and `bazel run` writes it to `build/ios/framework/<Mode>/` in the package (`-- --output=<dir>` elsewhere), replacing what an earlier run wrote for that mode and saying which other modes are from earlier runs. Build every mode from the same sources: Xcode picks the directory by its configuration, and a Debug Flutter.xcframework with a Release App.xcframework crashes at launch. `flutter_macos_xcframeworks` is the same for macOS, under `build/macos/framework/`.
+Build every mode from the same sources. Xcode picks the directory by its configuration, and a Debug `Flutter.xcframework` with a Release `App.xcframework` crashes at launch. `flutter_macos_xcframeworks` is the same for macOS, under `build/macos/framework/`.
 
 What `<Mode>/` holds, as upstream:
 
 | xcframework | What it is |
 |---|---|
-| `App.xcframework` | The Dart program and its assets: AOT in profile and release (with `dSYMs/`), kernel in debug. The iOS simulator slice is a debug build in every mode, as upstream's: the simulator engine runs nothing else. |
-| `Flutter.xcframework`, `FlutterMacOS.xcframework` | Flutter's own engine xcframework of the mode, copied with Flutter's signature. |
-| `<plugin>.xcframework` | One per plugin with Apple code, named after its module, holding only that plugin's code; it links Flutter at `@rpath`. Plugins built from a `Package.swift` are included, which upstream's CocoaPods-only command leaves out. |
-| `<code asset>.xcframework` | One per code asset (a build hook's or `flutter_native_asset`'s dynamic library). |
-| `FlutterPluginRegistrant.xcframework` | iOS: a static framework of upstream's Objective-C `GeneratedPluginRegistrant`. |
+| `App.xcframework` | The Dart program and its assets: AOT in profile and release (with `dSYMs/`), kernel in debug. The iOS simulator slice is a debug build in every mode, as upstream's is, because the simulator engine runs nothing else. |
+| `Flutter.xcframework`, `FlutterMacOS.xcframework` | Flutter's own engine xcframework for the mode, copied with Flutter's signature. |
+| `<plugin>.xcframework` | One per plugin with Apple code, named after its module and holding only that plugin's code. It links Flutter at `@rpath`. Plugins built from a `Package.swift` are included, which upstream's CocoaPods-only command leaves out. |
+| `<code asset>.xcframework` | One per code asset: a build hook's or a `flutter_native_asset`'s dynamic library. |
+| `FlutterPluginRegistrant.xcframework` | iOS only: a static framework of upstream's Objective-C `GeneratedPluginRegistrant`. |
 
-Each `<Mode>/` is also a Swift package, as `flutter build swift-package` writes one per mode (Swift Package Manager is Flutter's default for plugins since 3.44): `Package.swift` declares the static library `FlutterPluginRegistrant`, upstream's Swift `GeneratedPluginRegistrant` over every xcframework of the mode as a binary target. `bazel run` points `FlutterPluginRegistrant`, beside the modes, at the mode it wrote. Add that directory to the host as a local package, link its library, and make the scheme's build pre-action point it at the mode Xcode builds, as upstream's scripts do: `ln -sfn "$CONFIGURATION" <path>/FlutterPluginRegistrant`. Xcode then embeds and signs the dynamic frameworks itself. Unlike upstream, a plugin is a binary target here, not its Swift package's source to build again.
+Beside the modes are `GeneratedPluginRegistrant.h` and `.m` on iOS (use them or the framework), or `GeneratedPluginRegistrant.swift` on macOS. After a debug iOS build there are also `flutter_lldbinit` and `flutter_lldb_helper.py`, which a debug build on an iOS 26 or later device needs as the scheme's LLDB init file.
 
-Above the modes are `GeneratedPluginRegistrant.h` and `.m` (iOS; use them or the framework) or `GeneratedPluginRegistrant.swift` (macOS), and after a debug iOS build `flutter_lldbinit` and `flutter_lldb_helper.py`, which a debug build on an iOS 26 or later device needs as the scheme's LLDB init file. Integrate them as Flutter's [add-to-app guide for iOS](https://docs.flutter.dev/add-to-app/ios/project-setup) describes for `flutter build ios-framework`: link and embed the dynamic xcframeworks (Embed & Sign), link FlutterPluginRegistrant without embedding it, and point the paths at `$(CONFIGURATION)`.
+Integrate them as Flutter's [add-to-app guide for iOS](https://docs.flutter.dev/add-to-app/ios/project-setup) describes for `flutter build ios-framework`: link and embed the dynamic xcframeworks (Embed & Sign), link `FlutterPluginRegistrant` without embedding it, and point the paths at `$(CONFIGURATION)`.
 
-The xcframeworks are built unsigned, so the build is the same on every machine and caches; Xcode signs the frameworks it embeds. To sign the xcframeworks themselves, as `flutter build ios-framework --codesign-identity` does, give `codesign_identity`: a certificate's name or SHA-1 as `codesign` takes it, or `-` for ad hoc. They are then signed in a step of its own over the unsigned build (`flutter_apple_xcframeworks_codesign`, which also composes over a layout you assemble), on this Mac and outside the sandbox so `codesign` reaches the keychain. Each xcframework is signed with `--timestamp=none` but in release, as upstream signs it; Flutter's engine xcframework keeps Flutter's signature. Changing the identity re-runs only the signing.
+**As a Swift package.** Each `<Mode>/` is also a Swift package, as `flutter build swift-package` writes one per mode. (Swift Package Manager is Flutter's default for plugins since 3.44.) Its `Package.swift` declares the static library `FlutterPluginRegistrant`: upstream's Swift `GeneratedPluginRegistrant`, over every xcframework of the mode as a binary target. `bazel run` points the `FlutterPluginRegistrant` link beside the modes at the mode it wrote. Add that directory to the host as a local package and link its library. Then make the scheme's build pre-action point it at the mode Xcode builds, as upstream's scripts do: `ln -sfn "$CONFIGURATION" <path>/FlutterPluginRegistrant`. Xcode then embeds and signs the dynamic frameworks itself. Unlike upstream's, a plugin here is a binary target, not its Swift package's source to build again.
 
-The frameworks have arm64 slices only (no Intel simulator or Mac), so a host builds for arm64: `ARCHS = arm64` in its build settings where Xcode would otherwise build every architecture (a release build, or a generic simulator destination).
+**Signing.** The xcframeworks are built unsigned, so the build is the same on every machine and caches. Xcode signs the frameworks it embeds. To sign the xcframeworks themselves, as `flutter build ios-framework --codesign-identity` does, set `codesign_identity`: a certificate's name or SHA-1 as `codesign` takes it, or `-` for ad hoc. Signing then runs as a step of its own over the unsigned build, on this Mac and outside the sandbox, so `codesign` reaches the keychain. Each xcframework is signed with `--timestamp=none` except in release, as upstream signs it, and Flutter's engine xcframework keeps Flutter's signature. Changing the identity re-runs only the signing. The step is `flutter_apple_xcframeworks_codesign`, which also works over a layout you assemble yourself.
 
-`plugins = False` leaves the plugins out (upstream's `--no-plugins`), for a host that ships them itself; `static_plugins = True` makes them static frameworks to link and not embed (`--static`).
+The frameworks have arm64 slices only, with no Intel simulator or Mac slice. So the host builds for arm64: set `ARCHS = arm64` in its build settings wherever Xcode would otherwise build every architecture (a release build, or a generic simulator destination).
 
-A plugin whose library depends on something that is not a plugin, such as a product of a remote Swift package, fails the build with a message: upstream makes such a dependency an xcframework of its own, which these rules do not yet. So does a plugin whose `Package.swift` reads the app's settings.
+Other attributes:
 
-The pieces are Tier 2 rules of their own, each building the configuration's mode: `flutter_ios_app_xcframework`, `flutter_ios_engine_xcframework`, `flutter_ios_plugin_xcframeworks`, `flutter_ios_code_asset_xcframeworks` and `flutter_ios_registrant_xcframework`, and their `flutter_macos_*` counterparts but the registrant. Bazel keeps no link to a directory in a directory artifact, so in `bazel-bin` a macOS framework is its `Versions/A/` alone; `bazel run` makes the links a versioned framework has.
+- `plugins = False` leaves the plugins out, as upstream's `--no-plugins` does, for a host that ships them itself.
+- `static_plugins = True` makes them static frameworks to link and not embed, as `--static` does.
+- `minimum_os_version` defaults to `"15.0"` on iOS and `"12.0"` on macOS.
+
+Two kinds of plugin fail the build with a message. One is a plugin whose library depends on something that isn't a plugin, such as a product of a remote Swift package. Upstream makes such a dependency an xcframework of its own, which these rules don't do yet. The other is a plugin whose `Package.swift` reads the app's settings.
+
+The pieces are Tier 2 rules of their own, each building the configuration's mode: `flutter_ios_app_xcframework`, `flutter_ios_engine_xcframework`, `flutter_ios_plugin_xcframeworks`, `flutter_ios_code_asset_xcframeworks` and `flutter_ios_registrant_xcframework`, and their `flutter_macos_*` counterparts except the registrant. Bazel can't keep a symlink to a directory inside a directory artifact, so in `bazel-bin` a macOS framework is its `Versions/A/` alone. `bazel run` makes the links a versioned framework has.
 
 ## Custom engines and frameworks
 
-By default an app builds against a Flutter release: its framework from the release's tag and its engine from the official artifacts. You can also build against a framework and an engine of your own, for example a flutter/flutter checkout and the engine you built in it, which is what `flutter run --local-engine` does upstream. Each such pairing is a named *SDK*, declared next to the release, and each build picks one.
+By default an app builds against a Flutter release: the framework from the release's tag, and the engine from the official artifacts. You can also build against a framework and an engine of your own, such as a flutter/flutter checkout and the engine you built in it. That is what `flutter run --local-engine` does upstream. Each such pairing is a named *SDK*, declared next to the release, and each build picks one.
 
 ### Building against a local checkout
 
-Build the engine in the checkout as usual, with `engine/src/flutter/tools/gn` and `ninja`, then declare an SDK over it. The checkout's path is machine-local, so it never appears in `MODULE.bazel`:
+Build the engine in the checkout as usual, with `engine/src/flutter/tools/gn` and `ninja`. Then declare an SDK over it in `MODULE.bazel`:
 
 ```starlark
 flutter = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter")
@@ -2648,9 +2815,9 @@ local_framework(name = "flutter_local_framework")
 local_engine(name = "flutter_local_engine")
 ```
 
-The repositories these rules make load `@rules_dart`, so the module that declares them has a `bazel_dep` on rules_dart.
+The repositories these rules make load `@rules_dart`, so the module that declares them needs a `bazel_dep` on rules_dart.
 
-The paths and the choice to use the SDK go in your untracked `.bazelrc.user`. `FLUTTER_CHECKOUT` is the flutter/flutter checkout. `FLUTTER_ENGINE` is the engine's source directory, which flutter_tools reads under the same name (it is the default of `--local-engine-src-path`): usually the checkout's `engine/src`, and the directory whose `out` holds the built out dirs. The engine is read from `FLUTTER_ENGINE` alone, never derived from `FLUTTER_CHECKOUT`, so an engine built elsewhere works with any checkout's framework.
+The checkout's path is specific to your machine, so it never appears in `MODULE.bazel`. The paths, and the choice to use the SDK, go in your untracked `.bazelrc.user`:
 
 ```bazelrc
 common --repo_env=FLUTTER_CHECKOUT=/Users/me/src/flutter
@@ -2658,41 +2825,43 @@ common --repo_env=FLUTTER_ENGINE=/Users/me/src/flutter/engine/src
 common --@rules_flutter//flutter:sdk=local
 ```
 
-`flutter_local_framework` links the checkout's `packages/` and `bin/internal/`, so an edit to the framework is seen by the next build. `flutter_local_engine` scans `$FLUTTER_ENGINE/out`, takes the `sky_engine` package from the host debug out dir's `gen/dart-pkg/sky_engine` (as flutter_tools does), reads each out dir's `args.gn` to learn what it holds, and links in the files each piece of the engine needs. A ninja rebuild changes a linked file, and the next build picks it up.
+`FLUTTER_CHECKOUT` is the flutter/flutter checkout. `FLUTTER_ENGINE` is the engine's source directory, the directory whose `out/` holds the built out dirs. That is usually the checkout's `engine/src`. flutter_tools reads a variable of the same name, the default of `--local-engine-src-path`. The engine is read from `FLUTTER_ENGINE` alone, never worked out from `FLUTTER_CHECKOUT`, so an engine built elsewhere works with any checkout's framework.
 
-Which out dir serves what, by the names `tools/gn` gives them (the CPU appears in a name only when it is not the platform's default, so an Apple silicon Mac's host build is `host_debug_arm64`):
+`flutter_local_framework` links the checkout's `packages/` and `bin/internal/`, so the next build sees an edit to the framework. `flutter_local_engine` scans `$FLUTTER_ENGINE/out`. It reads each out dir's `args.gn` to learn what the out dir holds, and links in the files each piece of the engine needs. It takes the `sky_engine` package from the host debug out dir's `gen/dart-pkg/sky_engine`, as flutter_tools does. A ninja rebuild changes a linked file, and the next build picks it up.
+
+Which out dir serves what, by the names `tools/gn` gives them. The CPU appears in a name only when it isn't the platform's default, so an Apple silicon Mac's host build is `host_debug_arm64`.
 
 | Out dir | Serves |
 |---|---|
-| `host_debug[_unopt][_<cpu>]` | The host tools (the Dart SDK, `frontend_server`, `flutter_tester`, `impellerc`, ...) and the debug platform kernel; on a Mac, the debug macOS engine |
-| `host_profile...`, `host_release...` | That mode's macOS engine and `gen_snapshot` on a Mac, or that mode's Linux or Windows engine on those machines; `host_release` also gives the release platform kernel |
+| `host_debug[_unopt][_<cpu>]` | The host tools (the Dart SDK, `frontend_server`, `flutter_tester`, `impellerc` and so on) and the debug platform kernel. On a Mac, also the debug macOS engine |
+| `host_profile...`, `host_release...` | On a Mac, that mode's macOS engine and `gen_snapshot`. On Linux or Windows, that mode's engine for the machine. `host_release` also gives the release platform kernel |
 | `ios_debug_sim[_unopt][_<cpu>]` | The iOS simulator engine, which is what debug means for iOS |
 | `ios_profile...`, `ios_release...` | The iOS device engine and its `gen_snapshot` |
 | `android_<mode>[_unopt][_<cpu>]` | The Android engine (`flutter.jar`) and, for profile and release, its `gen_snapshot` |
-| `linux_<mode>[_<cpu>]`, `win_<mode>[_<cpu>]` | A Linux or Windows engine built for a machine other than this one, for debug cross-builds |
+| `linux_<mode>[_<cpu>]`, `win_<mode>[_<cpu>]` | A Linux or Windows engine built for another machine than this one, for debug cross-builds |
 | `wasm_release` | The web SDK (`flutter_web_sdk/`, with `canvaskit/`) |
 
-Build only the out dirs your builds need. A `-c dbg` macOS app needs `host_debug_<cpu>`; a release one needs `host_release_<cpu>` too.
+Build only the out dirs your builds need. A `-c dbg` macOS app needs `host_debug_<cpu>`. A release one needs `host_release_<cpu>` too.
 
 If two out dirs fit the same slot (`host_debug_arm64` and `host_debug_unopt_arm64`, say), the build fails and lists them. Choose with `--repo_env=FLUTTER_LOCAL_ENGINES=host_debug_unopt_arm64,host_release_arm64`.
 
-The engine source directory also needs its Dart source, `flutter/third_party/dart`, which `gclient sync` fetches. rules_dart compiles each library's dependents against an outline of it (its kernel without function bodies), so an edit inside a function body does not recompile them. The tool that makes outlines reads only the kernel format of the Dart it ships with, so an engine built from a checkout is built from that checkout's own `pkg/kernel`. Without the source, a build fails saying so and naming the two ways out: run `gclient sync`, or build with `--@rules_dart//dart:outline_kernel=false`.
+The engine source directory also needs its Dart source, `flutter/third_party/dart`, which `gclient sync` fetches. rules_dart compiles each library's dependents against an outline of it: its kernel without function bodies. That way an edit inside a function body doesn't recompile them. The tool that makes outlines reads only the kernel format of its own Dart, so for an engine built from a checkout, it is built from that checkout's `pkg/kernel`. Without the Dart source, a build fails saying so, and names the two ways out: run `gclient sync`, or build with `--@rules_dart//dart:outline_kernel=false`.
 
 Programs built with a custom SDK get its own `FLUTTER_VERSION`, `FLUTTER_FRAMEWORK_REVISION`, `FLUTTER_ENGINE_REVISION` and `FLUTTER_DART_VERSION` defines, from the checkout's version and commit and the engine's `args.gn`. `flutter_test` runs under the selected SDK too: its modules compile against the checkout's platform kernel.
 
-You can also replace only one half. Give `flutter.toolchain` just `engine` or just `framework`, with `flutter_version` naming the release that supplies the other half. A framework whose `bin/internal/material_fonts.version` names a fonts revision no pinned release uses needs `material_fonts_sha256`.
+You can also replace only one half. Give `flutter.toolchain` just `engine` or just `framework`, with `flutter_version` naming the release that supplies the other half. A framework whose `bin/internal/material_fonts.version` names a fonts revision that no pinned release uses also needs `material_fonts_sha256`.
 
 ### Choosing the SDK per build
 
-`--@rules_flutter//flutter:sdk=<name>` picks the SDK. Leave it out and you get the release, which is named `flutter`. Put the flag in `.bazelrc.user` to make the checkout your default on one machine, or pass it on the command line for one build:
+`--@rules_flutter//flutter:sdk=<name>` picks the SDK. Without it you get the release, which is named `flutter`. Put the flag in `.bazelrc.user` to make the checkout your default on one machine, or pass it for one build:
 
 ```sh
 bazel build //:app --@rules_flutter//flutter:sdk=local
 ```
 
-Each SDK's repositories are fetched only when a build selects it. Without `FLUTTER_CHECKOUT` and `FLUTTER_ENGINE` set, the repositories still load, so `bazel query` works on a machine with no checkout, and a build that selects the SDK fails at analysis with the `.bazelrc.user` lines to add. A name no `flutter.toolchain()` declares fails, listing the ones that are declared. An SDK other than `flutter` can only be declared in the root module.
+An SDK's repositories are fetched only when a build selects it. On a machine without `FLUTTER_CHECKOUT` and `FLUTTER_ENGINE` set, the repositories still load, so `bazel query` works. A build that selects the SDK there fails at analysis, with the `.bazelrc.user` lines to add. A name no `flutter.toolchain()` declares fails, listing the names that are declared. Only the root module can declare an SDK other than `flutter`.
 
-All SDKs share one `pubspec.lock`. The `sdk: flutter` packages (`flutter`, `flutter_test`, ...) come from the selected SDK's framework. If what the checkout's pubspecs ask of a hosted package does not match the lock, or the lock needs a newer Flutter than the checkout is, the build fails naming each package and gives the command that re-resolves against that SDK:
+All SDKs share one `pubspec.lock`. The `sdk: flutter` packages (`flutter`, `flutter_test` and so on) come from the selected SDK's framework. The build fails in two cases: when what the checkout's pubspecs ask of a hosted package doesn't match the lock, and when the lock needs a newer Flutter than the checkout is. It names each package, and gives the command that resolves the lock again against that SDK:
 
 ```sh
 bazel run --@rules_flutter//flutter:sdk=local @rules_flutter//flutter/pub -- get
@@ -2700,7 +2869,17 @@ bazel run --@rules_flutter//flutter:sdk=local @rules_flutter//flutter/pub -- get
 
 ### What the app records
 
-An app built with a custom SDK carries `flutter_sdk.json` beside its Flutter assets: in `App.framework/Resources/flutter_assets/` on macOS, `flutter_assets/` in iOS's `App.framework/`, `assets/flutter_assets/` in an APK, `data/flutter_assets/` in a Linux or Windows bundle, and `assets/` on the web. An app built with the release carries none, so release apps are unchanged.
+An app built with a custom SDK carries `flutter_sdk.json` in its Flutter assets:
+
+| App | Where |
+|---|---|
+| macOS | `App.framework/Resources/flutter_assets/` |
+| iOS | `flutter_assets/` in `App.framework/` |
+| Android | `assets/flutter_assets/` in the APK |
+| Linux, Windows | `data/flutter_assets/` |
+| Web | `assets/` |
+
+An app built with the release carries none, so release apps are unchanged.
 
 ```json
 {
@@ -2729,21 +2908,21 @@ An app built with a custom SDK carries `flutter_sdk.json` beside its Flutter ass
 
 - `framework` is the checkout: its version (from `bin/cache/flutter.version.json`, or `git describe --tags` without one), its commit, and whether it had uncommitted changes when the build read it.
 - `engine` has one entry for each piece the app was built from, keyed by the piece's label: the host tools, the platform kernel, the engine and, in profile and release, the `gen_snapshot`. `engine_version`, `content_hash` and `dart_version` are what `tools/gn` wrote into the out dir's `args.gn`. `as_of: "gn"` says so: that commit is the one checked out when `tools/gn` generated the directory, which can be older than the last `ninja` run.
-- `snapshot_hash` and `kernel` are the fingerprints the engine's Dart VM checks; see below. A web app has no `snapshot_hash`.
-- The record holds no path of the machine that built the app: the checkout's path and every absolute path are left out.
+- `snapshot_hash` and `kernel` are the fingerprints the engine's Dart VM checks (see below). A web app has no `snapshot_hash`.
+- The record holds no path of the machine that built the app. The checkout's path and every absolute path are left out.
 
 ### What fails, and how
 
 Every failure names what is missing or which artifacts disagree, and how to fix it.
 
-**A piece the out dirs do not have.** A build that needs an engine for a mode, platform or CPU the out dirs lack fails at analysis. The message names the piece, the out dirs it found, and the `tools/gn` and `ninja` commands that build the missing one. A mode is never served by another mode's engine: a debug engine cannot run AOT code, and a release engine rejects anything not compiled for release. Builds that do not need the missing piece are unaffected, so a checkout with only `host_debug_arm64` and its Dart source builds every `-c dbg` macOS app on an Apple silicon Mac.
+**A piece the out dirs don't have.** A build that needs an engine for a mode, platform or CPU that the out dirs lack fails at analysis. The message names the piece, the out dirs it found, and the `tools/gn` and `ninja` commands that build the missing one. One mode's engine never stands in for another's: a debug engine can't run AOT code, and a release engine rejects anything not compiled for release. Builds that don't need the missing piece are unaffected. So on an Apple silicon Mac, a checkout with only `host_debug_arm64` and its Dart source builds every `-c dbg` macOS app.
 
-**An engine of the wrong CPU.** A locally built engine holds one CPU, where the release's macOS engine is universal. An app built for a CPU the engine lacks fails at analysis naming the engine, what it contains and what the build is for. An iOS app checks the same way for the device or simulator slice it needs, and an Android app for each ABI it carries.
+**An engine of the wrong CPU.** A locally built engine holds one CPU, where the release's macOS engine is universal. An app built for a CPU the engine lacks fails at analysis, naming the engine, the CPUs it holds and the CPU the build is for. An iOS app is checked the same way for the device or simulator slice it needs, and an Android app for each ABI it carries.
 
-**Pieces built from different Darts.** Once per SDK, platform and mode, one action, `FlutterSdkCheck`, reads the fingerprints out of the artifacts, and every app of that combination depends on it, so it cannot be skipped. It fails the build when:
+**Pieces built from different Darts.** Once per SDK, platform and mode, one action, `FlutterSdkCheck`, reads the fingerprints out of the artifacts. Every app of that combination depends on it, so it can't be skipped. It fails the build when:
 
 - the engine's platform kernel and the Dart SDK's `vm_platform_strong.dill` have different kernel formats or SDK hashes;
-- in profile and release, `gen_snapshot` and the engine binary share no snapshot hash (the engine's VM refuses a snapshot whose hash is not its own);
+- in profile and release, `gen_snapshot` and the engine binary share no snapshot hash (the engine's VM refuses a snapshot whose hash isn't its own);
 - the Dart SDK's `dartaotruntime` is of another Dart than the engine.
 
 For example:
@@ -2759,36 +2938,38 @@ The Flutter SDK does not match itself for release:
 An engine only runs code compiled by a gen_snapshot from the same Dart. Rebuild both from one checkout.
 ```
 
-A web SDK has no engine binary or `gen_snapshot`, so a web build checks only the kernel: each of the web SDK's platform dills against the Dart SDK. A web app of a custom engine loads its renderer from the web SDK rather than the CDN, which has nothing for an engine that is not a release, so a web SDK without `canvaskit/` fails too.
+A web SDK has no engine binary or `gen_snapshot`, so a web build checks only the kernel: each of the web SDK's platform dills against the Dart SDK. A web app built with a custom engine loads its renderer from the web SDK rather than the CDN, which has nothing for an engine that isn't a release. So a web SDK without `canvaskit/` fails too.
 
-**A checkout that is not one.** A `FLUTTER_CHECKOUT` without `packages/flutter/pubspec.yaml`, or a `FLUTTER_ENGINE` without `out`, fails when the repository is fetched, naming what is missing.
+**A checkout that isn't one.** A `FLUTTER_CHECKOUT` without `packages/flutter/pubspec.yaml`, or a `FLUTTER_ENGINE` without `out/`, fails when the repository is fetched, naming what is missing.
 
 ### Writing an engine source
 
 `flutter_local_engine` is one *engine source*. Any repository that follows the same contract can be one, and `flutter.toolchain(engine = "@my_engine")` uses it the same way. The release's engine is written to this contract too.
 
-An engine source has a `flutter_engine.json` at its root and a target, a *slice*, at each of these labels. `<host>` is the machine the tools run on (`darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`, `windows-x64`); `<mode>` is `debug`, `profile` or `release`.
+An engine source has a `flutter_engine.json` at its root, and a target, called a *slice*, at each of these labels. `<host>` is the machine the tools run on (`darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64` or `windows-x64`). `<mode>` is `debug`, `profile` or `release`.
 
 | Label | Rule (provider) | Used by |
 |---|---|---|
-| `//:flutter_engine.json` | a file | `{"origin": ..., "description": ...}`, plus `engine_revision` and `dart_version` for the `FLUTTER_*` defines |
-| `//host/<host>:tools` | `flutter_host_tools` (`FlutterHostToolsInfo`) | every build whose actions run on `<host>` |
-| `//kernel/debug:platform` | `flutter_platform_kernel` (`FlutterPlatformKernelInfo`) | debug and profile Dart compiles |
-| `//kernel/release:platform` | `flutter_platform_kernel` | release Dart compiles |
-| `//sky_engine:pubspec.yaml` | a file: the `pubspec.yaml` of the engine's `sky_engine` package, the rest of the package beside it | resolving `pubspec.lock` against a framework source (`@rules_flutter//flutter/pub`) |
-| `//outline_tool:outline_tool` | the outline tool, for example an `alias` to the `:outline_tool` of a rules_dart `dart_kernel_source(path = ...)` of the engine's Dart | builds with `--@rules_dart//dart:outline_kernel` (the default) |
+| `//:flutter_engine.json` | A file: `{"origin": ..., "description": ...}`, plus `engine_revision` and `dart_version` for the `FLUTTER_*` defines | Every build |
+| `//host/<host>:tools` | `flutter_host_tools` (`FlutterHostToolsInfo`) | Every build whose actions run on `<host>` |
+| `//kernel/debug:platform` | `flutter_platform_kernel` (`FlutterPlatformKernelInfo`) | Debug and profile Dart compiles |
+| `//kernel/release:platform` | `flutter_platform_kernel` | Release Dart compiles |
+| `//sky_engine:pubspec.yaml` | A file: the `pubspec.yaml` of the engine's `sky_engine` package, with the rest of the package beside it | Resolving `pubspec.lock` against a framework source (`@rules_flutter//flutter/pub`) |
+| `//outline_tool:outline_tool` | The outline tool, for example an `alias` to the `:outline_tool` of a rules_dart `dart_kernel_source(path = ...)` of the engine's Dart | Builds with `--@rules_dart//dart:outline_kernel`, the default |
 | `//macos/<mode>:engine` | `flutter_macos_engine_slice` (`FlutterEngineInfo`) | macOS apps |
-| `//macos/<mode>:xcframework` | `flutter_macos_engine_slice`, its files a whole `FlutterMacOS.xcframework` | macOS add-to-app (`flutter_macos_xcframeworks`) |
-| `//ios/<mode>:engine` | `flutter_ios_engine_slice` | iOS apps; `debug` is the simulator engine |
-| `//android-<arch>/<mode>:engine` | `flutter_android_engine_slice` | Android apps; `<arch>` is `arm`, `arm64` or `x64` |
-| `//linux-<arch>/<mode>:engine` | `flutter_linux_engine_slice` | Linux apps; `<arch>` is `x64` or `arm64` |
+| `//macos/<mode>:xcframework` | `flutter_macos_engine_slice`, whose files are a whole `FlutterMacOS.xcframework` | macOS add-to-app (`flutter_macos_xcframeworks`) |
+| `//ios/<mode>:engine` | `flutter_ios_engine_slice` | iOS apps. `debug` is the simulator engine |
+| `//android-<arch>/<mode>:engine` | `flutter_android_engine_slice` | Android apps. `<arch>` is `arm`, `arm64` or `x64` |
+| `//linux-<arch>/<mode>:engine` | `flutter_linux_engine_slice` | Linux apps. `<arch>` is `x64` or `arm64` |
 | `//windows-x64/<mode>:engine` | `flutter_windows_engine_slice` | Windows apps |
-| `//<target>/<mode>:gen_snapshot_<host>` | `flutter_gen_snapshot` (`FlutterGenSnapshotInfo`) | profile and release builds for `<target>` (`macos-<arch>`, `ios-arm64`, `android-<arch>`, `linux-<arch>`, `windows-x64`) run on `<host>` |
-| `//web:sdk` | `flutter_web_sdk` (`FlutterWebSdkInfo`) | web apps, with the files a web app names beside it in `//web` (`files`, `dart2js_platform.dill`, `dart2wasm_platform.dill`, `ddc_outline.dill`, `libraries.json`, `ddc_dart_sdk.js`, `ddc_module_loader.js`, `dart_stack_trace_mapper.js`) |
+| `//<target>/<mode>:gen_snapshot_<host>` | `flutter_gen_snapshot` (`FlutterGenSnapshotInfo`) | Profile and release builds for `<target>` (`macos-<arch>`, `ios-arm64`, `android-<arch>`, `linux-<arch>` or `windows-x64`) that run on `<host>` |
+| `//web:sdk` | `flutter_web_sdk` (`FlutterWebSdkInfo`), with the files a web app names beside it in `//web` (`files`, `dart2js_platform.dill`, `dart2wasm_platform.dill`, `ddc_outline.dill`, `libraries.json`, `ddc_dart_sdk.js`, `ddc_module_loader.js` and `dart_stack_trace_mapper.js`) | Web apps |
 
-The rules and providers load from `@rules_flutter//flutter:engine.bzl`, whose docstrings list every field. A slice can be anything that returns the provider: one of these rules over downloaded files, over symlinks into a build directory, an `alias` into another repository, or a target that builds the files. Every provider takes a `provenance` dict, which is what the app's record shows for that piece. Keep machine paths out of it: the record drops a `path` key and any value starting with `/`, and nothing else.
+The rules and providers load from `@rules_flutter//flutter:engine.bzl`, whose docstrings list every field. A slice can be anything that returns the provider: one of these rules over downloaded files or over symlinks into a build directory, an `alias` into another repository, or a target that builds the files.
 
-Define every label, and make the ones you do not provide `flutter_missing_slice`s. A build that needs one fails at analysis with your message, and a build that does not is unaffected:
+Every provider takes a `provenance` dict, which is what the app's record shows for that piece. Keep machine paths out of it. The record drops a `path` key and any value that is an absolute path (starting with `/`, `\\` or a drive letter), and nothing else.
+
+Define every label. Make the ones you don't provide `flutter_missing_slice`s. A build that needs one then fails at analysis with your message, and a build that doesn't is unaffected:
 
 ```starlark
 load("@rules_flutter//flutter:engine.bzl", "flutter_macos_engine_slice", "flutter_missing_slice")
@@ -2819,17 +3000,17 @@ flutter_missing_slice(
 )
 ```
 
-`cpus` is what the CPU check reads, `binary` is the file whose snapshot hash the check reads (for Android, `flutter.jar` with `binary_entry = "lib/<abi>/libflutter.so"`), and an iOS slice lists its `xcframework_slices`. The same `FlutterSdkCheck` runs on your pieces as on a checkout's.
+`cpus` is what the CPU check reads. `binary` is the file whose snapshot hash the check reads. For Android that is `flutter.jar`, with `binary_entry = "lib/<abi>/libflutter.so"`. An iOS slice also lists its `xcframework_slices`. The same `FlutterSdkCheck` runs on your pieces as on a checkout's.
 
 A *framework source* is the other half: a repository whose root is a flutter/flutter tree, with `packages/`, `bin/internal/material_fonts.version`, and a `flutter_framework.json` saying what it is: `{"version": "...", "commit": "...", "dirty": false, "origin": "..."}`.
 
 ### Limitations
 
-- `flutter_local_engine` is tested against a stand-in checkout: `e2e/custom_engine` lays the official release's artifacts out the way a checkout's out dirs hold them, with matching `args.gn` files. The out dir layout and `args.gn` fields it reads follow `tools/gn`, but have not yet been checked against a real engine build.
-- A debug iOS build is a simulator build. There is no debug build for an iOS device from out dirs.
+- `flutter_local_engine` is tested against a stand-in checkout. `e2e/custom_engine` lays the official release's artifacts out the way a checkout's out dirs hold them, with matching `args.gn` files. The out dir layout and the `args.gn` fields it reads follow `tools/gn`, but haven't yet been checked against a real engine build.
+- A debug iOS build is a simulator build. Out dirs give no debug build for an iOS device.
 - Engines and `gen_snapshot`s for macOS and iOS are read only on a Mac.
-- A desktop profile or release build uses the out dir's own `gen_snapshot`, which runs only on the machine it was built for, so those builds exist only for the machine's own platform. As with the release, release builds for another desktop OS do not cross-compile; debug builds do.
-- The only engine and framework sources rules_flutter ships are the release and a local checkout. Anything else, such as a fork's artifacts at a URL, needs a repository you write to the contract above.
+- A desktop profile or release build uses the out dir's own `gen_snapshot`, which runs only on the machine it was built for. So those builds exist only for the machine's own platform. As with the release, release builds for another desktop OS don't cross-compile, and debug builds do.
+- rules_flutter ships only two engine and framework sources: the release and a local checkout. Anything else, such as a fork's artifacts at a URL, needs a repository you write to the contract above.
 
 ## Rules reference
 
