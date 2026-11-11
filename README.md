@@ -272,26 +272,23 @@ If `flutter build` works for you, here is what Bazel adds:
 
 ### Requirements
 
-| Platform | What you need |
+You need Bazel 9.2 or newer. rules_flutter downloads Flutter itself, so you don't install Flutter, and this release builds with Flutter 3.47.9.
+
+What else you need depends on what you build for:
+
+| Building for | What you need |
 |---|---|
-| All | Bazel 9.2 or newer. The rules download Flutter 3.47.9 themselves; the supported releases are 3.47.x, and any other `flutter_version` fails naming the supported ones. |
-| macOS | Xcode, for `rules_apple` and `rules_swift`. |
-| iOS | A Mac with Apple silicon, and Xcode. rules_flutter builds iOS for arm64 only, so an Intel Mac's x86_64 simulator is not supported. The simulator needs no signing identity. A physical device does; see [Running on an iOS device](#running-on-an-ios-device). `flutter_bazel` screenshots, of a simulator or a device, need Xcode 27 or later, whose `devicectl` lists and captures screens and knows simulators (measured with Xcode 27.2, `devicectl` 651.32; earlier Xcodes were not tried). |
-| Android | Nothing installed: hermetic_android_toolchains downloads the Android SDK and NDK. An installed SDK and NDK, at `ANDROID_HOME` and `ANDROID_NDK_HOME`, work instead. See [Android](#android). |
-| Linux | A C++ toolchain. From macOS, an LLVM cross-toolchain. |
-| Windows | MSVC for native builds. From macOS or Linux, a C++ cross-toolchain, debug builds only. |
-| Web | Nothing extra. Compiling Dart to WASM or JavaScript is fully hermetic. |
+| macOS | Xcode. |
+| iOS | A Mac with Apple silicon, and Xcode. iOS builds are arm64 only, so an Intel Mac can't run the simulator builds. A simulator needs no signing identity; a physical device does (see [Running on an iOS device](#running-on-an-ios-device)). Screenshots from `flutter_bazel` need Xcode 27 or later. |
+| Android | Nothing installed. [Android](#android) shows the `MODULE.bazel` lines that download the SDK and NDK. An SDK and NDK you have installed, at `ANDROID_HOME` and `ANDROID_NDK_HOME`, also work. |
+| Linux | A C++ toolchain. GTK comes with rules_flutter. From a Mac you need an LLVM cross-toolchain, and you can only make debug builds. |
+| Windows | MSVC. From a Mac or Linux you need a C++ cross-toolchain, and you can only make debug builds. |
+| Web | Nothing extra to build. `flutter_bazel run -d chrome` uses the Chrome you have installed, or the one `CHROME_EXECUTABLE` names. |
 
 ### MODULE.bazel
 
 ```starlark
 bazel_dep(name = "rules_flutter", version = "<latest from registry.bazel.build/modules/rules_flutter>")
-
-# Your BUILD files load `dart_package_metadata` from rules_flutter. A project
-# that also loads rules_dart's own rules (`dart_library`, `dart_analysis_options`)
-# or names its flags needs this too, at the version rules_flutter's own
-# MODULE.bazel names, or later:
-# bazel_dep(name = "rules_dart", version = "<the version rules_flutter depends on>")
 
 flutter = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter")
 flutter.toolchain(flutter_version = "3.47.9")
@@ -304,96 +301,120 @@ flutter_pub.from_lock(
 use_repo(flutter_pub, "deps")
 ```
 
-`flutter.toolchain` downloads the Flutter SDK and engine. Your root module's `flutter_version` is the one built with. A dependency never gets an older release than it asks for, so if one asks for a newer release than your pin, the build fails and names it: raise your pin, or set `allow_upgrade_by_dependencies = True` on your `flutter.toolchain` to build with the highest version any module asks for. Without a root pin, the highest version asked for is used. `flutter_pub.from_lock` reads your `pubspec.lock` and creates a repository, here named `deps`, with one target per package: `@deps//:flutter`, `@deps//:flutter_test`, `@deps//:collection`, and so on. See [Pub packages](#pub-packages). The two are separate extensions so that a lock `flutter_pub` refuses leaves the toolchain working, and with it the command that fixes the lock.
+`flutter.toolchain` pins the Flutter release you build with. Your pin is used exactly. rules_flutter itself asks for 3.47.9, and a module never gets an older Flutter than it asks for, so a lower pin fails and names the module that wants more. You can raise your pin, or set `allow_upgrade_by_dependencies = True` to build with the highest version any module asks for. If you leave `flutter.toolchain` out, that highest version is what you get.
 
-Building for any platform needs nothing more from the `flutter` extension: the rules find the engine and web SDK repositories themselves. A BUILD file of yours that names one of them, `flutter_macos_engine`, `flutter_ios_engine` or `flutter_web_sdk`, needs it in `use_repo(flutter, ...)`. Android has no such repository: the engine of each ABI is rules_flutter's own.
+`flutter_pub.from_lock` turns your `pubspec.lock` into a repository, here named `deps`, with one target per package: `@deps//:flutter`, `@deps//:flutter_test`, `@deps//:collection`. [Pub packages](#pub-packages) covers it in full. It is a separate extension from `flutter` so that if it rejects your lock, the toolchain still works, and so does `bazel run @rules_flutter//flutter/pub`, which regenerates the lock.
 
-The macOS and iOS engine repositories name the engine of the build mode directly, for a rule of your own that links the engine: `@flutter_macos_engine//:engine_library` and `@flutter_ios_engine//:Flutter_xcframework` are the debug engine under `-c dbg`, the profile engine under `-c opt --@rules_flutter//flutter:profile`, and the release engine under any other `-c opt`. To pin one engine whatever the mode, use `engine_debug_library`, `engine_profile_library` or `engine_release_library` on macOS (the Linux and Windows engines of the SDK repositories are named the same way), and `Flutter_xcframework_debug`, `Flutter_xcframework_profile` or `Flutter_xcframework_release` on iOS.
-
-Static analysis needs nothing extra. rules_dart's analysis resolves `dart:ui` in a `flutter_library`, `flutter_plugin`, `flutter_test`, `flutter_application` or `flutter_application_variant` through the `sky_engine` package, which those rules add to the analyzer's closure themselves. Their compiled output does not change.
-
-**Analysis and lints.** Static analysis is rules_dart's `dart_analyze` aspect, which `.bazelrc` turns on for `bazel test`; nothing runs without it. A lint set such as `flutter_lints` reaches the analyzer through a `dart_analysis_options` target, not through `deps`:
+You may also want rules_dart, which rules_flutter builds on:
 
 ```starlark
-# BUILD.bazel, beside analysis_options.yaml (`include: package:flutter_lints/flutter.yaml`)
-load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options")
-
-dart_analysis_options(
-    name = "options",
-    src = "analysis_options.yaml",
-    deps = ["@deps//:flutter_lints"],  # the package its `include:` names
-)
-
-dart_analysis_config(
-    name = "analysis_config",
-    options = [":options"],
-)
+bazel_dep(name = "rules_dart", version = "<the version rules_flutter's MODULE.bazel names>")
 ```
 
-```
-# .bazelrc
-test --aspects=@rules_dart//dart:analyze.bzl%dart_analyze
-test --output_groups=+dart_analyze
-common --@rules_dart//dart:analysis_config=//:analysis_config
-```
-
-`bazel test //...` then fails on any analyzer finding. [`e2e/android_example`](e2e/android_example/BUILD.bazel) is set up this way.
-
-Each target is checked over its own files: a library's sources; a `flutter_test`'s, `flutter_application`'s or variant's `main` and `srcs`, whether or not they are under `lib/`; and, for an iOS, macOS, Linux, Windows or web app and an integration test, those of the program it runs. An Android app (rules_android's `android_binary`) passes on nothing, so check its program through the `flutter_application`. A `manual` target is not checked by `//...`; name it in a `dart_analysis_test(targets = [...])`.
+`dart_package_metadata` comes from rules_flutter, so a plain app doesn't need it. You do need it as soon as a BUILD file or `.bazelrc` names `@rules_dart` directly: to load `dart_library` or `dart_analysis_options`, or to set a flag such as `--@rules_dart//dart:split_debug_info`. Use at least the version rules_flutter depends on.
 
 ### .bazelrc
 
-Two settings are required. Paste them into your project's `.bazelrc`:
+Building for macOS, iOS, Linux, Windows or the web needs no settings.
+
+An Android build runs Java tools from rules_android and rules_jvm_external, which are compiled for Java 21 or newer. Bazel's default tool JDK is older, and it uses whatever JDK is installed locally to run the app's Java. Add these three lines:
 
 ```bazelrc
-# rules_flutter's Java dependencies (rules_jvm_external 7+, rules_android 0.7.2+)
-# ship tool jars compiled for Java 21+. Bazel's default tool JDK is older.
 common --tool_java_language_version=25
 common --tool_java_runtime_version=remotejdk_25
-
-# Windows only: rules_python 2+ needs symlink support.
-startup --windows_enable_symlinks
-```
-
-Without the Java settings you get `UnsupportedClassVersionError` when an action runs, or `could not locate class file for java.lang.Record` when one compiles.
-
-An Android app needs one more, unless the machine has a JDK installed:
-
-```bazelrc
-# The Java runtime an Android build resolves for the app's platform.
 common --java_runtime_version=remotejdk_25
 ```
 
-Without it Bazel takes the local JDK, and on a machine with none every Android build fails during analysis with `Cannot find Java binary bin/java in .../local_jdk/nosystemjdk`.
+Without the first two, an action fails with `UnsupportedClassVersionError`, or a compile fails with `could not locate class file for java.lang.Record`. Without the third, a machine with no JDK installed fails every Android build during analysis with `Cannot find Java binary bin/java in .../local_jdk/nosystemjdk`.
 
-One more is recommended:
+One more setting is recommended, on macOS and Linux:
 
 ```bazelrc
-# Share identical work between configurations, where Bazel can sandbox.
 common --enable_platform_specific_config
 common:linux --experimental_output_paths=strip
 common:macos --experimental_output_paths=strip
 ```
 
-A Flutter build reaches the same work in several configurations: each Android ABI compiles the same release kernel and bundles the same assets, `-c dbg` and `-c fastbuild` run the same codegen, and platform transitions give one target several output directories. Bazel keys an action by its paths, so each configuration's copy normally runs again. With this flag, Bazel rewrites `bazel-out/<config>/bin` to `bazel-out/cfg/bin` in every action that declares it can run that way, and the copies after the first are cache hits. rules_flutter's actions all declare it. The rewrite needs a sandbox or remote execution, so actions with `local` or `no-sandbox` tags run as before. Windows has no sandbox, and there Bazel fails a path-mapped action (`requires sandboxing due to path mapping`) rather than run it unmapped, so leave the flag off on Windows. Outputs still land in their own configuration's directory, so nothing that reads `bazel-out` changes.
+A Flutter build often does the same work in several configurations. Each Android ABI compiles the same release kernel and bundles the same assets, and `-c dbg` and `-c fastbuild` run the same code generation. Bazel normally keys an action by its output paths, which include the configuration, so each copy runs again. With this flag, Bazel rewrites `bazel-out/<config>/bin` to `bazel-out/cfg/bin` in the command line of every action that declares it can take it, and the second copy is a cache hit. Outputs still land in their own configuration's directory, so nothing that reads `bazel-out` changes.
 
-A debug build's kernel is the one action that does not share across configurations: it carries the path of its `flutter_assets/`, which is how `flutter_bazel` tells an app's configurations apart.
+Most of rules_flutter's actions declare it. One that does still won't share in two cases:
 
-**Remote execution.** Everything above builds on the machine running Bazel. To send actions to execution platforms of more than one kind (a Linux remote worker beside your Mac, say), rules_flutter works with Bazel's automatic execution groups, under which each action runs where the toolchain it names is registered, not where every toolchain its rule uses is:
-
-```bazelrc
-common --incompatible_auto_exec_groups
-
-# Start py_binary tools with their hermetic interpreter, not python3 from
-# PATH, which a remote worker does not have.
-common --@@rules_python+//python/config_settings:bootstrap_impl=script
-```
-
-rules_flutter's actions land the same with the flag on or off: `gen_snapshot` for iOS and macOS, Xcode tools and signing run on a Mac; kernel compiles, asset and shader bundling and web compiles run on any host with the Flutter SDK; stripping the Android engine runs on the machine running Bazel, where its NDK is. An Android app needs fixes to rulesets it builds with, because rules_android 0.8.1, protobuf and rules_go have actions the flag rejects or places on the wrong host. [`e2e/android_example`](e2e/android_example/MODULE.bazel) is set up this way: copy its `single_version_override` patches for rules_android, protobuf and rules_go into your own `MODULE.bazel`. The downloaded NDK of the [Android](#android) setup declares which host each of its toolchains runs on; an installed one (rules_android_ndk 0.1.5, `ANDROID_NDK_HOME`) has toolchains that match any execution platform, so a remote worker would be sent this machine's clang. Build with the downloaded NDK when actions run remotely. Of those, `rules_android_no_initial_heap.patch` is not about remote execution: every Android build on a Windows host needs it (see **Building on Windows** under [Android](#android)).
+- It runs without a sandbox: a `local` or `no-sandbox` action, or any action on Windows. Windows has no sandbox, and there Bazel fails a path-mapped action with `requires sandboxing due to path mapping` rather than run it, which is why the lines above leave Windows out.
+- It is a debug build's kernel. The kernel records the path of the app's `flutter_assets/`, which is how `flutter_bazel` tells an app's configurations apart.
 
 ### Your first app
 
-Start from a project made with `flutter create`. It has `lib/main.dart`, a `pubspec.yaml`, and one folder per platform. rules_flutter reads those files as they are. You add a `BUILD.bazel`:
+Start from a project made with `flutter create`. You keep its `lib/`, its `pubspec.yaml` and `pubspec.lock`, and its platform folders. `flutter_macos_app` reads `macos/Runner/` as `flutter create` wrote it, and pub still reads `pubspec.yaml` when you regenerate the lock.
+
+The build itself takes nothing from your `pubspec.yaml`. You state the same facts in a `BUILD.bazel` beside it. Here are the parts of a pubspec that matter to the build:
+
+```yaml
+# pubspec.yaml
+name: my_app
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.13.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/
+```
+
+And the same app in Bazel:
+
+```starlark
+# BUILD.bazel
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application")
+load("@rules_flutter//flutter:macos.bzl", "flutter_macos_app")
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "my_app",                       # name:
+    # Optional. The <major>.<minor> of environment: sdk:. Left out, your code
+    # compiles at the SDK's own language version, which may be newer than
+    # `flutter build` would allow.
+    language_version = "3.13",
+    # Optional. Listed on the app's licence page.
+    license_file = "LICENSE",
+)
+
+flutter_application(
+    name = "my_app",
+    package = ":pubspec-metadata",
+    main = "lib/main.dart",
+    srcs = glob(["lib/**/*.dart"]),
+    deps = [
+        "@deps//:flutter",                         # dependencies: flutter
+        "@rules_flutter//flutter:material_icons",  # uses-material-design: true
+    ],
+    # Optional. flutter: assets:
+    assets = glob(["assets/**"]),
+    # Optional. version: 1.0.0+1, which is also the default.
+    build_name = "1.0.0",
+    build_number = "1",
+)
+
+flutter_macos_app(
+    name = "my_app_macos",
+    application = ":my_app",
+    bundle_id = "com.example.my_app",
+    # Optional. The name in the menu bar and window title; defaults to the
+    # target name.
+    app_name = "My App",
+)
+```
+
+`dart_package_metadata` is the Bazel stand-in for `pubspec.yaml`: one per package, and every target of the package points at it with `package`. Its `package_name` should match the pubspec's `name:`, because it is the name your `package:my_app/...` imports use and the name hot reload keys libraries by. Bazel doesn't compare the two, but Gazelle does if you use it to write BUILD files. The target's name is up to you. `pubspec-metadata` is the convention, and the name Gazelle gives it.
+
+`flutter_application` compiles the Dart and bundles the assets. Each platform then has a macro, here `flutter_macos_app`, that wraps it in an app you can run. `deps` lists the packages your code imports, by their `@deps` targets. `@rules_flutter//flutter:material_icons` is the Material icon font, which `uses-material-design: true` adds in a `flutter build`.
+
+Without the optional lines, the BUILD file for a fresh `flutter create` project is:
 
 ```starlark
 load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application")
@@ -409,7 +430,6 @@ flutter_application(
     package = ":pubspec-metadata",
     main = "lib/main.dart",
     srcs = glob(["lib/**/*.dart"]),
-    assets = glob(["assets/**"]),
     deps = [
         "@deps//:flutter",
         "@rules_flutter//flutter:material_icons",
@@ -423,10 +443,7 @@ flutter_macos_app(
 )
 ```
 
-`flutter_application` compiles the Dart code and bundles the assets. Each platform then has a macro, like `flutter_macos_app`, that wraps it in a runnable app. Two attributes deserve a note:
-
-- `dart_package_metadata` is the Bazel stand-in for `pubspec.yaml`: it states the package's facts once (its name, its language version, its licence), and every target of the package names it with `package`. A package has one, as it has one `pubspec.yaml`: it is always named `pubspec-metadata`, in the BUILD file at the package root (not one under `lib/`), and rules_dart refuses any other name or place. Its `package_name` must match the `name:` field in `pubspec.yaml`. Hot reload and code generation both rely on it. Where one program of the package needs a different native library than the package declares, its own `code_assets` replaces it (see [Choosing the library that serves an asset id](#choosing-the-library-that-serves-an-asset-id)); a second declaration is never the way.
-- `@rules_flutter//flutter:material_icons` bundles the Material icon font. Any app that uses Material widgets needs it in `deps`.
+A fresh project has no `assets/` folder, so leave `assets` out until it does: Bazel fails a `glob` that matches nothing.
 
 Build it, or run it with hot reload:
 
@@ -435,41 +452,111 @@ bazel build //:my_app_macos
 bazel run @rules_flutter//tools/dev_tool:flutter_bazel -- run -t //:my_app_macos -d macos
 ```
 
-The second command is long. [Shorter commands with bazel_env](#shorter-commands-with-bazel_env) turns it into `fl run -t //:my_app_macos -d macos`.
+[Shorter commands with bazel_env](#shorter-commands-with-bazel_env) turns the second one into `fl run -t //:my_app_macos -d macos`.
 
 ### Build modes
 
-Bazel's compilation mode flag selects how the Dart is compiled:
+Bazel's `-c` flag picks the Flutter build mode:
 
-| Flag | Mode | Dart compilation | Use it for |
+| Flag | Flutter mode | Dart compiled to | Use it for |
 |---|---|---|---|
-| `-c dbg` | Debug | Kernel `.dill`, run by the JIT | Development, hot reload |
-| none (fastbuild) | Release | AOT native code | CI, tests |
-| `-c opt` | Release | AOT native code, stripped | Production |
+| `-c dbg` | Debug | Kernel (`.dill`), run by the JIT | Development and hot reload |
+| none (`fastbuild`) | Release | AOT native code | CI and tests |
+| `-c opt` | Release | AOT native code, stripped | Shipping |
 | `-c opt --@rules_flutter//flutter:profile` | Profile | AOT native code, stripped, with the Dart VM service | Measuring performance with DevTools |
 
-Note that a plain `bazel build` is a release build, not a debug one. That matters for [permissions](#release-builds-and-permissions).
+A plain `bazel build` is a release build. `flutter build` defaults to release too, but `flutter run` defaults to debug, so this may surprise you. It matters for [permissions](#release-builds-and-permissions), and it means the iOS simulator needs `-c dbg`. The simulator runs debug builds only, and a release or profile build for it fails with a message saying so. `flutter_bazel run` builds `-c dbg` for you.
 
-On iOS and macOS a release or profile build strips `App.framework/App` of its local symbols, as `flutter build ios` and `flutter build macos` do, and keeps them in a dSYM. The dSYM has the binary's UUID, so a crash reporter symbolicates the shipped app with it. It is in the `dsyms` output group of the app target: `bazel build //:app --output_groups=+dsyms`. `extra_gen_snapshot_options = ["--no-strip"]` keeps the local symbols in the binary, as it does for `flutter build`; the dSYM is still made. Keep it with each release. A dSYM of an obfuscated app holds the unobfuscated Dart names (`gen_snapshot` warns of it), so keep it out of the shipped app. `flutter_aot_snapshot` on an Apple platform is not stripped, and its object is in the `macho_object` output group.
+**Profile mode** is what `flutter run --profile` gives you: release-speed code that still serves the Dart VM service, so DevTools can record timelines and CPU profiles. It has no hot reload. The flag needs `-c opt`, and the build fails with any other `-c`. Profile builds use their own engine and `gen_snapshot`, because the engine refuses a snapshot compiled for another mode. They are downloaded the first time a profile build needs them. A `.bazelrc` config saves typing:
 
-A release or profile build is obfuscated and its debug info split out as `flutter build --obfuscate --split-debug-info=<dir>` does it, with two build flags, which apply to every app in the build:
-
+```bazelrc
+build:profile -c opt --@rules_flutter//flutter:profile
 ```
-bazel build -c opt //:app \
+
+To check a profile build in `bazel test` without those flags on the command line, wrap the app in [`flutter_profile_build`](#flutter_profile_build).
+
+**dSYMs on iOS and macOS.** A non-debug build strips the local symbols from `App.framework/App` and keeps them in a dSYM, as `flutter build ios` and `flutter build macos` do. The dSYM carries the binary's UUID, so a crash reporter can symbolicate the shipped app with it. Keep it with each release. It is in the app target's `dsyms` output group:
+
+```sh
+bazel build -c opt //:my_app_macos --output_groups=+dsyms
+```
+
+`extra_gen_snapshot_options = ["--no-strip"]` on the `flutter_application` keeps the symbols in the binary, as it does for `flutter build`. The dSYM is still made. A `flutter_aot_snapshot` on its own isn't stripped, and its object file is in the `macho_object` output group.
+
+**Obfuscation and split debug info** work as `flutter build --obfuscate --split-debug-info=<dir>` does, through two build flags that apply to every app in the build:
+
+```sh
+bazel build -c opt //:my_app_macos \
     --@rules_dart//dart:split_debug_info \
     --@rules_flutter//flutter:obfuscate \
     --output_groups=+debug_info
 ```
 
-`--@rules_dart//dart:split_debug_info` leaves the Dart debugging information out of the AOT snapshot and writes it to `<application>.symbols`, in the `debug_info` output group of the `flutter_application` (and of a `flutter_aot_snapshot`, and of a rules_dart `dart_binary`), as `gen_snapshot --save-debugging-info` writes it. `--@rules_flutter//flutter:obfuscate` renames the Dart symbols. It needs `split_debug_info`, as `--obfuscate` needs `--split-debug-info`, and the build fails without it. A debug build ignores both.
+`--@rules_dart//dart:split_debug_info` leaves the Dart debug information out of the AOT snapshot and writes it to `<application>.symbols`, as `gen_snapshot --save-debugging-info` does. The file is in the `debug_info` output group of the `flutter_application`, and of a `flutter_aot_snapshot` or a rules_dart `dart_binary`. `--@rules_flutter//flutter:obfuscate` renames the Dart symbols. It needs `split_debug_info`, as `--obfuscate` needs `--split-debug-info`, and the build fails without it. A debug build ignores both.
 
-Profile mode is `flutter run --profile`: release-speed code that still serves the Dart VM service, so DevTools can record timelines and CPU profiles. It has no hot reload. Profile uses its own engine and gen_snapshot on every platform, downloaded the first time a profile build needs them, because the engine refuses a snapshot compiled for a different mode. The flag needs `-c opt`, and the build fails if it is set with any other `-c`. Like upstream Flutter, there is no profile mode for the iOS simulator: build profile for a physical device. A `.bazelrc` config saves typing:
+The dSYM of an obfuscated app holds the original Dart names, and `gen_snapshot` warns about it. Don't ship it inside the app.
 
+### Lints and static analysis
+
+`bazel test` runs `dart analyze` and the `dart format` check once you turn on rules_dart's `dart_analyze` aspect. Without these lines nothing is analysed. They name `@rules_dart`, so add its `bazel_dep` too (see [MODULE.bazel](#modulebazel)).
+
+```bazelrc
+test --aspects=@rules_dart//dart:analyze.bzl%dart_analyze
+test --output_groups=+dart_analyze
+test --output_groups=+dart_format     # optional: the format check
+common --@rules_dart//dart:analysis_config=//:analysis_config
 ```
-build:profile -c opt --@rules_flutter//flutter:profile
+
+The last line names a target that lists your `analysis_options.yaml` files. A lint package such as `flutter_lints` reaches the analyzer through the options target, not through any library's `deps`:
+
+```starlark
+# BUILD.bazel, beside analysis_options.yaml
+# (which has `include: package:flutter_lints/flutter.yaml`)
+load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options")
+
+dart_analysis_options(
+    name = "options",
+    src = "analysis_options.yaml",
+    deps = ["@deps//:flutter_lints"],  # the package `include:` names
+)
+
+dart_analysis_config(
+    name = "analysis_config",
+    options = [":options"],
+)
 ```
 
-To check a profile build from a test without those flags on the command line, wrap the app in [`flutter_profile_build`](#flutter_profile_build).
+`bazel test //...` then fails on any analyzer finding, down to an info. [`e2e/macos_example`](e2e/macos_example/BUILD.bazel) is set up this way. `dart:ui` resolves without anything extra.
+
+Each target is checked over its own files. For a library, that is its sources. For a `flutter_test`, `flutter_application` or `flutter_application_variant`, it is `main` and `srcs`, whether or not they are under `lib/`. An iOS, macOS, Linux, Windows or web app, and an integration test, check the program they run. An Android app (rules_android's `android_binary`) checks nothing, so its program is checked through its `flutter_application`. `//...` skips a target tagged `manual`; list it in a `dart_analysis_test(targets = [...])` to check it.
+
+### Linking the engine from your own rules
+
+You don't need this to build an app: the rules find the engine and web SDK repositories themselves. If a BUILD file of yours names one, add it to `use_repo(flutter, ...)`: `flutter_macos_engine`, `flutter_ios_engine` or `flutter_web_sdk`. Android has no such repository; each ABI's engine belongs to rules_flutter.
+
+`@flutter_macos_engine//:engine_library` and `@flutter_ios_engine//:Flutter_xcframework` follow the build mode. They are the debug engine under `-c dbg`, the profile engine under `-c opt --@rules_flutter//flutter:profile`, and the release engine under any other `-c opt`. To pin one engine whatever the mode, use `engine_debug_library`, `engine_profile_library` or `engine_release_library` on macOS, and `Flutter_xcframework_debug`, `Flutter_xcframework_profile` or `Flutter_xcframework_release` on iOS. The Linux and Windows engines in the SDK repositories use the same names as macOS.
+
+### Remote execution
+
+Everything above builds on the machine running Bazel. To send actions to more than one kind of execution platform, such as a Linux remote worker alongside your Mac, add:
+
+```bazelrc
+common --incompatible_auto_exec_groups
+
+# Start py_binary tools with their own hermetic interpreter. A remote worker
+# has no python3 on PATH.
+common --@@rules_python+//python/config_settings:bootstrap_impl=script
+```
+
+With automatic execution groups, each action runs where the toolchain it uses is registered, rather than where every toolchain of its rule is. rules_flutter's actions land in the same places with the flag on or off:
+
+- on a Mac: `gen_snapshot` for iOS and macOS, Xcode tools, and signing;
+- on any host with the Flutter SDK: kernel compiles, asset and shader bundling, and web compiles;
+- on the machine running Bazel: stripping the Android engine, which needs the NDK that machine has.
+
+An Android app needs fixes to other rulesets, because rules_android 0.8.1, protobuf and rules_go have actions that the flag rejects or sends to the wrong host. Copy the `single_version_override` patches for those three from [`e2e/android_example/MODULE.bazel`](e2e/android_example/MODULE.bazel) into your own `MODULE.bazel`. One of them, `rules_android_no_initial_heap.patch`, has nothing to do with remote execution: every Android build on a Windows host needs it (see **Building on Windows** under [Android](#android)).
+
+Use the downloaded NDK from the [Android](#android) setup when actions run remotely. It declares which host each of its toolchains runs on. An installed NDK (rules_android_ndk 0.1.5, `ANDROID_NDK_HOME`) has toolchains that match any execution platform, so a remote worker would be sent this machine's clang.
 
 ## Dependencies
 
