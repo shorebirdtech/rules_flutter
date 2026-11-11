@@ -51,11 +51,11 @@ def make_integration_bootstrap_content(test_import, support_import, test_config_
 def _source_import(ctx, file):
     """The URI by which the bootstrap imports `file`, as `ctx.attr.src_import` says."""
     if ctx.attr.src_import == RELATIVE:
-        return compute_wrapper_main_import(len(ctx.outputs.main.dirname.split("/")), file.path)
+        return compute_wrapper_main_import(len(ctx.outputs.out.dirname.split("/")), file.path)
     return app_scheme_location(file).uri
 
 def _flutter_integration_bootstrap_impl(ctx):
-    bootstrap = ctx.outputs.main
+    bootstrap = ctx.outputs.out
     check_required_packages(ctx.label, ctx.attr.deps, ctx.attr.requires_packages)
     support_dir = ctx.label.name + "_support"
 
@@ -82,7 +82,7 @@ def _flutter_integration_bootstrap_impl(ctx):
         StagedSourcesInfo(sources = depset(ctx.files._support)),
     ]
 
-flutter_integration_bootstrap = rule(
+_flutter_integration_bootstrap = rule(
     implementation = _flutter_integration_bootstrap_impl,
     # Its files are the same for every platform, and are written where the
     # build was before any web app's transition: a web app reaches them through
@@ -90,6 +90,10 @@ flutter_integration_bootstrap = rule(
     # that output directory, by a path relative to it.
     cfg = runtime_reset,
     attrs = {
+        "out": attr.output(
+            doc = "The generated program, `<name>.dart`.",
+            mandatory = True,
+        ),
         "src": attr.label(
             doc = "The integration test file, whose `main` declares the tests. " +
                   "It is imported by its workspace path, so it needs no `package:` URI and may sit outside `lib/`.",
@@ -123,21 +127,30 @@ flutter_integration_bootstrap = rule(
             allow_files = [".dart"],
         ),
     },
-    outputs = {"main": "%{name}.dart"},
-    doc = """Generates the program an integration test file runs as, `<name>.dart`.
-
-The program imports the test file (by its workspace path, or by a path relative to
-itself: `src_import`) and calls
-`runIntegrationSuite` (a support library this rule stages beside it, in
-`<name>_support/`) on its `main`. That registers the file's tests as a suite
-the host drives over the app's VM service (a web app's page, over the browser's
-DevTools protocol), with the same
-`IntegrationTestWidgetsFlutterBinding` set-up, golden comparator and
-`flutter_test_config.dart` `flutter test` gives it. The `DefaultInfo` carries
-the bootstrap and the staged support files.
-
-It is the `main` of a `flutter_application_variant`, whose `srcs` hold the test
-file, the files it imports and this target (for the support files). The packages
-the support library imports, `integration_test` and `flutter_test`, must come
-from that variant's `deps`.""",
+    doc = "The rule behind `flutter_integration_bootstrap`, which names its output.",
 )
+
+def flutter_integration_bootstrap(name, **kwargs):
+    """Generates the program an integration test file runs as, `<name>.dart`.
+
+    The program imports the test file (by its workspace path, or by a path relative to
+    itself: `src_import`) and calls
+    `runIntegrationSuite` (a support library this rule stages beside it, in
+    `<name>_support/`) on its `main`. That registers the file's tests as a suite
+    the host drives over the app's VM service (a web app's page, over the browser's
+    DevTools protocol), with the same
+    `IntegrationTestWidgetsFlutterBinding` set-up, golden comparator and
+    `flutter_test_config.dart` `flutter test` gives it. The `DefaultInfo` carries
+    the bootstrap and the staged support files.
+
+    It is the `main` of a `flutter_application_variant`, whose `srcs` hold the test
+    file, the files it imports and this target (for the support files). The packages
+    the support library imports, `integration_test` and `flutter_test`, must come
+    from that variant's `deps`.
+
+    Args:
+      name: The target, and with `.dart` added, the program it generates.
+      **kwargs: `src`, `test_config`, `src_import`, `requires_packages` and the
+        common attributes.
+    """
+    _flutter_integration_bootstrap(name = name, out = name + ".dart", **kwargs)
