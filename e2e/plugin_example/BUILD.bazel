@@ -877,8 +877,7 @@ flutter_library(
 # a MissingPluginException string — inverting the one property plugin_example
 # exists to prove. The rule's own bootstrap is regression-covered by
 # //e2e/hello_world:widget_test. Plugin registration is verified here against
-# real artifacts instead: the APK and runtime verifiers above, and
-# playwright/web.spec.js for web.
+# real artifacts instead: the APK and runtime verifiers above.
 
 # =============================================================================
 # A plugin whose Package.swift decides its defines from the app, on macOS

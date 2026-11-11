@@ -125,7 +125,7 @@ class _HomeState extends State<_Home> {
       recordHasPermission: recordHasPermission,
     );
 
-    // Emit a single line so e2e tests (Playwright + the macOS verifier) can
+    // Emit a single line so e2e tests (the macOS verifier) can
     // assert on the resolved plugin outputs without needing semantics-tree
     // access.
     final summary =
@@ -259,8 +259,8 @@ class _Row extends StatelessWidget {
             ),
             TextSpan(
               text: value,
-              // data-testid-style attribute via semantics so playwright/web
-              // tests can locate this row by its label.
+              // `semanticsLabel` below lets a test locate this row by its
+              // label.
             ),
           ],
         ),

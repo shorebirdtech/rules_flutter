@@ -37,8 +37,6 @@
 /e2e/_linux_test/ export-ignore
 /e2e/_macos_test/ export-ignore
 /e2e/_windows_test/ export-ignore
-/e2e/package.json export-ignore
-/e2e/package-lock.json export-ignore
 /e2e/android_example/ export-ignore
 /e2e/asset_bundle/ export-ignore
 /e2e/codegen/ export-ignore
