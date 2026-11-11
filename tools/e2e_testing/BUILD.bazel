@@ -23,8 +23,10 @@ dart_package_metadata(
 # there lists `@rules_flutter//tools/e2e_testing` in `deps` and imports
 # `package:rules_flutter_e2e_testing/...`.
 #
-# It is for this repository's tests. `.gitattributes` leaves it out of the
-# release archive, and it is public only so the e2e workspaces can name it.
+# It is for this repository's tests, and public only so the e2e workspaces can
+# name it. It stays in the release archive: `//tools/dev_tool`'s test targets
+# (`:e2e`, `:loose_sources`) depend on it, and with the package missing a
+# consumer's `@rules_flutter//...` fails to analyse.
 dart_library(
     name = "e2e_testing",
     srcs = glob(["lib/**/*.dart"]),
