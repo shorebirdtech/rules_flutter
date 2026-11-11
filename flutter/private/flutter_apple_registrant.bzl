@@ -158,7 +158,7 @@ def _registrant_xcframework_impl(ctx):
     steps = []
     for slice in slices:
         toolchain = ctx.split_attr._cc_toolchain[slice.id][cc_common.CcToolchainInfo]
-        engine_files = ctx.split_attr._engine[slice.id].files.to_list()
+        engine_files = ctx.split_attr._engine[slice.id][DefaultInfo].files.to_list()
         feature_configuration = cc_common.configure_features(
             ctx = ctx,
             cc_toolchain = toolchain,

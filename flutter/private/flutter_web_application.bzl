@@ -854,7 +854,7 @@ def _flutter_web_bundle_impl(ctx):
     # Step 6: Collect web engine artifacts from the web SDK.
     # flutter.js is the engine bootstrapper loaded by flutter_bootstrap.js.
     # Renderer WASM/JS files are under web-sdk/canvaskit/.
-    web_sdk_files = ctx.attr._web_sdk.files.to_list() if ctx.attr._web_sdk else []
+    web_sdk_files = ctx.attr._web_sdk[DefaultInfo].files.to_list() if ctx.attr._web_sdk else []
     flutter_js_file = None
     renderer_files = []
     for f in web_sdk_files:

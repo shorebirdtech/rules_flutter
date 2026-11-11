@@ -131,7 +131,7 @@ _mode_transition = transition(
 
 def _toolchain_engine_impl(ctx):
     sdk = ctx.toolchains[_TOOLCHAIN_TYPE].flutter_sdk_info
-    return [DefaultInfo(files = sdk.engine_library.files)]
+    return [DefaultInfo(files = sdk.engine_library[DefaultInfo].files)]
 
 # The engine the Flutter toolchain resolved for a build mode and target
 # platform (the host's, when `platform` is empty).

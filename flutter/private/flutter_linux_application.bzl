@@ -272,7 +272,7 @@ def _compile_linux_runner(ctx, runner_srcs, engine_files, defines, linux_sysroot
 
     system_include_dirs = []
     sysroot_link_flags = []
-    sysroot_files = linux_sysroot.files.to_list()
+    sysroot_files = linux_sysroot[DefaultInfo].files.to_list()
 
     # Determine sysroot root path from the first file.
     sysroot_root = ""
@@ -451,7 +451,7 @@ def _flutter_linux_bundle_impl(ctx):
             "To build a Linux bundle from a non-Linux host, use: " +
             "--platforms=@rules_flutter//flutter/platforms:linux_x64",
         )
-    engine_files = flutter_sdk_info.engine_library.files.to_list()
+    engine_files = flutter_sdk_info.engine_library[DefaultInfo].files.to_list()
 
     # Build the bundle config JSON for the Dart bundler tool. Both
     # `native_libs` (the legacy FFI cc_library outputs) and

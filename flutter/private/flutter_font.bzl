@@ -70,7 +70,7 @@ def _flutter_font_family_impl(ctx):
         if FlutterFontInfo in target:
             fonts.append(target[FlutterFontInfo])
             continue
-        files = target.files.to_list()
+        files = target[DefaultInfo].files.to_list()
         if len(files) != 1:
             fail("%s: `fonts` entry %s is %d files; a font is one file, or a `flutter_font`." % (ctx.label, target.label, len(files)))
         fonts.append(FlutterFontInfo(file = files[0], weight = None, style = None, asset = None))

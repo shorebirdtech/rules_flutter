@@ -11,7 +11,7 @@ def _fake_android_sdk_impl(ctx):
         source_properties = None,
         shrinked_android_jar = None,  # typos:ignore-line
         main_dex_classes = None,
-        adb = ctx.attr.adb.files_to_run,
+        adb = ctx.attr.adb[DefaultInfo].files_to_run,
         dx = None,
         main_dex_list_creator = None,
         aidl = None,

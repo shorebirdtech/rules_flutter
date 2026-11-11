@@ -345,7 +345,7 @@ def _flutter_windows_bundle_impl(ctx):
             "To build a Windows bundle from a non-Windows host, use: " +
             "--platforms=@rules_flutter//flutter/platforms:windows_x64",
         )
-    engine_files = flutter_sdk_info.engine_library.files.to_list()
+    engine_files = flutter_sdk_info.engine_library[DefaultInfo].files.to_list()
 
     # Filter engine files to only include runtime artifacts (.dll) — not
     # headers, import libraries, or C++ wrapper sources used at compile time.
