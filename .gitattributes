@@ -47,7 +47,6 @@
 /e2e/dual_hub/ export-ignore
 /e2e/external_module/ export-ignore
 /e2e/ffi_example/ export-ignore
-/e2e/ffi_plugin_example/ export-ignore
 /e2e/hello_world/ export-ignore
 /e2e/integration_test/ export-ignore
 /e2e/ios_example/ export-ignore

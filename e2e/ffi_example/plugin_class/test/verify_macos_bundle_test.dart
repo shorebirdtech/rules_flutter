@@ -8,8 +8,8 @@ import 'package:rules_flutter_e2e_testing/macos_bundle.dart';
 
 void main() {
   final bundle = MacosBundle.fromRunfiles(
-    'ffi_plugin_macos.zip',
-    appName: 'ffi_plugin_macos',
+    'plugin_class/plugin_class_macos.zip',
+    appName: 'plugin_class_macos',
   );
   try {
     bundle

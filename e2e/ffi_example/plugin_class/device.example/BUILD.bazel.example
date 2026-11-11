@@ -2,14 +2,15 @@
 #
 # This whole `device/` directory is git-ignored so your Apple Team ID and
 # provisioning profile never land in version control. It holds nothing but the
-# credential: the device app itself is `//:ffi_plugin_ios_device` in the root
-# BUILD.bazel, which is the simulator's `//:ffi_plugin_ios` — the same
-# hand-assembled Tier-2 `ios_application`, sharing every `_gen` target with it
-# — plus `provisioning_profile`.
+# credential: the device app itself is `//plugin_class:plugin_class_ios_device`
+# in the BUILD.bazel beside this folder, which is the simulator's
+# `//plugin_class:plugin_class_ios` — the same hand-assembled Tier-2
+# `ios_application`, sharing every `_gen` target with it — plus
+# `provisioning_profile`.
 #
 # Setup:
-#   1. cp -r device.example device
-#   2. mv device/BUILD.bazel.example device/BUILD.bazel
+#   1. cp -r plugin_class/device.example plugin_class/device
+#   2. mv plugin_class/device/BUILD.bazel.example plugin_class/device/BUILD.bazel
 #   3. Install a development provisioning profile covering
 #      com.example.ffiplugin into
 #      ~/Library/Developer/Xcode/UserData/Provisioning Profiles/ — from the
@@ -17,9 +18,9 @@
 #      against any Xcode project whose PRODUCT_BUNDLE_IDENTIFIER is that id.
 #   4. Set profile_name below to that profile's own name — see the note.
 #   5. Point the device targets at the profile (.bazelrc.user is git-ignored):
-#        echo 'common --//:device_profile=//device:profile' >> .bazelrc.user
-#   6. Build:  bazel build //:ffi_plugin_ios_device -c opt --ios_multi_cpus=arm64
-#      Or run: flutter_bazel run -t //:ffi_plugin_ios_device -d ios
+#        echo 'common --//plugin_class:device_profile=//plugin_class/device:profile' >> .bazelrc.user
+#   6. Build:  bazel build //plugin_class:plugin_class_ios_device -c opt --ios_multi_cpus=arm64
+#      Or run: flutter_bazel run -t //plugin_class:plugin_class_ios_device -d ios
 #
 # Naming the profile: `profile_name` matches the profile's `Name` field, which
 # is *not* always "iOS Team Provisioning Profile: <bundle id>". Xcode mints a

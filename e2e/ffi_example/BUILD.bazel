@@ -1,3 +1,18 @@
+# How native code reaches a Flutter app, each way in a package of its own:
+#
+#   //add_plugin        a Native Assets code asset, bound with `@Native`
+#   //mul_plugin        `native_deps` alone, opened by its per-platform path
+#   //multiply_plugin   `native_deps` and a `dart_plugin_class`, statically
+#                       linked on iOS (the app is `//plugin_class`)
+#   //sub_asset, //prebuilt_asset, //count_a, //count_b
+#                       code assets from a wrapper rule, a prebuilt file and one
+#                       library bound under two ids
+#   //pick              code assets and the link hook that drops one
+#
+# The app below uses all of them but `//multiply_plugin`, and this file builds
+# its bundles on every platform, with the runtime tests that load the libraries.
+# Hot patching of `mul`, `sub` and `counter` is further down.
+
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@rules_apple//apple:ios.bzl", "ios_application")
 load("@rules_apple//apple:macos.bzl", "macos_application")
@@ -50,6 +65,28 @@ cc_shared_library(
     name = "add",
     visibility = ["//add_plugin:__pkg__"],
     deps = [":add_cc"],
+)
+
+# `multiply` belongs to `//multiply_plugin`, a plugin that also has a Dart
+# plugin class; `//plugin_class` is the app that uses it, which on iOS links
+# `:multiply_cc` statically.
+cc_library(
+    name = "multiply_cc",
+    srcs = ["native/multiply.c"],
+    hdrs = ["native/multiply.h"],
+    visibility = ["//plugin_class:__pkg__"],
+    # alwayslink ensures the linker keeps symbols even when only
+    # referenced via dart:ffi (no static ObjC/Swift references).
+    alwayslink = True,
+)
+
+cc_shared_library(
+    name = "multiply",
+    visibility = [
+        "//multiply_plugin:__pkg__",
+        "//plugin_class:__pkg__",
+    ],
+    deps = [":multiply_cc"],
 )
 
 # `mul` is patchable in a running app: `native/mul_hot_patch.c` routes every

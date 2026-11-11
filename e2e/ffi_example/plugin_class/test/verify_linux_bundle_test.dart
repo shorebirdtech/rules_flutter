@@ -5,7 +5,7 @@ library;
 import 'package:rules_flutter_e2e_testing/desktop_bundle.dart';
 
 void main() {
-  final bundle = LinuxBundle.fromRunfiles('ffi_plugin_linux');
+  final bundle = LinuxBundle.fromRunfiles('plugin_class/plugin_class_linux');
   bundle
     ..checkStandardLayout()
     ..check.exists(

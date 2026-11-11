@@ -1,14 +1,18 @@
 """The per-developer files a device build of an e2e example is signed with."""
 
 def _unset_impl(ctx):
+    # `device.example/` sits beside the BUILD file that calls `device_flag`,
+    # which is not the workspace root when the app is in a subpackage.
+    dir = ctx.label.package + "/" if ctx.label.package else ""
     fail(
         "\n\nThis target is signed for a physical device and needs your own " +
         "{what}, which this repository does not carry.\n\n".format(what = ctx.attr.what) +
         "Set it up once:\n" +
-        "  1. cp -r device.example device\n" +
-        "  2. mv device/BUILD.bazel.example device/BUILD.bazel, then edit it " +
-        "(device/BUILD.bazel explains how)\n" +
-        "  3. echo 'common --{flag}=//device:{target}' >> .bazelrc.user\n\n".format(
+        "  1. cp -r {dir}device.example {dir}device\n".format(dir = dir) +
+        "  2. mv {dir}device/BUILD.bazel.example {dir}device/BUILD.bazel, then edit it ".format(dir = dir) +
+        "({dir}device/BUILD.bazel explains how)\n".format(dir = dir) +
+        "  3. echo 'common --{flag}=//{dir}device:{target}' >> .bazelrc.user\n\n".format(
+            dir = dir,
             flag = ctx.attr.flag,
             target = ctx.attr.device_target,
         ),

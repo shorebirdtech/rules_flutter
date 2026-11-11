@@ -208,29 +208,18 @@ const e2eWorkspaces = <E2eWorkspace>[
       Os.macos:
           'native_deps libraries and Native Assets code assets linked by the '
           'Apple toolchain into the macOS .app\'s Frameworks and the iOS '
-          'simulator bundle',
+          'simulator bundle, and, in //plugin_class, a flutter_plugin that '
+          'carries native_deps with a dart_plugin_class, statically linked '
+          'into the iOS app',
       Os.linux:
           'native_deps libraries and Native Assets code assets as ELF shared '
-          'libraries (with -ldl) in the Linux bundle\'s lib/',
+          'libraries (with -ldl) in the Linux bundle\'s lib/, and, in '
+          '//plugin_class, a flutter_plugin that carries native_deps with a '
+          'dart_plugin_class, its library bundled into the app',
       Os.windows:
           'native_deps libraries and Native Assets code assets as DLLs beside '
-          'the Windows bundle\'s .exe',
-    },
-  ),
-  E2eWorkspace(
-    'ffi_plugin_example',
-    runs: {
-      Os.linux:
-          'a Bazel flutter_plugin carrying native_deps and a dart_plugin_class, '
-          'its library bundled into the app. How a bundle carries a native '
-          'library is ffi_example\'s on each system; this path is '
-          'platform-neutral, so one run, on the cheapest runner',
-    },
-    skips: {
-      Os.macos:
-          'ffi_example covers native libraries in Apple bundles; the plugin '
-          'path is platform-neutral and runs on Linux',
-      Os.windows: 'the workspace builds no Windows bundle',
+          'the Windows bundle\'s .exe; //plugin_class builds no Windows '
+          'bundle, and its platform-neutral targets build here too',
     },
   ),
   E2eWorkspace(
