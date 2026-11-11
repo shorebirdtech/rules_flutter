@@ -12,6 +12,8 @@ library;
 
 import 'dart:convert';
 
+import 'dev_tool_exception.dart';
+
 /// The rule class a web bundle target is.
 const webBundleRuleClass = 'flutter_web_bundle';
 
@@ -79,4 +81,73 @@ WebBundleFacts? parseWebBundleFacts(String jsonproto) {
     '${bundles.single['name']} reports no $jsFallbackAttribute attribute',
     jsonproto,
   );
+}
+
+/// The run's target built, and none of its outputs is a web bundle: it is not a
+/// `flutter_web_bundle` (or a `flutter_web_app`, which makes one), typically
+/// the `flutter_application` a web target is built over.
+class NotAWebBundle extends DevToolException {
+  NotAWebBundle()
+    : super(
+        'The target is not a web bundle: its build has no `_web` directory.',
+      );
+}
+
+/// The rule class of the staging target `flutter_web_bundle` declares beside a
+/// bundle. It carries the `application` the bundle is built over, and names the
+/// bundle in its `bundle` attribute.
+const webBranchRuleClass = 'flutter_web_branch';
+
+/// The `query` arguments that list the web bundles built over the application
+/// [label] (canonical, as `bazel query <target> --output=label` prints it):
+/// the branch targets whose `application` is it, each naming its bundle.
+List<String> webBundlesOverQuery(String label) => [
+  'query',
+  'attr(application, "^(@@)?${RegExp.escape(label)}\$", '
+      'kind("$webBranchRuleClass", //...))',
+  '--output=streamed_jsonproto',
+  '--proto:output_rule_attrs=bundle',
+  '--noshow_progress',
+];
+
+/// The bundle labels in the output of [webBundlesOverQuery], sorted.
+///
+/// Throws [FormatException] for output that is not what the query asks for.
+List<String> parseWebBundlesOver(String streamedJsonproto) {
+  final bundles = <String>{};
+  for (final line in LineSplitter.split(streamedJsonproto)) {
+    if (line.trim().isEmpty) continue;
+    final decoded = jsonDecode(line);
+    if (decoded is! Map<String, Object?>) {
+      throw FormatException('query printed no JSON object', line);
+    }
+    final rule = decoded['rule'];
+    for (final attribute
+        in (rule is Map<String, Object?> ? rule['attribute'] : null)
+                as List<Object?>? ??
+            const []) {
+      final a = attribute as Map<String, Object?>;
+      if (a['name'] != 'bundle') continue;
+      // The main repository prints as `@@//pkg:name`.
+      bundles.add((a['stringValue'] as String).replaceFirst('@@//', '//'));
+    }
+  }
+  return bundles.toList()..sort();
+}
+
+/// What a run says for a [target] that is not a web bundle: [bundles] are the
+/// web targets over it, or empty when there are none to name.
+String notAWebBundleMessage(String target, List<String> bundles) {
+  final what =
+      '$target is not a web bundle: building it produced no `_web` '
+      'directory, which is what a browser run serves.';
+  if (bundles.isEmpty) {
+    return '$what\n'
+        'A web run takes a `flutter_web_app` or `flutter_web_bundle`. Make '
+        'one over this target with `application = "$target"`, or look for '
+        'a web target that names it as its `application`.';
+  }
+  return '$what\n'
+      'Run a web target built over it instead:\n'
+      '${bundles.map((b) => '  $b').join('\n')}';
 }

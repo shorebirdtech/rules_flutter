@@ -19,6 +19,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import 'dev_tool_exception.dart';
+import 'web_bundle_facts.dart' show NotAWebBundle;
 
 /// Toolchain paths resolved from Bazel.
 class ToolchainPaths {
@@ -750,17 +751,16 @@ WebToolchainPaths buildWebToolchainFromOutputs(
 
 /// Find the web output directory in build outputs.
 ///
-/// The web output dir ends with `_web` and is a directory.
+/// The web output dir ends with `_web` and is a directory. Outputs without one
+/// are not a web bundle's: [NotAWebBundle], which the run turns into the
+/// answer naming the web targets over the application.
 String findWebOutputDir(List<String> outputFiles) {
   for (final f in outputFiles) {
     if (f.endsWith('_web') && FileSystemEntity.isDirectorySync(f)) {
       return f;
     }
   }
-  throw StateError(
-    'No web output directory found in build outputs.\n'
-    'Expected a directory ending with _web.',
-  );
+  throw NotAWebBundle();
 }
 
 /// Resolve a build output to the path the DDC toolchain is handed.

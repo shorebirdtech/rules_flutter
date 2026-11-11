@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter_bazel_dev_tool/dev_tool_exception.dart';
 import 'package:flutter_bazel_dev_tool/toolchain_info.dart';
+import 'package:flutter_bazel_dev_tool/web_bundle_facts.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
@@ -950,7 +951,7 @@ void main() {
     test('throws when no _web directory found', () {
       expect(
         () => findWebOutputDir(['/some/file.json']),
-        throwsStateError,
+        throwsA(isA<NotAWebBundle>()),
       );
     });
   });

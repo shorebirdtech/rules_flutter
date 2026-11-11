@@ -22,6 +22,7 @@ import 'device_id.dart';
 import 'logging.dart';
 import 'native_libs_fingerprint.dart';
 import 'toolchain_info.dart';
+import 'web_bundle_facts.dart';
 import 'web_mode.dart';
 import 'web_options.dart';
 
@@ -586,7 +587,17 @@ class RunPlan {
         'Build succeeded but cquery returned no output files for $target.',
       );
     }
-    final appFile = devices.first.pickArtifact(result.outputFiles);
+    final String appFile;
+    try {
+      appFile = devices.first.pickArtifact(result.outputFiles);
+    } on NotAWebBundle {
+      throw DevToolException(
+        notAWebBundleMessage(
+          target,
+          await bazel.queryWebBundlesOver(target, workspace: workspace),
+        ),
+      );
+    }
     logger.fine({
       'message': 'build_outputs',
       'text': 'Launch artifact: $appFile',

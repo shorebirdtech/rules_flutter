@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:clock/clock.dart';
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter_bazel_dev_tool/device.dart';
+import 'package:flutter_bazel_dev_tool/web_bundle_facts.dart';
 import 'package:flutter_bazel_dev_tool/key_press.dart';
 import 'package:flutter_bazel_dev_tool/toolchain_info.dart';
 import 'package:flutter_bazel_dev_tool/web_module_server.dart';
@@ -855,7 +856,7 @@ void main() {
       expect(
         () => WebDevice().pickArtifact(['/out/app_web.serving.json']),
         throwsA(
-          isA<StateError>().having(
+          isA<NotAWebBundle>().having(
             (e) => e.message,
             'message',
             contains('_web'),

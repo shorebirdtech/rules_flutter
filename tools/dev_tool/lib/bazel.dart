@@ -985,6 +985,26 @@ class Bazel {
     }
   }
 
+  /// The labels of the web bundles built over [target], for naming them to a
+  /// run that was handed the application instead. Empty when there are none or
+  /// the query fails: the run is already failing, and its message says how to
+  /// ask by hand.
+  Future<List<String>> queryWebBundlesOver(
+    String target, {
+    required String workspace,
+  }) async {
+    final labelArgs = ['query', target, '--output=label', '--noshow_progress'];
+    final labelResult = await run(labelArgs, workingDirectory: workspace);
+    if (labelResult.exitCode != 0) return const [];
+    final label = (labelResult.stdout as String).trim();
+    final result = await run(
+      webBundlesOverQuery(label),
+      workingDirectory: workspace,
+    );
+    if (result.exitCode != 0) return const [];
+    return parseWebBundlesOver(result.stdout as String);
+  }
+
   /// Locate the Bazel workspace root.
   ///
   /// Two sources, in priority order:

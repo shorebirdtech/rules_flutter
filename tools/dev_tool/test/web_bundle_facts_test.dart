@@ -84,4 +84,49 @@ void main() {
     expect(args[1], 'kind("flutter_web_bundle", deps(//app:web, 1))');
     expect(args, contains('--proto:output_rule_attrs=js_fallback'));
   });
+
+  group('notAWebBundleMessage', () {
+    test('names the web bundles built over the application', () {
+      final message = notAWebBundleMessage('//app:app', [
+        '//app:app_wasm',
+        '//app:app_web',
+      ]);
+      expect(message, startsWith('//app:app is not a web bundle'));
+      expect(message, contains('  //app:app_wasm\n  //app:app_web'));
+    });
+
+    test('says how to find them when there are none to name', () {
+      final message = notAWebBundleMessage('//app:app', const []);
+      expect(message, contains('application = "//app:app"'));
+      expect(message, contains('names it as its `application`'));
+    });
+
+    test('queries the branch targets whose application is the label', () {
+      final args = webBundlesOverQuery('//app:app');
+      expect(args.first, 'query');
+      expect(
+        args[1],
+        r'attr(application, "^(@@)?//app:app$", '
+        'kind("flutter_web_branch", //...))',
+      );
+    });
+  });
+
+  group('parseWebBundlesOver', () {
+    String branch(String bundle) =>
+        '{"type":"RULE","rule":{"name":"//:__b","ruleClass":'
+        '"flutter_web_branch","attribute":[{"name":"bundle","type":"STRING",'
+        '"stringValue":"$bundle"}]}}';
+
+    test('lists the bundles the branches name, sorted', () {
+      expect(
+        parseWebBundlesOver('${branch('@@//:b_wasm')}\n${branch('@@//:a')}\n'),
+        ['//:a', '//:b_wasm'],
+      );
+    });
+
+    test('is empty for no output', () {
+      expect(parseWebBundlesOver(''), isEmpty);
+    });
+  });
 }
