@@ -5,7 +5,7 @@ import 'dart:io';
 
 /// The directories under [e2e] that are Bazel workspaces: each holds a
 /// `MODULE.bazel`. Found by walking, so a workspace added tomorrow is checked
-/// tomorrow, whatever its depth (`e2e/_overlay_tests/*` sit one level down).
+/// tomorrow, whatever its depth.
 ///
 /// The walk stops at a workspace — its subdirectories are the app's own
 /// (`ios/`, `macos/`, `lib/`) and a `MODULE.bazel` there would belong to a

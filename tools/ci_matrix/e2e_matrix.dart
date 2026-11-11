@@ -346,38 +346,25 @@ const e2eWorkspaces = <E2eWorkspace>[
     },
     skips: {Os.linux: _appleOnly, Os.windows: _appleOnly},
   ),
-  // Its test reads the flutter_application's bundle, not the macOS app, and
-  // the link hook runs over the host's release AOT compile.
+  // The link hooks' tests read the flutter_application's bundle, not the macOS
+  // app, and the hook runs over the host's release AOT compile. The code
+  // asset's dylib is macOS-only.
   E2eWorkspace(
-    '_overlay_tests/link_hooks',
+    'package_assets',
     runs: {
       Os.linux:
           'package link hooks over the uses a release compile records, the '
           'hook\'s assets in the bundle, and the declared data assets it '
-          'drops and keeps: platform-neutral, so one run, on the cheapest '
-          'runner',
-    },
-    skips: {
-      Os.macos: 'platform-neutral; Linux runs it',
-      Os.windows: 'platform-neutral; Linux runs it',
-    },
-  ),
-  E2eWorkspace(
-    '_overlay_tests/native_assets_synthetic',
-    runs: {
+          'drops and keeps, native and web, with a package\'s own hook: '
+          'platform-neutral, so one run, on the cheapest runner. The code '
+          'asset\'s tests are macOS-only and skip here',
       Os.macos:
           'a dart_code_asset over a hand-linked dylib with its own install '
           'name, and a dart_data_asset in the bundle, both declared on the app '
-          'package\'s own metadata, which no library in deps names',
+          'package\'s own metadata, which no library in deps names; the link '
+          'hook tests run here too, which costs little',
     },
-    skips: {
-      Os.linux:
-          'its tests build the macOS-only dylib, so they are incompatible '
-          'here and nothing runs',
-      Os.windows:
-          'its tests build the macOS-only dylib, so they are incompatible '
-          'here and nothing runs',
-    },
+    skips: {Os.windows: 'platform-neutral; Linux runs it'},
   ),
   // The flutter_assets/ tree of every platform (Android, iOS, Linux, macOS,
   // Windows, web) is built from this one host by platform transition, so what

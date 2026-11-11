@@ -1,3 +1,19 @@
+# What a package declares besides its Dart code: data assets, code assets, and
+# the link hooks that decide which of them ship. Three apps, one per question:
+#
+#   //          an app and a package it depends on (`//glyphs`), whose link hook
+#               runs over the uses a release compile records. Data assets
+#               dropped and kept, native and web, and a hook that fails the
+#               build.
+#   //own_hook  an app whose *own* package has the link hook.
+#   //own_assets
+#               an app whose own package declares a hand-linked code asset and
+#               a data asset, with a macOS runtime test that loads both.
+#
+# The link hooks run over a release compile's recorded uses, so the bundle
+# tests here read what a release build ships and, under `-c dbg`, what a debug
+# build does (it links nothing, so it ships every declared asset).
+
 load("@rules_dart//dart:defs.bzl", "dart_test")
 load("@rules_flutter//flutter:defs.bzl", "dart_data_asset", "dart_package_metadata", "flutter_application")
 load("@rules_flutter//flutter:macos.bzl", "flutter_macos_app")
@@ -10,12 +26,12 @@ exports_files(["pubspec.lock"])
 dart_data_asset(
     name = "greeting",
     src = "greeting.txt",
-    asset_id = "package:link_hooks/greeting.txt",
+    asset_id = "package:package_assets/greeting.txt",
 )
 
 dart_package_metadata(
     name = "pubspec-metadata",
-    package_name = "link_hooks",
+    package_name = "package_assets",
     data_assets = [":greeting"],
 )
 
@@ -36,9 +52,9 @@ flutter_application(
 
 flutter_macos_app(
     name = "macos_app",
-    app_name = "Link Hooks",
+    app_name = "Package Assets",
     application = ":app",
-    bundle_id = "com.example.linkhooks",
+    bundle_id = "com.example.packageassets",
     target_compatible_with = ["@platforms//os:macos"],
 )
 

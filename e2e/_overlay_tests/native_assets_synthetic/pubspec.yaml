@@ -1,7 +1,0 @@
-name: native_assets_synthetic
-publish_to: none
-environment:
-  sdk: ^3.13.0
-dependencies:
-  flutter:
-    sdk: flutter

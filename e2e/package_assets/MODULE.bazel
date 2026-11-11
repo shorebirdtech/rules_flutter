@@ -1,6 +1,6 @@
-"E2e regression: package link hooks over recorded uses."
+"E2e regression: what a package declares besides its Dart code: data assets, a hand-linked code asset, and link hooks over recorded uses."
 
-module(name = "rules_flutter_link_hooks")
+module(name = "rules_flutter_package_assets")
 
 bazel_dep(name = "rules_flutter", version = "0.0.0")
 bazel_dep(name = "rules_dart", version = "0.8.1")
@@ -13,7 +13,7 @@ bazel_dep(name = "platforms", version = "1.1.0")
 
 local_path_override(
     module_name = "rules_flutter",
-    path = "../../..",
+    path = "../..",
 )
 
 flutter = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter")

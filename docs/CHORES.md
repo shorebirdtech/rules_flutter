@@ -33,9 +33,7 @@ The latest tag is the current stable release.
   and `ARTIFACT_CHECKSUMS`
 - `MODULE.bazel` — `flutter_version` in the `flutter.toolchain()` call, and the
   `flutter_outline.toolchain()` calls below it (see step 5)
-- Every `e2e/*/MODULE.bazel` and `e2e/_overlay_tests/*/MODULE.bazel` — their own
-  `flutter.toolchain()` calls (`_overlay_tests` is one directory deeper, so an
-  `e2e/*/MODULE.bazel` glob misses it)
+- Every `e2e/*/MODULE.bazel` — their own `flutter.toolchain()` calls
 - `README.md` — the Requirements table, the `MODULE.bazel` snippets under
   Getting started and further down, and the `FlutterSdkInfo.version` example
   under Providers
@@ -77,7 +75,7 @@ Dart versions those need. Then `bazel test //...` in `e2e/smoke`.
 **Files**:
 
 - Every `.bazelversion`: the repo root plus one per workspace with a
-  `MODULE.bazel`, including `e2e/_overlay_tests/*`. A workspace without one does
+  `MODULE.bazel`. A workspace without one does
   not inherit the root's: bazelisk reads only its own workspace root and
   otherwise fetches the newest release, so a missing file silently runs a
   different Bazel than the rest of the sweep. `git ls-files '*.bazelversion'`
@@ -106,10 +104,10 @@ Dart versions those need. Then `bazel test //...` in `e2e/smoke`.
 **Files**:
 
 - `MODULE.bazel` — `bazel_dep()` version strings
-- Every `e2e/*/MODULE.bazel` and `e2e/_overlay_tests/*/MODULE.bazel`: these
+- Every `e2e/*/MODULE.bazel`: these
   declare their own `bazel_dep`s rather than inheriting the root's, so a
   root-only bump leaves them behind. `grep -l 'name = "<module>"'
-  e2e/*/MODULE.bazel e2e/_overlay_tests/*/MODULE.bazel` lists the workspaces
+  e2e/*/MODULE.bazel` lists the workspaces
   that declare a given module.
 
 **Procedure**:

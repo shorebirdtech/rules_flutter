@@ -72,8 +72,8 @@ void _checkAssets(String bundle, {required bool debug}) {
   if (!debug && File('$bundle/packages/glyphs/glyphs/moon.txt').existsSync()) {
     throw StateError('the unused glyph moon shipped');
   }
-  final greeting = File('$bundle/packages/link_hooks/greeting.txt');
-  if (greeting.readAsStringSync().trim() != 'hello from link_hooks') {
+  final greeting = File('$bundle/packages/package_assets/greeting.txt');
+  if (greeting.readAsStringSync().trim() != 'hello from package_assets') {
     throw StateError('${greeting.path} does not hold the greeting');
   }
 

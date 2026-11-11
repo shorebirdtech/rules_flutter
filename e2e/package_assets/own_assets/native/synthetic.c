@@ -1,6 +1,6 @@
 // Tiny C library exposing one FFI function. Used by the
-// native_assets_synthetic e2e workspace to verify the rules_flutter
-// Native Assets pipeline is generic — i.e. nothing about it is
+// `//own_assets` app of the package_assets e2e workspace to verify the
+// rules_flutter Native Assets pipeline is generic — i.e. nothing about it is
 // objective_c-specific.
 
 #include <stdint.h>

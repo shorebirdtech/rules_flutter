@@ -1,3 +1,10 @@
+# An app whose own package declares what it ships: a code asset, linked by hand
+# into the one dylib the app loads, and a data asset, both routed by the
+# package's own `dart_package_metadata` rather than by a pub package's. No link
+# hook runs here: `//` has the hooks over a dependency's assets and `//own_hook`
+# one over the app's own. The app, run on macOS, calls the code asset and reads
+# the data asset.
+
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
@@ -7,7 +14,7 @@ load("@rules_flutter//flutter:macos.bzl", "flutter_macos_app")
 
 exports_files(["pubspec.lock"])
 
-# 1. The native side.
+# 1. The native side. (This workspace's other apps ship no native code.)
 cc_library(
     name = "_synthetic_cc",
     srcs = ["native/synthetic.c"],
@@ -85,7 +92,7 @@ dart_test(
 
 # 5. The running app loads both: it calls the code asset and reads the data
 #    asset with `rootBundle`, and prints what it got. Needs a GUI session, so
-#    `manual`: `bazel test :verify_macos_app_test --test_tag_filters=
+#    `manual`: `bazel test //own_assets:verify_macos_app_test --test_tag_filters=
 #    --strategy=TestRunner=standalone`.
 dart_test(
     name = "verify_macos_app_test",

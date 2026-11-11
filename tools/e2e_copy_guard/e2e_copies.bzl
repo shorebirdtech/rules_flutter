@@ -18,8 +18,8 @@ def _workspaces(root, directory):
 
     A directory with a `MODULE.bazel` is a workspace, and the walk stops
     there. A directory without one is searched a level down, as
-    `e2e/_overlay_tests/*` need. Starlark cannot recurse, and nothing nests
-    deeper.
+    `findWorkspaces` (`tools/e2e_workspaces`) would find a workspace there.
+    Starlark cannot recurse, and nothing nests deeper.
     """
     found = []
     for entry in sorted(root.get_child(directory).readdir(), key = lambda e: e.basename):

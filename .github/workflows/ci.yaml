@@ -45,7 +45,6 @@ env:
     - MODULE.bazel
     - MODULE.bazel.lock
     - e2e/*/MODULE.bazel
-    - e2e/_overlay_tests/*/MODULE.bazel
     - flutter/private/versions.bzl
 # Every job has a timeout, at a few times its slowest recent run, and more
 # where a cold cache makes it fetch toolchains: 15 minutes for a check of a

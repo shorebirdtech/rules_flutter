@@ -22,11 +22,11 @@ void main() {
 
     test('finds workspaces at any depth, sorted', () {
       module('smoke');
-      module('_overlay_tests/link_hooks');
+      module('nested/inner');
       module('app');
       expect(findWorkspaces(e2e), [
-        'e2e/_overlay_tests/link_hooks',
         'e2e/app',
+        'e2e/nested/inner',
         'e2e/smoke',
       ]);
     });

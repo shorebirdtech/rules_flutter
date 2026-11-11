@@ -35,7 +35,6 @@
 /e2e/_compare/ export-ignore
 /e2e/_linux_test/ export-ignore
 /e2e/_macos_test/ export-ignore
-/e2e/_overlay_tests/ export-ignore
 /e2e/_windows_test/ export-ignore
 /e2e/package.json export-ignore
 /e2e/package-lock.json export-ignore
@@ -54,6 +53,7 @@
 /e2e/pub_resolve/ export-ignore
 /e2e/macos_example/ export-ignore
 /e2e/multi_window_example/ export-ignore
+/e2e/package_assets/ export-ignore
 /e2e/plugin_example/ export-ignore
 /e2e/web_example/ export-ignore
 

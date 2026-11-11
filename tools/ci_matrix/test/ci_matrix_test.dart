@@ -51,8 +51,8 @@ void main() {
 
     test('names a workspace that no entry covers', () {
       expect(
-        matrixProblems([ok], ['e2e/a', 'e2e/_overlay_tests/b']),
-        [contains('e2e/_overlay_tests/b is in no entry')],
+        matrixProblems([ok], ['e2e/a', 'e2e/nested/b']),
+        [contains('e2e/nested/b is in no entry')],
       );
     });
 

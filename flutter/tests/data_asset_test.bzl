@@ -5,7 +5,7 @@ application reaching it bundles each at `packages/<package>/<name>`, the key
 `rootBundle` loads it by: in a debug build, in a release build with no link
 hook to run, and in a web build; and an application of the package itself,
 which no library in its `deps` names. What a link hook does with them is
-`e2e/_overlay_tests/link_hooks`' to show.
+`e2e/package_assets`' to show.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")

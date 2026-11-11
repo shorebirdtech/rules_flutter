@@ -4,7 +4,7 @@
 //   1. Calls a `@Native(assetId: ...)`-bound function from
 //      "package:native_assets_synthetic/synthetic.dylib", a
 //      `dart_code_asset(link_mode = "dynamic_loading_bundle")`, the
-//      workspace's `:synthetic_native_asset_macos`, which the package's
+//      `//own_assets:synthetic_native_asset_macos`, which the package's
 //      metadata owns. The VM resolves the asset id at first call through the
 //      kernel's `--native-assets` manifest and dlopens the dylib from
 //      the bundle's Frameworks slot.

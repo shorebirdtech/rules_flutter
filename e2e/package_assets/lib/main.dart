@@ -20,7 +20,7 @@ class _App extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const MaterialApp(title: 'Link Hooks', home: _Home());
+    return const MaterialApp(title: 'Package Assets', home: _Home());
   }
 }
 
