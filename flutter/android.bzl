@@ -54,6 +54,14 @@ Two tiers of API:
         # Its native libraries reach android_binary as an aar_import's do.
         flutter_android_bundle(name = "my_bundle", application = ":my_app")
         flutter_android_engine(name = "my_engine")
+
+        # The flutter_assets tree at assets/flutter_assets/, as the APK holds it.
+        filegroup(
+            name = "my_flutter_assets",
+            srcs = [":my_bundle"],
+            output_group = "flutter_assets",
+        )
+
         flutter_android_manifest_gen(name = "my_manifest", application_id = "com.example.myapp")
 
         flutter_android_runner_lib_gen(
@@ -65,6 +73,8 @@ Two tiers of API:
         android_binary(
             name = "my_apk",
             manifest = ":my_manifest",
+            assets = [":my_flutter_assets"],
+            assets_dir = "assets",
             # Stored uncompressed, as the manifest's
             # android:extractNativeLibs="false" requires.
             nocompress_extensions = [".so"],
@@ -75,15 +85,17 @@ Two tiers of API:
     arguments, with rules_flutter's bundle configuration:
 
         android_application(
-            name = "my_bundle",
+            name = "my_aab",
             bundle_config_file = "@rules_flutter//flutter:android_bundle_config.pb.json",
             manifest = ":my_manifest",
             manifest_values = {"applicationId": "com.example.myapp"},
+            assets = [":my_flutter_assets"],
+            assets_dir = "assets",
             nocompress_extensions = [".so"],
             deps = [":my_bundle", ":my_engine", ":my_runner"],
         )
 
-        flutter_android_release(name = "my_release", app_bundle = ":my_bundle")
+        flutter_android_release(name = "my_release", app_bundle = ":my_aab")
 
     The add-to-app repository, `flutter_android_aar`, is these three over the
     bundle and a registrant compiled against a `neverlink` engine:
@@ -664,8 +676,10 @@ def flutter_android_app(
 
         bazel build //:my_app_android --@rules_android//flags:android_platforms=@rules_android//:arm64-v8a
 
-    With no `--@rules_android//flags:android_platforms`, rules_android builds for `--platforms`, the
-    host's, and the build fails naming the flag. To fix the ABI of a target
+    With no `--@rules_android//flags:android_platforms`, rules_android builds
+    for `--platforms`, the host's, with which the engine and the bundle are
+    incompatible: building the app fails as incompatible, naming the platform,
+    and `bazel build //...` skips it. To fix the ABI of a target
     regardless of the command line, as a test does, wrap it in
     `flutter_android_build`.
 

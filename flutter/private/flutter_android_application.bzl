@@ -49,9 +49,10 @@ The bundle is built for whichever Android platform `android_binary` builds it
 for, and takes its ABI from that platform, so the application behind it (its
 AOT compile and any FFI/native deps) is built for the same one. Every native
 library is validated to be an ELF shared object with the ABI's machine type
-before the APK is packaged; a host-format binary is a hard build error. A
-bundle built for a platform that is not Android arm, arm64 or x86_64 fails with the
-flag to pass.
+before the APK is packaged; a host-format binary is a hard build error.
+`flutter_android_bundle`, the macro in android.bzl, makes the bundle
+incompatible with any platform that is not Android arm, arm64 or x86_64:
+building it there fails as incompatible, and `bazel build //...` skips it.
 """
 
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
@@ -320,6 +321,8 @@ one for each of `--@rules_android//flags:android_platforms`, and takes its ABI f
 the application behind it is built for the same platform, so the AOT compile
 and all native deps target Android with no further flag. An APK for several
 ABIs therefore carries `libapp.so` of each. Native libraries are validated to
-be ELF for the platform's ABI at packaging time. Building it for a platform
-that is not Android arm, arm64 or x86_64 fails, naming the flag to pass.""",
+be ELF for the platform's ABI at packaging time. The `flutter_android_bundle`
+macro makes it incompatible with a platform that is not Android arm, arm64 or
+x86_64; reached any other way on such a platform, it fails, naming the flag
+to pass.""",
 )
