@@ -18,13 +18,12 @@ not neutral: `package_config.json` reads a missing `languageVersion` as the
 current SDK's.
 """
 
-load("@rules_dart//dart:utils.bzl", "METADATA_TARGET_NAME")
 load("@rules_dart//dart/pub:pub_lock_package.bzl", "find_pub_license_file")
 load("@rules_dart//dart/pub:pubspec.bzl", "read_pubspec")
 load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url")
 load("//flutter/private:flutter_pub_index.bzl", "library_label", "read_index")
 load("//flutter/private:framework_source.bzl", "check_dependency_constraints", "check_lock_floor", "link_framework_package", "read_framework", "unset_message", "write_unset_stub")
-load("//flutter/private:package_metadata_content.bzl", "PACKAGE_METADATA_LOAD", "make_package_metadata_content")
+load("//flutter/private:package_metadata_content.bzl", "METADATA_TARGET_NAME", "PACKAGE_METADATA_LOAD", "make_package_metadata_content")
 load("//flutter/private:pinned.bzl", "pinned")
 
 _PACKAGE = "flutter"

@@ -1,6 +1,9 @@
 """The `dart_package_metadata` a generated BUILD file declares its package with."""
 
-load("@rules_dart//dart:utils.bzl", "METADATA_TARGET_NAME")
+# The name of the `dart_package_metadata` a package BUILD file that
+# rules_flutter writes declares, and its targets name in `package`. It is the
+# name Gazelle gives one.
+METADATA_TARGET_NAME = "pubspec-metadata"
 
 # What a generated BUILD file loads the rule from.
 PACKAGE_METADATA_LOAD = 'load("@rules_dart//dart:defs.bzl", "dart_package_metadata")\n'

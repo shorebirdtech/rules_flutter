@@ -49,7 +49,6 @@ using `pub_lock_package`. Both fetch and lay out the archive with rules_dart's
 for it.
 """
 
-load("@rules_dart//dart:utils.bzl", "METADATA_TARGET_NAME")
 load("@rules_dart//dart/pub:pub_graph.bzl", "write_pubspec_dependencies")
 load("@rules_dart//dart/pub:pub_lock_package.bzl", "fetch_pub_archive", "fetch_pub_git", "fetch_pub_path", "find_pub_license_file", "pub_git_purl", "pub_hosted_purl", "pub_package_identity")
 load("@rules_dart//dart/pub:pubspec.bzl", "read_pubspec")
@@ -62,7 +61,7 @@ load("//flutter/private:constants.bzl", "PLUGIN_PLATFORMS")
 load("//flutter/private:flutter_pub_index.bzl", "MEMBER_DART", "MEMBER_FILE", "MEMBER_FLUTTER", "MEMBER_OVERLAY", "library_label", "owner_prefix", "read_index", "sibling_path", "source_repo")
 load("//flutter/private:flutter_pubspec.bzl", "flutter_assets_block", "flutter_licenses_block", "flutter_manifest_errors", "flutter_plugin_block")
 load("//flutter/private:framework_source.bzl", "check_dependency_constraints", "link_framework_package", "unset_message", "write_unset_stub")
-load("//flutter/private:package_metadata_content.bzl", "PACKAGE_METADATA_LOAD", "make_package_metadata_content")
+load("//flutter/private:package_metadata_content.bzl", "METADATA_TARGET_NAME", "PACKAGE_METADATA_LOAD", "make_package_metadata_content")
 load("//flutter/private:pinned.bzl", "pinned")
 load("//flutter/private:swiftpm_manifest.bzl", "find_manifest_computations", "find_swiftpm_build_settings", "find_unsupported_swiftpm_dependencies")
 load(

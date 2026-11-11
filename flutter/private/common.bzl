@@ -1333,9 +1333,11 @@ PROGRAM_PACKAGE_DOC = (
     "`environment.sdk` (left unset, the program's sources compile " +
     "at the SDK's current version, newer than `flutter build` " +
     "would allow); its `license_file` is listed in `NOTICES.Z` " +
-    "under the package's name. It is `:pubspec-metadata` in the " +
-    "BUILD file at the package root, its directory, which `srcs` " +
-    "(its `lib/`) and the keys of `assets` are relative to.\n\n" +
+    "under the package's name. Its name is free. The package is " +
+    "rooted at the declaration's directory, or, for one in a BUILD " +
+    "file under `lib/`, at the directory above that `lib`; `srcs` " +
+    "(its `lib/`) and the keys of `assets` are relative to that " +
+    "root.\n\n" +
     "The `flutter_library` targets of the same package — the app's " +
     "own `lib/`, beside it — name the same declaration. Two Dart " +
     "packages cannot share a directory, so a dependency declaring " +

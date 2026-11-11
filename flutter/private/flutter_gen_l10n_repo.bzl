@@ -54,10 +54,10 @@ applies is a loud failure, where a rewrite would quietly drift.
    another dead-code cut, not a toolchain workaround — see the seventh patch.
 """
 
-load("@rules_dart//dart:utils.bzl", "METADATA_TARGET_NAME")
 load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url")
 load("//flutter/private:flutter_pub_index.bzl", "library_label", "read_index")
 load("//flutter/private:framework_source.bzl", "framework_root", "read_framework", "unset_message", "write_unset_stub")
+load("//flutter/private:package_metadata_content.bzl", "METADATA_TARGET_NAME")
 load("//flutter/private:pinned.bzl", "pinned")
 
 # The exact closure of `src/localizations/gen_l10n.dart` once the six import

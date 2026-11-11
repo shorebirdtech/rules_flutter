@@ -29,7 +29,7 @@ The generated package carries its non-Dart `lib/` members (`_embedder.yaml`
 among them) as `dart_library`'s `resources`.
 """
 
-load("@rules_dart//dart:utils.bzl", "METADATA_TARGET_NAME")
+load("//flutter/private:package_metadata_content.bzl", "METADATA_TARGET_NAME")
 load("//flutter/private:pinned.bzl", "pinned")
 load(":artifact_urls.bzl", "engine_artifact_url")
 

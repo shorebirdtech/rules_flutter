@@ -64,7 +64,7 @@ def _undeclared_library_impl(ctx):
     env = analysistest.begin(ctx)
     asserts.expect_failure(env, "different `dart_package_metadata`")
     asserts.expect_failure(env, "app_root_record_fixture:pubspec-metadata")
-    asserts.expect_failure(env, "none, named by @@//flutter/tests/app_root_record_fixture:undeclared_library")
+    asserts.expect_failure(env, "none (package \"app_root_record_fixture\"), named by @@//flutter/tests/app_root_record_fixture:undeclared_library")
     return analysistest.end(env)
 
 _undeclared_library_test = analysistest.make(_undeclared_library_impl, expect_failure = True)

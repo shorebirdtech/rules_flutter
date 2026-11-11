@@ -41,8 +41,8 @@ rules_dart rules and flags you use directly.
    each other → `flutter_pub.cycle()` (the error gives it). A lock entry
    without `sha256` now fails; regenerate the lock.
 7. Overlay templates: `{HUB_NAME}` → `{DEPS}`; facts go in a
-   `dart_package_metadata(name = "pubspec-metadata", ...)` the plugin names,
-   with `{LICENSE}` there.
+   `dart_package_metadata` the plugin names with `package`, with `{LICENSE}`
+   there.
 8. Android: installed SDK/NDK → `hermetic_android_toolchains` (see
    [Android](#android)), or keep the installed ones with
    `configure(api_level = ...)` pinned. Keep `rules_flutter`'s `bazel_dep`
@@ -73,9 +73,9 @@ rules_dart rules and flags you use directly.
 13. `package_name`, `language_version`, `version`, `license_file`,
     `link_hook`, `code_assets`, `unreplaced_hook` (was
     `has_unreplaced_hook`) on `flutter_library`, `flutter_plugin`, app, test
-    and web rules → one `dart_package_metadata(name = "pubspec-metadata", ...)`
-    at the package root, loaded from `@rules_flutter//flutter:defs.bzl`, and
-    `package = ":pubspec-metadata"` on each target. `flutter_application` no
+    and web rules → one `dart_package_metadata` per package, loaded from
+    `@rules_flutter//flutter:defs.bzl`, and `package` naming it on each
+    target. Any name works; Gazelle writes `pubspec-metadata`. `flutter_application` no
     longer names the package after the target.
 14. `flutter_library`/`flutter_plugin` `srcs` and `resources` must be under
     their package's `lib/`; generated `srcs` must come from that package's own

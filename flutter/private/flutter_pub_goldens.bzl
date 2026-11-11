@@ -11,8 +11,8 @@ Made only when some lock lists `flutter_test`. Loaded lazily: it is parsed when
 an integration test asks for it.
 """
 
-load("@rules_dart//dart:utils.bzl", "METADATA_TARGET_NAME")
 load("//flutter/private:flutter_pub_index.bzl", "library_repo")
+load("//flutter/private:package_metadata_content.bzl", "METADATA_TARGET_NAME")
 
 def _flutter_pub_goldens_impl(ctx):
     ctx.file("BUILD.bazel", """\
