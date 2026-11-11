@@ -813,7 +813,7 @@ cd e2e/android_example && bazel test //...
 cd e2e/web_example && bazel test //...
 cd e2e/pub_resolve && bazel test //...  # macOS, Linux (:render_test)
 cd e2e/desktop_example && bazel test //...  # Linux and Windows targets, each target_compatible_with its own OS: on macOS nothing runs
-cd e2e/package_assets && bazel test //...   # macOS-only
+cd e2e/package_assets && bazel test //...   # the link hook tests on any host; the macOS app's tests on macOS only (target_compatible_with)
 ```
 
 **Platform notes:**
