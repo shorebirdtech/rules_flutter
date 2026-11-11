@@ -22,13 +22,13 @@ load("@bazel_skylib//lib:dicts.bzl", "dicts")
 # buildifier: disable=bzl-visibility
 load("@build_bazel_rules_apple//apple/internal:framework_import_support.bzl", "framework_import_support")
 load("@rules_cc//cc:find_cc_toolchain.bzl", "use_cc_toolchain")
-load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
+load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "program_assets_action_args")
 load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterSdkRecordInfo")
 load("//flutter/private:apple_xcode.bzl", "declare_dsym", "run_xcode_tool", "split_and_strip_aot_binary")
 load("//flutter/private:assemble_directory.bzl", "ASSEMBLE_DIRECTORY_ATTRS", "assemble_directory")
 load("//flutter/private:constants.bzl", "IOS_MINIMUM_OS_VERSION")
 load("//flutter/private:exec_groups.bzl", "PORTABLE_EXEC_GROUPS", "portable_tools")
-load("//flutter/private:flutter_native_assets.bzl", "native_asset_framework_name")
+load("//flutter/private:flutter_native_assets.bzl", "CODE_ASSETS_TOOL_ATTRS", "candidate_code_asset_libraries", "native_asset_framework_name", "run_code_assets_tool")
 load("//flutter/private:mobile_engine_check.bzl", "check_ios_engine")
 load("//flutter/private:program_analysis.bzl", "bundled_program_info")
 
@@ -314,7 +314,7 @@ def _flutter_ios_native_frameworks_impl(ctx):
     """Wraps each native dylib in a signed `.framework` for iOS bundling.
 
     iOS forbids loose embedded dylibs, so every native dependency — the legacy
-    `native_libs` set (FFI `native_deps`) and the `bundled_code_assets` set
+    `native_libs` set (FFI `native_deps`) and every code-asset candidate
     contributed by Native Assets `dynamic_loading_bundle` declarations — is
     repackaged as `<name>.framework/<name>` (binary + Info.plist) with its
     install name rewritten to `@rpath/<name>.framework/<name>`, matching
@@ -322,21 +322,22 @@ def _flutter_ios_native_frameworks_impl(ctx):
     `AppleFrameworkImportInfo` lets `ios_application` embed and code-sign each
     framework; the engine `dlopen`s the framework-relative path the
     native-assets manifest records (see flutter_native_assets.bzl).
+
+    rules_apple has to know each framework it embeds when the app is
+    analysed, and which code assets ship is known only when the app is built
+    (a release build's link hooks choose), so every candidate is wrapped.
+    `flutter_application` has checked no two of these share a framework name.
     """
     app_info = ctx.attr.application[FlutterApplicationInfo]
-    dylibs = list(app_info.native_libs) + app_info.bundled_code_assets.to_list()
+    dylibs = list({
+        lib: None
+        for lib in list(app_info.native_libs) + candidate_code_asset_libraries(app_info.program_assets)
+    }.keys())
     minimum_os_version = ctx.attr.minimum_os_version
 
     framework_files = []
-    seen = {}
     for dylib in dylibs:
         name = native_asset_framework_name(dylib.basename)
-        if name in seen:
-            fail(
-                "Two native dylibs map to the same iOS framework name %r " % name +
-                "(from %s and %s). Rename one native asset." % (seen[name], dylib.basename),
-            )
-        seen[name] = dylib.basename
 
         binary = ctx.actions.declare_file("%s/%s.framework/%s" % (ctx.label.name, name, name))
         plist = ctx.actions.declare_file("%s/%s.framework/Info.plist" % (ctx.label.name, name))
@@ -398,6 +399,55 @@ flutter_ios_native_frameworks = rule(
     fragments = ["apple"],
     toolchains = use_cc_toolchain(mandatory = True),
     doc = "Wraps native plugin/native-asset dylibs in signed .frameworks for iOS bundling.",
+)
+
+# -- flutter_ios_dropped_frameworks (code assets a link hook dropped) ----------
+
+def _flutter_ios_dropped_frameworks_impl(ctx):
+    app_info = ctx.attr.application[FlutterApplicationInfo]
+    output = ctx.actions.declare_file("%s/rules_flutter_dropped_frameworks.txt" % ctx.label.name)
+    code_assets = program_assets_action_args(ctx.actions, app_info.program_assets, data = False, code = "names")
+    args = ctx.actions.args()
+    args.add("--output", output)
+    if ctx.attr.conflict:
+        args.add("--conflict", ctx.attr.conflict)
+    run_code_assets_tool(
+        ctx,
+        "ios-dropped-frameworks",
+        [args, code_assets.args],
+        code_assets.inputs,
+        [output],
+        mnemonic = "FlutterIOSDroppedFrameworks",
+        progress_message = "Listing the code assets %{label} drops",
+    )
+    return [DefaultInfo(files = depset([output]))]
+
+flutter_ios_dropped_frameworks = rule(
+    implementation = _flutter_ios_dropped_frameworks_impl,
+    attrs = {
+        "application": attr.label(
+            doc = "The `flutter_application` the iOS app bundles.",
+            mandatory = True,
+            providers = [FlutterApplicationInfo],
+        ),
+        "conflict": attr.string(
+            doc = "The app's own `ipa_post_processor`, when it has one. rules_apple runs " +
+                  "one post-processor, so the app cannot have rules_flutter's too: the " +
+                  "build fails, naming it, when a link hook dropped a code asset.",
+        ),
+    } | CODE_ASSETS_TOOL_ATTRS,
+    exec_groups = PORTABLE_EXEC_GROUPS,
+    doc = """The frameworks of the code assets a release app's link hooks dropped, for the app to remove.
+
+`flutter_ios_native_frameworks` wraps every code asset that could ship, because
+rules_apple embeds only frameworks it knows when the app is analysed. In a
+release or profile build a package's link hook chooses among its code assets,
+so this writes `rules_flutter_dropped_frameworks.txt`, one `<name>.framework` a
+line. Give it to the `ios_application`'s `resources` and
+`@rules_flutter//flutter:ios_code_asset_post_processor` as its
+`ipa_post_processor`, outside `-c dbg` (a debug build runs no hook, and any
+post-processor makes rules_apple unpack and repack the archive): the processor
+removes those frameworks and the list before rules_apple signs the app.""",
 )
 
 # -- flutter_ios_privacy_manifests (xcprivacy bundling) -----------------------

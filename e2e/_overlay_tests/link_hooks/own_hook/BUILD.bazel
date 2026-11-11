@@ -14,7 +14,6 @@ dart_package_metadata(
 flutter_application(
     name = "app",
     srcs = ["lib/src/motto.dart"],
-    link_hook_assets = ["package:own_hook/motto.txt"],
     main = "lib/main.dart",
     package = ":pubspec-metadata",
     deps = [

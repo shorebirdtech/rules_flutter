@@ -1,6 +1,7 @@
 /// The pass/fail log of a test that inspects a built artifact.
 library;
 
+import 'dart:convert';
 import 'dart:io';
 
 /// Runs checks against a built bundle and keeps going after a failure, so one
@@ -65,6 +66,38 @@ class BundleCheck {
       pass('$subject is absent');
     } else {
       fail('$subject is present: $path');
+    }
+  }
+
+  /// Passes if the app's `NativeAssetsManifest.json` in [flutterAssets]
+  /// names each of [shipped], by asset id, and none of [dropped]: the code
+  /// assets a link hook kept and those it dropped.
+  void nativeAssetsManifest(
+    String flutterAssets, {
+    Iterable<String> shipped = const [],
+    Iterable<String> dropped = const [],
+  }) {
+    final file = File('$flutterAssets/NativeAssetsManifest.json');
+    if (!file.existsSync()) {
+      fail('NativeAssetsManifest.json — not found: ${file.path}');
+      return;
+    }
+    final manifest = json.decode(file.readAsStringSync()) as Map;
+    final ids = {
+      for (final section in (manifest['native-assets'] as Map).values)
+        ...(section as Map).keys.cast<String>(),
+    };
+    for (final id in shipped) {
+      expect(
+        'NativeAssetsManifest.json names $id',
+        condition: ids.contains(id),
+      );
+    }
+    for (final id in dropped) {
+      expect(
+        'NativeAssetsManifest.json leaves out the dropped $id',
+        condition: !ids.contains(id),
+      );
     }
   }
 

@@ -28,7 +28,6 @@ void main() {
     'extraDartDefines': const <String>[],
     'assetsDir': assetsDir,
     'targetPlatform': 'ios',
-    'nativeAssetsManifest': '',
     'trackWidgetCreation': false,
   });
 
@@ -176,7 +175,6 @@ void main() {
           'platformBuildArgs': <String>[],
           'extraDartDefines': <String>[],
           'targetPlatform': 'ios',
-          'nativeAssetsManifest': '',
           'trackWidgetCreation': false,
           // assetsDir missing — a rules/dev-tool version skew.
         }),
@@ -213,47 +211,6 @@ void main() {
       );
     });
 
-    test('requires the native-assets manifest, so skew fails by name', () {
-      // A dev tool that guessed "none" here would compile hot restarts with no
-      // asset-id map, and a restarted Android app would throw in `main()`.
-      expect(
-        () => BuildInfo.fromJson(const {
-          'label': '@@//:app_flutter',
-          'compilationMode': 'dbg',
-          'platformBuildArgs': <String>[],
-          'extraDartDefines': <String>[],
-          'assetsDir': 'bazel-out/x/bin/app_flutter_flutter_assets',
-          'targetPlatform': 'android',
-          // nativeAssetsManifest missing — a rules/dev-tool version skew.
-        }),
-        throwsA(
-          isA<DevToolException>().having(
-            (e) => e.message,
-            'message',
-            contains('nativeAssetsManifest'),
-          ),
-        ),
-      );
-    });
-
-    test('carries the native-assets manifest through', () {
-      final parsed = BuildInfo.fromJson(const {
-        'label': '@@//:app_flutter',
-        'compilationMode': 'dbg',
-        'platformBuildArgs': <String>[],
-        'extraDartDefines': <String>[],
-        'assetsDir': 'bazel-out/x/bin/app_flutter_flutter_assets',
-        'targetPlatform': 'android',
-        'nativeAssetsManifest':
-            'bazel-out/x/bin/app_flutter.native_assets.json',
-        'trackWidgetCreation': false,
-      });
-      expect(
-        parsed.nativeAssetsManifest,
-        'bazel-out/x/bin/app_flutter.native_assets.json',
-      );
-    });
-
     test('carries whether the app tracks widget creation through', () {
       Map<String, dynamic> record(Object? tracked) => {
         'label': '@@//:app_flutter',
@@ -262,7 +219,6 @@ void main() {
         'extraDartDefines': <String>[],
         'assetsDir': 'bazel-out/x/bin/app_flutter_flutter_assets',
         'targetPlatform': 'macos',
-        'nativeAssetsManifest': '',
         'trackWidgetCreation': ?tracked,
       };
       expect(BuildInfo.fromJson(record(true)).trackWidgetCreation, isTrue);
@@ -291,7 +247,6 @@ void main() {
         'extraDartDefines': <String>[],
         'assetsDir': 'bazel-out/x/bin/app_flutter_flutter_assets',
         'targetPlatform': 'ios',
-        'nativeAssetsManifest': '',
         'trackWidgetCreation': false,
       });
       expect(parsed.targetPlatform, 'ios');
@@ -311,7 +266,6 @@ void main() {
         'extraDartDefines': ['E2E_FLAG=from,flag'],
         'assetsDir': 'bazel-out/x/bin/app_flutter_flutter_assets',
         'targetPlatform': 'ios',
-        'nativeAssetsManifest': '',
         'trackWidgetCreation': false,
       };
       final parsed = BuildInfo.fromJson(record);
@@ -345,7 +299,6 @@ void main() {
         'extraDartDefines': <String>[],
         'assetsDir': 'bazel-out/x/bin/app_flutter_flutter_assets',
         'targetPlatform': 'ios',
-        'nativeAssetsManifest': '',
         'trackWidgetCreation': false,
         'somethingNewerRulesBake': 'keep me',
       });
@@ -535,7 +488,6 @@ void main() {
           'extraDartDefines': <String>[],
           'assetsDir': 'bazel-out/x/bin/app_flutter_flutter_assets',
           'targetPlatform': 'macos',
-          'nativeAssetsManifest': '',
           'trackWidgetCreation': false,
         },
       );

@@ -1765,9 +1765,8 @@ def _detect_hooks(ctx):
     generation would break builds over packages never reached. The
     application that actually depends on one fails instead.
 
-    `link_hook` is `hook/link.dart` when the package has one, for an
-    application listing its assets in `link_hook_assets` to run, as rules_dart's
-    pub spokes record it.
+    `link_hook` is `hook/link.dart` when the package has one, for a linked
+    program to run, as rules_dart's pub spokes record it.
     """
     replaced = bool(ctx.attr.code_assets) or ctx.attr.ignore_hook
     return struct(

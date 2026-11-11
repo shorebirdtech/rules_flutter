@@ -22,7 +22,7 @@
 ///
 /// Pass criteria: after launch the app writes
 /// `ffi_example_result add(3,4)=7 mul(3,4)=12 sqlite=HELLO shared=2
-/// negate(5)=-5` to
+/// negate(5)=-5 kept(20)=21` to
 /// `tmp/ffi_result.txt` in its sandbox — written in main() only if all three
 /// calls succeeded via the bundled native libraries. The test reads the file
 /// back through `simctl get_app_container` (a deterministic signal that
@@ -42,7 +42,7 @@ import 'package:rules_flutter_e2e_testing/ios_bundle.dart';
 const _bundleId = 'com.example.ffi';
 const _marker =
     'ffi_example_result add(3,4)=7 mul(3,4)=12 sqlite=HELLO shared=2 '
-    'negate(5)=-5';
+    'negate(5)=-5 kept(20)=21';
 const _resultFile = 'tmp/ffi_result.txt';
 const _timeout = Duration(seconds: 60);
 

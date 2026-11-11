@@ -41,7 +41,6 @@ Map<String, dynamic> buildInfoJson({String compilationMode = 'dbg'}) => {
   'extraDartDefines': <String>['E2E_MESSAGE=from,the,app'],
   'assetsDir': 'bazel-out/darwin_arm64-dbg/bin/app_flutter_flutter_assets',
   'targetPlatform': 'macos',
-  'nativeAssetsManifest': '',
   'trackWidgetCreation': false,
 };
 

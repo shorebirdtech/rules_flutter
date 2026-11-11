@@ -6,6 +6,13 @@
 ///
 /// Usage:
 ///   dart generate_asset_manifest.dart --config <path> --output-dir <path>
+///       [--program-assets=<path>]
+///
+/// `--program-assets` names what a program ships, in rules_dart's
+/// program-assets line format (its README, "The program-assets file"). Each
+/// data asset the program ships is bundled at `packages/<package>/<name>` and
+/// listed in the asset manifest under that key, as flutter_tools bundles a
+/// hook's data asset.
 ///
 /// The config file is JSON with this schema:
 /// {
@@ -182,15 +189,172 @@ Future<bool> _runFontSubset(
 
 // -- Main --------------------------------------------------------------------
 
+/// The name and version of the program-assets line format this reads.
+const programAssetsFormat = 'rules_dart_program_assets/1';
+
+/// The data assets a program ships, read from a file in rules_dart's
+/// program-assets line format: each link hook's data directory listed.
+///
+/// The bundle holds data assets only, so this reads a file that holds them
+/// and passes over any code records it also holds. rules_dart's reference
+/// reader (`@rules_dart//dart/program_assets`) is a package, and this tool
+/// runs as a script with none; rules_dart's conformance fixture checks the
+/// two agree.
+final class ProgramAssets {
+  ProgramAssets(this.dataAssets);
+
+  /// Each data asset's file, by id (`package:<package>/<name>`).
+  final Map<String, String> dataAssets;
+
+  /// Reads [path]. Its `exec` paths are relative to [base], the working
+  /// directory when null.
+  static ProgramAssets read(String path, {String? base}) {
+    String resolve(String p) =>
+        base == null || p.startsWith('/') ? p : '$base/$p';
+    final lines = File(path).readAsLinesSync();
+    var at = 0;
+    String next(String what) {
+      if (at >= lines.length) {
+        throw FormatException('$path: ends before $what');
+      }
+      return lines[at++];
+    }
+
+    void tag(String expected) {
+      final line = next('`$expected`');
+      if (line != expected) {
+        throw FormatException('$path: expected `$expected`, got `$line`');
+      }
+    }
+
+    tag('--format');
+    final format = next('the format');
+    if (format != programAssetsFormat) {
+      throw FormatException(
+        '$path: format `$format`, not `$programAssetsFormat`',
+      );
+    }
+    tag('--paths');
+    final paths = next('the paths');
+    if (paths != 'exec') {
+      throw FormatException(
+        '$path: `--paths $paths`; only `exec` is read here',
+      );
+    }
+    tag('--holds');
+    final holds = next('what it holds');
+    final parts = holds.split(' ');
+    if (holds.isEmpty ||
+        parts.toSet().length != parts.length ||
+        parts.any((p) => !const {'data', 'code', 'code-names'}.contains(p)) ||
+        (parts.contains('code') && parts.contains('code-names'))) {
+      throw FormatException('$path: `--holds` `$holds` is not a valid view');
+    }
+    if (!parts.contains('data')) {
+      throw FormatException(
+        '$path holds `$holds`, not the data assets the bundle needs; pass '
+        '`data = True` to `program_assets_action_args()`',
+      );
+    }
+    final holdsCode = parts.length > 1;
+    void holding(String record, bool held) {
+      if (!held) {
+        throw FormatException(
+          '$path: a `$record` record in a file that holds `$holds`',
+        );
+      }
+    }
+
+    final data = <String, String>{};
+    void ship(String id, String file) {
+      if (data.containsKey(id)) {
+        throw FormatException('$path names data asset `$id` twice');
+      }
+      data[id] = file;
+    }
+
+    // A code asset's record: its id, link mode, library and uri.
+    void passCodeAsset() {
+      for (final what in ['an id', 'a link mode', 'a library', 'a uri']) {
+        next(what);
+      }
+    }
+
+    while (at < lines.length) {
+      switch (next('a record')) {
+        case '--data-asset':
+          final id = next('an id');
+          ship(id, resolve(next('a file')));
+        case '--link-data':
+          final package = next('a package');
+          final directory = resolve(next('a directory'));
+          final root = Directory(directory);
+          final files = root.existsSync()
+              ? root
+                    .listSync(recursive: true, followLinks: true)
+                    .whereType<File>()
+              : const <File>[];
+          for (final file in files) {
+            final name = file.path
+                .substring(directory.length + 1)
+                .replaceAll(r'\', '/');
+            ship('package:$package/$name', file.path);
+          }
+        case '--code-asset':
+          holding('--code-asset', holdsCode);
+          passCodeAsset();
+        case '--link-code':
+          holding('--link-code', holdsCode);
+          next('a package');
+          next('a selection');
+          while (at < lines.length && lines[at] == '--candidate') {
+            at++;
+            passCodeAsset();
+          }
+        case final other:
+          throw FormatException('$path: unknown record `$other`');
+      }
+    }
+    return ProgramAssets(data);
+  }
+}
+
+/// Adds each of a program's data assets to [config], at
+/// `packages/<package>/<name>`, the key `rootBundle` loads it by.
+///
+/// A key another file already claims fails: the bundle can hold one of them.
+void addProgramDataAssets(Map<String, dynamic> config, ProgramAssets program) {
+  final assets = (config['assets'] ??= <String, dynamic>{}) as Map;
+  final copies = (config['copies'] ??= <String, dynamic>{}) as Map;
+  for (final MapEntry(key: id, value: source) in program.dataAssets.entries) {
+    final key = 'packages/${id.substring('package:'.length)}';
+    final claimed = copies[key];
+    if (claimed != null && claimed != source) {
+      stderr.writeln(
+        'Two files claim the asset key $key: $claimed and the data asset '
+        '$source. A bundle can hold one of them.',
+      );
+      exit(1);
+    }
+    copies[key] = source;
+    assets[key] = [
+      {'asset': key},
+    ];
+  }
+}
+
 Future<void> main(List<String> args) async {
   String? configPath;
   String? outputDir;
+  String? programAssets;
 
   for (var i = 0; i < args.length; i++) {
     if (args[i] == '--config' && i + 1 < args.length) {
       configPath = args[++i];
     } else if (args[i] == '--output-dir' && i + 1 < args.length) {
       outputDir = args[++i];
+    } else if (args[i].startsWith('--program-assets=')) {
+      programAssets = args[i].substring('--program-assets='.length);
     }
   }
 
@@ -203,6 +367,9 @@ Future<void> main(List<String> args) async {
 
   final config =
       json.decode(File(configPath).readAsStringSync()) as Map<String, dynamic>;
+  if (programAssets != null) {
+    addProgramDataAssets(config, ProgramAssets.read(programAssets));
+  }
 
   // Create output directory.
   Directory(outputDir).createSync(recursive: true);

@@ -15,7 +15,9 @@ fix.
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("@rules_dart//dart:defs.bzl", "dart_code_asset")
 load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo")
+load("@rules_dart//dart:utils.bzl", "PROGRAM_ASSETS_TOOLCHAINS", "program_assets_attrs")
 load("//flutter/private:common.bzl", "check_unreplaced_hooks")
+load("//flutter/private:exec_groups.bzl", "PORTABLE_EXEC_GROUPS")
 load("//flutter/private:flutter_native_assets.bzl", "native_asset_framework_name", "native_assets_target_string", "resolve_native_assets", "write_native_assets_manifest")
 
 # -- Pure-function tests for the manifest helpers ----------------------
@@ -84,12 +86,15 @@ def _manifest_probe_impl(ctx):
 
 _manifest_probe = rule(
     implementation = _manifest_probe_impl,
-    attrs = {
+    attrs = program_assets_attrs() | {
         "code_assets": attr.label_list(providers = [DartCodeAssetInfo]),
-        "layout": attr.string(default = "bundle"),
+        "layout": attr.string(mandatory = True),
         "target_arch": attr.string(mandatory = True),
         "target_os": attr.string(mandatory = True),
     },
+    toolchains = PROGRAM_ASSETS_TOOLCHAINS,
+    exec_groups = PORTABLE_EXEC_GROUPS,
+    fragments = ["cpp"],
 )
 
 def _manifest_path_test_impl(ctx):
@@ -210,22 +215,13 @@ def _setup_failure_targets():
     by the analysistests that wrap them.
     """
 
-    # A bundled library, probed under both layouts. An application e2e only
-    # reaches the bundle one, so without these the runfiles layout is only
-    # exercised through a `flutter_test`.
+    # A bundled library, probed under the runfiles layout, which otherwise is
+    # only exercised through a `flutter_test`. An application's manifest is
+    # written by `code_assets.dart`, whose unit test pins its paths.
     dart_code_asset(
         name = "_layout_asset",
         asset_id = "package:layout/layout.dart",
         file = "//flutter/tests/dart_asset_fixture:layout_probe_shared",
-        tags = ["manual"],
-    )
-
-    _manifest_probe(
-        name = "_layout_bundle",
-        code_assets = [":_layout_asset"],
-        layout = "bundle",
-        target_arch = "arm64",
-        target_os = "macos",
         tags = ["manual"],
     )
 
@@ -275,18 +271,6 @@ def native_assets_test_suite(name):
         expected_substring = "hook_fixture (hook/build.dart)",
     )
 
-    # An application resolves a bundled library inside its bundle slot, so the
-    # bare filename is all the engine needs.
-    manifest_path_test(
-        name = name + "_bundle_layout_path",
-        size = "small",
-        target_under_test = ":_layout_bundle",
-        expected_substrings = ["\"liblayout_probe.dylib\""],
-        # The distinguishing part: no directory component at all, so the engine
-        # resolves it inside the bundle slot rather than anywhere else.
-        forbidden_substrings = ["flutter/tests/"],
-    )
-
     # A test has no bundle, so the same asset must be named by where it sits in
     # the runfiles tree — a path with separators, which is what makes the
     # loader resolve it against the test's working directory rather than
@@ -318,7 +302,6 @@ def native_assets_test_suite(name):
             ":" + name + "_unreplaced_hook",
             ":" + name + "_misowned_code_asset",
             ":" + name + "_unreplaced_hook_in_test",
-            ":" + name + "_bundle_layout_path",
             ":" + name + "_runfiles_layout_path",
             ":" + name + "_test_host_is_target",
             ":" + name + "_pure",
@@ -374,9 +357,12 @@ def _bridge_probe_impl(ctx):
 
 bridge_probe = rule(
     implementation = _bridge_probe_impl,
-    attrs = {
+    attrs = program_assets_attrs() | {
         "deps": attr.label_list(),
         "expected_asset_ids": attr.string_list(),
     },
+    toolchains = PROGRAM_ASSETS_TOOLCHAINS,
+    exec_groups = PORTABLE_EXEC_GROUPS,
+    fragments = ["cpp"],
     doc = "Asserts which rules_dart code assets the Flutter bridge lifts.",
 )

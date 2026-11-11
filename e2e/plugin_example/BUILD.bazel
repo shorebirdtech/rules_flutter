@@ -105,6 +105,18 @@ flutter_application(
     ],
 )
 
+# An app over `pick`, whose link hook keeps the code asset of the one `Op`
+# the app constructs and drops the other.
+flutter_application(
+    name = "pick_app",
+    main = "lib/pick_main.dart",
+    package = ":pubspec-metadata",
+    deps = [
+        "//pick",
+        "@deps//:flutter",
+    ],
+)
+
 # An app whose only Android plugin is `annotated_plugin`, whose Gradle build
 # declares a `platform(...)` entry that rules_flutter does not read. The
 # annotation in MODULE.bazel gives its Android library `androidx.browser`, which
@@ -357,6 +369,48 @@ flutter_android_build(
     name = "annotated_arm64_build",
     android_platforms = ["@rules_android//:arm64-v8a"],
     targets = [":annotated_android"],
+)
+
+flutter_android_app(
+    name = "pick_android",
+    application = ":pick_app",
+    application_id = "com.example.pick",
+    namespace = "com.example.plugin_example",
+    proguard_specs = [],
+)
+
+flutter_android_build(
+    name = "pick_android_arm64_build",
+    android_platforms = ["@rules_android//:arm64-v8a"],
+    targets = [":pick_android"],
+)
+
+[
+    android_apk(
+        name = "pick_android_" + variant,
+        apk = ":pick_android_arm64_build",
+        compilation_mode = mode,
+        tags = ["android"],
+    )
+    for variant, mode in [
+        ("arm64", ""),
+        ("dbg", "dbg"),
+    ]
+]
+
+# Each ABI's libapp.so once, and the code asset the hook kept: the dropped one
+# only in debug, which runs no hook.
+dart_test(
+    name = "verify_android_pick_apk_test",
+    data = [
+        ":pick_android_arm64",
+        ":pick_android_dbg",
+        "@bazel_tools//tools/zip:zipper",
+    ],
+    env = {"ZIPPER_RUNFILE": "$(rlocationpath @bazel_tools//tools/zip:zipper)"},
+    main = "test/verify_android_pick_apk_test.dart",
+    tags = ["android"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 flutter_android_build(
@@ -804,6 +858,7 @@ flutter_library(
     deps = [
         "//greeting_plugin",
         "//mixed_plugin",
+        "//pick",
         "@deps//:audio_session",
         "@deps//:flutter",
         "@deps//:geolocator_apple",

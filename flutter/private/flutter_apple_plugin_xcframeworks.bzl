@@ -3,8 +3,8 @@
 `flutter build ios-framework` packages each plugin with Apple code as its own
 xcframework, and each code asset (a Dart build hook's dynamic library) as one
 more. These rules do the same, from the plugin libraries an application
-carries (`FlutterApplicationInfo.apple_plugin_libraries`) and its bundled code
-assets, in the build mode of the configuration.
+carries (`FlutterApplicationInfo.apple_plugin_libraries`) and the code assets
+it ships, in the build mode of the configuration.
 
 A plugin's framework holds only that plugin's code. It is linked here, slice by
 slice, from the plugin's own static libraries: Flutter is linked dynamically
@@ -27,13 +27,13 @@ in profile and release a dSYM.
 
 load("@bazel_skylib//lib:dicts.bzl", "dicts")
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
-load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
+load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "program_assets_action_args")
 load("//flutter:providers.bzl", "FlutterApplicationInfo")
 load("//flutter/private:apple_add_to_app.bzl", "BUNDLE_ATTRS", "SLICES", "SLICES_TRANSITION", "assemble_bundle", "framework_resources", "framework_root", "xcframework_info_plist")
 load("//flutter/private:apple_xcode.bzl", "XCODE_TOOL_ATTRS", "XCODE_TOOL_FRAGMENTS", "XCODE_TOOL_TOOLCHAINS", "run_xcode_tool")
 load("//flutter/private:constants.bzl", "IOS_MINIMUM_OS_VERSION", "MACOS_MINIMUM_OS_VERSION")
 load("//flutter/private:exec_groups.bzl", "PORTABLE_EXEC_GROUPS")
-load("//flutter/private:flutter_native_assets.bzl", "native_asset_framework_name")
+load("//flutter/private:flutter_native_assets.bzl", "CODE_ASSETS_TOOL_ATTRS", "candidate_code_asset_libraries", "native_asset_framework_name", "run_code_assets_tool")
 load("//flutter/private:unbuilt_native_code.bzl", "fail_on_unbuilt_native_code")
 
 _MINIMUM_OS_VERSION = {"ios": IOS_MINIMUM_OS_VERSION, "macos": MACOS_MINIMUM_OS_VERSION}
@@ -531,24 +531,37 @@ flutter_macos_plugin_xcframeworks = _plugin_xcframeworks_rule("macos")
 def _code_asset_xcframeworks_impl(ctx):
     platform = ctx.attr._platform
     slices = SLICES[platform]
+
+    # Every library a slice could ship, by its name in the bundle: the
+    # `native_deps` libraries, which always ship, and every code-asset
+    # candidate. Which candidates ship is known only to the action below,
+    # which reads each slice's program assets. `flutter_application` has
+    # checked that no two of a slice's share a name.
     per_name = {}
+    file_names = {}
+    always = {}
+    program_assets = {}
     for slice in slices:
         app_info = ctx.split_attr.application[slice.id][FlutterApplicationInfo]
-        dylibs = list(app_info.native_libs) + app_info.bundled_code_assets.to_list()
-        seen = {}
-        for dylib in dylibs:
+        program_assets[slice.id] = app_info.program_assets
+        for dylib in list(app_info.native_libs) + candidate_code_asset_libraries(app_info.program_assets):
             name = native_asset_framework_name(dylib.basename) if platform == "ios" else dylib.basename
-            if name in seen:
-                fail("Two code assets, %s and %s, are both %s" % (seen[name], dylib.short_path, name))
-            seen[name] = dylib.short_path
             per_name.setdefault(name, {})[slice.id] = dylib
+            file_names[name] = dylib.basename
+        for dylib in app_info.native_libs:
+            name = native_asset_framework_name(dylib.basename) if platform == "ios" else dylib.basename
+            always.setdefault(name, []).append(slice.id)
 
-    outputs = []
+    candidates = {}
     for name, dylibs in sorted(per_name.items()):
         # As upstream's `verifyCodeAssetConsistency`: the device and simulator
-        # builds must agree on every code asset.
+        # builds must agree on every code asset. Of the `native_deps`
+        # libraries that is known now; of the code assets, which a link hook
+        # may keep in one slice and not the other, when they are built.
         if len(dylibs) != len(slices):
-            fail("The code asset %s is built for %s only; each slice must build the same code assets" % (name, ", ".join(sorted(dylibs.keys()))))
+            if name in always:
+                fail("The code asset %s is built for %s only; each slice must build the same code assets" % (name, ", ".join(sorted(dylibs.keys()))))
+            continue
         steps = []
         for slice in slices:
             dylib = dylibs[slice.id]
@@ -595,7 +608,7 @@ def _code_asset_xcframeworks_impl(ctx):
             xcframework_info_plist(ctx, plist, name, slices)
         else:
             _library_xcframework_plist(ctx, plist, name, slices)
-        xcframework = ctx.actions.declare_directory("%s/%s.xcframework" % (ctx.label.name, base))
+        xcframework = ctx.actions.declare_directory("%s_candidates/%s.xcframework" % (ctx.label.name, base))
         assemble_bundle(
             ctx,
             xcframework,
@@ -603,8 +616,36 @@ def _code_asset_xcframeworks_impl(ctx):
             mnemonic = "FlutterCodeAssetXCFramework",
             progress_message = "Assembling %s.xcframework for %%{label}" % base,
         )
-        outputs.append(xcframework)
-    return [DefaultInfo(files = depset(outputs))]
+        candidates[name] = xcframework
+
+    # One directory of the xcframeworks that ship.
+    output = ctx.actions.declare_directory(ctx.label.name)
+    args = ctx.actions.args()
+    args.add_all("--output", [output], expand_directories = False)
+    arguments = [args]
+    inputs = []
+    for slice in slices:
+        code_assets = program_assets_action_args(ctx.actions, program_assets[slice.id], data = False, code = "names")
+        arguments.extend([ctx.actions.args().add("--slice", slice.id), code_assets.args])
+        inputs.append(code_assets.inputs)
+    rest = ctx.actions.args()
+    for name, xcframework in sorted(candidates.items()):
+        if name in always:
+            rest.add_all("--always", [xcframework], expand_directories = False)
+        else:
+            rest.add("--candidate", file_names[name])
+            rest.add_all([xcframework], expand_directories = False)
+    arguments.append(rest)
+    run_code_assets_tool(
+        ctx,
+        "xcframeworks",
+        arguments,
+        depset(candidates.values(), transitive = inputs),
+        [output],
+        mnemonic = "FlutterCodeAssetXCFrameworks",
+        progress_message = "Collecting the code-asset xcframeworks that ship for %{label}",
+    )
+    return [DefaultInfo(files = depset([output]))]
 
 _LIBRARY_XCFRAMEWORK_PLIST = """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -656,12 +697,18 @@ def _code_asset_xcframeworks_rule(platform):
                 ),
                 "_platform": attr.string(default = platform),
             },
+            CODE_ASSETS_TOOL_ATTRS,
         ),
         exec_groups = PORTABLE_EXEC_GROUPS,
         fragments = XCODE_TOOL_FRAGMENTS,
         toolchains = XCODE_TOOL_TOOLCHAINS,
-        doc = ("One xcframework per code asset (a dynamic library a Dart build hook or " +
-               "`flutter_native_asset` bundles), as `flutter build %s-framework` makes them. %s") % (
+        doc = ("A directory of one xcframework per code asset that ships (a dynamic library a Dart build hook or " +
+               "`flutter_native_asset` bundles, less those a release build's link hooks drop), as " +
+               "`flutter build %s-framework` makes them. The device build is the source of truth, as in " +
+               "upstream's `verifyCodeAssetConsistency`: another slice may not ship a code asset it does " +
+               "not. On iOS the simulator slice is built in debug, as upstream builds it, and runs no link " +
+               "hook, so a release build whose link hooks drop a code asset fails, as " +
+               "`flutter build ios-framework` does. %s") % (
             platform,
             "Each slice is a framework, as the app's native-assets manifest names it." if platform == "ios" else "Each slice is the library itself, as the app's native-assets manifest names it.",
         ),

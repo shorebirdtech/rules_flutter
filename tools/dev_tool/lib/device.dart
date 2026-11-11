@@ -589,7 +589,6 @@ abstract class Device {
     String fileSystemScheme = '',
     List<String> dartDefines = const [],
     String dartPluginRegistrantUri = '',
-    String nativeAssetsManifest = '',
     bool trackWidgetCreation = false,
     List<String> enableExperiments = const [],
   }) => NativeCompilerConfig(
@@ -598,7 +597,6 @@ abstract class Device {
     fileSystemScheme: fileSystemScheme,
     dartDefines: dartDefines,
     dartPluginRegistrantUri: dartPluginRegistrantUri,
-    nativeAssetsManifest: nativeAssetsManifest,
     trackWidgetCreation: trackWidgetCreation,
     enableExperiments: enableExperiments,
   );
@@ -5174,7 +5172,6 @@ class WebDevice extends Device {
     String fileSystemScheme = '',
     List<String> dartDefines = const [],
     String dartPluginRegistrantUri = '',
-    String nativeAssetsManifest = '',
     bool trackWidgetCreation = false,
     List<String> enableExperiments = const [],
   }) {

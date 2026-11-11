@@ -31,5 +31,22 @@ void main() {
   for (final name in ['counter_a.dll', 'counter_b.dll']) {
     check.absent('replaced code asset $name', bundle.file(name));
   }
+  // `pick`'s link hook keeps the library of the `Op` the app constructs and
+  // drops the other, which neither the bundle nor its manifest carries.
+  check
+    ..exists(
+      'code asset the link hook kept, pick_kept.dll',
+      bundle.file('pick_kept.dll'),
+      nonEmpty: true,
+    )
+    ..absent(
+      'code asset the link hook dropped, pick_dropped.dll,',
+      bundle.file('pick_dropped.dll'),
+    )
+    ..nativeAssetsManifest(
+      bundle.flutterAssets,
+      shipped: ['package:pick/kept', 'package:add_plugin/add_plugin.dart'],
+      dropped: ['package:pick/dropped'],
+    );
   bundle.finish();
 }

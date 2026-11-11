@@ -111,10 +111,11 @@ int crc32(List<int> bytes) {
 }
 
 /// The zip archive of [entries], in the order given, each deflated (or
-/// stored, when deflating does not make it smaller).
+/// stored, when deflating does not make it smaller), or with [store] every
+/// one stored, as an APK's native libraries are, to be loaded in place.
 ///
 /// Throws [ArgumentError] for two entries with one name.
-Uint8List writeZip(List<ZipEntry> entries) {
+Uint8List writeZip(List<ZipEntry> entries, {bool store = false}) {
   final names = <String>{};
   final out = BytesBuilder(copy: false);
   final central = BytesBuilder(copy: false);
@@ -125,8 +126,10 @@ Uint8List writeZip(List<ZipEntry> entries) {
     }
     final name = entry.name.codeUnits;
     final crc = crc32(entry.bytes);
-    final deflated = ZLibEncoder(raw: true, level: 6).convert(entry.bytes);
-    final stored = deflated.length >= entry.bytes.length;
+    final deflated = store
+        ? entry.bytes
+        : ZLibEncoder(raw: true, level: 6).convert(entry.bytes);
+    final stored = store || deflated.length >= entry.bytes.length;
     final payload = stored ? entry.bytes : deflated;
     final method = stored ? 0 : 8;
 

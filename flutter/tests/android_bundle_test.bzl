@@ -8,6 +8,7 @@ Over `//flutter/tests/shared_code_asset_fixture:app_android_bundle`.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
+load("@rules_android//providers:providers.bzl", "AndroidNativeLibsInfo")
 
 _BUNDLE = "//flutter/tests/shared_code_asset_fixture:app_android_bundle"
 
@@ -20,13 +21,30 @@ def _libraries_impl(ctx):
     env = analysistest.begin(ctx)
     target = analysistest.target_under_test(env)
 
+    # One zip of the APK's libraries, which android_binary takes as an
+    # aar_import's: the same file as the `native_libs` group.
+    packaged = target[AndroidNativeLibsInfo].native_libs.to_list()
+    asserts.equals(env, 1, len(packaged), "one zip of native libraries: %s" % packaged)
+    asserts.equals(env, packaged, target[OutputGroupInfo].native_libs.to_list())
+
     # The AOT code is `libapp.so` whatever gen_snapshot called its output, next
-    # to the application's native libraries.
-    asserts.equals(
-        env,
-        sorted(ctx.attr.libraries),
-        sorted([f.basename for f in target[OutputGroupInfo].native_libs.to_list()]),
-    )
+    # to the application's native libraries and its code assets, which the
+    # action reads with their libraries and without the data assets.
+    packaging = [a for a in analysistest.target_actions(env) if a.mnemonic == "FlutterAndroidNativeLibs"]
+    asserts.equals(env, 1, len(packaging), "one packaging action")
+    if packaging:
+        argv = packaging[0].argv
+        names = []
+        for i, arg in enumerate(argv):
+            if arg == "--library-as":
+                names.append(argv[i + 1])
+            elif arg == "--library":
+                names.append(argv[i + 1].rsplit("/", 1)[-1])
+            elif arg in ("--code-asset", "--candidate") and argv[i + 2] == "dynamic_loading_bundle":
+                names.append(argv[i + 3].rsplit("/", 1)[-1])
+        asserts.equals(env, sorted(ctx.attr.libraries), sorted({n: None for n in names}.keys()), "each library once")
+        asserts.equals(env, "code", argv[argv.index("--holds") + 1], "the libraries view, no data assets")
+        asserts.equals(env, ctx.attr.abi, argv[argv.index("--abi") + 1])
 
     # Every library is checked against the ABI of the platform it was built
     # for: that ABI's name and ELF machine, not another's.

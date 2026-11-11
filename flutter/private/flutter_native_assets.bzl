@@ -1,11 +1,10 @@
-"""`flutter_native_assets_manifest` — emits the `--native-assets` JSON
-manifest the Flutter frontend_server reads.
+"""Code assets: what a program loads, and its native-assets manifests.
 
-The frontend_server's `--native-assets` flag points at a JSON file in
-the format produced by Flutter's frontend_server (see
-`packages/flutter_tools/lib/src/isolated/native_assets/dart_hook_result.dart`
-in the flutter/flutter repository). Per-target
-section, per-asset entry:
+An app ships `flutter_assets/NativeAssetsManifest.json`, which the engine
+reads at startup, as `flutter build` ships it. It maps each code asset that
+ships to how the engine loads it (`["absolute", <path>]` for a bundled
+library, `["system", <uri>]`, `["executable"]`, `["process"]`), per Dart
+target:
 
     {
       "format-version": [1, 0, 0],
@@ -17,35 +16,33 @@ section, per-asset entry:
       }
     }
 
-The manifest is always emitted, even when the depset is empty
-(`{"format-version":[1,0,0],"native-assets":{}}`). That keeps the
-kernel-compile path uniform — no `if manifest:` branches downstream.
+A release build's link hooks choose which code assets ship, so the app's
+manifest is written by an action (`code_assets.dart manifest`), and each
+platform's bundler places the libraries from the same reading of the program's
+assets. A bundled library is named by its path in the platform's code-asset
+directory:
 
-The Flutter engine reads the relative-path entries verbatim and
-`dlopen`s them inside the platform bundle slot:
-
-  * macOS: `<App>.app/Contents/Frameworks/<basename>` (loose dylib)
-  * iOS:   `<App>.app/Frameworks/<name>.framework/<name>` — iOS forbids
-           loose embedded dylibs, so each `dynamic_loading_bundle` library is
-           wrapped in its own `.framework` (matching flutter_tools'
-           `frameworkUri`). The manifest entry is the framework-relative path.
-
-Several asset ids may name one library. It is bundled once — one file, or one
-framework on iOS — and every id's entry names it, so the loader opens one image
-for all of them.
-  * Linux: `<bundle>/lib/<basename>` (resolved relative to the runner)
+  * macOS:   `<App>.app/Contents/Frameworks/<basename>`
+  * iOS:     `<App>.app/Frameworks/<name>.framework/<name>`: iOS forbids loose
+             embedded dylibs, so each library is wrapped in a framework of its
+             own (flutter_tools' `frameworkUri`)
+  * Linux:   `<bundle>/lib/<basename>`
   * Windows: next to the runner exe
   * Android: `lib/<abi>/<basename>` inside the APK
 
-Multi-arch Apple builds are out of scope: rules_flutter targets one
-arch per `bazel build` invocation. Universal binaries flow through
-`apple_universal_binary` over the dylib outputs at the user's
-discretion.
+Several asset ids may name one library. It is bundled once, one file or one
+framework on iOS, and every id's entry names it, so the loader opens one image
+for all of them.
+
+A `flutter_test` keeps upstream's `flutter test` route: its manifest, written
+here (`write_native_assets_manifest`), is compiled into its kernel through the
+frontend_server's `--native-assets`.
 """
 
 load("@rules_dart//dart:providers.bzl", "DartInfo")
-load("@rules_dart//dart:utils.bzl", "collect_transitive_code_assets", "resolve_code_assets")
+load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "dart_program_assets_actions", "program_kernel_code_assets")
 load("//flutter:providers.bzl", "FlutterApplicationInfo")
+load("//flutter/private:exec_groups.bzl", "PORTABLE", "portable_tools")
 
 # Map (target_os, arch) → the Target string Dart's
 # `Target.fromArchitectureAndOS` would produce. Keep this mirrored
@@ -120,14 +117,13 @@ def native_asset_framework_name(filename):
             sanitized += c
     return sanitized
 
-def _path_list_for(asset, target_os, layout):
+def _path_list_for(asset, layout):
     """Return the manifest path-list shape for `asset`.
 
     For `dynamic_loading_bundle` the engine's `KernelAssetAbsolutePath` is the
-    path it `dlopen`s. Under `layout = "bundle"` that is resolved inside the
-    platform bundle slot: on iOS the dylib is wrapped in a `.framework`, so the
-    path is `<name>.framework/<name>`; every other OS places a loose
-    dylib/so/dll and uses the bare basename.
+    path it `dlopen`s. An app's manifest names it in its bundle
+    (`code_assets.dart`, which ships it in `flutter_assets`); this one is a
+    test's, compiled into its kernel.
 
     Under `layout = "runfiles"` there is no bundle — a `flutter_test` runs out
     of Bazel's runfiles tree — so the entry is the library's runfiles-relative
@@ -155,10 +151,7 @@ def _path_list_for(asset, target_os, layout):
             # is a bare basename; `./` makes it a path again.
             path = asset.file.short_path
             return ["absolute", path if "/" in path else "./" + path]
-        if target_os == "ios":
-            fw = native_asset_framework_name(asset.bundle_filename)
-            return ["absolute", "%s.framework/%s" % (fw, fw)]
-        return ["absolute", asset.bundle_filename]
+        fail("flutter_native_assets_manifest: unknown layout %r" % layout)
     if asset.link_mode == "dynamic_loading_system":
         return ["system", asset.uri]
     if asset.link_mode == "dynamic_loading_executable":
@@ -185,8 +178,8 @@ def write_native_assets_manifest(
         native_assets,
         target_os,
         target_arch,
-        layout = "bundle"):
-    """Write the canonical `--native-assets` JSON manifest.
+        layout):
+    """Write a test's `--native-assets` JSON manifest.
 
     Groups `native_assets` (from `resolve_native_assets`, one per asset id)
     under the Dart Target string for the platform being built and serializes
@@ -206,19 +199,17 @@ def write_native_assets_manifest(
       target_arch: Target architecture string (`arm64`, `x64`, etc.).
         Empty defers to the host arch implicitly via an empty
         manifest map.
-      layout: Where the bundled libraries will be at run time. `"bundle"`
-        (the default) writes paths relative to the platform application's
-        bundle slot; `"runfiles"` writes each library's runfiles-relative
-        path, for a `flutter_test`, which has no bundle; `"library_path"`
-        names each by its bundle filename, for a `flutter_tester_binary` and
-        for a `flutter_test` on Windows, whose runner puts the directory they
-        are staged in on the loader's path.
+      layout: Where the test's libraries are at run time: `"runfiles"`
+        writes each library's runfiles-relative path, for a `flutter_test`;
+        `"library_path"` names each by its file name, for a
+        `flutter_tester_binary` and for a `flutter_test` on Windows, whose
+        runner puts the directory they are staged in on the loader's path.
     """
     target_string = native_assets_target_string(target_os, target_arch)
 
     section = {}
     for asset in native_assets:
-        section[asset.asset_id] = _path_list_for(asset, target_os, layout)
+        section[asset.asset_id] = _path_list_for(asset, layout)
 
     # Assets in the graph with no resolvable `<os>_<arch>` key means the
     # manifest would silently omit them and every `@Native` binding
@@ -262,6 +253,80 @@ def collect_bundled_code_asset_files(native_assets):
         if asset.link_mode == "dynamic_loading_bundle" and asset.file != None
     ])
 
+def code_asset_candidates(program_assets):
+    """Every code asset a program could ship: those that always do, and every one a link hook chooses among.
+
+    Which of them ships is known only to an action reading the program's
+    assets file (`program_assets_action_args`), so analysis uses these for
+    what must hold of every candidate: an action's declared inputs, and the
+    checks that no two could land on one path.
+
+    Args:
+      program_assets: The program's `DartProgramAssetsInfo`.
+
+    Returns:
+      A list of `DartCodeAssetInfo`, one per id.
+    """
+    return program_kernel_code_assets(program_assets)
+
+def candidate_code_asset_libraries(program_assets):
+    """The library of every bundled code-asset candidate (`code_asset_candidates`), each once.
+
+    Args:
+      program_assets: The program's `DartProgramAssetsInfo`.
+
+    Returns:
+      A list of Files.
+    """
+    return list({
+        asset.file: None
+        for asset in code_asset_candidates(program_assets)
+        if asset.link_mode == "dynamic_loading_bundle" and asset.file != None
+    }.keys())
+
+def check_bundled_library_names(label, libraries, target_os):
+    """Fails when two of an app's bundled libraries would land on one path.
+
+    A bundle places every library by its file name (on iOS by the framework
+    name derived from it), so two different libraries under one name cannot
+    both ship. Checked over every candidate, kept or not, because which a
+    link hook keeps is known only when the bundle is built: the check holds
+    whatever it keeps.
+
+    Args:
+      label: The application's label, for the message.
+      libraries: Files: the code-asset candidates' libraries and the
+        `native_deps` libraries, in any order, repeats allowed.
+      target_os: The platform the app is built for.
+    """
+    by_name = {}
+    for library in libraries:
+        names = [("`%s`" % library.basename, library.basename)]
+        if target_os == "ios":
+            framework = native_asset_framework_name(library.basename)
+            names.append(("the framework `%s.framework`" % framework, framework + ".framework"))
+        for what, key in names:
+            other = by_name.get(key)
+            if other == None:
+                by_name[key] = library
+                continue
+            if other == library:
+                continue
+            if other.owner == library.owner:
+                fail((
+                    "%s: %s reaches this target in two configurations " +
+                    "(%s and %s), so two builds of it would both be " +
+                    "bundled as %s. Name the one to ship in this " +
+                    "target's `code_assets`, or reset the setting that " +
+                    "changes on the way to the other."
+                ) % (label, library.owner, other.path, library.path, what))
+            fail((
+                "%s: two native libraries would both be bundled as %s: " +
+                "%s and %s. A bundle places each library by its file name, " +
+                "so only one of them can ship. Rename one, or serve both ids " +
+                "from one library by naming it in this target's `code_assets`."
+            ) % (label, what, other.owner, library.owner))
+
 def resolve_native_assets(ctx, package, deps, code_assets):
     """The one asset per id a program loads, with each library staged once.
 
@@ -295,8 +360,15 @@ def resolve_native_assets(ctx, package, deps, code_assets):
     `bundle_paths.owner_relative_path`. Every bundler places the library by its
     basename, which this keeps.
 
+    The assets are every one the program's unlinked assets operation
+    (`dart_program_assets_actions`) can load, known at analysis time as the
+    kernel compile's `--native-assets` needs them. A package's
+    `linked_code_assets` are linked for this program there.
+
     Args:
-      ctx: The consuming rule's context.
+      ctx: The consuming rule's context, carrying `program_assets_attrs()`,
+        `PROGRAM_ASSETS_TOOLCHAINS`, `PORTABLE_EXEC_GROUPS` and the `cpp`
+        fragment.
       package: The program's own `DartPackageInfo` (`program_package`), or
         None for a program in no package. Its `code_assets` count as any
         package's, whether or not a library in `deps` names the same
@@ -311,11 +383,24 @@ def resolve_native_assets(ctx, package, deps, code_assets):
       `libraries`, each id's library as built, before staging (None for an
       asset with no library).
     """
-    resolved = resolve_code_assets(
-        ctx.label,
-        collect_transitive_code_assets(package, [dep for dep in deps if DartInfo in dep]),
-        code_assets,
-    )
+    return stage_native_assets(ctx, program_kernel_code_assets(dart_program_assets_actions(
+        ctx,
+        package,
+        [dep for dep in deps if DartInfo in dep],
+        ctx.label.name + "_program_assets",
+        code_assets = code_assets,
+    ).info))
+
+def stage_native_assets(ctx, resolved):
+    """The code assets a program loads, as `resolve_native_assets` returns them.
+
+    Args:
+      ctx: The consuming rule's context.
+      resolved: The `DartCodeAssetInfo` its program assets operation ships.
+
+    Returns:
+      What `resolve_native_assets` returns.
+    """
     return struct(
         assets = _stage_code_assets(ctx, resolved),
         libraries = {asset.asset_id: asset.file for asset in resolved},
@@ -365,6 +450,44 @@ def _stage_code_assets(ctx, assets):
         ))
     return staged
 
+# What a rule running `run_code_assets_tool` declares.
+CODE_ASSETS_TOOL_ATTRS = {
+    "_code_assets_tool": attr.label(
+        default = "//flutter/private/tools:code_assets.dart",
+        allow_single_file = True,
+    ),
+    "_code_assets_tool_imports": attr.label(
+        default = "//flutter/private/tools:code_assets_imports",
+    ),
+}
+
+def run_code_assets_tool(ctx, command, arguments, inputs, outputs, mnemonic, progress_message):
+    """Runs `code_assets.dart <command>` in the `PORTABLE` exec group.
+
+    Args:
+      ctx: Rule context with `CODE_ASSETS_TOOL_ATTRS` and `PORTABLE_EXEC_GROUPS`.
+      command: The tool's command (`place`, `ios-post-processor`, `xcframeworks`).
+      arguments: Its `Args`, in order: the program-assets file's among them.
+      inputs: A depset of the Files they name.
+      outputs: The declared outputs.
+      mnemonic: The action's mnemonic.
+      progress_message: The action's progress message.
+    """
+    tools = portable_tools(ctx)
+    ctx.actions.run(
+        executable = tools.dart,
+        arguments = [ctx.actions.args().add(ctx.file._code_assets_tool).add(command)] + arguments,
+        inputs = depset(
+            [ctx.file._code_assets_tool] + ctx.files._code_assets_tool_imports,
+            transitive = [inputs, tools.sdk_files.run],
+        ),
+        outputs = outputs,
+        mnemonic = mnemonic,
+        exec_group = PORTABLE,
+        execution_requirements = PATH_MAPPING,
+        progress_message = progress_message,
+    )
+
 # -- Tier 2 standalone rule ----------------------------------------------------
 
 def _flutter_native_assets_manifest_impl(ctx):
@@ -390,5 +513,5 @@ flutter_native_assets_manifest = rule(
             providers = [FlutterApplicationInfo],
         ),
     },
-    doc = "Re-exposes a flutter_application's `--native-assets` manifest as a standalone target.",
+    doc = "Re-exposes the native-assets manifest a flutter_application ships (`flutter_assets/NativeAssetsManifest.json`) as a standalone target.",
 )

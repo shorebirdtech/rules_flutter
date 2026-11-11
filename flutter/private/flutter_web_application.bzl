@@ -32,7 +32,7 @@ staging target each compiler's inputs come from, over the application.
 """
 
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
-load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "PATH_MAPPING", "generate_dev_package_config", "import_check_validation", "link_hook_runner_attr")
+load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "PROGRAM_ASSETS_TOOLCHAINS", "generate_dev_package_config", "import_check_validation", "program_assets_attrs")
 load("//flutter:providers.bzl", "FlutterInfo", "FlutterNativeLibraryInfo", "FlutterSdkRecordInfo")
 load(
     "//flutter/private:app_entrypoint.bzl",
@@ -75,7 +75,7 @@ load(
     "flutter_web_icon_kernel_action",
     "web_build_mode",
 )
-load("//flutter/private:link_hooks.bzl", "link_hooks_plan", "program_data_assets")
+load("//flutter/private:link_hooks.bzl", "link_hooks_plan", "program_assets")
 load("//flutter/private:path_mapping.bzl", "file_ref", "json_config_args")
 load("//flutter/private:plugin_registrant.bzl", "generate_dart_plugin_registrant")
 load("//flutter/private:program_analysis.bzl", "program_analyzable_info")
@@ -333,7 +333,7 @@ def _extract_from_tree(ctx, tools, tree, name, output):
     elsewhere, which Bazel cannot declare inside the declared directory.
 
     Args:
-        ctx: Rule context carrying `_bundle_tool`.
+        ctx: Rule context carrying `_bundle_tool` and `_bundle_tool_imports`.
         tools: `portable_tools(ctx)`.
         tree: The tree artifact.
         name: The file's path inside `tree`.
@@ -350,7 +350,7 @@ def _extract_from_tree(ctx, tools, tree, name, output):
     ctx.actions.run(
         executable = tools.dart,
         arguments = [args, json_config_args(ctx, config, refs)],
-        inputs = depset([tree, ctx.file._bundle_tool], transitive = [tools.sdk_files.run]),
+        inputs = depset([tree, ctx.file._bundle_tool] + ctx.files._bundle_tool_imports, transitive = [tools.sdk_files.run]),
         outputs = [output],
         mnemonic = "FlutterWebExtract",
         exec_group = PORTABLE,
@@ -755,13 +755,13 @@ def _flutter_web_bundle_impl(ctx):
             renderer = renderer,
         )
 
-    linked = program_data_assets(
+    linked = program_assets(
         ctx,
         program,
         primary.deps,
         link_hooks,
         recorded_uses,
-        name = ctx.label.name + "_link_hooks",
+        name = ctx.label.name + "_program_assets",
     )
     flutter_assets = declare_flutter_assets_dir(ctx)
     flutter_build_assets(
@@ -776,7 +776,7 @@ def _flutter_web_bundle_impl(ctx):
         # The engine measures an icon font's height with the space glyph, so
         # every subset keeps it, as flutter_tools' web icon shaking does.
         optional_code_points = [_SPACE_CODE_POINT],
-        data_assets = linked.assets,
+        program_assets = linked.info,
         inputs = program,
     )
 
@@ -1188,7 +1188,7 @@ def _flutter_web_bundle_impl(ctx):
         executable = tools.dart,
         arguments = [bundle_args, json_config_args(ctx, config, refs)],
         inputs = depset(
-            direct = all_inputs + [ctx.file._bundle_tool],
+            direct = all_inputs + [ctx.file._bundle_tool] + ctx.files._bundle_tool_imports,
             transitive = [tools.sdk_files.run],
         ),
         outputs = [output_dir] + ([dump_info_file] if dump_info_file else []),
@@ -1396,7 +1396,7 @@ _WEB_APPLICATION_ATTRS = FLUTTER_APPLICATION_TOOL_ATTRS | {
 
 flutter_web_bundle = rule(
     implementation = _flutter_web_bundle_impl,
-    attrs = dict(_WEB_APPLICATION_ATTRS | WEB_PLATFORM_ATTRS | link_hook_runner_attr(), **{
+    attrs = dict(_WEB_APPLICATION_ATTRS | WEB_PLATFORM_ATTRS | program_assets_attrs(), **{
         "compiler": attr.string(
             doc = "Web compiler: 'dart2wasm' (default) or 'dart2js'. 'dart2wasm' " +
                   "builds WebAssembly, and by default a dart2js build beside it " +
@@ -1794,6 +1794,9 @@ build knows which served file is a native module.
             default = Label("//flutter/private/tools:bundle_app.dart"),
             allow_single_file = [".dart"],
         ),
+        "_bundle_tool_imports": attr.label(
+            default = Label("//flutter/private/tools:bundle_app_imports"),
+        ),
         "_web_template_tool": attr.label(
             default = Label("//flutter/private/tools:web_template.dart"),
             allow_single_file = [".dart"],
@@ -1804,7 +1807,8 @@ build knows which served file is a native module.
             allow_single_file = [".dart"],
         ),
     }),
-    toolchains = ["@rules_flutter//flutter:toolchain_type"] + COPY_TO_DIRECTORY_TOOLCHAINS,
+    toolchains = ["@rules_flutter//flutter:toolchain_type"] + PROGRAM_ASSETS_TOOLCHAINS,
     exec_groups = PORTABLE_EXEC_GROUPS,
+    fragments = ["cpp"],
     doc = "Builds a Flutter web application (WASM or JS) with all deployment artifacts. Declared through the `flutter_web_bundle` macro in `web.bzl`, which adds the staging target `branches` names.",
 )

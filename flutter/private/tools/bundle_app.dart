@@ -28,16 +28,35 @@
 ///   "write_files": [
 ///     {"path": "relative/path", "content": "file content", "executable": true},
 ///     ...
-///   ]
+///   ],
+///   "code_asset_os": "linux"
 /// }
+///
+/// With `code_asset_os`, the tool is also given `--program-assets=<file>`
+/// (`program_assets_action_args(data = False)`), and copies each code asset
+/// that ships to where that OS's bundle has it (`CodeAssetPlacement`).
 library;
 
 import 'dart:convert';
 import 'dart:io';
 
+import 'code_assets.dart' show CodeAssetPlacement, ProgramCodeAssets, place;
+
 Future<void> main(List<String> args) async {
-  if (args.length != 2 || args[0] != '--config') {
-    stderr.writeln('Usage: bundle_app.dart --config <config.json>');
+  const programAssetsFlag = '--program-assets=';
+  final programAssets = [
+    for (final a in args)
+      if (a.startsWith(programAssetsFlag))
+        a.substring(programAssetsFlag.length),
+  ];
+  args = [
+    for (final a in args)
+      if (!a.startsWith(programAssetsFlag)) a,
+  ];
+  if (args.length != 2 || args[0] != '--config' || programAssets.length > 1) {
+    stderr.writeln(
+      'Usage: bundle_app.dart --config <config.json> [--program-assets=<file>]',
+    );
     exit(1);
   }
 
@@ -57,6 +76,30 @@ Future<void> main(List<String> args) async {
     }
   } else {
     Directory(outputDir).createSync(recursive: true);
+  }
+
+  // The code assets that ship, each where the OS's loader finds it.
+  final codeAssetOs = config['code_asset_os'] as String?;
+  if ((codeAssetOs == null) != programAssets.isEmpty) {
+    throw ArgumentError(
+      'code_asset_os and --program-assets come together; got '
+      '${codeAssetOs ?? 'no code_asset_os'} and ${programAssets.length} '
+      'program-assets files',
+    );
+  }
+  if (codeAssetOs != null) {
+    if (outputDir == null) {
+      throw ArgumentError('code_asset_os places files, and needs output_dir');
+    }
+    final placement = CodeAssetPlacement(codeAssetOs);
+    place(
+      ProgramCodeAssets.read(programAssets.single),
+      placement,
+      placement.directory.isEmpty
+          ? outputDir
+          : '$outputDir/${placement.directory}',
+      const [],
+    );
   }
 
   // Process file copies.

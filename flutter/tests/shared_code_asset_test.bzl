@@ -9,9 +9,11 @@ own static state. Over `//flutter/tests/shared_code_asset_fixture`.
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo", "DartPackageInfo")
+load("@rules_dart//dart:utils.bzl", "PROGRAM_ASSETS_TOOLCHAINS", "program_assets_attrs")
 load("//flutter:native_hot_patch.bzl", "HOT_PATCH_OUTPUT_GROUP", "flutter_native_hot_patch_aspect")
 load("//flutter:providers.bzl", "FlutterApplicationInfo")
-load("//flutter/private:flutter_native_assets.bzl", "resolve_native_assets")
+load("//flutter/private:exec_groups.bzl", "PORTABLE_EXEC_GROUPS")
+load("//flutter/private:flutter_native_assets.bzl", "candidate_code_asset_libraries", "resolve_native_assets")
 load(":action_content.bzl", "written_json")
 
 _FIXTURE = "//flutter/tests/shared_code_asset_fixture:"
@@ -25,14 +27,13 @@ def _platform(name):
     label = "@rules_android//:arm64-v8a" if name == "android_arm64" else "//flutter/platforms:" + name
     return {"//command_line_option:platforms": str(Label(label))}
 
-# Per platform: the Dart target key, the library's extension there, and the
-# manifest path an entry for `lib<name>` takes.
+# Per platform: the Dart target key and the library's extension there.
 _PLATFORMS = {
-    "android_arm64": ("android_arm64", "so", lambda name: "lib%s.so" % name),
-    "ios_arm64": ("ios_arm64", "dylib", lambda name: "%s.framework/%s" % (name, name)),
-    "linux_x64": ("linux_x64", "so", lambda name: "lib%s.so" % name),
-    "macos_arm64": ("macos_arm64", "dylib", lambda name: "lib%s.dylib" % name),
-    "windows_x64": ("windows_x64", "dll", lambda name: "lib%s.dll" % name),
+    "android_arm64": ("android_arm64", "so"),
+    "ios_arm64": ("ios_arm64", "dylib"),
+    "linux_x64": ("linux_x64", "so"),
+    "macos_arm64": ("macos_arm64", "dylib"),
+    "windows_x64": ("windows_x64", "dll"),
 }
 
 # -- The application: what it bundles, and what its manifest names -------------
@@ -40,9 +41,9 @@ _PLATFORMS = {
 def _layout_impl(ctx):
     env = analysistest.begin(ctx)
     target = analysistest.target_under_test(env)
-    dart_target, ext, entry = _PLATFORMS[ctx.attr.platform]
+    dart_target, ext = _PLATFORMS[ctx.attr.platform]
 
-    bundled = target[FlutterApplicationInfo].bundled_code_assets.to_list()
+    bundled = candidate_code_asset_libraries(target[FlutterApplicationInfo].program_assets)
     asserts.equals(
         env,
         sorted(["lib%s.%s" % (name, ext) for name in ctx.attr.libraries]),
@@ -50,18 +51,35 @@ def _layout_impl(ctx):
         "each library bundled once",
     )
 
-    manifest = written_json(env, ".native_assets.json")
-    if manifest == None:
+    # The manifest is written by an action, from the code assets by name: it
+    # names each id's library and reads none of them.
+    actions = analysistest.target_actions(env)
+    writes = [a for a in actions if a.mnemonic == "FlutterNativeAssetsManifest"]
+    asserts.equals(env, 1, len(writes), "one manifest action")
+    if len(writes) != 1:
         return analysistest.end(env)
-    section = manifest["native-assets"].get(dart_target, {})
+    argv = writes[0].argv
+    asserts.equals(env, "manifest", argv[argv.index("--os") - 1])
+    asserts.equals(env, ctx.attr.platform.split("_")[0], argv[argv.index("--os") + 1])
+    asserts.equals(env, dart_target, argv[argv.index("--target") + 1])
+    asserts.equals(env, "code-names", argv[argv.index("--holds") + 1])
+    for asset_id, library in [(_A, ctx.attr.libraries[0]), (_B, ctx.attr.libraries[-1])]:
+        at = argv.index(asset_id)
+        asserts.equals(env, ["dynamic_loading_bundle", "lib%s.%s" % (library, ext)], argv[at + 1:at + 3])
     asserts.equals(
         env,
-        {
-            _A: ["absolute", entry(ctx.attr.libraries[0])],
-            _B: ["absolute", entry(ctx.attr.libraries[-1])],
-        },
-        section,
+        [],
+        [f.basename for f in writes[0].inputs.to_list() if f.extension in ("so", "dylib", "dll")],
+        "the manifest reads no library",
     )
+
+    # The asset bundle ships the manifest and reads no library either.
+    bundles = [a for a in actions if a.mnemonic == "FlutterAssetBundle"]
+    asserts.equals(env, 1, len(bundles), "one asset bundle")
+    for bundle in bundles:
+        inputs = bundle.inputs.to_list()
+        asserts.true(env, writes[0].outputs.to_list()[0] in inputs, "the asset bundle ships the manifest")
+        asserts.equals(env, [], [f.basename for f in inputs if f.extension in ("so", "dylib", "dll")], "the asset bundle reads no library")
     return analysistest.end(env)
 
 _LAYOUT_ATTRS = {
@@ -119,19 +137,18 @@ _hot_patch_test = analysistest.make(
 
 # -- The platform bundlers -----------------------------------------------------
 
-def _code_asset_inputs(env, application):
-    """Distinct code-asset libraries any action of the target reads."""
-    own = "/%s_code_assets/" % application
+def _code_asset_inputs(env, package):
+    """Distinct libraries of this package that any action of the target reads."""
     return sorted({
         f.basename: None
         for a in analysistest.target_actions(env)
         for f in a.inputs.to_list()
-        if own in f.path
+        if f.owner != None and f.owner.package == package and f.extension in ("so", "dylib", "dll")
     }.keys())
 
 def _bundler_impl(ctx):
     env = analysistest.begin(ctx)
-    asserts.equals(env, ctx.attr.libraries, _code_asset_inputs(env, ctx.attr.application))
+    asserts.equals(env, ctx.attr.libraries, _code_asset_inputs(env, Label(_FIXTURE + "app").package))
     if ctx.attr.frameworks:
         asserts.equals(
             env,
@@ -146,9 +163,6 @@ def _bundler_impl(ctx):
     return analysistest.end(env)
 
 _BUNDLER_ATTRS = {
-    # The name of the application the bundler reads, which names the
-    # directory its libraries are staged in.
-    "application": attr.string(mandatory = True),
     "frameworks": attr.string_list(),
     "libraries": attr.string_list(mandatory = True),
 }
@@ -268,12 +282,15 @@ def _resolve_probe_impl(ctx):
 
 resolve_probe = rule(
     implementation = _resolve_probe_impl,
-    attrs = {
+    attrs = program_assets_attrs() | {
         "code_assets": attr.label_list(providers = [DartCodeAssetInfo]),
         "deps": attr.label_list(),
         # Asset id to the basename of the staged library.
         "expected": attr.string_dict(),
     },
+    toolchains = PROGRAM_ASSETS_TOOLCHAINS,
+    exec_groups = PORTABLE_EXEC_GROUPS,
+    fragments = ["cpp"],
     doc = "Runs `resolve_native_assets` and checks which library serves each id.",
 )
 
@@ -295,6 +312,20 @@ def _builds_impl(ctx):
 _builds_test = analysistest.make(_builds_impl)
 
 _builds_debug_test = analysistest.make(_builds_impl, config_settings = _DBG)
+
+_REFUSES_ATTRS = {"message": attr.string()}
+_refuses_ios_arm64_test = analysistest.make(_refuses_impl, attrs = _REFUSES_ATTRS, expect_failure = True, config_settings = _platform("ios_arm64"))
+_refuses_linux_x64_test = analysistest.make(_refuses_impl, attrs = _REFUSES_ATTRS, expect_failure = True, config_settings = _platform("linux_x64") | _DBG)
+_refuses_macos_arm64_test = analysistest.make(_refuses_impl, attrs = _REFUSES_ATTRS, expect_failure = True, config_settings = _platform("macos_arm64"))
+_builds_macos_arm64_test = analysistest.make(_builds_impl, config_settings = _platform("macos_arm64"))
+
+_REFUSES_ON = {
+    "ios_arm64": _refuses_ios_arm64_test,
+    "linux_x64": _refuses_linux_x64_test,
+    "macos_arm64": _refuses_macos_arm64_test,
+}
+
+_BUILDS_ON = {"macos_arm64": _builds_macos_arm64_test}
 
 _LAYOUT_TESTS = {
     "android_arm64": _layout_android_arm64_test,
@@ -352,7 +383,6 @@ def shared_code_asset_test_suite(name):
             _BUNDLER_TESTS[platform](
                 name = test,
                 target_under_test = _FIXTURE + app + "_" + bundler,
-                application = app,
                 libraries = ["%s.%s" % (lib, ext) for lib in libraries],
                 frameworks = [lib.removeprefix("lib") for lib in libraries] if platform == "ios_arm64" else [],
                 target_compatible_with = ["@platforms//os:macos"],
@@ -478,6 +508,28 @@ def shared_code_asset_test_suite(name):
         target_compatible_with = ["@platforms//os:macos"],
     )
     tests.append(name + "_two_configurations_refused")
+
+    # The one check that no two libraries an application could bundle land on
+    # one path, over every candidate whichever ships: by file name on every
+    # platform, and by framework name on iOS.
+    for app, platform, message in [
+        ("app_same_file_name", "macos_arm64", "two native libraries would both be bundled as `libcombined.dylib`"),
+        ("app_same_file_name", "linux_x64", "two native libraries would both be bundled as `libcombined.so`"),
+        ("app_same_framework_name", "ios_arm64", "would both be bundled as the framework `combined.framework`"),
+    ]:
+        _REFUSES_ON[platform](
+            name = "%s_%s_%s_refused" % (name, app, platform),
+            target_under_test = _FIXTURE + app,
+            message = message,
+            target_compatible_with = ["@platforms//os:macos"],
+        )
+        tests.append("%s_%s_%s_refused" % (name, app, platform))
+    _BUILDS_ON["macos_arm64"](
+        name = name + "_framework_names_matter_on_ios_only",
+        target_under_test = _FIXTURE + "app_same_framework_name",
+        target_compatible_with = ["@platforms//os:macos"],
+    )
+    tests.append(name + "_framework_names_matter_on_ios_only")
 
     # An id the application names in its `code_assets` is not loaded from the
     # packages below, so their disagreeing about it is no conflict, in a debug

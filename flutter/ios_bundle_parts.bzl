@@ -36,6 +36,7 @@ aspect serves both.
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("//flutter:providers.bzl", "FlutterApplicationInfo")
 load("//flutter/private:bundle_parts.bzl", "own_libraries", "parts_of_dependencies", "parts_result")
+load("//flutter/private:flutter_native_assets.bzl", "candidate_code_asset_libraries")
 
 IOS_BUNDLE_PARTS_OUTPUT_GROUP = "flutter_ios_bundle_parts"
 IOS_NATIVE_LIBS_OUTPUT_GROUP = "flutter_ios_native_libs"
@@ -61,7 +62,7 @@ def _flutter_ios_bundle_parts_aspect_impl(target, ctx):
             assets.append(depset([app_info.flutter_assets]))
         elif ctx.rule.kind == "flutter_ios_native_frameworks":
             native_libs.append(depset(app_info.native_libs))
-            native_libs.append(app_info.bundled_code_assets)
+            native_libs.append(depset(candidate_code_asset_libraries(app_info.program_assets)))
 
     if CcInfo in target:
         native_libs.append(depset(own_libraries(target[CcInfo], target.label)))

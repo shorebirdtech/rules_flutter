@@ -94,26 +94,12 @@ void main() {
     });
   });
 
-  group('nativeAssetsManifest', () {
-    // The manifest is what puts the asset-id map into a hot restart's whole
-    // kernel. Without it a restarted Android app's `@Native(assetId:)` calls
-    // fall back to a process symbol lookup that finds nothing.
-
-    test('is passed as --native-assets with its path', () {
-      final flags = NativeCompilerConfig(
-        patchedSdkRoot: '/patched',
-        nativeAssetsManifest: '/ws/bazel-out/x/bin/app.native_assets.json',
-      ).extraFlags;
-      final at = flags.indexOf('--native-assets');
-      expect(at, isNot(-1));
-      expect(flags[at + 1], '/ws/bazel-out/x/bin/app.native_assets.json');
-    });
-
-    test('an app without one adds no flag', () {
-      expect(
-        NativeCompilerConfig(patchedSdkRoot: '/patched').extraFlags,
-        isNot(contains('--native-assets')),
-      );
-    });
+  test('passes no --native-assets: the app ships its manifest', () {
+    // The engine reads `flutter_assets/NativeAssetsManifest.json` at startup
+    // and keeps it across a hot restart, as `flutter run` relies on.
+    expect(
+      NativeCompilerConfig(patchedSdkRoot: '/patched').extraFlags,
+      isNot(contains('--native-assets')),
+    );
   });
 }

@@ -1,12 +1,100 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:runfiles/runfiles.dart';
 import 'package:test/test.dart';
 
 // Import the library directly.
 import '../generate_asset_manifest.dart';
 
 void main() {
+  group('ProgramAssets', () {
+    // rules_dart's conformance fixture, read in its directory:
+    // `program.params` lists what `expected.txt` does, whose data lines are
+    // what the bundle ships.
+    String fixture(String name) {
+      final runfiles = Runfiles.create();
+      return Platform.environment['CONFORMANCE']!
+          .split(' ')
+          .map(runfiles.rlocation)
+          .whereType<String>()
+          .firstWhere((p) => p.endsWith('/$name'));
+    }
+
+    test('reads the data assets of rules_dart\'s conformance fixture', () {
+      final params = fixture('program.params');
+      final base = File(params).parent.path;
+      final program = ProgramAssets.read(params, base: base);
+      final listed = [
+        for (final MapEntry(:key, :value) in program.dataAssets.entries)
+          'data\t$key\t${value.substring(base.length + 1)}',
+      ]..sort();
+      final expected = File(
+        '$base/expected.txt',
+      ).readAsLinesSync().where((l) => l.startsWith('data\t')).toList()..sort();
+      expect(listed, expected);
+    });
+
+    test('refuses a file without the data assets', () {
+      final params = fixture('code_names.params');
+      expect(
+        () => ProgramAssets.read(params, base: File(params).parent.path),
+        throwsFormatException,
+      );
+    });
+
+    test('refuses a code record in a file that holds only data', () {
+      final dir = Directory.systemTemp.createTempSync('program_assets');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final file = File('${dir.path}/p.params')
+        ..writeAsStringSync(
+          '--format\nrules_dart_program_assets/1\n--paths\nexec\n'
+          '--holds\ndata\n--code-asset\npackage:a/b\n'
+          'dynamic_loading_bundle\nlibb.so\n\n',
+        );
+      expect(() => ProgramAssets.read(file.path), throwsFormatException);
+    });
+
+    test('refuses another format', () {
+      final dir = Directory.systemTemp.createTempSync('program_assets');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final file = File('${dir.path}/p.params')
+        ..writeAsStringSync(
+          '--format\nrules_dart_program_assets/2\n--paths\nexec\n',
+        );
+      expect(() => ProgramAssets.read(file.path), throwsFormatException);
+    });
+  });
+
+  group('addProgramDataAssets', () {
+    test('bundles each data asset at packages/<package>/<name>', () {
+      final config = <String, dynamic>{
+        'assets': <String, dynamic>{
+          'assets/a.png': [
+            {'asset': 'assets/a.png'},
+          ],
+        },
+        'copies': <String, dynamic>{'assets/a.png': 'src/a.png'},
+      };
+      addProgramDataAssets(
+        config,
+        ProgramAssets({
+          'package:p/greeting.txt': 'out/greeting.txt',
+          'package:glyphs/glyphs/heart.txt': 'out/glyphs.data/glyphs/heart.txt',
+        }),
+      );
+      expect(config['copies'], {
+        'assets/a.png': 'src/a.png',
+        'packages/p/greeting.txt': 'out/greeting.txt',
+        'packages/glyphs/glyphs/heart.txt': 'out/glyphs.data/glyphs/heart.txt',
+      });
+      expect((config['assets'] as Map)['packages/p/greeting.txt'], [
+        {'asset': 'packages/p/greeting.txt'},
+      ]);
+    });
+  });
+
   group('encodeStandardMessage', () {
     test('encodes null to empty bytes', () {
       final result = encodeStandardMessage(null);

@@ -20,13 +20,15 @@ import 'dart:io';
 import 'dart:typed_data';
 
 /// Files a bundle holds whatever the app declares: the manifests, the license
-/// blob, and the Material shaders flutter_tools adds to every bundle. The
-/// shaders are no entry of the manifest, so they are left out of the files
-/// compared and the manifest is compared as it is.
+/// blob, the native-assets manifest a native app ships (a web app has none),
+/// and the Material shaders flutter_tools adds to every bundle. The shaders
+/// are no entry of the manifest, so they are left out of the files compared
+/// and the manifest is compared as it is.
 const infrastructure = {
   'AssetManifest.bin',
   'AssetManifest.bin.json',
   'FontManifest.json',
+  'NativeAssetsManifest.json',
   'NOTICES',
   'NOTICES.Z',
   'shaders/ink_sparkle.frag',

@@ -153,39 +153,58 @@ rules_dart rules and flags you use directly.
     `--@rules_dart//dart:split_debug_info` and
     `--@rules_flutter//flutter:obfuscate`; obfuscating needs split debug info.
     `extra_gen_snapshot_options` refuses `--resolve-dwarf-paths`.
+35. Composed Android apps: the `flutter_android_bundle`'s `native_libs`
+    group through a `filegroup` and a `cc_library` → put the bundle itself in
+    the `android_binary`'s (or `android_application`'s) `deps`. It provides
+    `libapp.so`, the `native_deps` libraries and the code assets that ship as
+    `AndroidNativeLibsInfo`, as an `aar_import` does; its `native_libs` group
+    is that one zip of `lib/<abi>/` entries.
+36. `flutter_ios_code_asset_xcframeworks`, `flutter_macos_code_asset_xcframeworks`
+    → one directory holding an xcframework per code asset that ships, not one
+    output per xcframework.
+37. Composed iOS apps (an `ios_application` of your own): add a
+    `flutter_ios_dropped_frameworks_gen` to its `resources` and
+    `@rules_flutter//flutter:ios_code_asset_post_processor` as its
+    `ipa_post_processor`, both outside `-c dbg` (see the composable rules of
+    iOS). Without them a release app embeds the frameworks of code assets its
+    link hooks dropped.
 
 **Flags and tests**
 
-35. `--@rules_flutter//flutter:extra_dart_defines` →
+38. `--@rules_flutter//flutter:extra_dart_defines` →
     `--@rules_dart//dart:extra_dart_defines`.
     `--@rules_flutter//flutter:wasm_opt_cores` → `wasm_opt_cpus`.
-36. `flutter_desktop_integration_test` → `flutter_desktop_app_integration_test`;
+39. `flutter_desktop_integration_test` → `flutter_desktop_app_integration_test`;
     `flutter_web_bundle_integration_test` → `flutter_web_app_integration_test`.
     Integration test rules require `src`.
-37. `flutter_suite_program` → `flutter_test_program`. A `flutter_test` suite
+40. `flutter_suite_program` → `flutter_test_program`. A `flutter_test` suite
     that registers no test now fails. A library's `data` reaches its tests'
     runfiles.
-38. `go_router_library` (rules_dart) → `go_router_codegen` from
+41. `go_router_library` (rules_dart) → `go_router_codegen` from
     `@rules_flutter//flutter/ext/go_router:defs.bzl`.
 
 **Dev tool**
 
-39. `flutter_bazel --config <mode>` → `--compilation_mode` (`-c` unchanged);
+42. `flutter_bazel --config <mode>` → `--compilation_mode` (`-c` unchanged);
     `--config` now passes a Bazel config.
-40. `app.restart` without `fullRestart` → hot reload; pass
+43. `app.restart` without `fullRestart` → hot reload; pass
     `fullRestart: true` to restart.
 
 **Rule authors**
 
-41. `flutter_kernel_target` → `flutter_kernel`; `flutter_aot_target` →
+44. `flutter_kernel_target` → `flutter_kernel`; `flutter_aot_target` →
     `flutter_aot_snapshot`; `host_transition` → `host_platform_transition`;
     the `flutter_dev_files` aspect → `flutter_dev_files_aspect`.
-42. `FlutterInfo.asset_dirs` → `pub_assets`; `FlutterInfo.native_assets`,
+45. `FlutterInfo.asset_dirs` → `pub_assets`; `FlutterInfo.native_assets`,
     `FlutterNativeAssetInfo`, `FlutterDataAssetInfo`,
     `FlutterInfo.data_assets` → rules_dart's code and data assets;
     `FlutterApplicationInfo.package_config` → removed;
     `FlutterExecToolsInfo.tool_files` → `FlutterSdkInfo.sdk_files`;
     `FlutterTestProgramInfo.coverage_libraries` → `packages`.
+46. `FlutterApplicationInfo.bundled_code_assets` → removed: which code
+    assets ship is known only in an action, which reads `program_assets`
+    (`program_assets_action_args`). `native_assets_manifest` is the manifest
+    the app ships in `flutter_assets`.
 
 ## Road to 1.0
 
@@ -786,7 +805,7 @@ flutter_application(
 )
 ```
 
-If you would rather bind with `@Native(assetId: ...)` and let the Dart VM find the library, declare it as a code asset with rules_dart's `dart_code_asset` and name it in the `code_assets` of the package's `dart_package_metadata`, as a pub package's build hook would supply it. Every program that depends on the package then bundles the library under its file name, wrapped in a framework on iOS, and maps the id to it. `e2e/ffi_example` shows both styles side by side.
+If you would rather bind with `@Native(assetId: ...)` and let the Dart VM find the library, declare it as a code asset with rules_dart's `dart_code_asset` and name it in the `code_assets` of the package's `dart_package_metadata`, as a pub package's build hook would supply it. Every program that depends on the package then bundles the library under its file name, wrapped in a framework on iOS, and maps the id to it: an application in `flutter_assets/NativeAssetsManifest.json`, which the engine reads at startup, as `flutter build` ships it. `e2e/ffi_example` shows both styles side by side.
 
 #### Choosing the library that serves an asset id
 
@@ -1106,6 +1125,7 @@ load("@rules_flutter//flutter:ios.bzl",
     "flutter_entitlements_merge",
     "flutter_ios_engine",
     "flutter_ios_app_framework_gen",
+    "flutter_ios_dropped_frameworks_gen",
     "flutter_ios_info_plist_gen",
     "flutter_ios_native_frameworks_gen",
     "flutter_ios_registrant_gen",
@@ -1121,6 +1141,11 @@ flutter_ios_info_plist_gen(name = "my_info_plist", app_name = "My App")
 # then fails every native call at runtime.
 flutter_ios_native_frameworks_gen(name = "my_native_frameworks", application = ":my_app")
 
+# Those frameworks are every code asset that could ship. Outside debug, a link
+# hook may drop some: the app carries their list, and the post-processor
+# removes them before the app is signed.
+flutter_ios_dropped_frameworks_gen(name = "my_dropped_frameworks", application = ":my_app")
+
 flutter_ios_runner_lib_gen(
     name = "my_runner",
     registrant = ":my_registrant",
@@ -1132,6 +1157,14 @@ ios_application(
     bundle_id = "com.example.myapp",
     families = ["iphone"],
     minimum_os_version = "15.0",
+    resources = select({
+        "@rules_flutter//flutter/private:dbg": [],
+        "//conditions:default": [":my_dropped_frameworks"],
+    }),
+    ipa_post_processor = select({
+        "@rules_flutter//flutter/private:dbg": None,
+        "//conditions:default": "@rules_flutter//flutter:ios_code_asset_post_processor",
+    }),
     deps = [":my_framework", ":my_native_frameworks", ":my_runner"],
 )
 ```
@@ -1652,15 +1685,6 @@ load("@rules_android//android:rules.bzl", "android_binary")
 flutter_android_bundle(name = "my_bundle", application = ":my_app")
 flutter_android_engine(name = "my_engine")
 
-# The bundle's libraries, as the cc_library android_binary takes the native
-# libraries of each ABI from.
-filegroup(
-    name = "my_native_libs_files",
-    srcs = [":my_bundle"],
-    output_group = "native_libs",
-)
-
-cc_library(name = "my_native_libs", srcs = [":my_native_libs_files"])
 flutter_android_manifest_gen(name = "my_manifest", application_id = "com.example.myapp")
 
 flutter_android_runner_lib_gen(
@@ -1676,7 +1700,9 @@ android_binary(
     # Stored uncompressed, as the manifest's android:extractNativeLibs="false"
     # requires: Android refuses to install the APK otherwise.
     nocompress_extensions = [".so"],
-    deps = [":my_native_libs", ":my_engine", ":my_runner"],
+    # The bundle gives android_binary its native libraries, for each ABI, as
+    # an aar_import does.
+    deps = [":my_bundle", ":my_engine", ":my_runner"],
 )
 ```
 
@@ -1684,9 +1710,9 @@ android_binary(
 
 | Group | Contents |
 |---|---|
-| `native_libs` | `libapp.so` (AOT code) plus any `native_deps` libraries |
+| `native_libs` | One zip of `lib/<abi>/` entries, stored: `libapp.so` (AOT code), the `native_deps` libraries and the code assets that ship. The bundle provides it to `android_binary` as `AndroidNativeLibsInfo` |
 | `flutter_assets` | The `flutter_assets/` tree |
-| `mobile_install` | JNI-structured symlinks and assets for `bazel mobile-install` |
+| `mobile_install` | The `flutter_assets/` tree at `assets/flutter_assets/`, for an `android_binary`'s `assets` with `assets_dir = "assets"` (with `mobile_install_compatible`, the default). No native libraries: they are `native_libs` |
 
 An App Bundle from these rules is rules_android's `android_application`, given the same arguments as the `android_binary` and `bundle_config_file = "@rules_flutter//flutter:android_bundle_config.pb.json"`. `bazel build` of it works, and `flutter_android_release` signs it. `bazel run` of it does not install it: rules_android's run script looks for the JDK where the build ran, gives bundletool no `aapt2`, runs bundletool without the Kotlin runtime its `install-apks` needs, and takes `adb` from your PATH. To install a bundle on a device, declare the app with `flutter_android_app` and its `app_bundle`, whose `bazel run` takes all those tools from the build (see [Release: App Bundle and signing](#release-app-bundle-and-signing)), or install the APK, which `bazel run` of an `android_binary` does.
 
@@ -2548,7 +2574,6 @@ flutter_application(
 | `shader_includes` | Files the `shaders` may `#include`. |
 | `require_sksl_shaders` | Fail the build when a shader cannot be compiled for Skia (SkSL). By default such a shader, say one that indexes a uniform array in a loop, is compiled for Impeller alone with a warning, as `flutter build` does, and fails to load only where the app renders with Skia. Web builds always need SkSL. Default `False`. |
 | `tree_shake_icons` | Keep only the icon glyphs the app uses, in a release or profile build. Default `True`. It needs every `IconData` to be constant, and an icon font family of one font file; as with `flutter build`, a non-constant `IconData`, a family of several font files that the app draws icons from, or a `const_finder` or `font-subset` that fails fails the build. Set `False` to ship the fonts whole. |
-| `link_hook_assets` | The data assets packages' link hooks emit, each `package:<package>/<name>`. See [Link hooks](#link-hooks). |
 | `additional_licenses` | The files the pubspec's `flutter: licenses:` lists. They are appended to `NOTICES.Z` as they are, after the sorted entries. |
 | `minimum_os_version` | Minimum Apple deployment target, passed to `gen_snapshot` as `--macho-min-os-version`. |
 
@@ -3080,6 +3105,8 @@ A plugin's native code is its own target. Swift goes in a `flutter_apple_plugin_
 
 A package can decide what it ships from how the app uses it. Mark a `final class` with `@RecordUse()` from `package:meta` (1.19 or later), and write a `hook/link.dart` that reads the recorded uses with `package:record_use` and emits data assets with `package:data_assets`. The hook may import pure Dart from its own package's `lib/`, not Flutter.
 
+A hook can choose among its package's code assets too, with `package:code_assets`, keeping those the program uses. In a release or profile build the application's native-assets manifest, its bundles on every platform and its macOS add-to-app xcframeworks carry only the libraries the hook keeps. An iOS app embeds every candidate, because rules_apple embeds the frameworks it knows when the app is analysed, and removes those the hooks dropped before it is signed, with an `ipa_post_processor` of rules_flutter's. rules_apple runs one post-processor, so a `flutter_ios_app` given its own `ipa_post_processor` runs that one instead, and fails to build if a hook drops a code asset. iOS add-to-app (`flutter_ios_xcframeworks`) in release fails when a hook drops one, as `flutter build ios-framework` does: its simulator slice is a debug build, which runs no hook, and the device build is the source of truth.
+
 ```starlark
 # symbols/BUILD.bazel
 dart_package_metadata(
@@ -3105,13 +3132,12 @@ dart_package_metadata(
 flutter_application(
     name = "app",
     package = ":pubspec-metadata",
-    link_hook_assets = ["package:symbols/index.json"],
     deps = ["//symbols", "@deps//:flutter"],
     # ...
 )
 ```
 
-Keep the hook file out of `srcs`. Bazel names every output before anything runs, so the application lists each asset its packages' hooks emit. A hook that emits an asset not listed, skips one that is, or reports an error fails the build with its own message.
+Keep the hook file out of `srcs`. Whatever data assets of its package a hook emits ship, and a hook that reports an error fails the build with its own message. A rule that has to name one of them before the build runs can only name one the package promises: list its id in the package's `dart_package_metadata(link_hook_assets = [...])`, and the hook must then always emit it.
 
 In a release or profile build the compile records the uses, and the hook of every package of the application that has one runs over them, the application's own package among them, as `flutter build` runs them. A native app's kernel compile records them (`--recorded-uses`); a web bundle's dart2wasm compile does (`--recorded-uses`), or its dart2js one (`--write-resources`) when it has no WebAssembly build, and the hooks' assets serve both of its builds. A hook receives its package's declared [data assets](#data-assets) (`LinkInput.assets.data`) and ships only those it emits, so it can drop what the app does not use; the declared assets of packages without a hook ship as they are. What ships is bundled at `flutter_assets/packages/<package>/<name>`, listed in `AssetManifest`, and loaded with `rootBundle.load('packages/<package>/<name>')`. Debug builds record nothing (a native one is a JIT compile, and `flutter build web` links no debug build either): no hook runs, every declared data asset ships, and nothing a hook would write does, so load what the hook would have indexed on demand there. The application's own package's hook runs whether or not a library in `deps` names its declaration, and it can import the application's own files under the package's `lib/`, as any package's hook imports its own `lib/`. `e2e/_overlay_tests/link_hooks` is a working example, including a hook that fails the build.
 

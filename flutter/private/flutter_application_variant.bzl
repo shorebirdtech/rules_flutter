@@ -2,12 +2,13 @@
 
 load("@apple_support//lib:apple_support.bzl", "apple_support")
 load("@bazel_skylib//lib:structs.bzl", "structs")
-load("@rules_dart//dart:utils.bzl", "link_hook_runner_attr", "runtime_reset")
+load("@rules_dart//dart:utils.bzl", "program_assets_attrs", "runtime_reset")
 load("//flutter:providers.bzl", "FlutterApplicationInputsInfo")
 load("//flutter/private:code_asset_libraries.bzl", "code_asset_libraries_aspect")
 load("//flutter/private:common.bzl", "FLUTTER_APPLICATION_TOOL_ATTRS", "PLATFORM_CONSTRAINT_ATTRS", "flutter_deps_attr")
 load("//flutter/private:exec_groups.bzl", "PORTABLE_EXEC_GROUPS")
 load("//flutter/private:flutter_application.bzl", "APPLICATION_TOOLCHAINS", "WEB_PLATFORM_CONSTRAINT_ATTRS", "flutter_application_build")
+load("//flutter/private:flutter_native_assets.bzl", "CODE_ASSETS_TOOL_ATTRS")
 load("//flutter/private:program_analysis.bzl", "staged_sources")
 load("//flutter/private:required_packages.bzl", "check_required_packages")
 
@@ -37,7 +38,7 @@ def _flutter_application_variant_impl(ctx):
 
 flutter_application_variant = rule(
     implementation = _flutter_application_variant_impl,
-    attrs = FLUTTER_APPLICATION_TOOL_ATTRS | PLATFORM_CONSTRAINT_ATTRS | WEB_PLATFORM_CONSTRAINT_ATTRS | link_hook_runner_attr() | apple_support.platform_constraint_attrs() | {
+    attrs = FLUTTER_APPLICATION_TOOL_ATTRS | PLATFORM_CONSTRAINT_ATTRS | WEB_PLATFORM_CONSTRAINT_ATTRS | CODE_ASSETS_TOOL_ATTRS | program_assets_attrs() | apple_support.platform_constraint_attrs() | {
         "application": attr.label(
             doc = "The `flutter_application` whose program this is a variant of.",
             mandatory = True,
@@ -71,6 +72,7 @@ flutter_application_variant = rule(
     },
     toolchains = APPLICATION_TOOLCHAINS,
     exec_groups = PORTABLE_EXEC_GROUPS,
+    fragments = ["cpp"],
     doc = """The `flutter_application` `application`, rebuilt with another `main`.
 
 Compiles the application's program again with `main` as its entry point, `srcs`,

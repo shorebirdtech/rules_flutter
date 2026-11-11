@@ -128,38 +128,36 @@ def _native_libs_staged_test_impl(ctx):
     if len(actions) != 1:
         return analysistest.end(env)
     argv = [_without_config(arg) for arg in actions[0].argv]
-
-    # `--output <dir>`, then one `--add <basename> <library>` for each library.
-    asserts.equals(env, _without_config(staged.path), argv[argv.index("--output") + 1])
-    additions = argv[argv.index("--output") + 2:]
-    asserts.equals(env, ["--add"] * (len(additions) // 3), additions[0::3])
-    basenames = additions[1::3]
-    sources = additions[2::3]
     fake_prefix = "/%s/" % ctx.attr.fake_application_name
+
+    def in_fake(paths):
+        return [path.split(fake_prefix, 1)[1] for path in paths if fake_prefix in "/" + path]
+
+    # `place --os macos --output <dir>`, then a `--library` for each
+    # `native_deps` library, which always ships, and the program-assets file,
+    # from which the tool places the code assets that ship.
+    asserts.true(env, "place" in argv, "the action runs `code_assets.dart place`: %s" % argv)
+    asserts.equals(env, "macos", argv[argv.index("--os") + 1])
+    asserts.equals(env, _without_config(staged.path), argv[argv.index("--output") + 1])
     asserts.equals(
         env,
-        ctx.attr.expected_sources,
-        [path.split(fake_prefix, 1)[1] for path in sources],
-        "each library once, deduplicated by path, in arrival order",
+        ctx.attr.expected_libraries,
+        in_fake([argv[i + 1] for i, arg in enumerate(argv) if arg == "--library"]),
     )
-    asserts.equals(env, ctx.attr.expected_basenames, basenames)
-    asserts.equals(
-        env,
-        sorted(sources),
-        sorted([
-            _without_config(f.path)
-            for f in actions[0].inputs.to_list()
-            if fake_prefix in "/" + _without_config(f.path)
-        ]),
-        "the libraries the action copies must be among its inputs, and no other file of the application",
-    )
+
+    # Analysis shows a param file's lines in place of the flag that names it.
+    asserts.equals(env, "code", argv[argv.index("--holds") + 1], "the libraries view, without the data assets")
+
+    # It reads every candidate library, and no data asset.
+    inputs = in_fake([_without_config(f.path) for f in actions[0].inputs.to_list()])
+    asserts.equals(env, sorted(ctx.attr.expected_inputs), sorted([i for i in inputs if not i.endswith(".code_selection")]))
     return analysistest.end(env)
 
 _native_libs_staged_test = analysistest.make(
     _native_libs_staged_test_impl,
     attrs = {
-        "expected_basenames": attr.string_list(mandatory = True),
-        "expected_sources": attr.string_list(mandatory = True),
+        "expected_inputs": attr.string_list(mandatory = True),
+        "expected_libraries": attr.string_list(mandatory = True),
         "fake_application_name": attr.string(mandatory = True),
     },
 )
@@ -173,20 +171,6 @@ def _native_libs_empty_test_impl(ctx):
     return analysistest.end(env)
 
 _native_libs_empty_test = analysistest.make(_native_libs_empty_test_impl)
-
-def _expect_failure_test_impl(ctx):
-    env = analysistest.begin(ctx)
-    for expected in ctx.attr.expected_substrings:
-        asserts.expect_failure(env, expected)
-    return analysistest.end(env)
-
-_expect_failure_test = analysistest.make(
-    _expect_failure_test_impl,
-    expect_failure = True,
-    attrs = {
-        "expected_substrings": attr.string_list(mandatory = True),
-    },
-)
 
 def _bundling_tests(name):
     """Declare the bundling fixtures and the tests over them.
@@ -204,6 +188,8 @@ def _bundling_tests(name):
         # exists for: a library that is not at the root of its package.
         native_libs = ["libadd.dylib", "vendor/lib/libsub.dylib"],
         code_assets = ["libadd.dylib", "assets/libasset.dylib"],
+        dropped_code_assets = ["assets/libdropped.dylib"],
+        data_assets = ["data/blob.txt"],
         # Debug: a release framework runs `dsymutil` on its dylib, which rejects
         # a placeholder that is not a Mach-O, and `_two_apps_one_package` below
         # really builds this one.
@@ -219,8 +205,8 @@ def _bundling_tests(name):
         name = name + "_native_libs_staged",
         target_under_test = name + "_native_libs",
         fake_application_name = staged_app,
-        expected_sources = ["libadd.dylib", "vendor/lib/libsub.dylib", "assets/libasset.dylib"],
-        expected_basenames = ["libadd.dylib", "libsub.dylib", "libasset.dylib"],
+        expected_libraries = ["libadd.dylib", "vendor/lib/libsub.dylib"],
+        expected_inputs = ["libadd.dylib", "vendor/lib/libsub.dylib", "assets/libasset.dylib", "assets/libdropped.dylib"],
     )
 
     fake_application(
@@ -235,28 +221,6 @@ def _bundling_tests(name):
     _native_libs_empty_test(
         name = name + "_native_libs_nothing_to_bundle",
         target_under_test = name + "_native_libs_empty",
-    )
-
-    # Two different libraries that would both be Contents/Frameworks/libdup.dylib.
-    fake_application(
-        name = name + "_fake_app_duplicate",
-        native_libs = ["one/libdup.dylib"],
-        code_assets = ["two/libdup.dylib"],
-        tags = ["manual"],
-    )
-    flutter_macos_native_libs(
-        name = name + "_native_libs_duplicate",
-        application = name + "_fake_app_duplicate",
-        tags = ["manual"],
-    )
-    _expect_failure_test(
-        name = name + "_native_libs_duplicate_basename_fails",
-        target_under_test = name + "_native_libs_duplicate",
-        expected_substrings = [
-            "bundled as Contents/Frameworks/libdup.dylib",
-            "_fake_app_duplicate/one/libdup.dylib",
-            "_fake_app_duplicate/two/libdup.dylib",
-        ],
     )
 
     # A second, different app in the same package. Built together with the
@@ -321,7 +285,6 @@ def _bundling_tests(name):
         name + "_framework_outputs_under_target_dir",
         name + "_native_libs_staged",
         name + "_native_libs_nothing_to_bundle",
-        name + "_native_libs_duplicate_basename_fails",
         name + "_two_apps_one_package",
         name + "_release_framework_stripped_test",
         name + "_release_framework_unstripped_test",

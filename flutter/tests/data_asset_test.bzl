@@ -13,16 +13,22 @@ load("//flutter:defs.bzl", "flutter_application")
 load("//flutter:web.bzl", "flutter_web_bundle")
 load(":action_content.bzl", "action_config")
 
-_KEY = "packages/data_asset_fixture/greeting.txt"
-
 def _bundled_impl(ctx):
     env = analysistest.begin(ctx)
     config = action_config(env, "FlutterAssetBundle")
     if config == None:
         return analysistest.end(env)
-    asserts.true(env, _KEY in config["copies"], "%s is not bundled: %s" % (_KEY, config["copies"].keys()))
-    asserts.true(env, _KEY in config["assets"], "%s is not in the asset manifest: %s" % (_KEY, config["assets"].keys()))
+
+    # The bundling tool places each data asset the program ships at
+    # `packages/<package>/<name>`; the program's assets reach it as
+    # rules_dart's program-assets lines.
     bundle = [a for a in analysistest.target_actions(env) if a.mnemonic == "FlutterAssetBundle"][0]
+    argv = bundle.argv
+    asserts.true(
+        env,
+        "--data-asset" in argv and "package:data_asset_fixture/greeting.txt" in argv,
+        "the asset bundle is not given the program's data asset: %s" % argv,
+    )
     asserts.true(
         env,
         "flutter/tests/dart_asset_fixture/data_asset/greeting.txt" in [f.short_path for f in bundle.inputs.to_list()],

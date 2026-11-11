@@ -75,7 +75,7 @@ load("//flutter/private:flutter_apple_plugin_xcframeworks.bzl", _flutter_ios_cod
 load("//flutter/private:flutter_apple_plugins_aggregator.bzl", _flutter_apple_plugins_aggregator = "flutter_apple_plugins_aggregator")
 load("//flutter/private:flutter_apple_registrant.bzl", _flutter_apple_swift_package_registrant = "flutter_apple_swift_package_registrant", _flutter_ios_registrant_xcframework = "flutter_ios_registrant_xcframework")
 load("//flutter/private:flutter_apple_xcframeworks.bzl", _flutter_ios_app_xcframework = "flutter_ios_app_xcframework", _flutter_ios_engine_xcframework = "flutter_ios_engine_xcframework")
-load("//flutter/private:flutter_ios_application.bzl", _flutter_ios_app_framework_rule = "flutter_ios_app_framework", _flutter_ios_application = "flutter_ios_application", _flutter_ios_native_frameworks_rule = "flutter_ios_native_frameworks", _flutter_ios_privacy_manifests_rule = "flutter_ios_privacy_manifests")
+load("//flutter/private:flutter_ios_application.bzl", _flutter_ios_app_framework_rule = "flutter_ios_app_framework", _flutter_ios_application = "flutter_ios_application", _flutter_ios_dropped_frameworks_rule = "flutter_ios_dropped_frameworks", _flutter_ios_native_frameworks_rule = "flutter_ios_native_frameworks", _flutter_ios_privacy_manifests_rule = "flutter_ios_privacy_manifests")
 load("//flutter/private:flutter_ios_registrant.bzl", _flutter_ios_registrant_rule = "flutter_ios_registrant")
 load("//flutter/private:flutter_plist_merge.bzl", _flutter_entitlements_merge = "flutter_entitlements_merge", _flutter_plist_merge = "flutter_plist_merge")
 load("//flutter/private:ios_entitlements.bzl", "resolve_ios_entitlements")
@@ -145,6 +145,33 @@ def flutter_ios_native_frameworks_gen(name, **kwargs):
     """
     tags = kwargs.pop("tags", ["manual"])
     _flutter_ios_native_frameworks_rule(name = name, tags = tags, **kwargs)
+
+def flutter_ios_dropped_frameworks_gen(name, **kwargs):
+    """Lists the frameworks a release app removes. See `flutter_ios_dropped_frameworks`.
+
+    Give it to the `ios_application`'s `resources`, and
+    `@rules_flutter//flutter:ios_code_asset_post_processor` as its
+    `ipa_post_processor`, both outside `-c dbg`:
+
+        ios_application(
+            ...
+            resources = select({
+                "@rules_flutter//flutter/private:dbg": [],
+                "//conditions:default": [":my_dropped_frameworks"],
+            }),
+            ipa_post_processor = select({
+                "@rules_flutter//flutter/private:dbg": None,
+                "//conditions:default": "@rules_flutter//flutter:ios_code_asset_post_processor",
+            }),
+        )
+
+    Args:
+        name: Target name.
+        **kwargs: Forwarded to the underlying rule. `tags` defaults to
+            `["manual"]` — build via the consuming `ios_application`.
+    """
+    tags = kwargs.pop("tags", ["manual"])
+    _flutter_ios_dropped_frameworks_rule(name = name, tags = tags, **kwargs)
 
 def flutter_ios_privacy_manifests_gen(name, **kwargs):
     """Exposes plugin privacy manifests. See `flutter_ios_privacy_manifests`.
@@ -651,6 +678,24 @@ def flutter_ios_app(
         testonly = testonly,
     )
 
+    # 6c. Outside debug, a link hook may drop a code asset whose framework
+    #     `__<name>_native_frameworks` wraps, as it wraps every candidate:
+    #     rules_apple embeds only frameworks it knows when the app is
+    #     analysed. The app carries the list of those to remove, and the
+    #     post-processor removes them before rules_apple signs the app.
+    #     rules_apple runs one post-processor: an app with its own has it in
+    #     place of this one, and fails to build if anything is to be removed.
+    user_post_processor = kwargs.pop("ipa_post_processor", None)
+    _flutter_ios_dropped_frameworks_rule(
+        name = "__%s_dropped_frameworks" % name,
+        application = application,
+        conflict = (
+            str(native.package_relative_label(user_post_processor)) if type(user_post_processor) in ("string", "Label") else "the app's `ipa_post_processor`"
+        ) if user_post_processor != None else "",
+        tags = tags,
+        testonly = testonly,
+    )
+
     # 7. Discover runner Swift sources and build swift_library.
     runner_srcs = native.glob(["ios/Runner/*.swift"])
     if not runner_srcs:
@@ -795,7 +840,14 @@ def flutter_ios_app(
         launch_storyboard = actual_launch_storyboard,
         provisioning_profile = provisioning_profile,
         app_icons = app_icons,
-        resources = resources + ["__%s_privacy_manifests" % name],
+        resources = resources + ["__%s_privacy_manifests" % name] + select({
+            "@rules_flutter//flutter/private:dbg": [],
+            "//conditions:default": ["__%s_dropped_frameworks" % name],
+        }),
+        ipa_post_processor = user_post_processor if user_post_processor != None else select({
+            "@rules_flutter//flutter/private:dbg": None,
+            "//conditions:default": "@rules_flutter//flutter:ios_code_asset_post_processor",
+        }),
         deps = [
             "__%s_runner" % name,
             "__%s_app_bundle" % name,

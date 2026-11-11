@@ -115,6 +115,15 @@ config_setting(
     visibility = ["//visibility:public"],
 )
 
+# The `ipa_post_processor` of an `ios_application` built outside `-c dbg` from
+# a `flutter_application`: removes the frameworks of the code assets its link
+# hooks dropped, which `flutter_ios_dropped_frameworks_gen` lists in the app.
+alias(
+    name = "ios_code_asset_post_processor",
+    actual = "//flutter/private/tools:ios_code_asset_post_processor",
+    visibility = ["//visibility:public"],
+)
+
 # The release R8 configuration of `flutter_android_app` (the Android Gradle
 # plugin's proguard-android-optimize.txt and Flutter's own rules), and the
 # bundletool BundleConfig of its App Bundle (AGP's defaults: split by ABI,

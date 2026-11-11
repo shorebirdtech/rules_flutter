@@ -216,7 +216,7 @@ def collect_binding_contracts(native_deps):
                     pairs.append(struct(library = f, contract = ()))
     return pairs
 
-def flutter_compile_kernel(ctx, tools, aot = None, target_platform = None, native_assets_manifest = None, track_widget_creation = False, assets_dir = None, platform_build_args = [], recorded_uses = None, inputs = None):
+def flutter_compile_kernel(ctx, tools, aot = None, target_platform = None, track_widget_creation = False, assets_dir = None, platform_build_args = [], recorded_uses = None, inputs = None):
     """Run the shared kernel compilation step.
 
     Collects sources and packages and compiles them (`flutter_kernel_compile`).
@@ -234,10 +234,6 @@ def flutter_compile_kernel(ctx, tools, aot = None, target_platform = None, nativ
         aot: If set, override AOT mode. Otherwise determined by the build mode.
         target_platform: Optional platform string (e.g. "web", "linux", "android").
             When set, only plugins with dartPluginClass on that platform are registered.
-        native_assets_manifest: Optional File pointing at the
-            `native_assets.json` manifest (the JSON shape the
-            frontend_server reads via `--native-assets`). Always passed
-            through when set; the manifest's contents may be empty.
         track_widget_creation: Whether to pass `--track-widget-creation` to
             the frontend server, and to tell the dev tool the kernel has it
             (the `trackWidgetCreation` of the debug `rules_flutter.build_info`
@@ -455,12 +451,6 @@ def flutter_compile_kernel(ctx, tools, aot = None, target_platform = None, nativ
             # build runs in the host platform's configuration, so only the app can say
             # which platform-filtered plugin registrant its reloads need.
             "targetPlatform": target_platform,
-            # The manifest this kernel's `@Native(assetId:)` bindings resolve
-            # through, written for this configuration's OS and CPU. The dev
-            # tool's compiler is started from the host platform's configuration, whose
-            # manifest names the host's libraries, so only the app can say
-            # which one a hot restart's kernel has to carry. "" when none.
-            "nativeAssetsManifest": native_assets_manifest.path if native_assets_manifest else "",
             # Whether this kernel was compiled with `--track-widget-creation`.
             # The dev tool's frontend_server recompiles libraries on every hot
             # reload and restart, and must apply the same transform: a library
@@ -485,7 +475,6 @@ def flutter_compile_kernel(ctx, tools, aot = None, target_platform = None, nativ
         target_os = target_platform,
         defines = all_defines,
         track_widget_creation = track_widget_creation,
-        native_assets_manifest = native_assets_manifest,
         dart_plugin_registrant_uri = registrant_location.uri if registrant_location else None,
         recorded_uses = recorded_uses,
     )
@@ -768,7 +757,7 @@ def program_package_files(inputs):
         if f.short_path.startswith(prefix)
     ]
 
-def flutter_build_assets(ctx, tools, output_dir, deps, target_platform, compiled_shaders = struct(listed = [], unlisted = []), kernel_dill = None, is_debug = False, data_assets = None, optional_code_points = [], inputs = None):
+def flutter_build_assets(ctx, tools, output_dir, deps, target_platform, compiled_shaders = struct(listed = [], unlisted = []), kernel_dill = None, is_debug = False, program_assets = None, native_assets_manifest = None, optional_code_points = [], inputs = None):
     """Run the shared asset bundling step.
 
     Walks `FlutterInfo.pub_fonts` / `pub_assets` from deps to bundle
@@ -793,12 +782,16 @@ def flutter_build_assets(ctx, tools, output_dir, deps, target_platform, compiled
         compiled_shaders: What `flutter_compile_shaders` made.
         kernel_dill: The compiled kernel .dill File (needed for icon tree shaking).
         is_debug: Whether this is a debug build (icon tree shaking is skipped in debug).
-        data_assets: Optional depset of data assets, each a
-            `struct(package, name, file)` as `DartDataAssetInfo.assets` holds
-            one. Each is
-            placed at `flutter_assets/packages/<package>/<name>` and listed in
-            the asset manifest under that key, as flutter_tools bundles a
-            hook's data asset.
+        program_assets: Optional `DartProgramAssetsInfo` of the program. Each
+            data asset it ships is placed at
+            `flutter_assets/packages/<package>/<name>` and listed in the
+            asset manifest under that key, as flutter_tools bundles a hook's
+            data asset. They are read in the bundling action: a linked
+            program's hooks decide what ships only when they run.
+        native_assets_manifest: Optional File, the app's native-assets
+            manifest, bundled as `NativeAssetsManifest.json`, where the engine
+            reads it at startup. Not in the asset manifest, as upstream's is
+            not.
         optional_code_points: Code points every subset icon font keeps if it
             has a glyph for them, whether or not the app uses them.
         inputs: The program whose assets are bundled, from
@@ -819,13 +812,8 @@ def flutter_build_assets(ctx, tools, output_dir, deps, target_platform, compiled
     fonts, pub_copies, unlisted_copies = aggregate_pub_contributions(deps, target_platform, inputs.flavor, package_root_of(inputs))
     extra_asset_copies = compiled_shaders.listed + pub_copies
     unlisted_copies = compiled_shaders.unlisted + unlisted_copies
-
-    # Drop each DataAsset at flutter_assets/packages/<pkg>/<name>, the key
-    # flutter_tools gives a hook's data asset and the one `rootBundle` loads
-    # it by.
-    if data_assets != None:
-        for entry in data_assets.to_list():
-            extra_asset_copies.append(("packages/{pkg}/{name}".format(pkg = entry.package, name = entry.name), entry.file))
+    if native_assets_manifest != None:
+        unlisted_copies = unlisted_copies + [("NativeAssetsManifest.json", native_assets_manifest)]
 
     # The licences the program ships, in the one asset the framework reads
     # them from. `inputs` has the program's own; a package's reach this when
@@ -866,6 +854,7 @@ def flutter_build_assets(ctx, tools, output_dir, deps, target_platform, compiled
         optional_code_points = optional_code_points,
         extra_asset_copies = extra_asset_copies,
         unlisted_asset_copies = unlisted_copies,
+        program_assets = program_assets,
     )
 
 def compute_desktop_bundle_copies(is_debug, kernel_dill_path, aot_output_path, aot_dst, icu_data_path, engine_basenames, native_basenames, engine_dst_prefix = "lib/", native_dst_prefix = "lib/"):
@@ -908,31 +897,6 @@ def compute_desktop_bundle_copies(is_debug, kernel_dill_path, aot_output_path, a
         copies.append({"src": src_path, "dst": native_dst_prefix + basename})
 
     return copies
-
-def compute_android_jni_path(target_name, abi, basename):
-    """Compute the JNI symlink path for an Android native library.
-
-    Scoped by [target_name] because `ctx.actions.declare_file` resolves
-    package-relative: two Android bundles in one package would otherwise both
-    declare `jni/<abi>/libapp.so` and collide. That is not hypothetical — the
-    Tier 1 `flutter_android_app` macro generates a bundle internally, so a
-    package holding two apps (or an app plus an explicit Tier 2 bundle) hits
-    it, and `bazel build //...` fails with conflicting actions. Bazel only
-    tolerates the duplicate while both symlinks happen to point at the *same*
-    source file, which masks the bug until the two apps differ.
-
-    Mirrors the same scoping already applied to the mobile-install assets
-    directory in `flutter_android_application.bzl`.
-
-    Args:
-        target_name: Name of the declaring target (`ctx.label.name`).
-        abi: Android ABI string (e.g. "arm64-v8a").
-        basename: Filename within the ABI directory.
-
-    Returns:
-        Path string like "my_app_jni/arm64-v8a/libapp.so".
-    """
-    return "{}_jni/{}/{}".format(target_name, abi, basename)
 
 # Android ABIs with AOT cross-compilation support. Single source of truth
 # mapping each ABI to the Bazel platform Android rules transition to and the
@@ -1351,7 +1315,6 @@ def flutter_program_inputs(ctx, metadata = None):
         tree_shake_icons = getattr(ctx.attr, "tree_shake_icons", False),
         native_deps = list(getattr(ctx.attr, "native_deps", [])),
         code_assets = list(getattr(ctx.attr, "code_assets", [])),
-        link_hook_assets = list(getattr(ctx.attr, "link_hook_assets", [])),
         track_widget_creation = getattr(ctx.attr, "track_widget_creation", False),
         minimum_os_version = getattr(ctx.attr, "minimum_os_version", ""),
         extra_gen_snapshot_options = list(getattr(ctx.attr, "extra_gen_snapshot_options", [])),
@@ -1488,21 +1451,6 @@ FLUTTER_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | {
         default = Label("//flutter/private/tools:compile_shader.dart"),
         allow_single_file = True,
     ),
-    "link_hook_assets": attr.string_list(
-        doc = "Data assets the packages' link hooks emit, each " +
-              "`package:<package>/<name>`. In a release or profile build, " +
-              "native or web, the compiler records the uses of `@RecordUse` " +
-              "classes, each listed package's `hook/link.dart` " +
-              "runs over them, and the assets it emits are bundled at " +
-              "`packages/<package>/<name>`, loadable with `rootBundle`. " +
-              "A hook that emits an asset not listed, skips one that is, or " +
-              "reports an error fails the build with its own message. Every " +
-              "package with a link hook in `deps` runs, so list the assets " +
-              "of each; a hook receives its package's declared data assets " +
-              "and ships only those it emits. Debug builds run no hook and " +
-              "ship every package's declared data assets: load what the hook " +
-              "would index on demand there.",
-    ),
     "tree_shake_icons": attr.bool(
         doc = "If True, tree-shake icon fonts to only include used glyphs. " +
               "Requires all IconData instances to be const, and one font file in each icon font family; " +
@@ -1539,7 +1487,6 @@ FLUTTER_PROGRAM_ATTR_NAMES = [
     "deps",
     "extra_gen_snapshot_options",
     "flavor",
-    "link_hook_assets",
     "main",
     "minimum_os_version",
     "native_deps",

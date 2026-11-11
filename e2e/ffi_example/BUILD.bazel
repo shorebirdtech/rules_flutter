@@ -11,6 +11,7 @@ load(
     "IOS_DEFAULT_LAUNCH_STORYBOARD",
     "IOS_MINIMUM_OS_VERSION",
     "flutter_ios_app_framework_gen",
+    "flutter_ios_dropped_frameworks_gen",
     "flutter_ios_engine",
     "flutter_ios_info_plist_gen",
     "flutter_ios_native_frameworks_gen",
@@ -29,8 +30,10 @@ load(
     "flutter_macos_native_libs_gen",
     "flutter_macos_registrant_gen",
     "flutter_macos_runner_lib_gen",
+    "flutter_macos_xcframeworks",
 )
 load("@rules_flutter//flutter:windows.bzl", "flutter_windows_app")
+load("@rules_flutter//tools/e2e_testing:apple_release_build.bzl", "apple_release_build")
 load(":c_hot_patch.bzl", "c_hot_patch")
 load(":code_asset.bzl", "stand_in_code_asset")
 load(":ios_sim_debug.bzl", "ios_sim_debug_app")
@@ -327,6 +330,7 @@ flutter_application(
         "//count_a",
         "//count_b",
         "//mul_plugin",
+        "//pick",
         "//prebuilt_asset",
         "//sub_asset",
         # No code asset is named anywhere in this workspace. drift pulls
@@ -420,6 +424,13 @@ flutter_ios_native_frameworks_gen(
     application = ":ffi_app",
 )
 
+# Outside debug, the frameworks of the code assets a link hook dropped
+# (`pick_dropped`), which the app removes before it is signed.
+flutter_ios_dropped_frameworks_gen(
+    name = "ffi_ios_dropped_frameworks",
+    application = ":ffi_app",
+)
+
 flutter_ios_info_plist_gen(
     name = "ffi_ios_info_plist",
     app_name = "FFI Example",
@@ -431,21 +442,39 @@ flutter_ios_runner_lib_gen(
     registrant = ":ffi_ios_registrant",
 )
 
-ios_application(
-    name = "ffi_ios",
-    bundle_id = "com.example.ffi",
-    families = ["iphone"],
-    infoplists = [":ffi_ios_info_plist"],
-    launch_storyboard = IOS_DEFAULT_LAUNCH_STORYBOARD,
-    minimum_os_version = IOS_MINIMUM_OS_VERSION,
-    tags = ["manual"],
-    version = ":ffi_macos_version",
-    deps = [
-        ":ffi_ios_framework",
-        ":ffi_ios_native_frameworks",
-        ":ffi_ios_runner_lib",
-    ],
-)
+# The app for the simulator, and the same for a device: rules_apple wants a
+# profile for every device build, and this one, a plain property list in the
+# shape of one, lets the unsigned release build below be read on any machine.
+[
+    ios_application(
+        name = name,
+        bundle_id = "com.example.ffi",
+        families = ["iphone"],
+        infoplists = [":ffi_ios_info_plist"],
+        ipa_post_processor = select({
+            "@rules_flutter//flutter/private:dbg": None,
+            "//conditions:default": "@rules_flutter//flutter:ios_code_asset_post_processor",
+        }),
+        launch_storyboard = IOS_DEFAULT_LAUNCH_STORYBOARD,
+        minimum_os_version = IOS_MINIMUM_OS_VERSION,
+        provisioning_profile = profile,
+        resources = select({
+            "@rules_flutter//flutter/private:dbg": [],
+            "//conditions:default": [":ffi_ios_dropped_frameworks"],
+        }),
+        tags = ["manual"],
+        version = ":ffi_macos_version",
+        deps = [
+            ":ffi_ios_framework",
+            ":ffi_ios_native_frameworks",
+            ":ffi_ios_runner_lib",
+        ],
+    )
+    for name, profile in [
+        ("ffi_ios", None),
+        ("ffi_ios_device", "profiles/unsigned.mobileprovision"),
+    ]
+]
 
 flutter_linux_app(
     name = "ffi_linux",
@@ -586,6 +615,58 @@ dart_analysis_test(
     targets = [":verify_ios_simulator_test"],
 )
 
+# A release iOS app for a device, unsigned: its link hook drops `pick_dropped`,
+# whose framework the post-processor removes, with the list it read.
+apple_release_build(
+    name = "ios_device_release",
+    compilation_mode = "fastbuild",
+    ios_device = True,
+    sign = False,
+    tags = ["manual"],
+    targets = [":ffi_ios_device"],
+)
+
+dart_test(
+    name = "verify_ios_release_code_assets_test",
+    data = [":ios_device_release"],
+    main = "test/verify_ios_release_code_assets_test.dart",
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
+)
+
+# Add-to-app: the xcframeworks of the code assets that ship, in release, where
+# `pick`'s link hook drops `pick_dropped`. macOS only: an iOS one builds its
+# simulator slice in debug, as `flutter build ios-framework` does, where no
+# link hook runs, so it ships `pick_dropped` too, and the device build, which
+# does not, is the source of truth (upstream's `verifyCodeAssetConsistency`).
+flutter_macos_xcframeworks(
+    name = "ffi_macos_xcframeworks",
+    application = ":ffi_app",
+    plugins = False,
+    tags = ["manual"],
+)
+
+apple_release_build(
+    name = "macos_xcframeworks_release",
+    compilation_mode = "fastbuild",
+    sign = False,
+    tags = ["manual"],
+    targets = [":ffi_macos_xcframeworks"],
+)
+
+dart_test(
+    name = "verify_macos_add_to_app_code_assets_test",
+    args = [
+        "ffi_macos_xcframeworks",
+        "libpick_kept",
+        "libpick_dropped",
+    ],
+    data = [":macos_xcframeworks_release"],
+    main = "test/verify_add_to_app_code_assets_test.dart",
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
+)
+
 flutter_ios_simulator_build_test(
     name = "ios_bundle_build_test",
     target_compatible_with = ["@platforms//os:macos"],
@@ -651,6 +732,7 @@ flutter_library(
         "//count_a",
         "//count_b",
         "//mul_plugin",
+        "//pick",
         "//prebuilt_asset",
         "//sub_asset",
         "@deps//:drift",

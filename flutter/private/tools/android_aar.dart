@@ -14,14 +14,17 @@
 ///       [--entry <name in the archive> <file>]...
 ///       [--tree <prefix in the archive> <directory>]...
 ///       [--flutter-assets <abi> <directory>]...
-///       [--jni <abi> <library>]...
+///       [--jni <abi> <library>]... [--jni-zip <abi> <zip>]...
 ///
 /// `classes.jar` holds the entries of every `--classes` jar; two jars with
 /// one class are an error. `--flutter-assets` names the `flutter_assets` of
 /// each ABI's build. An AAR has one, at `assets/flutter_assets/`: the first
 /// given. The others must be the same files with the same bytes, and are an
 /// error when they are not, but for `kernel_blob.bin` (see
-/// [sameFlutterAssets]). Each `--jni` library goes to `jni/<abi>/<its name>`.
+/// [sameFlutterAssets]). Each `--jni` library goes to `jni/<abi>/<its name>`,
+/// and each `lib/<abi>/<name>` entry of a `--jni-zip` (a
+/// `flutter_android_bundle`'s native libraries, as an APK has them) to
+/// `jni/<abi>/<name>`.
 library;
 
 import 'dart:io';
@@ -48,6 +51,7 @@ class AarSpec {
   final trees = <(String, String)>[];
   final flutterAssets = <(String, String)>[];
   final jni = <(String, String)>[];
+  final jniZips = <(String, String)>[];
 }
 
 /// Expands a leading `@<file>` into the file's lines.
@@ -90,6 +94,8 @@ AarSpec parseArgs(List<String> args) {
         spec.flutterAssets.add((next(++i), next(++i)));
       case '--jni':
         spec.jni.add((next(++i), next(++i)));
+      case '--jni-zip':
+        spec.jniZips.add((next(++i), next(++i)));
       default:
         throw AarException('unknown argument: $flag');
     }
@@ -235,6 +241,17 @@ List<ZipEntry> aarEntries(AarSpec spec) {
   }
   for (final (abi, library) in spec.jni) {
     add('jni/$abi/${library.split('/').last}', File(library).readAsBytesSync());
+  }
+  for (final (abi, zip) in spec.jniZips) {
+    for (final entry in readZip(File(zip).readAsBytesSync())) {
+      final prefix = 'lib/$abi/';
+      if (!entry.name.startsWith(prefix)) {
+        throw AarException(
+          '$zip holds ${entry.name}, which is not a library of $abi',
+        );
+      }
+      add('jni/$abi/${entry.name.substring(prefix.length)}', entry.bytes);
+    }
   }
   final names = rest.keys.toList()..sort();
   return out..addAll([for (final n in names) ZipEntry(n, rest[n]!)]);

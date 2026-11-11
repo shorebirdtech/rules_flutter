@@ -227,12 +227,6 @@ def _code_asset_impl(ctx):
     asserts.equals(env, 1, len(libs), "the variant bundles the application's one library: %s" % libs)
     if len(libs) != 1:
         return analysistest.end(env)
-    label = analysistest.target_under_test(env).label
-    asserts.true(
-        env,
-        "/%s/%s_code_assets/" % (label.package, label.name) in libs[0],
-        "the library is bundled under the variant's own name for it, got %s" % libs[0],
-    )
     asserts.equals(
         env,
         ["interface.json"],

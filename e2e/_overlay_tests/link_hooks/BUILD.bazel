@@ -25,11 +25,6 @@ dart_package_metadata(
 # it constructs (`heart` and `star`, not `moon`).
 flutter_application(
     name = "app",
-    link_hook_assets = [
-        "package:glyphs/glyphs/heart.txt",
-        "package:glyphs/glyphs/index.json",
-        "package:glyphs/glyphs/star.txt",
-    ],
     main = "lib/main.dart",
     package = ":pubspec-metadata",
     deps = [
@@ -52,11 +47,6 @@ flutter_macos_app(
 # builds it and checks the hook's message reaches the user.
 flutter_application(
     name = "dynamic_app",
-    link_hook_assets = [
-        "package:glyphs/glyphs/heart.txt",
-        "package:glyphs/glyphs/index.json",
-        "package:glyphs/glyphs/star.txt",
-    ],
     main = "lib/dynamic_main.dart",
     package = ":pubspec-metadata",
     tags = ["manual"],

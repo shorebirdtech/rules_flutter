@@ -7,7 +7,7 @@ Produces a `flutter_assets/` tree artifact containing:
 - Copied asset files (images, etc.)
 """
 
-load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
+load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "program_assets_action_args")
 load("//flutter/private:asset_variants.bzl", "variant_scale")
 load("//flutter/private:exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
 load("//flutter/private:flutter_library.bzl", "aggregate_pub_contributions", "package_root_of", "path_in_package")
@@ -86,7 +86,8 @@ def flutter_asset_bundle_action(
         optional_code_points = [],
         extra_asset_copies = [],
         unlisted_asset_copies = [],
-        owner = None):
+        owner = None,
+        program_assets = None):
     """Create an action that generates the flutter_assets/ tree artifact.
 
     Args:
@@ -122,6 +123,10 @@ def flutter_asset_bundle_action(
         owner: What has the package `assets` are keyed in: anything with a
             `label`, `ctx` when None. A program rebuilt under another target
             (`flutter_application_variant`) keeps its own package's keys.
+        program_assets: Optional `DartProgramAssetsInfo`. The tool places each
+            data asset the program ships at `packages/<package>/<name>`,
+            the key flutter_tools gives a hook's data asset and the one
+            `rootBundle` loads it by, and lists it in the asset manifest.
 
     Returns:
         The `output_dir` it was given, so callers can chain.
@@ -183,13 +188,20 @@ def flutter_asset_bundle_action(
     args.add(tool)
     args.add_all("--output-dir", [output_dir], expand_directories = False)
     args.add("--config")
+    arguments = [args, json_config_args(ctx, config, refs)]
+    program_inputs = []
+    if program_assets != None:
+        # The bundle holds data assets only: no native library is an input.
+        program = program_assets_action_args(ctx.actions, program_assets, code = None)
+        arguments.append(program.args)
+        program_inputs = [program.inputs]
 
     ctx.actions.run(
         executable = dart,
-        arguments = [args, json_config_args(ctx, config, refs)],
+        arguments = arguments,
         inputs = depset(
             direct = [tool] + claims.values() + extra_inputs,
-            transitive = [dart_files],
+            transitive = [dart_files] + program_inputs,
         ),
         outputs = [output_dir],
         mnemonic = "FlutterAssetBundle",

@@ -24,6 +24,7 @@ exports_files(
         "bundle_app.dart",
         "check_android_classes.dart",
         "check_apple_version_keys.dart",
+        "code_assets.dart",
         "collect_notices.dart",
         "compile_shader.dart",
         "libraries_spec.dart",
@@ -42,6 +43,27 @@ exports_files(
         # its neighbours this one is a `dart_binary` main (below), and rules
         # reach it through that target rather than by file label.
         "flutter_test_runner.dart",
+    ],
+    visibility = ["//flutter:__subpackages__"],
+)
+
+# What `code_assets.dart` imports, which the rules running it give its action.
+filegroup(
+    name = "code_assets_imports",
+    srcs = [
+        "apple_frameworks.dart",
+        "assemble_directory.dart",
+        "zip_archive.dart",
+    ],
+    visibility = ["//flutter:__subpackages__"],
+)
+
+# What `bundle_app.dart` imports, likewise.
+filegroup(
+    name = "bundle_app_imports",
+    srcs = [
+        "code_assets.dart",
+        ":code_assets_imports",
     ],
     visibility = ["//flutter:__subpackages__"],
 )
@@ -76,6 +98,23 @@ dart_binary(
     main = "apple_xcframeworks_export.dart",
     visibility = ["//flutter:__subpackages__"],
     deps = ["@rules_dart//dart/runfiles"],
+)
+
+# The `ipa_post_processor` of a release iOS app: removes the frameworks of the
+# code assets its link hooks dropped. rules_apple runs it with no runfiles, so
+# it is a self-contained executable.
+dart_binary(
+    name = "ios_code_asset_post_processor",
+    compile_mode = "exe",
+    main = "ios_code_asset_post_processor.dart",
+    visibility = ["//visibility:public"],
+)
+
+dart_test(
+    name = "ios_code_asset_post_processor_test",
+    srcs = ["ios_code_asset_post_processor.dart"],
+    main = "test/ios_code_asset_post_processor_test.dart",
+    deps = ["@dev_tool_deps//:test"],
 )
 
 # The program behind `bazel run` of `flutter_android_aar`: writes the module's
@@ -253,11 +292,19 @@ _UNIT_TESTS = {
         "maven_artifacts.dart",
         ["@rules_dart//dart/runfiles"],
     ),
-    "bundle_app_test": ("bundle_app.dart", []),
+    "bundle_app_test": (
+        [
+            "apple_frameworks.dart",
+            "assemble_directory.dart",
+            "bundle_app.dart",
+            "code_assets.dart",
+            "zip_archive.dart",
+        ],
+        [],
+    ),
     "collect_notices_test": ("collect_notices.dart", []),
     "libraries_spec_test": ("libraries_spec.dart", []),
     "linux_runtime_test": ("linux_runtime.dart", []),
-    "generate_asset_manifest_test": ("generate_asset_manifest.dart", []),
     "merge_android_manifests_test": ("merge_android_manifests.dart", []),
     "sdk_check_test": ("sdk_check.dart", []),
     "strip_native_libs_test": ("strip_native_libs.dart", []),
@@ -294,6 +341,37 @@ _UNIT_TESTS = {
     main = "test/%s.dart" % name,
     deps = ["@dev_tool_deps//:test"] + extra_deps,
 ) for name, (tool, extra_deps) in _UNIT_TESTS.items()]
+
+# Checked against rules_dart's conformance fixture of the program-assets
+# line format, which the tool reads.
+dart_test(
+    name = "generate_asset_manifest_test",
+    srcs = ["generate_asset_manifest.dart"],
+    data = ["@rules_dart//dart/program_assets:conformance"],
+    env = {"CONFORMANCE": "$(rlocationpaths @rules_dart//dart/program_assets:conformance)"},
+    main = "test/generate_asset_manifest_test.dart",
+    deps = [
+        "@dev_tool_deps//:test",
+        "@rules_dart//dart/runfiles",
+    ],
+)
+
+dart_test(
+    name = "code_assets_test",
+    srcs = [
+        "apple_frameworks.dart",
+        "assemble_directory.dart",
+        "code_assets.dart",
+        "zip_archive.dart",
+    ],
+    data = ["@rules_dart//dart/program_assets:conformance"],
+    env = {"CONFORMANCE": "$(rlocationpaths @rules_dart//dart/program_assets:conformance)"},
+    main = "test/code_assets_test.dart",
+    deps = [
+        "@dev_tool_deps//:test",
+        "@rules_dart//dart/runfiles",
+    ],
+)
 
 # Stand-in for `impellerc`, which `compile_shader_test` runs through
 # `compile_shader.dart`. A compiled executable, as `fake_font_subset` is.

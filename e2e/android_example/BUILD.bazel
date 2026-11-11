@@ -289,7 +289,9 @@ android_binary(
     deps = [
         ":aar_native",
         ":app_engine",
-        ":app_native_libs",
+        # libapp.so and the FFI library, for each ABI android_binary builds
+        # the bundle for.
+        ":app_android",
         ":extra_native",
         ":native_dep_runner_lib",
         ":prebuilt_native",
@@ -304,21 +306,6 @@ android_binary(
 flutter_android_bundle(
     name = "app_android",
     application = ":app_flutter",
-)
-
-# The bundle's native libraries, for composable wiring: libapp.so and the
-# FFI library, offered for each ABI android_binary builds for.
-filegroup(
-    name = "app_native_libs_files",
-    srcs = [":app_android"],
-    output_group = "native_libs",
-    tags = ["manual"],
-)
-
-cc_library(
-    name = "app_native_libs",
-    srcs = [":app_native_libs_files"],
-    tags = ["manual"],
 )
 
 flutter_android_engine(
@@ -364,7 +351,9 @@ android_binary(
     tags = ["manual"],
     deps = [
         ":app_engine",
-        ":app_native_libs",
+        # libapp.so and the FFI library, for each ABI android_binary builds
+        # the bundle for.
+        ":app_android",
         ":bazel_runner_lib",
     ],
 )
@@ -399,7 +388,9 @@ android_binary(
     tags = ["manual"],
     deps = [
         ":app_engine",
-        ":app_native_libs",
+        # libapp.so and the FFI library, for each ABI android_binary builds
+        # the bundle for.
+        ":app_android",
         ":custom_runner_lib",
     ],
 )

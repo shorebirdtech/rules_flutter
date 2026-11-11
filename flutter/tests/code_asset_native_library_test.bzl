@@ -30,18 +30,13 @@ def _dev_config_impl(ctx):
     if config == None:
         return analysistest.end(env)
 
-    # One library, under the application's own name for it: the bundled copy is
-    # what the dev tool compares, and the keys of every per-library map are its
-    # path. Under a directory of the application's own, so neither the
-    # library's rule nor a second application in the package writes it too.
+    # One library, by the path its build wrote it at: what the dev tool
+    # compares, and the key of every per-library map.
     libs = config["nativeLibs"]
     asserts.equals(env, 1, len(libs), "expected one bundled library, got %s" % libs)
     if len(libs) != 1:
         return analysistest.end(env)
     lib = libs[0]
-    label = analysistest.target_under_test(env).label
-    own = "/%s/%s_code_assets/" % (label.package, label.name)
-    asserts.true(env, own in lib, "expected the library under %s, got %s" % (own, lib))
     asserts.equals(env, ctx.attr.contract, _basenames(config["nativeLibContracts"][lib]))
     asserts.equals(env, ctx.attr.sources, _basenames(config["nativeLibSources"][lib]))
     return analysistest.end(env)

@@ -64,7 +64,7 @@ cannot write there.
 
 load("@bazel_skylib//lib:structs.bzl", "structs")
 load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo", "DartKernelSdkInfo")
-load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "KERNEL_LIST_ATTR", "KERNEL_TOOL_ATTR", "MODULAR_KERNEL_ATTR", "TRACK_CREATION_LOCATIONS_ATTR", "collect_modules", "collect_packages", "collect_transitive_runfiles", "collect_transitive_srcs", "dart_entry_kernel_action", "dart_import_check_aspect", "dart_link_kernel_action", "executable_defines", "executable_defines_config", "import_check_validation", "kernel_list", "modular_kernel", "package_identity_attrs", "runfiles_path", "track_creation_locations")
+load("@rules_dart//dart:utils.bzl", "KERNEL_LIST_ATTR", "KERNEL_TOOL_ATTR", "MODULAR_KERNEL_ATTR", "PROGRAM_ASSETS_TOOLCHAINS", "TRACK_CREATION_LOCATIONS_ATTR", "collect_modules", "collect_packages", "collect_transitive_runfiles", "collect_transitive_srcs", "dart_entry_kernel_action", "dart_import_check_aspect", "dart_link_kernel_action", "executable_defines", "executable_defines_config", "import_check_validation", "kernel_list", "modular_kernel", "package_identity_attrs", "program_assets_attrs", "runfiles_path", "track_creation_locations")
 load("//flutter:providers.bzl", "FlutterApplicationInputsInfo", "FlutterTestProgramInfo")
 load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "synthesize_app_package")
 load("//flutter/private:application_libraries.bzl", "application_libraries", "application_libraries_aspect")
@@ -765,6 +765,7 @@ _PROGRAM_ATTRS["enable_impeller"] = attr.bool(
 _PROGRAM_ATTRS.update(_ENVIRONMENT.attrs)
 
 _PROGRAM_ATTRS.update(PLATFORM_CONSTRAINT_ATTRS)
+_PROGRAM_ATTRS.update(program_assets_attrs())
 _PROGRAM_ATTRS.update(KERNEL_TOOL_ATTR)
 _PROGRAM_ATTRS.update(KERNEL_LIST_ATTR)
 _PROGRAM_ATTRS.update(MODULAR_KERNEL_ATTR)
@@ -846,8 +847,9 @@ flutter_test_program = rule(
     attrs = _PROGRAM_ATTRS,
     cfg = track_widget_creation,
     # The compiles are `portable`.
-    toolchains = [_FLUTTER_TOOLCHAIN] + COPY_TO_DIRECTORY_TOOLCHAINS,
+    toolchains = [_FLUTTER_TOOLCHAIN] + PROGRAM_ASSETS_TOOLCHAINS,
     exec_groups = PORTABLE_EXEC_GROUPS,
+    fragments = ["cpp"],
     provides = [FlutterTestProgramInfo],
     doc = """Compiles a Flutter test into a program, and does not run it. Returns \
 `FlutterTestProgramInfo`, which `flutter_program_test` runs.
@@ -953,7 +955,8 @@ flutter_tester_binary = rule(
     attrs = _BINARY_ATTRS,
     cfg = track_widget_creation,
     executable = True,
-    toolchains = COPY_TO_DIRECTORY_TOOLCHAINS,
+    toolchains = PROGRAM_ASSETS_TOOLCHAINS,
+    fragments = ["cpp"],
     exec_groups = PORTABLE_EXEC_GROUPS | {
         _RUN: exec_group(toolchains = [FLUTTER_EXEC_TOOLS, _RUN_HOST_TOOLCHAIN]),
     },

@@ -12,6 +12,7 @@ load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_dart//dart:utils.bzl", "runfiles_path")
 load("//flutter/private:apple_add_to_app.bzl", "BUNDLE_ATTRS", "assemble_bundle")
 load("//flutter/private:exec_groups.bzl", "PORTABLE_EXEC_GROUPS")
+load("//flutter/private:flutter_native_assets.bzl", "CODE_ASSETS_TOOL_ATTRS", "run_code_assets_tool")
 
 FlutterXCFrameworksLayoutInfo = provider(
     doc = "An add-to-app layout of one build mode, as `flutter build <platform>-framework` writes it.",
@@ -64,8 +65,8 @@ let package = Package(
         .library(name: "FlutterPluginRegistrant", type: .static, targets: ["FlutterPluginRegistrant"]),
     ],
     targets: [
-        .target(name: "FlutterPluginRegistrant", dependencies: [{dependencies}]),
-{binary_targets}    ]
+        .target(name: "FlutterPluginRegistrant", dependencies: [@DEPENDENCIES@]),
+@BINARY_TARGETS@    ]
 )
 """
 
@@ -80,10 +81,16 @@ def _layout_impl(ctx):
         seen[name] = True
         steps.append(step)
 
+    # Directories of xcframeworks whose names are known only once built: the
+    # code assets that ship (`flutter_*_code_asset_xcframeworks`).
+    xcframework_dirs = []
     for target in ctx.attr.xcframeworks:
         for f in target[DefaultInfo].files.to_list():
             if f.basename.endswith(".xcframework"):
                 place(f.basename, ("bundle", "%s/%s" % (mode, f.basename), f))
+            elif f.is_directory:
+                steps.append(("bundle", mode, f))
+                xcframework_dirs.append(f)
             elif f.extension in ("h", "m", "swift"):
                 # The registrant's sources, above the modes as upstream's.
                 place(f.basename, ("file", f.basename, f))
@@ -105,17 +112,27 @@ def _layout_impl(ctx):
             for name in seen
             if name.endswith(".xcframework") and name != "FlutterPluginRegistrant.xcframework"
         ])
-        manifest = ctx.actions.declare_file(ctx.label.name + "_package/Package.swift")
-        ctx.actions.write(manifest, _PACKAGE_SWIFT.format(
+        template = ctx.actions.declare_file(ctx.label.name + "_package/Package.swift.in")
+        ctx.actions.write(template, _PACKAGE_SWIFT.format(
             mode = mode,
             platform = {"ios": ".iOS", "macos": ".macOS"}[ctx.attr.platform],
             minimum_os_version = ctx.attr.minimum_os_version,
-            dependencies = ", ".join(['"%s"' % b for b in binaries]),
-            binary_targets = "".join([
-                '        .binaryTarget(name: "{name}", path: "{name}.xcframework"),\n'.format(name = b)
-                for b in binaries
-            ]),
         ))
+        manifest = ctx.actions.declare_file(ctx.label.name + "_package/Package.swift")
+        args = ctx.actions.args()
+        args.add("--template", template)
+        args.add("--output", manifest)
+        args.add_all(binaries, before_each = "--binary")
+        args.add_all(xcframework_dirs, expand_directories = False, before_each = "--binaries-in")
+        run_code_assets_tool(
+            ctx,
+            "package-swift",
+            [args],
+            depset([template] + xcframework_dirs),
+            [manifest],
+            mnemonic = "FlutterSwiftPackageManifest",
+            progress_message = "Writing the Swift package of %{label}",
+        )
         place("Package.swift", ("file", mode + "/Package.swift", manifest))
         place("Sources", ("file", mode + "/Sources/FlutterPluginRegistrant/GeneratedPluginRegistrant.swift", ctx.file.swift_package_registrant))
 
@@ -176,8 +193,9 @@ flutter_apple_xcframeworks_layout = rule(
             values = ["ios", "macos"],
         ),
         "xcframeworks": attr.label_list(
-            doc = "Targets whose `.xcframework` directories go under `<Mode>/`, and whose " +
-                  "`.h`, `.m` and `.swift` files go above it.",
+            doc = "Targets whose `.xcframework` directories go under `<Mode>/`, as do the " +
+                  "xcframeworks in their other directories, and whose `.h`, `.m` and " +
+                  "`.swift` files go above it.",
             allow_files = True,
         ),
         "renamed_files": attr.label_keyed_string_dict(
@@ -197,7 +215,7 @@ flutter_apple_xcframeworks_layout = rule(
             doc = "The minimum OS version of the Swift package.",
         ),
         "_profile": attr.label(default = "//flutter:profile"),
-    }, EXPORT_ATTRS),
+    }, EXPORT_ATTRS, CODE_ASSETS_TOOL_ATTRS),
     exec_groups = PORTABLE_EXEC_GROUPS,
     doc = """Lays out the xcframeworks of one build mode as `flutter build ios-framework` and
 `macos-framework` do: `<Mode>/` (the configuration's), and the files upstream writes

@@ -21,7 +21,7 @@ Output bundle structure:
 """
 
 load("@rules_dart//dart:providers.bzl", "DartAnalyzableInfo")
-load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
+load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "program_assets_action_args")
 load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterSdkRecordInfo")
 load("//flutter/private:cc_runner_compile.bzl", "compile_and_link_runner")
 load("//flutter/private:common.bzl", "compute_desktop_bundle_copies")
@@ -433,8 +433,11 @@ def _flutter_linux_bundle_impl(ctx):
     app_info = ctx.attr.application[FlutterApplicationInfo]
     flutter_assets = app_info.flutter_assets
     icu_data = app_info.icu_data
+
+    # The `native_deps` libraries always ship; the code assets are placed by
+    # the bundle tool, which reads which of them ship (`code_asset_os`).
     native_libs = list(app_info.native_libs)
-    native_libs.extend(app_info.bundled_code_assets.to_list())
+    code_assets = program_assets_action_args(ctx.actions, app_info.program_assets, data = False)
     is_debug = app_info.is_debug
 
     flutter_toolchain = ctx.toolchains["@rules_flutter//flutter:toolchain_type"]
@@ -454,9 +457,9 @@ def _flutter_linux_bundle_impl(ctx):
     engine_files = flutter_sdk_info.engine_library[DefaultInfo].files.to_list()
 
     # Build the bundle config JSON for the Dart bundler tool. Both
-    # `native_libs` (the legacy FFI cc_library outputs) and
-    # `bundled_code_assets` (Native Assets dynamic_loading_bundle dylibs)
-    # land at `lib/<basename>` next to `libapp.so`.
+    # `native_libs` (the legacy FFI cc_library outputs) and the code assets
+    # that ship (Native Assets dynamic_loading_bundle libraries) land at
+    # `lib/<basename>` next to `libapp.so`.
     # Every path in the bundle config is a `file_ref`, which Bazel fills in
     # when it writes the config, path-mapped where the action is.
     refs = []
@@ -503,9 +506,10 @@ def _flutter_linux_bundle_impl(ctx):
         "copy_dirs": [
             {"src": file_ref(refs, flutter_assets), "dst": "data/flutter_assets"},
         ],
+        "code_asset_os": "linux",
     }
 
-    inputs = [ctx.file._bundle_tool, flutter_assets, icu_data, runner_binary] + extra_inputs + native_libs + engine_files
+    inputs = [ctx.file._bundle_tool, flutter_assets, icu_data, runner_binary] + ctx.files._bundle_tool_imports + extra_inputs + native_libs + engine_files
 
     args = ctx.actions.args()
     args.add(ctx.file._bundle_tool)
@@ -513,10 +517,10 @@ def _flutter_linux_bundle_impl(ctx):
 
     ctx.actions.run(
         executable = portable_tools(ctx).dart,
-        arguments = [args, json_config_args(ctx, config, refs)],
+        arguments = [args, json_config_args(ctx, config, refs), code_assets.args],
         inputs = depset(
             direct = inputs,
-            transitive = [portable_tools(ctx).sdk_files.run],
+            transitive = [portable_tools(ctx).sdk_files.run, code_assets.inputs],
         ),
         outputs = [bundle_dir],
         mnemonic = "FlutterLinuxBundle",
@@ -550,6 +554,9 @@ flutter_linux_bundle_rule = rule(
         "_bundle_tool": attr.label(
             default = Label("//flutter/private/tools:bundle_app.dart"),
             allow_single_file = True,
+        ),
+        "_bundle_tool_imports": attr.label(
+            default = Label("//flutter/private/tools:bundle_app_imports"),
         ),
         "_sdk_record": attr.label(
             default = Label("//flutter/private:sdk_record"),

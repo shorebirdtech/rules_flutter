@@ -51,9 +51,8 @@ Two tiers of API:
             "flutter_android_release",
             "flutter_android_runner_lib_gen")
 
+        # Its native libraries reach android_binary as an aar_import's do.
         flutter_android_bundle(name = "my_bundle", application = ":my_app")
-        filegroup(name = "my_native_libs_files", srcs = [":my_bundle"], output_group = "native_libs")
-        cc_library(name = "my_native_libs", srcs = [":my_native_libs_files"])
         flutter_android_engine(name = "my_engine")
         flutter_android_manifest_gen(name = "my_manifest", application_id = "com.example.myapp")
 
@@ -69,7 +68,7 @@ Two tiers of API:
             # Stored uncompressed, as the manifest's
             # android:extractNativeLibs="false" requires.
             nocompress_extensions = [".so"],
-            deps = [":my_native_libs", ":my_engine", ":my_runner"],
+            deps = [":my_bundle", ":my_engine", ":my_runner"],
         )
 
     The App Bundle is rules_android's `android_application` from the same
@@ -81,7 +80,7 @@ Two tiers of API:
             manifest = ":my_manifest",
             manifest_values = {"applicationId": "com.example.myapp"},
             nocompress_extensions = [".so"],
-            deps = [":my_native_libs", ":my_engine", ":my_runner"],
+            deps = [":my_bundle", ":my_engine", ":my_runner"],
         )
 
         flutter_android_release(name = "my_release", app_bundle = ":my_bundle")
@@ -108,7 +107,6 @@ Two tiers of API:
 load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@rules_android//android:rules.bzl", _android_application = "android_application", _android_binary = "android_binary", _android_library = "android_library")
-load("@rules_cc//cc:cc_library.bzl", _cc_library = "cc_library")
 load("@rules_dart//dart:defs.bzl", "dart_binary")
 load("@rules_java//java:java_import.bzl", _java_import = "java_import")
 load("@rules_kotlin//kotlin:android.bzl", _kt_android_library = "kt_android_library")
@@ -861,21 +859,10 @@ def flutter_android_app(
         testonly = testonly,
     )
 
-    # 2. The bundle's native libraries, as a cc_library: the dep android_binary
-    # takes the native libraries of each ABI it builds from.
-    native.filegroup(
-        name = "__%s_native_libs_files" % name,
-        srcs = ["__%s_bundle" % name],
-        output_group = "native_libs",
-        tags = tags,
-        testonly = testonly,
-    )
-    _cc_library(
-        name = "__%s_native_libs" % name,
-        srcs = ["__%s_native_libs_files" % name],
-        tags = tags,
-        testonly = testonly,
-    )
+    # 2. The bundle is a dependency of android_binary itself, which packages
+    # the native libraries of each ABI it builds it for (`libapp.so`, the
+    # `native_deps` libraries and the code assets that ship) from its
+    # `AndroidNativeLibsInfo`, as it does an `aar_import`'s.
 
     # 4. Import Flutter engine. listenablefuture is the app's own choice:
     # see step 9b.
@@ -887,8 +874,8 @@ def flutter_android_app(
         testonly = testonly,
     )
 
-    # 5. Extract flutter_assets for inclusion in the APK.
-    # The mobile_install output group has assets at assets/flutter_assets/.
+    # 5. Extract flutter_assets for inclusion in the APK: the mobile_install
+    # output group is the tree at assets/flutter_assets/, and nothing else.
     native.filegroup(
         name = "__%s_flutter_assets" % name,
         srcs = ["__%s_bundle" % name],
@@ -950,7 +937,6 @@ def flutter_android_app(
     base_manifest = manifest
     app_proguard_rules = []
     binary_deps = [
-        "__%s_native_libs" % name,
         "__%s_engine" % name,
         "__%s_registrant" % name,
     ]
@@ -1169,7 +1155,9 @@ def flutter_android_app(
         resource_files = resources if resources else None,
         assets = ["__%s_flutter_assets" % name],
         assets_dir = "assets",
-        deps = binary_deps + deps + ["__%s_class_check" % name],
+        # The bundle is built for the ABIs android_binary builds; the class
+        # check, which reads the Java libraries of `binary_deps`, is not.
+        deps = binary_deps + ["__%s_bundle" % name] + deps + ["__%s_class_check" % name],
         proguard_specs = proguard_specs,
         tags = tags,
         testonly = testonly,

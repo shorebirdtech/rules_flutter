@@ -270,9 +270,10 @@ def _flutter_android_module_aar_impl(ctx):
         args.add_all([assets], expand_directories = False)
         inputs.append(assets)
     for abi in ctx.attr.abis:
-        libs = ctx.split_attr.bundle[abi][OutputGroupInfo].native_libs.to_list()
-        _jni_args(args, abi, libs)
-        inputs.extend(libs)
+        libs = _single(ctx.split_attr.bundle[abi], "native_libs", ctx.label)
+        args.add("--jni-zip", abi)
+        args.add(libs)
+        inputs.append(libs)
 
     artifact = "flutter_" + mode
     aar = ctx.actions.declare_file("%s/%s.aar" % (ctx.label.name, artifact))

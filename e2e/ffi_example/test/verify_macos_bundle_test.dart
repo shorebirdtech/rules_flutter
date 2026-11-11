@@ -42,6 +42,22 @@ void main() {
     for (final name in ['libcounter_a.dylib', 'libcounter_b.dylib']) {
       check.absent('replaced code asset $name', '${bundle.frameworks}/$name');
     }
+    // `pick`'s link hook keeps the library of the `Op` the app constructs
+    // and drops the other, which neither the bundle nor its manifest carries.
+    check
+      ..exists(
+        'code asset the link hook kept, libpick_kept.dylib, exists',
+        '${bundle.frameworks}/libpick_kept.dylib',
+      )
+      ..absent(
+        'code asset the link hook dropped, libpick_dropped.dylib,',
+        '${bundle.frameworks}/libpick_dropped.dylib',
+      )
+      ..nativeAssetsManifest(
+        bundle.flutterAssets,
+        shipped: ['package:pick/kept', 'package:add_plugin/add_plugin.dart'],
+        dropped: ['package:pick/dropped'],
+      );
     bundle
       ..checkFlutterLayout(nib: null)
       ..finish('All macOS bundle verification checks passed.');

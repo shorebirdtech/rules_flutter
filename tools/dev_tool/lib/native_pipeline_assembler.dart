@@ -19,7 +19,6 @@
 library;
 
 import 'dart:async';
-import 'dart:io';
 
 import 'bazel.dart';
 import 'build_info.dart';
@@ -511,7 +510,6 @@ class NativePipelineAssembler {
       dartPluginRegistrantUri: registrant.isEmpty
           ? ''
           : Uri.file(registrant).toString(),
-      nativeAssetsManifest: await _launchNativeAssetsManifest(),
       // The app says whether its kernel has widget creation locations, so a
       // reload's recompiled libraries keep them: the build's `track_widget_creation`
       // is the app's, not something the host-configured dev build knows.
@@ -749,34 +747,6 @@ class NativePipelineAssembler {
       );
     }
     return info;
-  }
-
-  /// The absolute path of the `native_assets.json` the running app was built
-  /// with, or `''` when its build had none.
-  ///
-  /// From the app rather than from the dev config, for the reason
-  /// [_wireAssets] takes its tree from the app: the dev build resolves in the
-  /// top-level configuration, and its manifest maps every asset id to the
-  /// host's libraries (`macos_arm64` → `libfoo.dylib` on an Android run).
-  ///
-  /// The launch build requests the application's outputs, the manifest among
-  /// them, so after `run` it is on disk. An app this command did not build —
-  /// `attach` — may have been built where the manifest was never written here,
-  /// so the launch target is built once to put it there; a manifest still
-  /// missing after that fails by name rather than as a frontend_server exit.
-  Future<String> _launchNativeAssetsManifest() async {
-    final declared = _info.nativeAssetsManifest;
-    if (declared.isEmpty) return '';
-    final manifest = '$workspace/$declared';
-    if (File(manifest).existsSync()) return manifest;
-    await _rebuildBundle();
-    if (File(manifest).existsSync()) return manifest;
-    throw DevToolException(
-      'The app reports it was built with the native-assets manifest '
-      '$declared, and building $target with the flags the app says built it '
-      '(${_launchArgs.join(' ')}) did not write it. A hot restart compiled '
-      'without it could not resolve the app\'s @Native(assetId:) bindings.',
-    );
   }
 
   /// Point each app's VM client at the `flutter_assets` tree the running app

@@ -6,6 +6,7 @@ per fixture would cost minutes and need a device SDK.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
+load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartProgramAssetsInfo")
 load("//flutter:providers.bzl", "FlutterApplicationInfo")
 
 def _fake_application_impl(ctx):
@@ -15,14 +16,50 @@ def _fake_application_impl(ctx):
     the tests over them are checking the real rules for.
 
     A path named in both `native_libs` and `code_assets` is one File: the shape
-    of one library arriving by both routes.
+    of one library arriving by both routes. `code_assets` ship, each as the
+    asset `package:fake/<path>`; `dropped_code_assets` are code assets of a
+    package `pick` whose link hook dropped them, and `data_assets` data assets
+    that ship.
     """
     libs = {}
-    for path in ctx.attr.native_libs + ctx.attr.code_assets:
+    for path in ctx.attr.native_libs + ctx.attr.code_assets + ctx.attr.dropped_code_assets + ctx.attr.data_assets:
         if path not in libs:
             lib = ctx.actions.declare_file("%s/%s" % (ctx.label.name, path))
             ctx.actions.write(lib, "%s %s" % (ctx.label, path))
             libs[path] = lib
+
+    def code_asset(package, path):
+        return DartCodeAssetInfo(
+            asset_id = "package:%s/%s" % (package, path),
+            link_mode = "dynamic_loading_bundle",
+            file = libs[path],
+            uri = "",
+        )
+
+    link_outputs = ()
+    if ctx.attr.dropped_code_assets:
+        selection = ctx.actions.declare_file(ctx.label.name + "/pick.code_selection")
+        ctx.actions.write(selection, "")
+        emitted = ctx.actions.declare_directory(ctx.label.name + "/pick.data")
+        ctx.actions.run(
+            executable = ctx.executable._assemble,
+            arguments = ["--output", emitted.path],
+            outputs = [emitted],
+        )
+        link_outputs = (struct(
+            package = "pick",
+            data_assets = emitted,
+            code_assets = {
+                "package:pick/" + path: code_asset("pick", path)
+                for path in ctx.attr.dropped_code_assets
+            },
+            code_selection = selection,
+        ),)
+    program_assets = DartProgramAssetsInfo(
+        data_assets = {"package:fake/" + path: libs[path] for path in ctx.attr.data_assets},
+        code_assets = {"package:fake/" + path: code_asset("fake", path) for path in ctx.attr.code_assets},
+        link_outputs = link_outputs,
+    )
 
     # Debug carries a kernel and no AOT dylib; release the reverse. Which one
     # a fixture wants is not cosmetic: a release Apple framework retags its
@@ -58,14 +95,16 @@ def _fake_application_impl(ctx):
         is_debug = ctx.attr.debug,
         flutter_assets = flutter_assets,
         native_libs = [libs[path] for path in ctx.attr.native_libs],
-        bundled_code_assets = depset([libs[path] for path in ctx.attr.code_assets]),
+        program_assets = program_assets,
     )]
 
 fake_application = rule(
     implementation = _fake_application_impl,
     attrs = {
         "code_assets": attr.string_list(),
+        "data_assets": attr.string_list(),
         "debug": attr.bool(default = False),
+        "dropped_code_assets": attr.string_list(),
         "native_libs": attr.string_list(),
         "strip_aot": attr.bool(default = True),
         "_assemble": attr.label(

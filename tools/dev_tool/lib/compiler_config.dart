@@ -75,15 +75,6 @@ class NativeCompilerConfig implements CompilerConfig {
   /// and the comment there records why the two need not agree.
   final String dartPluginRegistrantUri;
 
-  /// Absolute path of the `native_assets.json` the running app was built
-  /// with, or empty when it has none. Passed as `--native-assets`, which puts
-  /// the asset-id map into every whole-program dill this compiler writes — a
-  /// hot restart's included. Without it the restarted isolate has no map, and
-  /// each `@Native(assetId:)` call falls back to a symbol lookup in the
-  /// process: masked where an earlier `dlopen` made the library global
-  /// (macOS, iOS), and an exception in `main()` where it did not (Android).
-  final String nativeAssetsManifest;
-
   /// Whether the app was built with `--track-widget-creation`, which the
   /// compiler then applies to every library it recompiles (see
   /// `BuildInfo.trackWidgetCreation`).
@@ -98,7 +89,6 @@ class NativeCompilerConfig implements CompilerConfig {
     this.fileSystemScheme = '',
     this.dartDefines = const [],
     this.dartPluginRegistrantUri = '',
-    this.nativeAssetsManifest = '',
     this.trackWidgetCreation = false,
     this.enableExperiments = const [],
   });
@@ -121,10 +111,6 @@ class NativeCompilerConfig implements CompilerConfig {
       '--source',
       'package:flutter/src/dart_plugin_registrant.dart',
       '-Dflutter.dart_plugin_registrant=$dartPluginRegistrantUri',
-    ],
-    if (nativeAssetsManifest.isNotEmpty) ...[
-      '--native-assets',
-      nativeAssetsManifest,
     ],
     for (final root in fileSystemRoots) ...['--filesystem-root', root],
     if (fileSystemRoots.isNotEmpty && fileSystemScheme.isNotEmpty)
