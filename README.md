@@ -18,7 +18,9 @@ rules_dart rules and flags you use directly.
 
 **MODULE.bazel**
 
-1. Bazel 9.2 or newer; Flutter 3.47.x (3.41 and 3.44 are dropped).
+1. Bazel 9.2 or newer. `flutter.toolchain(flutter_version = ...)` → 3.47.9 or
+   later: the root's pin is used exactly, and rules_flutter itself asks for
+   3.47.9 (3.41 and 3.44 are dropped).
 2. `flutter.pub(name, lock)` → `flutter_pub = use_extension("@rules_flutter//flutter/pub:extensions.bzl", "pub")`,
    then `flutter_pub.from_lock(name, lock)` and `use_repo(flutter_pub, ...)`.
    `flutter.plugin_overlays` → `flutter_pub.plugin_overlays`. The pub runner
@@ -27,8 +29,9 @@ rules_dart rules and flags you use directly.
    `use_repo(flutter, "flutter_toolchains")` → delete both; rules_flutter
    registers its toolchains. `@rules_flutter//flutter:repositories.bzl` is
    removed.
-4. `use_repo(flutter, "flutter_android_engine_arm64")` (or `_x64`) → delete;
-   no Android engine repository is named.
+4. `use_repo(flutter, ...)` of `flutter_android_engine_arm64` (or `_x64`),
+   `flutter_ios_engine`, `flutter_macos_engine` and `flutter_web_sdk` →
+   delete, unless your own BUILD files name the repository.
 5. `flutter_pub.from_lock(on_version_conflict = ...)` → removed; the highest
    version any module's lock records is built. A dependency asking for a newer
    Flutter than the root's `flutter_version` fails, unless the root sets
@@ -44,11 +47,15 @@ rules_dart rules and flags you use directly.
    [Android](#android)), or keep the installed ones with
    `configure(api_level = ...)` pinned. Keep `rules_flutter`'s `bazel_dep`
    above `rules_android`'s.
-9. Android Maven: a `maven.install(name = "rules_android_maven")` carrying
-   plugin artifacts → `maven.install(name = "rules_flutter_maven")`, pinned
-   with `REPIN=1 bazel run @rules_flutter_maven//:pin`. An app whose plugins
-   declare no Maven artifacts needs no install.
-   `bazel run @<hub>//android:maven_artifacts` lists what the plugins need.
+9. Android Maven: artifacts your plugins or your own Android code need, in
+   a `maven.install(name = "rules_android_maven")` → a
+   `maven.install(name = "rules_flutter_maven")`, pinned with
+   `REPIN=1 bazel run @rules_flutter_maven//:pin`. rules_flutter no longer
+   adds to `rules_android_maven`, and rules_android resolves its own tools
+   there with the lock it ships: delete that install, and keep a re-pin of
+   rules_android's artifacts only if your build still fails without it. `bazel run @<hub>//android:maven_artifacts`
+   lists the artifacts your plugins declare. An app that needs none needs no
+   install.
 10. Apple plugins that use remote Swift packages →
     `flutter_pub.from_lock(swift_package_resolved = ...)`, written by
     `bazel run @<hub>//swift:resolve`.
@@ -89,7 +96,9 @@ rules_dart rules and flags you use directly.
     program of that same package. Fix `rootBundle`/`AssetImage` keys that
     assumed the old layout.
 18. `fonts_json` + `font_files` → `flutter_font_family` and `flutter_font`
-    targets listed in `fonts`.
+    targets listed in a `flutter_library`'s or `flutter_plugin`'s `fonts`.
+    An app's own fonts go on a `flutter_library` of the app's package (one
+    with only `fonts` will do), so that they bundle without `packages/<name>/`.
 19. `license_files` → `license_file` (on the metadata) and
     `additional_licenses`.
 20. Icon tree shaking fails on a non-constant `IconData` and matches fonts by
@@ -127,7 +136,8 @@ rules_dart rules and flags you use directly.
     (1)).
 30. `flutter_web_app`/`flutter_web_bundle(main, deps, ...)` →
     `application = ":<flutter_application>"`; `flutter_web_integration_test`
-    likewise. They take `js_platform`/`wasm_platform`. Per-compiler `select`s
+    likewise. One application can serve web and native apps: its
+    `native_deps` and code assets are not built for the web. They take `js_platform`/`wasm_platform`. Per-compiler `select`s
     use `@rules_dart//dart/constraints:js` and `:wasm`; a web-only app's
     `:none` → `@rules_dart//dart/constraints:vm`.
 31. `flutter_web_bundle.track_widget_creation` → removed (debug apps track it
@@ -276,15 +286,7 @@ use_repo(flutter_pub, "deps")
 
 `flutter.toolchain` downloads the Flutter SDK and engine. Your root module's `flutter_version` is the one built with. A dependency never gets an older release than it asks for, so if one asks for a newer release than your pin, the build fails and names it: raise your pin, or set `allow_upgrade_by_dependencies = True` on your `flutter.toolchain` to build with the highest version any module asks for. Without a root pin, the highest version asked for is used. `flutter_pub.from_lock` reads your `pubspec.lock` and creates a repository, here named `deps`, with one target per package: `@deps//:flutter`, `@deps//:flutter_test`, `@deps//:collection`, and so on. See [Pub packages](#pub-packages). The two are separate extensions so that a lock `flutter_pub` refuses leaves the toolchain working, and with it the command that fixes the lock.
 
-Some platforms need one more repository from the `flutter` extension. Add it to `use_repo(flutter, ...)` when you build for that platform:
-
-| Platform | Add to `use_repo` |
-|---|---|
-| macOS | `flutter_macos_engine` |
-| iOS | `flutter_ios_engine` |
-| Web | `flutter_web_sdk` |
-
-Android needs none: the engine of each ABI is rules_flutter's own, so a workspace names no Android engine repository.
+Building for any platform needs nothing more from the `flutter` extension: the rules find the engine and web SDK repositories themselves. A BUILD file of yours that names one of them, `flutter_macos_engine`, `flutter_ios_engine` or `flutter_web_sdk`, needs it in `use_repo(flutter, ...)`. Android has no such repository: the engine of each ABI is rules_flutter's own.
 
 The macOS and iOS engine repositories name the engine of the build mode directly, for a rule of your own that links the engine: `@flutter_macos_engine//:engine_library` and `@flutter_ios_engine//:Flutter_xcframework` are the debug engine under `-c dbg`, the profile engine under `-c opt --@rules_flutter//flutter:profile`, and the release engine under any other `-c opt`. To pin one engine whatever the mode, use `engine_debug_library`, `engine_profile_library` or `engine_release_library` on macOS (the Linux and Windows engines of the SDK repositories are named the same way), and `Flutter_xcframework_debug`, `Flutter_xcframework_profile` or `Flutter_xcframework_release` on iOS.
 
@@ -1063,7 +1065,7 @@ macos_application(
 
 ### iOS
 
-Requires Xcode. Run `flutter create --platforms=ios .` first so `ios/Runner/` exists, and add `flutter_ios_engine` to `use_repo`.
+Requires Xcode. Run `flutter create --platforms=ios .` first so `ios/Runner/` exists.
 
 ```starlark
 load("@rules_flutter//flutter:ios.bzl", "flutter_ios_app")
@@ -1867,7 +1869,7 @@ flutter_windows_bundle(
 
 ### Web
 
-Run `flutter create --platforms=web .` first so `web/` has its `index.html`, `manifest.json`, and icons. Any of those that are missing are replaced by built-in templates. Add `flutter_web_sdk` to `use_repo`.
+Run `flutter create --platforms=web .` first so `web/` has its `index.html`, `manifest.json`, and icons. Any of those that are missing are replaced by built-in templates.
 
 ```starlark
 load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application")
