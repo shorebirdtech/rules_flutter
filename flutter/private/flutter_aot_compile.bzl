@@ -8,7 +8,7 @@ Output format depends on the target platform:
 """
 
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
-load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
+load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "SPLIT_DEBUG_INFO_ATTR", "split_debug_info")
 
 _FLUTTER_TOOLCHAIN = Label("//flutter:toolchain_type")
 
@@ -33,9 +33,8 @@ _RESOLVE_DWARF_PATHS_REFUSED = (
 # compiles. Like `flutter build --split-debug-info` and `--obfuscate`, they are
 # the build's, not the app's: rules_dart's flag splits the debug info of every
 # AOT program in the build, a `dart_binary`'s too.
-GEN_SNAPSHOT_SETTINGS_ATTRS = {
+GEN_SNAPSHOT_SETTINGS_ATTRS = SPLIT_DEBUG_INFO_ATTR | {
     "_obfuscate": attr.label(default = Label("//flutter:obfuscate")),
-    "_split_debug_info": attr.label(default = Label("@rules_dart//dart:split_debug_info")),
 }
 
 _OBFUSCATE_NEEDS_SPLIT = (
@@ -79,8 +78,8 @@ def gen_snapshot_options(ctx, inputs = None):
     if inputs == None:
         inputs = struct(extra_gen_snapshot_options = ctx.attr.extra_gen_snapshot_options)
     obfuscate = ctx.attr._obfuscate[BuildSettingInfo].value
-    split_debug_info = ctx.attr._split_debug_info[BuildSettingInfo].value
-    if obfuscate and not split_debug_info:
+    split = split_debug_info(ctx)
+    if obfuscate and not split:
         fail(_OBFUSCATE_NEEDS_SPLIT % ctx.label)
     for option in inputs.extra_gen_snapshot_options:
         if option.partition("=")[0].replace("_", "-") == "--resolve-dwarf-paths":
@@ -106,7 +105,7 @@ def gen_snapshot_options(ctx, inputs = None):
     if obfuscate:
         flags.append("--obfuscate")
     debug_info = None
-    if split_debug_info:
+    if split:
         debug_info = ctx.actions.declare_file(ctx.label.name + ".symbols")
     return struct(
         flags = flags,

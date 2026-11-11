@@ -64,7 +64,7 @@ cannot write there.
 
 load("@bazel_skylib//lib:structs.bzl", "structs")
 load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo", "DartKernelSdkInfo")
-load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "KERNEL_LIST_ATTR", "KERNEL_TOOL_ATTR", "MODULAR_KERNEL_ATTR", "TRACK_CREATION_LOCATIONS_ATTR", "collect_modules", "collect_packages", "collect_transitive_srcs", "dart_entry_kernel_action", "dart_import_check_aspect", "dart_link_kernel_action", "executable_defines", "executable_defines_config", "import_check_validation", "kernel_list", "modular_kernel", "package_identity_attrs", "runfiles_path", "track_creation_locations")
+load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "KERNEL_LIST_ATTR", "KERNEL_TOOL_ATTR", "MODULAR_KERNEL_ATTR", "TRACK_CREATION_LOCATIONS_ATTR", "collect_modules", "collect_packages", "collect_transitive_runfiles", "collect_transitive_srcs", "dart_entry_kernel_action", "dart_import_check_aspect", "dart_link_kernel_action", "executable_defines", "executable_defines_config", "import_check_validation", "kernel_list", "modular_kernel", "package_identity_attrs", "runfiles_path", "track_creation_locations")
 load("//flutter:providers.bzl", "FlutterApplicationInputsInfo", "FlutterTestProgramInfo")
 load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "synthesize_app_package")
 load("//flutter/private:application_libraries.bzl", "application_libraries", "application_libraries_aspect")
@@ -571,12 +571,8 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
 
     # What the libraries the program reaches need at run time (a
     # `dart_library`'s or `flutter_library`'s `data`), as rules_dart's
-    # `dart_test` carries it. `getattr`: a hand-built `DartInfo` may lack it.
-    runfiles = runfiles.merge_all([
-        dep[DartInfo].runfiles
-        for dep in deps
-        if getattr(dep[DartInfo], "runfiles", None) != None
-    ])
+    # `dart_test` carries it.
+    runfiles = runfiles.merge(collect_transitive_runfiles(ctx, deps))
 
     info = FlutterTestProgramInfo(
         kernel = kernel_dill,
