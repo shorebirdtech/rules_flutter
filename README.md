@@ -999,6 +999,49 @@ Every application that reaches the package bundles each asset at `flutter_assets
 
 A debug build runs no hooks and ships every declared asset. In a release or profile build, native or web, a package with a link hook receives its declared assets and ships only those the hook emits (see [Link hooks](#link-hooks)). `e2e/_overlay_tests/native_assets_synthetic` loads one in a running app.
 
+### Link hooks
+
+A package can choose what it ships from how the app uses it, as with `flutter build`. Mark a `final class` with `@RecordUse()` from `package:meta` (1.19 or later). Then write a `hook/link.dart` that reads the recorded uses with `package:record_use` and emits data assets with `package:data_assets`. The hook may import pure Dart from its own package's `lib/`, but not Flutter. This is [`e2e/_overlay_tests/link_hooks`](e2e/_overlay_tests/link_hooks), where the hook ships only the glyphs the app constructs:
+
+```starlark
+# glyphs/BUILD.bazel
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "glyphs",
+    data_assets = [":heart", ":moon", ":star"],  # dart_data_asset targets
+    link_hook = "hook/link.dart",
+)
+
+flutter_plugin(
+    name = "glyphs",
+    package = ":pubspec-metadata",
+    srcs = glob(["lib/**/*.dart"]),  # not hook/link.dart
+    platforms = [],
+    deps = ["@deps//:data_assets", "@deps//:hooks", "@deps//:meta", "@deps//:record_use"],
+)
+
+# BUILD.bazel
+flutter_application(
+    name = "app",
+    package = ":pubspec-metadata",
+    main = "lib/main.dart",
+    deps = ["//glyphs", "@deps//:flutter"],
+)
+```
+
+Hooks run only in release and profile builds, where the compile records the uses: the kernel compile of a native app, and the dart2wasm compile of a web app (dart2js when it has no WebAssembly build). Every package of the application that has a hook runs it. That includes the application's own package, whether or not a library in `deps` names its `dart_package_metadata`, and its hook may import the application's files under `lib/`.
+
+A hook receives its package's declared [data assets](#data-assets) and ships only those it emits. Packages without a hook ship theirs as declared. What ships is bundled at `flutter_assets/packages/<package>/<name>`, and loaded with `rootBundle.load('packages/<package>/<name>')`. A hook that reports an error fails the build with its own message; the example has an app that does this.
+
+A debug build records nothing, so no hook runs. Every declared data asset ships, and nothing a hook would write does. Have the app load what the hook would have indexed on demand in a debug build.
+
+A rule that names one of a hook's assets before the build runs can name only one the package promises. List its id in `dart_package_metadata(link_hook_assets = [...])`, and the hook must then always emit it.
+
+A hook can also choose among its package's code assets, with `package:code_assets`. In a release or profile build, the app's Native Assets manifest and bundles, and its macOS add-to-app xcframeworks, carry only the libraries the hooks keep. iOS is different, because rules_apple embeds every framework it knows of when it analyses the app:
+
+- A `flutter_ios_app` embeds every candidate, then removes the dropped ones before signing, with an `ipa_post_processor` of rules_flutter's. rules_apple runs one post-processor, so if you give the app your own, that one runs instead, and a hook that drops a code asset fails the build.
+- iOS add-to-app (`flutter_ios_xcframeworks`) fails a release build when a hook drops a code asset, as `flutter build ios-framework` does. Its simulator slice is a debug build, which runs no hook.
+
 ### Native code from Bazel
 
 A Flutter app can use native code built by any Bazel rule that produces a shared library: `cc_shared_library` from rules_cc, `rust_shared_library` from rules_rust, and so on. List the library in `native_deps`, and it is bundled beside the app, where `dart:ffi` can open it:
@@ -2790,82 +2833,27 @@ A *framework source* is the other half: a repository whose root is a flutter/flu
 
 ## Rules reference
 
-The core rules load from `@rules_flutter//flutter:defs.bzl`.
+This section is for looking a rule up: what it is for, how to declare it, and its attributes. Each rule's docstring, in the `.bzl` file it is defined in, says more about each attribute. The README points you there when the extra detail matters.
 
-### flutter_library
-
-Collects Dart sources and assets for a Flutter package. It does not compile anything. It carries `DartInfo` and `FlutterInfo` to whatever depends on it.
-
-```starlark
-dart_package_metadata(
-    name = "pubspec-metadata",
-    package_name = "my_lib",
-)
-
-flutter_library(
-    name = "my_lib",
-    srcs = glob(["lib/**/*.dart"]),
-    deps = ["@deps//:some_package"],
-    assets = glob(["assets/**"]),
-    package = ":pubspec-metadata",
-)
-```
-
-| Attribute | Description |
-|---|---|
-| `srcs` | Dart source files. Required. |
-| `deps` | `dart_library` or `flutter_library` targets. |
-| `assets` | Asset files: images, fonts, and so on, from anywhere in the Dart package. Bundled at `packages/<package_name>/<path>` in a program of another package and at `<path>` in a program of this package (its own `flutter_test`, or the application this is part of), as `flutter build` keys them. The path is the file's path from the package root, the directory above `lib/`, so a file listed here is one of the package's: to bundle a file from elsewhere (another package, or a generated file) at a path of this package, put it at that path with a rule of this package, such as `copy_file`, and list that. |
-| `fonts` | The package's font families, `flutter_font_family` targets, as `flutter: fonts:` in `pubspec.yaml` declares them (see [Fonts](#fonts)). A program of another package sees each family as `packages/<package_name>/<family>`, and each font at `packages/<package_name>/<path>`; a program of this package sees both bare, as `flutter build` keys them. |
-| `shaders` | The package's fragment shaders, mirroring `flutter: shaders:` in `pubspec.yaml`, keyed by their path from the package root as `assets` are. Bundled at `packages/<package_name>/<path>` in a program of another package and at `<path>` in a program of this package (its own `flutter_test`, or the application this is part of), as `flutter build` keys them, where `FragmentProgram.fromAsset` looks for them. |
-| `shader_includes` | Files the `shaders` may `#include`, such as `glob(["shaders/**/*.glsl"])`. A shader compiles with only its declared inputs, so an include not listed here is not found. |
-| `data` | Files the library needs at run time on the host, outside its `lib/`: a fixture, a model, a tool it runs. As with `dart_library.data`, they join the runfiles of every `flutter_test`, `flutter_tester_binary`, `dart_test` and `dart_binary` that reaches the library, found there with `rlocation`. An application does not ship them, nor does an integration test, whose code runs in the app; a file an app loads at run time is one of its `assets`, as with `flutter build`. |
-| `package` | The package's `dart_package_metadata`, `:pubspec-metadata` in the BUILD file at the package root, which states its name, its language version (the `sdk:` constraint in `pubspec.yaml`), its version, its licence and its hooks. Its directory is the package root, and `srcs` and `resources` must be under that root's `lib/`. Without it, the package is named for its root directory and states nothing else. |
-
-#### Fonts
-
-A font family is a target, as an entry of `flutter: fonts:` is, and each of its fonts a file or a `flutter_font` with the entry's `weight` and `style`:
-
-```starlark
-flutter_font(
-    name = "inter_bold",
-    src = "fonts/Inter-Bold.ttf",
-    weight = 700,  # 100 to 900; style = "italic" or "normal"
-)
-
-flutter_font_family(
-    name = "inter",
-    family = "Inter",
-    fonts = [
-        "fonts/Inter-Regular.ttf",  # no weight, no style
-        ":inter_bold",
-    ],
-)
-
-flutter_library(
-    name = "ui",
-    srcs = glob(["lib/**/*.dart"]),
-    fonts = [":inter"],
-    package = ":pubspec-metadata",
-)
-```
-
-| Rule | Attribute | Description |
+| You want to | Use | Load from |
 |---|---|---|
-| `flutter_font_family` | `family` | The family name, which `TextStyle.fontFamily` selects. Defaults to the target's name. |
-| | `fonts` | Its fonts, in order: `flutter_font` targets, or font files, each a font with no weight and no style. |
-| `flutter_font` | `src` | The font file. Required. |
-| | `weight` | `100` to `900`, in steps of 100. Unset, the font has none. |
-| | `style` | `normal` or `italic`. Unset, the font has none. |
-| | `asset` | For a font of another package, the `packages/<package>/<path>` a pubspec names it by: every program bundles `src` at that path. |
+| Compile an app's Dart and bundle its assets | [`flutter_application`](#flutter_application) | `@rules_flutter//flutter:defs.bzl` |
+| Share Dart code and assets between targets | [`flutter_library`](#flutter_library) | `defs.bzl` |
+| Write a plugin in your workspace | [`flutter_plugin`](#flutter_plugin) | `defs.bzl` |
+| Build the app with another entry point | [`flutter_application_variant`](#flutter_application_variant) | `@rules_flutter//flutter:integration_test.bzl` |
+| Run widget and unit tests | [`flutter_test`](#flutter_test) | `defs.bzl` |
+| Run tests in the real app, on a device or in a browser | [Integration tests](#integration-tests) | `integration_test.bzl` |
+| Make build outputs with Flutter's renderer, such as screenshots | [`flutter_tester_binary`](#flutter_tester_binary) | `defs.bzl` |
+| Test a profile build, or an APK for fixed ABIs, in a plain `bazel test` | [`flutter_profile_build`](#flutter_profile_build), [`flutter_android_build`](#flutter_android_build) | `defs.bzl`, `@rules_flutter//flutter:android.bzl` |
+| Sign an Android release | [`flutter_android_release`](#flutter_android_release) | `android.bzl` |
+| Generate code instead of running `build_runner` or `flutter gen-l10n` | [Code generation](#code-generation) | `@rules_dart//dart:defs.bzl`, `defs.bzl` |
+| Write your own rule over these | [Providers](#providers), [Lower-level rules](#lower-level-rules) | `@rules_flutter//flutter:providers.bzl`, `defs.bzl` |
 
-A font is a file of the package whose `flutter_library` or `flutter_plugin` lists the family, keyed by its path from the package root, as an asset is; a file outside it fails the build unless `asset` names it as another package's.
-
-**Fonts fetched at run time.** `package:google_fonts` downloads fonts over the network when the app first draws them. In a `flutter_test`, whose test binding answers every HTTP request with an error, a widget drawing such a font fails, and an app offline falls back to another font. To ship the fonts instead, list their `.ttf` files (`Lato-Regular.ttf`, as Google Fonts names them) in a `flutter_library`'s `assets`, where `google_fonts` finds them by file name in the asset manifest, and set `GoogleFonts.config.allowRuntimeFetching = false` before `runApp`.
+The platform rules (`flutter_macos_app` and the rest) are in [Building for each platform](#building-for-each-platform).
 
 ### flutter_application
 
-Compiles a Flutter app. In debug mode (`-c dbg`) it produces a kernel `.dill` for the JIT. Otherwise it produces AOT native code. Either way it also builds the `flutter_assets/` bundle. The platform macros consume its `FlutterApplicationInfo`, except the web app's, which compiles the application's program itself with the web compilers (see [Web](#web)).
+Compiles an app's Dart and builds its `flutter_assets/` bundle. Under `-c dbg` the Dart becomes a kernel `.dill` that the JIT runs. Under any other `-c` it is AOT native code. Each platform's app rule takes the application as its `application` (see [Your first app](#your-first-app)). The web app rule compiles the application's program itself, with the web compilers (see [Web](#web)).
 
 ```starlark
 dart_package_metadata(
@@ -2887,33 +2875,250 @@ flutter_application(
 )
 ```
 
-| Attribute | Description |
+| Attribute | Default | Description |
+|---|---|---|
+| `main` | required | The entry point. It may be outside `lib/`, as `flutter run -t test_driver/app.dart` allows. |
+| `package` | required | The app's `dart_package_metadata`. Its `package_name` is the `name:` of `pubspec.yaml`, which `package:my_app/...` imports and hot reload key libraries by. |
+| `srcs` | `[]` | The app package's other Dart files, generated ones included. A `main` outside `lib/` that imports a file by relative path needs that file here. |
+| `deps` | `[]` | `dart_library` and `flutter_library` targets. Add `@rules_flutter//flutter:material_icons` for the Material icon font. |
+| `assets` | `[]` | Files of the application's Bazel package. Each is bundled under its path in that package (`assets/a.png`), the key `rootBundle` and `Image.asset` load it by, as with `flutter run`. A file from another package fails the build. |
+| `native_deps` | `[]` | Shared libraries to bundle for `dart:ffi`. A web app bundles none. |
+| `code_assets` | `[]` | The library this program uses for an asset id, in place of the one its packages supply. See [Choosing the library that serves an asset id](#choosing-the-library-that-serves-an-asset-id). |
+| `defines` | `[]` | Dart environment defines, `flutter build`'s `--dart-define`. |
+| `flavor` | `""` | `flutter build --flavor`. See [Flavors](#flavors). |
+| `build_name`, `build_number` | unset: `1.0.0`, `1` | `flutter build --build-name` and `--build-number`. See [App version](#app-version). |
+| `shaders` | `[]` | `.frag` or `.glsl` fragment shaders, compiled with `impellerc`. |
+| `shader_includes` | `[]` | Files the `shaders` `#include`. A shader compiles with only its declared inputs, so an include not listed here is not found. |
+| `require_sksl_shaders` | `False` | Fail the build when a shader can't be compiled for Skia. By default such a shader is compiled for Impeller alone, with a warning, as `flutter build` does. It then fails to load only where the app renders with Skia. Web builds always need Skia shaders. |
+| `tree_shake_icons` | `True` | In a release or profile build, keep only the icon glyphs the app uses. As with `flutter build`, this needs every `IconData` to be a constant and each icon font family the app draws from to be one font file, and the build fails otherwise. Set it to `False` to ship the fonts whole. |
+| `track_widget_creation` | `True` | In a debug or profile build, record where each widget was created, for the DevTools inspector, as `flutter run` does. A release build never records it. |
+| `extra_gen_snapshot_options` | `[]` | Flags for `gen_snapshot`. `--no-strip` keeps the shipped binary's symbols, as in `flutter build`. It is read by the rules, not passed on. A flag that makes `gen_snapshot` write a file names it relative to the package: `--save-obfuscation-map=obfuscation.json` writes `<name>_gen_snapshot/obfuscation.json`, in the `gen_snapshot_files` output group. `--resolve-dwarf-paths` is refused. |
+| `additional_licenses` | `[]` | The files `flutter: licenses:` lists in `pubspec.yaml`. They are appended to the licence notices as they are. |
+| `minimum_os_version` | `""` | The Apple deployment target given to `gen_snapshot`. The iOS and macOS app rules set it, so you rarely do. |
+
+**Licences.** An app's licence page reads `NOTICES.Z` from its bundle (`NOTICES` on the web). It lists the app's own licence, the `license_file` of its `dart_package_metadata`, under the package name. Then it lists the licence of each package in `deps`, and the Flutter engine's. A pub package's licence is its `NOTICES` or `LICENSE` file. A package of your workspace states its own, as the `license_file` of its `dart_package_metadata`.
+
+**Defines from the command line.** `--@rules_dart//dart:extra_dart_defines=KEY=VALUE` adds a define to every Dart compile in the build: Flutter kernels, `flutter_test`, dart2wasm, dart2js, and rules_dart's `dart_test` and `dart_binary`. Repeat it for more defines. Tools built for the execution platform don't get them. When a key is in both the flag and `defines`, the flag wins. A value may contain commas, except in a `flutter_test`, which refuses one at analysis: its dependencies are compiled by the SDK's `kernel_worker`, which splits every value on commas. The keys the build sets itself are refused in both places: `dart.vm.profile` and `dart.vm.product`, `FLUTTER_APP_FLAVOR`, `FLUTTER_BUILD_NAME`, `FLUTTER_BUILD_NUMBER`, the `FlutterVersion` keys, and `flutter.dart_plugin_registrant`. `flutter_bazel run --dart-define` sets this flag, and keeps the defines for hot reload and hot restart, as `flutter run --dart-define` does.
+
+### flutter_library
+
+Collects a package's Dart sources and assets for other targets to depend on. It compiles nothing. Whatever depends on it compiles its sources and bundles its assets.
+
+```starlark
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "my_lib",
+)
+
+flutter_library(
+    name = "my_lib",
+    package = ":pubspec-metadata",
+    srcs = glob(["lib/**/*.dart"]),
+    deps = ["@deps//:some_package"],
+    assets = glob(["assets/**"]),
+)
+```
+
+A package's assets are keyed by their path from the package root, the directory above `lib/`, as its `pubspec.yaml` lists them. A program of another package bundles `assets/logo.png` of `my_lib` at `packages/my_lib/assets/logo.png`. A program of the same package (its own `flutter_test`, or the application whose code this is) bundles it at `assets/logo.png`. This is how `flutter build` keys them, and it applies to `fonts` and `shaders` too.
+
+| Attribute | Default | Description |
+|---|---|---|
+| `srcs` | required | The package's Dart files. They must be under its `lib/`. |
+| `package` | none | The package's `dart_package_metadata`, `:pubspec-metadata` in the BUILD file at the package root. Without it, the package is named after its root directory and states nothing else. |
+| `deps` | `[]` | `dart_library` and `flutter_library` targets. |
+| `assets` | `[]` | `flutter: assets:`. Files of the package, keyed as above. To bundle a file from elsewhere, such as a generated one, put it at a path of the package with a rule of the package, such as `copy_file`, and list that. |
+| `fonts` | `[]` | `flutter: fonts:`, as `flutter_font_family` targets. See [Fonts](#fonts). |
+| `shaders` | `[]` | `flutter: shaders:`. `FragmentProgram.fromAsset` loads each by its key. |
+| `shader_includes` | `[]` | Files the `shaders` `#include`, such as `glob(["shaders/**/*.glsl"])`. |
+| `asset_platforms`, `shader_platforms` | `{}` | The `platforms:` of an entry of `flutter: assets:` or `flutter: shaders:`: path to the platforms it ships on. A file not listed ships on all of them. |
+| `asset_flavors`, `shader_flavors` | `{}` | The `flavors:` of an entry: path to the flavors it ships in. A file not listed ships in every build. |
+| `resources` | `[]` | Non-Dart files under `lib/` that are part of the package but not bundled as assets, such as a template another package reads as `package:my_lib/...`. |
+| `data` | `[]` | Files the library needs when it runs on the host: a fixture, a model, a tool it runs. They join the runfiles of every `flutter_test`, `flutter_tester_binary`, `dart_test` and `dart_binary` that reaches the library, found there with `rlocation`. An app doesn't ship them. A file an app loads at run time is an asset. |
+| `additional_licenses` | `[]` | The files `flutter: licenses:` lists. |
+| `runtime_independent` | `False` | Build the library once, rather than once per web compiler. See [Per-compiler code](#per-compiler-code). |
+
+#### Fonts
+
+Each entry of `flutter: fonts:` is a `flutter_font_family`. A font with a `weight` or `style` is a `flutter_font`:
+
+```yaml
+# pubspec.yaml
+flutter:
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: fonts/Inter-Regular.ttf
+        - asset: fonts/Inter-Bold.ttf
+          weight: 700
+```
+
+```starlark
+flutter_font(
+    name = "inter_bold",
+    src = "fonts/Inter-Bold.ttf",
+    weight = 700,
+)
+
+flutter_font_family(
+    name = "inter",
+    family = "Inter",
+    fonts = [
+        "fonts/Inter-Regular.ttf",  # a plain file: no weight, no style
+        ":inter_bold",
+    ],
+)
+
+flutter_library(
+    name = "ui",
+    package = ":pubspec-metadata",
+    srcs = glob(["lib/**/*.dart"]),
+    fonts = [":inter"],
+)
+```
+
+| Rule | Attribute | Default | Description |
+|---|---|---|---|
+| `flutter_font_family` | `family` | the target's name | The name `TextStyle.fontFamily` selects. |
+| | `fonts` | required | Its fonts, in order: `flutter_font` targets, or plain font files. |
+| `flutter_font` | `src` | required | The font file. |
+| | `weight` | none | `100` to `900`, in steps of 100. |
+| | `style` | none | `normal` or `italic`. |
+| | `asset` | none | For a font of another package, the `packages/<package>/<path>` that `asset:` names it by. Every program bundles `src` at that path. |
+
+A font is a file of the package whose `flutter_library` or `flutter_plugin` lists the family, and is keyed like that package's assets. A file from another package fails the build unless `asset` names it.
+
+**Fonts that `google_fonts` fetches.** `package:google_fonts` downloads a font the first time the app draws with it. A `flutter_test` answers every HTTP request with an error, so a widget drawn with such a font fails there, and an app that is offline falls back to another font. To ship the fonts instead, list their `.ttf` files (named as Google Fonts names them, `Lato-Regular.ttf`) in a `flutter_library`'s `assets`. `google_fonts` finds them by file name in the asset manifest. Then set `GoogleFonts.config.allowRuntimeFetching = false` before `runApp`.
+
+### flutter_plugin
+
+Declares a plugin written in your workspace: its Dart code, and its registration and native code on each platform. Plugins from pub don't need this, because the pub hub declares them.
+
+Each entry of `flutter: plugin: platforms:` is a `flutter_plugin_platform`. This is [`e2e/plugin_example/glass_plugin`](e2e/plugin_example/glass_plugin/BUILD.bazel), whose iOS and macOS code is one Swift library:
+
+```yaml
+# pubspec.yaml
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.example.glass_plugin
+        pluginClass: GlassPlugin
+      ios:
+        pluginClass: GlassPlugin
+        sharedDarwinSource: true
+      macos:
+        pluginClass: GlassPlugin
+        sharedDarwinSource: true
+  shaders:
+    - shaders/invert.frag
+    - shaders/tint.frag
+```
+
+```starlark
+load("@rules_flutter//flutter:android.bzl", "flutter_android_engine", "flutter_android_plugin_library")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_plugin", "flutter_plugin_platform")
+load("@rules_flutter//flutter:macos.bzl", "flutter_apple_plugin_library")
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "glass_plugin",
+)
+
+flutter_plugin(
+    name = "glass_plugin",
+    package = ":pubspec-metadata",
+    srcs = ["lib/glass_plugin.dart"],
+    platforms = [":android", ":ios", ":macos"],
+    shaders = ["shaders/invert.frag", "shaders/tint.frag"],
+    shader_includes = glob(["shaders/*.glsl"]),
+    # The plugin's Kotlin, which every Android app that depends on it links.
+    exports = select({
+        "@platforms//os:android": [":glass_plugin_android"],
+        "//conditions:default": [],
+    }),
+    deps = ["@deps//:flutter"],
+)
+
+flutter_plugin_platform(
+    name = "android",
+    platform = "android",
+    plugin_class = "GlassPlugin",
+    package = "com.example.glass_plugin",
+)
+
+flutter_plugin_platform(
+    name = "ios",
+    platform = "ios",
+    plugin_class = "GlassPlugin",
+    lib = ":glass_plugin_apple",
+)
+
+flutter_plugin_platform(
+    name = "macos",
+    platform = "macos",
+    plugin_class = "GlassPlugin",
+    lib = ":glass_plugin_apple",
+)
+
+# platform = "darwin" compiles for whichever of iOS and macOS the build is for.
+flutter_apple_plugin_library(
+    name = "glass_plugin_apple",
+    srcs = ["darwin/Classes/GlassPlugin.swift"],
+    module_name = "glass_plugin",
+    platform = "darwin",
+)
+
+# Compile-only: the app packages its own engine, for its own ABI.
+flutter_android_engine(
+    name = "android_engine",
+    neverlink = True,
+    tags = ["manual"],
+)
+
+flutter_android_plugin_library(
+    name = "glass_plugin_android",
+    srcs = glob(["android/src/main/kotlin/**/*.kt"]),
+    flutter_engine = ":android_engine",
+    java_package = "com.example.glass_plugin",
+    manifest = "android/src/main/AndroidManifest.xml",
+)
+```
+
+| Attribute of `flutter_plugin_platform` | pubspec key | Description |
+|---|---|---|
+| `platform` | the key under `platforms:` | `android`, `ios`, `linux`, `macos`, `web` or `windows`. Required. |
+| `plugin_class` | `pluginClass` | The class registered with the platform's plugin registry. On the web, the Dart class whose `registerWith(Registrar)` the web registrant calls. |
+| `dart_plugin_class` | `dartPluginClass` | The Dart class whose `registerWith()` runs before `main()`. |
+| `dart_file_name` | `dartFileName` | The library under `lib/` that declares `dart_plugin_class`. Defaults to `<package>.dart`. Not on the web. |
+| `file_name` | `fileName` | The library under `lib/` that declares a web `plugin_class`. Defaults to `<package>.dart`. Web only. |
+| `ffi_plugin` | `ffiPlugin` | The platform's native code is a library Dart opens through `dart:ffi`. |
+| `default_package` | `default_package` | The package that implements a federated plugin on this platform. |
+| `package` | `package` | The Java package of an Android `plugin_class`. Android only, and required with a `plugin_class`. |
+| `group` | `group` in `android/build.gradle` | The Maven group a `flutter_android_aar` repository publishes the plugin under. Android only, and required for that. |
+| `lib` | | The native library: a `flutter_apple_plugin_library` on iOS and macOS, a `flutter_linux_plugin_library` or `flutter_windows_plugin_library` on the desktops. Only a build for `platform` analyses it. Android's goes in the plugin's `exports`, and the web has none. |
+
+A platform needs a `plugin_class`, a `dart_plugin_class`, `ffi_plugin` or a `default_package`, as flutter_tools requires.
+
+| Attribute of `flutter_plugin` | Description |
 |---|---|
-| `main` | The entry point. Required. It can sit outside the package's `lib/`, as `flutter run -t` allows: `test_driver/app.dart`, say. See [Hot reload and hot restart](#hot-reload-and-hot-restart). |
-| `package` | The app's `dart_package_metadata`. Required. Its `package_name` is the same as `pubspec.yaml`'s `name:`; it keys the compiled libraries under stable `package:` URIs, which hot reload matches against, and resolves `package:<self>/...` imports. |
-| `srcs` | Other Dart sources in the app package, including generated ones. List here any file a `main` outside `lib/` imports by relative path. |
-| `deps` | `dart_library` or `flutter_library` targets. Add `@rules_flutter//flutter:material_icons` to bundle the Material icon font. |
-| `assets` | Asset files for the bundle, each under its path in the application's Bazel package (`assets/a.png`), wherever in the workspace that package is. That is the key `rootBundle` and `Image.asset` load it by, and the one `flutter run` gives it. A file from another package fails the build. |
-| `native_deps` | Shared libraries to bundle for `dart:ffi`. A web app built over the application bundles none, as `flutter build web` builds no native code. |
-| `defines` | Dart environment defines, the `-D` flags. |
-| `extra_gen_snapshot_options` | Extra flags for `gen_snapshot`. `--no-strip` keeps the shipped binary's local symbols, as it does in `flutter build`; it is not passed on to `gen_snapshot`. A flag that makes `gen_snapshot` write a file (`--save-obfuscation-map`, `--write-v8-snapshot-profile-to`, `--print-instructions-sizes-to`) names it relative to the package, as `--save-obfuscation-map=obfuscation.json`. The file is built to `<name>_gen_snapshot/obfuscation.json`, and it is in the target's `gen_snapshot_files` output group. |
-| `track_widget_creation` | Record where each widget was created, for the DevTools inspector, as `flutter run` does. Debug and profile builds; a release build never does. Default `True`. |
-| `shaders` | Fragment shaders to compile with impellerc. |
-| `shader_includes` | Files the `shaders` may `#include`. |
-| `require_sksl_shaders` | Fail the build when a shader cannot be compiled for Skia (SkSL). By default such a shader, say one that indexes a uniform array in a loop, is compiled for Impeller alone with a warning, as `flutter build` does, and fails to load only where the app renders with Skia. Web builds always need SkSL. Default `False`. |
-| `tree_shake_icons` | Keep only the icon glyphs the app uses, in a release or profile build. Default `True`. It needs every `IconData` to be constant, and an icon font family of one font file; as with `flutter build`, a non-constant `IconData`, a family of several font files that the app draws icons from, or a `const_finder` or `font-subset` that fails fails the build. Set `False` to ship the fonts whole. |
-| `additional_licenses` | The files the pubspec's `flutter: licenses:` lists. They are appended to `NOTICES.Z` as they are, after the sorted entries. |
-| `minimum_os_version` | Minimum Apple deployment target, passed to `gen_snapshot` as `--macho-min-os-version`. |
+| `srcs` | The plugin's Dart files. |
+| `deps` | `dart_library` and `flutter_library` targets. |
+| `package` | The package's `dart_package_metadata`, as on `flutter_library`. It also carries the package's code and data assets (see [Data assets](#data-assets)) and its link hook (see [Link hooks](#link-hooks)). |
+| `platforms` | A `flutter_plugin_platform` for each platform the plugin registers on. |
+| `exports` | The plugin's Android library, in a `select()` on `@platforms//os:android` with `[]` as the default. It is here, and not on the `android` platform, because rules_android finds a library to dex only through `exports`. |
+| `native_deps` | Shared libraries to bundle for `dart:ffi`. |
+| `apple_privacy_files` | The `PrivacyInfo.xcprivacy` files the plugin adds to an iOS or macOS app. |
+| `assets`, `fonts`, `shaders`, `shader_includes`, `asset_platforms`, `asset_flavors`, `shader_platforms`, `shader_flavors`, `resources`, `data`, `additional_licenses`, `runtime_independent` | As on [`flutter_library`](#flutter_library). |
 
-**Licences.** The program's own licence is the `license_file` of its `dart_package_metadata`, the `NOTICES` or `LICENSE` file at the root of its package. `NOTICES.Z` (`NOTICES` on the web) lists it under the package name, with the licence of every package in `deps` (each package states its own: a package of your workspace as the `license_file` of its `dart_package_metadata`) and the Flutter engine's, which every program ships.
+A plugin's native code is a target of its own. Swift goes in a `flutter_apple_plugin_library`. Kotlin or Java goes in a `flutter_android_plugin_library`, whose `flutter_engine` is a `flutter_android_engine(neverlink = True)`: the plugin compiles against the engine, and each app ships an engine for its own ABI. An Android app that depends on the plugin packages the library, registers its plugin class, and merges its `manifest` (receivers, services, permissions) into the app's. The library gets a `BuildConfig` in its `java_package`, with `DEBUG` and `BUILD_TYPE` as Gradle would set them for the build's mode.
 
-**Defines from the command line.** The repeatable flag `--@rules_dart//dart:extra_dart_defines=KEY=VALUE` adds a define to every Dart compile: native kernel, `flutter_test`, dart2wasm, and dart2js. It is rules_dart's flag, so the `dart_test` and `dart_binary` targets of the same build take the same defines; build tools in the exec configuration are compiled without them. Each occurrence of the flag is one define, so values may contain commas, except in a `flutter_test`: its dependencies are compiled one library at a time by the SDK's `kernel_worker`, which splits every value on commas, so a comma there is refused at analysis. When a key is set both by the flag and by the `defines` attribute, the flag wins. The keys the Flutter build sets itself (`dart.vm.profile` and `dart.vm.product` from the compilation mode, `FLUTTER_APP_FLAVOR` from `flavor`, `FLUTTER_BUILD_NAME` and `FLUTTER_BUILD_NUMBER` from `build_name` and `build_number`, the `FlutterVersion` ones, and `flutter.dart_plugin_registrant`) are refused, in the flag and in `defines`, when a Flutter target is built. The dev tool's `--dart-define` forwards to this flag and replays the defines on hot reload and restart, matching `flutter run --dart-define`.
+More plugins in the examples: [`e2e/plugin_example/greeting_plugin`](e2e/plugin_example/greeting_plugin/BUILD.bazel) has a Dart plugin class and no native code, [`e2e/ffi_plugin_example`](e2e/ffi_plugin_example/multiply_plugin/BUILD.bazel) a Dart plugin class with `native_deps`, and [`e2e/ffi_example`](e2e/ffi_example) plugins built on Native Assets.
 
 ### flutter_application_variant
 
-The same application with another `main`. It compiles the application's program again with `main` as the entry point, adds `srcs`, `deps` and `defines` to the application's, and keeps the rest (the application's own `main` stays a source, for the new one to import): its Dart package (so `package:my_app/...` imports in the new `main` resolve), assets, native libraries, shaders and build options. It returns what `flutter_application` returns, so every platform rule takes it as its `application`. The framework and each package are compiled once for the variant and the application alike.
+The same application with another `main`, as `flutter run -t test_driver/app.dart` runs one. The variant compiles the application's program again with the new entry point. It adds its own `srcs`, `deps` and `defines` to the application's, and keeps everything else: the Dart package, so `package:my_app/...` imports in the new `main` resolve, and the assets, native libraries, code assets, shaders and build options. The application's own `main` stays among the sources, so the new one can import it. The framework and each package are compiled once and shared by both.
 
-It is exported from `@rules_flutter//flutter:integration_test.bzl`, beside the rules that run integration tests, but it is not tied to them: an entry point of its own, as `flutter run -t test_driver/app.dart` runs, is the same shape.
+It returns what `flutter_application` returns, so any platform rule takes it as its `application`. It loads from `integration_test.bzl`, because the integration test macros are built on it, but it works on its own:
 
 ```starlark
 load("@rules_flutter//flutter:integration_test.bzl", "flutter_application_variant")
@@ -2934,34 +3139,33 @@ flutter_macos_app(
 
 | Attribute | Description |
 |---|---|
-| `application` | The `flutter_application` to rebuild. Required. It may be in another Bazel package: the variant is in the application's Dart package and its assets keep their keys there. |
-| `main` | The entry point, in place of the application's. Required. It may sit outside the package's `lib/`. |
-| `srcs`, `deps`, `defines` | Added to the application's. A plugin only the variant's `deps` bring is registered in the variant and not in the application. |
-| `unchecked_srcs` | Sources added like `srcs` whose imports are not checked against the program's `deps`: files a rule wrote for the program, whose imports are that rule's to get right. The integration test macros use it for the bootstrap and its support library. |
-| `requires_packages` | Packages the program must have, by name. Analysis fails, naming the package and the `@<hub>//:<package>` target to add, if no dependency brings one. |
+| `application` | The `flutter_application` to rebuild. Required. It may be in another Bazel package. |
+| `main` | The new entry point. Required. It may be outside `lib/`. |
+| `srcs`, `deps`, `defines` | Added to the application's. A plugin that only the variant's `deps` bring is registered in the variant and not in the application. |
+| `unchecked_srcs` | Added like `srcs`, but their imports are not checked against `deps`. For files a rule writes, whose imports are that rule's to get right. |
+| `requires_packages` | Packages the program must have, by name. If no dependency brings one, analysis fails and names the `@<hub>//:<package>` target to add. |
 
 ### flutter_test
 
-Compiles and runs widget and unit tests on the Dart VM with Flutter's test engine. Assertions are enabled.
+Compiles and runs widget and unit tests on Flutter's headless test engine, `flutter_tester`, as `flutter test` does. Assertions are on. This is [`e2e/hello_world`](e2e/hello_world/BUILD.bazel)'s:
 
 ```starlark
-dart_package_metadata(
-    name = "pubspec-metadata",
-    package_name = "my_app",
-)
-
 flutter_test(
     name = "widget_test",
     package = ":pubspec-metadata",
     main = "test/widget_test.dart",
-    srcs = glob(["lib/**/*.dart"]),
-    deps = ["@deps//:flutter", "@deps//:flutter_test"],
+    srcs = [
+        "lib/common_widgets.dart",
+        "lib/main.dart",
+    ],
+    deps = [
+        "@deps//:flutter",
+        "@deps//:flutter_test",
+    ],
 )
 ```
 
-It takes the compile attributes of `flutter_application` (`main`, `srcs`, `deps`, `defines`, `package`, `assets`, `shaders`) plus the usual `data` and `env`, and `include_tags` and `exclude_tags` (below). Values in `env` are literal; there is no `$(location)` expansion.
-
-A test of an app can name the app's `flutter_application` as `application` instead of repeating its package, as `flutter test` compiles a test in the package it is in. The application's package, sources, `deps`, `code_assets` and assets become the test's, so `package:my_app/…` resolves; the test's `main`, `srcs`, `deps` and `code_assets` add to them, and its `defines` and `flavor` are its own:
+`flutter test` compiles a test in the package it is in. Here you name that package with `package`, and list in `srcs` the files of `lib/` the test imports. For a test of an app, name the app's `flutter_application` as `application` instead. The test then takes the application's package, sources, `deps`, code assets and assets, and its own `main`, `srcs`, `deps` and `code_assets` add to them:
 
 ```starlark
 flutter_test(
@@ -2972,66 +3176,104 @@ flutter_test(
 )
 ```
 
-A test runs where its target runs, as a `cc_test` does: its `deps`, native code included, and the `flutter_tester` that runs it are built for the target platform, and Bazel's default test toolchain runs it on an execution platform matching that platform. On a Mac that is the Mac. To run tests on other machines, a Linux remote worker say:
+The test's `defines`, `flavor`, `build_name` and `build_number` are its own, not the application's.
 
-- **`--platforms`** builds every test for that platform, so Bazel runs them on an execution platform matching it.
-- **A platform transition** does the same for one test: wrap it in `platform_transition_test` from `@bazel_lib//lib:transitions.bzl` with `target_platform` set, and tag the wrapped `flutter_test` `manual`. `e2e/codegen`'s `:transitioned_native_asset_test` is one.
-- **`exec_group_compatible_with = {"test": [...]}`** narrows the execution platforms a test may run on, and execution-requirement tags such as `no-remote-exec` keep it local. A test whose result depends on the machine, such as a golden, and one that loads an FFI library from `data`, are pinned this way.
-- **A toolchain for `@bazel_tools//tools/test:default_test_toolchain_type`** registered in your root module changes where every test rule's tests may run, `flutter_test` included, as it does for `cc_test`. A test sent to a machine other than the one it was built for fails when it starts there, as a `cc_test` does.
+| Attribute | Description |
+|---|---|
+| `main` | The test file. Required. |
+| `package` | The `dart_package_metadata` of the package the test is compiled in. Required, unless `application` is set. |
+| `application` | A `flutter_application` or `flutter_application_variant` whose package the test is compiled in, as above. |
+| `srcs`, `deps`, `code_assets`, `defines`, `flavor`, `build_name`, `build_number` | As on `flutter_application`. |
+| `assets`, `shaders`, `shader_includes`, `require_sksl_shaders`, `additional_licenses` | As on `flutter_application`, for a test without `application`. |
+| `data` | Files the test reads at run time: fixtures, FFI libraries, and [goldens](#golden-files). |
+| `env` | Environment variables for the test. Values are literal, with no `$(location)` expansion. |
+| `enable_impeller` | Render with Impeller, as `flutter test --enable-impeller` does, instead of software Skia. Default `False`. |
+| `test_config` | The suite's `flutter_test_config.dart`, when it is above the BUILD file's package. See below. |
+| `include_tags`, `exclude_tags` | Fixed `package:test` tag selection. See below. |
 
-A widget built in a test records where it was built, as under `flutter test`'s `--track-widget-creation`. A `flutter_test` sets `--@rules_dart//dart:track_creation_locations` for itself and its `deps`, so every library's kernel module and the test's own compile agree on it.
+The usual test attributes (`size`, `timeout`, `shard_count`, `flaky`, `tags`, ...) work too.
 
-`enable_impeller = True` renders with Impeller in `flutter_tester`, as `flutter test --enable-impeller` does, instead of software Skia. A test that draws a shader SkSL cannot compile needs it, and so does a golden meant to match an Impeller device. Shaders are compiled for `flutter_tester` either way, with the SkSL and Vulkan stages `flutter test` gives them.
+**Running tests: `flutter test` and `bazel test` side by side.** The suite runs under Bazel's test protocol, as a `dart_test` does:
 
-A `flutter_test_config.dart` wraps the suite as it does under `flutter test`: its `testExecutable(FutureOr<void> Function() testMain)` is handed the suite and runs it, so setup shared by every test in a directory lives in one file. The config used is the nearest one walking up from `main`'s directory, and the walk ends after the directory holding `pubspec.yaml`. Bazel can see only the BUILD file's own package, so the walk also ends there; name a config above it with `test_config = "//path:flutter_test_config.dart"`. The config is compiled into the test like its `main`, and its imports come from the test's `deps`.
+| `flutter test` | Bazel |
+|---|---|
+| `--name <regex>` | `--test_filter=<regex>`, matched against each test's full name, groups included. |
+| `--tags golden`, `--exclude-tags slow` | For one run: `--test_env=DART_TEST_TAGS=golden`, `--test_env=DART_TEST_EXCLUDE_TAGS=slow`. Always: `include_tags = ["golden"]`, `exclude_tags = ["slow"]`. |
+| `--total-shards`, `--shard-index` | `shard_count`. Each shard runs a contiguous share of the tests. |
+| `--test-randomize-ordering-seed=<seed>` | `--test_env=DART_TEST_ORDERING_SEED=<seed>`, or `random`. |
+| `--update-goldens` | `bazel run //:widget_test -- --update-goldens` (see [Golden files](#golden-files)). |
+| `--coverage` | `bazel coverage --combined_report=lcov //...` |
+| `--enable-impeller` | `enable_impeller = True` |
+| `--dart-define` | `defines`, or `--@rules_dart//dart:extra_dart_defines` (see [flutter_application](#flutter_application)). |
+| package:test's 30-second default timeout | The target's `size` or `timeout`. |
 
-Bazel's test protocol applies, as it does to `dart_test`:
+What differs:
 
-- **Time.** The target's `size` or `timeout` replaces `package:test`'s 30-second default, so a test with no `timeout:` of its own runs as long as Bazel lets the target run. A `timeout:` written on a test still applies, and `Timeout.factor` scales Bazel's limit.
-- **`--test_filter`.** A regular expression matched against each test's full name, group names included, like `flutter test --name`. A target the filter matches nothing in passes, so `bazel test //... --test_filter=x` runs only what it names.
-- **`shard_count`.** Splits the suite's tests into contiguous shares, one per shard.
-- **Tags.** `@Tags` on the test library, and `tags:` on a `test`, select cases as under `flutter test --tags`. Per run: `bazel test //... --test_env=DART_TEST_TAGS=golden` (and `DART_TEST_EXCLUDE_TAGS`), comma-separated boolean selectors as `--tags` takes them. A target it matches nothing in passes, and nothing is rebuilt. Fixed: `include_tags` and `exclude_tags`, the keys of `dart_test.yaml`, one selector per entry; a target whose fixed selection matches nothing fails. Both apply together. These are `package:test` tags: Bazel's `tags` and `--test_tag_filters` choose targets, not cases. `dart_test.yaml` itself is not read: its `include_tags` and `exclude_tags` become the attributes, and its per-tag settings (`tags:` with `skip` or `timeout`), `add_tags` and presets do not apply.
-- **Order.** `bazel test --test_env=DART_TEST_ORDERING_SEED=<seed>` shuffles each group's cases with that seed, as `flutter test --test-randomize-ordering-seed` does, so one seed gives one order; `random` draws a seed. The test's log says `Shuffling test order with --test-randomize-ordering-seed=<seed>`, which repeats the order. Unset or `0` keeps the order the file declares. Cases are shuffled after the filter, tags and shards choose them.
-- **Library annotations.** `@Skip`, `@Timeout`, `@TestOn` and `@OnPlatform` on the test library apply as under `flutter test`: `@Timeout` merges with the target's timeout, and a suite its `@TestOn` excludes passes with a note in the log. `@TestOn` and `@OnPlatform` are evaluated against runtime `vm` on the host's operating system, as `flutter test` does for every suite whatever the device, so an integration test on a browser or a phone is still `vm` on the host.
-- **No tests.** A suite that registers no test fails, as under `flutter test`; one whose every test is `testOn` another platform registers none here too.
-- **Results.** Each case is reported in the `test.xml` Bazel collects, so CI shows cases rather than one pass or fail per target.
-- **Coverage.** `bazel coverage --combined_report=lcov //...` collects the lines each `flutter_test` runs, as `flutter test --coverage` does, and Bazel merges them into one LCOV report (`$(bazel info output_path)/_coverage/_coverage_report.dat`; each test's own is `bazel-testlogs/<package>/<name>/coverage.dat`). It reports the `srcs` of the test and of every `flutter_library`, `dart_library` and `application` the test reaches, for the libraries `--instrumentation_filter` selects (by default those in the packages named on the command line), each file under its path in the workspace. The test's `main` is not reported, as for every Bazel test. Lines only: no function or branch counts.
+- **Timeouts.** A test with no `timeout:` of its own runs as long as Bazel lets the target run. A `timeout:` written on a test still applies, and `Timeout.factor` scales Bazel's limit.
+- **Tags.** The tags are `package:test`'s, from `@Tags` on the test library and `tags:` on a test. Bazel's own `tags` and `--test_tag_filters` choose targets, not cases. `include_tags` and `exclude_tags` take one boolean selector per entry, as `dart_test.yaml` does. `dart_test.yaml` itself is not read, so its per-tag settings, `add_tags` and presets don't apply.
+- **Selecting nothing.** A target where `--test_filter` or `DART_TEST_TAGS` matches nothing passes, so `bazel test //... --test_filter=x` runs only the tests it names. A target whose `include_tags` or `exclude_tags` leave nothing fails. So does a suite that registers no test, as under `flutter test`.
+- **Order.** A seed shuffles each group's cases after the filter, tags and shards have chosen them. The log prints `Shuffling test order with --test-randomize-ordering-seed=<seed>`, which repeats the order. Unset or `0` keeps the order of the file.
+- **Library annotations.** `@Skip`, `@Timeout`, `@TestOn` and `@OnPlatform` apply as under `flutter test`. `@TestOn` and `@OnPlatform` are evaluated as runtime `vm` on the host's operating system, as `flutter test` does whatever the device. A suite that `@TestOn` excludes passes, with a note in the log.
+- **Results.** Each case is in the `test.xml` Bazel collects, so CI shows cases rather than one result per target.
+- **Coverage.** The merged LCOV report is `$(bazel info output_path)/_coverage/_coverage_report.dat`, and each test's own is `bazel-testlogs/<package>/<name>/coverage.dat`. It covers the `srcs` of the test and of every library and application it reaches that `--instrumentation_filter` selects (by default, the packages named on the command line). The test's `main` is not reported, as with every Bazel test. It counts lines only, not functions or branches.
+
+**Widget creation tracking.** A widget built in a test records where it was built, as with `flutter test`'s `--track-widget-creation`. The test sets `--@rules_dart//dart:track_creation_locations` for itself and its `deps`, so every library agrees on it.
+
+**Impeller.** `enable_impeller = True` is for a test that draws a shader Skia can't compile, or a golden meant to match an Impeller device. Impeller needs a GPU where the test runs, Metal on macOS or Vulkan on Linux, and a host without one, as most remote workers are, fails to start `flutter_tester`. Shaders are compiled for `flutter_tester` with the SkSL and Vulkan stages `flutter test` gives them, either way.
+
+**`flutter_test_config.dart`** wraps the suite as under `flutter test`: its `testExecutable(FutureOr<void> Function() testMain)` runs it, so setup shared by a directory's tests lives in one file. The config used is the nearest one walking up from `main`'s directory, stopping after the directory holding `pubspec.yaml`. Bazel lets a BUILD file see only its own package, so the walk also stops at the package's top. For a config above it, set `test_config = "//path:flutter_test_config.dart"`. The config is compiled into the test, and its imports come from the test's `deps`.
+
+**Where a test runs.** A test runs where its target platform runs, as a `cc_test` does. Its `deps`, native code included, and `flutter_tester` are built for the target platform, and Bazel runs the test on an execution platform that matches it. On a Mac, that is the Mac. To run tests elsewhere, such as on a Linux remote worker:
+
+- `--platforms` builds every test for that platform, and Bazel runs them on a matching execution platform.
+- For one test, wrap it in `platform_transition_test` from `@bazel_lib//lib:transitions.bzl` with `target_platform` set, and tag the `flutter_test` `manual`. `e2e/codegen`'s `:transitioned_native_asset_test` does this.
+- `exec_group_compatible_with = {"test": [...]}` limits the execution platforms a test may run on, and a tag such as `no-remote-exec` keeps it local. Pin a test this way when its result depends on the machine, as a golden's does, or when it loads an FFI library from `data`.
+- A toolchain of `@bazel_tools//tools/test:default_test_toolchain_type` in your root module changes where every test may run, `flutter_test` included.
+
+A test sent to a machine other than the one it was built for fails when it starts, as a `cc_test` does.
 
 #### Golden files
 
-Goldens must be listed in `data`, or the test cannot see them:
+List the goldens in `data`, or the test can't see them:
 
 ```starlark
 flutter_test(
     name = "widget_test",
+    package = ":pubspec-metadata",
     main = "test/widget_test.dart",
     data = glob(["test/goldens/**"]),
     deps = ["@deps//:flutter", "@deps//:flutter_test"],
 )
 ```
 
-This is the first thing to check when a golden fails, because the failure message does not say it. The comparator reads goldens from runfiles, so a PNG in the source tree that is not an input of the test is invisible to it, and it fails with `Could not be compared against non-existent file`, the same message you get when the file really is absent. If you can see the file on disk and the test says it does not exist, it is almost certainly undeclared. Making declared inputs the only inputs is what keeps a cached pass meaningful.
+Check this first when a golden fails. The comparator reads goldens from the test's runfiles, so a PNG that is in the source tree but not in `data` fails with `Could not be compared against non-existent file`. That is the same message as for a file that really is missing. Declaring every input is what keeps a cached pass meaningful.
 
-Otherwise `matchesGoldenFile('goldens/x.png')` means what it means under `flutter test`: the golden is read from `goldens/x.png` next to the test's `main`, and a mismatch reports the pixel difference the same way. When a comparison fails, the four diff images (`masterImage`, `testImage`, `isolatedDiff`, `maskedDiff`) are written under `bazel-testlogs/<pkg>/<target>/test.outputs/failures/`, and the failure message names the path. Upstream writes them beside the test, which under Bazel would be inside the sandbox and gone before you could open them.
+Otherwise `matchesGoldenFile('goldens/x.png')` means what it means under `flutter test`. It reads `goldens/x.png` beside the test's `main`, and a mismatch reports the pixel difference. The four diff images (`masterImage`, `testImage`, `isolatedDiff`, `maskedDiff`) go to `bazel-testlogs/<package>/<target>/test.outputs/failures/`, and the failure message names the path. `flutter test` writes them beside the test, which under Bazel would be in a sandbox that is gone when the test ends.
 
-To regenerate goldens, use upstream's flag under `bazel run`:
+To regenerate a target's goldens:
 
 ```sh
 bazel run //:widget_test -- --update-goldens
 ```
 
-That writes the PNGs into the source tree next to the test and names each one. The same flag under `bazel test` exits with code 64, because a test action cannot write to the source tree and a golden regenerated into the sandbox would report success while changing nothing. There is no repo-wide command; it is one `bazel run` per target, which `bazel query 'tests(//...)'` can drive.
+This writes the PNGs into the source tree beside the test and names each one. The same flag under `bazel test` exits with code 64: a test can't write to the source tree, and regenerating into its sandbox would report success and change nothing. There is no command for the whole repository. Run one `bazel run` per target, which `bazel query 'tests(//...)'` can list.
 
-Two limits come from Flutter rather than from these rules:
+Two limits come from Flutter itself:
 
-- **Goldens are host-specific.** Font rendering and antialiasing differ between operating systems, so a PNG generated on macOS may not match on Linux or Windows. Regenerate on the platform that checks them, or keep per-OS golden directories.
-- **Replacing the comparator disables regeneration.** If a test assigns its own `goldenFileComparator`, `--update-goldens` calls that object's `update()`, which for `LocalFileComparator` writes into runfiles. The run passes, prints nothing, and leaves the source PNG unchanged.
+- **Goldens depend on the host.** Fonts and antialiasing render differently on each operating system, so a PNG made on macOS may not match on Linux or Windows. Regenerate on the platform that checks them, or keep a golden directory per platform.
+- **A comparator of your own disables regeneration.** If a test assigns its own `goldenFileComparator`, `--update-goldens` calls that comparator's `update()`. For a `LocalFileComparator` that writes into runfiles: the run passes, prints nothing, and leaves the source PNG unchanged.
 
 ### flutter_test_program and flutter_program_test
 
-`flutter_test` is a macro over two rules. `flutter_test_program` compiles the test and returns a `FlutterTestProgramInfo` (below); `flutter_program_test` runs any target that returns one. `flutter_test(name = "x", ...)` declares a `flutter_test_program` named `x.program` and the test `x`, so everything above holds as before: the attributes of both rules are `flutter_test`'s, a compile attribute (`main`, `srcs`, `deps`, `package`, `application`, `flavor`, `enable_impeller`, `test_config`, ...) goes to the program, a run attribute (`include_tags`, `exclude_tags`, `env`, `size`, `timeout`, `shard_count`, `args`) to the test, and `data`, `tags`, `visibility` and the platform constraints to both. The test's kind is `flutter_test` whichever way it is declared, so `bazel query 'kind("^flutter_test rule$", //...)'` lists exactly the Flutter tests. `kind` takes an unanchored regular expression over the string `<rule> rule`, so the pattern is anchored: unanchored `flutter_test` also matches `flutter_test_program` and `flutter_tester_binary`. The program is a target of its own, of kind `flutter_test_program`.
+`flutter_test` is a macro over two rules. `flutter_test_program` compiles the test into a [`FlutterTestProgramInfo`](#providers), and `flutter_program_test` runs any target that provides one. `flutter_test(name = "x", ...)` declares the program `x.program` and the test `x`. It sends each attribute where it belongs: compile attributes to the program, run attributes (`include_tags`, `exclude_tags`, `env`, `size`, `timeout`, `shard_count`, `args`, `flaky`, `local`) to the test, and `data`, `tags`, `visibility` and the platform constraints to both.
 
-Use the two rules directly to run a program that something else compiled, with everything `flutter_test` gives a test: the `bazel test` result protocol, `@Tags` selection (`include_tags`, `exclude_tags`, `DART_TEST_TAGS`), JUnit output, golden comparison and `--update-goldens`, code assets, sharding and coverage:
+The test's rule kind is `flutter_test` either way. To list every Flutter test, anchor the pattern, since `kind` matches a regular expression against `<rule> rule` and a bare `flutter_test` also matches `flutter_test_program` and `flutter_tester_binary`:
+
+```sh
+bazel query 'kind("^flutter_test rule$", //...)'
+```
+
+Use the two rules directly to put a step between compiling and running, or to run a program compiled another way. The test gets everything `flutter_test` gives one: the result protocol, tag selection, JUnit output, goldens and `--update-goldens`, code assets, sharding and coverage.
 
 ```starlark
 load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_program_test", "flutter_test_program")
@@ -3058,20 +3300,15 @@ flutter_program_test(
 )
 ```
 
-`flutter_test_program` takes the compile attributes of `flutter_test` (and `data`, which its runfiles carry) and builds, but does not run, the kernel, the `flutter_assets` tree, the code assets and the Native Assets manifest. Mark it `testonly`, as `flutter_test` does. `flutter_program_test` takes `program`, `data`, `env`, `include_tags`, `exclude_tags` and the usual test attributes.
+`flutter_test_program` takes `flutter_test`'s compile attributes and `data`. It builds the kernel, the `flutter_assets` tree, the code assets and the Native Assets manifest, and runs nothing. Mark it `testonly`, as `flutter_test` does. `flutter_program_test` takes `program`, `data`, `env`, `include_tags`, `exclude_tags`, and the usual test attributes.
 
-A rule that compiles tests its own way returns `FlutterTestProgramInfo` and `flutter_program_test` runs it. The program must be a kernel whose entry point speaks the `package:test_api` `RemoteListener` protocol over the WebSocket at `FLUTTER_TEST_HARNESS_PORT`, as the bootstrap `flutter_test_program` generates does, and its `source` is the library the runner reads `@Tags` from. The golden-file comparator is installed by that bootstrap, so a program from another compile has to install one for `matchesGoldenFile` to compare anything.
+A rule that compiles tests its own way returns `FlutterTestProgramInfo`, and `flutter_program_test` runs the result. Its kernel's entry point must speak `package:test_api`'s `RemoteListener` protocol over the WebSocket at `FLUTTER_TEST_HARNESS_PORT`, as the bootstrap `flutter_test_program` writes does. Its `source` is the file the runner reads `@Tags` from. That bootstrap is also what installs the golden comparator, so a program compiled another way must install one for `matchesGoldenFile` to compare anything.
 
 ### flutter_tester_binary
 
-Runs a program under `flutter_tester`, the headless engine `flutter_test` uses, as an ordinary executable rather than a test. Use it to make build outputs with Flutter's rendering, such as store screenshots: the outputs do not have to be `testonly`. It is compiled as `flutter_test` compiles a test and takes the same attributes, `enable_impeller` included, except `include_tags` and `exclude_tags`: it is not a test, and `DART_TEST_TAGS` in a shell does not change it. A program that registers no test fails.
+Runs a program on `flutter_tester` as an ordinary executable, with `bazel run` or as a tool of a build action. Use it to make build outputs with Flutter's renderer, such as store screenshots. Unlike a test's, those outputs don't have to be `testonly`.
 
 ```starlark
-dart_package_metadata(
-    name = "pubspec-metadata",
-    package_name = "my_app",
-)
-
 flutter_tester_binary(
     name = "render",
     package = ":pubspec-metadata",
@@ -3088,17 +3325,19 @@ genrule(
 )
 ```
 
-The program is written as a test suite, because `flutter_tester` draws frames through `package:flutter_test`'s binding: its work is the bodies of its `testWidgets` and `test` calls, and `tester.pumpWidget`, `tester.view` and `RenderRepaintBoundary.toImage` work as they do in a test. The binary exits 0 when every case passes and 1 when one fails, so a failed render fails the action. A case that runs past five minutes is stopped as wedged.
+You write the program as a test suite, because `flutter_tester` draws frames through `package:flutter_test`'s binding. Its work goes in the bodies of `testWidgets` and `test`, where `tester.pumpWidget`, `tester.view` and `RenderRepaintBoundary.toImage` work as they do in a test. The binary exits 0 when every case passes and non-zero when one fails, so a failed render fails the action. A suite that registers no test fails, and a case that runs past five minutes is stopped as stuck.
 
-The program sees the environment it was started with and runs in the working directory it was started in, which for a build action is the exec root, so it can be handed paths of the action's inputs and outputs. Native Assets load from any working directory. Arguments are not passed to the program.
+It is compiled as `flutter_test` compiles a test, and takes the same compile attributes, `enable_impeller` included, and `env`. It has no `include_tags` or `exclude_tags`, and `DART_TEST_TAGS` doesn't change it. Its `test_config` is not searched for: the program runs through a `flutter_test_config.dart` only when `test_config` names it.
 
-Build it for the machine it runs on. `bazel run` does that, and a rule that runs it in an action takes it as an executable attribute with `cfg = "exec"`, as `genrule` takes `tools`. With `enable_impeller = True` it needs that machine's GPU, so keep such an action off remote executors (`execution_requirements = {"no-remote-exec": "1"}`).
+The program gets the environment and working directory it was started with. For a build action that is the exec root, so you can hand it the paths of the action's inputs and outputs. Native Assets load from any working directory. Command-line arguments are not passed to the program.
+
+Build it for the machine it runs on. `bazel run` does that. A rule that runs it in an action takes it as an executable attribute with `cfg = "exec"`, as `genrule` takes `tools`. With `enable_impeller = True` it needs that machine's GPU, so keep such actions off remote executors with `execution_requirements = {"no-remote-exec": "1"}`.
 
 ### Integration tests
 
-`package:integration_test` tests run in the real app, on a device or in a browser, and each `testWidgets` is reported as a test case. The test is the `integration_test/app_test.dart` that `flutter create` users write, unchanged: `IntegrationTestWidgetsFlutterBinding.ensureInitialized()`, then `testWidgets` that call the app's own `main()`. The rules are in `@rules_flutter//flutter:integration_test.bzl`.
+`package:integration_test` tests run in the real app, on a device or in a browser. You write the test as `flutter create` users do, in `integration_test/app_test.dart`: `IntegrationTestWidgetsFlutterBinding.ensureInitialized()`, then `testWidgets` that call the app's own `main()`. Each `testWidgets` is reported as a test case. `integration_test` goes in `pubspec.yaml`'s `dev_dependencies` with `sdk: flutter`, as usual.
 
-macOS, Windows, Linux, the web (headless Chrome), Android devices and the iOS simulator are the platforms so far; Windows is [below](#windows-integration-tests), Linux [after it](#linux-integration-tests), the web [next](#web-integration-tests), Android [after that](#android-integration-tests) and iOS [last](#ios-simulator-integration-tests).
+There is one macro per platform, in `@rules_flutter//flutter:integration_test.bzl`. This is the macOS one:
 
 ```starlark
 load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application")
@@ -3129,24 +3368,41 @@ flutter_macos_integration_test(
 )
 ```
 
-`bazel test :app_test` builds the application with the test as its program, in debug mode whatever `-c` says (the suite is driven through the VM service a debug build serves, and `flutter test` forces debug for an integration test too), launches it on the host's own desktop, and drives the suite over that VM service, as `flutter test integration_test/app_test.dart -d macos` does. `integration_test` is in your `pubspec.yaml`'s `dev_dependencies`, as `sdk: flutter`. The app's own `main` is unchanged and carries no test code: the test is a program of its own, a variant of the application (see [flutter_application_variant](#flutter_application_variant)).
+`bazel test :app_test` does what `flutter test integration_test/app_test.dart -d macos` does. It builds the application with the test as its program, in debug mode whatever `-c` says, because the suite is driven over the VM service that a debug build serves. It launches the app on the host's desktop and drives the suite. The app's own `main` doesn't change: the test's program is a [`flutter_application_variant`](#flutter_application_variant) of the application.
 
-- **Per-test results.** Each test case is reported as it finishes, and the JUnit report names each one. `--test_filter` selects test cases by name, a regular expression matched against each full name, and `shard_count` divides them among shards.
-- **Tags.** `@Tags` on `src` (the test file, which every integration test rule requires) and `tags:` on a `testWidgets` select cases as under `flutter test --tags`, on every platform: the host reads them, so an app that cannot be given an environment is selected the same way. Per run, `bazel test //... --test_env=DART_TEST_TAGS=golden` (and `DART_TEST_EXCLUDE_TAGS`); fixed, `include_tags` and `exclude_tags`, which work as for `flutter_test`, with a target whose fixed selection matches nothing failing and a run that narrows one to nothing passing. Bazel's `tags` choose targets, these choose cases.
-- **Order.** `DART_TEST_ORDERING_SEED` shuffles the cases as for `flutter_test`.
-- **Library annotations.** `@Skip`, `@Timeout`, `@TestOn` and `@OnPlatform` on `src` apply as for `flutter_test`, against runtime `vm` on the host's operating system whatever the device; a suite its `@TestOn` excludes passes without the app being launched.
-- **A failing test fails the target**, and the JUnit report names the failing case. So does an app that exits during a test, with the reason the device gives: `The macOS app exited with code 3 …`. A suite that registers no test fails, since a program that declared nothing has not been tested.
-- **One target per test file**, as `flutter test` launches the app once per file. `srcs` lists the files the test imports by relative path. A `flutter_test_config.dart` beside the test is found by the same search `flutter_test` runs, or is named with `test_config`. It runs in the app and, for goldens, on the host where they are compared, so a comparator or tolerance it installs applies; both compile it in the app's package, so it may import the app's libraries as `package:<app>/…`.
-- **`deps` must bring `integration_test` and `flutter_test`**: analysis fails, naming the package and the `@<hub>//:<package>` target to add, if they are missing.
-- **The test needs an unlocked, awake desktop.** The runner holds the display awake for the run and fails, saying which, if the screen is locked or the display is asleep. A test that cannot run is a failure, not a skip: a skipped test reads as a pass. Two tests do not share the screen at once, since a covered window stops drawing: they take turns on a lock (`/tmp/rules_flutter-locks/macos-gui.lock`), which the operating system releases if a test dies.
-- **`env` reaches the runner and the app's process.** `data` is available to the test at run time.
-- **Goldens work as in `flutter_test`**: `matchesGoldenFile('goldens/x.png')` reads `goldens/x.png` from the directory of `src`, so the goldens are `data` (`data = glob(["integration_test/goldens/**"])`). The picture is sent from the app to the host, which compares it with the same comparator `flutter_test` uses (a `flutter_tester` it starts for it), on every platform, an app on a phone or in a browser included. A mismatch fails the test, naming the golden and how far it is off, and leaves the pictures of the failure in the target's undeclared outputs (`bazel-testlogs/<target>/test.outputs/failures/`). `bazel run :app_test -- --update-goldens` writes the goldens into the source tree instead of comparing, naming each file it wrote. A golden is a function of the platform that rendered it: keep one per platform (the test chooses the path), and do not commit one whose rendering depends on the machine's fonts.
+| Platform | Macro | Extra required attribute | Where the app runs |
+|---|---|---|---|
+| macOS | `flutter_macos_integration_test` | `bundle_id` | The host's desktop, which must be unlocked and awake |
+| Windows | [`flutter_windows_integration_test`](#windows-integration-tests) | | The desktop of the test's session |
+| Linux | [`flutter_linux_integration_test`](#linux-integration-tests) | `application_id` | An X server the test starts for itself |
+| Web | [`flutter_web_integration_test`](#web-integration-tests) | | A pinned headless Chrome |
+| Android | [`flutter_android_integration_test`](#android-integration-tests) | `application_id` | An emulator the test boots for itself, or an attached device |
+| iOS | [`flutter_ios_simulator_integration_test`](#ios-simulator-integration-tests) | `bundle_id` | A simulator the test makes for itself |
 
-The macro is Tier 1. Tier 2 is `flutter_integration_bootstrap` (the program a test file runs as), `flutter_application_variant`, `flutter_macos_app`, `flutter_desktop_app_integration_test` and `flutter_desktop_runner`, which the macro composes as `__<name>_bootstrap`, `__<name>_program` and `__<name>_app` (the macro's own targets, which you do not name).
+Every platform's macro takes `src`, `application`, `deps`, `srcs`, `test_config`, `data`, `env`, `include_tags`, `exclude_tags`, `runner`, and the usual test attributes. Other arguments pass through to the platform's app rule (`app_name`, `entitlements`, ...). The macro's own targets are named `__<name>_bootstrap`, `__<name>_program` and `__<name>_app`, and you don't name them.
+
+On every platform:
+
+- **One target per test file**, as `flutter test` launches the app once per file. `srcs` lists the files the test imports by relative path.
+- **`deps` lists `@deps//:flutter_test` and `@deps//:integration_test`.** Without `flutter_test`, the BUILD file fails to load. Without `integration_test` in the test's or the application's `deps`, analysis fails and names the target to add.
+- **Results are per case.** Each `testWidgets` is reported as it finishes, and the JUnit report names each one. `--test_filter` selects cases by full name and `shard_count` divides them among shards, as for `flutter_test`.
+- **Tags, order and annotations work as for `flutter_test`.** The host reads `@Tags` on `src` and `tags:` on each `testWidgets`, so a case is selected the same way on every device. `DART_TEST_ORDERING_SEED` shuffles the cases. `@TestOn` and `@OnPlatform` are evaluated as runtime `vm` on the host's operating system, whatever the device, and a suite that `@TestOn` excludes passes without the app being launched.
+- **Failures.** A failing case fails the target, and the report names it. So does an app that exits during the test, with the reason the device gives (`The macOS app exited with code 3 …`). A suite that registers no test fails.
+- **`flutter_test_config.dart`** is found as for `flutter_test`, or named with `test_config`. It runs in the app, and on the host where goldens are compared, so a comparator or tolerance it installs applies to both. It is compiled in the app's package, so it may import the app's libraries as `package:<app>/…`.
+- **Goldens work as in `flutter_test`.** `matchesGoldenFile('goldens/x.png')` reads `goldens/x.png` from the directory of `src`, so the goldens are `data`: `data = glob(["integration_test/goldens/**"])`. The app sends its picture to the host, which compares it with `flutter_test`'s comparator, on a phone or in a browser too. A mismatch fails the test, naming the golden and how far it is off, and leaves the failure's pictures in `bazel-testlogs/<target>/test.outputs/failures/`. `bazel run :app_test -- --update-goldens` writes the goldens into the source tree and names each file. A golden depends on the platform that drew it, so keep one per platform (the test chooses the path), and don't commit one that depends on the machine's fonts.
+- **A test that can't run fails.** A locked screen, a missing simulator runtime, or no attached device is a failure, not a skip, because a skipped test reads as a pass.
+
+On macOS:
+
+- **The desktop must be unlocked and awake.** The runner keeps the display awake during the run, and fails, saying which, if the screen is locked or the display is asleep.
+- **Tests take turns on the screen**, because a covered window stops drawing. They wait on a lock, `/tmp/rules_flutter-locks/macos-gui.lock`, which the operating system releases if a test dies.
+- **`env`** reaches the runner and the app's process. `data` is available to the test at run time.
+
+The macros are Tier 1. The Tier 2 rules they compose are below each platform's notes. All of them use `flutter_integration_bootstrap`, which turns the test file into a program, and `flutter_application_variant`. On macOS the others are `flutter_macos_app`, `flutter_desktop_app_integration_test` and `flutter_desktop_runner`.
 
 #### Windows integration tests
 
-`flutter_windows_integration_test` runs the same test file on the Windows desktop: the application with the test as its program is built as a Windows bundle in debug mode, launched on the host's own desktop, and its suite driven over its VM service, as `flutter test integration_test/app_test.dart -d windows` does. It is the macOS macro without `bundle_id`.
+`flutter_windows_integration_test` is `flutter test integration_test/app_test.dart -d windows`. It takes the macOS macro's arguments, without `bundle_id`, and passes `app_name` and the other `flutter_windows_app` arguments on.
 
 ```starlark
 load("@rules_flutter//flutter:integration_test.bzl", "flutter_windows_integration_test")
@@ -3162,16 +3418,16 @@ flutter_windows_integration_test(
 )
 ```
 
-- **Runs on a Windows host** (`target_compatible_with`); a Mac or Linux host skips it. The app is built as for `flutter_windows_app`, whose arguments (`app_name`) the macro passes on, and the runner is `windows/runner/` when the package has one, else the built-in template.
-- **The window is real.** The app's window is created on the desktop of the session the test runs in, and the test reads and taps what it draws. Windows that overlap keep drawing, so two tests at once do not hang each other (measured with two windows at one origin), and there is no lock. A session with no visible desktop, such as an SSH logon, still runs the test: the window exists and is not on screen, so a screenshot needs the interactive session.
-- **Per-test results, `--test_filter`, tags, `shard_count`, `env`, `data`, goldens and the failures** (a failing case, an app that exits, a suite that registers nothing) are as on macOS; an app that exits says `The Windows app exited with code 3 …`. `bazel run :app_windows_test -- --update-goldens` writes the goldens, the Windows one in `goldens/windows/`.
-- **Use a short output base.** Windows limits a path to 260 characters and a Flutter bundle is deep: `bazel --output_base=C:/b test ...`.
+- **It runs on a Windows host.** On a Mac or Linux host the test is skipped as incompatible. The app is built as `flutter_windows_app` builds it, with `windows/runner/` when the package has one and the built-in runner otherwise.
+- **The window is real.** It is created on the desktop of the session the test runs in, and the test reads and taps what it draws. Windows that overlap keep drawing, so tests run at once with no lock. A session with no visible desktop, such as an SSH logon, still runs the test, but a screenshot needs an interactive session.
+- **Use a short output base**, such as `bazel --output_base=C:/b test ...`. Windows limits a path to 260 characters, and a Flutter bundle is deep.
+- An app that exits says `The Windows app exited with code 3 …`. `--update-goldens` writes the Windows goldens wherever the test's paths name, such as `goldens/windows/`.
 
-The macro is Tier 1. Tier 2 is `flutter_integration_bootstrap`, `flutter_application_variant`, `flutter_windows_app`, `flutter_desktop_app_integration_test` and `flutter_desktop_runner`, which the macro composes as `__<name>_bootstrap`, `__<name>_program` and `__<name>_app`.
+Tier 2: `flutter_windows_app`, `flutter_desktop_app_integration_test` and `flutter_desktop_runner`.
 
 #### Linux integration tests
 
-`flutter_linux_integration_test` runs the same test file on Linux: the application with the test as its program is built as a Linux bundle in debug mode, started on an X server the test starts for itself, and its suite driven over its VM service, as `flutter test integration_test/app_test.dart -d linux` does. It is the Windows macro, passing `flutter_linux_app`'s arguments (`application_id`, `app_name`).
+`flutter_linux_integration_test` is `flutter test integration_test/app_test.dart -d linux`. It takes `application_id`, and passes `app_name` and the other `flutter_linux_app` arguments on.
 
 ```starlark
 load("@rules_flutter//flutter:integration_test.bzl", "flutter_linux_integration_test")
@@ -3188,16 +3444,16 @@ flutter_linux_integration_test(
 )
 ```
 
-- **Runs on a Linux host** (`target_compatible_with`), x86_64 or arm64; a Mac or Windows host skips it.
-- **Nothing of the host's but its C and C++ runtime.** The X server (`Xvfb`), GTK, Mesa's software OpenGL and the fonts come from a pinned runtime: a closure of Debian 13 packages, pinned by path and `sha256` for each architecture and fetched only when a Linux integration test is analysed. The host needs no desktop, no GTK and no X server, and its display, libraries and GTK modules are not used; a test runs the same on a workstation, over SSH and in CI. The host's glibc and libstdc++ must be at least Ubuntu 24.04's (glibc 2.39): the build checks every file of the runtime against that and fails, naming the file, on one that asks for more.
-- **Each test has a screen of its own**, so tests run at once without a lock and never draw on your desktop.
-- **Per-test results, `--test_filter`, tags, `shard_count`, `env`, `data`, goldens and the failures** are as on macOS; an app that exits says `The Linux app exited with code 3 …`. `bazel run :app_linux_test -- --update-goldens` writes the goldens, the Linux one in `goldens/linux/`.
+- **It runs on a Linux host**, x86_64 or arm64. On a Mac or Windows host the test is skipped as incompatible.
+- **It uses nothing of the host's but its C and C++ runtime.** The X server (`Xvfb`), GTK, Mesa's software OpenGL and the fonts come from a pinned set of Debian 13 packages, pinned by `sha256` for each architecture and downloaded only when a Linux integration test is analysed. The host needs no desktop, GTK or X server, and its own are not used, so a test runs the same on a workstation, over SSH and in CI. The host's glibc and libstdc++ must be at least Ubuntu 24.04's (glibc 2.39). The build checks every file of the runtime against that, and fails, naming the file, on one that asks for more.
+- **Each test has its own X server**, so tests run at once with no lock, and never draw on your desktop.
+- An app that exits says `The Linux app exited with code 3 …`.
 
-The macro is Tier 1. Tier 2 is `flutter_integration_bootstrap`, `flutter_application_variant`, `flutter_linux_app`, `flutter_desktop_app_integration_test` and `flutter_desktop_runner`, whose `linux_runtime` is the runtime (`@flutter_linux_runtime_amd64//:runtime` or `_arm64`, a `flutter_linux_runtime`). `bazel run @rules_flutter//tools/update_linux_runtime -- <snapshot>` re-pins the runtime at a snapshot.debian.org timestamp.
+Tier 2: `flutter_linux_app`, `flutter_desktop_app_integration_test`, and `flutter_desktop_runner`, whose `linux_runtime` is the runtime: `@flutter_linux_runtime_amd64//:runtime` or `@flutter_linux_runtime_arm64//:runtime`, a `flutter_linux_runtime`. To re-pin the runtime at a snapshot.debian.org timestamp, run `bazel run @rules_flutter//tools/update_linux_runtime -- <snapshot>`.
 
 #### Web integration tests
 
-`flutter_web_integration_test` runs the same test file in headless Chrome. `flutter test` refuses web devices (flutter/flutter#66264), and `flutter drive -d chrome` reports only pass or fail; this reports each `testWidgets` as a case, as the other platforms do, with `--test_filter`, tags and `shard_count`.
+`flutter_web_integration_test` runs the test in headless Chrome. `flutter test` refuses web devices (flutter/flutter#66264), and `flutter drive -d chrome` reports only a pass or a fail. This reports each `testWidgets` as a case, with `--test_filter`, tags and `shard_count`, as on the other platforms.
 
 ```starlark
 load("@rules_flutter//flutter:integration_test.bzl", "flutter_web_integration_test")
@@ -3213,18 +3469,18 @@ flutter_web_integration_test(
 )
 ```
 
-It takes the `application` the test runs, as the other platforms' macros do, with `deps` the test imports beyond the application's and `srcs` it imports by relative path; the other `flutter_web_app` arguments (`web_dir`, `base_href`, and the rest) pass through. The test's program is the application with the test as its `main` (`flutter_application_variant`), built as a web app in debug mode whatever `-c` says, served from a directory of its own on the loopback and opened in a headless Chrome.
+The `flutter_web_app` arguments (`web_dir`, `base_href`, ...) pass through. The test's program is built as a web app in debug mode whatever `-c` says, served from a directory of its own on the loopback interface, and opened in the browser. `env` reaches the host runner only.
 
-- **The browser is pinned.** It is Chrome for Testing's headless shell (`@rules_flutter//flutter/integration_test:chrome`), downloaded by version and `sha256` for macOS (arm64, x64), Linux (x64, arm64) and Windows x64, so the page is drawn by the same browser wherever the test runs. Only the host's own is fetched, and only when a web integration test is analysed. A host with no pinned shell skips the test (`@platforms//:incompatible`); it is never run in another browser. `runner` takes a `flutter_chrome_runner` of your own. `bazel run @rules_flutter//tools/update_chrome_for_testing` prints a newer pin.
-- **The suite is driven over the browser's DevTools protocol**, which a web bundle has in place of a VM service: the page publishes a hook the host calls, and calls a binding the host added, so there is no port to open and no server of the page's own. The browser's profile is deleted when the test ends, and the browser is killed.
-- **A page that is lost fails the target, saying why**: the browser exiting (`Chrome exited with code 139`), the page crashing, or the connection closing; a page that never starts the suite fails at the test's timeout, naming the bootstrap it never reached.
-- **On Linux the browser loads the pinned Linux runtime's libraries** (see Linux integration tests), never the host's, and the build checks that it needs none the runtime lacks. It runs without its sandbox, as upstream's headless Chrome does: the sandbox needs unprivileged user namespaces, which Ubuntu denies by default since 23.10, or Chrome's set-user-ID helper installed by root. Windows is not verified yet.
+- **The browser is pinned:** Chrome for Testing's headless shell, downloaded by version and `sha256` for macOS (arm64, x64), Linux (x64, arm64) and Windows (x64). Only the host's own is downloaded, and only when a web integration test is analysed. A host with no pinned build skips the test, rather than run it in another browser. To use another, pass a `flutter_chrome_runner` of your own as `runner`. `bazel run @rules_flutter//tools/update_chrome_for_testing` prints a newer pin.
+- **The suite is driven over the browser's DevTools protocol**, which a web app has in place of a VM service, so the page opens no port. The browser's profile is deleted and the browser killed when the test ends.
+- **A lost page fails the target, saying why:** the browser exiting (`Chrome exited with code 139`), the page crashing, or the connection closing. A page that never starts the suite fails at the test's timeout, naming the step it didn't reach.
+- **On Linux, the browser uses the pinned Linux runtime's libraries**, never the host's, and the build checks that it needs none the runtime lacks. It runs without Chrome's sandbox, as upstream's headless Chrome does: the sandbox needs unprivileged user namespaces, which Ubuntu has denied by default since 23.10, or Chrome's set-user-ID helper installed by root. Windows is not verified yet.
 
-The macro is Tier 1. Tier 2 is `flutter_integration_bootstrap` (with `src_import = "relative"`: a web compile mounts no file-system root to name the test under), `flutter_application_variant`, `flutter_web_app` or `flutter_web_bundle`, `flutter_web_app_integration_test` and `flutter_chrome_runner`, which the macro composes as `__<name>_bootstrap`, `__<name>_program` and `__<name>_app`.
+Tier 2: `flutter_web_app` or `flutter_web_bundle`, `flutter_web_app_integration_test` and `flutter_chrome_runner`. The bootstrap takes `src_import = "relative"`, because a web compile has no file-system root to name the test under.
 
 #### Android integration tests
 
-`flutter_android_integration_test` runs the same test file on an Android emulator the test boots for itself, or on an attached phone: the app is built in debug mode for the device's ABI, installed, started, and its suite driven through the VM service forwarded from the device, as `flutter test integration_test/app_test.dart -d <device>` does.
+`flutter_android_integration_test` is `flutter test integration_test/app_test.dart -d <device>`. The app is built in debug mode for the device's ABI, installed, started, and its suite driven over the VM service, forwarded from the device.
 
 ```starlark
 load("@rules_flutter//flutter:integration_test.bzl", "flutter_android_integration_test")
@@ -3248,22 +3504,34 @@ bazel test :app_android_test \
     --test_env=ANDROID_SERIAL=<serial>  # on your phone
 ```
 
-- **By default the device is an emulator of the test's own.** The emulator (36.2.12) and the system image it boots (Android 15, API 35, AOSP's Automated Test Device image) are pinned by sha256 and downloaded by Bazel for the host, about 1 GB: macOS on Apple silicon boots the arm64-v8a image, Linux on x86_64 the x86_64 one, and the app is built for it. A build that runs no Android test on the emulator downloads nothing of it. Each test makes a device in its own temporary directory, boots it from a cold start with fresh data and no window (15 to 30 s on an Apple-silicon Mac, depending on its load), runs, and shuts it down however it ends; a test needs nothing attached, booted or installed, and leaves nothing behind. On other hosts (Windows, Intel Macs, Linux on arm64) the test is skipped; run it on an attached device there.
-- **The emulator needs the host's hypervisor**: Hypervisor.framework on macOS, KVM on Linux (`/dev/kvm` readable and writable by the user; a cloud VM needs nested virtualisation). Without it the test fails before anything boots, saying so and how to enable it. On Linux the emulator loads the X client libraries it links from the pinned Linux runtime of [Linux integration tests](#linux-integration-tests), not the host's.
-- **Tests on emulators run side by side.** Each takes a pair of the ports `adb` knows emulators by (5554 to 5585, passing over those of emulators already running, so 16 at once) under a lock (`/tmp/rules_flutter-locks/android-emulator-<port>.lock`), and Bazel schedules each with three cores, the device's two and one for the emulator. The emulator answers to an `adb` server of the test's own that looks at no USB or network device, so a phone that is attached is never touched. An emulator that a SIGKILL left behind is shut down by the next test that takes its ports. The emulator's output and the device's whole log are kept with the test's outputs (`emulator.log`, `logcat.txt` in `bazel-testlogs/<test>/test.outputs/`).
-- **On an attached device** (`--@rules_flutter//flutter/integration_test:android_device=attached`), the test runs on the device `ANDROID_SERIAL` names, else the only one attached; with none, or several and none named, it fails, naming `adb devices` and the variable that picks one. It is a failure, not a skip: a skipped test reads as a pass. Two tests on one device take turns on a lock (`/tmp/rules_flutter-locks/android-<serial>.lock`), which the operating system releases if a test dies. The app is built for arm64-v8a. `ANDROID_SERIAL` given to a test that runs on the emulator fails it, naming the flag.
-- **`adb` is the SDK's own**, that of the `@androidsdk` your `MODULE.bazel` already declares for building an APK (downloaded, or found at `ANDROID_HOME`), not one found on `PATH`, and the file the SDK has for the host the test runs on (`adb.exe` on Windows). The `aapt2` that reads the APK's package and launch activity is `@androidsdk`'s too. `runner` takes a runner of your own: `flutter_android_emulator_runner(sdk = ..., emulator = ..., system_image = ...)`, whose `system_image` can be another `flutter_android_system_image` (another API level, say) and whose `cores` and `memory_mb` size the device, or `flutter_android_device_runner(sdk = ...)`.
-- **`abi`** (by default the emulator image's, or `arm64-v8a` on an attached device; `x86_64` and `armeabi-v7a` otherwise) is the ABI the app is built for, whatever `--@rules_android//flags:android_platforms` says: it has to be the one the device runs. An emulator runner whose image runs another fails analysis, naming both.
-- **`integration_test`'s Android library links into the app**, and its Gradle build asks for `androidx.test:runner`, `androidx.test:rules`, `androidx.test.espresso:espresso-core` and `com.google.guava:guava`. Name a version of each in the `rules_flutter_maven` install of your `MODULE.bazel` (Gradle's `1.2+`, `1.2+` and `3.3+` are ranges; analysis names whatever is missing, and `bazel run @<hub>//android:maven_artifacts` prints the block). Only the tests' apps link it: your own app does not.
-- **The app stays installed** on an attached device, as `flutter test` leaves it. `adb uninstall <application_id>` removes it.
-- **`env` is refused**: an app started by the device cannot be handed an environment. Pass `defines` to the application instead.
-- Results, `--test_filter`, tags, `shard_count`, and the failures (a failing case, an app that exits, a suite that registers nothing) are as on the other platforms.
+By default the test boots an emulator of its own:
 
-The macro is Tier 1. Tier 2 is `flutter_integration_bootstrap`, `flutter_application_variant`, `flutter_android_app`, `flutter_android_app_integration_test`, `flutter_android_emulator_runner`, `flutter_android_system_image` and `flutter_android_device_runner`, which the macro composes as `__<name>_bootstrap`, `__<name>_program`, `__<name>_app` and, when you name no `runner`, `__<name>_emulator` and `__<name>_device`, of which the flag picks one.
+- **The emulator and its system image are pinned:** emulator 36.2.12, and AOSP's Automated Test Device image of Android 15 (API 35), by `sha256`. Bazel downloads them for the host, about 1 GB, and only for a build that runs an Android test on the emulator. A Mac with Apple silicon boots the arm64-v8a image and Linux on x86_64 the x86_64 one, and the app is built to match. On other hosts (Windows, Intel Macs, Linux on arm64) the emulator test is skipped; run on an attached device there.
+- **It needs the host's hypervisor:** Hypervisor.framework on macOS, KVM on Linux (`/dev/kvm` readable and writable by you; a cloud VM needs nested virtualisation). Without it the test fails before anything boots, and says how to enable it. On Linux the emulator loads its X client libraries from the pinned runtime of [Linux integration tests](#linux-integration-tests).
+- **Each test has a fresh device.** It is made in the test's temporary directory and cold-booted with fresh data and no window, which takes 15 to 30 seconds on a Mac with Apple silicon, depending on its load. It is shut down however the test ends. A test needs nothing attached, booted or installed, and leaves nothing behind.
+- **Emulator tests run side by side**, up to 16 at once. Each takes a pair of the ports `adb` knows emulators by (5554 to 5585, skipping those of emulators already running), under a lock (`/tmp/rules_flutter-locks/android-emulator-<port>.lock`). Bazel schedules each with three cores: two for the device and one for the emulator. The emulator talks to an `adb` server of the test's own that sees no USB or network device, so an attached phone is never touched. An emulator left behind by a killed test is shut down by the next test that takes its ports.
+- **Logs.** The emulator's output and the device's whole log are kept with the test's outputs, as `emulator.log` and `logcat.txt` in `bazel-testlogs/<test>/test.outputs/`.
+
+On an attached device (`--@rules_flutter//flutter/integration_test:android_device=attached`):
+
+- The test runs on the device `ANDROID_SERIAL` names, or the only one attached. With none attached, or several and none named, it fails, naming `adb devices` and the variable. `ANDROID_SERIAL` given to a test that runs on the emulator fails it, naming the flag.
+- Two tests on one device take turns on a lock (`/tmp/rules_flutter-locks/android-<serial>.lock`), which the operating system releases if a test dies.
+- The app is built for arm64-v8a, and stays installed afterwards, as `flutter test` leaves it. `adb uninstall <application_id>` removes it.
+
+On both:
+
+- **`adb` and `aapt2` are the SDK's own**, from the `@androidsdk` your `MODULE.bazel` declares for building APKs (downloaded, or found at `ANDROID_HOME`), for the host the test runs on. An `adb` on your `PATH` is not used.
+- **`abi`** sets the ABI the app is built for, whatever `--@rules_android//flags:android_platforms` says. It defaults to the emulator image's, or arm64-v8a on an attached device. The others are `x86_64` and `armeabi-v7a`. An emulator runner whose image runs another ABI fails analysis, naming both.
+- **`integration_test`'s Android library is linked into the test's app**, and its Gradle build asks for `androidx.test:runner`, `androidx.test:rules`, `androidx.test.espresso:espresso-core` and `com.google.guava:guava`. Give each a version in your `MODULE.bazel`'s `rules_flutter_maven` install; Gradle's `1.2+`, `1.2+` and `3.3+` are ranges. Analysis names whatever is missing, and `bazel run @<hub>//android:maven_artifacts` prints the block. Your own app doesn't link it.
+- **`env` is refused**, because an app the device starts can't be given an environment. Pass `defines` to the application instead.
+
+To use another device, pass a runner of your own as `runner`: `flutter_android_emulator_runner(sdk = ..., emulator = ..., system_image = ...)`, whose `system_image` can be another `flutter_android_system_image` (another API level, say) and whose `cores` (default 2) and `memory_mb` (default 2048) size the device, or `flutter_android_device_runner(sdk = ...)`.
+
+Tier 2: `flutter_android_app`, `flutter_android_app_integration_test`, `flutter_android_emulator_runner`, `flutter_android_system_image` and `flutter_android_device_runner`. With no `runner`, the macro also declares `__<name>_emulator` and `__<name>_device`, and the flag picks one.
 
 #### iOS simulator integration tests
 
-`flutter_ios_simulator_integration_test` runs the same test file on an iOS simulator: the app is built in debug mode for the simulator, and the test makes a simulator of its own, installs and starts the app on it, and drives its suite through the VM service, as `flutter test integration_test/app_test.dart -d <simulator>` does.
+`flutter_ios_simulator_integration_test` is `flutter test integration_test/app_test.dart -d <simulator>`. The app is built for the simulator in debug mode, and the test makes a simulator, installs and starts the app, and drives the suite over the VM service.
 
 ```starlark
 load("@rules_flutter//flutter:integration_test.bzl", "flutter_ios_simulator_integration_test")
@@ -3280,17 +3548,43 @@ flutter_ios_simulator_integration_test(
 )
 ```
 
-- **The simulator is the test's own.** It is created as `rules_flutter-<test>-<pid>` (an iPhone 16 on the newest installed iOS runtime), booted, and shut down and deleted when the test ends, however it ends: a failing test, a crash of the app, a Bazel timeout. It shares nothing with another test or with the simulators you use, so tests need no lock, and `shard_count` shards each get one. `runner` takes a `flutter_ios_simulator_runner(device_type = ..., runtime = ...)` for another device type or runtime (names `xcrun simctl list devicetypes` and `runtimes` list).
-- **Needs Xcode and an iOS runtime** (`xcodebuild -downloadPlatform iOS`): a host with none fails the test saying so. It is a failure, not a skip. `DEVELOPER_DIR` reaches the test, so the Xcode you selected for the build is the one `xcrun` uses.
-- **The app is built for the arm64 simulator** (`sim_arm64`), in debug mode whatever `-c` says. rules_flutter supports Apple Silicon hosts only: on an Intel Mac the test fails at analysis, saying so.
-- **`env` is refused**: an app started by the simulator cannot be handed an environment. Pass `defines` to the application instead.
-- Results, `--test_filter`, tags, `shard_count`, and the failures (a failing case, an app that exits, a suite that registers nothing) are as on the other platforms. The test is `macos`-only (`target_compatible_with`), scheduled with two cores (`cpus` of the runner), and runs outside Bazel's sandbox and never remotely.
+- **The simulator is the test's own:** an iPhone 16 on the newest installed iOS runtime that suits it, named `rules_flutter-<test>-<pid>-<start>`. It is shut down and deleted when the test ends, however it ends, a Bazel timeout included. It shares nothing with other tests or with your own simulators, so tests need no lock, and each shard gets its own. For another device type or runtime, pass `runner = flutter_ios_simulator_runner(device_type = ..., runtime = ...)`, with names that `xcrun simctl list devicetypes` and `xcrun simctl list runtimes` print.
+- **It needs Xcode and an iOS runtime** (`xcodebuild -downloadPlatform iOS`). Without one the test fails, saying so. `DEVELOPER_DIR` reaches the test, so `xcrun` uses the Xcode you selected for the build.
+- **The app is built for the arm64 simulator** (`sim_arm64`). An Intel Mac fails the test at analysis, saying so.
+- **`env` is refused**, because an app the simulator starts can't be given an environment. Pass `defines` to the application instead.
+- The test runs on macOS only, outside Bazel's sandbox, and never remotely. Bazel schedules it with two cores (the runner's `cpus`).
 
-The macro is Tier 1. Tier 2 is `flutter_integration_bootstrap`, `flutter_application_variant`, `flutter_ios_app`, `flutter_ios_app_integration_test` and `flutter_ios_simulator_runner`, which the macro composes as `__<name>_bootstrap`, `__<name>_program` and `__<name>_app`.
+Tier 2: `flutter_ios_app`, `flutter_ios_app_integration_test` and `flutter_ios_simulator_runner`.
+
+### flutter_profile_build
+
+Builds its `targets` in profile mode, as `-c opt --@rules_flutter//flutter:profile` would, whatever the command line says. Use it to check a profile build in a plain `bazel test //...`, with no `--config=profile` in the CI job.
+
+```starlark
+load("@rules_flutter//flutter:defs.bzl", "flutter_profile_build")
+
+flutter_profile_build(
+    name = "my_app_profile",
+    tags = ["manual"],
+    targets = [":my_app_macos"],
+)
+
+dart_test(
+    name = "profile_bundle_test",
+    data = [":my_app_profile"],
+    main = "test/profile_bundle_test.dart",
+)
+```
+
+| Attribute | Description |
+|---|---|
+| `targets` | The targets to build in profile mode, such as a `flutter_macos_app`. Required. |
+
+The rule passes on the files of `targets`, so a test lists it in `data` and finds them in its runfiles. `tags = ["manual"]` keeps `bazel build //...` from building the profile app every time; the test that depends on it still builds it. A profile build needs the profile engine and `gen_snapshot` of the target platform, which are downloaded the first time. Its AOT snapshot can't be built for another desktop operating system, so give the target and its test the same `target_compatible_with` as the app. The iOS simulator has no profile mode.
 
 ### flutter_android_build
 
-Builds its `targets` for the Android `android_platforms`, as `--@rules_android//flags:android_platforms=<those platforms>` would, whatever flags the command line has. A plain `bazel test //...` then checks an APK for one ABI, or for several, with no `--@rules_android//flags:android_platforms` in the CI job.
+Builds its `targets` for the Android platforms in `android_platforms`, as `--@rules_android//flags:android_platforms=<those platforms>` would, whatever the command line says. Use it to check an APK for one ABI, or for several, in a plain `bazel test //...`.
 
 ```starlark
 load("@rules_flutter//flutter:android.bzl", "flutter_android_build")
@@ -3306,16 +3600,16 @@ flutter_android_build(
 )
 ```
 
-The rule forwards the files of `targets`, so a test names them in `data` and finds the APK in its runfiles. Two builds of one APK share its file name; a test that reads more than one needs each under a name of its own, which `e2e/plugin_example/android_apk.bzl` does with a symlink.
-
 | Attribute | Description |
 |---|---|
-| `android_platforms` | The platforms to build `targets` for, such as `@rules_android//:armeabi-v7a`, `@rules_android//:arm64-v8a` and `@rules_android//:x86_64`. Your `MODULE.bazel` needs a `bazel_dep` on `rules_android` to name them in a BUILD file. Required. |
+| `android_platforms` | The platforms to build for, such as `@rules_android//:armeabi-v7a`, `@rules_android//:arm64-v8a` and `@rules_android//:x86_64`. One platform builds an APK for that ABI, several build one APK with all of them. Naming them in a BUILD file needs a `bazel_dep` on `rules_android`. Required. |
 | `targets` | The targets to build, such as a `flutter_android_app`. Required. |
+
+The rule passes on the files of `targets`, so a test lists it in `data` and finds the APK in its runfiles. Two builds of one APK have the same file name, so a test that reads more than one needs each under its own name. `e2e/plugin_example/android_apk.bzl` gives them one with a symlink.
 
 ### flutter_android_release
 
-Signs an App Bundle and the APK of the same release build with your upload key when you `bazel run` it. See [Release: App Bundle and signing](#release-app-bundle-and-signing).
+`bazel run` of it signs an App Bundle, and the APK of the same release build, with your upload key. It is the counterpart of `flutter build appbundle` and `flutter build apk --release`. [Release: App Bundle and signing](#release-app-bundle-and-signing) shows it in use.
 
 ```starlark
 load("@rules_flutter//flutter:android.bzl", "flutter_android_release")
@@ -3326,11 +3620,12 @@ flutter_android_release(
 )
 ```
 
-| Attribute | Description |
-|---|---|
-| `app_bundle` | An `android_application`: `flutter_android_app`'s `app_bundle`, or your own built from the composable rules with `bundle_config_file = "@rules_flutter//flutter:android_bundle_config.pb.json"`. Built in release mode for `android_platforms`. Required. |
-| `android_platforms` | The ABIs of the release build. Defaults to `@rules_android//:armeabi-v7a`, `@rules_android//:arm64-v8a` and `@rules_android//:x86_64`. |
-| `key_properties` | Where `key.properties` is, relative to the target's package in the source tree. A path, not a label, so the file never enters the build. Defaults to `android/key.properties`. |
+| Attribute | Default | Description |
+|---|---|---|
+| `app_bundle` | required | An `android_application`: `flutter_android_app`'s `app_bundle`, or one you build from the composable rules with `bundle_config_file = "@rules_flutter//flutter:android_bundle_config.pb.json"`. It is built in release mode for `android_platforms`, whatever the command line says. |
+| `android_platforms` | `@rules_android//:armeabi-v7a`, `:arm64-v8a`, `:x86_64` | The ABIs of the release build. |
+| `key_properties` | `android/key.properties` | Where `key.properties` is, relative to the target's package in the source tree. It is a path, not a label, so the file and its passwords never enter the build. |
+| `apksigner` | `@androidsdk//:apksigner` | The Android SDK's `apksigner`, which signs the APK. |
 
 Commands, after `--`:
 
@@ -3339,161 +3634,22 @@ Commands, after `--`:
 | `sign` (the default) | `--key-properties=<path>`, `--output-dir=<dir>` |
 | `create-key` | `--key-properties=<path>`, `--dname=<X.500 name>` (default `CN=Upload Key`) |
 
-Relative paths in flags are relative to the directory you ran `bazel run` from. The Java runtime (`--java_runtime_version`) must be a full JDK, such as `remotejdk_25`, since signing uses its `jarsigner` and `keytool`.
-
-### flutter_profile_build
-
-Builds its `targets` in profile mode, as `-c opt --@rules_flutter//flutter:profile` would, whatever flags the command line has. A plain `bazel test //...` then checks a profile build, with no `--config=profile` in the CI job.
-
-```starlark
-load("@rules_flutter//flutter:defs.bzl", "flutter_profile_build")
-
-flutter_profile_build(
-    name = "my_app_profile",
-    tags = ["manual"],
-    targets = [":my_app"],
-)
-
-dart_test(
-    name = "profile_bundle_test",
-    data = [":my_app_profile"],
-    main = "test/profile_bundle_test.dart",
-)
-```
-
-The rule forwards the files of `targets`, so a test names them in `data` and finds them in its runfiles. `tags = ["manual"]` keeps `bazel build //...` from building the profile app on every run; the test that depends on it builds it. Profile mode needs the profile engine and `gen_snapshot` of the target platform, which are downloaded the first time, and the AOT snapshot cannot be built for another desktop OS, so put `target_compatible_with` on the target and its test as you would on the app. There is no profile mode for the iOS simulator.
-
-| Attribute | Description |
-|---|---|
-| `targets` | The targets to build in profile mode, such as a `flutter_macos_app`. Required. |
-
-### flutter_plugin
-
-Declares a Flutter plugin written in your workspace: its Dart code plus per-platform native implementations. Plugins from pub do not need this; the hub declares them.
-
-Each platform the plugin registers on is a `flutter_plugin_platform`, as each entry of `flutter: plugin: platforms:` is in a pubspec, holding that platform's registration and its native library:
-
-```starlark
-flutter_plugin_platform(
-    name = "ios",
-    platform = "ios",
-    plugin_class = "AudioSessionPlugin",
-    lib = ":audio_session_apple",
-)
-
-flutter_plugin_platform(
-    name = "web",
-    platform = "web",
-    plugin_class = "AudioSessionWeb",
-    file_name = "audio_session_web.dart",
-)
-
-flutter_plugin(
-    name = "audio_session",
-    srcs = glob(["lib/**/*.dart"]),
-    platforms = [
-        ":ios",
-        ":web",
-    ],
-)
-```
-
-| Attribute of `flutter_plugin_platform` | Description |
-|---|---|
-| `platform` | `android`, `ios`, `linux`, `macos`, `web` or `windows`. Required. |
-| `plugin_class` | `pluginClass`: the class registered with the platform's plugin registry. On web, the Dart class whose `registerWith(Registrar)` the web registrant calls. |
-| `dart_plugin_class` | `dartPluginClass`: the Dart class whose `registerWith()` runs before `main()`. |
-| `dart_file_name` | `dartFileName`: the library under `lib/` that declares `dart_plugin_class`. Defaults to `<package>.dart`. Not on web. |
-| `file_name` | `fileName`: the library under `lib/` that declares a web `plugin_class`. Defaults to `<package>.dart`. Web only. |
-| `ffi_plugin` | `ffiPlugin`: the platform's native code is a library Dart opens through `dart:ffi`. |
-| `default_package` | `default_package`: the package that implements a federated plugin on this platform. |
-| `package` | `package`: the Java package of an Android `plugin_class`. Android only, and required with a `plugin_class`. |
-| `lib` | The platform's native library: a `flutter_apple_plugin_library` on iOS and macOS, a `flutter_linux_plugin_library` or `flutter_windows_plugin_library` on the desktops. Only a build for `platform` analyses it. Not on Android or web. |
-
-A platform has a `plugin_class`, a `dart_plugin_class`, `ffi_plugin` or a `default_package`, as flutter_tools requires.
-
-| Attribute of `flutter_plugin` | Description |
-|---|---|
-| `srcs` | Dart sources. |
-| `deps` | `dart_library` or `flutter_library` targets. |
-| `platforms` | A `flutter_plugin_platform` for each platform the plugin registers on. |
-| `exports` | The plugin's Android library, in a `select()` on `@platforms//os:android`. Android apps that depend on the plugin link it. It is here rather than on the `android` platform because rules_android's dexing reaches a library through `exports` and no other attribute. |
-| `native_deps` | Shared libraries bundled for `dart:ffi`. |
-| `assets`, `resources` | Asset and resource files. An asset is keyed as on `flutter_library`. |
-| `data` | Files the plugin needs at run time on the host, as on `flutter_library`: in the runfiles of the tests that reach it, never in an app. |
-| `shaders`, `shader_includes` | The package's fragment shaders and what they `#include`, as on `flutter_library`. |
-| `fonts` | The package's font families, as on `flutter_library`. |
-| `package` | The package's `dart_package_metadata`, as on `flutter_library`. It states the package's name, language version and version, its code and data assets (see [Data assets](#data-assets)), its `hook/link.dart` (see [Link hooks](#link-hooks)) and its `NOTICES` or `LICENSE` file, as `flutter build` reads it from the package root: programs that depend on the package list that file in their `NOTICES`. |
-
-A plugin's native code is its own target. Swift goes in a `flutter_apple_plugin_library`, the `lib` of the `ios` or `macos` platform; one with `platform = "darwin"` compiles for whichever of the two the build is for, so a plugin whose sources are shared (`sharedDarwinSource`) names the one library as the `lib` of both. Kotlin or Java goes in a `flutter_android_plugin_library`, passed as `exports` in a `select()` on `@platforms//os:android` (an empty list otherwise). Every Android app that depends on the plugin then links it, as it links a pub plugin's library: `flutter_android_app` packages it, registers its plugin class and merges its `manifest` (receivers, services, permissions) into the app's. It gets a generated `BuildConfig` in its `java_package`, with `DEBUG` and `BUILD_TYPE` as Gradle's would be in the build's mode. Its `flutter_engine` is a `flutter_android_engine(neverlink = True)`: the plugin compiles against the engine and the app ships its own, of the app's ABI. `e2e/plugin_example/glass_plugin` shows both, with shaders.
-
-`e2e/ffi_example` shows a plugin built on Native Assets, `e2e/ffi_plugin_example` one with a Dart plugin class and `native_deps`, and `e2e/plugin_example` one with a Dart plugin class only.
-
-### Link hooks
-
-A package can decide what it ships from how the app uses it. Mark a `final class` with `@RecordUse()` from `package:meta` (1.19 or later), and write a `hook/link.dart` that reads the recorded uses with `package:record_use` and emits data assets with `package:data_assets`. The hook may import pure Dart from its own package's `lib/`, not Flutter.
-
-A hook can choose among its package's code assets too, with `package:code_assets`, keeping those the program uses. In a release or profile build the application's native-assets manifest, its bundles on every platform and its macOS add-to-app xcframeworks carry only the libraries the hook keeps. An iOS app embeds every candidate, because rules_apple embeds the frameworks it knows when the app is analysed, and removes those the hooks dropped before it is signed, with an `ipa_post_processor` of rules_flutter's. rules_apple runs one post-processor, so a `flutter_ios_app` given its own `ipa_post_processor` runs that one instead, and fails to build if a hook drops a code asset. iOS add-to-app (`flutter_ios_xcframeworks`) in release fails when a hook drops one, as `flutter build ios-framework` does: its simulator slice is a debug build, which runs no hook, and the device build is the source of truth.
-
-```starlark
-# symbols/BUILD.bazel
-dart_package_metadata(
-    name = "pubspec-metadata",
-    package_name = "symbols",
-    link_hook = "hook/link.dart",
-)
-
-flutter_plugin(
-    name = "symbols",
-    srcs = glob(["lib/**/*.dart"]),
-    package = ":pubspec-metadata",
-    platforms = [],
-    deps = ["@deps//:data_assets", "@deps//:hooks", "@deps//:meta", "@deps//:record_use"],
-)
-
-# app/BUILD.bazel
-dart_package_metadata(
-    name = "pubspec-metadata",
-    package_name = "app",
-)
-
-flutter_application(
-    name = "app",
-    package = ":pubspec-metadata",
-    deps = ["//symbols", "@deps//:flutter"],
-    # ...
-)
-```
-
-Keep the hook file out of `srcs`. Whatever data assets of its package a hook emits ship, and a hook that reports an error fails the build with its own message. A rule that has to name one of them before the build runs can only name one the package promises: list its id in the package's `dart_package_metadata(link_hook_assets = [...])`, and the hook must then always emit it.
-
-In a release or profile build the compile records the uses, and the hook of every package of the application that has one runs over them, the application's own package among them, as `flutter build` runs them. A native app's kernel compile records them (`--recorded-uses`); a web bundle's dart2wasm compile does (`--recorded-uses`), or its dart2js one (`--write-resources`) when it has no WebAssembly build, and the hooks' assets serve both of its builds. A hook receives its package's declared [data assets](#data-assets) (`LinkInput.assets.data`) and ships only those it emits, so it can drop what the app does not use; the declared assets of packages without a hook ship as they are. What ships is bundled at `flutter_assets/packages/<package>/<name>`, listed in `AssetManifest`, and loaded with `rootBundle.load('packages/<package>/<name>')`. Debug builds record nothing (a native one is a JIT compile, and `flutter build web` links no debug build either): no hook runs, every declared data asset ships, and nothing a hook would write does, so load what the hook would have indexed on demand there. The application's own package's hook runs whether or not a library in `deps` names its declaration, and it can import the application's own files under the package's `lib/`, as any package's hook imports its own `lib/`. `e2e/_overlay_tests/link_hooks` is a working example, including a hook that fails the build.
-
-### Lower-level rules
-
-These are what `flutter_application` is made of. Most apps never need them.
-
-| Rule | What it does |
-|---|---|
-| `flutter_kernel` | Compiles Dart to a kernel `.dill` with Flutter's patched platform kernel. |
-| `flutter_aot_snapshot` | Compiles Dart to an AOT shared library (`.so` on Linux and Android, `.dylib` on macOS) with `gen_snapshot`. |
-| `flutter_asset_bundle` | Builds the `flutter_assets/` tree: `AssetManifest.bin`, `FontManifest.json`, `NOTICES.Z`, and the asset files. |
-| `flutter_native_library` | Pairs a native library with its binding contract. See [Hot reload across a native rebuild](#hot-reload-across-a-native-rebuild). |
+A relative path in a flag is relative to the directory you ran `bazel run` from. Signing uses the `jarsigner` and `keytool` of the Java runtime, so `--java_runtime_version` must name a full JDK, such as `remotejdk_25`.
 
 ### Code generation
 
-rules_dart provides `dart_codegen` and `dart_aggregate_codegen`, which replace `build_runner` with ordinary Bazel actions. They load from `@rules_dart//dart:defs.bzl`. A generated file goes into the consuming target's `srcs`, and the rules place it next to its hand-written sibling so a `part` directive resolves:
+rules_dart's `dart_codegen` and `dart_aggregate_codegen` replace `build_runner` with ordinary Bazel actions. They load from `@rules_dart//dart:defs.bzl`. A generated file goes in the `srcs` of the target that uses it, and lands beside its hand-written source, so a `part` directive resolves:
 
 ```starlark
 load("@rules_dart//dart:defs.bzl", "dart_aggregate_codegen", "dart_codegen")
-load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application")
 
 dart_package_metadata(
     name = "pubspec-metadata",
     package_name = "my_app",
 )
 
-# One output per input file, for example a json_serializable part.
+# One output per input file, such as a json_serializable part.
 dart_codegen(
     name = "user_json",
     package = ":pubspec-metadata",
@@ -3502,7 +3658,7 @@ dart_codegen(
     output_suffixes = [".g.dart"],
 )
 
-# One output from all the inputs, for example a route registry.
+# One output from all the inputs, such as a route registry.
 dart_aggregate_codegen(
     name = "registry",
     package = ":pubspec-metadata",
@@ -3520,7 +3676,7 @@ flutter_application(
 )
 ```
 
-A `generator` is a target: a `dart_binary` whose `main` hands a `package:build` `Builder` to rules_dart's shim runner, which speaks the rules' command line and runs as a persistent worker. It is built for the execution platform. The Builder reads its input with `buildStep.readAsString(buildStep.inputId)` and writes the file the rule declared, `buildStep.allowedOutputs.single`; an aggregate Builder finds the other sources with `buildStep.findAssets`. The rule's `config` reaches the factory as `options.config`.
+A `generator` is a `dart_binary` whose `main` hands a `package:build` `Builder` to rules_dart's shim runner. The runner speaks the rules' command line, runs as a persistent worker, and is built for the execution platform. The Builder reads its input with `buildStep.readAsString(buildStep.inputId)` and writes the file the rule declared, `buildStep.allowedOutputs.single`. An aggregate Builder finds the other sources with `buildStep.findAssets`. The rule's `config` reaches the Builder's factory as `options.config`.
 
 ```dart
 // tools/json_generator.dart
@@ -3567,13 +3723,23 @@ dart_binary(
 )
 ```
 
-`generator_pub_deps` is a hub of its own, from a `pubspec.lock` beside the generators (`dart_pub = use_extension("@rules_dart//dart/pub:extensions.bzl", "pub")`, then `dart_pub.from_lock(name = "generator_pub_deps", lock = "//tools:pubspec.lock")`). It must resolve `analyzer`, `args`, `bazel_worker`, `build`, `crypto`, `glob`, `logging`, `package_config`, `path`, `pub_semver` and `yaml`, which the shim runner links; `e2e/codegen/tools/pubspec.yaml` lists them.
+The generators have a pub hub of their own, read from a `pubspec.lock` beside them by rules_dart's extension:
 
-`e2e/codegen` is the worked example, including generated code in dependency packages and hot reload over regenerated sources.
+```starlark
+# MODULE.bazel
+dart_pub = use_extension("@rules_dart//dart/pub:extensions.bzl", "pub")
+dart_pub.from_lock(
+    name = "generator_pub_deps",
+    lock = "//tools:pubspec.lock",
+)
+use_repo(dart_pub, "generator_pub_deps")
+```
+
+It must resolve the packages the shim runner links: `analyzer`, `args`, `bazel_worker`, `build`, `crypto`, `glob`, `logging`, `package_config`, `path`, `pub_semver` and `yaml`. [`e2e/codegen`](e2e/codegen) is the worked example these come from, with generated code in dependency packages and hot reload over regenerated sources. Its `tools/pubspec.yaml` lists those packages.
 
 #### go_router_builder
 
-rules_dart ships macros for pure-Dart builders such as json_serializable and freezed, written on its builder API (`@rules_dart//dart/ext:defs.bzl`). go_router_builder states a Flutter constraint, so rules_flutter ships it: `go_router_codegen` writes the `<src>.g.dart` part of each source that declares `@TypedGoRoute` routes, as `dart run build_runner build` would. The builder comes from rules_flutter's own lock; your lock needs `go_router`, which the generated code and your sources import.
+rules_dart has macros for pure-Dart builders such as json_serializable and freezed (`@rules_dart//dart/ext:defs.bzl`). go_router_builder depends on Flutter, so rules_flutter has its macro: `go_router_codegen` writes the `.g.dart` part of each source that declares `@TypedGoRoute` routes, as `dart run build_runner build` would. The builder comes from rules_flutter's own lock. Your lock needs `go_router`, which your sources and the generated code import.
 
 ```starlark
 load("@rules_flutter//flutter/ext/go_router:defs.bzl", "go_router_codegen")
@@ -3581,9 +3747,9 @@ load("@rules_flutter//flutter/ext/go_router:defs.bzl", "go_router_codegen")
 # lib/routes.dart declares `part 'routes.g.dart';`.
 go_router_codegen(
     name = "routes",
+    package = ":pubspec-metadata",
     srcs = ["lib/routes.dart"],
     annotation_dep = "@deps//:go_router",
-    package = ":pubspec-metadata",
     deps = ["@deps//:flutter"],
 )
 
@@ -3596,17 +3762,15 @@ flutter_application(
 )
 ```
 
-`annotation_dep` names your `go_router` library; it is `@pub_deps//:go_router` unless you set it, so a hub named `pub_deps` can leave it out. `config` takes the builder's options as JSON, as `build.yaml` states them. For Gazelle to write these targets, register the builder in the BUILD file at your repository's root:
+`annotation_dep` is your `go_router` library. It defaults to `@pub_deps//:go_router`, so with a hub named `pub_deps` you can leave it out. `config` takes the builder's options as JSON, as `build.yaml` gives them. For Gazelle to write these targets, register the builder in the BUILD file at your repository's root, with `runtime_dep` naming the same library as `annotation_dep`:
 
 ```starlark
-# gazelle:dart_builder TypedGoRoute macro=@rules_flutter//flutter/ext/go_router:defs.bzl%go_router_codegen shim=@rules_flutter//flutter/ext/go_router:shim produces=.go_router.g.part runtime_dep=@pub_deps//:go_router key=go_router_builder:go_router_builder
+# gazelle:dart_builder TypedGoRoute macro=@rules_flutter//flutter/ext/go_router:defs.bzl%go_router_codegen shim=@rules_flutter//flutter/ext/go_router:shim produces=.go_router.g.part runtime_dep=@deps//:go_router key=go_router_builder:go_router_builder
 ```
-
-`runtime_dep` names the same library as `annotation_dep`: with the hub `deps`, `runtime_dep=@deps//:go_router`.
 
 #### flutter_gen_l10n
 
-Generates `AppLocalizations` from `.arb` files, the equivalent of `flutter gen-l10n`.
+Generates `AppLocalizations` from `.arb` files, as `flutter gen-l10n` does.
 
 ```starlark
 load("@rules_flutter//flutter:defs.bzl", "flutter_gen_l10n")
@@ -3634,92 +3798,140 @@ flutter_test(
 )
 ```
 
-The generated files land beside the `.arb` files, and a consumer collects them by listing the target in `srcs`. The attributes mirror the flags of `flutter gen-l10n` with the same defaults: `template_arb_file`, `output_class`, `use_deferred_loading`, and so on. `l10n.yaml` is not read, because Bazel has to know the output file names during analysis and a config file read while the action runs cannot tell it.
+The generated files land beside the `.arb` files, which must all be in one directory. List the target in `srcs` to compile them. The app needs `intl` in its own lock, as with `flutter gen-l10n`; the generator has its own copy.
 
-A few things to know:
+`l10n.yaml` is not read, because Bazel must know the output file names during analysis, before any file is read. Its settings are attributes instead, with `flutter gen-l10n`'s defaults:
 
-- **Keep `@@locale` consistent with the filename.** The rule derives output names from the arb filenames, while the generator decides what to write from each file's `@@locale`. If `app_english.arb` declares `"@@locale": "en"`, Bazel expects `app_localizations_english.dart` and the generator writes `app_localizations_en.dart`, which surfaces as "output was not created". Bazel cannot read file contents during analysis, so the rule cannot check this for you.
-- **Outputs are grouped by primary language.** `app_es.arb` and `app_es_419.arb` produce one `app_localizations_es.dart` holding both classes, matching upstream.
-- **Generated files always use LF line endings.** Upstream copies the line endings of `pubspec.yaml`, which would make the output depend on a file the action does not declare.
-- **There is no `format` attribute.** Formatting shells out to the `dart` binary, which the action does not have. Setting it is an error rather than a silent no-op. rules_dart's format check covers hand-written files only, so the generated sources are not checked.
-- **Two copies of `intl` are in play.** The generator has its own. An app using the generated code needs `intl` in its own lock. Upstream has the same split.
+| `l10n.yaml` / `flutter gen-l10n` flag | Attribute | Default |
+|---|---|---|
+| `template-arb-file` | `template_arb_file` | `app_en.arb` |
+| `output-localization-file` | `output_localization_file` | `app_localizations.dart` |
+| `output-class` | `output_class` | `AppLocalizations` |
+| `preferred-supported-locales` | `preferred_supported_locales` | `[]` |
+| `header` | `header` | `""` |
+| `use-deferred-loading` | `use_deferred_loading` | `False` |
+| `nullable-getter` | `nullable_getter` | `True` |
+| `required-resource-attributes` | `required_resource_attributes` | `False` |
+| `use-escaping` | `use_escaping` | `False` |
+| `relax-syntax` | `relax_syntax` | `False` |
+| `use-named-parameters` | `use_named_parameters` | `False` |
+| `suppress-warnings` | `suppress_warnings` | `False` |
+| `format` | none | |
 
-The generator is carved out of `flutter_tools` at fetch time with a set of patches, so a Flutter version bump re-validates it. A release that moves the patch context fails the patch, and a new release also needs a `source_sha256` in `flutter/private/versions.bzl`. Two things those checks cannot catch: a newly added read of an undeclared file at run time, which shows up as a `PathNotFoundException`, and a newly adopted `dart:io` API newer than the Dart that rules_dart provides, which shows up as a compile error naming a missing type. The fix for the second is to cut the dead code that uses it, as the existing patches do for an unused `NetworkInterface` wrapper. See `flutter/private/flutter_gen_l10n_repo.bzl`.
+Where it differs from `flutter gen-l10n`:
 
-On Windows, the repository rule extracts all of `packages/flutter_tools` (about 19 MB) and uses twenty of its files. The deepest path is around 130 characters from the repository root, which fits within `MAX_PATH` given a short `output_user_root`.
+- **Output names come from file names.** The rule names the outputs from the `.arb` file names, while the generator decides what to write from each file's `@@locale`. If `app_english.arb` declares `"@@locale": "en"`, Bazel expects `app_localizations_english.dart`, the generator writes `app_localizations_en.dart`, and the build fails with "output was not created". Keep the two consistent. Bazel can't read the files during analysis to check this for you.
+- **One output per primary language.** `app_es.arb` and `app_es_419.arb` produce one `app_localizations_es.dart` holding both classes, as upstream does.
+- **Line endings are always LF.** Upstream copies `pubspec.yaml`'s line endings, which would make the output depend on a file the action doesn't declare.
+- **There is no `format`.** Formatting runs the `dart` binary, which the action doesn't have. rules_dart's format check covers only hand-written files, so the generated files are not checked either.
+
+The generator is a part of `flutter_tools`, cut out with patches when the repository is fetched. A Flutter release that moves the code the patches touch fails the fetch. A failure at run time with a `PathNotFoundException`, or a compile error naming a missing `dart:io` type, also points at a newer release than the patches were made for. [`flutter/private/flutter_gen_l10n_repo.bzl`](flutter/private/flutter_gen_l10n_repo.bzl) explains what to check.
+
+On Windows, the repository extracts all of `packages/flutter_tools` and uses twenty of its files. The longest path is around 130 characters from the repository root, which fits within the 260-character limit with a short `output_user_root`.
+
+### Lower-level rules
+
+`flutter_application` is made of these. Most apps never use them directly.
+
+| Rule | What it does |
+|---|---|
+| `flutter_kernel` | Compiles Dart to a kernel `.dill` against Flutter's platform kernel. `aot = True` compiles for AOT in any mode. |
+| `flutter_aot_snapshot` | Compiles Dart to AOT native code with `gen_snapshot`: a `.dylib` for macOS and iOS, an ELF `.so` for every other platform. |
+| `flutter_asset_bundle` | Builds the `flutter_assets/` tree: `AssetManifest.bin`, `FontManifest.json`, `NOTICES.Z` (`NOTICES` for the web), and the asset files. |
+| `flutter_native_library` | Pairs a native library with the files its bindings were built against. See [Hot reload across a native rebuild](#hot-reload-across-a-native-rebuild). |
 
 ### Providers
 
-**`FlutterSdkInfo`** comes from the toolchain and carries the engine binaries and SDK files a custom rule needs:
+Load providers from `@rules_flutter//flutter:providers.bzl`. Each field's full description is there.
+
+**`FlutterSdkInfo`** comes from the Flutter toolchain, and carries the SDK and engine files of the target platform:
 
 ```starlark
 sdk = ctx.toolchains["@rules_flutter//flutter:toolchain_type"].flutter_sdk_info
 ```
 
+The fields a custom rule most often uses:
+
 | Field | Type | Description |
 |---|---|---|
-| `version` | `str` | The Flutter SDK version, for example `"3.47.9"`. |
-| `engine_revision` | `str` | The engine commit hash. |
-| `dart` | `File` | The `dart` executable from the bundled Dart SDK. |
-| `dartaotruntime` | `File` | The runtime for AOT snapshots. |
-| `gen_snapshot` | `File` | The AOT compiler. |
-| `frontend_server` | `File` | `frontend_server_aot.dart.snapshot`, for kernel compilation. |
+| `version` | `str` | The Flutter version, such as `"3.47.9"`. |
+| `engine_revision` | `str` | The engine commit. |
+| `dart`, `dartaotruntime` | `File` | The bundled Dart SDK's `dart`, and its runtime for AOT snapshots. |
+| `gen_snapshot` | `File` or `None` | The AOT compiler. `None` in debug mode, and for a toolchain that can't compile one. |
+| `flutter_tester` | `File` or `None` | The headless engine tests run on. `None` where the SDK has none, such as a cross-compiling toolchain. |
+| `frontend_server` | `File` | `frontend_server_aot.dart.snapshot`, the kernel compiler. |
 | `platform_kernel_dill` | `File` | `platform_strong.dill`, the debug platform kernel. |
-| `platform_kernel_dill_product` | `File` | `platform_strong_product.dill`, the release platform kernel. |
-| `patched_sdk` | `Target` | The Flutter-patched Dart SDK root. |
+| `platform_kernel_dill_product` | `File` or `None` | `platform_strong_product.dill`, the release platform kernel. `None` in debug mode. |
+| `patched_sdk` | `Target` | The Flutter-patched Dart SDK. |
 | `icu_data` | `File` | `icudtl.dat`. |
-| `sdk_files` | `DartSdkFilesInfo` | The bundled Dart SDK's files by the use that reads them (`run`, `aot_run`, `kernel`, `dart2js`, `dart2wasm`, ...), as rules_dart declares them. An action takes the set of the one tool it runs. |
-| `tool_files` | `depset[File]` | Every file of the bundled Dart SDK and the patched SDK (~1,050 files, 650 MB), for running any SDK command such as `dart pub`. An action that runs one tool takes that tool's set from `sdk_files` instead. |
-| `engine_library` | `Target` or `None` | The platform engine runtime library of the build mode (debug under `-c dbg`, profile under `--@rules_flutter//flutter:profile` where the toolchain has one, release otherwise). `None` for mobile and web. |
-| `const_finder` | `File` or `None` | `const_finder.dart.snapshot`, for icon tree shaking. |
-| `font_subset` | `File` or `None` | The `font-subset` binary. |
+| `sdk_files` | `DartSdkFilesInfo` | The Dart SDK's files, grouped by the tool that reads them (`run`, `aot_run`, `kernel`, `dart2js`, `dart2wasm`, ...), as rules_dart declares them. An action takes the group of the one tool it runs. |
+| `tool_files` | `depset[File]` | Every file of the Dart SDK and the patched SDK, about 1,050 files and 650 MB, for running any SDK command such as `dart pub`. |
+| `engine_library` | `Target` or `None` | The desktop engine library of the build mode: debug under `-c dbg`, profile under `--@rules_flutter//flutter:profile` where the toolchain has one, release otherwise. `None` for mobile and the web. |
+| `const_finder`, `font_subset` | `File` or `None` | The icon tree shaker's two tools. |
 | `impellerc` | `File` or `None` | The shader compiler. |
-| `shader_lib` | `list[File]` | Shader include files for impellerc. |
+| `shader_lib` | `list[File]` | The files shaders may include. |
 | `target_os`, `target_arch` | `str` | The cross-compilation target, or empty for a native build. |
 
-**`FlutterInfo`** is carried by `flutter_library` and `flutter_plugin`:
+The rest describe how the toolchain was assembled (`sdk`, `sdk_defines`, `host_tools`, `kernel_debug`, `kernel_release`, `engine`, `gen_snapshot_info`, `framework_json`, `slice_labels`), and a few files only rules_flutter's own rules need (`kernel_worker`, `dart_libraries_json`, `material_icons_font`, `vm_isolate_snapshot`, `isolate_snapshot`, `linux_sysroot`).
+
+An action whose output doesn't depend on the target platform, such as a kernel compile or shader compile, can take its tools from `@rules_flutter//flutter:exec_tools_toolchain_type` instead. Its `flutter_exec_tools_info` is a **`FlutterExecToolsInfo`**: the same tools, for the host they run on.
+
+**`FlutterApplicationInfo`** is provided by `flutter_application` and `flutter_application_variant`, and read by the platform rules:
 
 | Field | Type | Description |
 |---|---|---|
-| `pub_assets` | `depset[struct]` | The asset files of each package, each with its `package_name`, its `package_root`, its path from that root and the file. A program bundles them as `packages/<package_name>/<path>`, or as `<path>` when the package is the program's own. |
-| `plugins` | `list[struct]` | Plugin metadata, each with `name` and `platforms`, a dict of platform to the `FlutterPluginPlatformInfo` of its `flutter_plugin_platform`. |
-| `transitive_native_libs` | `depset[File]` | Shared libraries from plugins' `native_deps`. |
-
-**`FlutterFontFamilyInfo`** is carried by `flutter_font_family`: its `family`, and its `fonts`, a `FlutterFontInfo` each (`file`, `weight`, `style` and `asset`, as on `flutter_font`). **`FlutterPluginPlatformInfo`** is carried by `flutter_plugin_platform`: its attributes, with `lib` the native library of a build for its platform, or `None`.
-
-**`FlutterApplicationInfo`** is carried by `flutter_application` and consumed by the platform rules:
-
-| Field | Type | Description |
-|---|---|---|
-| `aot_output` | `File` or `None` | AOT native code. `None` in debug mode. |
-| `kernel_dill` | `File` or `None` | The kernel `.dill`. `None` in release mode. |
+| `aot_output` | `File` or `None` | The AOT native code. `None` in debug mode. |
+| `aot_object` | `File` or `None` | On Apple platforms, the object file `gen_snapshot` wrote beside `aot_output`, which its dSYM is made from. |
+| `strip_aot` | `bool` | Whether the shipped AOT binary is stripped. `False` with `--no-strip`. |
+| `kernel_dill` | `File` or `None` | The kernel. `None` in a release or profile build. |
+| `is_debug` | `bool` | Whether this is a debug build. |
 | `flutter_assets` | `File` | The `flutter_assets/` tree. |
 | `icu_data` | `File` | `icudtl.dat`. |
-| `native_libs` | `list[File]` | Shared libraries from `native_deps`. |
-| `is_debug` | `bool` | `True` for a debug build. |
-| `native_plugin_registrant` | `File` or `None` | The generated plugin registrant source for desktop platforms. |
+| `native_libs` | `list[File]` | The shared libraries of `native_deps`. |
+| `native_assets_manifest` | `File` | The Native Assets manifest the app ships, which `@Native(assetId:)` bindings resolve through. |
+| `program_assets` | `DartProgramAssetsInfo` | The code and data assets the program ships, after link hooks. |
+| `plugins` | `list[struct]` | The plugins of the whole app, each with `name` and `platforms`, a dict of platform to `FlutterPluginPlatformInfo`. |
+| `apple_plugin_libraries`, `linux_plugin_libraries`, `windows_plugin_libraries`, `android_libs` | `depset[struct]` | The plugins' native libraries, which each platform's rules link. |
+| `apple_privacy_manifests` | `depset[File]` | The plugins' `PrivacyInfo.xcprivacy` files. |
 
-**`FlutterApplicationInputsInfo`** is carried by `flutter_application` and `flutter_application_variant`. Its one field, `inputs`, is the program the application was built from, which `flutter_application_variant` changes and builds again.
+**`FlutterApplicationInputsInfo`** is also provided by `flutter_application` and `flutter_application_variant`. Its one field, `inputs`, is the program the application was compiled from, which `flutter_application_variant` changes and compiles again.
 
-**`FlutterTestProgramInfo`** is returned by `flutter_test_program` and read by `flutter_program_test`: a compiled Flutter test and what the runner needs beside it.
+**`FlutterInfo`** is provided by `flutter_library`, `flutter_plugin` and the pub packages. It carries what a package contributes to the apps that depend on it, merged over its dependencies. Among its fields:
 
 | Field | Type | Description |
 |---|---|---|
-| `kernel` | `File` | The kernel `flutter_tester` is started with: a `.dill`, or, with `kernel_list`, a list of the kernels in `kernels`, which the runner joins into one when it starts `flutter_tester`. |
+| `pub_assets` | `depset[struct]` | Each package's asset files: `package_name`, `package_root`, `asset_path` (the path from the package root), `file`, and the `platforms` and `flavors` it is limited to. |
+| `pub_fonts`, `pub_shaders` | `depset[struct]` | Each package's font families and shaders, in the same shape. |
+| `plugins` | `list[struct]` | The plugins, each with `name` and `platforms`. |
+| `transitive_native_libs` | `depset[File]` | The shared libraries of plugins' `native_deps`. |
+
+**`FlutterFontFamilyInfo`** is provided by `flutter_font_family`: its `family`, and its `fonts`, each a **`FlutterFontInfo`** with `file`, `weight`, `style` and `asset`, as on `flutter_font`.
+
+**`FlutterPluginPlatformInfo`** is provided by `flutter_plugin_platform`. Its fields are the rule's attributes, and `lib` is the native library in a build for that platform, `None` in any other.
+
+**`FlutterNativeLibraryInfo`** is provided by `flutter_native_library`: its `libraries`, its `binding_contract` files, and its `hot_patch`.
+
+**`FlutterTestProgramInfo`** is provided by `flutter_test_program` and read by `flutter_program_test`: a compiled test, and what the runner needs beside it.
+
+| Field | Type | Description |
+|---|---|---|
+| `kernel` | `File` | The kernel `flutter_tester` starts with: a `.dill`, or, when `kernel_list` is true, a list of the kernels in `kernels`, which the runner joins when it starts `flutter_tester`. |
 | `kernel_list` | `bool` | Whether `kernel` is a list of kernels. |
-| `kernels` | `depset[File]` | The kernels `kernel` names; empty for a joined kernel. |
+| `kernels` | `depset[File]` | The kernels `kernel` lists; empty when it is one kernel. |
 | `assets` | `File` | The `flutter_assets` directory the test runs with. |
 | `tester`, `icu_data` | `File` | `flutter_tester` and its ICU data, for the platform the program is built for. |
 | `display_path` | `str` | The suite's path in the runner's reports. |
-| `source` | `File` | The test library's source, read for its `@Tags`. |
-| `packages` | `list[DartPackageInfo]` | Every package the program runs, its own included, by which `bazel coverage` finds the file of each library it reports. |
+| `source` | `File` | The test file, read for its `@Tags`. |
+| `packages` | `list[DartPackageInfo]` | Every package the program runs, its own included, which `bazel coverage` maps library files through. |
 | `native_assets_manifest` | `File` | The Native Assets manifest the kernel was compiled with. |
-| `native_files` | `list[str]` | Runfiles paths of native-asset libraries the runner puts on the loader's search path (Windows); empty elsewhere. |
+| `native_files` | `list[str]` | Runfiles paths of native-asset libraries the runner puts on the loader's search path on Windows. Empty elsewhere. |
 | `enable_impeller` | `bool` | Whether the test renders with Impeller. |
-| `target_os` | `str` | The OS the program is built for. |
-| `runfiles` | `runfiles` | Everything the program needs when it runs, less the runner: every File above, native-asset libraries and `data`, goldens included. |
+| `target_os` | `str` | The operating system the program is built for. |
+| `runfiles` | `runfiles` | Everything the program needs at run time except the runner: every file above, native-asset libraries, and `data`, goldens included. |
 
-**`FlutterIntegrationRunnerInfo`** is returned by the runner rules (`flutter_desktop_runner`) and read by the test rule of the same family: the `family` of device (`"web"`, `"desktop"`, `"ios_simulator"` or `"android"`), the runner's own `launcher_config`, the `runfiles` it needs, the test's `execution_requirements` and `target_compatible_with`. A test rule takes only a runner of its own family.
+**`FlutterIntegrationRunnerInfo`** is provided by the integration test runner rules (`flutter_desktop_runner`, `flutter_chrome_runner`, `flutter_android_emulator_runner`, `flutter_android_device_runner`, `flutter_ios_simulator_runner`). It holds the `family` of device (`"desktop"`, `"web"`, `"android"` or `"ios_simulator"`), the runner's `launcher_config`, the `runfiles` it needs, and the test's `execution_requirements` and `target_compatible_with`. A test rule takes only a runner of its own family.
+
+**`FlutterLinuxRuntimeInfo`** is provided by `flutter_linux_runtime`: the files of the pinned Linux runtime, which a Linux runner carries.
 
 ## The dev tool
 
