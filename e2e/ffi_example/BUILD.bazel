@@ -203,7 +203,7 @@ filegroup(
 dart_code_asset(
     name = "negate_asset",
     asset_id = "package:prebuilt_asset/negate",
-    shared_library = ":negate_prebuilt",
+    file = ":negate_prebuilt",
     visibility = ["//prebuilt_asset:__pkg__"],
 )
 
@@ -277,7 +277,7 @@ c_hot_patch(
     dart_code_asset(
         name = "count_%s_%s" % (package, which),
         asset_id = "package:count_%s/count_%s" % (package, package),
-        shared_library = library,
+        file = library,
         visibility = ["//count_%s:__pkg__" % package],
     )
     for package in [

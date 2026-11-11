@@ -31,7 +31,7 @@ cc_library(
 dart_code_asset(
     name = "own",
     asset_id = "package:shared_counter/shared_counter",
-    shared_library = ":counter_own",
+    file = ":counter_own",
 )
 
 dart_package_metadata(
@@ -50,13 +50,13 @@ dart_library(
 dart_code_asset(
     name = "package_combined",
     asset_id = "package:shared_counter/shared_counter",
-    shared_library = ":counter",
+    file = ":counter",
     visibility = ["//:__pkg__"],
 )
 
 dart_code_asset(
     name = "test_combined",
     asset_id = "package:codegen_e2e/shared_counter",
-    shared_library = ":counter",
+    file = ":counter",
     visibility = ["//:__pkg__"],
 )

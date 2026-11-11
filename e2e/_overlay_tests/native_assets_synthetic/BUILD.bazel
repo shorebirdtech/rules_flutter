@@ -31,7 +31,7 @@ cc_shared_library(
 dart_code_asset(
     name = "synthetic_native_asset_macos",
     asset_id = "package:native_assets_synthetic/synthetic.dylib",
-    shared_library = ":_synthetic_dylib",
+    file = ":_synthetic_dylib",
     target_compatible_with = ["@platforms//os:macos"],
 )
 

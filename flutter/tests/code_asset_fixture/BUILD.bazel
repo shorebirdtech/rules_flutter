@@ -110,7 +110,7 @@ stand_in_code_asset(
     name = "system_code_asset",
     asset_id = "package:code_asset_owner/system",
     link_mode = "dynamic_loading_system",
-    system_uri = "libbridge.so.1",
+    uri = "libbridge.so.1",
 )
 
 flutter_native_library(

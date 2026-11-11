@@ -55,9 +55,9 @@ copy_file(
     out = "vendor/lib/libbridge.dylib",
 )
 
-# The library as rules_dart's code asset, which takes it as `shared_library`.
+# The library as rules_dart's code asset, which takes it as `file`.
 dart_code_asset(
     name = "bridge_code_asset",
     asset_id = "package:native_sources_fixture/bridge",
-    shared_library = ":bridge",
+    file = ":bridge",
 )

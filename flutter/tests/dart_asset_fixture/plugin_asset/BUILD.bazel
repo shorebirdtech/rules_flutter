@@ -19,7 +19,7 @@ cc_shared_library(
 dart_code_asset(
     name = "plugin_asset",
     asset_id = "package:plugin_asset_fixture/plugin_asset.dart",
-    shared_library = ":plugin_asset_shared",
+    file = ":plugin_asset_shared",
 )
 
 dart_package_metadata(

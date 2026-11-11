@@ -145,7 +145,7 @@ cc_shared_library(
 dart_code_asset(
     name = "{PKG}_native_asset",
     asset_id = "package:{PKG}/objective_c.dylib",
-    shared_library = ":_{PKG}_dylib",
+    file = ":_{PKG}_dylib",
     target_compatible_with = select({
         "@platforms//os:macos": [],
         "@platforms//os:ios": [],

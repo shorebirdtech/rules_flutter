@@ -85,7 +85,7 @@ def _below(ctx, skip):
 
 def _code_asset_libraries_aspect_impl(target, ctx):
     asset = target[DartCodeAssetInfo] if DartCodeAssetInfo in target else None
-    if asset != None and asset.dynamic_library == None:
+    if asset != None and asset.file == None:
         asset = None
     wrapper = target[FlutterNativeLibraryInfo] if asset != None and FlutterNativeLibraryInfo in target else None
 
@@ -109,7 +109,7 @@ def _code_asset_libraries_aspect_impl(target, ctx):
         sources = tuple(target[NativeSourcesInfo].sources.to_list())
     record = struct(
         asset_id = asset.asset_id,
-        library = asset.dynamic_library,
+        library = asset.file,
         contract = contract,
         sources = sources,
         hot_patch = hot_patch,

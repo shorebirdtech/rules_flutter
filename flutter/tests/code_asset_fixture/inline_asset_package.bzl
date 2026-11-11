@@ -17,8 +17,8 @@ def _inline_asset_package_impl(ctx):
     asset = DartCodeAssetInfo(
         asset_id = "package:%s/bridge" % ctx.attr.package_name,
         link_mode = "dynamic_loading_bundle",
-        dynamic_library = library,
-        system_uri = "",
+        file = library,
+        uri = "",
     )
     pkg = DartPackageInfo(
         package_name = ctx.attr.package_name,

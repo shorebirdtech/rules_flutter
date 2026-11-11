@@ -13,7 +13,7 @@ stand_in_code_asset(
     name = "system_asset",
     asset_id = "package:app_root_record_fixture/system",
     link_mode = "dynamic_loading_system",
-    system_uri = "libapp_root_record_fixture.so",
+    uri = "libapp_root_record_fixture.so",
 )
 
 dart_package_metadata(

@@ -47,14 +47,14 @@ _HOT_PATCH_MANIFEST_SUFFIX = ".hot_patch.json"
 
 def _code_asset_library(ctx, asset):
     """The one library a code asset loads, which is what the contract describes."""
-    if asset.link_mode != "dynamic_loading_bundle" or asset.dynamic_library == None:
+    if asset.link_mode != "dynamic_loading_bundle" or asset.file == None:
         fail((
             "%s names `library = %s`, a code asset (`%s`) with link mode " +
             "`%s`. The app bundles no library for it, so there is nothing a " +
             "contract could describe or a patch could reach; only a " +
             "`dynamic_loading_bundle` asset can be wrapped."
         ) % (ctx.label, ctx.attr.library.label, asset.asset_id, asset.link_mode))
-    return asset.dynamic_library
+    return asset.file
 
 def _flutter_native_library_impl(ctx):
     default = ctx.attr.library[DefaultInfo]
@@ -197,7 +197,7 @@ A shared library on a native platform; a `.wasm` module on web. Usually a rule's
 output, and a checked-in prebuilt file works too.
 
 A target that provides `DartCodeAssetInfo` is a code asset: the library it
-describes is the asset's `dynamic_library`, which must exist, so only a
+describes is the asset's `file`, which must exist, so only a
 `dynamic_loading_bundle` asset can be wrapped. The wrapper then provides the
 same `DartCodeAssetInfo`.
 """,

@@ -207,7 +207,7 @@ dart_code_asset(
     name = "a_system",
     asset_id = "package:shared_a/a",
     link_mode = "dynamic_loading_system",
-    system_uri = "libshared_a.so",
+    uri = "libshared_a.so",
 )
 
 flutter_application(

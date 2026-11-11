@@ -81,7 +81,8 @@ rules_dart rules and flags you use directly.
     their package's `lib/`; generated `srcs` must come from that package's own
     codegen.
 15. `flutter_native_asset` and `flutter_plugin.native_assets` →
-    rules_dart's `dart_code_asset` in the metadata's `code_assets`.
+    rules_dart's `dart_code_asset` in the metadata's `code_assets`; its fields are
+    `file` and `uri`.
     `flutter_data_asset` and `flutter_plugin.data_assets` →
     `dart_data_asset` in the metadata's `data_assets`.
 
@@ -797,8 +798,8 @@ cc_shared_library(
     deps = ["//bridge_a:native", "//bridge_b:native"],
 )
 
-dart_code_asset(name = "a_combined", asset_id = "package:a/a", shared_library = ":combined")
-dart_code_asset(name = "b_combined", asset_id = "package:b/b", shared_library = ":combined")
+dart_code_asset(name = "a_combined", asset_id = "package:a/a", file = ":combined")
+dart_code_asset(name = "b_combined", asset_id = "package:b/b", file = ":combined")
 
 flutter_application(
     name = "my_app",

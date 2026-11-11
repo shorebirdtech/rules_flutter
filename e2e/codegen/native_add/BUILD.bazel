@@ -48,7 +48,7 @@ cc_shared_library(
 dart_code_asset(
     name = "code_asset",
     asset_id = "package:native_add/native_add.dart",
-    shared_library = ":native_add_shared",
+    file = ":native_add_shared",
 )
 
 dart_package_metadata(

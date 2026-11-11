@@ -83,8 +83,8 @@ id's manifest entry names it, so the process loads one image of it: one copy of
 its static state, whichever id a call goes through.
 
 ```starlark
-dart_code_asset(name = "a_combined", asset_id = "package:a/a", shared_library = ":combined")
-dart_code_asset(name = "b_combined", asset_id = "package:b/b", shared_library = ":combined")
+dart_code_asset(name = "a_combined", asset_id = "package:a/a", file = ":combined")
+dart_code_asset(name = "b_combined", asset_id = "package:b/b", file = ":combined")
 
 flutter_application(
     name = "app",
@@ -160,7 +160,7 @@ def _path_list_for(asset, target_os, layout):
             return ["absolute", "%s.framework/%s" % (fw, fw)]
         return ["absolute", asset.bundle_filename]
     if asset.link_mode == "dynamic_loading_system":
-        return ["system", asset.system_uri]
+        return ["system", asset.uri]
     if asset.link_mode == "dynamic_loading_executable":
         return ["executable"]
     if asset.link_mode == "dynamic_loading_process":
@@ -307,7 +307,7 @@ def resolve_native_assets(ctx, package, deps, code_assets):
     Returns:
       A struct with `assets`, every asset the program loads, one per id, each
       a struct of `asset_id`, `link_mode`, `file` (the staged library, or
-      None), `bundle_filename` (its basename, or empty) and `system_uri`; and
+      None), `bundle_filename` (its basename, or empty) and `uri`; and
       `libraries`, each id's library as built, before staging (None for an
       asset with no library).
     """
@@ -318,7 +318,7 @@ def resolve_native_assets(ctx, package, deps, code_assets):
     )
     return struct(
         assets = _stage_code_assets(ctx, resolved),
-        libraries = {asset.asset_id: asset.dynamic_library for asset in resolved},
+        libraries = {asset.asset_id: asset.file for asset in resolved},
     )
 
 def _stage_code_assets(ctx, assets):
@@ -327,7 +327,7 @@ def _stage_code_assets(ctx, assets):
     by_basename = {}
     staged = []
     for asset in assets:
-        library = asset.dynamic_library
+        library = asset.file
         link = None
         if library != None:
             link = links.get(library)
@@ -361,7 +361,7 @@ def _stage_code_assets(ctx, assets):
             link_mode = asset.link_mode,
             file = link,
             bundle_filename = library.basename if library != None else "",
-            system_uri = asset.system_uri,
+            uri = asset.uri,
         ))
     return staged
 

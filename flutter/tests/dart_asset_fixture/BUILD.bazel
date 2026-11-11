@@ -39,7 +39,7 @@ cc_shared_library(
 dart_code_asset(
     name = "code_asset",
     asset_id = "package:asset_fixture/src/ffi/asset_fixture.g.dart",
-    shared_library = ":asset_fixture_shared",
+    file = ":asset_fixture_shared",
     visibility = ["//flutter/tests/dart_asset_fixture/not_owner:__pkg__"],
 )
 

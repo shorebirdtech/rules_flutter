@@ -216,7 +216,7 @@ def _setup_failure_targets():
     dart_code_asset(
         name = "_layout_asset",
         asset_id = "package:layout/layout.dart",
-        shared_library = "//flutter/tests/dart_asset_fixture:layout_probe_shared",
+        file = "//flutter/tests/dart_asset_fixture:layout_probe_shared",
         tags = ["manual"],
     )
 

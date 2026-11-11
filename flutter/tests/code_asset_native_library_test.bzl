@@ -80,10 +80,10 @@ def _forwards_impl(ctx):
     # identity rather than by extension.
     asserts.equals(
         env,
-        [asset.dynamic_library],
+        [asset.file],
         target[FlutterNativeLibraryInfo].libraries.to_list(),
     )
-    asserts.equals(env, [asset.dynamic_library], target[DefaultInfo].files.to_list())
+    asserts.equals(env, [asset.file], target[DefaultInfo].files.to_list())
     return analysistest.end(env)
 
 _forwards_test = analysistest.make(_forwards_impl)

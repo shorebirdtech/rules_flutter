@@ -16,7 +16,7 @@ load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_plugi
 dart_code_asset(
     name = "add_native_asset",
     asset_id = "package:add_plugin/add_plugin.dart",
-    shared_library = "//:add",
+    file = "//:add",
 )
 
 dart_package_metadata(
