@@ -3,7 +3,7 @@
 Produces the native artifacts needed for an Android APK:
 - libapp.so (AOT-compiled Dart code), as a native library of the APK
 - the app's other native libraries (FFI, Native Assets)
-- a flutter_assets/ tree artifact
+- the flutter_assets/ tree, at `<name>/assets/flutter_assets/`
 
 The user wires these outputs into rules_android's android_binary:
 
@@ -19,11 +19,20 @@ The user wires these outputs into rules_android's android_binary:
         application = ":my_app_flutter",
     )
 
+    filegroup(
+        name = "my_app_flutter_assets",
+        srcs = [":my_app_android"],
+        output_group = "flutter_assets",
+    )
+
     # Put the bundle in android_binary's `deps`: it provides its native
-    # libraries as `AndroidNativeLibsInfo`, as an `aar_import` does.
+    # libraries as `AndroidNativeLibsInfo`, as an `aar_import` does. Its
+    # flutter_assets tree goes in `assets`.
     android_binary(
         name = "my_app",
         manifest = "AndroidManifest.xml",
+        assets = [":my_app_flutter_assets"],
+        assets_dir = "assets",
         nocompress_extensions = [".so"],
         deps = [":my_app_android", ...],
         ...
@@ -156,15 +165,6 @@ def validate_android_native_libs(ctx, tools, abi, libs, name):
     )
     return validated
 
-def _symlink_assets_dir(ctx, flutter_assets):
-    """Symlink the flutter_assets tree to `assets/flutter_assets/`, as an APK holds it."""
-
-    # Use label name as prefix to avoid conflicts when multiple bundles
-    # exist in the same package (e.g. Tier 1 macro + explicit Tier 2).
-    out = ctx.actions.declare_directory(ctx.label.name + "_mi/assets/flutter_assets")
-    ctx.actions.symlink(output = out, target_file = flutter_assets)
-    return out
-
 def _package_native_libs(ctx, tools, app_info, abi):
     """The app's native libraries as the APK holds them, and their validation.
 
@@ -220,46 +220,27 @@ def _package_native_libs(ctx, tools, app_info, abi):
     )
     return zip, validated
 
-def _copy_assets_with_kernel(ctx, flutter_assets, kernel_dill, tools):
-    """Copy flutter_assets and add kernel_blob.bin + VM snapshots for debug mode.
+def _apk_assets(ctx, tools, flutter_assets, additions):
+    """The flutter_assets tree at `<name>/assets/flutter_assets/`, as an APK holds it.
 
-    On Android, the debug engine looks for kernel_blob.bin inside
-    flutter_assets/ (same convention as `flutter build apk --debug`).
-    The vm_snapshot_data and isolate_snapshot_data are needed for the
-    kernel service isolate (hot reload and expression evaluation).
+    That is the layout `android_binary` takes with `assets_dir = "assets"`.
+    The tree is the application's, symlinked, or, with `additions` (name and
+    file pairs placed at its root), a copy that holds them too.
     """
-    out = ctx.actions.declare_directory(ctx.label.name + "_debug_flutter_assets")
 
-    vm_snapshot = tools.vm_isolate_snapshot
-    iso_snapshot = tools.isolate_snapshot
+    # Under the label name: two bundles in one package (a Tier 1 macro's and
+    # an explicit Tier 2 one) must not declare the same directory.
+    out = ctx.actions.declare_directory(ctx.label.name + "/assets/flutter_assets")
+    if not additions:
+        ctx.actions.symlink(output = out, target_file = flutter_assets)
+        return out
     assemble_directory(
         ctx,
         tools,
         out,
-        [
-            ("tree", ".", flutter_assets),
-            ("file", "kernel_blob.bin", kernel_dill),
-            ("file", "vm_snapshot_data", vm_snapshot),
-            ("file", "isolate_snapshot_data", iso_snapshot),
-        ],
-        mnemonic = "FlutterAndroidDebugAssets",
-        progress_message = "Assembling debug flutter_assets with kernel and VM snapshots %s" % ctx.label,
-    )
-    return out
-
-def _copy_assets_with_record(ctx, flutter_assets, record, tools):
-    """Copy flutter_assets and add `flutter_sdk.json`, the record of the SDK the app is built with."""
-    out = ctx.actions.declare_directory(ctx.label.name + "_recorded_flutter_assets")
-    assemble_directory(
-        ctx,
-        tools,
-        out,
-        [
-            ("tree", ".", flutter_assets),
-            ("file", "flutter_sdk.json", record),
-        ],
-        mnemonic = "FlutterAndroidSdkRecordAssets",
-        progress_message = "Adding the Flutter SDK record to flutter_assets %s" % ctx.label,
+        [("tree", ".", flutter_assets)] + [("file", name, file) for name, file in additions],
+        mnemonic = "FlutterAndroidAssets",
+        progress_message = "Assembling the flutter_assets of %{label}",
     )
     return out
 
@@ -267,32 +248,31 @@ def _flutter_android_bundle_impl(ctx):
     """Bundles Flutter compilation outputs for Android packaging."""
     app_info = ctx.attr.application[FlutterApplicationInfo]
     tools = portable_tools(ctx)
-    flutter_assets = app_info.flutter_assets
-    kernel_dill = app_info.kernel_dill
-
-    # Debug mode: include kernel_blob.bin in flutter_assets for JIT execution.
-    if kernel_dill and not app_info.aot_output:
-        flutter_assets = _copy_assets_with_kernel(ctx, flutter_assets, kernel_dill, tools)
-
     abi = _android_abi(ctx)
 
     # The engine must have been built for the app's ABI, and an app of a
     # custom SDK keeps the record of the checked pieces it was built from.
     sdk_record = ctx.attr._sdk_record[FlutterSdkRecordInfo]
     check_android_engine(ctx.label, sdk_record, abi)
+
+    # A debug app runs on the JIT: the engine looks for `kernel_blob.bin` in
+    # flutter_assets/, as `flutter build apk --debug` puts it, and the VM
+    # snapshots there serve the kernel service isolate (hot reload and
+    # expression evaluation).
+    additions = []
+    if app_info.kernel_dill and not app_info.aot_output:
+        additions += [
+            ("kernel_blob.bin", app_info.kernel_dill),
+            ("vm_snapshot_data", tools.vm_isolate_snapshot),
+            ("isolate_snapshot_data", tools.isolate_snapshot),
+        ]
     if sdk_record.record:
-        flutter_assets = _copy_assets_with_record(ctx, flutter_assets, sdk_record.record, tools)
+        additions.append(("flutter_sdk.json", sdk_record.record))
+    flutter_assets = _apk_assets(ctx, tools, app_info.flutter_assets, additions)
 
     packaged, validated = _package_native_libs(ctx, tools, app_info, abi)
 
     outputs = [flutter_assets, packaged]
-
-    # The flutter_assets tree under `assets/`, for an `android_binary`'s
-    # `assets` with `assets_dir = "assets"`. The native libraries are the zip.
-    mobile_install_files = []
-    if ctx.attr.mobile_install_compatible:
-        mobile_install_files.append(_symlink_assets_dir(ctx, flutter_assets))
-        outputs.extend(mobile_install_files)
 
     return [
         DefaultInfo(files = depset(outputs)),
@@ -304,7 +284,6 @@ def _flutter_android_bundle_impl(ctx):
         OutputGroupInfo(
             native_libs = depset([packaged]),
             flutter_assets = depset([flutter_assets]),
-            mobile_install = depset(mobile_install_files),
             _validation = depset([validated]),
         ),
     ]
@@ -316,18 +295,6 @@ flutter_android_bundle = rule(
             doc = "A flutter_application target providing the compiled artifacts.",
             mandatory = True,
             providers = [FlutterApplicationInfo],
-        ),
-        "mobile_install_compatible": attr.bool(
-            doc = """Whether to offer the flutter_assets tree at `assets/flutter_assets/`.
-
-When True (the default), the `mobile_install` output group holds the tree
-under `<name>_mi/assets/flutter_assets`, for an `android_binary`'s `assets`
-with `assets_dir = "assets"`, which is how `flutter_android_app` packages it.
-It holds no native libraries: those are the bundle's one zip
-(`AndroidNativeLibsInfo`, the `native_libs` group).
-
-Set to False when nothing packages the tree from this group.""",
-            default = True,
         ),
         "_sdk_record": attr.label(
             default = "//flutter/private:sdk_record",
@@ -343,8 +310,10 @@ Set to False when nothing packages the tree from this group.""",
 Put it in an `android_binary`'s `deps`: it provides the app's native libraries
 (`libapp.so`, the `native_deps` libraries and the code assets that ship) as
 `AndroidNativeLibsInfo`, one zip of `lib/<abi>/<name>` entries, as an
-`aar_import` does; the zip is also its `native_libs` output group. It offers a
-flutter_assets tree artifact too.
+`aar_import` does; the zip is also its `native_libs` output group. Its
+`flutter_assets` output group is the app's flutter_assets tree, at
+`<name>/assets/flutter_assets/` as an APK holds it: give it to the
+`android_binary`'s `assets`, with `assets_dir = "assets"`.
 
 The bundle is built for the Android platform `android_binary` builds it for,
 one for each of `--@rules_android//flags:android_platforms`, and takes its ABI from that platform;
@@ -352,9 +321,5 @@ the application behind it is built for the same platform, so the AOT compile
 and all native deps target Android with no further flag. An APK for several
 ABIs therefore carries `libapp.so` of each. Native libraries are validated to
 be ELF for the platform's ABI at packaging time. Building it for a platform
-that is not Android arm, arm64 or x86_64 fails, naming the flag to pass.
-
-With `mobile_install_compatible` (the default), its `mobile_install` output
-group is the flutter_assets tree at `assets/flutter_assets/`, for an
-`android_binary`'s `assets`.""",
+that is not Android arm, arm64 or x86_64 fails, naming the flag to pass.""",
 )

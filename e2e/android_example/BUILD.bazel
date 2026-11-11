@@ -316,7 +316,7 @@ flutter_android_engine(
 filegroup(
     name = "app_flutter_assets",
     srcs = [":app_android"],
-    output_group = "mobile_install",
+    output_group = "flutter_assets",
     tags = ["manual"],
 )
 

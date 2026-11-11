@@ -159,10 +159,14 @@ rules_dart rules and flags you use directly.
     `libapp.so`, the `native_deps` libraries and the code assets that ship as
     `AndroidNativeLibsInfo`, as an `aar_import` does; its `native_libs` group
     is that one zip of `lib/<abi>/` entries.
-36. `flutter_ios_code_asset_xcframeworks`, `flutter_macos_code_asset_xcframeworks`
+36. `flutter_android_bundle`'s `mobile_install` output group →
+    its `flutter_assets` group, now laid out at `assets/flutter_assets/` for
+    an `android_binary`'s `assets` with `assets_dir = "assets"`.
+    `mobile_install_compatible` → removed.
+37. `flutter_ios_code_asset_xcframeworks`, `flutter_macos_code_asset_xcframeworks`
     → one directory holding an xcframework per code asset that ships, not one
     output per xcframework.
-37. Composed iOS apps (an `ios_application` of your own): add a
+38. Composed iOS apps (an `ios_application` of your own): add a
     `flutter_ios_dropped_frameworks_gen` to its `resources` and
     `@rules_flutter//flutter:ios_code_asset_post_processor` as its
     `ipa_post_processor`, both outside `-c dbg` (see the composable rules of
@@ -171,37 +175,37 @@ rules_dart rules and flags you use directly.
 
 **Flags and tests**
 
-38. `--@rules_flutter//flutter:extra_dart_defines` →
+39. `--@rules_flutter//flutter:extra_dart_defines` →
     `--@rules_dart//dart:extra_dart_defines`.
     `--@rules_flutter//flutter:wasm_opt_cores` → `wasm_opt_cpus`.
-39. `flutter_desktop_integration_test` → `flutter_desktop_app_integration_test`;
+40. `flutter_desktop_integration_test` → `flutter_desktop_app_integration_test`;
     `flutter_web_bundle_integration_test` → `flutter_web_app_integration_test`.
     Integration test rules require `src`.
-40. `flutter_suite_program` → `flutter_test_program`. A `flutter_test` suite
+41. `flutter_suite_program` → `flutter_test_program`. A `flutter_test` suite
     that registers no test now fails. A library's `data` reaches its tests'
     runfiles.
-41. `go_router_library` (rules_dart) → `go_router_codegen` from
+42. `go_router_library` (rules_dart) → `go_router_codegen` from
     `@rules_flutter//flutter/ext/go_router:defs.bzl`.
 
 **Dev tool**
 
-42. `flutter_bazel --config <mode>` → `--compilation_mode` (`-c` unchanged);
+43. `flutter_bazel --config <mode>` → `--compilation_mode` (`-c` unchanged);
     `--config` now passes a Bazel config.
-43. `app.restart` without `fullRestart` → hot reload; pass
+44. `app.restart` without `fullRestart` → hot reload; pass
     `fullRestart: true` to restart.
 
 **Rule authors**
 
-44. `flutter_kernel_target` → `flutter_kernel`; `flutter_aot_target` →
+45. `flutter_kernel_target` → `flutter_kernel`; `flutter_aot_target` →
     `flutter_aot_snapshot`; `host_transition` → `host_platform_transition`;
     the `flutter_dev_files` aspect → `flutter_dev_files_aspect`.
-45. `FlutterInfo.asset_dirs` → `pub_assets`; `FlutterInfo.native_assets`,
+46. `FlutterInfo.asset_dirs` → `pub_assets`; `FlutterInfo.native_assets`,
     `FlutterNativeAssetInfo`, `FlutterDataAssetInfo`,
     `FlutterInfo.data_assets` → rules_dart's code and data assets;
     `FlutterApplicationInfo.package_config` → removed;
     `FlutterExecToolsInfo.tool_files` → `FlutterSdkInfo.sdk_files`;
     `FlutterTestProgramInfo.coverage_libraries` → `packages`.
-46. `FlutterApplicationInfo.bundled_code_assets` → removed: which code
+47. `FlutterApplicationInfo.bundled_code_assets` → removed: which code
     assets ship is known only in an action, which reads `program_assets`
     (`program_assets_action_args`). `native_assets_manifest` is the manifest
     the app ships in `flutter_assets`.
@@ -2152,7 +2156,7 @@ flutter_android_engine(name = "my_engine")
 filegroup(
     name = "my_flutter_assets",
     srcs = [":my_bundle"],
-    output_group = "mobile_install",
+    output_group = "flutter_assets",
 )
 
 flutter_android_manifest_gen(name = "my_manifest", application_id = "com.example.myapp")
@@ -2183,8 +2187,7 @@ android_binary(
 | Group | Contents |
 |---|---|
 | `native_libs` | One zip of `lib/<abi>/` entries, stored: `libapp.so` (the AOT code), the `native_deps` libraries and the code assets that ship. The bundle provides it to `android_binary` as `AndroidNativeLibsInfo` |
-| `flutter_assets` | The `flutter_assets/` tree |
-| `mobile_install` | The `flutter_assets/` tree at `assets/flutter_assets/`, for an `android_binary`'s `assets` with `assets_dir = "assets"` (with `mobile_install_compatible`, the default). No native libraries: they are `native_libs` |
+| `flutter_assets` | The `flutter_assets/` tree, at `<name>/assets/flutter_assets/`, for an `android_binary`'s `assets` with `assets_dir = "assets"`. A debug build's holds the kernel and VM snapshots too. No native libraries: they are `native_libs` |
 
 The other Tier 2 rules are `flutter_android_manifest_merge` and `flutter_android_permissions_manifest`, which add a variant manifest's or a list's permissions to a manifest, and `flutter_android_plugin_libs`, `flutter_android_registrant` and `flutter_android_plugin_library`, which wire in plugins.
 

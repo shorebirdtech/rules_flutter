@@ -183,8 +183,8 @@ def flutter_android_bundle(name, **kwargs):
 
     Args:
         name: Target name.
-        **kwargs: Arguments of the rule: `application`, `mobile_install_compatible`,
-            and the common ones (`tags`, `visibility`, ...).
+        **kwargs: Arguments of the rule: `application`, and the common ones
+            (`tags`, `visibility`, ...).
     """
     kwargs["target_compatible_with"] = kwargs.pop("target_compatible_with", []) + _android_only()
     _flutter_android_bundle(name = name, **kwargs)
@@ -874,12 +874,12 @@ def flutter_android_app(
         testonly = testonly,
     )
 
-    # 5. Extract flutter_assets for inclusion in the APK: the mobile_install
-    # output group is the tree at assets/flutter_assets/, and nothing else.
+    # 5. The flutter_assets tree for the APK, laid out at
+    # assets/flutter_assets/ for `assets_dir = "assets"`.
     native.filegroup(
         name = "__%s_flutter_assets" % name,
         srcs = ["__%s_bundle" % name],
-        output_group = "mobile_install",
+        output_group = "flutter_assets",
         tags = tags,
         testonly = testonly,
     )
@@ -1237,7 +1237,6 @@ def flutter_android_aar(
     flutter_android_bundle(
         name = "__%s_bundle" % name,
         application = application,
-        mobile_install_compatible = False,
         tags = tags,
         testonly = testonly,
     )
