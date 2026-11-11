@@ -535,7 +535,7 @@ Future<ReloadResult> recompileAndReload({
   apply: (result) => reloadStrategy.applyReload(result, sessions),
 );
 
-/// Full recompile and hot restart all devices.
+/// Compile the whole program and hot restart all devices.
 ///
 /// `reset` + `recompile`, never a second `compile` — the same pairing
 /// `FrontendServerCompiler.compileFull` uses for a native restart, and the one
@@ -549,10 +549,9 @@ Future<ReloadResult> recompileAndReload({
 /// with every later restart in that session owed the same phantom. See
 /// [FrontendServer.recompile].
 ///
-/// [invalidatedFiles] does not decide what is compiled — a reset re-reads the
-/// tree regardless — but the compiler takes the reset and the invalidation on
-/// one request, and it keeps per-file state that has to be told the same thing
-/// an incremental compile would tell it.
+/// [invalidatedFiles] decides what is recompiled: a reset does not re-read the
+/// tree, it only makes the answer a whole program, so a changed file left out
+/// of this list comes back as its old code.
 ///
 /// [reloadStrategy] is required for the same reason as in
 /// [recompileAndReload]: there is no strategy that is right by default.

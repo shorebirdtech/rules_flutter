@@ -568,12 +568,68 @@ void main() {
         final outcome = await orchestrator.restart(targets: [app]);
         expect(outcome, isA<ReloadApplied>());
         expect(compiler.fullCompileCalls, hasLength(1));
+        // Nothing changed since the baseline, so nothing is recompiled: the
+        // compiler answers the whole program from what it already holds.
+        expect(compiler.fullCompileCalls.single.invalidated, isEmpty);
         expect(app.calls.last.mode, ApplyMode.hotRestart);
 
         // After restart, applied is repopulated to current snapshot. No
         // further changes, so next reload is a no-op.
         final second = await orchestrator.reload(targets: [app]);
         expect(second, isA<ReloadNoChange>());
+      },
+    );
+
+    // The compiler's `reset` makes its answer a whole program but recompiles
+    // only what it is told changed; told every file, it recompiles every
+    // first-party library on each restart. Told less than the gap, the
+    // restarted app runs old code for what was left out.
+    test('restart() invalidates exactly what changed since the baseline, and '
+        'the restarted app is current in every file', () async {
+      writeFile('a.dart', 'a-v1');
+      writeFile('b.dart', 'b-v1');
+      writeFile('c.dart', 'c-v1');
+      seedApplied();
+      final orchestrator = makeOrchestrator();
+      writeFile('b.dart', 'b-v2 longer');
+
+      expect(
+        await orchestrator.restart(targets: [app]),
+        isA<ReloadApplied>(),
+      );
+      expect(compiler.fullCompileCalls.single.invalidated, {
+        uriFor('b.dart'),
+      });
+      expect(
+        await orchestrator.reload(targets: [app]),
+        isA<ReloadNoChange>(),
+        reason: 'the restarted app runs the whole snapshot, a.dart included',
+      );
+    });
+
+    test(
+      'a restart the app refused keeps its gap for the next restart',
+      () async {
+        writeFile('a.dart', 'a-v1');
+        writeFile('b.dart', 'b-v1');
+        seedApplied();
+        final orchestrator = makeOrchestrator();
+        writeFile('b.dart', 'b-v2 longer');
+
+        app.nextOutcome = const ApplyFailed('device error');
+        await orchestrator.restart(targets: [app]);
+        expect(compiler.rollbackCount, 1);
+
+        app.nextOutcome = const Applied();
+        writeFile('a.dart', 'a-v2 longer');
+        expect(
+          await orchestrator.restart(targets: [app]),
+          isA<ReloadApplied>(),
+        );
+        expect(compiler.fullCompileCalls.last.invalidated, {
+          uriFor('a.dart'),
+          uriFor('b.dart'),
+        });
       },
     );
 

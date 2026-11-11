@@ -1203,10 +1203,8 @@ class FakeCompiler implements Compiler {
 
   final List<RecompileCall> recompileCalls = [];
 
-  /// One entry per [compileFull], carrying what the caller declared changed.
-  /// A restart re-reads the tree regardless, but the set is recorded so a test
-  /// can assert the restart path still hands it down — it is what the real
-  /// compiler's `reset` + `recompile` sends on the wire.
+  /// One entry per [compileFull], carrying what the caller declared changed:
+  /// what the real compiler's `reset` + `recompile` recompiles.
   final List<RecompileCall> fullCompileCalls = [];
 
   int commitCount = 0;

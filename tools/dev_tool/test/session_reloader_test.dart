@@ -311,6 +311,26 @@ void main() {
       expect(unit.applied.versionOf(uriFor('main.dart')), isNotNull);
     });
 
+    test('a restart marks every file in the snapshot live, not only those '
+        'it was told changed', () async {
+      // The restart's answer is the whole program the compiler holds, and
+      // every file it was not told about already matched disk: kept.dart is
+      // live, though the record was cleared and it was not recompiled.
+      writeFile('kept.dart', 'v1');
+      seed();
+      writeFile('main.dart', 'v1');
+
+      final snap = workspace.snapshot();
+      await unit.applyAndSettle(
+        '/tmp/d.dill',
+        mode: ApplyMode.hotRestart,
+        snapshot: snap,
+        invalidated: {uriFor('main.dart')},
+      );
+
+      expect(unit.applied.findChangedFrom(snap), isEmpty);
+    });
+
     test(
       'discard rolls the compiler back without touching the record',
       () async {
