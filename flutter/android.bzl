@@ -766,7 +766,9 @@ def flutter_android_app(
             full against it, as AGP does; qualified names are untouched.
         app_name: User-facing display name. Defaults to name.
         min_sdk_version: Minimum Android SDK version.
-        target_sdk_version: Target Android SDK version.
+        target_sdk_version: Target Android SDK version, Gradle's
+            `targetSdk`. Defaults to 36, the Flutter Gradle plugin's
+            `flutter.targetSdkVersion`.
         manifest: Override AndroidManifest.xml. If not set, auto-discovered
             from android/app/src/main/ or generated from template.
         debug_manifest: Debug variant manifest merged into `-c dbg` APKs.

@@ -1785,8 +1785,8 @@ flutter_android_app(
     namespace = "com.example.my_app",
     # Optional. minSdk; defaults to 24, as flutter.minSdkVersion.
     min_sdk_version = "24",
-    # Optional. targetSdk; defaults to 35.
-    target_sdk_version = "35",
+    # Optional. targetSdk; defaults to 36, as flutter.targetSdkVersion.
+    target_sdk_version = "36",
 )
 ```
 
@@ -2075,7 +2075,7 @@ An app that doesn't need 16 KB support can turn both checks off with `--@rules_f
 | `namespace` | The package the runner's code declares, Gradle's `namespace`, and the package of the app's `R` class (the `android_binary`'s `custom_package`), as AGP makes it. Relative class names in the manifest (`.MainActivity`, `.sub.Receiver`, `MainActivity`) are written out in full against it, as AGP does. Defaults to `application_id`. |
 | `app_name` | The `android:label` of the manifest the macro generates when there is no `android/app/src/main/AndroidManifest.xml`. Defaults to the target name. A `flutter create` manifest sets its own label, and this is unused. |
 | `min_sdk_version` | Gradle's `minSdk`. Defaults to `"24"`, Flutter's `flutter.minSdkVersion` and the engine's own minimum. |
-| `target_sdk_version` | Gradle's `targetSdk`. Defaults to `"35"`. |
+| `target_sdk_version` | Gradle's `targetSdk`. Defaults to `"36"`, as `flutter.targetSdkVersion`. |
 | `build_name` | `versionName`. Defaults to the `flutter_application`'s, which defaults to `"1.0.0"`. See [App version](#app-version). |
 | `build_number` | `versionCode`. Defaults to the `flutter_application`'s, which defaults to `"1"`. |
 | `manifest_values` | Values for `${...}` placeholders in the manifest, as `android_binary` takes them. `applicationId`, `minSdkVersion` and `targetSdkVersion` come from the attributes above and can't be set here. `versionCode` and `versionName` can, while `build_number` and `build_name` are unset, and must then be the `flutter_application`'s. |
