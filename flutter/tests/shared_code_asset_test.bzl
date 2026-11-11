@@ -182,11 +182,12 @@ _test_layout_test = analysistest.make(_test_layout_impl)
 # -- Resolution itself ---------------------------------------------------------
 
 def _fake_package_impl(ctx):
-    assets = tuple([t[DartCodeAssetInfo] for t in ctx.attr.code_assets])
     pkg = DartPackageInfo(
+        label = ctx.label,
         package_name = ctx.attr.package_name,
-        package_root = ctx.label.package,
-        code_assets = assets,
+        package_root = "%s/%s" % (ctx.label.package, ctx.label.name),
+        language_version = "",
+        code_assets = ctx.attr.code_assets,
     )
     return [DartInfo(
         packages = (pkg,),
@@ -201,19 +202,21 @@ fake_package = rule(
         "code_assets": attr.label_list(providers = [DartCodeAssetInfo]),
         "package_name": attr.string(mandatory = True),
     },
-    doc = "A Dart package record carrying code assets, with no ownership check.",
+    doc = "A Dart package record carrying code assets, each the package's own.",
 )
 
 def _fake_cycle_impl(ctx):
     names = ctx.attr.package_names
-    assets = [t[DartCodeAssetInfo] for t in ctx.attr.code_assets]
+    assets = ctx.attr.code_assets
     if len(names) != len(assets):
         fail("%s: one code asset per package" % ctx.label)
     packages = tuple([
         DartPackageInfo(
+            label = ctx.label,
             package_name = name,
             package_root = "%s/%s" % (ctx.label.package, name),
-            code_assets = (asset,),
+            language_version = "",
+            code_assets = [asset],
         )
         for name, asset in zip(names, assets)
     ])
@@ -396,13 +399,13 @@ def shared_code_asset_test_suite(name):
     # rules_dart, unless the target names the one to use.
     fake_package(
         name = name + "_claims_a_own",
-        package_name = "claim_one",
+        package_name = "shared_a",
         code_assets = [_FIXTURE + "a_own"],
         tags = ["manual"],
     )
     fake_package(
         name = name + "_claims_a_combined",
-        package_name = "claim_two",
+        package_name = "shared_a",
         code_assets = [_FIXTURE + "a_combined_asset"],
         tags = ["manual"],
     )

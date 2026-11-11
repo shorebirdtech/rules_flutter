@@ -9,6 +9,7 @@ load("@rules_dart//dart:defs.bzl", "dart_library")
 load("//flutter:defs.bzl", "dart_package_metadata", "flutter_plugin")
 load("//flutter/tests/code_asset_fixture:forwarding_package.bzl", "forwarding_package")
 load("//flutter/tests/code_asset_fixture:inline_asset_package.bzl", "inline_asset_package")
+load("//flutter/tests/code_asset_fixture:stand_in_code_asset.bzl", "stand_in_code_asset")
 
 package(default_visibility = [
     "//flutter/tests/code_asset_fixture:__pkg__",
@@ -38,8 +39,14 @@ forwarding_package(
     exports = [":dart_owner"],
 )
 
+stand_in_code_asset(
+    name = "inline_asset",
+    asset_id = "package:inline_owner/bridge",
+    library = "//flutter/tests/code_asset_fixture:library",
+)
+
 inline_asset_package(
     name = "inline_owner",
     package_name = "inline_owner",
-    library = "//flutter/tests/code_asset_fixture:library",
+    code_asset = ":inline_asset",
 )

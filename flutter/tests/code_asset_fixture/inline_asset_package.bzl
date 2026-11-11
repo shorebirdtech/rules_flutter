@@ -1,29 +1,21 @@
 """A Dart package rule that makes its code asset itself, as no target of its own.
 
-The package's `DartInfo` carries a `DartCodeAssetInfo` built from a library
-the rule takes directly, so the application bundles the library, and no target
-anywhere provides the asset for a walk of the build graph to find. This is the
+The package's `DartInfo` carries the `DartCodeAssetInfo` of a target the rule
+takes as a tool, so the application bundles the library, and no target
+anywhere below the package provides the asset for a walk of the build graph to
+find. This is the
 shape a build cannot describe: nothing says what the library is built from.
 """
 
 load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo", "DartPackageInfo")
 
 def _inline_asset_package_impl(ctx):
-    library = [
-        f
-        for f in ctx.attr.library[DefaultInfo].files.to_list()
-        if f.extension in ("so", "dylib", "dll")
-    ][0]
-    asset = DartCodeAssetInfo(
-        asset_id = "package:%s/bridge" % ctx.attr.package_name,
-        link_mode = "dynamic_loading_bundle",
-        file = library,
-        uri = "",
-    )
     pkg = DartPackageInfo(
+        label = ctx.label,
         package_name = ctx.attr.package_name,
         package_root = ctx.label.package,
-        code_assets = (asset,),
+        language_version = "",
+        code_assets = [ctx.attr.code_asset],
     )
     return [DartInfo(
         packages = (pkg,),
@@ -35,7 +27,14 @@ def _inline_asset_package_impl(ctx):
 inline_asset_package = rule(
     implementation = _inline_asset_package_impl,
     attrs = {
-        "library": attr.label(mandatory = True),
+        # A tool dependency, so the aspect that walks an application's graph
+        # for code assets does not follow it: the record holds the asset, and
+        # no target anywhere below the package provides it.
+        "code_asset": attr.label(
+            mandatory = True,
+            cfg = "exec",
+            providers = [DartCodeAssetInfo],
+        ),
         "package_name": attr.string(mandatory = True),
     },
 )

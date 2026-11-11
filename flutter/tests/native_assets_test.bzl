@@ -14,7 +14,7 @@ fix.
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("@rules_dart//dart:defs.bzl", "dart_code_asset")
-load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo", "DartPackageInfo")
+load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo")
 load("//flutter/private:common.bzl", "check_unreplaced_hooks")
 load("//flutter/private:flutter_native_assets.bzl", "native_asset_framework_name", "native_assets_target_string", "resolve_native_assets", "write_native_assets_manifest")
 
@@ -335,10 +335,9 @@ def native_assets_test_suite(name):
 def _legacy_dart_library_impl(ctx):
     # The pre-`unreplaced_hook` record shape, matching rules_dart's own
     # `//dart/tests/no_lv_fixture`: `package_name` and `package_root` and nothing
-    # else. Built by hand on purpose — a fixture asserting that older producers
-    # still work cannot be written through a constructor that makes them
-    # current.
-    pkg = DartPackageInfo(
+    # else. A plain struct on purpose: `DartPackageInfo(...)` states every field,
+    # so it cannot build the record of a producer that predates one.
+    pkg = struct(
         package_name = ctx.attr.package_name,
         package_root = ctx.label.package,
     )

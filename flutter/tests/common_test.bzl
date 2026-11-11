@@ -1,8 +1,7 @@
 """Unit tests for app_entrypoint.bzl pure functions."""
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
-load("@rules_dart//dart:providers.bzl", "DartPackageMetadataInfo")
-load("@rules_dart//dart:utils.bzl", "dart_package_info")
+load("@rules_dart//dart:providers.bzl", "DartPackageInfo", "DartPackageMetadataInfo")
 load(
     "//flutter/private:app_entrypoint.bzl",
     "app_main_package_uri",
@@ -200,8 +199,8 @@ def _synthesize_app_package_replaces_collision_test_impl(ctx):
     """A transitive entry at the app's own `package_root` collides and is dropped."""
     env = unittest.begin(ctx)
     packages = [
-        dart_package_info(label = Label("//:dep"), package_name = "transitive", package_root = "../pub/transitive", language_version = ""),
-        dart_package_info(label = Label("//:dep"), package_name = "my_app", package_root = "", language_version = ""),
+        DartPackageInfo(label = Label("//:dep"), package_name = "transitive", package_root = "../pub/transitive", language_version = ""),
+        DartPackageInfo(label = Label("//:dep"), package_name = "my_app", package_root = "", language_version = ""),
     ]
     result = synthesize_app_package("//:app", packages, "my_app", "", None)
     asserts.equals(env, 2, len(result))
@@ -220,8 +219,8 @@ def _synthesize_app_package_roots_at_its_own_package_test_impl(ctx):
     """
     env = unittest.begin(ctx)
     packages = [
-        dart_package_info(label = Label("//:dep"), package_name = "root_lib", package_root = "", language_version = ""),
-        dart_package_info(label = Label("//:dep"), package_name = "custom_boot", package_root = "custom_boot", language_version = ""),
+        DartPackageInfo(label = Label("//:dep"), package_name = "root_lib", package_root = "", language_version = ""),
+        DartPackageInfo(label = Label("//:dep"), package_name = "custom_boot", package_root = "custom_boot", language_version = ""),
     ]
     result = synthesize_app_package("//custom_boot:app", packages, "custom_boot", "custom_boot", None)
     asserts.equals(env, 2, len(result))

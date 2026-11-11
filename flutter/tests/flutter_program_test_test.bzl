@@ -7,7 +7,7 @@ variable, and under `bazel coverage` the converter.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
-load("@rules_dart//dart:utils.bzl", "dart_package_info")
+load("@rules_dart//dart:providers.bzl", "DartPackageInfo")
 load("//flutter:defs.bzl", "flutter_program_test")
 load("//flutter:providers.bzl", "FlutterTestProgramInfo")
 
@@ -33,7 +33,7 @@ def _fake_program_impl(ctx):
             icu_data = icu,
             display_path = "pkg/fake_suite.dart",
             source = source,
-            packages = [dart_package_info(label = ctx.label, package_name = "fake", package_root = "pkg", language_version = "")],
+            packages = [DartPackageInfo(label = ctx.label, package_name = "fake", package_root = "pkg", language_version = "")],
             native_assets_manifest = None,
             native_files = ctx.attr.native_files,
             enable_impeller = ctx.attr.impeller,
