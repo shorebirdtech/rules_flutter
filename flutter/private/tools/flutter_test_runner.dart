@@ -326,9 +326,10 @@ void main(List<String> args) async {
 /// A `flutter_test` ([isTest]) selects cases by the target's own
 /// `include_tags`/`exclude_tags`, which the rule passes as newline-joined
 /// `FLUTTER_TEST_INCLUDE_TAGS`/`FLUTTER_TEST_EXCLUDE_TAGS`, and by the
-/// `DART_TEST_TAGS`/`DART_TEST_EXCLUDE_TAGS` of the run. A
-/// `flutter_tester_binary` is not a test, and a shell's variable must not
-/// change what a build tool does: it takes neither.
+/// `DART_TEST_TAGS`/`DART_TEST_EXCLUDE_TAGS` of the run, and orders them by
+/// its `DART_TEST_ORDERING_SEED`. A `flutter_tester_binary` is not a test,
+/// and a shell's variable must not change what a build tool does: it takes
+/// none of these.
 ///
 /// Throws [FormatException] for a selector that does not parse.
 ///
@@ -341,7 +342,8 @@ TestSelection runSelection(
     return TestSelection.fromEnvironment({
       for (final entry in settings.entries)
         if (entry.key != 'DART_TEST_TAGS' &&
-            entry.key != 'DART_TEST_EXCLUDE_TAGS')
+            entry.key != 'DART_TEST_EXCLUDE_TAGS' &&
+            entry.key != 'DART_TEST_ORDERING_SEED')
           entry.key: entry.value,
     });
   }

@@ -12,9 +12,15 @@
 ///   of the tests the filter left, as `--total-shards`/`--shard-index` do.
 /// - A group left with no test is dropped, and its `setUpAll`/`tearDownAll`
 ///   with it.
+/// - `DART_TEST_ORDERING_SEED` (`--test_env`) is `--test-randomize-ordering-seed`:
+///   each group's entries are shuffled with a `Random` of that seed after the
+///   other selections, as the runner's engine shuffles them, so a seed orders
+///   a suite here as it does under `flutter test`.
 /// - Each case goes to `XML_OUTPUT_FILE` as JUnit XML, in the shape
 ///   `dart_test` writes.
 library;
+
+import 'dart:math';
 
 import 'package:boolean_selector/boolean_selector.dart';
 
@@ -205,6 +211,7 @@ class TestSelection {
     this.shardIndex = 0,
     this.fixedTags = const TagSelection(),
     this.runTags = const TagSelection(),
+    this.orderingSeed,
   }) {
     if (totalShards < 1 || shardIndex < 0 || shardIndex >= totalShards) {
       throw FormatException(
@@ -213,16 +220,24 @@ class TestSelection {
     }
   }
 
-  /// Reads Bazel's variables out of [env], and `DART_TEST_TAGS` and
-  /// `DART_TEST_EXCLUDE_TAGS`. [fixedTags] is the target's own selection.
+  /// Reads Bazel's variables out of [env], and `DART_TEST_TAGS`,
+  /// `DART_TEST_EXCLUDE_TAGS` and `DART_TEST_ORDERING_SEED`. [fixedTags] is
+  /// the target's own selection. [random] draws the seed of
+  /// `DART_TEST_ORDERING_SEED=random`.
   ///
   /// Throws [FormatException] for a filter that is not a regular expression,
-  /// shard numbers that are not numbers or a tag selector that does not parse:
-  /// a run that guessed would report a selection that never happened.
+  /// shard numbers that are not numbers, a tag selector that does not parse
+  /// or a seed that is not one: a run that guessed would report a selection
+  /// that never happened.
   factory TestSelection.fromEnvironment(
     Map<String, String> env, {
     TagSelection fixedTags = const TagSelection(),
+    Random? random,
   }) {
+    final orderingSeed = parseOrderingSeed(
+      env['DART_TEST_ORDERING_SEED'],
+      random: random,
+    );
     final pattern = env['TESTBRIDGE_TEST_ONLY'];
     RegExp? filter;
     if (pattern != null && pattern.isNotEmpty) {
@@ -244,6 +259,7 @@ class TestSelection {
         filter: filter,
         fixedTags: fixedTags,
         runTags: runTags,
+        orderingSeed: orderingSeed,
       );
     }
     final totalShards = int.tryParse(total);
@@ -260,7 +276,24 @@ class TestSelection {
       shardIndex: shardIndex,
       fixedTags: fixedTags,
       runTags: runTags,
+      orderingSeed: orderingSeed,
     );
+  }
+
+  /// `DART_TEST_ORDERING_SEED` [value] as `--test-randomize-ordering-seed`
+  /// reads it: an integer, taken as unsigned 32 bits, or `random` for one
+  /// [random] draws. Unset or empty is no seed.
+  static int? parseOrderingSeed(String? value, {Random? random}) {
+    if (value == null || value.isEmpty) return null;
+    if (value == 'random') return (random ?? Random()).nextInt(4294967295);
+    final seed = int.tryParse(value);
+    if (seed == null) {
+      throw FormatException(
+        'DART_TEST_ORDERING_SEED "$value" is not a seed: it must be a 32bit '
+        'unsigned integer or "random", as for --test-randomize-ordering-seed',
+      );
+    }
+    return seed.toUnsigned(32);
   }
 
   final RegExp? filter;
@@ -272,6 +305,10 @@ class TestSelection {
 
   /// This run's tag selection (`DART_TEST_TAGS`, `DART_TEST_EXCLUDE_TAGS`).
   final TagSelection runTags;
+
+  /// This run's `DART_TEST_ORDERING_SEED`. Null or 0 keeps the order the
+  /// suite declares, as with `--test-randomize-ordering-seed`.
+  final int? orderingSeed;
 
   /// Whether this run asked for less than the whole suite. A selection that
   /// matches nothing is then a pass, not a failure: `bazel test //...
@@ -320,9 +357,10 @@ class TestSelection {
     final chosen = Set<Map<Object?, Object?>>.identity()
       ..addAll(matching.sublist(start, end));
     final tree = _prune(root, chosen);
-    return tree == null
-        ? NarrowedToNothing(_note(program, used))
-        : RunThese(tree);
+    if (tree == null) return NarrowedToNothing(_note(program, used));
+    final seed = orderingSeed;
+    if (seed != null && seed > 0) _shuffle(tree, seed);
+    return RunThese(tree);
   }
 
   /// [test]'s tags: the ones `RemoteListener` merged from its library, groups
@@ -363,6 +401,19 @@ class TestSelection {
       } else {
         into.add(m);
       }
+    }
+  }
+
+  /// Shuffles each group's entries with a `Random` of [seed], a new one per
+  /// group, before the groups inside it: package:test's engine does the same
+  /// as it runs each group. [group] is a tree [_prune] built, whose lists are
+  /// its own.
+  static void _shuffle(Map<Object?, Object?> group, int seed) {
+    final entries = group['entries'] as List;
+    entries.shuffle(Random(seed));
+    for (final entry in entries) {
+      final m = entry as Map<Object?, Object?>;
+      if (m['type'] == 'group') _shuffle(m, seed);
     }
   }
 

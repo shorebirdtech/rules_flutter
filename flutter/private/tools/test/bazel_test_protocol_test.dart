@@ -1,4 +1,6 @@
 // How `flutter_test` applies Bazel's test protocol to a `RemoteListener` tree.
+import 'dart:math';
+
 import 'package:flutter_rule_tools/bazel_test_protocol.dart';
 import 'package:test/test.dart';
 
@@ -396,6 +398,111 @@ void main() {
       expect(
         () => TagSelection.fromAttribute(['a,b'], const []),
         throwsFormatException,
+      );
+    });
+  });
+
+  group('ordering seed', () {
+    /// [names] in the order package:test's engine runs a group of them under
+    /// [seed]: one `Random(seed)` shuffling the group's entries.
+    List<String> shuffled(List<String> names, int seed) =>
+        names.toList()..shuffle(Random(seed));
+
+    final flat = [
+      'a golden',
+      'b golden slow',
+      'c slow',
+      'd bare',
+      'e bare',
+      'f bare',
+    ];
+
+    test('unset, empty or 0 keeps the declared order', () {
+      for (final env in [
+        const <String, String>{},
+        const {'DART_TEST_ORDERING_SEED': ''},
+        const {'DART_TEST_ORDERING_SEED': '0'},
+      ]) {
+        expect(
+          _names(TestSelection.fromEnvironment(env).select(_tagged())),
+          flat,
+          reason: '$env',
+        );
+      }
+    });
+
+    test('a seed shuffles each group with a Random of that seed', () {
+      final selection = TestSelection.fromEnvironment(const {
+        'DART_TEST_ORDERING_SEED': '7',
+      });
+      expect(selection.orderingSeed, 7);
+      expect(_names(selection.select(_tagged())), shuffled(flat, 7));
+      expect(shuffled(flat, 7), isNot(flat), reason: 'a seed that reorders');
+    });
+
+    test('nested groups are each shuffled with a new Random', () {
+      final selection = TestSelection.fromEnvironment(const {
+        'DART_TEST_ORDERING_SEED': '3',
+      });
+      final tree = _tree(selection.select(_suite()));
+      final top = [
+        for (final e in tree['entries'] as List) (e as Map)['name'] as String,
+      ];
+      expect(
+        top,
+        shuffled(['outer', 'a widget test is a case like any other'], 3),
+      );
+      final outer = (tree['entries'] as List).cast<Map>().singleWhere(
+        (e) => e['name'] == 'outer',
+      );
+      expect(
+        [for (final e in outer['entries'] as List) (e as Map)['name']],
+        shuffled([
+          'outer runs its setUpAll once',
+          'outer ignores a per-test timeout',
+          'outer inner',
+        ], 3),
+      );
+      expect(outer['setUpAll'], isNotNull, reason: 'fixtures stay put');
+    });
+
+    test('shards split the declared order, then the shard is shuffled', () {
+      final selection = TestSelection.fromEnvironment(const {
+        'DART_TEST_ORDERING_SEED': '7',
+        'TEST_TOTAL_SHARDS': '2',
+        'TEST_SHARD_INDEX': '0',
+      });
+      expect(
+        _names(selection.select(_tagged())),
+        shuffled(['a golden', 'b golden slow', 'c slow'], 7),
+      );
+    });
+
+    test('random draws a seed and keeps it, for the runner to print', () {
+      final seed = TestSelection.parseOrderingSeed(
+        'random',
+        random: Random(1),
+      );
+      expect(seed, Random(1).nextInt(4294967295));
+    });
+
+    test('a seed is read as unsigned 32 bits, as package:test reads it', () {
+      expect(TestSelection.parseOrderingSeed('-1'), 4294967295);
+      expect(TestSelection.parseOrderingSeed('4294967297'), 1);
+    });
+
+    test('a value that is no seed fails, naming the variable', () {
+      expect(
+        () => TestSelection.fromEnvironment(const {
+          'DART_TEST_ORDERING_SEED': 'often',
+        }),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            contains('DART_TEST_ORDERING_SEED "often"'),
+          ),
+        ),
       );
     });
   });

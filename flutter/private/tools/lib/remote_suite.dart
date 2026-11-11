@@ -207,6 +207,13 @@ class RemoteSuiteDriver {
   }) async {
     selection ??= TestSelection();
     final outcome = SuiteOutcome._();
+    if (selection.orderingSeed case final seed?) {
+      // As package:test prints it, `random`'s seed too, so the test's log
+      // says how to repeat the order.
+      _out.writeln(
+        'Shuffling test order with --test-randomize-ordering-seed=$seed',
+      );
+    }
 
     // Default channel handler: the suite tree, plus print/error events. Resolves
     // `suiteReady` once the program finishes registering tests (or surfaces a
