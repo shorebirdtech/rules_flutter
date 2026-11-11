@@ -850,6 +850,8 @@ def flutter_android_app(
     )
     if conflict:
         fail(conflict)
+    if "custom_package" in kwargs:
+        fail("flutter_android_app(name = %r): set `namespace`, which is the APK's `custom_package`" % name)
     manifest_values = {
         "applicationId": application_id,
         "minSdkVersion": min_sdk_version,
@@ -1164,6 +1166,11 @@ def flutter_android_app(
     # `android_application` declares an `android_binary` of its own,
     # `<app_bundle>_base`, from the same arguments: it cannot take this one.
     binary_args = dict(
+        # The R class package, as AGP takes it from `namespace`: unset, it
+        # is the manifest's package, the application id. `bazel
+        # mobile-install` needs it set, or a java/ directory in the BUILD
+        # package's path to infer it from.
+        custom_package = namespace,
         manifest = actual_manifest,
         manifest_values = manifest_values,
         resource_files = resources if resources else None,

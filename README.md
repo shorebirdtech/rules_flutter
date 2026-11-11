@@ -1802,6 +1802,15 @@ bazel run @rules_flutter//tools/dev_tool:flutter_bazel -- run -t //:my_app_andro
 
 The APK is `bazel-bin/my_app_android.apk`. `flutter_android_app` is tagged `manual` by default, so `bazel build //...` skips it. Build it by name, or pass `tags = []`. [Choosing ABIs](#choosing-abis) explains the platform flag, and how to set it once in `.bazelrc`.
 
+rules_android's `bazel mobile-install` works too: it builds the app, installs it on the device `ANDROID_SERIAL` names (or the only one attached), with the `adb` on your PATH, and launches it.
+
+```sh
+bazel mobile-install //:my_app_android \
+    --@rules_android//flags:android_platforms=@rules_android//:arm64-v8a
+```
+
+It installs the app as split APKs, and a later run reinstalls only the splits that changed. A Dart edit still rebuilds `libapp.so` (under `-c dbg`, the kernel in the assets) and relaunches the app, losing its state; `flutter_bazel run` hot-reloads it instead. An `android_binary` of your own needs `custom_package` for mobile-install, as in the composable rules below, unless its BUILD file is under a `java/` directory; without it, mobile-install stops at analysis with "Unable to infer Java package".
+
 #### Setting up the Android SDK and NDK
 
 Add these lines to `MODULE.bazel`, below `rules_flutter`'s `bazel_dep`:
@@ -2063,7 +2072,7 @@ An app that doesn't need 16 KB support can turn both checks off with `--@rules_f
 |---|---|
 | `application` | A `flutter_application` target. Required. |
 | `application_id` | The application id, Gradle's `applicationId`, for example `"com.example.myapp"`. Required. |
-| `namespace` | The package the runner's code declares, Gradle's `namespace`. Relative class names in the manifest (`.MainActivity`, `.sub.Receiver`, `MainActivity`) are written out in full against it, as AGP does. Defaults to `application_id`. |
+| `namespace` | The package the runner's code declares, Gradle's `namespace`, and the package of the app's `R` class (the `android_binary`'s `custom_package`), as AGP makes it. Relative class names in the manifest (`.MainActivity`, `.sub.Receiver`, `MainActivity`) are written out in full against it, as AGP does. Defaults to `application_id`. |
 | `app_name` | The `android:label` of the manifest the macro generates when there is no `android/app/src/main/AndroidManifest.xml`. Defaults to the target name. A `flutter create` manifest sets its own label, and this is unused. |
 | `min_sdk_version` | Gradle's `minSdk`. Defaults to `"24"`, Flutter's `flutter.minSdkVersion` and the engine's own minimum. |
 | `target_sdk_version` | Gradle's `targetSdk`. Defaults to `"35"`. |

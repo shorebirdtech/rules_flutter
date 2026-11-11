@@ -1811,6 +1811,23 @@ $ADB uninstall com.example.flutterapp
 
 Each screenshot shows "Hello from Flutter Android!", `native add(19, 23) = 42` and `shared counter = 2`. Uninstall at the end: an app signed with the scratch key blocks the debug-signed installs of the other device tests.
 
+### Android mobile-install (manual)
+
+`bazel mobile-install` is rules_android's; nothing in `bazel test //...` runs it, and a Bazel test cannot run another Bazel command against a device. This checks that a `flutter_android_app` installs, renders and takes an edit through it. With the phone attached and `ANDROID_SERIAL` set to it, `adb` on your PATH, in `e2e/android_example`:
+
+```sh
+bazel mobile-install //:app
+adb exec-out screencap -p > /tmp/mi_1.png
+# Change 'Hello from Flutter Android!' in lib/main.dart, then:
+bazel mobile-install //:app
+adb exec-out screencap -p > /tmp/mi_2.png
+git checkout lib/main.dart
+bazel mobile-install -c dbg //:app
+adb exec-out screencap -p > /tmp/mi_dbg.png
+```
+
+Each run ends with `Finished deploying changes. Launching app`. The first screenshot and the debug one show "Hello from Flutter Android!", `native add(19, 23) = 42` and `shared counter = 2`; the second shows the edited text over the same two lines. A black screenshot is a locked phone: unlock it, or read `adb logcat -d | grep " flutter "` for the `android_example shared=2` line `main()` prints. If analysis fails with "Unable to infer Java package", `flutter_android_app` has stopped passing its `namespace` as the `android_binary`'s `custom_package`.
+
 ### Linux visual verification (GCP VM)
 
 Cross-compile a Linux debug bundle from macOS, deploy to a GCP VM, and verify the Flutter UI renders.
@@ -2077,6 +2094,7 @@ runner needs both).
 | Plugins | plugin_example, ffi_plugin_example |
 | Apple add-to-app (`flutter/private/apple_add_to_app.bzl`, `flutter_apple_xcframeworks.bzl`, `flutter_apple_plugin_xcframeworks.bzl`, `flutter_apple_registrant.bzl`, `apple_xcframeworks_*.bzl`, `flutter_plugin.bzl`'s Apple entries, `flutter_apple_plugin_library.bzl`, the `apple_*` tools) | Root `//flutter/private/tools/...`, plugin_example's `:add_to_app_{ios,macos}_{debug,release}[_signed]_test` (layout, modules, signatures, Swift package), **and** its `manual` Xcode hosts with a booted simulator and an unlocked screen: `bazel test :add_to_app_ios_host_debug_test :add_to_app_macos_host_debug_test :add_to_app_macos_host_release_test --test_tag_filters=`, whose screenshots are in each test's `test.outputs/` |
 | Android release (`flutter_android_release`, `flutter_android_app`'s `app_bundle`/`bundle_config`/`proguard_specs`, `flutter/android_proguard_rules.pro`, `flutter/android_bundle_config.pb.json`, `release_transition.bzl`, `android_release.dart`, `flutter_android_bundle_install.bzl`, `android_bundle_install.dart`) | Root `//...` (`android_release_test`), android_example `//...` (`verify_android_release_test` signs with a key it makes), plugin_example `//...` for an R8 change, **and** "Android release (manual)" in § 4: both signed installs render on the phone |
+| `flutter_android_app`'s `android_binary` arguments (`custom_package`, `assets`), `flutter_android_bundle`'s outputs, or a bump of `rules_android` | android_example `//...` **and** "Android mobile-install (manual)" in § 4 |
 | Android add-to-app (`flutter_android_aar`, `flutter_android_aar.bzl`, `android_aar.dart`, `android_maven_repo.dart`, `maven_repo.dart`, `zip_archive.dart`, `android_aar_install.dart`, `flutter_plugin_platform.group`, and the pub spokes' reading of it in `android_plugin_maven.bzl`) | Root `//...` (`android_aar_test`, `android_maven_repo_test`, `android_aar_install_test`, `android_plugin_maven_test`), plugin_example `//...` (`verify_android_aar_test` checks the layout, POMs and AARs in release and debug, and a workspace plugin under its declared `group` (`//glass_app:glass_module_aar`); `//glass_app:no_group_aar_test` checks the failure when `group` is missing; `verify_android_aar_resolves_test` resolves every coordinate against the repository, the engine POMs MODULE.bazel pins and `@rules_flutter_maven`'s lock), plugin_example `//... --config=deep` (`gradle_host_test` builds the Gradle host app of `add_to_app_host/android` offline against the debug, profile and release repositories, with Gradle, the Android Gradle plugin and its Maven artifacts pinned by MODULE.bazel and the lock `bazel run --config=deep //:record_gradle_host_repository` writes, and checks each APK's native libraries per ABI, dexed plugin classes and merged manifest), **and** `bazel run` of `//:plugin_module_aar` in `-c dbg`, profile and `-c opt` into one repository: the three modes' `maven-metadata.xml` and the printed host steps |
 | Android ABI selection (`flutter_android_engine`, `flutter_android_bundle`, `flutter_android_build`, `AndroidDevice` ABI in `device.dart`) | Root `//...`, android_example, hello_world and plugin_example `//...` (force-run `verify_android_apk_test`), dev_tool unit **and** `flutter_bazel run` on the attached phone (arm64-v8a) and on an x86_64 emulator, which must each launch the app |
 | Toolchain / SDK, or any action's inputs from the Dart SDK | smoke, hello_world, and `//flutter/tests:sdk_inputs_test` with `//flutter/tests/sdk_sets:sdk_sets_test` (see § "SDK inputs") |
