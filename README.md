@@ -461,8 +461,8 @@ Bazel's `-c` flag picks the Flutter build mode:
 | Flag | Flutter mode | Dart compiled to | Use it for |
 |---|---|---|---|
 | `-c dbg` | Debug | Kernel (`.dill`), run by the JIT | Development and hot reload |
-| none (`fastbuild`) | Release | AOT native code | CI and tests |
-| `-c opt` | Release | AOT native code, stripped | Shipping |
+| none (`fastbuild`) | Release | AOT native code, stripped | CI and tests |
+| `-c opt` | Release | AOT native code, stripped, with native C and C++ libraries compiled optimized | Shipping |
 | `-c opt --@rules_flutter//flutter:profile` | Profile | AOT native code, stripped, with the Dart VM service | Measuring performance with DevTools |
 
 A plain `bazel build` is a release build. `flutter build` defaults to release too, but `flutter run` defaults to debug, so this may surprise you. It matters for [permissions](#release-builds-and-permissions), and it means the iOS simulator needs `-c dbg`. The simulator runs debug builds only, and a release or profile build for it fails with a message saying so. `flutter_bazel run` builds `-c dbg` for you.

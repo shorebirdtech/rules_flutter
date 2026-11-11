@@ -93,11 +93,6 @@ def flutter_application_build(ctx, inputs):
     mode = flutter_build_mode(ctx)
     is_debug = mode == "debug"
 
-    # Profile strips like release, as `flutter build --profile` does: the
-    # profiler names Dart code from the snapshot, not from native symbols.
-    # (Not for Apple, which strips after making a dSYM: see `apple_xcode.bzl`.)
-    strip = ctx.var["COMPILATION_MODE"] == "opt"
-
     # Guard: AOT cross-compilation between desktop OSes is not supported.
     # gen_snapshot can only produce native code for the host OS.
     # target_os is non-empty only for cross-compilation toolchains.
@@ -268,7 +263,11 @@ def flutter_application_build(ctx, inputs):
                 gen_snapshot = flutter_sdk_info.gen_snapshot,
                 kernel_dill = kernel_dill,
                 output = aot_output,
-                strip = strip and options.strip,
+                # Every AOT build strips unless `--no-strip` asks otherwise,
+                # as `flutter build` does whatever the `-c`: release and profile
+                # alike, since the profiler names Dart code from the snapshot.
+                # Apple strips after making a dSYM instead (`apple_xcode.bzl`).
+                strip = options.strip,
                 extra_flags = options.flags,
                 file_flags = options.file_flags,
                 debug_info = debug_info_output,

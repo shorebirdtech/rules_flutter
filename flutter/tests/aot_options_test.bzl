@@ -179,6 +179,42 @@ def aot_options_test_suite(name, rules):
         lambda suffix: _SETTING_TESTS.get(suffix, _PLAIN_TESTS),
     )
 
+def _strips_impl(ctx):
+    env = analysistest.begin(ctx)
+    action = _gen_snapshot(env)
+    if action == None:
+        return analysistest.end(env)
+    asserts.equals(env, "FlutterAotElf", action.mnemonic, "an Android build makes an ELF snapshot")
+    asserts.true(
+        env,
+        "--strip" in action.argv,
+        "every AOT build strips its ELF snapshot unless --no-strip, as flutter build does: %s" % action.argv,
+    )
+    return analysistest.end(env)
+
+_ANDROID_ARM64 = {"//command_line_option:platforms": str(Label("@rules_android//:arm64-v8a"))}
+
+_strips_fastbuild_test = analysistest.make(_strips_impl, attrs = _OPTION, config_settings = _ANDROID_ARM64 | {"//command_line_option:compilation_mode": "fastbuild"})
+_strips_opt_test = analysistest.make(_strips_impl, attrs = _OPTION, config_settings = _ANDROID_ARM64 | {"//command_line_option:compilation_mode": "opt"})
+
+def aot_strip_test_suite(name, rules):
+    """A fixture per rule with no options, built for Android in each `-c` that builds release.
+
+    `-c opt` and a plain build are both Flutter release builds, and
+    `flutter build` strips every one.
+
+    Args:
+        name: The test_suite name.
+        rules: Which of "application" and "aot_target" to test.
+    """
+    _instantiate(
+        name,
+        rules,
+        {"strips": {}},
+        "strips",
+        lambda _suffix: [("fastbuild", _strips_fastbuild_test), ("opt", _strips_opt_test)],
+    )
+
 def aot_no_strip_test_suite(name, rules):
     """A fixture per rule with `--no-strip`, and a test per `-c`.
 

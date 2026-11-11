@@ -7,7 +7,7 @@ load(":android_class_check_test.bzl", "android_class_check_test_suite")
 load(":android_listenablefuture_test.bzl", "android_listenablefuture_test_suite")
 load(":android_plugin_libs_test.bzl", "android_plugin_libs_test_suite")
 load(":android_plugin_maven_test.bzl", "android_plugin_maven_test_suite")
-load(":aot_options_test.bzl", "aot_file_flags_test_suite", "aot_no_strip_test_suite", "aot_obfuscate_alone_test_suite", "aot_options_test_suite", "aot_resolve_dwarf_paths_test_suite")
+load(":aot_options_test.bzl", "aot_file_flags_test_suite", "aot_no_strip_test_suite", "aot_obfuscate_alone_test_suite", "aot_options_test_suite", "aot_resolve_dwarf_paths_test_suite", "aot_strip_test_suite")
 load(":app_defines_test.bzl", "app_defines_test_suite")
 load(":app_entrypoint_test.bzl", "app_entrypoint_test_suite")
 load(":app_flavor_test.bzl", "app_flavor_test_suite")
@@ -244,6 +244,14 @@ aot_obfuscate_alone_test_suite(
 
 aot_no_strip_test_suite(
     name = "aot_no_strip_test",
+    rules = [
+        "application",
+        "aot_target",
+    ],
+)
+
+aot_strip_test_suite(
+    name = "aot_strip_test",
     rules = [
         "application",
         "aot_target",

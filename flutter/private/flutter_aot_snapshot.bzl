@@ -81,7 +81,7 @@ def _flutter_aot_snapshot_impl(ctx):
             gen_snapshot = flutter_sdk_info.gen_snapshot,
             kernel_dill = kernel_dill,
             output = output,
-            strip = ctx.var["COMPILATION_MODE"] == "opt" and options.strip,
+            strip = options.strip,
             extra_flags = options.flags,
             file_flags = options.file_flags,
             debug_info = options.debug_info,
