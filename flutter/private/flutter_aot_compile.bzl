@@ -7,6 +7,7 @@ Output format depends on the target platform:
   with the relocatable object it links, which a dSYM is read from.
 """
 
+load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
 
 _FLUTTER_TOOLCHAIN = Label("//flutter:toolchain_type")
@@ -28,11 +29,29 @@ _RESOLVE_DWARF_PATHS_REFUSED = (
     "import URI."
 )
 
+# The build settings `gen_snapshot_options` reads, for every rule that AOT
+# compiles. Like `flutter build --split-debug-info` and `--obfuscate`, they are
+# the build's, not the app's: rules_dart's flag splits the debug info of every
+# AOT program in the build, a `dart_binary`'s too.
+GEN_SNAPSHOT_SETTINGS_ATTRS = {
+    "_obfuscate": attr.label(default = Label("//flutter:obfuscate")),
+    "_split_debug_info": attr.label(default = Label("@rules_dart//dart:split_debug_info")),
+}
+
+_OBFUSCATE_NEEDS_SPLIT = (
+    "%s: `--@rules_flutter//flutter:obfuscate` needs " +
+    "`--@rules_dart//dart:split_debug_info`, as `flutter build --obfuscate` " +
+    "needs `--split-debug-info`: without the symbols it writes, an obfuscated " +
+    "stack trace cannot be read back."
+)
+
 def gen_snapshot_options(ctx, inputs = None):
     """Reads the gen_snapshot options a rule's attributes ask for.
 
-    `obfuscate`, `split_debug_info` and `extra_gen_snapshot_options` mean the
-    same on every rule that declares them, so they are read in one place.
+    `extra_gen_snapshot_options` means the same on every rule that declares
+    it, and `--@rules_flutter//flutter:obfuscate` and
+    `--@rules_dart//dart:split_debug_info` the same on every rule that AOT
+    compiles, so they are read in one place.
 
     An option that makes gen_snapshot write a file (`--save-obfuscation-map`,
     for one) names the file relative to the package, and the file is declared
@@ -41,10 +60,10 @@ def gen_snapshot_options(ctx, inputs = None):
     `gen_snapshot_files` output group.
 
     Args:
-        ctx: A rule context with `obfuscate`, `split_debug_info` and
-            `extra_gen_snapshot_options` attributes, which says where the
-            declared files go (`<name>_gen_snapshot/`).
-        inputs: What to read the three attributes from, if not `ctx`:
+        ctx: A rule context with an `extra_gen_snapshot_options` attribute
+            and `GEN_SNAPSHOT_SETTINGS_ATTRS`, which says where the declared
+            files go (`<name>_gen_snapshot/`).
+        inputs: What to read `extra_gen_snapshot_options` from, if not `ctx`:
             `flutter_program_inputs`, which a program rebuilt under another
             target (`flutter_application_variant`) carries from its own.
 
@@ -58,11 +77,11 @@ def gen_snapshot_options(ctx, inputs = None):
     file_flags = []
     strip = True
     if inputs == None:
-        inputs = struct(
-            extra_gen_snapshot_options = ctx.attr.extra_gen_snapshot_options,
-            obfuscate = ctx.attr.obfuscate,
-            split_debug_info = ctx.attr.split_debug_info,
-        )
+        inputs = struct(extra_gen_snapshot_options = ctx.attr.extra_gen_snapshot_options)
+    obfuscate = ctx.attr._obfuscate[BuildSettingInfo].value
+    split_debug_info = ctx.attr._split_debug_info[BuildSettingInfo].value
+    if obfuscate and not split_debug_info:
+        fail(_OBFUSCATE_NEEDS_SPLIT % ctx.label)
     for option in inputs.extra_gen_snapshot_options:
         if option.partition("=")[0].replace("_", "-") == "--resolve-dwarf-paths":
             fail(_RESOLVE_DWARF_PATHS_REFUSED % ctx.label)
@@ -84,10 +103,10 @@ def gen_snapshot_options(ctx, inputs = None):
             )
         output = ctx.actions.declare_file("%s_gen_snapshot/%s" % (ctx.label.name, value))
         file_flags.append((flag, output))
-    if inputs.obfuscate:
+    if obfuscate:
         flags.append("--obfuscate")
     debug_info = None
-    if inputs.split_debug_info:
+    if split_debug_info:
         debug_info = ctx.actions.declare_file(ctx.label.name + ".symbols")
     return struct(
         flags = flags,

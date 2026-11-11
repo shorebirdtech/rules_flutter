@@ -46,6 +46,20 @@ bool_flag(
     visibility = ["//visibility:public"],
 )
 
+# Obfuscates the Dart names of every AOT-compiled app in the build, as
+# `flutter build --obfuscate` does. It needs rules_dart's split debug info, whose
+# `.symbols` file is what reads an obfuscated stack trace back:
+#
+#   bazel build -c opt --@rules_flutter//flutter:obfuscate \
+#       --@rules_dart//dart:split_debug_info --output_groups=+debug_info //app
+bool_flag(
+    name = "obfuscate",
+    build_setting_default = False,
+    # It describes the app, and no build tool reads it.
+    scope = "target",
+    visibility = ["//visibility:public"],
+)
+
 # The Flutter SDK a build uses: the name of one `flutter.toolchain()` the root
 # module declares. The default is the stock release, `flutter`.
 #

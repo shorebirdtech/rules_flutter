@@ -537,22 +537,13 @@ dart_analysis_test(
 # `-c` but `dbg`, so each property below is checked in `fastbuild` and in `opt`.
 # =============================================================================
 
-# The same app with its Dart names obfuscated and the symbols split out.
-flutter_application(
-    name = "app_obfuscated_flutter",
-    assets = glob(["assets/**"]),
-    main = "lib/main.dart",
-    native_deps = [":sub"],
-    obfuscate = True,
-    package = ":pubspec-metadata",
-    split_debug_info = True,
-    deps = _APP_DEPS,
-)
-
+# The same app, which `:release_obfuscated_<mode>` builds with its Dart names
+# obfuscated and the symbols split out. A target of its own, so its bundle and
+# `:app`'s, in one test's runfiles, have paths of their own.
 flutter_macos_app(
     name = "app_obfuscated",
     app_name = "Flutter App",
-    application = ":app_obfuscated_flutter",
+    application = ":app_flutter",
     bundle_id = "com.example.flutterapp.obfuscated",
     target_compatible_with = ["@platforms//os:macos"],
 )
@@ -585,8 +576,17 @@ flutter_macos_app(
         targets = [
             ":app",
             ":app_no_strip",
-            ":app_obfuscated",
         ],
+    )
+    for mode in ("fastbuild", "opt")
+]
+
+[
+    apple_release_build(
+        name = "release_obfuscated_%s" % mode,
+        compilation_mode = mode,
+        obfuscate = True,
+        targets = [":app_obfuscated"],
     )
     for mode in ("fastbuild", "opt")
 ]
@@ -594,7 +594,7 @@ flutter_macos_app(
 [
     dart_test(
         name = "verify_macos_release_%s_%s_test" % (what, mode),
-        data = [":release_%s" % mode],
+        data = [":release_%s" % mode] + ([":release_obfuscated_%s" % mode] if what == "obfuscated" else []),
         main = "test/verify_macos_release_%s_test.dart" % what,
         target_compatible_with = ["@platforms//os:macos"],
         deps = ["@rules_flutter//tools/e2e_testing"],

@@ -258,7 +258,18 @@ Bazel's compilation mode flag selects how the Dart is compiled:
 
 Note that a plain `bazel build` is a release build, not a debug one. That matters for [permissions](#release-builds-and-permissions).
 
-On iOS and macOS a release or profile build strips `App.framework/App` of its local symbols, as `flutter build ios` and `flutter build macos` do, and keeps them in a dSYM. The dSYM has the binary's UUID, so a crash reporter symbolicates the shipped app with it. It is in the `dsyms` output group of the app target: `bazel build //:app --output_groups=+dsyms`. `extra_gen_snapshot_options = ["--no-strip"]` keeps the local symbols in the binary, as it does for `flutter build`; the dSYM is still made. Keep it with each release. A dSYM of an `obfuscate = True` app holds the unobfuscated Dart names (`gen_snapshot` warns of it), so keep it out of the shipped app. `flutter_aot_snapshot` on an Apple platform is not stripped, and its object is in the `macho_object` output group.
+On iOS and macOS a release or profile build strips `App.framework/App` of its local symbols, as `flutter build ios` and `flutter build macos` do, and keeps them in a dSYM. The dSYM has the binary's UUID, so a crash reporter symbolicates the shipped app with it. It is in the `dsyms` output group of the app target: `bazel build //:app --output_groups=+dsyms`. `extra_gen_snapshot_options = ["--no-strip"]` keeps the local symbols in the binary, as it does for `flutter build`; the dSYM is still made. Keep it with each release. A dSYM of an obfuscated app holds the unobfuscated Dart names (`gen_snapshot` warns of it), so keep it out of the shipped app. `flutter_aot_snapshot` on an Apple platform is not stripped, and its object is in the `macho_object` output group.
+
+A release or profile build is obfuscated and its debug info split out as `flutter build --obfuscate --split-debug-info=<dir>` does it, with two build flags, which apply to every app in the build:
+
+```
+bazel build -c opt //:app \
+    --@rules_dart//dart:split_debug_info \
+    --@rules_flutter//flutter:obfuscate \
+    --output_groups=+debug_info
+```
+
+`--@rules_dart//dart:split_debug_info` leaves the Dart debugging information out of the AOT snapshot and writes it to `<application>.symbols`, in the `debug_info` output group of the `flutter_application` (and of a `flutter_aot_snapshot`, and of a rules_dart `dart_binary`), as `gen_snapshot --save-debugging-info` writes it. `--@rules_flutter//flutter:obfuscate` renames the Dart symbols. It needs `split_debug_info`, as `--obfuscate` needs `--split-debug-info`, and the build fails without it. A debug build ignores both.
 
 Profile mode is `flutter run --profile`: release-speed code that still serves the Dart VM service, so DevTools can record timelines and CPU profiles. It has no hot reload. Profile uses its own engine and gen_snapshot on every platform, downloaded the first time a profile build needs them, because the engine refuses a snapshot compiled for a different mode. The flag needs `-c opt`, and the build fails if it is set with any other `-c`. Like upstream Flutter, there is no profile mode for the iOS simulator: build profile for a physical device. A `.bazelrc` config saves typing:
 
@@ -2358,8 +2369,6 @@ flutter_application(
 | `assets` | Asset files for the bundle, each under its path in the application's Bazel package (`assets/a.png`), wherever in the workspace that package is. That is the key `rootBundle` and `Image.asset` load it by, and the one `flutter run` gives it. A file from another package fails the build. |
 | `native_deps` | Shared libraries to bundle for `dart:ffi`. A web app built over the application bundles none, as `flutter build web` builds no native code. |
 | `defines` | Dart environment defines, the `-D` flags. |
-| `obfuscate` | Obfuscate Dart symbols in the AOT output. Pair with `split_debug_info`. Default `False`. |
-| `split_debug_info` | Write debug info to a separate `.symbols` file. Default `False`. |
 | `extra_gen_snapshot_options` | Extra flags for `gen_snapshot`. `--no-strip` keeps the shipped binary's local symbols, as it does in `flutter build`; it is not passed on to `gen_snapshot`. A flag that makes `gen_snapshot` write a file (`--save-obfuscation-map`, `--write-v8-snapshot-profile-to`, `--print-instructions-sizes-to`) names it relative to the package, as `--save-obfuscation-map=obfuscation.json`. The file is built to `<name>_gen_snapshot/obfuscation.json`, and it is in the target's `gen_snapshot_files` output group. |
 | `track_widget_creation` | Record where each widget was created, for the DevTools inspector, as `flutter run` does. Debug and profile builds; a release build never does. Default `True`. |
 | `shaders` | Fragment shaders to compile with impellerc. |

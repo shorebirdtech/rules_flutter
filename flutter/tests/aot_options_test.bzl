@@ -1,11 +1,12 @@
 """Every gen_snapshot option a target declares reaches gen_snapshot.
 
-`obfuscate`, `split_debug_info` and `extra_gen_snapshot_options` are attributes
-of both `flutter_application` and `flutter_aot_snapshot`. A user who sets one has
-asked for something specific of the snapshot; an attribute a rule declares and
+`extra_gen_snapshot_options` is an attribute of both `flutter_application` and
+`flutter_aot_snapshot`, and `--@rules_flutter//flutter:obfuscate` and
+`--@rules_dart//dart:split_debug_info` build settings both read. A user who sets
+one has asked for something specific of the snapshot; an option a rule takes and
 does not act on gives the user a build that is not the one they asked for, with
 no error. These tests read the gen_snapshot action each rule declares, for each
-attribute, in each `-c` that builds Flutter's release mode.
+option, in each `-c` that builds Flutter's release mode.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
@@ -45,7 +46,7 @@ def _impl(ctx):
         asserts.true(
             env,
             "--obfuscate" in argv,
-            "obfuscate = True should run gen_snapshot with --obfuscate: %s" % argv,
+            "--@rules_flutter//flutter:obfuscate should run gen_snapshot with --obfuscate: %s" % argv,
         )
     elif what == "split_debug_info":
         saved = [a for a in argv if a.startswith("--save-debugging-info=")]
@@ -53,7 +54,7 @@ def _impl(ctx):
             env,
             1,
             len(saved),
-            "split_debug_info = True should save the debugging info: %s" % argv,
+            "--@rules_dart//dart:split_debug_info should save the debugging info: %s" % argv,
         )
         outputs = [o.basename for o in action.outputs.to_list()]
         asserts.true(
@@ -109,21 +110,34 @@ def _impl(ctx):
 
 _OPTION = {"option": attr.string(mandatory = True)}
 
-_fastbuild_test = analysistest.make(
-    _impl,
-    attrs = _OPTION,
-    config_settings = {"//command_line_option:compilation_mode": "fastbuild"},
-)
-_opt_test = analysistest.make(
-    _impl,
-    attrs = _OPTION,
-    config_settings = {"//command_line_option:compilation_mode": "opt"},
-)
+_OBFUSCATE = str(Label("//flutter:obfuscate"))
+_SPLIT_DEBUG_INFO = str(Label("@rules_dart//dart:split_debug_info"))
+
+def _settings(mode, settings = {}):
+    return settings | {"//command_line_option:compilation_mode": mode}
+
+_fastbuild_test = analysistest.make(_impl, attrs = _OPTION, config_settings = _settings("fastbuild"))
+_opt_test = analysistest.make(_impl, attrs = _OPTION, config_settings = _settings("opt"))
+
+# Obfuscating needs the debug info split, as `flutter build --obfuscate` does.
+_OBFUSCATED = {_OBFUSCATE: True, _SPLIT_DEBUG_INFO: True}
+_obfuscate_fastbuild_test = analysistest.make(_impl, attrs = _OPTION, config_settings = _settings("fastbuild", _OBFUSCATED))
+_obfuscate_opt_test = analysistest.make(_impl, attrs = _OPTION, config_settings = _settings("opt", _OBFUSCATED))
+
+_SPLIT = {_SPLIT_DEBUG_INFO: True}
+_split_fastbuild_test = analysistest.make(_impl, attrs = _OPTION, config_settings = _settings("fastbuild", _SPLIT))
+_split_opt_test = analysistest.make(_impl, attrs = _OPTION, config_settings = _settings("opt", _SPLIT))
+
+_PLAIN_TESTS = [("fastbuild", _fastbuild_test), ("opt", _opt_test)]
+
+# Each build setting's tests, with what it needs set beside it.
+_SETTING_TESTS = {
+    "obfuscate": [("fastbuild", _obfuscate_fastbuild_test), ("opt", _obfuscate_opt_test)],
+    "split_debug_info": [("fastbuild", _split_fastbuild_test), ("opt", _split_opt_test)],
+}
 
 _OPTIONS = {
     "extra_gen_snapshot_options": [_EXTRA_FLAG],
-    "obfuscate": True,
-    "split_debug_info": True,
 }
 
 _RULES = {
@@ -131,7 +145,7 @@ _RULES = {
     "application": flutter_application,
 }
 
-def _instantiate(name, rules, fixtures, option):
+def _instantiate(name, rules, fixtures, option, tests_of = lambda _suffix: _PLAIN_TESTS):
     tests = []
     for rule_name in rules:
         for suffix, attrs in fixtures.items():
@@ -143,7 +157,7 @@ def _instantiate(name, rules, fixtures, option):
                 tags = ["manual"],
                 **attrs
             )
-            for mode, test in [("fastbuild", _fastbuild_test), ("opt", _opt_test)]:
+            for mode, test in tests_of(suffix):
                 test_name = "%s%s_%s_test" % (name, fixture, mode)
                 test(name = test_name, target_under_test = ":" + fixture, option = option or suffix)
                 tests.append(":" + test_name)
@@ -159,8 +173,10 @@ def aot_options_test_suite(name, rules):
     _instantiate(
         name,
         rules,
-        {option: {option: value} for option, value in _OPTIONS.items()},
+        {option: {option: value} for option, value in _OPTIONS.items()} |
+        {setting: {} for setting in _SETTING_TESTS},
         None,
+        lambda suffix: _SETTING_TESTS.get(suffix, _PLAIN_TESTS),
     )
 
 def aot_no_strip_test_suite(name, rules):
@@ -193,6 +209,44 @@ def aot_file_flags_test_suite(name, rules):
         },
         "file_writing_flags",
     )
+
+def _obfuscate_alone_refused_impl(ctx):
+    env = analysistest.begin(ctx)
+    asserts.expect_failure(env, "needs `--@rules_dart//dart:split_debug_info`")
+    return analysistest.end(env)
+
+_obfuscate_alone_refused_test = analysistest.make(
+    _obfuscate_alone_refused_impl,
+    expect_failure = True,
+    config_settings = {
+        "//command_line_option:compilation_mode": "opt",
+        _OBFUSCATE: True,
+    },
+)
+
+def aot_obfuscate_alone_test_suite(name, rules):
+    """A fixture per rule, refused when obfuscated without split debug info.
+
+    `flutter build --obfuscate` without `--split-debug-info` is refused, as
+    the symbols are what read an obfuscated stack trace back.
+
+    Args:
+        name: The test_suite name.
+        rules: Which of "application" and "aot_target" to test.
+    """
+    tests = []
+    for rule_name in rules:
+        fixture = "_%s_obfuscate_alone" % rule_name
+        _RULES[rule_name](
+            name = fixture,
+            package = ":pubspec-metadata",
+            main = _MAIN,
+            tags = ["manual"],
+        )
+        test_name = "%s%s_test" % (name, fixture)
+        _obfuscate_alone_refused_test(name = test_name, target_under_test = ":" + fixture)
+        tests.append(":" + test_name)
+    native.test_suite(name = name, tests = tests)
 
 def _resolve_dwarf_paths_refused_impl(ctx):
     env = analysistest.begin(ctx)

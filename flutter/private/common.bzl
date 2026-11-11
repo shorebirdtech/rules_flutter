@@ -10,6 +10,7 @@ load("@rules_dart//dart:providers.bzl", "DartInfo")
 load("@rules_dart//dart:utils.bzl", "KERNEL_TOOL_ATTR", "collect_packages", "collect_transitive_srcs", "dart_import_check_aspect", "generate_dev_package_config", "import_check_validation", "package_identity_attrs", "package_info_from_metadata", "package_lib_prefix", "resolve_package_identity", "runtime_reset")
 load("//flutter:providers.bzl", "FlutterInfo", "FlutterNativeLibraryInfo")
 load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "app_main_location", "app_scheme_files", "app_scheme_location", "app_scheme_sources", "synthesize_app_package", "with_root")
+load("//flutter/private:flutter_aot_compile.bzl", "GEN_SNAPSHOT_SETTINGS_ATTRS")
 load("//flutter/private:flutter_asset_bundle.bzl", "flutter_asset_bundle_action")
 load("//flutter/private:flutter_compile.bzl", "flutter_kernel_compile")
 load("//flutter/private:flutter_info.bzl", "dedup_plugins")
@@ -1359,8 +1360,6 @@ def flutter_program_inputs(ctx, metadata = None):
         link_hook_assets = list(getattr(ctx.attr, "link_hook_assets", [])),
         track_widget_creation = getattr(ctx.attr, "track_widget_creation", False),
         minimum_os_version = getattr(ctx.attr, "minimum_os_version", ""),
-        obfuscate = getattr(ctx.attr, "obfuscate", False),
-        split_debug_info = getattr(ctx.attr, "split_debug_info", False),
         extra_gen_snapshot_options = list(getattr(ctx.attr, "extra_gen_snapshot_options", [])),
     )
 
@@ -1459,14 +1458,6 @@ FLUTTER_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | {
         # transition: no C++ toolchain targets a web platform.
         cfg = runtime_reset,
     ),
-    "obfuscate": attr.bool(
-        doc = "If True, obfuscate Dart symbols in the AOT output. Pair with split_debug_info to produce a symbol map for deobfuscation.",
-        default = False,
-    ),
-    "split_debug_info": attr.bool(
-        doc = "If True, extract debug info from the AOT output into a separate file. Produces a .symbols output alongside the AOT binary.",
-        default = False,
-    ),
     "extra_gen_snapshot_options": attr.string_list(
         doc = "Additional flags passed directly to gen_snapshot (AOT compiler). " +
               "A flag that makes gen_snapshot write a file (`--save-obfuscation-map`, " +
@@ -1475,7 +1466,7 @@ FLUTTER_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | {
               "(`<name>_gen_snapshot/<path>`) in the `gen_snapshot_files` output group. " +
               "`--resolve-dwarf-paths` is refused: the kernel names its sources by " +
               "workspace-relative URIs, which gen_snapshot cannot turn into paths, and " +
-              "`split_debug_info` names them by those URIs instead.",
+              "with `--@rules_dart//dart:split_debug_info` the debug info names them by those URIs instead.",
     ),
     "track_widget_creation": attr.bool(
         doc = "If True, a debug or profile build records where each widget was created, for the DevTools widget inspector, as `flutter run` does. A release build never does. Default `True`.",
@@ -1539,7 +1530,7 @@ FLUTTER_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | {
         allow_single_file = True,
     ),
     "_sky_engine": program_sky_engine_attr(),
-} | NOTICES_ATTRS | AGENT_EXTENSIONS_ATTR
+} | NOTICES_ATTRS | AGENT_EXTENSIONS_ATTR | GEN_SNAPSHOT_SETTINGS_ATTRS
 
 # What a `flutter_application` states about its program: the attributes
 # `flutter_program_inputs` reads, and so the ones a rule that rebuilds the
@@ -1558,12 +1549,10 @@ FLUTTER_PROGRAM_ATTR_NAMES = [
     "main",
     "minimum_os_version",
     "native_deps",
-    "obfuscate",
     "package",
     "require_sksl_shaders",
     "shader_includes",
     "shaders",
-    "split_debug_info",
     "srcs",
     "track_widget_creation",
     "tree_shake_icons",

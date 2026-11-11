@@ -8,10 +8,15 @@ it needs the bundle built in a mode it names, not the one the command line has.
 
 load("@build_bazel_rules_apple//apple:providers.bzl", "AppleFrameworkImportInfo")
 
+_OBFUSCATE = str(Label("//flutter:obfuscate"))
+_SPLIT_DEBUG_INFO = str(Label("@rules_dart//dart:split_debug_info"))
+
 def _transition_impl(settings, attr):
     ios_multi_cpus = settings["//command_line_option:ios_multi_cpus"]
     features = settings["//command_line_option:features"]
     return {
+        _OBFUSCATE: attr.obfuscate,
+        _SPLIT_DEBUG_INFO: attr.obfuscate,
         "//command_line_option:features": features if attr.sign else features + ["disable_legacy_signing"],
         "//command_line_option:apple_generate_dsym": attr.generate_dsym,
         "//command_line_option:compilation_mode": attr.compilation_mode,
@@ -25,6 +30,8 @@ _transition = transition(
         "//command_line_option:ios_multi_cpus",
     ],
     outputs = [
+        _OBFUSCATE,
+        _SPLIT_DEBUG_INFO,
         "//command_line_option:features",
         "//command_line_option:apple_generate_dsym",
         "//command_line_option:compilation_mode",
@@ -55,7 +62,7 @@ frameworks of the framework imports among them.
 
 With `generate_dsym`, builds them with `--apple_generate_dsym` and forwards
 the dSYM bundles the targets' `dsyms` output group holds besides their own
-files.""",
+files. With `obfuscate`, builds them obfuscated.""",
     attrs = {
         "compilation_mode": attr.string(
             mandatory = True,
@@ -64,6 +71,11 @@ files.""",
         "generate_dsym": attr.bool(
             default = False,
             doc = "Build with `--apple_generate_dsym` and forward the `dsyms` output group.",
+        ),
+        "obfuscate": attr.bool(
+            default = False,
+            doc = "Build with `--@rules_flutter//flutter:obfuscate` and the " +
+                  "`--@rules_dart//dart:split_debug_info` it needs.",
         ),
         "sign": attr.bool(
             default = True,
