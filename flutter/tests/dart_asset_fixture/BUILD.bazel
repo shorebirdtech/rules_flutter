@@ -3,7 +3,7 @@ load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
 load("@rules_dart//dart:defs.bzl", "dart_code_asset", "dart_library")
 load("//flutter:defs.bzl", "dart_package_metadata")
-load("//flutter/tests:native_assets_test.bzl", "hook_check_probe", "legacy_dart_library")
+load("//flutter/tests:native_assets_test.bzl", "hook_check_probe")
 
 # A pub-package-shaped `dart_library` that owns a native code asset, exactly as
 # `pub.from_lock()` generates for a package with a curated `//dart/ext` entry.
@@ -60,51 +60,13 @@ dart_library(
     ],
 )
 
-# The tolerance side of the check that a package's build hook is replaced
-# (see `hook_fixture/`). A `DartPackageInfo` built against a
-# rules_dart predating `unreplaced_hook` has no such field, and reaching it
-# from an application must be a non-event: it cannot be an offender, because a
-# producer with no field could not have recorded a hook. Probed directly rather
-# than through `flutter_application` so the assertion is about the check and
-# needs no Flutter toolchain.
-legacy_dart_library(
-    name = "legacy_package",
-    package_name = "legacy_package",
-    srcs = ["lib/fixture.dart"],
-    # A hand-built `DartInfo` carries no analyzer summaries, so analysis
-    # against them refuses it. Its source is a placeholder.
-    tags = ["no-dart-analyze"],
-)
-
+# The check over a package with no build hook and one with an unreplaced
+# one, so a check that reported nothing, or everything, fails one of them.
 hook_check_probe(
-    name = "legacy_package_has_no_hook",
-    deps = [":legacy_package"],
+    name = "plain_package_is_no_offender",
+    deps = ["//flutter/tests/flutter_test_analyze_fixture/fake_test_api"],
 )
 
-# `flutter_test` refuses deps that do not expose `package:test_api`, and that
-# check runs before the hook check. This stands in for the real package so a
-# test target can be built here, where there is no pub hub to get one from —
-# `_has_flutter_test` matches on the package name and nothing else. Being a
-# legacy-shaped record, it also puts a field-less package alongside the
-# offender in the same closure.
-legacy_dart_library(
-    name = "fake_test_api",
-    package_name = "test_api",
-    srcs = ["lib/fixture.dart"],
-    # As `:legacy_package`.
-    tags = ["no-dart-analyze"],
-    visibility = [
-        "//flutter/tests/code_asset_fixture/test:__pkg__",
-        "//flutter/tests/dart_asset_fixture/code_asset_test:__pkg__",
-        "//flutter/tests/dart_asset_fixture/hook_app:__pkg__",
-        "//flutter/tests/shared_code_asset_fixture/test:__pkg__",
-        "//flutter/tests/test_tags_fixture:__pkg__",
-        "//flutter/tests/tester_binary_fixture:__pkg__",
-    ],
-)
-
-# The paired positive: the same probe over the package that does ship one, so
-# a guard that swallowed every record would not pass both.
 hook_check_probe(
     name = "hook_fixture_is_an_offender",
     expect_offender = True,
@@ -112,9 +74,9 @@ hook_check_probe(
 )
 
 build_test(
-    name = "hook_check_tolerance_test",
+    name = "hook_check_test",
     targets = [
         ":hook_fixture_is_an_offender",
-        ":legacy_package_has_no_hook",
+        ":plain_package_is_no_offender",
     ],
 )

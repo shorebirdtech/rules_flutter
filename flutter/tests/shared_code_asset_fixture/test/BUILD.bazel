@@ -19,7 +19,7 @@ flutter_test(
     tags = ["manual"],
     visibility = ["//flutter/tests:__pkg__"],
     deps = [
-        "//flutter/tests/dart_asset_fixture:fake_test_api",
+        "//flutter/tests/flutter_test_analyze_fixture/fake_test_api",
         "//flutter/tests/shared_code_asset_fixture/a",
         "//flutter/tests/shared_code_asset_fixture/b",
     ],

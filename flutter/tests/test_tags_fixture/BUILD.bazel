@@ -12,7 +12,7 @@ flutter_test(
     package = ":pubspec-metadata",
     tags = ["manual"],
     visibility = ["//flutter/tests:__pkg__"],
-    deps = ["//flutter/tests/dart_asset_fixture:fake_test_api"],
+    deps = ["//flutter/tests/flutter_test_analyze_fixture/fake_test_api"],
 )
 
 flutter_test(
@@ -26,7 +26,7 @@ flutter_test(
     package = ":pubspec-metadata",
     tags = ["manual"],
     visibility = ["//flutter/tests:__pkg__"],
-    deps = ["//flutter/tests/dart_asset_fixture:fake_test_api"],
+    deps = ["//flutter/tests/flutter_test_analyze_fixture/fake_test_api"],
 )
 
 flutter_test(
@@ -36,7 +36,7 @@ flutter_test(
     package = ":pubspec-metadata",
     tags = ["manual"],
     visibility = ["//flutter/tests:__pkg__"],
-    deps = ["//flutter/tests/dart_asset_fixture:fake_test_api"],
+    deps = ["//flutter/tests/flutter_test_analyze_fixture/fake_test_api"],
 )
 
 flutter_test(
@@ -46,5 +46,5 @@ flutter_test(
     package = ":pubspec-metadata",
     tags = ["manual"],
     visibility = ["//flutter/tests:__pkg__"],
-    deps = ["//flutter/tests/dart_asset_fixture:fake_test_api"],
+    deps = ["//flutter/tests/flutter_test_analyze_fixture/fake_test_api"],
 )

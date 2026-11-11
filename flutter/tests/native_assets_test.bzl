@@ -325,40 +325,7 @@ def native_assets_test_suite(name):
         ],
     )
 
-# --- check_unreplaced_hooks tolerance ---
-#
-# The hook check reads a field off `DartPackageInfo`, which is rules_dart's
-# provider and is documented to tolerate a record built before a given field
-# existed. A record from such a producer must read as "no hook" rather than
-# failing analysis — it is not an offender, and it could not have been one.
-
-def _legacy_dart_library_impl(ctx):
-    # The pre-`unreplaced_hook` record shape, matching rules_dart's own
-    # `//dart/tests/no_lv_fixture`: `package_name` and `package_root` and nothing
-    # else. A plain struct on purpose: `DartPackageInfo(...)` states every field,
-    # so it cannot build the record of a producer that predates one.
-    pkg = struct(
-        package_name = ctx.attr.package_name,
-        package_root = ctx.label.package,
-    )
-    return [
-        DefaultInfo(files = depset(ctx.files.srcs)),
-        DartInfo(
-            packages = (pkg,),
-            transitive_srcs = depset(ctx.files.srcs),
-            transitive_resources = depset(),
-            transitive_packages = depset([pkg]),
-        ),
-    ]
-
-legacy_dart_library = rule(
-    implementation = _legacy_dart_library_impl,
-    attrs = {
-        "package_name": attr.string(mandatory = True),
-        "srcs": attr.label_list(allow_files = [".dart"]),
-    },
-    doc = "Emits a `DartPackageInfo` predating `unreplaced_hook`.",
-)
+# --- check_unreplaced_hooks ---
 
 def _hook_check_probe_impl(ctx):
     err = check_unreplaced_hooks(ctx.label, ctx.attr.deps)

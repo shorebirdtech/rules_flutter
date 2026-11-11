@@ -121,16 +121,10 @@ def check_unreplaced_hooks(label, deps):
         transitive = [dep[DartInfo].transitive_packages for dep in deps],
     ).to_list()
 
-    # Guarded for the same reason rules_dart's `package_code_assets` guards
-    # `code_assets`: `DartPackageInfo` is rules_dart's, and it deliberately
-    # tolerates a record built against a rules_dart predating a field. Absent
-    # is not "unknown" here — a producer with no such field could not have
-    # recorded a hook — so it reads as "no hook". Unguarded, the read fails
-    # analysis on records that are not even offenders.
     offenders = [
         pkg
         for pkg in packages
-        if hasattr(pkg, "unreplaced_hook") and pkg.unreplaced_hook
+        if pkg.unreplaced_hook
     ]
     if not offenders:
         return None

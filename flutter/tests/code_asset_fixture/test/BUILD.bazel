@@ -17,6 +17,6 @@ flutter_test(
     visibility = ["//flutter/tests:__pkg__"],
     deps = [
         "//flutter/tests/code_asset_fixture/owner:dart_owner",
-        "//flutter/tests/dart_asset_fixture:fake_test_api",
+        "//flutter/tests/flutter_test_analyze_fixture/fake_test_api",
     ],
 )

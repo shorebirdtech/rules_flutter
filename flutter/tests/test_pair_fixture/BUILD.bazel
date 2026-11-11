@@ -23,7 +23,7 @@ flutter_test(
         "manual",
         "paired",
     ],
-    deps = ["//flutter/tests/dart_asset_fixture:fake_test_api"],
+    deps = ["//flutter/tests/flutter_test_analyze_fixture/fake_test_api"],
 )
 
 genquery(

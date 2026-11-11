@@ -26,7 +26,7 @@ flutter_test(
     package = ":pubspec-metadata",
     tags = ["manual"],
     deps = [
-        "//flutter/tests/dart_asset_fixture:fake_test_api",
         "//flutter/tests/dart_asset_fixture/hook_fixture",
+        "//flutter/tests/flutter_test_analyze_fixture/fake_test_api",
     ],
 )
