@@ -25,7 +25,8 @@ def _path_entry(name, path, relative = "true", version = "1.0.0"):
 """.format(name = name, path = path, relative = relative, version = version)
 
 def _lock(entries):
-    return "packages:\n" + "".join(entries) + "sdks:\n  dart: \">=3.0.0 <4.0.0\"\n"
+    packages = "packages:\n" + "".join(entries) if entries else "packages: {}\n"
+    return packages + "sdks:\n  dart: \">=3.0.0 <4.0.0\"\n"
 
 def _errors(entries, resolve, lock = _LOCK, build_from_pubspec = [], ignored = {}):
     return resolve_errors(lock, parse_pubspec_lock(_lock(entries), str(lock)), resolve, build_from_pubspec, ignored)
