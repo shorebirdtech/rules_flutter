@@ -261,7 +261,7 @@ If `flutter build` works for you, here is what Bazel adds:
 ## Contents
 
 - [Getting started](#getting-started)
-- [Dependencies](#dependencies): pub packages, build hooks, native code
+- [Dependencies](#dependencies): pub packages, build and link hooks, native code
 - [Building for each platform](#building-for-each-platform): macOS, iOS, Android, Linux, Windows, web, cross-compiling, release permissions, add-to-app
 - [Custom engines and frameworks](#custom-engines-and-frameworks): a local flutter/flutter checkout and its engine, provenance, writing an engine source
 - [Rules reference](#rules-reference): libraries, applications, tests, integration tests, plugins, code generation, providers
