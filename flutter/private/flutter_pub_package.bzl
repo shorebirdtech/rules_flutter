@@ -51,7 +51,7 @@ for it.
 
 load("@rules_dart//dart:utils.bzl", "METADATA_TARGET_NAME")
 load("@rules_dart//dart/pub:pub_graph.bzl", "write_pubspec_dependencies")
-load("@rules_dart//dart/pub:pub_lock_package.bzl", "fetch_pub_archive", "fetch_pub_git", "fetch_pub_path", "find_pub_license_file")
+load("@rules_dart//dart/pub:pub_lock_package.bzl", "fetch_pub_archive", "fetch_pub_git", "fetch_pub_path", "find_pub_license_file", "pub_git_purl", "pub_hosted_purl", "pub_package_identity")
 load("@rules_dart//dart/pub:pubspec.bzl", "read_pubspec")
 load("//flutter/private:android_plugin_maven.bzl", "MAVEN_DEPS_FILE", "gradle_statements", "parse_gradle_maven_dependencies")
 load("//flutter/private:apple_plugin_repo.bzl", "APPLE_PLUGIN_FILE", "apple_library_label")
@@ -1119,12 +1119,13 @@ _RESOURCES_GLOB_BLOCK = """    resources = glob(
     ),
 """
 
-def _member_metadata(name, language_version, code_assets, unreplaced_hook, version, license_file, link_hook):
+def _member_metadata(name, language_version, code_assets, unreplaced_hook, version, license_file, link_hook, purl = ""):
     """The `dart_package_metadata` of a generated member: the package's facts.
 
     Shared by the `pub_package_member` and `flutter_pub_member` generators, so
     the two state a package alike: what rules_dart's own pub spokes state.
-    A version or licence that is unknown is not stated.
+    A version or licence that is unknown is not stated. With a purl, the
+    package's identity (`package_metadata`) follows it.
     """
     return make_package_metadata_content(
         name,
@@ -1134,9 +1135,9 @@ def _member_metadata(name, language_version, code_assets, unreplaced_hook, versi
         build_hook = unreplaced_hook,
         link_hook = link_hook,
         license_file = license_file,
-    )
+    ) + pub_package_identity(purl).target
 
-def make_dart_member_build_content(name, language_version, code_assets, unreplaced_hook, version = "", license_file = "", link_hook = ""):
+def make_dart_member_build_content(name, language_version, code_assets, unreplaced_hook, version = "", license_file = "", link_hook = "", purl = ""):
     """Generate BUILD content for the source repository of a pure-Dart pub package.
 
     A package with nothing of Flutter's in its pubspec is rules_dart's own
@@ -1156,11 +1157,14 @@ def make_dart_member_build_content(name, language_version, code_assets, unreplac
         version: The resolved package version, or "".
         license_file: The package's `NOTICES` or `LICENSE` (`find_pub_license_file`), or "".
         link_hook: Its `hook/link.dart`, or "".
+        purl: Its purl (`pub_hosted_purl`, `pub_git_purl`), stated on a
+            `package_metadata` that its `REPO.bazel` attaches to every target
+            of the repository; or "" for a package of the user's own.
 
     Returns:
         BUILD.bazel content as a string.
     """
-    return PACKAGE_METADATA_LOAD + """\
+    return PACKAGE_METADATA_LOAD + pub_package_identity(purl).loads + """\
 load("@rules_dart//dart/pub:pub_library.bzl", "pub_package_member")
 
 {metadata}
@@ -1173,7 +1177,7 @@ pub_package_member(
 """.format(
         name = name,
         resources = _RESOURCES_GLOB_BLOCK,
-        metadata = _member_metadata(name, language_version, code_assets, unreplaced_hook, version, license_file, link_hook),
+        metadata = _member_metadata(name, language_version, code_assets, unreplaced_hook, version, license_file, link_hook, purl),
         metadata_target = METADATA_TARGET_NAME,
     )
 
@@ -1256,7 +1260,8 @@ def make_flutter_member_build_content(
         unbuilt_native_code = {},
         android_group = "",
         license_file = "",
-        link_hook = ""):
+        link_hook = "",
+        purl = ""):
     """Generate BUILD content for the source repository of a Flutter pub package.
 
     Emits the package's `flutter_pub_member`, a plugin when
@@ -1286,6 +1291,7 @@ def make_flutter_member_build_content(
             `dart_package_metadata` states with its other facts).
         license_file: The package's `NOTICES` or `LICENSE` (`find_pub_license_file`), or "".
         link_hook: Its `hook/link.dart`, or "".
+        purl: Its purl, as for `make_dart_member_build_content`.
         has_android_lib: Whether the package has an `android/` sub-package
             that defines `:lib`, which the member lists under `exports`,
             selected on Android.
@@ -1466,7 +1472,7 @@ flutter_unbuilt_plugin_library(
 
     # The `lib/` glob is `allow_empty`: a pub package can be only assets or native
     # code, with no Dart.
-    return PACKAGE_METADATA_LOAD + """\
+    return PACKAGE_METADATA_LOAD + pub_package_identity(purl).loads + """\
 load("@rules_flutter//flutter/private:flutter_pub_library.bzl", "flutter_pub_member")
 {extra_loads}
 {metadata}
@@ -1479,7 +1485,7 @@ flutter_pub_member(
 {extra_targets}
 """.format(
         name = name,
-        metadata = _member_metadata(name, language_version, code_assets, unreplaced_hook, version, license_file, link_hook),
+        metadata = _member_metadata(name, language_version, code_assets, unreplaced_hook, version, license_file, link_hook, purl),
         metadata_target = METADATA_TARGET_NAME,
         resources = _RESOURCES_GLOB_BLOCK,
         platforms_arg = platforms_arg,
@@ -2155,6 +2161,12 @@ def fetch_local_package(ctx, directory):
     fetch_pub_path(ctx, directory, _local_package_entries(ctx, directory))
 
 def _flutter_pub_package_impl(ctx):
+    # What the package is and where it came from, for SBOM tools: that of a
+    # hosted or git package, as rules_dart's pub repositories state theirs.
+    # A Flutter SDK package (built from the Flutter source, or linked from a
+    # framework source) and a path package are the user's own, and state
+    # their own, as rules_dart's path packages do.
+    purl = ""
     if ctx.attr.framework_json:
         unset = unset_message(ctx)
         if unset:
@@ -2181,6 +2193,13 @@ def _flutter_pub_package_impl(ctx):
             path = ctx.attr.git_path,
             lock = ctx.attr.lock,
         )
+        purl = pub_git_purl(
+            ctx.attr.package_name,
+            ctx.attr.version,
+            ctx.attr.git_url,
+            ctx.attr.resolved_ref,
+            ctx.attr.git_path,
+        )
     else:
         # Downloads, verifies and extracts the archive the way every pub-backed
         # repository does, so a package is laid out the same whichever rule asks.
@@ -2191,6 +2210,15 @@ def _flutter_pub_package_impl(ctx):
             sha256 = ctx.attr.sha256,
             base_url = ctx.attr.base_url,
         )
+        purl = pub_hosted_purl(
+            ctx.attr.package_name,
+            ctx.attr.version,
+            ctx.attr.sha256,
+            ctx.attr.base_url,
+        )
+    identity = pub_package_identity(purl)
+    if purl:
+        ctx.file("REPO.bazel", identity.repo_file)
 
     # Pub's own reading of the pubspec: a package pub would refuse (malformed
     # YAML, a `name` that is not this package's, a dependency or constraint of
@@ -2309,7 +2337,9 @@ def _flutter_pub_package_impl(ctx):
             "and remove the annotation."
         ).format(pkg = ctx.attr.package_name))
     if overlay_content:
-        ctx.file("BUILD.bazel", overlay_content)
+        # The overlay is the whole of the BUILD file, which the package's
+        # identity joins, as it joins a generated one.
+        ctx.file("BUILD.bazel", identity.loads + overlay_content + identity.target)
         ctx.file(MEMBER_FILE, json.encode({"kind": MEMBER_OVERLAY, "material_icons": False, "android_lib": False}))
 
         # When the overlay ships an `android/BUILD.bazel.tpl`, use it
@@ -2424,6 +2454,7 @@ def _flutter_pub_package_impl(ctx):
             language_version = language_version,
             version = ctx.attr.version,
             license_file = license_file,
+            purl = purl,
             code_assets = ctx.attr.code_assets,
             unreplaced_hook = unreplaced_hook,
             link_hook = hooks.link_hook,
@@ -2465,6 +2496,7 @@ def _flutter_pub_package_impl(ctx):
             language_version = language_version,
             version = ctx.attr.version,
             license_file = license_file,
+            purl = purl,
             code_assets = ctx.attr.code_assets,
             unreplaced_hook = unreplaced_hook,
             link_hook = hooks.link_hook,
@@ -2493,6 +2525,7 @@ def _flutter_pub_package_impl(ctx):
             link_hook = hooks.link_hook,
             version = ctx.attr.version,
             license_file = license_file,
+            purl = purl,
         )
         android_src_dir = ""
         android_java_package = ""

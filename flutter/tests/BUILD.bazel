@@ -1,4 +1,5 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
+load("@rules_dart//dart:defs.bzl", "dart_test")
 load("//flutter:defs.bzl", "dart_package_metadata")
 load(":android_arm_test.bzl", "android_arm_test_suite")
 load(":android_bundle_test.bzl", "android_bundle_test_suite")
@@ -54,6 +55,7 @@ load(":native_assets_test.bzl", "bridge_probe", "native_assets_test_suite")
 load(":native_hot_patch_test.bzl", "native_hot_patch_test_suite")
 load(":native_sources_test.bzl", "native_sources_test_suite")
 load(":notices_test.bzl", "notices_test_suite")
+load(":package_identity_test.bzl", "package_identity_test_suite")
 load(":path_mapping_test.bzl", "path_mapping_test_suite")
 load(":pinned_test.bzl", "pinned_test_suite")
 load(":platform_bundle_test.bzl", "platform_bundle_test_suite")
@@ -66,6 +68,7 @@ load(":pub_lock_sdks_test.bzl", "pub_lock_sdks_test_suite")
 load(":pub_reconcile_test.bzl", "pub_reconcile_test_suite")
 load(":pub_resolve_test.bzl", "pub_resolve_test_suite")
 load(":pub_settings_test.bzl", "pub_settings_test_suite")
+load(":purls.bzl", "package_metadata_files")
 load(":sdk_inputs_test.bzl", "sdk_inputs_test_suite")
 load(":shader_compile_test.bzl", "shader_compile_test_suite")
 load(":shared_code_asset_test.bzl", "shared_code_asset_test_suite")
@@ -174,6 +177,32 @@ pub_settings_test_suite(name = "pub_settings_test")
 toolchain_version_test_suite(name = "toolchain_version_test")
 
 flutter_pub_package_test_suite(name = "flutter_pub_package_test")
+
+package_identity_test_suite(name = "package_identity_test")
+
+# A package really fetched, reached through the hub that lists it, says what it
+# is: the purl of its lock entry (`pubspec.lock`'s `args`), in a
+# `package_metadata` its repository's `REPO.bazel` attaches to every target.
+package_metadata_files(
+    name = "fetched_package_metadata",
+    deps = ["@dev_tool_deps//:args"],
+)
+
+# The test reads the purls of a closure, for the e2e workspaces with packages
+# of kinds this one has none of (plugins, overlays, path packages).
+exports_files(["fetched_purls_test.dart"])
+
+dart_test(
+    name = "fetched_purls_test",
+    size = "small",
+    data = [":fetched_package_metadata"],
+    env = {
+        "PACKAGE_METADATA": "$(rlocationpaths :fetched_package_metadata)",
+        "PURLS": "pkg:pub/args@2.7.0?checksum=sha256:d0481093c50b1da8910eb0bb301626d4d8eb7284aa739614d2b394ee09e3ea04",
+    },
+    main = "fetched_purls_test.dart",
+    deps = ["@rules_dart//dart/runfiles"],
+)
 
 flutter_pubspec_test_suite(name = "flutter_pubspec_test")
 

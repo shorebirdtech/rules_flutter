@@ -37,6 +37,7 @@ load(
 )
 load("@rules_flutter//flutter:web.bzl", "flutter_web_bundle")
 load("@rules_flutter//flutter:windows.bzl", "flutter_windows_app")
+load("@rules_flutter//flutter/tests:purls.bzl", "package_metadata_files")
 load("@rules_flutter//tools/e2e_testing:apple_release_build.bzl", "apple_release_build")
 load("@rules_flutter//tools/e2e_testing:device_profile.bzl", "device_profile")
 load(":android_apk.bzl", "android_apk")
@@ -1187,4 +1188,41 @@ dart_binary(
         "@deps//:crypto",
         "@rules_dart//dart/runfiles",
     ],
+)
+
+# Each package fetched from pub.dev says what it is, for any SBOM tool, whichever
+# kind of repository holds it: a plugin's (`record_android`), an overlay's
+# (`audio_session`) and a pure-Dart package's, by name, version and archive
+# digest. A `path` package (`kotlin_only_plugin`) is the user's own and states
+# none; nor does a package of the Flutter SDK.
+package_metadata_files(
+    name = "fetched_package_metadata",
+    deps = [
+        "@deps//:audio_session",
+        "@deps//:kotlin_only_plugin",
+        "@deps//:record_android",
+    ],
+)
+
+dart_test(
+    name = "fetched_purls_test",
+    size = "small",
+    data = [":fetched_package_metadata"],
+    env = {
+        "PACKAGE_METADATA": "$(rlocationpaths :fetched_package_metadata)",
+        "PURLS": " ".join([
+            "pkg:pub/audio_session@0.1.25?checksum=sha256:2b7fff16a552486d078bfc09a8cde19f426dc6d6329262b684182597bec5b1ac",
+            "pkg:pub/characters@1.4.1?checksum=sha256:faf38497bda5ead2a8c7615f4f7939df04333478bf32e4173fcb06d428b5716b",
+            "pkg:pub/collection@1.19.1?checksum=sha256:2f5709ae4d3d59dd8f7cd309b4e023046b57d8a6c82130785d2b0e5868084e76",
+            "pkg:pub/material_color_utilities@0.13.0?checksum=sha256:9c337007e82b1889149c82ed242ed1cb24a66044e30979c44912381e9be4c48b",
+            "pkg:pub/meta@1.19.0?checksum=sha256:307249ce4ff29d58a18e97f6345f539382eb9c9c29ecda628900f31de0443dd9",
+            "pkg:pub/plugin_platform_interface@2.1.8?checksum=sha256:4820fbfdb9478b1ebae27888254d445073732dae3d6ea81f0b7e06d5dedc3f02",
+            "pkg:pub/record_android@1.5.1?checksum=sha256:94783f08403aed33ffb68797bf0715b0812eb852f3c7985644c945faea462ba1",
+            "pkg:pub/record_platform_interface@1.6.0?checksum=sha256:8e56cbe06c6984137fb86132ff03459f29938d927496d9b2d0962e2d6345d488",
+            "pkg:pub/rxdart@0.28.0?checksum=sha256:5c3004a4a8dbb94bd4bf5412a4def4acdaa12e12f269737a5751369e12d1a962",
+            "pkg:pub/vector_math@2.4.4?checksum=sha256:fa49e1674cb84acb900141714e6c6e1f9ae099827c24d141430ff6819db4e1bc",
+        ]),
+    },
+    main = "@rules_flutter//flutter/tests:fetched_purls_test.dart",
+    deps = ["@rules_dart//dart/runfiles"],
 )
