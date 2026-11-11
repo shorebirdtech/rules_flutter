@@ -244,7 +244,7 @@ Future<void> _deployWindows(
   try {
     await sshRun(
       vmName,
-      'C:\\ProgramData\\chocolatey\\bin\\PsExec64.exe -accepteula '
+      'C:\\tools\\PsExec64.exe -accepteula '
       '-i $sessionId -u $windowsTestUser -p $windowsTestPassword '
       'C:\\temp\\run_verify.bat & exit /b 0',
     );
