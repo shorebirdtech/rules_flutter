@@ -8,11 +8,14 @@ import 'dart:io';
 import 'package:rules_flutter_e2e_testing/bytes.dart';
 import 'package:rules_flutter_e2e_testing/runfiles_paths.dart';
 
-const _title = 'Linux Example';
+const _title = 'Desktop Example';
 
 void main() {
   final runner = File(
-    requireRunfile('app_bazel_runner/app_bazel_runner', what: 'Runner binary'),
+    requireRunfile(
+      'linux_bazel_runner_app/linux_bazel_runner_app',
+      what: 'Runner binary',
+    ),
   );
 
   final needle = [...utf8.encode(_title), 0];

@@ -1,6 +1,6 @@
-"E2e test: Windows desktop app via rules_flutter with 3 approaches (flutter create, Bazel-generated, custom cc_binary)"
+"E2e test: Linux and Windows desktop apps via rules_flutter, each with the runner flutter create makes, a Bazel-generated runner and (on Windows) a custom cc_binary runner"
 
-module(name = "rules_flutter_windows_example")
+module(name = "rules_flutter_desktop_example")
 
 bazel_dep(name = "rules_flutter", version = "0.0.0")
 bazel_dep(name = "rules_dart", version = "0.8.1")

@@ -97,10 +97,6 @@ const _consumerQuery =
     'it has no targets; the `consumer-query` job queries the whole module '
     'from it instead';
 
-const _linuxOnly = 'every test is target_compatible_with Linux';
-
-const _windowsOnly = 'every test is target_compatible_with Windows';
-
 const _webElsewhere =
     'web bundles are platform-neutral; hello_world builds one on this host, '
     'which is what depends on it (the host web compilers and wasm-opt)';
@@ -290,7 +286,7 @@ const e2eWorkspaces = <E2eWorkspace>[
     skips: {
       Os.linux:
           'on a Linux host the target is an ordinary native Linux bundle, '
-          'which hello_world and linux_example build',
+          'which hello_world and desktop_example build',
       Os.windows: 'the Flutter toolchain has no Windows-to-Linux pair',
     },
     command: 'build',
@@ -408,23 +404,25 @@ const e2eWorkspaces = <E2eWorkspace>[
           'and `tar`',
     },
   ),
+  // One Flutter project with `linux/` and `windows/` runners side by side. Every
+  // target is compatible with its own OS only, so each runner skips the
+  // other's targets and nothing is analysed on the wrong host.
   E2eWorkspace(
-    'linux_example',
+    'desktop_example',
     runs: {
       Os.linux:
-          'Tier-2 Linux rules: engine, registrant and the Bazel-generated GTK '
-          'runner composed by hand, and the window title',
-    },
-    skips: {Os.macos: _linuxOnly, Os.windows: _linuxOnly},
-  ),
-  E2eWorkspace(
-    'windows_example',
-    runs: {
+          'Tier-2 Linux rules: the `flutter create` GTK runner, and the '
+          'engine, registrant and Bazel-generated GTK runner composed by '
+          'hand with its window title',
       Os.windows:
-          'Tier-2 Windows rules: the Bazel-generated Win32 runner and a custom '
-          'cc_binary runner',
+          'Tier-2 Windows rules: the `flutter create` Win32 runner, the '
+          'Bazel-generated Win32 runner and a custom cc_binary runner',
     },
-    skips: {Os.macos: _windowsOnly, Os.linux: _windowsOnly},
+    skips: {
+      Os.macos:
+          'its targets are compatible with Linux or Windows only, so they '
+          'skip cleanly here',
+    },
   ),
 ];
 

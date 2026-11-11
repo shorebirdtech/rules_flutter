@@ -56,22 +56,25 @@ void main() {
   _desktop(
     platform: 'macOS',
     workspace: 'macos_example',
+    target: ':app',
     device: 'macos',
     title: 'macOS Example',
     runs: Platform.isMacOS,
   );
   _desktop(
     platform: 'Linux',
-    workspace: 'linux_example',
+    workspace: 'desktop_example',
+    target: ':linux_app',
     device: 'linux',
-    title: 'Linux Example',
+    title: 'Desktop Example',
     runs: Platform.isLinux,
   );
   _desktop(
     platform: 'Windows',
-    workspace: 'windows_example',
+    workspace: 'desktop_example',
+    target: ':windows_app',
     device: 'windows',
-    title: 'Windows Example',
+    title: 'Desktop Example',
     runs: Platform.isWindows,
   );
 }
@@ -79,6 +82,7 @@ void main() {
 void _desktop({
   required String platform,
   required String workspace,
+  required String target,
   required String device,
   required String title,
   required bool runs,
@@ -102,7 +106,7 @@ void _desktop({
 
           final dt = await startDevTool(
             workspace: ws.root,
-            target: ':app',
+            target: target,
             device: device,
           );
           // The dev tool builds the app itself, so this wait covers a Bazel

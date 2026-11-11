@@ -7,7 +7,7 @@ library;
 import 'package:rules_flutter_e2e_testing/desktop_bundle.dart';
 
 void main() {
-  LinuxBundle.fromRunfiles('app')
+  LinuxBundle.fromRunfiles('linux_app')
     ..checkStandardLayout()
     ..finish();
 }

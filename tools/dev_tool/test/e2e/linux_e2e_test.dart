@@ -22,14 +22,14 @@ void main() {
     test(
       'a hot reload and a hot restart land in the window',
       () async {
-        final ws = await editableWorkspace('linux_example');
+        final ws = await editableWorkspace('desktop_example');
         final main = ws.file('lib/main.dart');
         final original = main.readAsStringSync();
         expect(original, contains(_greeting), reason: 'fixture marker');
 
         final dt = await startDevTool(
           workspace: ws.root,
-          target: ':app',
+          target: ':linux_app',
           device: 'linux',
         );
         await dt.waitForEvent(

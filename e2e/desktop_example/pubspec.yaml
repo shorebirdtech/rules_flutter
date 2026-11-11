@@ -1,4 +1,4 @@
-name: linux_example
+name: desktop_example
 publish_to: none
 environment:
   sdk: ^3.13.0

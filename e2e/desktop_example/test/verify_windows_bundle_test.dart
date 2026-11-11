@@ -9,7 +9,7 @@ import 'package:rules_flutter_e2e_testing/desktop_bundle.dart';
 import 'package:rules_flutter_e2e_testing/runfiles_paths.dart';
 
 void main() {
-  WindowsBundle.fromRunfiles('app')
+  WindowsBundle.fromRunfiles('windows_app')
     ..checkStandardLayout()
     ..checkRunnerResources(
       version: '2.3.4+56',
