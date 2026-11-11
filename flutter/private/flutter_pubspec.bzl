@@ -31,6 +31,8 @@ Schema reference (Flutter's pubspec):
         - path: <path>               # map form
           flavors: [<flavor>, ...]
           platforms: [<platform>, ...]
+          transformers:              # refused, as an asset's are
+            - package: <name>
       licenses:
         - <path>                     # a file of the package, appended to NOTICES
       plugin:
@@ -144,7 +146,14 @@ def _project_fonts(raw):
         out.append(struct(family = family, fonts = fonts))
     return out
 
-def _project_assets(raw):
+def _project_entries(raw):
+    """Project `flutter.assets` or `flutter.shaders`, whose entries have one shape.
+
+    flutter_tools reads both lists as `AssetsEntry`s: a path, or a map with a
+    `path` and optional `flavors`, `platforms` and `transformers`. It runs a
+    shader's transformers on its source before compiling it, as it runs an
+    asset's before bundling it.
+    """
     if type(raw) != "list":
         return []
     out = []
@@ -168,26 +177,6 @@ def _project_assets(raw):
         ))
     return out
 
-def _project_shaders(raw):
-    if type(raw) != "list":
-        return []
-    out = []
-    for entry in raw:
-        if type(entry) == "string":
-            out.append(struct(path = entry, flavors = [], platforms = []))
-            continue
-        if type(entry) == "dict":
-            path = entry.get("path")
-            if type(path) == "string":
-                flavors_raw = entry.get("flavors", [])
-                platforms_raw = entry.get("platforms", [])
-                out.append(struct(
-                    path = path,
-                    flavors = [str(f) for f in flavors_raw] if type(flavors_raw) == "list" else [],
-                    platforms = [str(p) for p in platforms_raw] if type(platforms_raw) == "list" else [],
-                ))
-    return out
-
 def flutter_assets_block(fields):
     """Project `flutter.fonts`, `flutter.assets`, `flutter.shaders`, and `flutter.uses-material-design`.
 
@@ -198,7 +187,7 @@ def flutter_assets_block(fields):
         struct(
             fonts:    list[struct(family, fonts=list[struct(asset, weight, style)])],
             assets:   list[struct(path, flavors, platforms, transformers)],
-            shaders:  list[struct(path, flavors, platforms)],
+            shaders:  list[struct(path, flavors, platforms, transformers)],
             uses_material_design: bool,
         )
 
@@ -210,8 +199,8 @@ def flutter_assets_block(fields):
     umd_raw = flutter.get("uses-material-design", False)
     return struct(
         fonts = _project_fonts(flutter.get("fonts")),
-        assets = _project_assets(flutter.get("assets")),
-        shaders = _project_shaders(flutter.get("shaders")),
+        assets = _project_entries(flutter.get("assets")),
+        shaders = _project_entries(flutter.get("shaders")),
         uses_material_design = umd_raw if type(umd_raw) == "bool" else False,
     )
 

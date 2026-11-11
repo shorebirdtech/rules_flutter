@@ -2229,6 +2229,12 @@ def _flutter_pub_package_impl(ctx):
                 "package {}: its asset {} lists `transformers`, which rules_flutter does not run. " +
                 "Bundling the file as it is would ship it untransformed under the transformed file's name."
             ).format(ctx.attr.package_name, repr(asset.path)))
+    for shader in asset_block.shaders:
+        if shader.transformers:
+            fail((
+                "package {}: its shader {} lists `transformers`, which rules_flutter does not run. " +
+                "Compiling the source as it is would ship a shader `flutter build` does not."
+            ).format(ctx.attr.package_name, repr(shader.path)))
 
     # The names the pubspec depends on, for the libraries of the packages that
     # reach this one. Which of them the lock lists, and what that makes of

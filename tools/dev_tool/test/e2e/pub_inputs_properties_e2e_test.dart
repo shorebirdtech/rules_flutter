@@ -196,7 +196,7 @@ void main() {
     }
   });
 
-  group('an asset with transformers', () {
+  group('an asset or shader with transformers', () {
     late PubInputsWorkspace ws;
     setUpAll(() async {
       ws = await PubInputsFixture(
@@ -213,6 +213,18 @@ void main() {
             ),
             files: {'assets/data.txt': 'x'},
           ),
+          HostedPackage(
+            'transformed_shader',
+            pubspec: _pubspec(
+              'transformed_shader',
+              'flutter:\n'
+                  '  shaders:\n'
+                  '    - path: shaders/a.frag\n'
+                  '      transformers:\n'
+                  '        - package: some_transformer\n',
+            ),
+            files: {'shaders/a.frag': 'void main() {}\n'},
+          ),
         ],
       ).materialize();
     });
@@ -227,6 +239,19 @@ void main() {
         package: 'transformed',
         what: 'an asset with transformers',
         mentions: ['transformers'],
+      );
+    });
+
+    /// flutter_tools runs a shader's transformers on its source before it
+    /// compiles it, so a shader built without them is not the one
+    /// `flutter build` ships.
+    test('on a shader is refused naming the package and the key', () async {
+      final result = await ws.loadSpoke('transformed_shader');
+      expectRefused(
+        result,
+        package: 'transformed_shader',
+        what: 'a shader with transformers',
+        mentions: ['transformers', 'shader'],
       );
     });
   });

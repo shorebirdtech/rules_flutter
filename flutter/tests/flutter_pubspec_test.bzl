@@ -374,6 +374,20 @@ def _asset_transformers_test_impl(ctx):
         },
     }).assets
     asserts.equals(env, [False, False, True], [bool(a.transformers) for a in assets])
+
+    # flutter_tools runs a shader's transformers on its source before compiling
+    # it, so a shader entry's are read too, for the fetch to refuse.
+    shaders = flutter_assets_block({
+        "name": "p",
+        "flutter": {
+            "shaders": [
+                "shaders/plain.frag",
+                {"path": "shaders/map.frag"},
+                {"path": "shaders/t.frag", "transformers": [{"package": "shader_preprocessor"}]},
+            ],
+        },
+    }).shaders
+    asserts.equals(env, [False, False, True], [bool(s.transformers) for s in shaders])
     return unittest.end(env)
 
 _asset_transformers_test = unittest.make(_asset_transformers_test_impl)
