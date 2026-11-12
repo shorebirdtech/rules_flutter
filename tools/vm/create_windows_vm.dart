@@ -56,7 +56,7 @@ const _startupScript = r'''
 # Keep Defender's real-time scan off the build trees. A Bazel build writes tens
 # of thousands of small files, and scanning them takes most of a core, which a
 # timing measurement here would then include. Set before anything builds.
-Add-MpPreference -ExclusionPath 'C:\b','C:\rf','C:\rules_dart','C:\android','C:\tools','C:\temp','C:\Users\testuser\AppData\Local\Temp','C:\Windows\Temp'
+Add-MpPreference -ExclusionPath 'C:\b','C:\rf','C:\rules_dart','C:\android','TOOLS_DIR','C:\temp','C:\Users\testuser\AppData\Local\Temp','C:\Windows\Temp'
 Add-MpPreference -ExclusionProcess 'java.exe','bazel.exe','dart.exe','cl.exe','link.exe','gen_snapshot.exe','aapt2.exe'
 
 # Install Chocolatey (package manager).
@@ -80,8 +80,8 @@ choco install -y python3
 # Pinning a hash here would fail the same way, so the download is checked by
 # its Authenticode signature instead, which every release carries. A file that
 # is not Microsoft-signed is deleted and the startup marker says why.
-New-Item -ItemType Directory -Force -Path C:\tools | Out-Null
-$psexec = "C:\tools\PsExec64.exe"
+New-Item -ItemType Directory -Force -Path TOOLS_DIR | Out-Null
+$psexec = "TOOLS_DIR\PsExec64.exe"
 curl.exe -sSL --retry 5 -o $psexec "https://live.sysinternals.com/PsExec64.exe"
 $signature = Get-AuthenticodeSignature $psexec
 if ($signature.Status -ne "Valid" -or $signature.SignerCertificate.Subject -notmatch "O=Microsoft Corporation") {
@@ -102,7 +102,7 @@ if ($pythonDir) {
 # not `choco install dart-sdk`, which floats to whatever chocolatey last
 # packaged and so cannot match the build. Same URL shape and same source of
 # truth as create_linux_vm.dart — see hermetic_dart.dart. Kept at
-# C:\tools\dart-sdk so the path everything else expects is unchanged.
+# TOOLS_DIR\dart-sdk so the path everything else expects is unchanged.
 # curl.exe and tar.exe, both shipped with Windows Server 2022, rather than
 # Invoke-WebRequest and Expand-Archive: Invoke-WebRequest's progress bar
 # throttles a download this size (~350MB) by an order of magnitude unless
@@ -111,12 +111,12 @@ if ($pythonDir) {
 # does, for one less difference between them.
 $dartZip = "$env:TEMP\dartsdk.zip"
 curl.exe -sSL -o $dartZip "DART_SDK_URL"
-if (Test-Path C:\tools\dart-sdk) { Remove-Item -Recurse -Force C:\tools\dart-sdk }
-New-Item -ItemType Directory -Force -Path C:\tools | Out-Null
-tar.exe -xf $dartZip -C C:\tools
+if (Test-Path TOOLS_DIR\dart-sdk) { Remove-Item -Recurse -Force TOOLS_DIR\dart-sdk }
+New-Item -ItemType Directory -Force -Path TOOLS_DIR | Out-Null
+tar.exe -xf $dartZip -C TOOLS_DIR
 $machinePath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
-if ($machinePath -notlike "*C:\tools\dart-sdk\bin*") {
-    [System.Environment]::SetEnvironmentVariable("Path", "$machinePath;C:\tools\dart-sdk\bin", "Machine")
+if ($machinePath -notlike "*TOOLS_DIR\dart-sdk\bin*") {
+    [System.Environment]::SetEnvironmentVariable("Path", "$machinePath;TOOLS_DIR\dart-sdk\bin", "Machine")
 }
 
 # Set BAZEL_VC so Bazel finds MSVC.
@@ -171,11 +171,13 @@ Future<void> main(List<String> args) async {
   final tmpStartup = File('${tmpDir.path}/startup.ps1');
   tmpSpecialize.writeAsStringSync(_specializeScript);
   tmpStartup.writeAsStringSync(
-    _startupScript.replaceAll(
-      'DART_SDK_URL',
-      'https://storage.googleapis.com/dart-archive/channels/stable/release/'
-          '$dartVersion/sdk/dartsdk-windows-x64-release.zip',
-    ),
+    _startupScript
+        .replaceAll('TOOLS_DIR', windowsToolsDir)
+        .replaceAll(
+          'DART_SDK_URL',
+          'https://storage.googleapis.com/dart-archive/channels/stable/release/'
+              '$dartVersion/sdk/dartsdk-windows-x64-release.zip',
+        ),
   );
 
   try {

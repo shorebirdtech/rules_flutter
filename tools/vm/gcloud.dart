@@ -11,6 +11,13 @@ import 'dart:io';
 const windowsTestUser = 'testuser';
 const windowsTestPassword = 'FlutterTest2024';
 
+/// Where `create_windows_vm.dart` installs the VM's own tools (PsExec, the Dart
+/// SDK), and where the scripts that drive the VM run them from.
+const windowsToolsDir = r'C:\tools';
+
+/// PsExec, which launches a program in the auto-logon user's console session.
+const windowsPsExec = '$windowsToolsDir\\PsExec64.exe';
+
 /// Run a gcloud command and return stdout. Throws on failure.
 Future<String> gcloud(List<String> args, {bool quiet = false}) async {
   if (!quiet) {
