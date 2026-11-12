@@ -37,9 +37,6 @@ flutter_application_variant(
     deps = [
         "@dev_tool_deps//:flutter_test",
         "@dev_tool_deps//:integration_test",
-        "@dev_tool_deps//:stack_trace",
-        "@dev_tool_deps//:stream_channel",
-        "@dev_tool_deps//:test_api",
     ],
 )
 

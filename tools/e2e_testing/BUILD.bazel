@@ -38,6 +38,12 @@ dart_library(
     ],
 )
 
+# The tests that import `package:path`.
+_PATH_TESTS = [
+    "test/host_leaks_test.dart",
+    "test/web_bundle_test.dart",
+]
+
 [
     dart_test(
         name = test[len("test/"):-len(".dart")],
@@ -45,9 +51,8 @@ dart_library(
         main = test,
         deps = [
             ":e2e_testing",
-            "@dev_tool_deps//:path",
             "@dev_tool_deps//:test",
-        ],
+        ] + (["@dev_tool_deps//:path"] if test in _PATH_TESTS else []),
     )
     for test in glob(
         ["test/*_test.dart"],

@@ -9,8 +9,10 @@ library;
 import 'dart:ui';
 
 import 'package:flutter_test_analyze_fixture/counter.dart';
+import 'package:test_api/backend.dart';
 
 void main() {
   final grown = grow(const Size(1, 2), 3);
   assert(grown.width == 4, 'grow() should add to width');
+  assert(backendPlaceholder.isNotEmpty, 'a test imports its test package');
 }

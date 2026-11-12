@@ -138,11 +138,11 @@ dart_binary(
 #           sends: what a web app running an integration test looks like from
 #           the host.
 #   deps  — packages the test imports directly, beyond :lib and test.
+#   lib   — False for a test that imports nothing of :lib.
 #   target_compatible_with — the hosts the test runs on, when not every one.
-_TEST_DEPS = [
-    ":lib",
-    "@dev_tool_deps//:test",
-]
+_TEST_DEP = ["@dev_tool_deps//:test"]
+
+_TEST_DEPS = [":lib"] + _TEST_DEP
 
 _PATH_DEP = ["@dev_tool_deps//:path"]
 
@@ -179,8 +179,6 @@ _UNIT_TESTS = {
     "connected_app_death_test": {
         "fakes": True,
         "deps": [
-            "@dev_tool_deps//:dds",
-            "@dev_tool_deps//:logging",
             "@dev_tool_deps//:watcher",
         ],
     },
@@ -229,7 +227,7 @@ _UNIT_TESTS = {
     "device_integration_test": {"fakes": True},
     "device_discovery_test": {},
     "device_id_test": {},
-    "devices_command_test": {"deps": ["@dev_tool_deps//:args"]},
+    "devices_command_test": {},
     "device_test": {
         "fakes": True,
         "deps": [
@@ -243,12 +241,10 @@ _UNIT_TESTS = {
         "fakes": True,
         "deps": [
             "@dev_tool_deps//:fake_async",
-            "@dev_tool_deps//:dds",
-            "@dev_tool_deps//:logging",
             "@dev_tool_deps//:watcher",
         ],
     },
-    "flutter_error_report_test": {"deps": _PATH_DEP},
+    "flutter_error_report_test": {},
     "ios_simulator_launch_properties_test": {
         "fakes": True,
         "deps": ["@dev_tool_deps//:fake_async"],
@@ -369,7 +365,10 @@ _UNIT_TESTS = {
     },
     "teardown_test": {},
     "temp_dir_test": {},
-    "test_lifetime_test": {"lifetime": True},
+    "test_lifetime_test": {
+        "lifetime": True,
+        "lib": False,
+    },
     "toolchain_info_test": {"deps": _PATH_DEP},
     "tool_services_test": {"fakes": True},
     "tooling_daemon_test": {
@@ -440,7 +439,7 @@ _UNIT_TESTS = {
     # A test that imports a fakes package itself lists it too; each once.
     deps = {
         dep: None
-        for dep in _TEST_DEPS +
+        for dep in (_TEST_DEPS if cfg.get("lib", True) else _TEST_DEP) +
                    (_FAKES_DEPS if cfg.get("fakes") else []) +
                    (["//tools/e2e_testing"] if cfg.get("gui") else []) +
                    cfg.get("deps", [])
@@ -460,7 +459,7 @@ dart_test(
     name = "e2e_runner_test",
     srcs = ["tool/e2e.dart"],
     main = "test/e2e_runner_test.dart",
-    deps = _TEST_DEPS + ["@rules_dart//dart/runfiles"],
+    deps = _TEST_DEP + ["@rules_dart//dart/runfiles"],
 )
 
 # The Dart in this package that belongs to no package's `lib/` and to no test
