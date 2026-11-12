@@ -17,7 +17,7 @@ load("@build_bazel_rules_apple//apple:providers.bzl", "AppleBundleVersionInfo")
 load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
 load("//flutter:providers.bzl", "FlutterApplicationInputsInfo")
 load("//flutter/private:app_version.bzl", "apple_version")
-load("//flutter/private:application_version.bzl", "shown_label")
+load("//flutter/private:application_version.bzl", "shown_label", "version_names")
 load("//flutter/private:exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
 
 def _impl(ctx):
@@ -34,12 +34,15 @@ def _impl(ctx):
 
     # What the program reports, as the bundle's keys would carry it.
     program = ctx.attr.application[FlutterApplicationInputsInfo].inputs
-    expected = apple_version(program.build_name, program.build_number)
+    expected = apple_version(program.build_name, program.build_number, version_names(program.version_settings))
     if expected.error:
         fail("%s: the application %s: %s" % (ctx.label, shown_label(ctx.attr.application.label), expected.error))
     args.add("--application", shown_label(ctx.attr.application.label))
     args.add("--short-version-string", expected.short_version_string)
     args.add("--build-version", expected.build_version)
+    for attribute, option in [("build_name", "--short-version-string-setting"), ("build_number", "--build-version-setting")]:
+        if attribute in program.version_settings:
+            args.add(option, program.version_settings[attribute])
     args.add("--version-target", shown_label(ctx.attr.version.label))
     args.add("--rule", ctx.attr.rule_name)
     args.add("--stamp", stamp)

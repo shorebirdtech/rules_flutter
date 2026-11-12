@@ -636,5 +636,32 @@ void main() {
         ),
       );
     });
+
+    test('names the build setting that gave the version', () {
+      expect(
+        () => mergeManifests(
+          baseXml: declaring,
+          basePath: 'out/base/AndroidManifest.xml',
+          versionCode: '123',
+          versionName: '3.0 & up',
+          versionSettings: {
+            'build_number': '--@rules_flutter//flutter:build_number',
+          },
+        ),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            allOf(
+              contains('android:versionCode="7"'),
+              contains('the app\'s version is "123"'),
+              contains('`--@rules_flutter//flutter:build_number` gives it'),
+              contains('remove the attribute from the manifest'),
+              isNot(contains('on the flutter_application')),
+            ),
+          ),
+        ),
+      );
+    });
   });
 }

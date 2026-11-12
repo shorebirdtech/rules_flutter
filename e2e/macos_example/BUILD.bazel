@@ -22,6 +22,7 @@ load(
 load("@rules_flutter//tools/e2e_testing:apple_analysis_test.bzl", "analyses_test", "program_test", "skipped_test")
 load("@rules_flutter//tools/e2e_testing:apple_release_build.bzl", "apple_release_build")
 load("@rules_flutter//tools/e2e_testing:device_profile.bzl", "device_flag", "device_profile")
+load("@rules_flutter//tools/e2e_testing:version_build.bzl", "version_build")
 load("@rules_swift//swift:swift.bzl", "swift_library")
 
 exports_files(["pubspec.lock"])
@@ -434,6 +435,23 @@ dart_test(
     name = "verify_macos_bundle_test",
     data = [":app"],
     main = "test/verify_macos_bundle_test.dart",
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
+)
+
+# `:app` built with `--@rules_flutter//flutter:build_number=123`, which replaces
+# the build number its application states and it repeats.
+version_build(
+    name = "app_build_number_123",
+    build_number = "123",
+    target_compatible_with = ["@platforms//os:macos"],
+    targets = [":app"],
+)
+
+dart_test(
+    name = "verify_macos_build_number_test",
+    data = [":app_build_number_123"],
+    main = "test/verify_macos_build_number_test.dart",
     target_compatible_with = ["@platforms//os:macos"],
     deps = ["@rules_flutter//tools/e2e_testing"],
 )

@@ -10,6 +10,7 @@ load("@rules_dart//dart:providers.bzl", "DartInfo")
 load("@rules_dart//dart:utils.bzl", "KERNEL_TOOL_ATTR", "collect_packages", "collect_transitive_srcs", "dart_import_check_aspect", "generate_dev_package_config", "import_check_validation", "package_identity_attrs", "package_info_from_metadata", "package_lib_prefix", "resolve_package_identity", "runtime_reset")
 load("//flutter:providers.bzl", "FlutterInfo", "FlutterNativeLibraryInfo")
 load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "app_main_location", "app_scheme_files", "app_scheme_location", "app_scheme_sources", "synthesize_app_package", "with_root")
+load("//flutter/private:application_version.bzl", "VERSION_SETTING_ATTRS", "program_version")
 load("//flutter/private:flutter_aot_compile.bzl", "GEN_SNAPSHOT_SETTINGS_ATTRS")
 load("//flutter/private:flutter_asset_bundle.bzl", "flutter_asset_bundle_action")
 load("//flutter/private:flutter_compile.bzl", "flutter_kernel_compile")
@@ -1287,9 +1288,14 @@ def flutter_program_inputs(ctx, metadata = None):
         `native_deps` and `code_assets` are Targets, as is `package_target`,
         the `package` Target (None for a rule naming none); the rest, `flavor`
         among them, are as the attributes of `flutter_application` of the same
-        names.
+        names, but for `build_name` and `build_number`: those are the version
+        the program has, which `--@rules_flutter//flutter:build_name` and
+        `build_number` replace when set, and `stated_build_name` and
+        `stated_build_number` are the attributes; `version_settings` names the
+        settings that are set, as `program_version` does.
     """
     identity = resolve_package_identity(ctx, metadata = metadata)
+    version = program_version(ctx)
     return struct(
         label = ctx.label,
         main = getattr(ctx.file, "main", None),
@@ -1300,8 +1306,11 @@ def flutter_program_inputs(ctx, metadata = None):
         package_target = getattr(ctx.attr, "package", None),
         defines = list(getattr(ctx.attr, "defines", [])),
         flavor = getattr(ctx.attr, "flavor", ""),
-        build_name = getattr(ctx.attr, "build_name", ""),
-        build_number = getattr(ctx.attr, "build_number", ""),
+        build_name = version.build_name,
+        build_number = version.build_number,
+        stated_build_name = version.stated_build_name,
+        stated_build_number = version.stated_build_number,
+        version_settings = version.settings,
         package = identity.metadata,
         package_name = identity.package_name,
         package_root = identity.package_root,
@@ -1381,16 +1390,20 @@ KERNEL_COMPILE_ATTRS = package_identity_attrs(
         doc = "Dart environment defines (-D flags).",
     ),
     "build_name": attr.string(
-        doc = "The app's version name, as `flutter build --build-name`: " +
+        doc = "The app's version name, as the `version:` of `pubspec.yaml`: " +
               "`appBuildName` (`package:flutter/services.dart`) reads it. " +
               "Unset is `flutter create`'s `1.0.0`. The platform apps built over " +
               "this application take their bundle's version from it, unless " +
-              "they set their own `build_name`, which must then be this one.",
+              "they set their own `build_name`, which must then be this one. " +
+              "`--@rules_flutter//flutter:build_name` replaces it for one build, " +
+              "as `flutter build --build-name` does.",
     ),
     "build_number": attr.string(
-        doc = "The app's build number, as `flutter build --build-number`: " +
+        doc = "The app's build number, as the `version:` of `pubspec.yaml`: " +
               "`appBuildNumber` (`package:flutter/services.dart`) reads it. " +
-              "Unset is `flutter create`'s `1`.",
+              "Unset is `flutter create`'s `1`. " +
+              "`--@rules_flutter//flutter:build_number` replaces it for one build, " +
+              "as `flutter build --build-number` does.",
     ),
     "flavor": attr.string(
         doc = "The app's flavor, as `flutter build --flavor`: `appFlavor` " +
@@ -1402,7 +1415,7 @@ KERNEL_COMPILE_ATTRS = package_identity_attrs(
               "name and resources. The app's own `assets` are not filtered by " +
               "flavor: list a flavor's assets in that flavor's target.",
     ),
-} | EXTRA_DART_DEFINES_ATTR | BUILD_MODE_ATTR | KERNEL_TOOL_ATTR
+} | VERSION_SETTING_ATTRS | EXTRA_DART_DEFINES_ATTR | BUILD_MODE_ATTR | KERNEL_TOOL_ATTR
 
 # Shared attrs for all flutter application rules.
 FLUTTER_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | {

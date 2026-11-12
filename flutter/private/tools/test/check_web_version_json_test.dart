@@ -72,6 +72,32 @@ void main() {
       expect(problems.single, isNot(contains('default')));
     });
 
+    test('names the build setting that gave the version', () {
+      final problems = _problems(
+        '{"version": "1.0.0", "build_number": "1"}',
+        expected: const {
+          'version': Reported('1.0.0', isDefault: true),
+          'build_number': Reported(
+            '123',
+            isDefault: false,
+            setting: '--@rules_flutter//flutter:build_number',
+          ),
+        },
+      );
+      expect(problems, hasLength(1));
+      expect(
+        problems.single,
+        allOf(
+          contains('gives `build_number` "1"'),
+          contains(
+            '`--@rules_flutter//flutter:build_number` gives the application '
+            '//app:app "123" for this build',
+          ),
+          contains('Delete web/version.json'),
+        ),
+      );
+    });
+
     test('reports both fields', () {
       expect(
         _problems('{"version": "9.9.9", "build_number": "9"}'),

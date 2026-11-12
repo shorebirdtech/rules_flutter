@@ -26,7 +26,9 @@ be a `select()`. Inside one, an empty string or `None` picks the default.
 
 Every function returns a struct of the platform's values and an `error`
 string, `None` when the values are good; the rule fails with the error. That
-keeps the checks testable without failing a build.
+keeps the checks testable without failing a build. An error names a value as
+its attribute, or as `names` gives it: a value that
+`--@rules_flutter//flutter:build_number` set is named as that setting.
 """
 
 DEFAULT_BUILD_NAME = "1.0.0"
@@ -81,19 +83,24 @@ def _apple_value(value, arg, key):
         ) % (arg, value, key, _APPLE_MAX_SEGMENTS, _APPLE_MAX_LENGTH)
     return segments, None
 
-def apple_version(build_name, build_number):
+def _name(names, attribute):
+    return names.get(attribute, attribute)
+
+def apple_version(build_name, build_number, names = {}):
     """The Info.plist version keys of an iOS or macOS app.
 
     Args:
         build_name: The build name, or "" for the default.
         build_number: The build number, or "" for the default.
+        names: How the error names a value, by attribute, where not as the
+            attribute.
 
     Returns:
         struct(short_version_string, build_version, error).
     """
     name_segments, error = _apple_value(
         build_name or DEFAULT_BUILD_NAME,
-        "build_name",
+        _name(names, "build_name"),
         "CFBundleShortVersionString",
     )
     if error:
@@ -103,11 +110,11 @@ def apple_version(build_name, build_number):
     short_version_string = ".".join(name_segments + ["0"] * (3 - len(name_segments)))
     if len(short_version_string) > _APPLE_MAX_LENGTH:
         return _result(error = (
-            "build_name = %r is too long for CFBundleShortVersionString: " +
+            "%s = %r is too long for CFBundleShortVersionString: " +
             "padded to three numbers, %r is over %d characters."
-        ) % (build_name, short_version_string, _APPLE_MAX_LENGTH))
+        ) % (_name(names, "build_name"), build_name, short_version_string, _APPLE_MAX_LENGTH))
     number = build_number or DEFAULT_BUILD_NUMBER
-    _, error = _apple_value(number, "build_number", "CFBundleVersion")
+    _, error = _apple_value(number, _name(names, "build_number"), "CFBundleVersion")
     if error:
         return _result(error = error)
     return _result(
@@ -115,12 +122,14 @@ def apple_version(build_name, build_number):
         build_version = number,
     )
 
-def android_version(build_name, build_number):
+def android_version(build_name, build_number, names = {}):
     """The manifest version attributes of an Android app.
 
     Args:
         build_name: The build name, or "" for the default.
         build_number: The build number, or "" for the default.
+        names: How the error names a value, by attribute, where not as the
+            attribute.
 
     Returns:
         struct(version_name, version_code, error).
@@ -128,9 +137,9 @@ def android_version(build_name, build_number):
     number = build_number or DEFAULT_BUILD_NUMBER
     if not _is_digits(number) or number.startswith("0") or int(number) > ANDROID_MAX_VERSION_CODE:
         return _result(error = (
-            "build_number = %r is not a valid Android versionCode: a whole " +
+            "%s = %r is not a valid Android versionCode: a whole " +
             "number from 1 to %d, written without leading zeros. See %s"
-        ) % (number, ANDROID_MAX_VERSION_CODE, _ANDROID_DOC))
+        ) % (_name(names, "build_number"), number, ANDROID_MAX_VERSION_CODE, _ANDROID_DOC))
     return _result(
         version_name = build_name or DEFAULT_BUILD_NAME,
         version_code = number,
@@ -166,7 +175,7 @@ def _is_identifiers(s):
             return False
     return True
 
-def windows_version(build_name, build_number):
+def windows_version(build_name, build_number, names = {}):
     """The version `flutter create`'s `Runner.rc` gives a Windows app.
 
     `flutter build windows` parses `<build_name>+<build_number>` as a semantic
@@ -179,6 +188,8 @@ def windows_version(build_name, build_number):
     Args:
         build_name: The build name, or "" for the default.
         build_number: The build number, or "" for the default.
+        names: How the error names a value, by attribute, where not as the
+            attribute.
 
     Returns:
         struct(version, major, minor, patch, build, error).
@@ -190,15 +201,15 @@ def windows_version(build_name, build_number):
     if ("+" in name or len(parts) != 3 or not all([_is_digits(p) for p in parts]) or
         (prerelease != "" and not _is_identifiers(prerelease)) or name.endswith("-")):
         return _result(error = (
-            "build_name = %r is not a valid Windows version: it is three " +
+            "%s = %r is not a valid Windows version: it is three " +
             "numbers separated by periods, such as \"2.1.0\", with an optional " +
             "prerelease such as \"2.1.0-beta.1\"."
-        ) % name)
+        ) % (_name(names, "build_name"), name))
     if not _is_digits(number):
         return _result(error = (
-            "build_number = %r is not a valid Windows build number: a whole " +
+            "%s = %r is not a valid Windows build number: a whole " +
             "number, the last of the executable's four version numbers."
-        ) % number)
+        ) % (_name(names, "build_number"), number))
     numbers = [int(p, 10) for p in parts] + [int(number, 10)]
     for arg, value, too_large in [
         ("build_name", name, any([n > _WINDOWS_MAX_VERSION_PART for n in numbers[:3]])),
@@ -208,7 +219,7 @@ def windows_version(build_name, build_number):
             return _result(error = (
                 "%s = %r is too large for a Windows version: each of its " +
                 "four numbers is at most %d. See %s"
-            ) % (arg, value, _WINDOWS_MAX_VERSION_PART, _WINDOWS_DOC))
+            ) % (_name(names, arg), value, _WINDOWS_MAX_VERSION_PART, _WINDOWS_DOC))
     return _result(
         version = "%s+%s" % (name, number),
         major = numbers[0],

@@ -2,11 +2,11 @@
 
 load("@build_bazel_rules_apple//apple:providers.bzl", "apple_provider")
 load("//flutter/private:app_version.bzl", "apple_version")
-load("//flutter/private:application_version.bzl", "APPLICATION_VERSION_ATTR", "application_version")
+load("//flutter/private:application_version.bzl", "APPLICATION_VERSION_ATTR", "application_version", "version_names")
 
 def _impl(ctx):
     given = application_version(ctx.label, ctx.attr.application, ctx.attr.build_name, ctx.attr.build_number)
-    version = apple_version(given.build_name, given.build_number)
+    version = apple_version(given.build_name, given.build_number, version_names(given.settings))
     if version.error:
         fail("%s: %s" % (ctx.label, version.error))
 
@@ -48,7 +48,10 @@ version as its app, passing it as the `version` of both, and give it the app's
     )
 
 The app checks that its `version` is its `application`'s, so one with another
-version, or with none and so the defaults, fails the app's build.
+version, or with none and so the defaults, fails the app's build. With an
+`application`, it follows `--@rules_flutter//flutter:build_name` and
+`build_number` as the application does; without one, its version is fixed, and
+an app built with either setting fails unless the version is the setting's.
 
 It provides what rules_apple's `apple_bundle_version` provides, so either fits
 any `version` attribute.""",

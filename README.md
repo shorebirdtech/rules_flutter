@@ -190,7 +190,12 @@ rules_dart side.
     app you compose yourself `flutter_apple_bundle_version(application = ...)`:
     `flutter_ios_info_plist_gen`/`flutter_macos_info_plist_gen` now write
     `$(FLUTTER_BUILD_NAME)`/`$(FLUTTER_BUILD_NUMBER)`, which need a `version`.
-41. A Dart dependency in `deps` that none of the target's files imports fails
+41. A version stamped per build, `apple_bundle_version(build_label_pattern = ...,
+    build_version = "{number}")` with `--embed_label=build_<N>_...` →
+    `flutter_apple_bundle_version(application = ...)` with
+    `--@rules_flutter//flutter:build_number=<N>`, which gives the Android
+    `versionCode` and the program's `appBuildNumber` the same number.
+42. A Dart dependency in `deps` that none of the target's files imports fails
     the build, in `flutter_library`, `flutter_plugin`, `flutter_application`
     and `flutter_test` alike. Remove it. Plugins and packages with fonts,
     assets or shaders may stay without an import; a rule of your own that is
@@ -199,40 +204,40 @@ rules_dart side.
 
 **Flags and tests**
 
-42. A plain `bazel build` for Android, Linux or Windows strips the Dart
+43. A plain `bazel build` for Android, Linux or Windows strips the Dart
     snapshot, as `-c opt` did and `flutter build` does;
     `extra_gen_snapshot_options = ["--no-strip"]` keeps the symbols.
-43. `--@rules_flutter//flutter:extra_dart_defines` →
+44. `--@rules_flutter//flutter:extra_dart_defines` →
     `--@rules_dart//dart:extra_dart_defines`.
     `--@rules_flutter//flutter:wasm_opt_cores` → `wasm_opt_cpus`.
-44. `flutter_desktop_integration_test` → `flutter_desktop_app_integration_test`;
+45. `flutter_desktop_integration_test` → `flutter_desktop_app_integration_test`;
     `flutter_web_bundle_integration_test` → `flutter_web_app_integration_test`.
     Integration test rules require `src`.
-45. `flutter_suite_program` → `flutter_test_program`. A `flutter_test` suite
+46. `flutter_suite_program` → `flutter_test_program`. A `flutter_test` suite
     that registers no test now fails. A library's `data` reaches its tests'
     runfiles.
-46. `go_router_library` (rules_dart) → `go_router_codegen` from
+47. `go_router_library` (rules_dart) → `go_router_codegen` from
     `@rules_flutter//flutter/ext/go_router:defs.bzl`.
 
 **Dev tool**
 
-47. `flutter_bazel --config <mode>` → `--compilation_mode` (`-c` unchanged);
+48. `flutter_bazel --config <mode>` → `--compilation_mode` (`-c` unchanged);
     `--config` now passes a Bazel config.
-48. `app.restart` without `fullRestart` → hot reload; pass
+49. `app.restart` without `fullRestart` → hot reload; pass
     `fullRestart: true` to restart.
 
 **Rule authors**
 
-49. `flutter_kernel_target` → `flutter_kernel`; `flutter_aot_target` →
+50. `flutter_kernel_target` → `flutter_kernel`; `flutter_aot_target` →
     `flutter_aot_snapshot`; `host_transition` → `host_platform_transition`;
     the `flutter_dev_files` aspect → `flutter_dev_files_aspect`.
-50. `FlutterInfo.asset_dirs` → `pub_assets`; `FlutterInfo.native_assets`,
+51. `FlutterInfo.asset_dirs` → `pub_assets`; `FlutterInfo.native_assets`,
     `FlutterNativeAssetInfo`, `FlutterDataAssetInfo`,
     `FlutterInfo.data_assets` → rules_dart's code and data assets;
     `FlutterApplicationInfo.package_config` → removed;
     `FlutterExecToolsInfo.tool_files` → `FlutterSdkInfo.sdk_files`;
     `FlutterTestProgramInfo.coverage_libraries` → `packages`.
-51. `FlutterApplicationInfo.bundled_code_assets` → removed: which code
+52. `FlutterApplicationInfo.bundled_code_assets` → removed: which code
     assets ship is known only in an action, which reads `program_assets`
     (`program_assets_action_args`). `native_assets_manifest` is the manifest
     the app ships in `flutter_assets`.
@@ -1264,7 +1269,19 @@ A value the platform can't use fails the build and says what the platform accept
 
 `flutter_android_app`, `flutter_ios_app`, `flutter_macos_app` and `flutter_windows_app` also take `build_name` and `build_number`. These must match the application's, or the build fails: the bundle would report one version and the program another. [`e2e/ios_example`](e2e/ios_example/BUILD.bazel) sets the same values on both.
 
-rules_flutter has no flag for a release version. To vary the version by build, give the application's arguments a `select()` over a `config_setting` of your own. `None` keeps the default:
+For a version that changes with every build, such as a CI build number or a TestFlight upload's, pass it on the command line, as you would to `flutter build`:
+
+```sh
+flutter build ios --build-number 123
+```
+
+```sh
+bazel build //app:ios --@rules_flutter//flutter:build_number=123
+```
+
+`--@rules_flutter//flutter:build_name` and `--@rules_flutter//flutter:build_number` replace every application's `build_name` and `build_number` for that build, as `flutter build`'s flags replace the pubspec's `version:`. The program reports the new version and every bundle built over the application carries it. A platform app's own `build_name` and `build_number`, which repeat the application's, follow the flag too, and so does a `flutter_apple_bundle_version` given the `application`. A value the platform can't use fails the build, naming the flag. A `flutter_test` keeps its own version, as `flutter test` takes neither flag. A change of version recompiles the program, as it does under `flutter build`.
+
+To vary the version by configuration instead, give the application's arguments a `select()` over a `config_setting` of your own. `None` keeps the default:
 
 ```starlark
 flutter_application(
@@ -1279,9 +1296,11 @@ flutter_application(
 
 Each platform's own way of setting the version works too:
 
-- **iOS, macOS:** `version`, an `apple_bundle_version` or `flutter_apple_bundle_version` target, the way to give the app's extensions its version (see [App extensions](#app-extensions)). Its values must be the application's, or the app's build fails. A `flutter_apple_bundle_version` given the same `application` takes them. rules_apple's `apple_bundle_version` can read the version from `bazel build --embed_label=...`, and the label must then give the application's version.
+- **iOS, macOS:** `version`, an `apple_bundle_version` or `flutter_apple_bundle_version` target, the way to give the app's extensions its version (see [App extensions](#app-extensions)). Its values must be the application's, or the app's build fails. A `flutter_apple_bundle_version` given the same `application` takes them, flags included. Give your app extensions one of those rather than an `apple_bundle_version` stamped from `--embed_label`.
 - **Android:** `android:versionCode` and `android:versionName` in your own manifest, or `versionCode` and `versionName` in `manifest_values`. Each must be the application's, or the build fails.
 - **Web:** `version_json`, or a `web/version.json`, which `flutter_web_app` picks up. Its `version` and `build_number` must be the application's, `1.0.0` and `1` if it sets none, or the build fails.
+
+These state their own values, which the flags don't change: built with a flag that gives the application another version, the app fails to build, naming both.
 
 Use one way for each field. `version` beside the macro's own `build_name` or `build_number` fails the build, and so does a `manifest_values` key beside the matching argument.
 
@@ -3128,7 +3147,7 @@ flutter_application(
 | `code_assets` | `[]` | The library this program uses for an asset id, in place of the one its packages supply. See [Choosing the library that serves an asset id](#choosing-the-library-that-serves-an-asset-id). |
 | `defines` | `[]` | Dart environment defines, `flutter build`'s `--dart-define`. |
 | `flavor` | `""` | `flutter build --flavor`. See [Flavors](#flavors). |
-| `build_name`, `build_number` | unset: `1.0.0`, `1` | `flutter build --build-name` and `--build-number`. See [App version](#app-version). |
+| `build_name`, `build_number` | unset: `1.0.0`, `1` | The pubspec's `version:`. `--@rules_flutter//flutter:build_name` and `build_number` replace them for one build, as `flutter build --build-name` and `--build-number` do. See [App version](#app-version). |
 | `shaders` | `[]` | `.frag` or `.glsl` fragment shaders, compiled with `impellerc`. |
 | `shader_includes` | `[]` | Files the `shaders` `#include`. A shader compiles with only its declared inputs, so an include not listed here is not found. |
 | `require_sksl_shaders` | `False` | Fail the build when a shader can't be compiled for Skia. By default such a shader is compiled for Impeller alone, with a warning, as `flutter build` does. It then fails to load only where the app renders with Skia. Web builds always need Skia shaders. |

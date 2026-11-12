@@ -2,7 +2,8 @@
 
 Unit tests of `app_version.bzl`'s checks, and analysis tests of the rules that
 use them: the Apple bundle version, the Android manifest step, and a web
-bundle's version.json.
+bundle's version.json, with and without `--@rules_flutter//flutter:build_name`
+and `build_number`.
 
 Instantiated from `flutter/tests/app_version/BUILD.bazel`, beside its fixtures.
 """
@@ -129,6 +130,13 @@ _manifest_values_conflict_test = unittest.make(_manifest_values_conflict_test_im
 
 # -- Rules --------------------------------------------------------------------
 
+# A build with `--@rules_flutter//flutter:build_name=3.0` and
+# `--@rules_flutter//flutter:build_number=123`.
+_SETTINGS = {
+    str(Label("//flutter:build_name")): "3.0",
+    str(Label("//flutter:build_number")): "123",
+}
+
 def _apple_bundle_version_test_impl(ctx):
     env = analysistest.begin(ctx)
     target = analysistest.target_under_test(env)
@@ -146,6 +154,14 @@ _apple_bundle_version_test = analysistest.make(
         "build_version": attr.string(),
         "short_version_string": attr.string(),
     },
+)
+_apple_bundle_version_settings_test = analysistest.make(
+    _apple_bundle_version_test_impl,
+    attrs = {
+        "build_version": attr.string(),
+        "short_version_string": attr.string(),
+    },
+    config_settings = _SETTINGS,
 )
 
 def _android_version_args_test_impl(ctx):
@@ -168,6 +184,14 @@ _android_version_args_test = analysistest.make(
         "absent": attr.string_list(),
     },
 )
+_android_version_args_settings_test = analysistest.make(
+    _android_version_args_test_impl,
+    attrs = {
+        "expected": attr.string_dict(),
+        "absent": attr.string_list(),
+    },
+    config_settings = _SETTINGS,
+)
 
 def _version_json_test_impl(ctx):
     env = analysistest.begin(ctx)
@@ -189,6 +213,14 @@ _version_json_test = analysistest.make(
         "version": attr.string(),
         "build_number": attr.string(),
     },
+)
+_version_json_settings_test = analysistest.make(
+    _version_json_test_impl,
+    attrs = {
+        "version": attr.string(),
+        "build_number": attr.string(),
+    },
+    config_settings = _SETTINGS,
 )
 
 def _version_json_check_test_impl(ctx):
@@ -237,6 +269,26 @@ _expect_failure_test = analysistest.make(
     _expect_failure_test_impl,
     expect_failure = True,
     attrs = {"messages": attr.string_list()},
+)
+_expect_failure_settings_test = analysistest.make(
+    _expect_failure_test_impl,
+    expect_failure = True,
+    attrs = {"messages": attr.string_list()},
+    config_settings = _SETTINGS,
+)
+
+# Values no Android or Apple bundle can carry.
+_expect_failure_invalid_number_test = analysistest.make(
+    _expect_failure_test_impl,
+    expect_failure = True,
+    attrs = {"messages": attr.string_list()},
+    config_settings = {str(Label("//flutter:build_number")): "0"},
+)
+_expect_failure_invalid_name_test = analysistest.make(
+    _expect_failure_test_impl,
+    expect_failure = True,
+    attrs = {"messages": attr.string_list()},
+    config_settings = {str(Label("//flutter:build_name")): "1.0-beta"},
 )
 
 def app_version_test_suite(name):
@@ -592,6 +644,103 @@ def app_version_test_suite(name):
             "--build-number": "42",
             "--build-number-default": "false",
         },
+    )
+
+    # `--@rules_flutter//flutter:build_name` and `build_number` replace the
+    # application's version for the build. Whatever takes the version from the
+    # application follows them, an app's argument that repeats the
+    # application's included.
+    add(
+        _apple_bundle_version_settings_test,
+        "apple_from_application_settings",
+        target_under_test = ":_apple_from_application",
+        build_version = "123",
+        short_version_string = "3.0.0",
+    )
+    add(
+        _apple_bundle_version_settings_test,
+        "apple_same_as_application_settings",
+        target_under_test = ":_apple_same_as_application",
+        build_version = "123",
+        short_version_string = "3.0.0",
+    )
+
+    # One with no application states its own version, which no setting
+    # changes: the app's check fails it at build time, against the program's.
+    add(
+        _apple_bundle_version_settings_test,
+        "apple_without_application_settings",
+        target_under_test = ":_apple_given",
+        build_version = "42",
+        short_version_string = "2.1.0",
+    )
+
+    # An argument that differs from the application's is still an error.
+    add(
+        _expect_failure_settings_test,
+        "apple_differs_from_application_settings",
+        target_under_test = ":_apple_differs_from_application",
+        messages = ["build_number = \"43\", and the application ", "_versioned_application it is built over has build_number = \"42\""],
+    )
+    add(
+        _android_version_args_settings_test,
+        "android_from_application_settings",
+        target_under_test = ":_android_from_application",
+        expected = {
+            "--version-code": "123",
+            "--version-name": "3.0",
+            "--version-code-setting": "--@rules_flutter//flutter:build_number",
+            "--version-name-setting": "--@rules_flutter//flutter:build_name",
+        },
+    )
+    flutter_android_manifest_merge(
+        name = "_android_repeats_application",
+        application = ":_versioned_application",
+        base = "AndroidManifest.xml",
+        set_version = True,
+        build_name = "2.1",
+        build_number = "42",
+        tags = ["manual"],
+    )
+    add(
+        _android_version_args_settings_test,
+        "android_repeats_application_settings",
+        target_under_test = ":_android_repeats_application",
+        expected = {"--version-code": "123", "--version-name": "3.0"},
+    )
+
+    # A `versionCode` of `manifest_values` is written as it is, and cannot
+    # follow the setting.
+    add(
+        _expect_failure_settings_test,
+        "android_manifest_values_settings",
+        target_under_test = ":_android_manifest_values_from_application",
+        messages = [
+            "`versionCode` in `manifest_values` = \"42\", and " +
+            "`--@rules_flutter//flutter:build_number=123` gives the application ",
+            "_versioned_application that version for this build.",
+        ],
+    )
+    add(
+        _version_json_settings_test,
+        "web_settings",
+        target_under_test = ":_web_given",
+        version = "3.0",
+        build_number = "123",
+    )
+
+    # A value the platform cannot carry fails, naming the setting.
+    add(
+        _expect_failure_invalid_number_test,
+        "android_invalid_setting",
+        target_under_test = ":_android_from_application",
+        messages = ["`--@rules_flutter//flutter:build_number` = \"0\" is not a valid Android versionCode"],
+    )
+    add(
+        _expect_failure_invalid_name_test,
+        "apple_invalid_setting",
+        target_under_test = ":_apple_from_application",
+        messages = ["`--@rules_flutter//flutter:build_name` = \"1.0-beta\" is not a valid CFBundleShortVersionString"],
     )
 
     native.test_suite(name = name, tests = tests)

@@ -334,6 +334,7 @@ void main() {
       Map<String, Object?> version = _defaultVersion,
       String shortVersionString = '1.0.0',
       String buildVersion = '1',
+      Map<String, String> settings = const {},
     }) => versionAgreementProblems(
       bytes: plist is Uint8List
           ? plist
@@ -347,6 +348,7 @@ void main() {
         'CFBundleShortVersionString': shortVersionString,
         'CFBundleVersion': buildVersion,
       },
+      settings: settings,
     );
 
     test("accepts a version that is the application's", () {
@@ -392,6 +394,31 @@ void main() {
         );
       },
     );
+
+    test('names the build setting that gave the version', () {
+      // A version target with its own build number, built with
+      // --@rules_flutter//flutter:build_number=123.
+      final problems = agreement(
+        _flutterCreate,
+        buildVersion: '123',
+        settings: {
+          'CFBundleVersion': '--@rules_flutter//flutter:build_number',
+        },
+      );
+      expect(problems, hasLength(1));
+      expect(
+        problems.single,
+        allOf(
+          contains('CFBundleVersion "1"'),
+          contains(
+            '`--@rules_flutter//flutter:build_number` gives the application '
+            '//app:app_flutter "123" for this build',
+          ),
+          contains('so that it follows the setting'),
+          isNot(contains('set the version on the application')),
+        ),
+      );
+    });
 
     test("takes the plist's literal for a key the version leaves alone", () {
       final plist = _plist(

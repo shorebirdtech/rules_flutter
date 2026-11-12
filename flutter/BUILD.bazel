@@ -60,6 +60,32 @@ bool_flag(
     visibility = ["//visibility:public"],
 )
 
+# The version of every app in the build, as `flutter build --build-name` and
+# `--build-number`: set, each replaces the `build_name` or `build_number` of
+# every `flutter_application`, as the flags replace the `version:` of
+# `pubspec.yaml`. The program reports it, and every bundle built over the
+# application carries it. For a build number that changes with every build:
+#
+#   bazel build --@rules_flutter//flutter:build_number=123 //app
+#
+# Empty, the default, leaves each application's own. A `flutter_test` keeps its
+# own `build_name` and `build_number`, as `flutter test` takes no such flags.
+string_flag(
+    name = "build_name",
+    build_setting_default = "",
+    # It describes the app, and no build tool reads it.
+    scope = "target",
+    visibility = ["//visibility:public"],
+)
+
+string_flag(
+    name = "build_number",
+    build_setting_default = "",
+    # It describes the app, and no build tool reads it.
+    scope = "target",
+    visibility = ["//visibility:public"],
+)
+
 # The Flutter SDK a build uses: the name of one `flutter.toolchain()` the root
 # module declares. The default is the stock release, `flutter`.
 #

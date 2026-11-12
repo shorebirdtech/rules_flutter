@@ -10,7 +10,9 @@
 /// the defaults `1.0.0` and `1` when the application sets none. So the file's
 /// `version` and `build_number` must be that version, as strings, or the app
 /// would report two versions. The file is known only when it is built, so this
-/// is checked here.
+/// is checked here. `--version-setting` and `--build-number-setting` name the
+/// build setting that gave a value, such as
+/// `--@rules_flutter//flutter:build_number`, which the file cannot follow.
 ///
 /// On success the tool writes `--stamp`, which the build requires so that a
 /// file that fails the check fails the build.
@@ -22,6 +24,7 @@
 ///       --bundle <label> --application <label>
 ///       --version <value> --version-default <true|false>
 ///       --build-number <value> --build-number-default <true|false>
+///       [--version-setting <flag>] [--build-number-setting <flag>]
 ///       --stamp <file>
 import 'dart:convert';
 import 'dart:io';
@@ -41,13 +44,15 @@ const versionFields = [
   VersionField('build_number', 'build_number', 'appBuildNumber'),
 ];
 
-/// What the application reports for one field: its [value], and whether that
-/// is the default because the application sets none.
+/// What the application reports for one field: its [value], whether that is
+/// the default because the application sets none, and the build [setting]
+/// that gave it, if one did.
 class Reported {
   final String value;
   final bool isDefault;
+  final String? setting;
 
-  const Reported(this.value, {required this.isDefault});
+  const Reported(this.value, {required this.isDefault, this.setting});
 }
 
 /// The problems with the version.json [text], one message each; empty when
@@ -89,14 +94,23 @@ List<String> versionJsonProblems({
           ? 'gives `${f.field}` "$value"'
           : 'gives `${f.field}` as ${jsonEncode(value)}, which is not a string';
     }
+    final setting = want.setting;
     problems.add(
-      'ERROR: The bundle of $bundle would not report the version its program '
-      'does: $name $gives, and the application $application reports '
-      '"${want.value}" (its `${f.argument}`${want.isDefault ? ', unset and so the default' : ''}, '
-      'as `${f.reportedAs}`).\n'
-      '  Give $name `"${f.field}": "${want.value}"`, or set the version on '
-      'the application alone and delete $name: the bundle then writes '
-      'version.json from the application.',
+      setting != null
+          ? 'ERROR: The bundle of $bundle would not report the version its '
+                'program does: $name $gives, and `$setting` gives the '
+                'application $application "${want.value}" for this build (its '
+                '`${f.argument}`, as `${f.reportedAs}`).\n'
+                '  Delete $name, which states its own version and cannot '
+                'follow the setting: the bundle then writes version.json from '
+                'the application.'
+          : 'ERROR: The bundle of $bundle would not report the version its program '
+                'does: $name $gives, and the application $application reports '
+                '"${want.value}" (its `${f.argument}`${want.isDefault ? ', unset and so the default' : ''}, '
+                'as `${f.reportedAs}`).\n'
+                '  Give $name `"${f.field}": "${want.value}"`, or set the version on '
+                'the application alone and delete $name: the bundle then writes '
+                'version.json from the application.',
     );
   }
   return problems;
@@ -137,10 +151,12 @@ int run(List<String> args) {
       'version': Reported(
         options['version']!,
         isDefault: options['version-default'] == 'true',
+        setting: options['version-setting'],
       ),
       'build_number': Reported(
         options['build-number']!,
         isDefault: options['build-number-default'] == 'true',
+        setting: options['build-number-setting'],
       ),
     },
   );

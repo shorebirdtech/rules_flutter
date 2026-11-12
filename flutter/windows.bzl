@@ -183,11 +183,13 @@ def flutter_windows_app(
             carries it. Defaults to `1.0.0`. May be a `select()`.
             Unset, the `application`'s `build_name`. Set, the
             `application` must set the same.
+            `--@rules_flutter//flutter:build_name` replaces both for one build.
         build_number: The build number, as `flutter build --build-number`
             takes it: the fourth of the executable's version numbers.
             Defaults to `1`. May be a `select()`.
             Unset, the `application`'s `build_number`. Set, the
             `application` must set the same.
+            `--@rules_flutter//flutter:build_number` replaces both for one build.
         **kwargs: Passed through to flutter_windows_bundle, except `testonly`,
             which every target the macro declares has, since one that depends on a
             `testonly` application would otherwise fail analysis.

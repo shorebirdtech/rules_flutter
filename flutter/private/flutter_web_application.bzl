@@ -382,6 +382,9 @@ def _check_version_json(ctx, tools, program, version):
     args.add("--version-default", "false" if program.build_name else "true")
     args.add("--build-number", version.build_number)
     args.add("--build-number-default", "false" if program.build_number else "true")
+    for attribute, option in [("build_name", "--version-setting"), ("build_number", "--build-number-setting")]:
+        if attribute in program.version_settings:
+            args.add(option, program.version_settings[attribute])
     args.add("--stamp", stamp)
     ctx.actions.run(
         executable = tools.dart,

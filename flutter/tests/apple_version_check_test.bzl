@@ -79,6 +79,27 @@ _invalid_application_test = analysistest.make(
     expect_failure = True,
 )
 
+def _setting_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    actions = [a for a in analysistest.target_actions(env) if a.mnemonic == "FlutterCheckAppleVersion"]
+    asserts.equals(env, 1, len(actions), "expected one check action")
+    if len(actions) != 1:
+        return analysistest.end(env)
+    argv = actions[0].argv
+
+    # The program has the setting's build number, and the check names the
+    # setting, so that a version target with its own fails saying so.
+    asserts.equals(env, "123", argv[argv.index("--build-version") + 1])
+    asserts.equals(env, "--@rules_flutter//flutter:build_number", argv[argv.index("--build-version-setting") + 1])
+    asserts.equals(env, "3.1.0", argv[argv.index("--short-version-string") + 1])
+    asserts.false(env, "--short-version-string-setting" in argv, argv)
+    return analysistest.end(env)
+
+_setting_test = analysistest.make(
+    _setting_test_impl,
+    config_settings = {str(Label("//flutter:build_number")): "123"},
+)
+
 def apple_version_check_test_suite(name):
     """Defines the tests.
 
@@ -141,5 +162,13 @@ def apple_version_check_test_suite(name):
         target_under_test = ":_version_check_invalid",
     )
     tests.append(":%s_invalid_application" % name)
+
+    # Built with `--@rules_flutter//flutter:build_number`, the application's
+    # version is the setting's.
+    _setting_test(
+        name = name + "_build_number_setting",
+        target_under_test = ":_version_check_FlutterCreate",
+    )
+    tests.append(":%s_build_number_setting" % name)
 
     native.test_suite(name = name, tests = tests)

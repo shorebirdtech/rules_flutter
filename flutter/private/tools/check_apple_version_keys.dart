@@ -23,7 +23,10 @@
 /// version as `appBuildName` and `appBuildNumber`, and a bundle that said
 /// otherwise would ship two. The version file of a rules_apple
 /// `apple_bundle_version` may be written from `--embed_label`, so this is
-/// known only here.
+/// known only here. `--short-version-string-setting` and
+/// `--build-version-setting` name the build setting that gave a value, such as
+/// `--@rules_flutter//flutter:build_number`, which a version that states its
+/// own values cannot follow.
 ///
 /// On success the tool writes `--stamp`, which the build requires so that a
 /// plist that fails the check fails the build.
@@ -36,6 +39,7 @@
 ///       --version-file <rules_apple version file> --version-target <label>
 ///       --app <label> --rule <macro> --application <label>
 ///       --short-version-string <value> --build-version <value>
+///       [--short-version-string-setting <flag>] [--build-version-setting <flag>]
 ///       --stamp <file>
 import 'dart:convert';
 import 'dart:io';
@@ -182,8 +186,9 @@ List<String> versionKeyProblems({
 
 /// The problems with the version the bundle of [app] ends up with, one message
 /// each; empty when it is the program's. [version] is the decoded version
-/// file of [versionTarget], [bytes] the plist named [name], and [expected]
-/// the value of each key that [application] gives it.
+/// file of [versionTarget], [bytes] the plist named [name], [expected]
+/// the value of each key that [application] gives it, and [settings] the
+/// build setting that gave a key's value, where one did.
 List<String> versionAgreementProblems({
   required Uint8List bytes,
   required String name,
@@ -192,6 +197,7 @@ List<String> versionAgreementProblems({
   required String app,
   required String application,
   required Map<String, String> expected,
+  Map<String, String> settings = const {},
 }) {
   final wanted = {for (final k in versionKeys) k.key};
   final values = readXmlValues(plistXml(bytes, name), name, wanted);
@@ -216,13 +222,22 @@ List<String> versionAgreementProblems({
           : 'its version $versionTarget gives no ${k.key}';
     }
     if (bundle == want) continue;
+    final setting = settings[k.key];
     problems.add(
-      'ERROR: The bundle of $app would not report the version its program '
-      'does: $from, and the application $application reports "$want" '
-      '(its `${k.argument}`, as `${k.reportedAs}`).\n'
-      '  Give $versionTarget `application = "$application"` if it is a '
-      'flutter_apple_bundle_version, or set the version on the application '
-      'to the one the bundle should carry.',
+      setting != null
+          ? 'ERROR: The bundle of $app would not report the version its '
+                'program does: $from, and `$setting` gives the application '
+                '$application "$want" for this build (its `${k.argument}`, as '
+                '`${k.reportedAs}`).\n'
+                '  Give $versionTarget `application = "$application"` if it is '
+                'a flutter_apple_bundle_version, so that it follows the '
+                'setting: a version that states its own values cannot.'
+          : 'ERROR: The bundle of $app would not report the version its program '
+                'does: $from, and the application $application reports "$want" '
+                '(its `${k.argument}`, as `${k.reportedAs}`).\n'
+                '  Give $versionTarget `application = "$application"` if it is a '
+                'flutter_apple_bundle_version, or set the version on the application '
+                'to the one the bundle should carry.',
     );
   }
   return problems;
@@ -279,6 +294,12 @@ int run(List<String> args) {
         expected: {
           'CFBundleShortVersionString': options['short-version-string']!,
           'CFBundleVersion': options['build-version']!,
+        },
+        settings: {
+          if (options['short-version-string-setting'] case final setting?)
+            'CFBundleShortVersionString': setting,
+          if (options['build-version-setting'] case final setting?)
+            'CFBundleVersion': setting,
         },
       ),
     ];

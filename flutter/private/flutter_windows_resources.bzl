@@ -15,7 +15,7 @@ load("@rules_cc//cc:find_cc_toolchain.bzl", "CC_TOOLCHAIN_TYPE", "find_cc_toolch
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("//flutter/private:app_version.bzl", "windows_version")
-load("//flutter/private:application_version.bzl", "APPLICATION_VERSION_ATTR", "application_version")
+load("//flutter/private:application_version.bzl", "APPLICATION_VERSION_ATTR", "application_version", "version_names")
 
 WINDOWS_RESOURCE_COMPILER_TOOLCHAIN_TYPE = "@bazel_tools//tools/res:toolchain_type"
 
@@ -33,7 +33,7 @@ def windows_version_defines(ctx):
         A list of `NAME=value` defines.
     """
     given = application_version(ctx.label, ctx.attr.application, ctx.attr.build_name, ctx.attr.build_number)
-    version = windows_version(given.build_name, given.build_number)
+    version = windows_version(given.build_name, given.build_number, version_names(given.settings))
     if version.error:
         fail("%s: %s" % (ctx.label, version.error))
     return [

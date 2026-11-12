@@ -108,6 +108,18 @@ _compile_test = analysistest.make(
     attrs = {"build_name": attr.string(default = "1.0.0"), "build_number": attr.string(default = "1")},
 )
 
+# `--@rules_flutter//flutter:build_name` and `build_number` replace the
+# program's own, as `flutter build --build-name` and `--build-number` do.
+_SETTINGS = {
+    str(Label("//flutter:build_name")): "3.0.0",
+    str(Label("//flutter:build_number")): "123",
+}
+_compile_settings_test = analysistest.make(
+    _compile_impl,
+    attrs = {"build_name": attr.string(default = "1.0.0"), "build_number": attr.string(default = "1")},
+    config_settings = _SETTINGS,
+)
+
 def _dev_loop_impl(ctx):
     env = analysistest.begin(ctx)
     kernel = _kernel(env)
@@ -153,6 +165,13 @@ _whole_program_test = analysistest.make(
     config_settings = {str(Label("@rules_dart//dart:modular_kernel")): False},
 )
 
+# `flutter test` takes no `--build-name` or `--build-number`: a test keeps its own.
+_test_settings_test = analysistest.make(
+    _test_compile_impl,
+    attrs = _test_compile_attrs,
+    config_settings = _SETTINGS,
+)
+
 def version_defines_test_suite(name):
     """Fixtures and tests for the version defines of an application, a kernel target and a test.
 
@@ -195,6 +214,19 @@ def version_defines_test_suite(name):
         build_number = "7",
     )
     _compile_test(name = name + "_kernel_target", target_under_test = ":_version_kernel")
+    _compile_settings_test(
+        name = name + "_app_settings",
+        target_under_test = ":_versioned_app",
+        build_name = "3.0.0",
+        build_number = "123",
+    )
+    _compile_settings_test(
+        name = name + "_kernel_target_settings",
+        target_under_test = ":_version_kernel",
+        build_name = "3.0.0",
+        build_number = "123",
+    )
+    _test_settings_test(name = name + "_test_settings", target_under_test = ":_version_test.program", mnemonic = "DartEntryKernel")
     _dev_loop_test(name = name + "_dev_loop", target_under_test = ":_versioned_app")
     _modular_test(name = name + "_test_modular", target_under_test = ":_version_test.program", mnemonic = "DartEntryKernel")
     _whole_program_test(name = name + "_test_whole_program", target_under_test = ":_version_test.program", mnemonic = "DartKernel")
@@ -207,6 +239,9 @@ def version_defines_test_suite(name):
             ":" + name + "_app",
             ":" + name + "_app_versioned",
             ":" + name + "_kernel_target",
+            ":" + name + "_app_settings",
+            ":" + name + "_kernel_target_settings",
+            ":" + name + "_test_settings",
             ":" + name + "_dev_loop",
             ":" + name + "_test_modular",
             ":" + name + "_test_whole_program",

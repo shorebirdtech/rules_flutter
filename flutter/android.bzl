@@ -796,11 +796,13 @@ def flutter_android_app(
             `1.0.0`. May be a `select()`, whose `None` is the default.
             Unset, the `application`'s `build_name`. Set, the
             `application` must set the same.
+            `--@rules_flutter//flutter:build_name` replaces both for one build.
         build_number: versionCode, as `flutter build --build-number`: a
             whole number from 1 to 2100000000, Google Play's limit. Defaults
             to `1`. May be a `select()`.
             Unset, the `application`'s `build_number`. Set, the
-            `application` must set the same. A manifest that declares
+            `application` must set the same.
+            `--@rules_flutter//flutter:build_number` replaces both for one build. A manifest that declares
             `android:versionCode` or `android:versionName` itself must
             declare the app's version, the program's, or the build fails.
         manifest_values: `android_binary`'s `manifest_values`: values for
@@ -809,7 +811,10 @@ def flutter_android_app(
             `application_id`, `min_sdk_version` and `target_sdk_version`, so
             naming them here is an error. `versionCode` and `versionName`
             are allowed while `build_number` and `build_name` are unset,
-            and are then held to the `application`'s as those are.
+            and are then held to the `application`'s as those are. They
+            are written as given, so `--@rules_flutter//flutter:build_name`
+            and `build_number` do not change them: built with the setting of
+            one set to another value, the app fails to build.
             Other keys pass through. A dict, not a `select()`.
         proguard_specs: The R8 configuration of the APK. By default a
             release build (`-c opt` without

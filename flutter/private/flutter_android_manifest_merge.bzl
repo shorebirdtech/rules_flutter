@@ -45,7 +45,7 @@ silently mis-merge a variant manifest it does not fully understand.
 load("@rules_android//providers:providers.bzl", "StarlarkAndroidResourcesInfo")
 load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
 load("//flutter/private:app_version.bzl", "android_version")
-load("//flutter/private:application_version.bzl", "APPLICATION_VERSION_ATTR", "application_version")
+load("//flutter/private:application_version.bzl", "APPLICATION_VERSION_ATTR", "application_version", "version_names")
 load("//flutter/private:exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
 
 _TOOL = Label("//flutter/private/tools:merge_android_manifests.dart")
@@ -91,7 +91,7 @@ def _flutter_android_manifest_merge_impl(ctx):
             ctx.attr.build_number,
             stated_as = ctx.attr.version_stated_as,
         )
-        version = android_version(given.build_name, given.build_number)
+        version = android_version(given.build_name, given.build_number, version_names(given.settings))
         if version.error:
             fail("%s: %s" % (ctx.label, version.error))
 
@@ -99,6 +99,9 @@ def _flutter_android_manifest_merge_impl(ctx):
         # declares must be the same.
         args.add("--version-code", version.version_code)
         args.add("--version-name", version.version_name)
+        for attribute, flag in [("build_number", "--version-code-setting"), ("build_name", "--version-name-setting")]:
+            if attribute in given.settings:
+                args.add(flag, given.settings[attribute])
     if ctx.attr.uncompressed_native_libs:
         args.add("--uncompressed-native-libs")
     args.add("--output", output)

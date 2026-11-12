@@ -54,7 +54,9 @@
 /// base that declares either attribute itself must declare that value, or
 /// the `${versionCode}` or `${versionName}` placeholder, which
 /// `manifest_values` fills with the same; any other is an error rather than
-/// a second version.
+/// a second version. `--version-code-setting` and `--version-name-setting`
+/// name the build setting that gave a value, such as
+/// `--@rules_flutter//flutter:build_number`, for the error to name.
 ///
 /// Uncompressed native libraries (`--uncompressed-native-libs`): AGP stores
 /// an app's native libraries uncompressed and page-aligned when its minimum
@@ -75,6 +77,7 @@
 ///   dart merge_android_manifests.dart --base <path> [--overlay <path>]
 ///       [--library <path>]... [--placeholder <name>]... [--namespace <package>]
 ///       [--version-code <n>] [--version-name <s>]
+///       [--version-code-setting <flag>] [--version-name-setting <flag>]
 ///       [--uncompressed-native-libs] --output <path>
 import 'dart:io';
 
@@ -598,12 +601,15 @@ String _decodeAttribute(String value) => value.replaceAllMapped(
 /// `<manifest>` from [versionCode] and [versionName]. An attribute the root
 /// already declares stays when it is the same value, or the placeholder
 /// `manifest_values` fills with it; any other is an error, so the manifest
-/// and the program never report two versions.
+/// and the program never report two versions. [settings] names the build
+/// setting that gave a value, by the argument it replaces (`build_number`,
+/// `build_name`).
 String setVersion(
   String xml, {
   required String basePath,
   String? versionCode,
   String? versionName,
+  Map<String, String> settings = const {},
 }) {
   final scanner = _Scanner(xml)..skipInsignificant();
   final (_, rootAttributes, _, _) = scanner.readTag();
@@ -619,12 +625,19 @@ String setVersion(
       if (_decodeAttribute(declared) == version || declared == placeholder) {
         continue;
       }
+      final setting = settings[argument];
       throw FormatException(
-        'The manifest $basePath declares $attribute="$declared", and the '
-        'app\'s version is "$version": its `$argument`, or its '
-        'flutter_application\'s, which the program reports. Remove the '
-        'attribute from the manifest, or set `$argument` on the '
-        'flutter_application to "$declared".',
+        setting != null
+            ? 'The manifest $basePath declares $attribute="$declared", and '
+                  'the app\'s version is "$version": `$setting` gives it for '
+                  'this build, and the program reports it. The manifest '
+                  'states its own, which cannot follow the setting: remove '
+                  'the attribute from the manifest.'
+            : 'The manifest $basePath declares $attribute="$declared", and the '
+                  'app\'s version is "$version": its `$argument`, or its '
+                  'flutter_application\'s, which the program reports. Remove the '
+                  'attribute from the manifest, or set `$argument` on the '
+                  'flutter_application to "$declared".',
       );
     }
     added.write(' $attribute="${_escapeAttribute(version)}"');
@@ -649,6 +662,7 @@ String mergeManifests({
   String? namespace,
   String? versionCode,
   String? versionName,
+  Map<String, String> versionSettings = const {},
   bool uncompressedNativeLibs = false,
 }) {
   if (namespace != null) baseXml = qualifyClassNames(baseXml, namespace);
@@ -662,6 +676,7 @@ String mergeManifests({
       basePath: basePath,
       versionCode: versionCode,
       versionName: versionName,
+      settings: versionSettings,
     );
   }
   final overlayPermissions = overlayXml == null
@@ -725,6 +740,7 @@ void main(List<String> args) {
   String? namespace;
   String? versionCode;
   String? versionName;
+  final versionSettings = <String, String>{};
   var uncompressedNativeLibs = false;
 
   for (var i = 0; i < args.length; i++) {
@@ -742,6 +758,10 @@ void main(List<String> args) {
       versionCode = args[++i];
     } else if (args[i] == '--version-name' && i + 1 < args.length) {
       versionName = args[++i];
+    } else if (args[i] == '--version-code-setting' && i + 1 < args.length) {
+      versionSettings['build_number'] = args[++i];
+    } else if (args[i] == '--version-name-setting' && i + 1 < args.length) {
+      versionSettings['build_name'] = args[++i];
     } else if (args[i] == '--uncompressed-native-libs') {
       uncompressedNativeLibs = true;
     } else if (args[i] == '--output' && i + 1 < args.length) {
@@ -755,6 +775,7 @@ void main(List<String> args) {
       '[--overlay <path>] [--library <path>]... [--placeholder <name>]... '
       '[--namespace <package>] '
       '[--version-code <n>] [--version-name <s>] '
+      '[--version-code-setting <flag>] [--version-name-setting <flag>] '
       '[--uncompressed-native-libs] --output <path>',
     );
     exit(1);
@@ -776,6 +797,7 @@ void main(List<String> args) {
       namespace: namespace,
       versionCode: versionCode,
       versionName: versionName,
+      versionSettings: versionSettings,
       uncompressedNativeLibs: uncompressedNativeLibs,
     );
   } on FormatException catch (e) {

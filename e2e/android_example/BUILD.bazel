@@ -16,6 +16,7 @@ load(
 )
 load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application", "flutter_library")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_bundle")
+load("@rules_flutter//tools/e2e_testing:version_build.bzl", "version_build")
 load("@rules_kotlin//kotlin:android.bzl", "kt_android_library")
 load(":aar.bzl", "android_archive")
 load(":version_test.bzl", "manifest_values_version_refused_test")
@@ -472,6 +473,25 @@ dart_test(
     ],
     env = {"ZIPPER_RUNFILE": "$(rlocationpath @bazel_tools//tools/zip:zipper)"},
     main = "test/verify_android_second_app_test.dart",
+    deps = ["@rules_flutter//tools/e2e_testing"],
+)
+
+# `:second_app` built with `--@rules_flutter//flutter:build_number=123`, which
+# replaces the build number its application states and it repeats.
+version_build(
+    name = "second_app_build_number_123",
+    build_number = "123",
+    targets = [":second_app"],
+)
+
+dart_test(
+    name = "verify_android_build_number_test",
+    data = [
+        ":second_app_build_number_123",
+        "@bazel_tools//tools/zip:zipper",
+    ],
+    env = {"ZIPPER_RUNFILE": "$(rlocationpath @bazel_tools//tools/zip:zipper)"},
+    main = "test/verify_android_build_number_test.dart",
     deps = ["@rules_flutter//tools/e2e_testing"],
 )
 

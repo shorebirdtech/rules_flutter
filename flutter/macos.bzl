@@ -359,19 +359,23 @@ def flutter_macos_app(
             `application`'s, which the program reports as `appBuildName` and
             `appBuildNumber`: a bundle version that differs fails the build.
             A `flutter_apple_bundle_version` with the same `application`
-            takes them. Setting it with `build_name` or `build_number` is an
-            error.
+            takes them, and follows `--@rules_flutter//flutter:build_name`
+            and `build_number`; one that states its own values fails the
+            build when a setting gives another. Setting it with `build_name`
+            or `build_number` is an error.
         build_name: CFBundleShortVersionString, as `flutter build
             --build-name`: numbers separated by periods, padded to three
             as `flutter build` pads them (`2.1` is `2.1.0`). Defaults to
             `1.0.0`. May be a `select()`, whose `None` is the default.
             Unset, the `application`'s `build_name`. Set, the
             `application` must set the same.
+            `--@rules_flutter//flutter:build_name` replaces both for one build.
         build_number: CFBundleVersion, as `flutter build --build-number`:
             numbers separated by periods. Defaults to `1`. May be a
             `select()`.
             Unset, the `application`'s `build_number`. Set, the
             `application` must set the same.
+            `--@rules_flutter//flutter:build_number` replaces both for one build.
         additional_contents: Extra content for the bundle (merged with Flutter defaults).
         entitlements: Override entitlements wiring. By default the macro
             auto-discovers `macos/Runner/{DebugProfile,Release}.entitlements`
