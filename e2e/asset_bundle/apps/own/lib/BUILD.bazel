@@ -8,5 +8,4 @@ flutter_library(
     assets = ["r.txt"],
     package = "//apps/own:pubspec-metadata",
     visibility = ["//apps/own:__pkg__"],
-    deps = ["@deps//:flutter"],
 )

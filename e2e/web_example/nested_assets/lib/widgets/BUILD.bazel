@@ -9,5 +9,4 @@ flutter_library(
     assets = ["banner.txt"],
     package = "//nested_assets:pubspec-metadata",
     visibility = ["//nested_assets:__pkg__"],
-    deps = ["@deps//:flutter"],
 )

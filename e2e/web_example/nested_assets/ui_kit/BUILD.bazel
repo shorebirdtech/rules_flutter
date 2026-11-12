@@ -13,5 +13,4 @@ flutter_library(
     assets = glob(["assets/**"]),
     package = ":pubspec-metadata",
     visibility = ["//nested_assets:__pkg__"],
-    deps = ["@deps//:flutter"],
 )

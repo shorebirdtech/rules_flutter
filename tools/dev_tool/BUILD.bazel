@@ -201,10 +201,7 @@ _UNIT_TESTS = {
         "fakes": True,
         "deps": ["@dev_tool_deps//:logging"],
     },
-    "cdp_suite_transport_test": {
-        "cdp_page": True,
-        "deps": ["@dev_tool_deps//:vm_service"],
-    },
+    "cdp_suite_transport_test": {"cdp_page": True},
     "cdp_console_test": {
         "fakes": True,
         "deps": ["@dev_tool_deps//:fake_async"],

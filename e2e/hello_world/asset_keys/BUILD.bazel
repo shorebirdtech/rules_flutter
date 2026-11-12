@@ -15,7 +15,6 @@ flutter_library(
     ],
     package = ":pubspec-metadata",
     visibility = ["//visibility:public"],
-    deps = ["@deps//:flutter"],
 )
 
 # The package's own test, as `flutter test` runs it in the package: the

@@ -101,10 +101,7 @@ _MISMATCH_SAYS = [
 
 # -- Tag selection and an empty suite (`flutter_test`) ---------------------
 
-_TAGS_TEST_DEPS = [
-    "@deps//:flutter",
-    "@deps//:flutter_test",
-]
+_TAGS_TEST_DEPS = ["@deps//:flutter_test"]
 
 # Three cases, tagged `golden`, `slow` and neither, and
 # `library_tag` on every one. Passes as a whole.
@@ -140,7 +137,7 @@ flutter_test(
     main = "test/no_tests_test.dart",
     package = ":pubspec-metadata",
     tags = ["manual"],
-    deps = _TAGS_TEST_DEPS,
+    deps = ["@deps//:flutter_test"],
 )
 
 # `--test_env=DART_TEST_TAGS=golden` runs the case tagged so.

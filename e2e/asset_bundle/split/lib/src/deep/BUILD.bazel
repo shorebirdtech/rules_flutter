@@ -11,5 +11,4 @@ flutter_library(
         "//split:assets/s.txt",
     ],
     visibility = ["//visibility:public"],
-    deps = ["@deps//:flutter"],
 )
