@@ -243,6 +243,7 @@ flutter_ios_info_plist_gen(
 
 flutter_ios_runner_lib_gen(
     name = "bazel_runner_lib",
+    application = ":app_flutter",
     engine = ":app_engine",
     module_name = "BazelRunner",
     registrant = ":app_registrant",

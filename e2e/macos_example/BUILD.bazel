@@ -327,6 +327,7 @@ flutter_macos_menu_xib_gen(
 
 flutter_macos_runner_lib_gen(
     name = "bazel_runner_lib",
+    application = ":app_flutter",
     engine = ":flutter_engine",
     module_name = "BazelRunner",
     registrant = ":app_registrant",
