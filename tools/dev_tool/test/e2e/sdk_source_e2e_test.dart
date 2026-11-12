@@ -1,6 +1,9 @@
 @Tags(['e2e'])
 library;
 
+import 'dart:io';
+
+import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 import 'digest_probe.dart';
@@ -10,10 +13,12 @@ import 'digest_probe.dart';
 /// **The property:** `flutter_pub_package` with `flutter_source_version` set
 /// builds a package out of `packages/<name>` of the Flutter source tarball, and
 /// the package's files are at the repository's root as a hosted package's are.
-/// A lock that lists an `sdk: flutter` package the release's source does not
-/// have fails the fetch, naming the package, the Flutter version and the
-/// command that re-resolves the lock, instead of Bazel's message about archive
-/// prefixes.
+/// Only that package is extracted: nothing else of `packages/` is in the
+/// repository. A lock that lists an `sdk: flutter` package the release's
+/// source does not have (one not in `flutter_source_packages`, the list
+/// versions.bzl records per release) fails the fetch, naming the package, the
+/// Flutter version and the command that re-resolves the lock, instead of
+/// Bazel's message about archive prefixes.
 ///
 /// The tarball is served from a distdir, as in `digest_probe.dart`, under the
 /// name GitHub's tag archive has, so no network is involved.
@@ -40,6 +45,8 @@ void main() {
         'version': str('0.0.0'),
         'sha256': str(digest),
         'flutter_source_version': str(fakeFlutterVersion),
+        'flutter_source_packages':
+            '[${str('flutter_driver')}, ${str('integration_test')}]',
       });
 
   setUpAll(() async {
@@ -72,6 +79,33 @@ void main() {
         contains('//:lib/$package.dart'),
         reason: 'the package target does not list its source file:\n$srcs',
       );
+
+      // Nothing else of the source's `packages/`.
+      // The repository's directory, from where its BUILD file is.
+      final location = await fetcher.bazel([
+        'query',
+        '--output=location',
+        '@$repo//:$package',
+      ]);
+      expect(location.succeeded, isTrue, reason: '$location');
+      final build = RegExp(
+        r'^(/\S+)/BUILD\.bazel:',
+        multiLine: true,
+      ).firstMatch(location.output);
+      expect(build, isNotNull, reason: '$location');
+      final root = Directory(build![1]!);
+      final entries = [
+        for (final e in root.listSync()) p.basename(e.path),
+      ];
+      expect(entries, contains('pubspec.yaml'), reason: '${root.path}');
+      for (final other in [
+        'analysis_options.yaml',
+        'flutter_driver',
+        'integration_test',
+      ]) {
+        if (other == package) continue;
+        expect(entries, isNot(contains(other)), reason: '${root.path}');
+      }
     });
   }
 

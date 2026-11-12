@@ -163,6 +163,7 @@ void main() {
           'version': str('0.0.0'),
           'sha256': str(sha256Hex(flutterSource)),
           'flutter_source_version': str(fakeFlutterVersion),
+          'flutter_source_packages': '[${str('integration_test')}]',
         }),
         // A digest that is a SHA-256 but not these bytes'.
         ProbeRepo('sky_wrong', 'flutter_sky_engine_repo', {

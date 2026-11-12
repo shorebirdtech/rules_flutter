@@ -146,6 +146,100 @@ FLUTTER_SDK_EXACT_PINS = {
     },
 }
 
+# The packages of each Flutter version's source: the directories of its
+# `packages/` with a pubspec. A Flutter SDK package of a lock is extracted from
+# that source's `packages/<name>` alone, and a name not listed fails its fetch,
+# before any download, saying to re-resolve the lock. `bazel run
+# //tools/update_flutter_version -- <version>` prints the entry.
+FLUTTER_SDK_PACKAGES = {
+    "3.47.2": [
+        "flutter",
+        "flutter_driver",
+        "flutter_goldens",
+        "flutter_localizations",
+        "flutter_test",
+        "flutter_tools",
+        "flutter_web_plugins",
+        "fuchsia_remote_debug_protocol",
+        "integration_test",
+    ],
+    "3.47.5": [
+        "flutter",
+        "flutter_driver",
+        "flutter_goldens",
+        "flutter_localizations",
+        "flutter_test",
+        "flutter_tools",
+        "flutter_web_plugins",
+        "fuchsia_remote_debug_protocol",
+        "integration_test",
+    ],
+    "3.47.6": [
+        "flutter",
+        "flutter_driver",
+        "flutter_goldens",
+        "flutter_localizations",
+        "flutter_test",
+        "flutter_tools",
+        "flutter_web_plugins",
+        "fuchsia_remote_debug_protocol",
+        "integration_test",
+    ],
+    "3.47.7": [
+        "flutter",
+        "flutter_driver",
+        "flutter_goldens",
+        "flutter_localizations",
+        "flutter_test",
+        "flutter_tools",
+        "flutter_web_plugins",
+        "fuchsia_remote_debug_protocol",
+        "integration_test",
+    ],
+    "3.47.8": [
+        "flutter",
+        "flutter_driver",
+        "flutter_goldens",
+        "flutter_localizations",
+        "flutter_test",
+        "flutter_tools",
+        "flutter_web_plugins",
+        "fuchsia_remote_debug_protocol",
+        "integration_test",
+    ],
+    "3.47.9": [
+        "flutter",
+        "flutter_driver",
+        "flutter_goldens",
+        "flutter_localizations",
+        "flutter_test",
+        "flutter_tools",
+        "flutter_web_plugins",
+        "fuchsia_remote_debug_protocol",
+        "integration_test",
+    ],
+}
+
+def flutter_sdk_packages(flutter_version):
+    """Returns the packages of a release's source.
+
+    Args:
+        flutter_version: Flutter release tag (e.g. "3.47.9"). Must be a key of
+            FLUTTER_VERSIONS.
+
+    Returns:
+        The names of the directories of its `packages/` with a pubspec.
+    """
+    packages = FLUTTER_SDK_PACKAGES.get(flutter_version)
+    if packages == None:
+        fail((
+            "No SDK packages recorded for Flutter {v}.\n" +
+            "Add its entry to FLUTTER_SDK_PACKAGES in " +
+            "//flutter/private:versions.bzl; " +
+            "`bazel run //tools/update_flutter_version -- {v}` prints it."
+        ).format(v = flutter_version))
+    return packages
+
 def require_supported_flutter_version(flutter_version):
     """Fails, naming the supported releases, unless the release is one.
 

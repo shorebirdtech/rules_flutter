@@ -2071,43 +2071,42 @@ def _resolve_overlay(ctx, overlay_root_label, package_name, version, language_ve
         license_file = license_file,
     )
 
-# Where the Flutter source's `packages/` is extracted before the one package
-# wanted is moved to the repository root.
-_FLUTTER_PACKAGES_STAGING = "_flutter_packages"
-
-def fetch_flutter_source_package(ctx, package_name, flutter_version, sha256):
+def fetch_flutter_source_package(ctx, package_name, flutter_version, sha256, packages):
     """Extracts `packages/<package_name>` of the pinned Flutter source at the repository root.
 
     The tarball is the one every consumer of the framework source fetches,
     pinned to the same digest, so Bazel's repository cache serves it to all
-    of them from one download. Extracting it with `stripPrefix` straight to
-    the package would fail, for a name the release lacks, with a message about
-    archive prefixes that names neither the package nor the lock. So
-    `packages/` is extracted into a staging directory, the package's
-    pubspec is looked for there, and the package's files are moved up.
+    of them from one download. Only the one package is extracted, straight to
+    the root. Extracting a prefix the archive lacks fails with a message about
+    archive prefixes that names neither the package nor the lock, and a
+    failed extraction cannot be caught, so the package is first looked up in
+    `packages`, the release's own list of them.
 
     Args:
         ctx: The `repository_ctx`.
         package_name: The package under `packages/` of the Flutter source.
         flutter_version: The Flutter version whose source tarball to fetch.
         sha256: The recorded digest of that tarball.
+        packages: The packages under `packages/` of that source
+            (`flutter_sdk_packages`).
     """
-    ctx.download_and_extract(
-        url = flutter_source_tarball_url(flutter_version),
-        sha256 = pinned(flutter_version + ".tar.gz", sha256),
-        output = _FLUTTER_PACKAGES_STAGING,
-        stripPrefix = "flutter-{}/packages".format(flutter_version),
-    )
-    package_dir = ctx.path(_FLUTTER_PACKAGES_STAGING).get_child(package_name)
-    if not package_dir.get_child("pubspec.yaml").exists:
+    if not packages:
+        fail((
+            "flutter_pub_package `{name}` has `flutter_source_version` {version} " +
+            "but no `flutter_source_packages`, so it cannot tell whether the " +
+            "source has packages/{name}."
+        ).format(name = package_name, version = flutter_version))
+    if package_name not in packages:
         fail((
             "pubspec.lock lists `{name}` from the Flutter SDK, but Flutter {version}'s " +
             "source has no packages/{name}; re-resolve the lock with the pinned " +
             "toolchain (`bazel run @rules_flutter//flutter/pub -- get`)."
         ).format(name = package_name, version = flutter_version))
-    for child in package_dir.readdir():
-        ctx.rename(child, ctx.path(child.basename))
-    ctx.delete(ctx.path(_FLUTTER_PACKAGES_STAGING))
+    ctx.download_and_extract(
+        url = flutter_source_tarball_url(flutter_version),
+        sha256 = pinned(flutter_version + ".tar.gz", sha256),
+        stripPrefix = "flutter-{}/packages/{}".format(flutter_version, package_name),
+    )
 
 # What of a package's directory its build reads besides `pubspec.yaml`, its
 # `android/` and what its pubspec lists: pub's (rules_dart links the same) and
@@ -2177,6 +2176,7 @@ def _flutter_pub_package_impl(ctx):
             package_name = ctx.attr.package_name,
             flutter_version = ctx.attr.flutter_source_version,
             sha256 = ctx.attr.sha256,
+            packages = ctx.attr.flutter_source_packages,
         )
     elif ctx.attr.directory:
         fetch_local_package(ctx, ctx.attr.directory)
@@ -2640,6 +2640,12 @@ flutter_pub_package = repository_rule(
             doc = "The Flutter version whose pinned source tarball holds this package as `packages/<package_name>`, for a Flutter SDK package " +
                   "(`source: sdk` in the lock). When empty, the package is downloaded from a pub registry.",
             default = "",
+        ),
+        "flutter_source_packages": attr.string_list(
+            doc = "With `flutter_source_version`, the packages under `packages/` of that Flutter version's source " +
+                  "(`flutter_sdk_packages`). A `package_name` not among them fails the fetch, before anything is " +
+                  "downloaded, saying to re-resolve the lock.",
+            default = [],
         ),
         "code_assets": attr.string_list(
             doc = "Labels of `dart_code_asset` targets standing in for this " +

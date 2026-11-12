@@ -11,9 +11,10 @@
 ///   2. Downloads each artifact and computes SHA-256 (archives already pinned
 ///      in versions.bzl for this version are reused, not downloaded again)
 ///   3. Prints the Starlark snippet to add to versions.bzl, with the exact
-///      version pins of the SDK's own packages (`FLUTTER_SDK_EXACT_PINS`)
+///      version pins of the SDK's own packages (`FLUTTER_SDK_EXACT_PINS`) and
+///      the packages there are (`FLUTTER_SDK_PACKAGES`)
 ///
-/// `--sdk-pins-only <version>` prints just those pins.
+/// `--sdk-pins-only <version>` prints just those two entries.
 library;
 
 import 'dart:convert';
@@ -61,7 +62,7 @@ Future<void> main(List<String> args) async {
   }
 
   if (pinsOnly) {
-    print(renderPins(version, _sdkPins(version, flutterRepo)));
+    print(_sdkPackageEntries(version, flutterRepo));
     return;
   }
 
@@ -260,11 +261,7 @@ Future<void> main(List<String> args) async {
   print('        source_sha256 = "${checksums['__source__'] ?? 'FIXME'}",');
   print('    ),');
   print('');
-  print(
-    '=== Add to FLUTTER_SDK_EXACT_PINS in flutter/private/versions.bzl ===',
-  );
-  print('');
-  print(renderPins(version, _sdkPins(version, flutterRepo)));
+  print(_sdkPackageEntries(version, flutterRepo));
   print('=== Add to ARTIFACT_CHECKSUMS in flutter/private/versions.bzl ===');
   print('');
   print('    "$version": {');
@@ -516,9 +513,9 @@ void _checkShaderFlags(String version, String flutterRepo, String workspace) {
   }
 }
 
-/// The exact pins of the SDK packages at the Flutter tag [version], read from
-/// `packages/*/pubspec.yaml` of the clone at [flutterRepo].
-Map<String, Map<String, String>> _sdkPins(String version, String flutterRepo) {
+/// The `pubspec.yaml` of each package of `packages/` at the Flutter tag
+/// [version], by package name, read from the clone at [flutterRepo].
+Map<String, String> _sdkPubspecs(String version, String flutterRepo) {
   String git(List<String> args) {
     final result = Process.runSync(
       'git',
@@ -539,9 +536,7 @@ Map<String, Map<String, String>> _sdkPins(String version, String flutterRepo) {
     '$version:packages',
   ]).split('\n')) {
     final package = line.trim();
-    // flutter_tools is the tool, not a package an app's lock lists; its
-    // dependencies are pinned for the tool's own build.
-    if (package.isEmpty || package == 'flutter_tools') continue;
+    if (package.isEmpty) continue;
     final show = Process.runSync(
       'git',
       ['show', '$version:packages/$package/pubspec.yaml'],
@@ -550,5 +545,18 @@ Map<String, Map<String, String>> _sdkPins(String version, String flutterRepo) {
     // A directory of packages/ with no pubspec is not a package.
     if (show.exitCode == 0) pubspecs[package] = show.stdout as String;
   }
-  return exactPins(pubspecs);
+  return pubspecs;
+}
+
+/// What versions.bzl records of the SDK packages at the Flutter tag
+/// [version]: their exact pins, then the packages there are.
+String _sdkPackageEntries(String version, String flutterRepo) {
+  final pubspecs = _sdkPubspecs(version, flutterRepo);
+  return '=== Add to FLUTTER_SDK_EXACT_PINS in flutter/private/versions.bzl ===\n'
+      '\n'
+      '${renderPins(version, exactPins(pubspecs))}'
+      '\n'
+      '=== Add to FLUTTER_SDK_PACKAGES in flutter/private/versions.bzl ===\n'
+      '\n'
+      '${renderPackages(version, pubspecs.keys)}';
 }

@@ -35,7 +35,7 @@ load("//flutter/private:pub_reconcile.bzl", "pub_command", "reconcile_package", 
 load("//flutter/private:pub_resolve.bzl", "path_package_directory", "resolve_errors", "resolve_failure", "resolved_targets")
 load("//flutter/private:pub_settings.bzl", "root_annotations", "root_only_settings", "unknown_annotation")
 load("//flutter/private:swift_packages.bzl", "declare_swift_packages")
-load("//flutter/private:versions.bzl", "flutter_sdk_exact_pins", "flutter_source_sha256")
+load("//flutter/private:versions.bzl", "flutter_sdk_exact_pins", "flutter_sdk_packages", "flutter_source_sha256")
 
 # The name of the SDK every build has: the default `flutter.toolchain`.
 DEFAULT_SDK_NAME = "flutter"
@@ -750,6 +750,7 @@ def _declare_pub_packages(tags, settings, annotations, sdks, user_overlay_roots,
                     version = e.version,
                     sha256 = flutter_source_sha256(sdk.version) if sdk.version and not sdk.framework else "",
                     flutter_source_version = sdk.version if not sdk.framework else "",
+                    flutter_source_packages = flutter_sdk_packages(sdk.version) if sdk.version and not sdk.framework else [],
                     framework_json = framework_json(sdk.framework) if sdk.framework else None,
                     sdk = sdk.name,
                     prefix = prefix,

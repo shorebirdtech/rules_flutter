@@ -10,7 +10,7 @@ load(
     "host_artifacts_path",
     "ios_engine_artifact_path",
 )
-load("//flutter/private:versions.bzl", "ARTIFACT_CHECKSUMS", "FLUTTER_SDK_EXACT_PINS", "FLUTTER_VERSIONS")
+load("//flutter/private:versions.bzl", "ARTIFACT_CHECKSUMS", "FLUTTER_SDK_EXACT_PINS", "FLUTTER_SDK_PACKAGES", "FLUTTER_VERSIONS")
 
 def _latest_version_first_test_impl(ctx):
     env = unittest.begin(ctx)
@@ -166,6 +166,17 @@ def _sdk_pins_recorded_for_all_versions_test_impl(ctx):
             asserts.false(env, "flutter_tools" == package, "flutter_tools is the tool, not an SDK package a lock lists")
     return unittest.end(env)
 
+def _sdk_packages_recorded_for_all_versions_test_impl(ctx):
+    # A Flutter SDK package of a lock is fetched only if the release's entry
+    # lists it, so a version without one could fetch none of them.
+    env = unittest.begin(ctx)
+    asserts.equals(env, sorted(FLUTTER_VERSIONS.keys()), sorted(FLUTTER_SDK_PACKAGES.keys()), "FLUTTER_SDK_PACKAGES has an entry for every Flutter version")
+    for version, packages in FLUTTER_SDK_PACKAGES.items():
+        asserts.equals(env, sorted(packages), packages, "FLUTTER_SDK_PACKAGES[{}] is sorted".format(version))
+        for package in ["flutter_test", "integration_test"]:
+            asserts.true(env, package in packages, "FLUTTER_SDK_PACKAGES[{}] lacks {}".format(version, package))
+    return unittest.end(env)
+
 _t0_test = unittest.make(_latest_version_first_test_impl)
 _t1_test = unittest.make(_engine_revision_format_test_impl)
 _t2_test = unittest.make(_checksums_exist_for_all_versions_test_impl)
@@ -174,6 +185,7 @@ _t4_test = unittest.make(_checksums_are_sha256_test_impl)
 _t5_test = unittest.make(_source_sha256_recorded_for_all_versions_test_impl)
 _t6_test = unittest.make(_every_download_is_checksummed_test_impl)
 _t7_test = unittest.make(_sdk_pins_recorded_for_all_versions_test_impl)
+_t8_test = unittest.make(_sdk_packages_recorded_for_all_versions_test_impl)
 
 def versions_test_suite(name):
-    unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test, _t6_test, _t7_test)
+    unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test, _t6_test, _t7_test, _t8_test)

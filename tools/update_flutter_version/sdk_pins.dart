@@ -5,7 +5,8 @@
 /// with one copy of each package has to know them, or another lock could move
 /// a package past a pin and build `flutter_test` against a version it forbids.
 /// `flutter/private/versions.bzl` records them per Flutter version
-/// (`FLUTTER_SDK_EXACT_PINS`).
+/// (`FLUTTER_SDK_EXACT_PINS`), with the packages the release has
+/// (`FLUTTER_SDK_PACKAGES`).
 library;
 
 import 'package:yaml/yaml.dart';
@@ -23,6 +24,9 @@ final _exactVersion = RegExp(
 Map<String, Map<String, String>> exactPins(Map<String, String> pubspecs) {
   final pins = <String, Map<String, String>>{};
   for (final package in pubspecs.keys.toList()..sort()) {
+    // flutter_tools is the tool, not a package an app's lock lists; its
+    // dependencies are pinned for the tool's own build.
+    if (package == 'flutter_tools') continue;
     final yaml = loadYaml(pubspecs[package]!);
     final dependencies = yaml is YamlMap ? yaml['dependencies'] : null;
     if (dependencies is! YamlMap) continue;
@@ -36,6 +40,17 @@ Map<String, Map<String, String>> exactPins(Map<String, String> pubspecs) {
     if (exact.isNotEmpty) pins[package] = exact;
   }
   return pins;
+}
+
+/// The entry of `FLUTTER_SDK_PACKAGES` for [version], as Starlark: the
+/// [packages] of the release's `packages/`, sorted.
+String renderPackages(String version, Iterable<String> packages) {
+  final out = StringBuffer('    "$version": [\n');
+  for (final package in packages.toList()..sort()) {
+    out.writeln('        "$package",');
+  }
+  out.writeln('    ],');
+  return out.toString();
 }
 
 /// The entry of `FLUTTER_SDK_EXACT_PINS` for [version], as Starlark.

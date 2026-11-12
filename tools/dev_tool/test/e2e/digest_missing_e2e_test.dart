@@ -248,6 +248,7 @@ void main() {
             'version': str('0.0.0'),
             'sha256': str(''),
             'flutter_source_version': str(fakeFlutterVersion),
+            'flutter_source_packages': '[${str('integration_test')}]',
           }),
         ),
         // A hosted pub package is served from file://, so an unpinned fetch

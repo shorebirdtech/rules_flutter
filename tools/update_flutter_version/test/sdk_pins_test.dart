@@ -28,6 +28,7 @@ dependencies:
 ''',
         'integration_test': 'name: integration_test\ndependencies:\n  flutter:\n    sdk: flutter\n',
         'broken': 'name: broken\n',
+        'flutter_tools': 'name: flutter_tools\ndependencies:\n  args: 2.7.0\n',
       });
 
       expect(pins, {
@@ -42,6 +43,17 @@ dependencies:
       'a': 'name: a\ndependencies:\n  b: 1.0.0-dev.1\n  c: 2.0.0+3\n',
     });
     expect(pins['a'], {'b': '1.0.0-dev.1', 'c': '2.0.0+3'});
+  });
+
+  test('packages render as the sorted Starlark entry of versions.bzl', () {
+    expect(
+      renderPackages('3.47.9', ['integration_test', 'flutter', 'flutter_test']),
+      '    "3.47.9": [\n'
+      '        "flutter",\n'
+      '        "flutter_test",\n'
+      '        "integration_test",\n'
+      '    ],\n',
+    );
   });
 
   test('pins render as the Starlark entry of versions.bzl', () {
