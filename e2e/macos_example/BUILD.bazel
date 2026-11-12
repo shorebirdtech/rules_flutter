@@ -183,9 +183,11 @@ flutter_macos_engine(
 )
 
 # Shared version and Info.plist for approaches 2 & 3. The version is also the
-# apps with extensions', since an extension's must match its app's.
+# apps with extensions', since an extension's must match its app's. It is the
+# application's, which the program reports and the app checks its own against.
 flutter_apple_bundle_version(
     name = "app_version",
+    application = ":app_flutter",
     tags = ["manual"],
     visibility = ["//extensions:__pkg__"],
 )

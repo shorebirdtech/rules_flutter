@@ -1,4 +1,5 @@
-/// Checks that an app's Info.plist leaves its version keys to `build_name` and
+/// Checks that an app's bundle version is the version its program reports,
+/// and that its Info.plist leaves the version keys to `build_name` and
 /// `build_number`.
 ///
 /// `flutter_ios_app` and `flutter_macos_app` always give rules_apple a version,
@@ -16,6 +17,14 @@
 /// when the version file does not name it, since rules_apple then keeps the
 /// plist's value. The plist may be XML or binary.
 ///
+/// The value each key ends up with, the version file's or else the plist's
+/// literal, must be the one the `flutter_application` gives it
+/// (`--short-version-string`, `--build-version`): the program reports that
+/// version as `appBuildName` and `appBuildNumber`, and a bundle that said
+/// otherwise would ship two. The version file of a rules_apple
+/// `apple_bundle_version` may be written from `--embed_label`, so this is
+/// known only here.
+///
 /// On success the tool writes `--stamp`, which the build requires so that a
 /// plist that fails the check fails the build.
 ///
@@ -24,8 +33,10 @@
 ///
 /// Usage:
 ///   dart check_apple_version_keys.dart --plist <file> --name <shown name>
-///       --version-file <rules_apple version file> --app <label>
-///       --rule <macro> --stamp <file>
+///       --version-file <rules_apple version file> --version-target <label>
+///       --app <label> --rule <macro> --application <label>
+///       --short-version-string <value> --build-version <value>
+///       --stamp <file>
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -33,7 +44,8 @@ import 'dart:typed_data';
 import 'merge_plists.dart';
 
 /// A version key: the variables that stand for it, the field of rules_apple's
-/// version file that sets it, and the macro argument that sets that field.
+/// version file that sets it, the macro argument that sets that field, and
+/// the getter the program reads the same value with.
 class VersionKey {
   final String key;
 
@@ -41,8 +53,15 @@ class VersionKey {
   final List<String> variables;
   final String versionField;
   final String argument;
+  final String reportedAs;
 
-  const VersionKey(this.key, this.variables, this.versionField, this.argument);
+  const VersionKey(
+    this.key,
+    this.variables,
+    this.versionField,
+    this.argument,
+    this.reportedAs,
+  );
 }
 
 const versionKeys = [
@@ -51,12 +70,14 @@ const versionKeys = [
     ['FLUTTER_BUILD_NAME', 'MARKETING_VERSION'],
     'short_version_string',
     'build_name',
+    'appBuildName',
   ),
   VersionKey(
     'CFBundleVersion',
     ['FLUTTER_BUILD_NUMBER', 'CURRENT_PROJECT_VERSION'],
     'build_version',
     'build_number',
+    'appBuildNumber',
   ),
 ];
 
@@ -159,6 +180,54 @@ List<String> versionKeyProblems({
   return problems;
 }
 
+/// The problems with the version the bundle of [app] ends up with, one message
+/// each; empty when it is the program's. [version] is the decoded version
+/// file of [versionTarget], [bytes] the plist named [name], and [expected]
+/// the value of each key that [application] gives it.
+List<String> versionAgreementProblems({
+  required Uint8List bytes,
+  required String name,
+  required Map<String, Object?> version,
+  required String versionTarget,
+  required String app,
+  required String application,
+  required Map<String, String> expected,
+}) {
+  final wanted = {for (final k in versionKeys) k.key};
+  final values = readXmlValues(plistXml(bytes, name), name, wanted);
+  final problems = <String>[];
+  for (final k in versionKeys) {
+    final want = expected[k.key]!;
+    final replacement = version[k.versionField];
+    final String? bundle;
+    final String from;
+    if (replacement is String && replacement.isNotEmpty) {
+      bundle = replacement;
+      from = 'its version $versionTarget gives ${k.key} "$replacement"';
+    } else {
+      final text = values[k.key]?.text;
+      final literal =
+          text != null &&
+          !k.variables.any((variable) => isVariable(text, variable));
+      bundle = literal ? text : null;
+      from = literal
+          ? 'its version $versionTarget gives no ${k.key}, so the bundle '
+                'keeps "$text" from $name'
+          : 'its version $versionTarget gives no ${k.key}';
+    }
+    if (bundle == want) continue;
+    problems.add(
+      'ERROR: The bundle of $app would not report the version its program '
+      'does: $from, and the application $application reports "$want" '
+      '(its `${k.argument}`, as `${k.reportedAs}`).\n'
+      '  Give $versionTarget `application = "$application"` if it is a '
+      'flutter_apple_bundle_version, or set the version on the application '
+      'to the one the bundle should carry.',
+    );
+  }
+  return problems;
+}
+
 /// Checks [args] (the command line) and returns the exit code.
 int run(List<String> args) {
   final options = <String, String>{};
@@ -173,8 +242,12 @@ int run(List<String> args) {
     'plist',
     'name',
     'version-file',
+    'version-target',
     'app',
     'rule',
+    'application',
+    'short-version-string',
+    'build-version',
     'stamp',
   ]) {
     if (!options.containsKey(required)) {
@@ -184,15 +257,31 @@ int run(List<String> args) {
   }
   final List<String> problems;
   try {
-    problems = versionKeyProblems(
-      bytes: File(options['plist']!).readAsBytesSync(),
-      name: options['name']!,
-      version: jsonDecode(
-        File(options['version-file']!).readAsStringSync(),
-      ) as Map<String, Object?>,
-      app: options['app']!,
-      rule: options['rule']!,
-    );
+    final bytes = File(options['plist']!).readAsBytesSync();
+    final version = jsonDecode(
+      File(options['version-file']!).readAsStringSync(),
+    ) as Map<String, Object?>;
+    problems = [
+      ...versionKeyProblems(
+        bytes: bytes,
+        name: options['name']!,
+        version: version,
+        app: options['app']!,
+        rule: options['rule']!,
+      ),
+      ...versionAgreementProblems(
+        bytes: bytes,
+        name: options['name']!,
+        version: version,
+        versionTarget: options['version-target']!,
+        app: options['app']!,
+        application: options['application']!,
+        expected: {
+          'CFBundleShortVersionString': options['short-version-string']!,
+          'CFBundleVersion': options['build-version']!,
+        },
+      ),
+    ];
   } on PlistFormatException catch (e) {
     stderr.writeln('ERROR: ${options['name']} cannot be read as a plist: $e');
     return 1;

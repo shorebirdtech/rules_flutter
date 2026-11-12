@@ -551,23 +551,16 @@ void main() {
   });
 
   group('version', () {
-    String withVersion(
-      String base, {
-      VersionAttribute? code,
-      VersionAttribute? name,
-    }) => mergeManifests(
-      baseXml: base,
-      basePath: 'out/base/AndroidManifest.xml',
-      versionCode: code,
-      versionName: name,
-    );
+    String withVersion(String base, {String? code, String? name}) =>
+        mergeManifests(
+          baseXml: base,
+          basePath: 'out/base/AndroidManifest.xml',
+          versionCode: code,
+          versionName: name,
+        );
 
     test('sets both attributes on the root manifest', () {
-      final out = withVersion(
-        _base,
-        code: (value: '42', isDefault: false),
-        name: (value: '2.1.0', isDefault: false),
-      );
+      final out = withVersion(_base, code: '42', name: '2.1.0');
       expect(
         out,
         contains(
@@ -585,21 +578,8 @@ void main() {
       );
     });
 
-    test('sets defaults on a base that declares no version', () {
-      final out = withVersion(
-        _base,
-        code: (value: '1', isDefault: true),
-        name: (value: '1.0.0', isDefault: true),
-      );
-      expect(out, contains('android:versionCode="1"'));
-      expect(out, contains('android:versionName="1.0.0"'));
-    });
-
     test('escapes the version name', () {
-      final out = withVersion(
-        _base,
-        name: (value: '1.0 "beta" <&>', isDefault: false),
-      );
+      final out = withVersion(_base, name: '1.0 "beta" <&>');
       expect(
         out,
         contains('android:versionName="1.0 &quot;beta&quot; &lt;&amp;&gt;"'),
@@ -609,43 +589,44 @@ void main() {
     const declaring = '''
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     android:versionCode="7"
-    android:versionName="3.0">
+    android:versionName="3.0 &amp; up">
     <application android:label="example"/>
 </manifest>
 ''';
 
-    test("keeps the base's own version over a default", () {
-      final out = withVersion(
-        declaring,
-        code: (value: '1', isDefault: true),
-        name: (value: '1.0.0', isDefault: true),
-      );
-      expect(out, declaring);
+    test("keeps the base's own version when it is the app's", () {
+      expect(withVersion(declaring, code: '7', name: '3.0 & up'), declaring);
     });
 
-    test('refuses a version the base declares too', () {
+    test('keeps the placeholders manifest_values fills', () {
+      const placeholders = '''
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    android:versionCode="\${versionCode}"
+    android:versionName="\${versionName}">
+</manifest>
+''';
+      expect(withVersion(placeholders, code: '7', name: '3.0'), placeholders);
+    });
+
+    test("refuses a version the base declares that is not the app's", () {
+      // The defaults too: the program reports them.
       expect(
-        () => withVersion(
-          declaring,
-          code: (value: '8', isDefault: false),
-          name: (value: '1.0.0', isDefault: true),
-        ),
+        () => withVersion(declaring, code: '1', name: '3.0 & up'),
         throwsA(
           isA<FormatException>().having(
             (e) => e.message,
             'message',
             allOf(
               contains('android:versionCode="7"'),
-              contains('`build_number` sets it to "8"'),
+              contains('the app\'s version is "1"'),
+              contains('`build_number`'),
+              contains('`build_number` on the flutter_application to "7"'),
             ),
           ),
         ),
       );
       expect(
-        () => withVersion(
-          declaring,
-          name: (value: '4.0', isDefault: false),
-        ),
+        () => withVersion(declaring, code: '7', name: '4.0'),
         throwsA(
           isA<FormatException>().having(
             (e) => e.message,

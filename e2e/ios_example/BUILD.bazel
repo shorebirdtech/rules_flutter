@@ -77,9 +77,11 @@ flutter_ios_native_frameworks_gen(
     application = ":app_flutter",
 )
 
-# Shared version for approaches 2 & 3 and the app with extensions.
+# Shared version for approaches 2 & 3 and the app with extensions: the
+# application's, which the program reports and the app checks its own against.
 flutter_apple_bundle_version(
     name = "app_version",
+    application = ":app_flutter",
     tags = ["manual"],
     visibility = ["//extensions:__pkg__"],
 )

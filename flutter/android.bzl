@@ -801,15 +801,15 @@ def flutter_android_app(
             to `1`. May be a `select()`.
             Unset, the `application`'s `build_number`. Set, the
             `application` must set the same. A manifest that declares
-            `android:versionCode` or `android:versionName` itself keeps it
-            while the matching argument is unset, and is an error once it
-            is set.
+            `android:versionCode` or `android:versionName` itself must
+            declare the app's version, the program's, or the build fails.
         manifest_values: `android_binary`'s `manifest_values`: values for
             the manifest's `${...}` placeholders. The macro sets
             `applicationId`, `minSdkVersion` and `targetSdkVersion` from
             `application_id`, `min_sdk_version` and `target_sdk_version`, so
             naming them here is an error. `versionCode` and `versionName`
-            are allowed while `build_number` and `build_name` are unset.
+            are allowed while `build_number` and `build_name` are unset,
+            and are then held to the `application`'s as those are.
             Other keys pass through. A dict, not a `select()`.
         proguard_specs: The R8 configuration of the APK. By default a
             release build (`-c opt` without
@@ -854,6 +854,18 @@ def flutter_android_app(
         fail(conflict)
     if "custom_package" in kwargs:
         fail("flutter_android_app(name = %r): set `namespace`, which is the APK's `custom_package`" % name)
+
+    # `android_binary` writes a `versionCode` or `versionName` of
+    # `manifest_values` over the manifest's, so it states the app's version
+    # as the argument would: it must be the application's.
+    version_stated_as = {}
+    for key, arg in [("versionCode", "build_number"), ("versionName", "build_name")]:
+        if key in manifest_values:
+            version_stated_as[arg] = "`%s` in `manifest_values`" % key
+    if "build_number" in version_stated_as:
+        build_number = manifest_values["versionCode"]
+    if "build_name" in version_stated_as:
+        build_name = manifest_values["versionName"]
     manifest_values = {
         "applicationId": application_id,
         "minSdkVersion": min_sdk_version,
@@ -1115,6 +1127,7 @@ def flutter_android_app(
         application = application,
         build_name = version_arg(build_name),
         build_number = version_arg(build_number),
+        version_stated_as = version_stated_as,
         tags = tags,
         testonly = testonly,
     )

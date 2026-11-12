@@ -18,6 +18,7 @@ load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_appli
 load("@rules_flutter//flutter:web.bzl", "flutter_web_bundle")
 load("@rules_kotlin//kotlin:android.bzl", "kt_android_library")
 load(":aar.bzl", "android_archive")
+load(":version_test.bzl", "manifest_values_version_refused_test")
 
 exports_files(["pubspec.lock"])
 
@@ -200,6 +201,21 @@ flutter_android_app(
     # The VM service's grant, which this workspace has no debug variant
     # manifest to give, so `flutter_bazel run` can debug it.
     permissions = ["android.permission.INTERNET"],
+)
+
+# A `versionCode` in `manifest_values` that is not the application's 42: the
+# APK and `appBuildNumber` would disagree, so analysis fails.
+flutter_android_app(
+    name = "manifest_values_version_app",
+    application = ":app_flutter",
+    application_id = "com.example.flutterapp.version",
+    manifest_values = {"versionCode": "7"},
+    namespace = "com.example.flutterapp",
+)
+
+manifest_values_version_refused_test(
+    name = "manifest_values_version_refused_test",
+    target_under_test = ":manifest_values_version_app",
 )
 
 flutter_android_app(

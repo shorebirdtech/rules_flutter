@@ -1,13 +1,15 @@
 """Analysis tests for flutter_apple_version_check.
 
 The check is a validation action: it is registered over the plist it is given,
-with the name and app the failure message uses, and its stamp is in the
+with the name and app the failure message uses, and the version the
+application reports, which the bundle's must be. Its stamp is in the
 `_validation` output group, so building the app runs it. What the tool says
-about a plist is covered by its unit test; what makes a build fail is that the
-stamp is required, which is asserted here.
+about a plist and a version is covered by its unit test; what makes a build
+fail is that the stamp is required, which is asserted here.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
+load("//flutter:defs.bzl", "flutter_application")
 load("//flutter/private:apple_version_check.bzl", "flutter_apple_version_check")
 load("//flutter/private:flutter_apple_bundle_version.bzl", "flutter_apple_bundle_version")
 
@@ -37,6 +39,13 @@ def _check_test_impl(ctx):
         "the version file is an input",
     )
     asserts.true(env, argv[argv.index("--app") + 1].endswith(":app"), argv)
+    asserts.true(env, argv[argv.index("--version-target") + 1].endswith(":_version_check_version"), argv)
+
+    # What the application reports, as the bundle's keys carry it: its
+    # `build_name` of 3.1 padded to three numbers.
+    asserts.true(env, argv[argv.index("--application") + 1].endswith(":_version_check_application"), argv)
+    asserts.equals(env, "3.1.0", argv[argv.index("--short-version-string") + 1])
+    asserts.equals(env, "42", argv[argv.index("--build-version") + 1])
 
     asserts.equals(
         env,
@@ -59,12 +68,31 @@ _check_test = analysistest.make(
     attrs = {"plist": attr.string(mandatory = True)},
 )
 
+def _invalid_application_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    asserts.expect_failure(env, "the application ")
+    asserts.expect_failure(env, "build_name = \"1.0-beta\" is not a valid CFBundleShortVersionString")
+    return analysistest.end(env)
+
+_invalid_application_test = analysistest.make(
+    _invalid_application_test_impl,
+    expect_failure = True,
+)
+
 def apple_version_check_test_suite(name):
     """Defines the tests.
 
     Args:
         name: The test_suite target name.
     """
+    flutter_application(
+        name = "_version_check_application",
+        package = ":pubspec-metadata",
+        main = "web_fixture_main.dart",
+        build_name = "3.1",
+        build_number = "42",
+        tags = ["manual"],
+    )
     flutter_apple_bundle_version(
         name = "_version_check_version",
         build_name = "3.1.0",
@@ -78,6 +106,7 @@ def apple_version_check_test_suite(name):
             plist = "apple_version_check/%s.plist" % fixture,
             plist_name = "macos/Runner/Info.plist",
             app_label = "//flutter/tests:app",
+            application = ":_version_check_application",
             version = ":_version_check_version",
             rule_name = "flutter_macos_app",
             tags = ["manual"],
@@ -88,5 +117,29 @@ def apple_version_check_test_suite(name):
             plist = "apple_version_check/%s.plist" % fixture,
         )
         tests.append(":%s_%s" % (name, fixture))
+
+    # An application whose version no Apple bundle can carry fails the app
+    # that names it, whatever its `version` says.
+    flutter_application(
+        name = "_version_check_invalid_application",
+        package = ":pubspec-metadata",
+        main = "web_fixture_main.dart",
+        build_name = "1.0-beta",
+        tags = ["manual"],
+    )
+    flutter_apple_version_check(
+        name = "_version_check_invalid",
+        plist = "apple_version_check/FlutterCreate.plist",
+        app_label = "//flutter/tests:app",
+        application = ":_version_check_invalid_application",
+        version = ":_version_check_version",
+        rule_name = "flutter_macos_app",
+        tags = ["manual"],
+    )
+    _invalid_application_test(
+        name = name + "_invalid_application",
+        target_under_test = ":_version_check_invalid",
+    )
+    tests.append(":%s_invalid_application" % name)
 
     native.test_suite(name = name, tests = tests)

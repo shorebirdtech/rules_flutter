@@ -50,10 +50,11 @@
 /// `android:versionCode` and `android:versionName` onto the root
 /// `<manifest>` from `flutter.versionCode` and `flutter.versionName`, and so
 /// does this tool, from `flutter_android_app`'s `build_number` and
-/// `build_name`. A base that declares either attribute itself conflicts with
-/// a value the app sets, which is an error; `--default-version-code` and
-/// `--default-version-name` give the value used only when the base declares
-/// none, for an app that leaves the arguments unset.
+/// `build_name` or its application's, the version the program reports. A
+/// base that declares either attribute itself must declare that value, or
+/// the `${versionCode}` or `${versionName}` placeholder, which
+/// `manifest_values` fills with the same; any other is an error rather than
+/// a second version.
 ///
 /// Uncompressed native libraries (`--uncompressed-native-libs`): AGP stores
 /// an app's native libraries uncompressed and page-aligned when its minimum
@@ -73,8 +74,7 @@
 /// Usage:
 ///   dart merge_android_manifests.dart --base <path> [--overlay <path>]
 ///       [--library <path>]... [--placeholder <name>]... [--namespace <package>]
-///       [--version-code <n> | --default-version-code <n>]
-///       [--version-name <s> | --default-version-name <s>]
+///       [--version-code <n>] [--version-name <s>]
 ///       [--uncompressed-native-libs] --output <path>
 import 'dart:io';
 
@@ -567,45 +567,67 @@ String markNativeLibsUncompressed(String xml, {required String basePath}) {
       '${xml.substring(insertAt)}';
 }
 
-/// A version attribute for the root `<manifest>`: its [value], and whether
-/// that is only the default, which a value the base declares replaces.
-typedef VersionAttribute = ({String value, bool isDefault});
-
 String _escapeAttribute(String value) => value
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;');
 
+/// An attribute value as written, with the XML entities it may use read.
+String _decodeAttribute(String value) => value.replaceAllMapped(
+  RegExp(r'&(#x[0-9a-fA-F]+|#[0-9]+|amp|lt|gt|quot|apos);'),
+  (m) {
+    final e = m[1]!;
+    if (e.startsWith('#x')) {
+      return String.fromCharCode(int.parse(e.substring(2), radix: 16));
+    }
+    if (e.startsWith('#')) {
+      return String.fromCharCode(int.parse(e.substring(1)));
+    }
+    return const {
+      'amp': '&',
+      'lt': '<',
+      'gt': '>',
+      'quot': '"',
+      'apos': "'",
+    }[e]!;
+  },
+);
+
 /// [xml] with `android:versionCode` and `android:versionName` set on its root
 /// `<manifest>` from [versionCode] and [versionName]. An attribute the root
-/// already declares stays when the value is a default; otherwise it is an
-/// error, so neither value is silently lost.
+/// already declares stays when it is the same value, or the placeholder
+/// `manifest_values` fills with it; any other is an error, so the manifest
+/// and the program never report two versions.
 String setVersion(
   String xml, {
   required String basePath,
-  VersionAttribute? versionCode,
-  VersionAttribute? versionName,
+  String? versionCode,
+  String? versionName,
 }) {
   final scanner = _Scanner(xml)..skipInsignificant();
   final (_, rootAttributes, _, _) = scanner.readTag();
   final insertAt = scanner.pos - 1;
   final added = StringBuffer();
-  for (final (attribute, argument, version) in [
-    ('android:versionCode', 'build_number', versionCode),
-    ('android:versionName', 'build_name', versionName),
+  for (final (attribute, argument, placeholder, version) in [
+    ('android:versionCode', 'build_number', r'${versionCode}', versionCode),
+    ('android:versionName', 'build_name', r'${versionName}', versionName),
   ]) {
     if (version == null) continue;
     final declared = rootAttributes[attribute];
     if (declared != null) {
-      if (version.isDefault) continue;
+      if (_decodeAttribute(declared) == version || declared == placeholder) {
+        continue;
+      }
       throw FormatException(
-        'The manifest $basePath declares $attribute="$declared", and '
-        '`$argument` sets it to "${version.value}". Remove the attribute '
-        'from the manifest, or leave `$argument` unset to keep it.',
+        'The manifest $basePath declares $attribute="$declared", and the '
+        'app\'s version is "$version": its `$argument`, or its '
+        'flutter_application\'s, which the program reports. Remove the '
+        'attribute from the manifest, or set `$argument` on the '
+        'flutter_application to "$declared".',
       );
     }
-    added.write(' $attribute="${_escapeAttribute(version.value)}"');
+    added.write(' $attribute="${_escapeAttribute(version)}"');
   }
   if (added.isEmpty) return xml;
   return xml.substring(0, insertAt) +
@@ -625,8 +647,8 @@ String mergeManifests({
   Map<String, String> libraries = const {},
   Set<String> placeholders = const {},
   String? namespace,
-  VersionAttribute? versionCode,
-  VersionAttribute? versionName,
+  String? versionCode,
+  String? versionName,
   bool uncompressedNativeLibs = false,
 }) {
   if (namespace != null) baseXml = qualifyClassNames(baseXml, namespace);
@@ -701,8 +723,8 @@ void main(List<String> args) {
   final libraryPaths = <String>[];
   final placeholders = <String>{};
   String? namespace;
-  VersionAttribute? versionCode;
-  VersionAttribute? versionName;
+  String? versionCode;
+  String? versionName;
   var uncompressedNativeLibs = false;
 
   for (var i = 0; i < args.length; i++) {
@@ -717,13 +739,9 @@ void main(List<String> args) {
     } else if (args[i] == '--namespace' && i + 1 < args.length) {
       namespace = args[++i];
     } else if (args[i] == '--version-code' && i + 1 < args.length) {
-      versionCode = (value: args[++i], isDefault: false);
-    } else if (args[i] == '--default-version-code' && i + 1 < args.length) {
-      versionCode = (value: args[++i], isDefault: true);
+      versionCode = args[++i];
     } else if (args[i] == '--version-name' && i + 1 < args.length) {
-      versionName = (value: args[++i], isDefault: false);
-    } else if (args[i] == '--default-version-name' && i + 1 < args.length) {
-      versionName = (value: args[++i], isDefault: true);
+      versionName = args[++i];
     } else if (args[i] == '--uncompressed-native-libs') {
       uncompressedNativeLibs = true;
     } else if (args[i] == '--output' && i + 1 < args.length) {
@@ -736,8 +754,7 @@ void main(List<String> args) {
       'Usage: dart merge_android_manifests.dart --base <path> '
       '[--overlay <path>] [--library <path>]... [--placeholder <name>]... '
       '[--namespace <package>] '
-      '[--version-code <n> | --default-version-code <n>] '
-      '[--version-name <s> | --default-version-name <s>] '
+      '[--version-code <n>] [--version-name <s>] '
       '[--uncompressed-native-libs] --output <path>',
     );
     exit(1);

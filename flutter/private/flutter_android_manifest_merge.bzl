@@ -24,9 +24,10 @@ application id.
 
 Given `set_version`, it writes the app's version onto the root
 `<manifest>` as `android:versionCode` and `android:versionName`, from
-`build_number` and `build_name`, the attributes Gradle writes from
-`flutter.versionCode` and `flutter.versionName`. Done here rather than through
-`android_binary`'s `manifest_values` so that the values may be a `select()`.
+`build_number` and `build_name` or the application's, the attributes Gradle
+writes from `flutter.versionCode` and `flutter.versionName`. Done here rather
+than through `android_binary`'s `manifest_values` so that the values may be a
+`select()`. A base that declares either attribute must declare that value.
 
 Given `uncompressed_native_libs`, it marks `<application>` with
 `android:extractNativeLibs="false"`, as AGP does for an app whose native
@@ -83,21 +84,21 @@ def _flutter_android_manifest_merge_impl(ctx):
     if ctx.attr.namespace:
         args.add("--namespace", ctx.attr.namespace)
     if ctx.attr.set_version:
-        given = application_version(ctx.label, ctx.attr.application, ctx.attr.build_name, ctx.attr.build_number)
+        given = application_version(
+            ctx.label,
+            ctx.attr.application,
+            ctx.attr.build_name,
+            ctx.attr.build_number,
+            stated_as = ctx.attr.version_stated_as,
+        )
         version = android_version(given.build_name, given.build_number)
         if version.error:
             fail("%s: %s" % (ctx.label, version.error))
 
-        # A value the app gives conflicts with one the manifest declares; a
-        # default gives way to it.
-        args.add(
-            "--version-code" if given.build_number else "--default-version-code",
-            version.version_code,
-        )
-        args.add(
-            "--version-name" if given.build_name else "--default-version-name",
-            version.version_name,
-        )
+        # The program reports these, defaults included, so a value the base
+        # declares must be the same.
+        args.add("--version-code", version.version_code)
+        args.add("--version-name", version.version_name)
     if ctx.attr.uncompressed_native_libs:
         args.add("--uncompressed-native-libs")
     args.add("--output", output)
@@ -157,12 +158,19 @@ flutter_android_manifest_merge = rule(
         ),
         "build_name": attr.string(
             doc = "versionName, as `flutter build --build-name`. Empty is " +
-                  "`1.0.0`, which a versionName the base declares replaces.",
+                  "the application's, else `1.0.0`.",
         ),
         "build_number": attr.string(
             doc = "versionCode, as `flutter build --build-number`: a whole " +
-                  "number from 1 to 2100000000. Empty is `1`, which a " +
-                  "versionCode the base declares replaces.",
+                  "number from 1 to 2100000000. Empty is the application's, " +
+                  "else `1`.",
+        ),
+        "version_stated_as": attr.string_dict(
+            doc = "How the app states `build_name` or `build_number`, by " +
+                  "attribute, where it is not that argument of its macro, " +
+                  "such as `{\"build_number\": \"`versionCode` in " +
+                  "`manifest_values`\"}`: for the message when it is not the " +
+                  "application's.",
         ),
         "uncompressed_native_libs": attr.bool(
             doc = "Set `android:extractNativeLibs=\"false\"` on " +

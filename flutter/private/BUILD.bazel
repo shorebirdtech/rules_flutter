@@ -554,6 +554,7 @@ bzl_library(
     srcs = ["apple_version_check.bzl"],
     visibility = ["//flutter:__subpackages__"],
     deps = [
+        ":app_version",
         ":exec_groups",
         "@rules_dart//dart:utils",
     ],

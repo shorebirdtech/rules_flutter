@@ -439,9 +439,13 @@ def flutter_ios_app(
             `flutter create` writes them, and Xcode's `$(MARKETING_VERSION)`
             and `$(CURRENT_PROJECT_VERSION)` pass.
         version: An `apple_bundle_version` (or `flutter_apple_bundle_version`)
-            target, rules_apple's own way to set the version, for example
-            from `--embed_label`. Setting it with `build_name` or
-            `build_number` is an error.
+            target, rules_apple's own way to set the version, to give the
+            app's extensions the same one. Its values must be the
+            `application`'s, which the program reports as `appBuildName` and
+            `appBuildNumber`: a bundle version that differs fails the build.
+            A `flutter_apple_bundle_version` with the same `application`
+            takes them. Setting it with `build_name` or `build_number` is an
+            error.
         build_name: CFBundleShortVersionString, as `flutter build
             --build-name`: numbers separated by periods, padded to three
             as `flutter build` pads them (`2.1` is `2.1.0`). Defaults to
@@ -770,11 +774,13 @@ def flutter_ios_app(
 
     # 9b. The plist leaves the version keys to the version: rules_apple
     #     replaces both, so a literal that differs would be dropped silently.
+    #     And the version is the application's, which the program reports.
     _flutter_apple_version_check(
         name = "__%s_version_check" % name,
         plist = actual_info_plist,
         plist_name = "ios/Runner/Info.plist" if not info_plist else "",
         app_label = str(native.package_relative_label(name)),
+        application = application,
         version = version,
         rule_name = "flutter_ios_app",
         tags = tags,

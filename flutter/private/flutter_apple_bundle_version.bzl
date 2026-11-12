@@ -39,13 +39,16 @@ flutter_apple_bundle_version = rule(
 
 `flutter_ios_app` and `flutter_macos_app` declare one from their `build_name`
 and `build_number`. Declare one yourself to give an app extension the same
-version as its app, passing it as the `version` of both:
+version as its app, passing it as the `version` of both, and give it the app's
+`application`, whose version it takes:
 
     flutter_apple_bundle_version(
         name = "version",
-        build_name = "2.1.0",
-        build_number = "42",
+        application = ":app_flutter",
     )
+
+The app checks that its `version` is its `application`'s, so one with another
+version, or with none and so the defaults, fails the app's build.
 
 It provides what rules_apple's `apple_bundle_version` provides, so either fits
 any `version` attribute.""",

@@ -333,7 +333,83 @@ def app_version_test_suite(name):
         "android_from_application",
         target_under_test = ":_android_from_application",
         expected = {"--version-code": "42", "--version-name": "2.1"},
-        absent = ["--default-version-code", "--default-version-name"],
+    )
+
+    # A `versionCode` of `manifest_values` states the version as
+    # `build_number` does, so it is the application's or an error.
+    flutter_android_manifest_merge(
+        name = "_android_manifest_values_from_application",
+        application = ":_versioned_application",
+        base = "AndroidManifest.xml",
+        set_version = True,
+        build_number = "42",
+        version_stated_as = {"build_number": "`versionCode` in `manifest_values`"},
+        tags = ["manual"],
+    )
+    add(
+        _android_version_args_test,
+        "android_manifest_values_from_application",
+        target_under_test = ":_android_manifest_values_from_application",
+        expected = {"--version-code": "42", "--version-name": "2.1"},
+    )
+    flutter_android_manifest_merge(
+        name = "_android_manifest_values_differ",
+        application = ":_versioned_application",
+        base = "AndroidManifest.xml",
+        set_version = True,
+        build_number = "5",
+        version_stated_as = {"build_number": "`versionCode` in `manifest_values`"},
+        tags = ["manual"],
+    )
+    add(
+        _expect_failure_test,
+        "android_manifest_values_differ",
+        target_under_test = ":_android_manifest_values_differ",
+        messages = [
+            "`versionCode` in `manifest_values` = \"5\", and the application ",
+            "_versioned_application it is built over has build_number = \"42\"",
+        ],
+    )
+
+    # An application that sets no version reports the defaults: an app that
+    # states them agrees with it, and one that states another does not.
+    flutter_application(
+        name = "_unversioned_application",
+        package = ":pubspec-metadata",
+        main = "main.dart",
+        tags = ["manual"],
+    )
+    flutter_apple_bundle_version(
+        name = "_apple_defaults_of_application",
+        application = ":_unversioned_application",
+        build_name = "1.0.0",
+        build_number = "1",
+        tags = ["manual"],
+    )
+    add(
+        _apple_bundle_version_test,
+        "apple_defaults_of_application",
+        target_under_test = ":_apple_defaults_of_application",
+        build_version = "1",
+        short_version_string = "1.0.0",
+    )
+    flutter_android_manifest_merge(
+        name = "_android_manifest_values_beside_defaults",
+        application = ":_unversioned_application",
+        base = "AndroidManifest.xml",
+        set_version = True,
+        build_number = "5",
+        version_stated_as = {"build_number": "`versionCode` in `manifest_values`"},
+        tags = ["manual"],
+    )
+    add(
+        _expect_failure_test,
+        "android_manifest_values_beside_defaults",
+        target_under_test = ":_android_manifest_values_beside_defaults",
+        messages = [
+            "`versionCode` in `manifest_values` = \"5\", and the application ",
+            "has build_number = \"1\", the default.",
+        ],
     )
 
     # Android.
@@ -347,8 +423,7 @@ def app_version_test_suite(name):
         _android_version_args_test,
         "android_default",
         target_under_test = ":_android_default",
-        expected = {"--default-version-code": "1", "--default-version-name": "1.0.0"},
-        absent = ["--version-code", "--version-name"],
+        expected = {"--version-code": "1", "--version-name": "1.0.0"},
     )
     flutter_android_manifest_merge(
         name = "_android_given",
@@ -363,7 +438,6 @@ def app_version_test_suite(name):
         "android_given",
         target_under_test = ":_android_given",
         expected = {"--version-code": "42", "--version-name": "2.1.0"},
-        absent = ["--default-version-code", "--default-version-name"],
     )
     flutter_android_manifest_merge(
         name = "_android_unversioned",
@@ -374,7 +448,7 @@ def app_version_test_suite(name):
         _android_version_args_test,
         "android_unversioned",
         target_under_test = ":_android_unversioned",
-        absent = ["--version-code", "--version-name", "--default-version-code", "--default-version-name"],
+        absent = ["--version-code", "--version-name"],
     )
     flutter_android_manifest_merge(
         name = "_android_invalid",

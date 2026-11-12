@@ -235,7 +235,11 @@ void main() {
     );
     tearDown(() => dir.deleteSync(recursive: true));
 
-    int check(String plistText, {String name = 'macos/Runner/Info.plist'}) {
+    int check(
+      String plistText, {
+      String name = 'macos/Runner/Info.plist',
+      String shortVersionString = '3.1.0',
+    }) {
       File('${dir.path}/Info.plist').writeAsStringSync(plistText);
       File(
         '${dir.path}/version.json',
@@ -245,6 +249,8 @@ void main() {
       return run([
         '--version-file',
         '${dir.path}/version.json',
+        '--version-target',
+        '//app:version',
         '--plist',
         '${dir.path}/Info.plist',
         '--name',
@@ -253,6 +259,12 @@ void main() {
         '//app:app',
         '--rule',
         'flutter_macos_app',
+        '--application',
+        '//app:app_flutter',
+        '--short-version-string',
+        shortVersionString,
+        '--build-version',
+        '42',
         '--stamp',
         '${dir.path}/stamp',
       ]);
@@ -284,6 +296,129 @@ void main() {
 
     test('fails on text that is not a plist', () {
       expect(check('not a plist'), 1);
+    });
+
+    test("writes no stamp for a version that is not the application's", () {
+      expect(check(_flutterCreate, shortVersionString: '2.0.0'), 1);
+      expect(File('${dir.path}/stamp').existsSync(), isFalse);
+    });
+
+    test('requires the application\'s version', () {
+      File('${dir.path}/Info.plist').writeAsStringSync(_flutterCreate);
+      File('${dir.path}/version.json').writeAsStringSync('{}');
+      expect(
+        run([
+          '--version-file',
+          '${dir.path}/version.json',
+          '--version-target',
+          '//app:version',
+          '--plist',
+          '${dir.path}/Info.plist',
+          '--name',
+          'macos/Runner/Info.plist',
+          '--app',
+          '//app:app',
+          '--rule',
+          'flutter_macos_app',
+          '--stamp',
+          '${dir.path}/stamp',
+        ]),
+        2,
+      );
+    });
+  });
+
+  group('versionAgreementProblems', () {
+    List<String> agreement(
+      Object plist, {
+      Map<String, Object?> version = _defaultVersion,
+      String shortVersionString = '1.0.0',
+      String buildVersion = '1',
+    }) => versionAgreementProblems(
+      bytes: plist is Uint8List
+          ? plist
+          : Uint8List.fromList((plist as String).codeUnits),
+      name: 'ios/Runner/Info.plist',
+      version: version,
+      versionTarget: '//app:app_version',
+      app: '//app:app',
+      application: '//app:app_flutter',
+      expected: {
+        'CFBundleShortVersionString': shortVersionString,
+        'CFBundleVersion': buildVersion,
+      },
+    );
+
+    test("accepts a version that is the application's", () {
+      expect(agreement(_flutterCreate), isEmpty);
+      expect(
+        agreement(
+          _flutterCreate,
+          version: {'build_version': '42', 'short_version_string': '2.3.0'},
+          shortVersionString: '2.3.0',
+          buildVersion: '42',
+        ),
+        isEmpty,
+      );
+    });
+
+    test(
+      'rejects a version target the application disagrees with, naming both',
+      () {
+        // A flutter_apple_bundle_version with no `application` gives the
+        // defaults, while the application reports 2.3.0 (42).
+        final problems = agreement(
+          _flutterCreate,
+          shortVersionString: '2.3.0',
+          buildVersion: '42',
+        );
+        expect(problems, hasLength(2));
+        expect(
+          problems.first,
+          allOf(
+            contains('//app:app'),
+            contains(
+              'its version //app:app_version gives '
+              'CFBundleShortVersionString "1.0.0"',
+            ),
+            contains('the application //app:app_flutter reports "2.3.0"'),
+            contains('`appBuildName`'),
+            contains('application = "//app:app_flutter"'),
+          ),
+        );
+        expect(
+          problems.last,
+          allOf(contains('CFBundleVersion "1"'), contains('reports "42"')),
+        );
+      },
+    );
+
+    test("takes the plist's literal for a key the version leaves alone", () {
+      final plist = _plist(
+        '\t<key>CFBundleShortVersionString</key>\n\t<string>2.3.0</string>',
+      );
+      final version = {'build_version': '1'};
+      expect(
+        agreement(plist, version: version, shortVersionString: '2.3.0'),
+        isEmpty,
+      );
+      expect(
+        agreement(plist, version: version, shortVersionString: '2.4.0').single,
+        contains(
+          'gives no CFBundleShortVersionString, so the bundle keeps '
+          '"2.3.0" from ios/Runner/Info.plist',
+        ),
+      );
+    });
+
+    test('rejects a key that neither the version nor a literal sets', () {
+      expect(
+        agreement(_flutterCreate, version: {'build_version': '1'}).single,
+        contains(
+          'its version //app:app_version gives no '
+          'CFBundleShortVersionString, and the application',
+        ),
+      );
     });
   });
 }

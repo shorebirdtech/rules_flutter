@@ -1,16 +1,28 @@
-"""Fails the build of an Apple app whose Info.plist sets a version key itself.
+"""Fails the build of an Apple app whose bundle version is not its program's.
 
 rules_apple replaces `CFBundleShortVersionString` and `CFBundleVersion` with
-the app's version, so a literal in the plist that differs from it would be
-dropped without a word.
-This rule runs `check_apple_version_keys.dart` over the plist as a validation
-action: the app's `_validation` output group carries it, so building the app
-fails with the key, the value and what to set instead.
+the values of the app's `version` target, so a literal in the plist that
+differs from them would be dropped without a word. And the program reports the
+`flutter_application`'s version as `appBuildName` and `appBuildNumber`, so a
+`version` target that gives the bundle other values would ship two versions.
+The values of a rules_apple `apple_bundle_version` may come from
+`--embed_label`, known only when it runs, so both are checked then.
+
+This rule runs `check_apple_version_keys.dart` over the plist and the version
+file as a validation action: the app's `_validation` output group carries it,
+so building the app fails with the key, the values and what to set instead.
 """
 
 load("@build_bazel_rules_apple//apple:providers.bzl", "AppleBundleVersionInfo")
 load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
+load("//flutter:providers.bzl", "FlutterApplicationInputsInfo")
+load("//flutter/private:app_version.bzl", "apple_version")
 load("//flutter/private:exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
+
+def _shown(label):
+    """`label`, a `Label` or its string, as a BUILD file in the main repository writes it."""
+    text = str(label)
+    return text[2:] if text.startswith("@@//") else text
 
 def _impl(ctx):
     tools = portable_tools(ctx)
@@ -22,7 +34,17 @@ def _impl(ctx):
     args.add("--name", ctx.attr.plist_name or ctx.file.plist.short_path)
     version_file = ctx.attr.version[AppleBundleVersionInfo].version_file
     args.add("--version-file", version_file)
-    args.add("--app", ctx.attr.app_label)
+    args.add("--app", _shown(ctx.attr.app_label))
+
+    # What the program reports, as the bundle's keys would carry it.
+    program = ctx.attr.application[FlutterApplicationInputsInfo].inputs
+    expected = apple_version(program.build_name, program.build_number)
+    if expected.error:
+        fail("%s: the application %s: %s" % (ctx.label, _shown(ctx.attr.application.label), expected.error))
+    args.add("--application", _shown(ctx.attr.application.label))
+    args.add("--short-version-string", expected.short_version_string)
+    args.add("--build-version", expected.build_version)
+    args.add("--version-target", _shown(ctx.attr.version.label))
     args.add("--rule", ctx.attr.rule_name)
     args.add("--stamp", stamp)
     ctx.actions.run(
@@ -61,6 +83,12 @@ flutter_apple_version_check = rule(
             providers = [AppleBundleVersionInfo],
             mandatory = True,
         ),
+        "application": attr.label(
+            doc = "The `flutter_application` the app is built over, whose " +
+                  "version the bundle's must be.",
+            providers = [FlutterApplicationInputsInfo],
+            mandatory = True,
+        ),
         "app_label": attr.string(
             doc = "The label of the app, for the message.",
             mandatory = True,
@@ -83,5 +111,5 @@ flutter_apple_version_check = rule(
         ),
     },
     exec_groups = PORTABLE_EXEC_GROUPS,
-    doc = "Validates that an Info.plist leaves the version keys to the app's version.",
+    doc = "Validates that an Apple app's bundle version is its application's, and that its Info.plist leaves the version keys to it.",
 )
