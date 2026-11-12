@@ -79,7 +79,10 @@ dart_binary(
     compile_mode = "exe",
     main = "compile_fail_runner.dart",
     visibility = ["//visibility:public"],
-    deps = ["@rules_dart//dart/runfiles"],
+    deps = [
+        ":e2e_testing",
+        "@rules_dart//dart/runfiles",
+    ],
 )
 
 # Records an action's command line for `compile_fail_test`.

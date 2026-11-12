@@ -8,12 +8,13 @@
 /// runfiles under its `execroot`, at their exec paths. This links them into a
 /// fresh directory at those paths, as Bazel's sandbox does, writes the param
 /// files there, makes the directories the outputs go in, and runs the command
-/// there with the action's environment alone.
+/// there with the action's environment alone, as Bazel runs it locally.
 library;
 
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:rules_flutter_e2e_testing/action_environment.dart';
 import 'package:runfiles/runfiles.dart';
 
 Future<void> main() async {
@@ -76,10 +77,12 @@ Future<int> _run(Map<String, Object?> config, Runfiles runfiles) async {
       _executable(argv.first, execroot.path),
       argv.skip(1).toList(),
       workingDirectory: execroot.path,
-      environment: {
-        ...(action['env']! as Map<String, Object?>).cast<String, String>(),
-        'TMPDIR': tmp.path,
-      },
+      environment: actionEnvironment(
+        (action['env']! as Map<String, Object?>).cast<String, String>(),
+        tmp: tmp.path,
+        host: Platform.environment,
+        windows: Platform.isWindows,
+      ),
       includeParentEnvironment: false,
     );
     final output = '${result.stdout}${result.stderr}';
@@ -123,6 +126,6 @@ Future<int> _run(Map<String, Object?> config, Runfiles runfiles) async {
 /// [command] as the action names it: an exec path, relative to [execroot],
 /// or a program found on the action's own `PATH`.
 String _executable(String command, String execroot) =>
-    command.contains('/') && !command.startsWith('/')
+    command.contains('/') && !File(command).isAbsolute
     ? '$execroot/$command'
     : command;

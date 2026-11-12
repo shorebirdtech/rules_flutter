@@ -4,12 +4,16 @@ library;
 import 'dart:io';
 
 /// Launches [binary] with [environment] added to the process's own, waits up
-/// to [timeout] for the app to write [markerFile], and exits 1 unless the file
-/// holds exactly [expected].
+/// to [timeout] for the app to write [markerFile], and throws a [StateError]
+/// unless the file holds exactly [expected].
 ///
 /// The app writes the marker from `main()`; the test points its temp
 /// directory at the marker's directory. [forwardOutput] copies the app's
 /// stdout and stderr to the test log, to surface loader errors.
+///
+/// Returns, or throws, only once the app has exited, so the caller may delete
+/// the marker's directory: on Windows a directory a running program holds a
+/// file or its working directory in cannot be deleted.
 Future<void> runUntilMarker({
   required String binary,
   required File markerFile,
@@ -45,18 +49,19 @@ Future<void> runUntilMarker({
     }
 
     if (contents == null) {
-      stderr.writeln(
-        'FAIL: app never wrote ${markerFile.path} — it likely '
-        'crashed before main() completed (native library failed to load?).',
+      throw StateError(
+        'app never wrote ${markerFile.path} — it likely crashed before '
+        'main() completed (native library failed to load?).',
       );
-      exit(1);
     }
     stdout.writeln('App recorded: "$contents"');
     if (contents != expected) {
-      stderr.writeln('FAIL: expected "$expected" but got "$contents".');
-      exit(1);
+      throw StateError('expected "$expected" but got "$contents".');
     }
   } finally {
-    app?.kill();
+    if (app != null) {
+      app.kill();
+      await app.exitCode;
+    }
   }
 }

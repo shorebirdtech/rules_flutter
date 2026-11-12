@@ -57,10 +57,7 @@ Future<void> main() async {
       'worked at runtime.',
     );
   } finally {
-    try {
-      markerDir.deleteSync(recursive: true);
-    } on FileSystemException {
-      // The app may still hold the dir briefly on Windows; not a failure.
-    }
+    // After the app has exited, which `runUntilMarker` waits for.
+    markerDir.deleteSync(recursive: true);
   }
 }
