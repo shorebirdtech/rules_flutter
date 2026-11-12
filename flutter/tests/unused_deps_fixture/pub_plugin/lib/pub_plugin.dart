@@ -1,0 +1,1 @@
+int pubPlugin() => 1;

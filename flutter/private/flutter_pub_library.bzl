@@ -23,12 +23,12 @@ pass through rules_dart. It accepts rules_dart's own `pub_package_member` too,
 which a pure-Dart package is, so one cycle can mix packages of both kinds.
 """
 
-load("@rules_dart//dart:providers.bzl", "DartInfo", "DartPackageMetadataInfo")
+load("@rules_dart//dart:providers.bzl", "DartInfo", "DartPackageMetadataInfo", "DartUsedWithoutImportInfo")
 load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "PORTABLE_EXEC_GROUPS", "SUMMARY_ATTRS", "dart_info", "package_identity_attrs", "runtime_reset")
 load("@rules_dart//dart/pub:pub_library.bzl", "DartPackageMemberInfo", "dart_package_member_info")
 load("@rules_java//java/common:java_info.bzl", "JavaInfo")
 load("//flutter/private:flutter_info.bzl", "flutter_info")
-load("//flutter/private:flutter_library.bzl", "SKY_ENGINE_ATTR", "flutter_analyzable_info_of_packages")
+load("//flutter/private:flutter_library.bzl", "SKY_ENGINE_ATTR", "bundled_without_import", "flutter_analyzable_info_of_packages")
 load("//flutter/private:flutter_plugin.bzl", "PLUGIN_PACKAGE_ATTRS", "plugin_contributions")
 
 FlutterPubMemberInfo = provider(
@@ -54,17 +54,26 @@ def _flutter_pub_member_impl(ctx):
         srcs = ctx.files.srcs,
         resources = ctx.files.resources,
     )
+    declares_plugin = bool(ctx.attr.platforms)
+    contributions = plugin_contributions(
+        ctx,
+        package_name,
+        member.package.package_root,
+        declares_plugin = declares_plugin,
+    )
+
+    # A plugin is registered by native code, and what a package bundles is
+    # loaded by key, so a library that depends on the package for either
+    # need not import it. Its cycle's library says so for it.
+    used_without_import = [DartUsedWithoutImportInfo()] if declares_plugin else bundled_without_import(
+        contributions["pub_fonts"],
+        contributions["pub_assets"],
+        contributions["pub_shaders"],
+    )
     return [
         member,
-        FlutterPubMemberInfo(
-            contributions = plugin_contributions(
-                ctx,
-                package_name,
-                member.package.package_root,
-                declares_plugin = bool(ctx.attr.platforms),
-            ),
-        ),
-    ]
+        FlutterPubMemberInfo(contributions = contributions),
+    ] + used_without_import
 
 flutter_pub_member = rule(
     implementation = _flutter_pub_member_impl,
@@ -116,7 +125,10 @@ def _flutter_pub_library_impl(ctx):
         ),
         flutter_analyzable_info_of_packages(ctx, packages, srcs, resources),
         flutter_info(deps = ctx.attr.deps, **contributions),
-    ]
+        # Depending on the library brings each member to the app, so it is
+        # used without an import when one of them is: a plugin, or a package
+        # that bundles fonts, assets or shaders.
+    ] + ([DartUsedWithoutImportInfo()] if [m for m in ctx.attr.members if DartUsedWithoutImportInfo in m] else [])
 
 flutter_pub_library = rule(
     implementation = _flutter_pub_library_impl,

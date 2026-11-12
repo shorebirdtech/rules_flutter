@@ -1,0 +1,15 @@
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_library")
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "unused_deps_bundled",
+)
+
+# A package an app may depend on for its asset alone, which it loads by key.
+flutter_library(
+    name = "bundled",
+    srcs = ["lib/bundled.dart"],
+    assets = ["assets/note.txt"],
+    package = ":pubspec-metadata",
+    visibility = ["//flutter/tests/unused_deps_fixture:__pkg__"],
+)

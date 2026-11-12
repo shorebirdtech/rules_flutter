@@ -431,7 +431,7 @@ flutter_macos_app(
 
 `dart_package_metadata` is the Bazel stand-in for `pubspec.yaml`: one per package, and every target of the package points at it with `package`. Its `package_name` should match the pubspec's `name:`, because it is the name your `package:my_app/...` imports use and the name hot reload keys libraries by. Bazel doesn't compare the two, but Gazelle does if you use it to write BUILD files. The target's name is up to you. `pubspec-metadata` is the convention, and the name Gazelle gives it.
 
-`flutter_application` compiles the Dart and bundles the assets. Each platform then has a macro, here `flutter_macos_app`, that wraps it in an app you can run. `deps` lists the packages your code imports, by their `@deps` targets. `@rules_flutter//flutter:material_icons` is the Material icon font, which `uses-material-design: true` adds in a `flutter build`.
+`flutter_application` compiles the Dart and bundles the assets. Each platform then has a macro, here `flutter_macos_app`, that wraps it in an app you can run. `deps` lists the packages your code imports, by their `@deps` targets, and only those: a package none of your files imports fails the build, unless the app uses it some other way (see [Pub packages](#pub-packages)). `@rules_flutter//flutter:material_icons` is the Material icon font, which `uses-material-design: true` adds in a `flutter build`.
 
 Without the optional lines, the BUILD file for a fresh `flutter create` project is:
 
@@ -608,6 +608,14 @@ flutter_application(
 ```
 
 The version comes from the lock, so the BUILD file doesn't repeat it. After editing `pubspec.yaml`, regenerate the lock (see [Regenerating pubspec.lock](#regenerating-pubspeclock)).
+
+Each target's `deps` are checked against its files' imports, both ways. A file that imports a package missing from `deps` fails the build, and so does a package in `deps` that no file imports or exports:
+
+```
+@@//:my_app: depends on @@deps//:collection, but none of its files imports or exports a library of it. Remove @@deps//:collection from deps of @@//:my_app.
+```
+
+The unneeded edge compiles nothing in, but every change to that package would rebuild everything above it, so usually you remove it. Two kinds of package are used without an import, and may be in `deps` anyway: a plugin, which the app registers from native code, and a package with fonts, assets or shaders, which the app loads by key, as it does `cupertino_icons`' font. A rule of your own whose targets are used that way says so by returning `DartUsedWithoutImportInfo` from `@rules_dart//dart:providers.bzl`. To keep any other package, turn the second check off with `features = ["-dart_unused_deps"]` on the target, in the BUILD file's `package()`, or with `--features=-dart_unused_deps` for the whole build.
 
 A plugin needs nothing extra. A pub package that is a Flutter plugin arrives as a plugin target, and the platform macros register it and build its native code. An Android app links the Kotlin and Java only of the plugins it depends on. A plugin that is in the lock but not in the app's dependencies adds no code, manifest entries or Maven requirements to the APK.
 

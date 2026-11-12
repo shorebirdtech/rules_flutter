@@ -1,7 +1,7 @@
 """Implementation of the flutter_library rule."""
 
-load("@rules_dart//dart:providers.bzl", "DartInfo")
-load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "PORTABLE_EXEC_GROUPS", "RUNTIME_INDEPENDENT_ATTR", "SUMMARY_ATTRS", "dart_analyzable_info", "dart_info", "derive_package_root", "library_package", "package_identity_attrs", "runtime_reset_when_independent")
+load("@rules_dart//dart:providers.bzl", "DartInfo", "DartUsedWithoutImportInfo")
+load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "LIBRARY_IMPORT_CHECKER_ATTRS", "PORTABLE_EXEC_GROUPS", "RUNTIME_INDEPENDENT_ATTR", "SUMMARY_ATTRS", "dart_analyzable_info", "dart_info", "derive_package_root", "library_import_check", "library_package", "package_identity_attrs", "runtime_reset_when_independent")
 load("//flutter:providers.bzl", "FlutterFontFamilyInfo", "FlutterInfo")
 load("//flutter/private:flutter_font.bzl", "FONTS_ATTR")
 load("//flutter/private:flutter_info.bzl", "flutter_info")
@@ -173,6 +173,23 @@ def build_pub_contributions(ctx, package_name, package_root):
                 fail("%s: `%s` names %s, which is not the path of any file of its `%s` %s." % (ctx.label, attr_name, repr(path), listing, paths))
 
     return (extra_pub_fonts, extra_pub_assets, extra_pub_shaders)
+
+def bundled_without_import(pub_fonts, pub_assets, pub_shaders):
+    """`DartUsedWithoutImportInfo` for a package that puts files in the app's bundle, or nothing.
+
+    An app gets a package's fonts, assets and shaders by depending on it, and
+    loads them by key (`packages/<name>/<path>`), not by an import: a
+    dependent that lists `cupertino_icons` for its font imports nothing of it.
+
+    Args:
+        pub_fonts: The package's own fonts, from `build_pub_contributions`.
+        pub_assets: Its own assets.
+        pub_shaders: Its own shaders.
+
+    Returns:
+        A list of the provider, or an empty one.
+    """
+    return [DartUsedWithoutImportInfo()] if pub_fonts or pub_assets or pub_shaders else []
 
 def ships_on(platforms, target_platform):
     """Whether a pub asset or shader restricted to `platforms` is in a bundle for `target_platform`.
@@ -416,7 +433,9 @@ def _flutter_library_impl(ctx):
             dependency_attributes = ["deps"],
             extensions = ["dart"],
         ),
-    ]
+        # Its imports, checked against its `deps` as `dart_library`'s are,
+        # every dep among them named by an import or export of `srcs`.
+    ] + library_import_check(ctx, list(info.packages)) + bundled_without_import(extra_pub_fonts, extra_pub_assets, extra_pub_shaders)
 
 # A library's `data`, as `dart_library`'s: the runfiles of whatever runs it on
 # the host, never what an application ships.
@@ -470,7 +489,7 @@ _LIBRARY_ATTRS = package_identity_attrs() | {
               "not listed here is not found.",
         allow_files = True,
     ),
-} | RUNTIME_INDEPENDENT_ATTR | SUMMARY_ATTRS
+} | RUNTIME_INDEPENDENT_ATTR | SUMMARY_ATTRS | LIBRARY_IMPORT_CHECKER_ATTRS
 
 flutter_library = rule(
     implementation = _flutter_library_impl,
