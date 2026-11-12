@@ -831,7 +831,7 @@ def flutter_build_assets(ctx, tools, output_dir, deps, target_platform, compiled
     )
     unlisted_copies = unlisted_copies + [(notices_asset_key(web), notices)]
 
-    # Icon tree shaking: enabled only in non-debug mode with tree_shake_icons=True.
+    # Icon tree shaking: in profile and release builds with tree_shake_icons=True.
     tree_shake_icons = (
         inputs.tree_shake_icons and
         not is_debug and
@@ -1456,7 +1456,8 @@ FLUTTER_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | {
     "tree_shake_icons": attr.bool(
         doc = "If True, tree-shake icon fonts to only include used glyphs. " +
               "Requires all IconData instances to be const, and one font file in each icon font family; " +
-              "otherwise the build fails, as `flutter build` does. Only applies to release builds.",
+              "otherwise the build fails, as `flutter build` does. Applies to profile and release builds; " +
+              "a debug build keeps every glyph, as `flutter build` does.",
         default = True,
     ),
     "additional_licenses": attr.label_list(
