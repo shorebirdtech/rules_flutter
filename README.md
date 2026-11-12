@@ -184,43 +184,49 @@ rules_dart rules and flags you use directly.
     app you compose yourself `flutter_apple_bundle_version(application = ...)`:
     `flutter_ios_info_plist_gen`/`flutter_macos_info_plist_gen` now write
     `$(FLUTTER_BUILD_NAME)`/`$(FLUTTER_BUILD_NUMBER)`, which need a `version`.
+41. A Dart dependency in `deps` that none of the target's files imports fails
+    the build, in `flutter_library`, `flutter_plugin`, `flutter_application`
+    and `flutter_test` alike. Remove it. Plugins and packages with fonts,
+    assets or shaders may stay without an import; a rule of your own that is
+    used that way returns `DartUsedWithoutImportInfo`.
+    `features = ["-dart_unused_deps"]` turns the check off.
 
 **Flags and tests**
 
-41. A plain `bazel build` for Android, Linux or Windows strips the Dart
+42. A plain `bazel build` for Android, Linux or Windows strips the Dart
     snapshot, as `-c opt` did and `flutter build` does;
     `extra_gen_snapshot_options = ["--no-strip"]` keeps the symbols.
-42. `--@rules_flutter//flutter:extra_dart_defines` →
+43. `--@rules_flutter//flutter:extra_dart_defines` →
     `--@rules_dart//dart:extra_dart_defines`.
     `--@rules_flutter//flutter:wasm_opt_cores` → `wasm_opt_cpus`.
-43. `flutter_desktop_integration_test` → `flutter_desktop_app_integration_test`;
+44. `flutter_desktop_integration_test` → `flutter_desktop_app_integration_test`;
     `flutter_web_bundle_integration_test` → `flutter_web_app_integration_test`.
     Integration test rules require `src`.
-44. `flutter_suite_program` → `flutter_test_program`. A `flutter_test` suite
+45. `flutter_suite_program` → `flutter_test_program`. A `flutter_test` suite
     that registers no test now fails. A library's `data` reaches its tests'
     runfiles.
-45. `go_router_library` (rules_dart) → `go_router_codegen` from
+46. `go_router_library` (rules_dart) → `go_router_codegen` from
     `@rules_flutter//flutter/ext/go_router:defs.bzl`.
 
 **Dev tool**
 
-46. `flutter_bazel --config <mode>` → `--compilation_mode` (`-c` unchanged);
+47. `flutter_bazel --config <mode>` → `--compilation_mode` (`-c` unchanged);
     `--config` now passes a Bazel config.
-47. `app.restart` without `fullRestart` → hot reload; pass
+48. `app.restart` without `fullRestart` → hot reload; pass
     `fullRestart: true` to restart.
 
 **Rule authors**
 
-48. `flutter_kernel_target` → `flutter_kernel`; `flutter_aot_target` →
+49. `flutter_kernel_target` → `flutter_kernel`; `flutter_aot_target` →
     `flutter_aot_snapshot`; `host_transition` → `host_platform_transition`;
     the `flutter_dev_files` aspect → `flutter_dev_files_aspect`.
-49. `FlutterInfo.asset_dirs` → `pub_assets`; `FlutterInfo.native_assets`,
+50. `FlutterInfo.asset_dirs` → `pub_assets`; `FlutterInfo.native_assets`,
     `FlutterNativeAssetInfo`, `FlutterDataAssetInfo`,
     `FlutterInfo.data_assets` → rules_dart's code and data assets;
     `FlutterApplicationInfo.package_config` → removed;
     `FlutterExecToolsInfo.tool_files` → `FlutterSdkInfo.sdk_files`;
     `FlutterTestProgramInfo.coverage_libraries` → `packages`.
-50. `FlutterApplicationInfo.bundled_code_assets` → removed: which code
+51. `FlutterApplicationInfo.bundled_code_assets` → removed: which code
     assets ship is known only in an action, which reads `program_assets`
     (`program_assets_action_args`). `native_assets_manifest` is the manifest
     the app ships in `flutter_assets`.
