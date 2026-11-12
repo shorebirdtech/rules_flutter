@@ -313,6 +313,25 @@ flutter_test(
     ],
 )
 
+# Exercises: the target ends once its suite is reported, though a process the
+# test started still holds flutter_tester's stdout. Its child outlives the
+# target's timeout, so a runner that waited for it would TIMEOUT. No `sh` on
+# Windows.
+flutter_test(
+    name = "leftover_child_test",
+    package_name = "hello_world",
+    timeout = "short",
+    main = "test/leftover_child_test.dart",
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = [
+        "@deps//:flutter",
+        "@deps//:flutter_test",
+    ],
+)
+
 flutter_test(
     name = "bazel_protocol_test",
     package_name = "hello_world",
