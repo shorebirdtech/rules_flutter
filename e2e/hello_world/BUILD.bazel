@@ -319,8 +319,8 @@ flutter_test(
 # Windows.
 flutter_test(
     name = "leftover_child_test",
-    timeout = "short",
     package_name = "hello_world",
+    timeout = "short",
     main = "test/leftover_child_test.dart",
     target_compatible_with = select({
         "@platforms//os:windows": ["@platforms//:incompatible"],
