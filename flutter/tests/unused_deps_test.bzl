@@ -29,14 +29,18 @@ def _unused_dep_judged_test_impl(ctx):
 _unused_dep_judged_test = analysistest.make(_unused_dep_judged_test_impl)
 
 def _plugin_dep_exempt_test_impl(ctx):
-    # A plugin among `deps` is not judged.
+    # A plugin among `deps` is marked exempt: the check never calls it unused,
+    # and credits it for its own files only.
     env = analysistest.begin(ctx)
     argv = _check_argv(env)
     asserts.true(env, "--check-unused" in argv, "the unused check is off: %s" % argv)
-    asserts.false(env, "plugin\t" in argv, "a plugin dependency is judged: %s" % argv)
+    asserts.true(env, ctx.attr.dep + "\texempt" in argv, "the plugin dependency is not exempt: %s" % argv)
     return analysistest.end(env)
 
-_plugin_dep_exempt_test = analysistest.make(_plugin_dep_exempt_test_impl)
+_plugin_dep_exempt_test = analysistest.make(
+    _plugin_dep_exempt_test_impl,
+    attrs = {"dep": attr.string(mandatory = True)},
+)
 
 def _used_without_import_test_impl(ctx):
     env = analysistest.begin(ctx)
@@ -67,10 +71,12 @@ def unused_deps_test_suite(name):
     _plugin_dep_exempt_test(
         name = "plugin_dep_exempt_test",
         target_under_test = _FIXTURE + ":with_plugin",
+        dep = "unused_deps_fixture/plugin:plugin",
     )
     _plugin_dep_exempt_test(
         name = "pub_plugin_dep_exempt_test",
         target_under_test = _FIXTURE + ":with_pub_plugin",
+        dep = "unused_deps_fixture/pub_plugin:pub_plugin",
     )
     _used_without_import_test(
         name = "bundled_used_without_import_test",
