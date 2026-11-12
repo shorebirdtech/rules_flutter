@@ -14,6 +14,10 @@ rules_flutter compiles Dart to kernel or AOT native code, bundles assets, and pa
   - Improving consistency across rules_dart and rules_flutter
   - Handling various edge cases
   - Added features where the new feature's ideal name was already taken
+- **Integration tests.** package:integration_test suites run as `bazel test`.
+- **Add-to-app.** Existing iOS, macOS and Android apps can embed Flutter.
+- **Custom engines.** Build against customized Flutter, e.g. Shorebird.
+- **Flavors.** Support for Flutter's flavors for managing e.g. dev vs. staging vs. prod app variants.
 
 ### Migrating from 0.0.8
 
