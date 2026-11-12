@@ -28,9 +28,11 @@ toolchain. Without the cut the generator cannot build against a rules_dart older
 than Dart 3.13, and *with* it the subset honestly matches the SDK constraint it
 declares. When rules_dart ships a newer Dart, nothing here needs undoing.
 
-The patches under `patches/` are those seven cuts. They are overwhelmingly
-deletions (+14/-199 lines), which is deliberate: a deletion that no longer
-applies is a loud failure, where a rewrite would quietly drift.
+The six files under `patches/` are those seven cuts, one for each source file
+cut: `io.patch` is the seventh, and the other five carry the six import edges
+between them. They are overwhelmingly deletions (+14/-199 lines), which is
+deliberate: a deletion that no longer applies is a loud failure, where a
+rewrite would quietly drift.
 
 ### What a Flutter version bump must re-check
 
