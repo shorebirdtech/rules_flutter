@@ -9,9 +9,9 @@ Output bundle structure:
     my_app/
       my_app.exe             (Win32 runner executable)
       flutter_windows.dll    (Flutter engine)
-      app.so                 (AOT-compiled Dart code as ELF)
       *.dll                  (native plugin libraries, if any)
       data/
+        app.so               (AOT-compiled Dart code as ELF)
         flutter_assets/
           AssetManifest.bin
           FontManifest.json
