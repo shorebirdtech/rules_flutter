@@ -236,7 +236,7 @@ void main(List<String> args) async {
   final shardStatus = Platform.environment['TEST_SHARD_STATUS_FILE'];
   if (shardStatus != null) File(shardStatus).writeAsStringSync('');
 
-  exitCode = await _runOnce(
+  final code = await _runOnce(
     tester: tester,
     icu: icu,
     dill: dill,
@@ -250,6 +250,14 @@ void main(List<String> args) async {
     impeller: settings['FLUTTER_TEST_IMPELLER'] == '1',
     loader: {...launched, ...loader},
   );
+  // Exit here, not when the event loop drains: the run is over and
+  // reported, and anything still open in this process (the tester's output
+  // pipes, held by whatever outlived it; a socket whose close never
+  // completes) would otherwise keep the target alive, silent, until Bazel's
+  // timeout kills it. On 11-12 a suite printed "2 passed" and then sat
+  // until TIMEOUT in 300s.
+  await Future.wait([stdout.flush(), stderr.flush()]);
+  exit(code);
 }
 
 /// The loader's search path for a `flutter_tester_binary`'s Native Assets.
@@ -311,7 +319,14 @@ Future<int> _runOnce({
       loader: loader,
     );
   } finally {
-    await harness.dispose();
+    // Bounded: what it closes is already closed or dead on every path that
+    // gets here, and the result is decided. A close that never answers must
+    // not hold the result back.
+    await harness.dispose().timeout(
+      const Duration(seconds: 10),
+      onTimeout: () =>
+          stderr.writeln('flutter_test: the harness did not close in 10s.'),
+    );
   }
 }
 
