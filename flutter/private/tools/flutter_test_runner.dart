@@ -252,10 +252,9 @@ void main(List<String> args) async {
   );
   // Exit here, not when the event loop drains: the run is over and
   // reported, and anything still open in this process (the tester's output
-  // pipes, held by whatever outlived it; a socket whose close never
-  // completes) would otherwise keep the target alive, silent, until Bazel's
-  // timeout kills it. On 11-12 a suite printed "2 passed" and then sat
-  // until TIMEOUT in 300s.
+  // pipes, held by a process the test started that outlived it; a socket
+  // whose close never completes) would otherwise keep the target alive,
+  // silent, until Bazel's timeout kills it.
   await Future.wait([stdout.flush(), stderr.flush()]);
   exit(code);
 }
@@ -319,9 +318,8 @@ Future<int> _runOnce({
       loader: loader,
     );
   } finally {
-    // Bounded: what it closes is already closed or dead on every path that
-    // gets here, and the result is decided. A close that never answers must
-    // not hold the result back.
+    // Bounded: the result is decided, and a close that never answers must
+    // not hold it back.
     await harness.dispose().timeout(
       const Duration(seconds: 10),
       onTimeout: () =>
@@ -374,6 +372,9 @@ class _Harness {
   Process? _process;
   WebSocket? _ws;
   bool _socketClosed = false;
+
+  /// Done when each of the tester's output pipes closes.
+  final _testerOutput = <Future<void>>[];
 
   /// Per-channel inbound dispatchers, keyed by inputId.
   final Map<int, void Function(Object?)> _inbound = {};
@@ -449,14 +450,23 @@ class _Harness {
   /// delivered... Otherwise the signal could not be sent, usually meaning that
   /// the process is already dead." The `try` around it was guarding a failure
   /// that cannot happen, while the value that does report it went unread.
+  ///
+  /// The kill comes first, so a close that never answers can't leave the
+  /// tester running. Last, the tester's output is drained: its exit code can
+  /// arrive before its pipes deliver their last lines, which on a crash are
+  /// the only word on why. Bounded, because a process the test started may
+  /// hold those pipes open long after the tester is gone.
   Future<void> dispose() async {
+    _process?.kill(ProcessSignal.sigkill);
     try {
       await _ws?.close();
     } catch (_) {}
-    _process?.kill(ProcessSignal.sigkill);
     try {
       await _server.close(force: true);
     } catch (_) {}
+    await Future.wait(
+      _testerOutput,
+    ).timeout(const Duration(seconds: 2), onTimeout: () => const []);
   }
 
   Future<int> run({
@@ -529,7 +539,7 @@ class _Harness {
       r'(?:Observatory|The Dart VM service is) (?:listening on|listening on) (http\S+)',
     );
 
-    _process!.stdout
+    final out = _process!.stdout
         .transform(utf8.decoder)
         .transform(const LineSplitter())
         .listen((line) {
@@ -541,12 +551,16 @@ class _Harness {
             }
           }
         });
-    _process!.stderr
+    final err = _process!.stderr
         .transform(utf8.decoder)
         .transform(const LineSplitter())
         .listen((line) {
           stderr.writeln('[flutter_tester] $line');
         });
+    _testerOutput.addAll([
+      for (final sub in [out, err])
+        sub.asFuture<void>().then((_) {}, onError: (_) {}),
+    ]);
 
     // A coverage run that cannot reach the VM service cannot produce what it
     // exists for, so it ends here rather than running the whole suite first
