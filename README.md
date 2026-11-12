@@ -4,17 +4,23 @@ Bazel rules for building Flutter apps.
 
 > **Status: beta.** It works today, but the public API may still change. Feedback and contributions are welcome.
 
-rules_flutter compiles Dart to kernel or AOT native code, bundles assets, and packages the result for macOS, iOS, Android, Linux, Windows, and the web. It builds on [rules_dart](https://github.com/aran/rules_dart) for Dart compilation and hands platform packaging to the rulesets that already do it well: `rules_apple`, `rules_android`, and friends. It also ships a dev tool, `flutter_bazel`, that gives you hot reload, hot restart, and an HTTP channel for driving a running app from a script.
+rules_flutter compiles Dart to kernel or AOT native code, bundles assets, and packages the result for macOS, iOS, Android, Linux, Windows, and the web. It builds on [rules_dart](https://github.com/aran/rules_dart) for Dart compilation and hands platform packaging to the rulesets that already do it well: `rules_apple`, `rules_android`, and friends. It also ships a dev tool, `flutter_bazel`, that gives you hot reload, hot restart, and an HTTP channel for driving a running app from a script. It also supports [frustrate](https://github.com/aran/frustrate), which allows Rust code to be used in apps built with rules_flutter.
 
 ## What's New
 
+- **Many breaking API changes.** See detailed changelog notes. In general the
+  reasons are:
+  - More idiomatic Bazel APIs
+  - Improving consistency across rules_dart and rules_flutter
+  - Handling various edge cases
+  - Added features where the new feature's ideal name was already taken
+
 ### Migrating from 0.0.8
 
-Each step names the old API and the new one. The commit that carries that
-change's `Changelog:` line, and the sections below, give the details. rules_dart
+Summary of what to do, with details below. rules_dart
 changed too: also follow its
 [migration guide](https://github.com/aran/rules_dart#migrating-from-08) for the
-rules_dart rules and flags you use directly.
+rules_dart side.
 
 **MODULE.bazel**
 
