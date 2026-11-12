@@ -527,11 +527,14 @@ def flutter_ios_app(
             `testonly` application would otherwise fail analysis. The app is
             compatible with macOS (which builds it for iOS) and iOS only,
             whatever `target_compatible_with` adds, so `bazel build //...`
-            skips it on any other platform. The macro sets
+            skips it on any other platform. `tags` defaults to
+            `["manual"]`, so `bazel build //...` skips the app and every
+            target the macro declares for it; pass `tags` to replace that
+            on all of them. The macro sets
             `bundle_id`, `bundle_name`, `entitlements`, `families`,
             `minimum_os_version`, `infoplists`, `version`,
             `launch_storyboard`, `resources`, `provisioning_profile`,
-            `app_icons`, `deps` and `tags` itself, so passing any of those
+            `app_icons` and `deps` itself, so passing any of those
             here is a duplicate-keyword error — use the named parameter
             instead.
     """

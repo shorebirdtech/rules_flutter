@@ -421,9 +421,11 @@ def flutter_macos_app(
             every target the macro declares has, since one that depends on a
             `testonly` application would otherwise fail analysis. The app is
             compatible with macOS only, whatever `target_compatible_with`
-            adds, so `bazel build //...` skips it on any other platform. The
-            macro sets `app_icons` itself, so pass the named parameter
-            instead.
+            adds, so `bazel build //...` skips it on any other platform.
+            `tags` defaults to `["manual"]`, so `bazel build //...` skips
+            the app and every target the macro declares for it; pass `tags`
+            to replace that on all of them. The macro sets `app_icons`
+            itself, so pass the named parameter instead.
     """
     display_name = app_name or name
     tags = kwargs.pop("tags", ["manual"])
