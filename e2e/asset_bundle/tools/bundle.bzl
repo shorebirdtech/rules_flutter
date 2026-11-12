@@ -62,6 +62,10 @@ def bundled_app(name, assets = [], deps = [], package = "//:pubspec-metadata", m
         main = main,
         package = package,
         deps = ["@deps//:flutter"] + deps,
+        # The program imports none of `deps`: what is under test is what they
+        # put in the bundle, licences included, which no import shows. The
+        # unused-dependency check would refuse the very edges being tested.
+        features = kwargs.pop("features", []) + ["-dart_unused_deps"],
         **kwargs
     )
     app_bundle(

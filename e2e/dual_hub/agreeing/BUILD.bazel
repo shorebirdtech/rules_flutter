@@ -1,6 +1,11 @@
 load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_library")
 load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata")
 
+# What these targets test is which package records reach a program's closure
+# through deps that nothing imports, so the unused-dependency check is off:
+# removing the deps, or importing them, would leave nothing to test.
+package(features = ["-dart_unused_deps"])
+
 dart_package_metadata(
     name = "pubspec-metadata",
     package_name = "agreeing",

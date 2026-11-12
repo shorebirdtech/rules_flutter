@@ -234,6 +234,9 @@ tree_of(
 flutter_web_app(
     name = "web_with_licence_fixtures",
     application = ":app_with_licence_fixtures",
+    # As `bundled_app`'s: the program imports none of the packages whose
+    # licences are under test.
+    features = ["-dart_unused_deps"],
     js_fallback = False,
 )
 

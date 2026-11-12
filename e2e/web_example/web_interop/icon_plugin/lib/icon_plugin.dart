@@ -5,6 +5,7 @@ library;
 import 'dart:js_interop';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_web_plugins/flutter_web_plugins.dart';
 import 'package:web/web.dart' as web;
 
 /// The plugin class `flutter.plugin.platforms.web.pluginClass` names.
@@ -13,7 +14,7 @@ class IconPlugin {
   static IconData? shown;
 
   /// Called by the generated plugin registrant at startup.
-  static void registerWith(Object? registrar) {
+  static void registerWith(Registrar registrar) {
     shown = Icons.bolt;
     web.document.title = 'icon_plugin ${'registered'.toJS.toDart}';
   }

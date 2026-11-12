@@ -75,10 +75,7 @@ flutter_application(
     main = "lib/glyph_main.dart",
     package = ":pubspec-metadata",
     target_compatible_with = _WEB_ONLY,
-    deps = _DEPS + [
-        "//web_interop/icon_plugin",
-        "@deps//:flutter_web_plugins",
-    ],
+    deps = _DEPS + ["//web_interop/icon_plugin"],
 )
 
 flutter_web_app(

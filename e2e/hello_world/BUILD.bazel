@@ -433,8 +433,7 @@ build_variant_tests(
             package = ":pubspec-metadata",
             tags = ["manual"],
             deps = [
-                "//asserts_dep",
-                "//asserts_violation_dep",
+                dep,
                 "@deps//:flutter_test",
             ],
         ),
@@ -456,9 +455,11 @@ build_variant_tests(
             test = ":const_violation_%s_test" % where,
         ),
     )
-    for where in [
-        "entry",
-        "dep",
+    # What each one's test imports: the library the constant is in, or the
+    # one whose constructor it breaks.
+    for where, dep in [
+        ("entry", "//asserts_dep"),
+        ("dep", "//asserts_violation_dep"),
     ]
 ]
 
