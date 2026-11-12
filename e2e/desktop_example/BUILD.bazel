@@ -238,8 +238,11 @@ flutter_windows_bundle(
 
 # Approach 3: a custom runner (a `cc_binary` from rules_cc).
 #
-# flutter_windows_engine provides CcInfo so cc_binary can depend on it.
-# System libs (user32.lib, ole32.lib) come from the CC toolchain (MSVC).
+# flutter_windows_engine provides CcInfo so cc_binary can depend on it. The
+# runner uses the engine's C API: it makes the top-level window, parents the
+# Flutter view in it and calls the registrant, which `flutter create`'s runner
+# does through the C++ client wrapper. System libs (user32.lib, ole32.lib) come
+# from the CC toolchain (MSVC).
 cc_binary(
     name = "windows_custom_runner_bin",
     srcs = [
