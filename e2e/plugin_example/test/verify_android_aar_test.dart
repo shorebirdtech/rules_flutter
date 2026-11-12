@@ -164,7 +164,7 @@ Directory _extract(Directory scratch, String path) => ExtractedArchive.fromPath(
 
 Set<String> _files(Directory dir) => {
   for (final f in dir.listSync(recursive: true))
-    if (f is File) f.path.substring(dir.path.length + 1),
+    if (f is File) f.path.substring(dir.path.length + 1).replaceAll(r'\', '/'),
 };
 
 void _verifyRepo(

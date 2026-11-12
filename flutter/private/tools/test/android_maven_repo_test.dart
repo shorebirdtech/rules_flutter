@@ -116,7 +116,8 @@ void main() {
         'path_provider_android_release-1.0';
     final files = [
       for (final f in Directory('${tmp.path}/repo').listSync(recursive: true))
-        if (f is File) f.path.substring('${tmp.path}/repo/'.length),
+        if (f is File)
+          f.path.substring('${tmp.path}/repo/'.length).replaceAll(r'\', '/'),
     ]..sort();
     expect(files, [
       '$base.aar',

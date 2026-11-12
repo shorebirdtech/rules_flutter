@@ -158,7 +158,7 @@ void _resolve(
   for (final f in Directory(repo).listSync(recursive: true)) {
     if (f is! File || !f.path.endsWith('.pom')) continue;
     final pom = Pom(f.path, f.readAsStringSync());
-    final relative = f.path.substring(repo.length + 1);
+    final relative = f.path.substring(repo.length + 1).replaceAll(r'\', '/');
     final expected =
         '${pom.group?.replaceAll('.', '/')}/${pom.artifact}/${pom.version}/'
         '${pom.artifact}-${pom.version}.pom';
