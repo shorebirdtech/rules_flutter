@@ -210,9 +210,12 @@ def _generated_main_impl(ctx):
     checks = [a for a in analysistest.target_actions(env) if a.mnemonic == "DartImportCheck"]
     asserts.equals(env, 1, len(checks), "one import check")
     if checks:
-        checked = " ".join(checks[0].argv)
-        asserts.true(env, "extra.dart" in checked, "the user's source is checked: %s" % checked)
-        asserts.false(env, "generated_main.dart" in checked, "the rule's own file is not: %s" % checked)
+        argv = checks[0].argv
+        checked = [argv[i + 1] for i in range(len(argv) - 1) if argv[i] == "--src"]
+        credited = [argv[i + 1] for i in range(len(argv) - 1) if argv[i] == "--use-src"]
+        asserts.true(env, [f for f in checked if f.endswith("extra.dart")], "the user's source is checked: %s" % argv)
+        asserts.false(env, [f for f in checked if f.endswith("generated_main.dart")], "the rule's own file is not checked: %s" % argv)
+        asserts.true(env, [f for f in credited if f.endswith("generated_main.dart")], "its imports count as uses of deps: %s" % argv)
     return analysistest.end(env)
 
 _generated_main_test = analysistest.make(_generated_main_impl, config_settings = _DBG)

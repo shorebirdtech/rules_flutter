@@ -169,9 +169,12 @@ def _web_unchecked_impl(ctx):
     checks = [a for a in analysistest.target_actions(env) if a.mnemonic == "DartImportCheck"]
     asserts.equals(env, 1, len(checks), "one import check")
     if checks:
-        checked = " ".join(checks[0].argv)
-        asserts.true(env, "b_test.dart" in checked, "the user's source is checked: %s" % checked)
-        asserts.false(env, "flutter_test_config.dart" in checked, "the rule's own file is not: %s" % checked)
+        argv = checks[0].argv
+        checked = [argv[i + 1] for i in range(len(argv) - 1) if argv[i] == "--src"]
+        credited = [argv[i + 1] for i in range(len(argv) - 1) if argv[i] == "--use-src"]
+        asserts.true(env, [f for f in checked if f.endswith("b_test.dart")], "the user's source is checked: %s" % argv)
+        asserts.false(env, [f for f in checked if f.endswith("flutter_test_config.dart")], "the rule's own file is not checked: %s" % argv)
+        asserts.true(env, [f for f in credited if f.endswith("flutter_test_config.dart")], "its imports count as uses of deps: %s" % argv)
     return analysistest.end(env)
 
 _web_unchecked_test = analysistest.make(_web_unchecked_impl)

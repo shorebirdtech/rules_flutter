@@ -290,15 +290,6 @@ def flutter_compile_kernel(ctx, tools, aot = None, target_platform = None, track
         inputs.package,
     )
 
-    # `synthesize_app_package` appends the app's own package last.
-    import_checks = import_check_output_groups(
-        ctx,
-        ctx.executable._kernel_tool,
-        [f for f in [inputs.main] + inputs.srcs if f not in inputs.unchecked_srcs],
-        packages[-1],
-        inputs.deps,
-    )
-
     # Every file of the program, the app's own `main` included.
     program_files = all_srcs + ([inputs.main] if inputs.main else [])
 
@@ -412,6 +403,24 @@ def flutter_compile_kernel(ctx, tools, aot = None, target_platform = None, track
         all_srcs = all_srcs + [registrant]
     if staged_agent:
         all_srcs = all_srcs + [staged_agent, staged_native_agent]
+
+    # `synthesize_app_package` appends the app's own package last. What a rule
+    # wrote for the program (`unchecked_srcs`, the plugin registrant, the debug
+    # agent extensions) is compiled with it, so its imports are uses of `deps`;
+    # they are that rule's to get right, so the check judges only the user's.
+    generated = [f for f in inputs.unchecked_srcs if f.extension == "dart"]
+    if registrant:
+        generated.append(registrant)
+    if staged_agent:
+        generated.extend([staged_agent, staged_native_agent])
+    import_checks = import_check_output_groups(
+        ctx,
+        ctx.executable._kernel_tool,
+        [f for f in [inputs.main] + inputs.srcs if f not in inputs.unchecked_srcs],
+        packages[-1],
+        inputs.deps,
+        generated = generated,
+    )
 
     # The user's attr + extra_dart_defines flag, the flavor's, and the ones
     # that describe the app and the SDK. Surfaced in the return struct so

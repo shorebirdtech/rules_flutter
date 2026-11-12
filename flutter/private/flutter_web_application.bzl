@@ -528,18 +528,6 @@ def _flutter_web_bundle_impl(ctx):
         program.build_number,
     )
 
-    # `synthesize_app_package` appends the app's own package last.
-    # `unchecked_srcs` are files a rule wrote for the program, whose imports are
-    # that rule's to get right and need not be the user's `deps`.
-    unchecked = program.unchecked_srcs
-    import_checks = import_check_output_groups(
-        ctx,
-        ctx.executable._kernel_tool,
-        [f for f in [main] + program.srcs if f not in unchecked],
-        primary.packages[-1],
-        primary.deps,
-    )
-
     # Hot-reload dev metadata (debug only): a multi-root dev package_config so a
     # source-assembled (codegen) app resolves package: URIs across the live
     # source tree + generated bazel-out roots, instead of the frozen assembled
@@ -638,6 +626,21 @@ def _flutter_web_bundle_impl(ctx):
         extra_wrapper_srcs.append(registrant)
     if is_debug:
         extra_wrapper_srcs.extend([staged_agent, staged_agent_bridge])
+
+    # `synthesize_app_package` appends the app's own package last. What a rule
+    # wrote for the program (`unchecked_srcs`, the wrapper `main`, the plugin
+    # registrant, the debug agent files) is compiled with it, so its imports
+    # are uses of `deps`; they are that rule's to get right, so the check
+    # judges only the user's.
+    unchecked = program.unchecked_srcs
+    import_checks = import_check_output_groups(
+        ctx,
+        ctx.executable._kernel_tool,
+        [f for f in [main] + program.srcs if f not in unchecked],
+        primary.packages[-1],
+        primary.deps,
+        generated = [f for f in unchecked if f.extension == "dart"] + [f for f in extra_wrapper_srcs if f != main],
+    )
 
     # What a compile of each branch reads: the branch's co-located sources and
     # the files every compile shares.

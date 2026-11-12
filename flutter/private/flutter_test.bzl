@@ -594,8 +594,9 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
     return struct(info = info, providers = [
         # The test's own files and every library it reaches import only what
         # their `deps` provide, in either compile mode. The generated bootstrap
-        # and golden comparator are the rule's, not the user's, and are not
-        # checked.
+        # and golden comparator are the rule's, not the user's: their imports
+        # are uses of `deps` (the bootstrap's of `flutter_test`, which a test
+        # may reach only through a helper), and are not themselves checked.
         OutputGroupInfo(**import_check_output_groups(
             ctx,
             ctx.executable._kernel_tool,
@@ -603,6 +604,7 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
             # `synthesize_app_package` appends the test's own package last.
             packages[-1],
             deps,
+            generated = [bootstrap] + ([staged_comparator] if staged_comparator else []),
         )),
         # What lets rules_dart's analysis check a `flutter_test`. The test's
         # `main` belongs to no package's `lib/`, so no `DartInfo` can name it
