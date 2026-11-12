@@ -24,6 +24,7 @@ exports_files(
         "bundle_app.dart",
         "check_android_classes.dart",
         "check_apple_version_keys.dart",
+        "check_web_version_json.dart",
         "code_assets.dart",
         "collect_notices.dart",
         "compile_shader.dart",
@@ -439,6 +440,13 @@ dart_test(
         "plist_binary.dart",
     ],
     main = "test/check_apple_version_keys_test.dart",
+    deps = ["@dev_tool_deps//:test"],
+)
+
+dart_test(
+    name = "check_web_version_json_test",
+    srcs = ["check_web_version_json.dart"],
+    main = "test/check_web_version_json_test.dart",
     deps = ["@dev_tool_deps//:test"],
 )
 

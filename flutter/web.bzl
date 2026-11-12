@@ -160,8 +160,8 @@ def flutter_web_app(
         web/manifest.json         (built-in default if absent)
         web/version.json          (generated from the application's
                                   `build_name` and `build_number` if absent;
-                                  the application setting either with the
-                                  file present is an error)
+                                  if present, its `version` and
+                                  `build_number` must be the application's)
 
     Everything else under `web/` is copied into the bundle root verbatim.
 

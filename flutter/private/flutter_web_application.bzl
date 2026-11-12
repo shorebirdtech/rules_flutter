@@ -44,6 +44,7 @@ load(
     "with_root",
 )
 load("//flutter/private:app_version.bzl", "web_version")
+load("//flutter/private:application_version.bzl", "shown_label")
 load(
     "//flutter/private:common.bzl",
     "FLUTTER_APPLICATION_TOOL_ATTRS",
@@ -357,6 +358,45 @@ def _extract_from_tree(ctx, tools, tree, name, output):
         execution_requirements = PATH_MAPPING,
         progress_message = "Extracting %s of %s" % (name, ctx.label),
     )
+
+def _check_version_json(ctx, tools, program, version):
+    """Registers the check that the app's own version.json gives `version`.
+
+    Args:
+        ctx: Rule context carrying `version_json` and `_check_version_json_tool`.
+        tools: `portable_tools(ctx)`.
+        program: The application's program.
+        version: `web_version` of the application.
+
+    Returns:
+        The stamp the check writes, for the `_validation` output group.
+    """
+    stamp = ctx.actions.declare_file(ctx.label.name + "_version_json.checked")
+    args = ctx.actions.args()
+    args.add(ctx.file._check_version_json_tool)
+    args.add("--version-json", ctx.file.version_json)
+    args.add("--name", ctx.file.version_json.short_path)
+    args.add("--bundle", shown_label(ctx.label))
+    args.add("--application", shown_label(program.label))
+    args.add("--version", version.version)
+    args.add("--version-default", "false" if program.build_name else "true")
+    args.add("--build-number", version.build_number)
+    args.add("--build-number-default", "false" if program.build_number else "true")
+    args.add("--stamp", stamp)
+    ctx.actions.run(
+        executable = tools.dart,
+        arguments = [args],
+        inputs = depset(
+            [ctx.file._check_version_json_tool, ctx.file.version_json],
+            transitive = [tools.sdk_files.run],
+        ),
+        outputs = [stamp],
+        mnemonic = "FlutterCheckWebVersion",
+        exec_group = PORTABLE,
+        execution_requirements = PATH_MAPPING,
+        progress_message = "Checking the version.json of %s" % ctx.label,
+    )
+    return stamp
 
 def _flutter_web_bundle_impl(ctx):
     renderer = web_renderer(ctx.attr.compiler, ctx.attr.renderer)
@@ -820,19 +860,17 @@ def _flutter_web_bundle_impl(ctx):
             short_name = safe_title,
         ))
 
-    # Use user-provided version.json or generate from attrs.
+    # The app's own version.json, or one written from the application. The
+    # program reports the application's version, the defaults when it sets
+    # none, so an own file must give the same: checked when it is built,
+    # since only then is it known.
+    version = web_version(program.build_name, program.build_number)
+    version_checks = []
     if ctx.file.version_json:
-        given = [a for a in ["build_name", "build_number"] if getattr(program, a)]
-        if given:
-            fail((
-                "%s has two versions: the version.json in `version_json` (%s) " +
-                "and the application's `%s`. Set the version in one of them; `flutter_web_app` " +
-                "uses `<web_dir>/version.json` as `version_json` when it exists."
-            ) % (ctx.label, ctx.file.version_json.short_path, "` and `".join(given)))
         version_json = ctx.file.version_json
+        version_checks.append(_check_version_json(ctx, tools, program, version))
     else:
         app_name = program.package_name
-        version = web_version(program.build_name, program.build_number)
         version_json = ctx.actions.declare_file(ctx.label.name + "_version.json")
         ctx.actions.write(version_json, json.encode({
             "app_name": app_name,
@@ -1206,7 +1244,7 @@ def _flutter_web_bundle_impl(ctx):
         dump_info = depset([dump_info_file] if dump_info_file else []),
         # The renderers' symbol maps, for the engine this bundle runs.
         symbols = depset(symbol_files),
-        _validation = depset(linked.validation_outputs, transitive = [import_checks]),
+        _validation = depset(linked.validation_outputs + version_checks, transitive = [import_checks]),
     )
 
     # What lets rules_dart's analysis check a web app: its `main` and `srcs`,
@@ -1702,8 +1740,9 @@ build knows which served file is a native module.
         ),
         "version_json": attr.label(
             doc = "User-provided version.json file. If not set, a version.json is generated from " +
-                  "the application's package name, `build_name` and `build_number`; the application " +
-                  "setting either with this is an error. The web `package_info_plus` " +
+                  "the application's package name, `build_name` and `build_number`. If set, its " +
+                  "`version` and `build_number` must be the application's (`1.0.0` and `1` when it " +
+                  "sets none), which the program reports, or the build fails. The web `package_info_plus` " +
                   "plugin (and similar PackageInfo-style web plugins) reads this file to populate " +
                   "appName/version/buildNumber/packageName at runtime.",
             allow_single_file = [".json"],
@@ -1799,6 +1838,10 @@ build knows which served file is a native module.
         ),
         "_web_template_tool": attr.label(
             default = Label("//flutter/private/tools:web_template.dart"),
+            allow_single_file = [".dart"],
+        ),
+        "_check_version_json_tool": attr.label(
+            default = Label("//flutter/private/tools:check_web_version_json.dart"),
             allow_single_file = [".dart"],
         ),
         "_agent_web_bridge_src": attr.label(

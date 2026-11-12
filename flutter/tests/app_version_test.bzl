@@ -191,6 +191,42 @@ _version_json_test = analysistest.make(
     },
 )
 
+def _version_json_check_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    target = analysistest.target_under_test(env)
+    checks = [a for a in analysistest.target_actions(env) if a.mnemonic == "FlutterCheckWebVersion"]
+    if not ctx.attr.checked:
+        asserts.equals(env, 0, len(checks), "a version.json the bundle writes needs no check")
+        return analysistest.end(env)
+    asserts.equals(env, 1, len(checks), "expected one check of the app's own version.json")
+    if len(checks) != 1:
+        return analysistest.end(env)
+    argv = checks[0].argv
+    for flag, value in ctx.attr.expected.items():
+        asserts.true(env, flag in argv, "%s missing from %s" % (flag, argv))
+        if flag in argv:
+            asserts.equals(env, value, argv[argv.index(flag) + 1])
+    asserts.true(env, argv[argv.index("--version-json") + 1].endswith("app_version/version.json"), argv)
+    asserts.true(env, argv[argv.index("--application") + 1].endswith(ctx.attr.application), argv)
+
+    # The build requires the check: its stamp is a validation output.
+    stamp = checks[0].outputs.to_list()[0]
+    asserts.true(
+        env,
+        stamp in target[OutputGroupInfo]._validation.to_list(),
+        "the check is a requirement of the bundle",
+    )
+    return analysistest.end(env)
+
+_version_json_check_test = analysistest.make(
+    _version_json_check_test_impl,
+    attrs = {
+        "checked": attr.bool(default = True),
+        "application": attr.string(),
+        "expected": attr.string_dict(),
+    },
+)
+
 def _expect_failure_test_impl(ctx):
     env = analysistest.begin(ctx)
     for message in ctx.attr.messages:
@@ -503,24 +539,59 @@ def app_version_test_suite(name):
         version = "2.1.0-beta \"x\"",
         build_number = "42",
     )
+    add(
+        _version_json_check_test,
+        "web_generated_unchecked",
+        target_under_test = ":_web_given",
+        checked = False,
+    )
+
+    # An own version.json is checked when it is built, against what the
+    # program reports: the defaults for an application that sets no version,
+    # or the application's own.
+    flutter_web_bundle(
+        name = "_web_own_file",
+        application = ":_web_default_app",
+        tags = ["manual"],
+        version_json = "version.json",
+    )
+    add(
+        _version_json_check_test,
+        "web_own_file_defaults",
+        target_under_test = ":_web_own_file",
+        application = ":_web_default_app",
+        expected = {
+            "--version": "1.0.0",
+            "--version-default": "true",
+            "--build-number": "1",
+            "--build-number-default": "true",
+            "--name": "flutter/tests/app_version/version.json",
+        },
+    )
     flutter_application(
-        name = "_web_two_versions_app",
+        name = "_web_own_file_versioned_app",
         build_number = "42",
         main = "main.dart",
         package = ":pubspec-metadata",
         tags = ["manual"],
     )
     flutter_web_bundle(
-        name = "_web_two_versions",
-        application = ":_web_two_versions_app",
+        name = "_web_own_file_versioned",
+        application = ":_web_own_file_versioned_app",
         tags = ["manual"],
         version_json = "version.json",
     )
     add(
-        _expect_failure_test,
-        "web_two_versions",
-        target_under_test = ":_web_two_versions",
-        messages = ["has two versions: the version.json in `version_json`", "and the application's `build_number`"],
+        _version_json_check_test,
+        "web_own_file_versioned",
+        target_under_test = ":_web_own_file_versioned",
+        application = ":_web_own_file_versioned_app",
+        expected = {
+            "--version": "1.0.0",
+            "--version-default": "true",
+            "--build-number": "42",
+            "--build-number-default": "false",
+        },
     )
 
     native.test_suite(name = name, tests = tests)

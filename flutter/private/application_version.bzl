@@ -11,8 +11,9 @@ defaults, and a bundle that says otherwise disagrees with it.
 
 Every other place a bundle's version can be written is held to the same rule:
 an iOS or macOS app's `version` target, an Android app's `manifest_values`
-`versionCode` and `versionName`, and the version attributes of the app's own
-`AndroidManifest.xml` or keys of its `Info.plist`. Each may say what the
+`versionCode` and `versionName`, the version attributes of the app's own
+`AndroidManifest.xml` or keys of its `Info.plist`, and the `version` and
+`build_number` of a web app's own `version.json`. Each may say what the
 application says, and the build fails, naming both, where it says otherwise.
 """
 
@@ -28,6 +29,11 @@ APPLICATION_VERSION_ATTR = {
         providers = [FlutterApplicationInputsInfo],
     ),
 }
+
+def shown_label(label):
+    """`label`, a `Label` or its string, as a BUILD file in the main repository writes it."""
+    text = str(label)
+    return text[2:] if text.startswith("@@//") else text
 
 _DEFAULTS = {"build_name": DEFAULT_BUILD_NAME, "build_number": DEFAULT_BUILD_NUMBER}
 

@@ -1246,9 +1246,9 @@ Each platform's own way of setting the version works too:
 
 - **iOS, macOS:** `version`, an `apple_bundle_version` or `flutter_apple_bundle_version` target, the way to give the app's extensions its version (see [App extensions](#app-extensions)). Its values must be the application's, or the app's build fails. A `flutter_apple_bundle_version` given the same `application` takes them. rules_apple's `apple_bundle_version` can read the version from `bazel build --embed_label=...`, and the label must then give the application's version.
 - **Android:** `android:versionCode` and `android:versionName` in your own manifest, or `versionCode` and `versionName` in `manifest_values`. Each must be the application's, or the build fails.
-- **Web:** `version_json`, or a `web/version.json`, which `flutter_web_app` picks up, in place of the application's version.
+- **Web:** `version_json`, or a `web/version.json`, which `flutter_web_app` picks up. Its `version` and `build_number` must be the application's, `1.0.0` and `1` if it sets none, or the build fails.
 
-Use one way for each field. A `version.json` beside an application that sets a version fails the build, and so does `version` beside the macro's own `build_name` or `build_number`, or a `manifest_values` key beside the matching argument. A `version.json` isn't compared with an application that sets no version, though: the bundle then reports the file's version and `appBuildName` reports `1.0.0`.
+Use one way for each field. `version` beside the macro's own `build_name` or `build_number` fails the build, and so does a `manifest_values` key beside the matching argument.
 
 On iOS and macOS, the `Info.plist` leaves the two version keys to the app's version. A literal `CFBundleShortVersionString` or `CFBundleVersion` that differs from it fails the build. The `$(FLUTTER_BUILD_NAME)` and `$(FLUTTER_BUILD_NUMBER)` that `flutter create` writes are fine, and so are Xcode's `$(MARKETING_VERSION)` and `$(CURRENT_PROJECT_VERSION)`.
 

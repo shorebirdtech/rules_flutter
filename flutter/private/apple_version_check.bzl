@@ -17,12 +17,8 @@ load("@build_bazel_rules_apple//apple:providers.bzl", "AppleBundleVersionInfo")
 load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
 load("//flutter:providers.bzl", "FlutterApplicationInputsInfo")
 load("//flutter/private:app_version.bzl", "apple_version")
+load("//flutter/private:application_version.bzl", "shown_label")
 load("//flutter/private:exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
-
-def _shown(label):
-    """`label`, a `Label` or its string, as a BUILD file in the main repository writes it."""
-    text = str(label)
-    return text[2:] if text.startswith("@@//") else text
 
 def _impl(ctx):
     tools = portable_tools(ctx)
@@ -34,17 +30,17 @@ def _impl(ctx):
     args.add("--name", ctx.attr.plist_name or ctx.file.plist.short_path)
     version_file = ctx.attr.version[AppleBundleVersionInfo].version_file
     args.add("--version-file", version_file)
-    args.add("--app", _shown(ctx.attr.app_label))
+    args.add("--app", shown_label(ctx.attr.app_label))
 
     # What the program reports, as the bundle's keys would carry it.
     program = ctx.attr.application[FlutterApplicationInputsInfo].inputs
     expected = apple_version(program.build_name, program.build_number)
     if expected.error:
-        fail("%s: the application %s: %s" % (ctx.label, _shown(ctx.attr.application.label), expected.error))
-    args.add("--application", _shown(ctx.attr.application.label))
+        fail("%s: the application %s: %s" % (ctx.label, shown_label(ctx.attr.application.label), expected.error))
+    args.add("--application", shown_label(ctx.attr.application.label))
     args.add("--short-version-string", expected.short_version_string)
     args.add("--build-version", expected.build_version)
-    args.add("--version-target", _shown(ctx.attr.version.label))
+    args.add("--version-target", shown_label(ctx.attr.version.label))
     args.add("--rule", ctx.attr.rule_name)
     args.add("--stamp", stamp)
     ctx.actions.run(
