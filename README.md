@@ -1354,10 +1354,13 @@ Other arguments, such as `extensions` and `app_intents`, pass through to rules_a
 
 These are the pieces the macro assembles. This mirrors the Bazel-generated runner in [`e2e/macos_example`](e2e/macos_example/BUILD.bazel), which needs no `macos/Runner/`.
 
+Give the app its version with a `flutter_apple_bundle_version` of the same `application`, which takes the version the program reports. rules_flutter doesn't see the `version` of a `macos_application` you write, so it can't check one that says otherwise. The generated `Info.plist` leaves the version keys to `version`, as `flutter create`'s does, and without one rules_apple fails on `$(FLUTTER_BUILD_NAME)`.
+
 ```starlark
 load("@rules_apple//apple:macos.bzl", "macos_application")
 load("@rules_flutter//flutter:macos.bzl",
     "MACOS_MINIMUM_OS_VERSION",
+    "flutter_apple_bundle_version",
     "flutter_entitlements_merge",
     "flutter_macos_engine",
     "flutter_macos_app_framework_gen",
@@ -1375,6 +1378,9 @@ flutter_macos_native_libs_gen(name = "my_native_libs", application = ":my_app")
 flutter_macos_privacy_manifests_gen(name = "my_privacy_manifests", application = ":my_app")
 flutter_macos_info_plist_gen(name = "my_info_plist", app_name = "My App")
 flutter_macos_menu_xib_gen(name = "my_menu_xib", app_name = "My App")
+
+# The application's version, which the program reports as appBuildName.
+flutter_apple_bundle_version(name = "my_version", application = ":my_app")
 
 flutter_macos_runner_lib_gen(
     name = "my_runner",
@@ -1405,6 +1411,7 @@ macos_application(
     entitlements = ":my_entitlements",
     infoplists = [":my_info_plist"],
     resources = [":my_menu_xib"],
+    version = ":my_version",
     deps = [":my_runner"],
 )
 ```
@@ -1459,11 +1466,14 @@ Debug and profile builds add `NSBonjourServices` and `NSLocalNetworkUsageDescrip
 
 These are the pieces the macro assembles. This mirrors the Bazel-generated runner in [`e2e/ios_example`](e2e/ios_example/BUILD.bazel), which needs no `ios/Runner/`.
 
+As on macOS, give the app its version with a `flutter_apple_bundle_version` of the same `application`: rules_flutter can't check the `version` of an `ios_application` you write.
+
 ```starlark
 load("@rules_apple//apple:ios.bzl", "ios_application")
 load("@rules_flutter//flutter:ios.bzl",
     "IOS_DEFAULT_LAUNCH_STORYBOARD",
     "IOS_MINIMUM_OS_VERSION",
+    "flutter_apple_bundle_version",
     "flutter_entitlements_merge",
     "flutter_ios_engine",
     "flutter_ios_app_framework_gen",
@@ -1481,6 +1491,9 @@ flutter_ios_privacy_manifests_gen(name = "my_privacy_manifests", application = "
 
 # Debug and profile builds also get the VM service's Info.plist keys.
 flutter_ios_info_plist_gen(name = "my_info_plist", app_name = "My App")
+
+# The application's version, which the program reports as appBuildName.
+flutter_apple_bundle_version(name = "my_version", application = ":my_app")
 
 # Frameworks for the app's native assets and `native_deps` libraries. Leave
 # this out of `deps` below and the app builds and renders, then fails every
@@ -1515,6 +1528,7 @@ ios_application(
         "@rules_flutter//flutter/private:dbg": None,
         "//conditions:default": "@rules_flutter//flutter:ios_code_asset_post_processor",
     }),
+    version = ":my_version",
     deps = [":my_framework", ":my_native_frameworks", ":my_runner"],
 )
 ```

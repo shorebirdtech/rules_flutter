@@ -268,6 +268,12 @@ def flutter_ios_info_plist_gen(name, app_name, module_name = "Runner", **kwargs)
     VM service registration). Pass this target to ios_application
     infoplists.
 
+    As in `flutter create`'s, the version keys are `$(FLUTTER_BUILD_NAME)`
+    and `$(FLUTTER_BUILD_NUMBER)`, which the app's `version` replaces: give
+    the `ios_application` a `flutter_apple_bundle_version` with the same
+    `application`, so the bundle carries the version the program reports.
+    Without a `version`, rules_apple fails on the unknown variables.
+
     Args:
         name: Target name. Pass to ios_application infoplists.
         app_name: Display name (CFBundleDisplayName, CFBundleName).
