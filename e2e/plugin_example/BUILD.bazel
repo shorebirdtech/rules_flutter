@@ -1,7 +1,6 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@rules_apple//apple:ios.bzl", "ios_application")
 load("@rules_apple//apple:macos.bzl", "macos_application")
-load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
 load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_analysis_test", "dart_binary", "dart_test")
 load("@rules_flutter//flutter:android.bzl", "flutter_android_aar", "flutter_android_app", "flutter_android_build", "flutter_android_registrant")
 load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application", "flutter_library")
@@ -9,6 +8,7 @@ load(
     "@rules_flutter//flutter:ios.bzl",
     "IOS_DEFAULT_LAUNCH_STORYBOARD",
     "IOS_MINIMUM_OS_VERSION",
+    "flutter_apple_bundle_version",
     "flutter_ios_app",
     "flutter_ios_app_framework_gen",
     "flutter_ios_engine",
@@ -177,10 +177,9 @@ flutter_macos_runner_lib_gen(
     registrant = ":plugin_macos_registrant",
 )
 
-apple_bundle_version(
+flutter_apple_bundle_version(
     name = "plugin_macos_version",
-    build_version = "1.0",
-    short_version_string = "1.0",
+    application = ":plugin_app",
     tags = ["manual"],
 )
 
@@ -240,10 +239,9 @@ flutter_ios_runner_lib_gen(
     registrant = ":plugin_ios_registrant",
 )
 
-apple_bundle_version(
+flutter_apple_bundle_version(
     name = "plugin_ios_version",
-    build_version = "1.0",
-    short_version_string = "1.0",
+    application = ":plugin_app",
     tags = ["manual"],
 )
 
