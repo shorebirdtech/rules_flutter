@@ -82,9 +82,9 @@ change can substitute for it. Two routes:
     -allowProvisioningUpdates -allowProvisioningDeviceRegistration build
   ```
   This example happens to keep `ios/Runner.xcodeproj`, but **your app need
-  not**: `flutter_ios_app` reads only `ios/Runner/*.swift` and
-  `ios/Runner/Info.plist`, and a `flutter create --platforms=ios .` tree
-  checked into a Bazel repository has no reason to keep the project. Any
+  not**: `flutter_ios_app` reads no Xcode project, and a `flutter create
+  --platforms=ios .` tree checked into a Bazel repository has no reason to
+  keep it. Any
   scratch Xcode project whose `PRODUCT_BUNDLE_IDENTIFIER` is your bundle id
   will mint the same profile — override it with
   `PRODUCT_BUNDLE_IDENTIFIER=<id> DEVELOPMENT_TEAM=<id>` arguments.
@@ -103,9 +103,11 @@ for f in ~/Library/Developer/Xcode/UserData/Provisioning\ Profiles/*.mobileprovi
 done
 ```
 
-**Profile expired?** Free-team ("Personal Team") profiles expire after ~7
-days. When the bazel build fails with *"no provisioning profile was found
-named …"*, mint a fresh one the same way.
+**Profile expired?** Free-team ("Personal Team") profiles expire after
+seven days. rules_apple takes the newest profile of the name and does not skip
+an expired one, so the build still succeeds and the device refuses the app:
+mint a fresh one the same way. A build that fails with *"no provisioning
+profile was found named …"* has no profile of that name at all.
 
 ## App extensions
 

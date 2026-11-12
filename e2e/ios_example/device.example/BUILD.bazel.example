@@ -34,8 +34,10 @@
 #   for f in ~/Library/Developer/Xcode/UserData/Provisioning\ Profiles/*.mobileprovision; do
 #     security cms -D -i "$f" | plutil -extract Name raw -; done
 #
-# Free ("Personal Team") profiles expire after about seven days — mint a fresh
-# one the same way when a build reports "no provisioning profile was found".
+# Free ("Personal Team") profiles expire after seven days. rules_apple takes
+# the newest profile of the name and does not skip an expired one, so the build
+# succeeds and the device refuses the app: mint a fresh one the same way. A
+# build that reports "no provisioning profile was found" has none of the name.
 #
 # Entitlements your profile cannot grant. A device build is signed against the
 # profile, and an entitlement it does not grant fails the build:
