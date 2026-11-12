@@ -30,10 +30,13 @@ def _test_outcome_impl(ctx):
         "noSimulatorNamed": _simulator_prefix(ctx.attr.test.label) if ctx.attr.leaves_no_simulator else None,
     }))
 
-    executable = ctx.actions.declare_file(ctx.label.name)
+    target = ctx.executable._outcome_runner
+
+    # The target's extension too: Windows starts only a `.exe` (or `.bat`).
+    executable = ctx.actions.declare_file(ctx.label.name + ("." + target.extension if target.extension else ""))
     ctx.actions.symlink(
         output = executable,
-        target_file = ctx.executable._outcome_runner,
+        target_file = target,
         is_executable = True,
     )
     runfiles = ctx.runfiles(files = [config]).merge(

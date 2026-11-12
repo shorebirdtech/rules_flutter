@@ -17,10 +17,13 @@ _variant_transition = transition(
 
 def _build_variant_test_impl(ctx):
     test = ctx.attr.test[0]
-    executable = ctx.actions.declare_file(ctx.label.name)
+    target = test[DefaultInfo].files_to_run.executable
+
+    # The target's extension too: Windows starts only a `.exe` (or `.bat`).
+    executable = ctx.actions.declare_file(ctx.label.name + ("." + target.extension if target.extension else ""))
     ctx.actions.symlink(
         output = executable,
-        target_file = test[DefaultInfo].files_to_run.executable,
+        target_file = target,
         is_executable = True,
     )
     return [

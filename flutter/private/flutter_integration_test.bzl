@@ -470,10 +470,13 @@ def integration_test_impl(ctx, family, inherited_environment = []):
     }))
 
     tool = ctx.attr._runner
-    executable = ctx.actions.declare_file(ctx.label.name)
+    tool_executable = tool[DefaultInfo].files_to_run.executable
+
+    # The tool's extension too: Windows starts only a `.exe` (or `.bat`).
+    executable = ctx.actions.declare_file(ctx.label.name + ("." + tool_executable.extension if tool_executable.extension else ""))
     ctx.actions.symlink(
         output = executable,
-        target_file = tool[DefaultInfo].files_to_run.executable,
+        target_file = tool_executable,
         is_executable = True,
     )
 

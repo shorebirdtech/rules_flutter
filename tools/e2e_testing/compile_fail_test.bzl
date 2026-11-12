@@ -185,10 +185,13 @@ def _compile_fail_test_impl(ctx):
         "outputContains": ctx.attr.output_contains,
     }))
 
-    executable = ctx.actions.declare_file(ctx.label.name)
+    runner = ctx.executable._runner
+
+    # The runner's extension too: Windows starts only a `.exe` (or `.bat`).
+    executable = ctx.actions.declare_file(ctx.label.name + ("." + runner.extension if runner.extension else ""))
     ctx.actions.symlink(
         output = executable,
-        target_file = ctx.executable._runner,
+        target_file = runner,
         is_executable = True,
     )
     runfiles = ctx.runfiles(
