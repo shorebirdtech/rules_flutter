@@ -238,8 +238,11 @@ def flutter_macos_integration_test(
             package.
         bundle_id: The bundle identifier of the app, which is the application's own.
         deps: What the test imports beyond the application's own `deps`. It must
-            bring `integration_test` and `flutter_test` (`@<hub>//:integration_test`
-            and `@<hub>//:flutter_test`), which analysis fails without, naming them.
+            name `@<hub>//:flutter_test` itself, which says whose golden service
+            compares the test's goldens: without it the BUILD file fails to
+            load. `integration_test` (`@<hub>//:integration_test`) may come
+            from here or from the application's `deps`, and analysis fails
+            without it, naming it.
         srcs: Dart files `src` imports by relative path.
         test_config: The suite's `flutter_test_config.dart`. By default the one
             `flutter_test` would find for `src`, in this package.
@@ -343,8 +346,11 @@ def flutter_windows_integration_test(
         application: The `flutter_application` the test runs. It may be in another
             package.
         deps: What the test imports beyond the application's own `deps`. It must
-            bring `integration_test` and `flutter_test` (`@<hub>//:integration_test`
-            and `@<hub>//:flutter_test`), which analysis fails without, naming them.
+            name `@<hub>//:flutter_test` itself, which says whose golden service
+            compares the test's goldens: without it the BUILD file fails to
+            load. `integration_test` (`@<hub>//:integration_test`) may come
+            from here or from the application's `deps`, and analysis fails
+            without it, naming it.
         srcs: Dart files `src` imports by relative path.
         test_config: The suite's `flutter_test_config.dart`. By default the one
             `flutter_test` would find for `src`, in this package.
@@ -453,8 +459,11 @@ def flutter_linux_integration_test(
         application_id: The app's `application_id`, as `flutter_linux_app` takes it.
             Required.
         deps: What the test imports beyond the application's own `deps`. It must
-            bring `integration_test` and `flutter_test` (`@<hub>//:integration_test`
-            and `@<hub>//:flutter_test`), which analysis fails without, naming them.
+            name `@<hub>//:flutter_test` itself, which says whose golden service
+            compares the test's goldens: without it the BUILD file fails to
+            load. `integration_test` (`@<hub>//:integration_test`) may come
+            from here or from the application's `deps`, and analysis fails
+            without it, naming it.
         srcs: Dart files `src` imports by relative path.
         test_config: The suite's `flutter_test_config.dart`. By default the one
             `flutter_test` would find for `src`, in this package.
@@ -565,9 +574,11 @@ def flutter_web_integration_test(
         application: The `flutter_application` the test runs. It may be in another
             package.
         deps: What the test imports beyond the application's own `deps`. It must
-            bring `integration_test` and `flutter_test` (`@<hub>//:integration_test`
-            and `@<hub>//:flutter_test`) unless the application does, and analysis
-            fails without them, naming them.
+            name `@<hub>//:flutter_test` itself, which says whose golden service
+            compares the test's goldens: without it the BUILD file fails to
+            load. `integration_test` (`@<hub>//:integration_test`) may come
+            from here or from the application's `deps`, and analysis fails
+            without it, naming it.
         srcs: The files `src` imports by relative path.
         test_config: The suite's `flutter_test_config.dart`. By default the one
             `flutter_test` would find for `src`, in this package.
@@ -698,8 +709,11 @@ def flutter_android_integration_test(
         application_id: The application id of the app, as `flutter_android_app`
             takes it.
         deps: What the test imports beyond the application's own `deps`. It must
-            bring `integration_test` and `flutter_test` (`@<hub>//:integration_test`
-            and `@<hub>//:flutter_test`), which analysis fails without, naming them.
+            name `@<hub>//:flutter_test` itself, which says whose golden service
+            compares the test's goldens: without it the BUILD file fails to
+            load. `integration_test` (`@<hub>//:integration_test`) may come
+            from here or from the application's `deps`, and analysis fails
+            without it, naming it.
         srcs: Dart files `src` imports by relative path.
         test_config: The suite's `flutter_test_config.dart`. By default the one
             `flutter_test` would find for `src`, in this package.
@@ -853,8 +867,11 @@ def flutter_ios_simulator_integration_test(
             package.
         bundle_id: The bundle identifier of the app, as `flutter_ios_app` takes it.
         deps: What the test imports beyond the application's own `deps`. It must
-            bring `integration_test` and `flutter_test` (`@<hub>//:integration_test`
-            and `@<hub>//:flutter_test`), which analysis fails without, naming them.
+            name `@<hub>//:flutter_test` itself, which says whose golden service
+            compares the test's goldens: without it the BUILD file fails to
+            load. `integration_test` (`@<hub>//:integration_test`) may come
+            from here or from the application's `deps`, and analysis fails
+            without it, naming it.
         srcs: Dart files `src` imports by relative path.
         test_config: The suite's `flutter_test_config.dart`. By default the one
             `flutter_test` would find for `src`, in this package.
