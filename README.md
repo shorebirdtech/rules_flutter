@@ -197,10 +197,12 @@ rules_dart side.
     `versionCode` and the program's `appBuildNumber` the same number.
 42. A Dart dependency in `deps` that none of the target's files imports fails
     the build, in `flutter_library`, `flutter_plugin`, `flutter_application`
-    and `flutter_test` alike. Remove it. Plugins and packages with fonts,
-    assets or shaders may stay without an import; a rule of your own that is
-    used that way returns `DartUsedWithoutImportInfo`.
-    `features = ["-dart_unused_deps"]` turns the check off.
+    and `flutter_test` alike. Remove it, or let
+    `bazel run @rules_dart//dart/unused_deps -- //...` remove them all.
+    Plugins and packages with fonts, assets or shaders may stay without an
+    import; a rule of your own that is used that way returns
+    `DartUsedWithoutImportInfo`. `features = ["-dart_unused_deps"]` turns the
+    check off.
 
 **Flags and tests**
 
@@ -629,8 +631,12 @@ The version comes from the lock, so the BUILD file doesn't repeat it. After edit
 Each target's `deps` are checked against its files' imports, both ways. A file that imports a package missing from `deps` fails the build, and so does a package in `deps` that no file imports or exports:
 
 ```
-@@//:my_app: depends on @@deps//:collection, but none of its files imports or exports a library of it. Remove @@deps//:collection from deps of @@//:my_app.
+//:my_app: no file imports or exports these deps:
+  @deps//:collection
+bazel run @rules_dart//dart/unused_deps -- //:all removes them. One used without an import is exempt when its rule returns DartUsedWithoutImportInfo; features = ["-dart_unused_deps"] turns the check off.
 ```
+
+The command it names fixes them for you: `bazel run @rules_dart//dart/unused_deps -- //...` removes each unused entry as it is written in your BUILD files, editing a macro's call rather than the targets the macro makes. `--dry-run` shows what it would change, and it lists by file and line any entry it can't edit, such as one in a shared list.
 
 The unneeded edge compiles nothing in, but every change to that package would rebuild everything above it, so usually you remove it. Two kinds of package are used without an import, and may be in `deps` anyway: a plugin, which the app registers from native code, and a package with fonts, assets or shaders, which the app loads by key, as it does `cupertino_icons`' font. A rule of your own whose targets are used that way says so by returning `DartUsedWithoutImportInfo` from `@rules_dart//dart:providers.bzl`. To keep any other package, turn the second check off with `features = ["-dart_unused_deps"]` on the target, in the BUILD file's `package()`, or with `--features=-dart_unused_deps` for the whole build.
 

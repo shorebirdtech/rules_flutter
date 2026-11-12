@@ -64,7 +64,7 @@ cannot write there.
 
 load("@bazel_skylib//lib:structs.bzl", "structs")
 load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo", "DartKernelSdkInfo")
-load("@rules_dart//dart:utils.bzl", "KERNEL_LIST_ATTR", "KERNEL_TOOL_ATTR", "MODULAR_KERNEL_ATTR", "PROGRAM_ASSETS_TOOLCHAINS", "TRACK_CREATION_LOCATIONS_ATTR", "collect_modules", "collect_packages", "collect_transitive_runfiles", "collect_transitive_srcs", "dart_entry_kernel_action", "dart_import_check_aspect", "dart_link_kernel_action", "executable_defines", "executable_defines_config", "import_check_validation", "kernel_list", "modular_kernel", "package_identity_attrs", "program_assets_attrs", "runfiles_path", "track_creation_locations")
+load("@rules_dart//dart:utils.bzl", "KERNEL_LIST_ATTR", "KERNEL_TOOL_ATTR", "MODULAR_KERNEL_ATTR", "PROGRAM_ASSETS_TOOLCHAINS", "TRACK_CREATION_LOCATIONS_ATTR", "collect_modules", "collect_packages", "collect_transitive_runfiles", "collect_transitive_srcs", "dart_entry_kernel_action", "dart_import_check_aspect", "dart_link_kernel_action", "executable_defines", "executable_defines_config", "import_check_output_groups", "kernel_list", "modular_kernel", "package_identity_attrs", "program_assets_attrs", "runfiles_path", "track_creation_locations")
 load("//flutter:providers.bzl", "FlutterApplicationInputsInfo", "FlutterTestProgramInfo")
 load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "synthesize_app_package")
 load("//flutter/private:application_libraries.bzl", "application_libraries", "application_libraries_aspect")
@@ -596,7 +596,7 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
         # their `deps` provide, in either compile mode. The generated bootstrap
         # and golden comparator are the rule's, not the user's, and are not
         # checked.
-        OutputGroupInfo(_validation = import_check_validation(
+        OutputGroupInfo(**import_check_output_groups(
             ctx,
             ctx.executable._kernel_tool,
             entry_files + inputs.srcs,

@@ -504,7 +504,8 @@ def flutter_application_build(ctx, inputs):
 
     # Every hook runs whenever the app builds, even one that emits no asset,
     # so its verdict on the program is never skipped.
-    output_groups["_validation"] = depset(link_hook_validation, transitive = [compilation.import_checks])
+    output_groups.update(compilation.import_checks)
+    output_groups["_validation"] = depset(link_hook_validation, transitive = [compilation.import_checks["_validation"]])
 
     providers = [
         FlutterApplicationInputsInfo(inputs = inputs),

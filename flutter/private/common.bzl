@@ -7,7 +7,7 @@ flutter_application, flutter_android_bundle, and flutter_ios_application.
 
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_dart//dart:providers.bzl", "DartInfo")
-load("@rules_dart//dart:utils.bzl", "KERNEL_TOOL_ATTR", "collect_packages", "collect_transitive_srcs", "dart_import_check_aspect", "generate_dev_package_config", "import_check_validation", "package_identity_attrs", "package_info_from_metadata", "package_lib_prefix", "resolve_package_identity", "runtime_reset")
+load("@rules_dart//dart:utils.bzl", "KERNEL_TOOL_ATTR", "collect_packages", "collect_transitive_srcs", "dart_import_check_aspect", "generate_dev_package_config", "import_check_output_groups", "package_identity_attrs", "package_info_from_metadata", "package_lib_prefix", "resolve_package_identity", "runtime_reset")
 load("//flutter:providers.bzl", "FlutterInfo", "FlutterNativeLibraryInfo")
 load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "app_main_location", "app_scheme_files", "app_scheme_location", "app_scheme_sources", "synthesize_app_package", "with_root")
 load("//flutter/private:application_version.bzl", "VERSION_SETTING_ATTRS", "program_version")
@@ -262,8 +262,9 @@ def flutter_compile_kernel(ctx, tools, aot = None, target_platform = None, track
 
     Returns:
         struct with kernel_dill (File) and
-        import_checks (the depset of the app's and its libraries' import
-        checks, for the `_validation` output group).
+        import_checks (the import checks' output groups, a dict for
+        `OutputGroupInfo`: `_validation`, the app's and its libraries'
+        checks, and rules_dart's unused-dependency group its fixer reads).
     """
     if inputs == None:
         inputs = flutter_program_inputs(ctx)
@@ -290,7 +291,7 @@ def flutter_compile_kernel(ctx, tools, aot = None, target_platform = None, track
     )
 
     # `synthesize_app_package` appends the app's own package last.
-    import_checks = import_check_validation(
+    import_checks = import_check_output_groups(
         ctx,
         ctx.executable._kernel_tool,
         [f for f in [inputs.main] + inputs.srcs if f not in inputs.unchecked_srcs],

@@ -17,7 +17,7 @@ def _flutter_kernel_impl(ctx):
 
     return [
         DefaultInfo(files = depset([compilation.kernel_dill])),
-        OutputGroupInfo(_validation = compilation.import_checks),
+        OutputGroupInfo(**compilation.import_checks),
     ]
 
 flutter_kernel = rule(

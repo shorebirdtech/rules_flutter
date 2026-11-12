@@ -32,7 +32,7 @@ staging target each compiler's inputs come from, over the application.
 """
 
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
-load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "PROGRAM_ASSETS_TOOLCHAINS", "generate_dev_package_config", "import_check_validation", "program_assets_attrs")
+load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "PROGRAM_ASSETS_TOOLCHAINS", "generate_dev_package_config", "import_check_output_groups", "program_assets_attrs")
 load("//flutter:providers.bzl", "FlutterInfo", "FlutterNativeLibraryInfo", "FlutterSdkRecordInfo")
 load(
     "//flutter/private:app_entrypoint.bzl",
@@ -532,7 +532,7 @@ def _flutter_web_bundle_impl(ctx):
     # `unchecked_srcs` are files a rule wrote for the program, whose imports are
     # that rule's to get right and need not be the user's `deps`.
     unchecked = program.unchecked_srcs
-    import_checks = import_check_validation(
+    import_checks = import_check_output_groups(
         ctx,
         ctx.executable._kernel_tool,
         [f for f in [main] + program.srcs if f not in unchecked],
@@ -1243,12 +1243,12 @@ def _flutter_web_bundle_impl(ctx):
     # needs, so it rides an output group rather than the default outputs:
     # `bazel build //your:app --output_groups=dump_info`. Empty when the attr
     # is off, so the group always exists and always says the truth.
-    output_groups = OutputGroupInfo(
+    output_groups = OutputGroupInfo(**(import_checks | dict(
         dump_info = depset([dump_info_file] if dump_info_file else []),
         # The renderers' symbol maps, for the engine this bundle runs.
         symbols = depset(symbol_files),
-        _validation = depset(linked.validation_outputs + version_checks, transitive = [import_checks]),
-    )
+        _validation = depset(linked.validation_outputs + version_checks, transitive = [import_checks["_validation"]]),
+    )))
 
     # What lets rules_dart's analysis check a web app: its `main` and `srcs`,
     # and the sources of what `unchecked_srcs` staged copies of (an

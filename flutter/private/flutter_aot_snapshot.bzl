@@ -47,7 +47,7 @@ def _flutter_aot_snapshot_impl(ctx):
         target_platform = target_platform,
     )
     kernel_dill = compilation.kernel_dill
-    output_groups = {"_validation": compilation.import_checks}
+    output_groups = dict(compilation.import_checks)
 
     # In debug mode, return the kernel .dill directly (JIT, no gen_snapshot).
     if is_debug:
