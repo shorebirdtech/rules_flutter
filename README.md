@@ -133,8 +133,9 @@ rules_dart rules and flags you use directly.
 27. `flutter_linux_app.gtk_app_id` → `application_id`, now required.
 28. `flutter_application.min_os_version` → `minimum_os_version`.
 29. `flutter_web_bundle.app_version`/`app_build_number` → `build_name`/
-    `build_number` (all app macros take these; iOS and macOS default to 1.0.0
-    (1)).
+    `build_number` on the `flutter_application`, which every platform's app
+    reports; the iOS, macOS, Android and Windows app macros' own
+    `build_name`/`build_number` must match it.
 30. `flutter_web_app`/`flutter_web_bundle(main, deps, ...)` →
     `application = ":<flutter_application>"`; `flutter_web_integration_test`
     likewise. One application can serve web and native apps: its
