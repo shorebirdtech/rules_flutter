@@ -2,7 +2,7 @@
 ///
 /// Usage:
 ///   dart run tools/vm/deploy_bundle.dart <vm-name> <bundle_path> [--windows]
-///       [--title <window title>]
+///       [--on-vm] [--title <window title>]
 ///
 /// Linux (default):
 ///   1. SCPs the bundle directory to the VM
@@ -13,11 +13,16 @@
 ///   4. Downloads the screenshot
 ///
 /// Windows (--windows):
-///   1. SCPs the bundle directory to the VM
+///   1. SCPs the bundle directory to the VM, or with `--on-vm` copies one
+///      already there (`<bundle_path>` is then a path on the VM, such as a
+///      bundle `tools/vm/run_e2e.dart` built)
 ///   2. SCPs the DXGI screenshot script
 ///   3. Discovers the interactive session and Python path
-///   4. Runs dxgi_screenshot.py via PsExec in the interactive session
+///   4. Runs dxgi_screenshot.py via PsExec in the interactive session, which
+///      fails when the app exits or shows no window
 ///   5. Downloads the screenshot
+///
+/// Exits non-zero when the check fails.
 library;
 
 import 'dart:io';
@@ -28,7 +33,7 @@ Future<void> main(List<String> args) async {
   if (args.length < 2) {
     stderr.writeln(
       'Usage: dart run tools/vm/deploy_bundle.dart <vm-name> <bundle_path> '
-      '[--windows] [--title <window title>]',
+      '[--windows] [--on-vm] [--title <window title>]',
     );
     exit(1);
   }
@@ -36,24 +41,31 @@ Future<void> main(List<String> args) async {
   final vmName = args[0];
   final bundlePath = args[1];
   final isWindows = args.contains('--windows');
+  final onVm = args.contains('--on-vm');
+  if (onVm && !isWindows) {
+    stderr.writeln('--on-vm needs --windows');
+    exit(1);
+  }
   final titleFlag = args.indexOf('--title');
   if (titleFlag >= 0 && titleFlag + 1 >= args.length) {
     stderr.writeln('--title needs a value');
     exit(1);
   }
 
-  if (!Directory(bundlePath).existsSync()) {
+  if (!onVm && !Directory(bundlePath).existsSync()) {
     stderr.writeln('Bundle directory not found: $bundlePath');
     exit(1);
   }
 
-  final appName = Uri.parse(bundlePath).pathSegments.last;
+  final appName = bundlePath
+      .split(RegExp(r'[\\/]'))
+      .lastWhere((segment) => segment.isNotEmpty);
   final title = titleFlag >= 0 ? args[titleFlag + 1] : appName;
 
   print('Deploying $appName to $vmName ...');
 
   if (isWindows) {
-    await _deployWindows(vmName, bundlePath, appName);
+    await _deployWindows(vmName, bundlePath, appName, onVm: onVm);
   } else {
     await _deployLinux(vmName, bundlePath, appName, title);
   }
@@ -129,8 +141,9 @@ Future<void> _deployLinux(
 Future<void> _deployWindows(
   String vmName,
   String bundlePath,
-  String appName,
-) async {
+  String appName, {
+  required bool onVm,
+}) async {
   final scriptDir = Platform.script.resolve('.').toFilePath();
   final projectRoot = Directory(scriptDir).parent.parent.path;
 
@@ -167,21 +180,38 @@ Future<void> _deployWindows(
   final sessionId = sessionMatch.group(1)!;
   print('VM ready. Interactive session $sessionId confirmed.');
 
-  // Copy bundle to a temp dir (Bazel tree artifacts are symlinks / read-only).
-  print('Preparing bundle for upload ...');
-  final tmpDir = Directory.systemTemp.createTempSync('deploy_');
-  final tmpBundle = '${tmpDir.path}/$appName';
-  await Process.run('cp', ['-RL', bundlePath, tmpBundle]);
-
+  // The bundle goes to a shared location accessible to all users, in a
+  // directory of this tool's own, which no bundle given with `--on-vm` is.
+  final staged = 'C:\\temp\\bundles\\$appName';
+  await sshRun(vmName, 'if exist $staged rmdir /s /q $staged');
+  await sshRun(
+    vmName,
+    'if not exist C:\\temp\\bundles mkdir C:\\temp\\bundles',
+  );
+  Directory? tmpDir;
   try {
-    // Upload bundle to a shared location accessible to all users.
-    print('Uploading bundle ...');
-    await sshRun(
-      vmName,
-      'if exist C:\\temp\\$appName rmdir /s /q C:\\temp\\$appName',
-    );
-    await sshRun(vmName, 'if not exist C:\\temp mkdir C:\\temp');
-    await scpToVm(vmName, tmpBundle, 'C:/temp/$appName', compress: true);
+    if (onVm) {
+      print('Copying bundle on the VM ...');
+      final source = bundlePath.replaceAll('/', '\\');
+      await sshRun(
+        vmName,
+        'xcopy /e /i /q /y "$source" $staged',
+      );
+    } else {
+      // Copy bundle to a temp dir (Bazel tree artifacts are symlinks /
+      // read-only).
+      print('Preparing bundle for upload ...');
+      tmpDir = Directory.systemTemp.createTempSync('deploy_');
+      final tmpBundle = '${tmpDir.path}/$appName';
+      await Process.run('cp', ['-RL', bundlePath, tmpBundle]);
+      print('Uploading bundle ...');
+      await scpToVm(
+        vmName,
+        tmpBundle,
+        'C:/temp/bundles/$appName',
+        compress: true,
+      );
+    }
 
     // Upload the DXGI screenshot script.
     print('Uploading verification scripts ...');
@@ -196,7 +226,7 @@ Future<void> _deployWindows(
       'C:/temp/verify_scripts/dxgi_screenshot.py',
     );
   } finally {
-    tmpDir.deleteSync(recursive: true);
+    tmpDir?.deleteSync(recursive: true);
   }
 
   // Discover Python path.
@@ -213,11 +243,11 @@ Future<void> _deployWindows(
   // Find the app executable inside the bundle.
   final exeList = await sshRun(
     vmName,
-    'powershell -Command "Get-ChildItem C:\\temp\\$appName\\*.exe | Select-Object -ExpandProperty Name"',
+    'powershell -Command "Get-ChildItem $staged\\*.exe | Select-Object -ExpandProperty Name"',
   );
   final exeName = exeList.trim().split('\n').first.trim();
   if (exeName.isEmpty || !exeName.endsWith('.exe')) {
-    stderr.writeln('ERROR: No .exe found in C:\\temp\\$appName\\');
+    stderr.writeln('ERROR: No .exe found in $staged\\');
     exit(1);
   }
   print('App executable: $exeName');
@@ -235,7 +265,7 @@ Future<void> _deployWindows(
     vmName,
     "powershell -Command \"Set-Content -Path C:\\temp\\run_verify.bat "
     "-Value '$pythonPath\\python.exe C:\\temp\\verify_scripts\\dxgi_screenshot.py "
-    "C:\\temp\\$appName\\$exeName $screenshotRemotePath 15 "
+    "$staged\\$exeName $screenshotRemotePath 15 "
     "> $outputRemotePath 2>&1' -Force\"",
   );
 
@@ -252,18 +282,13 @@ Future<void> _deployWindows(
     stderr.writeln('PsExec command failed: $e');
   }
 
-  // Read the captured output.
+  // Read the captured output. Only the script's own PASS is a pass: a run
+  // that never got as far as printing one failed too.
+  var passed = false;
   try {
     final output = await sshRun(vmName, 'type $outputRemotePath');
     print(output);
-
-    if (output.contains('PASS')) {
-      print('');
-      print('Visual verification PASSED.');
-    } else if (output.contains('FAIL')) {
-      stderr.writeln('');
-      stderr.writeln('Visual verification FAILED.');
-    }
+    passed = RegExp(r'^PASS\s*$', multiLine: true).hasMatch(output);
   } catch (e) {
     stderr.writeln('Could not read verification output: $e');
   }
@@ -276,6 +301,15 @@ Future<void> _deployWindows(
     print('Screenshot downloaded to: $localPath');
   } catch (e) {
     print('Could not download screenshot: $e');
+  }
+
+  if (passed) {
+    print('');
+    print('Visual verification PASSED.');
+  } else {
+    stderr.writeln('');
+    stderr.writeln('Visual verification FAILED.');
+    exit(1);
   }
 }
 

@@ -1881,6 +1881,33 @@ dart run tools/vm/deploy_bundle.dart flutter-windows-test <bundle_path> --window
 gcloud compute instances delete flutter-windows-test --quiet
 ```
 
+**What the check asserts:** that the app is still running after the wait,
+and that it shows a visible top-level window with a non-empty client area. A
+crash at launch fails it with the exit code (`0xC0000005` is an access
+violation), and so does a runner that never parents the Flutter view in a
+window of its own, as the engine creates the view in a message-only window
+until a runner does. `deploy_bundle.dart` exits non-zero on either.
+
+**`e2e/desktop_example`'s three Windows apps** are built on the VM, since a
+Windows bundle needs MSVC and, but in debug mode, a Windows host's
+`gen_snapshot`. Build them with the workspace's tests, then check each where it
+was built with `--on-vm`:
+
+```sh
+dart run tools/vm/run_e2e.dart flutter-windows-test --windows \
+  --folders=e2e/desktop_example --rules-dart=../rules_dart
+for app in windows_app windows_bazel_runner_app windows_custom_runner_app; do
+  dart run tools/vm/deploy_bundle.dart flutter-windows-test \
+    'C:\rf\rules_flutter\e2e\desktop_example\bazel-bin\'$app --windows --on-vm
+done
+```
+
+Their `bazel test` covers only that they build. The custom runner
+(`windows_custom_runner_app`, a `cc_binary` over the engine's C API) shares no
+code with the other two, so it has to be run to be checked. Run all three after
+any change to the Windows runner, the engine's `CcInfo`, the bundle layout, or
+`custom_runner/windows.cc`.
+
 **Key details:**
 - `--enable-display-device` is mandatory — provides virtual GPU for D3D
 - GDI `CopyFromScreen` captures D3D/Flutter surfaces as **black** — must use DXGI (`dxcam`)
@@ -2053,7 +2080,7 @@ These are not Bazel tests — they're standalone Dart scripts for manual investi
 | `e2e/_linux_test/verify_linux_app.dart` | Launch Linux GTK app under Xvfb, verify window, screenshot | `dart run <script> <bundle_dir> [title]` |
 | `e2e/_windows_test/verify_windows_bundle.dart` | Verify Windows bundle directory structure | `dart run <script> <bundle_dir> [native_libs...]` |
 | `e2e/_windows_test/verify_windows_app.dart` | Launch Windows app, verify window via PowerShell | `dart run <script> <bundle_dir> [title]` |
-| `e2e/_windows_test/dxgi_screenshot.py` | Launch app + DXGI screenshot (captures D3D/Flutter) | `python <script> <exe_path> <output.png> [wait_s]` |
+| `e2e/_windows_test/dxgi_screenshot.py` | Launch app, check it runs and shows a window, DXGI screenshot (captures D3D/Flutter) | `python <script> <exe_path> <output.png> [wait_s]` |
 | `e2e/_compare/compare_artifacts.dart` | Diff flutter build vs bazel build outputs | `dart run <script> <flutter_dir> <bazel_dir>` |
 | `tools/dev_tool/tool/concurrent_sessions.dart` | Two `flutter_bazel run` sessions in one workspace vs one (control) | `dart run <script> [solo\|pair] [edits]` |
 
