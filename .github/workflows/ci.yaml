@@ -83,8 +83,8 @@ jobs:
           cache-version: ${{ env.CACHE_VERSION }}
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
           cache-save: false
-      - run: bazel run --noincompatible_auto_exec_groups @overhead//:bazel_env -- update-symlink
-      - run: bazel run --noincompatible_auto_exec_groups @overhead//lint:prek -- run --all-files --show-diff-on-failure
+      - run: bazel run @overhead//:bazel_env -- update-symlink
+      - run: bazel run @overhead//lint:prek -- run --all-files --show-diff-on-failure
   # Every workspace's MODULE.bazel.lock, the root's and those under e2e/: for
   # each, `bazel mod deps` and `bazel build --nobuild //...` with
   # --lockfile_mode=error, which catch a missing entry and one gone stale that

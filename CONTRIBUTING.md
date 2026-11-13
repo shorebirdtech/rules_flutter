@@ -24,13 +24,10 @@ The commit message, yamlfmt and typos hooks run overhead's tools from
 after any `bazel clean` or bump of overhead's pin:
 
 ```shell
-bazel run --noincompatible_auto_exec_groups @overhead//:bazel_env
+bazel run @overhead//:bazel_env
 ```
 
 A hook that fails with "No such file or directory" means it is not set up.
-The flag is there because bazel_env 0.10.0 fails analysis under
-`--incompatible_auto_exec_groups`, which `.bazelrc` sets; it costs the next
-build a re-analysis, not a rebuild.
 
 A worktree made with `git worktree add` runs the command above in the
 worktree.

@@ -51,7 +51,7 @@ repos:
   # .bazel_env/bin, without Bazel. Set that up once in each checkout and
   # worktree, and after bumping overhead's pin (a hook failing with "No such
   # file or directory" means it is missing):
-  #   bazel run --noincompatible_auto_exec_groups @overhead//:bazel_env
+  #   bazel run @overhead//:bazel_env
   # CI builds .bazel_env and runs these. The manual-stage copies run the same
   # tools through `bazel run`, for Windows, where bazel_env does not run;
   # multitool's Windows launchers need the runfiles tree, and they are .bat

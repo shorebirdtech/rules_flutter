@@ -55,7 +55,7 @@ where the repo has CI. To install the hook, `uv tool install prek`, then
 `prek install -f` (without `-f`, prek keeps an existing hook and runs both).
 The hook runs the check from `.bazel_env/bin`. Set that up in each checkout,
 and again after a `bazel clean` or a bump of overhead's pin, with
-`bazel run --noincompatible_auto_exec_groups @overhead//:bazel_env`; a hook
+`bazel run @overhead//:bazel_env`; a hook
 failing with "No such file or directory" means it is missing.
 `bazel run @overhead//changelog` prints the unreleased notes so you can see how
 they read.
