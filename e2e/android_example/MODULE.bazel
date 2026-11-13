@@ -1,10 +1,9 @@
 """E2e test: full Android APK via rules_flutter + rules_android composition.
 
 The one e2e workspace set up for remote execution, as the README's "Remote
-execution" describes it: `--incompatible_auto_exec_groups` and the hermetic
-Python bootstrap in its .bazelrc, and the patches below that the rulesets an
-Android app builds with need under them. Every other workspace is set up as
-the README tells an app to be, with none of this.
+execution" describes it: the hermetic Python bootstrap in its .bazelrc, and
+the rules_go patch below. Every other workspace is set up as the README tells
+an app to be, with none of this.
 
 The Android SDK and NDK are hermetic_android_toolchains' downloads, as the
 README's Android section recommends, so nothing needs to be installed:
@@ -25,21 +24,10 @@ local_path_override(
     path = "../..",
 )
 
-# Patches for `--incompatible_auto_exec_groups`, under which each action runs
-# where the toolchain it names resolves. rules_android's runs aapt2, zipalign and
-# apksigner where the Android SDK toolchain and the JDK both resolve (a host
-# the downloaded SDK has tools for), and declares the JDK toolchain singlejar runs with.
-# protobuf's names the proto toolchain on protoc actions. rules_go's runs a cgo
-# link and a cgo stdlib build with the Go SDK resolved beside the C toolchain
-# they need, so the Mac never runs the Linux Go SDK's tools. An override only
-# applies in the root module: an Android app built with the flag needs these in
-# its own MODULE.bazel. Drop each patch once a release of its module declares
-# these toolchains and exec groups itself.
 single_version_override(
     module_name = "rules_android",
     patch_strip = 1,
     patches = [
-        "//patches:rules_android_auto_exec_groups.patch",
         # rules_android starts its tool JVMs with an initial heap as large as
         # the cap: -Xms3G for resource processing, -Xms8g for desugar, D8 and
         # R8. A JVM commits its initial heap the moment it starts. Linux and
@@ -58,16 +46,17 @@ single_version_override(
     ],
 )
 
-single_version_override(
-    module_name = "protobuf",
-    patch_strip = 1,
-    patches = ["//patches:protobuf_auto_exec_groups.patch"],
-)
-
+# rules_go runs a go_proto_library's protoc step on the first execution
+# platform listed, but builds protoc and its Go plugins for the platform the
+# Go and C++ toolchains resolve to. rules_android's Go tools, built for the
+# Mac, then run Mac binaries on a Linux worker. The patch builds those tools
+# for the platform the step runs on. An override only applies in the root
+# module: an Android app built with remote execution needs it in its own
+# MODULE.bazel. Drop it once a rules_go release does this.
 single_version_override(
     module_name = "rules_go",
     patch_strip = 1,
-    patches = ["//patches:rules_go_auto_exec_groups.patch"],
+    patches = ["//patches:rules_go_go_proto_exec_group.patch"],
 )
 
 flutter = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter")

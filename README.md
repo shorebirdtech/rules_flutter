@@ -583,22 +583,20 @@ You don't need this to build an app: the rules find the engine and web SDK repos
 Everything above builds on the machine running Bazel. To send actions to more than one kind of execution platform, such as a Linux remote worker alongside your Mac, add:
 
 ```bazelrc
-common --incompatible_auto_exec_groups
-
 # Start py_binary tools with their own hermetic interpreter. A remote worker
 # has no python3 on PATH.
 common --@@rules_python+//python/config_settings:bootstrap_impl=script
 ```
 
-With automatic execution groups, each action runs where the toolchain it uses is registered, rather than where every toolchain of its rule is. rules_flutter's actions land in the same places with the flag on or off:
+rules_flutter's actions run where the tools they need are:
 
 - on a Mac: `gen_snapshot` for iOS and macOS, Xcode tools, and signing;
 - on any host with the Flutter SDK: kernel compiles, asset and shader bundling, and web compiles;
 - on the machine running Bazel: stripping the Android engine, which needs the NDK that machine has.
 
-An Android app needs fixes to rules_android 0.8.1, protobuf and rules_go, because each has actions that the flag rejects or sends to the wrong host: see [Fixes to other rulesets](#fixes-to-other-rulesets).
+An Android app needs Linux x86_64 workers. Google publishes the Android SDK's build tools, aapt2 among them, for Linux only on x86_64, so a Linux arm64 worker can't build one. It also needs a fix to rules_go: see [Fixes to other rulesets](#fixes-to-other-rulesets).
 
-Use the downloaded NDK from the [Android](#android) setup when actions run remotely. It declares which host each of its toolchains runs on. An installed NDK (rules_android_ndk 0.1.5, `ANDROID_NDK_HOME`) has toolchains that match any execution platform, so a remote worker would be sent this machine's clang.
+Use the downloaded SDK and NDK from the [Android](#android) setup when actions run remotely. They declare which host each of their toolchains runs on, so a worker gets tools for its own platform. An installed NDK (rules_android_ndk 0.1.5, `ANDROID_NDK_HOME`) has toolchains that match any execution platform, so a remote worker would be sent this machine's clang.
 
 ### Fixes to other rulesets
 
@@ -610,9 +608,7 @@ Some builds hit bugs in rulesets that rules_flutter depends on. Until a release 
 | A macOS app extension that runs App Intents | rules_apple 5.4.0's `macos_extension` has no `app_intents` attribute | `git_override` rules_apple to a commit with it, as [App extensions](#app-extensions) shows | Fixed by [#3112](https://github.com/bazelbuild/rules_apple/pull/3112); not yet released |
 | An Android build on a Windows host | A few of rules_android's JVMs at once fail with `There is insufficient memory for the Java Runtime Environment to continue` | `rules_android_no_initial_heap.patch` | Not fixed. [#496](https://github.com/bazelbuild/rules_android/pull/496) would let you lower the starting heap per action |
 | An Android build on a Windows host, of an app with about a hundred Android libraries (a few plugins bring that many) | Resource packaging fails with `CreateProcess error=206, The filename or extension is too long` | `rules_android_aapt2_command_length.patch` | Not fixed |
-| An Android build with [remote execution](#remote-execution) | rules_android's actions run on a host its SDK tools or JDK don't support | `rules_android_auto_exec_groups.patch` | Not fixed. [#576](https://github.com/bazelbuild/rules_android/pull/576) proposes a fix |
-| | protobuf's `protoc` actions run on a host the proto toolchain doesn't support | `protobuf_auto_exec_groups.patch` | Partly fixed in protobuf 37.0 ([#28328](https://github.com/protocolbuffers/protobuf/pull/28328)), not yet released |
-| | rules_go runs a cgo link and a cgo stdlib build with the Go SDK of the wrong host | `rules_go_auto_exec_groups.patch` | Not fixed |
+| An Android build with [remote execution](#remote-execution) | rules_android's Go tools, when built for the Mac, have a Linux worker run Mac-built `protoc` | `rules_go_go_proto_exec_group.patch` | Not fixed |
 
 The patches are in [`e2e/android_example/patches/`](e2e/android_example/patches/). Apply each in a `single_version_override` of its module, as [`e2e/android_example/MODULE.bazel`](e2e/android_example/MODULE.bazel) does.
 
@@ -4286,7 +4282,7 @@ bazel_env(
 )
 ```
 
-Then run `bazel run //:bazel_env` once. If your `.bazelrc` sets `--incompatible_auto_exec_groups` (see [Remote execution](#remote-execution)), run `bazel run --noincompatible_auto_exec_groups //:bazel_env` instead, because bazel_env.bzl 0.10.0 fails analysis under that flag.
+Then run `bazel run //:bazel_env` once.
 
 It builds the tool, writes a shim to `.bazel_env/bin/fl`, and prints setup instructions for [direnv](https://direnv.net). They amount to this `.envrc` next to `MODULE.bazel`:
 
