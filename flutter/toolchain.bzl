@@ -125,7 +125,8 @@ flutter_toolchain = rule(
             allow_single_file = True,
         ),
         "const_finder": attr.label(
-            doc = "The `const_finder.dart.snapshot` for icon tree shaking.",
+            doc = "The `const_finder.dart.snapshot` for icon tree shaking. Absent from " +
+                  "Flutter 3.50 on, which shakes icons from the uses the AOT compile records.",
             allow_single_file = True,
         ),
         "font_subset": attr.label(
@@ -241,7 +242,11 @@ flutter_exec_tools = rule(
         "icu_data": _file("`icudtl.dat`."),
         "vm_isolate_snapshot": _file("`vm_isolate_snapshot.bin`."),
         "isolate_snapshot": _file("`isolate_snapshot.bin`."),
-        "const_finder": _file("`const_finder.dart.snapshot`."),
+        "const_finder": attr.label(
+            doc = "`const_finder.dart.snapshot`. Absent from Flutter 3.50 on, which " +
+                  "shakes icons from the uses the AOT compile records.",
+            allow_single_file = True,
+        ),
         "font_subset": _file("The `font-subset` binary."),
         "impellerc": _file("The `impellerc` binary."),
         "shader_lib": attr.label(doc = "The impellerc include files.", mandatory = True),

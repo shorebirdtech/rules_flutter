@@ -47,6 +47,7 @@ load(
     "merge_dart_defines",
     "resolve_dev_generated_sources",
     "shader_sources",
+    "shakes_icons_from_recorded_uses",
 )
 load("//flutter/private:dev_config.bzl", "dev_config_file", "dev_search_roots", "dev_source_dir", "write_dev_config")
 load("//flutter/private:exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
@@ -532,13 +533,18 @@ def _flutter_web_bundle_impl(ctx):
     # Step 3: Shader compilation + asset bundle.
     compiled_shaders = flutter_compile_shaders(ctx, tools, "web")
 
-    # Icon tree shaking: compile a kernel .dill for const_finder analysis.
-    # Web targets don't otherwise need a kernel (they use dart2wasm/dart2js),
-    # so we compile one specifically for const_finder to analyze IconData constants.
+    # Icon tree shaking: compile an AOT kernel .dill for its IconData
+    # constants. Web targets don't otherwise need a kernel (they use
+    # dart2wasm/dart2js), so this one exists only for that: const_finder
+    # scans it before Flutter 3.50, and from 3.50 on the compile records the
+    # instances itself (`--recorded-uses`).
     kernel_dill = None
+    recorded_uses = None
     if (ctx.attr.tree_shake_icons and not is_debug and
-        tools.const_finder != None and tools.font_subset != None):
+        tools.const_finder != None and tools.font_subset != None) or shakes_icons_from_recorded_uses(ctx, tools, is_debug):
         kernel_dill = ctx.actions.declare_file(ctx.label.name + "_icon_tree_shaking.dill")
+        if tools.const_finder == None:
+            recorded_uses = ctx.actions.declare_file(ctx.label.name + "_icon_tree_shaking.recorded_uses.json")
 
         # When the app is a Dart package, key the entrypoint by its `package:`
         # URI so the compile reads `main.dart` from the colocated package and
@@ -563,6 +569,7 @@ def _flutter_web_bundle_impl(ctx):
             srcs = all_srcs,
             package_config = config_file,
             output = kernel_dill,
+            recorded_uses = recorded_uses,
             aot = True,
             # Mode-derived rather than hardcoded: this branch is reachable in
             # both non-debug modes, and a profile build that shook its icons
@@ -577,7 +584,7 @@ def _flutter_web_bundle_impl(ctx):
         )
 
     flutter_assets = declare_flutter_assets_dir(ctx)
-    flutter_build_assets(ctx, tools, flutter_assets, compiled_shaders, kernel_dill = kernel_dill, is_debug = is_debug)
+    flutter_build_assets(ctx, tools, flutter_assets, compiled_shaders, kernel_dill = kernel_dill, recorded_uses = recorded_uses, is_debug = is_debug)
 
     # Step 4: Pick the index.html and flutter_bootstrap.js *templates*.
     #

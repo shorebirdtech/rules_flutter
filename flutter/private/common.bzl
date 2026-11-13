@@ -652,7 +652,32 @@ def declare_flutter_assets_dir(ctx):
     """
     return ctx.actions.declare_directory(ctx.label.name + "_flutter_assets")
 
-def flutter_build_assets(ctx, tools, output_dir, compiled_shaders = {}, kernel_dill = None, is_debug = False, data_assets = None):
+def shakes_icons_from_recorded_uses(ctx, tools, is_debug):
+    """Whether a build's icon tree shaking reads the uses its AOT compile records.
+
+    True for a non-debug build with `tree_shake_icons` on a toolchain that has
+    `font-subset` but no const_finder: Flutter 3.50 removed const_finder
+    (flutter/flutter#191702), and flutter_tools reads the `IconData`
+    instances the compile writes with `--recorded-uses` instead. The caller
+    then declares that file and passes it to the kernel compile and to
+    `flutter_build_assets`.
+
+    Args:
+        ctx: Rule context with a `tree_shake_icons` attr.
+        tools: The `FlutterExecToolsInfo` the asset bundle runs with.
+        is_debug: Whether this is a debug build, which shakes nothing.
+
+    Returns:
+        A bool.
+    """
+    return (
+        ctx.attr.tree_shake_icons and
+        not is_debug and
+        tools.font_subset != None and
+        tools.const_finder == None
+    )
+
+def flutter_build_assets(ctx, tools, output_dir, compiled_shaders = {}, kernel_dill = None, recorded_uses = None, is_debug = False, data_assets = None):
     """Run the shared asset bundling step.
 
     Walks `FlutterInfo.pub_fonts` / `pub_assets` from deps to bundle
@@ -668,6 +693,9 @@ def flutter_build_assets(ctx, tools, output_dir, compiled_shaders = {}, kernel_d
             the kernel compile that this action depends on.
         compiled_shaders: Dict mapping bundle dest path → compiled shader File.
         kernel_dill: The compiled kernel .dill File (needed for icon tree shaking).
+        recorded_uses: The `--recorded-uses` File of the AOT kernel compile,
+            which icon tree shaking reads where the toolchain has no
+            const_finder (Flutter 3.50 on). See `shakes_icons_from_recorded_uses`.
         is_debug: Whether this is a debug build (icon tree shaking is skipped in debug).
         data_assets: Optional depset[FlutterDataAssetInfo]. Each entry is
             placed at `flutter_assets/packages/<package>/<name>` and listed in
@@ -700,12 +728,16 @@ def flutter_build_assets(ctx, tools, output_dir, compiled_shaders = {}, kernel_d
     license_files = ctx.files.license_files
 
     # Icon tree shaking: enabled only in non-debug mode with tree_shake_icons=True.
+    # Before Flutter 3.50, const_finder scans the kernel for the IconData
+    # constants; from 3.50 on, the AOT compile records them.
     tree_shake_icons = (
         ctx.attr.tree_shake_icons and
         not is_debug and
-        kernel_dill != None and
-        tools.const_finder != None and
-        tools.font_subset != None
+        tools.font_subset != None and
+        (
+            (kernel_dill != None and tools.const_finder != None) or
+            (recorded_uses != None and tools.const_finder == None)
+        )
     )
 
     return flutter_asset_bundle_action(
@@ -719,6 +751,7 @@ def flutter_build_assets(ctx, tools, output_dir, compiled_shaders = {}, kernel_d
         const_finder = tools.const_finder if tree_shake_icons else None,
         font_subset = tools.font_subset if tree_shake_icons else None,
         kernel_dill = kernel_dill if tree_shake_icons else None,
+        recorded_uses = recorded_uses if tree_shake_icons else None,
         extra_asset_copies = extra_asset_copies,
     )
 

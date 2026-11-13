@@ -55,6 +55,7 @@ applies is a loud failure, where a rewrite would quietly drift.
 """
 
 load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url")
+load("//flutter/private:versions.bzl", "flutter_version_at_least")
 
 # The exact closure of `src/localizations/gen_l10n.dart` once the six import
 # edges are cut. Listed explicitly rather than globbed: the subset boundary is
@@ -87,14 +88,37 @@ _SUBSET_SRCS = [
 # `//flutter/private/gen_l10n:pubspec.lock`.
 _SUBSET_DEPS = ["file", "intl", "meta", "path", "process", "stack_trace", "yaml"]
 
-_PATCHES = [
-    Label("//flutter/private/gen_l10n/patches:gen_l10n.patch"),
-    Label("//flutter/private/gen_l10n/patches:localizations_utils.patch"),
-    Label("//flutter/private/gen_l10n/patches:signals.patch"),
-    Label("//flutter/private/gen_l10n/patches:process.patch"),
-    Label("//flutter/private/gen_l10n/patches:features.patch"),
-    Label("//flutter/private/gen_l10n/patches:io.patch"),
+# Every patch any version applies, so editing one refetches the repository.
+_ALL_PATCHES = [
+    Label("//flutter/private/gen_l10n/patches:" + name)
+    for name in [
+        "gen_l10n.patch",
+        "localizations_utils.patch",
+        "localizations_utils_3_50.patch",
+        "signals.patch",
+        "process.patch",
+        "features.patch",
+        "io.patch",
+        "io_3_50.patch",
+    ]
 ]
+
+def _patches(version):
+    """The cuts for `version`'s flutter_tools.
+
+    Flutter 3.50 moved the surrounding lines of two of them (an import
+    `localizations_utils.dart` dropped, `base/io.dart`'s networking section),
+    so those two have a 3.50 copy that removes the same code.
+    """
+    at_3_50 = flutter_version_at_least(version, 3, 50)
+    return [
+        Label("//flutter/private/gen_l10n/patches:gen_l10n.patch"),
+        Label("//flutter/private/gen_l10n/patches:localizations_utils_3_50.patch") if at_3_50 else Label("//flutter/private/gen_l10n/patches:localizations_utils.patch"),
+        Label("//flutter/private/gen_l10n/patches:signals.patch"),
+        Label("//flutter/private/gen_l10n/patches:process.patch"),
+        Label("//flutter/private/gen_l10n/patches:features.patch"),
+        Label("//flutter/private/gen_l10n/patches:io_3_50.patch") if at_3_50 else Label("//flutter/private/gen_l10n/patches:io.patch"),
+    ]
 
 def _flutter_gen_l10n_repo_impl(repository_ctx):
     version = repository_ctx.attr.flutter_version
@@ -108,7 +132,7 @@ def _flutter_gen_l10n_repo_impl(repository_ctx):
     # `-p1` strips the leading `a/`, leaving the `lib/src/...` paths the
     # stripped tarball already uses. A patch that no longer applies stops the
     # build — see this file's header on bumping Flutter.
-    for patch in _PATCHES:
+    for patch in _patches(version):
         repository_ctx.patch(repository_ctx.path(patch), strip = 1)
 
     srcs = "\n".join(['        "%s",' % s for s in _SUBSET_SRCS])
@@ -156,7 +180,7 @@ flutter_gen_l10n_repo = repository_rule(
             mandatory = True,
         ),
         "_patches": attr.label_list(
-            default = _PATCHES,
+            default = _ALL_PATCHES,
             doc = "Declared so a patch edit refetches the repository.",
         ),
     },

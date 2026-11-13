@@ -8,7 +8,7 @@ Desktop cross-toolchains only support debug/JIT mode — gen_snapshot cannot
 cross-compile between desktop OSes for AOT.
 """
 
-load(":engine_helpers.bzl", "dart_binary_name", "dartaotruntime_binary_name", "platform_to_arch", "platform_to_os")
+load(":engine_helpers.bzl", "const_finder_attr", "dart_binary_name", "dartaotruntime_binary_name", "platform_to_arch", "platform_to_os")
 
 def _flutter_desktop_cross_repo_impl(repository_ctx):
     host_platform = repository_ctx.attr.host_platform
@@ -45,6 +45,7 @@ def _flutter_desktop_cross_repo_impl(repository_ctx):
         flutter_version = flutter_version,
         engine_revision = engine_revision,
         host_repo_name = host_repo_name,
+        const_finder_attr = const_finder_attr(flutter_version, "@{}//:font-subset-tools/const_finder.dart.snapshot".format(host_repo_name)),
         engine_library_attr = engine_library_attr,
         dart_bin = dart_binary_name(host_platform),
         dartaotruntime_bin = dartaotruntime_binary_name(host_platform),
@@ -67,7 +68,7 @@ flutter_toolchain(
     frontend_server = "@{host_repo_name}//:dart-sdk/bin/snapshots/frontend_server_aot.dart.snapshot",
     gen_snapshot = "@{host_repo_name}//:host-tools/gen_snapshot{exe_suffix}",
     icu_data = "@{host_repo_name}//:host-tools/icudtl.dat",
-    const_finder = "@{host_repo_name}//:font-subset-tools/const_finder.dart.snapshot",
+{const_finder_attr}
     font_subset = "@{host_repo_name}//:font-subset-tools/font-subset{exe_suffix}",
     impellerc = "@{host_repo_name}//:host-tools/impellerc{exe_suffix}",
     material_icons_font = "@{host_repo_name}//:material-fonts/MaterialIcons-Regular.otf",

@@ -9,7 +9,7 @@ engine repo's gen_snapshot_arm64 instead of downloading a separate one.
 """
 
 load(":artifact_urls.bzl", "engine_artifact_url", "gen_snapshot_cross_artifact_path")
-load(":engine_helpers.bzl", "dart_binary_name", "dartaotruntime_binary_name", "gen_snapshot_host_platform", "platform_to_arch", "platform_to_os")
+load(":engine_helpers.bzl", "const_finder_attr", "dart_binary_name", "dartaotruntime_binary_name", "gen_snapshot_host_platform", "platform_to_arch", "platform_to_os")
 
 def _flutter_cross_compilation_repo_impl(repository_ctx):
     engine_revision = repository_ctx.attr.engine_revision
@@ -45,6 +45,7 @@ def _flutter_cross_compilation_repo_impl(repository_ctx):
         flutter_version = flutter_version,
         engine_revision = engine_revision,
         host_repo_name = host_repo_name,
+        const_finder_attr = const_finder_attr(flutter_version, "@{}//:font-subset-tools/const_finder.dart.snapshot".format(host_repo_name)),
         dart_bin = dart_binary_name(host_platform),
         dartaotruntime_bin = dartaotruntime_binary_name(host_platform),
         target_os = platform_to_os(target_platform),
@@ -70,7 +71,7 @@ flutter_toolchain(
     frontend_server = "@{host_repo_name}//:dart-sdk/bin/snapshots/frontend_server_aot.dart.snapshot",
     gen_snapshot = {gen_snapshot_attr},
     icu_data = "@{host_repo_name}//:host-tools/icudtl.dat",
-    const_finder = "@{host_repo_name}//:font-subset-tools/const_finder.dart.snapshot",
+{const_finder_attr}
     font_subset = "@{host_repo_name}//:font-subset-tools/font-subset{exe_suffix}",
     impellerc = "@{host_repo_name}//:host-tools/impellerc{exe_suffix}",
     material_icons_font = "@{host_repo_name}//:material-fonts/MaterialIcons-Regular.otf",

@@ -6,7 +6,7 @@ See https://docs.bazel.build/versions/main/skylark/deploying.html#dependencies
 
 load("//flutter/private:artifact_urls.bzl", "android_engine_artifact_path", "dart_sdk_artifact_path", "desktop_engine_artifact_path", "engine_artifact_url", "gen_snapshot_cross_artifact_path", "host_artifacts_path", "ios_engine_artifact_path")
 load("//flutter/private:constants.bzl", "ANDROID_ABI_FOR_ARCH")
-load("//flutter/private:engine_helpers.bzl", "PLATFORM_PREFIX_TO_OS", "dart_binary_name", "dartaotruntime_binary_name", "engine_arch_for_os", "engine_debug_filegroup_for_os", "engine_filegroup_for_os", "extract_macos_inner_framework", "gen_snapshot_host_platform")
+load("//flutter/private:engine_helpers.bzl", "PLATFORM_PREFIX_TO_OS", "const_finder_attr", "dart_binary_name", "dartaotruntime_binary_name", "engine_arch_for_os", "engine_debug_filegroup_for_os", "engine_filegroup_for_os", "extract_macos_inner_framework", "gen_snapshot_host_platform")
 load("//flutter/private:flutter_android_engine_repo.bzl", "flutter_android_engine_repo")
 load("//flutter/private:flutter_cross_repo.bzl", "flutter_cross_compilation_repo")
 load("//flutter/private:flutter_desktop_cross_repo.bzl", "flutter_desktop_cross_repo")
@@ -142,7 +142,7 @@ def _flutter_engine_artifacts_impl(repository_ctx):
             output = "cpp-client-wrapper",
         )
 
-    # 7. Download font-subset tools (const_finder + font-subset binary).
+    # 7. Download font-subset tools (font-subset, and const_finder before 3.50).
     font_subset_path = "{platform}/font-subset.zip".format(platform = platform)
     repository_ctx.download_and_extract(
         url = engine_artifact_url(engine_revision, font_subset_path),
@@ -230,6 +230,7 @@ def _flutter_engine_artifacts_impl(repository_ctx):
         host_arch = arch_part,
         linux_sysroot_attr = linux_sysroot_attr,
         flutter_libraries_spec = _FLUTTER_LIBRARIES_SPEC,
+        const_finder_attr = const_finder_attr(flutter_version, "font-subset-tools/const_finder.dart.snapshot"),
     )
     repository_ctx.file("BUILD.bazel", build_content)
 
@@ -285,7 +286,7 @@ flutter_toolchain(
     libraries_spec = "{flutter_libraries_spec}",
 {gen_snapshot_attr}
     icu_data = "host-tools/icudtl.dat",
-    const_finder = "font-subset-tools/const_finder.dart.snapshot",
+{const_finder_attr}
     font_subset = "font-subset-tools/font-subset{exe_suffix}",
     impellerc = "host-tools/impellerc{exe_suffix}",
     material_icons_font = "material-fonts/MaterialIcons-Regular.otf",
@@ -301,7 +302,7 @@ flutter_toolchain(
 
 flutter_exec_tools(
     name = "flutter_exec_tools",
-    const_finder = "font-subset-tools/const_finder.dart.snapshot",
+{const_finder_attr}
     dart = "dart-sdk/bin/{dart_bin}",
     dart_sdk = ":dart_sdk_files",
     dartaotruntime = "dart-sdk/bin/{dartaotruntime_bin}",

@@ -91,6 +91,7 @@ def flutter_asset_bundle_action(
         const_finder = None,
         font_subset = None,
         kernel_dill = None,
+        recorded_uses = None,
         extra_asset_copies = {}):
     """Create an action that generates the flutter_assets/ tree artifact.
 
@@ -114,6 +115,10 @@ def flutter_asset_bundle_action(
         const_finder: File for const_finder.dart.snapshot (enables icon tree shaking).
         font_subset: File for font-subset binary (enables icon tree shaking).
         kernel_dill: File for the compiled kernel .dill (needed for icon tree shaking).
+        recorded_uses: File the AOT kernel compile wrote with
+            `--recorded-uses`. With `font_subset` and no `const_finder`
+            (Flutter 3.50 on), icon tree shaking reads the `IconData`
+            instances from it instead of running const_finder over the kernel.
         extra_asset_copies: dict mapping custom dest path → File for assets that
             need a specific destination path (e.g. "fonts/MaterialIcons-Regular.otf").
 
@@ -157,7 +162,13 @@ def flutter_asset_bundle_action(
 
     # Icon tree shaking config.
     extra_inputs = []
-    if const_finder and font_subset and kernel_dill:
+    if font_subset and recorded_uses and not const_finder:
+        config["icon_tree_shaking"] = {
+            "font_subset": file_ref(refs, font_subset),
+            "recorded_uses": file_ref(refs, recorded_uses),
+        }
+        extra_inputs.extend([font_subset, recorded_uses])
+    elif const_finder and font_subset and kernel_dill:
         config["icon_tree_shaking"] = {
             "dart": file_ref(refs, dart),
             "const_finder": file_ref(refs, const_finder),

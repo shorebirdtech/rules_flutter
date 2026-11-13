@@ -90,6 +90,35 @@ FLUTTER_VERSIONS = {
     ),
 }
 
+def flutter_has_const_finder(flutter_version):
+    """Whether a release ships `const_finder.dart.snapshot` in `font-subset.zip`.
+
+    Flutter 3.50 removed const_finder (flutter/flutter#191702): icon tree
+    shaking reads the instances of `IconData` the AOT kernel compile records
+    (`--recorded-uses`) instead of scanning the kernel for constants.
+
+    Args:
+        flutter_version: Flutter release tag (e.g. "3.47.5").
+
+    Returns:
+        True for releases before 3.50.0.
+    """
+    return not flutter_version_at_least(flutter_version, 3, 50)
+
+def flutter_version_at_least(flutter_version, major, minor):
+    """Whether a Flutter release tag is `major.minor` or later.
+
+    Args:
+        flutter_version: Flutter release tag (e.g. "3.47.5").
+        major: The major version to compare against.
+        minor: The minor version to compare against.
+
+    Returns:
+        A bool.
+    """
+    parts = flutter_version.split("-")[0].split(".")
+    return (int(parts[0]), int(parts[1])) >= (major, minor)
+
 def flutter_source_sha256(flutter_version):
     """Returns the recorded sha256 of a release's GitHub source tarball.
 

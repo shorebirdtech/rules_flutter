@@ -1478,7 +1478,7 @@ sdk = ctx.toolchains["@rules_flutter//flutter:toolchain_type"].flutter_sdk_info
 | `icu_data` | `File` | `icudtl.dat`. |
 | `tool_files` | `depset[File]` | Everything needed to run the build tools, for action inputs. |
 | `engine_library` | `Target` or `None` | The platform engine runtime library. `None` for mobile and web. |
-| `const_finder` | `File` or `None` | `const_finder.dart.snapshot`, for icon tree shaking. |
+| `const_finder` | `File` or `None` | `const_finder.dart.snapshot`, for icon tree shaking. `None` from Flutter 3.50 on, which shakes icons from the uses the AOT compile records. |
 | `font_subset` | `File` or `None` | The `font-subset` binary. |
 | `impellerc` | `File` or `None` | The shader compiler. |
 | `shader_lib` | `list[File]` | Shader include files for impellerc. |
