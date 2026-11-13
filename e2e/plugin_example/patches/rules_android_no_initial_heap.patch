@@ -1,0 +1,71 @@
+diff --git a/rules/android_sdk_repository/helper.bzl b/rules/android_sdk_repository/helper.bzl
+index 22a9cb2..66822e6 100644
+--- a/rules/android_sdk_repository/helper.bzl
++++ b/rules/android_sdk_repository/helper.bzl
+@@ -434,7 +434,6 @@ def create_android_sdk_rules(
+             "-XX:+TieredCompilation",
+             "-XX:TieredStopAtLevel=1",
+             # Consistent with what we use for desugar.
+-            "-Xms8g",
+             "-Xmx8g",
+         ],
+         main_class = "com.android.tools.r8.GenerateMainDexList",
+diff --git a/rules/java.bzl b/rules/java.bzl
+index 1f71362..6ecc1e5 100644
+--- a/rules/java.bzl
++++ b/rules/java.bzl
+@@ -468,7 +468,9 @@ def _run(
+ 
+     # Set reasonable max heap default. Required to prevent runaway memory usage.
+     # Can still be overridden by callers of this method.
+-    jvm_flags = ["-Xms3G", "-Xmx3G", "-XX:+ExitOnOutOfMemoryError"] + jvm_flags
++    # No -Xms: an initial heap equal to the cap is committed at JVM start, which
++    # Windows charges against its commit limit for every concurrent action.
++    jvm_flags = ["-Xmx3G", "-XX:+ExitOnOutOfMemoryError"] + jvm_flags
+ 
+     # executable should be a File or a FilesToRunProvider
+     jar = args.get("executable")
+diff --git a/src/tools/java/com/google/devtools/build/android/r8/BUILD b/src/tools/java/com/google/devtools/build/android/r8/BUILD
+index c6387b7..25871ba 100644
+--- a/src/tools/java/com/google/devtools/build/android/r8/BUILD
++++ b/src/tools/java/com/google/devtools/build/android/r8/BUILD
+@@ -83,7 +83,6 @@ java_binary(
+         # b/71513487
+         "-XX:+TieredCompilation",
+         "-XX:TieredStopAtLevel=1",
+-        "-Xms8g",
+         "-Xmx8g",
+     ],
+     main_class = "com.google.devtools.build.android.r8.Desugar",
+diff --git a/tools/android/BUILD b/tools/android/BUILD
+index d01d2db..953050a 100644
+--- a/tools/android/BUILD
++++ b/tools/android/BUILD
+@@ -260,7 +260,6 @@ _JVM_FLAGS = [
+     "-XX:+TieredCompilation",
+     "-XX:TieredStopAtLevel=1",
+     # Consistent with what we use for desugar.
+-    "-Xms8g",
+     "-Xmx8g",
+ ]
+ 
+@@ -370,7 +369,6 @@ java_binary(
+         "-XX:+TieredCompilation",
+         "-XX:TieredStopAtLevel=1",
+         # Consistent with what we use for desugar.
+-        "-Xms8g",
+         "-Xmx8g",
+     ],
+     main_class = "com.android.tools.r8.GlobalSyntheticsGenerator",
+diff --git a/tools/jdk/jvmopts.bzl b/tools/jdk/jvmopts.bzl
+index 5e9bf49..f148feb 100644
+--- a/tools/jdk/jvmopts.bzl
++++ b/tools/jdk/jvmopts.bzl
+@@ -20,7 +20,6 @@ BASE_JVMOPTS = [
+     # b/71513487
+     "-XX:+TieredCompilation",
+     "-XX:TieredStopAtLevel=1",
+-    "-Xms8g",
+     "-Xmx8g",
+ ]
+ 

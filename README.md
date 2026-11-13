@@ -596,7 +596,7 @@ With automatic execution groups, each action runs where the toolchain it uses is
 - on any host with the Flutter SDK: kernel compiles, asset and shader bundling, and web compiles;
 - on the machine running Bazel: stripping the Android engine, which needs the NDK that machine has.
 
-An Android app needs fixes to other rulesets, because rules_android 0.8.1, protobuf and rules_go have actions that the flag rejects or sends to the wrong host. Copy the `single_version_override` patches for those three from [`e2e/android_example/MODULE.bazel`](e2e/android_example/MODULE.bazel) into your own `MODULE.bazel`. One of them, `rules_android_no_initial_heap.patch`, has nothing to do with remote execution: every Android build on a Windows host needs it (see **Building on Windows** under [Android](#android)).
+An Android app needs fixes to other rulesets, because rules_android 0.8.1, protobuf and rules_go have actions that the flag rejects or sends to the wrong host. Copy the `single_version_override` patches for those three from [`e2e/android_example/MODULE.bazel`](e2e/android_example/MODULE.bazel) into your own `MODULE.bazel`. Two of them, `rules_android_no_initial_heap.patch` and `rules_android_aapt2_command_length.patch`, have nothing to do with remote execution: an Android build on a Windows host needs them (see **Building on Windows** under [Android](#android)).
 
 Use the downloaded NDK from the [Android](#android) setup when actions run remotely. It declares which host each of its toolchains runs on. An installed NDK (rules_android_ndk 0.1.5, `ANDROID_NDK_HOME`) has toolchains that match any execution platform, so a remote worker would be sent this machine's clang.
 
@@ -2037,7 +2037,9 @@ For [remote execution](#remote-execution), use the downloaded NDK. An installed 
 
 rules_android 0.8.1 starts its tool JVMs with an initial heap as large as their cap: `-Xms3G` for resource processing, and `-Xms8g` for desugaring, D8 and R8. A JVM commits its initial heap as it starts. Windows counts that against RAM plus the pagefile whether or not the JVM uses it, so on a 16 GB machine a few of these JVMs at once fail the build with `There is insufficient memory for the Java Runtime Environment to continue` and `The paging file is too small for this operation to complete`.
 
-Apply `rules_android_no_initial_heap.patch` from [`e2e/android_example/patches/`](e2e/android_example/patches/) in a `single_version_override` of rules_android, as [`e2e/android_example/MODULE.bazel`](e2e/android_example/MODULE.bazel) does. The patch keeps each heap cap and drops only the initial sizes. macOS and Linux build without it.
+rules_android 0.8.1 also puts an `-A` (assets) and an `-R` (compiled resources) argument on the `aapt2 link` command line for every library the app links. With about a hundred libraries, which a few plugins bring, that passes Windows' limit of 32,767 characters, and resource packaging fails with `CreateProcess error=206, The filename or extension is too long`.
+
+Apply `rules_android_no_initial_heap.patch` and `rules_android_aapt2_command_length.patch` from [`e2e/android_example/patches/`](e2e/android_example/patches/) in a `single_version_override` of rules_android, as [`e2e/android_example/MODULE.bazel`](e2e/android_example/MODULE.bazel) does. The first keeps each heap cap and drops only the initial sizes. The second writes the `-R` list to a file once it is long, and leaves out asset directories that hold nothing to package. macOS and Linux build without them.
 
 #### Choosing ABIs
 

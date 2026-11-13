@@ -46,6 +46,28 @@ git_override(
 
 bazel_dep(name = "rules_jvm_external", version = "7.2")
 
+# rules_android starts its tool JVMs with an initial heap as large as the cap
+# (-Xms3G for resource processing, -Xms8g for desugar, D8 and R8), and Windows
+# charges a JVM's initial heap against the commit limit as it starts, so a few
+# at once fail an Android build on a Windows host with "The paging file is too
+# small". The patch keeps every cap and drops the initial sizes; the README's
+# "Building on Windows" asks the same of every Android build on Windows. Drop it
+# once a rules_android release does.
+single_version_override(
+    module_name = "rules_android",
+    patch_strip = 1,
+    patches = [
+        "//patches:rules_android_no_initial_heap.patch",
+        # rules_android puts the -A and -R arguments of `aapt2 link` on its
+        # command line, one per library, and an app with about a hundred
+        # libraries passes Windows' 32,767-character limit. The patch writes -R
+        # to a file by length rather than only past 200 entries, and leaves out
+        # asset directories with nothing to package. Drop it once a
+        # rules_android release does.
+        "//patches:rules_android_aapt2_command_length.patch",
+    ],
+)
+
 # The Android SDK and NDK, downloaded at pinned versions and checked against
 # their checksums rather than found on the machine, so the build needs no
 # `ANDROID_HOME` or `ANDROID_NDK_HOME`. `.bazelrc` accepts their licences.

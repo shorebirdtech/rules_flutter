@@ -48,6 +48,13 @@ single_version_override(
         # exhaust that on a 16 GB machine. The patch keeps every cap and drops
         # the initial sizes. Drop it once a rules_android release does.
         "//patches:rules_android_no_initial_heap.patch",
+        # rules_android puts the -A and -R arguments of `aapt2 link` on its
+        # command line, one per library, and an app with about a hundred
+        # libraries passes Windows' 32,767-character limit. The patch writes -R
+        # to a file by length rather than only past 200 entries, and leaves out
+        # asset directories with nothing to package. Drop it once a
+        # rules_android release does.
+        "//patches:rules_android_aapt2_command_length.patch",
     ],
 )
 
