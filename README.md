@@ -1804,7 +1804,15 @@ What an extension needs:
 - **The app's version.** rules_apple gives an extension no version unless you pass one, and the system expects an extension's version to match its app's. Declare the version once and pass it as the `version` of the app and of each extension. `flutter_apple_bundle_version`, from `flutter:ios.bzl` or `flutter:macos.bzl`, takes the version of the `application` you give it, so the bundles and `appBuildName` agree. rules_apple's `apple_bundle_version` works too, if it gives the application's version: the app's build fails on any other.
 - **A bundle id under the app's**, such as `com.example.myapp.widgets`.
 - **An Info.plist with the bundle keys.** Besides `NSExtension` and its `NSExtensionPointIdentifier`, give `CFBundleName` (`$(PRODUCT_NAME)`), `CFBundleExecutable` (`$(EXECUTABLE_NAME)`), `CFBundleIdentifier` (`$(PRODUCT_BUNDLE_IDENTIFIER)`) and a `CFBundlePackageType` of `XPC!`. Without them the simulator refuses to install the app.
-- **Its App Intents.** A control's button, an interactive widget and a configurable widget each run an App Intent in the extension, so give the library to the extension's `app_intents` as well as its `deps`. rules_apple 5.4.0's `macos_extension` has no `app_intents` attribute. [`e2e/macos_example/patches/`](e2e/macos_example/patches/) has a patch that adds it. Apply it in your own `MODULE.bazel` with `single_version_override(module_name = "rules_apple", version = "5.4.0", patch_strip = 1, patches = [...])`. It doesn't come with rules_flutter, because only the root module's overrides apply.
+- **Its App Intents.** A control's button, an interactive widget and a configurable widget each run an App Intent in the extension, so give the library to the extension's `app_intents` as well as its `deps`. rules_apple 5.4.0's `macos_extension` has no `app_intents` attribute; its main branch has it, and no release does yet. Until one does, pin rules_apple to a commit that has it in your own `MODULE.bazel`, as [`e2e/macos_example/MODULE.bazel`](e2e/macos_example/MODULE.bazel) does, and drop the pin once you depend on a release with it. It doesn't come with rules_flutter, because only the root module's overrides apply:
+
+  ```starlark
+  git_override(
+      module_name = "rules_apple",
+      commit = "7610d32139667a06a77d448e6b24b1a34c3e8d2e",
+      remote = "https://github.com/bazelbuild/rules_apple.git",
+  )
+  ```
 - **On macOS, the sandbox.** macOS loads a widget or share extension only if its entitlements include `com.apple.security.app-sandbox`.
 - **Visibility** to the app's package, if the extension lives elsewhere. `flutter_ios_app` and `flutter_macos_app` have to sit in the package that holds `ios/Runner/` or `macos/Runner/`.
 
