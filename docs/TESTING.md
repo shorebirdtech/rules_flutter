@@ -446,8 +446,13 @@ The predicate for "ran and passed" is `result == "success" && !skipped
 runs it, and then the suite, is the `dart` of the toolchain the build compiles
 with. No `dart` on `PATH` is consulted, and none is needed.
 
-`dart test` resolves the pub workspace before it runs a test, and that workspace
-has packages depending on `sdk: flutter`, which a bare Dart SDK cannot resolve.
+The runner resolves the pub workspace with `dart pub get` before it starts
+`dart test`. Left to `dart test`, a fresh checkout can fail before any test
+runs with `Bad state: Attempting to send request on closed client`: Dart 3.13's
+pub resolves there, judges its own result stale whenever a workspace member's
+`pubspec.yaml` is newer than `pubspec.lock`, and the second resolution finds its
+HTTP client already closed. The workspace has packages depending on
+`sdk: flutter`, which a bare Dart SDK cannot resolve.
 The runner sets `FLUTTER_ROOT` to `@flutter_dev_root`, the same tree
 `bazel run //flutter/pub` resolves `pubspec.lock` against. Both paths are on the
 runner's first lines of output.

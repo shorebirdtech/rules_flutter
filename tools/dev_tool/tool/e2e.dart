@@ -48,7 +48,8 @@
 /// [Platform.resolvedExecutable], this very VM, so `PATH` is never consulted
 /// and the banner below names the `dart` that ran.
 ///
-/// `dart test` resolves the pub workspace before it runs anything, and that
+/// The runner resolves the pub workspace with `dart pub get` before the suite
+/// starts (see [_resolve] for why `dart test` is not left to do it), and that
 /// workspace has packages that depend on `sdk: flutter`. A bare Dart SDK cannot
 /// resolve those ("the Flutter SDK is not available", exit 65), so the suite
 /// gets `FLUTTER_ROOT` pointing at `@flutter_dev_root`, the tree
@@ -134,7 +135,9 @@ Future<void> main(List<String> runArgs) async {
   stderr.writeln('e2e: FLUTTER_ROOT=$flutterRoot');
   stderr.writeln('e2e: ${packageDir.path}\$ dart ${testArgs.join(' ')}');
 
-  final outcome = await _runSuite(packageDir, flutterRoot, adb, testArgs);
+  final environment = _suiteEnvironment(flutterRoot, adb);
+  await _resolve(packageDir, environment);
+  final outcome = await _runSuite(packageDir, environment, testArgs);
   outcome.report();
   exit(outcome.ok ? 0 : 1);
 }
@@ -196,17 +199,51 @@ Map<String, String> _suiteEnvironment(String flutterRoot, String adb) => {
   _adbVariable: adb,
 };
 
+/// Resolves the pub workspace with `dart pub get`, in a process of its own,
+/// before `dart test` starts.
+///
+/// `dart test` can resolve on its own, but with Dart 3.13's pub it can do so
+/// only once per process: the first resolution closes pub's HTTP client, and
+/// a second one dies on `Bad state: Attempting to send request on closed
+/// client`. A second one comes whenever `dart test` finds no
+/// `.dart_tool/package_config.json` and some workspace member's `pubspec.yaml`
+/// is newer than `pubspec.lock`, as in every fresh checkout that writes
+/// `tools/` after the root lock: it resolves, and then pub's up-to-date check,
+/// which counts the other workspace members as packages missing from the lock,
+/// calls that resolution stale and starts another. Resolved here first,
+/// `dart test` finds the package config and resolves at most once.
+Future<void> _resolve(
+  Directory packageDir,
+  Map<String, String> environment,
+) async {
+  final process = await Process.start(
+    Platform.resolvedExecutable,
+    ['pub', 'get'],
+    workingDirectory: packageDir.path,
+    environment: environment,
+    includeParentEnvironment: false,
+  );
+  // To stderr, both: this runner's stdout carries only what it says itself.
+  await Future.wait([
+    process.stdout.transform(utf8.decoder).forEach(stderr.write),
+    process.stderr.transform(utf8.decoder).forEach(stderr.write),
+  ]);
+  final code = await process.exitCode;
+  if (code != 0) {
+    _fail('`dart pub get` exited $code, so the suite did not run.');
+  }
+}
+
 Future<Outcome> _runSuite(
   Directory packageDir,
-  String flutterRoot,
-  String adb,
+  Map<String, String> environment,
   List<String> testArgs,
 ) async {
   final process = await Process.start(
     Platform.resolvedExecutable,
     [...testArgs, '--reporter', 'json'],
     workingDirectory: packageDir.path,
-    environment: _suiteEnvironment(flutterRoot, adb),
+    environment: environment,
     includeParentEnvironment: false,
   );
   // The runner's own diagnostics — version solving, load errors, a test's own
