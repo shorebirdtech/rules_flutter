@@ -361,7 +361,12 @@ def unbuilt_native_code_test_suite(name):
     )
     _link_flags_subject(name = name + "_link_flags_subject", tags = ["manual"])
     _link_flags_test(name = name + "_link_flags_test", target_under_test = ":" + name + "_link_flags_subject")
-    _apple_fails_test(name = name + "_apple_fails_test", target_under_test = _FIXTURE + "macos_plugins")
-    _other_apple_platform_builds_test(name = name + "_other_apple_platform_builds_test", target_under_test = _FIXTURE + "ios_plugins")
+
+    # The Apple builds are analysed only on a macOS host: there the host is the
+    # macOS target the aggregators build for, and rules_apple's tools have a
+    # platform to run on.
+    macos = ["@platforms//os:macos"]
+    _apple_fails_test(name = name + "_apple_fails_test", target_under_test = _FIXTURE + "macos_plugins", target_compatible_with = macos)
+    _other_apple_platform_builds_test(name = name + "_other_apple_platform_builds_test", target_under_test = _FIXTURE + "ios_plugins", target_compatible_with = macos)
     _carries_linux_message_test(name = name + "_carries_linux_message_test", target_under_test = _FIXTURE[:-1] + "/rusty")
-    _carries_macos_message_test(name = name + "_carries_macos_message_test", target_under_test = _FIXTURE[:-1] + "/rusty")
+    _carries_macos_message_test(name = name + "_carries_macos_message_test", target_under_test = _FIXTURE[:-1] + "/rusty", target_compatible_with = macos)
