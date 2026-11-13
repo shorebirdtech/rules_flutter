@@ -338,8 +338,7 @@ The first re-pins every stale Maven repo of that workspace (`REPIN=1 bazel run
 refreshes its `MODULE.bazel.lock` as above. The root's lock is re-pinned the same
 way, `bazel run //tools/maven_locks -- --refresh .`, and then every Android e2e
 lock the change reaches. Pinning resolves through Coursier, so it needs Maven
-Central and maven.google.com, and the `ANDROID_HOME` and `ANDROID_NDK_HOME` the
-workspace needs. Commit the changed lock with the change that made it stale.
+Central and maven.google.com. Commit the changed lock with the change that made it stale.
 
 A re-pin of `plugin_example` that changes a version also takes its
 `test/gradle_module_metadata.json`: the Gradle module metadata of what the lock
@@ -471,32 +470,22 @@ in `machine_protocol_e2e_test.dart` that keeps the from-source path, and the
 "Running build hooks…" stdout prefix only it produces, exercised. That case is
 the reason `hermeticDart` still exists.
 
-### The Android SDK/NDK variables must be exported too
+### The Android SDK and NDK are downloaded
 
-`plugin_example` registers the NDK toolchain, so **every** test that builds in
-that workspace fails without `ANDROID_HOME` and `ANDROID_NDK_HOME` — including
-its macOS, iOS and Chrome groups, because toolchain resolution fetches the
-repository regardless of the target being built. The failure arrives as a
-`Build failed with exit code 1` under half a second, which reads like a broken
-dev tool rather than a missing variable:
+The root and every Android e2e workspace (`android_example`, `custom_engine`,
+`hello_world`, `integration_test`, `plugin_example`) take the Android SDK and
+NDK from hermetic_android_toolchains, as the README recommends, and accept their
+licences in the checked-in `.bazelrc`. Nothing needs to be installed or
+exported: `ANDROID_HOME` and `ANDROID_NDK_HOME` are read by no workspace here.
+The first build of each fetches about 1.1 GB on a Mac (the NDK is 950 MB, 2.8 GB
+unpacked); the repository cache keeps the archives and the repository contents
+cache the unpacked NDK, both shared by every workspace, and each output base
+unpacks its own 350 MB of SDK.
 
-```sh
-export ANDROID_HOME="$HOME/Library/Android/sdk"
-export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/<version>"   # versioned dir, not ndk/
-```
-
-§ 3 has the full explanation, including why `.bazelrc` needs `--repo_env` for
-these rather than `--action_env`.
-
-Which failure you see depends on how warm the workspace's output base is. A
-test using `editableWorkspace` copies the workspace to a fresh temp directory,
-so its output base has never been built and the dev tool's *first* bazel
-command — the `bazel fetch` that materializes the Flutter toolchain repo before
-anything is compiled — is what hits the missing variable; the run reports
-`Error in fail: Either the ANDROID_NDK_HOME environment variable or …` together
-with the `cd … && bazel fetch …` that produced it. A *warm* in-tree workspace
-shows the `Build failed with exit code 1` above instead, because the toolchain
-repo is already on disk and the first thing to need the NDK is the build.
+Every build in such a workspace fetches the SDK repository, whatever the
+target, because rules_android registers `@androidsdk//:all` for every module
+that depends on it; a test that copies a workspace (`editableWorkspace`) copies
+the `.bazelrc` that accepts the licences with it.
 
 ### macOS permission prerequisites
 
@@ -640,7 +629,7 @@ When re-running to reproduce, use `--nocache_test_results` and read the
 | `android_restart_e2e_test.dart` | Android (an attached phone or emulator; `$ANDROID_SERIAL` picks one) | What an `app.restart` of `e2e/android_example` builds and when it replaces the process. A Dart-only edit restarts in the same process and the only bazel build the tool runs is of the bundle's parts (`flutter_android_bundle_parts`: the `flutter_assets` tree and native libraries, through `flutter/android_bundle_parts.bzl`), never of the launch target, which packages the APK (dex, resources, zip, sign: 24 of a restart's 46 s on an emulator). An edit to `native/add.c` relaunches: the APK is built once, for the relaunch to install, and the restart after it finds the libraries unchanged and builds no APK. So does an edit to `native/extra.c`, a `cc_library` listed on a Tier 2 `android_binary` (`:native_dep_app`) rather than on the application: the restart watches what the APK packages (each `cc_library`'s archives, the shared libraries and AAR `native_libs.zip`s below the binary, through the `flutter_android_native_libs` group), not only the application's own `native_deps`. So do an edit to the library an AAR carries (`native/aar_native.c`, packed into an AAR by `aar.bzl`) and to a checked-in prebuilt library `cc_import`ed on the binary (`native/prebuilt/libprebuilt.so`, `libprebuilt_static.a`), which are source files the group holds as they are. Waits for `frontend_server_ready` before editing, for the reason `native_libs_reload_e2e_test.dart` does |
 | `plugin_example_e2e_test.dart` | macOS/iOS-sim/Android/Chrome | Plugin apps render non-blank frames; Dart plugin registration survives `app.restart` (macOS); web plugins register in both DDC and `--wasm` dev mode (Chrome) |
 | `digest_pinned_e2e_test.dart` | Any | Fetches of rules_flutter's own repositories (`flutter_sky_engine_repo`, the profile, Android, iOS, desktop and cross repos, the web SDK repo with its per-host Dart SDK digests, a hosted pub package) in a generated workspace: the artifacts under test are served from a `--distdir` (a correct digest fetches from it), while the workspace's module graph still resolves from Bazel's registry or repository cache; a wrong one or one that is not a SHA-256 fails. The control for `digest_missing_e2e_test.dart` |
-| `android_engine_query_e2e_test.dart` | Any | `bazel query 'deps(//...)'` in `e2e/hello_world` (including the device-signed iOS app, whose provisioning profile is the `//:device_profile` flag, so a clean clone without the git-ignored `//device` still loads) loads every package, though the workspace names the Android engine repository of no ABI in `use_repo`. `flutter_android_engine` `select()`s over one repository per ABI and a query loads every branch, so the labels have to resolve from rules_flutter's own `use_repo`. Needs `ANDROID_HOME` and `ANDROID_NDK_HOME`; the check that the workspace leaves an ABI out keeps it from passing vacuously |
+| `android_engine_query_e2e_test.dart` | Any | `bazel query 'deps(//...)'` in `e2e/hello_world` (including the device-signed iOS app, whose provisioning profile is the `//:device_profile` flag, so a clean clone without the git-ignored `//device` still loads) loads every package, though the workspace names the Android engine repository of no ABI in `use_repo`. `flutter_android_engine` `select()`s over one repository per ABI and a query loads every branch, so the labels have to resolve from rules_flutter's own `use_repo`. The check that the workspace leaves an ABI out keeps it from passing vacuously |
 | `digest_missing_e2e_test.dart` | Any | The same repositories declared with a blank, unset or malformed digest must fail the fetch, naming the digest and the artifact, before a request is made (a fake engine revision answers 404, so a fetch that got that far did not ask). Also the web SDK repo's second archive, the Dart SDK, whose digest is looked up per host, and a hosted pub package served from `file://`, where an unpinned fetch succeeds (its `sha256` is a mandatory attribute, so a declaration without one is refused by Bazel itself; one that is blank is refused by rules_dart's `fetch_pub_archive`). Neither digest file is a Bazel target: each case runs `bazel fetch` in a second, generated workspace, which has to resolve its module graph and so cannot sit inside a sandboxed `bazel test`. The always-run parts are `//flutter/tests:pinned_test` and `//tools/download_guard:flutter_sources_test` |
 | `sdk_source_e2e_test.dart` | Any | How a Flutter SDK package is fetched from the pinned Flutter source: `flutter_pub_package` with `flutter_source_version`, over a fake release tarball served from a distdir (`digest_probe.dart`). A package in the tarball arrives with its own files at the repository root, and one the release lacks fails the fetch naming the package, the Flutter version and `bazel run @rules_flutter//flutter/pub -- get`. No network, no device |
 | `pub_archive_e2e_test.dart` | Any (macOS/Linux: needs `tar` and `shasum`/`sha256sum`; the link cases skip on Windows) | How a hosted pub package's archive is fetched, through the `flutter_pub.from_lock()` hub of `pub_inputs_fixture.dart` over `file://`: a lock entry without a `sha256` is refused when the lock is read (a query of the hub fails, naming `pubspec.lock` and the package, not at a later fetch), and symbolic links in an archive that leave the package, point at nothing, or reach outside through another link are not extracted, while one that stays inside is kept and the package still loads |
@@ -830,7 +819,7 @@ cd e2e/_overlay_tests/native_assets_synthetic && bazel test //...   # macOS-only
 - macOS-only targets (macos bundle tests, ios_example) are skipped on other platforms via `target_compatible_with`.
 - Linux-only targets (linux bundle tests, linux_example) are skipped on macOS/Windows.
 - Windows-only targets (windows_example) are skipped on macOS/Linux.
-- `android_example` and `hello_world` (Android targets) require `ANDROID_HOME` to be set to the Android SDK path (e.g. `export ANDROID_HOME=$HOME/Library/Android/sdk` on macOS) and `ANDROID_NDK_HOME` to the NDK path (e.g. `export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/<version>`, the versioned directory, not its `ndk/` parent). Any workspace that registers the NDK toolchain needs both even for non-Android targets, because toolchain resolution fetches the repository. In a `.bazelrc` these need `--repo_env`, not `--action_env` — repository rules never see `--action_env`.
+- The Android workspaces download their Android SDK and NDK (§ "The Android SDK and NDK are downloaded"); none needs `ANDROID_HOME` or `ANDROID_NDK_HOME`.
 - A plugin's or AAR's `<uses-permission>` (e.g. `record_android`'s RECORD_AUDIO) reaches the APK without `--merge_android_manifest_permissions`: `flutter_android_app` lifts library permissions into the app's manifest itself, and no e2e workspace sets the flag, so the suite shows it is not needed. `plugin_example`'s `verify_android_apk_test` and `glass_app:verify_glass_apk_test` check it.
 - `flutter_android_app` merges `android/app/src/debug/AndroidManifest.xml` (where `flutter create` declares `android.permission.INTERNET`) into `-c dbg` APKs only, mirroring Gradle's variant merge. Debug APKs therefore host the Dart VM service out of the box; release APKs stay permission-free. `plugin_example`'s and `hello_world`'s flutter-create manifests are kept pristine to cover this path; `android_example` declares INTERNET in its hand-written `src/main` manifest and has no variant manifests, covering the no-op path. `verify_android_apk_test` in `plugin_example` is mode-aware: it asserts INTERNET present + `kernel_blob.bin` under `-c dbg`, and INTERNET absent + `libapp.so` in default (release) builds.
 - An Android APK is built for the platforms of `--@rules_android//flags:android_platforms`, one build of each dependency per platform: the e2e workspaces that build one set `--@rules_android//flags:android_platforms` to arm64-v8a in their `.bazelrc`, and a test of another ABI, or of several at once, builds through `flutter_android_build`. Packaging hard-fails on any non-ELF native library. `verify_android_apk_test` in `e2e/android_example` asserts every packaged `.so` is ELF with the ABI's machine type, and that every androidx class the engine needs at runtime (including the profileinstaller → concurrent-futures → listenablefuture chain) is defined in the APK's dex — so a missing runtime dep fails in CI without an emulator.
@@ -912,9 +901,7 @@ launch a window, so run it on a Mac with an unlocked screen and an awake display
 the display awake itself and fails, saying which, when the screen is locked or the
 display asleep. The Android tests boot an emulator each (below), which needs the
 host's hypervisor and nothing attached; the iOS ones need Xcode with an iOS
-runtime installed. `bazel test //...` there runs, with `ANDROID_HOME` and
-`ANDROID_NDK_HOME` exported as for any Android build (§ "The Android SDK/NDK
-variables must be exported too"):
+runtime installed. `bazel test //...` there runs:
 
 | Target | Property |
 |---|---|
@@ -1699,11 +1686,13 @@ bazel build :app_bundle
 BT_CP=$(jq -r '.bundletoolClasspath | map("bazel-bin/app_bundle.runfiles/" + .) | join(":")' \
     bazel-bin/app_bundle.android_bundle_install.json)
 bt() { "$JAVA" -cp "$BT_CP" com.android.tools.build.bundletool.BundleToolMain "$@"; }
-ADB=$ANDROID_HOME/platform-tools/adb
+# The SDK's adb and aapt2 for this Mac, from the runfiles of the same run.
+ADB=$(jq -r '"bazel-bin/app_bundle.runfiles/" + .adb' bazel-bin/app_bundle.android_bundle_install.json)
+AAPT2=$(jq -r '"bazel-bin/app_bundle.runfiles/" + .aapt2' bazel-bin/app_bundle.android_bundle_install.json)
 $ADB uninstall com.example.flutterapp
 bt build-apks --bundle="$K/out/app-release.aab" --output="$K/out/device.apks" \
     --connected-device --device-id=$ANDROID_SERIAL --adb=$ADB \
-    --aapt2=$ANDROID_HOME/build-tools/<version>/aapt2 \
+    --aapt2=$AAPT2 \
     --ks="$K/upload.jks" --ks-pass=pass:throwaway123 --ks-key-alias=upload
 bt install-apks --apks="$K/out/device.apks" --adb=$ADB --device-id=$ANDROID_SERIAL
 $ADB shell am start -W -n com.example.flutterapp/.MainActivity
@@ -1806,14 +1795,9 @@ running Bazel.
 
 ### Windows integration tests (GCP VM)
 
-`e2e/integration_test`'s Windows targets run on the VM above, with three additions to what
+`e2e/integration_test`'s Windows targets run on the VM above, with two additions to what
 the visual verification installs:
 
-- **The Android SDK and NDK.** The workspace registers the Android NDK toolchain, so any
-  target in it, a Windows one included, fails analysis without `ANDROID_HOME` and
-  `ANDROID_NDK_HOME` (§ "The Android SDK/NDK variables must be exported too"). The VM
-  has neither: install a JDK, then `sdkmanager --sdk_root=C:\android "platforms;android-35"
-  "build-tools;35.0.0" "ndk;28.2.13676358"`, and export both with forward slashes.
 - **rules_dart's checkout.** The committed pin lags the tree (a build loads
   `web_compiler_reset`, which the pinned release lacks): ship the sibling checkout to
   `C:\rules_dart` and build with `--override_module=rules_dart=C:/rules_dart
@@ -1821,7 +1805,7 @@ the visual verification installs:
 - **A short output base**, `--output_base=C:/b/<n>` (§ "Windows and MAX_PATH").
 
 The first build takes about eight minutes. `build //...` works from a Windows host: the Android
-integration tests' runner takes the `adb` of rules_android's SDK for the host (`adb.exe`), and CI
+integration tests' runner takes the `adb` of the downloaded SDK for the host (`adb.exe`), and CI
 builds this workspace on Windows. Run the tests by name, as they need the console session:
 
 ```sh
@@ -1851,11 +1835,10 @@ none of the packages the visual verification installs: create it with only `gcc`
 supplied them. Run them on an x86_64 VM (`n2-standard-16`) and an arm64 one
 (`t2a-standard-8`), as each architecture has its own runtime and Chrome.
 
-- **The Android SDK and NDK** on x86_64, as for Windows: the workspace registers
-  the NDK toolchain, so every target in it fails analysis without `ANDROID_HOME`
-  and `ANDROID_NDK_HOME`. Google publishes neither for an arm64 Linux host, so on
-  arm64 copy the Linux and web targets into a scratch workspace that declares
-  only `rules_flutter`, `rules_dart` and the `flutter` extension.
+- **No Android SDK or NDK on arm64.** The workspace downloads them on x86_64.
+  Google publishes neither for an arm64 Linux host, so on arm64 copy the Linux
+  and web targets into a scratch workspace that declares only `rules_flutter`,
+  `rules_dart` and the `flutter` extension.
 - **rules_dart's checkout**, shipped beside the tree and named with
   `--override_module`, as on Windows.
 
@@ -1940,9 +1923,6 @@ suite. There is no browser-test toolchain in this repo and no `npx` step.
 | Per-compiler code | `flutter/tests/web_test.bzl` (`_per_compiler`, `_per_compiler_dev`, `_branch_inputs`, `_branch_config_*`), `flutter/tests/web_compiler_test.bzl`, `web_per_compiler_e2e_test.dart` | Each compile reads its own branch: the dart2wasm compile the `wasm` variant of a dependency and the dart2js compile the `js` one, the icon scan and the other once-per-bundle inputs the primary's, and in a debug build the dev package config the `js` one (`_per_compiler*`). Each branch's package config names each package once (`_branch_config_*`) and the bundle writes none itself, which is what two package configs in one target would collide on (`_branch_inputs`). `web_compiler_test.bzl` shows where generated files land, the configuration they were built in: a `flutter_native_library`, what `flutter_gen_l10n` generates, and a `web_compiler_independent` library or plugin are in the plain build's configuration under both compilers (built once), while a library or plugin that is not independent is built for each (the control). The generated SDK spokes say `web_compiler_independent = True` (`flutter_framework_package_test.bzl` for `package:flutter`; the others go through the pub writer), and a pub package's library, `flutter_pub_library`, resets the web platform itself, as rules_dart's `pub_library` does. The end-to-end test draws each variant in Chrome |
 | Allow-list, message, renderer files | `web_example/test/verify_compiler_flags_test.dart`; `web_test.bzl` (`_wasm_browsers_bootstrap`, `_renderer_files_*`) | `wasm_browsers` reaches the bootstrap as an exact `wasmAllowList`, the bootstrap catches a load failure and shows a message, and a bundle ships a local `canvaskit/` only with `use_local_canvaskit` or in a debug build, holding only its renderers' files (skwasm family, CanvasKit family, or both) and never the `.symbols` maps, which ride the `symbols` output group. The runtime claim behind that (nothing fetches a `.symbols` file, and the dev loop fetches `canvaskit/chromium/canvaskit.{js,wasm}` from the bundle) was checked by reading `performance.getEntriesByType('resource')` over CDP on a `flutter_bazel run -d chrome` and `--wasm` run; redo it if the loader changes. By hand, in Chrome: `//:app_no_blink` (Chromium left out) shows the message rather than a blank page; a WASM-only bundle with `useLocalCanvasKit` renders served with and without COOP/COEP, requesting only `canvaskit/skwasm.js` and `skwasm.wasm`. A browser extension's tab shows a cross-origin-isolated skwasm page blank, bundle or no bundle; drive Chrome over CDP (`Page.captureScreenshot`) for that check. |
 | Local CanvasKit | `web_example/test/verify_compiler_flags_test.dart` | `useLocalCanvasKit` is declared, so the renderer loads from the app origin rather than gstatic.com — the regression a strict `script-src 'self'` exposes. |
-
-Running the web checks needs, for `plugin_example`, `ANDROID_HOME` / `ANDROID_NDK_HOME` — its workspace-level
-analysis loads the Android repo rule whichever target you build.
 
 ```sh
 bazel run //tools/dev_tool:e2e -- test/e2e/web_smoke_e2e_test.dart

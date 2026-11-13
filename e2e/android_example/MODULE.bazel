@@ -6,17 +6,10 @@ Python bootstrap in its .bazelrc, and the patches below that the rulesets an
 Android app builds with need under them. Every other workspace is set up as
 the README tells an app to be, with none of this.
 
-Build it with both Android variables set. `ANDROID_NDK_HOME` must name the
-*versioned* NDK directory; `$ANDROID_HOME/ndk` (its parent) fails inside
-rules_android_ndk with an unrelated-looking `readdir()` error:
+The Android SDK and NDK are hermetic_android_toolchains' downloads, as the
+README's Android section recommends, so nothing needs to be installed:
 
-    ANDROID_HOME=~/Library/Android/sdk \\
-    ANDROID_NDK_HOME=~/Library/Android/sdk/ndk/<version> \\
-      bazel build //:app_android -c dbg
-
-In a `.bazelrc` the same two values need `--repo_env`, not `--action_env` —
-both repositories are fetched by repository rules, which never see
-`--action_env`. See the Android section of the rules_flutter README.
+    bazel build //:app_android -c dbg
 """
 
 module(name = "rules_flutter_android_example")
@@ -34,8 +27,8 @@ local_path_override(
 
 # Patches for `--incompatible_auto_exec_groups`, under which each action runs
 # where the toolchain it names resolves. rules_android's runs aapt2, zipalign and
-# apksigner where the Android SDK toolchain and the JDK both resolve (the Mac,
-# whose SDK they are), and declares the JDK toolchain singlejar runs with.
+# apksigner where the Android SDK toolchain and the JDK both resolve (a host
+# the downloaded SDK has tools for), and declares the JDK toolchain singlejar runs with.
 # protobuf's names the proto toolchain on protoc actions. rules_go's runs a cgo
 # link and a cgo stdlib build with the Go SDK resolved beside the C toolchain
 # they need, so the Mac never runs the Linux Go SDK's tools. An override only
@@ -70,34 +63,6 @@ single_version_override(
     patches = ["//patches:rules_go_auto_exec_groups.patch"],
 )
 
-# Pinned past the 0.1.5 release for 16KB page alignment. 0.1.5 links every
-# arm64 .so with `-Wl,-z,max-page-size=4096`; a device booted with 16KB pages
-# then refuses to load it — "ELF alignment check failed" — and nothing says so
-# at build time, because the APK builds, installs and dies on launch. Upstream
-# replaced that with 16384 for both max- and common-page-size, ungated, so it
-# applies to every ABI; no release carries it yet, which is the only reason
-# this is a commit rather than a version. Drop this override for the first
-# release that includes it.
-#
-# 16KB alignment loads on a 4KB device too, so this is wider compatibility
-# rather than a trade. The prebuilt engine libraries are unaffected —
-# libflutter.so ships at 0x10000.
-#
-# The patch declares the exec constraints of the NDK found at
-# `ANDROID_NDK_HOME`. Without them its toolchains match any execution
-# platform, and a remote Linux worker would be sent the Mac's clang. Upstream
-# sets them only for an NDK whose platform the rule is told. Once a release
-# carries the alignment fix, keep the patch on that version, and drop it once a
-# release sets exec constraints for a local NDK too.
-archive_override(
-    module_name = "rules_android_ndk",
-    patch_strip = 1,
-    patches = ["//patches:rules_android_ndk_exec_constraints.patch"],
-    sha256 = "0f566314be1257379d42630e068618169e410e4ecf964b28e0c72559e2196658",
-    strip_prefix = "rules_android_ndk-987213e7f982de48696f3b9cd031ff4e3e065c7c",
-    urls = ["https://github.com/bazelbuild/rules_android_ndk/archive/987213e7f982de48696f3b9cd031ff4e3e065c7c.tar.gz"],
-)
-
 flutter = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter")
 flutter.toolchain(flutter_version = "3.47.9")
 
@@ -116,29 +81,66 @@ register_toolchains("@flutter_toolchains//:all")
 # Android, as the README's Android section sets it up.
 bazel_dep(name = "rules_android", version = "0.8.1")
 bazel_dep(name = "rules_android_ndk", version = "0.1.5")
+
+# rules_android_ndk 0.1.5, its newest release, links every arm64 library with
+# `-Wl,-z,max-page-size=4096`, and rules_flutter's check of an APK's native
+# libraries refuses them: a device with 16 KB pages cannot load them. Upstream
+# fixed it in efc0c191 (#121); this is a later commit of its main branch. Drop
+# the override for the first release that has the fix.
+git_override(
+    module_name = "rules_android_ndk",
+    commit = "9946c72d5b617115d34dc2efb334f829c558a87b",
+    remote = "https://github.com/bazelbuild/rules_android_ndk.git",
+)
+
 bazel_dep(name = "rules_jvm_external", version = "7.2")
 
-# The NDK CC toolchain, used for native and FFI deps built for Android and
-# to strip the engine's native libraries, as a Gradle build does.
-android_ndk_repository_extension = use_extension(
-    "@rules_android_ndk//:extension.bzl",
-    "android_ndk_repository_extension",
+# The Android SDK and NDK, downloaded at pinned versions and checked against
+# their checksums rather than found on the machine, so the build needs no
+# `ANDROID_HOME` or `ANDROID_NDK_HOME`. `.bazelrc` accepts their licences.
+bazel_dep(name = "hermetic_android_toolchains", version = "0.5.0", dev_dependency = True)
+
+android = use_extension("@hermetic_android_toolchains//:extensions.bzl", "android", dev_dependency = True)
+
+# The Android platform the app compiles against, and the build tools.
+android.sdk(
+    build_tools_version = "35.0.0",
+    version = "35",
 )
 
-# Your app's `min_sdk_version` (24 unless you set it).
-android_ndk_repository_extension.configure(api_level = 24)
-use_repo(android_ndk_repository_extension, "androidndk")
+# The NDK CC toolchain, used for native and FFI deps built for Android and
+# to strip the engine's native libraries, as a Gradle build does: the NDK
+# Flutter's Gradle plugin builds with. `api_level` is your app's
+# `min_sdk_version` (24 unless you set it).
+android.ndk(
+    api_level = 24,
+    version = "r28c",
+)
+use_repo(android, "androidndk", "androidsdk")
 
-register_toolchains("@androidndk//:all")
-
-# The Android platform the app compiles against, rather than the newest one
-# installed on the machine.
-android_sdk_repository_extension = use_extension(
+# Every module's `@androidsdk` and `@androidndk` (rules_android's,
+# rules_android_ndk's, rules_flutter's) are these.
+rules_android_sdk = use_extension(
     "@rules_android//rules/android_sdk_repository:rule.bzl",
     "android_sdk_repository_extension",
+    dev_dependency = True,
 )
-android_sdk_repository_extension.configure(api_level = 35)
-use_repo(android_sdk_repository_extension, "androidsdk")
+
+override_repo(rules_android_sdk, "androidsdk")
+
+rules_android_ndk = use_extension(
+    "@rules_android_ndk//:extension.bzl",
+    "android_ndk_repository_extension",
+    dev_dependency = True,
+)
+
+override_repo(rules_android_ndk, "androidndk")
+
+register_toolchains(
+    "@androidndk//:all",
+    "@androidsdk//:all",
+    dev_dependency = True,
+)
 
 # The Maven artifacts the app's own Kotlin code compiles against. They join
 # rules_flutter's in one resolution, the app's, with a lock of this module's.

@@ -10,9 +10,9 @@
 /// repositories belong to rules_flutter's extension: rules_flutter resolves
 /// them itself, and a user's `use_repo` of them is never required.
 ///
-/// The workspace is queried with `ANDROID_HOME` and `ANDROID_NDK_HOME` set, as
-/// every Android check here is: without an SDK, rules_android declares no
-/// `androidsdk` targets and a query fails for that reason instead.
+/// The workspace downloads its Android SDK, as every Android workspace here
+/// does: without an SDK, rules_android declares no `androidsdk` targets and a
+/// query fails for that reason instead.
 ///
 /// This runs the query in `e2e/hello_world`, whose `MODULE.bazel` must not
 /// name every ABI's engine (the guard below), so a query that passes proves

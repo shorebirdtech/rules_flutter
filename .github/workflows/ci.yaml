@@ -251,18 +251,6 @@ jobs:
       - name: Install GTK3 (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev
-      # GitHub's windows-latest image exports ANDROID_NDK_HOME with backslashes
-      # (C:\Android\...), but rules_android_ndk's _create_symlinks() strips the
-      # NDK prefix with a forward-slash string match against ctx.path() output,
-      # so a backslashed value makes the symlink target escape the repo dir and
-      # the fetch fails. Hand it a forward-slash path, as upstream's own Windows
-      # CI does. See https://github.com/bazelbuild/rules_android_ndk/pull/108
-      - name: Normalize ANDROID_NDK_HOME to forward slashes (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $ndk = $env:ANDROID_NDK_HOME ?? $env:ANDROID_NDK_ROOT
-          "ANDROID_NDK_HOME=$($ndk -replace '\\','/')" >> $env:GITHUB_ENV
       # The workspace's `.bazelrc` builds with --lockfile_mode=error, which
       # refuses a lock that lacks an entry the build needs; the `lockfiles` job
       # checks every lock for stale entries too.

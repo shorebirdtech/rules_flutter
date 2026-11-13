@@ -20,6 +20,11 @@ common --enable_platform_specific_config
 common:linux --experimental_output_paths=strip
 common:macos --experimental_output_paths=strip
 
+# Accepts the licences of the Android SDK and NDK versions MODULE.bazel
+# downloads (README, "Android"), as rules_kotlin's examples do for theirs.
+common --repo_env=ACCEPTED_ANDROID_SDK_LICENSE_VERSION=35
+common --repo_env=ACCEPTED_ANDROID_NDK_LICENSE_VERSION=r28c
+
 # The ABIs of an Android APK are the platforms of --@rules_android//flags:android_platforms (README,
 # "Android"). This workspace builds for a 64-bit ARM device unless a command
 # says otherwise, as the dev tool does for the device it launches on.
