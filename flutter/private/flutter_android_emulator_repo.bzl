@@ -27,12 +27,16 @@ def _flutter_android_emulator_impl(repository_ctx):
     repository_ctx.file("BUILD.bazel", _EMULATOR_BUILD)
 
 # What a Linux emulator that has no window and runs x86_64 images never loads:
-# the Qt of its window, the software Vulkan it is not told to use, and the
-# QEMU of other guest CPUs and of a windowed x86_64 guest. Left out of the
-# runfiles of every test, and out of the check of what the emulator asks of the
-# host (Qt links far more than the Linux runtime has).
+# the Qt of its window, the software Vulkan it is not told to use, the Mesa of
+# the deprecated `-gpu mesa` renderer (the emulator adds `lib64/gles_<mode>` to
+# its library path only for the `-gpu` mode it runs, and the test's is
+# `swiftshader_indirect`), and the QEMU of other guest CPUs and of a windowed
+# x86_64 guest. Left out of the runfiles of every test, and out of the check of
+# what the emulator asks of the host (Qt links far more than the Linux runtime
+# has, and that Mesa needs `libtinfo.so.5`, which no Debian since bookworm has).
 _UNUSED = {
     "linux_x64": [
+        "lib64/gles_mesa",
         "lib64/qt",
         "lib64/vulkan/libvulkan_lvp.so",
         "qemu/linux-x86_64/qemu-system-aarch64",
