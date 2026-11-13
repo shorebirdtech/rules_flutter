@@ -29,8 +29,7 @@
 /// 10. A `flutter_test` runs under the checkout's SDK: its modules compile
 ///     against the checkout's platform kernel and are told the checkout's
 ///     framework and engine.
-@Tags(['e2e'])
-@Timeout(Duration(minutes: 30))
+@Tags(['e2e', 'app_builds'])
 library;
 
 import 'dart:convert';

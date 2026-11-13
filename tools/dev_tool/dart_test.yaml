@@ -20,6 +20,13 @@ concurrency: 1
 tags:
   e2e:
     timeout: 5m
+  # Cases that each build whole apps, for several platforms and modes, which
+  # on a machine with a cold cache (every CI run) take longer than 5 minutes.
+  # A library's `@Timeout` does not lift the tag's: the tag's applies after it.
+  # This selector is more specific than `e2e`, so its timeout is the one used.
+  app_builds:
+  "e2e && app_builds":
+    timeout: 30m
   # Needs the Bazel runfiles tree to reach a fixture declared in the target's
   # `data`. Bazel supplies it; a bare `dart test` does not, so CI excludes this
   # tag there and the coverage comes from the Bazel target instead.
