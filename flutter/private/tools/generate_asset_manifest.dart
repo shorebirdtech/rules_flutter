@@ -144,7 +144,6 @@ Uint8List encodeStandardMessage(Object? message) {
 
 // -- Icon tree shaking helpers -----------------------------------------------
 
-/// Run font-subset, piping code points via stdin. Returns true on success.
 /// The `IconData` constants the app uses, as const_finder prints them
 /// (`constantInstances`, `nonConstantLocations`), or null when they can't be
 /// found, which bundles the fonts whole.
@@ -233,8 +232,15 @@ Map<String, dynamic> iconUsesFromRecordings(Map<String, dynamic> recordings) {
         case 'creation':
           final positional = u['positional'] as List<dynamic>? ?? const [];
           final named = u['named'] as Map<String, dynamic>? ?? const {};
-          // A null index is an argument the compiler couldn't evaluate.
-          if (positional.contains(null) || named.values.contains(null)) {
+          // An argument the compiler couldn't evaluate is an index to a
+          // `{"type": "non_constant"}` entry (record_use's NonConstant); a
+          // missing index is treated the same.
+          bool nonConstantArg(Object? index) =>
+              index == null ||
+              (constants[index as int] as Map<String, dynamic>)['type'] ==
+                  'non_constant';
+          if (positional.any(nonConstantArg) ||
+              named.values.any(nonConstantArg)) {
             nonConstant.add(u);
           } else {
             constant.add({
@@ -253,6 +259,7 @@ Map<String, dynamic> iconUsesFromRecordings(Map<String, dynamic> recordings) {
   return {'constantInstances': constant, 'nonConstantLocations': nonConstant};
 }
 
+/// Run font-subset, piping code points via stdin. Returns true on success.
 Future<bool> _runFontSubset(
   String fontSubsetBin,
   String outputPath,
@@ -337,9 +344,9 @@ Future<void> main(List<String> args) async {
 
   if (iconTreeShaking != null) {
     // Step 1: find the icon code points the app uses, in const_finder's
-    // output shape. From Flutter 3.50 on, `icon_uses` is that output already,
-    // written by //flutter/private/icon_uses from the uses the AOT compile
-    // recorded; before 3.50, const_finder scans the kernel for them.
+    // output shape. From Flutter 3.50 on they come from the uses the AOT
+    // compile recorded (`recorded_uses`); before 3.50, const_finder scans the
+    // kernel for them.
     final output = _iconUses(iconTreeShaking);
     if (output != null) {
       // Check for non-const IconData usage.

@@ -10,7 +10,8 @@ load(
     "host_artifacts_path",
     "ios_engine_artifact_path",
 )
-load("//flutter/private:versions.bzl", "ARTIFACT_CHECKSUMS", "FLUTTER_VERSIONS")
+load("//flutter/private:engine_helpers.bzl", "const_finder_attr")
+load("//flutter/private:versions.bzl", "ARTIFACT_CHECKSUMS", "FLUTTER_VERSIONS", "flutter_has_const_finder", "flutter_version_at_least")
 
 def _latest_version_first_test_impl(ctx):
     env = unittest.begin(ctx)
@@ -154,7 +155,28 @@ def _checksums_are_sha256_test_impl(ctx):
             )
     return unittest.end(env)
 
+def _version_at_least_test_impl(ctx):
+    env = unittest.begin(ctx)
+    asserts.true(env, flutter_version_at_least("3.50.0", 3, 50))
+    asserts.true(env, flutter_version_at_least("3.51.0-0.1.pre", 3, 50))
+    asserts.true(env, flutter_version_at_least("4.0.0", 3, 50))
+    asserts.false(env, flutter_version_at_least("3.47.8", 3, 50))
+    asserts.false(env, flutter_version_at_least("2.99.0", 3, 50))
+    return unittest.end(env)
+
+def _const_finder_gate_test_impl(ctx):
+    env = unittest.begin(ctx)
+
+    # Flutter 3.50 removed const_finder from font-subset.zip.
+    asserts.true(env, flutter_has_const_finder("3.47.8"))
+    asserts.false(env, flutter_has_const_finder("3.50.0"))
+    asserts.equals(env, '    const_finder = "x",', const_finder_attr("3.47.8", "x"))
+    asserts.equals(env, "", const_finder_attr("3.50.0", "x"))
+    return unittest.end(env)
+
 _t0_test = unittest.make(_latest_version_first_test_impl)
+_t7_test = unittest.make(_version_at_least_test_impl)
+_t8_test = unittest.make(_const_finder_gate_test_impl)
 _t1_test = unittest.make(_engine_revision_format_test_impl)
 _t2_test = unittest.make(_checksums_exist_for_all_versions_test_impl)
 _t3_test = unittest.make(_checksums_have_key_artifacts_test_impl)
@@ -163,4 +185,4 @@ _t5_test = unittest.make(_source_sha256_recorded_for_all_versions_test_impl)
 _t6_test = unittest.make(_every_download_is_checksummed_test_impl)
 
 def versions_test_suite(name):
-    unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test, _t6_test)
+    unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test, _t6_test, _t7_test, _t8_test)
