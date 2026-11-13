@@ -25,13 +25,13 @@ permissions:
   actions: read # the release checks CI passed on the tagged commit
 jobs:
   release:
-    uses: aran/rules_dart/.github/workflows/overhead-release.yaml@2d78bccaa5ce13d09810ab85cc185a38e8f42d40
+    uses: aran/rules_dart/.github/workflows/overhead-release.yaml@5ca3547cfab16aaa6e5ebb2c4ac3f03ed3f4313e
     with:
       release_files: rules_flutter-*.tar.gz
       tag_name: ${{ inputs.tag_name || github.ref_name }}
   publish:
     needs: release
-    uses: aran/rules_dart/.github/workflows/overhead-publish.yaml@2d78bccaa5ce13d09810ab85cc185a38e8f42d40
+    uses: aran/rules_dart/.github/workflows/overhead-publish.yaml@5ca3547cfab16aaa6e5ebb2c4ac3f03ed3f4313e
     with:
       tag_name: ${{ inputs.tag_name || github.ref_name }}
     secrets:
