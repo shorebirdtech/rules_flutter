@@ -4,7 +4,7 @@ Bazel rules for building Flutter apps.
 
 > **Status: beta.** It works today, but the public API may still change. Feedback and contributions are welcome.
 
-rules_flutter compiles Dart to kernel or AOT native code, bundles assets, and packages the result for macOS, iOS, Android, Linux, Windows, and the web. It builds on [rules_dart](https://github.com/aran/rules_dart) for Dart compilation and hands platform packaging to the rulesets that already do it well: `rules_apple`, `rules_android`, and friends. It also ships a dev tool, `flutter_bazel`, that gives you hot reload, hot restart, and an HTTP channel for driving a running app from a script. It also supports [frustrate](https://github.com/aran/frustrate), which allows Rust code to be used in apps built with rules_flutter.
+rules_flutter compiles Dart to kernel or AOT native code, bundles assets, and packages the result for macOS, iOS, Android, Linux, Windows, and the web. It builds on [rules_dart](https://github.com/aran/rules_dart) for Dart compilation and hands platform packaging to the rulesets that already do it well: `rules_apple`, `rules_android`, and friends. It also ships a dev tool, `flutter_bazel`, that gives you hot reload, hot restart, and an HTTP channel for driving a running app from an AI agent or script. It also supports [frustrate](https://github.com/aran/frustrate), which allows Rust code to be used in apps built with rules_flutter.
 
 ## What's New
 
@@ -291,14 +291,13 @@ me so we can collaborate.
 
 ## Why build Flutter with Bazel
 
-If `flutter build` works for you, here is what Bazel adds:
-
-- **Pinned inputs.** rules_flutter downloads Flutter, its engines, your pub packages and, if you ask, the Android SDK and NDK, each at a pinned version with a recorded checksum. Your `pubspec.lock` pins the packages, and the Flutter version you name pins the rest. Bazel tracks every file a step reads. Two machines with the same Xcode or MSVC get the same build, whatever else they have installed.
-- **Caching.** Bazel keys each step by its inputs and keeps the result. A change to one package rebuilds only what depends on it, and a remote cache shares results across a team and CI.
-- **Remote execution.** Steps can run on cloud workers. The ones that need a Mac, such as compiling for iOS and signing, stay on one. See [Remote execution](#remote-execution).
+- **Industrial-strength builds.** No stale caches, no `build_runner clean`, no "works on my machine." Bazel builds some of the largest codebases in the world, and serious bugs in it are rare. Every result is cached by its exact inputs, so a rebuild either reuses a correct result or redoes the work, and a teammate's machine or CI gets the same answer yours did.
+- **Remote execution.** Builds, static analysis and test work can run remotely. You can hand Dart and Flutter builds and tests to big machines in the cloud. See [Remote execution](#remote-execution).
+- **Hermetic builds.** rules_flutter downloads Flutter, its engines, your pub packages and, if you ask, the Android SDK and NDK, each at a pinned version with a recorded checksum. Your `pubspec.lock` pins the packages, and the Flutter version you name pins the rest. Bazel tracks every file a step reads. Two machines with the same Xcode or MSVC get the same build, whatever else they have installed.
+- **Code generation without build_runner.** Each generator is a Bazel target that runs per file, in parallel and cached, instead of one whole-package `build_runner` pass. Shims come bundled for json_serializable, freezed, built_value, mockito, copy_with_extension_gen, stacked, drift and go_router_builder. See [Code generation](#code-generation).
+- **Native code built by Bazel.** Native code comes from ordinary targets instead of a package's build hook, so it's cross-compiled, cached and remote-executable like everything else. You don't write CMake, Gradle or CocoaPods files.
 - **One build graph.** Flutter apps, backend services, Rust and C++ libraries and the rest of your repository build together, and Bazel knows what depends on what.
-- **Native code without a second build system.** An app takes a `cc_shared_library` or `rust_shared_library` target as a dependency, and an iOS or macOS app links a `swift_library` into its runner. You don't write CMake, Gradle or CocoaPods files.
-- **No build_runner.** Code generators such as json_serializable and freezed run as ordinary Bazel actions (see [Code generation](#code-generation)).
+- **AI-friendly tooling.** The dev tool is built from the ground up for Claude Code or other AI agents to develop your app quickly. This includes a custom protocol for machine use, full screenshot support, and tools to let your agent navigate your app in a fast and token-efficient way.
 
 ## Contents
 
