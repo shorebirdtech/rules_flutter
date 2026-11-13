@@ -255,9 +255,10 @@ from the repository cache.
 
 | Lock | In | Pins |
 |---|---|---|
-| `rules_android_maven_install.json` | the repo root, and `e2e/hello_world`, `plugin_example`, `android_example` | `@rules_android_maven` |
-| `android_ide_common_30_1_3_install.json` | the same three e2e workspaces | `@android_ide_common_30_1_3` |
-| `bazel_worker_maven_install.json` | the same three e2e workspaces | `@bazel_worker_maven`, which `bazel_worker_java` (a dependency of rules_android) declares without a lock |
+| `rules_android_maven_install.json` | the repo root, and every Android e2e workspace (`hello_world`, `plugin_example`, `android_example`, `custom_engine`, `integration_test`) | `@rules_android_maven` |
+
+rules_android 0.8.1 pins its other two installs, `@android_ide_common_30_1_3` and
+`@bazel_worker_maven`, with locks of its own, and no workspace declares them.
 
 A lock holds the artifacts of every module that contributes to its repo, not
 only the ones the file next to it lists: `@rules_android_maven` merges what
@@ -290,13 +291,13 @@ other artifacts ask for (2.0.0, 2.6.1, 2.6.1, and `savedstate` 1.2.1) beside
 `lifecycle-runtime` 2.10.0. `//tools/maven_locks:root_lock_test` fails on a
 root lock where the group is not at one version.
 
-The root's lock is the one consumers get. When rules_flutter is a dependency
-and the consuming module declares no `maven.install` of that name, the root's
-lock pins `@rules_android_maven` for them. A consumer that declares its own
-`maven.install(name = "rules_android_maven", ...)` replaces it: only the root
-module's `lock_file` counts, so with none the artifacts are resolved through
-Coursier again, and with one it has to list every artifact of the merged repo.
-The e2e workspaces do exactly that, so they carry their own.
+The root's lock pins rules_flutter's own builds. A consumer gets no use of it:
+rules_android 0.8.1 ships a lock for `@rules_android_maven` too, and
+rules_jvm_external refuses two locks for one repository unless the root module
+names one, which then pins the whole merged repository. So every Android app
+declares `maven.install(name = "rules_android_maven", lock_file = ...)` itself
+(README, "Maven dependencies"), and every Android e2e workspace does, as an app
+would.
 
 A stale lock fails the build, at the point the repo loads:
 `rules_android_maven_install.json contains an invalid input signature ... must
@@ -307,8 +308,7 @@ root's: `bazel fetch --repo=@rules_android_maven`. That check is
     bazel run //tools/maven_locks
 
 and also fails a `maven.install` in the root or an e2e `MODULE.bazel` that names
-no `lock_file` (installs a dependency declares are not seen; that is why
-`bazel_worker_maven` is declared in the three workspaces), and the warnings
+no `lock_file` (installs a dependency declares are not seen), and the warnings
 above. Run both commands; neither covers the other.
 
 To regenerate, after a change to the artifacts or to a module that contributes
@@ -1992,7 +1992,7 @@ script's own package requires ≥ 3.13.
 | A new or removed e2e workspace, or where one runs in CI (`tools/ci_matrix/e2e_matrix.dart`, `.github/workflows/ci.yaml`) | `bazel run //tools/ci_matrix` (fails on a gap) and `bazel test //tools/ci_matrix/...` |
 | A new package with a `BUILD` that loads a repo only development has (a dev dependency of `MODULE.bazel`), or a change to `ignore_directories` in `REPO.bazel` | `bazel run //tools/consumer_archive`, then `cd e2e/external_module` and both `bazel query "@rules_flutter//..."` and `bazel build --nobuild "@rules_flutter//..."` must succeed (the archive is committed state only, and omits what `.gitattributes` trims); put such a package in `ignore_directories` |
 | The bazelrc preset (`tools/preset`) | `cd tools/preset && bazel run //:preset.update`, then `bazel test //...` there |
-| Maven artifacts (a `maven.install` in any `MODULE.bazel`, or a bump of `rules_android` or `rules_jvm_external`) | `bazel run //tools/maven_locks -- --refresh` on hello_world, plugin_example, android_example and `.`, then `bazel run @overhead//locks -- --refresh` on each — see "Maven lock files" in § 1 |
+| Maven artifacts (a `maven.install` in any `MODULE.bazel`, or a bump of `rules_android` or `rules_jvm_external`) | `bazel run //tools/maven_locks -- --refresh` on every Android workspace (hello_world, plugin_example, android_example, custom_engine, integration_test) and `.`, then `bazel run @overhead//locks -- --refresh` on each — see "Maven lock files" in § 1 |
 | dev_tool (unit) | `bazel test //tools/dev_tool/...` (already covered by root `//...`) |
 | dev_tool (e2e) | `dart run tools/dev_tool/tool/e2e.dart` — needs a Dart ≥3.13 on `PATH`, see § 2 |
 | dev_tool reload paths (`run_command.dart`, `vm_service_client.dart`, `hot_reload/**`, `session.dart`, `reload_pipeline.dart`) | dev_tool unit + e2e **and** manual hot reload **and** hot restart — see "Hot reload / hot restart (manual)" |

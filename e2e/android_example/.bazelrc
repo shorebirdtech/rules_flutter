@@ -18,6 +18,10 @@ common --enable_platform_specific_config
 common:linux --experimental_output_paths=strip
 common:macos --experimental_output_paths=strip
 
+# This workspace, alone of the e2e workspaces, is set up for remote execution
+# (README, "Remote execution"): the two settings below, and the patches its
+# MODULE.bazel applies for them.
+#
 # Each action picks its execution platform from the toolchain it names, not
 # from every toolchain its rule uses: an iOS AOT compile stays on a Mac while
 # the same target's kernel compile can run elsewhere. rules_flutter's actions

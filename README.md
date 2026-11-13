@@ -91,6 +91,15 @@ startup --windows_enable_symlinks
 
 Without the Java settings you get `UnsupportedClassVersionError` when an action runs, or `could not locate class file for java.lang.Record` when one compiles.
 
+An Android app needs one more, unless the machine has a JDK installed:
+
+```bazelrc
+# The Java runtime an Android build resolves for the app's platform.
+common --java_runtime_version=remotejdk_25
+```
+
+Without it Bazel takes the local JDK, and on a machine with none every Android build fails during analysis with `Cannot find Java binary bin/java in .../local_jdk/nosystemjdk`.
+
 One more is recommended:
 
 ```bazelrc
@@ -104,14 +113,17 @@ A Flutter build reaches the same work in several configurations: each Android AB
 
 A debug build's kernel is the one action that does not share across configurations: it carries the path of its `flutter_assets/`, which is how `flutter_bazel` tells an app's configurations apart.
 
-rules_flutter also works with Bazel's automatic execution groups:
+**Remote execution.** Everything above builds on the machine running Bazel. To send actions to execution platforms of more than one kind (a Linux remote worker beside your Mac, say), rules_flutter works with Bazel's automatic execution groups, under which each action runs where the toolchain it names is registered, not where every toolchain its rule uses is:
 
 ```bazelrc
-# Run each action where the toolchain it uses is registered.
 common --incompatible_auto_exec_groups
+
+# Start py_binary tools with their hermetic interpreter, not python3 from
+# PATH, which a remote worker does not have.
+common --@@rules_python+//python/config_settings:bootstrap_impl=script
 ```
 
-With it, Bazel places each action by the toolchain it names rather than by every toolchain its rule uses, which matters once you register execution platforms of more than one kind (a Linux remote worker beside your Mac, say). rules_flutter's actions land the same with the flag on or off: `gen_snapshot` for iOS and macOS, Xcode tools and signing run on a Mac; kernel compiles, asset and shader bundling and web compiles run on any host with the Flutter SDK; stripping the Android engine runs on the machine running Bazel, where its NDK is. An Android app needs fixes to rulesets it builds with, because rules_android 0.8.1, protobuf 34 and rules_go have actions the flag rejects or places on the wrong host: copy the three `single_version_override` patches in [`e2e/android_example/MODULE.bazel`](e2e/android_example/MODULE.bazel) into your own `MODULE.bazel`. Once you register an execution platform other than your machine, also copy its `archive_override` patch for rules_android_ndk, which keeps the local NDK's tools on the machine that has it.
+rules_flutter's actions land the same with the flag on or off: `gen_snapshot` for iOS and macOS, Xcode tools and signing run on a Mac; kernel compiles, asset and shader bundling and web compiles run on any host with the Flutter SDK; stripping the Android engine runs on the machine running Bazel, where its NDK is. An Android app needs fixes to rulesets it builds with, because rules_android 0.8.1, protobuf and rules_go have actions the flag rejects or places on the wrong host, and rules_android_ndk 0.1.5 lets any execution platform run the local NDK's clang. [`e2e/android_example`](e2e/android_example/MODULE.bazel) is set up this way: copy its `single_version_override` patches for rules_android, protobuf and rules_go, and its patch for rules_android_ndk, into your own `MODULE.bazel`.
 
 ### Your first app
 
@@ -643,8 +655,6 @@ flutter_macos_app(
 )
 ```
 
-**16 KB pages.** Devices with 16 KB memory pages, which Android 15 introduced, refuse a native library whose segments are aligned for 4 KB ones, and the app dies on launch. A Gradle build gets 16 KB alignment from NDK r28 and later. Bazel links an Android app's C/C++ code with the Android C/C++ toolchain, and rules_flutter leaves the alignment to it. rules_android_ndk 0.1.5's toolchain links every arm64 library for 4 KB pages; upstream fixed it in commit `efc0c191`, which no release has yet. Until one does, pin rules_android_ndk to a commit of its main branch with the fix, with the `git_override` the `MODULE.bazel` lines below carry. For arm64-v8a and x86_64 the build checks the native libraries the application and its plugins bring, prebuilt ones inside the plugins' AARs included, and fails naming any that is aligned for 4 KB pages. A 16 KB-aligned library loads on a 4 KB device too.
-
 | Attribute | Description |
 |---|---|
 | `application` | A `flutter_application` target. Required. |
@@ -837,11 +847,11 @@ Without `provisioning_profile`, a device build fails at analysis, and the messag
 
 ```sh
 bazel build //:my_app_ios_device -c opt --ios_multi_cpus=arm64 \
-    --features=disable_legacy_signing --noincompatible_auto_exec_groups \
+    --features=disable_legacy_signing \
     --output_groups=+combined_dossier_zip
 ```
 
-`--noincompatible_auto_exec_groups` is needed with rules_apple 5.2.0, whose action that assembles the unsigned archive has no toolchain set and so fails analysis under the `--incompatible_auto_exec_groups` this README recommends. Leave it out once the rules_apple you use sets one.
+If you build with `--incompatible_auto_exec_groups` (see **Remote execution** under [.bazelrc](#bazelrc)), add `--noincompatible_auto_exec_groups` to this command: rules_apple 5.2.0's action that assembles the unsigned archive has no toolchain set and fails analysis under that flag.
 
 The dossier holds what rules_apple's `dossier_codesigningtool` needs to sign the bundle on a machine that has the identity. The profile is still required, because it supplies the bundle's `embedded.mobileprovision` and its entitlements. `--no-codesign` differs here: Xcode leaves the profile out as well, and rules_apple's sign-later model has no equivalent.
 
@@ -1010,9 +1020,10 @@ Add these to `MODULE.bazel`:
 ```starlark
 bazel_dep(name = "rules_android", version = "0.8.1")
 bazel_dep(name = "rules_android_ndk", version = "0.1.5")
+bazel_dep(name = "rules_jvm_external", version = "7.2")
 
 # rules_android_ndk 0.1.5 links arm64 libraries for 4 KB pages: see "16 KB
-# pages" above.
+# pages" below.
 git_override(
     module_name = "rules_android_ndk",
     commit = "9946c72d5b617115d34dc2efb334f829c558a87b",
@@ -1028,13 +1039,44 @@ android_ndk_repository_extension = use_extension(
     "@rules_android_ndk//:extension.bzl",
     "android_ndk_repository_extension",
 )
+
 # Your app's `min_sdk_version` (24 unless you set it).
 android_ndk_repository_extension.configure(api_level = 24)
 use_repo(android_ndk_repository_extension, "androidndk")
+
 register_toolchains("@androidndk//:all")
+
+# The Android platform the app compiles against, rather than the newest one
+# installed on the machine.
+android_sdk_repository_extension = use_extension(
+    "@rules_android//rules/android_sdk_repository:rule.bzl",
+    "android_sdk_repository_extension",
+)
+android_sdk_repository_extension.configure(api_level = 35)
+use_repo(android_sdk_repository_extension, "androidsdk")
+
+# The androidx and Kotlin jars, pinned by this module's own lock.
+maven = use_extension("@rules_jvm_external//:extensions.bzl", "maven")
+maven.install(
+    name = "rules_android_maven",
+    known_contributing_modules = [
+        "rules_android",
+        "rules_flutter",
+    ],
+    lock_file = "//:rules_android_maven_install.json",
+    repositories = [
+        "https://maven.google.com",
+        "https://repo1.maven.org/maven2",
+    ],
+)
+use_repo(maven, "rules_android_maven")
 ```
 
+Then create the lock and fill it, once: `touch rules_android_maven_install.json && bazel run @rules_android_maven//:pin`. See **Maven dependencies** below.
+
 **Order of the `bazel_dep` lines.** Keep `rules_flutter`'s above `rules_android`'s, as here. rules_android builds some of its tools from Go, with the first Go SDK the module graph declares: your module's own, then each dependency's in the order your `MODULE.bazel` names them. rules_flutter declares one new enough for the Gazelle the graph resolves; rules_android's own, Go 1.22.4, is not, and with rules_android named first, every Android build fails during analysis with `go: go.work requires go >= 1.24.12 (running go 1.22.4; GOTOOLCHAIN=local)`. A `go_sdk.download` in your own `MODULE.bazel` takes precedence over both.
+
+**Compile SDK.** Without `configure(api_level = ...)`, rules_android compiles against the newest Android platform installed on the machine, so two machines can build the same app differently: a newer `android.jar` can, for instance, mark a method a plugin's Kotlin calls `@Nullable` and fail its compile. Name a platform you have installed.
 
 **NDK `api_level`.** Set it to the app's `min_sdk_version`, as Gradle compiles native code at `minSdkVersion`. The extension defaults to 31, so without `configure` your `cc_library` code (an FFI library, a plugin's C code) is built against API 31 and can call functions that devices on API 24 to 30 lack. Such a library installs, and then fails to load there with an unresolved symbol. The root module's `configure` is the one that counts; a dependency's is ignored.
 
@@ -1070,9 +1112,9 @@ ERROR: An error occurred during the fetch of repository
 
 **Building on Windows.** rules_android 0.8.1 starts its tool JVMs with an initial heap as large as their cap (`-Xms3G` for resource processing, `-Xms8g` for desugaring, D8 and R8), and a JVM commits its initial heap as it starts. Windows counts that against RAM plus the pagefile whether or not the JVM uses it, so on a 16 GB machine a few of them running at once fail the build with `There is insufficient memory for the Java Runtime Environment to continue` and `The paging file is too small for this operation to complete`. Apply `rules_android_no_initial_heap.patch` from [`e2e/android_example/patches/`](e2e/android_example/patches/) in your `single_version_override` of rules_android, as that workspace's `MODULE.bazel` does. It keeps each heap cap and drops only the initial sizes. macOS and Linux build without it.
 
-**Maven dependencies.** The androidx and Kotlin jars the runner and plugins compile against come from `@rules_android_maven`, which rules_flutter declares with rules_jvm_external and pins with a lock file (`rules_android_maven_install.json`). Each jar is then fetched by checksum and kept in Bazel's repository cache, so a fresh output base or CI runner does not download them again. If your `MODULE.bazel` declares no `maven.install` of that name, you get this as is.
+**Maven dependencies.** The androidx and Kotlin jars the runner and plugins compile against come from `@rules_android_maven`, which rules_flutter and rules_android each declare with rules_jvm_external. Your module's `maven.install` of that name, as in the setup above, names the lock file (`rules_android_maven_install.json`) that pins all of it: each jar is fetched by checksum and kept in Bazel's repository cache, so a fresh output base or CI runner does not download it again. It is required. rules_android 0.8.1 and rules_flutter each ship a lock of their own for the repository, and rules_jvm_external accepts one lock per repository unless the root module names it: without your declaration, every Android build fails while Bazel evaluates the Maven extension, with `Error in join: expected string for sequence element 0, got '@@rules_flutter+//:rules_android_maven_install.json' of type Label` (rules_jvm_external failing as it reports the two locks).
 
-If you add artifacts to it, say another androidx library that a plugin's `build.gradle` needs, your declaration takes over from rules_flutter's lock file, and without a `lock_file` of your own Bazel resolves every jar at build time and downloads it again for each output base. Name one, create it empty, and let rules_jvm_external fill it; it merges rules_flutter's and rules_android's artifacts into the list it pins:
+To add artifacts, say another androidx library that a plugin's `build.gradle` needs, list them in it:
 
 ```starlark
 maven.install(
@@ -1083,30 +1125,16 @@ maven.install(
         "rules_flutter",
     ],
     lock_file = "//:rules_android_maven_install.json",
+    repositories = [
+        "https://maven.google.com",
+        "https://repo1.maven.org/maven2",
+    ],
 )
 ```
 
-`known_contributing_modules` lists the other modules whose artifacts join yours. Without it rules_jvm_external prints a notice naming them each time it evaluates the extension, and with it only the listed modules contribute: a module you add later that declares artifacts for `rules_android_maven` has to be added to the list. rules_android and rules_flutter are the two that contribute today.
-
-```sh
-touch rules_android_maven_install.json
-bazel run @rules_android_maven//:pin
-```
+The lock rules_jvm_external writes merges your artifacts with rules_flutter's and rules_android's. `known_contributing_modules` lists the other modules whose artifacts join yours. Without it rules_jvm_external prints a notice naming them each time it evaluates the extension, and with it only the listed modules contribute: a module you add later that declares artifacts for `rules_android_maven` has to be added to the list. rules_android and rules_flutter are the two that contribute today. `repositories` replaces the default, Maven Central alone, which lacks the androidx and Android tools artifacts.
 
 Run `REPIN=1 bazel run @rules_android_maven//:pin` again after changing the artifacts, or bumping rules_flutter or rules_android: Bazel fails the build until you do. Do not repeat an artifact that rules_android already declares at a lower version than yours: rules_android's version is the one used (`com.android.tools:r8` is one), and the pin warns that your line has no effect. [`e2e/plugin_example/MODULE.bazel`](e2e/plugin_example/MODULE.bazel) is a worked example.
-
-rules_android also declares two Maven repositories with no lock file, which Bazel then resolves through Coursier at build time, with no checksums, so every fresh output base downloads them again: `bazel_worker_maven` (declared by `bazel_worker_java`, a dependency of rules_android) and `android_ide_common_30_1_3`. rules_jvm_external takes a lock file only from the root module, so to pin one, declare the same repository in your `MODULE.bazel` with a lock of its own and add it to `use_repo`:
-
-```starlark
-maven.install(
-    name = "bazel_worker_maven",
-    known_contributing_modules = ["bazel_worker_java"],
-    lock_file = "//:bazel_worker_maven_install.json",
-)
-use_repo(maven, "bazel_worker_maven")
-```
-
-Create the lock file empty and run `bazel run @bazel_worker_maven//:pin`, as above. It is optional: leave them out and the build works, only slower on a fresh output base. `@android_ide_common_30_1_3` takes the same declaration, with `known_contributing_modules = ["rules_android"]`; [`e2e/plugin_example/MODULE.bazel`](e2e/plugin_example/MODULE.bazel) shows it, with the newer protobuf-java it lists for a protobuf module newer than the jar rules_android pins.
 
 **ABIs.** The ABIs of the APK are the platforms of `--@rules_android//flags:android_platforms`, as for any rules_android `android_binary`. One platform builds an APK for that ABI; several build one APK for all of them, like the fat APK `flutter build apk` makes. The Flutter engine, the app's `libapp.so`, the native libraries of the AARs your plugins bring and any C/C++ deps are each packaged for every ABI, from one mechanism: `android_binary` builds its dependencies once for each platform and packages what each build brings.
 
@@ -1151,6 +1179,8 @@ common --@rules_android//flags:desugar_java8_libs=false
 ```
 
 It is a build-wide flag of rules_android's, so only your project can set it; `flutter_android_app` cannot. Leave it on if your own Android code, or a plugin's, calls one of those APIs: a plugin that does says in its setup to enable `isCoreLibraryDesugaringEnabled`.
+
+**16 KB pages.** Devices with 16 KB memory pages, which Android 15 introduced, refuse a native library whose segments are aligned for 4 KB ones, and the app dies on launch. A Gradle build gets 16 KB alignment from NDK r28 and later. Bazel links an Android app's C/C++ code with the Android C/C++ toolchain, and rules_flutter leaves the alignment to it. rules_android_ndk 0.1.5's toolchain links every arm64 library for 4 KB pages; upstream fixed it in commit `efc0c191`, which no release has yet. Until one does, pin rules_android_ndk to a commit of its main branch with the fix, with the `git_override` the `MODULE.bazel` lines above carry. For arm64-v8a and x86_64 the build checks the native libraries the application and its plugins bring, prebuilt ones inside the plugins' AARs included, and fails naming any that is aligned for 4 KB pages. A 16 KB-aligned library loads on a 4 KB device too.
 
 | Attribute | Description |
 |---|---|
