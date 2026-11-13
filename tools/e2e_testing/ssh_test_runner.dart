@@ -71,7 +71,7 @@ Future<int> _run(List<String> args, _Signals signals) async {
   final ssh = _Ssh(host);
 
   final probe = await ssh.capture(
-    'uname -sm && mktemp -d -t rules_flutter_test',
+    r'uname -sm && mktemp -d "${TMPDIR:-/tmp}/rules_flutter_test.XXXXXX"',
   );
   final [remoteSystem, remoteRoot] = LineSplitter.split(probe).toList();
   final localSystem = (await _capture('uname', ['-sm'])).trim();

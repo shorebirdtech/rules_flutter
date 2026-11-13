@@ -72,7 +72,7 @@ class RemoteChromeLaunch {
   /// whether a shell gives it to a background job is shell-specific.
   String remoteScript(String chrome) {
     final script = [
-      r'profile=$(mktemp -d -t rules_flutter_chrome) || exit 1',
+      r'profile=$(mktemp -d "${TMPDIR:-/tmp}/rules_flutter_chrome.XXXXXX") || exit 1',
       '${_quote(chrome)} "--user-data-dir=\$profile" '
           '${args.map(_quote).join(' ')} </dev/null & chrome=\$!',
       r'( read -r _; kill $chrome 2>/dev/null ) <&0 & watcher=$!',
