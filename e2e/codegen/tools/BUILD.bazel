@@ -33,4 +33,5 @@ builder_shim_library(
     "simple_generator": [],
     "json_generator": [],
     "aggregate_generator": ["@generator_pub_deps//:glob"],
+    "ui_type_generator": ["@generator_pub_deps//:analyzer"],
 }.items()]

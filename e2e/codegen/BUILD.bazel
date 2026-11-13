@@ -272,6 +272,34 @@ flutter_test(
     ],
 )
 
+# --- A generator that resolves dart:ui ---
+# lib/swatch.dart imports Flutter and has `Color`, `Offset` and `Size` fields.
+# `ui_type_generator` throws on a type that does not resolve, so this building
+# at all shows the action's analysis has Flutter's `dart:ui`.
+
+dart_codegen(
+    name = "swatch_gen",
+    src = "lib/swatch.dart",
+    generator = "//tools:ui_type_generator",
+    output_suffixes = [".g.dart"],
+    package = ":pubspec-metadata",
+    deps = ["@deps//:flutter"],
+)
+
+flutter_test(
+    name = "swatch_test",
+    srcs = [
+        "lib/swatch.dart",
+        ":swatch_gen",
+    ],
+    main = "test/swatch_test.dart",
+    package = ":pubspec-metadata",
+    deps = [
+        "@deps//:flutter",
+        "@deps//:flutter_test",
+    ],
+)
+
 # Exercises: Native Assets under flutter_tester. The library is owned by a
 # dependency, so nothing here names an asset — the way a pub package's
 # hook-built library arrives. A test loads no application bundle, so this is
