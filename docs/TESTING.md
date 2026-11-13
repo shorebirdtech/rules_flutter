@@ -1139,7 +1139,7 @@ execution root, 258 in all: under the limit by one, which the next artifact
 bump may take. `tools/ci_matrix/test/windows_paths_test.dart` checks that the job
 names the base and that the arithmetic holds; when `plugin_example` gains a longer
 resource, change the constant there and shorten nothing else. On a VM pass
-`--output_base=C:/b` (`tools/vm/run_e2e.dart` does, `C:/b/<n>` per folder).
+`--output_base=C:/b` (`//tools/vm:run_e2e` does, `C:/b/<hash of the folder>`).
 
 Separately, three rules_android genrules (`Configuration_proto_file` and two
 more) used to fail the first build of a fresh Windows output base with `replace
@@ -1824,6 +1824,30 @@ adb exec-out screencap -p > /tmp/mi_dbg.png
 
 Each run ends with `Finished deploying changes. Launching app`. The first screenshot and the debug one show "Hello from Flutter Android!", `native add(19, 23) = 42` and `shared counter = 2`; the second shows the edited text over the same two lines. A black screenshot is a locked phone: unlock it, or read `adb logcat -d | grep " flutter "` for the `android_example shared=2` line `main()` prints. If analysis fails with "Unable to infer Java package", `flutter_android_app` has stopped passing its `namespace` as the `android_binary`'s `custom_package`.
 
+### The test VMs
+
+The VM tooling is overhead's (`@overhead//vm`, in rules_dart's `overhead/`):
+creating a VM, reaching it, copying to it, and running the e2e suites on it.
+`//tools/vm` holds what is particular to this repository on top of it: the
+Windows auto-logon session, display device, Python/dxcam and PsExec, the Linux
+GTK and Xvfb packages, the Dart SDK `@rules_dart//dart` resolves to, the Defender
+exclusions for this repository's builds, and which folders run (from
+`tools/ci_matrix/e2e_matrix.dart`).
+
+```sh
+bazel run //tools/vm:run_e2e -- <vm-name> [--windows] \
+    [--folders=.,e2e/hello_world] [--keep-going] [--rules-dart=../rules_dart]
+```
+
+The VM gets the **committed** tree: commit before each run. Each folder runs
+what `ci.yaml` runs on that system, with CI's 120-minute limit; on a timeout the
+runner ends that folder's Bazel server, so its build does not run on into the
+next folder's. With `--rules-dart`, that checkout's committed HEAD goes over
+too and every folder builds against it. The tree is at `C:\src\rules_flutter`
+(Windows) or `~/src/rules_flutter` (Linux). `--remote-cache=<url>` shares a
+Bazel cache between VMs. Delete a VM when done:
+`gcloud compute instances delete <vm-name> --quiet`.
+
 ### Linux visual verification (GCP VM)
 
 Cross-compile a Linux debug bundle from macOS, deploy to a GCP VM, and verify the Flutter UI renders.
@@ -1833,10 +1857,10 @@ Cross-compile a Linux debug bundle from macOS, deploy to a GCP VM, and verify th
 cd e2e/cross_compile_example && bazel build :cross_linux
 
 # 2. Create a Linux VM
-dart run tools/vm/create_linux_vm.dart flutter-linux-test
+bazel run //tools/vm:create_linux_vm -- flutter-linux-test
 
 # 3. Deploy and verify
-dart run tools/vm/deploy_bundle.dart flutter-linux-test e2e/cross_compile_example/bazel-bin/cross_linux
+bazel run //tools/vm:deploy_bundle -- flutter-linux-test e2e/cross_compile_example/bazel-bin/cross_linux
 
 # 4. Clean up
 gcloud compute instances delete flutter-linux-test --quiet
@@ -1851,7 +1875,7 @@ that a capture of it differs from the blank display measured before launch. It
 fails loudly if the runner dies on a missing library, or maps a window and
 paints nothing.
 
-**Three things the VM needs, all handled by `create_linux_vm.dart` and
+**Three things the VM needs, all handled by `//tools/vm:create_linux_vm` and
 `verify_linux_app.dart`** — each fails silently when missing:
 - `libgtk-3-0` is **not** in the Ubuntu cloud image; without it the runner exits
   with `libgtk-3.so.0: cannot open shared object file`.
@@ -1872,10 +1896,10 @@ The create script sets up auto-logon via sysprep specialize, so an interactive c
 
 ```sh
 # 1. Create a Windows VM (auto-logon, MSVC, Python, dxcam, PsExec)
-dart run tools/vm/create_windows_vm.dart flutter-windows-test
+bazel run //tools/vm:create_windows_vm -- flutter-windows-test
 
 # 2. Deploy bundle and verify (automated — screenshot downloads locally)
-dart run tools/vm/deploy_bundle.dart flutter-windows-test <bundle_path> --windows
+bazel run //tools/vm:deploy_bundle -- flutter-windows-test <bundle_path> --windows
 
 # 3. Clean up
 gcloud compute instances delete flutter-windows-test --quiet
@@ -1886,7 +1910,7 @@ and that it shows a visible top-level window with a non-empty client area. A
 crash at launch fails it with the exit code (`0xC0000005` is an access
 violation), and so does a runner that never parents the Flutter view in a
 window of its own, as the engine creates the view in a message-only window
-until a runner does. `deploy_bundle.dart` exits non-zero on either.
+until a runner does. `deploy_bundle` exits non-zero on either.
 
 **`e2e/desktop_example`'s three Windows apps** are built on the VM, since a
 Windows bundle needs MSVC and, but in debug mode, a Windows host's
@@ -1894,11 +1918,11 @@ Windows bundle needs MSVC and, but in debug mode, a Windows host's
 was built with `--on-vm`:
 
 ```sh
-dart run tools/vm/run_e2e.dart flutter-windows-test --windows \
+bazel run //tools/vm:run_e2e -- flutter-windows-test --windows \
   --folders=e2e/desktop_example --rules-dart=../rules_dart
 for app in windows_app windows_bazel_runner_app windows_custom_runner_app; do
-  dart run tools/vm/deploy_bundle.dart flutter-windows-test \
-    'C:\rf\rules_flutter\e2e\desktop_example\bazel-bin\'$app --windows --on-vm
+  bazel run //tools/vm:deploy_bundle -- flutter-windows-test \
+    'C:\src\rules_flutter\e2e\desktop_example\bazel-bin\'$app --windows --on-vm
 done
 ```
 
@@ -1953,7 +1977,7 @@ bazel --output_base=C:/b/2 test //:windows_pass_test //:windows_filter_test \
 
 A test's window is created in the session the test runs in. To see it, run Bazel in the
 console session (`PsExec64.exe -accepteula -i 1 -u testuser -p <password> cmd /c <script>`,
-the script writing Bazel's output to a file, as `tools/vm/deploy_bundle.dart` does) and
+the script writing Bazel's output to a file, as `//tools/vm:deploy_bundle` does) and
 take a DXGI screenshot while a test holds its window up (`dxcam` through `PsExec -i 1`,
 `e2e/_windows_test/dxgi_screenshot.py` is the capture). The window's title is the
 runner's, `hello_world`. The console is
@@ -2000,8 +2024,9 @@ Linux (`flutter_linux_integration_test`, `LinuxDevice`,
 `gen_snapshot` cannot cross-compile AOT between desktop OSes, so a profile (or
 release) desktop bundle is built on the VM itself, in the same workspaces as
 above (`e2e/desktop_example`), not on the Mac. Ship the
-committed tree the way `tools/vm/run_e2e.dart` does (`git ls-files`, not
-`git archive`), then on the VM:
+committed tree the way `//tools/vm:run_e2e` does (overhead's runner packs it
+with `git archive` from a scratch repository, so `export-ignore` does not drop
+`e2e/`), then on the VM:
 
 ```sh
 bazel build -c opt --@rules_flutter//flutter:profile //:linux_app   # //:windows_app on Windows

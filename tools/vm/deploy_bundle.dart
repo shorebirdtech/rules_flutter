@@ -1,7 +1,7 @@
 /// Deploys a Flutter bundle to a GCP VM and runs visual verification.
 ///
 /// Usage:
-///   dart run tools/vm/deploy_bundle.dart <vm-name> <bundle_path> [--windows]
+///   bazel run //tools/vm:deploy_bundle -- <vm-name> <bundle_path> [--windows]
 ///       [--on-vm] [--title <window title>]
 ///
 /// Linux (default):
@@ -15,7 +15,7 @@
 /// Windows (--windows):
 ///   1. SCPs the bundle directory to the VM, or with `--on-vm` copies one
 ///      already there (`<bundle_path>` is then a path on the VM, such as a
-///      bundle `tools/vm/run_e2e.dart` built)
+///      bundle `//tools/vm:run_e2e` built)
 ///   2. SCPs the DXGI screenshot script
 ///   3. Discovers the interactive session and Python path
 ///   4. Runs dxgi_screenshot.py via PsExec in the interactive session, which
@@ -27,19 +27,27 @@ library;
 
 import 'dart:io';
 
-import 'gcloud.dart';
+import 'package:overhead_vm/e2e.dart' show checkoutRoot;
+import 'package:overhead_vm/gcloud.dart';
+
+import 'vm_constants.dart';
 
 Future<void> main(List<String> args) async {
   if (args.length < 2) {
     stderr.writeln(
-      'Usage: dart run tools/vm/deploy_bundle.dart <vm-name> <bundle_path> '
+      'Usage: bazel run //tools/vm:deploy_bundle -- <vm-name> <bundle_path> '
       '[--windows] [--on-vm] [--title <window title>]',
     );
     exit(1);
   }
 
   final vmName = args[0];
-  final bundlePath = args[1];
+  // `bazel run` starts in the runfiles, so a relative path is the caller's.
+  final cwd = Platform.environment['BUILD_WORKING_DIRECTORY'];
+  final bundlePath =
+      (cwd != null && !args.contains('--on-vm') && !args[1].startsWith('/'))
+      ? '$cwd/${args[1]}'
+      : args[1];
   final isWindows = args.contains('--windows');
   final onVm = args.contains('--on-vm');
   if (onVm && !isWindows) {
@@ -77,11 +85,7 @@ Future<void> _deployLinux(
   String appName,
   String title,
 ) async {
-  // Determine project root (for verification scripts).
-  final scriptDir = Platform.script.resolve('.').toFilePath();
-  final projectRoot = Directory(
-    scriptDir,
-  ).parent.parent.path; // tools/vm/ -> project root
+  final projectRoot = checkoutRoot(); // for the verification scripts
 
   // Copy bundle to a temp dir (Bazel tree artifacts are read-only).
   print('Preparing bundle for upload ...');
@@ -144,8 +148,7 @@ Future<void> _deployWindows(
   String appName, {
   required bool onVm,
 }) async {
-  final scriptDir = Platform.script.resolve('.').toFilePath();
-  final projectRoot = Directory(scriptDir).parent.parent.path;
+  final projectRoot = checkoutRoot();
 
   // Check that the startup script has finished installing tools.
   print('Checking VM readiness ...');
