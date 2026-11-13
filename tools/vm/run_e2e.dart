@@ -73,9 +73,11 @@ _Folder _namedFolder(String path, Os os, String repoRoot) {
   return _Folder(path);
 }
 
-/// Per-folder timeout. The first folder pays for the hermetic Flutter SDK +
-/// engine download; later folders re-fetch (separate output bases).
-const _folderTimeout = Duration(minutes: 30);
+/// Per-folder timeout: the `e2e` job's `timeout-minutes` in
+/// `.github/workflows/ci.yaml`, as a folder here is one of those jobs. Every
+/// folder starts cold (its own output base) and fetches the Flutter SDK, engine
+/// and toolchains, and a cold Windows Android workspace takes most of an hour.
+const _folderTimeout = Duration(minutes: 120);
 
 /// Short Windows output bases, one per folder (a Bazel output base serves one
 /// workspace) — keeps generated paths under MAX_PATH (260).
@@ -288,11 +290,8 @@ Future<_FolderResult> _runFolder(
         '${folder.command} $testFlags$overrides${folder.targets} & '
         'echo RF_EXIT=!errorlevel!"';
   } else {
-    final dir = folder.path == '.'
-        ? '\$HOME/rf/rules_flutter'
-        : '\$HOME/rf/rules_flutter/${folder.path}';
     command =
-        "bash -lc 'cd $dir && "
+        "bash -lc 'cd ${_linuxFolder(folder)} && "
         "bazel ${folder.command} $testFlags$overrides${folder.targets}; "
         "echo RF_EXIT=\$?'";
   }
@@ -301,6 +300,18 @@ Future<_FolderResult> _runFolder(
   try {
     result = await sshExec(vmName, command).timeout(_folderTimeout);
   } on TimeoutException {
+    // The timeout ends only the wait here: the build goes on in its SSH
+    // session, and would run on into the next folder's, sharing its CPUs and
+    // memory. Ending the folder's Bazel server ends the build, its workers and
+    // the session with it.
+    await sshExec(
+      vmName,
+      isWindows
+          ? 'for /f %p in '
+                '(${_winOutputRoot.replaceAll('/', '\\')}\\$index\\server\\server.pid.txt) '
+                'do taskkill /f /t /pid %p'
+          : "bash -lc 'pkill -f -- \"--workspace_directory=${_linuxFolder(folder)}( |\\\$)\"'",
+    );
     return _FolderResult(
       folder.path,
       -2,
@@ -314,6 +325,11 @@ Future<_FolderResult> _runFolder(
   final pass = exitCode == 0 || exitCode == 4;
   return _FolderResult(folder.path, exitCode, pass, _tail(combined));
 }
+
+/// Where [folder] is on a Linux VM, for a login shell to expand.
+String _linuxFolder(_Folder folder) => folder.path == '.'
+    ? '\$HOME/rf/rules_flutter'
+    : '\$HOME/rf/rules_flutter/${folder.path}';
 
 /// Waits until the VM's toolchain (bazel + C compiler) is installed.
 Future<void> _waitForToolchain(String vmName, {required bool isWindows}) async {
