@@ -40,7 +40,7 @@ bazel_dep(name = "rules_android", version = "0.8.1")
 bazel_dep(name = "rules_kotlin", version = "2.4.21")
 bazel_dep(name = "rules_java", version = "9.9.0")
 bazel_dep(name = "rules_jvm_external", version = "7.2")
-bazel_dep(name = "rules_dart", version = "0.9.0")
+bazel_dep(name = "rules_dart", version = "0.9.1")
 
 # The Go SDK that builds rules_android's Go tools (`ak`, a tool of the Android
 # toolchain, so every Android build analyses it) and the Gazelle tools that
@@ -110,7 +110,7 @@ bazel_dep(name = "rules_license", version = "1.0.0")
 bazel_dep(name = "overhead", version = "0.0.0", dev_dependency = True)
 git_override(
     module_name = "overhead",
-    commit = "5ca3547cfab16aaa6e5ebb2c4ac3f03ed3f4313e",
+    commit = "6868a95fd5b341345c506eef8a19a2564ace65bc",
     remote = "https://github.com/aran/rules_dart.git",
     strip_prefix = "overhead",
 )
