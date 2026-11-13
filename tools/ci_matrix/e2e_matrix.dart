@@ -101,6 +101,10 @@ const _webElsewhere =
     'web bundles are platform-neutral; hello_world builds one on this host, '
     'which is what depends on it (the host web compilers and wasm-opt)';
 
+const _customEngineJob =
+    'its targets are manual: the `custom-engine` job builds and checks them '
+    'with the stand-in checkout through the dev tool e2e test, on macOS';
+
 const e2eWorkspaces = <E2eWorkspace>[
   // The BCR presubmit module (.bcr/presubmit.yml), which BCR runs on Debian,
   // Ubuntu, macOS and Windows before it accepts a release. Each job is the
@@ -230,19 +234,15 @@ const e2eWorkspaces = <E2eWorkspace>[
     },
     skips: {Os.macos: _webElsewhere, Os.windows: _webElsewhere},
   ),
+  // Not an E2E job: every target that exercises the checkout is manual, and
+  // the `custom-engine` job in ci.yaml runs them through the dev tool's
+  // custom_engine_e2e_test, which builds them with the checkout selected.
   E2eWorkspace(
     'custom_engine',
-    runs: {
-      Os.macos:
-          'macOS, iOS (simulator and device) and Android (both ABIs) apps '
-          'built against a stand-in checkout\'s framework and engine out dirs '
-          '(the official artifacts laid out as a checkout), in debug and '
-          'release, with their `flutter_sdk.json`; and the refusal of a '
-          'gen_snapshot from another Dart',
-    },
     skips: {
-      Os.linux: 'macOS, iOS and Android engine slices only, so far',
-      Os.windows: 'macOS, iOS and Android engine slices only, so far',
+      Os.macos: _customEngineJob,
+      Os.linux: _customEngineJob,
+      Os.windows: _customEngineJob,
     },
   ),
   E2eWorkspace(

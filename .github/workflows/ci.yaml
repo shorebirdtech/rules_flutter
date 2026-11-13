@@ -190,6 +190,28 @@ jobs:
       # itself, and runs the suite on the toolchain's Dart.
       - name: Web smoke
         run: xvfb-run -a bazel run //tools/dev_tool:e2e -- test/e2e/web_smoke_e2e_test.dart
+  # e2e/custom_engine, built against a stand-in checkout of the framework and
+  # the engine out dirs: macOS, iOS and Android apps in debug and release,
+  # their `flutter_sdk.json`, and the refusal of a gen_snapshot of another Dart.
+  # Its targets are manual, since each needs the checkout selected; the dev
+  # tool's custom_engine_e2e_test builds and checks them.
+  custom-engine:
+    name: Custom engine (stand-in checkout)
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # 0.19.1
+        with:
+          cache-version: ${{ env.CACHE_VERSION }}
+          repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
+          cache-save: false
+      # As in web-smoke: the dev tool runs from the root's bazel-bin and builds
+      # e2e/custom_engine, so each workspace keeps its own output base.
+      - name: Keep one output base per workspace
+        run: sed -i '' '/^startup --output_base=/d' ~/.bazelrc
+      - name: Custom engine
+        run: bazel run //tools/dev_tool:e2e -- test/e2e/custom_engine_e2e_test.dart
   # The jobs of `e2e` below: one per workspace and operating system, from the
   # table in tools/ci_matrix/e2e_matrix.dart. The same run checks that the table
   # lists every workspace under e2e/ and says, for each system, what the
