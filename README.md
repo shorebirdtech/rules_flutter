@@ -596,9 +596,25 @@ With automatic execution groups, each action runs where the toolchain it uses is
 - on any host with the Flutter SDK: kernel compiles, asset and shader bundling, and web compiles;
 - on the machine running Bazel: stripping the Android engine, which needs the NDK that machine has.
 
-An Android app needs fixes to other rulesets, because rules_android 0.8.1, protobuf and rules_go have actions that the flag rejects or sends to the wrong host. Copy the `single_version_override` patches for those three from [`e2e/android_example/MODULE.bazel`](e2e/android_example/MODULE.bazel) into your own `MODULE.bazel`. Two of them, `rules_android_no_initial_heap.patch` and `rules_android_aapt2_command_length.patch`, have nothing to do with remote execution: an Android build on a Windows host needs them (see **Building on Windows** under [Android](#android)).
+An Android app needs fixes to rules_android 0.8.1, protobuf and rules_go, because each has actions that the flag rejects or sends to the wrong host: see [Fixes to other rulesets](#fixes-to-other-rulesets).
 
 Use the downloaded NDK from the [Android](#android) setup when actions run remotely. It declares which host each of its toolchains runs on. An installed NDK (rules_android_ndk 0.1.5, `ANDROID_NDK_HOME`) has toolchains that match any execution platform, so a remote worker would be sent this machine's clang.
+
+### Fixes to other rulesets
+
+Some builds hit bugs in rulesets that rules_flutter depends on. Until a release of each ruleset fixes its bug, add the fix to your own `MODULE.bazel`: overrides only take effect in the root module, so rules_flutter can't apply them for you. Our e2e workspaces apply each one, so CI tests the fix you copy. Drop a fix once you depend on a release that has it.
+
+| When you need it | What goes wrong | Fix | Upstream |
+|---|---|---|---|
+| An Android app that builds C/C++ code: its plugins' native code, `native_deps`, code assets | rules_android_ndk 0.1.5 links arm64 libraries for 4 KB pages, and the [16 KB check](#16-kb-memory-pages) fails the build | `git_override` rules_android_ndk to a commit with the fix, as [16 KB memory pages](#16-kb-memory-pages) shows | Fixed by [#121](https://github.com/bazelbuild/rules_android_ndk/pull/121); not yet released |
+| A macOS app extension that runs App Intents | rules_apple 5.4.0's `macos_extension` has no `app_intents` attribute | `git_override` rules_apple to a commit with it, as [App extensions](#app-extensions) shows | Fixed by [#3112](https://github.com/bazelbuild/rules_apple/pull/3112); not yet released |
+| An Android build on a Windows host | A few of rules_android's JVMs at once fail with `There is insufficient memory for the Java Runtime Environment to continue` | `rules_android_no_initial_heap.patch` | Not fixed. [#496](https://github.com/bazelbuild/rules_android/pull/496) would let you lower the starting heap per action |
+| An Android build on a Windows host, of an app with about a hundred Android libraries (a few plugins bring that many) | Resource packaging fails with `CreateProcess error=206, The filename or extension is too long` | `rules_android_aapt2_command_length.patch` | Not fixed |
+| An Android build with [remote execution](#remote-execution) | rules_android's actions run on a host its SDK tools or JDK don't support | `rules_android_auto_exec_groups.patch` | Not fixed. [#576](https://github.com/bazelbuild/rules_android/pull/576) proposes a fix |
+| | protobuf's `protoc` actions run on a host the proto toolchain doesn't support | `protobuf_auto_exec_groups.patch` | Partly fixed in protobuf 37.0 ([#28328](https://github.com/protocolbuffers/protobuf/pull/28328)), not yet released |
+| | rules_go runs a cgo link and a cgo stdlib build with the Go SDK of the wrong host | `rules_go_auto_exec_groups.patch` | Not fixed |
+
+The patches are in [`e2e/android_example/patches/`](e2e/android_example/patches/). Apply each in a `single_version_override` of its module, as [`e2e/android_example/MODULE.bazel`](e2e/android_example/MODULE.bazel) does.
 
 ## Dependencies
 
@@ -2047,7 +2063,7 @@ rules_android 0.8.1 starts its tool JVMs with an initial heap as large as their 
 
 rules_android 0.8.1 also puts an `-A` (assets) and an `-R` (compiled resources) argument on the `aapt2 link` command line for every library the app links. With about a hundred libraries, which a few plugins bring, that passes Windows' limit of 32,767 characters, and resource packaging fails with `CreateProcess error=206, The filename or extension is too long`.
 
-Apply `rules_android_no_initial_heap.patch` and `rules_android_aapt2_command_length.patch` from [`e2e/android_example/patches/`](e2e/android_example/patches/) in a `single_version_override` of rules_android, as [`e2e/android_example/MODULE.bazel`](e2e/android_example/MODULE.bazel) does. The first keeps each heap cap and drops only the initial sizes. The second writes the `-R` list to a file once it is long, and leaves out asset directories that hold nothing to package. macOS and Linux build without them.
+Apply `rules_android_no_initial_heap.patch` and `rules_android_aapt2_command_length.patch`, as [Fixes to other rulesets](#fixes-to-other-rulesets) says. The first keeps each heap cap and drops only the initial sizes. The second writes the `-R` list to a file once it is long, and leaves out asset directories that hold nothing to package. macOS and Linux build without them.
 
 #### Choosing ABIs
 
