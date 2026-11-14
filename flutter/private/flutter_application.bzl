@@ -139,6 +139,7 @@ def flutter_application_build(ctx, inputs):
     # anything: the hook decides which of its package's declared data assets
     # ship.
     link_hooks = link_hooks_plan(inputs, inputs.deps, links = not is_debug)
+
     # Icon tree shaking reads the same file from Flutter 3.50 on.
     shake_from_uses = shakes_icons_from_recorded_uses(portable_tools(ctx), inputs.tree_shake_icons, is_debug)
     recorded_uses = ctx.actions.declare_file(ctx.label.name + ".recorded_uses.json") if link_hooks.runs or shake_from_uses else None

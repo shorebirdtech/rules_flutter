@@ -517,6 +517,7 @@ def _flutter_web_bundle_impl(ctx):
     # build. The hooks' assets are the bundle's, shared by both builds. A
     # debug build links nothing and ships every declared data asset.
     link_hooks = link_hooks_plan(program, primary.deps, links = not is_debug)
+
     # Icon tree shaking reads the same file from Flutter 3.50 on, where there
     # is no const_finder to scan a kernel with; flutter_tools reads the primary
     # compile's uses for it too.
