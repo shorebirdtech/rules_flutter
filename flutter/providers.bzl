@@ -25,7 +25,7 @@ FlutterSdkInfo = provider(
         "engine_library": "Target or None: The platform-specific Flutter engine runtime library " +
                           "(FlutterMacOS.framework, libflutter_linux_gtk.so, flutter_windows.dll). " +
                           "None for mobile/web or when engine runtime is not downloaded.",
-        "const_finder": "File or None: The `const_finder.dart.snapshot` for icon tree shaking.",
+        "const_finder": "File or None: The `const_finder.dart.snapshot` for icon tree shaking. None from Flutter 3.50 on, which shakes icons from the uses the AOT compile records.",
         "font_subset": "File or None: The `font-subset` binary for font subsetting.",
         "impellerc": "File or None: The `impellerc` shader compiler binary.",
         "shader_lib": "list[File]: Shader include files for impellerc (shader_lib/ directory contents).",
@@ -61,7 +61,7 @@ FlutterExecToolsInfo = provider(
         "icu_data": "File: `icudtl.dat`, the ICU data `flutter_tester` loads.",
         "vm_isolate_snapshot": "File: `vm_isolate_snapshot.bin`, the VM bootstrap snapshot a debug app ships.",
         "isolate_snapshot": "File: `isolate_snapshot.bin`, the isolate bootstrap snapshot a debug app ships.",
-        "const_finder": "File: The `const_finder.dart.snapshot` for icon tree shaking.",
+        "const_finder": "File or None: The `const_finder.dart.snapshot` for icon tree shaking. None from Flutter 3.50 on, which shakes icons from the uses the AOT compile records.",
         "font_subset": "File: The `font-subset` binary for font subsetting.",
         "impellerc": "File: The `impellerc` shader compiler binary.",
         "shader_lib": "list[File]: Shader include files for impellerc (shader_lib/ directory contents).",

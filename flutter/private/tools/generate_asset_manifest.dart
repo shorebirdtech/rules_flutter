@@ -144,6 +144,121 @@ Uint8List encodeStandardMessage(Object? message) {
 
 // -- Icon tree shaking helpers -----------------------------------------------
 
+/// The `IconData` constants the app uses, as const_finder prints them
+/// (`constantInstances`, `nonConstantLocations`), or null when they can't be
+/// found, which bundles the fonts whole.
+///
+/// From Flutter 3.50 on there is no const_finder: `recorded_uses` is the file
+/// the AOT kernel compile wrote with `--recorded-uses`, and `IconData`
+/// (annotated `@RecordUse()`) has its instances there.
+Map<String, dynamic>? _iconUses(Map<String, dynamic> iconTreeShaking) {
+  final recordedUses = iconTreeShaking['recorded_uses'] as String?;
+  if (recordedUses != null) {
+    return iconUsesFromRecordings(
+      json.decode(File(recordedUses).readAsStringSync())
+          as Map<String, dynamic>,
+    );
+  }
+  final dart = iconTreeShaking['dart'] as String;
+  final constFinder = iconTreeShaking['const_finder'] as String;
+  final kernelDill = iconTreeShaking['kernel_dill'] as String;
+  final constFinderResult = Process.runSync(dart, [
+    constFinder,
+    '--kernel-file',
+    kernelDill,
+    '--class-library-uri',
+    'package:flutter/src/widgets/icon_data.dart',
+    '--class-name',
+    'IconData',
+    '--annotation-class-name',
+    '_StaticIconProvider',
+    '--annotation-class-library-uri',
+    'package:flutter/src/widgets/icon_data.dart',
+  ]);
+  if (constFinderResult.exitCode != 0) {
+    stderr.writeln('const_finder failed (exit ${constFinderResult.exitCode}):');
+    stderr.writeln(constFinderResult.stderr);
+    // Fall through without tree shaking rather than failing the build.
+    return null;
+  }
+  return json.decode(constFinderResult.stdout as String)
+      as Map<String, dynamic>;
+}
+
+/// Reads the `IconData` instances out of a `--recorded-uses` file (the
+/// `package:record_use` format) into const_finder's output shape: each
+/// constant instance's `codePoint`, `fontFamily` and `fontPackage`, and one
+/// entry in `nonConstantLocations` for each instance whose fields the
+/// compiler couldn't evaluate (a creation with a non-constant argument, or a
+/// constructor tear-off). flutter_tools 3.50 reads the same file the same
+/// way (`IconTreeShaker._parseRecordings`).
+Map<String, dynamic> iconUsesFromRecordings(Map<String, dynamic> recordings) {
+  final constants = recordings['constants'] as List<dynamic>? ?? const [];
+  final definitions = recordings['definitions'] as List<dynamic>? ?? const [];
+  final iconData = <int>{
+    for (final (i, d) in definitions.indexed)
+      if ((d as Map<String, dynamic>)['uri'] ==
+              'package:flutter/src/widgets/icon_data.dart' &&
+          ((d['path'] as List<dynamic>?)?.firstOrNull
+                  as Map<String, dynamic>?)?['name'] ==
+              'IconData')
+        i,
+  };
+
+  Object? value(int? index) {
+    if (index == null) return null;
+    final c = constants[index] as Map<String, dynamic>;
+    return c['type'] == 'int' || c['type'] == 'string' ? c['value'] : null;
+  }
+
+  final constant = <Map<String, Object?>>[];
+  final nonConstant = <Map<String, Object?>>[];
+  final uses = recordings['uses'] as Map<String, dynamic>? ?? const {};
+  for (final entry in uses['instances'] as List<dynamic>? ?? const []) {
+    final m = entry as Map<String, dynamic>;
+    if (!iconData.contains(m['definition_index'])) continue;
+    for (final use in m['uses'] as List<dynamic>? ?? const []) {
+      final u = use as Map<String, dynamic>;
+      switch (u['type']) {
+        case 'constant':
+          final instance =
+              constants[u['constant_index'] as int] as Map<String, dynamic>;
+          final fields = instance['value'] as Map<String, dynamic>? ?? const {};
+          constant.add({
+            'codePoint': value(fields['codePoint'] as int?),
+            'fontFamily': value(fields['fontFamily'] as int?),
+            'fontPackage': value(fields['fontPackage'] as int?),
+          });
+        case 'creation':
+          final positional = u['positional'] as List<dynamic>? ?? const [];
+          final named = u['named'] as Map<String, dynamic>? ?? const {};
+          // An argument the compiler couldn't evaluate is an index to a
+          // `{"type": "non_constant"}` entry (record_use's NonConstant); a
+          // missing index is treated the same.
+          bool nonConstantArg(Object? index) =>
+              index == null ||
+              (constants[index as int] as Map<String, dynamic>)['type'] ==
+                  'non_constant';
+          if (positional.any(nonConstantArg) ||
+              named.values.any(nonConstantArg)) {
+            nonConstant.add(u);
+          } else {
+            constant.add({
+              'codePoint': positional.isEmpty
+                  ? null
+                  : value(positional.first as int),
+              'fontFamily': value(named['fontFamily'] as int?),
+              'fontPackage': value(named['fontPackage'] as int?),
+            });
+          }
+        default:
+          nonConstant.add(u);
+      }
+    }
+  }
+  return {'constantInstances': constant, 'nonConstantLocations': nonConstant};
+}
+
 /// Run font-subset, piping code points via stdin. Returns true on success.
 Future<bool> _runFontSubset(
   String fontSubsetBin,
@@ -228,36 +343,12 @@ Future<void> main(List<String> args) async {
   Map<String, String>? fontFamilyToAsset;
 
   if (iconTreeShaking != null) {
-    final dart = iconTreeShaking['dart'] as String;
-    final constFinder = iconTreeShaking['const_finder'] as String;
-    final kernelDill = iconTreeShaking['kernel_dill'] as String;
-
-    // Step 1: Run const_finder to discover used icon code points.
-    final constFinderResult = Process.runSync(dart, [
-      constFinder,
-      '--kernel-file',
-      kernelDill,
-      '--class-library-uri',
-      'package:flutter/src/widgets/icon_data.dart',
-      '--class-name',
-      'IconData',
-      '--annotation-class-name',
-      '_StaticIconProvider',
-      '--annotation-class-library-uri',
-      'package:flutter/src/widgets/icon_data.dart',
-    ]);
-
-    if (constFinderResult.exitCode != 0) {
-      stderr.writeln(
-        'const_finder failed (exit ${constFinderResult.exitCode}):',
-      );
-      stderr.writeln(constFinderResult.stderr);
-      // Fall through without tree shaking rather than failing the build.
-    } else {
-      final output = json.decode(
-        constFinderResult.stdout as String,
-      ) as Map<String, dynamic>;
-
+    // Step 1: find the icon code points the app uses, in const_finder's
+    // output shape. From Flutter 3.50 on they come from the uses the AOT
+    // compile recorded (`recorded_uses`); before 3.50, const_finder scans the
+    // kernel for them.
+    final output = _iconUses(iconTreeShaking);
+    if (output != null) {
       // Check for non-const IconData usage.
       final nonConst = output['nonConstantLocations'] as List<dynamic>? ?? [];
       if (nonConst.isNotEmpty) {

@@ -6,6 +6,8 @@ flutter_desktop_engine_repo.bzl, flutter_cross_repo.bzl, and
 flutter_desktop_cross_repo.bzl.
 """
 
+load(":versions.bzl", "flutter_has_const_finder")
+
 # -- Engine filegroup templates ------------------------------------------------
 # Each template defines a filegroup named "engine_library" for a given OS.
 
@@ -314,3 +316,21 @@ def find_engine_header_dir(engine_files, header_suffix):
             idx = f.path.rfind(header_suffix)
             return f.path[:idx].rstrip("/")
     return None
+
+def const_finder_attr(flutter_version, path):
+    """The `const_finder` line of a generated `flutter_toolchain`/`flutter_exec_tools`.
+
+    Empty from Flutter 3.50 on, whose `font-subset.zip` no longer carries the
+    snapshot: those toolchains shake icons from the uses the AOT kernel
+    compile records instead (see `flutter_build_assets`).
+
+    Args:
+        flutter_version: The Flutter release the toolchain is for.
+        path: The snapshot's label or path in the generated BUILD file.
+
+    Returns:
+        A BUILD-file line (with its indent), or "".
+    """
+    if not flutter_has_const_finder(flutter_version):
+        return ""
+    return '    const_finder = "{}",'.format(path)

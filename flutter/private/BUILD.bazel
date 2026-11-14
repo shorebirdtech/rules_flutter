@@ -450,6 +450,7 @@ bzl_library(
     name = "engine_helpers",
     srcs = ["engine_helpers.bzl"],
     visibility = ["//flutter:__subpackages__"],
+    deps = [":versions"],
 )
 
 bzl_library(

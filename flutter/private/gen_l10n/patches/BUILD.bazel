@@ -18,6 +18,9 @@ exports_files(
         "process.patch",
         "features.patch",
         "io.patch",
+        # Flutter 3.50 moved the context of these two cuts; the cuts are the same.
+        "localizations_utils_3_50.patch",
+        "io_3_50.patch",
     ],
     visibility = ["//visibility:public"],
 )
