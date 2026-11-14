@@ -123,8 +123,10 @@ def native_asset_framework_name(filename):
 def _path_list_for(asset, target_os, layout):
     """Return the manifest path-list shape for `asset`.
 
-    For `dynamic_loading_bundle` the engine's `KernelAssetAbsolutePath` is the
-    path it `dlopen`s. Under `layout = "bundle"` that is resolved inside the
+    The manifest goes into the kernel, which engines before Flutter 3.50 read,
+    and into the asset bundle as `NativeAssetsManifest.json`, which the engine
+    reads from 3.50 on. For `dynamic_loading_bundle` the entry is the path the
+    engine `dlopen`s. Under `layout = "bundle"` that is resolved inside the
     platform bundle slot: on iOS the dylib is wrapped in a `.framework`, so the
     path is `<name>.framework/<name>`; every other OS places a loose
     dylib/so/dll and uses the bare basename.
@@ -134,8 +136,8 @@ def _path_list_for(asset, target_os, layout):
     path. A path with a separator in it is resolved by the loader against the
     process's working directory, and Bazel runs a test with that set to the
     runfiles root, so the same string works for every asset without the runner
-    having to rewrite the manifest (it is baked into the kernel at build time
-    and cannot be rewritten later).
+    having to rewrite the manifest (both copies are written at build time and
+    cannot be rewritten later).
 
     That last part is why this is unverified on Windows: without
     `--enable_runfiles` Bazel there uses a runfiles *manifest* instead of a

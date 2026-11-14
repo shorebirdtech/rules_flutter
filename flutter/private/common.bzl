@@ -677,7 +677,7 @@ def shakes_icons_from_recorded_uses(ctx, tools, is_debug):
         tools.const_finder == None
     )
 
-def flutter_build_assets(ctx, tools, output_dir, compiled_shaders = {}, kernel_dill = None, recorded_uses = None, is_debug = False, data_assets = None):
+def flutter_build_assets(ctx, tools, output_dir, compiled_shaders = {}, kernel_dill = None, recorded_uses = None, is_debug = False, data_assets = None, native_assets_manifest = None):
     """Run the shared asset bundling step.
 
     Walks `FlutterInfo.pub_fonts` / `pub_assets` from deps to bundle
@@ -701,6 +701,10 @@ def flutter_build_assets(ctx, tools, output_dir, compiled_shaders = {}, kernel_d
             placed at `flutter_assets/packages/<package>/<name>` and listed in
             the asset manifest under that key, as flutter_tools bundles a
             hook's data asset.
+        native_assets_manifest: Optional File, the `native_assets.json` the
+            kernel was compiled with, bundled as `NativeAssetsManifest.json`
+            for the engine to resolve code assets from. See
+            `flutter_asset_bundle_action`.
 
     Returns:
         The flutter_assets/ tree artifact File.
@@ -753,6 +757,7 @@ def flutter_build_assets(ctx, tools, output_dir, compiled_shaders = {}, kernel_d
         kernel_dill = kernel_dill if tree_shake_icons else None,
         recorded_uses = recorded_uses if tree_shake_icons else None,
         extra_asset_copies = extra_asset_copies,
+        native_assets_manifest = native_assets_manifest,
     )
 
 def compute_desktop_bundle_copies(is_debug, kernel_dill_path, aot_output_path, aot_dst, icu_data_path, engine_basenames, native_basenames, engine_dst_prefix = "lib/", native_dst_prefix = "lib/"):

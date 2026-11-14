@@ -16,6 +16,7 @@ load("@rules_dart//dart:providers.bzl", "DartInfo", "DartPackageInfo")
 load("//flutter:native_assets.bzl", "flutter_data_asset", "flutter_native_asset")
 load("//flutter:providers.bzl", "FlutterNativeAssetInfo")
 load("//flutter/private:common.bzl", "check_unreplaced_hooks")
+load("//flutter/private:flutter_asset_bundle.bzl", "NATIVE_ASSETS_MANIFEST_BUNDLE_PATH")
 load("//flutter/private:flutter_native_assets.bzl", "native_asset_framework_name", "native_assets_target_string", "resolve_native_assets", "write_native_assets_manifest")
 
 # -- Pure-function tests for the manifest helpers ----------------------
@@ -217,6 +218,50 @@ def _test_host_assets_test_impl(ctx):
     return analysistest.end(env)
 
 _test_host_assets_test = analysistest.make(_test_host_assets_test_impl)
+
+# -- Where the engine finds a target's code assets ---------------------
+
+def _bundles_manifest_test_impl(ctx):
+    """Assert that the asset bundle carries the target's native-assets manifest.
+
+    From Flutter 3.50 the engine resolves a code asset only from the bundle's
+    `NativeAssetsManifest.json` (flutter/flutter#188947); the mapping in the
+    kernel is never consulted. Without the file every `@Native` call falls
+    back to a process lookup, which on Linux finds nothing.
+    """
+    env = analysistest.begin(ctx)
+    target = analysistest.target_under_test(env)
+    bundles = [a for a in analysistest.target_actions(env) if a.mnemonic == "FlutterAssetBundle"]
+    asserts.equals(env, 1, len(bundles), "expected exactly one FlutterAssetBundle action")
+    if not bundles:
+        return analysistest.end(env)
+    argv = bundles[0].argv
+    config = json.decode(argv[argv.index("--config") + 1])
+
+    manifests = [
+        f
+        for f in bundles[0].inputs.to_list()
+        if f.basename == target.label.name + ".native_assets.json"
+    ]
+    asserts.equals(env, 1, len(manifests), "the kernel's native-assets manifest is an input of the bundle")
+    if manifests:
+        # The config's paths are path-mapped (`bazel-out/cfg/...`).
+        copied = config["copies"].get(NATIVE_ASSETS_MANIFEST_BUNDLE_PATH) or ""
+        asserts.true(
+            env,
+            copied.endswith("/bin/" + manifests[0].short_path),
+            "expected %s bundled as %s, got %s" % (manifests[0].short_path, NATIVE_ASSETS_MANIFEST_BUNDLE_PATH, copied or "nothing"),
+        )
+
+    # The engine reads it by name; it is not an asset `rootBundle` lists.
+    asserts.false(
+        env,
+        NATIVE_ASSETS_MANIFEST_BUNDLE_PATH in config["assets"],
+        "%s listed in the asset manifest" % NATIVE_ASSETS_MANIFEST_BUNDLE_PATH,
+    )
+    return analysistest.end(env)
+
+_bundles_manifest_test = analysistest.make(_bundles_manifest_test_impl)
 
 # -- Analysis-time failure tests ---------------------------------------
 
@@ -428,6 +473,17 @@ def native_assets_test_suite(name):
         target_compatible_with = ["@platforms//os:macos"],
     )
 
+    # The engine finds a test's code assets, and an application's, in the
+    # bundle rather than the kernel.
+    _bundles_manifest_test(
+        name = name + "_test_bundles_manifest",
+        target_under_test = "//flutter/tests/dart_asset_fixture/code_asset_test:code_asset_flutter_test",
+    )
+    _bundles_manifest_test(
+        name = name + "_app_bundles_manifest",
+        target_under_test = "//flutter/tests/code_asset_fixture:app_dart_owner",
+    )
+
     unittest.suite(
         name + "_pure",
         _target_string_t0_test,
@@ -450,6 +506,8 @@ def native_assets_test_suite(name):
             ":" + name + "_bundle_layout_path",
             ":" + name + "_runfiles_layout_path",
             ":" + name + "_test_host_is_target",
+            ":" + name + "_test_bundles_manifest",
+            ":" + name + "_app_bundles_manifest",
             ":" + name + "_pure",
         ],
     )
