@@ -1,10 +1,42 @@
-# Checks every commit pushed to main against the commit policy in AGENTS.md.
+# Checks a pull request's commits against the commit policy in AGENTS.md.
+#
+# This runs on pull requests rather than on pushes to main (as upstream's
+# reusable overhead-commit-messages workflow does) because this fork lands
+# PRs by squash: GitHub writes the squash commit's message by joining the
+# PR's commit messages and appending a Co-authored-by paragraph, which buries
+# each `Changelog:` trailer. The commits the hook checked are the PR's own.
+# Every pull request is checked, stacked ones into other branches too.
 name: Commit messages
 on:
-  push:
-    branches: [main]
+  pull_request:
 permissions:
   contents: read
 jobs:
   check:
-    uses: aran/rules_dart/.github/workflows/overhead-commit-messages.yaml@6868a95fd5b341345c506eef8a19a2564ace65bc
+    name: Commit messages
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      # Restores, never saves, ci.yaml's repository cache: these values must
+      # match its CACHE_VERSION, BAZEL_REPOSITORY_CACHE_KEY_FILES and the
+      # repo_contents_cache line of CI_BAZELRC.
+      - uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # 0.19.1
+        with:
+          cache-version: "2"
+          bazelrc: common --repo_contents_cache=~/.cache/bazel-repo-contents
+          repository-cache: |
+            - MODULE.bazel
+            - MODULE.bazel.lock
+            - e2e/*/MODULE.bazel
+            - flutter/private/versions.bzl
+          cache-save: false
+      # The commits on the PR's head that its base doesn't hold yet. The base
+      # is the branch as it is now, so main merged into the PR is not checked.
+      - name: Check the pull request's commits
+        env:
+          BASE: origin/${{ github.base_ref }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: bazel run @overhead//changelog:check -- --range "$BASE..$HEAD"
