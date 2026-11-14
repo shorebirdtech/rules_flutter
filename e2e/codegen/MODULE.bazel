@@ -17,6 +17,17 @@ local_path_override(
     path = "../..",
 )
 
+# rules_dart 0.9.1 plus Dart 3.14.0, from our fork's 0.9.x branch
+# (shorebirdtech/rules_dart#12, #13). The CI job that runs this workspace on
+# Flutter 3.50.0 needs it: rules_flutter builds its outline tool with
+# `dart_kernel_source` on the Flutter SDK's Dart, and BCR's 0.9.1 doesn't list
+# 3.14.0. Drop this once a rules_dart release on BCR lists 3.14.0.
+git_override(
+    module_name = "rules_dart",
+    commit = "d75b08e11ebfc987a25e4dc2fbd389f172ecdc72",
+    remote = "https://github.com/shorebirdtech/rules_dart.git",
+)
+
 flutter = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter")
 flutter.toolchain(flutter_version = "3.47.9")
 
