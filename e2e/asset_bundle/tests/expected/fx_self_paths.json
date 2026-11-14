@@ -7,6 +7,16 @@
         }
       ]
     },
+    "images/android_only.txt": {
+      "variants": [
+        {
+          "asset": "images/android_only.txt"
+        }
+      ],
+      "platforms": [
+        "android"
+      ]
+    },
     "images/logo.png": {
       "variants": [
         {

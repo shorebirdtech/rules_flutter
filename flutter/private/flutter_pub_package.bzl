@@ -899,8 +899,9 @@ def own_lib_path(package, path, literal_is_file):
     As in flutter_tools (asset.dart's `_resolveAsset`), a file entry
     `packages/<the package>/x` that is no file at that path is the package's
     `lib/x` (material_ui's `packages/material_ui/shaders/ink_sparkle.frag`),
-    bundled at `packages/<the package>/x`, where a plain `x` would be. A
-    directory entry is never read this way.
+    bundled at `packages/<the package>/x`, where a plain `x` would be: its
+    target's `bundle_paths` maps `lib/x` to `x`. A directory entry is never
+    read this way.
 
     Args:
         package: The package whose pubspec lists the entry.
@@ -921,28 +922,6 @@ def _own_lib_path(ctx, package, path):
     literal = ctx.path(path)
     return own_lib_path(package, path, literal.exists and not literal.is_dir)
 
-def _linked_out_of_lib(ctx, package, entry, lib_path):
-    """Link `lib/x` to `x`, the path in the package that it is bundled by.
-
-    A bundle keys a file by its path in its package, so the `lib/x` an entry
-    `packages/<the package>/x` names is linked at `x` to be bundled where
-    flutter_tools bundles it.
-
-    Returns:
-        `x`.
-    """
-    path = lib_path[len("lib/"):]
-    target = ctx.path(lib_path)
-    if not target.exists:
-        fail("package {}: it lists {}, which is its {}, and that file does not exist.".format(package, repr(entry), repr(lib_path)))
-    link = ctx.path(path)
-    if link.exists:
-        if link.realpath != target.realpath:
-            fail("package {}: it lists {}, which is its {}, but it has a file {} too, which a bundle keys the same.".format(package, repr(entry), repr(lib_path), repr(path)))
-        return path
-    ctx.symlink(target, path)
-    return path
-
 def _build_assets(ctx, package, parsed_assets, flavors):
     """Expand the package's `flutter: assets:` entries into files.
 
@@ -957,8 +936,8 @@ def _build_assets(ctx, package, parsed_assets, flavors):
     with `platforms:` ships in builds for those platforms only; a file that
     several entries list ships wherever any of them does.
 
-    A file entry `packages/<the package>/x` is the package's `lib/x` (see
-    `own_lib_path`).
+    A file entry `packages/<the package>/x` is the package's `lib/x` and its
+    variants, bundled by `x` (see `own_lib_path`).
 
     Args:
         ctx: The repository context.
@@ -967,11 +946,14 @@ def _build_assets(ctx, package, parsed_assets, flavors):
         flavors: The package's `flavor_restrictions`, shared with its shaders.
 
     Returns:
-        struct(labels, platforms): `labels` is the `assets` of the package's
-        target, sorted; `platforms` maps the path of each file that ships on
-        some platforms only to those platforms.
+        struct(labels, platforms, bundle_paths): `labels` is the `assets` of
+        the package's target, sorted; `platforms` maps the path of each file
+        that ships on some platforms only to those platforms; `bundle_paths`
+        maps the path of each file in `lib/` that an entry names by
+        `packages/<the package>/` to the path it is bundled by.
     """
     files = {}
+    bundle_paths = {}
     restrictions = _platform_restrictions()
     for entry in parsed_assets:
         path = entry.path
@@ -983,14 +965,15 @@ def _build_assets(ctx, package, parsed_assets, flavors):
             listed = ["lib/" + in_lib if in_lib != None else path]
         for f in listed:
             main = _checked_file_name(package, "asset file", f)
-            for found in _with_variants(ctx, package, main):
-                variant = _linked_out_of_lib(ctx, package, path, found) if in_lib != None else found
+            for variant in _with_variants(ctx, package, main):
                 files[":" + variant] = True
+                if in_lib != None:
+                    bundle_paths[variant] = variant[len("lib/"):]
                 restrictions.add(variant, entry.platforms)
-                conflict = flavors.add(variant, path, entry.flavors, main = found == main)
+                conflict = flavors.add(variant, path, entry.flavors, main = variant == main)
                 if conflict:
                     fail(conflict)
-    return struct(labels = sorted(files.keys()), platforms = restrictions.platforms())
+    return struct(labels = sorted(files.keys()), platforms = restrictions.platforms(), bundle_paths = bundle_paths)
 
 def _build_additional_licenses(ctx, package, paths):
     """The labels of the files a package lists under `flutter: licenses:`.
@@ -1026,22 +1009,26 @@ def _build_shaders(ctx, package, parsed_shaders, flavors):
         flavors: The package's `flavor_restrictions`, shared with its assets.
 
     Returns:
-        struct(labels, platforms): `labels` is the `shaders` of the package's
-        target, sorted; `platforms` maps the path of each shader that ships on some platforms
-        only to those platforms.
+        struct(labels, platforms, bundle_paths): as `_build_assets`'.
     """
     files = {}
+    bundle_paths = {}
     restrictions = _platform_restrictions()
     for entry in parsed_shaders:
         _checked_file_name(package, "shader file", entry.path)
         in_lib = _own_lib_path(ctx, package, entry.path)
-        shader = entry.path if in_lib == None else _linked_out_of_lib(ctx, package, entry.path, "lib/" + in_lib)
+        shader = entry.path
+        if in_lib != None:
+            shader = "lib/" + in_lib
+            if not ctx.path(shader).exists:
+                fail("package {}: it lists the shader {}, which is its {}, and that file does not exist.".format(package, repr(entry.path), repr(shader)))
+            bundle_paths[shader] = in_lib
         files[":" + shader] = True
         restrictions.add(shader, entry.platforms)
         conflict = flavors.add(shader, entry.path, entry.flavors)
         if conflict:
             fail(conflict)
-    return struct(labels = sorted(files.keys()), platforms = restrictions.platforms())
+    return struct(labels = sorted(files.keys()), platforms = restrictions.platforms(), bundle_paths = bundle_paths)
 
 def _platform_restrictions():
     """The platforms each file of a package ships on, from the entries that list it.
@@ -1136,7 +1123,7 @@ _SHADER_INCLUDES_GLOB = """    shader_includes = glob(
         allow_empty = True,
     ),"""
 
-def _format_pub_asset_attrs(font_families, assets, shaders, asset_platforms = {}, shader_platforms = {}, asset_flavors = {}, shader_flavors = {}, additional_licenses = []):
+def _format_pub_asset_attrs(font_families, assets, shaders, asset_platforms = {}, shader_platforms = {}, asset_flavors = {}, shader_flavors = {}, additional_licenses = [], bundle_paths = {}):
     """Render the pub-asset attrs as BUILD source, omitting empty ones."""
     parts = []
     if font_families:
@@ -1155,6 +1142,8 @@ def _format_pub_asset_attrs(font_families, assets, shaders, asset_platforms = {}
         parts.append("    shader_platforms = {},".format(_format_list_dict_literal(shader_platforms)))
     if shader_flavors:
         parts.append("    shader_flavors = {},".format(_format_list_dict_literal(shader_flavors)))
+    if bundle_paths:
+        parts.append("    bundle_paths = {},".format(_format_list_dict_literal(bundle_paths)))
     if shaders:
         # What the shaders may `#include`: a package's GLSL anywhere in it,
         # since an include can reach `../`.
@@ -1317,6 +1306,7 @@ def make_flutter_member_build_content(
         additional_licenses = [],
         asset_flavors = {},
         shader_flavors = {},
+        bundle_paths = {},
         has_android_lib = False,
         unbuilt_native_code = {},
         android_group = "",
@@ -1380,6 +1370,8 @@ def make_flutter_member_build_content(
             platforms it ships on, for the shaders a `platforms:` entry restricts.
         shader_flavors: Dict of package-relative shader path -> the flavors
             it ships in, for the shaders a `flavors:` entry restricts.
+        bundle_paths: Dict of package-relative path of an asset or shader
+            -> the path it is bundled by, for those not bundled by their own.
         version: The resolved package version this spoke was fetched at, or
             empty. Stated only when known, as rules_dart's pub spokes state
             it: its sole use is agreement
@@ -1529,7 +1521,7 @@ flutter_unbuilt_plugin_library(
             ios_lines = ios_lines,
         )
 
-    pub_attrs = _format_pub_asset_attrs(font_targets.labels, assets, shaders, asset_platforms, shader_platforms, additional_licenses = additional_licenses, asset_flavors = asset_flavors, shader_flavors = shader_flavors)
+    pub_attrs = _format_pub_asset_attrs(font_targets.labels, assets, shaders, asset_platforms, shader_platforms, additional_licenses = additional_licenses, asset_flavors = asset_flavors, shader_flavors = shader_flavors, bundle_paths = bundle_paths)
 
     # The `lib/` glob is `allow_empty`: a pub package can be only assets or native
     # code, with no Dart.
@@ -2535,6 +2527,7 @@ def _flutter_pub_package_impl(ctx):
             additional_licenses = additional_licenses,
             asset_flavors = asset_flavors,
             shader_flavors = shader_flavors,
+            bundle_paths = bundled_assets.bundle_paths | bundled_shaders.bundle_paths,
             linux_link = linux_link,
             windows_link = windows_link,
             has_android_lib = bool(android_src_dir or android_has_resources or android_native_build),
@@ -2568,6 +2561,7 @@ def _flutter_pub_package_impl(ctx):
             additional_licenses = additional_licenses,
             asset_flavors = asset_flavors,
             shader_flavors = shader_flavors,
+            bundle_paths = bundled_assets.bundle_paths | bundled_shaders.bundle_paths,
         )
         android_src_dir = ""
         android_java_package = ""
