@@ -46,6 +46,26 @@ env:
     - MODULE.bazel.lock
     - e2e/*/MODULE.bazel
     - flutter/private/versions.bzl
+  # Every setup-bazel step writes these to the user's `.bazelrc`, which every
+  # Bazel command reads, in the root and in each e2e workspace. They are here
+  # rather than in a file the user rc imports because that import would need
+  # the checkout's absolute path, and an rc file reads the backslashes of a
+  # Windows one as escapes.
+  #
+  # A log that shows what failed: no cursor control or colour codes, a
+  # progress line a minute (enough to see where a hung build hangs), no output
+  # of passing actions in other modules (javac and JDK warnings from
+  # toolchains, thousands of lines of them in an Android build; a failing
+  # action prints its output whatever its module), a failing test's log, which
+  # would otherwise stay in a test.log discarded with the runner, and no line
+  # per passing test.
+  CI_BAZELRC: |
+    common --curses=no
+    common --color=no
+    common --show_progress_rate_limit=60
+    common --output_filter=^//
+    test --test_output=errors
+    test --test_summary=terse
 # Every job has a timeout, at a few times its slowest recent run, and more
 # where a cold cache makes it fetch toolchains: 15 minutes for a check of a
 # command or two, 30 for analysing one workspace, 60 for the root workspace's
@@ -60,14 +80,15 @@ jobs:
       - uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # 0.19.1
         with:
           cache-version: ${{ env.CACHE_VERSION }}
+          bazelrc: ${{ env.CI_BAZELRC }}
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
           cache-save: false
       - name: bazel test //...
-        run: bazel test //... --test_output=errors
+        run: bazel test //...
       # The `deep` tier (.bazelrc): weekly, since its tests fetch extra SDKs.
       - name: bazel test //... --config=deep
         if: github.event_name == 'schedule'
-        run: bazel test //... --config=deep --test_output=errors
+        run: bazel test //... --config=deep
   # Every hook in .pre-commit-config.yaml, over every file, with the prek
   # overhead pins, as a commit runs them: one build puts overhead's tools in
   # .bazel_env, then the hooks run them without Bazel. Nothing else runs them
@@ -81,6 +102,7 @@ jobs:
       - uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # 0.19.1
         with:
           cache-version: ${{ env.CACHE_VERSION }}
+          bazelrc: ${{ env.CI_BAZELRC }}
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
           cache-save: false
       - run: bazel run @overhead//:bazel_env -- update-symlink
@@ -101,6 +123,7 @@ jobs:
       - uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # 0.19.1
         with:
           cache-version: ${{ env.CACHE_VERSION }}
+          bazelrc: ${{ env.CI_BAZELRC }}
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
           cache-save: false
       # e2e/external_module takes rules_flutter from the release archive, as
@@ -128,6 +151,7 @@ jobs:
       - uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # 0.19.1
         with:
           cache-version: ${{ env.CACHE_VERSION }}
+          bazelrc: ${{ env.CI_BAZELRC }}
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
           cache-save: false
       # What a consumer gets is the release archive (`git archive`, trimmed by
@@ -159,6 +183,7 @@ jobs:
       - uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # 0.19.1
         with:
           cache-version: ${{ env.CACHE_VERSION }}
+          bazelrc: ${{ env.CI_BAZELRC }}
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
           cache-save: false
       # setup-bazel pins every workspace to one output base with a `startup`
@@ -204,6 +229,7 @@ jobs:
       - uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # 0.19.1
         with:
           cache-version: ${{ env.CACHE_VERSION }}
+          bazelrc: ${{ env.CI_BAZELRC }}
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
           cache-save: false
       # As in web-smoke: the dev tool runs from the root's bazel-bin and builds
@@ -267,6 +293,7 @@ jobs:
         with:
           output-base: ${{ runner.os == 'Windows' && format('{0}/b', steps.drive.outputs.drive) || '' }}
           cache-version: ${{ env.CACHE_VERSION }}
+          bazelrc: ${{ env.CI_BAZELRC }}
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
           cache-save: ${{ github.event_name == 'push' && matrix.workspace == 'hello_world' }}
       - name: Install GTK3 (Linux)
@@ -276,14 +303,12 @@ jobs:
       # refuses a lock that lacks an entry the build needs; the `lockfiles` job
       # checks every lock for stale entries too.
       #
-      # --test_output=errors so a failure's assertion reaches this log. Without
-      # it the output stays in a test.log on the runner and is discarded with
-      # the machine. `build` takes no test flags: the workspaces that run it
-      # have no test targets (see tools/ci_matrix/e2e_matrix.dart). The targets
-      # are `//...` unless the table names others for the system.
+      # The workspaces that run `build` have no test targets (see
+      # tools/ci_matrix/e2e_matrix.dart). The targets are `//...` unless the
+      # table names others for the system.
       - name: bazel ${{ matrix.command }} ${{ matrix.targets }} (e2e/${{ matrix.workspace }})
         working-directory: e2e/${{ matrix.workspace }}
-        run: bazel ${{ matrix.command }} ${{ matrix.targets }} ${{ matrix.command == 'test' && '--test_output=errors' || '' }}
+        run: bazel ${{ matrix.command }} ${{ matrix.targets }}
       # `bazel coverage` of a flutter_test, which `bazel test` never reaches:
       # the merged report names the sources of the test's package and of a
       # library in another by their workspace paths, and
@@ -295,7 +320,7 @@ jobs:
         working-directory: e2e/hello_world
         run: |
           report="$(bazel info output_path)/_coverage/_coverage_report.dat"
-          bazel coverage --test_output=errors --combined_report=lcov //coverage/...
+          bazel coverage --combined_report=lcov //coverage/...
           bazel run //coverage/check -- "$report" coverage/lib/shapes.dart coverage/units/lib/units.dart
-          bazel coverage --test_output=errors --combined_report=lcov --instrumentation_filter=//coverage/units //coverage/...
+          bazel coverage --combined_report=lcov --instrumentation_filter=//coverage/units //coverage/...
           bazel run //coverage/check -- "$report" coverage/units/lib/units.dart

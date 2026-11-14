@@ -1100,9 +1100,10 @@ finds a gap before a push.
 | `package_assets` | Linux, macOS | on Linux the package link hooks over a release compile's recorded uses (platform-neutral, run once, on the cheapest runner); on macOS a hand-linked code asset and a data asset on the app's own package, loaded by the macOS app | Windows: the same again |
 
 The table in `e2e_matrix.dart` is the source; if this one disagrees, that one is
-right. After the lock check, the macOS and Linux jobs run exactly
-`bazel test //... --test_output=errors`
-(`build` for `cross_compile_example`), so a target the system cannot build must
+right. The macOS and Linux jobs run exactly `bazel test //...` (`build` for
+`cross_compile_example`), with the flags of `CI_BAZELRC` in ci.yaml, which
+every setup-bazel step writes to the user's `.bazelrc` (a quiet log, and a
+failing test's output in it), so a target the system cannot build must
 carry `target_compatible_with` and is then skipped, not failed. The Windows job
 runs the same commands in a short output base (`<drive>/b`, "Windows and
 MAX_PATH" below), so it builds the Android targets as the other two do. Tests on Windows locate their `data`
