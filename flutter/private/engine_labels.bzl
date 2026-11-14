@@ -38,7 +38,7 @@ WEB_SLICE_FILES = {
     "dart2js_platform.dill": "`kernel/dart2js_platform.dill`.",
     "ddc_outline.dill": "`kernel/ddc_outline.dill`.",
     "libraries.json": "The web SDK's `libraries.json`.",
-    "ddc_dart_sdk.js": "`kernel/ddcLibraryBundle-canvaskit/dart_sdk.js`.",
+    "ddc_dart_sdk.js": "The DDC SDK in the library-bundle format: `kernel/ddcLibraryBundle-canvaskit/dart_sdk.js`, or `kernel/ddc/canary/dart_sdk.js` from Flutter 3.50.",
     "ddc_module_loader.js": "The Dart SDK's `lib/dev_compiler/ddc/ddc_module_loader.js`.",
     "dart_stack_trace_mapper.js": "The Dart SDK's `lib/dev_compiler/web/dart_stack_trace_mapper.js`.",
 }
