@@ -1,20 +1,38 @@
 """Builds targets for given Android platforms, whatever the command line asked for."""
 
+load("@rules_android//rules:utils.bzl", android_utils = "utils")
+
 # rules_android reads the platforms of an APK from this Starlark flag when it
 # has a value, and from Bazel's native `--android_platforms` only when it is
 # empty. Setting the Starlark flag alone is enough, and cannot disagree with a
 # value of the native option the command line may carry: the Starlark one wins.
 _STARLARK_PLATFORMS = Label("@rules_android//flags:android_platforms")
 
-def _android_platforms_transition_impl(_settings, attr):
-    platforms = [str(platform) for platform in attr.android_platforms]
+def _platforms_of(value):
+    """The platforms rules_android builds for when its flag holds `value`.
+
+    The flag holds strings, which rules_android resolves as labels in its own
+    repository's context. Its own reader resolves them here, so a value means
+    the same to this transition as to the APK rules.
+    """
+    return android_utils.get_android_platforms({android_utils.ANDROID_PLATFORMS_SETTING: value})
+
+def _android_platforms_transition_impl(settings, attr):
+    # The flag is a string list, so two spellings of one platform
+    # (`@rules_android//:arm64-v8a` on a command line, `@@rules_android+//:arm64-v8a`
+    # from `str(Label)`) are two configurations, and every target outside this
+    # rule would be built in both. When the incoming value names these
+    # platforms, it is kept as it is spelled.
+    incoming = settings[str(_STARLARK_PLATFORMS)]
+    if incoming and _platforms_of(incoming) == attr.android_platforms:
+        return {str(_STARLARK_PLATFORMS): incoming}
     return {
-        str(_STARLARK_PLATFORMS): platforms,
+        str(_STARLARK_PLATFORMS): [str(platform) for platform in attr.android_platforms],
     }
 
 _android_platforms_transition = transition(
     implementation = _android_platforms_transition_impl,
-    inputs = [],
+    inputs = [str(_STARLARK_PLATFORMS)],
     outputs = [str(_STARLARK_PLATFORMS)],
 )
 
