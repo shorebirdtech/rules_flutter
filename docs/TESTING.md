@@ -259,9 +259,12 @@ the registry entry for rules_dart). A stale Maven lock fails these steps; see
 "Maven lock files" below for the re-pin, then refresh again. Commit the changed
 lock with the change that made it stale.
 
-Analysing `//...` needs every platform's toolchain, so run it on macOS. CI's
-`Lock files` job runs the check there, on every push and pull request; run it
-yourself after a change to a `MODULE.bazel`, before you push.
+Analysing `//...` needs every platform's toolchain, so run it on macOS. CI
+splits it in two, on every push and pull request: the `Lock files (macos-latest)`
+job checks the workspaces whose table entry (`tools/ci_matrix/e2e_matrix.dart`)
+runs on macOS or on no system, and `Lock files (ubuntu-latest)` the root and the
+rest, which analyse on Linux in their own jobs. Run it yourself after a change
+to a `MODULE.bazel`, before you push.
 
 #### Maven lock files
 
@@ -1049,7 +1052,8 @@ fourth thing to do when none applies.
 `.github/workflows/ci.yaml` runs, on every push and pull request:
 
 - `bazel test //...` in the repository root (Linux);
-- `bazel run @overhead//locks:check` (macOS), which fails on a stale or incomplete
+- `bazel run @overhead//locks:check` (on macOS for the workspaces with Apple
+  targets, on Linux for the rest), which fails on a stale or incomplete
   `MODULE.bazel.lock` in any workspace, see "Lock files" in § 1;
 - the pre-commit hooks, the dev_tool unit tests, and the web smoke test (§ 5);
 - `bazel test //...` in every e2e workspace (`build //...` where it has no test

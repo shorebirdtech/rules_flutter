@@ -1,8 +1,9 @@
-// Prints the matrix of the `E2E` jobs in .github/workflows/ci.yaml, as a
-// `matrix=<json>` line for $GITHUB_OUTPUT, after checking that the table in
-// e2e_matrix.dart accounts for every workspace under e2e/ on every system, and
-// that .gitattributes leaves every e2e/ entry but `smoke` out of the release
-// archive.
+// Prints the matrices of the `E2E` and `Lock files` jobs in
+// .github/workflows/ci.yaml, as `matrix=<json>` and `locks=<json>` lines for
+// $GITHUB_OUTPUT, after checking that the table in e2e_matrix.dart accounts
+// for every workspace under e2e/ on every system, that some `Lock files` job
+// checks every tracked MODULE.bazel.lock, and that .gitattributes leaves every
+// e2e/ entry but `smoke` out of the release archive.
 //
 //   dart run tools/ci_matrix/ci_matrix.dart       from the repository root
 //   bazel run //tools/ci_matrix
@@ -62,7 +63,30 @@ void main() {
       ..writeln(targetIssues.map((p) => '  $p').join('\n'));
     exit(1);
   }
-  stdout.writeln(
-    'matrix=${jsonEncode({'include': matrixInclude(e2eWorkspaces, buildFile)})}',
+  final locks = lockCheckWorkspaces(e2eWorkspaces);
+  final listing = Process.runSync('git', [
+    'ls-files',
+    '--',
+    'MODULE.bazel.lock',
+    '*/MODULE.bazel.lock',
+  ], workingDirectory: repo);
+  if (listing.exitCode != 0) {
+    stderr.writeln('ci_matrix: git ls-files failed: ${listing.stderr}');
+    exit(2);
+  }
+  final lockIssues = lockCheckProblems(
+    locks,
+    (listing.stdout as String).split('\n').where((l) => l.isNotEmpty),
   );
+  if (lockIssues.isNotEmpty) {
+    stderr
+      ..writeln('ci_matrix: a lock file is left unchecked:')
+      ..writeln(lockIssues.map((p) => '  $p').join('\n'));
+    exit(1);
+  }
+  stdout
+    ..writeln(
+      'matrix=${jsonEncode({'include': matrixInclude(e2eWorkspaces, buildFile)})}',
+    )
+    ..writeln('locks=${jsonEncode({'include': lockCheckInclude(locks)})}');
 }

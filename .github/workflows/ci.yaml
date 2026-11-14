@@ -112,6 +112,7 @@ jobs:
   # overhead pins, as a commit runs them: one build puts overhead's tools in
   # .bazel_env, then the hooks run them without Bazel. Nothing else runs them
   # for a commit made without `prek install`.
+  # Then the bazelrc preset, which no hook checks.
   pre-commit:
     name: pre-commit
     runs-on: ubuntu-latest
@@ -126,17 +127,30 @@ jobs:
           cache-save: false
       - run: bazel run @overhead//:bazel_env -- update-symlink
       - run: bazel run @overhead//lint:prek -- run --all-files --show-diff-on-failure
+      # tools/preset.bazelrc is overhead's preset, as pinned.
+      - name: bazelrc preset
+        run: bazel run @overhead//preset -- --check
   # Every workspace's MODULE.bazel.lock, the root's and those under e2e/: for
   # each, `bazel mod deps` and `bazel build --nobuild //...` with
   # --lockfile_mode=error, which catch a missing entry and one gone stale that
   # no build reads. A runner has no `.bazelrc.user` to switch the check off.
-  # On macOS because analysing `//...` needs every platform's toolchain, and
-  # only a macOS host has the iOS ones. See docs/TESTING.md, "Lock files".
+  # The E2E jobs build with the same mode, but catch only what their own
+  # targets read. See docs/TESTING.md, "Lock files".
+  #
+  # Two jobs, from the `plan` job (lockCheckWorkspaces in
+  # tools/ci_matrix/e2e_matrix.dart): macOS for the workspaces whose `//...`
+  # may hold Apple targets, which only a Mac can analyse, and Linux for the
+  # root and the rest. The check runs Bazel without the user's `.bazelrc`, so
+  # it neither reads the restored repository cache nor quiets its log; it
+  # prints a line per step.
   lockfiles:
-    name: Lock files
-    runs-on: macos-latest
-    # Cold, it fetches every workspace's toolchains to analyse it.
-    timeout-minutes: 60
+    name: Lock files (${{ matrix.os }})
+    needs: plan
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.locks) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # 0.19.1
@@ -148,10 +162,10 @@ jobs:
       # e2e/external_module takes rules_flutter from the release archive, as
       # the `consumer-query` job explains.
       - name: Extract the release archive
+        if: contains(format(' {0} ', matrix.workspaces), ' e2e/external_module ')
         run: bazel run //tools/consumer_archive
-      - run: bazel run @overhead//locks:check
-      - name: bazelrc preset
-        run: bazel run @overhead//preset -- --check
+      - name: bazel run @overhead//locks:check -- ${{ matrix.workspaces }}
+        run: bazel run @overhead//locks:check -- ${{ matrix.workspaces }}
   # A module that depends on rules_flutter must be able to list all of it, as
   # tools and IDE plugins do with `@rules_flutter//...`, from the release
   # archive it gets. Development tooling
@@ -269,10 +283,11 @@ jobs:
     timeout-minutes: 15
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
+      locks: ${{ steps.matrix.outputs.locks }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1
-      - name: Build the E2E matrix
+      - name: Build the E2E and lock check matrices
         id: matrix
         run: dart run tools/ci_matrix/ci_matrix.dart >> "$GITHUB_OUTPUT"
   e2e:

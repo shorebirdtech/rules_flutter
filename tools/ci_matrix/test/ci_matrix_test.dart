@@ -289,4 +289,58 @@ void main() {
       );
     });
   });
+
+  group('lockCheckWorkspaces', () {
+    const table = [
+      E2eWorkspace(
+        'apple',
+        runs: {Os.macos: 'a', Os.linux: 'b'},
+        skips: {Os.windows: 'x'},
+      ),
+      E2eWorkspace(
+        'neutral',
+        runs: {Os.linux: 'a', Os.windows: 'b'},
+        skips: {Os.macos: 'x'},
+      ),
+      E2eWorkspace(
+        'own_job',
+        skips: {Os.macos: 'x', Os.linux: 'x', Os.windows: 'x'},
+      ),
+    ];
+
+    test('checks on macOS what runs there or nowhere, the rest on Linux', () {
+      expect(lockCheckWorkspaces(table), {
+        Os.linux: ['.', 'e2e/neutral'],
+        Os.macos: ['e2e/apple', 'e2e/own_job'],
+      });
+    });
+
+    test('gives each system one job', () {
+      expect(lockCheckInclude(lockCheckWorkspaces(table)), [
+        {'os': 'ubuntu-latest', 'workspaces': '. e2e/neutral'},
+        {'os': 'macos-latest', 'workspaces': 'e2e/apple e2e/own_job'},
+      ]);
+    });
+
+    test('covers every lock the committed table knows', () {
+      expect(
+        lockCheckProblems(lockCheckWorkspaces(e2eWorkspaces), [
+          'MODULE.bazel.lock',
+          for (final w in e2eWorkspaces) 'e2e/${w.name}/MODULE.bazel.lock',
+        ]),
+        isEmpty,
+      );
+    });
+
+    test('names a lock no job checks', () {
+      expect(
+        lockCheckProblems(lockCheckWorkspaces(table), [
+          'MODULE.bazel.lock',
+          'e2e/apple/MODULE.bazel.lock',
+          'e2e/apple/nested/MODULE.bazel.lock',
+        ]),
+        [contains('e2e/apple/nested/MODULE.bazel.lock is checked by no')],
+      );
+    });
+  });
 }

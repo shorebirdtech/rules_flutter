@@ -499,6 +499,63 @@ List<Map<String, String>> matrixInclude(
         },
 ];
 
+/// The workspaces each `Lock files` job of ci.yaml checks with
+/// `@overhead//locks:check`, as directories relative to the repository root
+/// (`.` for the root), keyed by the system the job runs on.
+///
+/// The check runs `bazel build --nobuild //...`, which needs a host that can
+/// analyse every target. A workspace whose table entry runs it on macOS may
+/// have Apple targets, which only a Mac can analyse, so it is checked there;
+/// so is one that runs on no system, whose CI is a job of its own that the
+/// table does not describe. Every other workspace, and the root, analyses
+/// `//...` on Linux in its own jobs, so it is checked on Linux, where runners
+/// are cheaper and less scarce. No lock records an OS-dependent extension, so
+/// the host does not change what is checked.
+Map<Os, List<String>> lockCheckWorkspaces(List<E2eWorkspace> table) {
+  final hosts = <Os, List<String>>{
+    Os.linux: ['.'],
+    Os.macos: [],
+  };
+  for (final workspace in table) {
+    final onMac =
+        workspace.runs.containsKey(Os.macos) || workspace.runs.isEmpty;
+    hosts[onMac ? Os.macos : Os.linux]!.add('e2e/${workspace.name}');
+  }
+  for (final list in hosts.values) {
+    list.sort();
+  }
+  return hosts;
+}
+
+/// The `Lock files` jobs of [hosts] as the `include` list of a GitHub Actions
+/// matrix: one per system, with its workspaces space-separated.
+List<Map<String, String>> lockCheckInclude(Map<Os, List<String>> hosts) => [
+  for (final MapEntry(key: os, value: workspaces) in hosts.entries)
+    if (workspaces.isNotEmpty)
+      {'os': os.runner, 'workspaces': workspaces.join(' ')},
+];
+
+/// What is wrong with [hosts] as the lock checks of the workspaces whose
+/// `MODULE.bazel.lock` is tracked at [lockFiles] (`/`-separated paths from the
+/// repository root): a lock no job checks.
+List<String> lockCheckProblems(
+  Map<Os, List<String>> hosts,
+  Iterable<String> lockFiles,
+) {
+  final checked = {for (final list in hosts.values) ...list};
+  return [
+    for (final file in lockFiles)
+      if (!checked.contains(
+        file == 'MODULE.bazel.lock'
+            ? '.'
+            : file.substring(0, file.length - '/MODULE.bazel.lock'.length),
+      ))
+        '$file is checked by no `Lock files` job: lockCheckWorkspaces in '
+            'tools/ci_matrix/e2e_matrix.dart covers the root and the '
+            'workspaces of its table only',
+  ]..sort();
+}
+
 /// What is wrong with the test selections of [table]: a prefix that matches no
 /// `*_test` target in its workspace's BUILD file, or no prefix at all.
 /// [buildFile] returns the text of `e2e/<workspace>/BUILD.bazel`.
