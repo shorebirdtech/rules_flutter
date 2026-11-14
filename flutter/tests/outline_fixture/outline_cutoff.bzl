@@ -25,7 +25,6 @@ OUTLINE_SDKS = {
     "3.13.4": "outline_dart_3_13_4",
     "3.13.5": "outline_dart_3_13_5",
     "3.13.7": "flutter",
-    "3.14.0": "outline_dart_3_14_0",
 }
 
 # Dart releases a supported Flutter version bundles that no SDK here builds the
