@@ -1508,7 +1508,7 @@ build knows which served file is a native module.
             allow_single_file = True,
         ),
         "_ddc_dart_sdk_js": attr.label(
-            default = Label("@flutter_web_sdk//:web-sdk/kernel/ddcLibraryBundle-canvaskit/dart_sdk.js"),
+            default = Label("@flutter_web_sdk//:ddc_library_bundle_dart_sdk_js"),
             allow_single_file = True,
         ),
         "_ddc_module_loader_js": attr.label(

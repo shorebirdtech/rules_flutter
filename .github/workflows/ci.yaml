@@ -148,7 +148,7 @@ jobs:
       - name: Web smoke
         run: xvfb-run -a dart run tools/dev_tool/tool/e2e.dart test/e2e/web_smoke_e2e_test.dart
   e2e:
-    name: E2E (${{ matrix.workspace }}, ${{ matrix.os }})
+    name: E2E (${{ matrix.workspace }}, ${{ matrix.os }}${{ matrix.flutter && format(', Flutter {0}', matrix.flutter) || '' }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -175,6 +175,14 @@ jobs:
           # Run codegen on Linux (no platform-specific code).
           - workspace: codegen
             os: ubuntu-latest
+          # Every workspace pins the default release; this runs one of them on
+          # the newest supported release too, which differs where Flutter
+          # changed underneath the rules (3.50: no const_finder, the DDC SDK's
+          # new path, package:listen). codegen reaches native, web, tests,
+          # l10n and goldens in one workspace.
+          - workspace: codegen
+            os: macos-latest
+            flutter: 3.50.0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # See the note above `env` for why only hello_world saves. The output base
@@ -199,6 +207,16 @@ jobs:
         run: |
           $ndk = $env:ANDROID_NDK_HOME ?? $env:ANDROID_NDK_ROOT
           "ANDROID_NDK_HOME=$($ndk -replace '\\','/')" >> $env:GITHUB_ENV
+      # A release's pub resolution is pinned by its SDK packages, so the
+      # workspace keeps a lock resolved against each release it runs on.
+      # MODULE.bazel.lock is off in e2e workspaces, so the edit needs no other.
+      - name: Use Flutter ${{ matrix.flutter }}
+        if: matrix.flutter
+        working-directory: e2e/${{ matrix.workspace }}
+        run: |
+          perl -pi -e 's/flutter_version = "[^"]*"/flutter_version = "${{ matrix.flutter }}"/' MODULE.bazel
+          cp pubspec.flutter-${{ matrix.flutter }}.lock pubspec.lock
+          git diff --stat
       # --test_output=errors so a failure's assertion reaches this log. Without
       # it the output stays in a test.log on the runner and is discarded with
       # the machine.
