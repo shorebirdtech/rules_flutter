@@ -23,9 +23,9 @@ on:
 concurrency:
   group: ${{ github.workflow }}::${{ github.event.pull_request.number > 0 && format('pr-{0}', github.event.pull_request.number) || github.ref_name }}${{ github.ref_name == 'main' && format('::{0}', github.run_id) || '' }}
   cancel-in-progress: ${{ github.ref_name != 'main' }}
-# One repository cache per OS, set up by bazel-contrib/setup-bazel and shared
-# by every Bazel job: downloads are content-addressed, so a workspace never
-# needs its own copy.
+# A repository cache on macOS and on Linux, set up by bazel-contrib/setup-bazel
+# and shared by every Bazel job on that system: downloads are
+# content-addressed, so a workspace never needs its own copy.
 #
 # setup-bazel keys the repository cache by hashing files, by default the
 # MODULE.bazel at `module-root`. Every job passes this same list instead, so
@@ -39,8 +39,25 @@ concurrency:
 # to finish (smoke, fetching almost nothing) would take the key and the rest
 # could not replace it. Every other job, and every pull request, only restores,
 # then downloads whatever its own workspace needs beyond that.
+#
+# GitHub keeps 10 GB of caches per repository and evicts the least recently
+# used beyond that. Each OS's cache was 5.2-5.7 GB, so the three evicted one
+# another; about 2 GB of each was Bazel's unpacked repositories (the repo
+# contents cache), which CI_BAZELRC now keeps outside the saved directory.
+# That leaves about 3.7 GB on macOS and 3.2 GB on Linux, 7 GB in all. A key
+# change saves a second copy for its OS, up to 10.7 GB, and GitHub then evicts
+# the least recently used entry, the superseded one unless the other OS's has
+# gone longer unused. Windows keeps none: it restored its 5.2 GB at about 64 MB/s and
+# took as long again to unpack it, no faster than downloading, and a third
+# cache would not fit beside the other two.
+#
+# No job keeps setup-bazel's disk cache of action outputs. The 3 GB left would
+# not hold one for a job slow enough to gain from it (one e2e workspace's
+# outputs are several GB), and setup-bazel keys it by every BUILD file in the
+# repository, so each edit of one would save another copy and evict the
+# repository caches.
 env:
-  CACHE_VERSION: "1"
+  CACHE_VERSION: "2"
   BAZEL_REPOSITORY_CACHE_KEY_FILES: |
     - MODULE.bazel
     - MODULE.bazel.lock
@@ -58,7 +75,8 @@ env:
   # toolchains, thousands of lines of them in an Android build; a failing
   # action prints its output whatever its module), a failing test's log, which
   # would otherwise stay in a test.log discarded with the runner, and no line
-  # per passing test.
+  # per passing test. And the repo contents cache beside the repository cache,
+  # not inside it (its default), where setup-bazel would save it.
   CI_BAZELRC: |
     common --curses=no
     common --color=no
@@ -66,6 +84,7 @@ env:
     common --output_filter=^//
     test --test_output=errors
     test --test_summary=terse
+    common --repo_contents_cache=~/.cache/bazel-repo-contents
 # Every job has a timeout, at a few times its slowest recent run, and more
 # where a cold cache makes it fetch toolchains: 15 minutes for a check of a
 # command or two, 30 for analysing one workspace, 60 for the root workspace's
@@ -81,7 +100,7 @@ jobs:
         with:
           cache-version: ${{ env.CACHE_VERSION }}
           bazelrc: ${{ env.CI_BAZELRC }}
-          repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
+          repository-cache: ${{ runner.os != 'Windows' && env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
           cache-save: false
       - name: bazel test //...
         run: bazel test //...
@@ -103,7 +122,7 @@ jobs:
         with:
           cache-version: ${{ env.CACHE_VERSION }}
           bazelrc: ${{ env.CI_BAZELRC }}
-          repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
+          repository-cache: ${{ runner.os != 'Windows' && env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
           cache-save: false
       - run: bazel run @overhead//:bazel_env -- update-symlink
       - run: bazel run @overhead//lint:prek -- run --all-files --show-diff-on-failure
@@ -124,7 +143,7 @@ jobs:
         with:
           cache-version: ${{ env.CACHE_VERSION }}
           bazelrc: ${{ env.CI_BAZELRC }}
-          repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
+          repository-cache: ${{ runner.os != 'Windows' && env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
           cache-save: false
       # e2e/external_module takes rules_flutter from the release archive, as
       # the `consumer-query` job explains.
@@ -152,7 +171,7 @@ jobs:
         with:
           cache-version: ${{ env.CACHE_VERSION }}
           bazelrc: ${{ env.CI_BAZELRC }}
-          repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
+          repository-cache: ${{ runner.os != 'Windows' && env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
           cache-save: false
       # What a consumer gets is the release archive (`git archive`, trimmed by
       # .gitattributes), not the checkout: this extracts it for the workspace.
@@ -184,7 +203,7 @@ jobs:
         with:
           cache-version: ${{ env.CACHE_VERSION }}
           bazelrc: ${{ env.CI_BAZELRC }}
-          repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
+          repository-cache: ${{ runner.os != 'Windows' && env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
           cache-save: false
       # setup-bazel pins every workspace to one output base with a `startup`
       # line in ~/.bazelrc. This job runs two workspaces: the root, whose
@@ -230,7 +249,7 @@ jobs:
         with:
           cache-version: ${{ env.CACHE_VERSION }}
           bazelrc: ${{ env.CI_BAZELRC }}
-          repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
+          repository-cache: ${{ runner.os != 'Windows' && env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
           cache-save: false
       # As in web-smoke: the dev tool runs from the root's bazel-bin and builds
       # e2e/custom_engine, so each workspace keeps its own output base.
@@ -294,7 +313,7 @@ jobs:
           output-base: ${{ runner.os == 'Windows' && format('{0}/b', steps.drive.outputs.drive) || '' }}
           cache-version: ${{ env.CACHE_VERSION }}
           bazelrc: ${{ env.CI_BAZELRC }}
-          repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
+          repository-cache: ${{ runner.os != 'Windows' && env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
           cache-save: ${{ github.event_name == 'push' && matrix.workspace == 'hello_world' }}
       - name: Install GTK3 (Linux)
         if: runner.os == 'Linux'
