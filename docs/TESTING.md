@@ -1087,7 +1087,7 @@ finds a gap before a push.
 | `smoke` | macOS, Linux, Windows | the BCR presubmit module, which BCR runs on each | |
 | `hello_world` | macOS, Linux, Windows | the Tier-1 app over each `flutter create` runner; profile bundles on Linux and Windows; Android and web from each host | |
 | `codegen` | macOS, Linux, Windows | Native Assets loaded by each host's `flutter_tester` | |
-| `plugin_example` | macOS, Linux, Windows | each platform's implementations of real pub plugins | |
+| `plugin_example` | macOS, Linux, Windows (the `:windows_*` tests and `:android_bundle_build_test`) | each platform's implementations of real pub plugins; on Windows also one arm64 APK, whose AAR resources are the longest paths aapt2 opens ("Windows and MAX_PATH") | |
 | `ffi_example` | macOS, Linux, Windows | native libraries in each platform's bundle, and a plugin with a Dart plugin class and `native_deps` (`//plugin_class`) | |
 | `cross_compile_example` | macOS (`build`) | the Mac-to-Linux cross toolchain | Linux: a native build is `hello_world`'s; Windows: no such pair |
 | `macos_example`, `ios_example`, `multi_window_example` | macOS | Apple-only features | Linux, Windows: Apple-only |
@@ -1104,9 +1104,9 @@ right. The macOS and Linux jobs run exactly `bazel test //...` (`build` for
 `cross_compile_example`), with the flags of `CI_BAZELRC` in ci.yaml, which
 every setup-bazel step writes to the user's `.bazelrc` (a quiet log, and a
 failing test's output in it), so a target the system cannot build must
-carry `target_compatible_with` and is then skipped, not failed. The Windows job
-runs the same commands in a short output base (`<drive>/b`, "Windows and
-MAX_PATH" below), so it builds the Android targets as the other two do. Tests on Windows locate their `data`
+carry `target_compatible_with` and is then skipped, not failed. The Windows jobs
+run in a short output base (`<drive>/b`, "Windows and MAX_PATH" below), so
+they build Android targets as the other two do. Tests on Windows locate their `data`
 through `package:runfiles`, never `$TEST_SRCDIR/...` paths, since the runner has
 no runfiles tree, and run no tool from `PATH` that the image lacks: an APK test
 unpacks with Bazel's zipper (`Apk.fromRunfiles` in `//tools/e2e_testing`, which

@@ -60,7 +60,8 @@ class E2eWorkspace {
 
   /// The name prefixes that select what each system runs the command on, where
   /// that is not `//...`: a workspace whose `//...` holds tests that need
-  /// hardware or a desktop session runs the ones a runner can run. Every
+  /// hardware or a desktop session runs the ones a runner can run, and a
+  /// system that adds only some of a workspace's subject runs only those. Every
   /// `<prefix>...test` target of the workspace root package is run, so a test
   /// added under a prefix is picked up without touching the table.
   /// [targetProblems] holds each prefix to matching something.
@@ -199,7 +200,17 @@ const e2eWorkspaces = <E2eWorkspace>[
       Os.windows:
           'pub plugins\' Windows implementations (C++ url_launcher_windows, Dart '
           'path_provider_windows and shared_preferences_windows) registered in '
-          'the `flutter create` Win32 runner',
+          'the `flutter create` Win32 runner and linked into it; and one arm64 '
+          'APK, whose AAR resources are the longest paths aapt2 opens on a '
+          'Windows host (ci.yaml, `D:/b`). Its other Android targets add '
+          'nothing here: android_example\'s Windows job builds Android on a '
+          'Windows host, and this workspace\'s Linux and macOS jobs build its '
+          'plugins\' Android side',
+    },
+    // `windows_*_test`: the bundle and its plugin's link libraries;
+    // `android_bundle_build_test`: the arm64 APK.
+    testsNamed: {
+      Os.windows: ['windows_', 'android_bundle_'],
     },
   ),
   E2eWorkspace(
