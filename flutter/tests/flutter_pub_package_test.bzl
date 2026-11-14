@@ -19,6 +19,7 @@ load(
     "make_android_subpackage_build_content",
     "make_flutter_library_build_content",
     "make_flutter_plugin_build_content",
+    "package_file",
     "parse_android_manifest_package",
     "parse_gradle_android_namespace",
     "render_overlay_deps",
@@ -429,6 +430,30 @@ def _spoke_with_shaders_declares_their_includes_test_impl(ctx):
 
 spoke_with_shaders_declares_their_includes_test = unittest.make(_spoke_with_shaders_declares_their_includes_test_impl)
 
+def _package_file_test_impl(ctx):
+    """`packages/<self>/x` in a package's pubspec is its lib/x, bundled as x."""
+    env = unittest.begin(ctx)
+
+    own = package_file("material_ui", "packages/material_ui/shaders/ink_sparkle.frag")
+    asserts.equals(env, "lib/shaders/ink_sparkle.frag", own.file)
+    asserts.equals(env, "shaders/ink_sparkle.frag", own.bundle)
+
+    plain = package_file("glass_plugin", "shaders/tint.frag")
+    asserts.equals(env, "shaders/tint.frag", plain.file)
+    asserts.equals(env, "shaders/tint.frag", plain.bundle)
+
+    # Another package's prefix is not this package's lib/.
+    other = package_file("glass_plugin", "packages/material_ui/x.png")
+    asserts.equals(env, "packages/material_ui/x.png", other.file)
+
+    own_dir = package_file("icons", "packages/icons/images/")
+    asserts.equals(env, "lib/images/", own_dir.file)
+    asserts.equals(env, "images/", own_dir.bundle)
+
+    return unittest.end(env)
+
+package_file_test = unittest.make(_package_file_test_impl)
+
 def _overlay_substitutes_the_language_version_test_impl(ctx):
     """An overlay declares the language version by placeholder, never by value.
 
@@ -618,4 +643,5 @@ def flutter_pub_package_test_suite(name):
         plugin_spoke_carries_resources_test,
         library_spoke_carries_resources_test,
         spoke_with_shaders_declares_their_includes_test,
+        package_file_test,
     )

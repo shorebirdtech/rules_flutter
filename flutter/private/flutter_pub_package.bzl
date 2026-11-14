@@ -597,7 +597,28 @@ def _build_font_files_dict(parsed_fonts):
             out[":" + font.asset] = font.asset
     return out
 
-def _build_pkg_assets_dict(ctx, parsed_assets):
+def package_file(package_name, path):
+    """Where a path in a package's own pubspec is, and where it bundles.
+
+    As in flutter_tools, `packages/<the package>/x` names the package's
+    `lib/x` (material_ui's `packages/material_ui/shaders/ink_sparkle.frag`)
+    and bundles as `x` (under `packages/<the package>/`, like any of its
+    files); any other path is the package's own, bundled as written.
+
+    Args:
+        package_name: The package whose pubspec names the path.
+        path: The path as written there.
+
+    Returns:
+        struct(file, bundle): its path in the package, and in the bundle.
+    """
+    own = "packages/{}/".format(package_name)
+    if path.startswith(own):
+        rest = path[len(own):]
+        return struct(file = "lib/" + rest, bundle = rest)
+    return struct(file = path, bundle = path)
+
+def _build_pkg_assets_dict(ctx, package_name, parsed_assets):
     """Build the `pkg_assets` dict, expanding directory entries.
 
     Flutter's `flutter.assets:` accepts paths and trailing-slash directory
@@ -606,19 +627,22 @@ def _build_pkg_assets_dict(ctx, parsed_assets):
     """
     out = {}
     for entry in parsed_assets:
-        path = entry.path
-        if path.endswith("/"):
-            for f in _readdir_files_recursive(ctx, path.rstrip("/")):
-                out[":" + f] = f
+        where = package_file(package_name, entry.path)
+        if where.file.endswith("/"):
+            # The walk finds files by their path in the package; they bundle
+            # under the directory's bundle path.
+            for f in _readdir_files_recursive(ctx, where.file.rstrip("/")):
+                out[":" + f] = where.bundle + f[len(where.file):]
         else:
-            out[":" + path] = path
+            out[":" + where.file] = where.bundle
     return out
 
-def _build_pkg_shaders_dict(parsed_shaders):
+def _build_pkg_shaders_dict(package_name, parsed_shaders):
     """Build the `pkg_shaders` dict — same shape as pkg_assets, no directories."""
     out = {}
     for entry in parsed_shaders:
-        out[":" + entry.path] = entry.path
+        where = package_file(package_name, entry.path)
+        out[":" + where.file] = where.bundle
     return out
 
 def _format_label_dict_literal(d, indent = "        "):
@@ -1567,8 +1591,8 @@ def _flutter_pub_package_impl(ctx):
     # below (plugin vs library).
     fonts_json_str = _encode_fonts_json(asset_block.fonts)
     font_files = _build_font_files_dict(asset_block.fonts)
-    pkg_assets_dict = _build_pkg_assets_dict(ctx, asset_block.assets)
-    pkg_shaders_dict = _build_pkg_shaders_dict(asset_block.shaders)
+    pkg_assets_dict = _build_pkg_assets_dict(ctx, ctx.attr.package_name, asset_block.assets)
+    pkg_shaders_dict = _build_pkg_shaders_dict(ctx.attr.package_name, asset_block.shaders)
     has_asset_contributions = (
         bool(asset_block.fonts) or bool(asset_block.assets) or bool(asset_block.shaders)
     )
