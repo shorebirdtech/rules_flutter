@@ -1,8 +1,6 @@
 load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
-load("@bazel_skylib//rules:common_settings.bzl", "bool_flag", "int_flag")
-load("//flutter/private:build_settings.bzl", "dart_defines_flag")
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag", "int_flag", "string_flag")
 load("//flutter/private:flutter_material_icons.bzl", "flutter_material_icons")
-load("//flutter/private:flutter_pub.bzl", "flutter_pub")
 
 # This is the target rule authors should put in their "toolchains"
 # attribute in order to get a runtime for the correct platform.
@@ -42,6 +40,96 @@ toolchain_type(
 bool_flag(
     name = "profile",
     build_setting_default = False,
+    # It describes the app, and no build tool reads it: `scope = "target"`
+    # keeps it out of the exec configuration, so setting it rebuilds no tool.
+    scope = "target",
+    visibility = ["//visibility:public"],
+)
+
+# Obfuscates the Dart names of every AOT-compiled app in the build, as
+# `flutter build --obfuscate` does. It needs rules_dart's split debug info, whose
+# `.symbols` file is what reads an obfuscated stack trace back:
+#
+#   bazel build -c opt --@rules_flutter//flutter:obfuscate \
+#       --@rules_dart//dart:split_debug_info --output_groups=+debug_info //app
+bool_flag(
+    name = "obfuscate",
+    build_setting_default = False,
+    # It describes the app, and no build tool reads it.
+    scope = "target",
+    visibility = ["//visibility:public"],
+)
+
+# The version of every app in the build, as `flutter build --build-name` and
+# `--build-number`: set, each replaces the `build_name` or `build_number` of
+# every `flutter_application`, as the flags replace the `version:` of
+# `pubspec.yaml`. The program reports it, and every bundle built over the
+# application carries it. For a build number that changes with every build:
+#
+#   bazel build --@rules_flutter//flutter:build_number=123 //app
+#
+# Empty, the default, leaves each application's own. A `flutter_test` keeps its
+# own `build_name` and `build_number`, as `flutter test` takes no such flags.
+string_flag(
+    name = "build_name",
+    build_setting_default = "",
+    # It describes the app, and no build tool reads it.
+    scope = "target",
+    visibility = ["//visibility:public"],
+)
+
+string_flag(
+    name = "build_number",
+    build_setting_default = "",
+    # It describes the app, and no build tool reads it.
+    scope = "target",
+    visibility = ["//visibility:public"],
+)
+
+# The Flutter SDK a build uses: the name of one `flutter.toolchain()` the root
+# module declares. The default is the stock release, `flutter`.
+#
+#   bazel build --@rules_flutter//flutter:sdk=local //app
+#
+# A name that no `flutter.toolchain()` declares resolves no toolchain, and the
+# build fails saying so.
+string_flag(
+    name = "sdk",
+    build_setting_default = "flutter",
+    # No `scope = "target"`: the SDK decides how every Flutter compile is
+    # done, a build tool's in the exec configuration included.
+    visibility = ["//visibility:public"],
+)
+
+# Lets a `flutter_android_app` link jars that define one class with different
+# bytes, which otherwise fails its build. Two such jars can be harmless: two
+# copies of one interface either of which works, or a class an app shadows on
+# purpose. The app's deploy jar keeps the first copy of each class.
+#
+#   bazel build --@rules_flutter//flutter:allow_duplicate_classes //app
+#
+# The Android Gradle plugin's own check has the same switch,
+# `android.enableDuplicateClassesCheck=false`.
+bool_flag(
+    name = "allow_duplicate_classes",
+    build_setting_default = False,
+    visibility = ["//visibility:public"],
+)
+
+# Lets an Android app package native libraries for arm64-v8a and x86_64 that
+# are not aligned for 16 KB memory pages, which otherwise fails its build. An
+# app for a fleet of 4 KB-page devices does not need them, and Android 16 runs
+# a 4 KB-aligned app on a 16 KB device in page size compatibility mode, which
+# the manifest's `android:pageSizeCompat` turns on. Google Play requires 16 KB
+# support of apps that target Android 15 and later.
+#
+#   bazel build --@rules_flutter//flutter:allow_4kb_aligned_native_libraries //app
+#
+# The Android Gradle plugin does not fail on such a library; lint and the APK
+# Analyzer warn.
+bool_flag(
+    name = "allow_4kb_aligned_native_libraries",
+    build_setting_default = False,
     visibility = ["//visibility:public"],
 )
 
@@ -53,23 +141,39 @@ config_setting(
     visibility = ["//visibility:public"],
 )
 
-# The cores an optimizing dart2wasm (`-O1` and up) reserves, and the threads
-# its Binaryen wasm-opt may use. Fewer lets more compiles run at once on a
-# machine where CPUs are scarce; more makes a single compile finish sooner:
-#   bazel build //app --@rules_flutter//flutter:wasm_opt_cores=2
-int_flag(
-    name = "wasm_opt_cores",
-    build_setting_default = 4,
+# The `ipa_post_processor` of an `ios_application` built outside `-c dbg` from
+# a `flutter_application`: removes the frameworks of the code assets its link
+# hooks dropped, which `flutter_ios_dropped_frameworks_gen` lists in the app.
+alias(
+    name = "ios_code_asset_post_processor",
+    actual = "//flutter/private/tools:ios_code_asset_post_processor",
     visibility = ["//visibility:public"],
 )
 
-# Extra Dart environment defines folded into every Dart compile after any
-# target-level `defines`. Repeatable:
-#   bazel build //app --@rules_flutter//flutter:extra_dart_defines=FOO=bar
-# `flutter_bazel run --dart-define FOO=bar` forwards here.
-dart_defines_flag(
-    name = "extra_dart_defines",
-    build_setting_default = [],
+# The release R8 configuration of `flutter_android_app` (the Android Gradle
+# plugin's proguard-android-optimize.txt and Flutter's own rules), and the
+# bundletool BundleConfig of its App Bundle (AGP's defaults: split by ABI,
+# density and language; native libraries and dex stored uncompressed, the
+# libraries 16 KB-aligned). Public for an `android_binary` or
+# `android_application` assembled from the Tier 2 rules.
+exports_files(
+    [
+        "android_bundle_config.pb.json",
+        "android_proguard_rules.pro",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# The CPUs an optimizing dart2wasm (`-O1` and up) reserves, and the threads
+# its Binaryen wasm-opt may use. Fewer lets more compiles run at once on a
+# machine where CPUs are scarce; more makes a single compile finish sooner:
+#   bazel build //app --@rules_flutter//flutter:wasm_opt_cpus=2
+int_flag(
+    name = "wasm_opt_cpus",
+    build_setting_default = 4,
+    # It describes the app, and no build tool reads it: `scope = "target"`
+    # keeps it out of the exec configuration, so setting it rebuilds no tool.
+    scope = "target",
     visibility = ["//visibility:public"],
 )
 
@@ -84,29 +188,35 @@ flutter_material_icons(
     visibility = ["//visibility:public"],
 )
 
-# `dart pub`, run from the pinned toolchain against the current workspace, so
-# that the SDK which resolves pubspec.lock is the SDK which compiles it:
-#
-#   bazel run @rules_flutter//flutter:pub -- get
-#
-# Fetches @flutter_dev_root on first use; no normal build depends on it.
-flutter_pub(
-    name = "pub",
-    visibility = ["//visibility:public"],
-)
-
 bzl_library(
     name = "defs",
     srcs = ["defs.bzl"],
     visibility = ["//visibility:public"],
     deps = [
-        "//flutter/private:flutter_aot_target",
+        "//flutter/private:flutter_aot_snapshot",
         "//flutter/private:flutter_application",
         "//flutter/private:flutter_asset_bundle",
-        "//flutter/private:flutter_kernel_target",
+        "//flutter/private:flutter_font",
+        "//flutter/private:flutter_kernel",
         "//flutter/private:flutter_library",
         "//flutter/private:flutter_plugin",
+        "//flutter/private:flutter_plugin_platform",
+        "//flutter/private:flutter_profile_build",
+        "//flutter/private:flutter_program_test",
         "//flutter/private:flutter_test",
+        "@rules_dart//dart:defs",
+    ],
+)
+
+bzl_library(
+    name = "integration_test",
+    srcs = ["integration_test.bzl"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":macos",
+        "//flutter/private:flutter_application_variant",
+        "//flutter/private:flutter_integration_bootstrap",
+        "//flutter/private:flutter_integration_test",
     ],
 )
 
@@ -115,8 +225,13 @@ bzl_library(
     srcs = ["android.bzl"],
     visibility = ["//visibility:public"],
     deps = [
+        "//flutter/private:app_version",
+        "//flutter/private:flutter_android_aar",
         "//flutter/private:flutter_android_application",
+        "//flutter/private:flutter_android_build",
+        "//flutter/private:flutter_android_bundle_install",
         "//flutter/private:flutter_android_manifest_merge",
+        "//flutter/private:flutter_android_release",
         "@bazel_skylib//rules:expand_template",
         "@bazel_skylib//rules:write_file",
     ],
@@ -141,10 +256,15 @@ bzl_library(
     srcs = ["ios.bzl"],
     visibility = ["//visibility:public"],
     deps = [
+        "//flutter/private:app_version",
+        "//flutter/private:apple_app",
+        "//flutter/private:apple_version_check",
         "//flutter/private:debug_build",
+        "//flutter/private:flutter_apple_bundle_version",
         "//flutter/private:flutter_ios_application",
         "//flutter/private:flutter_ios_registrant",
         "//flutter/private:flutter_plist_merge",
+        "//flutter/private:ios_signing_check",
         "//flutter/private:runner_module",
     ],
 )
@@ -154,6 +274,10 @@ bzl_library(
     srcs = ["macos.bzl"],
     visibility = ["//visibility:public"],
     deps = [
+        "//flutter/private:app_version",
+        "//flutter/private:apple_app",
+        "//flutter/private:apple_version_check",
+        "//flutter/private:flutter_apple_bundle_version",
         "//flutter/private:flutter_macos_application",
         "//flutter/private:flutter_macos_registrant",
         "//flutter/private:flutter_plist_merge",
@@ -166,7 +290,9 @@ bzl_library(
     srcs = ["web.bzl"],
     visibility = ["//visibility:public"],
     deps = [
+        "//flutter/private:app_version",
         "//flutter/private:flutter_web_application",
+        "//flutter/private:flutter_web_branch",
         "@bazel_skylib//rules:expand_template",
     ],
 )
@@ -176,10 +302,17 @@ bzl_library(
     srcs = ["extensions.bzl"],
     visibility = ["//visibility:public"],
     deps = [
-        ":repositories",
-        "//flutter/private:flutter_sdk_package",
-        "//flutter/private:pub_lock_sdks",
+        "//flutter/private:flutter_sdks_repo",
+        "//flutter/private:pub_extension",
+        "//flutter/private:repositories",
+        "//flutter/private:toolchain_version",
     ],
+)
+
+bzl_library(
+    name = "engine",
+    srcs = ["engine.bzl"],
+    visibility = ["//visibility:public"],
 )
 
 bzl_library(
@@ -189,30 +322,19 @@ bzl_library(
 )
 
 bzl_library(
-    name = "repositories",
-    srcs = ["repositories.bzl"],
-    visibility = ["//visibility:public"],
-    deps = [
-        "//flutter/private:artifact_urls",
-        "//flutter/private:engine_helpers",
-        "//flutter/private:flutter_android_engine_repo",
-        "//flutter/private:flutter_cross_repo",
-        "//flutter/private:flutter_desktop_cross_repo",
-        "//flutter/private:flutter_desktop_engine_repo",
-        "//flutter/private:flutter_dev_root_repo",
-        "//flutter/private:flutter_ios_engine_repo",
-        "//flutter/private:flutter_profile_repo",
-        "//flutter/private:flutter_sky_engine_repo",
-        "//flutter/private:flutter_web_sdk_repo",
-        "//flutter/private:libraries_spec",
-        "//flutter/private:toolchains_repo",
-        "//flutter/private:versions",
-    ],
-)
-
-bzl_library(
     name = "toolchain",
     srcs = ["toolchain.bzl"],
     visibility = ["//visibility:public"],
-    deps = [":providers"],
+    deps = [
+        ":engine",
+        ":providers",
+    ],
+)
+
+# Every .bzl in this package, for //tools/download_guard, which reads them for
+# download calls that could fetch unverified bytes.
+filegroup(
+    name = "bzl_sources",
+    srcs = glob(["*.bzl"]),
+    visibility = ["//tools/download_guard:__pkg__"],
 )

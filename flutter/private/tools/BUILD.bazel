@@ -1,4 +1,6 @@
-load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_test")
+load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_library", "dart_package_metadata", "dart_test")
+load("//flutter/private:flutter_sdk_record.bzl", "flutter_sdk_record")
+load(":sdk_record_mode.bzl", "record_in_mode")
 
 # The scripts build actions run directly, handed to those actions as raw
 # sources — a rule's `_tool` attr resolves the file label and passes its path to
@@ -12,38 +14,226 @@ load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_test")
 # by nothing** — the test is what carries it, not this list.
 exports_files(
     [
+        "android_aar.dart",
+        "android_maven_repo.dart",
+        "android_release.dart",
+        "apple_frameworks.dart",
+        "apple_xcframeworks_codesign.dart",
+        "assemble_directory.dart",
         "generate_asset_manifest.dart",
         "bundle_app.dart",
+        "check_android_classes.dart",
+        "check_apple_version_keys.dart",
+        "check_web_version_json.dart",
+        "code_assets.dart",
+        "collect_notices.dart",
         "compile_shader.dart",
-        "kernel_filter.dart",
+        "libraries_spec.dart",
+        "linux_runtime.dart",
+        "maven_repo.dart",
         "merge_android_manifests.dart",
         "merge_plists.dart",
+        "plist_binary.dart",
+        "sdk_check.dart",
         "strip_native_libs.dart",
+        "swiftpm_app_settings.dart",
+        "validate_android_elf.dart",
         "web_template.dart",
+        "zip_archive.dart",
         # Exported for its unit test's `srcs`, not for a build action: unlike
         # its neighbours this one is a `dart_binary` main (below), and rules
         # reach it through that target rather than by file label.
         "flutter_test_runner.dart",
-        "bazel_test_protocol.dart",
     ],
     visibility = ["//flutter:__subpackages__"],
 )
 
+# What `code_assets.dart` imports, which the rules running it give its action.
+filegroup(
+    name = "code_assets_imports",
+    srcs = [
+        "apple_frameworks.dart",
+        "assemble_directory.dart",
+        "zip_archive.dart",
+    ],
+    visibility = ["//flutter:__subpackages__"],
+)
+
+# What `bundle_app.dart` imports, likewise.
+filegroup(
+    name = "bundle_app_imports",
+    srcs = [
+        "code_assets.dart",
+        ":code_assets_imports",
+    ],
+    visibility = ["//flutter:__subpackages__"],
+)
+
+# The `main` of the `dart_binary` that `flutter_android_maven_artifacts`
+# declares in the user's package, so it is visible to every package.
+exports_files(
+    ["maven_artifacts.dart"],
+    visibility = ["//visibility:public"],
+)
+
+# The program behind `flutter_android_release`: signs an App Bundle with the
+# user's key at run time, so the key never enters the build graph.
 dart_binary(
-    name = "pub_runner",
+    name = "android_release",
     compile_mode = "exe",
-    main = "pub.dart",
+    main = "android_release.dart",
     visibility = ["//flutter:__subpackages__"],
     deps = ["@rules_dart//dart/runfiles"],
 )
 
+# The program behind `bazel run` of `flutter_ios_xcframeworks` and
+# `flutter_macos_xcframeworks`: writes the build's xcframeworks where
+# `flutter build ios-framework` writes them.
+dart_binary(
+    name = "apple_xcframeworks_export",
+    srcs = [
+        "apple_frameworks.dart",
+        "assemble_directory.dart",
+    ],
+    compile_mode = "exe",
+    main = "apple_xcframeworks_export.dart",
+    visibility = ["//flutter:__subpackages__"],
+    deps = ["@rules_dart//dart/runfiles"],
+)
+
+# The `ipa_post_processor` of a release iOS app: removes the frameworks of the
+# code assets its link hooks dropped. rules_apple runs it with no runfiles, so
+# it is a self-contained executable.
+dart_binary(
+    name = "ios_code_asset_post_processor",
+    compile_mode = "exe",
+    main = "ios_code_asset_post_processor.dart",
+    visibility = ["//visibility:public"],
+)
+
+dart_test(
+    name = "ios_code_asset_post_processor_test",
+    srcs = ["ios_code_asset_post_processor.dart"],
+    main = "test/ios_code_asset_post_processor_test.dart",
+    deps = ["@dev_tool_deps//:test"],
+)
+
+# The program behind `bazel run` of `flutter_android_aar`: writes the module's
+# Maven repository where `flutter build aar` does and prints the host's steps.
+dart_binary(
+    name = "android_aar_install",
+    srcs = ["maven_repo.dart"],
+    compile_mode = "exe",
+    main = "android_aar_install.dart",
+    visibility = ["//flutter:__subpackages__"],
+    deps = ["@rules_dart//dart/runfiles"],
+)
+
+dart_test(
+    name = "apple_xcframeworks_codesign_test",
+    srcs = [
+        "apple_frameworks.dart",
+        "apple_xcframeworks_codesign.dart",
+        "assemble_directory.dart",
+    ],
+    main = "test/apple_xcframeworks_codesign_test.dart",
+    deps = ["@dev_tool_deps//:test"],
+)
+
+dart_test(
+    name = "apple_xcframeworks_export_test",
+    srcs = [
+        "apple_frameworks.dart",
+        "apple_xcframeworks_export.dart",
+        "assemble_directory.dart",
+    ],
+    main = "test/apple_xcframeworks_export_test.dart",
+    deps = [
+        "@dev_tool_deps//:test",
+        "@rules_dart//dart/runfiles",
+    ],
+)
+
+# The program behind `bazel run` of `flutter_android_app`'s App Bundle:
+# installs it on a device with bundletool.
+dart_binary(
+    name = "android_bundle_install",
+    compile_mode = "exe",
+    main = "android_bundle_install.dart",
+    visibility = ["//flutter:__subpackages__"],
+    deps = ["@rules_dart//dart/runfiles"],
+)
+
+# The pub runner: `dart compile exe` builds it from these two files, which
+# import only the Dart libraries, so that it depends on no pub repository (a
+# lock conflict there must not stop the command that fixes the lock). They are
+# files, not a library, because the runner must not depend on a Dart target; the
+# test below owns them for analysis and formatting.
+exports_files(
+    [
+        "pub.dart",
+        "pub_runfiles.dart",
+        "swift_resolve.dart",
+    ],
+    visibility = ["//flutter:__subpackages__"],
+)
+
+dart_test(
+    name = "pub_runfiles_test",
+    srcs = [
+        "pub.dart",
+        "pub_runfiles.dart",
+        "swift_resolve.dart",
+    ],
+    main = "test/pub_runfiles_test.dart",
+    deps = ["@dev_tool_deps//:test"],
+)
+
+# `assemble_directory.dart` as a program, for the test fixtures that build a
+# directory (the production actions run the script with the toolchain's `dart`).
+dart_binary(
+    name = "assemble_directory",
+    compile_mode = "exe",
+    main = "assemble_directory.dart",
+    visibility = ["//flutter/tests:__pkg__"],
+)
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "flutter_rule_tools",
+)
+
+# The host half of `package:test`'s `RemoteListener` protocol, and Bazel's test
+# protocol (`--test_filter`, sharding, JUnit) it applies. `flutter_test_runner`
+# carries it over a WebSocket; the integration test runner carries it over an
+# app's VM service. A library rather than a `srcs` entry because the two live in
+# different packages. It is a Dart package of its own, `flutter_rule_tools`,
+# which this directory's pubspec names, so `lib/` is where its files must sit.
+dart_library(
+    name = "remote_suite",
+    srcs = glob(["lib/**/*.dart"]),
+    package = ":pubspec-metadata",
+    # Public because `flutter_pub.from_lock(resolve = ...)` in MODULE.bazel maps
+    # the dev tool's lock entry for this package to it, and the hub's repository
+    # forwards to it from outside this repository's packages.
+    visibility = ["//visibility:public"],
+    deps = [
+        "@dev_tool_deps//:boolean_selector",
+        "@dev_tool_deps//:test_api",
+        "@dev_tool_deps//:test_core",
+    ],
+)
+
 dart_binary(
     name = "flutter_test_runner",
-    srcs = ["bazel_test_protocol.dart"],
     compile_mode = "exe",
     main = "flutter_test_runner.dart",
     visibility = ["//flutter:__subpackages__"],
-    deps = ["@rules_dart//dart/runfiles"],
+    deps = [
+        ":remote_suite",
+        "@rules_dart//dart/kernel_list",
+        "@rules_dart//dart/runfiles",
+    ],
 )
 
 # Unit tests for the tools above.
@@ -51,41 +241,287 @@ dart_binary(
 # Each test imports its tool by relative path (`../merge_plists.dart`), so the
 # tool is a `srcs` entry rather than a dep: these tools are plain scripts with
 # no pub dependencies, deliberately, since a build action runs them straight
-# from the toolchain's Dart.
+# from the toolchain's Dart. The exceptions are the runner, which is a compiled
+# binary and takes `:remote_suite` as a dep, and `:remote_suite`'s own tests,
+# which have no tool file at all (they import the package).
 #
 # A new test file needs an entry here, or nothing runs it.
 #
 # `@dev_tool_deps//:test` is `package:test` from the one pub hub this workspace
-# declares (MODULE.bazel `flutter.pub(name = "dev_tool_deps")`). These tools are
-# not part of the dev tool; they share its hub because a second hub would mean a
-# second pubspec to resolve and keep pinned for a single test-only dependency.
+# declares (MODULE.bazel `flutter_pub.from_lock(name = "dev_tool_deps")`),
+# resolved with every other tool of this repository by the root pub workspace.
 #
-# The value is the tool plus whatever that tool imports beyond `package:test`.
+# The value is the tool (or a list of it and the scripts it imports) plus what
+# it imports beyond `package:test`.
 _UNIT_TESTS = {
-    "bundle_app_test": ("bundle_app.dart", []),
-    "compile_shader_test": ("compile_shader.dart", []),
-    "kernel_filter_test": ("kernel_filter.dart", []),
-    "generate_asset_manifest_test": ("generate_asset_manifest.dart", []),
+    "assemble_directory_test": (
+        "assemble_directory.dart",
+        ["@dev_tool_deps//:path"],
+    ),
+    "android_bundle_install_test": (
+        "android_bundle_install.dart",
+        ["@rules_dart//dart/runfiles"],
+    ),
+    "android_aar_test": (
+        [
+            "android_aar.dart",
+            "zip_archive.dart",
+        ],
+        [],
+    ),
+    "android_aar_install_test": (
+        [
+            "android_aar_install.dart",
+            "maven_repo.dart",
+        ],
+        ["@rules_dart//dart/runfiles"],
+    ),
+    "android_maven_repo_test": (
+        [
+            "android_maven_repo.dart",
+            "maven_repo.dart",
+        ],
+        [],
+    ),
+    "android_release_test": (
+        "android_release.dart",
+        ["@rules_dart//dart/runfiles"],
+    ),
+    "validate_android_elf_test": ("validate_android_elf.dart", []),
+    "check_android_classes_test": ("check_android_classes.dart", []),
+    "maven_artifacts_test": (
+        "maven_artifacts.dart",
+        ["@rules_dart//dart/runfiles"],
+    ),
+    "bundle_app_test": (
+        [
+            "apple_frameworks.dart",
+            "assemble_directory.dart",
+            "bundle_app.dart",
+            "code_assets.dart",
+            "zip_archive.dart",
+        ],
+        [],
+    ),
+    "collect_notices_test": ("collect_notices.dart", []),
+    "libraries_spec_test": ("libraries_spec.dart", []),
+    "linux_runtime_test": ("linux_runtime.dart", []),
     "merge_android_manifests_test": ("merge_android_manifests.dart", []),
-    "merge_plists_test": ("merge_plists.dart", []),
+    "sdk_check_test": ("sdk_check.dart", []),
     "strip_native_libs_test": ("strip_native_libs.dart", []),
+    "swiftpm_app_settings_test": ("swiftpm_app_settings.dart", []),
     "web_template_test": ("web_template.dart", []),
     "flutter_test_runner_test": (
         "flutter_test_runner.dart",
-        ["@rules_dart//dart/runfiles"],
+        [
+            ":remote_suite",
+            "@rules_dart//dart/kernel_list",
+            "@rules_dart//dart/runfiles",
+        ],
     ),
-    "bazel_test_protocol_test": ("bazel_test_protocol.dart", []),
-}
-
-# The runner imports its protocol module by relative path, so every test of the
-# runner carries it too.
-_TOOL_SRCS = {
-    "flutter_test_runner.dart": ["bazel_test_protocol.dart"],
+    "bazel_test_protocol_test": (
+        None,
+        [":remote_suite"],
+    ),
+    "suite_annotations_test": (
+        None,
+        [":remote_suite"],
+    ),
+    "remote_suite_test": (
+        None,
+        [
+            ":remote_suite",
+            "@dev_tool_deps//:fake_async",
+        ],
+    ),
 }
 
 [dart_test(
     name = name,
-    srcs = [tool] + _TOOL_SRCS.get(tool, []),
+    srcs = (tool if type(tool) == "list" else [tool]) if tool else [],
     main = "test/%s.dart" % name,
     deps = ["@dev_tool_deps//:test"] + extra_deps,
 ) for name, (tool, extra_deps) in _UNIT_TESTS.items()]
+
+# Checked against rules_dart's conformance fixture of the program-assets
+# line format, which the tool reads.
+dart_test(
+    name = "generate_asset_manifest_test",
+    srcs = ["generate_asset_manifest.dart"],
+    data = ["@rules_dart//dart/program_assets:conformance"],
+    env = {"CONFORMANCE": "$(rlocationpaths @rules_dart//dart/program_assets:conformance)"},
+    main = "test/generate_asset_manifest_test.dart",
+    deps = [
+        "@dev_tool_deps//:test",
+        "@rules_dart//dart/runfiles",
+    ],
+)
+
+dart_test(
+    name = "code_assets_test",
+    srcs = [
+        "apple_frameworks.dart",
+        "assemble_directory.dart",
+        "code_assets.dart",
+        "zip_archive.dart",
+    ],
+    data = ["@rules_dart//dart/program_assets:conformance"],
+    env = {"CONFORMANCE": "$(rlocationpaths @rules_dart//dart/program_assets:conformance)"},
+    main = "test/code_assets_test.dart",
+    deps = [
+        "@dev_tool_deps//:test",
+        "@rules_dart//dart/runfiles",
+    ],
+)
+
+# Stand-in for `impellerc`, which `compile_shader_test` runs through
+# `compile_shader.dart`. A compiled executable, as `fake_font_subset` is.
+dart_binary(
+    name = "fake_impellerc",
+    testonly = True,
+    srcs = [],
+    compile_mode = "exe",
+    main = "test/fake_impellerc.dart",
+)
+
+dart_test(
+    name = "compile_shader_test",
+    srcs = ["compile_shader.dart"],
+    data = [":fake_impellerc"],
+    main = "test/compile_shader_test.dart",
+    deps = [
+        "@dev_tool_deps//:test",
+        "@rules_dart//dart/runfiles",
+    ],
+)
+
+# The Apple bundle tool imports the directory assembler's copies, so both are
+# its `srcs`.
+dart_test(
+    name = "apple_frameworks_test",
+    srcs = [
+        "apple_frameworks.dart",
+        "assemble_directory.dart",
+    ],
+    main = "test/apple_frameworks_test.dart",
+    deps = ["@dev_tool_deps//:test"],
+)
+
+# The merger imports the binary plist reader, so both are its `srcs`.
+dart_test(
+    name = "merge_plists_test",
+    srcs = [
+        "merge_plists.dart",
+        "plist_binary.dart",
+        "test/binary_plist_fixture.dart",
+    ],
+    main = "test/merge_plists_test.dart",
+    deps = ["@dev_tool_deps//:test"],
+)
+
+dart_test(
+    name = "plist_binary_test",
+    srcs = [
+        "merge_plists.dart",
+        "plist_binary.dart",
+        "test/binary_plist_fixture.dart",
+    ],
+    main = "test/plist_binary_test.dart",
+    deps = ["@dev_tool_deps//:test"],
+)
+
+# The version-key check imports the plist parser of `merge_plists.dart`, which
+# imports `plist_binary.dart`, so all three are its `srcs`.
+dart_test(
+    name = "check_apple_version_keys_test",
+    srcs = [
+        "check_apple_version_keys.dart",
+        "merge_plists.dart",
+        "plist_binary.dart",
+    ],
+    main = "test/check_apple_version_keys_test.dart",
+    deps = ["@dev_tool_deps//:test"],
+)
+
+dart_test(
+    name = "check_web_version_json_test",
+    srcs = ["check_web_version_json.dart"],
+    main = "test/check_web_version_json_test.dart",
+    deps = ["@dev_tool_deps//:test"],
+)
+
+# Stand-in for the engine's `font-subset`, which the tree-shaking tests below
+# make `generate_asset_manifest.dart` run. A compiled executable, since the tool
+# starts it as a program and a Dart script cannot be started.
+dart_binary(
+    name = "fake_font_subset",
+    testonly = True,
+    srcs = [],
+    compile_mode = "exe",
+    main = "test/fake_font_subset.dart",
+)
+
+# The tool's icon tree shaking, run as the build action runs it (a `dart`
+# process over a config file) against the stand-ins for `const_finder` and
+# `font-subset`.
+[dart_test(
+    name = "generate_asset_manifest_tree_shaking" + suffix + "_test",
+    srcs = ["test/tree_shaking_harness.dart"],
+    data = [
+        "generate_asset_manifest.dart",
+        ":fake_font_subset",
+    ],
+    main = "test/generate_asset_manifest_tree_shaking%s_test.dart" % suffix,
+    deps = [
+        "@dev_tool_deps//:test",
+        "@rules_dart//dart/runfiles",
+    ],
+) for suffix in [""]]
+
+# The check over the stock artifacts, in each build mode: the pinned release
+# passes it, with the hash its Dart has. The host's own engine, and the iOS and
+# Android engines a Mac cross-compiles for (macOS only: the engine slice of the
+# host is the host's own, and the cross toolchains of a Mac are the ones built
+# for these platforms).
+_STOCK_RECORD_PLATFORMS = {
+    "host": "",
+    "ios": "//flutter/platforms:ios_arm64",
+    "android_arm64": "@rules_android//:arm64-v8a",
+    "android_x64": "@rules_android//:x86_64",
+}
+
+_STOCK_RECORD_MODES = [
+    "debug",
+    "profile",
+    "release",
+]
+
+[flutter_sdk_record(
+    name = "stock_record_%s_%s_check" % (platform, mode) if platform != "host" else "stock_record_%s_check" % mode,
+    always = True,
+    mode = mode,
+    tags = ["manual"],
+) for platform in _STOCK_RECORD_PLATFORMS for mode in _STOCK_RECORD_MODES]
+
+[record_in_mode(
+    name = "stock_record_%s_%s" % (platform, mode) if platform != "host" else "stock_record_%s" % mode,
+    mode = mode,
+    platform = _STOCK_RECORD_PLATFORMS[platform],
+    record = ":stock_record_%s_%s_check" % (platform, mode) if platform != "host" else ":stock_record_%s_check" % mode,
+    tags = ["manual"],
+) for platform in _STOCK_RECORD_PLATFORMS for mode in _STOCK_RECORD_MODES]
+
+dart_test(
+    name = "sdk_record_stock_test",
+    data = [
+        ":stock_record_%s" % mode if platform == "host" else ":stock_record_%s_%s" % (platform, mode)
+        for platform in _STOCK_RECORD_PLATFORMS
+        for mode in _STOCK_RECORD_MODES
+    ],
+    main = "test/sdk_record_stock_test.dart",
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = [
+        "@dev_tool_deps//:test",
+        "@rules_dart//dart/runfiles",
+    ],
+)

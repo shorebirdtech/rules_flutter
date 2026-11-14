@@ -16,74 +16,36 @@
 /// sandbox key is present.
 library;
 
-// This script's diagnostics are its product: it reports what it found in
-// the built artifact to the bazel test log, so `print` is its output
-// channel rather than a stray debugging statement.
-// ignore_for_file: avoid_print
-
-import 'dart:convert';
 import 'dart:io';
 
-Future<void> main() async {
-  final testSrcDir = Platform.environment['TEST_SRCDIR'];
-  final testWorkspace = Platform.environment['TEST_WORKSPACE'];
-  if (testSrcDir == null || testWorkspace == null) {
-    stderr.writeln('Missing TEST_SRCDIR or TEST_WORKSPACE env vars');
-    exit(1);
-  }
+import 'package:rules_flutter_e2e_testing/macos_bundle.dart';
+import 'package:rules_flutter_e2e_testing/signing.dart';
 
-  final zipPath = '$testSrcDir/$testWorkspace/hello_world_macos.zip';
-  if (!File(zipPath).existsSync()) {
-    stderr.writeln('Bundle zip not found at $zipPath');
-    exit(1);
-  }
-
-  final tmpDir = Directory.systemTemp.createTempSync(
-    'hello_world_macos_entitlements_',
+void main() {
+  final bundle = MacosBundle.fromRunfiles(
+    'hello_world_macos.zip',
+    appName: 'Hello World',
+    prefix: 'hello_world_macos_entitlements_',
   );
   try {
-    final unzip = Process.runSync('unzip', ['-q', zipPath, '-d', tmpDir.path]);
-    if (unzip.exitCode != 0) {
-      stderr.writeln('Failed to extract zip: ${unzip.stderr}');
-      exit(1);
+    final check = bundle.check..exists('.app bundle', bundle.path);
+    if (check.ok) {
+      final entitlements = Entitlements.fromSignature(bundle.path);
+      stdout
+        ..writeln('--- codesign --entitlements --- ')
+        ..writeln(entitlements.blob)
+        ..writeln('--- end ---');
+      check.expect(
+        'sandbox entitlement present',
+        condition: entitlements.declares('com.apple.security.app-sandbox'),
+        detail:
+            'expected entitlements blob to declare '
+            'com.apple.security.app-sandbox. Got:\n'
+            '${entitlements.blob.isEmpty ? '<empty>' : entitlements.blob}',
+      );
     }
-
-    final appPath = '${tmpDir.path}/Hello World.app';
-    if (!Directory(appPath).existsSync()) {
-      stderr.writeln('FAIL: .app not found at $appPath');
-      exit(1);
-    }
-
-    final result = Process.runSync(
-      'codesign',
-      ['-d', '--entitlements', ':-', appPath],
-      stdoutEncoding: utf8,
-      stderrEncoding: utf8,
-    );
-    if (result.exitCode != 0) {
-      stderr
-        ..writeln('codesign failed (exit ${result.exitCode}):')
-        ..writeln(result.stderr);
-      exit(1);
-    }
-
-    final entitlementsBlob = result.stdout as String;
-    print('--- codesign --entitlements --- ');
-    print(entitlementsBlob);
-    print('--- end ---');
-
-    if (!entitlementsBlob.contains('com.apple.security.app-sandbox')) {
-      stderr
-        ..writeln(
-          'FAIL: expected entitlements blob to declare '
-          'com.apple.security.app-sandbox. Got:',
-        )
-        ..writeln(entitlementsBlob.isEmpty ? '<empty>' : entitlementsBlob);
-      exit(1);
-    }
-
-    print('PASS — sandbox entitlement present.');
+    bundle.finish('PASS — sandbox entitlement present.');
   } finally {
-    tmpDir.deleteSync(recursive: true);
+    bundle.dispose();
   }
 }

@@ -42,6 +42,7 @@ import 'run_plan.dart';
 import 'session.dart';
 import 'session_host.dart';
 import 'temp_dir.dart';
+import 'tool_services.dart';
 import 'toolchain_info.dart';
 import 'vm_service_client.dart';
 import 'vm_service_logs.dart';
@@ -132,6 +133,11 @@ class WebPipelineAssembler {
       });
       final devConfig = parseDevConfig(devConfigPath);
       requireDeclaredFilesExist(devConfig);
+      // Before the launch, so the page's VM service client registers
+      // `flutterVersion` when it connects.
+      host.toolServices.flutterVersion = FlutterSdkVersion.fromDevConfig(
+        devConfig,
+      );
 
       // Build web toolchain paths and find web output dir from build outputs.
       final webToolchain = buildWebToolchainFromOutputs(
@@ -159,8 +165,8 @@ class WebPipelineAssembler {
       // between them by the order `bazel cquery --output=files` happens to
       // print, which is the dev one. For a source-assembled (codegen) app that
       // is the wrong answer for this consumer: its `rootUri`s are
-      // `<filesystemScheme>:///<lib_root>`, and DWDS resolves a `package:` URI
-      // through this config only to open the result as a file —
+      // `<filesystemScheme>:///<package_root>`, and DWDS resolves a `package:`
+      // URI through this config only to open the result as a file —
       // `Uri.toFilePath()` throws `Cannot extract a file path from a
       // org-dartlang-app URI`, so every first-party library shows a blank
       // source pane in the debugger.
@@ -538,6 +544,7 @@ class WebPipelineAssembler {
         AssetBundle(
           directory: p.join(webOutputDir, 'assets'),
           workspaceRoot: plan.workspace,
+          assetRoots: devConfig.assetRoots,
           shaders: devConfig.shaders,
         ),
         builtBefore: builtBefore,
@@ -620,7 +627,18 @@ class WebPipelineAssembler {
           // websocket. Everything — our client, DevTools, DWDS's own client —
           // attaches there, and DDS multiplexes them.
           final wsUri = Uri.parse(debugConnection.uri);
-          final webClient = VmServiceClient();
+          // Claims hot reload on the DDS, as flutter_tools does. Without it a
+          // DevTools-initiated reload calls DWDS's raw `reloadSources`: no
+          // recompile from our frontend server, and a second concurrent
+          // reload that DWDS does not serialise. `reloadSources` only, as in
+          // `flutter_tools`' web runner: DWDS registers `hotRestart` on this
+          // DDS itself, and the restart path calls DWDS's. See
+          // [ToolServices.hotRestart].
+          final webClient = VmServiceClient(
+            services: plan.hotReloadOff == null
+                ? host.toolServices.withoutHotRestart()
+                : null,
+          );
           await webClient.connect(
             httpUriFromWebSocketUri(wsUri),
             createDevFS: false,
@@ -636,17 +654,13 @@ class WebPipelineAssembler {
             wsUri,
             httpUriFromWebSocketUri(wsUri),
           );
-
-          // Claim hot reload on the DDS, as flutter_tools does. Without it a
-          // DevTools-initiated reload bypasses us and calls DWDS's raw
-          // `reloadSources` directly — no recompile from our frontend
-          // server, and a second concurrent reload that DWDS does not
-          // serialise. Registering does not capture our own raw call: DDS
-          // resolves only namespaced (`sN.`) names against registrations.
-          await webVmService.registerService(
-            'reloadSources',
-            'rules_flutter dev_tool',
-          );
+          // DWDS's DDS serves DevTools, so it hosts a Dart Tooling Daemon and
+          // registers the page's VM service with it, as `flutter run`'s web
+          // runner relies on. This run only says where it is.
+          if (debugConnection.dtdUri case final dtd?) {
+            session.dtdUri = Uri.parse(dtd);
+            host.toolingDaemon?.announce(session.appId, session.dtdUri!);
+          }
 
           // DevTools comes from the DDS that DWDS started, already carrying
           // the VM service URI — no separate `dart devtools` process, and no
@@ -805,9 +819,10 @@ class WebPipelineAssembler {
   }
 }
 
-/// The WASM dev loop, which is not a dev loop: `dart2wasm` has no incremental
-/// compiler and no VM service, so "hot restart" is a bazel rebuild plus a CDP
-/// page reload, and hot reload does not exist at all.
+/// The WASM run: `dart2wasm` in this Dart SDK has no incremental compiler and
+/// no way to swap code into a running module, so "hot restart" is a bazel
+/// rebuild plus a CDP page reload, and hot reload does not exist at all. (The
+/// `app.*` agent commands still work, through the page's agent bridge.)
 ///
 /// Its handlers deliberately shadow the pipeline-backed ones, so this must be
 /// assembled *after* [SessionHost.registerReloadCommands] — `CommandRunner`
@@ -871,6 +886,7 @@ class WasmPipelineAssembler {
     final strategy = WasmReloadStrategy(
       cdpPort: cdpPort,
       appUrl: appUrl,
+      phase: pipeline.phase,
       rebuild: () async {
         logger.info({
           'message': 'wasm_rebuild',
@@ -887,9 +903,9 @@ class WasmPipelineAssembler {
     );
     pipeline.strategy = strategy;
 
-    host.commandRunner.register('app.restart', longRunning: true, (
-      params,
-    ) async {
+    Future<Map<String, dynamic>> restart(
+      Map<String, dynamic> params,
+    ) => pipeline.logged('Restart', (params) async {
       // Never stdout from inside a handler: in machine mode that is the
       // protocol channel. `app.progress` already announces the start.
       logger.info({
@@ -917,24 +933,37 @@ class WasmPipelineAssembler {
           elapsed: stopwatch.elapsed,
         ),
       );
-    });
+    }, params);
 
-    host.commandRunner.register('app.hotReload', longRunning: true, (
-      params,
-    ) async {
+    Future<Map<String, dynamic>> hotReload(
+      Map<String, dynamic> params,
+    ) => pipeline.logged('Hot reload', (params) async {
       // The one refusal in this file, and the strongest case for `unavailable`
-      // there is: dart2wasm has no incremental path at all, so this run can
-      // never hot reload — which is precisely what a client is entitled to
-      // conclude from the field. It also stops before a compiler or a browser
+      // there is: dart2wasm in this Dart SDK has no incremental compiler and
+      // no way to swap code into a running module, so this run can never hot
+      // reload — which is precisely what a client is entitled to conclude from
+      // the field. Upstream `flutter run --wasm` turns a reload into a restart;
+      // this tool refuses instead of silently restarting. It also stops before a compiler or a browser
       // is touched, so `runningCode: unchanged` is provable rather than
       // asserted.
       return toWire(
         CommandReport(
           verb: 'Hot reload',
           unavailable:
-              'Hot reload is not supported in WASM mode — use restart (R).',
+              'Hot reload is not available in WASM mode: dart2wasm in this '
+              'Dart SDK has no incremental compiler and no way to swap code '
+              'into a running module. Upstream `flutter run --wasm` restarts '
+              'on reload; this tool refuses rather than silently restarting. '
+              'Restart with R (or app.restart with fullRestart: true) to rebuild and reload the page.',
         ),
       );
-    });
+    }, params);
+
+    host.commandRunner.register('app.hotReload', hotReload, longRunning: true);
+    host.commandRunner.register(
+      'app.restart',
+      SessionHost.restartCommand(restart: restart, hotReload: hotReload),
+      longRunning: true,
+    );
   }
 }

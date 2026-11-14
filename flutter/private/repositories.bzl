@@ -1,0 +1,383 @@
+"""The repositories of one Flutter SDK: its engine artifacts and toolchains.
+
+The `flutter` module extension declares them, once for each SDK a
+`flutter.toolchain()` names.
+"""
+
+load("//flutter/private:artifact_urls.bzl", "android_engine_artifact_path", "cpp_client_wrapper_artifact_path", "dart_sdk_artifact_path", "desktop_engine_artifact_path", "engine_artifact_url", "gen_snapshot_cross_artifact_path", "host_artifacts_path", "ios_engine_artifact_path", "macos_xcframework_artifact_path")
+load("//flutter/private:engine_helpers.bzl", "ENGINE_MODES", "PLATFORM_PREFIX_TO_OS", "engine_arch_for_os", "gen_snapshot_binary_name", "gen_snapshot_host_platform")
+load("//flutter/private:flutter_android_engine_repo.bzl", "flutter_android_engine_repo")
+load("//flutter/private:flutter_cross_repo.bzl", "flutter_cross_compilation_repo")
+load("//flutter/private:flutter_desktop_engine_repo.bzl", "flutter_desktop_engine_repo")
+load("//flutter/private:flutter_ios_engine_repo.bzl", "flutter_ios_engine_repo")
+load("//flutter/private:flutter_linux_sysroot_repo.bzl", "flutter_linux_sysroot_repo")
+load("//flutter/private:flutter_macos_xcframework_repo.bzl", "flutter_macos_xcframework_repo")
+load("//flutter/private:flutter_profile_repo.bzl", "flutter_profile_repo")
+load("//flutter/private:flutter_sdk_toolchains_repo.bzl", "flutter_sdk_toolchains_repo")
+load("//flutter/private:flutter_sky_engine_repo.bzl", "flutter_sky_engine_repo")
+load("//flutter/private:flutter_stock_engine_repo.bzl", "flutter_stock_engine_repo")
+load("//flutter/private:flutter_version_pin_repo.bzl", "flutter_version_pin_repo")
+load("//flutter/private:flutter_web_sdk_repo.bzl", "flutter_web_sdk_repo")
+load("//flutter/private:pinned.bzl", "pinned")
+load("//flutter/private:toolchains_repo.bzl", "CROSS_COMPILATION_PAIRS", "DESKTOP_CROSS_PAIRS", "DESKTOP_ENGINE_PLATFORMS", "HOST_PLATFORMS", "sdk_repo_name")
+load("//flutter/private:versions.bzl", "ARTIFACT_CHECKSUMS", "FLUTTER_VERSIONS", "LINUX_SYSROOT_CHECKSUMS")
+
+# The profile engine's repository: its flutter.jar, which the Android engine
+# slice of the profile mode is over.
+_ANDROID_PROFILE_ENGINE_BUILD = """\
+exports_files(["flutter.jar"], visibility = ["//visibility:public"])
+"""
+
+def _flutter_engine_artifacts_impl(repository_ctx):
+    """Downloads the Flutter engine host tools for a given host platform."""
+    flutter_version = repository_ctx.attr.flutter_version
+    platform = repository_ctx.attr.platform
+    meta = FLUTTER_VERSIONS[flutter_version]
+    engine_revision = meta.engine_revision
+    checksums = ARTIFACT_CHECKSUMS.get(flutter_version, {})
+
+    # 1. Download the Flutter-bundled Dart SDK for this host.
+    dart_sdk_path = dart_sdk_artifact_path(platform)
+    repository_ctx.download_and_extract(
+        url = engine_artifact_url(engine_revision, dart_sdk_path),
+        sha256 = pinned(dart_sdk_path, checksums.get(dart_sdk_path, "")),
+        stripPrefix = "dart-sdk",
+        output = "dart-sdk",
+    )
+
+    # `FLUTTER_DART_VERSION` is read from versions.bzl; the SDK it describes
+    # is this one.
+    dart_version = repository_ctx.read("dart-sdk/version").strip()
+    if dart_version != meta.dart_version:
+        fail((
+            "Flutter {flutter} bundles Dart {actual}, and versions.bzl records {recorded}. " +
+            "Set dart_version in its entry: programs built with this release " +
+            "report it as FlutterVersion.dartVersion."
+        ).format(flutter = flutter_version, actual = dart_version, recorded = meta.dart_version))
+
+    # 2. Download host tools (flutter_tester, impellerc, icudtl.dat, snapshots, gen_snapshot for debug).
+    host_tools_path = host_artifacts_path(platform)
+    repository_ctx.download_and_extract(
+        url = engine_artifact_url(engine_revision, host_tools_path),
+        sha256 = pinned(host_tools_path, checksums.get(host_tools_path, "")),
+        output = "host-tools",
+    )
+
+    # 3. Download the release gen_snapshot (product mode, matches the release engine).
+    # Only macOS publishes a separate release host tools archive.  On Linux and
+    # Windows the release gen_snapshot is bundled inside the desktop engine
+    # archive, which the desktop engine repository holds.
+    os_part = platform.split("-")[0]  # "darwin", "linux", "windows"
+    if os_part == "darwin":
+        release_tools_path = host_artifacts_path(platform, mode = "release")
+        repository_ctx.download_and_extract(
+            url = engine_artifact_url(engine_revision, release_tools_path),
+            sha256 = pinned(release_tools_path, checksums.get(release_tools_path, "")),
+            output = "host-tools-release",
+        )
+
+    # 4. Download font-subset tools (font-subset, and const_finder before 3.50).
+    font_subset_path = "{platform}/font-subset.zip".format(platform = platform)
+    repository_ctx.download_and_extract(
+        url = engine_artifact_url(engine_revision, font_subset_path),
+        sha256 = pinned(font_subset_path, checksums.get(font_subset_path, "")),
+        output = "font-subset-tools",
+    )
+
+    # 5. Download material design fonts (MaterialIcons, Roboto family).
+    repository_ctx.download_and_extract(
+        url = "https://storage.googleapis.com/" + meta.material_fonts_url,
+        sha256 = pinned("material_fonts.zip", checksums.get("material_fonts.zip", "")),
+        output = "material-fonts",
+    )
+
+    repository_ctx.file("BUILD.bazel", _BUILD_TEMPLATE)
+
+    # Pinned downloads and files written from the attributes alone, so Bazel
+    # keeps one copy in its repository contents cache for every output base.
+    return repository_ctx.repo_metadata(reproducible = True)
+
+_BUILD_TEMPLATE = """# Generated by flutter/private/repositories.bzl
+load("@rules_dart//dart:toolchain.bzl", "dart_sdk_files")
+
+# The bundled Dart SDK, whole and by the use that reads each file (`run`,
+# `aot_run`, `dart2js`, ...), so that an action takes only its own files.
+dart_sdk_files(
+    name = "dart_sdk",
+    prefix = "dart-sdk/",
+    visibility = ["//visibility:public"],
+)
+
+exports_files(glob(["**"]), visibility = ["//visibility:public"])
+
+filegroup(
+    name = "shader_lib_files",
+    srcs = glob(["host-tools/shader_lib/**"]),
+    visibility = ["//visibility:public"],
+)
+"""
+
+flutter_engine_artifacts = repository_rule(
+    _flutter_engine_artifacts_impl,
+    doc = "Downloads the Flutter host tools (Dart SDK, flutter_tester, impellerc, font-subset) for a given host platform.",
+    attrs = {
+        "flutter_version": attr.string(
+            doc = "The Flutter SDK version (e.g. `3.47.2`). Must be listed in versions.bzl.",
+            mandatory = True,
+            values = FLUTTER_VERSIONS.keys(),
+        ),
+        "platform": attr.string(
+            doc = "The host platform (e.g. `darwin-arm64`). Must match a key in HOST_PLATFORMS.",
+            mandatory = True,
+            values = HOST_PLATFORMS.keys(),
+        ),
+    },
+)
+
+def _host_profile_repo(name, platform, engine_revision, checksums):
+    """Declares the profile gen_snapshot of a macOS host, in a repo of its own.
+
+    Linux and Windows bundle the profile gen_snapshot with the desktop engine,
+    whose repository holds it.
+    """
+    path = host_artifacts_path(platform, mode = "profile")
+    flutter_profile_repo(
+        name = name,
+        engine_revision = engine_revision,
+        downloads = {path: "host-tools"},
+        sha256s = {path: checksums.get(path, "")},
+        build_file_content = """exports_files(["host-tools/gen_snapshot"], visibility = ["//visibility:public"])
+""",
+    )
+
+def _desktop_engine_repo_name(name, target_platform, mode):
+    """The repo holding the desktop engine of one build mode for a target platform."""
+    return "{}_desktop_engine_{}_{}".format(name, target_platform, mode)
+
+def flutter_register_toolchains(name, flutter_version, framework_json = "", framework_json_file = None):
+    """Declares the repositories of the stock release SDK.
+
+    Creates a repository for each host platform, cross-compilation repos, the
+    engine repositories, and the stock engine source and toolchain
+    implementations written against them. The registry that picks among SDKs'
+    toolchains is the extension's, since it spans every SDK.
+
+    Args:
+        name: base name for all created repos, like "flutter"
+        flutter_version: the Flutter release the engine is.
+        framework_json: the label of the SDK's `flutter_framework.json`, when
+            its framework is not the release's.
+        framework_json_file: the same file, for the toolchains to read what the framework is.
+    """
+    meta = FLUTTER_VERSIONS[flutter_version]
+    checksums = ARTIFACT_CHECKSUMS.get(flutter_version, {})
+
+    # The release, for rules that cannot ask a toolchain.
+    flutter_version_pin_repo(
+        name = name + "_version_pin",
+        flutter_version = flutter_version,
+    )
+
+    # Host platform repos: the host tools. macOS also has a profile repo for
+    # its profile gen_snapshot.
+    for platform, host_meta in HOST_PLATFORMS.items():
+        flutter_engine_artifacts(
+            name = name + "_" + platform,
+            platform = platform,
+            flutter_version = flutter_version,
+        )
+        if host_meta.os == "macos":
+            _host_profile_repo(
+                name = name + "_" + platform + "_profile",
+                platform = platform,
+                engine_revision = meta.engine_revision,
+                checksums = checksums,
+            )
+
+    # Android gen_snapshot repos, one per cross pair and mode. (The iOS
+    # gen_snapshot is bundled with the iOS engine, below.)
+    for host_platform, targets in CROSS_COMPILATION_PAIRS.items():
+        for target_platform in targets:
+            if target_platform.startswith("ios"):
+                continue
+            artifact_host = gen_snapshot_host_platform(host_platform)
+            gen_snapshot_path = gen_snapshot_cross_artifact_path(target_platform, "release", artifact_host)
+            flutter_cross_compilation_repo(
+                name = name + "_cross_" + host_platform + "_" + target_platform,
+                engine_revision = meta.engine_revision,
+                host_platform = host_platform,
+                target_platform = target_platform,
+                gen_snapshot_sha256 = checksums.get(gen_snapshot_path, ""),
+            )
+            profile_gen_snapshot_path = gen_snapshot_cross_artifact_path(target_platform, "profile", artifact_host)
+            flutter_profile_repo(
+                name = name + "_cross_" + host_platform + "_" + target_platform + "_profile",
+                engine_revision = meta.engine_revision,
+                downloads = {profile_gen_snapshot_path: ""},
+                sha256s = {profile_gen_snapshot_path: checksums.get(profile_gen_snapshot_path, "")},
+                build_file_content = 'exports_files(["{}"], visibility = ["//visibility:public"])\n'.format(
+                    gen_snapshot_binary_name(host_platform),
+                ),
+            )
+
+    # Linux sysroot repos (one per architecture, shared across hosts).
+    # These are lazy — only fetched when a Linux desktop build is attempted.
+    # Collect all Linux architectures from both host platforms and desktop cross targets.
+    _ARCH_TO_DEB = {"x64": "amd64", "arm64": "arm64"}
+    linux_sysroot_arches = {}
+    for platform, host_meta in HOST_PLATFORMS.items():
+        if host_meta.os == "linux":
+            linux_sysroot_arches[host_meta.arch] = True
+    for _hp, desktop_targets in DESKTOP_CROSS_PAIRS.items():
+        for target_platform in desktop_targets:
+            if target_platform.startswith("linux-"):
+                linux_sysroot_arches[target_platform.split("-")[1]] = True
+    for arch in linux_sysroot_arches.keys():
+        deb_arch = _ARCH_TO_DEB.get(arch)
+        if not deb_arch:
+            continue
+        flutter_linux_sysroot_repo(
+            name = name + "_linux_sysroot_" + arch,
+            target_arch = arch,
+            sha256 = LINUX_SYSROOT_CHECKSUMS[deb_arch],
+        )
+
+    # Desktop engine repos (one per target platform and build mode, shared
+    # across hosts and across native and cross builds). These are lazy: only
+    # the repo of the mode being built is downloaded.
+    for target_platform in DESKTOP_ENGINE_PLATFORMS:
+        target_os = PLATFORM_PREFIX_TO_OS[target_platform.split("-")[0]]
+        engine_arch = engine_arch_for_os(target_os, target_platform.split("-")[1])
+        for mode in ENGINE_MODES:
+            engine_path = desktop_engine_artifact_path(target_os, engine_arch, mode)
+            flutter_desktop_engine_repo(
+                name = _desktop_engine_repo_name(name, target_platform, mode),
+                engine_revision = meta.engine_revision,
+                target_os = target_os,
+                target_arch = engine_arch,
+                mode = mode,
+                sha256 = checksums.get(engine_path, ""),
+                cpp_wrapper_sha256 = checksums.get(cpp_client_wrapper_artifact_path(target_platform), ""),
+            )
+
+    # Flutter's signed FlutterMacOS.xcframework of each mode, for macOS
+    # add-to-app (lazy: only the mode being built is downloaded).
+    for mode in ENGINE_MODES:
+        flutter_macos_xcframework_repo(
+            name = "{}_macos_xcframework_{}".format(name, mode),
+            engine_revision = meta.engine_revision,
+            mode = mode,
+            sha256 = checksums.get(macos_xcframework_artifact_path(mode), ""),
+        )
+
+    # Web SDK repo (lazy — only downloaded when web targets are built).
+    flutter_web_sdk_repo(
+        name = name + "_stock_web_sdk",
+        engine_revision = meta.engine_revision,
+        sha256 = checksums.get("flutter-web-sdk.zip", ""),
+        dart_sdk_sha256s = {h: checksums.get(dart_sdk_artifact_path(h), "") for h in HOST_PLATFORMS},
+    )
+
+    # sky_engine (lazy — only fetched when Flutter code is analyzed). Nothing
+    # in a build references it: the compiler gets Flutter's `dart:` libraries
+    # as kernel out of the patched SDK, and only the analyzer needs them as
+    # sources.
+    flutter_sky_engine_repo(
+        name = name + "_sky_engine",
+        engine_revision = meta.engine_revision,
+        sha256 = checksums.get("sky_engine.zip", ""),
+    )
+
+    # Android engine repos (lazy — one per ABI, only downloaded when Android targets are built).
+    # Each repo carries both the release engine (AOT) and the debug engine (JIT);
+    # the stock engine source's slices are over their jars.
+    android_engine_repos_created = {}
+    for _host_platform, targets in CROSS_COMPILATION_PAIRS.items():
+        for target_platform in targets:
+            if not target_platform.startswith("android-"):
+                continue
+            android_arch = target_platform.split("-")[1]
+            if android_arch in android_engine_repos_created:
+                continue
+            android_engine_repos_created[android_arch] = True
+
+            flutter_android_engine_repo(
+                name = name + "_stock_android_engine_" + android_arch,
+                engine_revision = meta.engine_revision,
+                android_arch = android_arch,
+                release_sha256 = checksums.get(android_engine_artifact_path(android_arch, "release"), ""),
+                debug_sha256 = checksums.get(android_engine_artifact_path(android_arch, "debug"), ""),
+            )
+
+            # The profile engine, apart so only a profile build fetches it.
+            profile_engine_path = android_engine_artifact_path(android_arch, "profile")
+            flutter_profile_repo(
+                name = name + "_android_engine_" + android_arch + "_profile",
+                engine_revision = meta.engine_revision,
+                downloads = {profile_engine_path: ""},
+                sha256s = {profile_engine_path: checksums.get(profile_engine_path, "")},
+                build_file_content = _ANDROID_PROFILE_ENGINE_BUILD,
+            )
+
+    # The iOS engines, a repository per mode, so a build fetches only the
+    # engine of the mode it builds: the release engine (device, AOT, with the
+    # iOS gen_snapshot) and the debug engine (simulator, JIT). The stock engine
+    # source's slices are over their files and the profile engine's below.
+    flutter_ios_engine_repo(
+        name = name + "_stock_ios_engine",
+        engine_revision = meta.engine_revision,
+        mode = "release",
+        sha256 = checksums.get(ios_engine_artifact_path("release"), ""),
+    )
+    flutter_ios_engine_repo(
+        name = name + "_stock_ios_engine_debug",
+        engine_revision = meta.engine_revision,
+        mode = "debug",
+        sha256 = checksums.get(ios_engine_artifact_path("debug"), ""),
+    )
+
+    # The iOS profile engine and its gen_snapshot, apart so only a profile
+    # build fetches them. Device only: Flutter publishes no profile engine for
+    # the simulator (the archive's simulator slice is the debug build).
+    ios_profile_path = ios_engine_artifact_path("profile")
+    flutter_profile_repo(
+        name = name + "_ios_engine_profile",
+        engine_revision = meta.engine_revision,
+        downloads = {ios_profile_path: ""},
+        sha256s = {ios_profile_path: checksums.get(ios_profile_path, "")},
+        build_file_content = """filegroup(
+    name = "Flutter_xcframework_profile",
+    srcs = glob(["Flutter.xcframework/**"]),
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    ["gen_snapshot_arm64"] + glob(["Flutter.xcframework/**"]),
+    visibility = ["//visibility:public"],
+)
+""",
+    )
+
+    # The stock release as an engine source, and the toolchains written
+    # against it.
+    flutter_stock_engine_repo(
+        name = name + "_stock_engine",
+        user_repository_name = name,
+        flutter_version = flutter_version,
+        engine_revision = meta.engine_revision,
+        sha256s = {
+            artifact: checksums.get(artifact, "")
+            for artifact in ["flutter_patched_sdk.zip", "flutter_patched_sdk_product.zip"]
+        },
+    )
+    flutter_sdk_toolchains_repo(
+        name = sdk_repo_name(name),
+        engine = "@{}_stock_engine".format(name),
+        sdk = name,
+        version = flutter_version,
+        engine_revision = meta.engine_revision,
+        material_fonts = "@{}_{{host}}//:material-fonts/MaterialIcons-Regular.otf".format(name),
+        sysroot_prefix = name,
+        framework_json = framework_json,
+        framework_json_file = framework_json_file,
+    )

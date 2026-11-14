@@ -24,6 +24,7 @@
 import 'dart:async';
 
 import 'app_instance.dart';
+import '../phase_log.dart';
 import 'compiler.dart';
 import 'session_reloader.dart';
 import 'workspace.dart';
@@ -36,11 +37,16 @@ sealed class ReloadOutcome {
 /// The compile and apply both succeeded.
 ///
 /// [filesRecompiled] is the union, across the targets that needed work, of
-/// what each was sent. [isEmpty] is true when every one of those files was
+/// what each was sent. [isEmpty] is true when a reload's files were all
 /// byte-identical (per `Version`) to what the target already had — i.e. the
 /// caller declared files that turned out clean. Distinguishable from
 /// [ReloadNoChange], which is returned only when no target had anything to
 /// recompile in the first place.
+///
+/// A restart is never empty. It compiles the whole program and runs it in a
+/// fresh isolate, as `flutter run`'s does, so it changes what is running even
+/// when every file matches what the last reload sent: static and top-level
+/// initializers run again, and the state a reload kept is gone.
 class ReloadApplied extends ReloadOutcome {
   final Set<String> filesRecompiled;
   final bool isEmpty;
@@ -153,31 +159,39 @@ class ReloadOrchestrator {
   /// IDE that knows about edits the FS may not yet show). Declared files are
   /// recompiled even if their disk version equals what's applied — but the
   /// response distinguishes that case via `ReloadApplied.isEmpty = true`.
+  ///
+  /// [phases], when given, is told how long the compile and the apply took.
   Future<ReloadOutcome> reload({
     Set<String>? declared,
     required List<AppInstance> targets,
+    PhaseLog? phases,
   }) => _runPipeline(
     declared: declared,
     mode: ApplyMode.hotReload,
     targets: targets,
+    phases: phases,
   );
 
-  /// Full restart of [targets] — the whole program, compiled incrementally
-  /// from each target's committed baseline, hotRestart, and each target's
-  /// applied record reset to the full disk snapshot. Untargeted apps keep their
+  /// Full restart of [targets] — the whole program, compiled from each
+  /// target's committed baseline plus what it lacks, hotRestart, and each
+  /// target's applied record reset to the full disk snapshot. Untargeted apps keep their
   /// records and their compilers, so their next `reload()` still delivers what
   /// they missed, dependent libraries included.
-  Future<ReloadOutcome> restart({required List<AppInstance> targets}) =>
-      _runPipeline(
-        declared: null,
-        mode: ApplyMode.hotRestart,
-        targets: targets,
-      );
+  Future<ReloadOutcome> restart({
+    required List<AppInstance> targets,
+    PhaseLog? phases,
+  }) => _runPipeline(
+    declared: null,
+    mode: ApplyMode.hotRestart,
+    targets: targets,
+    phases: phases,
+  );
 
   Future<ReloadOutcome> _runPipeline({
     required Set<String>? declared,
     required ApplyMode mode,
     required List<AppInstance> targets,
+    PhaseLog? phases,
   }) async {
     if (targets.isEmpty) {
       throw StateError('A reload needs at least one target app.');
@@ -194,11 +208,11 @@ class ReloadOrchestrator {
     // unioned across targets — each compiler is asked only for its own app's
     // gap and derives the dependent libraries itself.
     //
-    // A restart is told the same gap. Its `reset` makes the compiler answer
-    // with the whole program, but the compiler still reuses every library it
-    // already compiled; invalidating every file on disk instead recompiled the
-    // whole app on each restart. flutter_tools pairs `reset` with the changed
-    // files the same way (`devfs.dart`).
+    // A restart is told the same gap. Its `reset` makes the answer the whole
+    // program, but the compiler builds it from the libraries it already holds
+    // and recompiles only what it is told changed, as `flutter_tools` does
+    // (`devfs.dart`). Telling it every file on disk recompiles every
+    // first-party library on each restart.
     final work = <SessionReloader, Set<String>>{
       for (final u in targetUnits) u: u.pendingAt(snap, declared: declared),
     };
@@ -222,15 +236,28 @@ class ReloadOrchestrator {
       return const ReloadNoChange();
     }
 
-    // Judged before anything is applied, against the still-old records.
-    final isEmpty = working.every(
-      (u) => work[u]!.every((f) => snap.versionOf(f) == u.applied.versionOf(f)),
-    );
+    // Judged before anything is applied, against the still-old records. Only
+    // a reload can be empty — see [ReloadApplied].
+    final isEmpty =
+        !isRestart &&
+        working.every(
+          (u) => work[u]!.every(
+            (f) => snap.versionOf(f) == u.applied.versionOf(f),
+          ),
+        );
 
-    final compiled = await Future.wait([
-      for (final u in working)
-        u.compile(invalidated: work[u]!, entrypoint: entrypoint, mode: mode),
-    ]);
+    // Said per phase, not per target: the targets run side by side, and a line
+    // each would be an interleaving to untangle.
+    Future<T> phase<T>(String name, Future<T> Function() body) =>
+        phases?.run(name, body) ?? body();
+
+    final compiled = await phase(
+      'compile',
+      () => Future.wait([
+        for (final u in working)
+          u.compile(invalidated: work[u]!, entrypoint: entrypoint, mode: mode),
+      ]),
+    );
 
     // Every target compiles the same disk, so a failure is a property of the
     // source and they agree in practice — but the rule is atomic regardless:
@@ -241,15 +268,18 @@ class ReloadOrchestrator {
       return ReloadCompileFailed(failure.diagnostics);
     }
 
-    final results = await Future.wait([
-      for (var i = 0; i < working.length; i++)
-        working[i].applyAndSettle(
-          (compiled[i] as CompileSucceeded).dillPath,
-          mode: mode,
-          snapshot: snap,
-          invalidated: work[working[i]]!,
-        ),
-    ]);
+    final results = await phase(
+      'apply',
+      () => Future.wait([
+        for (var i = 0; i < working.length; i++)
+          working[i].applyAndSettle(
+            (compiled[i] as CompileSucceeded).dillPath,
+            mode: mode,
+            snapshot: snap,
+            invalidated: work[working[i]]!,
+          ),
+      ]),
+    );
 
     final perApp = <String, ApplyOutcome>{
       for (var i = 0; i < working.length; i++) working[i].id: results[i],

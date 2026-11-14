@@ -1,0 +1,45 @@
+{
+  "assets": {
+    "assets/icon.png": {
+      "variants": [
+        {
+          "asset": "assets/icon.png"
+        },
+        {
+          "asset": "assets/2.0x/icon.png",
+          "dpr": 2.0
+        },
+        {
+          "asset": "assets/3.0x/icon.png",
+          "dpr": 3.0
+        }
+      ]
+    },
+    "assets/photo.jpg": {
+      "variants": [
+        {
+          "asset": "assets/photo.jpg"
+        },
+        {
+          "asset": "assets/1.5x/photo.jpg",
+          "dpr": 1.5
+        },
+        {
+          "asset": "assets/4x/photo.jpg",
+          "dpr": 4.0
+        }
+      ]
+    },
+    "assets/logo.png": {
+      "variants": [
+        {
+          "asset": "assets/logo.png"
+        },
+        {
+          "asset": "assets/1.25x/logo.png",
+          "dpr": 1.25
+        }
+      ]
+    }
+  }
+}

@@ -1,6 +1,12 @@
-common --lockfile_mode=off
+# Fail rather than rewrite or ignore a lock file that is stale or incomplete.
+# `bazel run @overhead//locks:check`, from the repository root, checks every
+# workspace's (see docs/TESTING.md, "Lock files"). A gitignored .bazelrc.user that overrides a
+# module must switch this off, since the override no longer matches the lock.
+common --lockfile_mode=error
 
-# Use a remote JDK so the build works without a local Java installation.
+# rules_flutter's Java dependencies ship tool jars compiled for Java 21+, and an
+# Android build resolves a Java runtime of its own, the local JDK unless this
+# names another (README, ".bazelrc").
 common --java_runtime_version=remotejdk_25
 common --tool_java_language_version=25
 common --tool_java_runtime_version=remotejdk_25
@@ -9,8 +15,8 @@ common --tool_java_runtime_version=remotejdk_25
 # occurrence. No commas: a flutter_test's dependencies are compiled by
 # kernel_worker, which splits -D values on them (an app's compile keeps them,
 # see //flutter/tests:app_defines_test).
-common --@rules_flutter//flutter:extra_dart_defines=E2E_FLAG=from_flag
-common --@rules_flutter//flutter:extra_dart_defines=E2E_WINNER=flag
+common --@rules_dart//dart:extra_dart_defines=E2E_FLAG=from_flag
+common --@rules_dart//dart:extra_dart_defines=E2E_WINNER=flag
 
 # Share the results of identical actions between configurations (one
 # Android ABI and the next, -c dbg and -c fastbuild, platform transitions).
@@ -21,26 +27,26 @@ common --enable_platform_specific_config
 common:linux --experimental_output_paths=strip
 common:macos --experimental_output_paths=strip
 
-# Each action picks its execution platform from the toolchain it names, not
-# from every toolchain its rule uses: an iOS AOT compile stays on a Mac while
-# the same target's kernel compile can run elsewhere. rules_flutter's actions
-# all name a toolchain or run in an exec group. See README.md, ".bazelrc".
-common --incompatible_auto_exec_groups
+# Accepts the licences of the Android SDK and NDK versions MODULE.bazel
+# downloads (README, "Android"), as rules_kotlin's examples do for theirs.
+common --repo_env=ACCEPTED_ANDROID_SDK_LICENSE_VERSION=35
+common --repo_env=ACCEPTED_ANDROID_NDK_LICENSE_VERSION=r28c
 
-# Start py_binary tools with their hermetic interpreter, not python3 from
-# PATH, which a remote worker does not have. The canonical label needs no
-# direct bazel_dep on rules_python.
-common --@@rules_python+//python/config_settings:bootstrap_impl=script
+# The ABIs of an Android APK are the platforms of --@rules_android//flags:android_platforms (README,
+# "Android"). This workspace builds for a 64-bit ARM device unless a command
+# says otherwise, as the dev tool does for the device it launches on.
+common --@rules_android//flags:android_platforms=@rules_android//:arm64-v8a
 
-# The Linux arm64 C++ toolchain declared in MODULE.bazel, registered only
-# where actions can run on a Linux arm64 worker.
-build:dynabzl-cloud --extra_toolchains=@llvm_toolchains//:all
+# No core library desugaring, as a Flutter app built with Gradle has none
+# (README, "Android"). rules_android turns it on by default and packs the
+# whole, unshrunk desugar_jdk_libs runtime into every APK.
+common --@rules_android//flags:desugar_java8_libs=false
 
 try-import %workspace%/.bazelrc.user
 
 # `dart analyze` and the `dart format` check run as an aspect over every Dart
 # target a `bazel test` names. The config line is `common` because `bazel run`
-# of `dart_fix`/`dart_format` reads it too.
+# of `@rules_dart//dart/fix` and `@rules_dart//dart/format` reads it too.
 test --aspects=@rules_dart//dart:analyze.bzl%dart_analyze
 test --output_groups=+dart_analyze
 test --output_groups=+dart_format

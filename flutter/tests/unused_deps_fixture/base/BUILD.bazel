@@ -1,0 +1,14 @@
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_library")
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "unused_deps_base",
+)
+
+# A library its dependents may or may not import.
+flutter_library(
+    name = "base",
+    srcs = ["lib/base.dart"],
+    package = ":pubspec-metadata",
+    visibility = ["//flutter/tests/unused_deps_fixture:__pkg__"],
+)

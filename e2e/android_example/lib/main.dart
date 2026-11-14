@@ -1,4 +1,5 @@
 import 'package:android_example/native_add.dart';
+import 'package:android_example/negate.dart';
 import 'package:android_example/shared_counter.dart';
 import 'package:flutter/material.dart';
 
@@ -7,6 +8,7 @@ void main() {
   // `verify_android_app_test` reads this line back from logcat.
   final shared = sharedCount();
   debugPrint('android_example shared=$shared');
+  debugPrint('android_example negate(5)=${negate(5)}');
   runApp(MyApp(shared: shared));
 }
 

@@ -18,7 +18,7 @@
 /// `bazel-bin` happens to be pointed: the tool is launched through a symlink of
 /// the test's own, deleted once the tool reports it is launching the app —
 /// after the tool started, before the app's VM service exists.
-@Tags(['e2e'])
+@Tags(['e2e', 'macos'])
 library;
 
 import 'dart:io';

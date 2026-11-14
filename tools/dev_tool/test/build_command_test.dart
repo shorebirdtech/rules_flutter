@@ -14,14 +14,39 @@ void main() {
       expect(results['target'], '//:my_app');
     });
 
-    test('accepts --config', () {
-      final results = BuildCommand.parser.parse([
-        '-t',
-        '//:app',
-        '--config',
-        'release',
-      ]);
-      expect(results['config'], 'release');
+    test('accepts --compilation_mode and its -c shorthand', () {
+      expect(
+        BuildCommand.parser.parse([
+          '-t',
+          '//:app',
+          '--compilation_mode',
+          'opt',
+        ])['compilation_mode'],
+        'opt',
+      );
+      expect(
+        BuildCommand.parser.parse([
+          '-t',
+          '//:app',
+          '-c',
+          'dbg',
+        ])['compilation_mode'],
+        'dbg',
+      );
+    });
+
+    test('accepts repeated --config, defaults empty', () {
+      expect(BuildCommand.parser.parse(['-t', '//:app'])['config'], isEmpty);
+      expect(
+        BuildCommand.parser.parse([
+          '-t',
+          '//:app',
+          '--config',
+          'a',
+          '--config=b',
+        ])['config'],
+        ['a', 'b'],
+      );
     });
 
     test('accepts multiple --build-arg values', () {

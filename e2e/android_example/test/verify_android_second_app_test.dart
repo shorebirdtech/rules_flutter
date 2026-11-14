@@ -8,6 +8,9 @@
 /// name belongs to the former. Resolved against the application id instead, the
 /// APK names `com.example.flutterapp.second.MainActivity`, which does not
 /// exist, and the app dies on launch with a ClassNotFoundException.
+///
+/// It also sets `build_name` and `build_number`, which must reach the APK's
+/// manifest as `versionName` and `versionCode`.
 library;
 
 // This script's diagnostics are its product: it reports what it found in
@@ -15,73 +18,59 @@ library;
 // channel rather than a stray debugging statement.
 // ignore_for_file: avoid_print
 
-import 'dart:io';
-
-import 'apk_contents.dart';
+import 'package:rules_flutter_e2e_testing/apk.dart';
+import 'package:rules_flutter_e2e_testing/apk_contents.dart';
 
 const _applicationId = 'com.example.flutterapp.second';
+const _versionName = '2.3.4';
+const _versionCode = '42';
 
 void main() {
-  final testSrcDir = Platform.environment['TEST_SRCDIR'];
-  final testWorkspace = Platform.environment['TEST_WORKSPACE'];
-  if (testSrcDir == null || testWorkspace == null) {
-    stderr.writeln('Missing TEST_SRCDIR or TEST_WORKSPACE env vars');
-    exit(1);
-  }
-  final apkPath = '$testSrcDir/$testWorkspace/second_app.apk';
+  final apk = Apk.fromRunfiles('second_app.apk', prefix: 'android_second_app');
+  final check = apk.check;
+  final elements = manifestElements(apk.manifest.readAsBytesSync());
+  final package = elements.first.attributes['package'];
+  final versionName = elements.first.attributes['versionName'];
+  final versionCode = elements.first.attributes['versionCode'];
+  final activities = [
+    for (final e in elements)
+      if (e.name == 'activity') e.attributes['name']!,
+  ];
+  final classes = apk.definedClasses();
 
-  final tmpDir = Directory.systemTemp.createTempSync('android_second_app');
-  try {
-    final unzip = Process.runSync('unzip', [
-      '-q',
-      apkPath,
-      'AndroidManifest.xml',
-      'classes*.dex',
-      '-d',
-      tmpDir.path,
-    ]);
-    if (unzip.exitCode != 0) {
-      stderr.writeln('Failed to extract $apkPath: ${unzip.stderr}');
-      exit(1);
-    }
-
-    final elements = manifestElements(
-      File('${tmpDir.path}/AndroidManifest.xml').readAsBytesSync(),
+  print('Application id: $package');
+  print('Version: $versionName ($versionCode)');
+  check
+    ..expect(
+      'versionName is $_versionName',
+      condition: versionName == _versionName,
+      detail: 'expected versionName $_versionName from `build_name`',
+    )
+    ..expect(
+      'versionCode is $_versionCode',
+      condition: versionCode == _versionCode,
+      detail: 'expected versionCode $_versionCode from `build_number`',
+    )
+    ..expect(
+      'application id is $_applicationId',
+      condition: package == _applicationId,
+      detail: 'expected application id $_applicationId',
+    )
+    ..expect(
+      'the manifest declares an activity',
+      condition: activities.isNotEmpty,
+      detail: 'the manifest declares no activity',
     );
-    final package = elements.first.attributes['package'];
-    final activities = [
-      for (final e in elements)
-        if (e.name == 'activity') e.attributes['name']!,
-    ];
-    final classes = {
-      for (final dex in tmpDir.listSync().whereType<File>())
-        if (dex.path.endsWith('.dex')) ...definedClassDescriptors(dex),
-    };
-
-    print('Application id: $package');
-    var failed = package != _applicationId;
-    if (failed) {
-      stderr.writeln('FAIL: expected application id $_applicationId');
-    }
-    if (activities.isEmpty) {
-      stderr.writeln('FAIL: the manifest declares no activity');
-      failed = true;
-    }
-    for (final activity in activities) {
-      final descriptor = 'L${activity.replaceAll('.', '/')};';
-      if (classes.contains(descriptor)) {
-        print('OK: activity $activity is defined in dex');
-      } else {
-        stderr.writeln(
-          'FAIL: the manifest names activity $activity, which no dex '
+  for (final activity in activities) {
+    final descriptor = 'L${activity.replaceAll('.', '/')};';
+    check.expect(
+      'activity $activity is defined in dex',
+      condition: classes.contains(descriptor),
+      detail:
+          'the manifest names activity $activity, which no dex '
           'defines. Dex activities: '
           '${classes.where((c) => c.endsWith('Activity;')).join(', ')}',
-        );
-        failed = true;
-      }
-    }
-    if (failed) exit(1);
-  } finally {
-    tmpDir.deleteSync(recursive: true);
+    );
   }
+  apk.finish('All second app checks passed.');
 }

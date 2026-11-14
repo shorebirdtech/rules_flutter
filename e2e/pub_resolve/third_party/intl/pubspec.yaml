@@ -1,0 +1,6 @@
+name: intl
+description: A fork of intl that the lock's hosted intl is replaced with.
+version: 0.20.3
+publish_to: none
+environment:
+  sdk: ^3.13.0

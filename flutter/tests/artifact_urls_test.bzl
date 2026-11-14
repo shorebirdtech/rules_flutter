@@ -3,6 +3,7 @@
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load(
     "//flutter/private:artifact_urls.bzl",
+    "cpp_client_wrapper_artifact_path",
     "dart_sdk_artifact_path",
     "desktop_engine_artifact_path",
     "engine_artifact_url",
@@ -92,5 +93,16 @@ _t2_test = unittest.make(_gen_snapshot_path_test_impl)
 _t3_test = unittest.make(_host_artifacts_path_test_impl)
 _t4_test = unittest.make(_desktop_engine_artifact_path_test_impl)
 
+def _cpp_client_wrapper_artifact_path_test_impl(ctx):
+    env = unittest.begin(ctx)
+    asserts.equals(
+        env,
+        "windows-x64/flutter-cpp-client-wrapper.zip",
+        cpp_client_wrapper_artifact_path("windows-x64"),
+    )
+    return unittest.end(env)
+
+_t5_test = unittest.make(_cpp_client_wrapper_artifact_path_test_impl)
+
 def artifact_urls_test_suite(name):
-    unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test)
+    unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test)

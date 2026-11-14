@@ -25,9 +25,10 @@ void main() {
     'label': label,
     'compilationMode': 'dbg',
     'platformBuildArgs': const ['--ios_multi_cpus=sim_arm64'],
-    'dartDefines': const <String>[],
+    'extraDartDefines': const <String>[],
     'assetsDir': assetsDir,
     'targetPlatform': 'ios',
+    'trackWidgetCreation': false,
   });
 
   group('resolveAssetsDir', () {
@@ -172,8 +173,9 @@ void main() {
           'label': '@@//:app_flutter',
           'compilationMode': 'dbg',
           'platformBuildArgs': <String>[],
-          'dartDefines': <String>[],
+          'extraDartDefines': <String>[],
           'targetPlatform': 'ios',
+          'trackWidgetCreation': false,
           // assetsDir missing — a rules/dev-tool version skew.
         }),
         throwsA(
@@ -195,7 +197,7 @@ void main() {
           'label': '@@//:app_flutter',
           'compilationMode': 'dbg',
           'platformBuildArgs': <String>[],
-          'dartDefines': <String>[],
+          'extraDartDefines': <String>[],
           'assetsDir': 'bazel-out/x/bin/app_flutter_flutter_assets',
           // targetPlatform missing — a rules/dev-tool version skew.
         }),
@@ -209,14 +211,43 @@ void main() {
       );
     });
 
+    test('carries whether the app tracks widget creation through', () {
+      Map<String, dynamic> record(Object? tracked) => {
+        'label': '@@//:app_flutter',
+        'compilationMode': 'dbg',
+        'platformBuildArgs': <String>[],
+        'extraDartDefines': <String>[],
+        'assetsDir': 'bazel-out/x/bin/app_flutter_flutter_assets',
+        'targetPlatform': 'macos',
+        'trackWidgetCreation': ?tracked,
+      };
+      expect(BuildInfo.fromJson(record(true)).trackWidgetCreation, isTrue);
+      expect(BuildInfo.fromJson(record(false)).trackWidgetCreation, isFalse);
+      // The hot-reload compiler must apply the transform the app was built
+      // with. A tool that assumed either answer would drop the creation
+      // locations of every reloaded library, or add them to an app that was
+      // built without.
+      expect(
+        () => BuildInfo.fromJson(record(null)),
+        throwsA(
+          isA<DevToolException>().having(
+            (e) => e.message,
+            'message',
+            contains('trackWidgetCreation'),
+          ),
+        ),
+      );
+    });
+
     test('carries the target platform through', () {
       final parsed = BuildInfo.fromJson(const {
         'label': '@@//:app_flutter',
         'compilationMode': 'dbg',
         'platformBuildArgs': ['--ios_multi_cpus=sim_arm64'],
-        'dartDefines': <String>[],
+        'extraDartDefines': <String>[],
         'assetsDir': 'bazel-out/x/bin/app_flutter_flutter_assets',
         'targetPlatform': 'ios',
+        'trackWidgetCreation': false,
       });
       expect(parsed.targetPlatform, 'ios');
     });
@@ -232,9 +263,10 @@ void main() {
         'label': '@@//:app_flutter',
         'compilationMode': 'dbg',
         'platformBuildArgs': ['--ios_multi_cpus=sim_arm64'],
-        'dartDefines': ['E2E_FLAG=from,flag'],
+        'extraDartDefines': ['E2E_FLAG=from,flag'],
         'assetsDir': 'bazel-out/x/bin/app_flutter_flutter_assets',
         'targetPlatform': 'ios',
+        'trackWidgetCreation': false,
       };
       final parsed = BuildInfo.fromJson(record);
 
@@ -251,7 +283,7 @@ void main() {
       expect(replayed.label, parsed.label);
       expect(replayed.assetsDir, parsed.assetsDir);
       expect(replayed.targetPlatform, parsed.targetPlatform);
-      expect(replayed.dartDefines, parsed.dartDefines);
+      expect(replayed.extraDartDefines, parsed.extraDartDefines);
       expect(replayed.platformBuildArgs, parsed.platformBuildArgs);
     });
 
@@ -264,30 +296,62 @@ void main() {
         'label': '@@//:app_flutter',
         'compilationMode': 'dbg',
         'platformBuildArgs': <String>[],
-        'dartDefines': <String>[],
+        'extraDartDefines': <String>[],
         'assetsDir': 'bazel-out/x/bin/app_flutter_flutter_assets',
         'targetPlatform': 'ios',
+        'trackWidgetCreation': false,
         'somethingNewerRulesBake': 'keep me',
       });
 
       expect(parsed.defineAssignment, contains('somethingNewerRulesBake'));
       expect(parsed.defineAssignment, contains('keep me'));
     });
+  });
 
-    test('carries the dart defines through as bazel flags', () {
-      final parsed = BuildInfo.fromJson(const {
-        'label': '@@//:app_flutter',
-        'compilationMode': 'dbg',
-        'platformBuildArgs': ['--ios_multi_cpus=sim_arm64'],
-        'dartDefines': ['E2E_FLAG=from,flag'],
-        'assetsDir': 'bazel-out/x/bin/app_flutter_flutter_assets',
-        'targetPlatform': 'ios',
-      });
-      expect(parsed.buildArgs(extra: const ['--//custom:flag']), [
-        '--ios_multi_cpus=sim_arm64',
-        '--@rules_flutter//flutter:extra_dart_defines=E2E_FLAG=from,flag',
-        '--//custom:flag',
-      ]);
+  group('definesToReplay', () {
+    test('adds nothing when the options already apply the app\'s defines', () {
+      // A run builds its dev outputs in its own options, `.bazelrc` included:
+      // passing the app's defines again would double them and make Bazel
+      // throw its analysis away.
+      expect(
+        definesToReplay(
+          applied: ['E2E_FLAG=from_flag', 'E2E_WINNER=flag'],
+          built: ['E2E_FLAG=from_flag', 'E2E_WINNER=flag'],
+        ),
+        isEmpty,
+      );
+    });
+
+    test('adds what the app\'s command line added, in its order', () {
+      // `attach` is not given the run's `--dart-define`s. A key the command
+      // line set again stays after the `.bazelrc` value, where the app's own
+      // build had it, so the last one still wins.
+      expect(
+        definesToReplay(
+          applied: ['E2E_WINNER=flag'],
+          built: ['E2E_WINNER=flag', 'E2E_WINNER=cli', 'MSG=a,b'],
+        ),
+        ['E2E_WINNER=cli', 'MSG=a,b'],
+      );
+    });
+
+    test('refuses options whose defines the app was not built with', () {
+      for (final applied in [
+        ['OTHER=1'],
+        ['E2E_WINNER=flag', 'EXTRA=1'],
+      ]) {
+        expect(
+          () => definesToReplay(applied: applied, built: ['E2E_WINNER=flag']),
+          throwsA(
+            isA<DevToolException>().having(
+              (e) => e.message,
+              'message',
+              allOf(contains('E2E_WINNER=flag'), contains(applied.last)),
+            ),
+          ),
+          reason: '$applied',
+        );
+      }
     });
   });
 
@@ -421,9 +485,10 @@ void main() {
           'label': '@@//:app_flutter',
           'compilationMode': 'dbg',
           'platformBuildArgs': <String>[],
-          'dartDefines': <String>[],
+          'extraDartDefines': <String>[],
           'assetsDir': 'bazel-out/x/bin/app_flutter_flutter_assets',
           'targetPlatform': 'macos',
+          'trackWidgetCreation': false,
         },
       );
 

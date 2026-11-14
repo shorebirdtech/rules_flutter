@@ -1,0 +1,62 @@
+# Text files are LF in every checkout, Windows included: generated files,
+# formatters and lock checks compare bytes.
+* text=auto eol=lf
+
+# Exclude development-only files from release archives.
+#
+# Every pattern is anchored with a leading `/`. Without one, `git archive`
+# matches the basename at any depth, so an unanchored `e2e/` also strips
+# `tools/dev_tool/test/e2e/` and the published archive fails to load.
+#
+# Packages that exist to test this repository (`/flutter/tests/`) or read what
+# only a checkout has (`/tools/ci_matrix/` the CI workflow, `/tools/e2e_copy_guard/`
+# the e2e workspaces, `/tools/vm/` the CI matrix) are excluded too: in a consumer's copy of the module they
+# would not load. `bazel run //tools/consumer_archive` and building
+# `@rules_flutter//...` from `e2e/external_module` checks that.
+#
+# `/e2e/` is listed workspace by workspace rather than wholesale: the archive
+# has to keep `e2e/smoke`, which `.bcr/presubmit.yml` names as `module_path`
+# and BCR resolves inside the extracted archive. Adding an e2e workspace means
+# adding it here — the whole tree is 12MB against a 1.2MB archive, so the
+# exclusions are what keep the download small.
+/.bcr/ export-ignore
+/.devcontainer/ export-ignore
+/.github/ export-ignore
+/.gitattributes export-ignore
+/.gitignore export-ignore
+/.pre-commit-config.yaml export-ignore
+/.typos.toml export-ignore
+/dev/ export-ignore
+/references/ export-ignore
+/tools/ci_matrix/ export-ignore
+/tools/e2e_copy_guard/ export-ignore
+/tools/vm/ export-ignore
+/flutter/tests/ export-ignore
+/renovate.json export-ignore
+/e2e/_compare/ export-ignore
+/e2e/_linux_test/ export-ignore
+/e2e/_macos_test/ export-ignore
+/e2e/_windows_test/ export-ignore
+/e2e/android_example/ export-ignore
+/e2e/asset_bundle/ export-ignore
+/e2e/codegen/ export-ignore
+/e2e/cross_compile_example/ export-ignore
+/e2e/custom_engine/ export-ignore
+/e2e/desktop_example/ export-ignore
+/e2e/dual_hub/ export-ignore
+/e2e/external_module/ export-ignore
+/e2e/ffi_example/ export-ignore
+/e2e/hello_world/ export-ignore
+/e2e/integration_test/ export-ignore
+/e2e/ios_example/ export-ignore
+/e2e/pub_resolve/ export-ignore
+/e2e/macos_example/ export-ignore
+/e2e/multi_window_example/ export-ignore
+/e2e/package_assets/ export-ignore
+/e2e/plugin_example/ export-ignore
+/e2e/web_example/ export-ignore
+
+# Licence fixtures are compared byte for byte: a checkout must not rewrite their line endings.
+/e2e/asset_bundle/registry/fx_*/*/LICENSE -text
+/e2e/asset_bundle/registry/fx_*/*/NOTICES -text
+/e2e/asset_bundle/tests/expected/notices_fixtures.txt -text

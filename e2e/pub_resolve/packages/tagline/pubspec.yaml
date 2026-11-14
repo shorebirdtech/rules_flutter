@@ -1,0 +1,5 @@
+name: tagline
+description: A path package with no version, which pub locks as 0.0.0.
+publish_to: none
+environment:
+  sdk: ^3.13.0

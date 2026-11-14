@@ -11,8 +11,8 @@ import 'package:test/test.dart';
 /// build-emitted `sourcePackages`.
 Workspace appWorkspace(
   String root, {
-  List<({String name, String libRoot})> packages = const [
-    (name: 'app', libRoot: ''),
+  List<({String name, String packageRoot})> packages = const [
+    (name: 'app', packageRoot: ''),
   ],
   Map<String, String> generatedFiles = const {},
 }) {
@@ -333,8 +333,8 @@ void main() {
       final ws = appWorkspace(
         tmp.path,
         packages: const [
-          (name: 'app', libRoot: ''),
-          (name: 'dep', libRoot: 'packages/dep'),
+          (name: 'app', packageRoot: ''),
+          (name: 'dep', packageRoot: 'packages/dep'),
         ],
       );
       final snap = ws.snapshot();

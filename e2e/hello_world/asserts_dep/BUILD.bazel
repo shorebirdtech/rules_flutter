@@ -1,0 +1,17 @@
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_library")
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "assert_dep",
+)
+
+# A library the asserts tests (`//:asserts_fire_test`) and
+# `//asserts_violation_dep` reach as a dependency, so its code compiles apart
+# from the test's own file in the modular kernel mode and together with it in
+# the whole-program one.
+flutter_library(
+    name = "asserts_dep",
+    srcs = ["lib/guarded.dart"],
+    package = ":pubspec-metadata",
+    visibility = ["//visibility:public"],
+)

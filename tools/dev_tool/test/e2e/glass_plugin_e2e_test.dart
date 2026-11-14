@@ -5,7 +5,7 @@
 /// shaders — one as a `Paint.shader`, one as an `ImageFilter.shader` inside a
 /// `BackdropFilter` — reads the pixels back, calls the plugin's Swift or
 /// Kotlin, and prints its verdict as one `glass_results` line. That covers
-/// the package's `pkg_shaders` reaching each platform's bundle at
+/// the package's `shaders` reaching each platform's bundle at
 /// `packages/glass_plugin/`, compiled for that platform's renderer, and a
 /// workspace plugin's native code being registered.
 ///
@@ -84,6 +84,7 @@ void main() {
     },
     skip: notMac,
     timeout: _timeout,
+    tags: 'macos',
   );
 
   test(
@@ -99,6 +100,7 @@ void main() {
     },
     skip: notMac == null ? null : 'macOS only (needs Xcode Simulator)',
     timeout: _timeout,
+    tags: 'ios_sim',
   );
 
   // `//impeller_shader` draws with a shader SkSL cannot compile, which the
@@ -121,6 +123,7 @@ void main() {
       },
       skip: notMac,
       timeout: _timeout,
+      tags: device == 'macos' ? 'macos' : 'ios_sim',
     );
   }
 
@@ -182,22 +185,16 @@ void main() {
       },
       skip: notMac,
       timeout: _timeout,
+      tags: device == 'macos' ? 'macos' : 'ios_sim',
     );
   }
 
-  // Probed once, and read by both the `skip:` and the body; see
-  // plugin_example_e2e_test.dart's Android group for why.
+  // Probed once; see plugin_example_e2e_test.dart's Android group for why.
   final android = AndroidDeviceProbe.detect();
   test(
     'Android: a shader SkSL cannot compile still draws under Impeller',
     () async {
-      final probe = android;
-      if (probe is! AndroidDeviceFound) {
-        fail(
-          'Android device detection failed: '
-          '${(probe as AndroidProbeFailed).reason}',
-        );
-      }
+      final probe = android.require();
       expect(
         await _glassResults(
           target: '//impeller_shader:app_android',
@@ -207,20 +204,14 @@ void main() {
         'impeller_shader_results paint=PASS',
       );
     },
-    skip: android.skipReason,
+    tags: 'android',
     timeout: _timeout,
   );
 
   test(
     'Android: package shaders draw, and a workspace plugin is registered',
     () async {
-      final probe = android;
-      if (probe is! AndroidDeviceFound) {
-        fail(
-          'Android device detection failed: '
-          '${(probe as AndroidProbeFailed).reason}',
-        );
-      }
+      final probe = android.require();
       print('e2e: Android device ${probe.serial} (via ${probe.adb})');
       expect(
         await _glassResults(
@@ -230,7 +221,7 @@ void main() {
         _drewOn('android'),
       );
     },
-    skip: android.skipReason,
+    tags: 'android',
     timeout: _timeout,
   );
 
@@ -243,6 +234,7 @@ void main() {
       );
     },
     timeout: _timeout,
+    tags: 'web',
   );
 
   test(
@@ -259,6 +251,7 @@ void main() {
       );
     },
     timeout: _timeout,
+    tags: 'web',
   );
 
   test(
@@ -274,5 +267,6 @@ void main() {
       );
     },
     timeout: _timeout,
+    tags: 'web',
   );
 }

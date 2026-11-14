@@ -23,12 +23,12 @@ configurations.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
-load("//flutter/private:flutter_aot_target.bzl", "flutter_aot_target")
+load("//flutter:web.bzl", "flutter_web_bundle")
+load("//flutter/private:flutter_aot_snapshot.bzl", "flutter_aot_snapshot")
 load("//flutter/private:flutter_application.bzl", "flutter_application")
-load("//flutter/private:flutter_ios_application.bzl", "flutter_ios_framework")
-load("//flutter/private:flutter_kernel_target.bzl", "flutter_kernel_target")
-load("//flutter/private:flutter_macos_application.bzl", "flutter_macos_framework", "flutter_macos_native_libs")
-load("//flutter/private:flutter_web_application.bzl", "flutter_web_bundle")
+load("//flutter/private:flutter_ios_application.bzl", "flutter_ios_app_framework")
+load("//flutter/private:flutter_kernel.bzl", "flutter_kernel")
+load("//flutter/private:flutter_macos_application.bzl", "flutter_macos_app_framework", "flutter_macos_native_libs")
 load(":apple_bundling.bzl", "fake_application")
 
 _STRIP = "//command_line_option:experimental_output_paths"
@@ -139,7 +139,6 @@ def _config_paths_test_impl(ctx):
 
 _config_paths_test = unittest.make(_config_paths_test_impl)
 
-_PACKAGE = "path_mapping_fixture"
 _MAIN = "lib/web_fixture_main.dart"
 
 def path_mapping_test_suite(name):
@@ -153,33 +152,37 @@ def path_mapping_test_suite(name):
     """
     flutter_application(
         name = name + "_app",
-        package_name = _PACKAGE,
+        package = ":pubspec-metadata",
         main = _MAIN,
         deps = ["//flutter/tests/resources_fixture:resources_library"],
         tags = ["manual"],
     )
-    flutter_kernel_target(
+    flutter_kernel(
         name = name + "_kernel",
-        package_name = _PACKAGE,
+        package = ":pubspec-metadata",
         main = _MAIN,
         tags = ["manual"],
     )
-    flutter_aot_target(
+    flutter_aot_snapshot(
         name = name + "_aot",
-        package_name = _PACKAGE,
+        package = ":pubspec-metadata",
+        main = _MAIN,
+        tags = ["manual"],
+    )
+    flutter_application(
+        name = name + "_web_app",
+        package = ":pubspec-metadata",
         main = _MAIN,
         tags = ["manual"],
     )
     flutter_web_bundle(
         name = name + "_web",
-        package_name = _PACKAGE,
-        main = _MAIN,
+        application = name + "_web_app",
         tags = ["manual"],
     )
     flutter_web_bundle(
         name = name + "_web_js",
-        package_name = _PACKAGE,
-        main = _MAIN,
+        application = name + "_web_app",
         compiler = "dart2js",
         tags = ["manual"],
     )
@@ -191,12 +194,12 @@ def path_mapping_test_suite(name):
             native_libs = ["libadd.dylib"],
             tags = ["manual"],
         )
-        flutter_macos_framework(
+        flutter_macos_app_framework(
             name = name + "_macos_framework" + suffix,
             application = name + "_fake_app" + suffix,
             tags = ["manual"],
         )
-        flutter_ios_framework(
+        flutter_ios_app_framework(
             name = name + "_ios_framework" + suffix,
             application = name + "_fake_app" + suffix,
             tags = ["manual"],
@@ -215,24 +218,25 @@ def path_mapping_test_suite(name):
     })
 
     cases = {
-        "app": ("app", _path_mapped_test, ["FlutterKernelCompile", "FlutterAssetBundle", "FlutterShaderCompile"]),
-        "app_opt": ("app", _path_mapped_opt_test, ["FlutterKernelCompile", "FlutterAssetBundle"] + aot),
-        "app_dbg": ("app", _path_mapped_dbg_test, ["FlutterKernelCompile", "FlutterAssetBundle", "FlutterShaderCompile"]),
-        "kernel": ("kernel", _path_mapped_test, ["FlutterKernelCompile"]),
-        "aot": ("aot", _path_mapped_opt_test, ["FlutterKernelCompile"] + aot),
-        "web": ("web", _path_mapped_test, ["FlutterKernelCompile", "FlutterAssetBundle", "FlutterDart2Wasm", "FlutterDart2JS", "FlutterWebTemplate", "FlutterWebBundle"]),
+        "app": ("app", _path_mapped_test, ["DartKernel", "FlutterAssetBundle", "FlutterShaderCompile"]),
+        "app_opt": ("app", _path_mapped_opt_test, ["DartKernel", "FlutterAssetBundle"] + aot),
+        "app_dbg": ("app", _path_mapped_dbg_test, ["DartKernel", "FlutterAssetBundle", "FlutterShaderCompile"]),
+        "kernel": ("kernel", _path_mapped_test, ["DartKernel"]),
+        "aot": ("aot", _path_mapped_opt_test, ["DartKernel"] + aot),
+        "web": ("web", _path_mapped_test, ["FlutterWebIconKernel", "FlutterAssetBundle", "FlutterDart2Wasm", "FlutterDart2JS", "FlutterWebTemplate", "FlutterWebBundle"]),
         "web_dbg": ("web", _path_mapped_dbg_test, ["FlutterAssetBundle", "FlutterDart2Wasm", "FlutterDart2JS", "FlutterWebTemplate", "FlutterWebBundle"]),
         "web_js": ("web_js", _path_mapped_opt_test, ["FlutterDart2JS", "FlutterWebTemplate", "FlutterWebBundle"]),
         "macos_framework_debug": ("macos_framework_debug", _path_mapped_test, ["FlutterMacOSFramework"]),
-        "macos_framework_release": ("macos_framework_release", _path_mapped_test, ["FlutterMacOSFramework"]),
+        "macos_framework_release": ("macos_framework_release", _path_mapped_test, ["FlutterAppleSplitDebugInfo", "FlutterMacOSFramework"]),
         "macos_native_libs": ("macos_native_libs", _path_mapped_test, ["FlutterMacOSNativeLibs"]),
         "ios_framework_debug": ("ios_framework_debug", _path_mapped_test, ["FlutterIOSStubDylib", "FlutterIOSDebugAssets"]),
-        "ios_framework_release": ("ios_framework_release", _path_mapped_test, ["FlutterIOSRetagDylib", "FlutterIOSCopyAssets"]),
+        "ios_framework_release": ("ios_framework_release", _path_mapped_test, ["FlutterAppleSplitDebugInfo", "FlutterIOSCopyAssets"]),
     }
 
-    # Targets an iOS rule: there is no Linux-host-to-iOS Flutter toolchain,
-    # so the rule cannot be analysed on a Linux host.
-    macos_only = ["ios_framework_debug", "ios_framework_release"]
+    # Targets an iOS rule (there is no Linux-host-to-iOS Flutter toolchain, so
+    # it cannot be analysed on a Linux host), or a release macOS framework,
+    # which runs Xcode's `dsymutil` and `strip`.
+    macos_only = ["ios_framework_debug", "ios_framework_release", "macos_framework_release"]
 
     tests = []
     for case, (fixture, rule, mnemonics) in cases.items():

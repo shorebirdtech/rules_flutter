@@ -1,0 +1,70 @@
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
+load("@rules_dart//dart:defs.bzl", "dart_code_asset", "dart_library")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata")
+
+# A package with two native libraries, each a code asset, and a link hook that
+# keeps those whose `Op` the app constructs. The app constructs `Op('kept')`
+# only, so a release build ships `libpick_kept` and not `libpick_dropped`; a
+# debug build runs no hook and ships both.
+[
+    cc_library(
+        name = "pick_%s_cc" % op,
+        srcs = ["native/pick_%s.c" % op],
+    )
+    for op in [
+        "kept",
+        "dropped",
+    ]
+]
+
+[
+    cc_shared_library(
+        name = "pick_" + op,
+        # A Windows DLL exports nothing unless told to.
+        features = select({
+            "@platforms//os:windows": ["windows_export_all_symbols"],
+            "//conditions:default": [],
+        }),
+        deps = [":pick_%s_cc" % op],
+    )
+    for op in [
+        "kept",
+        "dropped",
+    ]
+]
+
+[
+    dart_code_asset(
+        name = op,
+        asset_id = "package:pick/" + op,
+        file = ":pick_" + op,
+    )
+    for op in [
+        "kept",
+        "dropped",
+    ]
+]
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "pick",
+    code_assets = [
+        ":dropped",
+        ":kept",
+    ],
+    link_hook = "hook/link.dart",
+)
+
+dart_library(
+    name = "pick",
+    srcs = ["lib/pick.dart"],
+    package = ":pubspec-metadata",
+    visibility = ["//visibility:public"],
+    deps = [
+        "@deps//:code_assets",
+        "@deps//:hooks",
+        "@deps//:meta",
+        "@deps//:record_use",
+    ],
+)

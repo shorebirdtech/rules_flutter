@@ -23,7 +23,6 @@ import 'package:flutter_bazel_dev_tool/native_pipeline_assembler.dart';
 import 'package:flutter_bazel_dev_tool/reload_pipeline.dart';
 import 'package:flutter_bazel_dev_tool/session.dart';
 import 'package:flutter_bazel_dev_tool/session_host.dart';
-import 'package:flutter_bazel_dev_tool/toolchain_info.dart';
 import 'package:flutter_bazel_dev_tool/vm_service_client.dart';
 import 'package:test/test.dart';
 import 'package:vm_service/vm_service.dart';
@@ -35,21 +34,14 @@ import 'fakes.dart';
 /// immediately and says so in the reason the gate carries.
 const _noWorkspace = '/nonexistent/rules_flutter/assembler_test_workspace';
 
-final _toolchain = ToolchainPaths(
-  dart: '/nonexistent/dart',
-  dartaotruntime: '/nonexistent/dartaotruntime',
-  frontendServer: '/nonexistent/frontend_server.dart.snapshot',
-  platformDill: '/nonexistent/platform_strong.dill',
-  patchedSdkRoot: '/nonexistent/flutter_patched_sdk',
-);
-
 Map<String, dynamic> buildInfoJson({String compilationMode = 'dbg'}) => {
   'label': '@@//:app_flutter',
   'compilationMode': compilationMode,
   'platformBuildArgs': <String>[],
-  'dartDefines': <String>['E2E_MESSAGE=from,the,app'],
+  'extraDartDefines': <String>['E2E_MESSAGE=from,the,app'],
   'assetsDir': 'bazel-out/darwin_arm64-dbg/bin/app_flutter_flutter_assets',
   'targetPlatform': 'macos',
+  'trackWidgetCreation': false,
 };
 
 void main() {
@@ -63,6 +55,8 @@ void main() {
     bool withVmService = true,
     bool shuttingDown = false,
     bool extensionRegistered = true,
+    List<String> sessionBuildArgs = const [],
+    List<List<String>>? bazelCalls,
   }) async {
     final logger = Logger('test.native_pipeline_assembler');
     final host = SessionHost(
@@ -72,8 +66,14 @@ void main() {
       // a test has no runfiles to find: what [_noWorkspace] relies on is the
       // spawn itself refusing the directory.
       bazel: Bazel.uninterruptible(
-        spawn: (args, {required workingDirectory}) =>
-            Process.start('bazel', args, workingDirectory: workingDirectory),
+        spawn: (args, {required workingDirectory}) {
+          bazelCalls?.add(args);
+          return Process.start(
+            'bazel',
+            args,
+            workingDirectory: workingDirectory,
+          );
+        },
         because: 'this test starts it straight from PATH',
       ),
     );
@@ -113,9 +113,9 @@ void main() {
     final pipeline = ReloadPipeline(host: host);
     await NativePipelineAssembler(
       workspace: _noWorkspace,
-      toolchain: _toolchain,
       target: '//:app',
       configDevice: _StubDevice(),
+      sessionBuildArgs: sessionBuildArgs,
       host: host,
       pipeline: pipeline,
       logger: logger,
@@ -125,6 +125,25 @@ void main() {
   }
 
   group('NativePipelineAssembler', () {
+    // `--config` reaches the pipeline as flags in `sessionBuildArgs`, so the dev
+    // build's cquery sees the configuration the initial build used.
+    test('asks bazel about the dev build with the user\'s configs', () async {
+      final calls = <List<String>>[];
+      await assembleAgainst(
+        buildInfo: buildInfoJson(),
+        sessionBuildArgs: userBazelFlags(
+          configs: ['a', 'b'],
+          buildArgs: ['--jobs=4'],
+        ),
+        bazelCalls: calls,
+      );
+      expect(calls, isNotEmpty);
+      expect(
+        calls.first,
+        containsAllInOrder(['cquery', '--config=a', '--config=b', '--jobs=4']),
+      );
+    });
+
     test('reads the app’s build record before it builds anything', () async {
       // A release app cannot be reloaded, and the app is the only thing that
       // knows it is one. Reported here means reported before the dev build —
@@ -248,7 +267,6 @@ void main() {
       final pipeline = ReloadPipeline(host: host);
       await NativePipelineAssembler(
         workspace: _noWorkspace,
-        toolchain: _toolchain,
         target: '//:app',
         configDevice: _StubDevice(),
         host: host,

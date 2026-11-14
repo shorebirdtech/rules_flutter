@@ -1,0 +1,34 @@
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_library", "flutter_test")
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "shapes",
+)
+
+# `bazel coverage --combined_report=lcov //coverage/...` reports this library
+# and `//coverage/units`, which the test reaches through it, by their paths in
+# the workspace; `//coverage/check` checks the report against the `// covered`
+# and `// uncovered` marks in their sources. With
+# `--instrumentation_filter=//coverage/units` it reports that library alone.
+flutter_library(
+    name = "shapes",
+    srcs = ["lib/shapes.dart"],
+    package = ":pubspec-metadata",
+    deps = ["//coverage/units"],
+)
+
+exports_files(
+    ["lib/shapes.dart"],
+    visibility = ["//coverage:__subpackages__"],
+)
+
+flutter_test(
+    name = "shapes_test",
+    size = "small",
+    main = "test/shapes_test.dart",
+    package = ":pubspec-metadata",
+    deps = [
+        ":shapes",
+        "@deps//:flutter_test",
+    ],
+)

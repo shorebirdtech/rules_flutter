@@ -1,0 +1,11 @@
+load("@rules_flutter//flutter:defs.bzl", "flutter_library")
+
+exports_files(["main.dart"])
+
+flutter_library(
+    name = "own",
+    srcs = ["own.dart"],
+    assets = ["r.txt"],
+    package = "//apps/own:pubspec-metadata",
+    visibility = ["//apps/own:__pkg__"],
+)

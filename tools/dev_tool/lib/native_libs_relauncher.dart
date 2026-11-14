@@ -6,16 +6,14 @@
 /// therefore restarts into the old machine code, silently and with a success
 /// message. The only fix is a new process.
 ///
-/// So `app.restart` asks here first. A fingerprint of the native libraries is
-/// recorded at assembly; on each restart they are rebuilt and re-fingerprinted,
-/// and only a difference buys a relaunch, which is when the bundle itself is
-/// rebuilt. Apps with no loose native libraries never construct one of these at
-/// all and keep the instant restart path.
+/// So `app.restart` asks here first. A fingerprint of the launched bundle's
+/// loose native libraries is recorded at assembly; on each restart the bundle is
+/// rebuilt and re-fingerprinted, and only a difference buys a relaunch. Apps
+/// with no loose native libraries never construct one of these at all and keep
+/// the instant restart path.
 library;
 
 import 'dart:async';
-
-import 'package:path/path.dart' as p;
 
 import 'app_log_sink.dart';
 import 'hot_reload/app_instance.dart' as hr;
@@ -26,28 +24,35 @@ import 'native_libs_fingerprint.dart';
 import 'native_libs_watch.dart';
 import 'relaunch_outcome.dart';
 import 'session.dart';
+import 'tool_services.dart';
 import 'vm_service_client.dart';
 
 class Relauncher {
-  /// The launch artifact to relaunch from.
+  /// The launch artifact, both to relaunch from and to fingerprint.
   final String appFile;
 
-  /// Rebuilds the native libraries and fingerprints them, the same way the
-  /// fingerprint [liveFingerprint] seeds was taken. Null when the build failed.
-  ///
-  /// Asked on every restart, so it builds as little as answers the question:
-  /// the assembler builds only the `flutter_native_libs` output group, not the
-  /// signed bundle, which a Dart-only edit would rebuild (kernel and all) for
-  /// a restart that then compiles the same edit again.
-  final Future<Map<String, String>?> Function() fingerprint;
-
-  /// Rebuilds the launch target, before a relaunch. Injected rather than called
-  /// directly so this is testable without bazel — and because the *launch*
-  /// target is what has to be rebuilt, not the flutter_application: a platform
-  /// rule reaches the flutter_application through a transition, so building it
-  /// alone writes a different configuration's outputs and leaves the running
-  /// bundle untouched.
+  /// Rebuilds the launch target. Injected rather than called directly so this
+  /// is testable without bazel — and because the *launch* target is what has to
+  /// be rebuilt, not the flutter_application: a platform rule reaches the
+  /// flutter_application through a transition, so building it alone writes a
+  /// different configuration's outputs and leaves the running bundle untouched.
   final Future<bool> Function() rebuild;
+
+  /// Reads the fingerprint of the native libraries the tree now builds without
+  /// building [rebuild]'s launch artifact, or null when the build it needed
+  /// failed.
+  ///
+  /// For a platform whose launch artifact costs far more than the libraries in
+  /// it: an APK is dexed, linked, zipped and signed, an Apple or desktop debug
+  /// bundle carries the whole program's kernel, and a restart that finds
+  /// its libraries unchanged needs none of that. Null for a device with no
+  /// such way to read them (`Device.launchBundleParts`), so [rebuild] runs
+  /// first and its bundle is read.
+  ///
+  /// The fingerprints it returns must be the form the `liveFingerprint` was
+  /// taken in, since they are compared. [rebuild] still runs before a
+  /// relaunch, because that installs the artifact.
+  final Future<Map<String, String>?> Function()? probeLibs;
 
   /// The run's live session list — the same instance the rest of the run holds,
   /// because [DeviceSession.relaunch] swaps each session's app instance in
@@ -67,6 +72,18 @@ class Relauncher {
   final String assetsDir;
 
   final Logger logger;
+
+  /// What each reconnected VM client registers for the app's other clients —
+  /// the same services the launch's client registered, since a relaunched
+  /// app's DevTools still reloads through them. See [ToolServices].
+  final ToolServices? services;
+
+  /// Told each relaunched app's new VM service, once its client is connected:
+  /// a relaunch is a new process, so whatever found the old one by its
+  /// address — the Dart Tooling Daemon's list of apps, chiefly — has to be
+  /// told the new one.
+  final Future<void> Function(DeviceSession session, Uri vmServiceWsUri)?
+  onReconnected;
 
   /// The fingerprint of what the running processes actually launched with.
   /// Advanced only after a successful relaunch, so a rebuild that fails leaves
@@ -96,13 +113,15 @@ class Relauncher {
 
   Relauncher({
     required this.appFile,
-    required this.fingerprint,
     required this.rebuild,
+    this.probeLibs,
     required this.sessions,
     required this.protocol,
     required this.orchestrator,
     required this.assetsDir,
     required this.logger,
+    this.services,
+    this.onReconnected,
     required Map<String, String> liveFingerprint,
     this.nativeLibs,
     this.patchedLibs,
@@ -115,8 +134,19 @@ class Relauncher {
   /// caller to run the ordinary isolate restart, and the other two are what the
   /// restart's reply is built from. The words are the renderers' job.
   Future<RelaunchOutcome> relaunchIfNeeded() async {
-    final fingerprint = await this.fingerprint();
-    if (fingerprint == null) return _buildFailed;
+    const buildFailed = RelaunchBuildFailed(
+      'bazel build failed during restart; see build output.',
+    );
+    final probe = probeLibs;
+    final Map<String, String> fingerprint;
+    if (probe == null) {
+      if (!await rebuild()) return buildFailed;
+      fingerprint = await nativeLibsFingerprint(appFile);
+    } else {
+      final probed = await probe();
+      if (probed == null) return buildFailed;
+      fingerprint = probed;
+    }
     final patched = patchedLibs?.call() ?? const [];
     final bundleMoved = !fingerprintsEqual(fingerprint, _live);
     if (!bundleMoved && patched.isEmpty) {
@@ -126,16 +156,18 @@ class Relauncher {
     // The bundle's own difference when it has one. Only when it has none is the
     // patch the reason — an edit patched in and then undone — and then the
     // patched libraries are what the reply has to name.
-    final changed = bundleMoved
-        ? {for (final lib in changedLibs(_live, fingerprint)) p.basename(lib)}
-              .toList()
-        : patched;
-    if (!await rebuild()) return _buildFailed;
+    final changed = bundleMoved ? changedLibs(_live, fingerprint) : patched;
     logger.info({
       'message': 'native_libs_changed',
       'text': 'Native libraries changed (${changed.join(', ')}); relaunching.',
       'libs': changed,
     });
+
+    // The relaunch installs the launch artifact, so the one a probe skipped is
+    // built now that a process is certain to be replaced. Where there is no
+    // probe it was built above, and this is the same build, which the caller's
+    // per-command cache answers without running bazel again.
+    if (probe != null && !await rebuild()) return buildFailed;
 
     final relaunched = <DeviceSession>[];
     final failures = <String, String>{};
@@ -152,11 +184,17 @@ class Relauncher {
       // a driver that is mid-restart.
       try {
         await session.relaunch(() async {
-          await session.vmClient?.disconnect();
+          // A device that shares this filesystem is not asked to delete the
+          // devFS it is about to lose: the old process may still hold files
+          // of it open, which Windows refuses to delete. The directory goes
+          // once the process has exited.
+          final local = session.device.sharesHostFilesystem;
+          await session.vmClient?.disconnect(leaveDevFS: local);
           // Stopping closes the old instance's log stream, so the sink
           // attached below is the only live one — the relaunched app's output
           // never doubles up with the previous instance's.
           await session.device.stop(session.appInstance);
+          if (local) await session.vmClient?.removeAbandonedDevFS();
           return session.device.launch(
             appFile,
             onLog: appLogSinkFor(
@@ -211,10 +249,6 @@ class Relauncher {
     );
   }
 
-  static const _buildFailed = RelaunchBuildFailed(
-    'bazel build failed during restart; see build output.',
-  );
-
   /// Tell the reload path that the running process holds what the tree builds.
   ///
   /// The reload path decides from cheaper evidence than this class: the watch
@@ -259,7 +293,7 @@ class Relauncher {
     Object? lastConnectFailure;
     if (uri != null) {
       for (var attempt = 0; attempt < 5; attempt++) {
-        client = VmServiceClient();
+        client = VmServiceClient(services: services);
         try {
           await client.connect(uri);
           break;
@@ -297,14 +331,12 @@ class Relauncher {
       return false;
     }
 
-    protocol.appDebugPort(
-      session.appId,
-      uri.replace(
-        scheme: uri.scheme == 'https' ? 'wss' : 'ws',
-        path: '${uri.path}ws',
-      ),
-      uri,
+    final wsUri = uri.replace(
+      scheme: uri.scheme == 'https' ? 'wss' : 'ws',
+      path: '${uri.path}ws',
     );
+    protocol.appDebugPort(session.appId, wsUri, uri);
+    await onReconnected?.call(session, wsUri);
     if (assetsDir.isNotEmpty) {
       client.assetDirectory = assetsDir;
       client.devicePathsAreWindows = session.device.usesWindowsPaths;

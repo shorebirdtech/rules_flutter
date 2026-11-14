@@ -1,0 +1,19 @@
+{
+  "optimizations": {
+    "splitsConfig": {
+      "splitDimension": [
+        { "value": "ABI" },
+        { "value": "SCREEN_DENSITY" },
+        { "value": "LANGUAGE" }
+      ]
+    },
+    "uncompressNativeLibraries": {
+      "enabled": true,
+      "alignment": "PAGE_ALIGNMENT_16K"
+    },
+    "uncompressDexFiles": {
+      "enabled": true,
+      "uncompressedDexTargetSdk": "SDK_31"
+    }
+  }
+}

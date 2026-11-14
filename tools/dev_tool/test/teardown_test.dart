@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_bazel_dev_tool/teardown.dart';
 import 'package:test/test.dart';
 
@@ -52,6 +54,38 @@ void main() {
       await teardown.run();
 
       expect(disposals, 1);
+    });
+
+    // A run is torn down from more than one place: a failure or the apps
+    // ending starts it, and the command's own `finally` runs it again on the
+    // way out. The second must not return while the first is still releasing
+    // things, or the process exits with a bazel command or an app half
+    // stopped.
+    test('a second run waits for the one in progress to finish', () async {
+      final release = Completer<void>();
+      final teardown = Teardown();
+      await teardown.add(() => release.future);
+
+      final first = teardown.run();
+      var secondDone = false;
+      final second = teardown.run().then((_) => secondDone = true);
+      await pumpEventQueue();
+      expect(secondDone, isFalse, reason: 'the first is still disposing');
+
+      release.complete();
+      await Future.wait([first, second]);
+      expect(secondDone, isTrue);
+    });
+
+    // A caller that gets no exception reads that as "everything was
+    // released", whichever caller it is.
+    test('a second run shares the first one\'s failure', () async {
+      final teardown = Teardown();
+      await teardown.add(() async => throw StateError('adb went away'));
+
+      final first = expectLater(teardown.run(), throwsStateError);
+      await expectLater(teardown.run(), throwsStateError);
+      await first;
     });
 
     test('awaits each disposer before starting the next', () async {

@@ -33,7 +33,7 @@ flutter_ios_app(
     name = "app_device",
     application = ":app_flutter",
     bundle_id = "com.rulesflutter.ios.example",
-    provisioning_profile = "//device:profile",
+    provisioning_profile = ":device_profile",
 )
 ```
 
@@ -52,14 +52,20 @@ mv device/BUILD.bazel.example device/BUILD.bazel
 # 3. Set device/BUILD.bazel's profile_name to that profile's own Name, and
 #    make sure //:app_device's bundle_id is covered by its App ID.
 
-# 4. Build
+# 4. Point the device targets at the profile (.bazelrc.user is gitignored)
+echo 'common --//:device_profile=//device:profile' >> .bazelrc.user
+
+# 5. Build
 bazel build //:app_device -c opt --ios_multi_cpus=arm64
 ```
 
 The `device/` directory is gitignored — it holds nothing but the credential,
-so `//:app_device` itself stays in version control. It is tagged `manual`, so
-`bazel build //...` on a fresh clone never expands it and therefore never
-loads the missing `//device` package.
+so `//:app_device` itself stays in version control. Its
+`provisioning_profile` is the `//:device_profile` flag, which is checked in and
+defaults to a target that fails with these setup steps; step 4 points it at
+your profile. Without the flag, `bazel query 'deps(//...)'` on a fresh clone
+would follow a label into the `//device` package that does not exist. The
+target is also tagged `manual`, so `bazel build //...` skips it.
 
 ### Getting a provisioning profile
 
@@ -76,9 +82,9 @@ change can substitute for it. Two routes:
     -allowProvisioningUpdates -allowProvisioningDeviceRegistration build
   ```
   This example happens to keep `ios/Runner.xcodeproj`, but **your app need
-  not**: `flutter_ios_app` reads only `ios/Runner/*.swift` and
-  `ios/Runner/Info.plist`, and a `flutter create --platforms=ios .` tree
-  checked into a Bazel repository has no reason to keep the project. Any
+  not**: `flutter_ios_app` reads no Xcode project, and a `flutter create
+  --platforms=ios .` tree checked into a Bazel repository has no reason to
+  keep it. Any
   scratch Xcode project whose `PRODUCT_BUNDLE_IDENTIFIER` is your bundle id
   will mint the same profile — override it with
   `PRODUCT_BUNDLE_IDENTIFIER=<id> DEVELOPMENT_TEAM=<id>` arguments.
@@ -97,9 +103,11 @@ for f in ~/Library/Developer/Xcode/UserData/Provisioning\ Profiles/*.mobileprovi
 done
 ```
 
-**Profile expired?** Free-team ("Personal Team") profiles expire after ~7
-days. When the bazel build fails with *"no provisioning profile was found
-named …"*, mint a fresh one the same way.
+**Profile expired?** Free-team ("Personal Team") profiles expire after
+seven days. rules_apple takes the newest profile of the name and does not skip
+an expired one, so the build still succeeds and the device refuses the app:
+mint a fresh one the same way. A build that fails with *"no provisioning
+profile was found named …"* has no profile of that name at all.
 
 ## App extensions
 
@@ -109,7 +117,7 @@ extension. The app and both extensions share the App Group
 `group.com.rulesflutter.ios.example`.
 
 `//:app_extensions_device` is the same app for a device, signed with
-`//device:profile`. The extensions are built twice, by `extensions/defs.bzl`,
+your profile (`//:device_profile`). The extensions are built twice, by `extensions/defs.bzl`,
 because each needs its own `provisioning_profile`. The team wildcard profile
 cannot grant an App Group, so the device variant leaves the group out of the app
 and both extensions. To keep it, register an App ID with the group for the app

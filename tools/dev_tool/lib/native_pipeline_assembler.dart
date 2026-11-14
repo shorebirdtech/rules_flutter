@@ -35,6 +35,7 @@ import 'hot_reload/source_uri_resolver.dart';
 import 'hot_reload/reload_orchestrator.dart';
 import 'hot_reload/session_reloader.dart';
 import 'hot_reload/workspace.dart';
+import 'launch_bundle_parts.dart';
 import 'logging.dart';
 import 'native_hot_patcher.dart';
 import 'native_libs_fingerprint.dart';
@@ -46,6 +47,8 @@ import 'reload_pipeline.dart';
 import 'session.dart';
 import 'session_host.dart';
 import 'temp_dir.dart';
+import 'tool_services.dart';
+import 'tooling_daemon.dart';
 import 'toolchain_info.dart';
 import 'vm_service_client.dart';
 
@@ -64,17 +67,20 @@ class NativeLaunch {
   /// The artifact the app was launched from.
   final String appFile;
 
-  /// When the build [appFile] came from had finished, on the filesystem's
-  /// clock. A build output stamped no later than this is in the launched
-  /// bundle; one stamped after it is code the process never loaded.
-  final DateTime builtAt;
+  /// The fingerprint of the native libraries in the bundle's parts
+  /// (`Device.launchBundleParts`), read as the build of [appFile] returned, or
+  /// null for a device that has no parts.
+  ///
+  /// Read then, not at assembly: assembly comes after the launch, and an edit
+  /// saved in between would be in a build of the parts made then and not in
+  /// the process, so no restart would ever relaunch over it.
+  final Map<String, String>? partsNativeLibs;
 
-  const NativeLaunch({required this.appFile, required this.builtAt});
+  const NativeLaunch({required this.appFile, this.partsNativeLibs});
 }
 
 class NativePipelineAssembler {
   final String workspace;
-  final ToolchainPaths toolchain;
 
   /// The target the user named. Also what gets rebuilt for assets and for a
   /// relaunch — never the flutter_application, whose own outputs live in a
@@ -87,14 +93,18 @@ class NativePipelineAssembler {
   /// attach needs.
   final Device configDevice;
 
-  /// The user's `--build-arg` values.
+  /// The bazel flags of the command, but for the device's: the user's
+  /// `--config`s and `--build-arg`s, and on `run` its `--dart-define`s and
+  /// mode flags, in the order the app's own build took them.
   ///
-  /// These reach every bazel invocation of the session, dev build included.
-  /// They cannot be recovered from the running app — a build arg is not
-  /// recorded anywhere in the binary — so on `attach` the user has to pass the
-  /// same ones the run used. Omitting them changes the configuration, which
-  /// the assets-tree check then reports by name.
-  final List<String> userBuildArgs;
+  /// These reach every bazel invocation of the session, dev build included, so
+  /// on `run` each is in exactly the options of the build that launched the
+  /// app, and Bazel keeps that build's analysis. A `--build-arg` cannot be
+  /// recovered from the running app, since nothing in the binary records it,
+  /// so on `attach` the user has to pass the same ones the run used. Omitting
+  /// them changes the configuration, which the assets-tree check then reports
+  /// by name. The app's defines it does recover: see [_replayedDefines].
+  final List<String> sessionBuildArgs;
 
   final SessionHost host;
   final ReloadPipeline pipeline;
@@ -114,10 +124,9 @@ class NativePipelineAssembler {
 
   NativePipelineAssembler({
     required this.workspace,
-    required this.toolchain,
     required this.target,
     required this.configDevice,
-    this.userBuildArgs = const [],
+    this.sessionBuildArgs = const [],
     required this.host,
     required this.pipeline,
     required this.logger,
@@ -133,22 +142,31 @@ class NativePipelineAssembler {
   /// be a bug to fix, not a case to fall back from.
   late final BuildInfo _info;
 
-  /// The bazel flags that produce the *dev* outputs: the dev config, the dev
-  /// package config, the regenerated codegen sources.
+  /// The `--dart-define`s the app was built with that [sessionBuildArgs] and
+  /// the workspace's `.bazelrc` do not already apply, as flags.
   ///
   /// The defines come from the app rather than from a flag the user repeats,
   /// which is what makes them right on both routes in: the dev config's
-  /// `dartDefines` are what the resident frontend_server replays as `-D` on
-  /// every recompile, so a dev build that did not know the app's defines
-  /// produces an app that loses them at the first reload.
+  /// `dartDefines` (the user's defines, the flavor's `FLUTTER_APP_FLAVOR` and
+  /// the app and SDK version ones) are what the resident frontend_server
+  /// replays as `-D` on every recompile, so a dev build that did not know the
+  /// app's defines produces an app that loses them at the first reload.
   ///
-  /// Deliberately not [BuildInfo.buildArgs]: the platform flags that value
-  /// carries put a build in the app's *launch* configuration, and these outputs
-  /// are read from the configuration this command builds them in.
+  /// Only the ones missing, because a define applied twice changes the
+  /// options and so throws away Bazel's analysis of the app. On `run` none
+  /// are: [sessionBuildArgs] carries the run's own `--dart-define`s.
+  late final List<String> _replayedDefines;
+
+  /// The bazel flags that produce the *dev* outputs: the dev config, the dev
+  /// package config, the regenerated codegen sources.
+  ///
+  /// Deliberately not [BuildInfo.platformBuildArgs]: the platform flags that
+  /// value carries put a build in the app's *launch* configuration, and these
+  /// outputs are read from the configuration this command builds them in.
   List<String> get _devArgs => [
     ...configDevice.buildArgs,
-    ...dartDefineFlags(_info.dartDefines),
-    ...userBuildArgs,
+    ...sessionBuildArgs,
+    ..._replayedDefines,
   ];
 
   /// The flags the running app says produced it, used by every bazel
@@ -159,7 +177,11 @@ class NativePipelineAssembler {
   /// configuration. Keeping one list per purpose is what stops the tracked
   /// tree and the rebuilt tree from drifting apart when a user passes
   /// `--build-arg`.
-  List<String> get _launchArgs => _info.buildArgs(extra: userBuildArgs);
+  List<String> get _launchArgs => [
+    ..._info.platformBuildArgs,
+    ...sessionBuildArgs,
+    ..._replayedDefines,
+  ];
 
   /// Assemble, or settle [ReloadPipeline.ready] with the reason it could not be.
   ///
@@ -296,10 +318,9 @@ class NativePipelineAssembler {
   Future<void> _assembleAgain() async {
     await NativePipelineAssembler(
       workspace: workspace,
-      toolchain: toolchain,
       target: target,
       configDevice: configDevice,
-      userBuildArgs: userBuildArgs,
+      sessionBuildArgs: sessionBuildArgs,
       host: host,
       pipeline: pipeline,
       logger: logger,
@@ -333,6 +354,16 @@ class NativePipelineAssembler {
     // frontend_server replays on every recompile — read any later and the first
     // reload compiles against defines the app does not have.
     _info = await _readBuildInfo(client);
+    _replayedDefines = dartDefineFlags(
+      definesToReplay(
+        applied: await host.bazel.cqueryExtraDartDefines(
+          workspace: workspace,
+          compilationMode: 'dbg',
+          extraArgs: [...configDevice.buildArgs, ...sessionBuildArgs],
+        ),
+        built: _info.extraDartDefines,
+      ),
+    );
 
     // Build the flutter_application target directly to materialize its
     // DefaultInfo — the hot-reload `_dev_config.json` + dev
@@ -391,18 +422,23 @@ class NativePipelineAssembler {
     // declared and did not write fails here, naming the file, rather than as
     // a frontend_server exit 255 several steps later.
     requireDeclaredFilesExist(devConfig);
+    // The apps are already up and connected, so their clients register it now;
+    // a re-dial or a relaunch registers it with the rest.
+    host.toolServices.flutterVersion = FlutterSdkVersion.fromDevConfig(
+      devConfig,
+    );
+    await Future.wait([
+      for (final session in host.sessions)
+        if (session.vmClient case final client?)
+          client.registerFlutterVersion(),
+    ]);
     // The dev package_config points a source-assembled app package at the live
-    // source + generated roots via filesystemScheme; for non-codegen apps it
-    // equals the build config.
+    // source + generated roots via filesystemScheme, and every other package
+    // at its directory.
     //
-    // Always the dev one, named rather than discovered among the build outputs.
-    // The app's DefaultInfo carries two outputs ending in `package_config.json`
-    // — the build's `<name>.package_config.json` and the dev
-    // `<name>.dev_package_config.json` — so a suffix match picks between them
-    // by list order. The build one maps `package:` URIs into the frozen
-    // `.pkgsrcs` tree the bundle was assembled from, so a compiler pointed at
-    // it reads a copy of the source instead of the source: every edit compiles
-    // cleanly, reports a successful reload, and changes nothing on screen.
+    // Always the dev one, named in the dev config. The build's own compile
+    // reads its packages under a scheme rooted in its sandbox, which only that
+    // action can resolve.
     //
     // The empty case below cannot arise on native: `flutter_application.bzl`
     // writes this `_dev_config.json` only inside `if is_debug and
@@ -416,8 +452,7 @@ class NativePipelineAssembler {
       throw DevToolException(
         'The build emitted a dev config at $devConfigPath with no '
         'devPackageConfig. Without it this run has no package config that '
-        'resolves to live sources, and every hot reload would recompile the '
-        'copy of the tree the bundle was assembled from.',
+        'resolves to live sources, so no hot reload could compile an edit.',
       );
     }
     final packageConfig = await _stablePackageConfig(
@@ -429,8 +464,11 @@ class NativePipelineAssembler {
     // an iOS run driven from a macOS host, and feeding the host's registers
     // the wrong plugin set after a hot restart, silently.
     final registrant = devConfig.registrantFor(_info.targetPlatform);
+    // The compiler is the one the build resolved, not one found in the
+    // output base: a workspace can declare several SDKs and custom engines,
+    // and only the build knows which one this app compiles with.
     final compilerConfig = configDevice.createCompilerConfig(
-      toolchain,
+      devConfig.patchedSdkRoot,
       fileSystemRoots: devConfig.filesystemRoots,
       fileSystemScheme: devConfig.filesystemScheme,
       // The app's own record travels with them. `flutter_compile_kernel` bakes
@@ -466,12 +504,16 @@ class NativePipelineAssembler {
       // `toMultiRootPath`), trying a `package:` URI first, which keeps every
       // reference to a file under a single URI identity in the incremental
       // compiler's state. Nothing else refers to the registrant — no import, no
-      // invalidation, and it sits outside every package's `libRoot`, so it is
-      // not reachable as a `package:` URI — leaving no second identity to
+      // invalidation, and it sits outside every package's `packageRoot`, so it
+      // is not reachable as a `package:` URI — leaving no second identity to
       // collide with.
       dartPluginRegistrantUri: registrant.isEmpty
           ? ''
           : Uri.file(registrant).toString(),
+      // The app says whether its kernel has widget creation locations, so a
+      // reload's recompiled libraries keep them: the build's `track_widget_creation`
+      // is the app's, not something the host-configured dev build knows.
+      trackWidgetCreation: _info.trackWidgetCreation,
       enableExperiments: devConfig.enableExperiments,
     );
     // A device with no compiler config has no incremental compiler, so there is
@@ -542,7 +584,7 @@ class NativePipelineAssembler {
     final units = await Future.wait([
       for (final session in host.sessions)
         if (session.vmClient != null)
-          _assembleUnit(session, compilerConfig, packageConfig),
+          _assembleUnit(session, devConfig, compilerConfig, packageConfig),
     ]);
     // Null means the compiler itself is gone — not that the source failed to
     // compile, which is a state the unit carries and recovers from. All or
@@ -564,7 +606,10 @@ class NativePipelineAssembler {
       return;
     }
 
-    final assetsDir = await _wireAssets(shaders: devConfig.shaders);
+    final assetsDir = await _wireAssets(
+      assetRoots: devConfig.assetRoots,
+      shaders: devConfig.shaders,
+    );
 
     // For codegen apps, rebuild the flutter_application via bazel before each
     // reload/restart so edits to codegen inputs are regenerated. Null for
@@ -727,6 +772,7 @@ class NativePipelineAssembler {
   ///
   /// Returns the directory.
   Future<String> _wireAssets({
+    required Map<String, String> assetRoots,
     required Map<String, List<String>> shaders,
   }) async {
     final candidates = await host.bazel.cqueryFlutterAppFiles(
@@ -765,11 +811,14 @@ class NativePipelineAssembler {
       AssetBundle(
         directory: assetsDir,
         workspaceRoot: workspace,
+        assetRoots: assetRoots,
         shaders: shaders,
       ),
       builtBefore: builtBefore,
     );
-    pipeline.rebuildAssets = _bundleRebuild.run;
+    // The refreshed assets, built the cheapest way the platform offers: an
+    // APK is not packaged to learn that an asset moved.
+    pipeline.rebuildAssets = _rebuildAssets;
     return assetsDir;
   }
 
@@ -787,10 +836,53 @@ class NativePipelineAssembler {
   /// asset sources moved asks for this build twice — once to refresh the bundle
   /// it diffs, once before the native-libs comparison — and the second is a
   /// bazel invocation that can only confirm the first.
-  late final BundleRebuild _bundleRebuild = BundleRebuild(
+  late final BundleRebuild<bool> _bundleRebuild = BundleRebuild(
     _rebuildBundle,
     () => pipeline.command,
   );
+
+  /// How a restart reads the bundle without building the launch artifact, if
+  /// the device has such a way (an APK is not packaged for it).
+  LaunchBundleParts? get _parts => configDevice.launchBundleParts;
+
+  /// The bundle's assets and native libraries alone, built through
+  /// [LaunchBundleParts]; deduplicated within one command like [_bundleRebuild],
+  /// for the same reason: the asset refresh and the native-libs check ask for
+  /// it in one restart, and the second can only confirm the first.
+  ///
+  /// In the configuration the running app used, which is the reason it goes
+  /// through the launch target and its aspect rather than building the
+  /// flutter_application: see [_rebuildBundle].
+  late final BundleRebuild<BazelAspectOutputs> _partsRebuild = BundleRebuild(
+    _buildParts,
+    () => pipeline.command,
+  );
+
+  Future<BazelAspectOutputs> _buildParts() => host.bazel.buildAspectOutputs(
+    target,
+    workspace: workspace,
+    aspect: _parts!.aspect,
+    outputGroup: _parts!.assetsGroup,
+    otherGroups: [_parts!.nativeLibsGroup],
+    compilationMode: 'dbg',
+    extraArgs: _launchArgs,
+  );
+
+  /// Refresh the assets the app reads: the launch target's bundle, or only its
+  /// parts where the device can read them without the artifact.
+  Future<bool> _rebuildAssets() async => _parts == null
+      ? _bundleRebuild.run()
+      : (await _partsRebuild.run()).success;
+
+  /// The fingerprint of the native libraries the tree now builds, read off the
+  /// bundle's parts. Null when that build failed.
+  Future<Map<String, String>?> _probeLibs() async {
+    final built = await _partsRebuild.run();
+    if (!built.success) return null;
+    return nativeLibsFingerprintOfBuiltFiles(
+      built.filesByGroup[_parts!.nativeLibsGroup]!,
+    );
+  }
 
   Future<bool> _rebuildBundle() async {
     final r = await host.bazel.build(
@@ -817,36 +909,44 @@ class NativePipelineAssembler {
     // launched bundle's fingerprint; app.restart rebuilds and, when it changed,
     // relaunches the process instead of restarting the isolate. Apps with no
     // loose native libraries skip all of this and keep the instant restart path.
-    final bundled = await nativeLibsFingerprint(launched.appFile);
-    if (bundled.isEmpty) return;
-    // Each restart asks whether the libraries moved by building only them —
-    // see `native_libs.bzl`. A bundle with any native code that group does not
-    // hold (a plugin's vendored framework, a checked-in prebuilt library) is
-    // still judged by rebuilding and reading the bundle, as before: the group
-    // would never see that code move. So is a group this build wrote anew: a
-    // native source saved after the launch build is compiled in here, and
-    // taking that as the baseline would hide it from every later restart.
-    final built = await _buildNativeLibs();
-    final byGroup =
-        built != null &&
-        nativeLibsCoverBundle(built.keys, bundled.keys) &&
-        nativeLibsWrittenBy(built.keys, launched.builtAt);
-    final fingerprint = byGroup
-        ? _buildNativeLibs
-        : () async => await _bundleRebuild.run()
-              ? await nativeLibsFingerprint(launched.appFile)
-              : null;
+    // Read the way a restart will read it, so the two are compared in one form.
+    // For a device that has a cheaper way to read the libraries than building
+    // its artifact, that is that way, read off the launch build itself.
+    final fingerprint = _parts == null
+        ? await nativeLibsFingerprint(launched.appFile)
+        : launched.partsNativeLibs;
+    // A launch build that named the parts reports them, so this is a run whose
+    // build did not: a broken contract between the two, not an app without
+    // native libraries, and calling it the second would turn restarts into
+    // isolate restarts over whatever native code moves.
+    if (fingerprint == null) {
+      throw StateError(
+        'The launch build of $target reported no bundle parts, so a restart '
+        'could not tell whether its native libraries moved.',
+      );
+    }
+    if (fingerprint.isEmpty) return;
     final hotPatcher = await _armHotPatcher(launched, nativeLibs);
     final relauncher = Relauncher(
       appFile: launched.appFile,
-      fingerprint: fingerprint,
       rebuild: _bundleRebuild.run,
+      probeLibs: _parts == null ? null : _probeLibs,
       sessions: host.sessions,
       protocol: host.protocol,
       orchestrator: orchestrator,
       assetsDir: assetsDir,
       logger: logger,
-      liveFingerprint: byGroup ? built : bundled,
+      // A relaunch is a restart, so this run reloads: the services go back on.
+      services: host.toolServices,
+      onReconnected: (session, wsUri) async {
+        final dtdUri = await host.toolingDaemon?.register(
+          appId: session.appId,
+          vmServiceWsUri: wsUri,
+          name: dtdAppName(device: session.device.name, target: target),
+        );
+        if (dtdUri != null) session.dtdUri = dtdUri;
+      },
+      liveFingerprint: fingerprint,
       nativeLibs: nativeLibs,
       patchedLibs: hotPatcher == null
           ? null
@@ -860,22 +960,6 @@ class NativePipelineAssembler {
             },
     );
     pipeline.relaunchIfNativeLibsChanged = relauncher.relaunchIfNeeded;
-  }
-
-  /// Builds the launch target's `flutter_native_libs` output group, in the
-  /// launch configuration, and fingerprints what it holds. Null when the build
-  /// failed.
-  Future<Map<String, String>?> _buildNativeLibs() async {
-    final r = await host.bazel.buildAspectOutputs(
-      target,
-      workspace: workspace,
-      aspect: nativeLibsAspect,
-      outputGroup: nativeLibsOutputGroup,
-      compilationMode: 'dbg',
-      extraArgs: _launchArgs,
-    );
-    if (!r.success) return null;
-    return nativeLibsFingerprintOfFiles(r.files);
   }
 
   /// Arm native hot reload for the libraries the launched app bundles, if any
@@ -998,12 +1082,13 @@ class NativePipelineAssembler {
   /// the VM open.
   Future<SessionReloader?> _assembleUnit(
     DeviceSession session,
+    DevConfig devConfig,
     CompilerConfig compilerConfig,
     String packageConfig,
   ) async {
     final fs = FrontendServer(
-      dartaotruntimePath: toolchain.dartaotruntime,
-      frontendServerPath: toolchain.frontendServer,
+      dartaotruntimePath: devConfig.dartaotruntime,
+      frontendServerPath: devConfig.frontendServer,
       config: compilerConfig,
       packageConfig: packageConfig,
     );

@@ -1,4 +1,4 @@
-@Tags(['e2e'])
+@Tags(['e2e', 'web'])
 library;
 
 import 'package:test/test.dart';
@@ -104,7 +104,7 @@ void main() {
         final clean = await dt.sendCommand(
           1,
           'app.restart',
-          params: {'appId': appId},
+          params: {'appId': appId, 'fullRestart': true},
           timeout: const Duration(minutes: 4),
         );
         expect(
@@ -121,7 +121,7 @@ void main() {
         final broken = await dt.sendCommand(
           2,
           'app.restart',
-          params: {'appId': appId},
+          params: {'appId': appId, 'fullRestart': true},
           timeout: const Duration(minutes: 4),
         );
         expect(
@@ -146,7 +146,7 @@ void main() {
         final fixed = await dt.sendCommand(
           3,
           'app.restart',
-          params: {'appId': appId},
+          params: {'appId': appId, 'fullRestart': true},
           timeout: const Duration(minutes: 4),
         );
         expect(

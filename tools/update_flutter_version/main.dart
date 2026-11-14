@@ -10,7 +10,11 @@
 ///   1. Looks up the engine revision from the Flutter tag
 ///   2. Downloads each artifact and computes SHA-256 (archives already pinned
 ///      in versions.bzl for this version are reused, not downloaded again)
-///   3. Prints the Starlark snippet to add to versions.bzl
+///   3. Prints the Starlark snippet to add to versions.bzl, with the exact
+///      version pins of the SDK's own packages (`FLUTTER_SDK_EXACT_PINS`) and
+///      the packages there are (`FLUTTER_SDK_PACKAGES`)
+///
+/// `--sdk-pins-only <version>` prints just those two entries.
 library;
 
 import 'dart:convert';
@@ -18,6 +22,7 @@ import 'dart:io';
 
 import 'artifact_list.dart';
 import 'pinned_checksums.dart';
+import 'sdk_pins.dart';
 import 'shader_flags.dart';
 
 const gcsBase = 'https://storage.googleapis.com/flutter_infra_release/flutter';
@@ -30,7 +35,12 @@ Future<void> main(List<String> args) async {
     exit(1);
   }
 
-  final version = args[0];
+  final pinsOnly = args[0] == '--sdk-pins-only';
+  if (pinsOnly && args.length < 2) {
+    stderr.writeln('Usage: --sdk-pins-only <flutter-version>');
+    exit(1);
+  }
+  final version = pinsOnly ? args[1] : args[0];
 
   // Locate the Flutter repo. BUILD_WORKSPACE_DIRECTORY is set by `bazel run`.
   final workspaceDir =
@@ -51,6 +61,11 @@ Future<void> main(List<String> args) async {
     exit(1);
   }
 
+  if (pinsOnly) {
+    print(_sdkPackageEntries(version, flutterRepo));
+    return;
+  }
+
   // Get engine revision from the Flutter tag.
   final gitResult = Process.runSync(
     'git',
@@ -66,6 +81,24 @@ Future<void> main(List<String> args) async {
   }
   final engineRev = (gitResult.stdout as String).trim();
   print('Engine revision: $engineRev');
+
+  // The release tag's commit: the framework revision `FlutterVersion` reports.
+  final frameworkResult = Process.runSync(
+    'git',
+    ['rev-parse', '$version^{commit}'],
+    workingDirectory: flutterRepo,
+  );
+  if (frameworkResult.exitCode != 0) {
+    stderr.writeln('ERROR: Could not resolve tag $version in $flutterRepo');
+    exit(1);
+  }
+  final frameworkRev = (frameworkResult.stdout as String).trim();
+  print('Framework revision: $frameworkRev');
+
+  // The Dart SDK the release bundles, which Flutter publishes with each
+  // stable release and which `FlutterVersion.dartVersion` reports.
+  final dartVersion = await _releasedDartVersion(version, frameworkRev);
+  print('Dart version: $dartVersion');
 
   // Get material fonts URL from the Flutter repo.
   final materialFontsResult = Process.runSync(
@@ -119,7 +152,7 @@ Future<void> main(List<String> args) async {
   // keyed by release tag rather than engine revision. Every rule that needs
   // Flutter's own Dart source pins this one checksum: the per-package SDK
   // spokes, the vendored gen-l10n generator, and the FLUTTER_ROOT tree behind
-  // `flutter:pub`. A version entry without it cannot be built.
+  // `flutter/pub`. A version entry without it cannot be built.
   final pinnedSource = pinnedSourceSha256(versionsBzl, version);
   if (pinnedSource != null) {
     checksums['__source__'] = pinnedSource;
@@ -220,12 +253,15 @@ Future<void> main(List<String> args) async {
   print('');
   print('    "$version": struct(');
   print('        engine_revision = "$engineRev",');
+  print('        framework_revision = "$frameworkRev",');
+  print('        dart_version = "$dartVersion",');
   print('        material_fonts_url = "$materialFontsUrl",');
   print('        # sha256 of the GitHub source tarball. Required: every');
   print('        # fetch of the framework source is pinned against it.');
   print('        source_sha256 = "${checksums['__source__'] ?? 'FIXME'}",');
   print('    ),');
   print('');
+  print(_sdkPackageEntries(version, flutterRepo));
   print('=== Add to ARTIFACT_CHECKSUMS in flutter/private/versions.bzl ===');
   print('');
   print('    "$version": {');
@@ -240,6 +276,44 @@ Future<void> main(List<String> args) async {
   );
   _printChecksum(checksums, 'material_fonts.zip');
   print('    },');
+}
+
+/// The Dart SDK version Flutter published for the stable release [version],
+/// from its release listing, checked against the release's commit.
+Future<String> _releasedDartVersion(String version, String frameworkRev) async {
+  final client = HttpClient();
+  try {
+    final request = await client.getUrl(
+      Uri.parse(
+        'https://storage.googleapis.com/flutter_infra_release/releases/releases_macos.json',
+      ),
+    );
+    final response = await request.close();
+    if (response.statusCode != 200) {
+      await response.drain<void>();
+      stderr.writeln('ERROR: releases_macos.json: HTTP ${response.statusCode}');
+      exit(1);
+    }
+    final listing =
+        jsonDecode(await utf8.decodeStream(response)) as Map<String, dynamic>;
+    for (final release in listing['releases'] as List<dynamic>) {
+      release as Map<String, dynamic>;
+      if (release['version'] == version && release['channel'] == 'stable') {
+        if (release['hash'] != frameworkRev) {
+          stderr.writeln(
+            'ERROR: the release listing has $version at ${release['hash']}, '
+            'and the local tag is at $frameworkRev.',
+          );
+          exit(1);
+        }
+        return release['dart_sdk_version'] as String;
+      }
+    }
+    stderr.writeln('ERROR: $version is not a stable release in the listing.');
+    exit(1);
+  } finally {
+    client.close();
+  }
 }
 
 void _printChecksum(Map<String, String> checksums, String artifact) {
@@ -437,4 +511,52 @@ void _checkShaderFlags(String version, String flutterRepo, String workspace) {
   for (final line in mismatches) {
     print('    $line');
   }
+}
+
+/// The `pubspec.yaml` of each package of `packages/` at the Flutter tag
+/// [version], by package name, read from the clone at [flutterRepo].
+Map<String, String> _sdkPubspecs(String version, String flutterRepo) {
+  String git(List<String> args) {
+    final result = Process.runSync(
+      'git',
+      args,
+      workingDirectory: flutterRepo,
+    );
+    if (result.exitCode != 0) {
+      stderr.writeln('ERROR: git ${args.join(' ')}: ${result.stderr}');
+      exit(1);
+    }
+    return result.stdout as String;
+  }
+
+  final pubspecs = <String, String>{};
+  for (final line in git([
+    'ls-tree',
+    '--name-only',
+    '$version:packages',
+  ]).split('\n')) {
+    final package = line.trim();
+    if (package.isEmpty) continue;
+    final show = Process.runSync(
+      'git',
+      ['show', '$version:packages/$package/pubspec.yaml'],
+      workingDirectory: flutterRepo,
+    );
+    // A directory of packages/ with no pubspec is not a package.
+    if (show.exitCode == 0) pubspecs[package] = show.stdout as String;
+  }
+  return pubspecs;
+}
+
+/// What versions.bzl records of the SDK packages at the Flutter tag
+/// [version]: their exact pins, then the packages there are.
+String _sdkPackageEntries(String version, String flutterRepo) {
+  final pubspecs = _sdkPubspecs(version, flutterRepo);
+  return '=== Add to FLUTTER_SDK_EXACT_PINS in flutter/private/versions.bzl ===\n'
+      '\n'
+      '${renderPins(version, exactPins(pubspecs))}'
+      '\n'
+      '=== Add to FLUTTER_SDK_PACKAGES in flutter/private/versions.bzl ===\n'
+      '\n'
+      '${renderPackages(version, pubspecs.keys)}';
 }

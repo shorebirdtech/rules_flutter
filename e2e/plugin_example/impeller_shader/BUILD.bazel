@@ -1,8 +1,14 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@rules_flutter//flutter:android.bzl", "flutter_android_app")
-load("@rules_flutter//flutter:defs.bzl", "flutter_application")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application")
 load("@rules_flutter//flutter:ios.bzl", "flutter_ios_app", "flutter_ios_simulator_build_test")
 load("@rules_flutter//flutter:macos.bzl", "flutter_macos_app")
+load("@rules_flutter//tools/e2e_testing:compile_fail_test.bzl", "compile_fail_test")
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "impeller_shader_app",
+)
 
 # A package shader SkSL cannot compile (pkg/shaders/indexed.frag indexes a
 # uniform array in a loop). It builds for the platforms that render with
@@ -11,8 +17,8 @@ load("@rules_flutter//flutter:macos.bzl", "flutter_macos_app")
 # (lib/main.dart).
 flutter_application(
     name = "app_flutter",
-    package_name = "impeller_shader_app",
     main = "lib/main.dart",
+    package = ":pubspec-metadata",
     deps = [
         "//impeller_shader/pkg",
         "@deps//:flutter",
@@ -35,24 +41,36 @@ flutter_ios_app(
 
 flutter_android_app(
     name = "app_android",
-    package_name = "com.example.impellershader",
     application = ":app_flutter",
+    application_id = "com.example.impellershader",
     tags = ["manual"],
 )
 
-# The same shader with SkSL required: the build must fail. `manual`, and
-# checked by hand (docs/TESTING.md), since a test cannot expect a build to
-# fail.
+# The same shader with SkSL required: the build must fail. `manual`, since it
+# does not build; `:app_flutter_sksl_required_test` runs its shader compiles
+# and passes only when `pkg/shaders/indexed.frag`'s fails so.
 flutter_application(
     name = "app_flutter_sksl_required",
-    package_name = "impeller_shader_app",
     main = "lib/main.dart",
+    package = ":pubspec-metadata",
     require_sksl_shaders = True,
     tags = ["manual"],
     deps = [
         "//impeller_shader/pkg",
         "@deps//:flutter",
     ],
+)
+
+compile_fail_test(
+    name = "app_flutter_sksl_required_test",
+    size = "small",
+    mnemonics = ["FlutterShaderCompile"],
+    output_contains = [
+        "error: 13: loop index must be compared with a constant expression",
+        "Shader impeller_shader/pkg/shaders/indexed.frag does not compile for Skia (SkSL), " +
+        "and this target sets require_sksl_shaders, so it is an error rather than a warning.",
+    ],
+    target = ":app_flutter_sksl_required",
 )
 
 build_test(

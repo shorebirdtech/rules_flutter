@@ -1,7 +1,7 @@
 """URL construction helpers for the archives rules_flutter downloads.
 
-Two independent origins, and the distinction matters when reading the rest of
-this file:
+Three independent origins, and the distinction matters when reading the rest
+of this file:
 
   * **Engine artifacts** — prebuilt binaries (gen_snapshot, frontend_server,
     the patched SDK, per-platform engine libraries), hosted on Google Cloud
@@ -14,18 +14,74 @@ this file:
     that needs Flutter's own Dart source, and they differ only in which subtree
     they strip to:
 
-      - `flutter_sdk_package` → `packages/<name>`, once per SDK package in the
-        lock (flutter, flutter_test, flutter_driver, flutter_localizations,
-        flutter_web_plugins),
+      - `flutter_framework_package` → `packages/flutter`, and
+        `flutter_pub_package` → `packages/<name>` for every other SDK package
+        in the lock (flutter_test, flutter_driver, integration_test, ...),
       - `flutter_gen_l10n_repo` → `packages/flutter_tools`,
       - `flutter_dev_root_repo` → `packages` and the sky_engine tree.
 
     The URL is built here rather than restated in each of them.
+
+  * **Chrome for Testing** — the browser web integration tests run in, hosted by
+    the Chrome for Testing project, keyed by *Chrome version* and host
+    platform; unrelated to the Flutter version.
+
+  * **The Android emulator and its system images** — what Android integration
+    tests run on by default, from Google's Android SDK repository, keyed by the
+    emulator's build and host, and by the image's API level, tag, ABI and
+    revision; unrelated to the Flutter version.
 """
 
 _GCS_BASE = "https://storage.googleapis.com/flutter_infra_release/flutter"
 
 _SOURCE_TARBALL_TEMPLATE = "https://github.com/flutter/flutter/archive/refs/tags/{version}.tar.gz"
+
+_CHROME_FOR_TESTING_TEMPLATE = "https://storage.googleapis.com/chrome-for-testing-public/{version}/{platform}/chrome-headless-shell-{platform}.zip"
+
+def chrome_for_testing_url(version, platform):
+    """Constructs the download URL for a Chrome for Testing headless shell.
+
+    Args:
+        version: Chrome version (e.g. "157.0.8103.38").
+        platform: Chrome for Testing's name for the host: `mac-arm64`, `mac-x64`,
+            `linux64`, `linux-arm64` or `win64`.
+
+    Returns:
+        The full HTTPS URL of the archive, which extracts to one
+        `chrome-headless-shell-<platform>/` directory.
+    """
+    return _CHROME_FOR_TESTING_TEMPLATE.format(version = version, platform = platform)
+
+_ANDROID_REPOSITORY = "https://dl.google.com/android/repository/"
+
+def android_emulator_url(build_id, host):
+    """Constructs the download URL for the Android emulator of a host.
+
+    Args:
+        build_id: The emulator's build (e.g. "16740729").
+        host: The SDK repository's name for the host: `darwin_aarch64`,
+            `linux_x64`.
+
+    Returns:
+        The full HTTPS URL of the archive, which extracts to one `emulator/`
+        directory.
+    """
+    return "{}emulator-{}-{}.zip".format(_ANDROID_REPOSITORY, host, build_id)
+
+def android_system_image_url(api_level, tag, abi, revision):
+    """Constructs the download URL for an Android emulator system image.
+
+    Args:
+        api_level: The Android API level (e.g. 35).
+        tag: The image's tag (e.g. "aosp_atd").
+        abi: The image's ABI: `arm64-v8a` or `x86_64`.
+        revision: The image's revision (e.g. "r01").
+
+    Returns:
+        The full HTTPS URL of the archive, which extracts to one `<abi>/`
+        directory.
+    """
+    return "{}sys-img/{}/{}-{}_{}.zip".format(_ANDROID_REPOSITORY, tag, abi, api_level, revision)
 
 def flutter_source_tarball_url(flutter_version):
     """Constructs the download URL for the Flutter framework source tarball.
@@ -36,7 +92,7 @@ def flutter_source_tarball_url(flutter_version):
     mismatch is a loud, intended failure rather than something to work around.
 
     Args:
-        flutter_version: Flutter release tag (e.g. "3.47.8").
+        flutter_version: Flutter release tag (e.g. "3.47.9").
 
     Returns:
         The full HTTPS URL of the source tarball. Extracting it yields a
@@ -147,6 +203,22 @@ def host_artifacts_path(host_platform, mode = "debug"):
         platform_dir = "{dir}-{mode}".format(dir = platform_dir, mode = mode)
     return "{platform}/artifacts.zip".format(platform = platform_dir)
 
+def cpp_client_wrapper_artifact_path(platform):
+    """Returns the artifact path for the Windows C++ client wrapper.
+
+    The wrapper provides `flutter/plugin_registry.h` and the sources behind it,
+    which a Windows runner and its plugin registrant compile. It is the same
+    for every build mode, so a repo holding a Windows engine of any mode
+    downloads this one.
+
+    Args:
+        platform: Windows platform string (e.g. "windows-x64").
+
+    Returns:
+        Artifact path like "windows-x64/flutter-cpp-client-wrapper.zip".
+    """
+    return "{platform}/flutter-cpp-client-wrapper.zip".format(platform = platform)
+
 def desktop_engine_artifact_path(os, arch, mode):
     """Returns the artifact path for a desktop Flutter engine runtime library.
 
@@ -194,3 +266,17 @@ def desktop_engine_artifact_path(os, arch, mode):
     elif os == "windows":
         return "{dir}/windows-{arch}-flutter.zip".format(dir = platform_dir, arch = arch)
     return None
+
+def macos_xcframework_artifact_path(mode):
+    """The artifact path of Flutter's signed `FlutterMacOS.xcframework` of a mode.
+
+    The engine cache's `framework.zip`, which `flutter build macos-framework`
+    copies: `darwin-x64/framework.zip` for debug, `darwin-x64-<mode>/` otherwise.
+
+    Args:
+        mode: Build mode ("debug", "profile", "release").
+
+    Returns:
+        Artifact path like "darwin-x64-release/framework.zip".
+    """
+    return ("darwin-x64" if mode == "debug" else "darwin-x64-" + mode) + "/framework.zip"

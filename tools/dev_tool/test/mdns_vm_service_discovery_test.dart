@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter_bazel_dev_tool/mdns_vm_service_discovery.dart';
 import 'package:test/test.dart';
 
@@ -213,30 +214,30 @@ void main() {
 
     // A lookup that answers instantly — nothing on the link, or a client that
     // short-circuits — must not become a tight loop of queries.
-    test(
-      'paces retransmissions instead of spinning',
-      () async {
+    test('paces retransmissions instead of spinning', () {
+      fakeAsync((async) {
         final factory = FakeMDnsClientFactory();
-        final elapsed = Stopwatch()..start();
 
-        await expectLater(
+        final outcome = track(
           discoveryOver(factory).discover(
             bundleId: bundleId,
             hostnames: deviceHostnames,
             timeout: const Duration(seconds: 3),
           ),
-          throwsA(isA<MdnsDiscoveryException>()),
         );
 
-        // 3s at 1s then 2s intervals is two queries, not hundreds.
-        expect(factory.clients.length, lessThanOrEqualTo(4));
-        expect(
-          elapsed.elapsed,
-          greaterThanOrEqualTo(const Duration(seconds: 3)),
-        );
-      },
-      timeout: const Timeout(Duration(seconds: 30)),
-    );
+        // Nothing answers, so each lookup returns at once and the loop waits
+        // out its window: 1 s, then 2 s (the last cut to what is left). Two
+        // queries, and not a moment sooner than the 3 s.
+        async.elapse(const Duration(milliseconds: 2999));
+        expect(outcome.done, isFalse);
+        async.elapse(const Duration(milliseconds: 1));
+
+        expect(outcome.done, isTrue);
+        expect(outcome.error, isA<MdnsDiscoveryException>());
+        expect(factory.clients.length, 2);
+      });
+    });
 
     // A launch that legitimately takes minutes is indistinguishable from a
     // hang unless something says so.

@@ -24,14 +24,14 @@ Two tiers of API:
 
         load("@rules_flutter//flutter:macos.bzl",
             "flutter_macos_engine",
-            "flutter_macos_framework_gen",
+            "flutter_macos_app_framework_gen",
             "flutter_macos_info_plist_gen",
             "flutter_macos_menu_xib_gen",
             "flutter_macos_native_libs_gen",
             "flutter_macos_registrant_gen",
             "flutter_macos_runner_lib_gen")
 
-        flutter_macos_framework_gen(name = "my_framework", application = ":my_app")
+        flutter_macos_app_framework_gen(name = "my_framework", application = ":my_app")
         flutter_macos_registrant_gen(name = "my_registrant", application = ":my_app")
         flutter_macos_engine(name = "my_engine")
         flutter_macos_native_libs_gen(name = "my_native_libs", application = ":my_app")
@@ -58,14 +58,23 @@ Two tiers of API:
 """
 
 load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
-load("@rules_apple//apple:apple.bzl", "apple_dynamic_framework_import")
-load("@rules_apple//apple:macos.bzl", "macos_application")
-load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
-load("@rules_swift//swift:swift.bzl", "swift_library")
+load("@build_bazel_rules_apple//apple:apple.bzl", "apple_dynamic_framework_import")
+load("@build_bazel_rules_apple//apple:macos.bzl", "macos_application")
+load("@build_bazel_rules_swift//swift:swift.bzl", "swift_library")
+load("//flutter/private:app_version.bzl", "version_arg", "version_target_conflict")
+load("//flutter/private:apple_app.bzl", "flutter_apple_app")
+load("//flutter/private:apple_engine.bzl", _MACOS_ENGINE_FRAMEWORK = "MACOS_ENGINE_FRAMEWORK")
+load("//flutter/private:apple_version_check.bzl", _flutter_apple_version_check = "flutter_apple_version_check")
+load("//flutter/private:apple_xcframeworks_codesign.bzl", _flutter_apple_xcframeworks_codesign = "flutter_apple_xcframeworks_codesign")
+load("//flutter/private:apple_xcframeworks_layout.bzl", "flutter_apple_xcframeworks_layout")
 load("//flutter/private:constants.bzl", _MACOS_MINIMUM_OS_VERSION = "MACOS_MINIMUM_OS_VERSION")
+load("//flutter/private:flutter_apple_bundle_version.bzl", _flutter_apple_bundle_version = "flutter_apple_bundle_version")
 load("//flutter/private:flutter_apple_plugin_library.bzl", _flutter_apple_plugin_library_macro = "flutter_apple_plugin_library")
+load("//flutter/private:flutter_apple_plugin_xcframeworks.bzl", _flutter_macos_code_asset_xcframeworks = "flutter_macos_code_asset_xcframeworks", _flutter_macos_plugin_xcframeworks = "flutter_macos_plugin_xcframeworks")
 load("//flutter/private:flutter_apple_plugins_aggregator.bzl", _flutter_apple_plugins_aggregator = "flutter_apple_plugins_aggregator")
-load("//flutter/private:flutter_macos_application.bzl", _flutter_macos_framework_rule = "flutter_macos_framework", _flutter_macos_native_libs_rule = "flutter_macos_native_libs", _flutter_macos_privacy_manifests_rule = "flutter_macos_privacy_manifests")
+load("//flutter/private:flutter_apple_registrant.bzl", _flutter_apple_swift_package_registrant = "flutter_apple_swift_package_registrant")
+load("//flutter/private:flutter_apple_xcframeworks.bzl", _flutter_macos_app_xcframework = "flutter_macos_app_xcframework", _flutter_macos_engine_xcframework = "flutter_macos_engine_xcframework")
+load("//flutter/private:flutter_macos_application.bzl", _flutter_macos_app_framework_rule = "flutter_macos_app_framework", _flutter_macos_native_libs_rule = "flutter_macos_native_libs", _flutter_macos_privacy_manifests_rule = "flutter_macos_privacy_manifests")
 load("//flutter/private:flutter_macos_registrant.bzl", _flutter_macos_registrant_rule = "flutter_macos_registrant")
 load("//flutter/private:flutter_plist_merge.bzl", _flutter_entitlements_merge = "flutter_entitlements_merge", _flutter_plist_merge = "flutter_plist_merge")
 load("//flutter/private:runner_module.bzl", "runner_module_name")
@@ -74,30 +83,37 @@ load("//flutter/private:validation.bzl", "validate_minimum_os_version")
 # Re-export for user BUILD files.
 MACOS_MINIMUM_OS_VERSION = _MACOS_MINIMUM_OS_VERSION
 
+# Add-to-app, for a host app built by Xcode (see README, "Add-to-app"): the
+# application's App.xcframework, a copy of Flutter's own engine xcframework, an
+# xcframework per plugin and per code asset, in the build mode of the
+# configuration.
+flutter_macos_app_xcframework = _flutter_macos_app_xcframework
+flutter_macos_engine_xcframework = _flutter_macos_engine_xcframework
+flutter_macos_plugin_xcframeworks = _flutter_macos_plugin_xcframeworks
+flutter_apple_xcframeworks_codesign = _flutter_apple_xcframeworks_codesign
+flutter_macos_code_asset_xcframeworks = _flutter_macos_code_asset_xcframeworks
+
 # Merges entitlement additions into a base entitlements file — the additive
 # seam rules_apple's single-file `entitlements` attribute does not provide.
 # Wired into flutter_macos_app as `additional_entitlements`; exposed for
 # Tier 2 users assembling a macos_application themselves.
 flutter_entitlements_merge = _flutter_entitlements_merge
 
-def _engine_framework_select():
-    """Selects FlutterMacOS.framework for the build mode: debug, profile or release."""
-    return select({
-        Label("@rules_flutter//flutter/private:dbg"): [Label("@flutter_macos_engine//:engine_debug_library")],
-        Label("@rules_flutter//flutter/private:profile"): [Label("@flutter_macos_engine//:engine_profile_library")],
-        "//conditions:default": [Label("@flutter_macos_engine//:engine_library")],
-    })
+# A macOS bundle's version from Flutter's build name and build number: what
+# flutter_macos_app's `build_name` and `build_number` declare. Exposed to
+# give an app extension the version of its app.
+flutter_apple_bundle_version = _flutter_apple_bundle_version
 
 # -- Composable rules (Tier 2) ------------------------------------------------
 #
 # Like every other *_gen macro in this file, these default to
 # `tags = ["manual"]`: the targets are only meaningful as deps of a
 # `macos_application` and run Apple-only tooling, so a standalone `//...`
-# build (host configuration) is wrong everywhere and fails outright on
+# build (the host platform's configuration) is wrong everywhere and fails outright on
 # non-macOS hosts.
 
-def flutter_macos_framework_gen(name, **kwargs):
-    """Generates App.framework. See `flutter_macos_framework`.
+def flutter_macos_app_framework_gen(name, **kwargs):
+    """Generates App.framework. See `flutter_macos_app_framework`.
 
     Args:
         name: Target name.
@@ -105,7 +121,7 @@ def flutter_macos_framework_gen(name, **kwargs):
             `["manual"]` — build via the consuming `macos_application`.
     """
     tags = kwargs.pop("tags", ["manual"])
-    _flutter_macos_framework_rule(name = name, tags = tags, **kwargs)
+    _flutter_macos_app_framework_rule(name = name, tags = tags, **kwargs)
 
 def flutter_macos_registrant_gen(name, **kwargs):
     """Generates the macOS GeneratedPluginRegistrant. See `flutter_macos_registrant`.
@@ -142,7 +158,7 @@ def flutter_macos_privacy_manifests_gen(name, **kwargs):
 
 # Public wrapper that compiles a Flutter plugin's macOS Apple sources into a
 # swift_library. Use directly to wire a monorepo plugin's BUILD.bazel without
-# going through the ext/ overlay system; for pub.dev plugins, flutter_pub_package
+# going through the flutter/ext/ overlay system; for pub.dev plugins, flutter_pub_package
 # emits this automatically.
 flutter_apple_plugin_library = _flutter_apple_plugin_library_macro
 
@@ -167,13 +183,19 @@ def flutter_macos_engine(name, **kwargs):
 
     apple_dynamic_framework_import(
         name = name,
-        framework_imports = _engine_framework_select(),
+        framework_imports = _MACOS_ENGINE_FRAMEWORK,
         tags = tags,
         **kwargs
     )
 
 def flutter_macos_info_plist_gen(name, app_name, **kwargs):
     """Generates a macOS Info.plist from the default Bazel template.
+
+    As in `flutter create`'s, the version keys are `$(FLUTTER_BUILD_NAME)`
+    and `$(FLUTTER_BUILD_NUMBER)`, which the app's `version` replaces: give
+    the `macos_application` a `flutter_apple_bundle_version` with the same
+    `application`, so the bundle carries the version the program reports.
+    Without a `version`, rules_apple fails on the unknown variables.
 
     Args:
         name: Target name. Pass to macos_application infoplists.
@@ -210,7 +232,7 @@ def flutter_macos_menu_xib_gen(name, app_name, **kwargs):
         **kwargs
     )
 
-def flutter_macos_runner_lib_gen(name, registrant, engine, application = None, module_name = "Runner", **kwargs):
+def flutter_macos_runner_lib_gen(name, registrant, engine, application = None, module_name = "Runner", info_plist = None, swift_package_environment = {}, **kwargs):
     """Generates a swift_library for the default macOS runner.
 
     Uses template AppDelegate.swift and MainFlutterWindow.swift from
@@ -230,6 +252,11 @@ def flutter_macos_runner_lib_gen(name, registrant, engine, application = None, m
             plugins' macOS Swift modules + link inputs into the runner;
             optional only for legacy Tier-2 setups with no native plugins.
         module_name: Swift module name (default "Runner").
+        info_plist: The app's Info.plist, which a plugin whose Package.swift
+            decides its defines from the app reads (`flutter_macos_app`'s
+            `swift_package_environment`). Unset, such a manifest sees an
+            empty one.
+        swift_package_environment: As `flutter_macos_app`'s.
         **kwargs: Additional arguments passed to swift_library.
     """
     tags = kwargs.pop("tags", ["manual"])
@@ -240,6 +267,8 @@ def flutter_macos_runner_lib_gen(name, registrant, engine, application = None, m
         _flutter_apple_plugins_aggregator(
             name = aggregator_name,
             application = application,
+            info_plist = info_plist,
+            swift_package_environment = swift_package_environment,
             platform = "macos",
             tags = tags,
             visibility = ["//visibility:private"],
@@ -269,12 +298,15 @@ def flutter_macos_app(
         minimum_os_version = MACOS_MINIMUM_OS_VERSION,
         info_plist = None,
         version = None,
+        build_name = None,
+        build_number = None,
         additional_contents = {},
         entitlements = None,
         additional_entitlements = [],
         app_icons = None,
         resources = [],
         runner_deps = [],
+        swift_package_environment = {},
         **kwargs):
     """Builds a Flutter macOS .app bundle from a flutter_application target.
 
@@ -315,7 +347,35 @@ def flutter_macos_app(
         app_name: User-facing display name (menu bar, window title). Defaults to name.
         minimum_os_version: Minimum macOS version.
         info_plist: Override conventional macos/Runner/Info.plist.
-        version: An apple_bundle_version target. Defaults to "1.0".
+            The plist leaves `CFBundleShortVersionString` and
+            `CFBundleVersion` to the app's version: a literal value there
+            that differs from it fails the build. No key, the version
+            itself, `$(FLUTTER_BUILD_NAME)` and `$(FLUTTER_BUILD_NUMBER)` as
+            `flutter create` writes them, and Xcode's `$(MARKETING_VERSION)`
+            and `$(CURRENT_PROJECT_VERSION)` pass.
+        version: An `apple_bundle_version` (or `flutter_apple_bundle_version`)
+            target, rules_apple's own way to set the version, to give the
+            app's extensions the same one. Its values must be the
+            `application`'s, which the program reports as `appBuildName` and
+            `appBuildNumber`: a bundle version that differs fails the build.
+            A `flutter_apple_bundle_version` with the same `application`
+            takes them, and follows `--@rules_flutter//flutter:build_name`
+            and `build_number`; one that states its own values fails the
+            build when a setting gives another. Setting it with `build_name`
+            or `build_number` is an error.
+        build_name: CFBundleShortVersionString, as `flutter build
+            --build-name`: numbers separated by periods, padded to three
+            as `flutter build` pads them (`2.1` is `2.1.0`). Defaults to
+            `1.0.0`. May be a `select()`, whose `None` is the default.
+            Unset, the `application`'s `build_name`. Set, the
+            `application` must set the same.
+            `--@rules_flutter//flutter:build_name` replaces both for one build.
+        build_number: CFBundleVersion, as `flutter build --build-number`:
+            numbers separated by periods. Defaults to `1`. May be a
+            `select()`.
+            Unset, the `application`'s `build_number`. Set, the
+            `application` must set the same.
+            `--@rules_flutter//flutter:build_number` replaces both for one build.
         additional_contents: Extra content for the bundle (merged with Flutter defaults).
         entitlements: Override entitlements wiring. By default the macro
             auto-discovers `macos/Runner/{DebugProfile,Release}.entitlements`
@@ -357,11 +417,43 @@ def flutter_macos_app(
             **kwargs. For App Intents, pass the library here *and* to
             rules_apple's `app_intents` (which passes through **kwargs):
             `app_intents` only extracts the metadata, it does not link.
-        **kwargs: Passed through to macos_application. The macro sets
-            `app_icons` itself, so pass the named parameter instead.
+        swift_package_environment: The environment in which the
+            `Package.swift` of each plugin that decides its defines from the
+            app is evaluated, as the shell's environment is under `flutter
+            build`: `{"AUDIO_SESSION_MICROPHONE": "1"}` for what
+            audio_session's README says to export. Such a manifest is
+            evaluated for this app, also seeing the app's Info.plist (see
+            the README's "Apple plugins built from their Package.swift").
+            Nothing else reads it, and the shell's environment does not
+            reach the manifests.
+        **kwargs: Passed through to macos_application, except `target_compatible_with`
+            and `visibility`, which are the named target's, and `testonly`, which
+            every target the macro declares has, since one that depends on a
+            `testonly` application would otherwise fail analysis. The app is
+            compatible with macOS only, whatever `target_compatible_with`
+            adds, so `bazel build //...` skips it on any other platform.
+            `tags` defaults to `["manual"]`, so `bazel build //...` skips
+            the app and every target the macro declares for it; pass `tags`
+            to replace that on all of them. The macro sets `app_icons`
+            itself, so pass the named parameter instead.
     """
     display_name = app_name or name
     tags = kwargs.pop("tags", ["manual"])
+    conflict = version_target_conflict(
+        "flutter_macos_app(name = %r)" % name,
+        version,
+        build_name,
+        build_number,
+    )
+    if conflict:
+        fail(conflict)
+
+    # `target_compatible_with` and what decides who can see the app belong to
+    # the target the user names (see `flutter_apple_app`), not to the
+    # `macos_application` behind it.
+    target_compatible_with = kwargs.pop("target_compatible_with", [])
+    visibility = kwargs.pop("visibility", None)
+    testonly = kwargs.pop("testonly", False)
     validate_minimum_os_version(
         "flutter_macos_app",
         name,
@@ -380,6 +472,7 @@ def flutter_macos_app(
     # instead of ~/Library/Containers/<bundle-id>/Data/Documents,
     # diverging from `flutter build macos`.
     if entitlements == None:
+        # `allow_empty`: an absent file is reported below, naming it.
         debug_present = native.glob(
             ["macos/Runner/DebugProfile.entitlements"],
             allow_empty = True,
@@ -424,6 +517,7 @@ def flutter_macos_app(
             base = entitlements,
             additions = additional_entitlements,
             tags = tags,
+            testonly = testonly,
         )
         entitlements = "__%s_entitlements" % name
 
@@ -434,13 +528,15 @@ def flutter_macos_app(
         name = "__%s_registrant" % name,
         application = application,
         tags = tags,
+        testonly = testonly,
     )
 
-    # 2. Assemble App.framework (versioned layout with AOT dylib + flutter_assets).
-    _flutter_macos_framework_rule(
+    # 2. Assemble App.framework (flat layout with the AOT binary + flutter_assets).
+    _flutter_macos_app_framework_rule(
         name = "__%s_app_framework" % name,
         application = application,
         tags = tags,
+        testonly = testonly,
     )
 
     # 3. Expose native plugin .dylib files for bundling.
@@ -448,6 +544,7 @@ def flutter_macos_app(
         name = "__%s_native_libs" % name,
         application = application,
         tags = tags,
+        testonly = testonly,
     )
 
     # 3b. Expose plugin PrivacyInfo.xcprivacy files for bundling.
@@ -455,13 +552,15 @@ def flutter_macos_app(
         name = "__%s_privacy_manifests" % name,
         application = application,
         tags = tags,
+        testonly = testonly,
     )
 
-    # 4. Import FlutterMacOS.framework engine — auto-select debug/release.
+    # 4. Import FlutterMacOS.framework engine — follows the build mode.
     apple_dynamic_framework_import(
         name = "__%s_engine" % name,
-        framework_imports = _engine_framework_select(),
+        framework_imports = _MACOS_ENGINE_FRAMEWORK,
         tags = tags,
+        testonly = testonly,
     )
 
     # 5. Discover runner Swift sources and build swift_library.
@@ -473,11 +572,17 @@ def flutter_macos_app(
     # 5b. Aggregate Apple plugin libraries from the application's transitive
     # FlutterInfo so the runner's swift_library imports + links each pub
     # plugin's Swift module.
+    # A plugin whose Package.swift decides its defines from the app reads the
+    # Info.plist the app is built from: the app's own, before the icon step
+    # below, which only drops an empty key.
     _flutter_apple_plugins_aggregator(
         name = "__%s_apple_plugins" % name,
         application = application,
+        info_plist = info_plist or "__%s_info_plist" % name,
         platform = "macos",
+        swift_package_environment = swift_package_environment,
         tags = tags,
+        testonly = testonly,
     )
 
     # 6. XIB — substitute APP_NAME and keep the NIB's module in sync.
@@ -512,6 +617,7 @@ def flutter_macos_app(
             "customModule=\"Runner\"": "customModule=\"%s\"" % module_name,
         },
         tags = tags,
+        testonly = testonly,
     )
 
     swift_library(
@@ -520,6 +626,7 @@ def flutter_macos_app(
         data = ["__%s_menu_xib" % name],
         module_name = module_name,
         tags = tags,
+        testonly = testonly,
         deps = [
             "__%s_engine" % name,
             "__%s_apple_plugins" % name,
@@ -537,6 +644,7 @@ def flutter_macos_app(
     #     and an app with no catalog at all is the second without having to
     #     write it.
     if app_icons == None:
+        # `allow_empty`: an app with no catalog ships the generic icon.
         app_icons = native.glob(
             ["macos/Runner/Assets.xcassets/AppIcon.appiconset/**"],
             allow_empty = True,
@@ -544,22 +652,58 @@ def flutter_macos_app(
 
     # 7. Info.plist — preprocess to resolve Xcode variables that rules_apple
     #    doesn't handle (PRODUCT_COPYRIGHT, DEVELOPMENT_LANGUAGE).
+    #    $(FLUTTER_BUILD_NAME) and $(FLUTTER_BUILD_NUMBER) stay: rules_apple
+    #    replaces both keys with `version`'s values.
     if not info_plist:
-        expand_template(
+        # A merge rather than a text template: the app's plist may be saved
+        # in binary form, which a text substitution would corrupt.
+        _flutter_plist_merge(
             name = "__%s_info_plist" % name,
-            template = "macos/Runner/Info.plist",
-            out = "__%s_Info.plist" % name,
+            base = "macos/Runner/Info.plist",
+            mode = "supplement",
+            output_basename = "Info.plist",
             substitutions = {
                 "$(DEVELOPMENT_LANGUAGE)": "en",
                 "$(PRODUCT_COPYRIGHT)": "",
             },
             tags = tags,
+            # Not `testonly` even in a testonly app: the plugins whose
+            # Package.swift reads the app read it (`swift_package_environment`),
+            # and they are not. It depends on nothing that is.
         )
         actual_info_plist = "__%s_info_plist" % name
     else:
         actual_info_plist = info_plist
 
-    # 7b. Drop the scaffold's empty `CFBundleIconFile`.
+    # 7a. Version, from `build_name` and `build_number` unless the app names
+    #     its own.
+    if not version:
+        _flutter_apple_bundle_version(
+            name = "__%s_version" % name,
+            application = application,
+            build_name = version_arg(build_name),
+            build_number = version_arg(build_number),
+            tags = tags,
+            testonly = testonly,
+        )
+        version = ":%s" % ("__%s_version" % name)
+
+    # 7b. The plist leaves the version keys to the version: rules_apple
+    #     replaces both, so a literal that differs would be dropped silently.
+    #     And the version is the application's, which the program reports.
+    _flutter_apple_version_check(
+        name = "__%s_version_check" % name,
+        plist = actual_info_plist,
+        plist_name = "macos/Runner/Info.plist" if not info_plist else "",
+        app_label = str(native.package_relative_label(name)),
+        application = application,
+        version = version,
+        rule_name = "flutter_macos_app",
+        tags = tags,
+        testonly = testonly,
+    )
+
+    # 7c. Drop the scaffold's empty `CFBundleIconFile`.
     #
     #     `flutter create` writes it as `<string></string>` for Xcode to fill
     #     in. Nothing fills it in here, and `macos_application` generates its
@@ -580,20 +724,11 @@ def flutter_macos_app(
             mode = "supplement",
             output_basename = "Info.plist",
             tags = tags,
+            testonly = testonly,
         )
         actual_info_plist = "__%s_info_plist_icon" % name
 
-    # 8. Version — create default apple_bundle_version if not provided.
-    if not version:
-        apple_bundle_version(
-            name = "__%s_version" % name,
-            build_version = "1.0",
-            short_version_string = "1.0",
-            tags = tags,
-        )
-        version = ":%s" % ("__%s_version" % name)
-
-    # 9. Assemble Flutter additional_contents.
+    # 8. Assemble Flutter additional_contents.
     flutter_contents = {
         "__%s_app_framework" % name: "Frameworks",
         "__%s_native_libs" % name: "Frameworks",
@@ -601,9 +736,9 @@ def flutter_macos_app(
     }
     flutter_contents.update(additional_contents)
 
-    # 10. Final macos_application.
+    # 9. Final macos_application, behind the target the user names.
     macos_application(
-        name = name,
+        name = "__%s_app" % name,
         bundle_id = bundle_id,
         bundle_name = display_name,
         minimum_os_version = minimum_os_version,
@@ -615,5 +750,123 @@ def flutter_macos_app(
         entitlements = entitlements,
         deps = ["__%s_runner" % name],
         tags = tags,
+        testonly = testonly,
+        **kwargs
+    )
+
+    # 10. The target the user names: carries the compatibility constraints (see
+    # `flutter_apple_app`). A macOS app is for a Mac.
+    flutter_apple_app(
+        name = name,
+        app = "__%s_app" % name,
+        validations = ["__%s_version_check" % name],
+        tags = tags,
+        target_compatible_with = target_compatible_with + select({
+            "@platforms//os:macos": [],
+            "//conditions:default": ["@platforms//:incompatible"],
+        }),
+        testonly = testonly,
+        visibility = visibility,
+    )
+
+def flutter_macos_xcframeworks(
+        name,
+        application,
+        plugins = True,
+        static_plugins = False,
+        codesign_identity = None,
+        minimum_os_version = MACOS_MINIMUM_OS_VERSION,
+        **kwargs):
+    """The xcframeworks a host app built by Xcode embeds Flutter with, as `flutter build macos-framework` makes them.
+
+    `bazel build` makes the build mode of the configuration (`-c dbg` Debug,
+    `-c opt --@rules_flutter//flutter:profile` Profile, otherwise Release) as
+    `<name>/<Mode>/`: App.xcframework, a copy of Flutter's own engine
+    xcframework, an xcframework per plugin and per code asset,
+    and `GeneratedPluginRegistrant.swift` above the modes, to copy into
+    the host,
+    as upstream lays them out. `bazel run` writes that to
+    `build/macos/framework/` in the package (`-- --output=<dir>` elsewhere),
+    replacing that mode's directory, so a run per mode fills `Debug/`,
+    `Profile/` and `Release/`. The frameworks are built unsigned; with
+    `codesign_identity` they are signed in a step of their own, as upstream
+    signs them (`flutter_apple_xcframeworks_codesign`).
+
+    Args:
+        name: The target: build it, or run it to export.
+        application: The `flutter_application` the host shows.
+        plugins: Whether to package the application's plugins; False when the
+            host ships them itself (upstream's `--no-plugins`).
+        static_plugins: Static plugin frameworks, linked and not embedded
+            (upstream's `--static`).
+        codesign_identity: The identity to sign the xcframeworks with
+            (upstream's `--codesign-identity`), or `-` for ad hoc. Unset, they
+            are unsigned, and Xcode signs them when it embeds them.
+        minimum_os_version: The minimum macOS version of the frameworks.
+        **kwargs: `visibility`, `tags` and the like, for `name`.
+    """
+    internal_tags = kwargs.get("tags", []) + ["manual"]
+    _flutter_macos_app_xcframework(
+        name = "_%s_app" % name,
+        application = application,
+        minimum_os_version = minimum_os_version,
+        tags = internal_tags,
+    )
+    _flutter_macos_engine_xcframework(
+        name = "_%s_engine" % name,
+        tags = internal_tags,
+    )
+    _flutter_macos_code_asset_xcframeworks(
+        name = "_%s_code_assets" % name,
+        application = application,
+        minimum_os_version = minimum_os_version,
+        tags = internal_tags,
+    )
+    xcframeworks = [
+        "_%s_app" % name,
+        "_%s_engine" % name,
+        "_%s_code_assets" % name,
+    ]
+    renamed = {}
+    if plugins:
+        _flutter_macos_plugin_xcframeworks(
+            name = "_%s_plugins" % name,
+            application = application,
+            minimum_os_version = minimum_os_version,
+            static = static_plugins,
+            tags = internal_tags,
+        )
+        _flutter_macos_registrant_rule(
+            name = "_%s_registrant" % name,
+            application = application,
+            tags = internal_tags,
+        )
+        xcframeworks.append("_%s_plugins" % name)
+        renamed[":_%s_registrant" % name] = "GeneratedPluginRegistrant.swift"
+    layout = name
+    if codesign_identity:
+        layout = "_%s_unsigned" % name
+        _flutter_apple_xcframeworks_codesign(
+            name = name,
+            xcframeworks = layout,
+            identity = codesign_identity,
+            **kwargs
+        )
+        kwargs = {"tags": internal_tags, "visibility": ["//visibility:private"]}
+    _flutter_apple_swift_package_registrant(
+        name = "_%s_swift_package_registrant" % name,
+        application = application,
+        platform = "macos",
+        register_plugins = plugins,
+        tags = internal_tags,
+    )
+    flutter_apple_xcframeworks_layout(
+        name = layout,
+        platform = "macos",
+        swift_package_registrant = "_%s_swift_package_registrant" % name,
+        minimum_os_version = minimum_os_version,
+        xcframeworks = xcframeworks,
+        renamed_files = renamed,
+        debug_files = [],
         **kwargs
     )

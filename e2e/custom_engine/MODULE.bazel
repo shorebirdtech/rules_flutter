@@ -1,0 +1,227 @@
+"""E2e test: apps built against a Flutter framework and engine that are not the release's.
+
+The checkout is a stand-in: `fake_checkout.bzl` lays the official artifacts out as
+a flutter/flutter checkout with engine out dirs (`engine/src/out/host_debug_arm64`
+and so on, `args.gn` written to match), so that the adapters, the contract, the
+check and the record are exercised with real, runnable binaries and without an
+engine build. `//tools/dev_tool/test/e2e:custom_engine_e2e_test.dart` drives it.
+"""
+
+module(name = "rules_flutter_custom_engine")
+
+bazel_dep(name = "rules_flutter", version = "0.0.0")
+bazel_dep(name = "rules_dart", version = "0.9.1")
+bazel_dep(name = "bazel_skylib", version = "1.9.2")
+bazel_dep(name = "apple_support", version = "2.12.0")
+bazel_dep(name = "rules_apple", version = "5.4.0")
+bazel_dep(name = "rules_cc", version = "0.2.28")
+bazel_dep(name = "rules_swift", version = "4.2.2")
+bazel_dep(name = "platforms", version = "1.1.0")
+bazel_dep(name = "llvm", version = "0.8.26")
+
+local_path_override(
+    module_name = "rules_flutter",
+    path = "../..",
+)
+
+flutter = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter")
+
+# The release: what a build gets when it names no SDK.
+flutter.toolchain(flutter_version = "3.47.9")
+
+# SDKs whose checkout is the stand-in below. Chosen per build with
+# --@rules_flutter//flutter:sdk=<name>.
+flutter.toolchain(
+    name = "local",
+    engine = "@local_engine",
+    framework = "@local_framework",
+)
+
+# The same checkout, but with a gen_snapshot of another Dart: the build must
+# refuse it, naming both.
+flutter.toolchain(
+    name = "mismatched",
+    engine = "@mismatched_engine",
+    framework = "@mismatched_framework",
+)
+
+# A checkout whose path is given the way a developer gives it: with
+# --repo_env=FLUTTER_CHECKOUT and --repo_env=FLUTTER_ENGINE. Not set, the
+# repositories still load.
+flutter.toolchain(
+    name = "env",
+    engine = "@env_engine",
+    framework = "@env_framework",
+)
+use_repo(
+    flutter,
+    "flutter_android_engine_arm",
+    "flutter_android_engine_arm64",
+    "flutter_android_engine_arm64_profile",
+    "flutter_android_engine_arm_profile",
+    "flutter_android_engine_x64",
+    "flutter_android_engine_x64_profile",
+    "flutter_cross_darwin-arm64_android-arm",
+    "flutter_cross_darwin-arm64_android-arm64",
+    "flutter_cross_darwin-arm64_android-arm64_profile",
+    "flutter_cross_darwin-arm64_android-arm_profile",
+    "flutter_cross_darwin-arm64_android-x64",
+    "flutter_cross_darwin-arm64_android-x64_profile",
+    "flutter_darwin-arm64",
+    "flutter_darwin-arm64_profile",
+    "flutter_desktop_engine_darwin-x64_debug",
+    "flutter_desktop_engine_darwin-x64_profile",
+    "flutter_desktop_engine_darwin-x64_release",
+    "flutter_desktop_engine_linux-arm64_debug",
+    "flutter_desktop_engine_linux-arm64_profile",
+    "flutter_desktop_engine_linux-arm64_release",
+    "flutter_desktop_engine_linux-x64_debug",
+    "flutter_desktop_engine_linux-x64_profile",
+    "flutter_desktop_engine_linux-x64_release",
+    "flutter_desktop_engine_windows-x64_debug",
+    "flutter_desktop_engine_windows-x64_profile",
+    "flutter_desktop_engine_windows-x64_release",
+    "flutter_dev_root_src",
+    "flutter_ios_engine",
+    "flutter_ios_engine_profile",
+    "flutter_linux-x64",
+    "flutter_macos_engine",
+    "flutter_outline_tool_src",
+    "flutter_stock_android_engine_arm",
+    "flutter_stock_android_engine_arm64",
+    "flutter_stock_android_engine_x64",
+    "flutter_stock_engine",
+    "flutter_stock_ios_engine",
+    "flutter_stock_ios_engine_debug",
+    "flutter_stock_web_sdk",
+    "flutter_web_sdk",
+    "flutter_windows-x64",
+)
+
+flutter_pub = use_extension("@rules_flutter//flutter/pub:extensions.bzl", "pub")
+flutter_pub.from_lock(
+    name = "deps",
+    lock = "//:pubspec.lock",
+)
+use_repo(flutter_pub, "deps")
+
+# The Linux bundle is cross-compiled from the Mac, as in e2e/cross_compile_example.
+register_toolchains(
+    "@llvm//toolchain:macos_aarch64_to_linux_x86_64",
+    "@llvm//toolchain:macos_x86_64_to_linux_x86_64",
+    "@llvm//toolchain:linux_aarch64_to_linux_x86_64",
+    "@llvm//toolchain:linux_x86_64_to_linux_x86_64",
+)
+
+llvm_tc = use_extension("@llvm//extensions:toolchain.bzl", "toolchain", dev_dependency = True)
+llvm_tc.exec(
+    arch = "aarch64",
+    os = "linux",
+)
+llvm_tc.target(
+    arch = "aarch64",
+    os = "linux",
+)
+use_repo(llvm_tc, "llvm_toolchains")
+
+# Android, as the README's Android section sets it up.
+bazel_dep(name = "rules_android", version = "0.8.1")
+bazel_dep(name = "rules_android_ndk", version = "0.1.5")
+
+# rules_android_ndk 0.1.5, its newest release, links every arm64 library with
+# `-Wl,-z,max-page-size=4096`, and rules_flutter's check of an APK's native
+# libraries refuses them: a device with 16 KB pages cannot load them. Upstream
+# fixed it in efc0c191 (#121); this is a later commit of its main branch. Drop
+# the override for the first release that has the fix.
+git_override(
+    module_name = "rules_android_ndk",
+    commit = "9946c72d5b617115d34dc2efb334f829c558a87b",
+    remote = "https://github.com/bazelbuild/rules_android_ndk.git",
+)
+
+bazel_dep(name = "rules_jvm_external", version = "7.2")
+
+# The Android SDK and NDK, downloaded at pinned versions and checked against
+# their checksums rather than found on the machine, so the build needs no
+# `ANDROID_HOME` or `ANDROID_NDK_HOME`. `.bazelrc` accepts their licences.
+bazel_dep(name = "hermetic_android_toolchains", version = "0.5.0", dev_dependency = True)
+
+android = use_extension("@hermetic_android_toolchains//:extensions.bzl", "android", dev_dependency = True)
+
+# The Android platform the app compiles against, and the build tools.
+android.sdk(
+    build_tools_version = "35.0.0",
+    version = "35",
+)
+
+# The NDK CC toolchain, used for native and FFI deps built for Android and
+# to strip the engine's native libraries, as a Gradle build does: the NDK
+# Flutter's Gradle plugin builds with. `api_level` is your app's
+# `min_sdk_version` (24 unless you set it).
+android.ndk(
+    api_level = 24,
+    version = "r28c",
+)
+use_repo(android, "androidndk", "androidsdk")
+
+# Every module's `@androidsdk` and `@androidndk` (rules_android's,
+# rules_android_ndk's, rules_flutter's) are these.
+rules_android_sdk = use_extension(
+    "@rules_android//rules/android_sdk_repository:rule.bzl",
+    "android_sdk_repository_extension",
+    dev_dependency = True,
+)
+
+override_repo(rules_android_sdk, "androidsdk")
+
+rules_android_ndk = use_extension(
+    "@rules_android_ndk//:extension.bzl",
+    "android_ndk_repository_extension",
+    dev_dependency = True,
+)
+
+override_repo(rules_android_ndk, "androidndk")
+
+register_toolchains(
+    "@androidndk//:all",
+    "@androidsdk//:all",
+    dev_dependency = True,
+)
+
+fake_checkout = use_repo_rule("//:fake_checkout.bzl", "fake_checkout")
+
+fake_checkout(name = "fake_checkout")
+
+fake_checkout(
+    name = "fake_checkout_mismatched",
+    gen_snapshot_flutter_version = "3.47.5",
+    web_kernel_format_mismatch = True,
+)
+
+local_framework = use_repo_rule("@rules_flutter//flutter:local_sdk.bzl", "flutter_local_framework")
+
+local_engine = use_repo_rule("@rules_flutter//flutter:local_sdk.bzl", "flutter_local_engine")
+
+local_framework(
+    name = "local_framework",
+    checkout = "@fake_checkout//:checkout/CHECKOUT",
+)
+
+local_engine(
+    name = "local_engine",
+    src = "@fake_checkout//:checkout/engine/src/ENGINE_SRC",
+)
+
+local_framework(
+    name = "mismatched_framework",
+    checkout = "@fake_checkout_mismatched//:checkout/CHECKOUT",
+)
+
+local_engine(
+    name = "mismatched_engine",
+    src = "@fake_checkout_mismatched//:checkout/engine/src/ENGINE_SRC",
+)
+
+local_framework(name = "env_framework")
+
+local_engine(name = "env_engine")

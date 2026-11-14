@@ -13,26 +13,64 @@ rule walks that depset, filters to the target platform, and merges:
     constructor — gives the runner each plugin's Swift module so the
     generated registrant's `import <PluginModule>` resolves.
 
+A plugin whose `Package.swift` decides its defines from the app is built
+here, for this app: the Dart graph names it by a marker, and this rule links
+the library the marker names from `@flutter_pub_apple_app_settings//:libraries`,
+which it depends on through `swiftpm_app_transition` with the app's
+`info_plist` and `swift_package_environment` (`swiftpm_app_settings.bzl`).
+
 The runner_lib_gen swift_library has the aggregator target in its `deps`.
 """
 
+# rules_apple has no public way to merge `AppleResourceInfo`s (5.4.0), so this
+# is its internal `resources.merge_providers`: a rules_apple upgrade can move or
+# change it. Check it on every upgrade, with `apple_resource_aspect` in
+# flutter_plugin.bzl.
+# buildifier: disable=bzl-visibility
+load("@build_bazel_rules_apple//apple/internal:resources.bzl", "resources")
+load("@build_bazel_rules_swift//swift:swift.bzl", "SwiftInfo")
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
-load("@rules_swift//swift:swift.bzl", "SwiftInfo")
 load("//flutter:providers.bzl", "FlutterApplicationInfo")
+load("//flutter/private:swiftpm_app_settings.bzl", "FlutterSwiftPMAppLibrariesInfo", "SWIFTPM_APP_LIBRARIES", "swift_package_environment_problems", "swiftpm_app_transition")
+load("//flutter/private:unbuilt_native_code.bzl", "fail_on_unbuilt_native_code")
 
 def _flutter_apple_plugins_aggregator_impl(ctx):
     flutter_info = ctx.attr.application[FlutterApplicationInfo]
     target_platform = ctx.attr.platform
 
+    entries = [
+        entry
+        for entry in flutter_info.apple_plugin_libraries.to_list()
+        if entry.platform == target_platform
+    ]
+
+    problems = swift_package_environment_problems(ctx.attr.swift_package_environment)
+    if problems:
+        fail("{}: `swift_package_environment` is the environment of the plugins' Package.swift:\n    {}".format(
+            ctx.label,
+            "\n    ".join(problems),
+        ))
+
+    # The libraries whose Package.swift decides its defines from the app,
+    # built for this one.
+    if [e for e in entries if getattr(e, "app_library", None)]:
+        built = ctx.attr._app_settings_libraries[0][FlutterSwiftPMAppLibrariesInfo].libraries
+        entries = [_for_app(e, built) for e in entries]
+
+    # A plugin whose library for this platform its podspec builds by other
+    # means (cargokit, a script phase, `ffiPlugin`) would link without it.
+    fail_on_unbuilt_native_code(entries)
+
     cc_infos = []
     swift_infos = []
-    for entry in flutter_info.apple_plugin_libraries.to_list():
-        if entry.platform != target_platform:
-            continue
+    resource_infos = []
+    for entry in entries:
         if entry.cc_info:
             cc_infos.append(entry.cc_info)
         if entry.swift_info:
             swift_infos.append(entry.swift_info)
+        if getattr(entry, "resource_info", None):
+            resource_infos.append(entry.resource_info)
 
     # Always emit CcInfo + SwiftInfo, even when there are no plugins.
     # The runner's swift_library depends on this aggregator
@@ -42,11 +80,35 @@ def _flutter_apple_plugins_aggregator_impl(ctx):
     # e2e/macos_example) still needs an aggregator that satisfies the
     # contract. cc_common.merge_cc_infos and SwiftInfo handle empty lists
     # cleanly and produce no-op merged providers.
-    return [
+    providers = [
         DefaultInfo(),
         cc_common.merge_cc_infos(cc_infos = cc_infos),
         SwiftInfo(swift_infos = swift_infos),
     ]
+
+    # The plugins' resources, which the app's bundling takes from this
+    # dependency of its runner as it takes any library's.
+    if resource_infos:
+        providers.append(resources.merge_providers(providers = resource_infos, default_owner = str(ctx.label)))
+    return providers
+
+def _for_app(entry, built):
+    """`entry`, or the library built for the app that its marker names."""
+    library = getattr(entry, "app_library", None)
+    if not library:
+        return entry
+    found = built.get(str(library))
+    if not found:
+        fail("{} is not in @flutter_pub_apple_app_settings//:libraries, the build's plugin libraries whose Package.swift decides its defines from the app".format(library))
+    return struct(
+        platform = entry.platform,
+        label = library,
+        cc_info = found.cc_info,
+        swift_info = found.swift_info,
+        resource_info = found.resource_info,
+        unbuilt_native_code = found.unbuilt_native_code,
+        package = entry.package,
+    )
 
 flutter_apple_plugins_aggregator = rule(
     implementation = _flutter_apple_plugins_aggregator_impl,
@@ -56,6 +118,24 @@ flutter_apple_plugins_aggregator = rule(
                   "Apple plugin libraries via FlutterApplicationInfo.apple_plugin_libraries.",
             mandatory = True,
             providers = [FlutterApplicationInfo],
+        ),
+        "info_plist": attr.label(
+            allow_single_file = [".plist"],
+            doc = "The app's Info.plist, as the app is built from it. A plugin " +
+                  "whose Package.swift decides its defines from the app reads " +
+                  "it, as under Xcode. Unset, such a manifest sees an app " +
+                  "whose Info.plist is empty.",
+        ),
+        "swift_package_environment": attr.string_dict(
+            doc = "The environment of the evaluation of each plugin's " +
+                  "Package.swift that decides its defines from the app, as " +
+                  "the shell's is under `flutter build`. Set what a plugin's " +
+                  "README says to export: `{\"AUDIO_SESSION_MICROPHONE\": \"1\"}`.",
+        ),
+        "_app_settings_libraries": attr.label(
+            default = SWIFTPM_APP_LIBRARIES,
+            cfg = swiftpm_app_transition,
+            providers = [FlutterSwiftPMAppLibrariesInfo],
         ),
         "platform": attr.string(
             doc = "Target platform: 'macos' or 'ios'.",

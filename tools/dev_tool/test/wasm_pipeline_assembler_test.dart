@@ -11,8 +11,10 @@
 /// reply has to carry.
 library;
 
+import 'package:flutter_bazel_dev_tool/frontend_server.dart';
 import 'package:flutter_bazel_dev_tool/logging.dart';
 import 'package:flutter_bazel_dev_tool/reload_pipeline.dart';
+import 'package:flutter_bazel_dev_tool/reload_strategy.dart';
 import 'package:flutter_bazel_dev_tool/session_host.dart';
 import 'package:flutter_bazel_dev_tool/web_pipeline_assembler.dart';
 import 'package:test/test.dart';
@@ -66,7 +68,7 @@ void main() {
       // `runningCode` is provable here rather than asserted, because the
       // refusal stops before a compiler or a browser is touched.
       expect(reply['succeeded'], isFalse);
-      expect(reply['error'], contains('not supported in WASM'));
+      expect(reply['error'], contains('not available in WASM'));
       expect(reply['runningCode'], 'unchanged');
     });
 
@@ -85,7 +87,7 @@ void main() {
           isNot(contains(_pipelineSentinel)),
           reason: 'the WASM refusal must be the registration that answers',
         );
-        expect(reply['error'], contains('use restart'));
+        expect(reply['error'], contains('Restart with R'));
       },
     );
   });
@@ -94,7 +96,9 @@ void main() {
     test('answers with the strategy\'s own verdict on the reload', () async {
       assemble();
 
-      final reply = await host.commandRunner.run('app.restart', {});
+      final reply = await host.commandRunner.run('app.restart', {
+        'fullRestart': true,
+      });
 
       // Not a refusal and not a hand-built map: the rebuild is attempted and
       // falls over, and what the reply carries is what the strategy says about
@@ -106,18 +110,99 @@ void main() {
       expect(reply['elapsedMs'], isA<int>());
     });
 
+    test('without fullRestart it is the refused hot reload, as upstream\'s '
+        'is a reload', () async {
+      assemble();
+
+      final reply = await host.commandRunner.run('app.restart', {});
+
+      expect(reply['error'], contains('Hot reload is not available'));
+      expect(reply['succeeded'], isFalse);
+    });
+
     test(
       'replaces the pipeline-backed handler rather than sitting behind it',
       () async {
         registerPipelineHandlers();
         assemble();
 
-        final reply = await host.commandRunner.run('app.restart', {});
+        final reply = await host.commandRunner.run('app.restart', {
+          'fullRestart': true,
+        });
 
         expect(reply['error'], isNot(contains(_pipelineSentinel)));
         expect(reply['error'], contains('WASM hot restart failed'));
       },
     );
+  });
+
+  group('phase lines', () {
+    late List<Map<String, dynamic>> lines;
+
+    setUp(() {
+      lines = [];
+      final sub = Logger.root.onRecord.listen((r) {
+        final o = r.object;
+        if (o is Map && o['message'] == 'reload_phase') {
+          lines.add(Map<String, dynamic>.from(o));
+        }
+      });
+      addTearDown(sub.cancel);
+    });
+
+    test(
+      'a restart says queue, build and total, with the build failing',
+      () async {
+        assemble();
+
+        await host.commandRunner.run('app.restart', {'fullRestart': true});
+
+        expect(
+          [for (final l in lines) l['phase']],
+          ['queue', 'build', 'total'],
+        );
+        expect(
+          [for (final l in lines) l['event']],
+          [
+            'finished',
+            'failed',
+            'finished',
+          ],
+        );
+        expect(lines[1]['verb'], 'Restart');
+        expect(lines.last['text'], matches(r'^Restart finished in \d+ms$'));
+      },
+    );
+
+    test('a hot reload refusal still ends with the total', () async {
+      assemble();
+
+      await host.commandRunner.run('app.hotReload', {});
+
+      expect([for (final l in lines) l['phase']], ['queue', 'total']);
+      expect(lines.last['verb'], 'Hot reload');
+    });
+
+    test('the strategy says apply once the build has succeeded', () async {
+      final ran = <String>[];
+      final strategy = WasmReloadStrategy(
+        // Nothing listens on port 1, so the page reload is rejected.
+        cdpPort: 1,
+        rebuild: () async => true,
+        phase: <T>(name, body) {
+          ran.add(name);
+          return body();
+        },
+      );
+
+      final outcome = await strategy.applyRestart(
+        CompileResult(dillPath: '', success: true),
+        host.sessions,
+      );
+
+      expect(ran, ['build', 'apply']);
+      expect(outcome, isA<StrategyRejected>());
+    });
   });
 
   group('with no CDP port', () {
@@ -133,7 +218,7 @@ void main() {
         containsPair('error', _pipelineSentinel),
       );
       expect(
-        await host.commandRunner.run('app.restart', {}),
+        await host.commandRunner.run('app.restart', {'fullRestart': true}),
         containsPair('error', _pipelineSentinel),
       );
     });

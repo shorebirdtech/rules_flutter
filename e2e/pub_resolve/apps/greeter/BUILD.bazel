@@ -1,0 +1,70 @@
+load("@rules_dart//dart:defs.bzl", "dart_test")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application", "flutter_test")
+load("@rules_flutter//flutter:integration_test.bzl", "flutter_web_integration_test")
+load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
+
+exports_files(["pubspec.lock"])
+
+# The app depends on `@deps//:greeting`, the hub's name for the path package
+# `flutter_pub.from_lock(resolve = ...)` maps to //packages/greeting. Going
+# through the hub is what checks the lock against that package's pubspec.yaml on
+# every build.
+_DEPS = [
+    "@deps//:flutter",
+    "@deps//:greeting",
+]
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "greeter",
+)
+
+flutter_application(
+    name = "app",
+    main = "lib/main.dart",
+    package = ":pubspec-metadata",
+    deps = _DEPS,
+)
+
+flutter_web_app(
+    name = "greeter",
+    app_name = "Greeter",
+    application = ":app",
+)
+
+# The greeting is the asset of one path package, joined to the number format of
+# the fork that replaces the hosted `intl` and a second path package's tagline.
+flutter_test(
+    name = "greeter_test",
+    srcs = ["lib/main.dart"],
+    main = "test/greeter_test.dart",
+    package = ":pubspec-metadata",
+    deps = _DEPS + ["@deps//:flutter_test"],
+)
+
+# The render check of docs/TESTING.md § 5: the app in headless Chrome, reading
+# the greeting back out of the widget tree. macOS and Linux run it; Windows is
+# not verified, and Bazel reports it skipped there.
+flutter_web_integration_test(
+    name = "render_test",
+    src = "integration_test/render_test.dart",
+    application = ":app",
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:macos": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "@deps//:flutter_test",
+        "@deps//:integration_test",
+    ],
+)
+
+# The path package's asset is in the bundle under the key `flutter build` gives
+# a package's asset, and not at a bare path.
+dart_test(
+    name = "bundle_test",
+    data = [":greeter"],
+    main = "test/bundle_test.dart",
+    deps = ["@rules_flutter//tools/e2e_testing"],
+)

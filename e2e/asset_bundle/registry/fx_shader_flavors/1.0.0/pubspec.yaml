@@ -1,0 +1,11 @@
+name: fx_shader_flavors
+version: 1.0.0
+environment:
+  sdk: ^3.13.0
+flutter:
+  shaders:
+    - shaders/all.frag
+    - path: shaders/free.frag
+      flavors: [free]
+    - path: shaders/paid.frag
+      flavors: [paid, premium]

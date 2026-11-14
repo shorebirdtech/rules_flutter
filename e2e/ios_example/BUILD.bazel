@@ -1,15 +1,15 @@
 load("@rules_apple//apple:ios.bzl", "ios_application")
-load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
 load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_test")
-load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_library")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application", "flutter_library")
 load(
     "@rules_flutter//flutter:ios.bzl",
     "IOS_DEFAULT_LAUNCH_STORYBOARD",
     "IOS_DEFAULT_MAIN_STORYBOARD",
     "IOS_MINIMUM_OS_VERSION",
+    "flutter_apple_bundle_version",
     "flutter_ios_app",
+    "flutter_ios_app_framework_gen",
     "flutter_ios_engine",
-    "flutter_ios_framework_gen",
     "flutter_ios_info_plist_gen",
     "flutter_ios_native_frameworks_gen",
     "flutter_ios_registrant_gen",
@@ -17,8 +17,11 @@ load(
     "flutter_ios_simulator_build",
     "flutter_ios_simulator_build_test",
 )
+load("@rules_flutter//tools/e2e_testing:apple_analysis_test.bzl", "analyses_test", "command_line_tests", "program_test", "skipped_test")
+load("@rules_flutter//tools/e2e_testing:apple_release_build.bzl", "apple_release_build")
+load("@rules_flutter//tools/e2e_testing:device_profile.bzl", "device_profile")
 load("@rules_swift//swift:swift.bzl", "swift_library")
-load(":simulator_mode_test.bzl", "simulator_fastbuild_refused_test")
+load(":simulator_mode_test.bzl", "device_needs_profile_test", "simulator_fastbuild_refused_test")
 
 exports_files(["pubspec.lock"])
 
@@ -26,17 +29,27 @@ exports_files(["pubspec.lock"])
 # Shared: Flutter application (Dart compilation)
 # =============================================================================
 
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "ios_example",
+)
+
 flutter_application(
     name = "app_flutter",
-    package_name = "ios_example",
     # A first-party asset so the dev loop has something real to deliver here.
     # iOS is the platform where this mattered: the runner reaches this target
     # through a split transition, so the app's `flutter_assets` tree lives in a
     # configuration no bare build produces. asset_reload_e2e_test edits
     # assets/message.txt on the simulator and asserts the change arrives.
     assets = glob(["assets/**"]),
+    # Not the default, and the same as `:app`'s, whose bundle and program must
+    # agree. Two numbers, which become three in the bundle as `flutter build`
+    # pads them.
+    build_name = "2.3",
+    build_number = "42",
     main = "lib/main.dart",
-    min_os_version = IOS_MINIMUM_OS_VERSION,
+    minimum_os_version = IOS_MINIMUM_OS_VERSION,
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:flutter",
         "@rules_flutter//flutter:material_icons",
@@ -47,7 +60,7 @@ flutter_application(
 # Shared iOS targets (used by approaches 2 & 3)
 # =============================================================================
 
-flutter_ios_framework_gen(
+flutter_ios_app_framework_gen(
     name = "app_framework",
     application = ":app_flutter",
 )
@@ -64,11 +77,11 @@ flutter_ios_native_frameworks_gen(
     application = ":app_flutter",
 )
 
-# Shared version for approaches 2 & 3.
-apple_bundle_version(
+# Shared version for approaches 2 & 3 and the app with extensions: the
+# application's, which the program reports and the app checks its own against.
+flutter_apple_bundle_version(
     name = "app_version",
-    build_version = "1.0",
-    short_version_string = "1.0",
+    application = ":app_flutter",
     tags = ["manual"],
     visibility = ["//extensions:__pkg__"],
 )
@@ -84,33 +97,55 @@ apple_bundle_version(
 flutter_ios_app(
     name = "app",
     application = ":app_flutter",
+    # Not the default, so :verify_ios_info_plist_test can see it arrive. Two
+    # numbers, which become three as `flutter build` pads them: 2.3.0.
+    build_name = "2.3",
+    build_number = "42",
     bundle_id = "com.rulesflutter.ios.example",
 )
 
-# A second app in the same package, built from a second application.
+# An application only a test may depend on, as one an integration test builds for
+# itself is, and an app over it. Everything `flutter_ios_app` declares around the
+# app has to be `testonly` too: `:testonly_app_build_test`.
+flutter_application(
+    name = "testonly_flutter",
+    testonly = True,
+    main = "lib/testonly_main.dart",
+    minimum_os_version = IOS_MINIMUM_OS_VERSION,
+    package = ":pubspec-metadata",
+    deps = ["@deps//:flutter"],
+)
+
+flutter_ios_app(
+    name = "testonly_app",
+    testonly = True,
+    application = ":testonly_flutter",
+    bundle_id = "com.rulesflutter.ios.example.testonly",
+    tags = ["manual"],
+)
+
+# A second app in the same package, built from a second application of the
+# same Dart package.
 #
 # Regression guard for every output the pair would otherwise share: each app's
 # runner compiles into its own Swift module, and each App.framework is written
 # under its own target's directory. Either one hardcoded would make both apps
 # write one path and fail the build with conflicting actions.
 #
-# The second `flutter_application` is what gives the guard its teeth, and costs
-# the second Dart compile it looks like it costs. Pointing both apps at one
-# application gives the two App.frameworks identical inputs, so their actions
-# are identical, and Bazel shares identical actions instead of reporting a
-# conflict — which is exactly how this defect survived here until 2026-09.
-# Differing only in `minimum_os_version` does not work either: that attribute
-# is part of the configuration, so it separates the two into different output
-# directories where nothing can collide.
+# The second `flutter_application`, with an entry point of its own, is what
+# gives the guard its teeth, and costs the second Dart compile it looks like it
+# costs. Pointing both apps at one application gives the two App.frameworks
+# identical inputs, so their actions are identical, and Bazel shares identical
+# actions instead of reporting a conflict — which is exactly how this defect
+# survived here until 2026-09. Differing only in `minimum_os_version` does not
+# work either: that attribute is part of the configuration, so it separates the
+# two into different output directories where nothing can collide.
 flutter_application(
     name = "app_flutter_second",
-    package_name = "ios_example_second",
-    main = "lib/main.dart",
-    min_os_version = IOS_MINIMUM_OS_VERSION,
-    deps = [
-        "@deps//:flutter",
-        "@rules_flutter//flutter:material_icons",
-    ],
+    main = "lib/second_main.dart",
+    minimum_os_version = IOS_MINIMUM_OS_VERSION,
+    package = ":pubspec-metadata",
+    deps = ["@deps//:flutter"],
 )
 
 flutter_ios_app(
@@ -123,15 +158,20 @@ flutter_ios_app(
 # only difference, so the device bundle is the identical construction rather
 # than a second one hand-assembled out of Tier-2 `_gen` rules.
 #
-# `//device` is git-ignored and absent from a fresh clone. That is fine:
-# flutter_ios_app defaults to `tags = ["manual"]`, so `bazel build //...`
-# never expands this target and therefore never loads the missing package.
-# Create it from device.example/ — see README.md "Device builds".
+# Signed with the developer's own profile, which is not in this repository:
+# `//:device_profile` is a flag whose default fails with the setup steps (copy
+# device.example/ to the git-ignored device/, then set
+# `--//:device_profile=//device:profile` in .bazelrc.user; see README.md
+# "Device builds"). The flag keeps `bazel query 'deps(//...)'` from following
+# a label into the //device package a fresh clone lacks. flutter_ios_app
+# defaults to `tags = ["manual"]`, so `bazel build //...` skips the target.
+device_profile()
+
 flutter_ios_app(
     name = "app_device",
     application = ":app_flutter",
     bundle_id = "com.rulesflutter.ios.example",
-    provisioning_profile = "//device:profile",
+    provisioning_profile = ":device_profile",
 )
 
 # An app that ships App Intents. The library goes to `runner_deps` so the runner
@@ -169,6 +209,8 @@ flutter_ios_app(
         "//extensions:share",
         "//extensions:widgets",
     ],
+    # The extensions' version: an extension's must match its app's.
+    version = ":app_version",
 )
 
 # The same app for a device, signed with //device's team wildcard profile. A
@@ -182,7 +224,8 @@ flutter_ios_app(
         "//extensions:share_device",
         "//extensions:widgets_device",
     ],
-    provisioning_profile = "//device:profile",
+    provisioning_profile = ":device_profile",
+    version = ":app_version",
 )
 
 # =============================================================================
@@ -200,6 +243,7 @@ flutter_ios_info_plist_gen(
 
 flutter_ios_runner_lib_gen(
     name = "bazel_runner_lib",
+    application = ":app_flutter",
     engine = ":app_engine",
     module_name = "BazelRunner",
     registrant = ":app_registrant",
@@ -283,6 +327,58 @@ flutter_ios_simulator_build_test(
     targets = [":app"],
 )
 
+# A `testonly` app builds: every target `flutter_ios_app` declares around it is
+# `testonly` too, so none is a non-test target depending on a `testonly`
+# application.
+flutter_ios_simulator_build_test(
+    name = "testonly_app_build_test",
+    target_compatible_with = ["@platforms//os:macos"],
+    targets = [":testonly_app"],
+)
+
+# An app over pub plugins whose Apple side is a Swift package, built as its
+# Package.swift says: `flutter_qjs_next` compiles QuickJS's C sources with
+# defines its manifest sets, one of them for debug builds only;
+# `video_player_avfoundation` is four targets, one of them iOS-only.
+flutter_application(
+    name = "swiftpm_plugins_flutter",
+    main = "lib/swiftpm_plugins_main.dart",
+    minimum_os_version = IOS_MINIMUM_OS_VERSION,
+    package = ":pubspec-metadata",
+    deps = [
+        "@deps//:ffi_dynamic_plugin",
+        "@deps//:firebase_core",
+        "@deps//:flutter",
+        "@deps//:flutter_qjs_next",
+        "@deps//:libremidi_flutter",
+        "@deps//:resource_plugin",
+        "@deps//:script_phase_plugin",
+        "@deps//:swift6_plugin",
+        "@deps//:video_player_avfoundation",
+    ],
+)
+
+flutter_ios_app(
+    name = "swiftpm_plugins_app",
+    application = ":swiftpm_plugins_flutter",
+    bundle_id = "com.rulesflutter.ios.example.swiftpm",
+    tags = ["manual"],
+)
+
+flutter_ios_simulator_build(
+    name = "swiftpm_plugins_simulator",
+    testonly = True,
+    targets = [":swiftpm_plugins_app"],
+)
+
+dart_test(
+    name = "verify_ios_swiftpm_plugins_test",
+    data = [":swiftpm_plugins_simulator"],
+    main = "test/verify_ios_swiftpm_plugins_test.dart",
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
+)
+
 # Both apps in one build_test: a per-package module-name collision is an
 # analysis-time action conflict, so it fails here rather than at runtime.
 flutter_ios_simulator_build_test(
@@ -296,6 +392,15 @@ flutter_ios_simulator_build_test(
 
 simulator_fastbuild_refused_test(
     name = "simulator_fastbuild_refused_test",
+    target_compatible_with = ["@platforms//os:macos"],
+    target_under_test = ":app",
+)
+
+# Property: a device build without a provisioning profile fails, and says why.
+# rules_apple wants the profile also for an app it does not sign (the build
+# below is the sign-later one), which its own message does not explain.
+device_needs_profile_test(
+    name = "device_needs_profile_test",
     target_compatible_with = ["@platforms//os:macos"],
     target_under_test = ":app",
 )
@@ -316,6 +421,7 @@ dart_test(
     data = [":app_simulator"],
     main = "test/verify_ios_info_plist_test.dart",
     target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 flutter_ios_simulator_build(
@@ -331,6 +437,7 @@ dart_test(
     data = [":app_intents_simulator"],
     main = "test/verify_ios_app_intents_test.dart",
     target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 flutter_ios_simulator_build(
@@ -346,6 +453,7 @@ dart_test(
     data = [":app_extensions_simulator"],
     main = "test/verify_ios_extensions_test.dart",
     target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 # The app icon `flutter create` leaves in the tree, which this BUILD file
@@ -356,6 +464,7 @@ dart_test(
     data = [":app_simulator"],
     main = "test/verify_ios_app_icon_test.dart",
     target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 flutter_ios_simulator_build_test(
@@ -393,10 +502,300 @@ dart_analysis_config(
 # the analyzer to stage.
 flutter_library(
     name = "app_lib",
-    package_name = "ios_example",
     srcs = glob(["lib/**/*.dart"]),
+    package = ":pubspec-metadata",
     deps = [
+        "@deps//:audio_session",
+        "@deps//:ffi_dynamic_plugin",
+        "@deps//:firebase_core",
         "@deps//:flutter",
+        "@deps//:flutter_qjs_next",
+        "@deps//:geolocator_apple",
+        "@deps//:libremidi_flutter",
+        "@deps//:permission_handler",
+        "@deps//:resource_plugin",
+        "@deps//:script_phase_plugin",
+        "@deps//:swift6_plugin",
+        "@deps//:video_player_avfoundation",
         "@rules_flutter//flutter:material_icons",
     ],
+)
+
+# =============================================================================
+# What a release iOS app ships
+#
+# `flutter build ios --release` strips App.framework/App. A release bundle is
+# a device build, which needs a provisioning profile this workspace does not
+# have, so the framework is checked where it is assembled: it is the same
+# `App` the bundle embeds. Flutter's release mode is every `-c` but `dbg`.
+# =============================================================================
+
+flutter_ios_app_framework_gen(
+    name = "release_framework",
+    application = ":app_flutter",
+    tags = ["manual"],
+)
+
+[
+    apple_release_build(
+        name = "release_framework_%s" % mode,
+        compilation_mode = mode,
+        ios_device = True,
+        targets = [":release_framework"],
+    )
+    for mode in ("fastbuild", "opt")
+]
+
+[
+    dart_test(
+        name = "verify_ios_release_stripped_%s_test" % mode,
+        data = [":release_framework_%s" % mode],
+        main = "test/verify_ios_release_stripped_test.dart",
+        target_compatible_with = ["@platforms//os:macos"],
+        deps = ["@rules_flutter//tools/e2e_testing"],
+    )
+    for mode in (
+        "fastbuild",
+        "opt",
+    )
+]
+
+# =============================================================================
+# The install name of App.framework/App
+#
+# A host app that links the framework records its install name, so it must be
+# `@rpath/App.framework/App` as `flutter build ios` makes it: the AOT snapshot
+# of every release mode, and the debug stub for a device and the simulator.
+# =============================================================================
+
+[
+    apple_release_build(
+        name = "install_name_framework_%s" % variant,
+        compilation_mode = mode,
+        ios_device = device,
+        targets = [":release_framework"],
+    )
+    for variant, mode, device in (
+        ("fastbuild", "fastbuild", True),
+        ("opt", "opt", True),
+        ("dbg_device", "dbg", True),
+        ("dbg_simulator", "dbg", False),
+    )
+]
+
+[
+    dart_test(
+        name = "verify_ios_app_install_name_%s_test" % variant,
+        data = [":install_name_framework_%s" % variant],
+        main = "test/verify_ios_app_install_name_test.dart",
+        target_compatible_with = ["@platforms//os:macos"],
+        deps = ["@rules_flutter//tools/e2e_testing"],
+    )
+    for variant in (
+        "fastbuild",
+        "opt",
+        "dbg_device",
+        "dbg_simulator",
+    )
+]
+
+# =============================================================================
+# The build as a whole
+# =============================================================================
+
+# Property: the simulator wrappers build debug mode whatever mode flags the
+# command line carries, `--@rules_flutter//flutter:profile` among them. A
+# `bazel test //... -c opt --@rules_flutter//flutter:profile` run (the way to
+# test a profile build of the other targets) must still analyse them.
+test_suite(
+    name = "simulator_command_line_tests",
+    tests = command_line_tests(
+        name = "simulator_build",
+        profile = False,
+        target = ":app_simulator",
+    ) + command_line_tests(
+        name = "simulator_build_test",
+        profile = False,
+        target = ":ios_app_build_test",
+    ),
+)
+
+# The same with the profile flag, which the other targets in a profile run
+# need and the wrappers must not trip over.
+test_suite(
+    name = "simulator_profile_command_line_tests",
+    tests = command_line_tests(
+        name = "simulator_build_profile",
+        profile = True,
+        target = ":app_simulator",
+    ) + command_line_tests(
+        name = "simulator_build_test_profile",
+        profile = True,
+        target = ":ios_app_build_test",
+    ),
+)
+
+# Property: a `flutter_ios_app` that declares itself for one platform is
+# skipped for another, not failed, and what the user declares on it is kept.
+#
+# Each test passes by being skipped (see `skipped_test`); `..._control_test`
+# is the same app where it is compatible, and passes by analysing.
+flutter_ios_app(
+    name = "app_macos_only",
+    application = ":app_flutter",
+    bundle_id = "com.rulesflutter.ios.example.macosonly",
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
+flutter_ios_app(
+    name = "app_windows_only",
+    application = ":app_flutter",
+    bundle_id = "com.rulesflutter.ios.example.windowsonly",
+    target_compatible_with = ["@platforms//os:windows"],
+)
+
+# Property: an iOS app over an application with an iOS-only dependency is
+# built for iOS and passes on its program for analysis, rather than being
+# skipped: nothing configures its application for any platform but the
+# bundle's. A regression shows as this test SKIPPED, not FAILED, since Bazel
+# skips a test of an incompatible target; `bazel build //:ios_only_app` says
+# so outright.
+flutter_application(
+    name = "ios_only_flutter",
+    main = "lib/testonly_main.dart",
+    minimum_os_version = IOS_MINIMUM_OS_VERSION,
+    package = ":pubspec-metadata",
+    deps = [
+        "//ios_only",
+        "@deps//:flutter",
+    ],
+)
+
+flutter_ios_app(
+    name = "ios_only_app",
+    application = ":ios_only_flutter",
+    bundle_id = "com.rulesflutter.ios.example.iosonly",
+)
+
+program_test(
+    name = "ios_only_app_program_test",
+    main = "lib/testonly_main.dart",
+    target = ":ios_only_app",
+)
+
+analyses_test(
+    name = "ios_app_macos_only_control_test",
+    target = ":app_macos_only",
+)
+
+skipped_test(
+    name = "ios_app_user_constraint_skipped_test",
+    target = ":app_windows_only",
+)
+
+skipped_test(
+    name = "ios_app_macos_only_skipped_on_linux_test",
+    on_linux = True,
+    target = ":app_macos_only",
+)
+
+skipped_test(
+    name = "ios_app_skipped_on_linux_test",
+    on_linux = True,
+    target = ":app",
+)
+
+# The same app for a device, built as a release and not signed, so that its
+# release link can be read on any machine: rules_apple wants a provisioning
+# profile for every device build, and this one is a plain property list in the
+# shape of one (profiles/unsigned.mobileprovision).
+flutter_ios_app(
+    name = "swiftpm_plugins_app_device",
+    application = ":swiftpm_plugins_flutter",
+    bundle_id = "com.rulesflutter.ios.example.swiftpm",
+    provisioning_profile = "profiles/unsigned.mobileprovision",
+)
+
+apple_release_build(
+    name = "swiftpm_plugins_app_release",
+    compilation_mode = "opt",
+    ios_device = True,
+    sign = False,
+    targets = [":swiftpm_plugins_app_device"],
+)
+
+dart_test(
+    name = "verify_ios_release_ffi_symbols_test",
+    data = [":swiftpm_plugins_app_release"],
+    main = "test/verify_ios_release_ffi_symbols_test.dart",
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
+)
+
+# =============================================================================
+# Plugins whose Package.swift decides its defines from the app
+# =============================================================================
+
+# permission_handler_apple compiles in each permission whose usage description
+# the app's Info.plist has. This app's plist explains the camera and nothing
+# else, so the camera's code is in it and the microphone's is not.
+flutter_application(
+    name = "permission_flutter",
+    main = "lib/permission_main.dart",
+    minimum_os_version = IOS_MINIMUM_OS_VERSION,
+    package = ":pubspec-metadata",
+    deps = [
+        "@deps//:flutter",
+        "@deps//:permission_handler",
+    ],
+)
+
+flutter_ios_app(
+    name = "permission_app",
+    application = ":permission_flutter",
+    bundle_id = "com.rulesflutter.ios.example.permission",
+    info_plist = "app_settings/Info.plist",
+    tags = ["manual"],
+)
+
+# audio_session and geolocator_apple read an environment variable each, which
+# the app sets for their manifests, as a shell would under `flutter build`.
+flutter_application(
+    name = "audio_session_flutter",
+    main = "lib/audio_session_main.dart",
+    minimum_os_version = IOS_MINIMUM_OS_VERSION,
+    package = ":pubspec-metadata",
+    deps = [
+        "@deps//:audio_session",
+        "@deps//:flutter",
+        "@deps//:geolocator_apple",
+    ],
+)
+
+flutter_ios_app(
+    name = "audio_session_app",
+    application = ":audio_session_flutter",
+    bundle_id = "com.rulesflutter.ios.example.audiosession",
+    swift_package_environment = {
+        "AUDIO_SESSION_MICROPHONE": "1",
+        "BYPASS_PERMISSION_LOCATION_ALWAYS": "1",
+    },
+    tags = ["manual"],
+)
+
+flutter_ios_simulator_build(
+    name = "app_settings_simulator",
+    testonly = True,
+    targets = [
+        ":audio_session_app",
+        ":permission_app",
+    ],
+)
+
+dart_test(
+    name = "verify_ios_app_settings_plugins_test",
+    data = [":app_settings_simulator"],
+    main = "test/verify_ios_app_settings_plugins_test.dart",
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )

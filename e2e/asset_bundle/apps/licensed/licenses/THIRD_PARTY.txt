@@ -1,0 +1,3 @@
+Third-party text the application lists.
+
+It has a blank line and no header.

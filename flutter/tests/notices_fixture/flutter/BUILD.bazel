@@ -1,0 +1,16 @@
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_library")
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "notices_flutter",
+    license_file = "FLUTTER_LICENSE",
+)
+
+flutter_library(
+    name = "notices_flutter",
+    srcs = ["lib/flutter_pkg.dart"],
+    package = ":pubspec-metadata",
+    tags = ["manual"],
+    visibility = ["//flutter/tests/notices_fixture:__subpackages__"],
+    deps = ["//flutter/tests/notices_fixture/dart:notices_dart"],
+)

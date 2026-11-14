@@ -1,0 +1,11 @@
+name: fx_font_borrower
+version: 1.0.0
+environment:
+  sdk: ^3.13.0
+dependencies:
+  fx_font_owner: 1.0.0
+flutter:
+  fonts:
+    - family: Borrowed
+      fonts:
+        - asset: packages/fx_font_owner/fonts/Owner.ttf

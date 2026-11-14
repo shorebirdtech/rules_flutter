@@ -1,0 +1,161 @@
+load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
+load("//flutter/private:flutter_integration_test.bzl", "flutter_chrome_runner", "flutter_desktop_runner", "flutter_ios_simulator_runner")
+
+# The runners an integration test rule defaults to, one per family of device.
+
+# The host's own desktop: macOS or Windows. On Linux, an X server of the test's
+# own, and the pinned runtime of the host's architecture in place of the host's
+# libraries; only that architecture's is fetched.
+flutter_desktop_runner(
+    name = "desktop",
+    linux_runtime = select({
+        ":linux_arm64": "@flutter_linux_runtime_arm64//:runtime",
+        ":linux_x64": "@flutter_linux_runtime_amd64//:runtime",
+        "//conditions:default": None,
+    }),
+    visibility = ["//visibility:public"],
+)
+
+# A simulator the test makes for itself: an iPhone 16 on the newest iOS runtime
+# installed.
+flutter_ios_simulator_runner(
+    name = "ios_simulator",
+    visibility = ["//visibility:public"],
+)
+
+# A pinned Chrome for Testing headless shell, the browser a web integration
+# test runs in. Each host's own is a repository of its own, and only the one
+# the test runs on is fetched. A test runs on its host, so the host's platform
+# is the one to select on. A host with no pinned shell gets
+# `@platforms//:incompatible`, and a web integration test is skipped there
+# rather than run in some other browser. On Linux the shell loads the libraries
+# of the pinned runtime, as a desktop test's app does.
+flutter_chrome_runner(
+    name = "chrome",
+    chrome = select({
+        ":linux_arm64": "@flutter_chrome_for_testing_linux_arm64//:chrome",
+        ":linux_x64": "@flutter_chrome_for_testing_linux64//:chrome",
+        ":macos_arm64": "@flutter_chrome_for_testing_mac_arm64//:chrome",
+        ":macos_x64": "@flutter_chrome_for_testing_mac_x64//:chrome",
+        ":windows_x64": "@flutter_chrome_for_testing_win64//:chrome",
+        "//conditions:default": "@platforms//:incompatible",
+    }),
+    linux_runtime = select({
+        ":linux_arm64": "@flutter_linux_runtime_arm64//:runtime",
+        ":linux_x64": "@flutter_linux_runtime_amd64//:runtime",
+        "//conditions:default": None,
+    }),
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "linux_arm64",
+    constraint_values = [
+        "@platforms//cpu:arm64",
+        "@platforms//os:linux",
+    ],
+)
+
+config_setting(
+    name = "linux_x64",
+    constraint_values = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+    # The Android tests' macro selects the Linux runtime with it.
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "macos_arm64",
+    constraint_values = [
+        "@platforms//cpu:arm64",
+        "@platforms//os:macos",
+    ],
+)
+
+config_setting(
+    name = "macos_x64",
+    constraint_values = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:macos",
+    ],
+)
+
+config_setting(
+    name = "windows_x64",
+    constraint_values = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:windows",
+    ],
+)
+
+# -- Android -----------------------------------------------------------------
+
+# Which device an Android integration test that names no `runner` runs on:
+#
+# - `emulator`, the default: an emulator the test boots for itself, of the
+#   pinned `android_emulator` and `android_system_image` below, with the app
+#   built for the image's ABI. Nothing has to be attached, booted or installed
+#   beforehand.
+# - `attached`: the phone or running emulator `adb devices` lists, or the one
+#   `--test_env=ANDROID_SERIAL=<serial>` names, with the app built for
+#   arm64-v8a.
+string_flag(
+    name = "android_device",
+    build_setting_default = "emulator",
+    # It describes the app, and no build tool reads it: `scope = "target"`
+    # keeps it out of the exec configuration, so setting it rebuilds no tool.
+    scope = "target",
+    values = [
+        "attached",
+        "emulator",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "android_on_attached_device",
+    flag_values = {":android_device": "attached"},
+    visibility = ["//visibility:public"],
+)
+
+# The emulator of an x86_64 host boots x86_64 images, which run x86_64 apps.
+config_setting(
+    name = "android_on_x86_64_emulator",
+    constraint_values = ["@platforms//cpu:x86_64"],
+    flag_values = {":android_device": "emulator"},
+    visibility = ["//visibility:public"],
+)
+
+# The pinned Android emulator of the host, as the test runs on the host. Each
+# host's own is a repository of its own, and only the one the test runs on is
+# fetched. A host with no pinned emulator gets a target compatible with no
+# platform, so a test that would run on the emulator is skipped there; on an
+# attached device it still runs.
+alias(
+    name = "android_emulator",
+    actual = select({
+        ":linux_x64": "@flutter_android_emulator_linux_x64//:emulator",
+        ":macos_arm64": "@flutter_android_emulator_darwin_aarch64//:emulator",
+        "//conditions:default": ":no_pinned_emulator",
+    }),
+    visibility = ["//visibility:public"],
+)
+
+# The system image that emulator boots, of the host's ABI: AOSP's Automated
+# Test Device image, pinned.
+alias(
+    name = "android_system_image",
+    actual = select({
+        ":linux_x64": "@flutter_android_system_image_x86_64//:system_image",
+        ":macos_arm64": "@flutter_android_system_image_arm64_v8a//:system_image",
+        "//conditions:default": ":no_pinned_emulator",
+    }),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "no_pinned_emulator",
+    target_compatible_with = ["@platforms//:incompatible"],
+)

@@ -19,7 +19,7 @@ class _Page extends StatefulWidget {
 }
 
 class _PageState extends State<_Page> {
-  final _key = GlobalKey();
+  final GlobalKey _key = GlobalKey();
   ui.FragmentProgram? _program;
   String _result = 'pending';
 

@@ -1,25 +1,12 @@
-load("@buildifier_prebuilt//:rules.bzl", "buildifier")
-
-buildifier(
-    name = "buildifier.fix",
-    exclude_patterns = [
-        "./.git/*",
-        "./.claude/*",
-        "./references/*",
-    ],
-    lint_mode = "fix",
-    mode = "fix",
+# Read by the tests that check the Windows job's output base and that every
+# `uses:` is pinned to a commit.
+exports_files(
+    ["ci.yaml"],
+    visibility = ["//tools/ci_matrix:__pkg__"],
 )
 
-buildifier(
-    name = "buildifier.check",
-    exclude_patterns = [
-        "./.git/*",
-        # Gitignored scratch checkouts. Linting them means a half-written
-        # .bzl in one fails the pre-commit hook of another.
-        "./.claude/*",
-        "./references/*",
-    ],
-    lint_mode = "warn",
-    mode = "diff",
+filegroup(
+    name = "workflows",
+    srcs = glob(["*.yaml"]),
+    visibility = ["//tools/ci_matrix:__pkg__"],
 )

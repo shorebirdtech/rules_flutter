@@ -1,0 +1,69 @@
+load("@bazel_tools//tools/res:winsdk_toolchain.bzl", "windows_resource_compiler_toolchain")
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_application")
+load("//flutter:windows.bzl", "flutter_windows_app")
+load("//flutter/tests:windows_resources_test.bzl", "windows_resources_test_suite", "windows_runner_title_test")
+
+exports_files(
+    ["main.dart"],
+    visibility = ["//flutter/tests/windows_resources_fixture:__subpackages__"],
+)
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "windows_resources_fixture",
+)
+
+# A `flutter create` runner's layout, with stand-in files: the analysis tests
+# read what `flutter_windows_app` makes of it and never compile it.
+flutter_application(
+    name = "app",
+    build_name = "2.3.4",
+    build_number = "7",
+    main = "main.dart",
+    package = ":pubspec-metadata",
+    tags = ["manual"],
+    visibility = ["//flutter/tests/windows_resources_fixture:__subpackages__"],
+)
+
+flutter_windows_app(
+    name = "created",
+    application = ":app",
+    build_name = "2.3.4",
+    build_number = 7,
+    tags = ["manual"],
+)
+
+# A resource compiler for the tests to register, so a Windows build analyses
+# on any host. It is never run.
+windows_resource_compiler_toolchain(
+    name = "fake_rc_tc",
+    rc_exe = "fake_rc.exe",
+)
+
+toolchain(
+    name = "fake_rc",
+    toolchain = ":fake_rc_tc",
+    toolchain_type = "@bazel_tools//tools/res:toolchain_type",
+)
+
+windows_resources_test_suite(
+    name = "created_resources_test",
+    defines = [
+        "FLUTTER_VERSION=\"2.3.4+7\"",
+        "FLUTTER_VERSION_MAJOR=2",
+        "FLUTTER_VERSION_MINOR=3",
+        "FLUTTER_VERSION_PATCH=4",
+        "FLUTTER_VERSION_BUILD=7",
+    ],
+    inputs = [
+        "flutter/tests/windows_resources_fixture/windows/runner/resource.h",
+        "flutter/tests/windows_resources_fixture/windows/runner/resources/app_icon.ico",
+    ],
+    rc = "flutter/tests/windows_resources_fixture/windows/runner/Runner.rc",
+    target = ":__created_resources",
+)
+
+windows_runner_title_test(
+    name = "created_title_test",
+    target = ":__created_runner",
+)

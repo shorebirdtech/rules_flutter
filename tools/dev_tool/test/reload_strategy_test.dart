@@ -405,6 +405,29 @@ void main() {
 
     final isolate = IsolateRef(id: 'isolates/1', name: 'main', number: '1');
 
+    /// The session holding the page's connection, over [service].
+    ///
+    /// The page has drawn unless the test says otherwise: a restart is
+    /// answered only once the restarted app reports its first frame.
+    Future<List<DeviceSession>> pageSession(FakeVmService service) async {
+      service.extensionResponses['ext.flutter.didSendFirstFrameEvent'] ??= {
+        'enabled': 'true',
+      };
+      final client = VmServiceClient(connector: (_) async => service);
+      await client.connect(
+        Uri.parse('http://127.0.0.1:8181/'),
+        createDevFS: false,
+      );
+      return [
+        DeviceSession(
+          device: WebDevice(),
+          appInstance: AppInstance(process: FakeProcess()),
+          vmClient: client,
+          appId: 'web',
+        ),
+      ];
+    }
+
     test(
       'restart before any page has connected loads the page instead',
       () async {
@@ -486,7 +509,10 @@ void main() {
       final s = strategy();
       await s.attachVmService(service);
 
-      final outcome = await s.applyRestart(compiled, []);
+      final outcome = await s.applyRestart(
+        compiled,
+        await pageSession(service),
+      );
 
       expect(outcome, isA<StrategyApplied>());
       expect(service.hotRestartMethod, 'hotRestart');
@@ -507,7 +533,10 @@ void main() {
       await s.applyReload(compiled, []);
       expect(service.lastIsolateId, 'isolates/1');
 
-      expect(await s.applyRestart(compiled, []), isA<StrategyApplied>());
+      expect(
+        await s.applyRestart(compiled, await pageSession(service)),
+        isA<StrategyApplied>(),
+      );
 
       // DWDS started a new isolate; the next reload must target it.
       service.isolates
@@ -527,7 +556,10 @@ void main() {
       service.emitServiceRegistered('hotRestart', 's0.hotRestart');
       await pumpEventQueue();
 
-      expect(await s.applyRestart(compiled, []), isA<StrategyApplied>());
+      expect(
+        await s.applyRestart(compiled, await pageSession(service)),
+        isA<StrategyApplied>(),
+      );
 
       // A hardcoded bare `hotRestart` gets kMethodNotFound once DWDS owns DDS.
       expect(service.hotRestartMethod, 's0.hotRestart');
@@ -542,7 +574,10 @@ void main() {
       service.emitServiceUnregistered('hotRestart', 's0.hotRestart');
       await pumpEventQueue();
 
-      expect(await s.applyRestart(compiled, []), isA<StrategyApplied>());
+      expect(
+        await s.applyRestart(compiled, await pageSession(service)),
+        isA<StrategyApplied>(),
+      );
 
       expect(service.hotRestartMethod, 'hotRestart');
     });
@@ -557,7 +592,10 @@ void main() {
         final s = strategy();
         await s.attachVmService(service);
 
-        final outcome = await s.applyRestart(compiled, []);
+        final outcome = await s.applyRestart(
+          compiled,
+          await pageSession(service),
+        );
 
         expect(outcome, isA<StrategyUnsupported>());
         // The page WENT AWAY, as this group's own comment says — a different
@@ -582,7 +620,10 @@ void main() {
       final s = strategy();
       await s.attachVmService(service);
 
-      final outcome = await s.applyRestart(compiled, []);
+      final outcome = await s.applyRestart(
+        compiled,
+        await pageSession(service),
+      );
 
       expect(outcome, isA<StrategyRejected>());
       expect(outcome.message, contains('Method not found'));
@@ -599,13 +640,66 @@ void main() {
         final s = strategy(restartTimeout: const Duration(milliseconds: 50));
         await s.attachVmService(service);
 
-        final outcome = await s.applyRestart(compiled, []);
+        final outcome = await s.applyRestart(
+          compiled,
+          await pageSession(service),
+        );
 
         expect(outcome, isA<StrategyRejected>());
         expect(outcome.message, contains('did not report a restarted isolate'));
         gate.complete(); // don't leak the pending call
       },
     );
+
+    // DWDS answers once the new `main` has started, which on web is before
+    // the generated entrypoint has reached the app's `runApp`. A command sent
+    // on that answer finds no binding, so the restart is answered on the
+    // restarted app's first frame instead.
+    test('a restart answers once the restarted app has drawn', () async {
+      final service = FakeVmService(isolates: [isolate])
+        ..extensionResponses['ext.flutter.didSendFirstFrameEvent'] = {
+          'enabled': 'false',
+        };
+      final s = strategy();
+      await s.attachVmService(service);
+      final sessions = await pageSession(service);
+
+      var answered = false;
+      final outcome = s
+          .applyRestart(compiled, sessions)
+          .whenComplete(() => answered = true);
+      // Until the app has been asked whether it drew, and said no.
+      while (!service.extensionCalls.any(
+        (c) => c.method == 'ext.flutter.didSendFirstFrameEvent',
+      )) {
+        await pumpEventQueue();
+      }
+      await pumpEventQueue();
+      expect(service.hotRestartMethod, 'hotRestart');
+      expect(answered, isFalse, reason: 'the app has not drawn yet');
+
+      service.extensionResponses['ext.flutter.didSendFirstFrameEvent'] = {
+        'enabled': 'true',
+      };
+      expect(await outcome, isA<StrategyApplied>());
+    });
+
+    test('a restarted app that never draws is rejected, not hung', () async {
+      final service = FakeVmService(isolates: [isolate])
+        ..extensionResponses['ext.flutter.didSendFirstFrameEvent'] = {
+          'enabled': 'false',
+        };
+      final s = strategy(restartTimeout: const Duration(milliseconds: 400));
+      await s.attachVmService(service);
+
+      final outcome = await s.applyRestart(
+        compiled,
+        await pageSession(service),
+      );
+
+      expect(outcome, isA<StrategyRejected>());
+      expect(outcome.message, contains('drew no frame'));
+    });
 
     test('evicts each changed asset and rebuilds the tree', () async {
       // Nothing is uploaded: the module server reads `assets/` off the build

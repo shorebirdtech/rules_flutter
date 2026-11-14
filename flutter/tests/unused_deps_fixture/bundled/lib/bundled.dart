@@ -1,0 +1,1 @@
+int bundled() => 1;

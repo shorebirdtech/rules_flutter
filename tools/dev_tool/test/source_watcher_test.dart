@@ -5,44 +5,14 @@ import 'package:flutter_bazel_dev_tool/hot_reload/source_watcher.dart';
 import 'package:test/test.dart';
 import 'package:watcher/watcher.dart';
 
-/// Programmable [DirectoryWatcher] for deterministic tests.
-class _FakeDirectoryWatcher implements DirectoryWatcher {
-  @override
-  final String path;
-
-  final StreamController<WatchEvent> _events =
-      StreamController<WatchEvent>.broadcast();
-
-  _FakeDirectoryWatcher(this.path);
-
-  @override
-  Stream<WatchEvent> get events => _events.stream;
-
-  @override
-  Future<void> get ready async {}
-
-  @override
-  bool get isReady => true;
-
-  @override
-  String get directory => path;
-
-  void emit(WatchEvent event) => _events.add(event);
-
-  void emitError(Object error) => _events.addError(error);
-
-  Future<void> closeStream() => _events.close();
-
-  @override
-  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
-}
+import 'fakes.dart';
 
 void main() {
   group('SourceWatcher', () {
     test(
       'debounces multiple file changes within the debounce window into one event',
       () async {
-        final fake = _FakeDirectoryWatcher('/root');
+        final fake = FakeDirectoryWatcher('/root');
         final watcher = SourceWatcher(
           root: '/root',
           debounce: const Duration(milliseconds: 30),
@@ -85,7 +55,7 @@ void main() {
     // compiler's first full compile. A change in that gap has to arrive when
     // the consumer shows up, not be dropped.
     test('delivers a change that landed before anyone subscribed', () async {
-      final fake = _FakeDirectoryWatcher('/root');
+      final fake = FakeDirectoryWatcher('/root');
       final watcher = SourceWatcher(
         root: '/root',
         debounce: const Duration(milliseconds: 20),
@@ -110,7 +80,7 @@ void main() {
     });
 
     test('events arriving after the window flush separately', () async {
-      final fake = _FakeDirectoryWatcher('/root');
+      final fake = FakeDirectoryWatcher('/root');
       final watcher = SourceWatcher(
         root: '/root',
         debounce: const Duration(milliseconds: 20),
@@ -135,7 +105,7 @@ void main() {
     });
 
     test('ignores non-.dart files', () async {
-      final fake = _FakeDirectoryWatcher('/root');
+      final fake = FakeDirectoryWatcher('/root');
       final watcher = SourceWatcher(
         root: '/root',
         debounce: const Duration(milliseconds: 20),
@@ -163,7 +133,7 @@ void main() {
       // Assets have no extension in common and no fixed location — which
       // directories feed the bundle is something the build knows and the
       // watcher is told. The default filter would drop every one of them.
-      final fake = _FakeDirectoryWatcher('/root');
+      final fake = FakeDirectoryWatcher('/root');
       final watcher = SourceWatcher(
         root: '/root',
         debounce: const Duration(milliseconds: 20),
@@ -194,7 +164,7 @@ void main() {
     test('a widened filter still never sees the build tree', () async {
       // `bazel-bin` holds copies of the assets, written by the very build a
       // reload runs — accepting them would make each reload trigger the next.
-      final fake = _FakeDirectoryWatcher('/root');
+      final fake = FakeDirectoryWatcher('/root');
       final watcher = SourceWatcher(
         root: '/root',
         debounce: const Duration(milliseconds: 20),
@@ -223,7 +193,7 @@ void main() {
     });
 
     test('ignores files inside bazel-* directories', () async {
-      final fake = _FakeDirectoryWatcher('/root');
+      final fake = FakeDirectoryWatcher('/root');
       final watcher = SourceWatcher(
         root: '/root',
         debounce: const Duration(milliseconds: 20),
@@ -248,7 +218,7 @@ void main() {
     });
 
     test('stop() cancels pending debounce and closes the stream', () async {
-      final fake = _FakeDirectoryWatcher('/root');
+      final fake = FakeDirectoryWatcher('/root');
       final watcher = SourceWatcher(
         root: '/root',
         debounce: const Duration(milliseconds: 100),
@@ -280,7 +250,7 @@ void main() {
         // (watcher → SourceUriResolver.uriFor) yields the expected URIs.
         final resolver = SourceUriResolver(
           workspaceRoot: '/root',
-          sourcePackages: const [(name: 'app', libRoot: '')],
+          sourcePackages: const [(name: 'app', packageRoot: '')],
         );
         final change = SourceChange({'/root/lib/foo/bar.dart'});
         final uris = change.paths.map(resolver.uriFor).toSet();
@@ -298,7 +268,7 @@ void main() {
   /// like working.
   group('SourceWatcher failure', () {
     test('reports an error from the underlying watcher', () async {
-      final fake = _FakeDirectoryWatcher('/root');
+      final fake = FakeDirectoryWatcher('/root');
       final watcher = SourceWatcher(root: '/root', watcherFactory: (_) => fake);
       await watcher.start();
 
@@ -310,7 +280,7 @@ void main() {
     });
 
     test('reports a stream that ends after ready', () async {
-      final fake = _FakeDirectoryWatcher('/root');
+      final fake = FakeDirectoryWatcher('/root');
       final watcher = SourceWatcher(root: '/root', watcherFactory: (_) => fake);
       await watcher.start();
 
@@ -327,7 +297,7 @@ void main() {
         // package:watcher emits a REMOVE for every known file before it closes.
         // Flushing those would hand the pipeline one enormous spurious change
         // and then fall silent, which is worse than either alone.
-        final fake = _FakeDirectoryWatcher('/root');
+        final fake = FakeDirectoryWatcher('/root');
         final watcher = SourceWatcher(
           root: '/root',
           debounce: const Duration(milliseconds: 50),
@@ -352,7 +322,7 @@ void main() {
     );
 
     test('a deliberate stop is not a failure', () async {
-      final fake = _FakeDirectoryWatcher('/root');
+      final fake = FakeDirectoryWatcher('/root');
       final watcher = SourceWatcher(root: '/root', watcherFactory: (_) => fake);
       await watcher.start();
 

@@ -1,0 +1,18 @@
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_library")
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "units",
+)
+
+flutter_library(
+    name = "units",
+    srcs = ["lib/units.dart"],
+    package = ":pubspec-metadata",
+    visibility = ["//coverage:__subpackages__"],
+)
+
+exports_files(
+    ["lib/units.dart"],
+    visibility = ["//coverage:__subpackages__"],
+)

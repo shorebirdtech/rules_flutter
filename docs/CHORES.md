@@ -1,7 +1,14 @@
 # Maintenance Chores
 
-Central reference for all recurring maintenance tasks. Slash commands read this
-file at runtime — keep file lists current as the repo evolves.
+The recurring maintenance tasks of this repository: what starts each one, the
+files it touches, the steps, and how to check the result. Keep the file lists
+current as the tree changes; check what a path names before trusting it.
+
+Some chores read sibling checkouts beside this one: `../flutter` is a clone of
+[flutter/flutter](https://github.com/flutter/flutter), the source of truth for
+release tags, and `../rules_dart` is a clone of
+[rules_dart](https://github.com/aran/rules_dart), whose `overhead/` module
+holds the tooling this repository shares with it (see AGENTS.md § Tooling).
 
 ---
 
@@ -9,8 +16,9 @@ file at runtime — keep file lists current as the repo evolves.
 
 **Trigger**: New Flutter stable release.
 
-**Authoritative source**: The Flutter reference repo tags are the source of truth for the
-latest stable version. Do NOT rely on web searches — they may be stale. Run:
+**Authoritative source**: the tags of a flutter/flutter clone at `../flutter`
+(or wherever `FLUTTER_REPO` points). Do not rely on web searches; they may be
+stale. Run:
 
 ```sh
 git -C ../flutter fetch --tags
@@ -21,25 +29,42 @@ The latest tag is the current stable release.
 
 **Files**:
 
-- `flutter/private/versions.bzl` — `FLUTTER_VERSIONS` and `ARTIFACT_CHECKSUMS` dicts
-- `MODULE.bazel` — `flutter_version` in `flutter.toolchain()` call
-- All `e2e/*/MODULE.bazel` — `flutter_version` in `flutter.toolchain()` calls
-- `e2e/_overlay_tests/*/MODULE.bazel` — same call, one directory deeper, so a
-  `e2e/*/MODULE.bazel` glob misses it, and no CI job runs it to notice
-- `README.md` — the Flutter version in the Requirements table, the
-  `MODULE.bazel` snippet under Getting started, and the `FlutterSdkInfo.version`
-  example under Providers
+- `flutter/private/versions.bzl` — `FLUTTER_VERSIONS`, `FLUTTER_SDK_EXACT_PINS`,
+  `FLUTTER_SDK_PACKAGES` and `ARTIFACT_CHECKSUMS`
+- `MODULE.bazel` — `flutter_version` in the `flutter.toolchain()` call, and the
+  `flutter_outline.toolchain()` calls below it (see step 5)
+- Every `e2e/*/MODULE.bazel` — their own `flutter.toolchain()` calls
+- `README.md` — the Requirements table, the `MODULE.bazel` snippets under
+  Getting started and further down, and the `FlutterSdkInfo.version` example
+  under Providers
+- Everything else that names the old version: `git grep -l '<old-version>' --
+  ':!*.lock'` lists it (tests, fixtures, the e2e custom engine's stand-in
+  checkout). Some of these pin a version on purpose; read each before changing
+  it.
 
 **Procedure**:
 
-1. Fetch tags and identify the latest stable version (see above)
-2. Run `bazel run //tools/update_flutter_version -- <new-version>` (requires Flutter reference
-   repo beside this one at `../flutter`, or `FLUTTER_REPO`, with tags fetched)
-3. Copy the printed snippets into `flutter/private/versions.bzl`
-4. Update `flutter_version` in `MODULE.bazel` and all `e2e/*/MODULE.bazel` files
-5. Regenerate lock files
+1. Fetch tags and identify the latest stable version (see above).
+2. Run `bazel run //tools/update_flutter_version -- <new-version>`. It looks up
+   the engine revision from the tag, downloads and hashes each artifact, and
+   prints the Starlark to put in `flutter/private/versions.bzl`, including the
+   exact pins of the SDK's own packages and the list of those packages.
+3. Copy the printed snippets into `flutter/private/versions.bzl`.
+4. Update `flutter_version` in `MODULE.bazel`, the e2e workspaces and the
+   README.
+5. If the new release bundles a Dart version no other supported release does,
+   give `//flutter/tests/outline_fixture` an SDK for it: a
+   `flutter_outline.toolchain()` in the root `MODULE.bazel` and an entry in
+   `OUTLINE_SDKS` in `flutter/tests/outline_fixture/outline_cutoff.bzl`. The
+   fixture fails to load, saying so, while a Dart version in `versions.bzl` has
+   no SDK there. Drop the entries of a Dart version no supported release uses
+   any more.
+6. Refresh the lock files (§ "Lock File Refresh").
 
-**Verification**: `bazel test //flutter/tests:all` and `cd e2e/smoke && bazel test //...`
+**Verification**: `bazel test //... --config=deep` in the root. The `deep`
+tier holds the tests that `bazel test //...` skips by default, the outline
+fixture's builds under each extra SDK among them, and a bump can change which
+Dart versions those need. Then `bazel test //...` in `e2e/smoke`.
 
 ---
 
@@ -49,21 +74,26 @@ The latest tag is the current stable release.
 
 **Files**:
 
-- Every `.bazelversion` — the repo root plus one per workspace with a
-  `MODULE.bazel`, including `e2e/_overlay_tests/*`. A workspace without one does
+- Every `.bazelversion`: the repo root plus one per workspace with a
+  `MODULE.bazel`. A workspace without one does
   not inherit the root's: bazelisk reads only its own workspace root and
   otherwise fetches the newest release, so a missing file silently runs a
-  different Bazel than the rest of the sweep.
-  `find . -name .bazelversion -not -path '*/bazel-*'` is the list.
+  different Bazel than the rest of the sweep. `git ls-files '*.bazelversion'`
+  is the list.
+- `.bcr/presubmit.yml` — the `bazel:` matrix value (if the major version
+  changes)
+- `tools/preset.bazelrc` — generated for the Bazel version in use
+  (§ "Bazelrc Preset")
 
 **Procedure**:
 
-1. Update all `.bazelversion` files to the new version
-2. Regenerate lock files
+1. Update all `.bazelversion` files to the new version.
+2. If the major version changed, update the `.bcr/presubmit.yml` matrix.
+3. Regenerate `tools/preset.bazelrc` (§ "Bazelrc Preset").
+4. Refresh the lock files (§ "Lock File Refresh"): the lock records a format
+   version that changes with Bazel's.
 
 **Verification**: `bazel build //...` passes.
-
-**Automation**: `/bump-bazel {version}` slash command.
 
 ---
 
@@ -74,46 +104,82 @@ The latest tag is the current stable release.
 **Files**:
 
 - `MODULE.bazel` — `bazel_dep()` version strings
-- Every `e2e/*/MODULE.bazel` and `e2e/_overlay_tests/*/MODULE.bazel` — these
-  declare their own `bazel_dep`s rather than inheriting the root's, so a root-only
-  bump leaves them behind. `bazel_skylib`, `rules_cc` and `apple_support` appear
-  in most; `rules_android`, `rules_kotlin`, `rules_java`, `rules_jvm_external`
-  and `rules_go` in the three Android ones; `llvm` only in
-  `cross_compile_example`
+- Every `e2e/*/MODULE.bazel`: these
+  declare their own `bazel_dep`s rather than inheriting the root's, so a
+  root-only bump leaves them behind. `grep -l 'name = "<module>"'
+  e2e/*/MODULE.bazel` lists the workspaces
+  that declare a given module.
 
 **Procedure**:
 
-1. For each `bazel_dep` in root `MODULE.bazel`, check latest version on BCR
-2. Update versions, skip any already current
-3. Mirror the same versions into the e2e workspaces that declare them
-4. Regenerate lock files
+1. For each `bazel_dep` in the root `MODULE.bazel`, check the latest version on
+   the Bazel Central Registry.
+2. Update versions, skipping any already current.
+3. Mirror the same versions into the e2e workspaces that declare them.
+4. A bump of rules_android or rules_jvm_external can change the Maven locks:
+   re-pin them (§ "Lock File Refresh").
+5. Refresh the lock files.
 
 **Verification**: `bazel build //...` passes.
-
-**Automation**: `/bump-deps` slash command.
 
 ---
 
 ## Lock File Refresh
 
-**Trigger**: After any change to the root `MODULE.bazel`, its transitive deps,
-or `.bazelversion` — the lock records a format version (Bazel 9.1.0 writes 26,
-9.2.0 writes 28) as well as registry hashes.
+**Trigger**: After any change to a `MODULE.bazel`, its transitive deps, or a
+`.bazelversion`. The lock records a format version as well as registry hashes.
 
-**Only the root lock is enforced.** Every `e2e/*` workspace sets
-`--lockfile_mode=off` in its own `.bazelrc`, because each one is overridden onto
-a sibling `rules_dart` in local development, and their locks are intentionally
-left stale. Refreshing them produces a large diff that nothing checks.
+Every workspace's `MODULE.bazel.lock` is checked: the root's and each e2e
+workspace's (their `.bazelrc` sets `--lockfile_mode=error`). The tools run
+Bazel without the gitignored `.bazelrc.user`, whose `--override_module` lines
+would otherwise put a local checkout's module graph into a lock.
 
-**Procedure**: move `.bazelrc.user` aside — its `--override_module` line changes
-the module graph away from the registry one CI resolves, and forces
-`--lockfile_mode` off — then `bazel mod deps --lockfile_mode=update`, then put it
-back. Any host will do.
+**Procedure**:
 
-**Verification**: to check the lock the way CI does, move `.bazelrc.user`
-aside and run `bazel mod deps --lockfile_mode=error`.
+- Module locks, root and e2e:
+  `bazel run --lockfile_mode=off @overhead//locks:refresh`
+- Maven locks (`maven.install` lock files), one workspace at a time:
+  `bazel run //tools/maven_locks -- --refresh <workspace>`, for example
+  `e2e/smoke`.
 
-**Automation**: none.
+**Verification**: `bazel run @overhead//locks:check` and `bazel run //tools/maven_locks`.
+Run the first on macOS: it analyses `//...` in every workspace, and only macOS
+can analyse the iOS rules.
+
+---
+
+## Bazelrc Preset
+
+**Trigger**: A bump of overhead's commit or of `.bazelversion`.
+
+**Files**: `tools/preset.bazelrc`, generated; the root `.bazelrc` imports it
+first.
+
+**Procedure**: `bazel run @overhead//preset`.
+
+**Verification**: `bazel run @overhead//preset -- --check`, which CI also runs.
+
+---
+
+## Chrome for Testing and Linux Runtime Pins
+
+**Trigger**: Periodic, or when a test needs a newer Chrome or Debian package.
+
+**Files**: `flutter/private/versions.bzl` (`CHROME_FOR_TESTING`) and
+`flutter/private/linux_runtime_pins.bzl`.
+
+**Procedure**:
+
+- Chrome: `bazel run //tools/update_chrome_for_testing` (the Stable channel) or
+  `bazel run //tools/update_chrome_for_testing -- <version>`. It hashes each
+  host's headless shell and prints the `CHROME_FOR_TESTING` entry to put in
+  `versions.bzl`.
+- Linux runtime: `bazel run //tools/update_linux_runtime -- <snapshot>`, a
+  snapshot.debian.org timestamp such as `20261104T000000Z`. It writes
+  `linux_runtime_pins.bzl`.
+
+**Verification**: the web and Linux integration tests in `e2e/integration_test`
+(docs/TESTING.md).
 
 ---
 
@@ -123,48 +189,34 @@ aside and run `bazel mod deps --lockfile_mode=error`.
 
 **Files**:
 
-- `README.md` — examples table, installation snippet, version references. It is
-  the architecture document too: `docs/ARCHITECTURE.md` was listed here long
-  after it stopped existing, so check what a path names before trusting it
+- `README.md` — the user guide and the architecture document: examples table,
+  installation snippet, version references
 - `docs/TESTING.md` — the e2e workspace list, the sweep commands, the per-device
   tables
 - `.github/workflows/ci.yaml` — the prose comments carry version claims of
   their own
 
-**Procedure**: Review hardcoded counts, tables, and version strings against actual state.
+**Procedure**: Review hardcoded counts, tables, version strings and paths
+against the tree.
 
-**Verification**: Visual inspection.
+**Verification**: Read the changed sections against the code.
 
 ---
 
-## Multitool Version Bumps
+## Tool Version Bumps
 
 **Trigger**: Periodic (monthly) or when a managed tool releases a version we need.
 
-**Files**:
+**Files**: none in this repository. `git-cliff`, `prek`, `typos` and `yamlfmt`
+are pinned in rules_dart's `overhead/multitool.lock.json`, which every
+repository that takes overhead as a dev dependency shares. Bump them there
+(rules_dart's CHORES.md has the procedure), then bump the `commit` of the
+`overhead` `git_override` in `MODULE.bazel` and the `uses:` refs in
+`.github/workflows` to the new rules_dart commit; `bazel run @overhead//pins:check`
+fails if they differ. A new overhead commit can change `tools/preset.bazelrc`
+(§ "Bazelrc Preset").
 
-- `multitool.lock.json` — tool versions, URLs, and SHA-256 hashes
-
-**Managed tools**: `git-cliff`, `prek`, `typos`, `yamlfmt`
-
-**Procedure**:
-
-1. For each tool in `multitool.lock.json`, check its GitHub releases for newer versions
-2. Download archives for all platform variants (macOS/Linux, arm64/x86_64)
-3. Compute SHA-256 hashes and update the lockfile entries
-4. Run `bazel run @multitool//tools/yamlfmt -- -lint .` and
-   `bazel run @multitool//tools/typos -- .` to verify the updated tools work
-
-**Verification**: Both tools run successfully against the repo.
-
-Also update the matching `rev:` values in `.pre-commit-config.yaml` for yamlfmt
-and typos to keep CI and local hooks in sync. CI runs prek from
-`multitool.lock.json`; when bumping it, run `uv tool upgrade prek` so the
-installed git hooks use the new version.
-
-**Automation**: `/bump-multitool` slash command. Alternatively, install the
-[multitool CLI](https://github.com/theoremlp/multitool) and run
-`multitool --lockfile ./multitool.lock.json update`.
+**Verification**: `bazel run --enable_runfiles @overhead//lint:prek -- run --all-files --hook-stage manual` passes.
 
 ---
 
@@ -172,27 +224,22 @@ installed git hooks use the new version.
 
 **Trigger**: New versions of the git hooks (buildifier, etc.).
 
-**Files**:
-
-- `.pre-commit-config.yaml`
+**Files**: `.pre-commit-config.yaml`
 
 **Procedure**: `renovate.json` extends `:enablePreCommit`, but treat this as
 manual until you have actually seen a Renovate PR land here.
 
 Reconcile the revs that track something else in this repo:
 
-- `keith/pre-commit-buildifier` tracks `buildifier_prebuilt` in `MODULE.bazel`
-  on the buildifier version — the first three components. The fourth is the
-  ruleset's own packaging revision and the mirror repo tags only some of them
-  (there is no 8.5.1.4), so a fourth-component gap is not drift.
-- `google/yamlfmt` and `crate-ci/typos` track `multitool.lock.json` (see
-  § "Multitool Version Bumps").
+- `keith/pre-commit-buildifier` is the only buildifier in this repository; pick
+  the newest tag of the mirror. The fourth component is the mirror's own
+  packaging revision and it tags only some of them.
+- The commit-message, yamlfmt and typos hooks are local hooks that run
+  overhead's pinned tools (see § "Tool Version Bumps").
 - `pre-commit/mirrors-prettier` is archived upstream; `v3.1.0` is the last
   stable tag and is expected to stay pinned.
 
 **Verification**: `prek run --all-files` passes.
-
-**Automation**: Manual, per above.
 
 ---
 
@@ -204,7 +251,20 @@ Reconcile the revs that track something else in this repo:
 
 **Procedure**:
 
-1. For each `uses:` reference, check the repo's tags/releases for newer versions
-2. Update the version ref
+Every `uses:` that is not local (`./.github/...`) is pinned to a full commit SHA
+with the version in a trailing comment: `uses: owner/repo@<sha> # v1.2.3`
+(`owner/repo/path@<sha> # v1.2.3` for a subpath). A bump changes both.
 
-**Verification**: CI workflow runs successfully.
+1. For each `uses:` reference, check the repo's tags/releases for newer versions.
+2. Resolve the new tag to its commit. For an annotated tag, take the peeled
+   `^{}` line (the commit), not the tag object:
+   `git ls-remote https://github.com/owner/repo refs/tags/<tag> 'refs/tags/<tag>^{}'`
+3. Replace the SHA and the comment together.
+4. For reusable workflows, review changelogs for new inputs or breaking changes.
+
+overhead's workflows (`aran/rules_dart/.github/workflows/overhead-*`) move with
+the rules_dart commit instead (see § "Tool Version Bumps").
+
+**Verification**: `bazel test //tools/ci_matrix:pinned_actions_test` passes (it
+fails on a `uses:` that is not a 40-hex SHA with a `# <ref>` comment), and the CI
+workflow runs successfully.

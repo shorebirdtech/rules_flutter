@@ -17,7 +17,11 @@
 #        for f in ~/Library/Developer/Xcode/UserData/Provisioning\ Profiles/*.provisionprofile; do
 #          security cms -D -i "$f" | plutil -extract Name raw -; done
 #
-#   5. Build: bazel build //:app_extensions_team
+#   5. Point the team-signed targets at these files (.bazelrc.user is
+#      git-ignored):
+#        echo 'common --//:device_profile=//device:profile' >> .bazelrc.user
+#        echo 'common --//:device_app_group=//device:AppGroup.entitlements' >> .bazelrc.user
+#   6. Build: bazel build //:app_extensions_team
 #      Test:  bazel test //:verify_macos_team_signing_test
 
 load("@rules_apple//apple:apple.bzl", "local_provisioning_profile")

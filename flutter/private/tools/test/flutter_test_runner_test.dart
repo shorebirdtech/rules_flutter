@@ -10,6 +10,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:kernel_list/kernel_list.dart';
+import 'package:runfiles/runfiles.dart';
 import 'package:test/test.dart';
 
 // Imported under a prefix rather than plainly: this script is a `main`, and so
@@ -17,7 +19,7 @@ import 'package:test/test.dart';
 // reachable from here and nowhere else — see their docstrings.
 import '../flutter_test_runner.dart' as runner;
 
-/// A VM service that answers exactly the three RPCs coverage collection makes.
+/// A VM service that answers exactly the two RPCs coverage collection makes.
 ///
 /// Real enough to be worth having: it speaks JSON-RPC over a real WebSocket on
 /// a real loopback port, so the transport, the framing, and the id/response
@@ -72,30 +74,28 @@ class _FakeVmService {
   Future<void> stop() => _server.close(force: true);
 }
 
-/// One isolate, one script, one hit on line 5 and one miss on line 7.
+/// One script with a hit on line 5 and a miss on line 7, and a `dart:` one.
 Map<String, dynamic> _oneScriptReport() => {
   'result': {
     'scripts': [
-      {'id': 'script-1', 'uri': 'file:///pkg/a.dart'},
+      {'id': 'script-1', 'uri': 'package:pkg/a.dart'},
+      {'id': 'script-2', 'uri': 'dart:core'},
     ],
     'ranges': [
       {
         'scriptIndex': 0,
         'coverage': {
-          'hits': [10],
-          'misses': [20],
+          'hits': [5],
+          'misses': [7],
         },
       },
-    ],
-  },
-};
-
-/// `[line, tokenPos, column, …]` — token 10 is line 5, token 20 is line 7.
-Map<String, dynamic> _tokenTable() => {
-  'result': {
-    'tokenPosTable': [
-      [5, 10, 1],
-      [7, 20, 1],
+      {
+        'scriptIndex': 1,
+        'coverage': {
+          'hits': [3],
+          'misses': const [],
+        },
+      },
     ],
   },
 };
@@ -113,36 +113,51 @@ void main() {
       },
     };
     vm.handlers['getSourceReport'] = _oneScriptReport;
-    vm.handlers['getObject'] = _tokenTable;
   });
 
   tearDown(() => vm.stop());
 
   group('collectCoverage', () {
-    test('renders hits and misses as LCOV line records', () async {
-      expect(
-        await runner.collectCoverage(vm.httpUri, const ['package:pkg/']),
-        'SF:/pkg/a.dart\n'
-        'DA:5,1\n'
-        'DA:7,0\n'
-        'end_of_record',
-      );
+    test(
+      'reports each line as package:coverage does, leaving out dart:',
+      () async {
+        expect(await runner.collectCoverage(vm.httpUri), {
+          'type': 'CodeCoverage',
+          'coverage': [
+            {
+              'source': 'package:pkg/a.dart',
+              'hits': [5, 1, 7, 0],
+            },
+          ],
+        });
+      },
+    );
+
+    test('asks for every library, by line, compiled or not', () async {
+      await runner.collectCoverage(vm.httpUri);
+
+      final request = vm.requests['getSourceReport']!;
+      expect(request['libraryFilters'], isNull);
+      expect(request['reportLines'], isTrue);
+      expect(request['forceCompile'], isTrue);
     });
 
-    test('asks the VM for only the libraries in scope', () async {
-      await runner.collectCoverage(vm.httpUri, const [
-        'package:pkg/',
-        'org-dartlang-root:///test/a_test.dart',
-      ]);
+    test('reports an isolate group once', () async {
+      vm.handlers['getVM'] = () => {
+        'result': {
+          'isolates': [
+            {'id': 'iso-1', 'isolateGroupId': 'group-1'},
+            {'id': 'iso-2', 'isolateGroupId': 'group-1'},
+          ],
+        },
+      };
 
-      expect(vm.requests['getSourceReport']?['libraryFilters'], [
-        'package:pkg/',
-        'org-dartlang-root:///test/a_test.dart',
-      ]);
+      final hits = await runner.collectCoverage(vm.httpUri);
+      expect(hits['coverage'], hasLength(1));
     });
 
-    // These must raise rather than report: an LCOV file missing an isolate,
-    // or missing a file inside one, is indistinguishable downstream from a
+    // These must raise rather than report: a report missing an isolate, or
+    // missing a file inside one, is indistinguishable downstream from a
     // complete one, so the run reads as green with a coverage number that was
     // never measured. The empty-report check only catches losing everything.
 
@@ -154,7 +169,7 @@ void main() {
         };
 
         await expectLater(
-          runner.collectCoverage(vm.httpUri, const ['package:pkg/']),
+          runner.collectCoverage(vm.httpUri),
           throwsA(
             isA<StateError>().having(
               (e) => e.message,
@@ -166,154 +181,199 @@ void main() {
       },
     );
 
-    test('raises when a script token table is refused, rather than dropping '
-        'that file', () async {
-      vm.handlers['getObject'] = () => {
-        'error': {'code': -32602, 'message': 'object id expired'},
-      };
-
-      await expectLater(
-        runner.collectCoverage(vm.httpUri, const ['package:pkg/']),
-        throwsA(
-          isA<StateError>().having(
-            (e) => e.message,
-            'message',
-            allOf(contains('getObject'), contains('object id expired')),
-          ),
-        ),
-      );
-    });
-
     test(
       'raises on a malformed report instead of reading it as empty coverage',
       () async {
-        // A cast failure inside the LCOV formatter, not an RPC error.
         vm.handlers['getSourceReport'] = () => {
           'result': {
             'scripts': [
-              {'id': 42, 'uri': 'file:///pkg/a.dart'},
+              {'id': 'script-1', 'uri': 42},
             ],
             'ranges': const [],
           },
         };
 
         await expectLater(
-          runner.collectCoverage(vm.httpUri, const ['package:pkg/']),
+          runner.collectCoverage(vm.httpUri),
           throwsA(isA<TypeError>()),
         );
       },
     );
   });
 
-  group('parseUpdateGoldens', () {
-    // The refusal is the reason this is a function rather than three lines in
-    // `main`: `bazel test` cannot be made to pass and fail the same target, so
-    // the only place the rejected case is reachable as a *passing* assertion
-    // is here.
+  group('CoverageRun', () {
+    late Directory scratch;
+    setUp(() => scratch = Directory.systemTemp.createTempSync('coverage_run'));
+    tearDown(() => scratch.deleteSync(recursive: true));
 
-    test('is off with no arguments, whether or not a workspace is set', () {
-      expect(runner.parseUpdateGoldens([], null), isFalse);
-      expect(runner.parseUpdateGoldens([], '/ws'), isFalse);
-    });
+    final runfiles = Runfiles.create();
+    const built = {
+      'FLUTTER_TEST_COVERAGE_CONVERTER': '_main/converter',
+      'FLUTTER_TEST_COVERAGE_SOURCES': '_main/sources.json',
+    };
 
-    test('is on under `bazel run`, which sets BUILD_WORKSPACE_DIRECTORY', () {
-      expect(runner.parseUpdateGoldens(['--update-goldens'], '/ws'), isTrue);
-    });
-
-    test('refuses under `bazel test`, where there is no source tree to write '
-        'to — a golden regenerated into the sandbox would report success and '
-        'change nothing', () {
+    test('is none unless the test was built for coverage', () {
       expect(
-        () => runner.parseUpdateGoldens(['--update-goldens'], null),
-        throwsA(
-          isA<FormatException>().having(
-            (e) => e.message,
-            'message',
-            allOf(contains('bazel run'), contains('--update-goldens')),
-          ),
-        ),
-      );
-      expect(
-        () => runner.parseUpdateGoldens(['--update-goldens'], ''),
-        throwsA(isA<FormatException>()),
+        runner.CoverageRun.of(runfiles, const {}, {
+          'COVERAGE_DIR': scratch.path,
+        }),
+        isNull,
       );
     });
 
-    test('rejects an unrecognised argument rather than ignoring it, so a '
-        'mistyped flag cannot report a green run that regenerated nothing', () {
-      expect(
-        () => runner.parseUpdateGoldens(['--update-golden'], '/ws'),
-        throwsA(
-          isA<FormatException>().having(
-            (e) => e.message,
-            'message',
-            contains('--update-golden'),
-          ),
-        ),
-      );
-    });
-  });
-
-  group('suiteTimeout', () {
-    test('is Bazel\'s TEST_TIMEOUT, not package:test\'s 30 seconds', () {
-      expect(runner.suiteTimeout('300'), {
-        'duration': const Duration(seconds: 300).inMicroseconds,
-        'scaleFactor': null,
-      });
+    test('is none when Bazel collects none, as under bazel run', () {
+      expect(runner.CoverageRun.of(runfiles, built, const {}), isNull);
     });
 
-    test('is never none under Bazel, so a test\'s own timeout still fires', () {
-      // `Timeout.merge` lets `none` on either side win.
-      expect(runner.suiteTimeout('60'), isNot('none'));
-    });
+    test('collects outside COVERAGE_DIR, which Bazel reads whole', () {
+      final coverageDir = Directory('${scratch.path}/coverage')..createSync();
+      final run = runner.CoverageRun.of(runfiles, built, {
+        'COVERAGE_DIR': coverageDir.path,
+        'TEST_TMPDIR': scratch.path,
+      })!;
+      run.writeHits({'type': 'CodeCoverage', 'coverage': const []});
 
-    test('is none outside bazel test, where there is no limit to state', () {
-      expect(runner.suiteTimeout(null), 'none');
-      expect(runner.suiteTimeout(''), 'none');
-    });
-  });
-
-  group('testCeiling', () {
-    test("derives the wedged-test backstop from Bazel's TEST_TIMEOUT, so a "
-        'test given --test_timeout=1200 runs its full length', () {
-      expect(runner.testCeiling('1200').inSeconds, greaterThan(600));
-    });
-
-    test('stays inside the Bazel budget, so a wedged test is reported here '
-        'rather than killed from outside with no diagnostic', () {
-      expect(runner.testCeiling('1200').inSeconds, lessThan(1200));
-      expect(runner.testCeiling('60').inSeconds, lessThan(60));
-    });
-
-    test('falls back to five minutes with no TEST_TIMEOUT — a direct run '
-        'outside `bazel test` has no budget to derive one from', () {
-      expect(runner.testCeiling(null), const Duration(minutes: 5));
-      expect(runner.testCeiling(''), const Duration(minutes: 5));
-      expect(runner.testCeiling('not-a-number'), const Duration(minutes: 5));
-      expect(runner.testCeiling('0'), const Duration(minutes: 5));
+      expect(run.collected, isTrue);
+      expect(run.hitmaps, isNot(startsWith(coverageDir.path)));
+      expect(File('${run.hitmaps}/flutter_tester.json').existsSync(), isTrue);
+      expect(coverageDir.listSync(), isEmpty);
     });
   });
 
   group('libraryPathEnvironment', () {
     test('sets nothing without a staged directory', () {
-      expect(runner.libraryPathEnvironment(null, const {}, 'macos'), isEmpty);
+      expect(
+        runner.libraryPathEnvironment(const [], const {}, 'macos'),
+        isEmpty,
+      );
+      expect(
+        runner.libraryPathEnvironment(const [], const {}, 'windows'),
+        isEmpty,
+      );
     });
 
     test('names the directory on each host loader path', () {
-      expect(runner.libraryPathEnvironment('/r/x.native', const {}, 'macos'), {
-        'DYLD_LIBRARY_PATH': '/r/x.native',
-      });
-      expect(runner.libraryPathEnvironment('/r/x.native', const {}, 'linux'), {
-        'LD_LIBRARY_PATH': '/r/x.native',
-      });
+      expect(
+        runner.libraryPathEnvironment(['/r/x.native'], const {}, 'macos'),
+        {'DYLD_LIBRARY_PATH': '/r/x.native'},
+      );
+      expect(
+        runner.libraryPathEnvironment(['/r/x.native'], const {}, 'linux'),
+        {'LD_LIBRARY_PATH': '/r/x.native'},
+      );
     });
 
     test('goes ahead of the path the caller set', () {
       expect(
-        runner.libraryPathEnvironment('/r/x.native', const {
-          'LD_LIBRARY_PATH': '/usr/local/lib',
-        }, 'linux'),
+        runner.libraryPathEnvironment(
+          ['/r/x.native'],
+          const {
+            'LD_LIBRARY_PATH': '/usr/local/lib',
+          },
+          'linux',
+        ),
         {'LD_LIBRARY_PATH': '/r/x.native:/usr/local/lib'},
+      );
+    });
+
+    test(
+      'puts a Windows directory on PATH, spelled and joined for Windows',
+      () {
+        expect(
+          runner.libraryPathEnvironment(
+            ['C:/b/x.native', 'C:/b/y.native'],
+            const {'PATH': r'C:\Windows;C:\bin'},
+            'windows',
+          ),
+          {'PATH': r'C:\b\x.native;C:\b\y.native;C:\Windows;C:\bin'},
+        );
+      },
+    );
+
+    test('keeps the spelling of the Windows variable the caller has', () {
+      expect(
+        runner.libraryPathEnvironment(
+          ['C:/b/x.native'],
+          const {'Path': r'C:\Windows'},
+          'windows',
+        ),
+        {'Path': r'C:\b\x.native;C:\Windows'},
+      );
+    });
+
+    test('makes a Windows PATH of the directory alone when there is none', () {
+      expect(
+        runner.libraryPathEnvironment(['C:/b/x.native'], const {}, 'windows'),
+        {'PATH': r'C:\b\x.native'},
+      );
+    });
+
+    test('refuses a host it has no loader path for', () {
+      expect(
+        () => runner.libraryPathEnvironment(['/r/x'], const {}, 'fuchsia'),
+        throwsUnsupportedError,
+      );
+    });
+  });
+
+  group('nativeLibraryDirectories', () {
+    late Directory tmp;
+    setUp(() => tmp = Directory.systemTemp.createTempSync('native_dirs'));
+    tearDown(() => tmp.deleteSync(recursive: true));
+
+    Runfiles manifest(Map<String, String> entries) =>
+        Runfiles.fromState(manifest: entries);
+
+    test('finds a library\'s directory through a manifest-only runfiles', () {
+      final dll = File('${tmp.path}/out/x.native/native_add.dll')
+        ..createSync(recursive: true);
+      final other = File('${tmp.path}/out/y.native/other.dll')
+        ..createSync(recursive: true);
+
+      final dirs = runner.nativeLibraryDirectories(
+        manifest({
+          '_main/x.native/native_add.dll': dll.path,
+          '_main/x.native/same.dll': dll.path,
+          '_main/y.native/other.dll': other.path,
+        }),
+        [
+          '_main/x.native/native_add.dll',
+          '_main/x.native/same.dll',
+          '_main/y.native/other.dll',
+        ],
+      );
+
+      expect(dirs, [dll.parent.path, other.parent.path]);
+    });
+
+    test('names a library the manifest does not list', () {
+      expect(
+        () => runner.nativeLibraryDirectories(manifest({}), [
+          '_main/x.native/native_add.dll',
+        ]),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            contains('_main/x.native/native_add.dll'),
+          ),
+        ),
+      );
+    });
+
+    test('names a library the manifest lists but is not on disk', () {
+      expect(
+        () => runner.nativeLibraryDirectories(
+          manifest({'_main/x.native/a.dll': '${tmp.path}/gone/a.dll'}),
+          ['_main/x.native/a.dll'],
+        ),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            allOf(contains('_main/x.native/a.dll'), contains('gone/a.dll')),
+          ),
+        ),
       );
     });
   });
@@ -348,6 +408,24 @@ void main() {
       expect(runner.readLaunchEnvironment(r, exe), {'B': '2'});
     });
 
+    test('in the manifest when the directory beside it holds none of them', () {
+      // Bazel with no runfiles tree, as on Windows by default, still makes the
+      // directory: a MANIFEST and empty directories, none of the files.
+      final exe = '${tmp.path}/tool.exe';
+      File('$exe.runfiles/MANIFEST').createSync(recursive: true);
+      Directory('$exe.runfiles/_main').createSync();
+      final data = File('${tmp.path}/elsewhere/data.json')
+        ..createSync(recursive: true)
+        ..writeAsStringSync('{"C": "3"}');
+      File(
+        '$exe.runfiles_manifest',
+      ).writeAsStringSync('tool.launch.json ${data.path}\n');
+
+      final r = runner.runfilesBeside(exe)!;
+
+      expect(runner.readLaunchEnvironment(r, exe), {'C': '3'});
+    });
+
     test('under a .exe name, as on Windows', () {
       final exe = '${tmp.path}/tool.exe';
       File('$exe.runfiles/tool.launch.json')
@@ -369,6 +447,178 @@ void main() {
         runner.parseRunfilesManifest(['a/b /x/y', 'c /z w', 'bad']),
         {'a/b': '/x/y', 'c': '/z w'},
       );
+    });
+  });
+
+  group('the program flutter_tester runs', () {
+    late Directory tmp;
+    late Runfiles r;
+    setUp(() {
+      tmp = Directory.systemTemp.createTempSync('runner_program');
+      r = Runfiles.fromState(directory: tmp.path, manifest: null);
+    });
+    tearDown(() => tmp.deleteSync(recursive: true));
+
+    File write(String name, String content) => File('${tmp.path}/$name')
+      ..createSync(recursive: true)
+      ..writeAsStringSync(content);
+
+    test('is the kernel itself when it is not a list', () {
+      write('t/test.dill', 'KERNEL');
+
+      final program = runner.joinProgram(r, 't/test.dill', isList: false);
+
+      expect(File(program.path).readAsStringSync(), 'KERNEL');
+      program.close();
+      expect(File('${tmp.path}/t/test.dill').existsSync(), isTrue);
+    });
+
+    test('joins the kernels of a list, in order', () {
+      write('t/entry.dill', 'ENTRY|');
+      write('m/a.dill', 'A|');
+      write('m/b.dill', 'B');
+      write('t/test.dill', '#@dill\nentry.dill\n../m/a.dill\n../m/b.dill\n');
+
+      final program = runner.joinProgram(
+        r,
+        't/test.dill',
+        isList: true,
+        temporaryDirectory: tmp.path,
+      );
+
+      expect(File(program.path).readAsStringSync(), 'ENTRY|A|B');
+      program.close();
+    });
+
+    test('a list naming a kernel that is not there fails, naming the flag '
+        'that turns lists off', () {
+      write('t/test.dill', '#@dill\nentry.dill\n');
+
+      expect(
+        () => runner.joinProgram(r, 't/test.dill', isList: true),
+        throwsA(
+          isA<KernelListException>().having(
+            (e) => runner.joinFailure(e),
+            'message',
+            allOf(
+              contains('flutter_test runner: cannot join the test'),
+              contains('--@rules_dart//dart:kernel_list=false'),
+              contains('entry.dill'),
+            ),
+          ),
+        ),
+      );
+    });
+  });
+
+  group('waiting for flutter_tester to connect', () {
+    const bound = Duration(milliseconds: 50);
+
+    test(
+      'times out when it neither connects nor exits, and says how long',
+      () async {
+        final outcome = await runner.awaitDialBack(
+          connected: Completer<HttpRequest>().future,
+          exited: Completer<int>().future,
+          bound: bound,
+        );
+
+        expect(outcome, isA<runner.DialBackTimedOut>());
+        expect(
+          runner.dialBackFailure(outcome, bound),
+          allOf(
+            contains('did not connect'),
+            contains('50 ms'),
+            contains('killing'),
+          ),
+        );
+      },
+    );
+
+    test('reports its exit code when it exits first', () async {
+      final outcome = await runner.awaitDialBack(
+        connected: Completer<HttpRequest>().future,
+        exited: Future.value(7),
+        bound: bound,
+      );
+
+      expect(outcome, isA<runner.TesterExited>());
+      expect(
+        runner.dialBackFailure(outcome, bound),
+        contains('exited with code 7'),
+      );
+    });
+
+    test('is bounded by the Bazel timeout when that is shorter', () {
+      expect(
+        runner.dialBackBound(const Duration(seconds: 20)),
+        const Duration(seconds: 20),
+      );
+      expect(
+        runner.dialBackBound(const Duration(minutes: 5)),
+        const Duration(minutes: 2),
+      );
+    });
+  });
+
+  group('runSelection', () {
+    const env = {
+      'FLUTTER_TEST_INCLUDE_TAGS': 'golden\n!slow',
+      'FLUTTER_TEST_EXCLUDE_TAGS': 'flaky',
+      'DART_TEST_TAGS': 'a',
+      'DART_TEST_EXCLUDE_TAGS': 'b',
+    };
+
+    test('a flutter_test reads the rule\'s attributes and the run\'s '
+        'variables', () {
+      final selection = runner.runSelection(env, isTest: true);
+
+      expect(selection.fixedTags.include.toString(), contains('golden'));
+      expect(selection.fixedTags.include.toString(), contains('!slow'));
+      expect(selection.fixedTags.exclude.toString(), 'flaky');
+      expect(selection.runTags.includeRaw, 'a');
+      expect(selection.runTags.excludeRaw, 'b');
+    });
+
+    test('a flutter_tester_binary ignores the shell\'s DART_TEST_* '
+        'variables', () {
+      final selection = runner.runSelection(env, isTest: false);
+
+      expect(selection.narrows, isFalse);
+      expect(selection.fixedTags.selects, isFalse);
+    });
+
+    test('a flutter_test with no tag keys selects nothing away', () {
+      final selection = runner.runSelection(const {}, isTest: true);
+
+      expect(selection.narrows, isFalse);
+      expect(selection.fixedTags.selects, isFalse);
+    });
+
+    test('an attribute entry that is not a selector is refused', () {
+      expect(
+        () => runner.runSelection(const {
+          'FLUTTER_TEST_INCLUDE_TAGS': 'a &&',
+        }, isTest: true),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            contains('include_tags entry "a &&"'),
+          ),
+        ),
+      );
+    });
+  });
+
+  group('suiteAnnotationsOf', () {
+    test('reads the annotations of the file', () {
+      final tmp = Directory.systemTemp.createTempSync('lib_tags_');
+      addTearDown(() => tmp.deleteSync(recursive: true));
+      final file = File('${tmp.path}/a_test.dart')
+        ..writeAsStringSync("@Tags(['x'])\nlibrary;\nvoid main() {}\n");
+
+      expect(runner.suiteAnnotationsOf(file, 'pkg/a_test.dart').tags, {'x'});
     });
   });
 }

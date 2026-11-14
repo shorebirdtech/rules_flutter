@@ -46,6 +46,26 @@
 /// `<namespace>.X`, `<namespace>.a.X`, `<namespace>.X`; any other is already
 /// qualified. Without `--namespace` the names are left as they are.
 ///
+/// The app's version (`--version-code`, `--version-name`): Gradle writes
+/// `android:versionCode` and `android:versionName` onto the root
+/// `<manifest>` from `flutter.versionCode` and `flutter.versionName`, and so
+/// does this tool, from `flutter_android_app`'s `build_number` and
+/// `build_name` or its application's, the version the program reports. A
+/// base that declares either attribute itself must declare that value, or
+/// the `${versionCode}` or `${versionName}` placeholder, which
+/// `manifest_values` fills with the same; any other is an error rather than
+/// a second version. `--version-code-setting` and `--version-name-setting`
+/// name the build setting that gave a value, such as
+/// `--@rules_flutter//flutter:build_number`, for the error to name.
+///
+/// Uncompressed native libraries (`--uncompressed-native-libs`): AGP stores
+/// an app's native libraries uncompressed and page-aligned when its minimum
+/// SDK is 23 or more (`jniLibs.useLegacyPackaging = false`, the default), and
+/// sets `android:extractNativeLibs="false"` on `<application>` so the
+/// installer leaves them in the APK; so does this tool. A base that declares
+/// `"true"` asks for the legacy packaging, which these rules do not build,
+/// and is an error.
+///
 /// The base manifest is never re-serialized: merged permissions are inserted
 /// textually right after the root `<manifest ...>` open tag, and qualified
 /// class names replace their attribute values in place, so every other base
@@ -56,7 +76,9 @@
 /// Usage:
 ///   dart merge_android_manifests.dart --base <path> [--overlay <path>]
 ///       [--library <path>]... [--placeholder <name>]... [--namespace <package>]
-///       --output <path>
+///       [--version-code <n>] [--version-name <s>]
+///       [--version-code-setting <flag>] [--version-name-setting <flag>]
+///       [--uncompressed-native-libs] --output <path>
 import 'dart:io';
 
 /// Pointer at the Tier-1 escape hatch, appended to every rejection.
@@ -514,6 +536,118 @@ String qualifyClassNames(String xml, String namespace) {
   return out.toString();
 }
 
+/// [xml] with `android:extractNativeLibs="false"` on its `<application>`,
+/// written first among its attributes. A base that declares it `false`
+/// already is returned unchanged; one that declares anything else, or has no
+/// `<application>`, is an error.
+String markNativeLibsUncompressed(String xml, {required String basePath}) {
+  // Comments, CDATA and processing instructions blanked, as in
+  // [qualifyClassNames].
+  final masked = xml.replaceAllMapped(
+    RegExp(r'<!--.*?-->|<!\[CDATA\[.*?\]\]>|<\?.*?\?>', dotAll: true),
+    (m) => ' ' * m[0]!.length,
+  );
+  final application = RegExp(
+    r'''<application((?:\s+[\w:.-]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*/?>''',
+  ).firstMatch(masked);
+  if (application == null) {
+    throw FormatException('The manifest $basePath has no <application>.');
+  }
+  final declared = RegExp(
+    r'''android:extractNativeLibs\s*=\s*(["'])(.*?)\1''',
+  ).firstMatch(application[1]!);
+  if (declared != null) {
+    if (declared[2] == 'false') return xml;
+    throw FormatException(
+      'The manifest $basePath declares '
+      'android:extractNativeLibs="${declared[2]}", but the APK stores its '
+      'native libraries uncompressed, as AGP does from a minimum SDK of 23, '
+      'so the installer must not extract them. Remove the attribute.',
+    );
+  }
+  final insertAt = application.start + '<application'.length;
+  return '${xml.substring(0, insertAt)} android:extractNativeLibs="false"'
+      '${xml.substring(insertAt)}';
+}
+
+String _escapeAttribute(String value) => value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
+
+/// An attribute value as written, with the XML entities it may use read.
+String _decodeAttribute(String value) => value.replaceAllMapped(
+  RegExp(r'&(#x[0-9a-fA-F]+|#[0-9]+|amp|lt|gt|quot|apos);'),
+  (m) {
+    final e = m[1]!;
+    if (e.startsWith('#x')) {
+      return String.fromCharCode(int.parse(e.substring(2), radix: 16));
+    }
+    if (e.startsWith('#')) {
+      return String.fromCharCode(int.parse(e.substring(1)));
+    }
+    return const {
+      'amp': '&',
+      'lt': '<',
+      'gt': '>',
+      'quot': '"',
+      'apos': "'",
+    }[e]!;
+  },
+);
+
+/// [xml] with `android:versionCode` and `android:versionName` set on its root
+/// `<manifest>` from [versionCode] and [versionName]. An attribute the root
+/// already declares stays when it is the same value, or the placeholder
+/// `manifest_values` fills with it; any other is an error, so the manifest
+/// and the program never report two versions. [settings] names the build
+/// setting that gave a value, by the argument it replaces (`build_number`,
+/// `build_name`).
+String setVersion(
+  String xml, {
+  required String basePath,
+  String? versionCode,
+  String? versionName,
+  Map<String, String> settings = const {},
+}) {
+  final scanner = _Scanner(xml)..skipInsignificant();
+  final (_, rootAttributes, _, _) = scanner.readTag();
+  final insertAt = scanner.pos - 1;
+  final added = StringBuffer();
+  for (final (attribute, argument, placeholder, version) in [
+    ('android:versionCode', 'build_number', r'${versionCode}', versionCode),
+    ('android:versionName', 'build_name', r'${versionName}', versionName),
+  ]) {
+    if (version == null) continue;
+    final declared = rootAttributes[attribute];
+    if (declared != null) {
+      if (_decodeAttribute(declared) == version || declared == placeholder) {
+        continue;
+      }
+      final setting = settings[argument];
+      throw FormatException(
+        setting != null
+            ? 'The manifest $basePath declares $attribute="$declared", and '
+                  'the app\'s version is "$version": `$setting` gives it for '
+                  'this build, and the program reports it. The manifest '
+                  'states its own, which cannot follow the setting: remove '
+                  'the attribute from the manifest.'
+            : 'The manifest $basePath declares $attribute="$declared", and the '
+                  'app\'s version is "$version": its `$argument`, or its '
+                  'flutter_application\'s, which the program reports. Remove the '
+                  'attribute from the manifest, or set `$argument` on the '
+                  'flutter_application to "$declared".',
+      );
+    }
+    added.write(' $attribute="${_escapeAttribute(version)}"');
+  }
+  if (added.isEmpty) return xml;
+  return xml.substring(0, insertAt) +
+      added.toString() +
+      xml.substring(insertAt);
+}
+
 /// Merges [overlayXml]'s permissions into [baseXml], returning the merged
 /// manifest text with its class names qualified against [namespace] when
 /// given (see [qualifyClassNames]). Throws [FormatException] when the overlay
@@ -526,8 +660,25 @@ String mergeManifests({
   Map<String, String> libraries = const {},
   Set<String> placeholders = const {},
   String? namespace,
+  String? versionCode,
+  String? versionName,
+  Map<String, String> versionSettings = const {},
+  bool uncompressedNativeLibs = false,
 }) {
   if (namespace != null) baseXml = qualifyClassNames(baseXml, namespace);
+  if (uncompressedNativeLibs) {
+    baseXml = markNativeLibsUncompressed(baseXml, basePath: basePath);
+  }
+  if (versionCode != null || versionName != null) {
+    _baseInsertionPoint(baseXml, basePath);
+    baseXml = setVersion(
+      baseXml,
+      basePath: basePath,
+      versionCode: versionCode,
+      versionName: versionName,
+      settings: versionSettings,
+    );
+  }
   final overlayPermissions = overlayXml == null
       ? const <OverlayPermission>[]
       : parseOverlayPermissions(overlayXml, overlayPath!);
@@ -587,6 +738,10 @@ void main(List<String> args) {
   final libraryPaths = <String>[];
   final placeholders = <String>{};
   String? namespace;
+  String? versionCode;
+  String? versionName;
+  final versionSettings = <String, String>{};
+  var uncompressedNativeLibs = false;
 
   for (var i = 0; i < args.length; i++) {
     if (args[i] == '--base' && i + 1 < args.length) {
@@ -599,6 +754,16 @@ void main(List<String> args) {
       placeholders.add(args[++i]);
     } else if (args[i] == '--namespace' && i + 1 < args.length) {
       namespace = args[++i];
+    } else if (args[i] == '--version-code' && i + 1 < args.length) {
+      versionCode = args[++i];
+    } else if (args[i] == '--version-name' && i + 1 < args.length) {
+      versionName = args[++i];
+    } else if (args[i] == '--version-code-setting' && i + 1 < args.length) {
+      versionSettings['build_number'] = args[++i];
+    } else if (args[i] == '--version-name-setting' && i + 1 < args.length) {
+      versionSettings['build_name'] = args[++i];
+    } else if (args[i] == '--uncompressed-native-libs') {
+      uncompressedNativeLibs = true;
     } else if (args[i] == '--output' && i + 1 < args.length) {
       outputPath = args[++i];
     }
@@ -608,7 +773,10 @@ void main(List<String> args) {
     stderr.writeln(
       'Usage: dart merge_android_manifests.dart --base <path> '
       '[--overlay <path>] [--library <path>]... [--placeholder <name>]... '
-      '[--namespace <package>] --output <path>',
+      '[--namespace <package>] '
+      '[--version-code <n>] [--version-name <s>] '
+      '[--version-code-setting <flag>] [--version-name-setting <flag>] '
+      '[--uncompressed-native-libs] --output <path>',
     );
     exit(1);
   }
@@ -627,6 +795,10 @@ void main(List<String> args) {
       },
       placeholders: placeholders,
       namespace: namespace,
+      versionCode: versionCode,
+      versionName: versionName,
+      versionSettings: versionSettings,
+      uncompressedNativeLibs: uncompressedNativeLibs,
     );
   } on FormatException catch (e) {
     stderr.writeln(e.message);

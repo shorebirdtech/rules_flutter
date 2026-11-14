@@ -1,0 +1,291 @@
+# A Dart plugin class and `native_deps` together, the third way a plugin
+# carries native code in this workspace (beside `//add_plugin`, a Native Assets
+# code asset, and `//mul_plugin`, `native_deps` alone).
+#
+# `//multiply_plugin` registers a `dart_plugin_class` on every platform and ships
+# its `//:multiply` library through `native_deps`. The generated registrant
+# calls `MultiplyPlugin.registerWith()` at startup, and Dart opens the library
+# by its per-platform name: a loose `libmultiply.dylib`/`.so` in the bundle on
+# macOS and Linux, and on iOS the code linked statically into the app binary and
+# found with `DynamicLibrary.process()`.
+#
+# The app is hand-assembled from the Tier-2 `_gen` targets on macOS and iOS and
+# built with `flutter_linux_app` on Linux. There is no Windows bundle here:
+# `//:ffi_windows` is this workspace's Windows app.
+
+load("@bazel_skylib//rules:build_test.bzl", "build_test")
+load("@rules_apple//apple:ios.bzl", "ios_application")
+load("@rules_apple//apple:macos.bzl", "macos_application")
+load("@rules_dart//dart:defs.bzl", "dart_test")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application", "flutter_library")
+load(
+    "@rules_flutter//flutter:ios.bzl",
+    "IOS_DEFAULT_LAUNCH_STORYBOARD",
+    "IOS_MINIMUM_OS_VERSION",
+    "flutter_ios_app_framework_gen",
+    "flutter_ios_engine",
+    "flutter_ios_info_plist_gen",
+    "flutter_ios_native_frameworks_gen",
+    "flutter_ios_registrant_gen",
+    "flutter_ios_runner_lib_gen",
+    "flutter_ios_simulator_build_test",
+)
+load("@rules_flutter//flutter:linux.bzl", "flutter_linux_app")
+load(
+    "@rules_flutter//flutter:macos.bzl",
+    "MACOS_MINIMUM_OS_VERSION",
+    "flutter_apple_bundle_version",
+    "flutter_macos_app_framework_gen",
+    "flutter_macos_engine",
+    "flutter_macos_info_plist_gen",
+    "flutter_macos_menu_xib_gen",
+    "flutter_macos_native_libs_gen",
+    "flutter_macos_registrant_gen",
+    "flutter_macos_runner_lib_gen",
+)
+load("@rules_flutter//tools/e2e_testing:device_profile.bzl", "device_profile")
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "plugin_class_example",
+)
+
+flutter_application(
+    name = "plugin_class_app",
+    main = "lib/main.dart",
+    package = ":pubspec-metadata",
+    deps = [
+        "//multiply_plugin",
+        "@deps//:flutter",
+        "@rules_flutter//flutter:material_icons",
+    ],
+)
+
+# =============================================================================
+# macOS build
+# =============================================================================
+
+flutter_macos_app_framework_gen(
+    name = "macos_framework",
+    application = ":plugin_class_app",
+)
+
+flutter_macos_registrant_gen(
+    name = "macos_registrant",
+    application = ":plugin_class_app",
+)
+
+flutter_macos_native_libs_gen(
+    name = "macos_native_libs",
+    application = ":plugin_class_app",
+)
+
+flutter_macos_engine(
+    name = "macos_engine",
+)
+
+flutter_macos_info_plist_gen(
+    name = "macos_info_plist",
+    app_name = "FFI Plugin Example",
+)
+
+flutter_macos_menu_xib_gen(
+    name = "macos_menu_xib",
+    app_name = "FFI Plugin Example",
+)
+
+flutter_macos_runner_lib_gen(
+    name = "macos_runner_lib",
+    engine = ":macos_engine",
+    registrant = ":macos_registrant",
+)
+
+flutter_apple_bundle_version(
+    name = "macos_version",
+    application = ":plugin_class_app",
+    tags = ["manual"],
+)
+
+macos_application(
+    name = "plugin_class_macos",
+    additional_contents = {
+        ":macos_framework": "Frameworks",
+        ":macos_native_libs": "Frameworks",
+    },
+    bundle_id = "com.example.ffiplugin",
+    infoplists = [":macos_info_plist"],
+    minimum_os_version = MACOS_MINIMUM_OS_VERSION,
+    resources = [":macos_menu_xib"],
+    tags = ["manual"],
+    version = ":macos_version",
+    deps = [":macos_runner_lib"],
+)
+
+# =============================================================================
+# iOS build — native code statically linked.
+# On iOS, native plugin code is statically linked into the app binary
+# (unlike macOS/Linux where it's a separate .dylib in Frameworks/).
+# The Dart FFI code uses DynamicLibrary.process() to find the symbols.
+# =============================================================================
+
+flutter_ios_app_framework_gen(
+    name = "ios_framework",
+    application = ":plugin_class_app",
+)
+
+flutter_ios_registrant_gen(
+    name = "ios_registrant",
+    application = ":plugin_class_app",
+)
+
+flutter_ios_engine(
+    name = "ios_engine",
+)
+
+flutter_ios_native_frameworks_gen(
+    name = "ios_native_frameworks",
+    application = ":plugin_class_app",
+)
+
+flutter_ios_info_plist_gen(
+    name = "ios_info_plist",
+    app_name = "FFI Plugin Example",
+)
+
+flutter_ios_runner_lib_gen(
+    name = "ios_runner_lib",
+    engine = ":ios_engine",
+    registrant = ":ios_registrant",
+)
+
+flutter_apple_bundle_version(
+    name = "ios_version",
+    application = ":plugin_class_app",
+    tags = ["manual"],
+)
+
+_IOS_DEPS = [
+    ":ios_framework",
+    # Native-asset frameworks. Declared above but easy to leave
+    # unwired: the app still builds and renders, then fails every
+    # native-asset call at runtime because dyld cannot resolve the
+    # framework-relative path the manifest records.
+    ":ios_native_frameworks",
+    ":ios_runner_lib",
+    # FFI C library (dart:ffi). alwayslink keeps symbols referenced only
+    # from Dart; on iOS the native code links statically into the app binary
+    # and Dart reaches it through DynamicLibrary.process().
+    "//:multiply_cc",
+]
+
+ios_application(
+    name = "plugin_class_ios",
+    bundle_id = "com.example.ffiplugin",
+    families = ["iphone"],
+    infoplists = [":ios_info_plist"],
+    launch_storyboard = IOS_DEFAULT_LAUNCH_STORYBOARD,
+    minimum_os_version = IOS_MINIMUM_OS_VERSION,
+    tags = ["manual"],
+    version = ":ios_version",
+    deps = _IOS_DEPS,
+)
+
+# The same app, signed for a physical device: `provisioning_profile` is the
+# only difference, so the device bundle shares every Tier-2 `_gen` target with
+# the simulator's `:plugin_class_ios` above rather than re-deriving them.
+#
+# Signed with the developer's own profile, which is not in this repository:
+# `//plugin_class:device_profile` is a flag whose default fails with the setup
+# steps (copy device.example/ to the git-ignored device/, then set
+# `--//plugin_class:device_profile=//plugin_class/device:profile` in
+# .bazelrc.user). The flag keeps `bazel query 'deps(//...)'` from following a
+# label into the //plugin_class/device package a fresh clone lacks. The target
+# is `manual`, so `bazel build //...` skips it. (`//:ffi_ios_device` is the
+# workspace's other device build, signed with a stand-in profile and never run
+# on a device.)
+device_profile()
+
+ios_application(
+    name = "plugin_class_ios_device",
+    bundle_id = "com.example.ffiplugin",
+    families = ["iphone"],
+    infoplists = [":ios_info_plist"],
+    launch_storyboard = IOS_DEFAULT_LAUNCH_STORYBOARD,
+    minimum_os_version = IOS_MINIMUM_OS_VERSION,
+    provisioning_profile = ":device_profile",
+    tags = ["manual"],
+    version = ":ios_version",
+    deps = _IOS_DEPS,
+)
+
+# =============================================================================
+# Linux build
+# =============================================================================
+
+flutter_linux_app(
+    name = "plugin_class_linux",
+    application = ":plugin_class_app",
+    application_id = "com.example.ffi_example.plugin_class_linux",
+    target_compatible_with = ["@platforms//os:linux"],
+)
+
+# =============================================================================
+# Tests
+# =============================================================================
+
+dart_test(
+    name = "verify_macos_bundle_test",
+    data = [":plugin_class_macos"],
+    main = "test/verify_macos_bundle_test.dart",
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
+)
+
+dart_test(
+    name = "verify_linux_bundle_test",
+    data = [":plugin_class_linux"],
+    main = "test/verify_linux_bundle_test.dart",
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
+)
+
+build_test(
+    name = "plugin_class_build_test",
+    targets = [
+        ":plugin_class_app",
+        "//:multiply",
+        "//multiply_plugin",
+    ],
+)
+
+build_test(
+    name = "macos_bundle_build_test",
+    target_compatible_with = ["@platforms//os:macos"],
+    targets = [":plugin_class_macos"],
+)
+
+flutter_ios_simulator_build_test(
+    name = "ios_bundle_build_test",
+    target_compatible_with = ["@platforms//os:macos"],
+    targets = [":plugin_class_ios"],
+)
+
+build_test(
+    name = "linux_bundle_build_test",
+    target_compatible_with = ["@platforms//os:linux"],
+    targets = [":plugin_class_linux"],
+)
+
+# Static analysis over this app's Dart, under the workspace's lint ruleset
+# (`//:analysis_config`). The app rule is a bundle and carries no DartInfo, so
+# the sources are declared once more as a library for the analyzer to stage.
+flutter_library(
+    name = "app_lib",
+    srcs = glob(["lib/**/*.dart"]),
+    package = ":pubspec-metadata",
+    deps = [
+        "//multiply_plugin",
+        "@deps//:flutter",
+        "@rules_flutter//flutter:material_icons",
+    ],
+)

@@ -1,0 +1,43 @@
+{
+  "assets": {
+    "assets/my image.png": {
+      "variants": [
+        {
+          "asset": "assets/my image.png"
+        },
+        {
+          "asset": "assets/2.0x/my image.png",
+          "dpr": 2.0
+        }
+      ]
+    },
+    "assets/日本語.png": {
+      "variants": [
+        {
+          "asset": "assets/日本語.png"
+        }
+      ]
+    },
+    "assets/with space/x y.txt": {
+      "variants": [
+        {
+          "asset": "assets/with space/x y.txt"
+        }
+      ]
+    },
+    "assets/with space/z.txt": {
+      "variants": [
+        {
+          "asset": "assets/with space/z.txt"
+        }
+      ]
+    },
+    "assets/map form.png": {
+      "variants": [
+        {
+          "asset": "assets/map form.png"
+        }
+      ]
+    }
+  }
+}

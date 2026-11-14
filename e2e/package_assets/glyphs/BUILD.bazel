@@ -1,0 +1,47 @@
+load("@rules_flutter//flutter:defs.bzl", "dart_data_asset", "dart_package_metadata", "flutter_plugin")
+
+# One data asset per glyph, as the package's build hook would emit them. The
+# link hook receives them and ships only the glyphs the app uses; a debug
+# build, which links nothing, ships all of them.
+[
+    dart_data_asset(
+        name = glyph,
+        src = "data/%s.txt" % glyph,
+        asset_id = "package:glyphs/glyphs/%s.txt" % glyph,
+    )
+    for glyph in [
+        "heart",
+        "moon",
+        "star",
+    ]
+]
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "glyphs",
+    data_assets = [
+        ":heart",
+        ":moon",
+        ":star",
+    ],
+    link_hook = "hook/link.dart",
+)
+
+# A package with a link hook: `hook/link.dart` reads the recorded uses of
+# `Glyph`, emits `package:glyphs/glyphs/index.json` and the declared glyphs
+# the app uses, and fails the build on a `Glyph` constructed at run time. The
+# shape a Flutter package that indexes its own assets takes: a
+# `flutter_plugin` with no platforms.
+flutter_plugin(
+    name = "glyphs",
+    srcs = glob(["lib/**/*.dart"]),
+    package = ":pubspec-metadata",
+    platforms = [],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@deps//:data_assets",
+        "@deps//:hooks",
+        "@deps//:meta",
+        "@deps//:record_use",
+    ],
+)

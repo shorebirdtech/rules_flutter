@@ -56,9 +56,10 @@
 ///
 /// Commands (IDE → tool):
 ///   app.hotReload          — hot reload
-///   app.restart            — hot restart. `fullRestart: false` asks for a
-///                            reload through this command, which is what a
-///                            `flutter run`-shaped client sends.
+///   app.restart            — as upstream's `flutter run --machine`: a hot
+///                            reload, or with `fullRestart: true` a hot
+///                            restart. `pause`, `reason` and `debounce` are
+///                            accepted; only `pause: true` is refused.
 ///   app.stop               — stop the app
 ///   daemon.shutdown        — shut down the dev tool
 ///
@@ -309,6 +310,15 @@ class MachineProtocol {
     sendEvent('app.devTools', {'appId': appId, 'uri': uri});
   }
 
+  /// Send app.dtd event: the Dart Tooling Daemon [appId] is registered with.
+  ///
+  /// Upstream's event and fields (`daemon.dart`, sent beside `app.debugPort`
+  /// and `app.devTools`). It is how a `--machine` client learns the address a
+  /// DTD client, such as the Dart MCP server, connects to.
+  void appDtd(String appId, Uri uri) {
+    sendEvent('app.dtd', {'appId': appId, 'uri': uri.toString()});
+  }
+
   /// Send app.started event.
   void appStarted(String appId) {
     sendEvent('app.started', {'appId': appId});
@@ -351,8 +361,12 @@ class MachineProtocol {
   }
 
   /// Send app.stop event.
-  void appStop(String appId) {
-    sendEvent('app.stop', {'appId': appId});
+  ///
+  /// [error] says the app did not stop because it was asked to: it died, or
+  /// the connection to it was lost. Upstream's daemon puts the same field on
+  /// the same event.
+  void appStop(String appId, {String? error}) {
+    sendEvent('app.stop', {'appId': appId, if (error != null) 'error': error});
   }
 
   void _sendResponse(dynamic id, Map<String, dynamic> result) {

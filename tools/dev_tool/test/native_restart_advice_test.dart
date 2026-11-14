@@ -254,7 +254,7 @@ Future<SessionHost> _assemble(_World world, {required bool launched}) async {
   host.registerReloadCommands(pipeline);
   final resolver = SourceUriResolver(
     workspaceRoot: world.workspace,
-    sourcePackages: const [(name: 'app', libRoot: '')],
+    sourcePackages: const [(name: 'app', packageRoot: '')],
   );
   final workspace = Workspace(resolver: resolver);
   pipeline
@@ -346,9 +346,6 @@ Future<SessionHost> _assemble(_World world, {required bool launched}) async {
 
   final relauncher = Relauncher(
     appFile: world.bundle,
-    fingerprint: () async => await world.buildLaunch()
-        ? await nativeLibsFingerprint(world.bundle)
-        : null,
     rebuild: world.buildLaunch,
     // No session to swap: the device is what this does not model.
     sessions: <DeviceSession>[],
@@ -434,7 +431,9 @@ void main() {
           Uint8List? running = world.image();
 
           Future<Map<String, dynamic>> run(String method) =>
-              host.commandRunner.run(method, {});
+              host.commandRunner.run(method, {
+                if (method == 'app.restart') 'fullRestart': true,
+              });
 
           bool clean(Map<String, dynamic> reply) =>
               reply['succeeded'] == true &&

@@ -1,0 +1,20 @@
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_library")
+
+# A package that ships a build hook nothing replaces, as `flutter_pub.from_lock()`
+# records when it finds `hook/build.dart` and the curated registry has no entry
+# for that package at that version. Using `flutter_library` rather than
+# `dart_library` is deliberate: what is under test is that rules_flutter's own
+# package rule carries the flag onto `DartPackageInfo` and up through
+# `transitive_packages`.
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "hook_fixture",
+    build_hook = "hook/build.dart",
+)
+
+flutter_library(
+    name = "hook_fixture",
+    srcs = ["lib/hook_fixture.dart"],
+    package = ":pubspec-metadata",
+    visibility = ["//flutter/tests/dart_asset_fixture:__subpackages__"],
+)

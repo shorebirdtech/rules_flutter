@@ -7,19 +7,24 @@ flutter_application, flutter_android_bundle, and flutter_ios_application.
 
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_dart//dart:providers.bzl", "DartInfo")
-load("@rules_dart//dart:utils.bzl", "KERNEL_TOOL_ATTR", "collect_packages", "collect_transitive_srcs", "dart_import_check_aspect", "derive_lib_root", "generate_dev_package_config", "import_check_validation")
+load("@rules_dart//dart:utils.bzl", "KERNEL_TOOL_ATTR", "collect_packages", "collect_transitive_srcs", "dart_import_check_aspect", "generate_dev_package_config", "import_check_output_groups", "package_identity_attrs", "package_info_from_metadata", "package_lib_prefix", "resolve_package_identity", "runtime_reset")
 load("//flutter:providers.bzl", "FlutterInfo", "FlutterNativeLibraryInfo")
-load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "app_main_location", "app_scheme_location", "app_scheme_sources", "compile_package_config", "resolve_kernel_entrypoint", "synthesize_app_package", "with_root")
+load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "app_main_location", "app_scheme_files", "app_scheme_location", "app_scheme_sources", "synthesize_app_package", "with_root")
+load("//flutter/private:application_version.bzl", "VERSION_SETTING_ATTRS", "program_version")
+load("//flutter/private:flutter_aot_compile.bzl", "GEN_SNAPSHOT_SETTINGS_ATTRS")
 load("//flutter/private:flutter_asset_bundle.bzl", "flutter_asset_bundle_action")
-load("//flutter/private:flutter_compile.bzl", "flutter_kernel_compile_action")
+load("//flutter/private:flutter_compile.bzl", "flutter_kernel_compile")
 load("//flutter/private:flutter_info.bzl", "dedup_plugins")
-load("//flutter/private:flutter_library.bzl", "aggregate_pub_contributions")
+load("//flutter/private:flutter_library.bzl", "aggregate_pub_contributions", "asset_key", "package_root_of", "path_in_package", "ships_in")
 load("//flutter/private:flutter_shader_compile.bzl", "flutter_shader_compile_action")
 load("//flutter/private:native_sources.bzl", "native_sources_aspect")
+load("//flutter/private:notices.bzl", "NOTICES_ATTRS", "additional_licenses_of", "flutter_notices_action", "notices_asset_key", "package_licenses_of")
 load("//flutter/private:plugin_registrant.bzl", "generate_dart_plugin_registrant", "generate_dev_plugin_registrants")
+load("//flutter/private:program_analysis.bzl", "program_sky_engine_attr")
+load("//flutter/private:sdk_defines.bzl", "program_version_dart_defines")
 load("//flutter/private:validation.bzl", "validate_dart_defines")
 
-def make_web_wrapper_main_content(original_import, registrant_import = None):
+def make_web_wrapper_main_content(original_import, registrant_import = None, agent_imports = None):
     """Generate a web wrapper main.dart that uses ui_web.bootstrapEngine().
 
     Flutter web requires ui_web.bootstrapEngine() to properly initialize the
@@ -33,6 +38,10 @@ def make_web_wrapper_main_content(original_import, registrant_import = None):
         original_import: Import URI for the original main.
         registrant_import: Optional relative import path for the generated
             registrant file. If None, plugin registration is a no-op.
+        agent_imports: Optional pair of relative import paths, the agent
+            extensions and their web bridge, for a debug build. The wrapper
+            registers the extensions and installs the bridge before anything
+            else runs, so they cover the app's whole start.
 
     Returns:
         String of Dart source code.
@@ -49,12 +58,21 @@ def make_web_wrapper_main_content(original_import, registrant_import = None):
     ]
     if registrant_import:
         lines.append("import '%s' as pluginRegistrant;" % registrant_import)
+    if agent_imports:
+        lines.append("import '%s' as agentExtensions;" % agent_imports[0])
+        lines.append("import '%s' as agentBridge;" % agent_imports[1])
     lines.extend([
         "",
         "typedef _UnaryFunction = dynamic Function(List<String> args);",
         "typedef _NullaryFunction = dynamic Function();",
         "",
         "Future<void> main() async {",
+    ])
+    if agent_imports:
+        lines.append("  agentBridge.installRulesFlutterAgentBridge(")
+        lines.append("    agentExtensions.registerRulesFlutterAgentExtensions(),")
+        lines.append("  );")
+    lines.extend([
         "  await ui_web.bootstrapEngine(",
         "    runApp: () {",
         "      if (entrypoint.main is _UnaryFunction) {",
@@ -84,16 +102,14 @@ def check_unreplaced_hooks(label, deps):
     native function" with nothing pointing at the cause.
 
     Checked at the application rather than when the spoke repo is generated.
-    `flutter.pub()` materialises the whole lock file, so failing at generation
-    would fail over packages nothing depends on, and on platforms where the
-    hook is irrelevant. Only a package an application actually reaches is a
-    problem, and only here is the depending target known.
+    `flutter_pub.from_lock()` materialises the whole lock file, so failing at
+    generation would fail over packages nothing depends on, and on platforms
+    where the hook is irrelevant. Only a package an application actually reaches
+    is a problem, and only here is the depending target known.
 
-    rules_dart applies the same rule at `dart_binary` with its own copy. The
-    two differ only in the remediation they suggest — a Flutter user fixes this
-    through `flutter.pub()`, not `pub.from_lock()` — so this collapses into one
-    shared helper once rules_dart exports one that takes the hint as an
-    argument.
+    rules_dart applies the same rule at `dart_binary`. The two differ in the
+    remediation they suggest: a Flutter user fixes this through
+    `flutter_pub.from_lock()`, not `pub.from_lock()`.
 
     Args:
       label: The consuming target's label, for the message.
@@ -106,16 +122,10 @@ def check_unreplaced_hooks(label, deps):
         transitive = [dep[DartInfo].transitive_packages for dep in deps],
     ).to_list()
 
-    # Guarded for the same reason rules_dart's `package_code_assets` guards
-    # `code_assets`: `DartPackageInfo` is rules_dart's, and it deliberately
-    # tolerates a record built against a rules_dart predating a field. Absent
-    # is not "unknown" here — a producer with no such field could not have
-    # recorded a hook — so it reads as "no hook". Unguarded, the read fails
-    # analysis on records that are not even offenders.
     offenders = [
         pkg
         for pkg in packages
-        if hasattr(pkg, "has_unreplaced_hook") and pkg.has_unreplaced_hook
+        if pkg.unreplaced_hook
     ]
     if not offenders:
         return None
@@ -124,14 +134,14 @@ def check_unreplaced_hooks(label, deps):
         "Bazel cannot run:\n%s\n\n" +
         "Their `@Native` bindings will not resolve at runtime. Either:\n" +
         "  - add a `dart_code_asset` to the owning package's `code_assets` " +
-        "(for a pub package, that means a `flutter.plugin_overlays` entry, " +
+        "(for a pub package, that means a `flutter_pub.plugin_overlays` entry, " +
         "or a curated entry upstream in rules_dart), or\n" +
-        "  - list the package in `flutter.pub(ignore_hooks = [...])` if its " +
+        "  - list the package in `flutter_pub.from_lock(ignore_hooks = [...])` if its " +
         "native code is genuinely unused here."
     ) % (
         label,
         "\n".join([
-            "  - %s (%s)" % (pkg.package_name, pkg.has_unreplaced_hook)
+            "  - %s (%s)" % (pkg.package_name, pkg.unreplaced_hook)
             for pkg in offenders
         ]),
     )
@@ -207,60 +217,36 @@ def collect_binding_contracts(native_deps):
                     pairs.append(struct(library = f, contract = ()))
     return pairs
 
-def collect_assets(deps, direct_assets):
-    """Collect asset files from direct attrs and transitive FlutterInfo deps.
-
-    Args:
-        deps: List of targets, some of which may provide FlutterInfo.
-        direct_assets: List of directly specified asset Files.
-
-    Returns:
-        List of all asset Files.
-    """
-    transitive_depsets = [
-        dep[FlutterInfo].asset_dirs
-        for dep in deps
-        if FlutterInfo in dep
-    ]
-    if transitive_depsets:
-        return list(direct_assets) + depset(transitive = transitive_depsets).to_list()
-    return list(direct_assets)
-
-def flutter_compile_kernel(ctx, tools, aot = None, platform_dill = None, target_platform = None, frontend_server_target = "flutter", native_assets_manifest = None, track_widget_creation = False, assets_dir = None, platform_build_args = [], recorded_uses = None):
+def flutter_compile_kernel(ctx, tools, aot = None, target_platform = None, track_widget_creation = False, assets_dir = None, platform_build_args = [], recorded_uses = None, inputs = None):
     """Run the shared kernel compilation step.
 
-    Collects sources, generates package_config.json, and invokes
-    flutter_kernel_compile_action. If deps contain plugins with
-    dartPluginClass (or the debug agent is injected), generates a
-    registrant library the engine invokes before main() on every
-    root-isolate launch — including hot restart.
+    Collects sources and packages and compiles them (`flutter_kernel_compile`).
+    If deps contain plugins with dartPluginClass (or the debug agent is
+    injected), generates a registrant library the engine invokes before main()
+    on every root-isolate launch — including hot restart.
 
-    If aot and platform_dill are not specified, they follow the build mode
-    (`flutter_build_mode`): debug → debug dill + JIT, profile → debug
-    (non-product) dill + AOT, release → product dill + AOT.
+    The kernel is for the build mode's runtime (`flutter_build_mode`): debug
+    is JIT against the non-product platform, profile AOT against it, and
+    release AOT against the product platform.
 
     Args:
         ctx: Rule context (must have main, srcs, deps, defines attrs).
         tools: `FlutterExecToolsInfo` of the `PORTABLE` group (`portable_tools`).
-        aot: If set, override AOT mode. Otherwise determined by compilation mode.
-        platform_dill: If set, override platform dill. Otherwise determined by compilation mode.
+        aot: If set, override AOT mode. Otherwise determined by the build mode.
         target_platform: Optional platform string (e.g. "web", "linux", "android").
             When set, only plugins with dartPluginClass on that platform are registered.
-        frontend_server_target: Frontend server --target flag ("flutter" or "dartdevc" for web).
-        native_assets_manifest: Optional File pointing at the
-            `native_assets.json` manifest (the JSON shape the
-            frontend_server reads via `--native-assets`). Always passed
-            through when set; the manifest's contents may be empty.
         track_widget_creation: Whether to pass `--track-widget-creation` to
-            the frontend server. Passed rather than read off `ctx.attr`,
+            the frontend server, and to tell the dev tool the kernel has it
+            (the `trackWidgetCreation` of the debug `rules_flutter.build_info`
+            record). Passed rather than read off `ctx.attr`,
             because the rules calling this do not share one attribute set —
-            `flutter_kernel_target` has no such attr — and a rule that has no
+            `flutter_kernel` has no such attr — and a rule that has no
             opinion should say `False` rather than be probed for one.
         assets_dir: The declared `flutter_assets/` tree artifact, from
             `declare_flutter_assets_dir`. Supplying it is what makes a debug
             build carry `rules_flutter.build_info`; the rules with no asset
-            bundle of their own (`flutter_kernel_target`,
-            `flutter_aot_target`) leave it None and emit no define, because
+            bundle of their own (`flutter_kernel`,
+            `flutter_aot_snapshot`) leave it None and emit no define, because
             an app with no assets tree has nothing for the dev tool to watch.
         platform_build_args: Flags from `launch_build_args`, recorded in
             `build_info` so an attaching dev tool can reproduce this
@@ -268,50 +254,52 @@ def flutter_compile_kernel(ctx, tools, aot = None, platform_dill = None, target_
         recorded_uses: Optional declared File for the compiler's recorded
             `@RecordUse` uses, the input of package link hooks. Pass it for
             AOT compiles only.
+        inputs: The program to compile, from `flutter_program_inputs`; `ctx`'s
+            own when None. A program rebuilt under another target
+            (`flutter_application_variant`) is the application's, changed, and
+            keeps the application's package: its package root, and so what
+            `package:<name>/…` resolves to.
 
     Returns:
-        struct with kernel_dill (File), package_config (File) and
-        import_checks (the depset of the app's and its libraries' import
-        checks, for the `_validation` output group).
+        struct with kernel_dill (File) and
+        import_checks (the import checks' output groups, a dict for
+        `OutputGroupInfo`: `_validation`, the app's and its libraries'
+        checks, and rules_dart's unused-dependency group its fixer reads).
     """
-    all_srcs = list(ctx.files.srcs) + collect_transitive_srcs(ctx.attr.deps).to_list()
-    packages = collect_packages(ctx.attr.deps)
+    if inputs == None:
+        inputs = flutter_program_inputs(ctx)
+    all_srcs = list(inputs.srcs) + collect_transitive_srcs(inputs.deps).to_list()
+    packages = collect_packages(inputs.deps)
 
     # Register the app itself as a package so the frontend_server keys the
     # entrypoint as `package:<name>/main.dart` — the URI the dev tool's
     # incremental compiler uses (without this, hot-reload deltas keyed via
     # sandbox `file://` URIs can't be matched against the kernel's libraries).
-    app_pkg_name = ctx.attr.package_name
+    app_pkg_name = inputs.package_name
 
-    # The app's own library root, which is what `package:<name>/…` resolves
-    # against. Derived from the label rather than assumed to be the workspace
-    # root, so an app in a nested Bazel package registers a `rootUri` pointing
-    # at its own directory; assuming `""` pointed every nested app's
-    # `package:` URIs at whatever sits in the *workspace's* `lib/`.
-    app_lib_root = derive_lib_root(ctx.label.workspace_root, ctx.label.package)
+    # The app's own package root, which is what `package:<name>/…` resolves
+    # against: its declaration's directory, so an app in a nested Bazel
+    # package registers a `rootUri` pointing at its own directory, not at
+    # whatever sits in the *workspace's* `lib/`.
+    app_package_root = inputs.package_root
     packages = synthesize_app_package(
         ctx.label,
         packages,
         app_pkg_name,
-        app_lib_root,
-        ctx.attr.language_version,
+        app_package_root,
+        inputs.package,
     )
 
-    # `synthesize_app_package` appends the app's own package last.
-    import_checks = import_check_validation(ctx, ctx.executable._kernel_tool, [ctx.file.main] + ctx.files.srcs, packages[-1], ctx.attr.deps)
+    # Every file of the program, the app's own `main` included.
+    program_files = all_srcs + ([inputs.main] if inputs.main else [])
 
-    # Include the app's own `main` so the synthesized package keyed as
-    # `package:<name>/main.dart` (hot-reload URI parity) is co-located with
-    # its lib/ siblings when any of them are generated.
-    colocate_inputs = all_srcs + ([ctx.file.main] if ctx.file.main else [])
-
-    # Dev hot-reload metadata (debug only): a *second* package_config that, for a
-    # source-assembled app package, points its `rootUri` at the live source tree
-    # + generated bazel-out roots via a filesystem scheme — instead of the frozen
-    # assembled `.pkgsrcs` dir the build package_config uses. This is what lets
-    # the dev tool's frontend_server pick up live edits AND find generated parts.
-    # Computed from the PRE-colocation `packages`/`colocate_inputs` so `lib_root`
-    # and `File.is_source` are still intact. See rules_dart
+    # Dev hot-reload metadata (debug only): a package_config for the dev tool's
+    # compiler, outside the sandbox. A package whose sources straddle the
+    # source tree and bazel-out (codegen) gets a `rootUri` under `APP_SCHEME`,
+    # the scheme the build's compile reads every source through, resolved
+    # across the live source tree and the generated roots; the rest point at
+    # their directories. This is what lets the dev tool's frontend_server pick
+    # up live edits AND find generated parts. See rules_dart
     # `generate_dev_package_config`.
     mode = flutter_build_mode(ctx)
     emit_dev_config = mode == "debug"
@@ -323,42 +311,39 @@ def flutter_compile_kernel(ctx, tools, aot = None, platform_dill = None, target_
     dev_generated_source_uris = []
     dev_source_packages = []
     dev_app_sources = []
-    main_location = app_main_location(app_pkg_name, app_lib_root, ctx.file.main) if ctx.file.main else None
+    main_location = app_main_location(app_pkg_name, app_package_root, inputs.main) if inputs.main else None
     app_entrypoint_uri = main_location.uri if main_location else None
+
     if emit_dev_config:
         dev_package_config = ctx.actions.declare_file(ctx.label.name + ".dev_package_config.json")
-        dev_pc = generate_dev_package_config(packages, colocate_inputs, dev_package_config, scheme = APP_SCHEME)
+        dev_pc = generate_dev_package_config(packages, program_files, dev_package_config, scheme = APP_SCHEME)
         ctx.actions.write(dev_package_config, dev_pc.content)
 
         # A `main` with no `package:` URI is compiled under the app scheme,
         # and the dev loop's compiler has to mount the same root to name it
         # the same way.
         dev_filesystem_roots = with_root(dev_pc.filesystem_roots, main_location.root if main_location else None)
+
+        # The sources the program reads by workspace path rather than by a
+        # `package:` URI. Each is found under the root it sits in, which is
+        # not the `main`'s when the two differ: a generated `main` (a
+        # variant's test bootstrap) importing a source test beside the
+        # application.
+        for scheme_file in app_scheme_files(app_pkg_name, app_package_root, inputs.main, inputs.srcs) if inputs.main else []:
+            dev_filesystem_roots = with_root(dev_filesystem_roots, app_scheme_location(scheme_file).root)
         dev_filesystem_scheme = dev_pc.scheme
-        dev_app_sources = app_scheme_sources(app_pkg_name, app_lib_root, ctx.file.main, ctx.files.srcs) if ctx.file.main else []
+        dev_app_sources = app_scheme_sources(app_pkg_name, app_package_root, inputs.main, inputs.srcs) if inputs.main else []
         dev_generated_source_uris = dev_pc.generated_source_uris
         dev_source_packages = dev_pc.source_packages
         dev_generated_sources = resolve_dev_generated_sources(
             dev_pc.generated_source_paths,
-            colocate_inputs,
+            program_files,
         )
 
         # The dev package_config's roots and the filesystem roots reach every
         # file the dev compiler may read.
-        dev_package_config_names = colocate_inputs
+        dev_package_config_names = program_files
 
-    pc = compile_package_config(ctx, packages, colocate_inputs)
-    config_file = pc.config_file
-    all_srcs = pc.srcs
-    packages = pc.packages
-
-    # Profile compiles against the non-product platform, as debug does: the
-    # product one has the VM service and the profiling hooks compiled out.
-    if platform_dill == None:
-        if mode == "release":
-            platform_dill = tools.platform_kernel_dill_product
-        else:
-            platform_dill = tools.platform_kernel_dill
     if aot == None:
         aot = mode != "debug"
 
@@ -387,7 +372,7 @@ def flutter_compile_kernel(ctx, tools, aot = None, platform_dill = None, target_
     # a side library (upstream _PluginRegistrant shape) the engine invokes
     # before main() on every root-isolate launch — including hot restart.
     all_dep_plugins = []
-    for dep in ctx.attr.deps:
+    for dep in inputs.deps:
         if FlutterInfo in dep:
             all_dep_plugins.extend(dep[FlutterInfo].plugins)
     plugins = dedup_plugins(all_dep_plugins)
@@ -414,28 +399,41 @@ def flutter_compile_kernel(ctx, tools, aot = None, platform_dill = None, target_
             native_agent_import = staged_native_agent.basename if staged_native_agent else None,
         )
 
-    # Resolve the kernel entrypoint: the user's main, keyed by its package:
-    # URI for hot-reload parity with the dev tool.
-    entrypoint_info = resolve_kernel_entrypoint(ctx, app_pkg_name, app_lib_root)
     if registrant:
         all_srcs = all_srcs + [registrant]
     if staged_agent:
         all_srcs = all_srcs + [staged_agent, staged_native_agent]
 
-    # Collect extra frontend_server flags from build flag attrs.
-    extra_frontend_flags = []
-    if track_widget_creation:
-        extra_frontend_flags.append("--track-widget-creation")
+    # `synthesize_app_package` appends the app's own package last. What a rule
+    # wrote for the program (`unchecked_srcs`, the plugin registrant, the debug
+    # agent extensions) is compiled with it, so its imports are uses of `deps`;
+    # they are that rule's to get right, so the check judges only the user's.
+    generated = [f for f in inputs.unchecked_srcs if f.extension == "dart"]
+    if registrant:
+        generated.append(registrant)
+    if staged_agent:
+        generated.extend([staged_agent, staged_native_agent])
+    import_checks = import_check_output_groups(
+        ctx,
+        ctx.executable._kernel_tool,
+        [f for f in [inputs.main] + inputs.srcs if f not in inputs.unchecked_srcs],
+        packages[-1],
+        inputs.deps,
+        generated = generated,
+    )
 
-    # Merge defines with mode-specific Dart VM flags. user_defines (attr +
-    # extra_dart_defines flag, no mode keys) is surfaced in the return struct
-    # so dev-config writers can replay it on the dev tool's frontend_server.
-    user_defines = merge_dart_defines(ctx)
-    all_defines = list(user_defines)
-    if mode == "profile":
-        all_defines.append("dart.vm.profile=true")
-    elif aot:
-        all_defines.append("dart.vm.product=true")
+    # The user's attr + extra_dart_defines flag, the flavor's, and the ones
+    # that describe the app and the SDK. Surfaced in the return struct so
+    # dev-config writers can replay it on the dev tool's frontend_server; the
+    # build mode's `dart.vm.*` keys are the runtime's, not in it.
+    flag_defines = flag_dart_defines(ctx, inputs.defines)
+    user_defines = list(inputs.defines) + flag_defines
+    program_defines = user_defines + flavor_dart_defines(inputs.flavor) + program_version_dart_defines(
+        tools.sdk_defines,
+        inputs.build_name,
+        inputs.build_number,
+    )
+    all_defines = list(program_defines)
 
     # A debug app describes its own build to itself. `ext.rules_flutter.buildInfo`
     # hands this straight back to the dev tool, which needs it because
@@ -444,7 +442,7 @@ def flutter_compile_kernel(ctx, tools, aot = None, platform_dill = None, target_
     # for flags they never typed. Debug only — profile mode must look like
     # release on the agent surface, and there is no dev loop to serve in AOT.
     #
-    # Deliberately NOT added to `user_defines`: that list is replayed by the dev
+    # Deliberately NOT added to `program_defines`: that list is replayed by the dev
     # tool's own frontend_server, which runs against the host-configured dev
     # build. Replaying this one would have the app start reporting the dev
     # pipeline's configuration as its launch truth. The dev tool re-injects the
@@ -454,50 +452,55 @@ def flutter_compile_kernel(ctx, tools, aot = None, platform_dill = None, target_
             "label": str(ctx.label),
             "compilationMode": ctx.var["COMPILATION_MODE"],
             "platformBuildArgs": platform_build_args,
-            "dartDefines": user_defines,
+            # The `extra_dart_defines` flag's value alone: the dev tool passes
+            # back as that flag whatever of it a build of this label in its own
+            # options does not already have. The target supplies its `defines`,
+            # flavor and versions itself, and refuses the reserved keys.
+            "extraDartDefines": flag_defines,
             "assetsDir": assets_dir.path,
             # The platform this kernel was compiled for. The dev tool's own
-            # build runs in the host configuration, so only the app can say
+            # build runs in the host platform's configuration, so only the app can say
             # which platform-filtered plugin registrant its reloads need.
             "targetPlatform": target_platform,
+            # Whether this kernel was compiled with `--track-widget-creation`.
+            # The dev tool's frontend_server recompiles libraries on every hot
+            # reload and restart, and must apply the same transform: a library
+            # compiled without it would build its widgets with no location
+            # while the rest of the app records them.
+            "trackWidgetCreation": track_widget_creation,
         }))
 
     kernel_dill = ctx.actions.declare_file(ctx.label.name + ".dill")
-    flutter_kernel_compile_action(
-        ctx = ctx,
-        dartaotruntime = tools.dartaotruntime,
-        dart = tools.dart,
-        kernel_filter_tool = ctx.file._kernel_filter_tool,
-        flutter_sdk_files = tools.tool_files,
-        frontend_server = tools.frontend_server,
-        platform_dill = platform_dill,
-        main = entrypoint_info.file,
-        entrypoint_uri = entrypoint_info.uri,
-        srcs = all_srcs,
-        package_config = config_file,
+    flutter_kernel_compile(
+        ctx,
+        tools,
+        runtime = mode,
+        main = inputs.main,
+        srcs = depset(all_srcs),
+        packages = packages,
         output = kernel_dill,
+        # The user's main, keyed by the URI the dev tool's compiler keys it
+        # by (`app_main_location`), so a hot reload's delta applies.
+        entrypoint_uri = app_entrypoint_uri,
         aot = aot,
+        target_os = target_platform,
         defines = all_defines,
-        target = frontend_server_target,
-        extra_flags = extra_frontend_flags,
-        native_assets_manifest = native_assets_manifest,
+        track_widget_creation = track_widget_creation,
         dart_plugin_registrant_uri = registrant_location.uri if registrant_location else None,
-        filesystem_root_files = ([registrant] if registrant_location else []) +
-                                ([entrypoint_info.file] if entrypoint_info.root != None else []),
         recorded_uses = recorded_uses,
     )
     return struct(
         kernel_dill = kernel_dill,
-        package_config = config_file,
         import_checks = import_checks,
         # Dev-loop plugin registrants, keyed by platform (empty outside
         # debug). The dev tool replays the entry matching the running app's
         # platform on its resident frontend_server so the engine hook keeps
         # firing — with the right plugin set — after hot restart.
         dev_plugin_registrants = dev_plugin_registrants,
-        # Merged user defines (attr + flag), without the mode-specific
-        # dart.vm.* keys — the dev tool replays these on its own compiler.
-        dart_defines = user_defines,
+        # Merged user defines (attr + flag) and the flavor's, without the
+        # mode-specific dart.vm.* keys — the dev tool replays these on its own
+        # compiler.
+        dart_defines = program_defines,
         # Hot-reload dev metadata (None/empty outside debug). Consumed by the
         # rule impl to emit `_dev_config.json` for the dev tool.
         app_entrypoint_uri = app_entrypoint_uri,
@@ -532,29 +535,43 @@ def collect_sdk_shader_srcs(deps):
         return depset(transitive = transitive_depsets).to_list()
     return []
 
-def _shader_jobs(ctx):
-    """Every shader this target bundles, as struct(bundle_path, file, includes).
+def _shader_jobs(ctx, deps, target_platform, inputs):
+    """Every shader this target bundles, as struct(bundle_path, file, includes, listed).
 
-    User shaders keep their workspace-relative path ("shaders/my_effect.frag"),
+    `listed` says whether the asset manifest lists the shader. Flutter's own
+    (`ink_sparkle.frag`, `stretch_effect.frag`) are bundled and not listed:
+    flutter_tools adds them to every bundle beside, not among, the assets the
+    manifest names, and the engine loads a shader by its path
+    (`FragmentProgram.fromAsset`), never through the manifest.
+
+    User shaders keep their path in the target's package ("shaders/my_effect.frag"),
     SDK shaders go under "shaders/<basename>" (Flutter's convention), and a
-    package's under "packages/<pkg>/<path>" (bare "<path>" when it has no
-    package name). Two shaders claiming one bundle path fail here: one would
-    otherwise overwrite the other.
+    package's are keyed as `asset_key` says: bare "<path>" for the program's
+    own package, "packages/<pkg>/<path>" for any other. Two shaders claiming
+    one bundle path fail here: one would otherwise overwrite the other.
+
+    A package's shader that its `platforms:` entry restricts to other platforms
+    than `target_platform` is no job, as flutter_tools leaves it out of a build
+    for them; `tester` and None leave out nothing. One that its `flavors:` entry
+    restricts is a job only for a build of one of those flavors (`inputs.flavor`),
+    never for a build without one, `tester` included.
     """
     jobs = []
-    user_includes = getattr(ctx.files, "shader_includes", [])
-    for shader in ctx.files.shaders:
-        jobs.append(struct(bundle_path = shader.short_path, file = shader, includes = user_includes))
-    for shader in collect_sdk_shader_srcs(ctx.attr.deps):
-        jobs.append(struct(bundle_path = "shaders/" + shader.basename, file = shader, includes = []))
-    for dep in ctx.attr.deps:
+    program_root = package_root_of(inputs)
+    for shader in inputs.shaders:
+        jobs.append(struct(bundle_path = path_in_package(inputs.label, program_root, shader), file = shader, includes = inputs.shader_includes, listed = True))
+    for shader in collect_sdk_shader_srcs(deps):
+        jobs.append(struct(bundle_path = "shaders/" + shader.basename, file = shader, includes = [], listed = False))
+    for dep in deps:
         if FlutterInfo in dep:
             for entry in dep[FlutterInfo].pub_shaders.to_list():
-                prefix = "packages/{}/".format(entry.package_name) if entry.package_name else ""
+                if not ships_in(entry, target_platform, inputs.flavor):
+                    continue
                 jobs.append(struct(
-                    bundle_path = prefix + entry.shader_path,
+                    bundle_path = asset_key(entry, entry.shader_path, program_root),
                     file = entry.file,
                     includes = entry.includes,
+                    listed = True,
                 ))
 
     # One package can reach a target along several paths; the same file at
@@ -573,24 +590,74 @@ def _shader_jobs(ctx):
             ))
     return by_path.values()
 
-def shader_sources(ctx):
+def shader_sources(ctx, deps, target_platform, inputs = None):
     """The workspace files behind each bundled shader, for the dev tool.
 
     `{bundle path: [workspace-relative path]}`: the shader and what it may
     `#include`, where those are source files of this workspace. A shader from
     another repository maps to an empty list; it is still a shader, which is
     what the dev tool needs to know to make the app reload it.
+
+    Args:
+        ctx: Rule context (must have the shaders attr).
+        deps: The dependencies whose packages' shaders are bundled: the ones
+            `flutter_compile_shaders` was given.
+        target_platform: The platform the build is for, as `flutter_compile_shaders`
+            was given it.
+        inputs: The program whose shaders these are, as `flutter_compile_shaders`
+            was given it.
+
+    Returns:
+        The dict above.
     """
+    if inputs == None:
+        inputs = flutter_program_inputs(ctx)
     return {
         job.bundle_path: [
             f.short_path
             for f in [job.file] + list(job.includes)
             if f.is_source and not f.short_path.startswith("../")
         ]
-        for job in _shader_jobs(ctx)
+        for job in _shader_jobs(ctx, deps, target_platform, inputs)
     }
 
-def flutter_compile_shaders(ctx, tools, target_platform):
+def asset_roots(ctx, deps, inputs = None):
+    """The workspace directories the first-party assets come from, for the dev tool.
+
+    `{bundle path prefix: workspace-relative directory}`: `""` for the
+    program's own package, whose assets are bare whichever target lists them,
+    and `packages/<name>/` for each other package among `deps` with assets in
+    this workspace. An asset is bundled under its path from its package's
+    root, which says nothing of where in the workspace the package is; this
+    does, so the dev tool can watch the files and find one added later.
+
+    Args:
+        ctx: Rule context.
+        deps: The dependencies whose packages' assets are bundled: the ones
+            `flutter_build_assets` was given.
+        inputs: The program whose assets these are, as `flutter_build_assets`
+            was given it; its `label` says which package is its own.
+
+    Returns:
+        The dict above.
+    """
+    if inputs == None:
+        inputs = flutter_program_inputs(ctx)
+    program_root = package_root_of(inputs)
+    roots = {"": program_root or "."}
+    for dep in deps:
+        if FlutterInfo not in dep:
+            continue
+        for entry in dep[FlutterInfo].pub_assets.to_list():
+            f = entry.file
+            if not entry.package_name or entry.package_root == program_root:
+                continue
+            if not f.is_source or f.short_path.startswith("../"):
+                continue
+            roots["packages/%s/" % entry.package_name] = entry.package_root or "."
+    return roots
+
+def flutter_compile_shaders(ctx, tools, target_platform, deps, inputs = None):
     """Compile every shader this target bundles for the target platform.
 
     The shaders are the target's own (`shaders`), the SDK's (collected from
@@ -598,19 +665,27 @@ def flutter_compile_shaders(ctx, tools, target_platform):
     `_shader_jobs` for where each is bundled.
 
     Args:
-        ctx: Rule context (must have shaders attr and deps attr).
+        ctx: Rule context (must have the shaders attr).
         tools: `FlutterExecToolsInfo` of the `PORTABLE` group (`portable_tools`).
         target_platform: Target platform string ("ios", "macos", "android", "linux", "windows", "web").
+        deps: The dependencies whose SDK and package shaders are bundled.
+            Named by the caller rather than read off `ctx.attr.deps`: a rule
+            whose `deps` edge is split sees every branch's copy there.
+        inputs: The program whose shaders are bundled, from
+            `flutter_program_inputs`; `ctx`'s own when None.
 
     Returns:
-        Dict mapping bundle destination path → compiled File. Pass to
-        extra_asset_copies in flutter_asset_bundle_action.
+        struct(listed, unlisted): lists of (bundle destination path, compiled
+        File), the shaders the asset manifest lists and the ones it does not.
+        Pass to `flutter_build_assets`.
     """
-    jobs = _shader_jobs(ctx)
+    if inputs == None:
+        inputs = flutter_program_inputs(ctx)
+    jobs = _shader_jobs(ctx, deps, target_platform, inputs)
+    compiled = struct(listed = [], unlisted = [])
     if not jobs or not tools.impellerc:
-        return {}
+        return compiled
 
-    compiled = {}
     for job in jobs:
         # Named by the bundle path, which is unique, so no two outputs meet.
         out_path = job.bundle_path.replace("../", "_external/")
@@ -627,11 +702,11 @@ def flutter_compile_shaders(ctx, tools, target_platform):
             includes = job.includes,
             # What compiles a shader whose SkSL stage fails without it.
             dart = tools.dart,
-            dart_files = tools.tool_files,
+            dart_files = tools.sdk_files.run,
             compile_tool = ctx.file._shader_compile_tool,
-            require_sksl = getattr(ctx.attr, "require_sksl_shaders", False),
+            require_sksl = inputs.require_sksl_shaders,
         )
-        compiled[job.bundle_path] = output
+        (compiled.listed if job.listed else compiled.unlisted).append((job.bundle_path, output))
     return compiled
 
 def declare_flutter_assets_dir(ctx):
@@ -652,32 +727,73 @@ def declare_flutter_assets_dir(ctx):
     """
     return ctx.actions.declare_directory(ctx.label.name + "_flutter_assets")
 
-def shakes_icons_from_recorded_uses(ctx, tools, is_debug):
-    """Whether a build's icon tree shaking reads the uses its AOT compile records.
+def program_package(inputs):
+    """A program's own package record, as rules_dart's program helpers take it.
+
+    The program's own package is one of its packages exactly as a
+    dependency's is, whether or not a library in its `deps` names the same
+    declaration: its code and data assets ship and its link hook runs. A
+    library of the package in `deps` merges into this record.
+
+    Args:
+        inputs: The program, from `flutter_program_inputs`.
+
+    Returns:
+        The program's `DartPackageInfo`, or None for a program naming no
+        `dart_package_metadata`.
+    """
+    if inputs.package == None:
+        return None
+    return package_info_from_metadata(inputs.label, inputs.package, inputs.package_root)
+
+def program_package_files(inputs):
+    """A program's own files under its package's `lib/`.
+
+    What the package's link hook may import, as any package's hook imports
+    its own `lib/`. The program's other files (a `main` outside `lib/`, say)
+    are no part of what `package:<self>/` resolves to.
+
+    Args:
+        inputs: The program, from `flutter_program_inputs`.
+
+    Returns:
+        List of Files; empty for a program in no package.
+    """
+    if inputs.package == None:
+        return []
+    prefix = package_lib_prefix(inputs.package_root)
+    return [
+        f
+        for f in ([inputs.main] if inputs.main else []) + inputs.srcs
+        if f.short_path.startswith(prefix)
+    ]
+
+def shakes_icons_from_recorded_uses(tools, tree_shake_icons, is_debug):
+    """Whether a build's icon tree shaking reads the uses its compile records.
 
     True for a non-debug build with `tree_shake_icons` on a toolchain that has
     `font-subset` but no const_finder: Flutter 3.50 removed const_finder
     (flutter/flutter#191702), and flutter_tools reads the `IconData`
     instances the compile writes with `--recorded-uses` instead. The caller
-    then declares that file and passes it to the kernel compile and to
-    `flutter_build_assets`.
+    then has its compile record uses (the file link hooks read too) and
+    passes it to `flutter_build_assets`.
 
     Args:
-        ctx: Rule context with a `tree_shake_icons` attr.
         tools: The `FlutterExecToolsInfo` the asset bundle runs with.
+        tree_shake_icons: The program's `tree_shake_icons`.
         is_debug: Whether this is a debug build, which shakes nothing.
 
     Returns:
         A bool.
     """
     return (
-        ctx.attr.tree_shake_icons and
+        tree_shake_icons and
         not is_debug and
         tools.font_subset != None and
         tools.const_finder == None
     )
 
-def flutter_build_assets(ctx, tools, output_dir, compiled_shaders = {}, kernel_dill = None, recorded_uses = None, is_debug = False, data_assets = None, native_assets_manifest = None):
+def flutter_build_assets(ctx, tools, output_dir, deps, target_platform, compiled_shaders = struct(listed = [], unlisted = []), kernel_dill = None, recorded_uses = None, is_debug = False, program_assets = None, native_assets_manifest = None, optional_code_points = [], inputs = None):
     """Run the shared asset bundling step.
 
     Walks `FlutterInfo.pub_fonts` / `pub_assets` from deps to bundle
@@ -685,57 +801,81 @@ def flutter_build_assets(ctx, tools, output_dir, compiled_shaders = {}, kernel_d
     `flutter_compile_shaders` and arrive via `compiled_shaders`).
 
     Args:
-        ctx: Rule context (must have assets, deps, license_files, tree_shake_icons attrs and _asset_bundle_tool).
+        ctx: Rule context (must have assets, tree_shake_icons attrs, `_asset_bundle_tool`, `_notices_tool` and `_engine_license`).
         tools: `FlutterExecToolsInfo` of the `PORTABLE` group (`portable_tools`).
         output_dir: The tree artifact to bundle into, from
             `declare_flutter_assets_dir`. Passed in rather than declared here
             so an application can bake the path into its `build_info` before
             the kernel compile that this action depends on.
-        compiled_shaders: Dict mapping bundle dest path → compiled shader File.
-        kernel_dill: The compiled kernel .dill File (needed for icon tree shaking).
-        recorded_uses: The `--recorded-uses` File of the AOT kernel compile,
+        deps: The dependencies whose assets and pub contributions are
+            bundled. Named by the caller rather than read off
+            `ctx.attr.deps`: a rule whose `deps` edge is split sees every
+            branch's copy there, and would bundle each package once per
+            branch.
+        target_platform: The platform the bundle is for ("android", "ios",
+            "linux", "macos", "windows", "web", or "tester" for a test), which
+            leaves out the pub assets restricted to other platforms.
+        compiled_shaders: What `flutter_compile_shaders` made.
+        kernel_dill: The compiled kernel .dill File (needed for icon tree shaking
+            where the toolchain has a const_finder).
+        recorded_uses: The `--recorded-uses` File of the program's compile,
             which icon tree shaking reads where the toolchain has no
             const_finder (Flutter 3.50 on). See `shakes_icons_from_recorded_uses`.
         is_debug: Whether this is a debug build (icon tree shaking is skipped in debug).
-        data_assets: Optional depset[FlutterDataAssetInfo]. Each entry is
-            placed at `flutter_assets/packages/<package>/<name>` and listed in
-            the asset manifest under that key, as flutter_tools bundles a
-            hook's data asset.
-        native_assets_manifest: Optional File, the `native_assets.json` the
-            kernel was compiled with, bundled as `NativeAssetsManifest.json`
-            for the engine to resolve code assets from. See
-            `flutter_asset_bundle_action`.
+        program_assets: Optional `DartProgramAssetsInfo` of the program. Each
+            data asset it ships is placed at
+            `flutter_assets/packages/<package>/<name>` and listed in the
+            asset manifest under that key, as flutter_tools bundles a hook's
+            data asset. They are read in the bundling action: a linked
+            program's hooks decide what ships only when they run.
+        native_assets_manifest: Optional File, the app's native-assets
+            manifest, bundled as `NativeAssetsManifest.json`, where the engine
+            reads it at startup. Not in the asset manifest, as upstream's is
+            not.
+        optional_code_points: Code points every subset icon font keeps if it
+            has a glyph for them, whether or not the app uses them.
+        inputs: The program whose assets are bundled, from
+            `flutter_program_inputs`; `ctx`'s own when None. Its package,
+            the one `inputs.label` is in, is the program's own: its assets,
+            and those of every library of that package, are keyed by their
+            path from the package root, with no `packages/<name>/`.
 
     Returns:
         The flutter_assets/ tree artifact File.
     """
-    all_assets = collect_assets(ctx.attr.deps, ctx.files.assets)
+    if inputs == None:
+        inputs = flutter_program_inputs(ctx)
 
     # Walk pub-package font/asset contributions from FlutterInfo.
     # MaterialIcons is no longer special-cased here — apps depend on
     # `@rules_flutter//flutter:material_icons` to get it via this same path.
-    fonts, pub_extra_asset_copies = aggregate_pub_contributions(ctx.attr.deps)
-    extra_asset_copies = dict(compiled_shaders)
-    extra_asset_copies.update(pub_extra_asset_copies)
+    fonts, pub_copies, unlisted_copies = aggregate_pub_contributions(deps, target_platform, inputs.flavor, package_root_of(inputs))
+    extra_asset_copies = compiled_shaders.listed + pub_copies
+    unlisted_copies = compiled_shaders.unlisted + unlisted_copies
+    if native_assets_manifest != None:
+        unlisted_copies = unlisted_copies + [("NativeAssetsManifest.json", native_assets_manifest)]
 
-    # Drop each DataAsset at flutter_assets/packages/<pkg>/<name>, the key
-    # flutter_tools gives a hook's data asset and the one `rootBundle` loads
-    # it by. The bundle action keys extra_asset_copies on a destination path
-    # relative to the assets/ root.
-    if data_assets != None:
-        for entry in data_assets.to_list():
-            dst = "packages/{pkg}/{name}".format(pkg = entry.package, name = entry.name)
-            if dst in extra_asset_copies:
-                fail("%s: data asset %s collides with another asset bundled at %s." % (ctx.label, entry.file.short_path, dst))
-            extra_asset_copies[dst] = entry.file
+    # The licences the program ships, in the one asset the framework reads
+    # them from. `inputs` has the program's own; a package's reach this when
+    # the closure's licences are collected too.
+    web = target_platform == "web"
+    own_package = [(inputs.package_name, inputs.license_file)] if inputs.license_file else []
+    own_additional = [(inputs.package_name, inputs.additional_licenses)] if inputs.additional_licenses else []
+    notices = flutter_notices_action(
+        ctx = ctx,
+        tools = tools,
+        packages = package_licenses_of(deps, own_package),
+        additional = additional_licenses_of(deps, own_additional),
+        engine_license = ctx.file._engine_license,
+        web = web,
+    )
+    unlisted_copies = unlisted_copies + [(notices_asset_key(web), notices)]
 
-    license_files = ctx.files.license_files
-
-    # Icon tree shaking: enabled only in non-debug mode with tree_shake_icons=True.
+    # Icon tree shaking: in profile and release builds with tree_shake_icons=True.
     # Before Flutter 3.50, const_finder scans the kernel for the IconData
-    # constants; from 3.50 on, the AOT compile records them.
+    # constants; from 3.50 on, the compile records them.
     tree_shake_icons = (
-        ctx.attr.tree_shake_icons and
+        inputs.tree_shake_icons and
         not is_debug and
         tools.font_subset != None and
         (
@@ -747,17 +887,19 @@ def flutter_build_assets(ctx, tools, output_dir, compiled_shaders = {}, kernel_d
     return flutter_asset_bundle_action(
         ctx = ctx,
         dart = tools.dart,
-        flutter_sdk_files = tools.tool_files,
-        assets = all_assets,
+        dart_files = tools.sdk_files.run,
+        assets = inputs.assets,
+        owner = inputs,
         fonts = fonts,
-        license_files = license_files,
         output_dir = output_dir,
         const_finder = tools.const_finder if tree_shake_icons else None,
         font_subset = tools.font_subset if tree_shake_icons else None,
         kernel_dill = kernel_dill if tree_shake_icons else None,
         recorded_uses = recorded_uses if tree_shake_icons else None,
+        optional_code_points = optional_code_points,
         extra_asset_copies = extra_asset_copies,
-        native_assets_manifest = native_assets_manifest,
+        unlisted_asset_copies = unlisted_copies,
+        program_assets = program_assets,
     )
 
 def compute_desktop_bundle_copies(is_debug, kernel_dill_path, aot_output_path, aot_dst, icu_data_path, engine_basenames, native_basenames, engine_dst_prefix = "lib/", native_dst_prefix = "lib/"):
@@ -801,41 +943,20 @@ def compute_desktop_bundle_copies(is_debug, kernel_dill_path, aot_output_path, a
 
     return copies
 
-def compute_android_jni_path(target_name, abi, basename):
-    """Compute the JNI symlink path for an Android native library.
-
-    Scoped by [target_name] because `ctx.actions.declare_file` resolves
-    package-relative: two Android bundles in one package would otherwise both
-    declare `jni/<abi>/libapp.so` and collide. That is not hypothetical — the
-    Tier 1 `flutter_android_app` macro generates a bundle internally, so a
-    package holding two apps (or an app plus an explicit Tier 2 bundle) hits
-    it, and `bazel build //...` fails with conflicting actions. Bazel only
-    tolerates the duplicate while both symlinks happen to point at the *same*
-    source file, which masks the bug until the two apps differ.
-
-    Mirrors the same scoping already applied to the mobile-install assets
-    directory in `flutter_android_application.bzl`.
-
-    Args:
-        target_name: Name of the declaring target (`ctx.label.name`).
-        abi: Android ABI string (e.g. "arm64-v8a").
-        basename: Filename within the ABI directory.
-
-    Returns:
-        Path string like "my_app_jni/arm64-v8a/libapp.so".
-    """
-    return "{}_jni/{}/{}".format(target_name, abi, basename)
-
 # Android ABIs with AOT cross-compilation support. Single source of truth
 # mapping each ABI to the Bazel platform Android rules transition to and the
 # ELF e_machine value native libraries packaged for that ABI must carry.
 ANDROID_ABIS = {
+    "armeabi-v7a": struct(
+        platform = Label("@rules_android//:armeabi-v7a"),
+        elf_machine = 40,  # EM_ARM
+    ),
     "arm64-v8a": struct(
-        platform = Label("//flutter/platforms:android_arm64"),
+        platform = Label("@rules_android//:arm64-v8a"),
         elf_machine = 183,  # EM_AARCH64
     ),
     "x86_64": struct(
-        platform = Label("//flutter/platforms:android_x64"),
+        platform = Label("@rules_android//:x86_64"),
         elf_machine = 62,  # EM_X86_64
     ),
 }
@@ -844,7 +965,7 @@ def android_platform_for_abi(abi):
     """The Bazel platform label Android rules build for, given an ABI.
 
     Args:
-        abi: Android ABI string ("arm64-v8a" or "x86_64").
+        abi: Android ABI string ("armeabi-v7a", "arm64-v8a" or "x86_64").
 
     Returns:
         A Label for the platform under //flutter/platforms.
@@ -860,7 +981,7 @@ def android_elf_machine_for_abi(abi):
     """The ELF e_machine value native libraries must have for an ABI.
 
     Args:
-        abi: Android ABI string ("arm64-v8a" or "x86_64").
+        abi: Android ABI string ("armeabi-v7a", "arm64-v8a" or "x86_64").
 
     Returns:
         The e_machine value as an int (e.g. 183 for EM_AARCH64).
@@ -972,9 +1093,12 @@ PLATFORM_CONSTRAINT_ATTRS = {
     "_x86_64_constraint": attr.label(
         default = "@platforms//cpu:x86_64",
     ),
+    "_armv7_constraint": attr.label(
+        default = "@platforms//cpu:armv7",
+    ),
 }
 
-def launch_build_args(target_platform, is_simulator, is_arm64, is_x86_64):
+def launch_build_args(target_platform, is_simulator, is_arm64, is_x86_64, is_armv7 = False):
     """The bazel flags the *launch target's* build needs to produce this app.
 
     MIRRORS `Device.buildArgs` in `tools/dev_tool/lib/device.dart`. The dev
@@ -1004,6 +1128,7 @@ def launch_build_args(target_platform, is_simulator, is_arm64, is_x86_64):
             that question is answerable; ignored off Apple.
         is_arm64: True when the target platform has the arm64 CPU constraint.
         is_x86_64: True when it has the x86_64 CPU constraint.
+        is_armv7: True when it has the 32-bit ARM (armv7) CPU constraint.
 
     Returns:
         list[str] of bazel flags. Empty on desktop.
@@ -1015,17 +1140,19 @@ def launch_build_args(target_platform, is_simulator, is_arm64, is_x86_64):
 
     if target_platform == "android":
         if is_arm64:
-            abi = "arm64"
+            abi = "arm64-v8a"
         elif is_x86_64:
-            abi = "x64"
+            abi = "x86_64"
+        elif is_armv7:
+            abi = "armeabi-v7a"
         else:
             fail(
-                "flutter_application: the Android target platform has neither an arm64 nor " +
-                "an x86_64 CPU constraint, so the `--platforms` flag a dev-loop rebuild " +
-                "needs cannot be named. rules_flutter ships android_arm64 and android_x64 " +
-                "under @rules_flutter//flutter/platforms.",
+                "flutter_application: the Android target platform has no armv7, arm64 or " +
+                "x86_64 CPU constraint, so the `--@rules_android//flags:android_platforms` flag a dev-loop rebuild " +
+                "needs cannot be named. rules_android ships @rules_android//:armeabi-v7a, " +
+                "@rules_android//:arm64-v8a and @rules_android//:x86_64.",
             )
-        return ["--platforms=@rules_flutter//flutter/platforms:android_" + abi]
+        return ["--@rules_android//flags:android_platforms=@rules_android//:" + abi]
 
     # Desktop needs no flag: the app is already built in the top-level
     # configuration. `Device.buildArgs` emits `--platforms=` only when
@@ -1080,35 +1207,80 @@ def flutter_build_mode(ctx):
         return "profile"
     return "debug" if compilation_mode == "dbg" else "release"
 
+# The command-line defines flag is rules_dart's, so a Flutter compile and a
+# Dart one in the same build read the same declarations.
 EXTRA_DART_DEFINES_ATTR = {
     "_extra_dart_defines": attr.label(
-        doc = "The //flutter:extra_dart_defines build setting, appended after the target's own `defines`.",
-        default = Label("//flutter:extra_dart_defines"),
+        doc = "rules_dart's `//dart:extra_dart_defines` build setting, appended after the target's own `defines`.",
+        default = Label("@rules_dart//dart:extra_dart_defines"),
+        providers = [BuildSettingInfo],
     ),
 }
 
-def merge_dart_defines(ctx):
-    """Merge a target's `defines` attr with the extra_dart_defines flag.
+# The define `appFlavor` reads. flutter_tools sets it from `--flavor` and
+# refuses a user's own, as the ruleset does from `flavor`.
+APP_FLAVOR_DEFINE = "FLUTTER_APP_FLAVOR"
 
-    Flag values come after attr values, so on a duplicated key the command
-    line wins (the compilers take the last -D). The flag validates its own
-    value in its rule impl; only the attr is validated here.
+def flavor_dart_defines(flavor):
+    """The define `appFlavor` reads for `flavor`, as flutter_tools adds it; none for no flavor.
+
+    Args:
+        flavor: The program's `flavor`; empty for none.
+
+    Returns:
+        A list of zero or one `KEY=VALUE` define.
+    """
+    return ["%s=%s" % (APP_FLAVOR_DEFINE, flavor)] if flavor else []
+
+def flag_dart_defines(ctx, defines = None):
+    """The `extra_dart_defines` flag's defines, after checking them and the target's own.
+
+    rules_dart reserves no key; the Flutter build sets some itself (see
+    `RESERVED_DART_DEFINE_KEYS`), so they are refused here, from the target's
+    `defines` and from the command line alike.
 
     Args:
         ctx: Rule context with `defines` and `_extra_dart_defines` attrs.
+        defines: The target's own defines, if not `ctx`'s: a program rebuilt
+            under another target carries the application's, and its own.
+
+    Returns:
+        The flag's list of KEY=VALUE define strings.
+    """
+    if defines == None:
+        defines = ctx.attr.defines
+    validate_dart_defines(defines, "defines attribute of %s" % ctx.label)
+    flag = ctx.attr._extra_dart_defines[BuildSettingInfo].value
+    validate_dart_defines(flag, "`--@rules_dart//dart:extra_dart_defines`, building %s" % ctx.label)
+    return flag
+
+def merge_dart_defines(ctx, defines = None):
+    """Merge a target's `defines` attr with the extra_dart_defines flag.
+
+    Flag values come after attr values, so on a duplicated key the command
+    line wins (the compilers take the last -D). Both are checked for the
+    keys the build reserves.
+
+    Args:
+        ctx: Rule context with `defines` and `_extra_dart_defines` attrs.
+        defines: The target's own defines, if not `ctx`'s: a program rebuilt
+            under another target carries the application's, and its own.
 
     Returns:
         The merged list of KEY=VALUE define strings.
     """
-    validate_dart_defines(ctx.attr.defines, "defines attribute of %s" % ctx.label)
-    return list(ctx.attr.defines) + ctx.attr._extra_dart_defines[BuildSettingInfo].value
+    if defines == None:
+        defines = ctx.attr.defines
+    return list(defines) + flag_dart_defines(ctx, defines)
 
-def flutter_deps_attr(aspects = []):
+def flutter_deps_attr(aspects = [], **kwargs):
     """The `deps` attribute of every rule that compiles a Flutter program.
 
     Args:
         aspects: Aspects a rule applies over its `deps` on top of the import
             check every such rule runs.
+        **kwargs: Further arguments to `attr.label_list`, such as the `cfg` of
+            a rule that builds its dependencies for several compilers.
 
     Returns:
         The `attr.label_list`.
@@ -1123,14 +1295,114 @@ def flutter_deps_attr(aspects = []):
         # Each library's imports are checked against its own `deps`, in the
         # `_validation` output group.
         aspects = [dart_import_check_aspect] + aspects,
+        **kwargs
     )
+
+def flutter_program_inputs(ctx, metadata = None):
+    """The Flutter program a rule compiles, read off its attributes.
+
+    What the compile and bundling helpers (`flutter_compile_kernel`,
+    `flutter_compile_shaders`, `flutter_build_assets`, `gen_snapshot_options`)
+    read of the program, as one value. A rule that is not the program's own
+    (`flutter_application_variant`: the application, with another `main`)
+    passes an `inputs` of its own making, so those helpers need no rule
+    context shaped like the application's.
+
+    Every field is read whether or not `ctx` declares it, and is empty when it
+    does not: a rule compiling a kernel has no assets, and one with no
+    `main` attribute has no `main`.
+
+    Args:
+        ctx: Rule context.
+        metadata: The `DartPackageMetadataInfo` of the package the program is
+            in, when it comes from elsewhere than `ctx`'s `package` (a test
+            compiled in its application's package). A `package` the rule also
+            names must be the same declaration.
+
+    Returns:
+        A struct. `label` is the target the program is built for, and
+        `package` the `DartPackageMetadataInfo` of the package it is in (None
+        for a rule naming none), whose `package_name`, `package_root` (what
+        each asset is keyed from), `language_version` and `license_file` are
+        fields of their own; `main`, `srcs`, `assets`, `shaders`,
+        `shader_includes`, `license_file` and `additional_licenses` are Files
+        (`unchecked_srcs`, among `srcs`, are not checked against `deps`;
+        `staged_sources` are the sources of staged copies among them, which
+        analysis checks in their place); `deps`,
+        `native_deps` and `code_assets` are Targets, as is `package_target`,
+        the `package` Target (None for a rule naming none); the rest, `flavor`
+        among them, are as the attributes of `flutter_application` of the same
+        names, but for `build_name` and `build_number`: those are the version
+        the program has, which `--@rules_flutter//flutter:build_name` and
+        `build_number` replace when set, and `stated_build_name` and
+        `stated_build_number` are the attributes; `version_settings` names the
+        settings that are set, as `program_version` does.
+    """
+    identity = resolve_package_identity(ctx, metadata = metadata)
+    version = program_version(ctx)
+    return struct(
+        label = ctx.label,
+        main = getattr(ctx.file, "main", None),
+        srcs = list(getattr(ctx.files, "srcs", [])),
+        unchecked_srcs = [],
+        staged_sources = [],
+        deps = getattr(ctx.attr, "deps", []),
+        package_target = getattr(ctx.attr, "package", None),
+        defines = list(getattr(ctx.attr, "defines", [])),
+        flavor = getattr(ctx.attr, "flavor", ""),
+        build_name = version.build_name,
+        build_number = version.build_number,
+        stated_build_name = version.stated_build_name,
+        stated_build_number = version.stated_build_number,
+        version_settings = version.settings,
+        package = identity.metadata,
+        package_name = identity.package_name,
+        package_root = identity.package_root,
+        language_version = identity.language_version,
+        assets = list(getattr(ctx.files, "assets", [])),
+        shaders = list(getattr(ctx.files, "shaders", [])),
+        shader_includes = list(getattr(ctx.files, "shader_includes", [])),
+        require_sksl_shaders = getattr(ctx.attr, "require_sksl_shaders", False),
+        license_file = identity.license_file,
+        additional_licenses = list(getattr(ctx.files, "additional_licenses", [])),
+        tree_shake_icons = getattr(ctx.attr, "tree_shake_icons", False),
+        native_deps = list(getattr(ctx.attr, "native_deps", [])),
+        code_assets = list(getattr(ctx.attr, "code_assets", [])),
+        track_widget_creation = getattr(ctx.attr, "track_widget_creation", False),
+        minimum_os_version = getattr(ctx.attr, "minimum_os_version", ""),
+        extra_gen_snapshot_options = list(getattr(ctx.attr, "extra_gen_snapshot_options", [])),
+    )
+
+# The `package` of a program, the doc of `KERNEL_COMPILE_ATTRS`' own. A rule
+# that applies an aspect to the declaration (to reach what it declares)
+# redeclares the attribute with this doc.
+PROGRAM_PACKAGE_DOC = (
+    "The `dart_package_metadata` declaring the program's own Dart " +
+    "package, the Bazel stand-in for its `pubspec.yaml`. Required: " +
+    "its `package_name` keys the kernel's libraries under stable " +
+    "`package:` URIs (hot-reload parity with the dev tool) and " +
+    "resolves `package:<self>/...` imports; its `language_version` " +
+    "is the program's own, as pub derives it from " +
+    "`environment.sdk` (left unset, the program's sources compile " +
+    "at the SDK's current version, newer than `flutter build` " +
+    "would allow); its `license_file` is listed in `NOTICES.Z` " +
+    "under the package's name. Its name is free. The package is " +
+    "rooted at the declaration's directory, or, for one in a BUILD " +
+    "file under `lib/`, at the directory above that `lib`; `srcs` " +
+    "(its `lib/`) and the keys of `assets` are relative to that " +
+    "root.\n\n" +
+    "The `flutter_library` targets of the same package — the app's " +
+    "own `lib/`, beside it — name the same declaration. Two Dart " +
+    "packages cannot share a directory, so a dependency declaring " +
+    "a different package at the program's root is refused."
+)
 
 # The attrs `flutter_compile_kernel` reads off its caller's `ctx`. Every rule
 # that calls it spreads this bundle wholesale rather than naming the members,
 # because naming them is what let the contract break: `flutter_compile_kernel`
-# reaches into `ctx.attr.language_version` on whatever context it is handed,
-# and the two callers that built a narrowed attr surface — `flutter_aot_target`
-# cherry-picking from `FLUTTER_APPLICATION_ATTRS`, `flutter_kernel_target`
+# reaches into `ctx.attr.package` on whatever context it is handed,
+# and the two callers that built a narrowed attr surface — `flutter_aot_snapshot`
+# cherry-picking from `FLUTTER_APPLICATION_ATTRS`, `flutter_kernel`
 # hand-rolling a near-copy that had already drifted — simply did not have it.
 # One failed at analysis, the other silently; a caller that spreads the bundle
 # can omit nothing.
@@ -1140,49 +1412,18 @@ def flutter_deps_attr(aspects = []):
 # docstring gives — the callers genuinely disagree about whether they have one
 # — and `_agent_extensions_src` is declared by the rules that inject the agent,
 # not by every kernel compile.
-KERNEL_COMPILE_ATTRS = {
-    "_kernel_filter_tool": attr.label(
-        default = Label("//flutter/private/tools:kernel_filter.dart"),
-        allow_single_file = True,
-    ),
+KERNEL_COMPILE_ATTRS = package_identity_attrs(
+    mandatory = True,
+    doc = PROGRAM_PACKAGE_DOC,
+) | {
     "main": attr.label(
         doc = "The main .dart entry point.",
         mandatory = True,
         allow_single_file = [".dart"],
-    ),
-    "package_name": attr.string(
-        doc = "Dart package name (same value as `pubspec.yaml`'s `name:`). " +
-              "Required: keys the kernel's libraries under stable `package:` URIs " +
-              "(hot-reload parity with the dev tool), anchors codegen sibling " +
-              "co-location, and resolves `package:<self>/...` imports. There is " +
-              "no signal in the Bazel graph that can determine this reliably, " +
-              "so it must be declared explicitly.\n\n" +
-              "A target declared beside the library it covers — a " +
-              "`flutter_test` in the same directory as its `flutter_library`, " +
-              "the layout pub uses — *is* that package rather than a consumer " +
-              "of it: give it the library's `package_name` and list the " +
-              "library's sources in `srcs`, instead of depending on the " +
-              "sibling target. Two Dart packages cannot share a directory, so " +
-              "a dependency declaring a different package name at this " +
-              "target's own root is refused.",
-        mandatory = True,
-    ),
-    "language_version": attr.string(
-        doc = "Dart language version for the app's own package, in " +
-              "`<major>.<minor>` form — the same value pub derives from this " +
-              "package's `environment.sdk` lower bound and writes into " +
-              "`package_config.json` (`sdk: ^3.12.0` → `\"3.12\"`). " +
-              "Optional, and it lives here for the same reason `package_name` " +
-              "does: it is stated in `pubspec.yaml`, which the analysis phase " +
-              "cannot read.\n\n" +
-              "Left unset, the app's entry carries no `languageVersion`, and " +
-              "`package_config.json` reads that as the *current* SDK's — so " +
-              "the build accepts newer syntax than the app's own pubspec " +
-              "permits, and applies newer semantics to code written against " +
-              "an older version. That is a divergence from `flutter build`, " +
-              "not a neutral default. Set it to match your pubspec if the two " +
-              "differ. Same attribute, same meaning, as on `flutter_library` " +
-              "and `flutter_plugin`.",
+        # A `main` a rule writes is written in the configuration the build
+        # had before any web app's transition, so it is in the same output
+        # directory as the web app's own wrapper that imports it.
+        cfg = runtime_reset,
     ),
     "srcs": attr.label_list(
         doc = "Additional Dart source files.",
@@ -1192,32 +1433,60 @@ KERNEL_COMPILE_ATTRS = {
     "defines": attr.string_list(
         doc = "Dart environment defines (-D flags).",
     ),
-} | EXTRA_DART_DEFINES_ATTR | BUILD_MODE_ATTR | KERNEL_TOOL_ATTR
+    "build_name": attr.string(
+        doc = "The app's version name, as the `version:` of `pubspec.yaml`: " +
+              "`appBuildName` (`package:flutter/services.dart`) reads it. " +
+              "Unset is `flutter create`'s `1.0.0`. The platform apps built over " +
+              "this application take their bundle's version from it, unless " +
+              "they set their own `build_name`, which must then be this one. " +
+              "`--@rules_flutter//flutter:build_name` replaces it for one build, " +
+              "as `flutter build --build-name` does.",
+    ),
+    "build_number": attr.string(
+        doc = "The app's build number, as the `version:` of `pubspec.yaml`: " +
+              "`appBuildNumber` (`package:flutter/services.dart`) reads it. " +
+              "Unset is `flutter create`'s `1`. " +
+              "`--@rules_flutter//flutter:build_number` replaces it for one build, " +
+              "as `flutter build --build-number` does.",
+    ),
+    "flavor": attr.string(
+        doc = "The app's flavor, as `flutter build --flavor`: `appFlavor` " +
+              "(`package:flutter/services.dart`) reads it, and a pub package's " +
+              "assets and shaders whose `flavors:` name it are bundled. Empty, " +
+              "the default, is no flavor: `appFlavor` is null and no `flavors:` " +
+              "entry ships. A flavor is a target: declare one application per " +
+              "flavor, and give each flavor's platform target its own app id, " +
+              "name and resources. The app's own `assets` are not filtered by " +
+              "flavor: list a flavor's assets in that flavor's target.",
+    ),
+} | VERSION_SETTING_ATTRS | EXTRA_DART_DEFINES_ATTR | BUILD_MODE_ATTR | KERNEL_TOOL_ATTR
 
 # Shared attrs for all flutter application rules.
 FLUTTER_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | {
     "assets": attr.label_list(
-        doc = "Asset files to include in the bundle.",
+        doc = "Asset files to include in the bundle, each under its path in this target's package. A file from another package fails the build.",
         allow_files = True,
     ),
     "native_deps": attr.label_list(
-        doc = "cc_library targets providing shared libraries for dart:ffi.",
+        doc = "cc_library targets providing shared libraries for dart:ffi. A web app built over the application bundles none of them, as `flutter build web` builds no native code.",
         aspects = [native_sources_aspect],
-    ),
-    "obfuscate": attr.bool(
-        doc = "If True, obfuscate Dart symbols in the AOT output. Pair with split_debug_info to produce a symbol map for deobfuscation.",
-        default = False,
-    ),
-    "split_debug_info": attr.bool(
-        doc = "If True, extract debug info from the AOT output into a separate file. Produces a .symbols output alongside the AOT binary.",
-        default = False,
+        # Built for the platform the build had before any web app's
+        # transition: no C++ toolchain targets a web platform.
+        cfg = runtime_reset,
     ),
     "extra_gen_snapshot_options": attr.string_list(
-        doc = "Additional flags passed directly to gen_snapshot (AOT compiler).",
+        doc = "Additional flags passed directly to gen_snapshot (AOT compiler). " +
+              "A flag that makes gen_snapshot write a file (`--save-obfuscation-map`, " +
+              "`--write-v8-snapshot-profile-to`, `--print-instructions-sizes-to`) names " +
+              "it relative to the package; it is declared as an output of the target " +
+              "(`<name>_gen_snapshot/<path>`) in the `gen_snapshot_files` output group. " +
+              "`--resolve-dwarf-paths` is refused: the kernel names its sources by " +
+              "workspace-relative URIs, which gen_snapshot cannot turn into paths, and " +
+              "with `--@rules_dart//dart:split_debug_info` the debug info names them by those URIs instead.",
     ),
     "track_widget_creation": attr.bool(
-        doc = "If True, track widget creation locations for the DevTools widget inspector. Adds overhead; typically used only in debug/profile builds.",
-        default = False,
+        doc = "If True, a debug or profile build records where each widget was created, for the DevTools widget inspector, as `flutter run` does. A release build never does. Default `True`.",
+        default = True,
     ),
     "shaders": attr.label_list(
         doc = "Fragment shader files (.frag) to compile with impellerc. Compiled shaders are included in the asset bundle.",
@@ -1241,29 +1510,19 @@ FLUTTER_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | {
         default = Label("//flutter/private/tools:compile_shader.dart"),
         allow_single_file = True,
     ),
-    "link_hook_assets": attr.string_list(
-        doc = "Data assets the packages' link hooks emit, each " +
-              "`package:<package>/<name>`. In a release or profile build " +
-              "the compiler records the uses of `@RecordUse` classes " +
-              "(`--recorded-uses`), each listed package's `hook/link.dart` " +
-              "runs over them, and the assets it emits are bundled at " +
-              "`packages/<package>/<name>`, loadable with `rootBundle`. " +
-              "A hook that emits an asset not listed, skips one that is, or " +
-              "reports an error fails the build with its own message. Every " +
-              "package with a link hook in `deps` runs, so list the assets " +
-              "of each. Debug builds run no hook and bundle none: load what " +
-              "the hook would index on demand there. Empty runs no hook.",
-    ),
     "tree_shake_icons": attr.bool(
         doc = "If True, tree-shake icon fonts to only include used glyphs. " +
-              "Requires all IconData instances to be const. Only applies to release builds.",
+              "Requires all IconData instances to be const, and one font file in each icon font family; " +
+              "otherwise the build fails, as `flutter build` does. Applies to profile and release builds; " +
+              "a debug build keeps every glyph, as `flutter build` does.",
         default = True,
     ),
-    "license_files": attr.label_list(
-        doc = "License/NOTICE files to include in NOTICES.Z. Typically LICENSE files from dependencies.",
+    "additional_licenses": attr.label_list(
+        doc = "Licence files appended to `NOTICES.Z` as they are, after the packages' " +
+              "licences: what `flutter: licenses:` lists in the program's `pubspec.yaml`.",
         allow_files = True,
     ),
-    "min_os_version": attr.string(
+    "minimum_os_version": attr.string(
         doc = "Minimum OS deployment target for Apple platforms (iOS/macOS). " +
               "Passed to gen_snapshot as --macho-min-os-version. " +
               "Platform-specific bundle rules set appropriate defaults.",
@@ -1272,4 +1531,55 @@ FLUTTER_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | {
         default = Label("//flutter/private/tools:generate_asset_manifest.dart"),
         allow_single_file = True,
     ),
-} | AGENT_EXTENSIONS_ATTR
+    "_sky_engine": program_sky_engine_attr(),
+} | NOTICES_ATTRS | AGENT_EXTENSIONS_ATTR | GEN_SNAPSHOT_SETTINGS_ATTRS
+
+# What a `flutter_application` states about its program: the attributes
+# `flutter_program_inputs` reads, and so the ones a rule that rebuilds the
+# program under another target (`flutter_application_variant`) takes from the
+# application instead of declaring its own.
+FLUTTER_PROGRAM_ATTR_NAMES = [
+    "additional_licenses",
+    "assets",
+    "build_name",
+    "build_number",
+    "defines",
+    "deps",
+    "extra_gen_snapshot_options",
+    "flavor",
+    "main",
+    "minimum_os_version",
+    "native_deps",
+    "package",
+    "require_sksl_shaders",
+    "shader_includes",
+    "shaders",
+    "srcs",
+    "track_widget_creation",
+    "tree_shake_icons",
+]
+
+# The rest of `FLUTTER_APPLICATION_ATTRS`: the tools and build settings every
+# application target carries, which a rebuild under another target needs for
+# itself. Every one is private: a public attribute here is one nobody decided
+# the variant's behaviour for, so adding it to `FLUTTER_APPLICATION_ATTRS`
+# without listing it above fails at load.
+FLUTTER_APPLICATION_TOOL_ATTRS = {
+    name: value
+    for name, value in FLUTTER_APPLICATION_ATTRS.items()
+    if name not in FLUTTER_PROGRAM_ATTR_NAMES
+}
+
+def _check_program_attrs():
+    unclassified = [name for name in FLUTTER_APPLICATION_TOOL_ATTRS if not name.startswith("_")]
+    unknown = [name for name in FLUTTER_PROGRAM_ATTR_NAMES if name not in FLUTTER_APPLICATION_ATTRS]
+    if unclassified or unknown:
+        fail(
+            "common.bzl: FLUTTER_APPLICATION_ATTRS and FLUTTER_PROGRAM_ATTR_NAMES disagree: " +
+            "%s are public attributes of the application not listed as program content, " % unclassified +
+            "%s are listed as program content and are not attributes of it. " % unknown +
+            "A flutter_application_variant takes the first from the application and would " +
+            "silently ignore them.",
+        )
+
+_check_program_attrs()

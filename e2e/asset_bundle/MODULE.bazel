@@ -1,0 +1,64 @@
+"E2e test: every asset a pubspec declares reaches the bundle under the key, variants and platform set `flutter build` gives it"
+
+module(name = "rules_flutter_asset_bundle")
+
+bazel_dep(name = "rules_flutter", version = "0.0.0")
+bazel_dep(name = "rules_dart", version = "0.9.1")
+bazel_dep(name = "bazel_skylib", version = "1.9.2")
+bazel_dep(name = "platforms", version = "1.1.0")
+
+# A second module, standing in for a repository outside this workspace that
+# ships a library with assets of its own.
+bazel_dep(name = "ext_assets", version = "0.0.0")
+
+local_path_override(
+    module_name = "rules_flutter",
+    path = "../..",
+)
+
+local_path_override(
+    module_name = "ext_assets",
+    path = "external_repo",
+)
+
+flutter = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter")
+flutter.toolchain(flutter_version = "3.47.9")
+
+flutter_pub = use_extension("@rules_flutter//flutter/pub:extensions.bzl", "pub")
+flutter_pub.from_lock(
+    name = "deps",
+    lock = "//:pubspec.lock",
+)
+
+use_repo(flutter, "flutter_web_sdk")
+
+use_repo(flutter_pub, "deps")
+
+# The packages `//registry` holds, served as a pub registry and fetched by the
+# repository rule that fetches a pub.dev package.
+pub_registry = use_repo_rule("//tools:registry.bzl", "pub_registry")
+
+pub_registry(
+    name = "pub_registry",
+    anchor = "//registry:MARKER",
+)
+
+fixture_pubs = use_extension("//tools:pubs.bzl", "fixture_pubs")
+use_repo(
+    fixture_pubs,
+    fx_dev_only = "flutter_pub_lib__fx_dev_only",
+    fx_dirs = "flutter_pub_lib__fx_dirs",
+    fx_extra = "flutter_pub_lib__fx_extra",
+    fx_flavors = "flutter_pub_lib__fx_flavors",
+    fx_font_borrower = "flutter_pub_lib__fx_font_borrower",
+    fx_licence_dart = "flutter_pub_lib__fx_licence_dart",
+    fx_licence_shared = "flutter_pub_lib__fx_licence_shared",
+    fx_names = "flutter_pub_lib__fx_names",
+    fx_nolicence = "flutter_pub_lib__fx_nolicence",
+    fx_notices = "flutter_pub_lib__fx_notices",
+    fx_platforms = "flutter_pub_lib__fx_platforms",
+    fx_self_paths = "flutter_pub_lib__fx_self_paths",
+    fx_shader_flavors = "flutter_pub_lib__fx_shader_flavors",
+    fx_shaders = "flutter_pub_lib__fx_shaders",
+    fx_variants = "flutter_pub_lib__fx_variants",
+)

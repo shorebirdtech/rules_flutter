@@ -4,7 +4,7 @@
 is a command inside `flutter_tools`, which the rules deliberately do not
 download (they take engine artifacts plus framework source, never the CLI). Its
 generator code is nevertheless ordinary Dart, sitting in the same GitHub tarball
-`flutter_sdk_package` already fetches for `package:flutter`.
+`flutter_framework_package` already fetches for `package:flutter`.
 
 Importing it as-is is not viable: Dart resolves dependencies by *file import*,
 not by call graph, so `gen_l10n.dart` transitively reaches 187 files and 33 pub
@@ -28,9 +28,11 @@ toolchain. Without the cut the generator cannot build against a rules_dart older
 than Dart 3.13, and *with* it the subset honestly matches the SDK constraint it
 declares. When rules_dart ships a newer Dart, nothing here needs undoing.
 
-The patches under `patches/` are those seven cuts. They are overwhelmingly
-deletions (+14/-199 lines), which is deliberate: a deletion that no longer
-applies is a loud failure, where a rewrite would quietly drift.
+The six files under `patches/` are those seven cuts, one for each source file
+cut: `io.patch` is the seventh, and the other five carry the six import edges
+between them. They are overwhelmingly deletions (+14/-199 lines), which is
+deliberate: a deletion that no longer applies is a loud failure, where a
+rewrite would quietly drift.
 
 ### What a Flutter version bump must re-check
 
@@ -55,6 +57,10 @@ applies is a loud failure, where a rewrite would quietly drift.
 """
 
 load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url")
+load("//flutter/private:flutter_pub_index.bzl", "library_label", "read_index")
+load("//flutter/private:framework_source.bzl", "framework_root", "read_framework", "unset_message", "write_unset_stub")
+load("//flutter/private:package_metadata_content.bzl", "METADATA_TARGET_NAME")
+load("//flutter/private:pinned.bzl", "pinned")
 load("//flutter/private:versions.bzl", "flutter_version_at_least")
 
 # The exact closure of `src/localizations/gen_l10n.dart` once the six import
@@ -123,11 +129,24 @@ def _patches(version):
 def _flutter_gen_l10n_repo_impl(repository_ctx):
     version = repository_ctx.attr.flutter_version
 
-    repository_ctx.download_and_extract(
-        url = flutter_source_tarball_url(version),
-        sha256 = repository_ctx.attr.sha256,
-        stripPrefix = "flutter-{version}/packages/flutter_tools".format(version = version),
-    )
+    if repository_ctx.attr.framework_json:
+        unset = unset_message(repository_ctx)
+        if unset:
+            write_unset_stub(repository_ctx, ["gen_l10n"], unset)
+            return
+
+        # A framework source: the files of the subset, copied (the patches
+        # below rewrite them, which a link would do to the source itself).
+        version = read_framework(repository_ctx)["version"]
+        tools = framework_root(repository_ctx).get_child("packages").get_child("flutter_tools")
+        for src in _SUBSET_SRCS:
+            repository_ctx.file(src, repository_ctx.read(repository_ctx.path(str(tools) + "/" + src)))
+    else:
+        repository_ctx.download_and_extract(
+            url = flutter_source_tarball_url(version),
+            sha256 = pinned(version + ".tar.gz", repository_ctx.attr.sha256),
+            stripPrefix = "flutter-{version}/packages/flutter_tools".format(version = version),
+        )
 
     # `-p1` strips the leading `a/`, leaving the `lib/src/...` paths the
     # stripped tarball already uses. A patch that no longer applies stops the
@@ -136,13 +155,19 @@ def _flutter_gen_l10n_repo_impl(repository_ctx):
         repository_ctx.patch(repository_ctx.path(patch), strip = 1)
 
     srcs = "\n".join(['        "%s",' % s for s in _SUBSET_SRCS])
+    index = read_index(repository_ctx)
     deps = "\n".join([
-        '        "@%s__%s//:%s",' % (repository_ctx.attr.hub_name, d, d)
+        '        "%s",' % library_label(index, d)
         for d in _SUBSET_DEPS
     ])
 
     repository_ctx.file("BUILD.bazel", """\
-load("@rules_dart//dart:defs.bzl", "dart_library")
+load("@rules_dart//dart:defs.bzl", "dart_library", "dart_package_metadata")
+
+dart_package_metadata(
+    name = "{metadata}",
+    package_name = "flutter_gen_l10n",
+)
 
 # The gen-l10n generator carved out of flutter_tools {version}. See
 # rules_flutter's flutter_gen_l10n_repo.bzl for what was cut and why, and for
@@ -152,20 +177,24 @@ dart_library(
     srcs = [
 {srcs}
     ],
-    package_name = "flutter_gen_l10n",
+    package = ":{metadata}",
     deps = [
 {deps}
     ],
+    runtime_independent = True,
     visibility = ["//visibility:public"],
 )
-""".format(version = version, srcs = srcs, deps = deps))
+""".format(version = version, srcs = srcs, deps = deps, metadata = METADATA_TARGET_NAME))
 
 flutter_gen_l10n_repo = repository_rule(
     implementation = _flutter_gen_l10n_repo_impl,
     attrs = {
         "flutter_version": attr.string(
-            doc = "Flutter release whose flutter_tools the generator is taken from.",
-            mandatory = True,
+            doc = "Flutter release whose flutter_tools the generator is taken from. Unused with `framework_json`.",
+        ),
+        "framework_json": attr.label(
+            doc = "The `flutter_framework.json` of a framework source whose flutter_tools the generator is taken from.",
+            allow_single_file = True,
         ),
         "sha256": attr.string(
             doc = "Checksum of the Flutter source tarball — an unpinned " +
@@ -173,11 +202,6 @@ flutter_gen_l10n_repo = repository_rule(
                   "Flutter version. Guaranteed non-empty by the caller: " +
                   "extensions.bzl reads it through `flutter_source_sha256()`, " +
                   "which refuses a version with no recorded checksum.",
-            mandatory = True,
-        ),
-        "hub_name": attr.string(
-            doc = "Pub hub supplying the generator's seven dependencies.",
-            mandatory = True,
         ),
         "_patches": attr.label_list(
             default = _ALL_PATCHES,

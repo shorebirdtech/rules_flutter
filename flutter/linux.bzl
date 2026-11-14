@@ -12,7 +12,7 @@ Two tiers of API:
         flutter_linux_app(
             name = "my_linux_app",
             application = ":my_app",
-            gtk_app_id = "com.example.myapp",
+            application_id = "com.example.myapp",
         )
 
     Prerequisites: run `flutter create --platforms=linux .` to generate
@@ -33,7 +33,7 @@ Two tiers of API:
             name = "my_runner",
             engine = ":flutter_engine",
             registrant = ":app_registrant",
-            gtk_app_id = "com.example.myapp",
+            application_id = "com.example.myapp",
         )
 
         flutter_linux_bundle(
@@ -70,10 +70,10 @@ flutter_linux_registrant_gen = _flutter_linux_registrant
 # Public wrapper that bundles a Flutter plugin's Linux C++ sources for the
 # runner to compile + link. For pub.dev plugins, flutter_pub_package emits
 # this automatically; expose it here so users can wire a monorepo plugin's
-# BUILD.bazel without going through the ext/ overlay system.
+# BUILD.bazel without going through the flutter/ext/ overlay system.
 flutter_linux_plugin_library = _flutter_linux_plugin_library
 
-def flutter_linux_runner_lib_gen(name, engine, registrant, application = None, gtk_app_id = "com.example.flutter", window_title = "Flutter", srcs = [], hdrs = [], **kwargs):
+def flutter_linux_runner_lib_gen(name, engine, registrant, application_id, application = None, window_title = "Flutter", srcs = [], hdrs = [], **kwargs):
     """Compiles a GTK Linux runner binary from template or custom sources.
 
     Uses the Chromium sysroot for hermetic GTK3 compilation, enabling
@@ -89,10 +89,12 @@ def flutter_linux_runner_lib_gen(name, engine, registrant, application = None, g
         name: Target name (produces an executable).
         engine: A flutter_linux_engine target.
         registrant: A flutter_linux_registrant_gen target.
+        application_id: The application identifier GTK names the app by (e.g.
+            "com.example.myapp"), as `flutter create`'s `APPLICATION_ID`. Required: the
+            desktop identifies an app by it, so each app has its own.
         application: A flutter_application target. Required to wire pub
             plugins' Linux C++ sources into the runner; optional only for
             legacy Tier-2 setups with no native plugins.
-        gtk_app_id: GTK application identifier (default "com.example.flutter").
         window_title: Title of the built-in runner's window (default
             "Flutter"). Custom `srcs` set their own title.
         srcs: Custom C++ sources (empty = use built-in template).
@@ -104,7 +106,7 @@ def flutter_linux_runner_lib_gen(name, engine, registrant, application = None, g
         engine = engine,
         registrant = registrant,
         application = application,
-        gtk_app_id = gtk_app_id,
+        application_id = application_id,
         window_title = window_title,
         srcs = srcs if srcs else [],
         hdrs = hdrs if hdrs else [],
@@ -136,8 +138,8 @@ def flutter_linux_bundle(name, application, runner, **kwargs):
 def flutter_linux_app(
         name,
         application,
+        application_id,
         app_name = None,
-        gtk_app_id = "com.example.flutter",
         window_title = None,
         **kwargs):
     """Builds a Flutter Linux application directory from a flutter_application target.
@@ -152,20 +154,27 @@ def flutter_linux_app(
     Args:
         name: Target name (Bazel identifier).
         application: A flutter_application target (required).
+        application_id: The application identifier GTK names the app by (e.g.
+            "com.example.myapp"), as `flutter create`'s `APPLICATION_ID`. Required: the
+            desktop identifies an app by it, so each app has its own.
         app_name: Bundle/binary name (defaults to target name).
-        gtk_app_id: GTK application identifier (default "com.example.flutter").
         window_title: Title of the window (defaults to `app_name`, then the
             target name). Used by the built-in runner; a `linux/runner/`
             from `flutter create` sets its own title in `my_application.cc`.
-        **kwargs: Passed through to flutter_linux_bundle.
+        **kwargs: Passed through to flutter_linux_bundle, except `testonly`,
+            which every target the macro declares has, since one that depends on a
+            `testonly` application would otherwise fail analysis.
     """
     tags = kwargs.pop("tags", [])
     target_compatible_with = kwargs.pop("target_compatible_with", None)
+    testonly = kwargs.pop("testonly", False)
 
     # Attributes propagated to all intermediate targets so that
     # `target_compatible_with` (and tags) cause Bazel to skip analysis on
-    # incompatible platforms (e.g. building Linux targets on macOS).
-    common = {"tags": tags}
+    # incompatible platforms (e.g. building Linux targets on macOS), and
+    # `testonly`, which a target that depends on a `testonly` application has to
+    # have too.
+    common = {"tags": tags, "testonly": testonly}
     if target_compatible_with:
         common["target_compatible_with"] = target_compatible_with
 
@@ -179,6 +188,8 @@ def flutter_linux_app(
     #    If flutter create registrant files exist, use them directly (they match
     #    the #include "flutter/generated_plugin_registrant.h" path expected by
     #    flutter create runner code). Otherwise, generate from FlutterInfo.
+    # `allow_empty`: the files exist only where `flutter create` or
+    # `flutter pub get` wrote them; the fallback generates the registrant.
     flutter_create_registrant = native.glob(
         [
             "linux/flutter/generated_plugin_registrant.cc",
@@ -200,6 +211,7 @@ def flutter_linux_app(
         )
 
     # 3. Runner target — discover flutter create output or use template.
+    # `allow_empty`: an app without a runner directory gets the template's.
     runner_srcs = native.glob(["linux/runner/*.cc", "linux/runner/*.cpp"], allow_empty = True)
     runner_hdrs = native.glob(["linux/runner/*.h"], allow_empty = True)
 
@@ -208,7 +220,7 @@ def flutter_linux_app(
         engine = "__%s_engine" % name,
         registrant = "__%s_registrant" % name,
         application = application,
-        gtk_app_id = gtk_app_id,
+        application_id = application_id,
         window_title = window_title or app_name or name,
         srcs = runner_srcs if runner_srcs else [],
         hdrs = runner_hdrs if runner_hdrs else [],

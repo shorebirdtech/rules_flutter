@@ -1,0 +1,23 @@
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_plugin", "flutter_plugin_platform")
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "variant_base_plugin",
+)
+
+# A plugin the application depends on.
+flutter_plugin(
+    name = "base_plugin",
+    srcs = ["lib/base_plugin.dart"],
+    package = ":pubspec-metadata",
+    platforms = [":macos"],
+    tags = ["manual"],
+    visibility = ["//flutter/tests:__subpackages__"],
+)
+
+flutter_plugin_platform(
+    name = "macos",
+    platform = "macos",
+    plugin_class = "BasePlugin",
+    tags = ["manual"],
+)

@@ -3,8 +3,12 @@
 /// Usage: dart run verify_macos_app.dart <path/to/App.app> [expected_title]
 ///
 /// Verification:
+/// 0. Declares the user active (`caffeinate -d -u`), which wakes a sleeping
+///    display and keeps it on: System Events reports no windows while the
+///    display is asleep
 /// 1. Launches the app binary directly to capture stdout/stderr
-/// 2. Polls for window existence (up to 30s)
+/// 2. Polls for window existence (up to 30s); if none appears, says whether
+///    the screen was locked, the display asleep or Accessibility untrusted
 /// 3. Verifies window has non-zero size (proves Flutter rendered a frame)
 /// 4. Checks window title bar text matches expected title (if provided)
 /// 5. Attempts screenshot via `screencapture` (best-effort, may fail in CI)
@@ -15,6 +19,10 @@
 /// Note: Flutter renders to a Metal surface — its widget content does NOT
 /// appear in the macOS accessibility tree. Window existence + non-zero size
 /// is the strongest signal available without UI automation frameworks.
+///
+/// This file stands alone: `tools/vm` copies this directory to bare machines,
+/// so it cannot import `tools/e2e_testing`. Its session hold and diagnosis
+/// are a copy of `macos_gui_session.dart` there; keep the two in step.
 library;
 
 import 'dart:convert';
@@ -29,6 +37,13 @@ Future<void> main(List<String> args) async {
   }
 
   final appPath = args[0];
+  final caffeinate = await Process.start('caffeinate', [
+    '-d',
+    '-u',
+    '-w',
+    '$pid',
+  ]);
+  await _waitForDisplay();
   final expectedTitle = args.length > 1 ? args[1] : null;
 
   if (!Directory(appPath).existsSync()) {
@@ -80,7 +95,9 @@ Future<void> main(List<String> args) async {
 
   if (!windowFound) {
     stderr.writeln('FAIL: No window found for $bundleName after 30s');
+    stderr.writeln(await _diagnoseSession());
     appProcess.kill();
+    caffeinate.kill();
     _printStructuredOutput(
       windowAppeared: false,
       windowSize: null,
@@ -144,6 +161,7 @@ Future<void> main(List<String> args) async {
   // Quit the app.
   appProcess.kill();
   await _quitApp(bundleName);
+  caffeinate.kill();
 
   // Check process output for Flutter engine messages.
   final allOutput = [...stdoutLines, ...stderrLines].join('\n');
@@ -295,4 +313,73 @@ Future<void> _quitApp(String bundleName) async {
     ),
   ]);
   await Future<void>.delayed(const Duration(seconds: 2));
+}
+
+/// Core Graphics' view of the desktop session. `CGSSessionScreenIsLocked` is
+/// in the session dictionary only while the screen is locked.
+const _probeScript = r'''
+ObjC.import('ApplicationServices');
+ObjC.import('CoreGraphics');
+var d = $.CGSessionCopyCurrentDictionary();
+var locked = false;
+if (d) {
+  locked = !!ObjC.deepUnwrap(ObjC.castRefToObject(d))['CGSSessionScreenIsLocked'];
+}
+JSON.stringify({
+  locked: locked,
+  asleep: $.CGDisplayIsAsleep($.CGMainDisplayID()) !== 0,
+  trusted: $.AXIsProcessTrusted(),
+});
+''';
+
+Future<Map<String, Object?>> _probeSession() async {
+  final result = await Process.run('osascript', [
+    '-l',
+    'JavaScript',
+    '-e',
+    _probeScript,
+  ]);
+  if (result.exitCode != 0) {
+    throw StateError('osascript: ${result.stderr}');
+  }
+  return jsonDecode(result.stdout.toString().trim()) as Map<String, Object?>;
+}
+
+/// Gives a display woken by the `caffeinate -u` above up to 15s to light.
+Future<void> _waitForDisplay() async {
+  final deadline = DateTime.now().add(const Duration(seconds: 15));
+  while (DateTime.now().isBefore(deadline)) {
+    if ((await _probeSession())['asleep'] != true) return;
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+  }
+}
+
+/// Which of a locked screen, a sleeping display and an untrusted runner is
+/// behind a missing window, with the remedy. A window System Events cannot
+/// see looks the same in all three.
+Future<String> _diagnoseSession() async {
+  final Map<String, Object?> state;
+  try {
+    state = await _probeSession();
+  } on StateError catch (e) {
+    return 'Could not read the desktop session ($e). Check by hand that the '
+        'screen is unlocked, the display awake and the terminal granted '
+        'Accessibility.';
+  }
+  if (state['locked'] == true) {
+    return 'The screen is locked: System Events sees no windows while it is, '
+        'and Accessibility is not the problem. Unlock the Mac and re-run.';
+  }
+  if (state['asleep'] == true) {
+    return 'The display is asleep and stayed asleep after `caffeinate -d -u`: '
+        'System Events sees no windows while it is, and Accessibility is not '
+        'the problem. Wake the Mac by hand and re-run.';
+  }
+  if (state['trusted'] == false) {
+    return 'The terminal is not trusted for Accessibility. Grant it in '
+        'System Settings > Privacy & Security > Accessibility, '
+        '`killall "System Events"`, and re-run.';
+  }
+  return 'The screen is unlocked, the display awake and Accessibility '
+      'granted: the app itself drew no window.';
 }

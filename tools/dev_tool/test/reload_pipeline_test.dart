@@ -8,6 +8,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter_bazel_dev_tool/command_failure.dart';
 import 'package:flutter_bazel_dev_tool/command_report.dart';
 import 'package:flutter_bazel_dev_tool/compiler_config.dart';
 import 'package:flutter_bazel_dev_tool/device.dart' as device;
@@ -116,7 +117,7 @@ class _Harness {
 
     final resolver = SourceUriResolver(
       workspaceRoot: tmp.path,
-      sourcePackages: const [(name: 'app', libRoot: '')],
+      sourcePackages: const [(name: 'app', packageRoot: '')],
     );
     final workspace = Workspace(resolver: resolver);
     final compiler = FakeCompiler();
@@ -200,6 +201,10 @@ class _Harness {
       host.commandRunner.run('app.hotReload', params ?? {});
 
   Future<Map<String, dynamic>> restart([Map<String, dynamic>? params]) =>
+      host.commandRunner.run('app.restart', {'fullRestart': true, ...?params});
+
+  /// `app.restart` exactly as the client sent it, defaults and all.
+  Future<Map<String, dynamic>> restartAsSent([Map<String, dynamic>? params]) =>
       host.commandRunner.run('app.restart', params ?? {});
 }
 
@@ -221,6 +226,7 @@ Future<AssetTracker> seedBundle(Directory tmp, String contents) async {
     AssetBundle(
       directory: p.join(tmp.path, 'bundle'),
       workspaceRoot: tmp.path,
+      assetRoots: {'': '.'},
     ),
     builtBefore: DateTime.now().add(const Duration(hours: 1)),
   );
@@ -457,6 +463,135 @@ void main() {
     );
   });
 
+  // A reload that is stuck and one that is slow must not look alike: every phase
+  // says when it ended, in order, and the last line says the command did.
+  group('phase lines', () {
+    late List<Map<String, dynamic>> lines;
+
+    setUp(() {
+      lines = [];
+      final sub = Logger.root.onRecord.listen((r) {
+        final o = r.object;
+        if (o is Map && o['message'] == 'reload_phase') {
+          lines.add(Map<String, dynamic>.from(o));
+        }
+      });
+      addTearDown(sub.cancel);
+    });
+
+    List<String> phases() => [for (final l in lines) '${l['phase']}'];
+
+    test('a hot reload says queue, generated build, compile, apply and '
+        'total, in that order', () async {
+      final h = await _Harness.create();
+      addTearDown(h.dispose);
+      h.writeSource('main.dart', 'void main() {}');
+      h.seedApplied();
+      h.pipeline.refreshGenerated = () async => true;
+      h.pipeline.ready.signalReady();
+      h.writeSource('main.dart', 'void main() { print("edited"); }');
+
+      await h.hotReload();
+
+      expect(phases(), [
+        'queue',
+        'generated sources build',
+        'compile',
+        'apply',
+        'total',
+      ]);
+      expect(
+        [for (final l in lines) l['verb']],
+        [
+          'app.hotReload',
+          'Hot reload',
+          'Hot reload',
+          'Hot reload',
+          'Hot reload',
+        ],
+      );
+      expect(
+        lines.last['text'],
+        matches(r'^Hot reload finished in \d+ms$'),
+      );
+      expect(lines[2]['text'], matches(r'^Hot reload: compile finished in '));
+    });
+
+    test('a restart says its phases too', () async {
+      final h = await _Harness.create();
+      addTearDown(h.dispose);
+      h.writeSource('main.dart', 'void main() {}');
+      h.seedApplied();
+      h.pipeline.refreshGenerated = () async => true;
+      h.pipeline.ready.signalReady();
+
+      await h.restart();
+
+      expect(phases(), [
+        'queue',
+        'generated sources build',
+        'compile',
+        'apply',
+        'total',
+      ]);
+      expect(lines[1]['verb'], 'Restart');
+    });
+
+    test('a compile that failed still ends with the total', () async {
+      final h = await _Harness.create();
+      addTearDown(h.dispose);
+      h.writeSource('main.dart', 'void main() {}');
+      h.seedApplied();
+      h.pipeline.ready.signalReady();
+      h.writeSource('main.dart', 'void main() { oops');
+      h.compiler.nextOutcome = const CompileFailed('Error: boom');
+
+      await h.hotReload();
+
+      expect(phases(), ['queue', 'compile', 'total']);
+    });
+
+    test('a command that waited for the pipeline to finish setting up says '
+        'so', () async {
+      final h = await _Harness.create();
+      addTearDown(h.dispose);
+      h.writeSource('main.dart', 'void main() {}');
+      h.seedApplied();
+
+      final reload = h.hotReload();
+      await pumpEventQueue();
+      h.pipeline.ready.signalReady();
+      await reload;
+
+      expect(phases(), contains('pipeline setup'));
+      expect(
+        phases().indexOf('pipeline setup'),
+        lessThan(phases().indexOf('total')),
+      );
+    });
+
+    test('a phase that has not ended has not been logged as ended, and the '
+        'phases before it have', () async {
+      final h = await _Harness.create();
+      addTearDown(h.dispose);
+      h.writeSource('main.dart', 'void main() {}');
+      h.seedApplied();
+      h.pipeline.ready.signalReady();
+      h.writeSource('main.dart', 'void main() { print("edited"); }');
+
+      // The apply is held open; the compile before it has finished.
+      final held = Completer<void>();
+      h.app.gate = held;
+      final reload = h.hotReload();
+      await pumpEventQueue();
+
+      expect(phases(), ['queue', 'compile'], reason: 'apply has not ended');
+      held.complete();
+      await reload;
+      expect(phases().last, 'total');
+    });
+  });
+
   group('orchestrator branch', () {
     test('a real edit reports what was recompiled', () async {
       final h = await _Harness.create();
@@ -552,20 +687,72 @@ void main() {
       );
     });
 
-    // `fullRestart: false` is how a flutter-run-shaped client asks for a reload
-    // through the restart command. Dispatching it to `restart` would do a full
-    // recompile and re-run `main()` for what the client asked to be a reload.
-    test('app.restart with fullRestart:false is a hot reload', () async {
+    // Upstream's `app.restart` reloads unless `fullRestart` is true, so a client
+    // written for `flutter run --machine` keeps its state. Dispatching it to
+    // `restart` would do a full recompile and re-run `main()` for what the
+    // client asked to be a reload.
+    for (final params in <Map<String, dynamic>>[
+      {},
+      {'fullRestart': false},
+      {'reason': 'saved', 'debounce': true, 'pause': false},
+    ]) {
+      test('app.restart with $params is a hot reload', () async {
+        final h = await _Harness.create();
+        addTearDown(h.dispose);
+        h.writeSource('main.dart', 'void main() {}');
+        h.seedApplied();
+        h.pipeline.ready.signalReady();
+
+        final response = await h.restartAsSent(params);
+
+        expect(response['message'], contains('Hot reload'));
+        expect(h.compiler.fullCompileCalls, isEmpty);
+      });
+    }
+
+    test('app.restart with fullRestart:true restarts, whatever else it '
+        'carries', () async {
       final h = await _Harness.create();
       addTearDown(h.dispose);
       h.writeSource('main.dart', 'void main() {}');
       h.seedApplied();
       h.pipeline.ready.signalReady();
 
-      final response = await h.restart({'fullRestart': false});
+      final response = await h.restartAsSent({
+        'fullRestart': true,
+        'reason': 'saved',
+        'debounce': true,
+      });
 
-      expect(response['message'], contains('Hot reload'));
-      expect(h.compiler.fullCompileCalls, isEmpty);
+      expect(response['message'], 'Restart successful');
+    });
+
+    test('app.restart with pause:true is refused, not ignored', () async {
+      final h = await _Harness.create();
+      addTearDown(h.dispose);
+      h.pipeline.ready.signalReady();
+
+      await expectLater(
+        h.restartAsSent({'pause': true}),
+        throwsA(
+          isA<CommandFailure>().having(
+            (e) => e.message,
+            'message',
+            contains('pause'),
+          ),
+        ),
+      );
+    });
+
+    test('app.restart with a non-bool fullRestart is refused', () async {
+      final h = await _Harness.create();
+      addTearDown(h.dispose);
+      h.pipeline.ready.signalReady();
+
+      await expectLater(
+        h.restartAsSent({'fullRestart': 'yes'}),
+        throwsA(isA<CommandFailure>()),
+      );
     });
   });
 
@@ -725,6 +912,7 @@ void main() {
             AssetBundle(
               directory: p.join(h.tmp.path, 'bundle'),
               workspaceRoot: h.tmp.path,
+              assetRoots: {'': '.'},
             ),
             // Later than anything the fixture wrote: these cases are about a
             // tree the build consumed, not one edited during assembly.

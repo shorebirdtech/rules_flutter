@@ -4,111 +4,64 @@
 /// rules_apple outputs a .zip — we extract it to a temp dir and verify.
 library;
 
-// This script's diagnostics are its product: it reports what it found in
-// the built artifact to the bazel test log, so `print` is its output
-// channel rather than a stray debugging statement.
-// ignore_for_file: avoid_print
-
-import 'dart:io';
+import 'package:rules_flutter_e2e_testing/macos_bundle.dart';
 
 void main() {
-  final testSrcDir = Platform.environment['TEST_SRCDIR'];
-  final testWorkspace = Platform.environment['TEST_WORKSPACE'];
-  if (testSrcDir == null || testWorkspace == null) {
-    stderr.writeln('Missing TEST_SRCDIR or TEST_WORKSPACE env vars');
-    exit(1);
-  }
-
-  final zipPath = '$testSrcDir/$testWorkspace/ffi_macos.zip';
-  if (!File(zipPath).existsSync()) {
-    stderr.writeln('Bundle zip not found at $zipPath');
-    exit(1);
-  }
-
-  // Extract to temp directory.
-  final tmpDir = Directory.systemTemp.createTempSync('macos_bundle_test');
+  final bundle = MacosBundle.fromRunfiles(
+    'ffi_macos.zip',
+    appName: 'ffi_macos',
+  );
   try {
-    final result = Process.runSync('unzip', ['-q', zipPath, '-d', tmpDir.path]);
-    if (result.exitCode != 0) {
-      stderr.writeln('Failed to extract zip: ${result.stderr}');
-      exit(1);
-    }
-
-    final bundlePath = '${tmpDir.path}/ffi_macos.app';
-    var failed = false;
-
-    void check(String description, String path) {
-      final exists =
-          FileSystemEntity.isDirectorySync(path) || File(path).existsSync();
-      if (!exists) {
-        stderr.writeln('FAIL: $description — not found: $path');
-        failed = true;
-      } else {
-        print('OK: $description');
-      }
-    }
-
-    check(
-      'Native-asset dylib libadd.dylib exists',
-      '$bundlePath/Contents/Frameworks/libadd.dylib',
-    );
-    check(
-      'native_deps dylib libmul.dylib exists',
-      '$bundlePath/Contents/Frameworks/libmul.dylib',
-    );
-    check(
-      'code-asset dylib libsub.dylib exists',
-      '$bundlePath/Contents/Frameworks/libsub.dylib',
-    );
-    check(
-      'curated code-asset dylib libsqlite3.dylib exists',
-      '$bundlePath/Contents/Frameworks/libsqlite3.dylib',
-    );
-    check(
-      'combined code-asset dylib libcounter.dylib exists',
-      '$bundlePath/Contents/Frameworks/libcounter.dylib',
-    );
+    final check = bundle.check
+      ..exists(
+        'Native-asset dylib libadd.dylib exists',
+        '${bundle.frameworks}/libadd.dylib',
+      )
+      ..exists(
+        'native_deps dylib libmul.dylib exists',
+        '${bundle.frameworks}/libmul.dylib',
+      )
+      ..exists(
+        'code-asset dylib libsub.dylib exists',
+        '${bundle.frameworks}/libsub.dylib',
+      )
+      ..exists(
+        'curated code-asset dylib libsqlite3.dylib exists',
+        '${bundle.frameworks}/libsqlite3.dylib',
+      )
+      ..exists(
+        'combined code-asset dylib libcounter.dylib exists',
+        '${bundle.frameworks}/libcounter.dylib',
+      )
+      ..exists(
+        'prebuilt code-asset dylib libnegate.dylib exists',
+        '${bundle.frameworks}/libnegate.dylib',
+      );
     // The app serves both packages' ids from `libcounter.dylib`, so the
     // standalone libraries the packages declare for themselves stay out.
     for (final name in ['libcounter_a.dylib', 'libcounter_b.dylib']) {
-      final path = '$bundlePath/Contents/Frameworks/$name';
-      if (File(path).existsSync()) {
-        stderr.writeln('FAIL: replaced code asset $name was bundled: $path');
-        failed = true;
-      } else {
-        print('OK: replaced code asset $name not bundled');
-      }
+      check.absent('replaced code asset $name', '${bundle.frameworks}/$name');
     }
-    check(
-      'App.framework exists',
-      '$bundlePath/Contents/Frameworks/App.framework',
-    );
-    check(
-      'FlutterMacOS.framework exists',
-      '$bundlePath/Contents/Frameworks/FlutterMacOS.framework',
-    );
-    check(
-      'Runner binary exists',
-      '$bundlePath/Contents/MacOS/ffi_macos',
-    );
-    check(
-      'Info.plist exists',
-      '$bundlePath/Contents/Info.plist',
-    );
-
-    if (failed) {
-      final fwDir = Directory('$bundlePath/Contents/Frameworks');
-      if (fwDir.existsSync()) {
-        stderr.writeln('Contents/Frameworks contains:');
-        for (final entity in fwDir.listSync()) {
-          stderr.writeln('  ${entity.path.split('/').last}');
-        }
-      }
-      exit(1);
-    }
-
-    print('All macOS bundle verification checks passed.');
+    // `pick`'s link hook keeps the library of the `Op` the app constructs
+    // and drops the other, which neither the bundle nor its manifest carries.
+    check
+      ..exists(
+        'code asset the link hook kept, libpick_kept.dylib, exists',
+        '${bundle.frameworks}/libpick_kept.dylib',
+      )
+      ..absent(
+        'code asset the link hook dropped, libpick_dropped.dylib,',
+        '${bundle.frameworks}/libpick_dropped.dylib',
+      )
+      ..nativeAssetsManifest(
+        bundle.flutterAssets,
+        shipped: ['package:pick/kept', 'package:add_plugin/add_plugin.dart'],
+        dropped: ['package:pick/dropped'],
+      );
+    bundle
+      ..checkFlutterLayout(nib: null)
+      ..finish('All macOS bundle verification checks passed.');
   } finally {
-    tmpDir.deleteSync(recursive: true);
+    bundle.dispose();
   }
 }

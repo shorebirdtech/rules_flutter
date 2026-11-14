@@ -4,7 +4,7 @@ Produces the intermediate artifacts needed for an iOS .ipa:
 - Release (AOT): App.framework/App (Mach-O dylib) + Info.plist + flutter_assets/
 - Debug (JIT): App.framework/App (stub dylib) + Info.plist + flutter_assets/ (with kernel_blob.bin)
 
-The framework is packaged by flutter_ios_framework_gen (a macro in flutter/ios.bzl)
+The framework is packaged by flutter_ios_app_framework_gen (a macro in flutter/ios.bzl)
 which wraps it with apple_dynamic_framework_import for seamless integration
 with rules_apple's ios_application. Debug mode uses bundle_only=True to
 embed the framework without linking (stub binary is not loaded at runtime).
@@ -20,39 +20,17 @@ load("@bazel_skylib//lib:dicts.bzl", "dicts")
 # native-asset frameworks that apple_dynamic_framework_import can't express
 # (it accepts a single .framework). This is the same helper that rule uses.
 # buildifier: disable=bzl-visibility
-load("@rules_apple//apple/internal:framework_import_support.bzl", "framework_import_support")
-load("@rules_cc//cc:find_cc_toolchain.bzl", "CC_TOOLCHAIN_TYPE", "use_cc_toolchain")
-load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
-load("//flutter:providers.bzl", "FlutterApplicationInfo")
+load("@build_bazel_rules_apple//apple/internal:framework_import_support.bzl", "framework_import_support")
+load("@rules_cc//cc:find_cc_toolchain.bzl", "use_cc_toolchain")
+load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "program_assets_action_args")
+load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterSdkRecordInfo")
+load("//flutter/private:apple_xcode.bzl", "declare_dsym", "run_xcode_tool", "split_and_strip_aot_binary")
+load("//flutter/private:assemble_directory.bzl", "ASSEMBLE_DIRECTORY_ATTRS", "assemble_directory")
 load("//flutter/private:constants.bzl", "IOS_MINIMUM_OS_VERSION")
-load("//flutter/private:exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
-load("//flutter/private:flutter_native_assets.bzl", "native_asset_framework_name")
-
-def _run_xcode_tool(ctx, **kwargs):
-    """Registers a shell action that runs Xcode's tools (`xcrun`).
-
-    `apple_support.run_shell` gives the action the selected Xcode's
-    environment (`DEVELOPER_DIR`, `SDKROOT`) and execution requirements, so the
-    Xcode version is part of the action's key. The workspace's shell
-    environment is left out: an `--action_env` such as
-    `MACOSX_DEPLOYMENT_TARGET` would otherwise retarget clang. The action runs
-    in the auto exec group of the C++ toolchain resolved for this Apple target:
-    that toolchain is Xcode's clang, and its registration says which hosts can
-    run Xcode.
-
-    Args:
-      ctx: A rule context with apple_support's action and platform attrs and
-        the C++ toolchain type.
-      **kwargs: Forwarded to `ctx.actions.run_shell`.
-    """
-    apple_support.run_shell(
-        actions = ctx.actions,
-        xcode_config = ctx.attr._xcode_config[apple_common.XcodeVersionConfig],
-        apple_platform_info = apple_support.platform_info_from_rule_ctx(ctx),
-        toolchain = CC_TOOLCHAIN_TYPE,
-        use_default_shell_env = False,
-        **kwargs
-    )
+load("//flutter/private:exec_groups.bzl", "PORTABLE_EXEC_GROUPS", "portable_tools")
+load("//flutter/private:flutter_native_assets.bzl", "CODE_ASSETS_TOOL_ATTRS", "candidate_code_asset_libraries", "native_asset_framework_name", "run_code_assets_tool")
+load("//flutter/private:mobile_engine_check.bzl", "check_ios_engine")
+load("//flutter/private:program_analysis.bzl", "bundled_program_info")
 
 def _flutter_ios_application_impl(ctx):
     """Bundles Flutter compilation outputs for iOS packaging."""
@@ -118,7 +96,7 @@ _APP_FRAMEWORK_INFO_PLIST = """\
 </plist>
 """
 
-def _flutter_ios_framework_impl(ctx):
+def _flutter_ios_app_framework_impl(ctx):
     """Assembles Flutter artifacts into App.framework individual files.
 
     Release mode (AOT): App binary (retagged via vtool) + Info.plist + flutter_assets.
@@ -129,15 +107,11 @@ def _flutter_ios_framework_impl(ctx):
     processor requires a binary. bundle_only=True prevents linking so the
     stub is never loaded — the engine uses kernel_blob.bin instead.
     """
-    app_info = ctx.attr.application[FlutterApplicationInfo]
-    tools = portable_tools(ctx)
-    flutter_assets = app_info.flutter_assets
-    minimum_os_version = ctx.attr.minimum_os_version
 
     # Every output under a directory named after this target. Without it two
     # apps in one package would both declare `App.framework/Info.plist` and the
     # build would fail with conflicting actions — the same defect
-    # `flutter_macos_framework` names its wrapper directory to avoid, and the
+    # `flutter_macos_app_framework` names its wrapper directory to avoid, and the
     # shape `flutter_ios_native_frameworks` already uses for its plugin
     # frameworks.
     #
@@ -145,19 +119,52 @@ def _flutter_ios_framework_impl(ctx):
     # imports by their deepest `.framework` ancestor and takes the framework's
     # name from that directory's basename (`group_files_by_directory` in
     # `apple_framework_import.bzl`), which is `App.framework` either way.
-    #
-    # The binary is declared here rather than once per branch below because
-    # every branch produces one; only the action that writes it differs.
-    framework_dir = "%s/App.framework" % ctx.label.name
+    framework = ios_app_framework(
+        ctx,
+        app_info = ctx.attr.application[FlutterApplicationInfo],
+        is_device = apple_support.target_environment_from_rule_ctx(ctx) == "device",
+        arch = apple_support.target_arch_from_rule_ctx(ctx),
+        directory = ctx.label.name,
+        minimum_os_version = ctx.attr.minimum_os_version,
+        sdk_record = ctx.attr._sdk_record[FlutterSdkRecordInfo],
+    )
+    return [
+        DefaultInfo(files = depset([framework.binary, framework.plist, framework.assets])),
+        OutputGroupInfo(dsym = depset(framework.dsym_files)),
+    ]
+
+def ios_app_framework(ctx, app_info, is_device, arch, directory, minimum_os_version, sdk_record):
+    """Declares the files of one iOS App.framework, as `flutter build ios` makes it.
+
+    Release and profile: the AOT dylib, stripped, with its dSYM. Debug: a stub
+    dylib, and the kernel and VM snapshots in `flutter_assets/`.
+
+    Args:
+        ctx: A rule context with the Xcode-tool and `assemble_directory`
+            attributes, the `PORTABLE` exec group and the C++ toolchain.
+        app_info: The `FlutterApplicationInfo` of the application, built for
+            this environment and CPU.
+        is_device: Whether the framework is for a device, not the simulator.
+        arch: The CPU it is for (`arm64`, `sim_arm64`).
+        directory: The package-relative directory `App.framework` is declared in.
+        minimum_os_version: The minimum iOS version the binary is tagged with.
+        sdk_record: The `FlutterSdkRecordInfo` of the build the application is
+            built in.
+
+    Returns:
+        A struct of `binary`, `plist`, `assets` (a directory) and `dsym_files`
+        (empty in debug).
+    """
+    tools = portable_tools(ctx)
+    flutter_assets = app_info.flutter_assets
+    framework_dir = "%s/App.framework" % directory
     framework_plist = ctx.actions.declare_file(framework_dir + "/Info.plist")
     framework_assets = ctx.actions.declare_directory(framework_dir + "/flutter_assets")
     framework_binary = ctx.actions.declare_file(framework_dir + "/App")
 
-    # Which iOS this binary is for, read from the platform constraints. Both
-    # branches tag their binary with it: gen_snapshot tags an AOT dylib as
-    # macOS (the host it ran on), and the debug stub is built by clang for
-    # whichever SDK this is.
-    is_device = apple_support.target_environment_from_rule_ctx(ctx) == "device"
+    # Both branches tag their binary with the iOS it is for: gen_snapshot tags
+    # an AOT dylib as macOS (the host it ran on), and the debug stub is built
+    # by clang for whichever SDK this is.
     vtool_platform = "ios" if is_device else "iossim"
 
     # The simulator engine runs kernel under the JIT and cannot load an AOT
@@ -172,92 +179,79 @@ def _flutter_ios_framework_impl(ctx):
              "use flutter_ios_simulator_build_test.") % ctx.var["COMPILATION_MODE"],
         )
 
+    # The engine must have a slice for this environment and CPU, and an app of
+    # a custom SDK keeps the record of the checked pieces it was built from.
+    check_ios_engine(ctx.label, sdk_record, arch, is_device)
+    record_steps = [("file", "flutter_sdk.json", sdk_record.record)] if sdk_record.record else []
+
     ctx.actions.write(framework_plist, _APP_FRAMEWORK_INFO_PLIST.format(
         minimum_os_version = minimum_os_version,
     ))
 
     if app_info.aot_output:
-        # Release mode: AOT binary + flutter_assets.
-        dylib = app_info.aot_output
-
-        # Copy the dylib and rewrite its LC_BUILD_VERSION with vtool.
-        _run_xcode_tool(
+        # Extract the dSYM, retag the dylib and strip it, as `flutter build ios`
+        # does. gen_snapshot tags the dylib as macOS, the host it ran on, so its
+        # LC_BUILD_VERSION is rewritten with vtool.
+        dsym = declare_dsym(ctx, directory)
+        split_and_strip_aot_binary(
             ctx,
-            command = 'cp "$1" "$2" && xcrun vtool -set-build-version "$3" "$4" "$4" -replace -output "$2" "$2"',
-            arguments = [ctx.actions.args().add_all([dylib, framework_binary, vtool_platform, minimum_os_version])],
-            inputs = [dylib],
-            outputs = [framework_binary],
-            mnemonic = "FlutterIOSRetagDylib",
-            execution_requirements = PATH_MAPPING,
-            progress_message = "Retagging App dylib for %s (min %s)" % (vtool_platform, minimum_os_version),
+            dylib = app_info.aot_output,
+            object = app_info.aot_object,
+            binary = framework_binary,
+            dsym = dsym,
+            strip = app_info.strip_aot,
+            retag = [vtool_platform, minimum_os_version],
         )
-
-        # Copy flutter_assets into the framework.
-        ctx.actions.run_shell(
-            command = 'cp -RL "$1"/. "$2"',
-            arguments = [ctx.actions.args().add_all([flutter_assets, framework_assets], expand_directories = False)],
-            inputs = [flutter_assets],
-            outputs = [framework_assets],
+        assemble_directory(
+            ctx,
+            tools,
+            framework_assets,
+            [("tree", ".", flutter_assets)] + record_steps,
             mnemonic = "FlutterIOSCopyAssets",
-            exec_group = PORTABLE,
-            execution_requirements = PATH_MAPPING,
             progress_message = "Copying flutter_assets into App.framework",
         )
+        return struct(binary = framework_binary, plist = framework_plist, assets = framework_assets, dsym_files = dsym.files)
 
-        return [DefaultInfo(files = depset([framework_binary, framework_plist, framework_assets]))]
-    else:
-        # Debug mode: stub binary + flutter_assets with kernel_blob.bin.
-        kernel_dill = app_info.kernel_dill
+    sdk = "iphoneos" if is_device else "iphonesimulator"
 
-        sdk = "iphoneos" if is_device else "iphonesimulator"
+    # A stub dylib: rules_apple's framework processor requires a binary, and an
+    # Xcode host links the framework. Built with `flutter build ios`'s flags:
+    # its install name, so a host app that links the framework resolves it
+    # through its rpaths, the two rpaths, and as safe for app extensions.
+    run_xcode_tool(
+        ctx,
+        command = 'echo "" | xcrun -sdk "$1" clang -shared -install_name "$5" -Xlinker -rpath -Xlinker @executable_path/Frameworks -Xlinker -rpath -Xlinker @loader_path/Frameworks -fapplication-extension -o "$2" -x c - && xcrun vtool -set-build-version "$3" "$4" "$4" -replace -output "$2" "$2"',
+        arguments = [ctx.actions.args().add_all([sdk, framework_binary, vtool_platform, minimum_os_version, "@rpath/App.framework/App"])],
+        outputs = [framework_binary],
+        mnemonic = "FlutterIOSStubDylib",
+        execution_requirements = PATH_MAPPING,
+        progress_message = "Creating stub App.framework binary for debug mode",
+    )
 
-        # Create a stub dylib — rules_apple's framework processor requires a
-        # binary file. bundle_only=True prevents linking so it's never loaded.
-        _run_xcode_tool(
-            ctx,
-            command = 'echo "" | xcrun -sdk "$1" clang -shared -o "$2" -x c - && xcrun vtool -set-build-version "$3" "$4" "$4" -replace -output "$2" "$2"',
-            arguments = [ctx.actions.args().add_all([sdk, framework_binary, vtool_platform, minimum_os_version])],
-            outputs = [framework_binary],
-            mnemonic = "FlutterIOSStubDylib",
-            execution_requirements = PATH_MAPPING,
-            progress_message = "Creating stub App.framework binary for debug mode",
-        )
+    # The vm_isolate_snapshot.bin and isolate_snapshot.bin are required for
+    # the Dart VM to bootstrap the kernel service isolate, which enables
+    # hot reload (reloadSources) and expression evaluation.
+    assemble_directory(
+        ctx,
+        tools,
+        framework_assets,
+        [
+            ("tree", ".", flutter_assets),
+            ("file", "kernel_blob.bin", app_info.kernel_dill),
+            ("file", "vm_snapshot_data", tools.vm_isolate_snapshot),
+            ("file", "isolate_snapshot_data", tools.isolate_snapshot),
+        ] + record_steps,
+        mnemonic = "FlutterIOSDebugAssets",
+        progress_message = "Assembling debug App.framework with kernel and VM snapshots",
+    )
+    return struct(binary = framework_binary, plist = framework_plist, assets = framework_assets, dsym_files = [])
 
-        # Copy flutter_assets and add kernel_blob.bin + VM snapshots.
-        # The vm_isolate_snapshot.bin and isolate_snapshot.bin are required for
-        # the Dart VM to bootstrap the kernel service isolate, which enables
-        # hot reload (reloadSources) and expression evaluation.
-        vm_snapshot = tools.vm_isolate_snapshot
-        iso_snapshot = tools.isolate_snapshot
-
-        copy_cmd = (
-            'cp -RL "$1"/. "$2" && cp "$3" "$2/kernel_blob.bin"' +
-            ' && cp "$4" "$2/vm_snapshot_data" && cp "$5" "$2/isolate_snapshot_data"'
-        )
-        copy_args = ctx.actions.args().add_all(
-            [flutter_assets, framework_assets, kernel_dill, vm_snapshot, iso_snapshot],
-            expand_directories = False,
-        )
-        copy_inputs = [flutter_assets, kernel_dill, vm_snapshot, iso_snapshot]
-
-        ctx.actions.run_shell(
-            command = copy_cmd,
-            arguments = [copy_args],
-            inputs = copy_inputs,
-            outputs = [framework_assets],
-            mnemonic = "FlutterIOSDebugAssets",
-            exec_group = PORTABLE,
-            execution_requirements = PATH_MAPPING,
-            progress_message = "Assembling debug App.framework with kernel and VM snapshots",
-        )
-
-        return [DefaultInfo(files = depset([framework_binary, framework_plist, framework_assets]))]
-
-flutter_ios_framework = rule(
-    implementation = _flutter_ios_framework_impl,
+flutter_ios_app_framework = rule(
+    implementation = _flutter_ios_app_framework_impl,
     attrs = dicts.add(
         apple_support.action_required_attrs(),
         apple_support.platform_constraint_attrs(),
+        ASSEMBLE_DIRECTORY_ATTRS,
         {
             "application": attr.label(
                 doc = "A flutter_ios_application target providing Flutter compilation outputs.",
@@ -268,6 +262,10 @@ flutter_ios_framework = rule(
                 doc = "Minimum iOS deployment target version.",
                 default = IOS_MINIMUM_OS_VERSION,
             ),
+            "_sdk_record": attr.label(
+                default = "//flutter/private:sdk_record",
+                providers = [FlutterSdkRecordInfo],
+            ),
         },
     ),
     # The copies are the same bytes on any host; vtool and clang run where
@@ -275,7 +273,11 @@ flutter_ios_framework = rule(
     exec_groups = PORTABLE_EXEC_GROUPS,
     fragments = ["apple"],
     toolchains = use_cc_toolchain(mandatory = True),
-    doc = "Assembles Flutter artifacts into App.framework for iOS (release: AOT binary + assets; debug: assets + kernel).",
+    doc = """Assembles Flutter artifacts into App.framework for iOS (release: AOT binary + assets; debug: assets + kernel).
+
+The release binary is stripped, as `flutter build ios` strips it (not with
+`--no-strip` in the application's `extra_gen_snapshot_options`); its dSYM
+is made either way, and is in the `dsym` output group.""",
 )
 
 # -- flutter_ios_native_frameworks (dylib -> framework wrapping) ---------------
@@ -312,7 +314,7 @@ def _flutter_ios_native_frameworks_impl(ctx):
     """Wraps each native dylib in a signed `.framework` for iOS bundling.
 
     iOS forbids loose embedded dylibs, so every native dependency — the legacy
-    `native_libs` set (FFI `native_deps`) and the `bundled_code_assets` set
+    `native_libs` set (FFI `native_deps`) and every code-asset candidate
     contributed by Native Assets `dynamic_loading_bundle` declarations — is
     repackaged as `<name>.framework/<name>` (binary + Info.plist) with its
     install name rewritten to `@rpath/<name>.framework/<name>`, matching
@@ -320,28 +322,29 @@ def _flutter_ios_native_frameworks_impl(ctx):
     `AppleFrameworkImportInfo` lets `ios_application` embed and code-sign each
     framework; the engine `dlopen`s the framework-relative path the
     native-assets manifest records (see flutter_native_assets.bzl).
+
+    rules_apple has to know each framework it embeds when the app is
+    analysed, and which code assets ship is known only when the app is built
+    (a release build's link hooks choose), so every candidate is wrapped.
+    `flutter_application` has checked no two of these share a framework name.
     """
     app_info = ctx.attr.application[FlutterApplicationInfo]
-    dylibs = list(app_info.native_libs) + app_info.bundled_code_assets.to_list()
+    dylibs = list({
+        lib: None
+        for lib in list(app_info.native_libs) + candidate_code_asset_libraries(app_info.program_assets)
+    }.keys())
     minimum_os_version = ctx.attr.minimum_os_version
 
     framework_files = []
-    seen = {}
     for dylib in dylibs:
         name = native_asset_framework_name(dylib.basename)
-        if name in seen:
-            fail(
-                "Two native dylibs map to the same iOS framework name %r " % name +
-                "(from %s and %s). Rename one native asset." % (seen[name], dylib.basename),
-            )
-        seen[name] = dylib.basename
 
         binary = ctx.actions.declare_file("%s/%s.framework/%s" % (ctx.label.name, name, name))
         plist = ctx.actions.declare_file("%s/%s.framework/Info.plist" % (ctx.label.name, name))
 
         # Copy the dylib into the framework and rewrite its install name so the
         # dynamic linker resolves it from the embedded framework via @rpath.
-        _run_xcode_tool(
+        run_xcode_tool(
             ctx,
             command = 'cp "$1" "$2" && xcrun install_name_tool -id "$3" "$2"',
             arguments = [ctx.actions.args().add_all([
@@ -372,7 +375,8 @@ def _flutter_ios_native_frameworks_impl(ctx):
             deps = [],
             framework_imports = framework_files,
         ),
-    ]
+        # For the app to pass on to analysis (`flutter_apple_app`).
+    ] + bundled_program_info(ctx.attr.application)
 
 flutter_ios_native_frameworks = rule(
     implementation = _flutter_ios_native_frameworks_impl,
@@ -395,6 +399,55 @@ flutter_ios_native_frameworks = rule(
     fragments = ["apple"],
     toolchains = use_cc_toolchain(mandatory = True),
     doc = "Wraps native plugin/native-asset dylibs in signed .frameworks for iOS bundling.",
+)
+
+# -- flutter_ios_dropped_frameworks (code assets a link hook dropped) ----------
+
+def _flutter_ios_dropped_frameworks_impl(ctx):
+    app_info = ctx.attr.application[FlutterApplicationInfo]
+    output = ctx.actions.declare_file("%s/rules_flutter_dropped_frameworks.txt" % ctx.label.name)
+    code_assets = program_assets_action_args(ctx.actions, app_info.program_assets, data = False, code = "names")
+    args = ctx.actions.args()
+    args.add("--output", output)
+    if ctx.attr.conflict:
+        args.add("--conflict", ctx.attr.conflict)
+    run_code_assets_tool(
+        ctx,
+        "ios-dropped-frameworks",
+        [args, code_assets.args],
+        code_assets.inputs,
+        [output],
+        mnemonic = "FlutterIOSDroppedFrameworks",
+        progress_message = "Listing the code assets %{label} drops",
+    )
+    return [DefaultInfo(files = depset([output]))]
+
+flutter_ios_dropped_frameworks = rule(
+    implementation = _flutter_ios_dropped_frameworks_impl,
+    attrs = {
+        "application": attr.label(
+            doc = "The `flutter_application` the iOS app bundles.",
+            mandatory = True,
+            providers = [FlutterApplicationInfo],
+        ),
+        "conflict": attr.string(
+            doc = "The app's own `ipa_post_processor`, when it has one. rules_apple runs " +
+                  "one post-processor, so the app cannot have rules_flutter's too: the " +
+                  "build fails, naming it, when a link hook dropped a code asset.",
+        ),
+    } | CODE_ASSETS_TOOL_ATTRS,
+    exec_groups = PORTABLE_EXEC_GROUPS,
+    doc = """The frameworks of the code assets a release app's link hooks dropped, for the app to remove.
+
+`flutter_ios_native_frameworks` wraps every code asset that could ship, because
+rules_apple embeds only frameworks it knows when the app is analysed. In a
+release or profile build a package's link hook chooses among its code assets,
+so this writes `rules_flutter_dropped_frameworks.txt`, one `<name>.framework` a
+line. Give it to the `ios_application`'s `resources` and
+`@rules_flutter//flutter:ios_code_asset_post_processor` as its
+`ipa_post_processor`, outside `-c dbg` (a debug build runs no hook, and any
+post-processor makes rules_apple unpack and repack the archive): the processor
+removes those frameworks and the list before rules_apple signs the app.""",
 )
 
 # -- flutter_ios_privacy_manifests (xcprivacy bundling) -----------------------

@@ -49,19 +49,19 @@ def _flags_only_a_toolchain_below_the_floor_test_impl(ctx):
     env = unittest.begin(ctx)
 
     # The failure this catches: lock resolved by a newer Flutter.
-    asserts.true(env, version_below_lower_bound("3.41.2", ">=3.44.0"))
-    asserts.true(env, version_below_lower_bound("3.44.0", ">=3.44.1"))
+    asserts.true(env, version_below_lower_bound("3.47.2", ">=3.47.5"))
+    asserts.true(env, version_below_lower_bound("3.47.5", ">=3.47.6"))
 
     # Satisfied, including the prerelease floor a real lock records: a release
     # version is >= any prerelease of the same triple.
-    asserts.false(env, version_below_lower_bound("3.44.1", ">=3.18.0-18.0.pre.54"))
+    asserts.false(env, version_below_lower_bound("3.47.6", ">=3.18.0-18.0.pre.54"))
     asserts.false(env, version_below_lower_bound("3.18.0", ">=3.18.0-18.0.pre.54"))
-    asserts.false(env, version_below_lower_bound("3.44.1", ">=3.44.1"))
+    asserts.false(env, version_below_lower_bound("3.47.6", ">=3.47.6"))
 
     # Nothing readable to compare against: never fail the build on a guess.
-    asserts.false(env, version_below_lower_bound("3.44.1", "any"))
-    asserts.false(env, version_below_lower_bound("3.44.1", "<4.0.0"))
-    asserts.false(env, version_below_lower_bound("stable", ">=3.44.0"))
+    asserts.false(env, version_below_lower_bound("3.47.6", "any"))
+    asserts.false(env, version_below_lower_bound("3.47.6", "<4.0.0"))
+    asserts.false(env, version_below_lower_bound("stable", ">=3.47.5"))
     return unittest.end(env)
 
 _parses_the_sdks_block_test = unittest.make(_parses_the_sdks_block_test_impl)

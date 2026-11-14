@@ -15,6 +15,8 @@
 /// - The app logs `android_example shared=2`: one bump through each of two
 ///   asset ids the app serves from one library moved one count, so both ids
 ///   reached one loaded image of it (two copies would log `shared=1`)
+/// - The app logs `android_example negate(5)=-5`: the code asset whose library
+///   is a prebuilt file, not a `cc_shared_library`, loaded
 library;
 
 // This script's diagnostics are its product: it reports what it found in
@@ -24,197 +26,46 @@ library;
 
 import 'dart:io';
 
+import 'package:rules_flutter_e2e_testing/adb.dart';
+
 const _packageName = 'com.example.flutterapp';
 const _timeout = Duration(seconds: 30);
 const _stabilityWindow = Duration(seconds: 10);
 const _sharedMarker = 'android_example shared=';
+const _negateMarker = 'android_example negate(5)=';
 
 Future<void> main() async {
-  final testSrcDir = Platform.environment['TEST_SRCDIR'];
-  final testWorkspace = Platform.environment['TEST_WORKSPACE'];
-  if (testSrcDir == null || testWorkspace == null) {
-    stderr.writeln('Missing TEST_SRCDIR or TEST_WORKSPACE env vars');
-    exit(1);
-  }
-
-  final apkPath = '$testSrcDir/$testWorkspace/app.apk';
-  if (!File(apkPath).existsSync()) {
-    stderr.writeln('APK not found at $apkPath');
-    exit(1);
-  }
-
-  // Check adb is available.
-  final adbCheck = Process.runSync('which', ['adb']);
-  if (adbCheck.exitCode != 0) {
-    stderr.writeln('adb not found in PATH');
-    exit(1);
-  }
-
-  // Check for connected devices/emulators.
-  final devices = Process.runSync('adb', ['devices']);
-  final deviceLines = devices.stdout
-      .toString()
-      .trim()
-      .split('\n')
-      .where((l) => l.contains('\tdevice'))
-      .toList();
-  if (deviceLines.isEmpty) {
-    stderr.writeln('No Android devices/emulators connected');
-    exit(1);
-  }
-  print('Found ${deviceLines.length} device(s)');
-
-  // Install the APK.
-  print('Installing APK...');
-  final install = Process.runSync('adb', ['install', '-r', apkPath]);
-  if (install.exitCode != 0) {
-    stderr.writeln('Failed to install APK: ${install.stderr}');
-    exit(1);
-  }
-  print('APK installed successfully');
-
-  // Clear the crash log buffer so the stability check only sees crashes
-  // from this run, and the main buffer so the shared-counter line is this
-  // run's.
-  Process.runSync('adb', ['logcat', '-b', 'crash', '-c']);
-  Process.runSync('adb', ['logcat', '-c']);
-  // A previous run's process would keep its count and skip `main`.
-  _cleanup();
-
-  // Resolve the installed package's launcher activity, then launch it.
-  final resolve = Process.runSync('adb', [
-    'shell',
-    'cmd',
-    'package',
-    'resolve-activity',
-    '--brief',
-    '-a',
-    'android.intent.action.MAIN',
-    '-c',
-    'android.intent.category.LAUNCHER',
-    _packageName,
-  ]);
-  final component = resolve.stdout
-      .toString()
-      .trim()
-      .split('\n')
-      .where((l) => l.startsWith('$_packageName/'))
-      .toList();
-  if (resolve.exitCode != 0 || component.isEmpty) {
-    stderr.writeln(
-      'Failed to resolve launcher activity for $_packageName: '
-      '${resolve.stdout}${resolve.stderr}',
-    );
-    exit(1);
-  }
-
-  print('Starting activity ${component.single} ...');
-  final start = Process.runSync('adb', [
-    'shell',
-    'am',
-    'start',
-    '-n',
-    component.single,
-  ]);
-  final startOutput = '${start.stdout}${start.stderr}';
-  if (start.exitCode != 0 || startOutput.contains('Error')) {
-    stderr.writeln('Failed to start activity: $startOutput');
-    exit(1);
-  }
-
-  // Wait for activity to reach RESUMED state.
-  print('Waiting for RESUMED state (up to ${_timeout.inSeconds}s)...');
-  final deadline = DateTime.now().add(_timeout);
-  var resumed = false;
-  while (DateTime.now().isBefore(deadline)) {
-    final dumpsys = Process.runSync('adb', [
-      'shell',
-      'dumpsys',
-      'activity',
-      'activities',
-    ]);
-    final output = dumpsys.stdout.toString();
-    // Matches both `mResumedActivity`/`ResumedActivity:` (older releases)
-    // and `topResumedActivity=` (API 29+).
-    if (output
-        .split('\n')
-        .any(
-          (l) => l.contains('ResumedActivity') && l.contains(_packageName),
-        )) {
-      resumed = true;
-      break;
-    }
-    await Future<void>.delayed(const Duration(seconds: 1));
-  }
-
-  if (!resumed) {
-    stderr.writeln('FAIL: Activity did not reach RESUMED state');
-    _cleanup();
-    exit(1);
-  }
-  print('Activity is RESUMED');
+  final app = AdbApp.fromRunfiles('app.apk', packageName: _packageName)
+    ..requireDevice()
+    ..install()
+    // Clear the crash log buffer so the stability check only sees crashes
+    // from this run, and the main buffer so the shared-counter line is this
+    // run's.
+    ..clearLogs()
+    // A previous run's process would keep its count and skip `main`.
+    ..stop()
+    ..launch();
+  await app.waitForResumed(_timeout);
 
   // Verify the app stays resumed with no crash for the full stability
   // window, polling so a crash fails fast with its log attached.
-  print('Verifying stability (${_stabilityWindow.inSeconds}s)...');
-  final stabilityDeadline = DateTime.now().add(_stabilityWindow);
-  var stillResumed = true;
-  while (DateTime.now().isBefore(stabilityDeadline)) {
-    await Future<void>.delayed(const Duration(seconds: 1));
-    final crashLog = Process.runSync(
-      'adb',
-      ['logcat', '-b', 'crash', '-d'],
-    ).stdout.toString();
-    if (crashLog.contains(_packageName)) {
-      stderr.writeln('FAIL: app crashed during stability window:\n$crashLog');
-      _cleanup();
-      exit(1);
-    }
-    final dumpsys = Process.runSync('adb', [
-      'shell',
-      'dumpsys',
-      'activity',
-      'activities',
-    ]);
-    stillResumed = dumpsys.stdout
-        .toString()
-        .split('\n')
-        .any((l) => l.contains('ResumedActivity') && l.contains(_packageName));
-    if (!stillResumed) break;
-  }
+  final stillResumed = await app.watchStability(_stabilityWindow);
 
   // `main` logs the count before the first frame, so by now it is there.
-  final sharedLines = Process.runSync('adb', ['logcat', '-d', '-s', 'flutter'])
-      .stdout
-      .toString()
-      .split('\n')
-      .where((l) => l.contains(_sharedMarker))
-      .toList();
+  final sharedLines = app.logLines(_sharedMarker, tag: 'flutter');
   final shared = sharedLines.isEmpty
       ? null
       : sharedLines.last.split(_sharedMarker).last.trim();
   print('Shared counter: ${shared ?? '(not logged)'}');
+  final negateLines = app.logLines(_negateMarker, tag: 'flutter');
+  final negated = negateLines.isEmpty
+      ? null
+      : negateLines.last.split(_negateMarker).last.trim();
+  print('Prebuilt negate(5): ${negated ?? '(not logged)'}');
 
-  // Capture a screenshot for visual verification.
-  print('Capturing screenshot...');
-  Process.runSync('adb', [
-    'shell',
-    'screencap',
-    '-p',
-    '/sdcard/flutter_test.png',
-  ]);
-  final screenshotDir = Directory.systemTemp.createTempSync(
-    'android_screenshot',
-  );
-  final localScreenshot = '${screenshotDir.path}/screenshot.png';
-  Process.runSync('adb', ['pull', '/sdcard/flutter_test.png', localScreenshot]);
-  Process.runSync('adb', ['shell', 'rm', '/sdcard/flutter_test.png']);
-  if (File(localScreenshot).existsSync()) {
-    print('Screenshot saved to $localScreenshot');
-  }
-
-  // Clean up.
-  _cleanup();
+  app
+    ..screenshot('android_screenshot')
+    ..stop();
 
   // Report results.
   print('');
@@ -235,10 +86,14 @@ Future<void> main() async {
     exit(1);
   }
 
-  print('PASS');
-}
+  if (negated != '-5') {
+    stderr.writeln(
+      'FAIL: expected "$_negateMarker-5" in logcat, got '
+      '${negated == null ? 'no such line' : '"$_negateMarker$negated"'}: the '
+      'code asset whose library is a prebuilt file did not load',
+    );
+    exit(1);
+  }
 
-void _cleanup() {
-  // Force stop the app.
-  Process.runSync('adb', ['shell', 'am', 'force-stop', _packageName]);
+  print('PASS');
 }

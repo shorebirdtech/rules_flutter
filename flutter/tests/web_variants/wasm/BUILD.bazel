@@ -1,0 +1,14 @@
+load("@rules_dart//dart:defs.bzl", "dart_library")
+load("//flutter:defs.bzl", "dart_package_metadata")
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "web_variant",
+)
+
+dart_library(
+    name = "variant",
+    srcs = ["lib/web_variant.dart"],
+    package = ":pubspec-metadata",
+    visibility = ["//flutter/tests/web_variants:__pkg__"],
+)

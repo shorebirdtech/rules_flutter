@@ -1,96 +1,212 @@
 # CI workflow for rules_flutter
 #
-# Runs repo-root tests (Starlark unit tests, buildifier lint) and
-# e2e tests across all workspaces on every push/PR.
+# Runs repo-root tests (Starlark unit tests, the pre-commit hooks) and the e2e tests
+# on every push/PR, and weekly. Each e2e workspace runs on the operating systems where it
+# exercises something no other job does; the `plan` job reads which, and why,
+# from tools/ci_matrix/e2e_matrix.dart.
 #
-# No job checks out rules_dart: every workspace below takes it as a registry
+# No job checks out rules_dart: every workspace takes it as a registry
 # `bazel_dep`. Local sibling overrides live in gitignored `.bazelrc.user` files,
-# which never exist on a runner. The one committed sibling override, in
-# e2e/_overlay_tests/native_assets_synthetic, is in no matrix — adding it means
-# adding a checkout step too.
+# which never exist on a runner.
 name: CI
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
-permissions:
-  contents: read
+  # Weekly, to catch breakage from outside: a new runner image, Bazel, or a
+  # dependency that moved.
+  schedule:
+    - cron: "0 9 * * 1"
+# A new push to a pull request or branch cancels its older runs. On main every
+# run gets its own group and runs to the end, so each commit there is tested.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
-  cancel-in-progress: true
-# One repository cache per OS, set up by bazel-contrib/setup-bazel and shared
-# by every Bazel job: downloads are content-addressed, so a workspace never
-# needs its own copy.
+  group: ${{ github.workflow }}::${{ github.event.pull_request.number > 0 && format('pr-{0}', github.event.pull_request.number) || github.ref_name }}${{ github.ref_name == 'main' && format('::{0}', github.run_id) || '' }}
+  cancel-in-progress: ${{ github.ref_name != 'main' }}
+# A repository cache on macOS and on Linux, set up by bazel-contrib/setup-bazel
+# and shared by every Bazel job on that system: downloads are
+# content-addressed, so a workspace never needs its own copy.
 #
 # setup-bazel keys the repository cache by hashing files, by default the
 # MODULE.bazel at `module-root`. Every job passes this same list instead, so
 # they all land on one key per OS whichever workspace they build. A change to
 # any of these files starts a new key, restored from the newest older one; the
-# cache only grows that way, so bump `cache-version` to start it over.
+# cache only grows that way. Every setup-bazel step also passes CACHE_VERSION as
+# its `cache-version`, part of every key: bump it to start the caches over.
 #
 # Only e2e hello_world saves it, on pushes to main. It builds for every
 # platform and so fetches the most; were every job allowed to save, the first
 # to finish (smoke, fetching almost nothing) would take the key and the rest
 # could not replace it. Every other job, and every pull request, only restores,
 # then downloads whatever its own workspace needs beyond that.
+#
+# GitHub keeps 10 GB of caches per repository and evicts the least recently
+# used beyond that. Each OS's cache was 5.2-5.7 GB, so the three evicted one
+# another; about 2 GB of each was Bazel's unpacked repositories (the repo
+# contents cache), which CI_BAZELRC now keeps outside the saved directory.
+# That leaves about 3.7 GB on macOS and 3.2 GB on Linux, 7 GB in all. A key
+# change saves a second copy for its OS, up to 10.7 GB, and GitHub then evicts
+# the least recently used entry, the superseded one unless the other OS's has
+# gone longer unused. Windows keeps none: it restored its 5.2 GB at about 64 MB/s and
+# took as long again to unpack it, no faster than downloading, and a third
+# cache would not fit beside the other two.
+#
+# No job keeps setup-bazel's disk cache of action outputs. The 3 GB left would
+# not hold one for a job slow enough to gain from it (one e2e workspace's
+# outputs are several GB), and setup-bazel keys it by every BUILD file in the
+# repository, so each edit of one would save another copy and evict the
+# repository caches.
 env:
+  CACHE_VERSION: "2"
   BAZEL_REPOSITORY_CACHE_KEY_FILES: |
     - MODULE.bazel
     - MODULE.bazel.lock
     - e2e/*/MODULE.bazel
     - flutter/private/versions.bzl
+  # Every setup-bazel step writes these to the user's `.bazelrc`, which every
+  # Bazel command reads, in the root and in each e2e workspace. They are here
+  # rather than in a file the user rc imports because that import would need
+  # the checkout's absolute path, and an rc file reads the backslashes of a
+  # Windows one as escapes.
+  #
+  # A log that shows what failed: no cursor control or colour codes, a
+  # progress line a minute (enough to see where a hung build hangs), no output
+  # of passing actions in other modules (javac and JDK warnings from
+  # toolchains, thousands of lines of them in an Android build; a failing
+  # action prints its output whatever its module), a failing test's log, which
+  # would otherwise stay in a test.log discarded with the runner, and no line
+  # per passing test. And the repo contents cache beside the repository cache,
+  # not inside it (its default), where setup-bazel would save it.
+  CI_BAZELRC: |
+    common --curses=no
+    common --color=no
+    common --show_progress_rate_limit=60
+    common --output_filter=^//
+    test --test_output=errors
+    test --test_summary=terse
+    common --repo_contents_cache=~/.cache/bazel-repo-contents
+# Every job has a timeout, at a few times its usual run (more where a cold
+# cache makes it fetch toolchains), so a hung job ends without holding a
+# runner for hours: 15 minutes for a check of a command or two (2 minutes
+# usually), 20 for a consumer's query (3-5), 30 for the root's tests or the web
+# smoke test (4-8), 60 and 90 for the Linux and macOS lock checks (about 20 and
+# 35), 150 for the custom engine (60), and for an e2e workspace 90 on Linux and
+# Windows (45 at most, plugin_example on Linux) and 180 on macOS (95 for
+# plugin_example).
 jobs:
   unit-tests:
     name: Unit tests
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # 0.19.1
         with:
-          repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          bazelrc: ${{ env.CI_BAZELRC }}
+          repository-cache: ${{ runner.os != 'Windows' && env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
           cache-save: false
       - name: bazel test //...
-        run: bazel test //... --test_output=errors
-  # The hooks in .pre-commit-config.yaml, over every file. Nothing else runs
-  # them for a commit made without `prek install`.
+        run: bazel test //...
+      # The `deep` tier (.bazelrc): weekly, since its tests fetch extra SDKs.
+      - name: bazel test //... --config=deep
+        if: github.event_name == 'schedule'
+        run: bazel test //... --config=deep
+  # Every hook in .pre-commit-config.yaml, over every file, with the prek
+  # overhead pins, as a commit runs them: one build puts overhead's tools in
+  # .bazel_env, then the hooks run them without Bazel. Nothing else runs them
+  # for a commit made without `prek install`.
+  # Then the bazelrc preset, which no hook checks.
   pre-commit:
     name: pre-commit
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # 0.19.1
         with:
-          python-version: "3.13"
-      # The prek pinned in multitool.lock.json
-      - run: bazel run @multitool//tools/prek -- -C "$PWD" run --all-files --show-diff-on-failure
-  dart-tool-tests:
-    name: Dart tool tests
-    runs-on: ubuntu-latest
+          cache-version: ${{ env.CACHE_VERSION }}
+          bazelrc: ${{ env.CI_BAZELRC }}
+          repository-cache: ${{ runner.os != 'Windows' && env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
+          cache-save: false
+      - run: bazel run @overhead//:bazel_env -- update-symlink
+      - run: bazel run @overhead//lint:prek -- run --all-files --show-diff-on-failure
+      # tools/preset.bazelrc is overhead's preset, as pinned.
+      - name: bazelrc preset
+        run: bazel run @overhead//preset -- --check
+  # Every workspace's MODULE.bazel.lock, the root's and those under e2e/: for
+  # each, `bazel mod deps` and `bazel build --nobuild //...` with
+  # --lockfile_mode=error, which catch a missing entry and one gone stale that
+  # no build reads. A runner has no `.bazelrc.user` to switch the check off.
+  # The E2E jobs build with the same mode, but catch only what their own
+  # targets read. See docs/TESTING.md, "Lock files".
+  #
+  # Two jobs, from the `plan` job (lockCheckWorkspaces in
+  # tools/ci_matrix/e2e_matrix.dart): macOS for the workspaces whose `//...`
+  # may hold Apple targets, which only a Mac can analyse, and Linux for the
+  # root and the rest. The check runs Bazel without the user's `.bazelrc`, so
+  # it neither reads the restored repository cache nor quiets its log; it
+  # prints a line per step.
+  lockfiles:
+    name: Lock files (${{ matrix.os }})
+    needs: plan
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: ${{ matrix.os == 'macos-latest' && 90 || 60 }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.locks) }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1.8.1
-      - name: Run dev_tool tests
-        working-directory: tools/dev_tool
-        # Exclude e2e tests (tagged @Tags(['e2e'])): they need a browser/CDP,
-        # iOS simulators, or a running macOS app — none available on this
-        # runner. Real-render coverage lives in the Bazel e2e workspaces and,
-        # for web, in the `web-smoke` job below.
-        #
-        # `runfiles` is excluded for a different reason: those tests read
-        # fixtures declared in a Bazel target's `data` and resolve them through
-        # the runfiles tree, which exists under `bazel test` and not here. They
-        # are covered by their Bazel targets, which this job does not replace.
-        run: dart test -x e2e -x runfiles
-      # `-x runfiles` for the same reason as the dev_tool step above: these
-      # tools are Bazel scripts, and one of them imports a package that arrives
-      # through its `dart_test` deps rather than through this pubspec. Excluded
-      # here, covered by //flutter/private/tools:flutter_test_runner_test.
-      - name: Run private tool tests
-        working-directory: flutter/private/tools
-        run: dart pub get && dart test -x runfiles
-  # The only web coverage CI has — web_example is in no e2e matrix below — and
-  # the only place CI runs the binary users install rather than `dart run`.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # 0.19.1
+        with:
+          cache-version: ${{ env.CACHE_VERSION }}
+          bazelrc: ${{ env.CI_BAZELRC }}
+          repository-cache: ${{ runner.os != 'Windows' && env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
+          cache-save: false
+      # e2e/external_module takes rules_flutter from the release archive, as
+      # the `consumer-query` job explains.
+      - name: Extract the release archive
+        if: contains(format(' {0} ', matrix.workspaces), ' e2e/external_module ')
+        run: bazel run //tools/consumer_archive
+      - name: bazel run @overhead//locks:check -- ${{ matrix.workspaces }}
+        run: bazel run @overhead//locks:check -- ${{ matrix.workspaces }}
+  # A module that depends on rules_flutter must be able to list all of it, as
+  # tools and IDE plugins do with `@rules_flutter//...`, from the release
+  # archive it gets. Development tooling
+  # loads repos a consumer never sees, so it lives in directories REPO.bazel
+  # keeps out of the module's packages; this fails when one gets in.
+  consumer-query:
+    name: Consumer query (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # 0.19.1
+        with:
+          cache-version: ${{ env.CACHE_VERSION }}
+          bazelrc: ${{ env.CI_BAZELRC }}
+          repository-cache: ${{ runner.os != 'Windows' && env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
+          cache-save: false
+      # What a consumer gets is the release archive (`git archive`, trimmed by
+      # .gitattributes), not the checkout: this extracts it for the workspace.
+      - name: Extract the release archive
+        run: bazel run //tools/consumer_archive
+      - name: Query the whole module from a consumer
+        working-directory: e2e/external_module
+        run: bazel query "@rules_flutter//..."
+      # Listing targets loads their packages; analysing them also resolves
+      # every label, repo and rule input, which is where a target that needs
+      # something only a checkout has fails.
+      - name: Analyse the whole module from a consumer
+        working-directory: e2e/external_module
+        run: bazel build --nobuild "@rules_flutter//..."
+  # The only place CI runs a browser against a web app — web_example's e2e jobs
+  # below only build it and read the bytes — and the only place CI runs the
+  # binary users install rather than `dart run`.
   # One `-c dbg` Chrome run, asserted down to a VM service that answers
   # `getVersion` — `app.started` alone does not prove DWDS came up.
   web-smoke:
@@ -98,12 +214,14 @@ jobs:
     runs-on: ubuntu-latest
     # Cold, this downloads the Flutter SDK, the engine artifacts and the web
     # SDK, then AOT-compiles the dev tool before the run itself starts.
-    timeout-minutes: 60
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # 0.19.1
         with:
-          repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          bazelrc: ${{ env.CI_BAZELRC }}
+          repository-cache: ${{ runner.os != 'Windows' && env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
           cache-save: false
       # setup-bazel pins every workspace to one output base with a `startup`
       # line in ~/.bazelrc. This job runs two workspaces: the root, whose
@@ -113,12 +231,6 @@ jobs:
       # line so each workspace keeps Bazel's own per-workspace default.
       - name: Keep one output base per workspace
         run: sed -i '/^startup --output_base=/d' ~/.bazelrc
-      # The test process itself resolves this package's pubspec, and dwds
-      # requires a Dart newer than the runner's default. The tool under test
-      # runs on the hermetic Flutter toolchain either way.
-      - uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1.8.1
-        with:
-          sdk: 3.13.0
       - name: Install xvfb
         run: sudo apt-get update && sudo apt-get install -y xvfb
       # Ubuntu 24.04 sets kernel.apparmor_restrict_unprivileged_userns=1, which
@@ -128,101 +240,125 @@ jobs:
       # run works, which a weakened browser would not establish.
       - name: Allow Chrome's sandbox to create user namespaces
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      # A fresh runner's disk is cold: the first Chrome launch pages Chrome in
-      # and took 0.5-14.8s to announce its DevTools port on an idle runner
-      # (every later launch, 0.2s), past the dev tool's 15s once the build is
-      # competing for the disk. One throwaway launch here pays that cost
-      # outside the test; after it the test's launch measured 0.2-1.0s.
-      - name: Page Chrome in from the cold disk
-        run: timeout 120 google-chrome --headless --no-first-run --user-data-dir="$(mktemp -d)" --dump-dom about:blank > /dev/null
       # google-chrome is preinstalled on this runner and is on PATH, which is
       # exactly how the dev tool resolves it on Linux (host_tools.dart) — no
       # CHROME_EXECUTABLE needed. xvfb gives that Chrome a display.
       #
-      # Run through tool/e2e.dart rather than `dart test` directly: `dart test`
+      # Run through the e2e runner rather than `dart test` directly: `dart test`
       # exits 0 when every selected test skipped, so a skip gate would take this
       # job green having executed nothing. The runner reads the JSON result
       # stream and fails unless a verdict was reached, nothing failed, and at
       # least one test ran. It supplies `--tags=e2e` and `--concurrency=1`
-      # itself and resolves tools/dev_tool from its own location.
+      # itself, and runs the suite on the toolchain's Dart.
       - name: Web smoke
-        run: xvfb-run -a dart run tools/dev_tool/tool/e2e.dart test/e2e/web_smoke_e2e_test.dart
+        run: xvfb-run -a bazel run //tools/dev_tool:e2e -- test/e2e/web_smoke_e2e_test.dart
+  # e2e/custom_engine, built against a stand-in checkout of the framework and
+  # the engine out dirs: macOS, iOS and Android apps in debug and release,
+  # their `flutter_sdk.json`, and the refusal of a gen_snapshot of another Dart.
+  # Its targets are manual, since each needs the checkout selected; the dev
+  # tool's custom_engine_e2e_test builds and checks them.
+  custom-engine:
+    name: Custom engine (stand-in checkout)
+    runs-on: macos-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # 0.19.1
+        with:
+          cache-version: ${{ env.CACHE_VERSION }}
+          bazelrc: ${{ env.CI_BAZELRC }}
+          repository-cache: ${{ runner.os != 'Windows' && env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
+          cache-save: false
+      # As in web-smoke: the dev tool runs from the root's bazel-bin and builds
+      # e2e/custom_engine, so each workspace keeps its own output base.
+      - name: Keep one output base per workspace
+        run: sed -i '' '/^startup --output_base=/d' ~/.bazelrc
+      - name: Custom engine
+        run: bazel run //tools/dev_tool:e2e -- test/e2e/custom_engine_e2e_test.dart
+  # The jobs of `e2e` below: one per workspace and operating system, from the
+  # table in tools/ci_matrix/e2e_matrix.dart. The same run checks that the table
+  # lists every workspace under e2e/ and says, for each system, what the
+  # workspace exercises there that no other job does or why it does not run, so
+  # a workspace added without a decision fails here and not silently never runs,
+  # and a job that repeats another's coverage has no purpose to give.
+  plan:
+    name: Plan E2E jobs
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      locks: ${{ steps.matrix.outputs.locks }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1
+      - name: Build the E2E and lock check matrices
+        id: matrix
+        run: dart run tools/ci_matrix/ci_matrix.dart >> "$GITHUB_OUTPUT"
   e2e:
     name: E2E (${{ matrix.workspace }}, ${{ matrix.os }})
+    needs: plan
     runs-on: ${{ matrix.os }}
+    # Cold, a workspace fetches its own Flutter SDK, engine and toolchains.
+    timeout-minutes: ${{ matrix.os == 'macos-latest' && 180 || 90 }}
     strategy:
       fail-fast: false
-      matrix:
-        workspace:
-          - smoke
-          # Two pub hubs over two locks — cheap (no Flutter SDK, no app) and the
-          # only coverage of duplicate package records across hubs.
-          - dual_hub
-          - hello_world
-          - ffi_example
-          - plugin_example
-          - ffi_plugin_example
-          - codegen
-        os:
-          - macos-latest
-        include:
-          # Run hello_world on Linux for native Linux bundle testing.
-          - workspace: hello_world
-            os: ubuntu-latest
-          # Run hello_world on Windows for native Windows bundle testing.
-          - workspace: hello_world
-            os: windows-latest
-          # Run codegen on Linux (no platform-specific code).
-          - workspace: codegen
-            os: ubuntu-latest
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # See the note above `env` for why only hello_world saves. The output base
-      # setup-bazel sets (~/.bazel; D:/_bazel on Windows) takes precedence over
-      # the Windows step's --output_user_root and is as short.
-      - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # See the note above `env` for why only hello_world saves.
+      #
+      # On Windows the output base is `<workspace drive>/b`, as short as a
+      # directory can be, because aapt2 cannot open a path of 260 characters or
+      # more, with long paths enabled or not (it is not long-path aware), and an
+      # Android build reads resources from
+      # `<output base>/execroot/_main/bazel-out/<config>/bin/external/<repo>/_aar/
+      # unzipped/resources/...`. plugin_example's longest is 233 characters below
+      # the execution root, so the execution root may take 26: `D:/b` leaves 6
+      # to spare, setup-bazel's default `D:/_bazel` leaves 1, and a longer
+      # artifact name on a bump would fail. The same short root
+      # keeps nested runfiles, such as the hermetic Python interpreter's
+      # `_socket.pyd`, under MAX_PATH. `--output_user_root` on the command line
+      # cannot do this: setup-bazel's `startup --output_base` line in
+      # `~/.bazelrc` beats it. tools/ci_matrix/test/windows_paths_test.dart
+      # checks the arithmetic. Workflow expressions cannot take a substring, so
+      # a step names the drive first.
+      - name: Name the workspace drive (Windows)
+        id: drive
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: '"drive=$(Split-Path -Qualifier $env:GITHUB_WORKSPACE)" >> $env:GITHUB_OUTPUT'
+      - uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # 0.19.1
         with:
-          repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
+          output-base: ${{ runner.os == 'Windows' && format('{0}/b', steps.drive.outputs.drive) || '' }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          bazelrc: ${{ env.CI_BAZELRC }}
+          repository-cache: ${{ runner.os != 'Windows' && env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
           cache-save: ${{ github.event_name == 'push' && matrix.workspace == 'hello_world' }}
       - name: Install GTK3 (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev
-      # GitHub's windows-latest image exports ANDROID_NDK_HOME with backslashes
-      # (C:\Android\...), but rules_android_ndk's _create_symlinks() strips the
-      # NDK prefix with a forward-slash string match against ctx.path() output,
-      # so a backslashed value makes the symlink target escape the repo dir and
-      # the fetch fails. Hand it a forward-slash path, as upstream's own Windows
-      # CI does. See https://github.com/bazelbuild/rules_android_ndk/pull/108
-      - name: Normalize ANDROID_NDK_HOME to forward slashes (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
+      # The workspace's `.bazelrc` builds with --lockfile_mode=error, which
+      # refuses a lock that lacks an entry the build needs; the `lockfiles` job
+      # checks every lock for stale entries too.
+      #
+      # The workspaces that run `build` have no test targets (see
+      # tools/ci_matrix/e2e_matrix.dart). The targets are `//...` unless the
+      # table names others for the system.
+      - name: bazel ${{ matrix.command }} ${{ matrix.targets }} (e2e/${{ matrix.workspace }})
+        working-directory: e2e/${{ matrix.workspace }}
+        run: bazel ${{ matrix.command }} ${{ matrix.targets }}
+      # `bazel coverage` of a flutter_test, which `bazel test` never reaches:
+      # the merged report names the sources of the test's package and of a
+      # library in another by their workspace paths, and
+      # `--instrumentation_filter` narrows it to that library. On one system:
+      # what is checked is Bazel's coverage model, and the runner's collection
+      # is the same on every flutter_tester.
+      - name: bazel coverage, combined LCOV report (e2e/hello_world)
+        if: matrix.workspace == 'hello_world' && runner.os == 'Linux'
+        working-directory: e2e/hello_world
         run: |
-          $ndk = $env:ANDROID_NDK_HOME ?? $env:ANDROID_NDK_ROOT
-          "ANDROID_NDK_HOME=$($ndk -replace '\\','/')" >> $env:GITHUB_ENV
-      # --test_output=errors so a failure's assertion reaches this log. Without
-      # it the output stays in a test.log on the runner and is discarded with
-      # the machine.
-      - name: bazel test //... (e2e/${{ matrix.workspace }})
-        if: runner.os != 'Windows'
-        working-directory: e2e/${{ matrix.workspace }}
-        run: bazel test //... --test_output=errors
-      # On Windows, Bazel's default output root lives under a long per-user
-      # temp path; nested runfiles (e.g. the hermetic Python interpreter's
-      # _socket.pyd used by rules_android's aar_embedded_jars_extractor) then
-      # exceed the 260-char MAX_PATH limit and fail to load with
-      # "DLL load failed ... The filename or extension is too long".
-      # A short --output_user_root keeps every generated path well under MAX_PATH.
-      # (`BAZEL_OUTPUT_BASE` is not read by Bazel; the startup flag is required.)
-      # --*_tag_filters=-no-windows-ci skips targets that build fine on
-      # macOS/Linux but exceed the windows-latest runner's commit limit
-      # (RAM + its small fixed pagefile). Today that's hello_world's Android
-      # target: rules_android's resource compiler launches its JVM with
-      # -Xms3G, eagerly committing 3 GiB and OOMing. Android is still covered
-      # on the macOS and Linux runners. The build filter (not just the test
-      # filter) is required because `bazel test //...` builds every matched
-      # target, including the non-test app, so a test-only filter wouldn't
-      # stop the OOMing build action.
-      - name: bazel test //... (e2e/${{ matrix.workspace }})
-        if: runner.os == 'Windows'
-        working-directory: e2e/${{ matrix.workspace }}
-        run: bazel --output_user_root=C:/b test //... --test_output=errors --build_tag_filters=-no-windows-ci --test_tag_filters=-no-windows-ci
+          report="$(bazel info output_path)/_coverage/_coverage_report.dat"
+          bazel coverage --combined_report=lcov //coverage/...
+          bazel run //coverage/check -- "$report" coverage/lib/shapes.dart coverage/units/lib/units.dart
+          bazel coverage --combined_report=lcov --instrumentation_filter=//coverage/units //coverage/...
+          bazel run //coverage/check -- "$report" coverage/units/lib/units.dart

@@ -16,7 +16,6 @@ import 'dart:convert';
 
 import 'package:vm_service/vm_service.dart' show RPCError;
 
-import 'bazel.dart';
 import 'dev_tool_exception.dart';
 import 'vm_service_client.dart';
 
@@ -48,9 +47,15 @@ class BuildInfo {
   /// to travel inside the app rather than being asked for.
   final List<String> platformBuildArgs;
 
-  /// The `--dart-define`s the app was compiled with, so the dev tool's own
-  /// compiler can replay them without being told.
-  final List<String> dartDefines;
+  /// The value of `--@rules_dart//dart:extra_dart_defines` the app was built
+  /// with: the workspace's `.bazelrc` defines and the run's `--dart-define`s,
+  /// in the order Bazel applied them. Not the target's own `defines`, flavor or
+  /// versions, which a build of the target supplies itself.
+  ///
+  /// A dev build has to end with this value: the dev config it writes carries
+  /// the defines the dev tool's compiler replays on every reload and restart.
+  /// It passes on only what its own options lack ([definesToReplay]).
+  final List<String> extraDartDefines;
 
   /// The app's `flutter_assets` tree, as an exec-root-relative bazel path
   /// with forward slashes on every host. Compared against
@@ -70,6 +75,14 @@ class BuildInfo {
   /// plugin set after a hot restart, silently.
   final String targetPlatform;
 
+  /// Whether the app's kernel was compiled with `--track-widget-creation`.
+  ///
+  /// The resident frontend_server recompiles every changed library on a hot
+  /// reload or restart, so it passes the flag too when this is true: a library
+  /// compiled without it builds its widgets with no creation location, and the
+  /// widget inspector loses them after the first edit.
+  final bool trackWidgetCreation;
+
   /// The record exactly as the running app served it.
   ///
   /// Kept alongside the parsed fields rather than re-derived from them, so a
@@ -81,9 +94,10 @@ class BuildInfo {
     required this.label,
     required this.compilationMode,
     required this.platformBuildArgs,
-    required this.dartDefines,
+    required this.extraDartDefines,
     required this.assetsDir,
     required this.targetPlatform,
+    required this.trackWidgetCreation,
     required this.record,
   });
 
@@ -128,28 +142,54 @@ class BuildInfo {
       platformBuildArgs: need<List<dynamic>>(
         'platformBuildArgs',
       ).cast<String>(),
-      dartDefines: need<List<dynamic>>('dartDefines').cast<String>(),
+      extraDartDefines: need<List<dynamic>>(
+        'extraDartDefines',
+      ).cast<String>(),
       assetsDir: need<String>('assetsDir'),
       targetPlatform: need<String>('targetPlatform'),
+      trackWidgetCreation: need<bool>('trackWidgetCreation'),
       record: json,
     );
   }
-
-  /// The bazel flags that reproduce this app's configuration on a build or
-  /// cquery of the launch target, plus whatever [extra] the caller was given.
-  ///
-  /// One list, used for every invocation of a session, so the tree that gets
-  /// queried and the tree that gets built cannot drift apart.
-  List<String> buildArgs({List<String> extra = const []}) => [
-    ...platformBuildArgs,
-    ...dartDefineFlags(dartDefines),
-    ...extra,
-  ];
 
   @override
   String toString() =>
       'BuildInfo($label, $compilationMode, $targetPlatform, '
       'platformBuildArgs: $platformBuildArgs, assetsDir: $assetsDir)';
+}
+
+/// The `--@rules_dart//dart:extra_dart_defines` values a build adds to its own
+/// options so that it compiles with the app's [built] value, given the
+/// [applied] value those options already give the flag.
+///
+/// The flag is a list every occurrence appends to, the `.bazelrc` lines first
+/// and the command line's after, so a build can only add to what its options
+/// apply, and the app's value has to begin with it. Passing the whole of
+/// [built] instead would apply the workspace's defines twice: the build would
+/// compile the same, but its options would differ from the app's own build,
+/// and Bazel throws its analysis cache away for each command whose options
+/// differ from the one before.
+///
+/// Throws when [built] does not begin with [applied]: no build in these
+/// options compiles what the app did.
+List<String> definesToReplay({
+  required List<String> applied,
+  required List<String> built,
+}) {
+  for (var i = 0; i < applied.length; i++) {
+    if (i == built.length || applied[i] != built[i]) {
+      throw DevToolException(
+        'The running app was built with '
+        '--@rules_dart//dart:extra_dart_defines ${jsonEncode(built)}, but '
+        'this command\'s Bazel options already give it '
+        '${jsonEncode(applied)}, which the app\'s value does not begin with. '
+        'A build can only add defines to the ones its options apply, so none '
+        'in these options compiles what the app did. Pass the --config and '
+        '--build-arg flags the app was built with, or run the app again.',
+      );
+    }
+  }
+  return built.sublist(applied.length);
 }
 
 /// The JSON-RPC code every `ServiceExtensionResponse.error` from the agent
@@ -242,8 +282,8 @@ String resolveAssetsDir({
       '(${appliedArgs.join(' ')}).\n'
       'Reachable from $target: '
       '${candidates.where((f) => f.endsWith('flutter_assets')).join(', ')}\n'
-      'If the run passed extra --build-arg values, attach needs the same '
-      'ones — they change the configuration and cannot be recovered from the '
+      'If the run passed --config or --build-arg values, attach needs the '
+      'same ones — they change the configuration and cannot be recovered from the '
       'app.',
     );
   }

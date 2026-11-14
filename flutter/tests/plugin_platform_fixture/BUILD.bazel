@@ -1,0 +1,113 @@
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_plugin", "flutter_plugin_platform")
+load("//flutter/tests:flutter_fonts_test.bzl", "analysis_fails_test")
+
+# What flutter_tools refuses in a `flutter: plugin: platforms:` entry, a
+# `flutter_plugin_platform` refuses too. Each target is a test's subject.
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "plugin_platform_fixture",
+)
+
+flutter_plugin_platform(
+    name = "nothing_declared",
+    platform = "ios",
+    tags = ["manual"],
+)
+
+analysis_fails_test(
+    name = "nothing_declared_test",
+    size = "small",
+    message = "a plugin platform has a `plugin_class`, a `dart_plugin_class`, `ffi_plugin` or a `default_package`",
+    target_under_test = ":nothing_declared",
+)
+
+flutter_plugin_platform(
+    name = "android_without_package",
+    platform = "android",
+    plugin_class = "P",
+    tags = ["manual"],
+)
+
+analysis_fails_test(
+    name = "android_without_package_test",
+    size = "small",
+    message = "an Android `plugin_class` needs its Java `package`",
+    target_under_test = ":android_without_package",
+)
+
+flutter_plugin_platform(
+    name = "group_off_android",
+    group = "com.example.p",
+    platform = "ios",
+    plugin_class = "P",
+    tags = ["manual"],
+)
+
+analysis_fails_test(
+    name = "group_off_android_test",
+    size = "small",
+    message = "`group` is the Maven group of an Android plugin's AAR",
+    target_under_test = ":group_off_android",
+)
+
+flutter_plugin_platform(
+    name = "file_name_off_web",
+    dart_plugin_class = "P",
+    file_name = "p.dart",
+    platform = "macos",
+    tags = ["manual"],
+)
+
+analysis_fails_test(
+    name = "file_name_off_web_test",
+    size = "small",
+    message = "`file_name` is a web plugin's",
+    target_under_test = ":file_name_off_web",
+)
+
+flutter_plugin_platform(
+    name = "dart_file_name_without_class",
+    dart_file_name = "p.dart",
+    ffi_plugin = True,
+    platform = "linux",
+    tags = ["manual"],
+)
+
+analysis_fails_test(
+    name = "dart_file_name_without_class_test",
+    size = "small",
+    message = "`dart_file_name` names the file of the `dart_plugin_class`, which is not set",
+    target_under_test = ":dart_file_name_without_class",
+)
+
+flutter_plugin_platform(
+    name = "web_a",
+    platform = "web",
+    plugin_class = "A",
+    tags = ["manual"],
+)
+
+flutter_plugin_platform(
+    name = "web_b",
+    platform = "web",
+    plugin_class = "B",
+    tags = ["manual"],
+)
+
+flutter_plugin(
+    name = "two_web_platforms",
+    srcs = ["lib/fixture.dart"],
+    package = ":pubspec-metadata",
+    platforms = [
+        ":web_a",
+        ":web_b",
+    ],
+    tags = ["manual"],
+)
+
+analysis_fails_test(
+    name = "two_web_platforms_test",
+    size = "small",
+    message = "`platforms` has two web entries",
+    target_under_test = ":two_web_platforms",
+)

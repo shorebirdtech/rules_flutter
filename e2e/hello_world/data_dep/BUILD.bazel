@@ -1,0 +1,17 @@
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_library")
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "data_dep",
+)
+
+# A library with a file it needs at run time, over another that has one too:
+# `//:library_data_test` reads both from its runfiles.
+flutter_library(
+    name = "data_dep",
+    srcs = ["lib/data_dep.dart"],
+    data = ["flutter_fixture.txt"],
+    package = ":pubspec-metadata",
+    visibility = ["//visibility:public"],
+    deps = ["//data_dep/inner"],
+)

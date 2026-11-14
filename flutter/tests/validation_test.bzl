@@ -57,6 +57,16 @@ def _rejects_registrant_define_test_impl(ctx):
     asserts.false(env, is_valid_dart_define("flutter.dart_plugin_registrant"))
     return unittest.end(env)
 
+def _rejects_app_flavor_define_test_impl(ctx):
+    """FLUTTER_APP_FLAVOR is reserved: the build sets it from `flavor`, as flutter_tools does."""
+    env = unittest.begin(ctx)
+    asserts.false(env, is_valid_dart_define("FLUTTER_APP_FLAVOR=x"))
+    asserts.false(env, is_valid_dart_define("FLUTTER_APP_FLAVOR"))
+
+    # Only that key: another key that starts with it is the user's own.
+    asserts.true(env, is_valid_dart_define("FLUTTER_APP_FLAVORS=x"))
+    return unittest.end(env)
+
 def _rejects_empty_test_impl(ctx):
     env = unittest.begin(ctx)
     asserts.false(env, is_valid_dart_define(""))
@@ -123,6 +133,7 @@ _t10_test = unittest.make(_rejects_non_identifier_test_impl)
 _t11_test = unittest.make(_rejects_swift_keyword_test_impl)
 _t12_test = unittest.make(_runner_module_is_distinct_test_impl)
 _t13_test = unittest.make(_runner_module_is_injective_test_impl)
+_t14_test = unittest.make(_rejects_app_flavor_define_test_impl)
 
 def validation_test_suite(name):
     unittest.suite(
@@ -141,4 +152,5 @@ def validation_test_suite(name):
         _t11_test,
         _t12_test,
         _t13_test,
+        _t14_test,
     )

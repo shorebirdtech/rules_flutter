@@ -3,24 +3,24 @@
 module(name = "rules_flutter_macos_example")
 
 bazel_dep(name = "rules_flutter", version = "0.0.0")
-bazel_dep(name = "rules_dart", version = "0.8.1")
+bazel_dep(name = "rules_dart", version = "0.9.1")
 bazel_dep(name = "bazel_skylib", version = "1.9.2")
-bazel_dep(name = "apple_support", version = "2.9.1")
-bazel_dep(name = "rules_apple", version = "5.2.0")
-bazel_dep(name = "rules_cc", version = "0.2.26")
-bazel_dep(name = "rules_swift", version = "4.1.2")
+bazel_dep(name = "apple_support", version = "2.12.0")
+bazel_dep(name = "rules_apple", version = "5.4.0")
+bazel_dep(name = "rules_cc", version = "0.2.28")
+bazel_dep(name = "rules_swift", version = "4.2.2")
 bazel_dep(name = "platforms", version = "1.1.0")
 
-# rules_apple's macos_extension has no `app_intents` attribute, so a macOS
-# widget extension cannot carry the App Intents metadata its Control Center
-# control runs. The patch adds it, as ios_extension has it. An override only
-# applies in the root module: an app that needs this adds it to its own
-# MODULE.bazel.
-single_version_override(
+# rules_apple 5.4.0's macos_extension has no `app_intents` attribute, so a
+# macOS widget extension cannot carry the App Intents metadata its Control
+# Center control runs. rules_apple's main branch has it (#3112) and no release
+# does yet. An override only applies in the root module: an app that needs
+# this adds it to its own MODULE.bazel. Drop it once a rules_apple release has
+# #3112.
+git_override(
     module_name = "rules_apple",
-    patch_strip = 1,
-    patches = ["//patches:rules_apple_macos_extension_app_intents.patch"],
-    version = "5.2.0",
+    commit = "7610d32139667a06a77d448e6b24b1a34c3e8d2e",
+    remote = "https://github.com/bazelbuild/rules_apple.git",
 )
 
 local_path_override(
@@ -29,22 +29,26 @@ local_path_override(
 )
 
 flutter = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter")
-flutter.toolchain(flutter_version = "3.47.8")
-flutter.pub(
+flutter.toolchain(flutter_version = "3.47.9")
+
+flutter_pub = use_extension("@rules_flutter//flutter/pub:extensions.bzl", "pub")
+flutter_pub.from_lock(
     name = "deps",
     lock = "//:pubspec.lock",
 )
-use_repo(flutter, "deps", "dev_tool_deps", "flutter_macos_engine", "flutter_toolchains", "flutter_web_sdk")
 
-register_toolchains("@flutter_toolchains//:all")
+use_repo(flutter, "flutter_macos_engine", "flutter_web_sdk")
+
+use_repo(flutter_pub, "deps", "dev_tool_deps")
 
 # Hermetic C++ toolchain for Linux arm64 execution platforms, so a C++ tool
 # built for the exec platform (zipper, xmllint) can be compiled when Bazel runs
 # actions on a Linux arm64 worker. Only the Linux-exec, Linux-target toolchain
 # exists: Mac and iOS builds keep apple_support's toolchain. It is registered
-# only for cloud builds, by `--extra_toolchains` in .bazelrc: registering it
-# here would make every build fetch llvm-project's sources, which toolchain
-# resolution loads the generated package from.
+# only on request, with `--extra_toolchains=@llvm_toolchains//:all` (for
+# example in .bazelrc.user, for builds that run on a Linux arm64 worker):
+# registering it here would make every build fetch llvm-project's sources,
+# which toolchain resolution loads the generated package from.
 bazel_dep(name = "llvm", version = "0.8.26", dev_dependency = True)
 
 llvm_tc = use_extension("@llvm//extensions:toolchain.bzl", "toolchain", dev_dependency = True)

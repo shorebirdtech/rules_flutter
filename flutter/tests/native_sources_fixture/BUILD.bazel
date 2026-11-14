@@ -4,6 +4,7 @@ and the library again behind a wrapper that moves it and as a Dart code
 asset."""
 
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
+load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
 load("@rules_dart//dart:defs.bzl", "dart_code_asset")
@@ -13,10 +14,14 @@ package(default_visibility = [
     "//flutter/tests/code_asset_fixture:__pkg__",
 ])
 
-genrule(
+write_file(
     name = "generated",
-    outs = ["generated.c"],
-    cmd = "echo 'int generated(void) { return 3; }' > $@",
+    out = "generated.c",
+    content = [
+        "int generated(void) { return 3; }",
+        "",
+    ],
+    newline = "unix",
 )
 
 cc_library(
@@ -50,9 +55,9 @@ copy_file(
     out = "vendor/lib/libbridge.dylib",
 )
 
-# The library as rules_dart's code asset, which takes it as `shared_library`.
+# The library as rules_dart's code asset, which takes it as `file`.
 dart_code_asset(
     name = "bridge_code_asset",
     asset_id = "package:native_sources_fixture/bridge",
-    shared_library = ":bridge",
+    file = ":bridge",
 )

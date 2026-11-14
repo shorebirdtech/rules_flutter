@@ -1,0 +1,10 @@
+name: fx_names
+version: 1.0.0
+environment:
+  sdk: ^3.13.0
+flutter:
+  assets:
+    - assets/my image.png
+    - assets/日本語.png
+    - assets/with space/
+    - path: assets/map form.png

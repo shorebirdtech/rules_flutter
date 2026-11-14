@@ -1,0 +1,51 @@
+{
+  "assets": {
+    "assets/all.txt": {
+      "variants": [
+        {
+          "asset": "assets/all.txt"
+        }
+      ]
+    },
+    "assets/android_only.txt": {
+      "variants": [
+        {
+          "asset": "assets/android_only.txt"
+        }
+      ],
+      "platforms": ["android"]
+    },
+    "assets/web_only.txt": {
+      "variants": [
+        {
+          "asset": "assets/web_only.txt"
+        }
+      ],
+      "platforms": ["web"]
+    },
+    "assets/ios_only.txt": {
+      "variants": [
+        {
+          "asset": "assets/ios_only.txt"
+        }
+      ],
+      "platforms": ["ios"]
+    },
+    "assets/desktop/a.txt": {
+      "variants": [
+        {
+          "asset": "assets/desktop/a.txt"
+        }
+      ],
+      "platforms": ["linux", "macos", "windows"]
+    },
+    "assets/desktop/b.txt": {
+      "variants": [
+        {
+          "asset": "assets/desktop/b.txt"
+        }
+      ],
+      "platforms": ["linux", "macos", "windows"]
+    }
+  }
+}

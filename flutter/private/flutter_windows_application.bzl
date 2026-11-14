@@ -9,9 +9,9 @@ Output bundle structure:
     my_app/
       my_app.exe             (Win32 runner executable)
       flutter_windows.dll    (Flutter engine)
-      app.so                 (AOT-compiled Dart code as ELF)
       *.dll                  (native plugin libraries, if any)
       data/
+        app.so               (AOT-compiled Dart code as ELF)
         flutter_assets/
           AssetManifest.bin
           FontManifest.json
@@ -19,13 +19,20 @@ Output bundle structure:
         icudtl.dat
 """
 
-load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
-load("//flutter:providers.bzl", "FlutterApplicationInfo")
+load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
+load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
+load("@rules_dart//dart:providers.bzl", "DartAnalyzableInfo")
+load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "program_assets_action_args")
+load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterSdkRecordInfo")
 load("//flutter/private:cc_runner_compile.bzl", "compile_and_link_runner")
 load("//flutter/private:common.bzl", "compute_desktop_bundle_copies")
 load("//flutter/private:engine_helpers.bzl", "find_engine_header_dir")
 load("//flutter/private:exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
+load("//flutter/private:flutter_desktop_plugin_info.bzl", "plugin_link_flags")
+load("//flutter/private:flutter_windows_resources.bzl", "WINDOWS_VERSION_ATTRS", "windows_version_defines")
+load("//flutter/private:mobile_engine_check.bzl", "check_desktop_engine")
 load("//flutter/private:path_mapping.bzl", "file_ref", "json_config_args")
+load("//flutter/private:plugin_registrant.bzl", "registrant_include_dirs")
 
 # =============================================================================
 # Runner compilation rule
@@ -45,10 +52,14 @@ def _flutter_windows_runner_lib_impl(ctx):
             registrant_hdrs.append(f)
 
     # Use custom sources if provided, otherwise use built-in flutter create-style runner.
+    defines = windows_version_defines(ctx)
     if ctx.attr.srcs:
         runner_srcs = ctx.files.srcs
         runner_hdrs = ctx.files.hdrs
     else:
+        # `flutter create` writes the project's name into `main.cpp` as the
+        # window's title; the built-in runner takes it as a define.
+        defines.append("RUNNER_APP_NAME=\"%s\"" % (ctx.attr.app_name or ctx.label.name))
         runner_srcs = [f for f in ctx.files._runner_sources if f.path.endswith((".cc", ".cpp", ".c"))]
         runner_hdrs = ctx.files.hdrs + [f for f in ctx.files._runner_sources if f.path.endswith(".h")]
         runner_hdrs = runner_hdrs + [f for f in ctx.files._runner_hdrs if f.path.endswith(".h")]
@@ -65,8 +76,10 @@ def _flutter_windows_runner_lib_impl(ctx):
     plugin_srcs = []
     plugin_hdrs = []
     plugin_include_dirs = []
+    plugin_entries = []
     if ctx.attr.application:
-        for entry in ctx.attr.application[FlutterApplicationInfo].windows_plugin_libraries.to_list():
+        plugin_entries = ctx.attr.application[FlutterApplicationInfo].windows_plugin_libraries.to_list()
+        for entry in plugin_entries:
             plugin_srcs.extend(entry.srcs.to_list())
             plugin_hdrs.extend(entry.hdrs.to_list())
             plugin_include_dirs.extend(entry.include_dirs.to_list())
@@ -82,6 +95,10 @@ def _flutter_windows_runner_lib_impl(ctx):
         plugin_srcs = plugin_srcs,
         plugin_hdrs = plugin_hdrs,
         plugin_include_dirs = plugin_include_dirs,
+        plugin_linkopts = plugin_link_flags(plugin_entries, "Windows"),
+        defines = defines,
+        linking_contexts = [r[CcInfo].linking_context for r in ctx.attr.resources] +
+                           _manifest_linking_contexts(ctx),
     )
 
     return [DefaultInfo(
@@ -89,7 +106,20 @@ def _flutter_windows_runner_lib_impl(ctx):
         executable = runner_binary,
     )]
 
-def _compile_windows_runner(ctx, runner_srcs, engine_files, is_debug, registrant_srcs = [], registrant_hdrs = [], runner_hdrs = [], plugin_srcs = [], plugin_hdrs = [], plugin_include_dirs = []):
+def _manifest_linking_contexts(ctx):
+    """Embeds the application manifest, as CMake does with a `.manifest` source."""
+    manifest = ctx.file.manifest
+    if not manifest:
+        return []
+    return [cc_common.create_linking_context(linker_inputs = depset([
+        cc_common.create_linker_input(
+            owner = ctx.label,
+            additional_inputs = depset([manifest]),
+            user_link_flags = depset(["/MANIFEST:EMBED", "/MANIFESTINPUT:" + manifest.path]),
+        ),
+    ]))]
+
+def _compile_windows_runner(ctx, runner_srcs, engine_files, is_debug, registrant_srcs = [], registrant_hdrs = [], runner_hdrs = [], plugin_srcs = [], plugin_hdrs = [], plugin_include_dirs = [], plugin_linkopts = [], defines = [], linking_contexts = []):
     """Compile the C++ Win32 runner binary.
 
     Uses cc_common.compile() + cc_common.link() with Bazel's hermetic CC
@@ -114,6 +144,13 @@ def _compile_windows_runner(ctx, runner_srcs, engine_files, is_debug, registrant
         plugin_include_dirs: Plugin-relative include directories,
             resolved against each plugin's package root via additional
             `-I` flags.
+        plugin_linkopts: Linker flags for the system libraries the plugins'
+            sources need (e.g. `shlwapi.lib`).
+        defines: Further defines for the runner's sources: the
+            `FLUTTER_VERSION*` ones, which `flutter build windows` defines for
+            the runner's C++ too.
+        linking_contexts: Further linking contexts: the compiled resources
+            and the manifest.
 
     Returns:
         The compiled runner executable File.
@@ -160,7 +197,7 @@ def _compile_windows_runner(ctx, runner_srcs, engine_files, is_debug, registrant
 
     # UNICODE/_UNICODE: use wide-char Win32 APIs (CreateWindowW, RegGetValueW, etc.)
     # Required by the flutter create runner which uses wchar_t throughout.
-    defines = ["UNICODE", "_UNICODE"]
+    defines = ["UNICODE", "_UNICODE"] + defines
     if not is_debug:
         defines.append("NDEBUG")
 
@@ -181,21 +218,14 @@ def _compile_windows_runner(ctx, runner_srcs, engine_files, is_debug, registrant
     # Include registrant, runner, and plugin header directories.
     all_header_files = header_files + registrant_hdrs + runner_hdrs + plugin_hdrs
     seen_dirs = {}
-    for h in registrant_hdrs + runner_hdrs + plugin_hdrs:
+    for d in registrant_include_dirs([h.path for h in registrant_hdrs]):
+        seen_dirs[d] = True
+        extra_compile_flags.append("-I" + d)
+    for h in runner_hdrs + plugin_hdrs:
         d = h.path[:h.path.rfind("/")]
         if d not in seen_dirs:
             seen_dirs[d] = True
             extra_compile_flags.append("-I" + d)
-
-    # For flutter create registrant files at windows/flutter/generated_plugin_registrant.h,
-    # also add the grandparent dir so #include "flutter/generated_plugin_registrant.h" resolves.
-    for h in registrant_hdrs:
-        if "/flutter/" in h.path:
-            d = h.path[:h.path.rfind("/")]
-            grandparent = d[:d.rfind("/")]
-            if grandparent and grandparent not in seen_dirs:
-                seen_dirs[grandparent] = True
-                extra_compile_flags.append("-I" + grandparent)
 
     # Plugin-relative include dirs (e.g. "windows/include") resolved
     # against each plugin's package root (deduced from plugin_srcs paths).
@@ -223,14 +253,15 @@ def _compile_windows_runner(ctx, runner_srcs, engine_files, is_debug, registrant
         engine_header_files = all_header_files,
         engine_include_dir = header_dir,
         extra_compile_flags = extra_compile_flags,
-        extra_link_flags = ["/SUBSYSTEM:WINDOWS", "user32.lib", "ole32.lib", "dwmapi.lib", "shell32.lib", "advapi32.lib"],
+        extra_link_flags = ["/SUBSYSTEM:WINDOWS", "user32.lib", "ole32.lib", "dwmapi.lib", "shell32.lib", "advapi32.lib"] + plugin_linkopts,
         extra_defines = defines,
         additional_srcs = additional_srcs + plugin_srcs,
+        linking_contexts = linking_contexts,
     )
 
 flutter_windows_runner_lib = rule(
     implementation = _flutter_windows_runner_lib_impl,
-    attrs = {
+    attrs = WINDOWS_VERSION_ATTRS | {
         "engine": attr.label(
             doc = "A flutter_windows_engine target providing engine DLL + headers.",
             mandatory = True,
@@ -254,6 +285,22 @@ flutter_windows_runner_lib = rule(
                   "alongside its own (collected from " +
                   "FlutterApplicationInfo.windows_plugin_libraries).",
             providers = [FlutterApplicationInfo],
+        ),
+        "resources": attr.label_list(
+            doc = "Compiled resources to link, `flutter_windows_resources` targets " +
+                  "(or anything else providing `CcInfo`): the icon and version " +
+                  "information of `Runner.rc`.",
+            providers = [CcInfo],
+        ),
+        "manifest": attr.label(
+            doc = "An application manifest to embed in the executable, " +
+                  "`windows/runner/runner.exe.manifest` in a `flutter create` tree.",
+            allow_single_file = [".manifest"],
+        ),
+        "app_name": attr.string(
+            doc = "The built-in runner's window title, the name `flutter " +
+                  "create` writes into `main.cpp`. Defaults to the target's " +
+                  "name. Unused with `srcs`, whose `main.cpp` names its own.",
         ),
         "_runner_sources": attr.label(
             default = Label("//flutter/private/runners:windows_runner_srcs"),
@@ -280,8 +327,11 @@ def _flutter_windows_bundle_impl(ctx):
     app_info = ctx.attr.application[FlutterApplicationInfo]
     flutter_assets = app_info.flutter_assets
     icu_data = app_info.icu_data
+
+    # The `native_deps` libraries always ship; the code assets are placed by
+    # the bundle tool, which reads which of them ship (`code_asset_os`).
     native_libs = list(app_info.native_libs)
-    native_libs.extend(app_info.bundled_code_assets.to_list())
+    code_assets = program_assets_action_args(ctx.actions, app_info.program_assets, data = False)
     is_debug = app_info.is_debug
 
     flutter_toolchain = ctx.toolchains["@rules_flutter//flutter:toolchain_type"]
@@ -298,7 +348,7 @@ def _flutter_windows_bundle_impl(ctx):
             "To build a Windows bundle from a non-Windows host, use: " +
             "--platforms=@rules_flutter//flutter/platforms:windows_x64",
         )
-    engine_files = flutter_sdk_info.engine_library.files.to_list()
+    engine_files = flutter_sdk_info.engine_library[DefaultInfo].files.to_list()
 
     # Filter engine files to only include runtime artifacts (.dll) — not
     # headers, import libraries, or C++ wrapper sources used at compile time.
@@ -334,6 +384,14 @@ def _flutter_windows_bundle_impl(ctx):
     elif app_info.aot_output:
         extra_inputs.append(app_info.aot_output)
 
+    # The engine must hold the app's CPU, and an app of a custom SDK keeps the
+    # record of the checked pieces it was built from.
+    sdk_record = ctx.attr._sdk_record[FlutterSdkRecordInfo]
+    check_desktop_engine(ctx.label, sdk_record, flutter_sdk_info.target_arch or flutter_sdk_info.host_tools.host_arch)
+    if sdk_record.record:
+        copies.append({"src": file_ref(refs, sdk_record.record), "dst": "data/flutter_assets/flutter_sdk.json"})
+        extra_inputs.append(sdk_record.record)
+
     # Get the runner executable from the runner target.
     runner_files = ctx.attr.runner[DefaultInfo].files.to_list()
     runner_binary = None
@@ -354,9 +412,10 @@ def _flutter_windows_bundle_impl(ctx):
         "copy_dirs": [
             {"src": file_ref(refs, flutter_assets), "dst": "data/flutter_assets"},
         ],
+        "code_asset_os": "windows",
     }
 
-    inputs = [ctx.file._bundle_tool, flutter_assets, icu_data, runner_binary] + extra_inputs + native_libs + engine_files
+    inputs = [ctx.file._bundle_tool, flutter_assets, icu_data, runner_binary] + ctx.files._bundle_tool_imports + extra_inputs + native_libs + engine_files
 
     args = ctx.actions.args()
     args.add(ctx.file._bundle_tool)
@@ -364,10 +423,10 @@ def _flutter_windows_bundle_impl(ctx):
 
     ctx.actions.run(
         executable = portable_tools(ctx).dart,
-        arguments = [args, json_config_args(ctx, config, refs)],
+        arguments = [args, json_config_args(ctx, config, refs), code_assets.args],
         inputs = depset(
             direct = inputs,
-            transitive = [portable_tools(ctx).tool_files],
+            transitive = [portable_tools(ctx).sdk_files.run, code_assets.inputs],
         ),
         outputs = [bundle_dir],
         mnemonic = "FlutterWindowsBundle",
@@ -376,7 +435,12 @@ def _flutter_windows_bundle_impl(ctx):
         progress_message = "Bundling Windows app %s" % ctx.label,
     )
 
-    return [DefaultInfo(files = depset([bundle_dir]))]
+    application = ctx.attr.application
+
+    # The program's own Dart files, for rules_dart's analysis of the app.
+    return [DefaultInfo(files = depset([bundle_dir]))] + (
+        [application[DartAnalyzableInfo]] if DartAnalyzableInfo in application else []
+    )
 
 flutter_windows_bundle_rule = rule(
     implementation = _flutter_windows_bundle_impl,
@@ -396,6 +460,13 @@ flutter_windows_bundle_rule = rule(
         "_bundle_tool": attr.label(
             default = Label("//flutter/private/tools:bundle_app.dart"),
             allow_single_file = True,
+        ),
+        "_bundle_tool_imports": attr.label(
+            default = Label("//flutter/private/tools:bundle_app_imports"),
+        ),
+        "_sdk_record": attr.label(
+            default = Label("//flutter/private:sdk_record"),
+            providers = [FlutterSdkRecordInfo],
         ),
     },
     toolchains = [

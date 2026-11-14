@@ -126,6 +126,7 @@ void main() {
         );
       },
       timeout: const Timeout(Duration(minutes: 5)),
+      tags: 'macos',
     );
 
     test(
@@ -234,6 +235,155 @@ void main() {
         );
       },
       timeout: const Timeout(Duration(minutes: 6)),
+      tags: 'web',
+    );
+
+    /// The same edit, for an app that is not at the workspace root, a library
+    /// of the app's own package and a library of another, neither at the root
+    /// either.
+    ///
+    /// An asset's key is its path in its package (`assets/message.txt`,
+    /// `lib/widgets/banner.txt` for the app's own library, with no package in
+    /// front, `packages/ui_kit/assets/greeting.txt`), which says nothing of
+    /// where in the workspace the file is. The build hands the dev tool a map from key
+    /// prefix to workspace directory (`assetRoots` of `_dev_config.json`); with
+    /// it wrong, no file is found behind either key, nothing is watched, and
+    /// an edit is "no changes" — the reload reports success and shows the old
+    /// text. Unit tests cover the lookup; this covers the map the build writes.
+    test(
+      'an edited asset of an app and of libraries below the workspace root '
+      'reaches the running browser app',
+      () async {
+        final ws = await editableWorkspace('web_example');
+        final appAsset = ws.file('nested_assets/assets/message.txt');
+        final ownLibAsset = ws.file('nested_assets/lib/widgets/banner.txt');
+        final libAsset = ws.file('nested_assets/ui_kit/assets/greeting.txt');
+        expect(appAsset.readAsStringSync().trim(), 'nested app v1');
+        expect(ownLibAsset.readAsStringSync().trim(), 'own lib v1');
+        expect(libAsset.readAsStringSync().trim(), 'ui kit v1');
+
+        final dt = await startDevTool(
+          workspace: ws.root,
+          target: '//nested_assets:nested_app',
+          device: 'chrome',
+        );
+        final start = await dt.waitForEvent(
+          'app.start',
+          timeout: const Duration(seconds: 240),
+        );
+        final appId = start['params']?['appId'] as String? ?? dt.appId!;
+        await dt.waitForHttpControl(timeout: const Duration(seconds: 120));
+        await dt.waitForStderr(
+          'dwds_vm_service',
+          timeout: const Duration(seconds: 120),
+        );
+        final moduleServer = Uri.parse(
+          json.decode(await dt.waitForStderr('frontend_server_ready'))['uri']
+              as String,
+        );
+
+        /// [key] as the page would fetch it from the module server.
+        Future<String> served(String key) async {
+          final client = HttpClient();
+          try {
+            final response = await (await client.getUrl(
+              moduleServer.resolve('assets/$key'),
+            )).close();
+            return (await utf8.decoder.bind(response).join()).trim();
+          } finally {
+            client.close();
+          }
+        }
+
+        Future<String?> shown(String label) async {
+          final answer = await dt.httpCommand('app.getText', {
+            'appId': appId,
+            'key': label,
+          });
+          expect(answer['error'], isNull, reason: 'app.getText $label');
+          return answer['result']?['text'] as String?;
+        }
+
+        expect(await served('assets/message.txt'), 'nested app v1');
+        expect(await served('lib/widgets/banner.txt'), 'own lib v1');
+        expect(
+          await served('packages/ui_kit/assets/greeting.txt'),
+          'ui kit v1',
+        );
+
+        var id = 1;
+        Future<void> editAndReload(
+          File file,
+          String text,
+          String key,
+          String label,
+        ) async {
+          file.writeAsStringSync('$text\n');
+          final reload = await dt.sendCommand(
+            id++,
+            'app.hotReload',
+            params: {'appId': appId},
+          );
+          expect(
+            reload['error'],
+            isNull,
+            reason: 'app.hotReload: ${reload['error']}',
+          );
+          expect(
+            reload['result']?['assetsChanged'],
+            1,
+            reason:
+                'the reload must notice an edit to ${file.path} and rebuild '
+                'the bundle, not report "no changes"',
+          );
+          expect(
+            reload['result']?['assetsProblem'],
+            isNull,
+            reason: '${reload['result']?['assetsProblem']}',
+          );
+          expect(await served(key), text);
+
+          // The reload rebuilds the tree and the label then reads its asset
+          // again, which is asynchronous: ask until it shows the text.
+          final deadline = DateTime.now().add(const Duration(seconds: 20));
+          var showing = await shown(label);
+          while (showing != text && DateTime.now().isBefore(deadline)) {
+            await Future<void>.delayed(const Duration(milliseconds: 250));
+            showing = await shown(label);
+          }
+          expect(
+            showing,
+            text,
+            reason: 'the page must show the edited ${file.path}',
+          );
+        }
+
+        await editAndReload(
+          appAsset,
+          'nested app v2',
+          'assets/message.txt',
+          'e2e_app_asset_label',
+        );
+        await editAndReload(
+          ownLibAsset,
+          'own lib v2',
+          'lib/widgets/banner.txt',
+          'e2e_own_lib_asset_label',
+        );
+        await editAndReload(
+          libAsset,
+          'ui kit v2',
+          'packages/ui_kit/assets/greeting.txt',
+          'e2e_lib_asset_label',
+        );
+
+        // The earlier edits' text is still shown: each reload rebuilt a
+        // bundle that has every edit, not only the last.
+        expect(await shown('e2e_app_asset_label'), 'nested app v2');
+        expect(await shown('e2e_own_lib_asset_label'), 'own lib v2');
+      },
+      timeout: const Timeout(Duration(minutes: 6)),
+      tags: 'web',
     );
 
     /// The same edit, on the platform where the tracked tree can diverge from
@@ -243,7 +393,7 @@ void main() {
     /// rules_apple split transition, so the running app's `flutter_assets`
     /// tree lives in a configuration — `…-ST-<hash>` — that no command line
     /// can name. Tracking the tool's own bare build of the application instead
-    /// lands in the host configuration, and everything then reports success:
+    /// lands in the host platform's configuration, and everything then reports success:
     /// the rebuild writes a real tree, the tracker diffs a real tree, they are
     /// different trees, and the edit never leaves the machine.
     ///
@@ -327,6 +477,7 @@ void main() {
       },
       timeout: const Timeout(Duration(minutes: 8)),
       skip: !Platform.isMacOS ? 'macOS only (needs Xcode Simulator)' : null,
+      tags: 'ios_sim',
     );
   });
 }

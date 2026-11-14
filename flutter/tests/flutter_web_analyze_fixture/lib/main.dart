@@ -3,7 +3,7 @@
 /// `lib/main.dart`).
 ///
 /// It is reachable as `package:flutter_web_analyze_fixture/main.dart`, so the
-/// rule routes it to `package_srcs`. Analysis cannot tell the two lists apart —
+/// rule routes it to `srcs`. Analysis cannot tell the two lists apart —
 /// both stage by `short_path` — so what this file guards is that the entrypoint
 /// reaches the analyzer at all, whichever list it lands in.
 library;

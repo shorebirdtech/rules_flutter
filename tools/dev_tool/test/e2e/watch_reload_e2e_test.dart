@@ -1,4 +1,4 @@
-@Tags(['e2e'])
+@Tags(['e2e', 'macos'])
 library;
 
 import 'package:test/test.dart';

@@ -1,19 +1,18 @@
 /// The built `flutter_assets` tree, and what an edit changed in it.
 ///
-/// The Bazel asset action keys every asset by its `short_path`, which for a
-/// main-repo source file is exactly its workspace-relative path. That makes the
-/// built bundle its own source map: an archive entry with a file of the same
-/// relative path in the workspace names the file the user edits. Nothing here
-/// parses `assets = glob(...)` or a pubspec to work out which files matter —
-/// the build already answered that, and the answer is on disk.
+/// An asset is bundled under its path in its package (`assets/a.png`, or
+/// `packages/<pkg>/…` for a library's), which is not its path in the
+/// workspace. The build says which workspace directory each package's assets
+/// come from ([AssetBundle.assetRoots], from `assetRoots` of the dev config),
+/// so nothing here parses `assets = glob(...)` or a pubspec to work out which
+/// files matter, and a file added to such a directory is found as it appears.
 ///
 /// Assets from elsewhere (`packages/<pkg>/…` from a pub dependency,
 /// `fonts/MaterialIcons-Regular.otf` from the SDK, the generated manifests)
-/// have no workspace file at their archive path, so they are not watched. They
-/// still take part in the diff: a rebuild that changes one is applied like any
-/// other. Shaders are the exception the build spells out: a package's shader
-/// sits at `packages/<pkg>/…` and is compiled from a `.frag` and whatever it
-/// includes, so the build lists those files ([AssetBundle.shaders]).
+/// have no workspace file, so they are not watched. They still take part in
+/// the diff: a rebuild that changes one is applied like any other. A shader is
+/// compiled from a `.frag` and whatever it includes, so the build lists those
+/// files ([AssetBundle.shaders]).
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
@@ -51,6 +50,10 @@ class AssetBundle {
   /// to the files a user edits.
   final String workspaceRoot;
 
+  /// The workspace-relative directory the first-party assets under each archive
+  /// path prefix come from. See `DevConfig.assetRoots`.
+  final Map<String, String> assetRoots;
+
   /// Every shader in the bundle, by archive path, with the workspace-relative
   /// files it is compiled from. See `DevConfig.shaders`.
   final Map<String, List<String>> shaders;
@@ -58,6 +61,7 @@ class AssetBundle {
   const AssetBundle({
     required this.directory,
     required this.workspaceRoot,
+    this.assetRoots = const {},
     this.shaders = const {},
   });
 
@@ -100,15 +104,24 @@ class AssetBundle {
   /// The workspace file that feeds [archivePath], or null when nothing in the
   /// source tree does.
   String? sourceOf(String archivePath) {
-    final candidate = p.join(
-      workspaceRoot,
-      p.joinAll(p.url.split(archivePath)),
-    );
-    return File(candidate).existsSync() ? candidate : null;
+    // The longest prefix first: `packages/ui/` before the application's own
+    // (empty) one, which every archive path starts with.
+    final prefixes = assetRoots.keys.toList()
+      ..sort((a, b) => b.length.compareTo(a.length));
+    for (final prefix in prefixes) {
+      if (!archivePath.startsWith(prefix)) continue;
+      final candidate = p.joinAll([
+        workspaceRoot,
+        ...p.url.split(assetRoots[prefix]!).where((s) => s != '.'),
+        ...p.url.split(archivePath.substring(prefix.length)),
+      ]);
+      if (File(candidate).existsSync()) return candidate;
+    }
+    return null;
   }
 
-  /// Every workspace file that feeds [archivePath]: the file at its own path,
-  /// and for a shader, the files the build says it is compiled from.
+  /// Every workspace file that feeds [archivePath]: the file the build names
+  /// for it, and for a shader, the files the build says it is compiled from.
   Iterable<String> sourcesOf(String archivePath) sync* {
     final own = sourceOf(archivePath);
     if (own != null) yield own;

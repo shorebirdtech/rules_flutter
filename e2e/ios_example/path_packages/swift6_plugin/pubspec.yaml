@@ -1,0 +1,21 @@
+# A `path` package with no Bazel build: an iOS plugin whose Swift package is
+# `swift-tools-version: 6.0`, so SwiftPM compiles its Swift in the Swift 6
+# language mode, and whose source does not compile in any other.
+name: swift6_plugin
+description: An iOS plugin whose Swift package is in the Swift 6 language mode.
+version: 0.0.1
+publish_to: none
+
+environment:
+  sdk: ^3.13.0
+  flutter: ">=3.3.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      ios:
+        pluginClass: Swift6Plugin

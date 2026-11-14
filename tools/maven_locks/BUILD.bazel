@@ -1,0 +1,40 @@
+load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_test")
+
+# The Maven half of lock checking, which `bazel run @overhead//locks:check` cannot
+# know: every `maven.install` names a `lock_file`, the root's locks (which
+# consumers get) are current, and the declarations print no warnings.
+#   bazel run //tools/maven_locks                         check
+#   bazel run //tools/maven_locks -- --refresh e2e/smoke  re-pin one workspace
+dart_binary(
+    name = "maven_locks",
+    srcs = [
+        "maven_locks.dart",
+        "//tools/e2e_workspaces:e2e_workspaces.dart",
+    ],
+    main = "check_maven_locks.dart",
+)
+
+dart_test(
+    name = "maven_locks_test",
+    size = "small",
+    srcs = ["maven_locks.dart"],
+    main = "test/maven_locks_test.dart",
+    deps = ["@dev_tool_deps//:test"],
+)
+
+# The root Maven lock, which every consumer of rules_flutter gets, keeps
+# androidx.lifecycle at one version. See root_lock_test.dart.
+dart_test(
+    name = "root_lock_test",
+    size = "small",
+    data = ["//:rules_flutter_maven_install.json"],
+    env = {
+        "ROOT_LOCK": "$(rlocationpath //:rules_flutter_maven_install.json)",
+        "RUNFILES_SOURCE_REPO": "",
+    },
+    main = "test/root_lock_test.dart",
+    deps = [
+        "@dev_tool_deps//:test",
+        "@rules_dart//dart/runfiles",
+    ],
+)

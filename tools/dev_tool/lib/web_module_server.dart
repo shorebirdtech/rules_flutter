@@ -926,7 +926,7 @@ class WebModuleServer implements AssetReader {
     final digests = <String, String>{if (!full) ..._moduleDigests};
     // Modules the compiler described without usable metadata. Collected and
     // reported once: with no metadata there is no library list, and
-    // `$dartReloadModifiedModules` reloads modules by library — so an edit in
+    // the DWDS client reloads modules by library — so an edit in
     // one of these reports as reloaded and does not take effect. Per-module
     // warnings would be one line per module in the app.
     final withoutMetadata = <String>[];
@@ -1110,7 +1110,7 @@ class WebModuleServer implements AssetReader {
           'A recompile only happens here once something is known to have '
           'changed, so an empty result means the invalidated libraries never '
           'reached the compiler. `reloaded_sources.json` would list no '
-          'modules, `\$dartReloadModifiedModules` would reload none, and the '
+          'modules, the page would reload none of them, and the '
           'reload would report success while the page kept running the code '
           'it already had.',
         );
@@ -1133,7 +1133,7 @@ class WebModuleServer implements AssetReader {
   /// The message for module metadata that is not the shape DDC emits.
   ///
   /// Every field here is read to build the module's `reloaded_sources.json`
-  /// entry, which is how `$dartReloadModifiedModules` finds the libraries to
+  /// entry, which is how the DWDS client finds the libraries to
   /// reload. A bare `as` cast would report the same fault as a `TypeError`
   /// naming neither the module nor the file it came out of.
   static String _badMetadata(String module, String artifact, String fault) =>

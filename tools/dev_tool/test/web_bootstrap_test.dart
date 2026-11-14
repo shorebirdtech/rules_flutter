@@ -112,16 +112,25 @@ void main() {
       expect(script, contains('"stack_trace_mapper.js"'));
     });
 
-    // Hot reload's browser half: DWDS calls this, it fetches the list the
-    // module server publishes, and re-requests every module named in it.
-    test(
-      'the reload hook fetches the descriptor file the server publishes',
-      () {
-        final script = generateDDCBootstrapScript(entrypoint: 'main.dart');
-        expect(script, contains(r'window.$dartReloadModifiedModules'));
-        expect(script, contains("'reloaded_sources.json'"));
-      },
-    );
+    // Hot restart's first phase: the DDC module loader's `hotRestartBegin`
+    // calls this with the descriptors the DWDS client fetched from
+    // `reloaded_sources.json` and awaits the ones it requested. Taking an app
+    // name and a callback and fetching the file itself is the contract of the
+    // loader's one-phase `hotRestart`, which DWDS stopped calling in 27.1.2;
+    // served to a newer DWDS, it leaves every hot restart unanswered.
+    test('the restart hook takes the descriptors and returns a promise', () {
+      final script = generateDDCBootstrapScript(entrypoint: 'main.dart');
+      expect(
+        script,
+        contains(
+          r'window.$dartReloadModifiedModules = '
+          '(function(filesToReload, appName) {\n'
+          '        return new Promise(function(resolve) {',
+        ),
+      );
+      expect(script, contains('resolve(filesToReload);'));
+      expect(script, isNot(contains('reloaded_sources.json')));
+    });
 
     test('native null assertions reach the SDK options', () {
       expect(

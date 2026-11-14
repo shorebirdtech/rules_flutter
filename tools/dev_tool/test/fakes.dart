@@ -27,6 +27,7 @@ import 'package:flutter_bazel_dev_tool/mdns_vm_service_discovery.dart';
 import 'package:multicast_dns/multicast_dns.dart';
 import 'package:path/path.dart' as p;
 import 'package:vm_service/vm_service.dart';
+import 'package:watcher/watcher.dart';
 
 /// A stand-in for the VM's devFS HTTP endpoint: decodes the `dev_fs_uri_b64`
 /// header the way the VM does and writes the gzipped body under [root].
@@ -304,6 +305,9 @@ class FakeProcess implements Process {
   /// End stdout only, leaving stderr open — the shape of a process that is
   /// still complaining after its normal output has finished.
   Future<void> closeStdout() => _stdoutController.close();
+
+  /// Whether stdout has ended, after which nothing more can be emitted on it.
+  bool get stdoutClosed => _stdoutController.isClosed;
 }
 
 /// The stdin of a [FakeProcess]: every write method funnelled into one path.
@@ -450,6 +454,11 @@ class FakeVmService implements VmService {
   /// The `renderedErrorText` carried by the simulated `Flutter.Error`.
   String flutterErrorText;
 
+  /// When non-null, `_flutter.runInView` stands for a restarted `main()` that
+  /// throws this before `runApp`: the agent posts `rules_flutter.UncaughtError`
+  /// and no frame follows.
+  String? uncaughtErrorOnRestart;
+
   /// The name a `hotRestart` [callMethod] was issued under — bare, or the
   /// DDS-namespaced alias. Null until one is called. What proves the alias
   /// resolved off the `ServiceRegistered` event rather than being hardcoded.
@@ -492,6 +501,7 @@ class FakeVmService implements VmService {
     this.callServiceExtensionGate,
     this.emitFlutterErrorOnReload = false,
     this.flutterErrorText = 'fake _CompileTimeError building MyApp',
+    this.uncaughtErrorOnRestart,
   });
 
   @override
@@ -508,7 +518,28 @@ class FakeVmService implements VmService {
     if (failingStreams.contains(streamId)) {
       throw RPCError('streamListen', 104, 'Stream cannot be subscribed');
     }
+    afterAnswering?.call('streamListen', streamId);
     return Success();
+  }
+
+  /// Called once an RPC's answer is settled and before the caller sees it:
+  /// `('getVM', null)` or `('streamListen', <stream id>)`.
+  ///
+  /// This is where the VM keeps running while a client is between two requests.
+  /// A hook here that calls [startIsolate] is an isolate starting in exactly
+  /// the gap after the client asked its question and before it asked the next
+  /// one, which no test that emits events from outside the handshake can reach.
+  void Function(String method, String? argument)? afterAnswering;
+
+  /// Start an isolate the way a VM does: it joins [isolates] from now on, and
+  /// an `IsolateStart` goes out to a client that subscribed to the Isolate
+  /// stream with [streamListen] — and only to one. A client that has not asked
+  /// for the stream is never told, whatever it later reads with `getVM`.
+  void startIsolate(String id, {String name = 'main'}) {
+    isolates.add(IsolateRef(id: id, name: name, number: id));
+    if (streamListens.contains(EventStreams.kIsolate)) {
+      emitIsolateStart(id, name: name);
+    }
   }
 
   @override
@@ -600,6 +631,52 @@ class FakeVmService implements VmService {
     );
   }
 
+  /// What this connection announced with `registerService`: service → alias.
+  final Map<String, String> registeredServices = {};
+
+  /// The handlers installed with `registerServiceCallback`, by service.
+  final Map<String, ServiceCallback> _serviceCallbacks = {};
+
+  @override
+  void registerServiceCallback(String service, ServiceCallback cb) {
+    // As the real one: one handler per name per connection.
+    if (_serviceCallbacks.containsKey(service)) {
+      throw Exception("Service '$service' already registered");
+    }
+    _serviceCallbacks[service] = cb;
+  }
+
+  @override
+  Future<Success> registerService(String service, String alias) async {
+    _checkAlive('registerService');
+    registeredServices[service] = alias;
+    return Success();
+  }
+
+  /// Call [service] as another client would through DDS, which forwards the
+  /// call to this connection: the handler's answer, or the error the real
+  /// `VmService` routing makes of what it threw (`_routeRequest`).
+  Future<Map<dynamic, dynamic>> callRegistered(
+    String service, [
+    Map<String, dynamic> params = const {},
+  ]) async {
+    final handler = _serviceCallbacks[service];
+    if (handler == null) {
+      return {
+        'error': RPCError(
+          service,
+          RPCErrorKind.kMethodNotFound.code,
+          "method not found '$service'",
+        ).toMap(),
+      };
+    }
+    try {
+      return await handler(params);
+    } on RPCError catch (e) {
+      return {'error': e.toMap()};
+    }
+  }
+
   @override
   Stream<Event> get onStdoutEvent => _stdoutController.stream;
 
@@ -689,8 +766,8 @@ class FakeVmService implements VmService {
   }
 
   Future<VM> _getVM() async {
-    return VM(
-      isolates: isolates,
+    final answer = VM(
+      isolates: List.of(isolates),
       name: 'fake_vm',
       architectureBits: 64,
       hostCPU: 'fake',
@@ -700,6 +777,8 @@ class FakeVmService implements VmService {
       pid: 12345,
       startTime: 0,
     );
+    afterAnswering?.call('getVM', null);
+    return answer;
   }
 
   @override
@@ -1010,6 +1089,22 @@ class FakeVmService implements VmService {
           ),
         );
       }
+      // A restarted `main()` that throws before `runApp`: the agent posts the
+      // error, and nothing draws.
+      if (uncaughtErrorOnRestart case final text?) {
+        _extController.add(
+          Event(
+            kind: EventKind.kExtension,
+            extensionKind: 'rules_flutter.UncaughtError',
+            extensionData: ExtensionData.parse({
+              'description': 'Uncaught exception: $text',
+              'renderedErrorText': 'Uncaught exception: $text\n#0 main',
+            }),
+            timestamp: 0,
+          ),
+        );
+        return Response()..json = {};
+      }
       // The restarted isolate renders a frame after runInView returns.
       if (drawsFrames) {
         Future<void>(() {
@@ -1108,10 +1203,8 @@ class FakeCompiler implements Compiler {
 
   final List<RecompileCall> recompileCalls = [];
 
-  /// One entry per [compileFull], carrying what the caller declared changed.
-  /// A restart re-reads the tree regardless, but the set is recorded so a test
-  /// can assert the restart path still hands it down — it is what the real
-  /// compiler's `reset` + `recompile` sends on the wire.
+  /// One entry per [compileFull], carrying what the caller declared changed:
+  /// what the real compiler's `reset` + `recompile` recompiles.
   final List<RecompileCall> fullCompileCalls = [];
 
   int commitCount = 0;
@@ -1524,4 +1617,260 @@ Map<(int, String), List<ResourceRecord>> dartVmServiceRecords({
           ),
       ],
   };
+}
+
+/// How a future ended, for a test that runs under `fakeAsync`, where nothing
+/// can `await` and time moves only when the test says.
+///
+/// Watch a future with [track], move time with `elapse`, then read [done],
+/// [value] and [error]: what had happened by that exact moment.
+class Outcome<T> {
+  bool done = false;
+  T? value;
+  Object? error;
+}
+
+/// Starts watching [future]; see [Outcome].
+Outcome<T> track<T>(Future<T> future) {
+  final outcome = Outcome<T>();
+  future.then<void>(
+    (v) {
+      outcome.done = true;
+      outcome.value = v;
+    },
+    onError: (Object e) {
+      outcome.done = true;
+      outcome.error = e;
+    },
+  );
+  return outcome;
+}
+
+/// A stand-in for Chrome's DevTools endpoint: the browser-level WebSocket
+/// that answers `Target.setDiscoverTargets` and reports target events, and
+/// the `/json` listing, both driven from one table of targets so they cannot
+/// disagree.
+///
+/// Held to the rule at the top of this file: the events are the ones Chrome
+/// sends, in the order it sends them — on `setDiscoverTargets` the targets
+/// that already exist arrive as `Target.targetCreated`, then the reply — and
+/// a page's WebSocket URL is the `/devtools/page/<targetId>` Chrome lists.
+class FakeBrowserCdp {
+  final HttpServer _server;
+  final _targets = <String, Map<String, Object?>>{};
+  final _discoverers = <WebSocket>[];
+  final _browserSockets = <WebSocket>[];
+  final _discovering = Completer<void>();
+
+  /// Called with each connection opened on a page's endpoint.
+  void Function(WebSocket page)? onPageConnection;
+
+  FakeBrowserCdp._(this._server) {
+    _server.listen(_handle);
+  }
+
+  static Future<FakeBrowserCdp> start() async =>
+      FakeBrowserCdp._(await HttpServer.bind('127.0.0.1', 0));
+
+  int get port => _server.port;
+
+  Uri get browserEndpoint =>
+      Uri.parse('ws://127.0.0.1:$port/devtools/browser/x');
+
+  /// What Chrome prints on stderr once it is listening.
+  String get announcement => 'DevTools listening on $browserEndpoint\n';
+
+  /// Completes when a client has switched target discovery on.
+  Future<void> get discovering => _discovering.future;
+
+  /// The page endpoint [target] is listed under.
+  String pageEndpoint(String targetId) =>
+      'ws://127.0.0.1:$port/devtools/page/$targetId';
+
+  /// Add [targetId], or change its URL, and tell whoever is discovering.
+  void target(String targetId, {required String type, required String url}) {
+    final isNew = !_targets.containsKey(targetId);
+    final info = _targets[targetId] = {
+      'targetId': targetId,
+      'type': type,
+      'url': url,
+    };
+    _emit(isNew ? 'Target.targetCreated' : 'Target.targetInfoChanged', {
+      'targetInfo': info,
+    });
+  }
+
+  void destroy(String targetId) {
+    _targets.remove(targetId);
+    _emit('Target.targetDestroyed', {'targetId': targetId});
+  }
+
+  /// Drop every browser-level connection, as a browser that is going away does.
+  Future<void> dropBrowserConnections() async {
+    for (final socket in _browserSockets.toList()) {
+      await socket.close();
+    }
+  }
+
+  void _emit(String method, Map<String, Object?> params) {
+    for (final socket in _discoverers) {
+      socket.add(json.encode({'method': method, 'params': params}));
+    }
+  }
+
+  Future<void> _handle(HttpRequest request) async {
+    final path = request.uri.path;
+    if (path == '/json') {
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(
+        json.encode([
+          for (final t in _targets.values)
+            {
+              'id': t['targetId'],
+              'type': t['type'],
+              'url': t['url'],
+              'webSocketDebuggerUrl': pageEndpoint(t['targetId'] as String),
+            },
+        ]),
+      );
+      await request.response.close();
+    } else if (path.startsWith('/devtools/browser/')) {
+      final socket = await WebSocketTransformer.upgrade(request);
+      _browserSockets.add(socket);
+      socket.listen(
+        (data) {
+          final message = json.decode(data as String) as Map<String, dynamic>;
+          if (message['method'] == 'Target.setDiscoverTargets') {
+            for (final t in _targets.values) {
+              socket.add(
+                json.encode({
+                  'method': 'Target.targetCreated',
+                  'params': {'targetInfo': t},
+                }),
+              );
+            }
+            _discoverers.add(socket);
+            socket.add(json.encode({'id': message['id'], 'result': {}}));
+            if (!_discovering.isCompleted) _discovering.complete();
+          }
+        },
+        onDone: () {
+          _discoverers.remove(socket);
+          _browserSockets.remove(socket);
+        },
+      );
+    } else if (path.startsWith('/devtools/page/')) {
+      final socket = await WebSocketTransformer.upgrade(request);
+      onPageConnection?.call(socket);
+    } else {
+      request.response.statusCode = HttpStatus.notFound;
+      await request.response.close();
+    }
+  }
+
+  Future<void> close() => _server.close(force: true);
+}
+
+/// The simulator's half of a launch's check that its `log stream` helpers are
+/// listening (see `simulator_log_stream.dart`), for fakes of `xcrun`.
+///
+/// Wrap a test's process fakes with [start] and [run]: every `log stream`
+/// started prints its banner, and the `syslog -s` the launch logs its marker
+/// with is delivered to every stream whose predicate admits it, in that
+/// stream's `--style`.
+class FakeSimulatorLog {
+  /// [endStreamsAtLaunch] ends every stream once `simctl launch` has run, for
+  /// a test that only needs the launch to return: with its discovery stream
+  /// ended, it returns with no VM service.
+  FakeSimulatorLog({this.endStreamsAtLaunch = false});
+
+  final bool endStreamsAtLaunch;
+
+  final _streams = <({FakeProcess process, String style, String marker})>[];
+
+  /// How many times the launch logged its marker.
+  int markersLogged = 0;
+
+  static final _markerClause = RegExp(
+    r'eventMessage == "(flutter_bazel log stream listening [0-9a-f]+)"',
+  );
+
+  Future<Process> Function(String, List<String>) start(
+    Future<Process> Function(String, List<String>) inner,
+  ) => (executable, args) async {
+    final process = await inner(executable, args);
+    final i = args.indexOf('stream');
+    if (i > 0 && args[i - 1] == 'log' && process is FakeProcess) {
+      final predicate = args[args.indexOf('--predicate') + 1];
+      final marker = _markerClause.firstMatch(predicate)?.group(1);
+      if (marker != null) {
+        _streams.add((
+          process: process,
+          style: args[args.indexOf('--style') + 1],
+          marker: marker,
+        ));
+      }
+      // After the launch has subscribed to the stream it was handed. A test
+      // handing one fake out for every stream may have ended it by then.
+      Timer.run(() {
+        if (process.stdoutClosed) return;
+        process.emitStdout('Filtering the log data using "$predicate"');
+      });
+    }
+    return process;
+  };
+
+  Future<ProcessResult> Function(String, List<String>) run(
+    Future<ProcessResult> Function(String, List<String>) inner,
+  ) => (executable, args) async {
+    if (!args.contains('syslog')) {
+      final result = await inner(executable, args);
+      if (endStreamsAtLaunch && args.length > 1 && args[1] == 'launch') {
+        for (final s in _streams) {
+          s.process.complete(0);
+        }
+      }
+      return result;
+    }
+    markersLogged++;
+    final message = args.last;
+    for (final s in _streams) {
+      if (s.marker != message) continue;
+      s.process.emitStdout(
+        s.style == 'ndjson'
+            ? jsonEncode({'eventType': 'logEvent', 'eventMessage': message})
+            : '  "eventMessage" : ${jsonEncode(message)},',
+      );
+    }
+    return ProcessResult(0, 0, '', '');
+  };
+}
+
+/// A [DirectoryWatcher] whose events the test decides, ready at once.
+class FakeDirectoryWatcher implements DirectoryWatcher {
+  @override
+  final String path;
+
+  final StreamController<WatchEvent> _events =
+      StreamController<WatchEvent>.broadcast();
+
+  FakeDirectoryWatcher(this.path);
+
+  @override
+  Stream<WatchEvent> get events => _events.stream;
+
+  @override
+  Future<void> get ready async {}
+
+  @override
+  bool get isReady => true;
+
+  @override
+  String get directory => path;
+
+  void emit(WatchEvent event) => _events.add(event);
+
+  void emitError(Object error) => _events.addError(error);
+
+  Future<void> closeStream() => _events.close();
 }

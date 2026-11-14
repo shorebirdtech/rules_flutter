@@ -1,0 +1,42 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace = 'com.example.add_to_app_host'
+    // Flutter's compileSdkVersion and targetSdkVersion, the SDK platform the
+    // workspace's MODULE.bazel downloads.
+    compileSdk = 36
+
+    defaultConfig {
+        applicationId = 'com.example.add_to_app_host'
+        minSdk = 24
+        targetSdk = 36
+        versionCode = 1
+        versionName = '1.0'
+        ndk {
+            // The ABIs Flutter builds for, as the add-to-app guide filters them.
+            abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86_64'
+        }
+    }
+
+    buildTypes {
+        // The build type the module's `flutter_profile` artifacts are for, as
+        // `flutter build aar` tells a host to add it.
+        profile {
+            initWith debug
+        }
+    }
+
+    lint {
+        // Lint is not what this app checks, and its tools would add a few
+        // hundred megabytes to the pinned repository.
+        checkReleaseBuilds = false
+    }
+}
+
+dependencies {
+    debugImplementation 'com.example.plugin_example.module:flutter_debug:1.0'
+    profileImplementation 'com.example.plugin_example.module:flutter_profile:1.0'
+    releaseImplementation 'com.example.plugin_example.module:flutter_release:1.0'
+}

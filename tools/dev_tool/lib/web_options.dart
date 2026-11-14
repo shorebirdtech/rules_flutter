@@ -10,9 +10,9 @@
 /// (`WebDevServerConfig`: host, port, https, headers), for the same reason.
 ///
 /// Every refusal lives in [WebOptions.resolve], for the same reason
-/// [resolveWebMode] is the one place `--wasm` and `--hot` are read: a flag that
-/// cannot mean anything for this run is an error stated once, by name, before
-/// a build is spent on it.
+/// [selectWasm] and [resolveWebMode] are the one place `--wasm` and `--hot` are
+/// read: a flag that cannot mean anything for this run is an error stated
+/// once, by name, before a build is spent on it.
 library;
 
 import 'dart:convert';
@@ -485,11 +485,12 @@ class WebOptions {
         'evaluating an expression means compiling it against the program '
         'that is running, and only the DDC dev loop has a resident compiler '
         'and a debugger to do that with. '
-        '${mode is WasmWebMode ? '--wasm builds with dart2wasm, which has '
-                  'neither.' : 'This run serves a built bundle statically, with '
-                  'no VM service.'}\n'
-        'Drop the flag, or run the DDC dev loop (no --wasm, no --profile, '
-        'no --no-hot).',
+        '${mode is WasmWebMode ? 'This run uses dart2wasm (asked for with '
+                  '--wasm, or the default for an app that ships WebAssembly '
+                  'only), which has neither.' : 'This run serves a built bundle '
+                  'statically, with no VM service.'}\n'
+        'Drop the flag, or run the DDC dev loop (no --wasm, or --no-wasm for '
+        'an app that ships WebAssembly only; no --profile, no --no-hot).',
       );
     }
 

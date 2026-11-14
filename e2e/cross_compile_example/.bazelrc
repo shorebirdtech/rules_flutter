@@ -1,4 +1,8 @@
-common --lockfile_mode=off
+# Fail rather than rewrite or ignore a lock file that is stale or incomplete.
+# `bazel run @overhead//locks:check`, from the repository root, checks every
+# workspace's (see docs/TESTING.md, "Lock files"). A gitignored .bazelrc.user that overrides a
+# module must switch this off, since the override no longer matches the lock.
+common --lockfile_mode=error
 
 # This workspace always cross-compiles for Linux in debug mode.
 # gen_snapshot can't cross-compile AOT between desktop OSes, so debug only.
@@ -14,28 +18,13 @@ common --enable_platform_specific_config
 common:linux --experimental_output_paths=strip
 common:macos --experimental_output_paths=strip
 
-# Each action picks its execution platform from the toolchain it names, not
-# from every toolchain its rule uses: an iOS AOT compile stays on a Mac while
-# the same target's kernel compile can run elsewhere. rules_flutter's actions
-# all name a toolchain or run in an exec group. See README.md, ".bazelrc".
-common --incompatible_auto_exec_groups
-
-# Start py_binary tools with their hermetic interpreter, not python3 from
-# PATH, which a remote worker does not have. The canonical label needs no
-# direct bazel_dep on rules_python.
-common --@@rules_python+//python/config_settings:bootstrap_impl=script
-
-# The Linux arm64 C++ toolchain declared in MODULE.bazel, registered only
-# where actions can run on a Linux arm64 worker.
-build:dynabzl-cloud --extra_toolchains=@llvm_toolchains//:all
-
 try-import %workspace%/.bazelrc.user
 
 # `dart analyze` and the `dart format` check run as an aspect. Under `build`
 # here, not `test` as elsewhere: this workspace has no test targets, and
 # `bazel test //...` with none exits 4 however clean the checks are, so
 # `bazel build //...` is what runs them. The config line is `common` because
-# `bazel run` of `dart_fix`/`dart_format` reads it too.
+# `bazel run` of `@rules_dart//dart/fix` and `@rules_dart//dart/format` reads it too.
 build --aspects=@rules_dart//dart:analyze.bzl%dart_analyze
 build --output_groups=+dart_analyze
 build --output_groups=+dart_format

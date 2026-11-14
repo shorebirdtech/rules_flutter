@@ -9,18 +9,23 @@ description: >-
   the same split — flutter_tools depends on `intl` to generate, and the app
   depends on `intl` to run.
 
-  Pins match flutter_tools 3.47.8 exactly. Bumping the Flutter version means
-  re-checking them against that release's `packages/flutter_tools/pubspec.yaml`.
+  The floors are the versions flutter_tools 3.47.9 pins; the repository's tool
+  workspace (the root `pubspec.yaml`) resolves them with every other tool.
 publish_to: none
 
 environment:
-  sdk: ^3.10.0-0
+  sdk: ^3.13.0
+
+resolution: workspace
 
 dependencies:
-  file: 7.0.1
-  intl: 0.20.3
-  meta: 1.18.3
-  path: 1.9.1
-  process: 5.0.5
-  stack_trace: 1.12.1
-  yaml: 3.1.3
+  file: ^7.0.1
+  intl: ^0.20.3
+  meta: ^1.18.3
+  path: ^1.9.1
+  # Through `process` and `file`. 3.0.x reads `Platform.packageRoot`, which
+  # Dart 3.13 no longer has.
+  platform: ^3.1.6
+  process: ^5.0.5
+  stack_trace: ^1.12.1
+  yaml: ^3.1.3

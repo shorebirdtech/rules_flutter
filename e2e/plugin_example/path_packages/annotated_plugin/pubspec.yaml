@@ -1,0 +1,22 @@
+# A `path` package whose Android dependencies the Gradle reader cannot read (a
+# `platform(...)` entry), so MODULE.bazel states them with
+# `flutter_pub.annotation(android_deps = ...)`.
+name: annotated_plugin
+description: An Android plugin whose Gradle build declares its dependency in a form rules_flutter does not read.
+version: 0.0.1
+publish_to: none
+
+environment:
+  sdk: ^3.13.0
+  flutter: ">=3.3.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.example.annotated_plugin
+        pluginClass: AnnotatedPlugin

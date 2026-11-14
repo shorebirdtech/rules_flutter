@@ -207,7 +207,7 @@ void main() {
       // same edit was not delivered either.
       await _expectRendered(dt, appId, 'RELOADED:name');
     }, timeout: const Timeout(Duration(minutes: 15)));
-  });
+  }, tags: 'macos');
 
   group('native module rebuilt under a web hot reload', () {
     test('delivered when the contract holds, withheld when it moves', () async {
@@ -307,7 +307,7 @@ void main() {
       );
       await _expectRendered(dt, appId, 'RELOADED:name');
     }, timeout: const Timeout(Duration(minutes: 15)));
-  });
+  }, tags: 'web');
 }
 
 /// Send [method] and require a result rather than a transport error.
@@ -316,7 +316,10 @@ Future<Map<String, dynamic>> _command(
   String method,
   String appId,
 ) async {
-  final response = await dt.httpCommand(method, {'appId': appId});
+  final response = await dt.httpCommand(method, {
+    'appId': appId,
+    if (method == 'app.restart') 'fullRestart': true,
+  });
   final result = response['result'] as Map<String, dynamic>?;
   expect(result, isNotNull, reason: '$method: ${response['error']}');
   return result!;

@@ -1,6 +1,7 @@
 /// A package that owns a native code asset, in the shape `pub.from_lock()`
-/// generates for a pub package with a curated `//dart/ext` entry: the asset
-/// rides `DartPackageInfo.code_assets`, and nothing downstream names it.
+/// generates for a pub package with a curated `//dart/ext` entry: the package's
+/// `dart_package_metadata` states the asset, which rides
+/// `DartPackageInfo.code_assets`, and nothing downstream names it.
 ///
 /// The `@Native` binding carries no asset id, so the VM derives this library's
 /// default one — `package:native_add/native_add.dart` — and resolves it through

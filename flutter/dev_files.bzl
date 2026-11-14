@@ -45,7 +45,7 @@ def _flutter_dev_files_aspect_impl(target, ctx):
 
     return [OutputGroupInfo(**{DEV_FILES_GROUP: depset(transitive = files)})]
 
-flutter_dev_files = aspect(
+flutter_dev_files_aspect = aspect(
     implementation = _flutter_dev_files_aspect_impl,
     attr_aspects = ["*"],
     doc = """Collects the `flutter_application` outputs the dev tool reads.
@@ -53,7 +53,7 @@ flutter_dev_files = aspect(
 Applied by the dev tool, not by users:
 
     bazel build //:app \\
-      --aspects=@rules_flutter//flutter:dev_files.bzl%flutter_dev_files \\
+      --aspects=@rules_flutter//flutter:dev_files.bzl%flutter_dev_files_aspect \\
       --output_groups=+flutter_dev_files
 
 Requesting the group is what makes those files top-level, so bazel writes them

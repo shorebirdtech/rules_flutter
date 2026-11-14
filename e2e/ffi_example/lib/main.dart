@@ -7,6 +7,8 @@ import 'package:drift/drift.dart' hide Column;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:mul_plugin/mul_plugin.dart';
+import 'package:pick/pick.dart';
+import 'package:prebuilt_asset/prebuilt_asset.dart';
 import 'package:sub_asset/sub_asset.dart';
 
 /// Minimal [QueryExecutorUser] so a raw drift executor can be opened without
@@ -65,11 +67,13 @@ Future<void> main() async {
   // `shared` is the count after one bump through each of `package:count_a`
   // and `package:count_b`, whose asset ids the app serves from one combined
   // library: 2 when both ids reached one loaded image of it, 1 when each got a
-  // copy of its own.
+  // copy of its own. `negate` is a code asset whose library is a prebuilt
+  // file rather than a `cc_shared_library`. `pick` is a code asset a link
+  // hook kept out of two because the app constructs its `Op`.
   //
-  // Success is
-  // `ffi_example_result add(3,4)=7 mul(3,4)=12 sqlite=HELLO shared=2`; a load
-  // failure records the error instead.
+  // Success is `ffi_example_result add(3,4)=7 mul(3,4)=12 sqlite=HELLO
+  // shared=2 negate(5)=-5 kept(20)=21`; a load failure records the error
+  // instead.
   String marker;
   int addResult;
   int mulResult;
@@ -83,7 +87,8 @@ Future<void> main() async {
     final shared = bumpThroughB();
     marker =
         'ffi_example_result add(3,4)=$addResult mul(3,4)=$mulResult '
-        'sqlite=${parts[0]} shared=$shared';
+        'sqlite=${parts[0]} shared=$shared negate(5)=${negate(5)} '
+        '${const Op('kept').name}(20)=${pickKept(20)}';
   } on Object catch (e) {
     // Deliberately broad: a native library that fails to load throws an Error
     // (ArgumentError from asset-id resolution or DynamicLibrary.open), not an

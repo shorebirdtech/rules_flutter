@@ -1,0 +1,34 @@
+load("@rules_dart//dart:defs.bzl", "dart_library")
+load("//flutter:defs.bzl", "dart_data_asset", "dart_package_metadata", "flutter_application")
+
+# A package that declares a data asset its build hook would emit, as a pub
+# package with a curated `//dart/ext` entry does. `data_asset_test.bzl` checks
+# that an application bundles it at `packages/data_asset_fixture/greeting.txt`.
+dart_data_asset(
+    name = "greeting",
+    src = "greeting.txt",
+    asset_id = "package:data_asset_fixture/greeting.txt",
+)
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "data_asset_fixture",
+    data_assets = [":greeting"],
+)
+
+dart_library(
+    name = "data_asset",
+    srcs = ["lib/data_asset.dart"],
+    package = ":pubspec-metadata",
+    visibility = ["//flutter/tests:__pkg__"],
+)
+
+# An application of the package itself, which no library in its `deps` names:
+# the package's data asset is still the application's.
+flutter_application(
+    name = "own_app",
+    main = "lib/main.dart",
+    package = ":pubspec-metadata",
+    tags = ["manual"],
+    visibility = ["//flutter/tests:__pkg__"],
+)

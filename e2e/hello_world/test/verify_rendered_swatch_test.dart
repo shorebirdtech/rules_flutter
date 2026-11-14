@@ -3,12 +3,12 @@
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:runfiles/runfiles.dart';
+import 'package:rules_flutter_e2e_testing/runfiles_paths.dart';
 import 'package:test/test.dart';
 
 void main() {
   test('the action wrote an 8x8 PNG', () {
-    final path = Runfiles.create().rlocation('_main/swatch.png');
+    final path = requireRunfile('swatch.png', what: 'Swatch');
     final bytes = ByteData.sublistView(File(path).readAsBytesSync());
     expect(bytes.getUint32(0), 0x89504E47, reason: 'PNG signature');
     // IHDR: width and height, big-endian, after the signature and chunk header.

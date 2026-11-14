@@ -1,8 +1,9 @@
 """Flutter Android application bundling.
 
 Produces the native artifacts needed for an Android APK:
-- A .jar containing lib/arm64-v8a/libapp.so (AOT-compiled Dart code)
-- flutter_assets/ tree artifact
+- libapp.so (AOT-compiled Dart code), as a native library of the APK
+- the app's other native libraries (FFI, Native Assets)
+- the flutter_assets/ tree, at `<name>/assets/flutter_assets/`
 
 The user wires these outputs into rules_android's android_binary:
 
@@ -18,202 +19,229 @@ The user wires these outputs into rules_android's android_binary:
         application = ":my_app_flutter",
     )
 
-    # Wire into android_binary via java_import:
-    java_import(
-        name = "my_app_native",
-        jars = [":my_app_android_native_libs.jar"],
+    filegroup(
+        name = "my_app_flutter_assets",
+        srcs = [":my_app_android"],
+        output_group = "flutter_assets",
     )
 
+    # Put the bundle in android_binary's `deps`: it provides its native
+    # libraries as `AndroidNativeLibsInfo`, as an `aar_import` does. Its
+    # flutter_assets tree goes in `assets`.
     android_binary(
         name = "my_app",
         manifest = "AndroidManifest.xml",
-        deps = [":my_app_native", "@flutter_android_engine_arm64//:flutter_embedding"],
+        assets = [":my_app_flutter_assets"],
+        assets_dir = "assets",
+        nocompress_extensions = [".so"],
+        deps = [":my_app_android", ...],
         ...
     )
 
-The native_libs.jar packages libapp.so at lib/<abi>/libapp.so inside a jar,
-matching the same convention as flutter.jar (which packages libflutter.so).
-This lets android_binary extract and package the .so into the APK automatically.
+The bundle's native libraries are one zip of `lib/<abi>/<name>` entries,
+stored uncompressed: `libapp.so`, the `native_deps` libraries and the code
+assets that ship (in a release or profile build, those the packages' link
+hooks keep). `android_binary` builds its dependencies once for each platform
+of `--@rules_android//flags:android_platforms` and merges each build's zip
+into the APK. The zip is also the `native_libs` output group.
 
-flutter_android_bundle applies a platform transition derived from its
-`android_abi` attribute, so the application — including its AOT compile and
-any FFI/native deps — always builds for the matching Android platform
-(//flutter/platforms:android_arm64 or :android_x64) with no --platforms
-flag from the user. Every native library is validated to be an ELF shared
-object with the ABI's machine type before packaging; a host-format binary
-is a hard build error.
+The bundle is built for whichever Android platform `android_binary` builds it
+for, and takes its ABI from that platform, so the application behind it (its
+AOT compile and any FFI/native deps) is built for the same one. Every native
+library is validated to be an ELF shared object with the ABI's machine type
+before the APK is packaged; a host-format binary is a hard build error.
+`flutter_android_bundle`, the macro in android.bzl, makes the bundle
+incompatible with any platform that is not Android arm, arm64 or x86_64:
+building it there fails as incompatible, and `bazel build //...` skips it.
 """
 
-load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
-load("//flutter:providers.bzl", "FlutterApplicationInfo")
-load("//flutter/private:common.bzl", "ANDROID_ABIS", "android_elf_machine_for_abi", "android_platform_for_abi", "compute_android_jni_path")
+load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
+load("@rules_android//providers:providers.bzl", "AndroidNativeLibsInfo")
+load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
+load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "program_assets_action_args")
+load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterSdkRecordInfo")
+load("//flutter/private:assemble_directory.bzl", "ASSEMBLE_DIRECTORY_ATTRS", "assemble_directory")
+load("//flutter/private:common.bzl", "android_elf_machine_for_abi")
 load("//flutter/private:exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
+load("//flutter/private:flutter_native_assets.bzl", "CODE_ASSETS_TOOL_ATTRS", "run_code_assets_tool")
+load("//flutter/private:mobile_engine_check.bzl", "check_android_engine")
 
-def _android_platform_transition_impl(_settings, attr):
-    return {"//command_line_option:platforms": [android_platform_for_abi(attr.android_abi)]}
+# The ABIs of devices that can have 16 KB pages: Android's 64-bit ones. Every
+# native library packaged for them is checked to be aligned for that.
+_SIXTEEN_KB_ABIS = ["arm64-v8a", "x86_64"]
+_PAGE_SIZE = 16384
 
-# Builds the bundle and everything behind it (the flutter_application, its
-# AOT compile, FFI cc deps, Native Assets) for the Android platform matching
-# `android_abi`. The ABI attribute is the single source of truth: the platform
-# is always derived from it, so the jar's lib/<abi>/ layout and the code inside
-# it cannot disagree — including when android_binary's own split transition
-# (--android_platforms) already re-configured this target.
-_android_platform_transition = transition(
-    implementation = _android_platform_transition_impl,
-    inputs = [],
-    outputs = ["//command_line_option:platforms"],
-)
+# The attributes `android_abi` and `validate_android_native_libs` read.
+ANDROID_NATIVE_LIBS_ATTRS = {
+    "_allow_4kb_aligned_native_libraries": attr.label(
+        default = "//flutter:allow_4kb_aligned_native_libraries",
+        providers = [BuildSettingInfo],
+    ),
+    "_android_constraint": attr.label(default = "@platforms//os:android"),
+    "_arm64_constraint": attr.label(default = "@platforms//cpu:aarch64"),
+    "_armv7_constraint": attr.label(default = "@platforms//cpu:armv7"),
+    "_validate_tool": attr.label(
+        default = "//flutter/private/tools:validate_android_elf.dart",
+        allow_single_file = True,
+    ),
+    "_x86_64_constraint": attr.label(default = "@platforms//cpu:x86_64"),
+}
 
-# Shell function validating that a native library is an ELF shared object
-# with the expected e_machine (2 bytes little-endian at offset 18). Android's
-# linker can only load ELF for the APK's ABI; anything else (e.g. a host
-# Mach-O dylib) would crash at app startup, so packaging fails instead.
-_ELF_VALIDATION_DEF = """\
-validate_android_elf() {
-  local lib="$1" want_machine="$2" abi="$3"
-  local bytes=( $(od -An -v -tu1 -N20 "$lib") )
-  if [ "${#bytes[@]}" -lt 20 ] ||
-      [ "${bytes[0]}" -ne 127 ] || [ "${bytes[1]}" -ne 69 ] ||
-      [ "${bytes[2]}" -ne 76 ] || [ "${bytes[3]}" -ne 70 ]; then
-    echo "ERROR: $lib is not an ELF binary. Android ($abi) cannot load it." >&2
-    exit 1
-  fi
-  local machine=$(( bytes[18] | (bytes[19] << 8) ))
-  if [ "$machine" -ne "$want_machine" ]; then
-    echo "ERROR: $lib has ELF machine $machine; $abi requires $want_machine." >&2
-    exit 1
-  fi
-}"""
+def android_abi(ctx):
+    """The ABI of the Android platform the target is built for.
 
-def _symlink_to_jni(ctx, src, abi, basename):
-    """Create a symlink placing a native lib into the jni/<abi>/ tree."""
-    out = ctx.actions.declare_file(
-        compute_android_jni_path(ctx.label.name, abi, basename),
+    Args:
+        ctx: Rule context, with `ANDROID_NATIVE_LIBS_ATTRS`.
+
+    Returns:
+        "armeabi-v7a", "arm64-v8a" or "x86_64", or None for a platform that is
+        not Android arm, arm64 or x86_64.
+    """
+    if ctx.target_platform_has_constraint(ctx.attr._android_constraint[platform_common.ConstraintValueInfo]):
+        if ctx.target_platform_has_constraint(ctx.attr._arm64_constraint[platform_common.ConstraintValueInfo]):
+            return "arm64-v8a"
+        if ctx.target_platform_has_constraint(ctx.attr._x86_64_constraint[platform_common.ConstraintValueInfo]):
+            return "x86_64"
+        if ctx.target_platform_has_constraint(ctx.attr._armv7_constraint[platform_common.ConstraintValueInfo]):
+            return "armeabi-v7a"
+    return None
+
+def _android_abi(ctx):
+    """The ABI of the Android platform this bundle is built for, or a failure."""
+    abi = android_abi(ctx)
+    if abi:
+        return abi
+    fail((
+        "{label} is built for the platform {platform}, which is not Android arm, arm64 or " +
+        "x86_64. An Android app is built for the platforms of --@rules_android//flags:android_platforms: pass " +
+        "--@rules_android//flags:android_platforms=@rules_android//:arm64-v8a (and " +
+        ":armeabi-v7a or :x86_64 for a second ABI), or build it through flutter_android_build."
+    ).format(label = ctx.label, platform = ctx.fragments.platform.platform))
+
+def validate_android_native_libs(ctx, tools, abi, libs, name):
+    """Checks that a device of `abi` can load `libs`, in a build action.
+
+    Each library must be an ELF shared object of the ABI's machine type and,
+    for a 64-bit ABI, have its segments aligned for 16 KB pages, unless
+    `--@rules_flutter//flutter:allow_4kb_aligned_native_libraries` is set.
+
+    The check is a Dart script run by the exec-tools toolchain's `dart`, so it
+    runs on any host.
+
+    Args:
+        ctx: Rule context, with `ANDROID_NATIVE_LIBS_ATTRS` and the `PORTABLE`
+            exec group.
+        tools: The `FlutterExecToolsInfo` of the host the action runs on.
+        abi: Android ABI string (e.g. "arm64-v8a").
+        libs: `.so` files, and `.zip` files of them (an AAR's native
+            libraries, as rules_android extracts them).
+        name: The name of the stamp file, unique in the package.
+
+    Returns:
+        The validation stamp the build must produce.
+    """
+    validated = ctx.actions.declare_file(name)
+
+    # Every path is an argument, so path mapping can rewrite it.
+    args = ctx.actions.args()
+    args.add(ctx.file._validate_tool)
+    args.add("--abi", abi)
+    args.add("--machine", str(android_elf_machine_for_abi(abi)))
+    if abi in _SIXTEEN_KB_ABIS and not ctx.attr._allow_4kb_aligned_native_libraries[BuildSettingInfo].value:
+        args.add("--min-load-align", str(_PAGE_SIZE))
+    args.add("--stamp", validated)
+    args.add_all(libs)
+    ctx.actions.run(
+        executable = tools.dart,
+        arguments = [args],
+        inputs = depset(
+            direct = [ctx.file._validate_tool] + libs,
+            transitive = [tools.sdk_files.run],
+        ),
+        outputs = [validated],
+        mnemonic = "FlutterValidateNativeLibs",
+        exec_group = PORTABLE,
+        execution_requirements = PATH_MAPPING,
+        progress_message = "Validating Android native libs for %s %s" % (abi, ctx.label),
     )
-    ctx.actions.symlink(output = out, target_file = src)
-    return out
+    return validated
 
-def _symlink_assets_dir(ctx, flutter_assets):
-    """Symlink the flutter_assets tree into assets/flutter_assets/ for mobile-install."""
+def _package_native_libs(ctx, tools, app_info, abi):
+    """The app's native libraries as the APK holds them, and their validation.
 
-    # Use label name as prefix to avoid conflicts when multiple bundles
-    # exist in the same package (e.g. Tier 1 macro + explicit Tier 2).
-    out = ctx.actions.declare_directory(ctx.label.name + "_mi/assets/flutter_assets")
-    ctx.actions.symlink(output = out, target_file = flutter_assets)
-    return out
+    One zip of `lib/<abi>/<name>` entries, stored uncompressed: `libapp.so`
+    (the AOT output, whatever `gen_snapshot` called it: the engine loads the
+    Dart snapshot via `System.loadLibrary("app")`), the `native_deps`
+    libraries and the code assets that ship. Which code assets ship is known
+    only when a release build's link hooks have run, so the action reads the
+    program's assets file, and `android_binary` takes the zip as it takes an
+    `aar_import`'s libraries (`AndroidNativeLibsInfo`), for this ABI.
 
-def _create_native_libs_jar(ctx, aot_output, native_libs, abi):
-    """Package native libs into a jar at lib/<abi>/*.so.
-
-    This matches flutter.jar's convention (which puts libflutter.so at
-    lib/arm64-v8a/libflutter.so). java_import + android_binary then
-    extract and package the .so files into the APK automatically.
-
-    Every library is validated to be an ELF shared object with the ABI's
-    machine type before it is zipped — a wrong-format library fails the
-    build instead of producing an APK that crashes on device. Two libraries
-    claiming the same packaged filename are a hard error too: the zip would
-    otherwise silently drop one of them.
+    Every library is validated (`validate_android_native_libs`) before the APK
+    is packaged: a library a device cannot load fails the build instead of
+    producing an APK that crashes on device. Two libraries under one name fail
+    the packaging action: the APK could hold only one of them.
 
     Args:
         ctx: Rule context.
-        aot_output: The AOT compile output, packaged as libapp.so (Android
-            convention: the engine loads the Dart snapshot via
-            System.loadLibrary("app")). None in debug/JIT mode.
-        native_libs: Plugin/FFI .so files to package under their own names.
+        tools: The `FlutterExecToolsInfo` of the host the action runs on.
+        app_info: The application's `FlutterApplicationInfo`.
         abi: Android ABI string (e.g. "arm64-v8a").
 
     Returns:
-        The output .jar File.
+        A tuple of the zip and the validation stamp the build must produce.
     """
-    jar = ctx.actions.declare_file(ctx.label.name + "_native_libs.jar")
-    expected_machine = android_elf_machine_for_abi(abi)
-
-    entries = ([("libapp.so", aot_output)] if aot_output else []) + [
-        (lib.basename, lib)
-        for lib in native_libs
-    ]
-
-    # $1 = ABI, $2 = its ELF machine, $3 = zipper, $4 = jar, then one
-    # (zip entry, library) pair per library. Every path is an argument, so
-    # path mapping can rewrite it.
+    zip = ctx.actions.declare_file("%s_native_libs/libs.zip" % ctx.label.name)
+    code_assets = program_assets_action_args(ctx.actions, app_info.program_assets, data = False)
     args = ctx.actions.args()
-    args.add(abi)
-    args.add(str(expected_machine))
-    args.add(ctx.executable._zipper)
-    args.add(jar)
-    seen_basenames = {}
-    for basename, lib in entries:
-        if basename in seen_basenames:
-            fail(
-                "flutter_android_bundle: two native libraries would both be " +
-                "packaged as lib/{abi}/{basename}: {first} and {second}. ".format(
-                    abi = abi,
-                    basename = basename,
-                    first = seen_basenames[basename].path,
-                    second = lib.path,
-                ) +
-                "Rename one of them — Android can only load one.",
-            )
-        seen_basenames[basename] = lib
-        args.add("lib/{abi}/{basename}".format(abi = abi, basename = basename))
-        args.add(lib)
-
-    commands = [
-        _ELF_VALIDATION_DEF,
-        'abi="$1"; machine="$2"; zipper="$3"; jar="$4"; shift 4',
-        "entries=()",
-        'while [ "$#" -gt 0 ]; do',
-        '  validate_android_elf "$2" "$machine" "$abi"',
-        '  entries+=("$1=$2")',
-        "  shift 2",
-        "done",
-        # cC = create, compressed.
-        'exec "$zipper" cC "$jar" "${entries[@]}"',
-    ]
-
-    ctx.actions.run_shell(
-        command = "\n".join(commands),
-        arguments = [args],
-        inputs = [lib for _, lib in entries],
-        tools = [ctx.executable._zipper],
-        outputs = [jar],
-        mnemonic = "FlutterNativeLibsJar",
-        exec_group = PORTABLE,
-        execution_requirements = PATH_MAPPING,
-        progress_message = "Packaging Flutter native libs into jar %s" % ctx.label,
+    args.add("--abi", abi)
+    args.add("--output", zip)
+    if app_info.aot_output:
+        args.add("--library-as", "libapp.so")
+        args.add(app_info.aot_output)
+    args.add_all(app_info.native_libs, before_each = "--library")
+    run_code_assets_tool(
+        ctx,
+        "android-libs",
+        [args, code_assets.args],
+        depset(
+            ([app_info.aot_output] if app_info.aot_output else []) + list(app_info.native_libs),
+            transitive = [code_assets.inputs],
+        ),
+        [zip],
+        mnemonic = "FlutterAndroidNativeLibs",
+        progress_message = "Packaging the %s native libraries of %%{label}" % abi,
     )
-    return jar
+    validated = validate_android_native_libs(
+        ctx,
+        tools,
+        abi,
+        [zip],
+        ctx.label.name + "_native_libs.validated",
+    )
+    return zip, validated
 
-def _copy_assets_with_kernel(ctx, flutter_assets, kernel_dill, tools):
-    """Copy flutter_assets and add kernel_blob.bin + VM snapshots for debug mode.
+def _apk_assets(ctx, tools, flutter_assets, additions):
+    """The flutter_assets tree at `<name>/assets/flutter_assets/`, as an APK holds it.
 
-    On Android, the debug engine looks for kernel_blob.bin inside
-    flutter_assets/ (same convention as `flutter build apk --debug`).
-    The vm_snapshot_data and isolate_snapshot_data are needed for the
-    kernel service isolate (hot reload and expression evaluation).
+    That is the layout `android_binary` takes with `assets_dir = "assets"`.
+    The tree is the application's, symlinked, or, with `additions` (name and
+    file pairs placed at its root), a copy that holds them too.
     """
-    out = ctx.actions.declare_directory(ctx.label.name + "_debug_flutter_assets")
 
-    vm_snapshot = tools.vm_isolate_snapshot
-    iso_snapshot = tools.isolate_snapshot
-    cmd = (
-        'cp -RL "$1"/. "$2" && cp "$3" "$2/kernel_blob.bin"' +
-        ' && cp "$4" "$2/vm_snapshot_data" && cp "$5" "$2/isolate_snapshot_data"'
-    )
-    args = ctx.actions.args()
-    args.add_all([flutter_assets, out, kernel_dill, vm_snapshot, iso_snapshot], expand_directories = False)
-    inputs = [flutter_assets, kernel_dill, vm_snapshot, iso_snapshot]
-
-    ctx.actions.run_shell(
-        command = cmd,
-        arguments = [args],
-        inputs = inputs,
-        outputs = [out],
-        mnemonic = "FlutterAndroidDebugAssets",
-        exec_group = PORTABLE,
-        execution_requirements = PATH_MAPPING,
-        progress_message = "Assembling debug flutter_assets with kernel and VM snapshots %s" % ctx.label,
+    # Under the label name: two bundles in one package (a Tier 1 macro's and
+    # an explicit Tier 2 one) must not declare the same directory.
+    out = ctx.actions.declare_directory(ctx.label.name + "/assets/flutter_assets")
+    if not additions:
+        ctx.actions.symlink(output = out, target_file = flutter_assets)
+        return out
+    assemble_directory(
+        ctx,
+        tools,
+        out,
+        [("tree", ".", flutter_assets)] + [("file", name, file) for name, file in additions],
+        mnemonic = "FlutterAndroidAssets",
+        progress_message = "Assembling the flutter_assets of %{label}",
     )
     return out
 
@@ -221,128 +249,80 @@ def _flutter_android_bundle_impl(ctx):
     """Bundles Flutter compilation outputs for Android packaging."""
     app_info = ctx.attr.application[FlutterApplicationInfo]
     tools = portable_tools(ctx)
-    flutter_assets = app_info.flutter_assets
-    native_libs = list(app_info.native_libs)
+    abi = _android_abi(ctx)
 
-    # Native Assets `dynamic_loading_bundle` shared libraries land in
-    # `jniLibs/<abi>/` of the same `native_libs.jar` rules_android
-    # already extracts into the APK.
-    native_libs.extend(app_info.bundled_code_assets.to_list())
+    # The engine must have been built for the app's ABI, and an app of a
+    # custom SDK keeps the record of the checked pieces it was built from.
+    sdk_record = ctx.attr._sdk_record[FlutterSdkRecordInfo]
+    check_android_engine(ctx.label, sdk_record, abi)
 
-    kernel_dill = app_info.kernel_dill
+    # A debug app runs on the JIT: the engine looks for `kernel_blob.bin` in
+    # flutter_assets/, as `flutter build apk --debug` puts it, and the VM
+    # snapshots there serve the kernel service isolate (hot reload and
+    # expression evaluation).
+    additions = []
+    if app_info.kernel_dill and not app_info.aot_output:
+        additions += [
+            ("kernel_blob.bin", app_info.kernel_dill),
+            ("vm_snapshot_data", tools.vm_isolate_snapshot),
+            ("isolate_snapshot_data", tools.isolate_snapshot),
+        ]
+    if sdk_record.record:
+        additions.append(("flutter_sdk.json", sdk_record.record))
+    flutter_assets = _apk_assets(ctx, tools, app_info.flutter_assets, additions)
 
-    # Debug mode: include kernel_blob.bin in flutter_assets for JIT execution.
-    if kernel_dill and not app_info.aot_output:
-        flutter_assets = _copy_assets_with_kernel(ctx, flutter_assets, kernel_dill, tools)
+    packaged, validated = _package_native_libs(ctx, tools, app_info, abi)
 
-    # The AOT output is the libapp.so for Android.
-    aot_output = app_info.aot_output
-    all_native_libs = ([aot_output] if aot_output else []) + native_libs
-    abi = ctx.attr.android_abi
-
-    # Create a jar containing native libs at lib/<abi>/*.so.
-    # In debug mode (JIT) with no plugin/FFI libs there is nothing to
-    # package — create an empty jar so the java_import pipeline in the
-    # macro doesn't break.
-    if all_native_libs:
-        native_libs_jar = _create_native_libs_jar(ctx, aot_output, native_libs, abi)
-    else:
-        native_libs_jar = ctx.actions.declare_file(ctx.label.name + "_native_libs.jar")
-
-        # Zipper requires at least one entry, so use a minimal valid zip header.
-        ctx.actions.run_shell(
-            command = 'printf "\\x50\\x4b\\x05\\x06\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00" > "$1"',
-            arguments = [ctx.actions.args().add(native_libs_jar)],
-            outputs = [native_libs_jar],
-            mnemonic = "FlutterEmptyNativeLibsJar",
-            exec_group = PORTABLE,
-            execution_requirements = PATH_MAPPING,
-            progress_message = "Creating empty native libs jar (debug mode) %s" % ctx.label,
-        )
-
-    outputs = [flutter_assets, native_libs_jar] + all_native_libs
-
-    # mobile-install compatible output structure.
-    mobile_install_files = []
-    if ctx.attr.mobile_install_compatible:
-        if aot_output:
-            jni_libapp = _symlink_to_jni(ctx, aot_output, abi, "libapp.so")
-            mobile_install_files.append(jni_libapp)
-
-        for lib in native_libs:
-            jni_lib = _symlink_to_jni(ctx, lib, abi, lib.basename)
-            mobile_install_files.append(jni_lib)
-
-        assets_dir = _symlink_assets_dir(ctx, flutter_assets)
-        mobile_install_files.append(assets_dir)
-
-        outputs.extend(mobile_install_files)
+    outputs = [flutter_assets, packaged]
 
     return [
         DefaultInfo(files = depset(outputs)),
+        # What `android_binary` packages, for the ABI it builds this for: the
+        # libraries an `aar_import` brings arrive the same way. The empty
+        # `CcInfo` is what makes this a dependency `android_binary` accepts.
+        AndroidNativeLibsInfo(native_libs = depset([packaged])),
+        CcInfo(),
         OutputGroupInfo(
-            native_libs = depset(all_native_libs),
-            native_libs_jar = depset([native_libs_jar]),
+            native_libs = depset([packaged]),
             flutter_assets = depset([flutter_assets]),
-            mobile_install = depset(mobile_install_files),
+            _validation = depset([validated]),
         ),
     ]
 
 flutter_android_bundle = rule(
     implementation = _flutter_android_bundle_impl,
-    cfg = _android_platform_transition,
     attrs = {
         "application": attr.label(
             doc = "A flutter_application target providing the compiled artifacts.",
             mandatory = True,
             providers = [FlutterApplicationInfo],
         ),
-        "mobile_install_compatible": attr.bool(
-            doc = """Whether to produce output structured for `bazel mobile-install`.
-
-When True (the default), native libs are symlinked into jni/<abi>/ and
-flutter assets into assets/flutter_assets/, matching the directory layout
-that mobile-install expects. A `mobile_install` output group is also
-provided for selective fetching.
-
-Set to False if you only build release APKs and do not need mobile-install.""",
-            default = True,
+        "_sdk_record": attr.label(
+            default = "//flutter/private:sdk_record",
+            providers = [FlutterSdkRecordInfo],
         ),
-        "android_abi": attr.string(
-            doc = """Android ABI to build for ("arm64-v8a" or "x86_64").
-
-Single source of truth for the target platform: the rule transitions itself
-and the application to the matching //flutter/platforms target, so native
-library placement (lib/<abi>/) and the code built into those libraries always
-agree.""",
-            default = "arm64-v8a",
-            values = ANDROID_ABIS.keys(),
-        ),
-        "_zipper": attr.label(
-            default = "@bazel_tools//tools/zip:zipper",
-            executable = True,
-            cfg = config.exec(PORTABLE),
-        ),
-        "_allowlist_function_transition": attr.label(
-            default = "@bazel_tools//tools/allowlists/function_transition_allowlist",
-        ),
-    },
-    # Packaging copies and zips what the application built, the same bytes on
+    } | ANDROID_NATIVE_LIBS_ATTRS | ASSEMBLE_DIRECTORY_ATTRS | CODE_ASSETS_TOOL_ATTRS,
+    # Packaging copies and checks what the application built, the same bytes on
     # any host.
     exec_groups = PORTABLE_EXEC_GROUPS,
+    fragments = ["platform"],
     doc = """Bundles Flutter compilation outputs for Android packaging.
 
-Produces a native_libs.jar containing lib/<abi>/libapp.so and a flutter_assets
-tree artifact. Use java_import on the jar and android_binary to assemble the APK.
+Put it in an `android_binary`'s `deps`: it provides the app's native libraries
+(`libapp.so`, the `native_deps` libraries and the code assets that ship) as
+`AndroidNativeLibsInfo`, one zip of `lib/<abi>/<name>` entries, as an
+`aar_import` does; the zip is also its `native_libs` output group. Its
+`flutter_assets` output group is the app's flutter_assets tree, at
+`<name>/assets/flutter_assets/` as an APK holds it: give it to the
+`android_binary`'s `assets`, with `assets_dir = "assets"`.
 
-The rule transitions itself and `application` to the Android platform derived
-from `android_abi`, so the AOT compile and all native deps target Android
-without any --platforms flag. Passing --android_platforms to android_binary
-remains supported: this rule's transition re-normalizes its subgraph to the
-declared ABI's platform, so the two compose to the same configuration. Native
-libraries are validated to be ELF for the declared ABI at packaging time.
-
-By default, outputs are also structured for `bazel mobile-install` compatibility.
-Use the wrapping android_binary target with `bazel mobile-install` for fast
-incremental deployment to a connected device.""",
+The bundle is built for the Android platform `android_binary` builds it for,
+one for each of `--@rules_android//flags:android_platforms`, and takes its ABI from that platform;
+the application behind it is built for the same platform, so the AOT compile
+and all native deps target Android with no further flag. An APK for several
+ABIs therefore carries `libapp.so` of each. Native libraries are validated to
+be ELF for the platform's ABI at packaging time. The `flutter_android_bundle`
+macro makes it incompatible with a platform that is not Android arm, arm64 or
+x86_64; reached any other way on such a platform, it fails, naming the flag
+to pass.""",
 )

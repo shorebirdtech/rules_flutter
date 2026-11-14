@@ -2,9 +2,9 @@
 /// pass.
 ///
 /// ```sh
-/// dart run tools/dev_tool/tool/e2e.dart                      # the whole suite
-/// dart run tools/dev_tool/tool/e2e.dart --plain-name="macOS" # scoped
-/// dart run tools/dev_tool/tool/e2e.dart test/e2e/agent_e2e_test.dart
+/// bazel run //tools/dev_tool:e2e                         # the whole suite
+/// bazel run //tools/dev_tool:e2e -- --plain-name="macOS" # scoped
+/// bazel run //tools/dev_tool:e2e -- test/e2e/agent_e2e_test.dart
 /// ```
 ///
 /// Arguments are forwarded to `dart test`; any positional one replaces the
@@ -39,41 +39,54 @@
 /// who judges by what scrolled past sees no failing test names and calls it
 /// green. Here the verdict is the last thing printed, in words.
 ///
-/// ## Too old a `dart` never reaches this script
+/// ## The toolchain's `dart` runs it, through `bazel run`
 ///
-/// The suite is executed by whatever `dart` invoked this script, and that is
-/// not a property of this repo. `pubspec.yaml` requires `sdk: ^3.13.0`, the SDK
-/// this repo pins, and an older SDK refuses to compile *any* library in the
-/// package:
+/// `//tools/dev_tool:e2e` is this file as a `kernel` `dart_binary`, so the VM
+/// that runs it is the resolved toolchain's `dart`, the one the build compiles
+/// with; its target lists `@rules_dart//dart` in `data` so the rest of that SDK,
+/// which `dart test` needs, is declared too. The suite runs on
+/// [Platform.resolvedExecutable], this very VM, so `PATH` is never consulted
+/// and the banner below names the `dart` that ran.
 ///
-/// ```
-/// tool/e2e.dart:1:1: Error: The language version 3.13 specified for the
-/// package 'flutter_bazel_dev_tool' is too high. The highest supported
-/// language version is 3.12.
-/// ```
+/// The runner resolves the pub workspace with `dart pub get` before the suite
+/// starts (see [_resolve] for why `dart test` is not left to do it), and that
+/// workspace has packages that depend on `sdk: flutter`. A bare Dart SDK cannot
+/// resolve those ("the Flutter SDK is not available", exit 65), so the suite
+/// gets `FLUTTER_ROOT` pointing at `@flutter_dev_root`, the tree
+/// `@rules_flutter//flutter/pub` resolves the lock against, from the same
+/// Flutter tag the toolchain pins.
 ///
-/// It exits **254**, so it is loud by this file's own standard: no sweep
-/// script, CI job or agent can read it as a pass. What it does not name is the
-/// fix — see `docs/TESTING.md` for the `export PATH=…` that supplies a new
-/// enough `dart`.
+/// The suite runs `bazel` itself, in this workspace among others, while it is
+/// running. That does not deadlock on the outer `bazel run`: its server builds
+/// the target and releases the workspace lock before the client starts the
+/// binary.
 ///
-/// That is the whole guard, and it fires before `main` runs. This script used
-/// to check [Platform.version] against the same floor itself, to name the wrong
-/// `dart` and the fix rather than let `package:test` hit a version-solving
-/// wall. The check cannot fire while `pubspec.yaml` states a real floor — an
-/// SDK below the floor fails to parse the
-/// package, and one above it passes the check — so it was dead code promising
-/// a message nobody could see, and it is gone. Restoring it would mean moving
-/// this script out of the package so an old SDK can still parse it.
-///
-/// The suite runs on [Platform.resolvedExecutable] — this very VM, the one that
-/// got far enough to run this — so `PATH` is never consulted for the run and
-/// cannot disagree with what is reported in the banner below.
+/// What `bazel run` hands this process is not the suite's. The package is found
+/// through `BUILD_WORKSPACE_DIRECTORY`, because [Platform.script] is a kernel in
+/// a runfiles tree. And the suite starts without `bazel run`'s variables: the
+/// dev tool it drives reads `BUILD_WORKSPACE_DIRECTORY` before anything else, so
+/// an inherited one would point every session at this workspace instead of the
+/// e2e workspace the test chose, and the runfiles variables would point the
+/// tool's own runfiles lookups at this runner's tree.
 library;
 
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+
+import 'package:runfiles/runfiles.dart';
+
+/// The leading argument the target's `args` supplies: the runfiles path of
+/// `bin/cache/flutter.version.json`, three levels below the `FLUTTER_ROOT` it
+/// anchors.
+const _manifestFlag = '--flutter-version-manifest=';
+
+/// The second: the runfiles path of the Android SDK's `adb` for this host,
+/// which the suite's Android cases ask which device to run on.
+const _adbFlag = '--adb=';
+
+/// What the suite reads that `adb` from.
+const _adbVariable = 'FLUTTER_BAZEL_E2E_ADB';
 
 /// The path used when the caller names none.
 const _defaultPath = 'test/e2e/';
@@ -83,7 +96,24 @@ const _defaultPath = 'test/e2e/';
 /// tagged files and the unit tests already have Bazel targets.
 const _alwaysArgs = ['--tags=e2e', '--concurrency=1'];
 
-Future<void> main(List<String> args) async {
+Future<void> main(List<String> runArgs) async {
+  if (runArgs.isEmpty || !runArgs.first.startsWith(_manifestFlag)) {
+    _fail(
+      'started without $_manifestFlag, so not by its Bazel target. Run the '
+      'suite with `bazel run //tools/dev_tool:e2e`.',
+    );
+  }
+  final flutterRoot = _flutterRoot(
+    runArgs.first.substring(_manifestFlag.length),
+  );
+  if (runArgs.length < 2 || !runArgs[1].startsWith(_adbFlag)) {
+    _fail(
+      'started without $_adbFlag, so not by its Bazel target. Run the suite '
+      'with `bazel run //tools/dev_tool:e2e`.',
+    );
+  }
+  final adb = _runfile(runArgs[1].substring(_adbFlag.length), 'adb');
+  final args = runArgs.sublist(2);
   final packageDir = _packageDir();
   // Forwarded verbatim and in order — splitting flags from positionals would
   // tear `--plain-name occluded` in half, since the value carries no leading
@@ -102,32 +132,119 @@ Future<void> main(List<String> args) async {
   // banner wants the semver.
   final runner = Platform.version.split(' ').first;
   stderr.writeln('e2e: ${Platform.resolvedExecutable} ($runner)');
+  stderr.writeln('e2e: FLUTTER_ROOT=$flutterRoot');
   stderr.writeln('e2e: ${packageDir.path}\$ dart ${testArgs.join(' ')}');
 
-  final outcome = await _runSuite(packageDir, testArgs);
+  final environment = _suiteEnvironment(flutterRoot, adb);
+  await _resolve(packageDir, environment);
+  final outcome = await _runSuite(packageDir, environment, testArgs);
   outcome.report();
   exit(outcome.ok ? 0 : 1);
 }
 
-/// The directory holding `pubspec.yaml`, derived from this script's own
-/// location so the runner works from any cwd.
+/// The source directory holding `pubspec.yaml`: `tools/dev_tool` in the
+/// workspace `bazel run` was invoked in, so the runner works from any cwd.
 Directory _packageDir() {
-  final dir = File(Platform.script.toFilePath()).parent.parent;
+  final workspace = Platform.environment['BUILD_WORKSPACE_DIRECTORY'];
+  if (workspace == null || workspace.isEmpty) {
+    _fail(
+      'BUILD_WORKSPACE_DIRECTORY is unset, so this was not started by '
+      '`bazel run`. Run the suite with `bazel run //tools/dev_tool:e2e`.',
+    );
+  }
+  final dir = Directory('$workspace/tools/dev_tool');
   final pubspec = File('${dir.path}/pubspec.yaml');
   if (!pubspec.existsSync()) {
-    _fail(
-      'expected ${pubspec.path} to exist — this script has to stay in '
-      'tools/dev_tool/tool/.',
-    );
+    _fail('expected ${pubspec.path} to exist.');
   }
   return dir;
 }
 
-Future<Outcome> _runSuite(Directory packageDir, List<String> testArgs) async {
+/// The `FLUTTER_ROOT` the suite's pub resolution reads: the root above the
+/// version manifest at the runfiles path [manifestPath].
+String _flutterRoot(String manifestPath) =>
+    File(_runfile(manifestPath, 'the Flutter version manifest'))
+        .absolute
+        .parent
+        .parent
+        .parent
+        .path;
+
+/// The absolute path of the runfile at [path], [what] naming it if it is not
+/// there.
+String _runfile(String path, String what) {
+  final Runfiles runfiles;
+  try {
+    runfiles = Runfiles.create();
+  } on StateError catch (e) {
+    _fail('cannot find this runner\'s runfiles: ${e.message}');
+  }
+  final file = File(runfiles.rlocation(path));
+  if (!file.existsSync()) {
+    _fail('cannot find $what: its runfile $path resolves to ${file.path}.');
+  }
+  return file.absolute.path;
+}
+
+/// This process's environment without what `bazel run` added for it, and with
+/// [flutterRoot] and [adb]. See the library comment for what each would break.
+Map<String, String> _suiteEnvironment(String flutterRoot, String adb) => {
+  for (final MapEntry(:key, :value) in Platform.environment.entries)
+    if (key != 'BUILD_WORKSPACE_DIRECTORY' &&
+        key != 'BUILD_WORKING_DIRECTORY' &&
+        key != 'JAVA_RUNFILES' &&
+        !key.startsWith('RUNFILES_'))
+      key: value,
+  'FLUTTER_ROOT': flutterRoot,
+  _adbVariable: adb,
+};
+
+/// Resolves the pub workspace with `dart pub get`, in a process of its own,
+/// before `dart test` starts.
+///
+/// `dart test` can resolve on its own, but with Dart 3.13's pub it can do so
+/// only once per process: the first resolution closes pub's HTTP client, and
+/// a second one dies on `Bad state: Attempting to send request on closed
+/// client`. A second one comes whenever `dart test` finds no
+/// `.dart_tool/package_config.json` and some workspace member's `pubspec.yaml`
+/// is newer than `pubspec.lock`, as in every fresh checkout that writes
+/// `tools/` after the root lock: it resolves, and then pub's up-to-date check,
+/// which counts the other workspace members as packages missing from the lock,
+/// calls that resolution stale and starts another. Resolved here first,
+/// `dart test` finds the package config and resolves at most once.
+Future<void> _resolve(
+  Directory packageDir,
+  Map<String, String> environment,
+) async {
+  final process = await Process.start(
+    Platform.resolvedExecutable,
+    ['pub', 'get'],
+    workingDirectory: packageDir.path,
+    environment: environment,
+    includeParentEnvironment: false,
+  );
+  // To stderr, both: this runner's stdout carries only what it says itself.
+  await Future.wait([
+    process.stdout.transform(utf8.decoder).forEach(stderr.write),
+    process.stderr.transform(utf8.decoder).forEach(stderr.write),
+  ]);
+  final code = await process.exitCode;
+  if (code != 0) {
+    _fail('`dart pub get` exited $code, so the suite did not run.');
+  }
+}
+
+Future<Outcome> _runSuite(
+  Directory packageDir,
+  Map<String, String> environment,
+  List<String> testArgs,
+) async {
   final process = await Process.start(
     Platform.resolvedExecutable,
     [...testArgs, '--reporter', 'json'],
     workingDirectory: packageDir.path,
+    environment: environment,
+    includeParentEnvironment: false,
   );
   // The runner's own diagnostics — version solving, load errors, a test's own
   // prints — arrive here, and when the JSON stream stops early this is the only

@@ -1,0 +1,22 @@
+load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
+load("//flutter/private:flutter_pub.bzl", "flutter_pub")
+
+# `dart pub`, run from the pinned toolchain against the current workspace, so
+# that the SDK which resolves pubspec.lock is the SDK which compiles it:
+#
+#   bazel run @rules_flutter//flutter/pub -- get
+#
+# Fetches @flutter_dev_root on first use; no normal build depends on it.
+flutter_pub(
+    name = "pub",
+    srcs = ["//flutter/private/tools:pub_runfiles.dart"],
+    main = "//flutter/private/tools:pub.dart",
+    visibility = ["//visibility:public"],
+)
+
+bzl_library(
+    name = "extensions",
+    srcs = ["extensions.bzl"],
+    visibility = ["//visibility:public"],
+    deps = ["//flutter/private:pub_extension"],
+)

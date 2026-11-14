@@ -22,7 +22,7 @@ selecting the platform-specific toolchain repo at the call site: the rule
 discovers the font File via `ctx.toolchains[...]` instead.
 """
 
-load("@rules_dart//dart:utils.bzl", "dart_info_no_package")
+load("@rules_dart//dart:utils.bzl", "dart_info_no_package", "non_dart_transition")
 load("//flutter/private:flutter_info.bzl", "flutter_info")
 
 _MATERIAL_ICONS_BUNDLE_PATH = "fonts/MaterialIcons-Regular.otf"
@@ -38,13 +38,18 @@ def _flutter_material_icons_impl(ctx):
     # fully immutable — mutable fields propagate to the struct's mutability.
     contribution = struct(
         package_name = "",
+        package_root = None,
         family = "MaterialIcons",
         fonts = (struct(
             asset_path = _MATERIAL_ICONS_BUNDLE_PATH,
+            of_other_package = False,
+            file = material_font,
             weight = None,
             style = None,
         ),),
-        files = (material_font,),
+        # flutter_tools bundles the font and names it in FontManifest.json, but
+        # lists no Material font in AssetManifest.
+        listed = False,
     )
 
     return [
@@ -60,6 +65,9 @@ def _flutter_material_icons_impl(ctx):
 
 flutter_material_icons = rule(
     implementation = _flutter_material_icons_impl,
+    # A font and no Dart: the same under every web compiler, and whether or
+    # not creation locations are tracked.
+    cfg = non_dart_transition,
     toolchains = ["@rules_flutter//flutter:toolchain_type"],
     doc = "Toolchain-backed MaterialIcons font target. List in " +
           "`flutter_application(deps = [...])` to bundle MaterialIcons.",

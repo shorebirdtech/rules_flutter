@@ -1,0 +1,76 @@
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_library", "flutter_native_library", "flutter_plugin")
+
+# Things a web bundle may reach under two compilers at once, each with
+# something generated for `web_compiler_test.bzl` to find the configuration of.
+# `manual`: only that test builds them. They are four targets of one package.
+
+[
+    genrule(
+        name = "gen_" + name,
+        outs = ["lib/%s.dart" % name],
+        cmd = "echo 'const %s = 1;' > $@" % name,
+        tags = ["manual"],
+    )
+    for name in [
+        "library",
+        "plugin",
+        "independent_library",
+        "independent_plugin",
+    ]
+]
+
+genrule(
+    name = "gen_native",
+    outs = ["libnative.so"],
+    cmd = "echo native > $@",
+    tags = ["manual"],
+)
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "web_compiler_fixture",
+)
+
+flutter_native_library(
+    name = "native_library",
+    binding_contract = ["contract.txt"],
+    library = ":gen_native",
+    tags = ["manual"],
+    visibility = ["//flutter/tests:__pkg__"],
+)
+
+# Not independent: it may `select()` by compiler, so it is built for each.
+flutter_library(
+    name = "library",
+    srcs = [":gen_library"],
+    package = ":pubspec-metadata",
+    tags = ["manual"],
+    visibility = ["//flutter/tests:__pkg__"],
+)
+
+flutter_plugin(
+    name = "plugin",
+    srcs = [":gen_plugin"],
+    package = ":pubspec-metadata",
+    tags = ["manual"],
+    visibility = ["//flutter/tests:__pkg__"],
+)
+
+# As every package from pub is.
+flutter_library(
+    name = "independent_library",
+    srcs = [":gen_independent_library"],
+    package = ":pubspec-metadata",
+    runtime_independent = True,
+    tags = ["manual"],
+    visibility = ["//flutter/tests:__pkg__"],
+)
+
+flutter_plugin(
+    name = "independent_plugin",
+    srcs = [":gen_independent_plugin"],
+    package = ":pubspec-metadata",
+    runtime_independent = True,
+    tags = ["manual"],
+    visibility = ["//flutter/tests:__pkg__"],
+)

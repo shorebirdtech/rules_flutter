@@ -1,13 +1,19 @@
 load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options")
-load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_library")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application", "flutter_library")
 load("@rules_flutter//flutter:linux.bzl", "flutter_linux_app")
 
 exports_files(["pubspec.lock"])
 
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "hello_world",
+)
+
 flutter_application(
     name = "cross_app",
-    package_name = "hello_world",
     main = "lib/main.dart",
+    package = ":pubspec-metadata",
+    visibility = ["//stock_runner:__pkg__"],
     deps = [
         "@deps//:flutter",
         "@rules_flutter//flutter:material_icons",
@@ -22,6 +28,7 @@ flutter_application(
 flutter_linux_app(
     name = "cross_linux",
     application = ":cross_app",
+    application_id = "com.example.cross_compile.cross_linux",
 )
 
 # The workspace's lint ruleset, bundled with the pub package whose YAML its
@@ -47,8 +54,8 @@ dart_analysis_config(
 # the analyzer to stage.
 flutter_library(
     name = "app_lib",
-    package_name = "hello_world",
     srcs = glob(["lib/**/*.dart"]),
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:flutter",
         "@rules_flutter//flutter:material_icons",

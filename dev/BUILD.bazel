@@ -1,0 +1,12 @@
+load("@rules_dart//dart:defs.bzl", "dart_analysis_config")
+
+# Every `analysis_options.yaml` in this workspace, for the `dart_analyze`
+# aspect `.bazelrc` enables under `bazel test`. Each Dart file is analyzed and
+# format-checked against the nearest listed one above it, as in the IDE.
+# A package of its own, left out of the release archive (.gitattributes): the
+# rule refuses options from another repository, so in a consumer's copy of the
+# module this target would not analyze.
+dart_analysis_config(
+    name = "analysis_config",
+    options = ["//:analysis_options"],
+)

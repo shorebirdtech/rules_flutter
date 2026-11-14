@@ -1,7 +1,30 @@
 """Unit tests for plugin_registrant.bzl pure functions."""
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
-load("//flutter/private:plugin_registrant.bzl", "make_android_registrant_content", "make_registrant_content")
+load("//flutter:providers.bzl", "FlutterPluginPlatformInfo")
+load("//flutter/private:plugin_registrant.bzl", "make_android_registrant_content", "make_registrant_content", "native_registrant_header_path", "registrant_include_dirs")
+
+_KEYS = {
+    "dartFileName": "dart_file_name",
+    "dartPluginClass": "dart_plugin_class",
+    "fileName": "file_name",
+    "package": "package",
+    "pluginClass": "plugin_class",
+}
+
+def _platforms(entries):
+    """`flutter.plugin.platforms` entries, as the `flutter_plugin_platform` targets a plugin lists provide them."""
+    out = {}
+    for platform, entry in entries.items():
+        fields = {field: entry.get(key, "") for key, field in _KEYS.items()}
+        out[platform] = FlutterPluginPlatformInfo(
+            platform = platform,
+            ffi_plugin = False,
+            default_package = "",
+            lib = None,
+            **fields
+        )
+    return out
 
 def _no_plugins_returns_empty_test_impl(ctx):
     env = unittest.begin(ctx)
@@ -14,7 +37,7 @@ def _native_only_plugin_returns_empty_test_impl(ctx):
     env = unittest.begin(ctx)
     plugins = [struct(
         name = "my_plugin",
-        platforms = {"linux": {"pluginClass": "MyPlugin"}},
+        platforms = _platforms({"linux": {"pluginClass": "MyPlugin"}}),
     )]
     result = make_registrant_content(plugins)
     asserts.equals(env, "", result)
@@ -32,7 +55,7 @@ def _single_dart_plugin_test_impl(ctx):
     env = unittest.begin(ctx)
     plugins = [struct(
         name = "url_launcher_web",
-        platforms = {"web": {"dartPluginClass": "UrlLauncherPlugin"}},
+        platforms = _platforms({"web": {"dartPluginClass": "UrlLauncherPlugin"}}),
     )]
     result = make_registrant_content(plugins)
     asserts.true(env, "import 'package:url_launcher_web/url_launcher_web.dart';" in result)
@@ -47,11 +70,11 @@ def _multiple_dart_plugins_test_impl(ctx):
     plugins = [
         struct(
             name = "url_launcher_web",
-            platforms = {"web": {"dartPluginClass": "UrlLauncherPlugin"}},
+            platforms = _platforms({"web": {"dartPluginClass": "UrlLauncherPlugin"}}),
         ),
         struct(
             name = "shared_preferences_web",
-            platforms = {"web": {"dartPluginClass": "SharedPreferencesPlugin"}},
+            platforms = _platforms({"web": {"dartPluginClass": "SharedPreferencesPlugin"}}),
         ),
     ]
     result = make_registrant_content(plugins)
@@ -65,11 +88,11 @@ def _mixed_native_and_dart_plugins_test_impl(ctx):
     plugins = [
         struct(
             name = "url_launcher_linux",
-            platforms = {"linux": {"pluginClass": "UrlLauncherLinux"}},
+            platforms = _platforms({"linux": {"pluginClass": "UrlLauncherLinux"}}),
         ),
         struct(
             name = "url_launcher_web",
-            platforms = {"web": {"dartPluginClass": "UrlLauncherPlugin"}},
+            platforms = _platforms({"web": {"dartPluginClass": "UrlLauncherPlugin"}}),
         ),
     ]
     result = make_registrant_content(plugins)
@@ -82,10 +105,10 @@ def _multi_platform_plugin_registers_once_test_impl(ctx):
     env = unittest.begin(ctx)
     plugins = [struct(
         name = "my_plugin",
-        platforms = {
+        platforms = _platforms({
             "web": {"dartPluginClass": "MyPlugin"},
             "linux": {"dartPluginClass": "MyPlugin"},
-        },
+        }),
     )]
     result = make_registrant_content(plugins)
 
@@ -98,7 +121,7 @@ def _dart_file_name_override_test_impl(ctx):
     env = unittest.begin(ctx)
     plugins = [struct(
         name = "my_plugin",
-        platforms = {"web": {"dartPluginClass": "MyPlugin", "dartFileName": "custom_file.dart"}},
+        platforms = _platforms({"macos": {"dartPluginClass": "MyPlugin", "dartFileName": "custom_file.dart"}}),
     )]
     result = make_registrant_content(plugins)
     asserts.true(env, "import 'package:my_plugin/custom_file.dart';" in result)
@@ -111,16 +134,16 @@ def _platform_filters_web_only_test_impl(ctx):
     plugins = [
         struct(
             name = "url_launcher",
-            platforms = {
+            platforms = _platforms({
                 "web": {"dartPluginClass": "UrlLauncherWeb"},
                 "android": {"dartPluginClass": "UrlLauncherAndroid"},
-            },
+            }),
         ),
         struct(
             name = "camera",
-            platforms = {
+            platforms = _platforms({
                 "android": {"dartPluginClass": "CameraAndroid"},
-            },
+            }),
         ),
     ]
     result = make_registrant_content(plugins, target_platform = "web")
@@ -136,16 +159,16 @@ def _platform_filters_android_only_test_impl(ctx):
     plugins = [
         struct(
             name = "url_launcher",
-            platforms = {
+            platforms = _platforms({
                 "web": {"dartPluginClass": "UrlLauncherWeb"},
                 "android": {"dartPluginClass": "UrlLauncherAndroid"},
-            },
+            }),
         ),
         struct(
             name = "camera",
-            platforms = {
+            platforms = _platforms({
                 "android": {"dartPluginClass": "CameraAndroid"},
-            },
+            }),
         ),
     ]
     result = make_registrant_content(plugins, target_platform = "android")
@@ -160,9 +183,9 @@ def _platform_no_match_returns_empty_test_impl(ctx):
     plugins = [
         struct(
             name = "camera",
-            platforms = {
+            platforms = _platforms({
                 "android": {"dartPluginClass": "CameraAndroid"},
-            },
+            }),
         ),
     ]
     result = make_registrant_content(plugins, target_platform = "web")
@@ -188,7 +211,7 @@ def _plugins_and_agent_test_impl(ctx):
     env = unittest.begin(ctx)
     plugins = [struct(
         name = "my_plugin",
-        platforms = {"macos": {"dartPluginClass": "MyPlugin"}},
+        platforms = _platforms({"macos": {"dartPluginClass": "MyPlugin"}}),
     )]
     result = make_registrant_content(
         plugins,
@@ -229,7 +252,7 @@ def _plugins_without_agent_test_impl(ctx):
     env = unittest.begin(ctx)
     plugins = [struct(
         name = "my_plugin",
-        platforms = {"macos": {"dartPluginClass": "MyPlugin"}},
+        platforms = _platforms({"macos": {"dartPluginClass": "MyPlugin"}}),
     )]
     result = make_registrant_content(plugins, target_platform = "macos")
     asserts.true(env, "agent" not in result)
@@ -245,7 +268,7 @@ def _web_registrant_keeps_function_shape_test_impl(ctx):
     env = unittest.begin(ctx)
     plugins = [struct(
         name = "url_launcher_web",
-        platforms = {"web": {"pluginClass": "UrlLauncherPlugin"}},
+        platforms = _platforms({"web": {"pluginClass": "UrlLauncherPlugin"}}),
     )]
     result = make_registrant_content(plugins, target_platform = "web", agent_import = "ignored.dart")
     asserts.true(env, "void registerPlugins() {" in result)
@@ -284,5 +307,52 @@ def _android_registrant_names_the_declared_package_test_impl(ctx):
 
 _t15_test = unittest.make(_android_registrant_names_the_declared_package_test_impl)
 
+def _web_file_name_test_impl(ctx):
+    """A web plugin's `fileName` is the library its registrant imports, as flutter_tools has it."""
+    env = unittest.begin(ctx)
+    plugins = [struct(
+        name = "audio_session",
+        platforms = _platforms({"web": {"pluginClass": "AudioSessionWeb", "fileName": "audio_session_web.dart"}}),
+    )]
+    result = make_registrant_content(plugins, target_platform = "web")
+    asserts.true(env, "import 'package:audio_session/audio_session_web.dart';" in result, result)
+    asserts.true(env, "AudioSessionWeb.registerWith(webPluginRegistrar);" in result, result)
+    return unittest.end(env)
+
+_t18_test = unittest.make(_web_file_name_test_impl)
+
+def _reaches(header_path, include_dirs, name):
+    """Whether `#include "<name>"` finds `header_path` under one of `include_dirs`."""
+    for d in include_dirs:
+        if header_path == d + "/" + name:
+            return True
+    return False
+
+def _native_registrant_is_included_as_flutter_header_test_impl(ctx):
+    """Runner code includes `flutter/generated_plugin_registrant.h`, as `flutter create`'s does.
+
+    Holds for the header rules_flutter generates (Linux and Windows share the
+    declaration and the include path) and for the one `flutter create` checks in
+    at `<platform>/flutter/`.
+    """
+    env = unittest.begin(ctx)
+    name = "flutter/generated_plugin_registrant.h"
+    generated = "bazel-out/cfg/bin/pkg/" + native_registrant_header_path("app_registrant")
+    committed = "pkg/linux/flutter/generated_plugin_registrant.h"
+    for header in [generated, committed]:
+        asserts.true(env, _reaches(header, registrant_include_dirs([header]), name), header)
+    return unittest.end(env)
+
+def _registrant_include_dirs_stay_narrow_test_impl(ctx):
+    """A header outside a `flutter/` directory adds only its own directory, once."""
+    env = unittest.begin(ctx)
+    asserts.equals(env, ["a/b"], registrant_include_dirs(["a/b/r.h", "a/b/s.h"]))
+    asserts.equals(env, ["a/flutter", "a"], registrant_include_dirs(["a/flutter/r.h"]))
+    asserts.equals(env, ["a/myflutter"], registrant_include_dirs(["a/myflutter/r.h"]))
+    return unittest.end(env)
+
+_t16_test = unittest.make(_native_registrant_is_included_as_flutter_header_test_impl)
+_t17_test = unittest.make(_registrant_include_dirs_stay_narrow_test_impl)
+
 def plugin_registrant_test_suite(name):
-    unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test, _t6_test, _t7_test, _t8_test, _t9_test, _t10_test, _t11_test, _t12_test, _t13_test, _t14_test, _t15_test)
+    unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test, _t6_test, _t7_test, _t8_test, _t9_test, _t10_test, _t11_test, _t12_test, _t13_test, _t14_test, _t15_test, _t16_test, _t17_test, _t18_test)

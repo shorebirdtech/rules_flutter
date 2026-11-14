@@ -7,8 +7,10 @@ import 'package:args/args.dart';
 import 'package:flutter_bazel_dev_tool/bazel.dart' show bazelBuildArgs;
 import 'package:flutter_bazel_dev_tool/dev_tool_exception.dart';
 import 'package:flutter_bazel_dev_tool/device.dart';
+import 'package:flutter_bazel_dev_tool/logging.dart';
 import 'package:flutter_bazel_dev_tool/run_command.dart' show RunCommand;
 import 'package:flutter_bazel_dev_tool/run_plan.dart';
+import 'package:flutter_bazel_dev_tool/web_mode.dart';
 import 'package:test/test.dart';
 
 /// The parsed flags a plan is resolved from. Goes through the real parser, so a
@@ -58,6 +60,73 @@ void main() {
       );
     });
   });
+  // One run is one build of the launch target, so every device in it gets that
+  // build's native libraries and native-assets table. A device of another ABI
+  // would run the first device's, so the run is refused before it builds.
+  group('assertDevicesShareOneBuild', () {
+    test('devices of different ABIs are refused, naming each and why', () {
+      expect(
+        () => assertDevicesShareOneBuild([
+          AndroidDevice(
+            adbPath: 'adb',
+            aapt2Path: 'aapt2',
+            deviceId: 'PIXEL',
+            abi: 'arm64-v8a',
+          ),
+          AndroidDevice(
+            adbPath: 'adb',
+            aapt2Path: 'aapt2',
+            deviceId: 'emulator-5554',
+            abi: 'x86_64',
+          ),
+        ]),
+        throwsA(
+          isA<DevToolException>().having(
+            (e) => e.message,
+            'message',
+            allOf(
+              contains('Android (PIXEL)'),
+              contains('arm64-v8a'),
+              contains('Android (emulator-5554)'),
+              contains('x86_64'),
+              contains('one run per'),
+            ),
+          ),
+        ),
+      );
+    });
+
+    test('devices of one ABI share a build', () {
+      expect(
+        () => assertDevicesShareOneBuild([
+          AndroidDevice(
+            adbPath: 'adb',
+            aapt2Path: 'aapt2',
+            deviceId: 'PIXEL',
+            abi: 'arm64-v8a',
+          ),
+          AndroidDevice(
+            adbPath: 'adb',
+            aapt2Path: 'aapt2',
+            deviceId: 'emulator-5554',
+            abi: 'arm64-v8a',
+          ),
+        ]),
+        returnsNormally,
+      );
+    });
+
+    test('a desktop and a phone are refused', () {
+      expect(
+        () => assertDevicesShareOneBuild([
+          IOSSimulatorDevice(udid: 'SIM'),
+          AndroidDevice(adbPath: 'adb', aapt2Path: 'aapt2', abi: 'arm64-v8a'),
+        ]),
+        throwsA(isA<DevToolException>()),
+      );
+    });
+  });
+
   // The run's own intent, asked once and answered everywhere the flag governs.
   group('hotReloadOffReason', () {
     test('a run that asked for hot reload has no reason to refuse it', () {
@@ -184,6 +253,41 @@ void main() {
         RunPlan.compilationModeFor(parse(['--profile', '-c', 'opt'])),
         'opt',
       );
+    });
+  });
+
+  // `-c` stays the compilation mode under its new long name, and `--config` is
+  // a bazel config that rides with every other bazel flag of the run.
+  group('--compilation_mode and --config', () {
+    test('--compilation_mode is what -c is', () {
+      expect(
+        RunPlan.compilationModeFor(
+          parse(['--no-hot', '--compilation_mode', 'opt']),
+        ),
+        'opt',
+      );
+      expect(
+        RunPlan.compilationModeFor(parse(['--no-hot', '-c', 'opt'])),
+        'opt',
+      );
+    });
+
+    test('--compilation_mode contradicting hot reload is refused', () {
+      expect(
+        () => RunPlan.compilationModeFor(parse(['--compilation_mode', 'opt'])),
+        throwsA(isA<DevToolException>()),
+      );
+    });
+
+    test('--config is not a compilation mode', () {
+      final results = parse(['--no-hot', '--config', 'ci']);
+      expect(RunPlan.compilationModeFor(results), isNull);
+      expect(results['config'], ['ci']);
+    });
+
+    test('--config repeats and defaults empty', () {
+      expect(parse([])['config'], isEmpty);
+      expect(parse(['--config', 'a', '--config=b'])['config'], ['a', 'b']);
     });
   });
 
@@ -323,21 +427,69 @@ void main() {
     });
   });
 
-  // The `app.*` commands proxy to `ext.rules_flutter.*` over a VM service.
-  // Every native run has one; on a browser only the DDC dev loop does, so a
-  // `--wasm` or `--profile` run advertising the whole surface could answer
-  // every call only with `no VM service for <appId>`.
+  // The `app.*` commands proxy to `ext.rules_flutter.*`: over a VM service on
+  // native and DDC, over a page bridge in a debug web bundle. Only a non-debug
+  // bundle compiles the extensions out.
   group('hasAgentSurfaceFor', () {
-    test('a native run has it, DDC or not', () {
-      expect(hasAgentSurfaceFor(isWebDevice: false, isDdcWeb: false), isTrue);
+    bool surface({
+      required bool web,
+      required bool ddc,
+      required BuildMode mode,
+    }) => hasAgentSurfaceFor(isWebDevice: web, isDdcWeb: ddc, buildMode: mode);
+
+    test('a native run has it', () {
+      for (final mode in BuildMode.values) {
+        expect(surface(web: false, ddc: false, mode: mode), isTrue);
+      }
     });
 
     test('the DDC dev loop has it', () {
-      expect(hasAgentSurfaceFor(isWebDevice: true, isDdcWeb: true), isTrue);
+      expect(surface(web: true, ddc: true, mode: BuildMode.debug), isTrue);
     });
 
-    test('a web run serving a built bundle does not', () {
-      expect(hasAgentSurfaceFor(isWebDevice: true, isDdcWeb: false), isFalse);
+    test('a debug bundle (--wasm, --no-hot -c dbg) has it', () {
+      expect(surface(web: true, ddc: false, mode: BuildMode.debug), isTrue);
+    });
+
+    test('a profile or release bundle does not', () {
+      expect(surface(web: true, ddc: false, mode: BuildMode.profile), isFalse);
+      expect(surface(web: true, ddc: false, mode: BuildMode.release), isFalse);
+    });
+  });
+
+  // A run that is not the loop its flags suggest says so before it builds.
+  group('announceWasmSelection', () {
+    List<LogRecord> announce(WasmSelection wasm) {
+      final logger = Logger.detached('announce_test')..level = Level.ALL;
+      final records = <LogRecord>[];
+      final sub = logger.onRecord.listen(records.add);
+      announceWasmSelection(wasm, '//app:web', logger);
+      sub.cancel();
+      return records;
+    }
+
+    test('a WebAssembly-only target running dart2wasm says why, and how to '
+        'get DDC', () {
+      final record = announce(WasmSelection.wasmOnlyTarget).single;
+      expect(record.level, Level.INFO);
+      final text = (record.object as Map)['text'] as String;
+      expect(text, contains('//app:web'));
+      expect(text, contains('js_fallback = False'));
+      expect(text, contains('no hot reload'));
+      expect(text, contains('--no-wasm'));
+    });
+
+    test('--no-wasm on such a target warns that the app ships wasm only', () {
+      final record = announce(WasmSelection.ddcDespiteWasmOnlyTarget).single;
+      expect(record.level, Level.WARNING);
+      final text = (record.object as Map)['text'] as String;
+      expect(text, contains('WebAssembly only'));
+      expect(text, contains('Int64List'));
+    });
+
+    test('a run that is what its flags say stays quiet', () {
+      expect(announce(WasmSelection.notWasm), isEmpty);
+      expect(announce(WasmSelection.requested), isEmpty);
     });
   });
 }

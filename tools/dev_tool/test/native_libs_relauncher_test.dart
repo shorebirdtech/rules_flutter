@@ -25,6 +25,8 @@ import 'package:flutter_bazel_dev_tool/native_libs_relauncher.dart';
 import 'package:flutter_bazel_dev_tool/native_libs_watch.dart';
 import 'package:flutter_bazel_dev_tool/outcome_renderer.dart';
 import 'package:flutter_bazel_dev_tool/session.dart';
+import 'package:flutter_bazel_dev_tool/vm_service_client.dart';
+import 'package:vm_service/vm_service.dart' show IsolateRef;
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
@@ -45,6 +47,12 @@ class _RelaunchDevice extends Device {
   String get name => 'fake';
 
   @override
+  bool sharesHostFilesystem = false;
+
+  /// Run inside [stop], once the old process is being stopped.
+  void Function()? onStop;
+
+  @override
   Future<AppInstance> launch(String appPath, {AppLogListener? onLog}) async {
     launches++;
     if (launchError case final error?) throw error;
@@ -54,6 +62,7 @@ class _RelaunchDevice extends Device {
   @override
   Future<void> stop(AppInstance instance) async {
     stops++;
+    onStop?.call();
     await instance.logs.close();
   }
 }
@@ -103,7 +112,7 @@ class _Harness {
 
     final resolver = SourceUriResolver(
       workspaceRoot: tmp.path,
-      sourcePackages: const [(name: 'app', libRoot: '')],
+      sourcePackages: const [(name: 'app', packageRoot: '')],
     );
     final workspace = Workspace(resolver: resolver);
     final applied = AppliedVersions();
@@ -137,20 +146,17 @@ class _Harness {
   void changeNativeLib(String contents) =>
       File(p.join(appDir, 'libnative.dylib')).writeAsStringSync(contents);
 
-  /// [rebuild] builds the native libraries the restart fingerprints;
-  /// [rebuildBundle] the launch target, which only a relaunch needs.
   Future<Relauncher> relauncher({
     required Future<bool> Function() rebuild,
-    Future<bool> Function()? rebuildBundle,
     List<String> Function()? patchedLibs,
     Future<void> Function({required bool newProcess})? catchUpPatcher,
     NativeLibsWatch? nativeLibs,
+    Future<Map<String, String>?> Function()? probeLibs,
   }) async {
     return Relauncher(
       appFile: appDir,
-      fingerprint: () async =>
-          await rebuild() ? await nativeLibsFingerprint(appDir) : null,
-      rebuild: rebuildBundle ?? () async => true,
+      rebuild: rebuild,
+      probeLibs: probeLibs,
       sessions: [session],
       protocol: MachineProtocol(enabled: false, commandRunner: CommandRunner()),
       orchestrator: orchestrator,
@@ -180,61 +186,6 @@ void main() {
     // restart, which is the fast path this check exists to protect.
     expect(await r.relaunchIfNeeded(), isA<RelaunchNotNeeded>());
     expect(rebuilds, 1);
-    expect(h.device.launches, 0);
-  });
-
-  // The restart's question is answered by building the libraries alone; the
-  // bundle, which on macOS means the kernel, App.framework and a signature,
-  // is built only for the relaunch that needs it.
-  test('an unchanged native library does not rebuild the bundle', () async {
-    final h = await _Harness.create();
-    addTearDown(h.dispose);
-    var bundleBuilds = 0;
-    final r = await h.relauncher(
-      rebuild: () async => true,
-      rebuildBundle: () async {
-        bundleBuilds++;
-        return true;
-      },
-    );
-    expect(await r.relaunchIfNeeded(), isA<RelaunchNotNeeded>());
-    expect(bundleBuilds, 0);
-  });
-
-  test(
-    'a changed native library rebuilds the bundle before relaunching',
-    () async {
-      final h = await _Harness.create();
-      addTearDown(h.dispose);
-      var bundleBuilds = 0;
-      final r = await h.relauncher(
-        rebuild: () async {
-          h.changeNativeLib('machine code v2 — longer');
-          return true;
-        },
-        rebuildBundle: () async {
-          bundleBuilds++;
-          expect(h.device.stops, 0, reason: 'built before the old app stops');
-          return true;
-        },
-      );
-      expect(await r.relaunchIfNeeded(), isA<Relaunched>());
-      expect(bundleBuilds, 1);
-    },
-  );
-
-  test('a bundle that fails to build relaunches nothing', () async {
-    final h = await _Harness.create();
-    addTearDown(h.dispose);
-    final r = await h.relauncher(
-      rebuild: () async {
-        h.changeNativeLib('machine code v2 — longer');
-        return true;
-      },
-      rebuildBundle: () async => false,
-    );
-    expect(await r.relaunchIfNeeded(), isA<RelaunchBuildFailed>());
-    expect(h.device.stops, 0);
     expect(h.device.launches, 0);
   });
 
@@ -364,6 +315,81 @@ void main() {
     expect(wire['message'], contains('libnative.dylib'));
   });
 
+  // Measured on a Windows VM: the engine holds files of the devFS open while
+  // the app runs, so asking the running app to delete it fails with `Access is
+  // denied` and leaves the directory behind for good.
+  test(
+    'the devFS of a replaced process is deleted after it exits, not by it',
+    () async {
+      final h = await _Harness.create();
+      addTearDown(h.dispose);
+      final outer = Directory(p.join(h.tmp.path, 'flutter_bazelAb12Cd'))
+        ..createSync();
+      final devFS = await FakeDevFS.start(
+        Directory(p.join(outer.path, 'flutter_bazel'))..createSync(),
+      );
+      addTearDown(devFS.close);
+      final vm = FakeVmService(
+        isolates: [IsolateRef(id: 'iso-main', name: 'main', number: '1')],
+      )..devFSUri = devFS.uri;
+      final client = VmServiceClient(connector: (_) async => vm);
+      await client.connect(devFS.serviceUri);
+      h.session.vmClient = client;
+      h.device.sharesHostFilesystem = true;
+      bool? presentWhileStopping;
+      h.device.onStop = () => presentWhileStopping = outer.existsSync();
+      final r = await h.relauncher(
+        rebuild: () async {
+          h.changeNativeLib('machine code v2 — longer');
+          return true;
+        },
+      );
+
+      await r.relaunchIfNeeded();
+
+      expect(
+        vm.extensionCalls.map((c) => c.method),
+        isNot(contains('_deleteDevFS')),
+        reason: 'the old process is not asked: it may hold the files open',
+      );
+      expect(
+        presentWhileStopping,
+        isTrue,
+        reason: 'nothing is deleted before the process is stopped',
+      );
+      expect(outer.existsSync(), isFalse);
+    },
+  );
+
+  test(
+    'a device on another filesystem is still asked to delete its devFS',
+    () async {
+      final h = await _Harness.create();
+      addTearDown(h.dispose);
+      final vm = FakeVmService(
+        isolates: [IsolateRef(id: 'iso-main', name: 'main', number: '1')],
+      );
+      final devFS = await FakeDevFS.start(
+        Directory(p.join(h.tmp.path, 'devfs'))..createSync(),
+      );
+      addTearDown(devFS.close);
+      vm.devFSUri = devFS.uri;
+      final client = VmServiceClient(connector: (_) async => vm);
+      await client.connect(devFS.serviceUri);
+      h.session.vmClient = client;
+      final r = await h.relauncher(
+        rebuild: () async {
+          h.changeNativeLib('machine code v2 — longer');
+          return true;
+        },
+      );
+
+      await r.relaunchIfNeeded();
+
+      expect(vm.extensionCalls.map((c) => c.method), contains('_deleteDevFS'));
+    },
+  );
+
   // Measured on an Android emulator short of storage: `adb install -r` refused
   // the rebuilt APK after the old app had been stopped. The run then ended
   // with no reply and no log line saying why.
@@ -474,5 +500,122 @@ void main() {
     // otherwise every subsequent restart would relaunch the process again.
     expect(await r.relaunchIfNeeded(), isA<RelaunchNotNeeded>());
     expect(h.device.launches, 1);
+  });
+
+  // Packaging the launch artifact is most of what an Android restart costs (an
+  // APK is dexed, linked, zipped and signed), and the only thing a restart
+  // needs of it is its native libraries. A platform that can read those without
+  // the artifact says how, and a restart that finds them unchanged builds
+  // nothing of it.
+  group('with a probe of the libraries that does not package the artifact', () {
+    /// The fingerprint the probe reads off the libraries, as the bundle's own
+    /// is keyed: the same file name and a token for its content.
+    Future<Map<String, String>?> Function() probing(
+      _Harness h,
+      List<String> asked,
+    ) => () async {
+      asked.add('probe');
+      return nativeLibsFingerprint(h.appDir);
+    };
+
+    test('unchanged libraries build and relaunch nothing', () async {
+      final h = await _Harness.create();
+      addTearDown(h.dispose);
+      final asked = <String>[];
+      final r = await h.relauncher(
+        rebuild: () async {
+          asked.add('rebuild');
+          return true;
+        },
+        probeLibs: probing(h, asked),
+      );
+
+      expect(await r.relaunchIfNeeded(), isA<RelaunchNotNeeded>());
+      expect(asked, ['probe']);
+      expect(h.device.launches, 0);
+    });
+
+    test('changed libraries build the artifact once, then relaunch from it, '
+        'and the next restart compares against what now runs', () async {
+      final h = await _Harness.create();
+      addTearDown(h.dispose);
+      final asked = <String>[];
+      final r = await h.relauncher(
+        rebuild: () async {
+          asked.add('rebuild');
+          return true;
+        },
+        probeLibs: () async {
+          asked.add('probe');
+          h.changeNativeLib('machine code v2 — longer');
+          return nativeLibsFingerprint(h.appDir);
+        },
+      );
+
+      final outcome = await r.relaunchIfNeeded();
+      expect(
+        outcome,
+        isA<Relaunched>().having((o) => o.changedLibs, 'changedLibs', [
+          'libnative.dylib',
+        ]),
+      );
+      // The relaunch installs the artifact, so it is built before it, and only
+      // once the libraries are known to have moved.
+      expect(asked, ['probe', 'rebuild']);
+      expect(h.device.launches, 1);
+
+      expect(await r.relaunchIfNeeded(), isA<RelaunchNotNeeded>());
+      expect(h.device.launches, 1);
+    });
+
+    test('a probe that cannot read the libraries reports the build and '
+        'relaunches nothing', () async {
+      final h = await _Harness.create();
+      addTearDown(h.dispose);
+      var rebuilt = false;
+      final r = await h.relauncher(
+        rebuild: () async => rebuilt = true,
+        probeLibs: () async => null,
+      );
+
+      expect(await r.relaunchIfNeeded(), isA<RelaunchBuildFailed>());
+      expect(rebuilt, isFalse);
+      expect(h.device.launches, 0);
+    });
+
+    test('a failed build of the artifact after a changed library relaunches '
+        'nothing', () async {
+      final h = await _Harness.create();
+      addTearDown(h.dispose);
+      final r = await h.relauncher(
+        rebuild: () async => false,
+        probeLibs: () async {
+          h.changeNativeLib('machine code v2 — longer');
+          return nativeLibsFingerprint(h.appDir);
+        },
+      );
+
+      expect(await r.relaunchIfNeeded(), isA<RelaunchBuildFailed>());
+      expect(h.device.stops, 0);
+      expect(h.device.launches, 0);
+    });
+
+    test('a live patch still relaunches an unchanged bundle, from a rebuilt '
+        'artifact', () async {
+      final h = await _Harness.create();
+      addTearDown(h.dispose);
+      final asked = <String>[];
+      final r = await h.relauncher(
+        rebuild: () async {
+          asked.add('rebuild');
+          return true;
+        },
+        probeLibs: probing(h, asked),
+        patchedLibs: () => ['libnative.dylib'],
+      );
+
+      expect(await r.relaunchIfNeeded(), isA<Relaunched>());
+      expect(asked, ['probe', 'rebuild']);
+    });
   });
 }

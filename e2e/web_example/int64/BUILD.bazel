@@ -1,0 +1,51 @@
+load("@bazel_skylib//rules:build_test.bzl", "build_test")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application")
+load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "int64",
+)
+
+# An app holding 64-bit identifiers that keeps the dart2js fallback. dart2wasm
+# compiles it with an `Int64List` and the largest 64-bit integer; dart2js, and
+# DDC under `flutter_bazel run`, compile it with a `List<int>` and 2^53 - 1. One
+# `lib/main.dart`, two programs: it renders `Int64List max: 9223372036854775807`
+# from the WebAssembly build and `List<int> max: 9007199254740991` from the
+# JavaScript one.
+flutter_application(
+    name = "app",
+    main = "lib/main.dart",
+    package = ":pubspec-metadata",
+    deps = [
+        "//int64/ids",
+        "@deps//:flutter",
+    ],
+)
+
+flutter_web_app(
+    name = "int64_app",
+    app_name = "Int64 identifiers",
+    application = ":app",
+)
+
+# The same program with Chrome left out of the WebAssembly allow-list, so Chrome
+# runs the dart2js build the fallback ships: `main.dart.js` draws the
+# `List<int>` variant, and the end-to-end test shows it on screen.
+flutter_web_app(
+    name = "int64_app_js_fallback",
+    app_name = "Int64 identifiers (JavaScript)",
+    application = ":app",
+    wasm_browsers = [
+        "gecko",
+        "webkit",
+    ],
+)
+
+build_test(
+    name = "int64_build_test",
+    targets = [
+        ":int64_app",
+        ":int64_app_js_fallback",
+    ],
+)

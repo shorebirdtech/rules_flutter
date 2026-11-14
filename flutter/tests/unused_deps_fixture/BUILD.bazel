@@ -1,0 +1,56 @@
+load("@bazel_skylib//rules:build_test.bzl", "build_test")
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_library")
+load("//flutter/tests:unused_deps_test.bzl", "unused_deps_test_suite")
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "unused_deps_fixture",
+)
+
+# Imports nothing of `base`: building it fails the unused-dependency check.
+# `manual`, and tested by analysis only: a test that depends on it, even
+# `compile_fail_test`, runs its failing check as a validation of its own.
+flutter_library(
+    name = "unused",
+    srcs = ["lib/unused.dart"],
+    package = ":pubspec-metadata",
+    tags = ["manual"],
+    deps = ["//flutter/tests/unused_deps_fixture/base"],
+)
+
+# Imports nothing; its one dependency is a plugin, which the app registers.
+flutter_library(
+    name = "with_plugin",
+    srcs = ["lib/with_plugin.dart"],
+    package = ":pubspec-metadata",
+    deps = ["//flutter/tests/unused_deps_fixture/plugin"],
+)
+
+# Imports nothing; its one dependency is a pub plugin.
+flutter_library(
+    name = "with_pub_plugin",
+    srcs = ["lib/with_plugin.dart"],
+    package = ":pubspec-metadata",
+    deps = ["//flutter/tests/unused_deps_fixture/pub_plugin"],
+)
+
+# Imports nothing; its one dependency bundles an asset.
+flutter_library(
+    name = "with_bundled",
+    srcs = ["lib/with_plugin.dart"],
+    package = ":pubspec-metadata",
+    deps = ["//flutter/tests/unused_deps_fixture/bundled"],
+)
+
+# Building them runs their checks, which pass.
+build_test(
+    name = "plugin_deps_pass_test",
+    size = "small",
+    targets = [
+        ":with_bundled",
+        ":with_plugin",
+        ":with_pub_plugin",
+    ],
+)
+
+unused_deps_test_suite(name = "unused_deps_test")

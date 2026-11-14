@@ -4,7 +4,7 @@
 /// `ArgParser` already refuses a misspelled *option* by name, which covers the
 /// mistake people expect to make. It does not cover the one they actually make
 /// with this tool: a bazel flag is not shaped like an option name at all —
-/// `--@rules_flutter//flutter:extra_dart_defines=K=V` carries `@`, `/` and `:` —
+/// `--@rules_dart//dart:extra_dart_defines=K=V` carries `@`, `/` and `:` —
 /// so it never parses as one, becomes a positional argument, and is dropped.
 ///
 /// Dropped silently, which is the part that costs hours. The run proceeds with
@@ -32,6 +32,7 @@ String topLevelUsage(ArgParser parser) => [
   '  build       Build a Flutter target with Bazel',
   '  run         Build, run, and hot reload a Flutter target',
   '  attach      Connect to an already-running Flutter app',
+  '  devices     List the devices `run -d` can run on',
   '',
   'Run options (all of them: flutter_bazel run --help):',
   for (final name in _summarizedRunOptions)
@@ -46,7 +47,7 @@ String topLevelUsage(ArgParser parser) => [
   '',
   'Machine protocol commands (--machine):',
   '  app.hotReload    Recompile and hot reload all devices',
-  '  app.restart      Hot restart all devices',
+  '  app.restart      Hot reload; with fullRestart: true, hot restart',
   '  app.stop         Stop the app',
   '  daemon.shutdown  Shut down the dev tool',
   '  app.*            The agent commands, such as app.tap and',
@@ -118,7 +119,7 @@ void requireNoPositionalArgs(String command, List<String> rest) {
     'No `$command` argument is positional, so none of these reached anything. '
     "A bazel flag reaches the app's build through `--build-arg=<flag>`, and a "
     'Dart define through `--dart-define=KEY=VALUE` (which forwards as '
-    '`--@rules_flutter//flutter:extra_dart_defines` and is replayed on every '
+    '`--@rules_dart//dart:extra_dart_defines` and is replayed on every '
     'hot reload). Run `flutter_bazel $command --help` for the rest.',
   );
 }

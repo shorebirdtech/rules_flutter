@@ -6,22 +6,14 @@
 /// pass/fail to stdout and exits non-zero on the first failure (or on
 /// flutter_tester crash).
 ///
-/// Wire protocol (mirrors `package:test`'s `flutter_platform.dart`):
-///   - WebSocket transport carries JSON-encoded `[id, data]` lists, plus
-///     `[id]` for channel-close. id 0 is the default channel.
-///   - We send `{type: 'initial', metadata, platform, ...}` on id 0.
-///   - Bootstrap responds `{type: 'success', root: <groupTree>}` on id 0;
-///     each test in the tree carries a `channel` id (bootstrap-created).
-///   - To run a test, we allocate our own outputId and send
-///     `{command: 'run', channel: outputId}` on `testChannel + 1`. Bootstrap
-///     replies with `state-change`/`error`/`message`/`complete` events on
-///     `outputId + 1`, which we deliver back to our test handler.
-///   - When the suite is exhausted we send `{type: 'close'}` on id 0.
+/// The protocol itself is `remote_suite.dart`'s; this file carries it over a
+/// WebSocket the bootstrap dials back on.
 ///
-/// Coverage: when `bazel coverage` sets `COVERAGE_OUTPUT_FILE`, the spawn
-/// switches to `--vm-service-port=0`. The runner pulls the VM service URI from
+/// Coverage: under `bazel coverage` ([CoverageRun]) the spawn switches to
+/// `--vm-service-port=0`. The runner pulls the VM service URI from
 /// flutter_tester's stdout and, once the suite has run and before it is told to
-/// close, collects source reports over the VM service JSON-RPC and writes LCOV.
+/// close, collects line coverage over the VM service JSON-RPC, which rules_dart's
+/// `coverage_converter` then turns into the LCOV tracefile Bazel merges.
 ///
 /// Goldens: `--update-goldens` (upstream's spelling) sets
 /// `FLUTTER_TEST_UPDATE_GOLDENS` in the tester's environment, which the
@@ -31,56 +23,30 @@
 /// Bazel's test protocol wins wherever it has one. The suite's default timeout
 /// is Bazel's own (`TEST_TIMEOUT`), not `package:test`'s 30 seconds; a test's
 /// own `timeout:` still applies — see [suiteTimeout].
-/// `--test_filter`, sharding and the per-case XML report follow
-/// `bazel_test_protocol.dart`.
+/// `--test_filter`, sharding, tag selection (`DART_TEST_TAGS`,
+/// `DART_TEST_EXCLUDE_TAGS`, the rule's `include_tags` and `exclude_tags`) and
+/// the per-case XML report follow `lib/bazel_test_protocol.dart`. A suite that
+/// registers no test fails, as under `flutter test`. The test file's library
+/// `@Tags` are read from `FLUTTER_TEST_SOURCE` with `package:test`'s own
+/// parser, so every case carries them.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter_rule_tools/remote_suite.dart';
+import 'package:flutter_rule_tools/suite_annotations.dart';
+import 'package:kernel_list/kernel_list.dart';
 import 'package:runfiles/runfiles.dart';
 
-import 'bazel_test_protocol.dart';
-
-/// Whether this run should regenerate goldens instead of comparing them.
-///
-/// Pure so it can be tested without a Bazel invocation to produce each case;
-/// [workspaceDir] is `BUILD_WORKSPACE_DIRECTORY`, which `bazel run` sets and
-/// `bazel test` does not. That variable is the discriminator rather than
-/// anything about the arguments, because it is the actual constraint: update
-/// mode writes to the source tree, and a test action has no source tree.
-///
-/// Throws [FormatException] for an unrecognised argument. Nothing passes argv
-/// to a `flutter_test` today — not `bazel test`, not `bazel coverage` — so an
-/// unrecognised one came from a person, and silently ignoring a mistyped
-/// `--update-golden` would report a green run that regenerated nothing.
-bool parseUpdateGoldens(List<String> args, String? workspaceDir) {
-  var update = false;
-  for (final arg in args) {
-    if (arg != '--update-goldens') {
-      throw FormatException(
-        'flutter_test runner: unrecognised argument "$arg". The only '
-        'supported argument is --update-goldens.',
-      );
-    }
-    update = true;
-  }
-  if (update && (workspaceDir == null || workspaceDir.isEmpty)) {
-    throw FormatException(
-      'flutter_test runner: --update-goldens rewrites goldens in the source '
-      'tree, which a test action cannot do. Regenerate with '
-      '`bazel run //<pkg>:<target> -- --update-goldens`.',
-    );
-  }
-  return update;
-}
-
-/// The runfiles tree of the program started as [executable], or null.
+/// The runfiles of the program started as [executable], or null.
 ///
 /// Unlike `Runfiles.create`, which trusts `RUNFILES_DIR` first, this looks
 /// only beside [executable]: a `RUNFILES_DIR` inherited from a caller names
-/// the caller's tree, not this program's. A directory or, where Bazel makes
-/// only a manifest, `<executable>.runfiles_manifest` is found; `.exe` is
-/// spelled both ways as on Windows.
+/// the caller's tree, not this program's. `<executable>.runfiles` and
+/// `<executable>.runfiles_manifest` are both read when both exist, with the
+/// manifest answering first: where Bazel makes no symlink tree, as on Windows
+/// by default, the directory is still there, holding only a `MANIFEST` and
+/// empty directories. `.exe` is spelled both ways as on Windows.
 ///
 /// Public, like [testCeiling], because the test reaches it directly.
 Runfiles? runfilesBeside(String executable) {
@@ -90,29 +56,24 @@ Runfiles? runfilesBeside(String executable) {
   final names = {executable, withoutExe, '$withoutExe.exe'};
   for (final name in names) {
     final dir = Directory('$name.runfiles');
-    if (dir.existsSync()) {
-      final root = dir.resolveSymbolicLinksSync();
-      final mapping = File('$root/_repo_mapping');
-      return Runfiles.fromState(
-        directory: root,
-        repoMapping: mapping.existsSync()
-            ? Runfiles.parseRepoMapping(mapping.readAsStringSync())
-            : null,
-      );
-    }
-  }
-  for (final name in names) {
     final file = File('$name.runfiles_manifest');
-    if (file.existsSync()) {
-      final manifest = parseRunfilesManifest(file.readAsLinesSync());
-      final mapping = manifest['_repo_mapping'];
-      return Runfiles.fromState(
-        manifest: manifest,
-        repoMapping: mapping == null
-            ? null
-            : Runfiles.parseRepoMapping(File(mapping).readAsStringSync()),
-      );
-    }
+    final hasDir = dir.existsSync();
+    final hasManifest = file.existsSync();
+    if (!hasDir && !hasManifest) continue;
+    final root = hasDir ? dir.resolveSymbolicLinksSync() : null;
+    final manifest = hasManifest
+        ? parseRunfilesManifest(file.readAsLinesSync())
+        : null;
+    final mappingFile = root != null && File('$root/_repo_mapping').existsSync()
+        ? '$root/_repo_mapping'
+        : manifest?['_repo_mapping'];
+    return Runfiles.fromState(
+      directory: root,
+      manifest: manifest,
+      repoMapping: mappingFile == null
+          ? null
+          : Runfiles.parseRepoMapping(File(mappingFile).readAsStringSync()),
+    );
   }
   return null;
 }
@@ -150,12 +111,65 @@ Map<String, String> readLaunchEnvironment(
       .cast<String, String>();
 }
 
-/// The directory holding the runfile [key], whose own entry may be absent.
+/// The directories holding the runfiles [keys], each listed once and in order.
 ///
 /// A manifest lists files, not directories, so a directory is found through
-/// a file known to be under it.
-String _directoryOf(Runfiles runfiles, String key) =>
-    File(runfiles.rlocation(key)).absolute.parent.path;
+/// a file known to be under it. A library that cannot be found is an error
+/// naming it: it is missing from the manifest, or listed but absent on disk.
+///
+/// Public, like [testCeiling], because the test reaches it directly.
+List<String> nativeLibraryDirectories(
+  Runfiles runfiles,
+  Iterable<String> keys,
+) {
+  final directories = <String>{};
+  for (final key in keys) {
+    final String path;
+    try {
+      path = runfiles.rlocation(key);
+    } on StateError {
+      throw StateError(
+        'flutter_test runner: native library $key is not in the runfiles.',
+      );
+    }
+    final file = File(path);
+    if (!file.existsSync()) {
+      throw StateError(
+        'flutter_test runner: native library $key resolves to $path, which '
+        'does not exist.',
+      );
+    }
+    directories.add(file.absolute.parent.path);
+  }
+  return directories.toList();
+}
+
+/// The program flutter_tester runs, from the runfiles path [key] of the test's
+/// kernel: that kernel, or, when [isList], the kernels a kernel list there
+/// names, joined into one because flutter_tester takes a single file. The
+/// join is in memory on Linux and a file under [temporaryDirectory] (by
+/// default the system's) elsewhere. Close it when the run is over.
+///
+/// Throws a [KernelListException] when the list or a kernel it names cannot be
+/// found or joined.
+///
+/// Public, like [testCeiling], because the test reaches it directly.
+JoinedKernel joinProgram(
+  Runfiles runfiles,
+  String key, {
+  required bool isList,
+  String? temporaryDirectory,
+}) => joinKernels(
+  isList ? kernelsInRunfiles(runfiles, key) : [runfiles.rlocation(key)],
+  temporaryDirectory: temporaryDirectory,
+);
+
+/// What the runner says when [joinProgram] fails. The exception's own text
+/// names the flag that builds joined kernels instead.
+///
+/// Public, like [testCeiling], because the test reaches it directly.
+String joinFailure(KernelListException e) =>
+    'flutter_test runner: cannot join the test\'s kernels: $e';
 
 void main(List<String> args) async {
   // A flutter_test is handed its settings by Bazel's test environment. A
@@ -190,6 +204,7 @@ void main(List<String> args) async {
     updateGoldens = parseUpdateGoldens(
       args,
       Platform.environment['BUILD_WORKSPACE_DIRECTORY'],
+      program: 'flutter_test runner',
     );
   } on FormatException catch (e) {
     stderr.writeln(e.message);
@@ -210,46 +225,101 @@ void main(List<String> args) async {
 
   final tester = r.rlocation(testerKey);
   final icu = r.rlocation(icuKey);
-  final dill = r.rlocation(dillKey);
   final assetsDir = assetsKey == null ? null : r.rlocation(assetsKey);
-  final nativeFile = settings['FLUTTER_TEST_NATIVE_FILE'];
-  final loader = libraryPathEnvironment(
-    nativeFile == null ? null : _directoryOf(r, nativeFile),
-    Platform.environment,
-    Platform.operatingSystem,
-  );
+  final nativeFiles = settings['FLUTTER_TEST_NATIVE_FILES'];
+  final Map<String, String> loader;
+  try {
+    loader = libraryPathEnvironment(
+      nativeFiles == null
+          ? const []
+          : nativeLibraryDirectories(r, nativeFiles.split('\n')),
+      Platform.environment,
+      Platform.operatingSystem,
+    );
+  } on StateError catch (e) {
+    stderr.writeln(e.message);
+    exit(64);
+  }
   final testPath = settings['FLUTTER_TEST_PATH'] ?? 'test.dart';
-  final coverageOutput = Platform.environment['COVERAGE_OUTPUT_FILE'];
-  final coverageLibraries =
-      settings['FLUTTER_TEST_COVERAGE_LIBRARIES']?.split('\n') ??
-      const <String>[];
+  final coverage = CoverageRun.of(r, settings, Platform.environment);
 
+  final isTest = Platform.environment['FLUTTER_TEST_DILL'] != null;
   final TestSelection selection;
   try {
-    selection = TestSelection.fromEnvironment(settings);
+    selection = runSelection(settings, isTest: isTest);
   } on FormatException catch (e) {
     stderr.writeln('flutter_test runner: ${e.message}');
     exit(64);
+  }
+  var annotations = SuiteAnnotations.none();
+  if (isTest) {
+    final sourceKey = settings['FLUTTER_TEST_SOURCE'];
+    if (sourceKey == null) {
+      stderr.writeln('flutter_test runner: FLUTTER_TEST_SOURCE must be set.');
+      exit(64);
+    }
+    try {
+      annotations = suiteAnnotationsOf(File(r.rlocation(sourceKey)), testPath);
+    } on FormatException catch (e) {
+      stderr.writeln(
+        'flutter_test runner: cannot read the annotations of $testPath: '
+        '${e.message}',
+      );
+      exit(1);
+    }
   }
   // Touched before the run, as Bazel asks: it is how a runner says it supports
   // sharding at all, and Bazel 9 fails a sharded test whose runner never does.
   final shardStatus = Platform.environment['TEST_SHARD_STATUS_FILE'];
   if (shardStatus != null) File(shardStatus).writeAsStringSync('');
 
-  final code = await _runOnce(
-    tester: tester,
-    icu: icu,
-    dill: dill,
-    assetsDir: assetsDir,
-    testPath: testPath,
-    coverageOutput: coverageOutput,
-    coverageLibraries: coverageLibraries,
-    updateGoldens: updateGoldens,
-    selection: selection,
-    xmlOutput: Platform.environment['XML_OUTPUT_FILE'],
-    impeller: settings['FLUTTER_TEST_IMPELLER'] == '1',
-    loader: {...launched, ...loader},
-  );
+  final exclusion = annotations.exclusion;
+  if (exclusion != null) {
+    exitCode = await reportSuiteNotRun(
+      suitePath: testPath,
+      note: exclusion,
+      logPrefix: 'flutter_test',
+      xmlOutput: Platform.environment['XML_OUTPUT_FILE'],
+    );
+    return;
+  }
+
+  final JoinedKernel program;
+  try {
+    program = joinProgram(
+      r,
+      dillKey,
+      isList: settings['FLUTTER_TEST_KERNEL_LIST'] == '1',
+      temporaryDirectory: Platform.environment['TEST_TMPDIR'],
+    );
+  } on KernelListException catch (e) {
+    stderr.writeln(joinFailure(e));
+    exitCode = 1;
+    return;
+  }
+  // flutter_tester has read the program by the time it connects; the memory or
+  // file is released when the run is over, however it ended.
+  int code;
+  try {
+    code = await _runOnce(
+      tester: tester,
+      icu: icu,
+      dill: program.path,
+      assetsDir: assetsDir,
+      testPath: testPath,
+      coverage: coverage,
+      updateGoldens: updateGoldens,
+      selection: selection,
+      metadata: annotations.handshakeMetadata(
+        Platform.environment['TEST_TIMEOUT'],
+      ),
+      xmlOutput: Platform.environment['XML_OUTPUT_FILE'],
+      impeller: settings['FLUTTER_TEST_IMPELLER'] == '1',
+      loader: {...launched, ...loader},
+    );
+  } finally {
+    program.close();
+  }
   // Exit here, not when the event loop drains: the run is over and
   // reported, and anything still open in this process (the tester's output
   // pipes, held by a process the test started that outlived it; a socket
@@ -259,32 +329,98 @@ void main(List<String> args) async {
   exit(code);
 }
 
+/// The selection this run applies, from [settings].
+///
+/// A `flutter_test` ([isTest]) selects cases by the target's own
+/// `include_tags`/`exclude_tags`, which the rule passes as newline-joined
+/// `FLUTTER_TEST_INCLUDE_TAGS`/`FLUTTER_TEST_EXCLUDE_TAGS`, and by the
+/// `DART_TEST_TAGS`/`DART_TEST_EXCLUDE_TAGS` of the run, and orders them by
+/// its `DART_TEST_ORDERING_SEED`. A `flutter_tester_binary` is not a test,
+/// and a shell's variable must not change what a build tool does: it takes
+/// none of these.
+///
+/// Throws [FormatException] for a selector that does not parse.
+///
+/// Public, like [testCeiling], because the test reaches it directly.
+TestSelection runSelection(
+  Map<String, String> settings, {
+  required bool isTest,
+}) {
+  if (!isTest) {
+    return TestSelection.fromEnvironment({
+      for (final entry in settings.entries)
+        if (entry.key != 'DART_TEST_TAGS' &&
+            entry.key != 'DART_TEST_EXCLUDE_TAGS' &&
+            entry.key != 'DART_TEST_ORDERING_SEED')
+          entry.key: entry.value,
+    });
+  }
+  List<String> lines(String key) {
+    final value = settings[key];
+    return value == null || value.isEmpty ? const [] : value.split('\n');
+  }
+
+  return TestSelection.fromEnvironment(
+    settings,
+    fixedTags: TagSelection.fromAttribute(
+      lines('FLUTTER_TEST_INCLUDE_TAGS'),
+      lines('FLUTTER_TEST_EXCLUDE_TAGS'),
+    ),
+  );
+}
+
+/// The library annotations of [source], the test file shown to people as [displayPath].
+///
+/// Throws [FormatException] when the file's annotations cannot be read.
+///
+/// Public, like [testCeiling], because the test reaches it directly.
+SuiteAnnotations suiteAnnotationsOf(File source, String displayPath) =>
+    SuiteAnnotations.parse(displayPath, source.readAsStringSync());
+
 /// The loader's search path for a `flutter_tester_binary`'s Native Assets.
 ///
 /// Its kernel names each bundled library by filename alone, so the program
-/// may run from any working directory; this puts [nativeDir], where they are
+/// may run from any working directory; this puts [nativeDirs], where they are
 /// staged, ahead of the search path [environment] already has. Empty when
-/// there is no such directory, as for every `flutter_test`, whose libraries
+/// there are no such directories, as for every `flutter_test`, whose libraries
 /// are named by their paths under the runfiles root it runs in.
+///
+/// Windows has no variable for the purpose: `LoadLibrary` of a bare name
+/// looks in the application's directory, the system directories, the working
+/// directory and then `PATH`, and only `PATH` can be set for a child. Its
+/// directories are joined with `;` and spelled with `\`, and its variable is
+/// found without regard to case, as Windows does, so the child is not given
+/// `Path` and `PATH` both.
 ///
 /// Public, like [testCeiling], because the test reaches it directly.
 Map<String, String> libraryPathEnvironment(
-  String? nativeDir,
+  List<String> nativeDirs,
   Map<String, String> environment,
   String os,
 ) {
-  if (nativeDir == null) return const {};
-  final variable = switch (os) {
-    'macos' => 'DYLD_LIBRARY_PATH',
-    'linux' => 'LD_LIBRARY_PATH',
-    _ => throw UnsupportedError('flutter_tester_binary: no loader path on $os'),
-  };
-  final existing = environment[variable];
-  return {
-    variable: existing == null || existing.isEmpty
-        ? nativeDir
-        : '$nativeDir:$existing',
-  };
+  if (nativeDirs.isEmpty) return const {};
+  final windows = os == 'windows';
+  final String variable;
+  switch (os) {
+    case 'macos':
+      variable = 'DYLD_LIBRARY_PATH';
+    case 'linux':
+      variable = 'LD_LIBRARY_PATH';
+    case 'windows':
+      variable = environment.keys.firstWhere(
+        (k) => k.toUpperCase() == 'PATH',
+        orElse: () => 'PATH',
+      );
+    default:
+      throw UnsupportedError('flutter_tester_binary: no loader path on $os');
+  }
+  final separator = windows ? ';' : ':';
+  final dirs = [
+    for (final dir in nativeDirs) windows ? dir.replaceAll('/', r'\') : dir,
+    if (environment[variable] case final existing? when existing.isNotEmpty)
+      existing,
+  ];
+  return {variable: dirs.join(separator)};
 }
 
 Future<int> _runOnce({
@@ -293,10 +429,10 @@ Future<int> _runOnce({
   required String dill,
   required String? assetsDir,
   required String testPath,
-  required String? coverageOutput,
-  required List<String> coverageLibraries,
+  required CoverageRun? coverage,
   required bool updateGoldens,
   required TestSelection selection,
+  required Map<String, Object?> metadata,
   required String? xmlOutput,
   required bool impeller,
   required Map<String, String> loader,
@@ -309,99 +445,65 @@ Future<int> _runOnce({
       dill: dill,
       assetsDir: assetsDir,
       testPath: testPath,
-      coverageOutput: coverageOutput,
-      coverageLibraries: coverageLibraries,
+      coverage: coverage,
       updateGoldens: updateGoldens,
       selection: selection,
+      metadata: metadata,
       xmlOutput: xmlOutput,
       impeller: impeller,
       loader: loader,
     );
   } finally {
-    // Bounded: the result is decided, and a close that never answers must
-    // not hold it back.
-    await harness.dispose().timeout(
-      const Duration(seconds: 10),
-      onTimeout: () =>
-          stderr.writeln('flutter_test: the harness did not close in 10s.'),
-    );
+    await harness.dispose();
   }
 }
 
-/// The per-test ceiling the wedged-test backstop waits out.
-///
-/// Bazel exports the target's timeout in `TEST_TIMEOUT` (seconds), so honour it
-/// and stay a beat inside: the backstop exists to name a wedged test here
-/// rather than let it run out Bazel's clock, and a flat bound silently overrode
-/// whatever `--test_timeout` a longer-running test was given. Outside
-/// `bazel test` there is no budget to derive one from, so five minutes stands.
-///
-/// Public, like [collectCoverage], because the test reaches it directly.
-Duration testCeiling(String? bazelTestTimeout) {
-  final seconds = int.tryParse(bazelTestTimeout ?? '');
-  if (seconds == null || seconds <= 0) return const Duration(minutes: 5);
-  final margin = seconds ~/ 20;
-  return Duration(seconds: seconds - (margin < 10 ? 10 : margin));
+/// The `flutter_tester` bootstrap's WebSocket, as a [SuiteTransport].
+class _TesterTransport implements SuiteTransport {
+  _TesterTransport(this._ws, this._process) {
+    _ws.listen(
+      (raw) => _incoming.add(raw as String),
+      onDone: () {
+        unawaited(_incoming.close());
+        if (!_lost.isCompleted) _lost.complete('flutter_tester disconnected');
+      },
+    );
+  }
+
+  final WebSocket _ws;
+  final Process _process;
+  final _incoming = StreamController<String>();
+  final _lost = Completer<String?>();
+
+  @override
+  Stream<String> get incoming => _incoming.stream;
+
+  @override
+  void send(String json) {
+    if (_lost.isCompleted) return;
+    _ws.add(json);
+  }
+
+  @override
+  Future<String?> get lostReason => _lost.future;
+
+  @override
+  Future<void> close() => _ws.close();
+
+  @override
+  Future<void> abandon(String why) async {
+    stderr.writeln('flutter_test: killing flutter_tester.');
+    _process.kill(ProcessSignal.sigkill);
+  }
 }
 
-/// The suite's default timeout, serialized as `Metadata` carries it.
-///
-/// Bazel's own limit (`TEST_TIMEOUT`, seconds) in place of `package:test`'s
-/// 30-second default, as `dart_test` sets it. Not `none`: `Timeout.merge`
-/// lets `none` on either side win, so it would discard a limit a test's author
-/// wrote on a case to catch a hang. With Bazel's limit as the default, such a
-/// `timeout:` still fires, `Timeout.factor` scales Bazel's limit, and a case
-/// with neither runs as long as Bazel lets the target run. Outside `bazel
-/// test` there is no limit to state, so the default is none.
-///
-/// Public, like [testCeiling], because the test reaches it directly.
-Object suiteTimeout(String? bazelTestTimeout) {
-  final seconds = int.tryParse(bazelTestTimeout ?? '');
-  if (seconds == null || seconds <= 0) return 'none';
-  return {
-    'duration': Duration(seconds: seconds).inMicroseconds,
-    'scaleFactor': null,
-  };
-}
-
-/// Harness state: server, tester process, WebSocket, channel demux.
+/// Harness state: server, tester process, WebSocket.
 class _Harness {
   _Harness._(this._server);
 
   final HttpServer _server;
   Process? _process;
   WebSocket? _ws;
-  bool _socketClosed = false;
-
-  /// Done when each of the tester's output pipes closes.
-  final _testerOutput = <Future<void>>[];
-
-  /// Per-channel inbound dispatchers, keyed by inputId.
-  final Map<int, void Function(Object?)> _inbound = {};
-
-  /// Pending test completers indexed by their reply-channel inputId. When the
-  /// socket closes mid-suite, we surface that as a failure on every
-  /// outstanding test so we can't hang waiting on a `complete` event that
-  /// will never arrive.
-  final Map<int, Completer<void>> _pendingTests = {};
-
-  /// MultiChannel-compatible counter for our locally-allocated channels.
-  /// `package:stream_channel`'s MultiChannel allocates outputId = nextId,
-  /// inputId = nextId+1, then increments by 2.
-  int _nextId = 1;
-
-  /// Allocates a virtual channel pair for our side. Returns (outputId, inputId).
-  ({int outputId, int inputId}) _allocChannel() {
-    final out = _nextId;
-    final inp = _nextId + 1;
-    _nextId += 2;
-    return (outputId: out, inputId: inp);
-  }
-
-  void _send(int outputId, Object? data) {
-    if (_socketClosed) return;
-    _ws!.add(json.encode([outputId, data]));
-  }
 
   /// Binds the socket the test bootstrap dials back on.
   ///
@@ -450,23 +552,14 @@ class _Harness {
   /// delivered... Otherwise the signal could not be sent, usually meaning that
   /// the process is already dead." The `try` around it was guarding a failure
   /// that cannot happen, while the value that does report it went unread.
-  ///
-  /// The kill comes first, so a close that never answers can't leave the
-  /// tester running. Last, the tester's output is drained: its exit code can
-  /// arrive before its pipes deliver their last lines, which on a crash are
-  /// the only word on why. Bounded, because a process the test started may
-  /// hold those pipes open long after the tester is gone.
   Future<void> dispose() async {
-    _process?.kill(ProcessSignal.sigkill);
     try {
       await _ws?.close();
     } catch (_) {}
+    _process?.kill(ProcessSignal.sigkill);
     try {
       await _server.close(force: true);
     } catch (_) {}
-    await Future.wait(
-      _testerOutput,
-    ).timeout(const Duration(seconds: 2), onTimeout: () => const []);
   }
 
   Future<int> run({
@@ -475,21 +568,21 @@ class _Harness {
     required String dill,
     required String? assetsDir,
     required String testPath,
-    required String? coverageOutput,
-    required List<String> coverageLibraries,
+    required CoverageRun? coverage,
     required bool updateGoldens,
     required TestSelection selection,
+    required Map<String, Object?> metadata,
     required String? xmlOutput,
     required bool impeller,
     required Map<String, String> loader,
   }) async {
-    final enableVmService = coverageOutput != null;
+    final enableVmService = coverage != null;
     // Coverage does not start the tester paused, and `flutter test --coverage`
     // does not either. Nothing needs holding: the VM records coverage from
     // the first line `main()` runs, and collection happens before the suite
     // is told to close, while the isolate is still alive. Starting paused and
-    // resuming over the VM service hung one run in ten, measured on
-    // `:hello_coverage_test`: the resumed isolate sat idle inside the
+    // resuming over the VM service hung one run in ten, measured on a
+    // one-case suite: the resumed isolate sat idle inside the
     // bootstrap, never dialling the harness, until an unrelated VM service
     // request woke it. Unpaused, 80 runs in a row passed with identical
     // covered lines.
@@ -539,7 +632,7 @@ class _Harness {
       r'(?:Observatory|The Dart VM service is) (?:listening on|listening on) (http\S+)',
     );
 
-    final out = _process!.stdout
+    _process!.stdout
         .transform(utf8.decoder)
         .transform(const LineSplitter())
         .listen((line) {
@@ -551,16 +644,12 @@ class _Harness {
             }
           }
         });
-    final err = _process!.stderr
+    _process!.stderr
         .transform(utf8.decoder)
         .transform(const LineSplitter())
         .listen((line) {
           stderr.writeln('[flutter_tester] $line');
         });
-    _testerOutput.addAll([
-      for (final sub in [out, err])
-        sub.asFuture<void>().then((_) {}, onError: (_) {}),
-    ]);
 
     // A coverage run that cannot reach the VM service cannot produce what it
     // exists for, so it ends here rather than running the whole suite first
@@ -580,134 +669,74 @@ class _Harness {
     }
 
     // Wait for the bootstrap to dial back.
-    switch (await _awaitDialBack()) {
-      case _TesterExited(:final exitCode):
-        stderr.writeln(
-          'flutter_test: flutter_tester exited with code $exitCode before '
-          'connecting to the harness.',
-        );
+    final bound = dialBackBound(
+      testCeiling(Platform.environment['TEST_TIMEOUT']),
+    );
+    final dialBack = await awaitDialBack(
+      connected: _server.first,
+      exited: _process!.exitCode,
+      bound: bound,
+    );
+    switch (dialBack) {
+      case TesterExited(:final exitCode):
+        stderr.writeln(dialBackFailure(dialBack, bound));
         return exitCode == 0 ? 1 : exitCode;
-      case _DialBackTimedOut():
-        stderr.writeln(
-          'flutter_test: flutter_tester did not connect to the harness within '
-          '${_dialBackBound.inMinutes} minutes and is still running; killing '
-          'it.',
-        );
+      case DialBackTimedOut():
+        stderr.writeln(dialBackFailure(dialBack, bound));
         return 1;
-      case _BootstrapConnected(:final request):
+      case BootstrapConnected(:final request):
         _ws = await WebSocketTransformer.upgrade(request);
     }
 
-    // Default channel handler — receives the suite tree plus print/error
-    // events. We resolve `suiteReady` once the bootstrap finishes registering
-    // tests (or surfaces a load failure).
-    final suiteReady = Completer<Map<String, dynamic>?>();
-    _inbound[0] = (data) {
-      final msg = (data as Map).cast<String, dynamic>();
-      switch (msg['type']) {
-        case 'success':
-          if (!suiteReady.isCompleted) {
-            suiteReady.complete((msg['root'] as Map).cast<String, dynamic>());
-          }
-        case 'loadException':
-          stderr.writeln('flutter_test: load failure — ${msg['message']}');
-          if (!suiteReady.isCompleted) suiteReady.complete(null);
-        case 'error':
-          final err = (msg['error'] as Map).cast<String, dynamic>();
-          stderr.writeln(
-            'flutter_test: top-level error — ${err['message']}\n'
-            '${err['stackChain']}',
-          );
-          if (!suiteReady.isCompleted) suiteReady.complete(null);
-        case 'print':
-          stdout.writeln(msg['line']);
-      }
-    };
-
-    _ws!.listen(
-      _onSocketMessage,
-      onDone: () {
-        _socketClosed = true;
-        if (!suiteReady.isCompleted) suiteReady.complete(null);
-        for (final c in _pendingTests.values) {
-          if (!c.isCompleted) c.complete();
-        }
-        _pendingTests.clear();
-      },
-    );
-
-    // Send the initial suite handshake.
-    _send(0, _initialMessage(testPath));
-
-    // Bounded inside Bazel's own budget, like each test below, so a suite that
-    // never finishes loading is reported here rather than killed silently.
-    final root = await suiteReady.future.timeout(
-      testCeiling(Platform.environment['TEST_TIMEOUT']),
-      onTimeout: () => null,
-    );
-
-    final results = _Results();
-    if (root != null) {
-      final selected = selection.select(root);
-      if (selected != null) {
-        await _runGroup(selected, results);
-      } else if (selection.narrows) {
-        stdout.writeln(
-          'flutter_test: no test case in this suite matches this run\'s '
-          '--test_filter or shard.',
-        );
-      }
-    } else {
-      results.recordError('suite did not load');
-    }
-    if (xmlOutput != null) {
-      await File(
-        xmlOutput,
-      ).writeAsString(junitXml(results.cases, suiteName: testPath));
-    }
-
-    // Collect coverage before tearing the tester down — the isolate must still
-    // be alive when we fetch source reports.
+    // Collect coverage before the driver tells the tester to close — the
+    // isolate must still be alive when we fetch source reports.
     String? coverageError;
-    if (enableVmService && coverageVmServiceUri != null) {
+    Future<void> collect() async {
+      if (coverage == null || coverageVmServiceUri == null) return;
       try {
         // Bounded inside Bazel's own budget, like the suite and each test: a
         // VM service that stops answering mid-collection would otherwise park
         // here until Bazel kills the target with no reason given. Not a fixed
         // bound: on a starved machine the tester gets a few percent of a core
         // and a collection that takes seconds idle takes minutes.
-        final lcov = await collectCoverage(
+        final hits = await collectCoverage(
           coverageVmServiceUri,
-          coverageLibraries,
         ).timeout(testCeiling(Platform.environment['TEST_TIMEOUT']));
-        // Every healthy run yields at least the test's own `main` file, which
-        // is always in scope, so an empty report means collection reached no
-        // source at all. Writing it
+        // Every healthy run reports at least the test's own `main` file, so
+        // nothing at all means collection reached no source. Converting it
         // would produce exactly the green-test-with-empty-LCOV outcome the
         // exit below exists to prevent.
-        if (lcov.isEmpty) {
+        if ((hits['coverage'] as List).isEmpty) {
           coverageError = 'collected no coverage records';
         } else {
-          await File(coverageOutput).writeAsString(lcov);
+          coverage.writeHits(hits);
         }
       } catch (e) {
         coverageError = 'failed to collect coverage: $e';
       }
-    }
-    if (coverageError != null) {
-      stderr.writeln('flutter_test (coverage): $coverageError');
+      if (coverageError != null) {
+        stderr.writeln('flutter_test (coverage): $coverageError');
+      }
     }
 
-    // Politely shut down: tell RemoteListener to close, then close the
-    // WebSocket. The bootstrap's `socket.map(...).pipe(sink)` and
-    // `socket.addStream(...)` both terminate on socket close, draining the
+    // The driver ends the suite politely: it tells RemoteListener to close,
+    // then closes the WebSocket. The bootstrap's `socket.map(...).pipe(sink)`
+    // and `socket.addStream(...)` both terminate on socket close, draining the
     // isolate so flutter_tester exits on its own. Without the explicit
     // close, the bootstrap's main isolate keeps the engine alive and
     // we'd block on the tester-exit timeout for every test run.
-    _send(0, {'type': 'close'});
-    try {
-      await _ws?.close();
-    } catch (_) {}
+    final ceiling = testCeiling(Platform.environment['TEST_TIMEOUT']);
+    final outcome =
+        await RemoteSuiteDriver(
+          _TesterTransport(_ws!, _process!),
+          suitePath: testPath,
+          metadata: metadata,
+        ).run(
+          selection: selection,
+          xmlOutput: xmlOutput,
+          ceiling: ceiling,
+          afterSuite: collect,
+        );
 
     // `-1` can't double as a "we killed it" sentinel here: on POSIX a
     // signal-killed process reports `-signum`, and SIGHUP is signal 1, so
@@ -728,9 +757,20 @@ class _Harness {
       );
     }
 
-    stdout.writeln(results.summary());
+    stdout.writeln(outcome.summary());
 
-    if (results.hasFailure) return 1;
+    // Converted whatever the outcome, as Bazel reports the coverage of a
+    // failing test too; only once collection succeeded, as a partial report
+    // reads as a complete one.
+    if (coverage != null && coverageError == null && coverage.collected) {
+      final converted = await coverage.convert();
+      if (converted != 0) {
+        coverageError = 'coverage_converter exited with $converted';
+        stderr.writeln('flutter_test (coverage): $coverageError');
+      }
+    }
+
+    if (outcome.hasFailure) return 1;
     // A requested coverage run that produced no data is a failure — Bazel
     // would otherwise record a green test with an empty/absent LCOV file.
     if (coverageError != null) return 1;
@@ -740,366 +780,162 @@ class _Harness {
     }
     return 0;
   }
+}
 
-  /// How long flutter_tester gets to open its socket back to us.
-  static const _dialBackBound = Duration(minutes: 2);
+/// How long flutter_tester gets to open its socket back to us: two minutes,
+/// or less where Bazel's own [ceiling] is shorter, so that a flutter_tester
+/// that hangs while starting is named here and not killed by Bazel's clock
+/// with no reason given.
+///
+/// Public, like [testCeiling], because the test reaches it directly.
+Duration dialBackBound(Duration ceiling) {
+  const bound = Duration(minutes: 2);
+  return ceiling < bound ? ceiling : bound;
+}
 
-  /// Waits for the bootstrap's dial-back, reporting which of the three
-  /// possible outcomes happened.
-  ///
-  /// The distinction is load-bearing rather than tidiness. A single nullable
-  /// `HttpRequest?` collapses "flutter_tester died" and "flutter_tester is
-  /// alive and silent" into one `null`, and only the first of those has an
-  /// exit code worth awaiting — awaiting it on the second blocks forever, and
-  /// a paused coverage run then reaches Bazel's outer test timeout with no
-  /// diagnostic of its own.
-  Future<_DialBack> _awaitDialBack() async {
-    final outcome = await Future.any([
-      _server.first.then<_DialBack?>(_BootstrapConnected.new),
-      _process!.exitCode.then<_DialBack?>(_TesterExited.new),
-    ]).timeout(_dialBackBound, onTimeout: () => null);
-    return outcome ?? const _DialBackTimedOut();
-  }
+/// Waits for the bootstrap's dial-back, reporting which of the three possible
+/// outcomes happened: it [connected], flutter_tester [exited], or neither
+/// within [bound].
+///
+/// The distinction is load-bearing rather than tidiness. A single nullable
+/// `HttpRequest?` collapses "flutter_tester died" and "flutter_tester is
+/// alive and silent" into one `null`, and only the first of those has an exit
+/// code worth awaiting — awaiting it on the second blocks forever, and a
+/// paused coverage run then reaches Bazel's outer test timeout with no
+/// diagnostic of its own.
+///
+/// Public, like [testCeiling], because the test reaches it directly.
+Future<DialBack> awaitDialBack({
+  required Future<HttpRequest> connected,
+  required Future<int> exited,
+  required Duration bound,
+}) async {
+  final outcome = await Future.any([
+    connected.then<DialBack?>(BootstrapConnected.new),
+    exited.then<DialBack?>(TesterExited.new),
+  ]).timeout(bound, onTimeout: () => null);
+  return outcome ?? const DialBackTimedOut();
+}
 
-  void _onSocketMessage(dynamic raw) {
-    final list = json.decode(raw as String) as List;
-    final id = (list[0] as num).toInt();
-    if (list.length == 1) {
-      // Channel closed by remote — drop the handler so we stop dispatching.
-      _inbound.remove(id);
-      return;
-    }
-    final handler = _inbound[id];
-    if (handler != null) {
-      handler(list[1]);
-    }
-  }
+/// What the runner says of a dial-back that did not happen.
+///
+/// Public, like [testCeiling], because the test reaches it directly.
+String dialBackFailure(DialBack outcome, Duration bound) => switch (outcome) {
+  TesterExited(:final exitCode) =>
+    'flutter_test: flutter_tester exited with code $exitCode before '
+        'connecting to the harness.',
+  DialBackTimedOut() =>
+    'flutter_test: flutter_tester did not connect to the harness within '
+        '${_describe(bound)} and is still running; killing it.',
+  BootstrapConnected() => throw ArgumentError.value(outcome, 'outcome'),
+};
 
-  Future<void> _runGroup(Map<String, dynamic> group, _Results results) async {
-    final setUpAll = group['setUpAll'] as Map?;
-    if (setUpAll != null) {
-      await _runTest(setUpAll.cast<String, dynamic>(), results, fixture: true);
-    }
-
-    final entries = group['entries'] as List? ?? const [];
-    for (final entry in entries) {
-      final m = (entry as Map).cast<String, dynamic>();
-      if (m['type'] == 'group') {
-        await _runGroup(m, results);
-      } else {
-        await _runTest(m, results);
-      }
-    }
-
-    final tearDownAll = group['tearDownAll'] as Map?;
-    if (tearDownAll != null) {
-      await _runTest(
-        tearDownAll.cast<String, dynamic>(),
-        results,
-        fixture: true,
-      );
-    }
-  }
-
-  /// Runs one test, or one `setUpAll`/`tearDownAll` when [fixture] is set: a
-  /// fixture is reported only when it fails, as `package:test` hides it.
-  ///
-  /// `test['name']` is already the full name, enclosing groups included —
-  /// `package:test` names a test that way when it is declared.
-  Future<void> _runTest(
-    Map<String, dynamic> test,
-    _Results results, {
-    bool fixture = false,
-  }) async {
-    final testChannelId = (test['channel'] as num).toInt();
-    final reportName = test['name'] as String? ?? '';
-
-    final metadata = test['metadata'] as Map?;
-    final skipReason = metadata == null ? null : metadata['skipReason'];
-    final skipFlag = metadata == null
-        ? false
-        : (metadata['skip'] as bool? ?? false);
-    if (!fixture && skipFlag) {
-      results.recordSkipped(reportName, skipReason as String?);
-      return;
-    }
-
-    if (_socketClosed) {
-      results.recordFailure(
-        reportName,
-        _TestFailureSummary(
-          message: 'flutter_tester disconnected before this test ran',
-          type: 'TestDeviceException',
-          stackChain: '',
-        ),
-        Duration.zero,
-        '',
-      );
-      return;
-    }
-
-    final ch = _allocChannel();
-    final completer = Completer<void>();
-    final started = Stopwatch()..start();
-    final output = StringBuffer();
-    _pendingTests[ch.inputId] = completer;
-    _TestFailureSummary? failure;
-
-    _inbound[ch.inputId] = (data) {
-      final msg = (data as Map).cast<String, dynamic>();
-      switch (msg['type']) {
-        case 'state-change':
-          // We rely on the explicit error events for failure tracking; state
-          // changes alone don't tell us the difference between "still
-          // running" and "failed and continuing".
-          break;
-        case 'error':
-          final err = (msg['error'] as Map).cast<String, dynamic>();
-          failure ??= _TestFailureSummary(
-            message:
-                err['message'] as String? ?? err['toString'] as String? ?? '',
-            type: err['type'] as String? ?? 'TestFailure',
-            stackChain: err['stackChain'] as String? ?? '',
-          );
-        case 'message':
-          final mtype = msg['message-type'] as String? ?? 'print';
-          final text = msg['text'] as String? ?? '';
-          final line = mtype == 'print' ? text : '[$mtype] $text';
-          stdout.writeln(line);
-          output.writeln(line);
-        case 'complete':
-          if (!completer.isCompleted) completer.complete();
-      }
-    };
-
-    // Send "run" to the test channel. testChannelId is bootstrap's outputId
-    // for the test's virtual channel; per MultiChannel framing we send back
-    // on testChannelId+1.
-    _send(testChannelId + 1, {'command': 'run', 'channel': ch.outputId});
-
-    // `test_api` enforces the timeout from the metadata we sent — Bazel's own,
-    // or the test's — but that's a Timer: a test that spins synchronously
-    // without yielding never lets it fire. This ceiling stays just inside
-    // Bazel's limit, so a wedged test is named as a failure here instead of the
-    // whole target being killed with no word on which test hung. Kill the tester and treat
-    // the socket as gone so the remaining tests bail out fast.
-    final ceiling = testCeiling(Platform.environment['TEST_TIMEOUT']);
-    await completer.future.timeout(
-      ceiling,
-      onTimeout: () {
-        stderr.writeln(
-          'flutter_test: test "$reportName" did not finish within '
-          '${ceiling.inSeconds}s; killing flutter_tester.',
-        );
-        _socketClosed = true;
-        _process?.kill(ProcessSignal.sigkill);
-      },
-    );
-    _pendingTests.remove(ch.inputId);
-    _inbound.remove(ch.inputId);
-
-    if (_socketClosed && failure == null) {
-      failure = _TestFailureSummary(
-        message: 'flutter_tester disconnected mid-test (or test timed out)',
-        type: 'TestDeviceException',
-        stackChain: '',
-      );
-    }
-
-    started.stop();
-    if (failure != null) {
-      results.recordFailure(
-        reportName,
-        failure!,
-        started.elapsed,
-        output.toString(),
-      );
-    } else if (!fixture) {
-      results.recordSuccess(reportName, started.elapsed, output.toString());
-    }
-  }
-
-  Map<String, dynamic> _initialMessage(String testPath) {
-    return {
-      'type': 'initial',
-      'metadata': _defaultMetadata(
-        suiteTimeout(Platform.environment['TEST_TIMEOUT']),
-      ),
-      'platform': _suitePlatform(),
-      'platformVariables': const <String>[],
-      'collectTraces': true,
-      'noRetry': true,
-      'allowDuplicateTestNames': true,
-      'foldTraceExcept': const <String>[],
-      'foldTraceOnly': const <String>[],
-      'path': testPath,
-      'asciiGlyphs': !stdout.supportsAnsiEscapes,
-      'ignoreTimeouts': false,
-    };
-  }
-
-  /// Minimal `Metadata.serialize` payload — all optional flags omitted, an
-  /// empty `forTag`, and [timeout] as [suiteTimeout] serializes it.
-  static Map<String, Object?> _defaultMetadata(Object timeout) {
-    return {
-      'testOn': null,
-      'timeout': timeout,
-      'skip': null,
-      'skipReason': null,
-      'verboseTrace': null,
-      'chainStackTraces': null,
-      'retry': null,
-      'tags': const <String>[],
-      'onPlatform': const <List<Object>>[],
-      'forTag': const <String, Object?>{},
-      'languageVersionComment': null,
-    };
-  }
-
-  /// Built-in `Runtime.vm` and `Compiler.kernel` serialize as plain identifiers.
-  static Map<String, Object?> _suitePlatform() {
-    return {
-      'runtime': 'vm',
-      'compiler': 'kernel',
-      'os': _osIdentifier(),
-      'inGoogle': false,
-    };
-  }
-
-  static String _osIdentifier() {
-    if (Platform.isMacOS) return 'mac-os';
-    if (Platform.isLinux) return 'linux';
-    if (Platform.isWindows) return 'windows';
-    if (Platform.isAndroid) return 'android';
-    if (Platform.isIOS) return 'ios';
-    return 'none';
-  }
+String _describe(Duration d) {
+  if (d.inMilliseconds < 1000) return '${d.inMilliseconds} ms';
+  if (d.inSeconds < 120) return '${d.inSeconds} seconds';
+  return '${d.inMinutes} minutes';
 }
 
 /// The outcome of waiting for flutter_tester's bootstrap to connect back.
-sealed class _DialBack {
-  const _DialBack();
+sealed class DialBack {
+  const DialBack();
 }
 
 /// The bootstrap connected; [request] is the HTTP request to upgrade.
-final class _BootstrapConnected extends _DialBack {
-  const _BootstrapConnected(this.request);
+final class BootstrapConnected extends DialBack {
+  const BootstrapConnected(this.request);
 
   final HttpRequest request;
 }
 
 /// flutter_tester exited before connecting, with [exitCode].
-final class _TesterExited extends _DialBack {
-  const _TesterExited(this.exitCode);
+final class TesterExited extends DialBack {
+  const TesterExited(this.exitCode);
 
   final int exitCode;
 }
 
 /// Nothing happened within the bound: flutter_tester is alive and has not
 /// connected. There is no exit code to wait for.
-final class _DialBackTimedOut extends _DialBack {
-  const _DialBackTimedOut();
-}
-
-class _TestFailureSummary {
-  _TestFailureSummary({
-    required this.message,
-    required this.type,
-    required this.stackChain,
-  });
-
-  final String message;
-  final String type;
-  final String stackChain;
-
-  @override
-  String toString() {
-    final buf = StringBuffer()
-      ..writeln('$type: $message')
-      ..write(stackChain);
-    return buf.toString();
-  }
-}
-
-class _Results {
-  int passed = 0;
-  int failed = 0;
-  int skipped = 0;
-  bool _suiteError = false;
-
-  /// Every case in the order it ran, for the JUnit report.
-  final List<TestCaseResult> cases = [];
-
-  void recordSuccess(String name, Duration elapsed, String output) {
-    passed++;
-    cases.add(TestCaseResult.passed(name, elapsed, output));
-    stdout.writeln('  PASS  $name');
-  }
-
-  void recordFailure(
-    String name,
-    _TestFailureSummary summary,
-    Duration elapsed,
-    String output,
-  ) {
-    failed++;
-    cases.add(
-      TestCaseResult.failed(
-        name,
-        elapsed,
-        output,
-        failureType: summary.type,
-        message: summary.message,
-        detail: summary.toString(),
-      ),
-    );
-    stdout.writeln('  FAIL  $name');
-    stdout.writeln(_indent(summary.toString(), '        '));
-  }
-
-  void recordSkipped(String name, String? reason) {
-    skipped++;
-    cases.add(TestCaseResult.skipped(name));
-    stdout.writeln(
-      reason == null ? '  SKIP  $name' : '  SKIP  $name (${reason.trim()})',
-    );
-  }
-
-  void recordError(String message) {
-    _suiteError = true;
-    stderr.writeln('flutter_test: $message');
-  }
-
-  bool get hasFailure => failed > 0 || _suiteError;
-
-  String summary() {
-    final pieces = <String>[
-      if (passed > 0) '$passed passed',
-      if (failed > 0) '$failed failed',
-      if (skipped > 0) '$skipped skipped',
-    ];
-    final body = pieces.isEmpty ? 'no tests' : pieces.join(', ');
-    return '\n$body${_suiteError ? ' (suite error)' : ''}';
-  }
-}
-
-String _indent(String body, String prefix) {
-  return body.split('\n').map((l) => l.isEmpty ? l : '$prefix$l').join('\n');
+final class DialBackTimedOut extends DialBack {
+  const DialBackTimedOut();
 }
 
 // ---------------------------------------------------------------------------
-// Coverage support — reuse the same VM service JSON-RPC scaffolding the old
-// `dart`-based runner had, but pointed at flutter_tester instead of the Dart
-// SDK binary.
+// Coverage support.
 
-/// Collects an LCOV report from every isolate the VM service lists, over the
-/// libraries whose URIs start with one of [libraryFilters].
+/// A run under `bazel coverage`: the VM's line coverage of the program,
+/// collected over flutter_tester's VM service into a scratch directory, and
+/// converted by rules_dart's `coverage_converter` into the LCOV tracefile in
+/// `COVERAGE_DIR` that Bazel's coverage runner merges.
 ///
-/// Scoped, as `flutter test --coverage` scopes to the test's own package by
-/// default: `forceCompile` compiles every library in scope and each script
-/// costs a round trip for its token table, so an unscoped report over the
-/// whole Flutter framework (some 1,000 scripts) costs seconds of CPU even
-/// for a test that touches none of it.
+/// The converter names each file by its workspace path and reports only the
+/// files Bazel instruments (`COVERAGE_MANIFEST`), which is how
+/// `--instrumentation_filter` reaches a `flutter_test`.
+class CoverageRun {
+  CoverageRun._(this.converter, this.sources, this.directory, this.hitmaps);
+
+  /// The run's coverage, when the test was built for coverage
+  /// (`FLUTTER_TEST_COVERAGE_CONVERTER`) and Bazel collects it
+  /// (`COVERAGE_DIR`): `bazel run` of a coverage build collects none.
+  static CoverageRun? of(
+    Runfiles runfiles,
+    Map<String, String> settings,
+    Map<String, String> environment,
+  ) {
+    final converter = settings['FLUTTER_TEST_COVERAGE_CONVERTER'];
+    final sources = settings['FLUTTER_TEST_COVERAGE_SOURCES'];
+    final directory = environment['COVERAGE_DIR'];
+    if (converter == null || sources == null || directory == null) return null;
+    final scratch = environment['TEST_TMPDIR'] ?? Directory.systemTemp.path;
+    return CoverageRun._(
+      runfiles.rlocation(converter),
+      runfiles.rlocation(sources),
+      directory,
+      Directory(scratch).createTempSync('flutter_test_coverage.').path,
+    );
+  }
+
+  /// `coverage_converter`.
+  final String converter;
+
+  /// The file naming each package's `lib/` directories, which it reads.
+  final String sources;
+
+  /// `COVERAGE_DIR`, where the tracefile goes.
+  final String directory;
+
+  /// Where the collected coverage goes before it is converted: not
+  /// `COVERAGE_DIR`, whose every file Bazel's coverage runner reads.
+  final String hitmaps;
+
+  /// Whether [writeHits] has written anything to convert.
+  bool collected = false;
+
+  /// Writes what [collectCoverage] returned, for [convert].
+  void writeHits(Map<String, Object?> hits) {
+    File('$hitmaps/flutter_tester.json').writeAsStringSync(json.encode(hits));
+    collected = true;
+  }
+
+  /// Converts the collected coverage into `COVERAGE_DIR/flutter_test.dat`,
+  /// with the converter's own messages on this process's; its exit status.
+  Future<int> convert() async {
+    final converting = await Process.start(converter, [
+      '--hitmaps=$hitmaps',
+      '--sources=$sources',
+      '--output=$directory/flutter_test.dat',
+    ], mode: ProcessStartMode.inheritStdio);
+    return converting.exitCode;
+  }
+}
+
+/// Collects the line coverage of every isolate group the VM service lists,
+/// as `package:coverage`'s `collect` reports it:
+/// `{"type": "CodeCoverage", "coverage": [{"source": <uri>, "hits":
+/// [line, count, ...]}]}`, a line that ran counted once and one that did not
+/// as 0. `dart:` libraries are left out; which of the rest are reported is
+/// the converter's to decide, from what Bazel instruments.
 ///
 /// Public so `flutter_test_runner_test.dart` can drive it against a fake VM
 /// service; nothing else in this script calls it from outside [main].
@@ -1110,37 +946,70 @@ String _indent(String body, String prefix) {
 /// indistinguishable from a complete one once written, so a run that drops
 /// part of its coverage reads as a run that simply exercised less code. That
 /// sends someone to write tests that already exist, or passes a coverage bar
-/// that was never actually met.
-///
-/// Per-isolate failures must not be swallowed. A bare catch cannot tell an
-/// exited isolate from anything else, so it equally hides every RPC error and
-/// every `TypeError` thrown by
-/// [_formatLcov] casting a malformed report. And the scenario it named does
-/// not arise here: collection runs before the suite is told to close, so the
-/// isolates `getVM` just listed are alive by construction — measured at one
-/// isolate, collected without error, on the `hello_coverage_test` path that is
-/// the only coverage run in the repo.
-Future<String> collectCoverage(Uri httpUri, List<String> libraryFilters) async {
+/// that was never actually met. Collection runs before the suite is told to
+/// close, so the isolates `getVM` just listed are alive by construction.
+Future<Map<String, Object?>> collectCoverage(Uri httpUri) async {
   final ws = await _connectVmServiceWebSocket(httpUri);
   try {
     final rpc = _VmServiceRpc(ws);
     final vm = await rpc.call('getVM');
     final isolates = (vm['isolates'] as List?) ?? const [];
-    final lines = <String>[];
+    final entries = <Map<String, Object?>>[];
+    // Isolates of one group share their code and so their counters: one
+    // report per group, or every hit would count once per isolate.
+    final groups = <String>{};
     for (final iso in isolates) {
-      final id = (iso as Map)['id'] as String;
+      final ref = iso as Map;
+      final group = ref['isolateGroupId'] as String?;
+      if (group != null && !groups.add(group)) continue;
       final report = await rpc.call('getSourceReport', {
-        'isolateId': id,
+        'isolateId': ref['id'] as String,
         'reports': const ['Coverage'],
+        // Every function, run or not, so a line that never ran is reported
+        // as such rather than left out; by line rather than token position.
         'forceCompile': true,
-        'libraryFilters': libraryFilters,
+        'reportLines': true,
       });
-      await _formatLcov(report, lines, rpc, id);
+      entries.addAll(_hitEntries(report));
     }
-    return lines.join('\n');
+    return {'type': 'CodeCoverage', 'coverage': entries};
   } finally {
     await ws.close();
   }
+}
+
+/// [report]'s line coverage, one entry per script.
+List<Map<String, Object?>> _hitEntries(Map<String, dynamic> report) {
+  final scripts = (report['scripts'] as List?) ?? const [];
+  final ranges = (report['ranges'] as List?) ?? const [];
+  final uris = [for (final s in scripts) (s as Map)['uri'] as String];
+  final byScript = <int, Map<int, int>>{};
+  for (final range in ranges) {
+    final scriptIndex = (range as Map)['scriptIndex'] as int;
+    if (uris[scriptIndex].startsWith('dart:')) continue;
+    final coverage = (range['coverage'] as Map?)?.cast<String, dynamic>();
+    if (coverage == null) continue;
+    final lines = byScript.putIfAbsent(scriptIndex, () => {});
+    for (final line in (coverage['hits'] as List?)?.cast<int>() ?? const []) {
+      lines[line] = 1;
+    }
+    for (final line in (coverage['misses'] as List?)?.cast<int>() ?? const []) {
+      lines.putIfAbsent(line, () => 0);
+    }
+  }
+  return [
+    for (final MapEntry(key: index, value: lines) in byScript.entries)
+      if (lines.isNotEmpty)
+        {
+          'source': uris[index],
+          'hits': [
+            for (final line in lines.keys.toList()..sort()) ...[
+              line,
+              lines[line],
+            ],
+          ],
+        },
+  ];
 }
 
 Future<WebSocket> _connectVmServiceWebSocket(Uri httpUri) {
@@ -1195,93 +1064,5 @@ class _VmServiceRpc {
 
   Future<void> close() async {
     await _sub.cancel();
-  }
-}
-
-Map<int, int> _buildTokenToLineMap(List<dynamic> tokenPosTable) {
-  final map = <int, int>{};
-  for (final entry in tokenPosTable) {
-    final row = entry as List;
-    if (row.isEmpty) continue;
-    final line = row[0] as int;
-    for (var i = 1; i < row.length; i += 2) {
-      map[row[i] as int] = line;
-    }
-  }
-  return map;
-}
-
-Future<void> _formatLcov(
-  Map<String, dynamic> report,
-  List<String> lines,
-  _VmServiceRpc rpc,
-  String isolateId,
-) async {
-  final scripts = (report['scripts'] as List?) ?? const [];
-  final ranges = (report['ranges'] as List?) ?? const [];
-
-  final scriptInfo = <int, ({String id, String uri})>{};
-  for (var i = 0; i < scripts.length; i++) {
-    final s = (scripts[i] as Map).cast<String, dynamic>();
-    scriptInfo[i] = (id: s['id'] as String, uri: s['uri'] as String);
-  }
-
-  final perScript = <int, ({List<int> hits, List<int> misses})>{};
-  for (final range in ranges) {
-    final scriptIndex = (range as Map)['scriptIndex'] as int?;
-    if (scriptIndex == null) continue;
-    final info = scriptInfo[scriptIndex];
-    if (info == null) continue;
-    if (info.uri.startsWith('dart:')) continue;
-    final coverage = (range['coverage'] as Map?)?.cast<String, dynamic>();
-    if (coverage == null) continue;
-    final entry = perScript.putIfAbsent(
-      scriptIndex,
-      () => (hits: <int>[], misses: <int>[]),
-    );
-    entry.hits.addAll((coverage['hits'] as List?)?.cast<int>() ?? const []);
-    entry.misses.addAll((coverage['misses'] as List?)?.cast<int>() ?? const []);
-  }
-
-  for (final entry in perScript.entries) {
-    final info = scriptInfo[entry.key]!;
-    final tokens = entry.value;
-
-    // Not guarded: a `getObject` that fails drops this script's every line
-    // from the report while the surrounding records still look complete, so
-    // the loss has to reach the caller. `tokenPosTable` being absent is the
-    // one silent skip left, and it is a documented-optional field rather than
-    // a failure — a script that reports no token table has no line numbers to
-    // attribute hits to.
-    final script = await rpc.call('getObject', {
-      'isolateId': isolateId,
-      'objectId': info.id,
-    });
-    final table = script['tokenPosTable'] as List?;
-    if (table == null) continue;
-    final tokenToLine = _buildTokenToLineMap(table);
-
-    final lineHits = <int, int>{};
-    for (final t in tokens.hits) {
-      final line = tokenToLine[t];
-      if (line != null) lineHits[line] = (lineHits[line] ?? 0) + 1;
-    }
-    for (final t in tokens.misses) {
-      final line = tokenToLine[t];
-      if (line != null) lineHits.putIfAbsent(line, () => 0);
-    }
-
-    if (lineHits.isEmpty) continue;
-
-    var path = info.uri;
-    if (path.startsWith('file://')) path = Uri.parse(path).toFilePath();
-
-    lines.add('SF:$path');
-    final sorted = lineHits.entries.toList()
-      ..sort((a, b) => a.key.compareTo(b.key));
-    for (final lh in sorted) {
-      lines.add('DA:${lh.key},${lh.value}');
-    }
-    lines.add('end_of_record');
   }
 }

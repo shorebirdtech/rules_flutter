@@ -1,0 +1,46 @@
+load("@rules_dart//dart:defs.bzl", "dart_test")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application")
+load("@rules_flutter//flutter:web.bzl", "flutter_web_bundle")
+
+# An app whose own package has a link hook, and no library of that package in
+# `deps`: the hook runs as any package's does, and imports the app's own
+# `lib/src/motto.dart`.
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "own_hook",
+    link_hook = "hook/link.dart",
+)
+
+flutter_application(
+    name = "app",
+    srcs = ["lib/src/motto.dart"],
+    main = "lib/main.dart",
+    package = ":pubspec-metadata",
+    deps = [
+        "@deps//:data_assets",
+        "@deps//:flutter",
+        "@deps//:hooks",
+    ],
+)
+
+flutter_web_bundle(
+    name = "web",
+    application = ":app",
+)
+
+dart_test(
+    name = "bundle_test",
+    args = select({
+        "//:debug": ["--debug"],
+        "//conditions:default": [],
+    }) + [
+        "$(rlocationpaths :app)",
+        "$(rlocationpaths :web)",
+    ],
+    data = [
+        ":app",
+        ":web",
+    ],
+    main = "bundle_test.dart",
+    deps = ["@rules_dart//dart/runfiles"],
+)

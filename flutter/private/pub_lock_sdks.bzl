@@ -10,7 +10,7 @@ by a *newer* Flutter than the build uses.
 The other direction (an older resolver silently capping packages at older
 versions) leaves no trace in the lock at all: the result is a perfectly valid
 solution under the newer SDK. Nothing can detect it after the fact, which is
-why `@rules_flutter//flutter:pub` exists — resolving with the pinned toolchain
+why `@rules_flutter//flutter/pub` exists — resolving with the pinned toolchain
 is the only thing that prevents it.
 """
 
@@ -79,7 +79,7 @@ def version_below_lower_bound(version, constraint):
     with no `>=` term, yields False rather than a guess.
 
     Args:
-        version: A version string such as `"3.44.1"`.
+        version: A version string such as `"3.47.6"`.
         constraint: A pub constraint string such as `">=3.18.0 <4.0.0"`.
 
     Returns:

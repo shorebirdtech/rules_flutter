@@ -45,8 +45,10 @@ abstract interface class Compiler {
   /// The whole program, for a hot restart.
   ///
   /// [invalidated] is what changed since the committed baseline, as for
-  /// [compileIncrement]: the compiler recompiles those and reuses the rest,
-  /// and only the answer differs, a whole program instead of a delta.
+  /// [compileIncrement], and it decides what is recompiled: the compiler
+  /// reuses every other library it holds, and only its answer differs, a
+  /// whole program instead of a delta. A changed file left out comes back as
+  /// its old code.
   Future<CompileOutcome> compileFull({
     required String entrypoint,
     required Set<String> invalidated,

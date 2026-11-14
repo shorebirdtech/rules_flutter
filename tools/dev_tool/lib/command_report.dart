@@ -286,9 +286,8 @@ class CommandReport {
   /// that landed new code rules the whole run out of [RunningCode.unchanged] —
   /// the state that alone earns "the app keeps running the code it already had".
   ///
-  /// Landed new code, not reached an app. An empty-delta apply reaches its app
-  /// and still answers [RunningCode.unchanged], which stays true of a restart
-  /// that re-ran `main()` on it — see that value's own doc.
+  /// Landed new code, not reached an app. An empty-delta reload reaches its app
+  /// and still answers [RunningCode.unchanged]; a restart is never empty.
   ///
   /// An empty list is [RunningCode.unchanged]: no half ran, so nothing moved.
   static RunningCode _leastCertain(List<RunningCode> states) {
@@ -300,11 +299,9 @@ class CommandReport {
   static RunningCode _outcomeCode(ReloadOutcome outcome) => switch (outcome) {
     // The compiler never handed back a delta, so nothing was sent.
     ReloadNoChange() || ReloadCompileFailed() => RunningCode.unchanged,
-    // An empty delta changed no code, however much it changed the app: the
-    // apply ran, and a restart's apply re-ran `main()` and wiped the state
-    // on the way. Which is why this reads no `ApplyMode` and needs none —
-    // a reload and a restart deliver the same nothing, and the only thing
-    // asked here is what code came out the other side.
+    // An empty delta changed no code. Only a reload has one: the
+    // orchestrator never calls a restart empty, because a new isolate running
+    // the whole program is new code even when its files are not.
     ReloadApplied(:final isEmpty) =>
       isEmpty ? RunningCode.unchanged : RunningCode.updated,
     ReloadApplyFailed(:final perApp) => _leastCertain([

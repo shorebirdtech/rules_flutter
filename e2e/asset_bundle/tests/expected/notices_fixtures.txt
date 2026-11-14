@@ -1,0 +1,13 @@
+fx_licence_dart
+fx_licence_shared
+
+Shared licence text
+
+--------------------------------------------------------------------------------
+fx_notices_a
+
+First notice
+--------------------------------------------------------------------------------
+fx_notices_b
+
+Second notice

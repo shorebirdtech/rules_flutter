@@ -1,0 +1,22 @@
+# A `path` package with no Bazel build: an iOS plugin whose Apple side is a
+# Swift package, and whose podspec, for CocoaPods, runs a script phase.
+# Flutter builds it with Swift Package Manager, which runs no script phase;
+# `flutter_pub.from_lock(build_from_pubspec = ...)` builds it so too.
+name: script_phase_plugin
+description: An iOS plugin with a Package.swift and a podspec script phase.
+version: 0.0.1
+publish_to: none
+
+environment:
+  sdk: ^3.13.0
+  flutter: ">=3.3.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      ios:
+        pluginClass: ScriptPhasePlugin

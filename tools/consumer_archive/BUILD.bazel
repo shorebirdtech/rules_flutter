@@ -1,0 +1,12 @@
+load("@rules_dart//dart:defs.bzl", "dart_binary")
+
+# Extracts the source archive a release ships (`git archive`, trimmed by
+# .gitattributes) to e2e/external_module/rules_flutter, which that workspace
+# depends on, so `bazel query @rules_flutter//...` there sees what a consumer
+# of the published module sees.
+#   bazel run //tools/consumer_archive
+dart_binary(
+    name = "consumer_archive",
+    srcs = ["consumer_archive.dart"],
+    main = "consumer_archive.dart",
+)

@@ -2,7 +2,7 @@
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("//flutter:providers.bzl", "FlutterSdkInfo")
-load("//flutter/private:engine_helpers.bzl", "dart_binary_name", "dartaotruntime_binary_name", "engine_arch_for_os", "platform_to_arch", "platform_to_os")
+load("//flutter/private:engine_helpers.bzl", "dart_binary_name", "dartaotruntime_binary_name", "engine_arch_for_os", "gen_snapshot_binary_name", "platform_to_arch", "platform_to_os")
 
 def _provider_exists_test_impl(ctx):
     env = unittest.begin(ctx)
@@ -21,6 +21,8 @@ def _dart_binary_name_test_impl(ctx):
     asserts.equals(env, "dart.exe", dart_binary_name("windows-x64"))
     asserts.equals(env, "dartaotruntime", dartaotruntime_binary_name("darwin-arm64"))
     asserts.equals(env, "dartaotruntime.exe", dartaotruntime_binary_name("windows-x64"))
+    asserts.equals(env, "gen_snapshot", gen_snapshot_binary_name("linux-x64"))
+    asserts.equals(env, "gen_snapshot.exe", gen_snapshot_binary_name("windows-x64"))
     return unittest.end(env)
 
 def _platform_mapping_test_impl(ctx):

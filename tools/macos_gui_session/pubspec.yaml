@@ -1,0 +1,8 @@
+name: rules_flutter_macos_gui_session
+description: Probing and holding a macOS desktop session for tests that need windows.
+publish_to: none
+
+environment:
+  sdk: ^3.13.0
+
+resolution: workspace

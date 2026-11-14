@@ -119,6 +119,18 @@ class AppLogStream {
   void closeWhen(Iterable<Future<void>> sources) =>
       unawaited(Future.wait(sources).then((_) => close()));
 
+  final List<AppLogPump> _ownedPumps = [];
+
+  /// Make [pump]'s lifetime this stream's: [close] cancels its readers.
+  ///
+  /// A pipe reaches end-of-file only when every holder of its write end has
+  /// closed it, and a process can leave a descendant behind that still holds
+  /// one. A reader waiting for that end-of-file is a live handle, and a Dart
+  /// VM with a live handle does not exit, so a run that has ended would leave
+  /// the tool sitting there. Once the stream is closed nothing it is handed is
+  /// kept ([add] drops it), so reading on has no purpose.
+  void own(AppLogPump pump) => _ownedPumps.add(pump);
+
   /// Append a line. Never blocks, and is a no-op once [close] has been called.
   void add(String text, {bool isError = false}) {
     if (_closed) return;
@@ -247,6 +259,8 @@ class AppLogStream {
   Future<void> close() async {
     if (_closed) return;
     _closed = true;
+    await Future.wait(_ownedPumps.map((pump) => pump.dispose()));
+    _ownedPumps.clear();
     await _controller.close();
   }
 }

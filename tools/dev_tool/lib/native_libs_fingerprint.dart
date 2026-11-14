@@ -72,30 +72,58 @@ Future<Map<String, String>> nativeLibsFingerprintOfFiles(
   return out;
 }
 
-/// The aspect whose [nativeLibsOutputGroup] holds the native libraries a
-/// launch target bundles, built without the bundle — see
-/// `flutter/native_libs.bzl`.
-const nativeLibsAspect =
-    '@rules_flutter//flutter:native_libs.bzl%flutter_native_libs_aspect';
-
-const nativeLibsOutputGroup = 'flutter_native_libs';
-
-/// Whether [built], the files [nativeLibsOutputGroup] held, include every
-/// library in [bundled], the keys of a bundle's [nativeLibsFingerprint].
+/// Per-file content fingerprint of [files], the build outputs an Android
+/// `android_binary` takes its native libraries from, keyed by where each sits
+/// in its configuration's output tree (`libextra.lo`,
+/// `external/aar+/jni/arm64-v8a/libaar.so`).
 ///
-/// Matched by file name: the group names build outputs and the bundle names
-/// where they landed. A library renamed on the way in (iOS wraps a dylib as
-/// `<name>.framework/<name>`) reads as not covered, which costs a bundle
-/// rebuild per restart and never a missed change.
-bool nativeLibsCoverBundle(Iterable<String> built, Iterable<String> bundled) {
-  final names = {for (final path in built) p.basename(path)};
-  return bundled.every((path) => names.contains(p.basename(path)));
+/// The companion to [nativeLibsFingerprint] for an app whose launch artifact
+/// is not built. A restart asks only whether the native code moved, and the
+/// APK is packaged from files the build makes first: the `.a`/`.lo` archives
+/// and objects of every `cc_library` listed on the binary (which it links into
+/// a library of its own), the shared libraries those bring, the application's
+/// own libraries, and the `jni/` libraries of every AAR. A change to any of
+/// them is a change to what the APK carries, so a changed library cannot
+/// slip past the check by being something other than the application's.
+///
+/// A macOS app reads the same way: what its bundle's native code is made from,
+/// the application's loose libraries and the linker inputs of everything the
+/// runner links.
+///
+/// [files] is whatever a build listed: anything that is not a regular file (a
+/// tree artifact) is skipped, and so are `libapp.so` and `libflutter.so`, the
+/// Dart snapshot and the engine, and the binary of an Apple engine framework
+/// (`FlutterMacOS.framework/FlutterMacOS`), which no edit to the app's native
+/// code moves.
+/// The content token is of the bytes, so the same file built in another
+/// configuration has the same one.
+Future<Map<String, String>> nativeLibsFingerprintOfBuiltFiles(
+  Iterable<String> files,
+) async {
+  // A launch target can reach one file in more than one configuration (the
+  // APK's own and the one its dependencies are split into), so a key can have
+  // several files. Their tokens are sorted, so the order the build listed them
+  // in decides nothing, and either one changing changes the key's.
+  final tokens = <String, Set<String>>{};
+  for (final path in files) {
+    final key = _inOutputTree.firstMatch(path)?.group(1) ?? path;
+    final segments = key.split('/');
+    if (_flutterLibraries.contains(segments.last) ||
+        _isFlutterFrameworkBinary(segments)) {
+      continue;
+    }
+    final file = File(path);
+    if (!file.existsSync()) continue;
+    (tokens[key] ??= {}).add('fnv:${await _fnv1a64(file)}');
+  }
+  return {
+    for (final entry in tokens.entries)
+      entry.key: (entry.value.toList()..sort()).join(','),
+  };
 }
 
-/// Whether every one of [files] was last written no later than [cutoff], so
-/// that a build finished by then holds them as they are now.
-bool nativeLibsWrittenBy(Iterable<String> files, DateTime cutoff) =>
-    files.every((path) => !File(path).lastModifiedSync().isAfter(cutoff));
+/// A path under a configuration's output tree: what follows `bazel-out/<cfg>/bin/`.
+final _inOutputTree = RegExp(r'bazel-out/[^/]+/bin/(.*)$');
 
 bool fingerprintsEqual(Map<String, String> a, Map<String, String> b) {
   if (a.length != b.length) return false;
@@ -124,6 +152,21 @@ const _flutterFrameworks = {'App', 'Flutter', 'FlutterMacOS'};
 /// Android's equivalents: `libapp.so` is the AOT Dart snapshot and
 /// `libflutter.so` the engine.
 const _flutterLibraries = {'libapp.so', 'libflutter.so'};
+
+/// Whether [segments] name the binary of one of [_flutterFrameworks], directly
+/// inside its `.framework` directory.
+///
+/// A framework the linker reaches through `_solib_*` has its directory path
+/// flattened into one segment (`/` becomes `_S`), which still ends with the
+/// framework's own directory name.
+bool _isFlutterFrameworkBinary(List<String> segments) {
+  if (segments.length < 2 || !_flutterFrameworks.contains(segments.last)) {
+    return false;
+  }
+  final directory = segments[segments.length - 2];
+  final framework = '${segments.last}.framework';
+  return directory == framework || directory.endsWith('_S$framework');
+}
 
 bool _isNativeLib(String path) {
   final segments = path.split('/');
@@ -219,7 +262,11 @@ Future<Map<String, String>> _fromExtractedBundle(Directory appDir) async {
   final out = <String, String>{};
   await for (final entity in appDir.list(recursive: true, followLinks: false)) {
     if (entity is! File) continue;
-    final rel = entity.path.substring(appDir.path.length + 1);
+    // Keyed with `/` on every host, as the entries of an archive are, so the
+    // `.framework` and `libapp.so` rules below read a key the same way.
+    final rel = p.posix.joinAll(
+      p.split(p.relative(entity.path, from: appDir.path)),
+    );
     if (!_isNativeLib(rel)) continue;
     out[rel] = 'fnv:${await _fnv1a64(entity)}';
   }

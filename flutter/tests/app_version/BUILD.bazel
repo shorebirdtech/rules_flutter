@@ -1,0 +1,5 @@
+load("//flutter/tests:app_version_test.bzl", "app_version_test_suite")
+
+# Beside its fixtures: a web bundle's `main` and `version_json`, and a base
+# AndroidManifest.xml.
+app_version_test_suite(name = "app_version_test")

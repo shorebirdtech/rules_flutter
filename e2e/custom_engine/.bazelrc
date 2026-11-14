@@ -1,0 +1,37 @@
+# Fail rather than rewrite or ignore a lock file that is stale or incomplete.
+# `bazel run @overhead//locks:check`, from the repository root, checks every
+# workspace's (see docs/TESTING.md, "Lock files"). A gitignored .bazelrc.user that overrides a
+# module must switch this off, since the override no longer matches the lock.
+common --lockfile_mode=error
+
+# rules_flutter's Java dependencies ship tool jars compiled for Java 21+, and an
+# Android build resolves a Java runtime of its own, the local JDK unless this
+# names another (README, ".bazelrc").
+common --java_runtime_version=remotejdk_25
+common --tool_java_language_version=25
+common --tool_java_runtime_version=remotejdk_25
+
+# Share the results of identical actions between configurations (one
+# Android ABI and the next, -c dbg and -c fastbuild, platform transitions).
+# Bazel rewrites `bazel-out/<config>` only in actions that declare they
+# support it, and only where it can sandbox them: on Windows it fails a
+# path-mapped action rather than run it unsandboxed. See README.md, ".bazelrc".
+common --enable_platform_specific_config
+common:linux --experimental_output_paths=strip
+common:macos --experimental_output_paths=strip
+
+# Accepts the licences of the Android SDK and NDK versions MODULE.bazel
+# downloads (README, "Android"), as rules_kotlin's examples do for theirs.
+common --repo_env=ACCEPTED_ANDROID_SDK_LICENSE_VERSION=35
+common --repo_env=ACCEPTED_ANDROID_NDK_LICENSE_VERSION=r28c
+
+# The ABIs of an Android APK are the platforms of --@rules_android//flags:android_platforms (README,
+# "Android"). This workspace builds for a 64-bit ARM device unless a command
+# says otherwise.
+common --@rules_android//flags:android_platforms=@rules_android//:arm64-v8a
+
+# No core library desugaring, as a Flutter app built with Gradle has none
+# (README, "Android").
+common --@rules_android//flags:desugar_java8_libs=false
+
+try-import %workspace%/.bazelrc.user

@@ -2,45 +2,74 @@
 
 `flutter_toolchain` is the SDK for one target platform, built on one host: its
 `gen_snapshot` and engine are the target's. `flutter_exec_tools` is the part of
-the SDK whose output does not depend on the target, for one host.
+the SDK whose output does not depend on the target, for one host. Both are
+assembled from the slices of an engine source (`//flutter:engine.bzl`).
 """
 
+load("//flutter:engine.bzl", "FlutterEngineInfo", "FlutterGenSnapshotInfo", "FlutterHostToolsInfo", "FlutterPlatformKernelInfo")
 load("//flutter:providers.bzl", "FlutterExecToolsInfo", "FlutterSdkInfo")
 
 def _flutter_toolchain_impl(ctx):
-    tool_files = depset(transitive = [ctx.attr.dart_sdk.files, ctx.attr.patched_sdk.files])
+    host = ctx.attr.host_tools[FlutterHostToolsInfo]
+    kernel_debug = ctx.attr.platform_kernel_debug[FlutterPlatformKernelInfo]
+    kernel_release = ctx.attr.platform_kernel_release[FlutterPlatformKernelInfo] if ctx.attr.platform_kernel_release else None
+    gen_snapshot = ctx.attr.gen_snapshot[FlutterGenSnapshotInfo] if ctx.attr.gen_snapshot else None
+    engine = ctx.attr.engine[FlutterEngineInfo] if ctx.attr.engine else None
+    sdk_files = host.dart_sdk
+    tool_files = depset(transitive = [sdk_files.all, kernel_debug.files])
+
+    # Where each piece came from, for the record an app of a custom SDK keeps.
+    slice_labels = {
+        "host_tools": str(ctx.attr.host_tools.label),
+        "platform_kernel": str((ctx.attr.platform_kernel_release or ctx.attr.platform_kernel_debug).label),
+    }
+    if ctx.attr.engine:
+        slice_labels["engine"] = str(ctx.attr.engine.label)
+    if ctx.attr.gen_snapshot:
+        slice_labels["gen_snapshot"] = str(ctx.attr.gen_snapshot.label)
 
     flutter_sdk_info = FlutterSdkInfo(
         version = ctx.attr.version,
         engine_revision = ctx.attr.engine_revision,
-        dart = ctx.file.dart,
-        dartaotruntime = ctx.file.dartaotruntime,
-        gen_snapshot = ctx.file.gen_snapshot,
-        flutter_tester = ctx.file.flutter_tester,
-        frontend_server = ctx.file.frontend_server,
-        kernel_worker = ctx.file.kernel_worker,
-        libraries_spec = ctx.file.libraries_spec,
-        platform_kernel_dill = ctx.file.platform_kernel_dill,
-        platform_kernel_dill_product = ctx.file.platform_kernel_dill_product,
-        patched_sdk = ctx.attr.patched_sdk,
-        icu_data = ctx.file.icu_data,
-        const_finder = ctx.file.const_finder,
-        font_subset = ctx.file.font_subset,
-        impellerc = ctx.file.impellerc,
-        shader_lib = ctx.files.shader_lib,
+        sdk = ctx.attr.sdk,
+        sdk_defines = ctx.attr.sdk_defines,
+        dart = host.dart,
+        dartaotruntime = host.dartaotruntime,
+        gen_snapshot = gen_snapshot.binary if gen_snapshot else None,
+        flutter_tester = host.flutter_tester,
+        frontend_server = host.frontend_server,
+        kernel_worker = host.kernel_worker,
+        dart_libraries_json = host.dart_libraries_json,
+        platform_kernel_dill = kernel_debug.platform_dill,
+        platform_kernel_dill_product = kernel_release.platform_dill if kernel_release else None,
+        patched_sdk = ctx.attr.platform_kernel_debug,
+        framework_json = ctx.file.framework_json,
+        slice_labels = slice_labels,
+        icu_data = host.icu_data,
+        const_finder = host.const_finder,
+        font_subset = host.font_subset,
+        impellerc = host.impellerc,
+        shader_lib = host.shader_lib,
         material_icons_font = ctx.file.material_icons_font,
-        vm_isolate_snapshot = ctx.file.vm_isolate_snapshot,
-        isolate_snapshot = ctx.file.isolate_snapshot,
+        vm_isolate_snapshot = host.vm_isolate_snapshot,
+        isolate_snapshot = host.isolate_snapshot,
         tool_files = tool_files,
-        engine_library = ctx.attr.engine_library,
+        sdk_files = sdk_files,
+        engine_library = ctx.attr.engine if ctx.attr.engine else None,
+        host_tools = host,
+        kernel_debug = kernel_debug,
+        kernel_release = kernel_release,
+        engine = engine,
+        gen_snapshot_info = gen_snapshot,
         target_os = ctx.attr.target_os,
         target_arch = ctx.attr.target_arch,
         linux_sysroot = ctx.attr.linux_sysroot,
     )
 
-    template_variables = platform_common.TemplateVariableInfo({
-        "GEN_SNAPSHOT": ctx.file.gen_snapshot.path,
-    })
+    # `$(GEN_SNAPSHOT)` has no value where the toolchain compiles no snapshot.
+    template_variables = platform_common.TemplateVariableInfo(
+        {"GEN_SNAPSHOT": gen_snapshot.binary.path} if gen_snapshot else {},
+    )
     default = DefaultInfo(
         files = tool_files,
         runfiles = ctx.runfiles(transitive_files = tool_files),
@@ -61,100 +90,53 @@ flutter_toolchain = rule(
     implementation = _flutter_toolchain_impl,
     attrs = {
         "version": attr.string(
-            doc = "The Flutter SDK version string (e.g. `3.41.2`).",
+            doc = "The Flutter SDK version string (e.g. `3.47.2`).",
             mandatory = True,
         ),
         "engine_revision": attr.string(
             doc = "The Flutter engine commit hash.",
             mandatory = True,
         ),
-        "dart": attr.label(
-            doc = "The `dart` executable from the Flutter-bundled Dart SDK.",
+        "sdk": attr.string(
+            doc = "The name of the SDK this toolchain belongs to.",
             mandatory = True,
-            allow_single_file = True,
         ),
-        "dartaotruntime": attr.label(
-            doc = "The `dartaotruntime` executable for running AOT snapshots like frontend_server.",
+        "sdk_defines": attr.string_list(
+            doc = "The defines that describe the SDK's framework and engine.",
+        ),
+        "host_tools": attr.label(
+            doc = "The host tools of the execution platform: a `flutter_host_tools` slice.",
             mandatory = True,
-            allow_single_file = True,
+            providers = [FlutterHostToolsInfo],
+        ),
+        "platform_kernel_debug": attr.label(
+            doc = "The debug (non-product) platform kernel: a `flutter_platform_kernel` slice.",
+            mandatory = True,
+            providers = [FlutterPlatformKernelInfo],
+        ),
+        "platform_kernel_release": attr.label(
+            doc = "The release (product) platform kernel: a `flutter_platform_kernel` slice. " +
+                  "Leave unset where no release kernel is compiled (debug mode), so a source " +
+                  "without one still serves a debug build.",
+            providers = [FlutterPlatformKernelInfo],
         ),
         "gen_snapshot": attr.label(
-            doc = "The `gen_snapshot` AOT compiler binary.",
-            mandatory = True,
-            allow_single_file = True,
+            doc = "The target's gen_snapshot of the build mode: a `flutter_gen_snapshot` slice. " +
+                  "Unset in debug mode, and for a toolchain that cannot compile a snapshot.",
+            providers = [FlutterGenSnapshotInfo],
         ),
-        "flutter_tester": attr.label(
-            doc = "The `flutter_tester` headless engine binary. Used by `flutter_test`.",
-            allow_single_file = True,
-        ),
-        "frontend_server": attr.label(
-            doc = "The `frontend_server_aot.dart.snapshot` file.",
-            mandatory = True,
-            allow_single_file = True,
-        ),
-        "kernel_worker": attr.label(
-            doc = "The `kernel_worker_aot.dart.snapshot`, which compiles one library target to a kernel module.",
-            allow_single_file = True,
-        ),
-        "libraries_spec": attr.label(
-            doc = "A `libraries.json` whose `flutter` target names the dart: libraries a " +
-                  "Flutter program can import.",
-            allow_single_file = True,
-        ),
-        "platform_kernel_dill": attr.label(
-            doc = "The `platform_strong.dill` debug platform kernel.",
-            mandatory = True,
-            allow_single_file = True,
-        ),
-        "platform_kernel_dill_product": attr.label(
-            doc = "The `platform_strong_product.dill` release platform kernel.",
-            mandatory = True,
-            allow_single_file = True,
-        ),
-        "dart_sdk": attr.label(
-            doc = "A filegroup containing the Flutter-bundled Dart SDK files.",
-            mandatory = True,
-        ),
-        "patched_sdk": attr.label(
-            doc = "A filegroup containing the Flutter patched Dart SDK files.",
-            mandatory = True,
-        ),
-        "icu_data": attr.label(
-            doc = "The `icudtl.dat` ICU data file.",
-            mandatory = True,
-            allow_single_file = True,
-        ),
-        "const_finder": attr.label(
-            doc = "The `const_finder.dart.snapshot` for icon tree shaking. Absent from " +
-                  "Flutter 3.50 on, which shakes icons from the uses the AOT compile records.",
-            allow_single_file = True,
-        ),
-        "font_subset": attr.label(
-            doc = "The `font-subset` binary for font subsetting.",
-            allow_single_file = True,
-        ),
-        "impellerc": attr.label(
-            doc = "The `impellerc` shader compiler binary.",
-            allow_single_file = True,
-        ),
-        "shader_lib": attr.label(
-            doc = "The shader_lib/ directory contents (include files for impellerc).",
+        "engine": attr.label(
+            doc = "The target's engine of the build mode, so a `select()` on the mode picks it: " +
+                  "a `flutter_<os>_engine` slice. Unset for web targets.",
+            providers = [FlutterEngineInfo],
         ),
         "material_icons_font": attr.label(
             doc = "MaterialIcons-Regular.otf font file from the material_fonts artifact.",
             allow_single_file = True,
         ),
-        "vm_isolate_snapshot": attr.label(
-            doc = "The vm_isolate_snapshot.bin for debug VM bootstrap.",
+        "framework_json": attr.label(
+            doc = "The `flutter_framework.json` of the SDK's framework, when it is not the release's.",
             allow_single_file = True,
-        ),
-        "isolate_snapshot": attr.label(
-            doc = "The isolate_snapshot.bin for debug isolate bootstrap (includes kernel service).",
-            allow_single_file = True,
-        ),
-        "engine_library": attr.label(
-            doc = "The platform-specific Flutter engine library (framework/so/dll). " +
-                  "None for mobile/web targets or when engine is not available.",
         ),
         "target_os": attr.string(
             doc = "Cross-compilation target OS. Leave empty for native compilation.",
@@ -166,97 +148,64 @@ flutter_toolchain = rule(
             doc = "Chromium sysroot filegroup for hermetic Linux GTK3 header resolution. None on non-Linux platforms.",
         ),
     },
-    doc = "Defines a Flutter SDK toolchain. Typically generated by the `flutter_engine_artifacts` repository rule.",
+    doc = "Defines a Flutter SDK toolchain, assembled from the slices of an engine source. Generated per SDK by the extension.",
 )
 
-def _shader_include_dir(ctx):
-    """The execution path of `shader_include_dir`, checked to hold every `shader_lib` file.
-
-    A source path: path mapping rewrites only output paths, so actions pass
-    it as a string.
-    """
-    if not ctx.files.shader_lib:
-        fail("%s: `shader_lib` has no files" % ctx.label)
-    anchor = ctx.files.shader_lib[0]
-    if not anchor.is_source:
-        fail("%s: `shader_lib` must be source files, not %s" % (ctx.label, anchor.path))
-
-    # The anchor's path less its package-relative name is its package's
-    # directory, wherever the repository layout puts external repositories.
-    in_package = anchor.owner.name
-    package_dir = anchor.path[:-len(in_package)].rstrip("/")
-    include_dir = "/".join([d for d in [package_dir, ctx.attr.shader_include_dir] if d])
-    for f in ctx.files.shader_lib:
-        if not f.path.startswith(include_dir + "/"):
-            fail("%s: %s is not under `shader_include_dir` (%s)" % (ctx.label, f.path, include_dir))
-    return include_dir
-
 def _flutter_exec_tools_impl(ctx):
-    tool_files = depset(transitive = [ctx.attr.dart_sdk.files, ctx.attr.patched_sdk.files])
+    host = ctx.attr.host_tools[FlutterHostToolsInfo]
+    kernel_debug = ctx.attr.platform_kernel_debug[FlutterPlatformKernelInfo]
+    kernel_release = ctx.attr.platform_kernel_release[FlutterPlatformKernelInfo] if ctx.attr.platform_kernel_release else None
     info = FlutterExecToolsInfo(
         version = ctx.attr.version,
         engine_revision = ctx.attr.engine_revision,
-        host_os = ctx.attr.host_os,
-        host_arch = ctx.attr.host_arch,
-        dart = ctx.file.dart,
-        dartaotruntime = ctx.file.dartaotruntime,
-        frontend_server = ctx.file.frontend_server,
-        kernel_worker = ctx.file.kernel_worker,
-        libraries_spec = ctx.file.libraries_spec,
-        platform_kernel_dill = ctx.file.platform_kernel_dill,
-        platform_kernel_dill_product = ctx.file.platform_kernel_dill_product,
-        patched_sdk = ctx.attr.patched_sdk,
-        flutter_tester = ctx.file.flutter_tester,
-        icu_data = ctx.file.icu_data,
-        vm_isolate_snapshot = ctx.file.vm_isolate_snapshot,
-        isolate_snapshot = ctx.file.isolate_snapshot,
-        const_finder = ctx.file.const_finder,
-        font_subset = ctx.file.font_subset,
-        impellerc = ctx.file.impellerc,
-        shader_lib = ctx.files.shader_lib,
-        shader_include_dir = _shader_include_dir(ctx),
-        tool_files = tool_files,
+        sdk = ctx.attr.sdk,
+        sdk_defines = ctx.attr.sdk_defines,
+        host_os = host.host_os,
+        host_arch = host.host_arch,
+        dart = host.dart,
+        dartaotruntime = host.dartaotruntime,
+        frontend_server = host.frontend_server,
+        kernel_worker = host.kernel_worker,
+        dart_libraries_json = host.dart_libraries_json,
+        platform_kernel_dill = kernel_debug.platform_dill,
+        platform_kernel_dill_product = kernel_release.platform_dill if kernel_release else None,
+        patched_sdk = ctx.attr.platform_kernel_debug,
+        host_tools = host,
+        flutter_tester = host.flutter_tester,
+        icu_data = host.icu_data,
+        vm_isolate_snapshot = host.vm_isolate_snapshot,
+        isolate_snapshot = host.isolate_snapshot,
+        const_finder = host.const_finder,
+        font_subset = host.font_subset,
+        impellerc = host.impellerc,
+        shader_lib = host.shader_lib,
+        shader_include_dir = host.shader_include_dir,
+        sdk_files = host.dart_sdk,
     )
     return [platform_common.ToolchainInfo(flutter_exec_tools_info = info)]
-
-def _file(doc):
-    return attr.label(doc = doc, mandatory = True, allow_single_file = True)
 
 flutter_exec_tools = rule(
     implementation = _flutter_exec_tools_impl,
     attrs = {
         "version": attr.string(doc = "The Flutter SDK version string.", mandatory = True),
         "engine_revision": attr.string(doc = "The Flutter engine commit hash.", mandatory = True),
-        "host_os": attr.string(doc = "The OS the tools run on.", mandatory = True, values = ["macos", "linux", "windows"]),
-        "host_arch": attr.string(doc = "The CPU the tools run on.", mandatory = True, values = ["arm64", "x64"]),
-        "dart": _file("The `dart` executable."),
-        "dartaotruntime": _file("The `dartaotruntime` executable."),
-        "dart_sdk": attr.label(doc = "A filegroup of the Flutter-bundled Dart SDK.", mandatory = True),
-        "frontend_server": _file("`frontend_server_aot.dart.snapshot`."),
-        "kernel_worker": _file("`kernel_worker_aot.dart.snapshot`."),
-        "libraries_spec": _file("The Flutter `libraries.json`."),
-        "platform_kernel_dill": _file("The debug `platform_strong.dill`."),
-        "platform_kernel_dill_product": _file("The release `platform_strong.dill`."),
-        "patched_sdk": attr.label(doc = "A filegroup of the Flutter patched SDK.", mandatory = True),
-        "flutter_tester": _file("The `flutter_tester` binary."),
-        "icu_data": _file("`icudtl.dat`."),
-        "vm_isolate_snapshot": _file("`vm_isolate_snapshot.bin`."),
-        "isolate_snapshot": _file("`isolate_snapshot.bin`."),
-        "const_finder": attr.label(
-            doc = "`const_finder.dart.snapshot`. Absent from Flutter 3.50 on, which " +
-                  "shakes icons from the uses the AOT compile records.",
-            allow_single_file = True,
-        ),
-        "font_subset": _file("The `font-subset` binary."),
-        "impellerc": _file("The `impellerc` binary."),
-        "shader_lib": attr.label(doc = "The impellerc include files.", mandatory = True),
-        "shader_include_dir": attr.string(
-            doc = "The directory impellerc searches for `shader_lib`'s files, relative to " +
-                  "the package of the `shader_lib` files.",
+        "sdk": attr.string(doc = "The name of the SDK these tools belong to.", mandatory = True),
+        "sdk_defines": attr.string_list(doc = "The defines that describe the SDK's framework and engine."),
+        "host_tools": attr.label(
+            doc = "The host tools: a `flutter_host_tools` slice.",
             mandatory = True,
+            providers = [FlutterHostToolsInfo],
+        ),
+        "platform_kernel_debug": attr.label(
+            doc = "The debug platform kernel: a `flutter_platform_kernel` slice.",
+            mandatory = True,
+            providers = [FlutterPlatformKernelInfo],
+        ),
+        "platform_kernel_release": attr.label(
+            doc = "The release platform kernel: a `flutter_platform_kernel` slice. Unset in debug mode.",
+            providers = [FlutterPlatformKernelInfo],
         ),
     },
-    doc = "The host tools of one Flutter SDK download, for " +
-          "`@rules_flutter//flutter:exec_tools_toolchain_type`. Generated by the " +
-          "`flutter_engine_artifacts` repository rule.",
+    doc = "The host tools of one Flutter SDK, for " +
+          "`@rules_flutter//flutter:exec_tools_toolchain_type`. Generated per SDK by the extension.",
 )

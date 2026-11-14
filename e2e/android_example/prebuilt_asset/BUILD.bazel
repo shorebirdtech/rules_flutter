@@ -1,0 +1,17 @@
+load("@rules_dart//dart:defs.bzl", "dart_library")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata")
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "prebuilt_asset",
+    code_assets = ["//:negate_asset"],
+)
+
+# A package whose code asset is a prebuilt library file, as a vendored or
+# downloaded `.so` is: see `//:negate_prebuilt`.
+dart_library(
+    name = "prebuilt_asset",
+    srcs = ["lib/prebuilt_asset.dart"],
+    package = ":pubspec-metadata",
+    visibility = ["//visibility:public"],
+)

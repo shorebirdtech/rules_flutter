@@ -47,25 +47,35 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:clock/clock.dart';
 import 'package:path/path.dart' as p;
 
 import 'app_log.dart';
+import 'browser_extension_channel.dart';
 import 'build_mode.dart';
+import 'cdp_app_page.dart';
 import 'cdp_console.dart';
+import 'chrome_profile.dart';
 import 'compiler_config.dart';
+import 'devicectl_screens.dart';
 import 'host_tools.dart';
 import 'key_press.dart';
+import 'launch_bundle_parts.dart';
 import 'logging.dart';
 import 'mdns_vm_service_discovery.dart';
 import 'native_patch_delivery.dart';
 import 'reload_strategy.dart';
 import 'runfiles_helper.dart';
+import 'screen.dart';
+import 'simulator_log_stream.dart';
+import 'simulator_terminations.dart';
 import 'temp_dir.dart';
 import 'toolchain_info.dart';
 import 'vm_service_client.dart';
 import 'teardown.dart';
 import 'web_module_server.dart';
 import 'web_options.dart';
+import 'x11_screenshot.dart';
 
 export 'app_log.dart' show AppLogLine, AppLogStream, LogPage;
 export 'build_mode.dart' show BuildMode;
@@ -201,6 +211,17 @@ class AppInstance {
   /// privately never deletes it.
   final List<Directory> scratchDirs;
 
+  /// Readers of [process]'s output pipes that must not outlive the run.
+  ///
+  /// A pipe reaches end-of-file only when *every* holder of its write end has
+  /// closed it, and a process can leave a descendant behind that still holds
+  /// one (a browser's helper process outliving the browser, say). A reader that
+  /// waits for that end-of-file is then a live handle, and a Dart VM with a live
+  /// handle does not exit: the tool answers `daemon.shutdown` and keeps
+  /// running. These are cancelled in `stop()`, which is the point at which
+  /// nothing further the process writes matters.
+  final List<AppLogPump> outputPumps;
+
   AppInstance({
     required this.process,
     this.vmServiceUri,
@@ -208,7 +229,14 @@ class AppInstance {
     AppLogStream? logs,
     this.auxiliaryProcesses = const [],
     this.scratchDirs = const [],
+    this.outputPumps = const [],
   }) : logs = logs ?? AppLogStream();
+
+  /// Cancel every [outputPumps] reader, so no pipe subscription outlives the
+  /// run. Safe to call more than once.
+  Future<void> disposeOutputPumps() async {
+    await Future.wait(outputPumps.map((pump) => pump.dispose()));
+  }
 
   /// Kill every [auxiliaryProcesses] entry and await its exit.
   /// [bound] is how long each one gets before it is escalated to SIGKILL —
@@ -259,6 +287,22 @@ class _LaunchScratch {
   }
 }
 
+/// How an app the tool was connected to ended, as its platform tells it.
+class AppExit {
+  /// The app ended because someone asked it to (it was closed, or quit), or it
+  /// ended itself with code 0: what upstream calls "Application finished."
+  const AppExit.closed(this.account) : closed = true;
+
+  /// The app ended without being asked to: a crash, a kill, a failing exit.
+  const AppExit.crashed(this.account) : closed = false;
+
+  /// The platform's account of the end, for the user.
+  final String account;
+
+  /// Whether the end was asked for rather than a crash.
+  final bool closed;
+}
+
 /// Abstract device that can launch and manage a Flutter app.
 abstract class Device {
   /// How long [stop] waits on any one thing it is stopping before giving up on
@@ -288,6 +332,21 @@ abstract class Device {
 
   /// Stop the running app.
   Future<void> stop(AppInstance instance);
+
+  /// Why [instance] is no longer running, once its VM service could not be
+  /// reached: null while it runs, or on a device that cannot tell.
+  Future<String?> whyAppExited(AppInstance instance) async => null;
+
+  /// How [instance] ended, once its VM service could not be reached: null
+  /// while it runs, or on a device that cannot tell.
+  ///
+  /// Every end [whyAppExited] reports is a crash unless the device says
+  /// otherwise: a device whose platform can tell a close from a crash, when
+  /// the tool does not hold the app's exit status itself, overrides this.
+  Future<AppExit?> howAppExited(AppInstance instance) async {
+    final account = await whyAppExited(instance);
+    return account == null ? null : AppExit.crashed(account);
+  }
 
   /// Release what a launch left running when no session took ownership of it.
   ///
@@ -323,7 +382,83 @@ abstract class Device {
     }
   }
 
+  /// The screens this device draws to.
+  ///
+  /// One, for every device but a few iOS simulators and phones: asked anew each
+  /// time, because what a multi-screen device reports changes as it is folded
+  /// and unfolded and its screens' ids change on every boot. Within [deadline]
+  /// when it is part of a screenshot; on its own, within [screenshotBound].
+  Future<List<Screen>> screens({ScreenshotDeadline? deadline}) async => [
+    Screen.only(name),
+  ];
+
+  /// How long a screenshot gets, from the moment the app can be captured to
+  /// the moment the PNG is written: listing the screens, asking again while a
+  /// device with several built-in screens has not reported which is active, and
+  /// the capture itself, all out of this one budget.
+  ///
+  /// Taken once, as a [ScreenshotDeadline], and handed to each step to spend
+  /// what is left. The capture runs inside an HTTP handler, so what has to be
+  /// bounded is what the caller waits for. A device whose capture is a helper
+  /// bounds the helper by this too.
+  ///
+  /// Settable so a test can drive the expiry in milliseconds.
+  Duration screenshotBound = const Duration(seconds: 30);
+
+  /// The pause between two asks of [screens] while a device has not reported.
+  Duration screenPollInterval = const Duration(milliseconds: 500);
+
+  /// The screen [screenshot] captures for [requested]: the one screen named,
+  /// or, with none named, the one the app is on. Throws
+  /// [ScreenSelectionException] when that cannot be settled — see
+  /// [chooseScreen] — and [ScreenshotTimeout] when [deadline] runs out first.
+  Future<Screen> resolveScreen(
+    String? requested,
+    ScreenshotDeadline deadline,
+  ) => resolveScreenOf(
+    (deadline) => screens(deadline: deadline),
+    requested,
+    deadline: deadline,
+    interval: screenPollInterval,
+  );
+
   /// Capture a screenshot of the running app.
+  ///
+  /// [screen] names a screen of [screens] by id or name; without it, the screen
+  /// the app is on (see [chooseScreen]). [window] selects a window *within* a
+  /// screen on a device that has windows; a window is not a screen.
+  ///
+  /// Waits for the app to be capturable ([prepareScreenshot]), then takes one
+  /// [ScreenshotDeadline] of [screenshotBound], resolves the screen and has
+  /// the device capture it ([captureScreen]). The wait for the first frame is
+  /// the app's, not the device's, and is not part of that budget.
+  Future<void> screenshot(
+    AppInstance instance,
+    String outputPath, {
+    VmServiceClient? vmClient,
+    String? window,
+    String? screen,
+  }) async {
+    await prepareScreenshot(vmClient);
+    final deadline = ScreenshotDeadline(screenshotBound);
+    final target = await resolveScreen(screen, deadline);
+    await captureScreen(
+      instance,
+      outputPath,
+      target,
+      deadline,
+      vmClient: vmClient,
+      window: window,
+    );
+  }
+
+  /// Wait for whatever has to be true before a capture shows the app, ahead of
+  /// choosing the screen: a multi-screen device's active screen follows its
+  /// posture and is read as late as it can be.
+  Future<void> prepareScreenshot(VmServiceClient? vmClient) async {}
+
+  /// Capture [screen], one of [screens], to the PNG at [outputPath], within
+  /// what is left of [deadline].
   ///
   /// For native platforms, uses the VM service `_flutter.screenshot` extension
   /// (pass [vmClient]). For web, subclasses override with CDP.
@@ -332,9 +467,11 @@ abstract class Device {
   /// [window] is an optional, platform-specific selector for which window to
   /// capture (e.g. on macOS, the exact window title). Devices that don't
   /// support window selection ignore it.
-  Future<void> screenshot(
+  Future<void> captureScreen(
     AppInstance instance,
-    String outputPath, {
+    String outputPath,
+    Screen screen,
+    ScreenshotDeadline deadline, {
     VmServiceClient? vmClient,
     String? window,
   }) {
@@ -391,6 +528,10 @@ abstract class Device {
   /// where they do not.
   bool get usesWindowsPaths => false;
 
+  /// Whether the app runs on this machine's filesystem, so a directory the app
+  /// made (its devFS) can be deleted from here once the app has exited.
+  bool get sharesHostFilesystem => false;
+
   /// Display name for this device.
   String get name;
 
@@ -418,23 +559,45 @@ abstract class Device {
   /// correct cross-compilation and output resolution.
   List<String> get buildArgs => const [];
 
+  /// How a restart reads the launch bundle's native libraries and assets
+  /// without building the launch artifact, or null for a device with no
+  /// artifact to avoid building (the web).
+  ///
+  /// A restart should not pay for the artifact: an APK is dexed, linked, zipped
+  /// and signed, and an Apple debug bundle's `App.framework` and a desktop
+  /// debug bundle carry the app's kernel, so building one recompiles the whole
+  /// program on every Dart edit. None of it is needed to learn that only Dart
+  /// changed.
+  LaunchBundleParts? get launchBundleParts => null;
+
+  /// Learn whatever [buildArgs] depends on that only the device can say.
+  ///
+  /// Called once, before anything reads [buildArgs]. Most devices' flags are
+  /// fixed by their kind; an Android device's are its ABI's.
+  Future<void> resolveBuildArgs() async {}
+
   /// Create the compiler config for hot reload on this platform.
+  ///
+  /// [patchedSdkRoot] is the patched SDK the app's build compiled against,
+  /// from its dev config.
   ///
   /// Returns null if this device does not support hot reload.
   CompilerConfig? createCompilerConfig(
-    ToolchainPaths toolchain, {
+    String patchedSdkRoot, {
     WebToolchainPaths? webToolchain,
     List<String> fileSystemRoots = const [],
     String fileSystemScheme = '',
     List<String> dartDefines = const [],
     String dartPluginRegistrantUri = '',
+    bool trackWidgetCreation = false,
     List<String> enableExperiments = const [],
   }) => NativeCompilerConfig(
-    patchedSdkRoot: toolchain.patchedSdkRoot,
+    patchedSdkRoot: patchedSdkRoot,
     fileSystemRoots: fileSystemRoots,
     fileSystemScheme: fileSystemScheme,
     dartDefines: dartDefines,
     dartPluginRegistrantUri: dartPluginRegistrantUri,
+    trackWidgetCreation: trackWidgetCreation,
     enableExperiments: enableExperiments,
   );
 
@@ -503,7 +666,17 @@ class MacOSDevice extends Device {
   NativePatchDelivery? get nativePatchDelivery => const MacOSPatchDelivery();
 
   @override
+  LaunchBundleParts? get launchBundleParts => const LaunchBundleParts(
+    aspect: macosBundlePartsAspect,
+    assetsGroup: macosBundlePartsOutputGroup,
+    nativeLibsGroup: macosNativeLibsOutputGroup,
+  );
+
+  @override
   String get name => 'macOS';
+
+  @override
+  bool get sharesHostFilesystem => true;
 
   final _scratch = _LaunchScratch();
 
@@ -574,6 +747,10 @@ class MacOSDevice extends Device {
       scratchDirs: _scratch.handOver(),
     );
   }
+
+  @override
+  Future<String?> whyAppExited(AppInstance instance) =>
+      _desktopAppExit(name, instance, posix: true);
 
   /// Bring the launched app's window to the front.
   ///
@@ -659,6 +836,7 @@ class MacOSDevice extends Device {
   /// *undecided* Screen Recording permission blocks rather than refuses.
   ///
   /// Settable so a test can drive the expiry in milliseconds.
+  @override
   Duration screenshotBound = const Duration(seconds: 10);
 
   /// Captures the launched app's windows via the bundled Swift helper.
@@ -674,9 +852,11 @@ class MacOSDevice extends Device {
   /// Bounded by [screenshotBound]: see there for why an unbounded capture is
   /// the one failure this path must not have.
   @override
-  Future<void> screenshot(
+  Future<void> captureScreen(
     AppInstance instance,
-    String outputPath, {
+    String outputPath,
+    Screen screen,
+    ScreenshotDeadline deadline, {
     VmServiceClient? vmClient,
     String? window,
   }) async {
@@ -761,33 +941,54 @@ class MacOSDevice extends Device {
 
 /// Linux desktop device.
 class LinuxDevice extends Device {
-  final ProcessRunSync _runProcess;
+  final X11Capture _captureX11;
   final ProcessStarter? _injectedStart;
 
-  LinuxDevice({
-    ProcessRunSync? runProcess,
-    ProcessStarter? startProcess,
-  }) : _runProcess = runProcess ?? Process.run,
-       _injectedStart = startProcess;
+  LinuxDevice({X11Capture? captureX11, ProcessStarter? startProcess})
+    : _captureX11 =
+          captureX11 ??
+          ((outputPath, {required environment}) =>
+              captureX11Screen(outputPath, environment: environment)),
+      _injectedStart = startProcess;
+
+  /// The whole environment the app starts in, or null for this process's.
+  ///
+  /// Set by an integration test, whose app runs with the libraries of a pinned
+  /// runtime and on a display of the test's own: nothing of the host's
+  /// environment is added to it.
+  Map<String, String>? environment;
 
   Future<Process> _startProcess(String exe, List<String> args) =>
       (_injectedStart ?? _defaultStart)(exe, args);
 
-  /// Start the app with the engine switches this launch asked for.
+  /// What the app starts with: [environment], or this process's, with the
+  /// engine switches this launch asked for.
   ///
-  /// An instance method because the switches depend on [startPaused], which is
-  /// set on the device after it is constructed. The
-  /// injected [_startProcess] bypasses this entirely, which is why the
-  /// environment it builds lives in [desktopLaunchEnvironment] where a test
-  /// can reach it.
+  /// A getter because the switches depend on [startPaused], which is set on
+  /// the device after it is constructed. The injected [_startProcess] bypasses
+  /// it, which is why a test reads it here.
+  Map<String, String> get launchEnvironment =>
+      desktopLaunchEnvironment(startPaused: startPaused, base: environment);
+
   Future<Process> _defaultStart(String exe, List<String> args) => Process.start(
     exe,
     args,
-    environment: desktopLaunchEnvironment(startPaused: startPaused),
+    environment: launchEnvironment,
+    includeParentEnvironment: environment == null,
+  );
+
+  @override
+  LaunchBundleParts? get launchBundleParts => const LaunchBundleParts(
+    aspect: linuxBundlePartsAspect,
+    assetsGroup: linuxBundlePartsOutputGroup,
+    nativeLibsGroup: linuxNativeLibsOutputGroup,
   );
 
   @override
   String get name => 'Linux';
+
+  @override
+  bool get sharesHostFilesystem => true;
 
   @override
   List<String> get buildArgs => Platform.isLinux
@@ -803,15 +1004,41 @@ class LinuxDevice extends Device {
       executable = p.join(appPath, dirName);
     }
 
-    final process = await _startProcess(executable, []);
-    final logs = _startProcessLogs(process, onLog);
-    final vmServiceUri = await discoverVmServiceUri(logs);
-    return AppInstance(
-      process: process,
-      vmServiceUri: vmServiceUri,
-      logs: logs,
-    );
+    try {
+      final process = _launching = await _startProcess(executable, []);
+      final logs = _startProcessLogs(process, onLog);
+      final vmServiceUri = await discoverVmServiceUri(logs);
+      _launching = null;
+      return AppInstance(
+        process: process,
+        vmServiceUri: vmServiceUri,
+        logs: logs,
+      );
+    } catch (_) {
+      await _releaseLaunch();
+      rethrow;
+    }
   }
+
+  /// The app a launch in flight has started, until the launch returns it.
+  Process? _launching;
+
+  @override
+  Future<void> abandonLaunch() => _releaseLaunch();
+
+  /// Stops the app of a launch that did not return. A launch that returned its
+  /// app has handed it to [stop], and this leaves it.
+  Future<void> _releaseLaunch() async {
+    final process = _launching;
+    _launching = null;
+    if (process != null) {
+      await _stopProcess('Linux app', process, teardownBound);
+    }
+  }
+
+  @override
+  Future<String?> whyAppExited(AppInstance instance) =>
+      _desktopAppExit(name, instance, posix: true);
 
   @override
   Future<void> stop(AppInstance instance) async {
@@ -820,21 +1047,35 @@ class LinuxDevice extends Device {
   }
 
   @override
-  Future<void> screenshot(
+  Future<void> captureScreen(
     AppInstance instance,
-    String outputPath, {
+    String outputPath,
+    Screen screen,
+    ScreenshotDeadline deadline, {
     VmServiceClient? vmClient,
     String? window,
   }) async {
     if (vmClient != null) {
       return vmClient.screenshot(outputPath);
     }
-    final result = await _runProcess('scrot', [outputPath]);
-    if (result.exitCode != 0) {
-      throw StateError('scrot failed: ${result.stderr}');
-    }
+    // The display the app draws on: the integration runtime's own, or the
+    // desktop's. The tool speaks to it itself, so the host needs no
+    // screenshot program.
+    return deadline.within(
+      'capturing the X display',
+      () => _captureX11(
+        outputPath,
+        environment: environment ?? Platform.environment,
+      ),
+    );
   }
 }
+
+/// Writes a PNG of the X display `environment['DISPLAY']` names.
+typedef X11Capture = Future<void> Function(
+  String outputPath, {
+  required Map<String, String> environment,
+});
 
 /// Windows desktop device.
 class WindowsDevice extends Device {
@@ -880,6 +1121,16 @@ class WindowsDevice extends Device {
   bool get usesWindowsPaths => true;
 
   @override
+  bool get sharesHostFilesystem => true;
+
+  @override
+  LaunchBundleParts? get launchBundleParts => const LaunchBundleParts(
+    aspect: windowsBundlePartsAspect,
+    assetsGroup: windowsBundlePartsOutputGroup,
+    nativeLibsGroup: windowsNativeLibsOutputGroup,
+  );
+
+  @override
   String get name => 'Windows';
 
   @override
@@ -896,8 +1147,43 @@ class WindowsDevice extends Device {
     // action does exactly that on any rebuild, which `app.restart` performs
     // before it swaps the kernel in. macOS and Linux let a running image be
     // unlinked and replaced, so only Windows needs the copy.
+    _launchInFlight = true;
     final launchPath = _stage(appPath);
+    try {
+      return await _launch(launchPath, onLog: onLog);
+    } catch (_) {
+      await _releaseLaunch();
+      rethrow;
+    }
+  }
 
+  /// Whether a launch has begun and not yet returned its app.
+  bool _launchInFlight = false;
+
+  /// The app a launch in flight has started, until the launch returns it.
+  Process? _launching;
+
+  @override
+  Future<void> abandonLaunch() => _releaseLaunch();
+
+  /// Undo a launch that did not return: the app it started, which runs out of
+  /// the staged copy and holds it open, and then that copy. A launch that
+  /// returned its app has handed both to [stop], and this leaves them.
+  Future<void> _releaseLaunch() async {
+    if (!_launchInFlight) return;
+    _launchInFlight = false;
+    final process = _launching;
+    _launching = null;
+    if (process != null) {
+      await _stopProcess('Windows app', process, teardownBound);
+    }
+    _clearStaging();
+  }
+
+  Future<AppInstance> _launch(
+    String launchPath, {
+    AppLogListener? onLog,
+  }) async {
     // Bundle directories contain the executable at <dir>/<name>.exe.
     String executable = launchPath;
     if (FileSystemEntity.isDirectorySync(launchPath)) {
@@ -905,9 +1191,11 @@ class WindowsDevice extends Device {
       executable = p.join(launchPath, '$dirName.exe');
     }
 
-    final process = await _startProcess(executable, []);
+    final process = _launching = await _startProcess(executable, []);
     final logs = _startProcessLogs(process, onLog);
     final vmServiceUri = await discoverVmServiceUri(logs);
+    _launching = null;
+    _launchInFlight = false;
     return AppInstance(
       process: process,
       vmServiceUri: vmServiceUri,
@@ -957,6 +1245,10 @@ class WindowsDevice extends Device {
   }
 
   @override
+  Future<String?> whyAppExited(AppInstance instance) =>
+      _desktopAppExit(name, instance, posix: false);
+
+  @override
   Future<void> stop(AppInstance instance) async {
     await _stopProcess('Windows app', instance.process, teardownBound);
     await instance.logs.close();
@@ -976,6 +1268,7 @@ class WindowsDevice extends Device {
   /// Generous rather than tight: what matters here is that the request ends.
   ///
   /// Settable so a test can drive the expiry in milliseconds.
+  @override
   Duration screenshotBound = const Duration(seconds: 30);
 
   /// Captures the screen with the bundled DXGI Desktop Duplication helper.
@@ -983,9 +1276,11 @@ class WindowsDevice extends Device {
   /// Bounded by [screenshotBound]: see there for why an unbounded capture is
   /// the one failure this path must not have.
   @override
-  Future<void> screenshot(
+  Future<void> captureScreen(
     AppInstance instance,
-    String outputPath, {
+    String outputPath,
+    Screen screen,
+    ScreenshotDeadline deadline, {
     VmServiceClient? vmClient,
     String? window,
   }) async {
@@ -1085,21 +1380,17 @@ Map<String, String> desktopLaunchEnvironment({
 
 /// Extract package name and launchable activity from an APK via aapt2.
 ///
-/// [aapt2Path] names the binary to run; when omitted it is resolved through
-/// [aapt2Tool], which throws a [MissingHostToolException] rather than handing
-/// `Process.run` a bare `'aapt2'` and letting a misconfigured SDK surface as a
-/// failure to launch.
+/// [aapt2Path] names the binary to run: the workspace's SDK's.
 Future<({String packageName, String? activityName})> extractPackageInfo(
   String apkPath, {
   ProcessRunSync? runProcess,
-  String? aapt2Path,
+  required String aapt2Path,
 }) async {
   final run = runProcess ?? Process.run;
-  final aapt2 = aapt2Path ?? aapt2Tool().require();
-  final result = await run(aapt2, ['dump', 'badging', apkPath]);
+  final result = await run(aapt2Path, ['dump', 'badging', apkPath]);
   if (result.exitCode != 0) {
     throw StateError(
-      '`$aapt2 dump badging $apkPath` failed '
+      '`$aapt2Path dump badging $apkPath` failed '
       '(exit ${result.exitCode}): ${result.stderr}',
     );
   }
@@ -1117,14 +1408,46 @@ Future<({String packageName, String? activityName})> extractPackageInfo(
   );
 }
 
+/// The ABIs rules_flutter builds an Android app for.
+const androidBuildableAbis = ['arm64-v8a', 'x86_64', 'armeabi-v7a'];
+
+/// The ABI to build for, given a device's `ro.product.cpu.abilist` (a
+/// comma-separated list, the device's own ABI first).
+///
+/// Throws a [StateError] naming the list when none of it is an ABI
+/// rules_flutter builds for.
+String androidAbiFromAbiList(String abiList, {required String deviceName}) {
+  final abis = abiList
+      .trim()
+      .split(',')
+      .map((abi) => abi.trim())
+      .where((abi) => abi.isNotEmpty)
+      .toList();
+  for (final abi in abis) {
+    if (androidBuildableAbis.contains(abi)) return abi;
+  }
+  throw StateError(
+    '$deviceName runs ${abis.isEmpty ? 'no ABI it reported' : abis.join(', ')}, '
+    'and rules_flutter builds Android apps for ${androidBuildableAbis.join(', ')}.',
+  );
+}
+
 /// Android device (via adb).
 class AndroidDevice extends Device {
   final String? deviceId;
   String? _packageName;
   String? _activityName;
-  final String abi;
-  final String? _explicitAdbPath;
-  final String? _explicitAapt2Path;
+  String? _abi;
+
+  /// The `adb` to run: the workspace's SDK's (see `android_sdk.dart`), or
+  /// the one an integration test's runner names.
+  final String adbPath;
+
+  /// The `aapt2` that reads the APK's package name and launchable activity,
+  /// from the same SDK. Only a launch that has to read the APK's manifest
+  /// runs it.
+  final String aapt2Path;
+
   final ProcessRunSync _runProcess;
   final ProcessStarter _startProcess;
 
@@ -1152,38 +1475,18 @@ class AndroidDevice extends Device {
     this.deviceId,
     String? packageName,
     String? activityName,
-    this.abi = 'arm64',
-    String? adbPath,
-    String? aapt2Path,
+    String? abi,
+    required this.adbPath,
+    required this.aapt2Path,
     ProcessRunSync? runProcess,
     ProcessStarter? startProcess,
     ProcessStarter? startScreenshotProcess,
   }) : _packageName = packageName,
        _activityName = activityName,
-       _explicitAdbPath = adbPath,
-       _explicitAapt2Path = aapt2Path,
+       _abi = abi,
        _runProcess = runProcess ?? Process.run,
        _startProcess = startProcess ?? Process.start,
        _injectedScreenshotStart = startScreenshotProcess;
-
-  /// The `adb` to run, resolved on first use.
-  ///
-  /// Lazy so that merely naming an Android serial on a machine with no SDK is
-  /// not itself an error — [preflight] is where that gets reported, with the
-  /// context that a run is about to need it.
-  late final String adbPath = _explicitAdbPath ?? adbTool().require();
-
-  /// The `aapt2` to run, resolved on first use. Only a launch that has to read
-  /// the APK's manifest touches it.
-  late final String aapt2Path = _explicitAapt2Path ?? aapt2Tool().require();
-
-  @override
-  Future<List<HostTool>> requiredHostTools() async => [
-    if (_explicitAdbPath == null) adbTool(),
-    // Needed only to read the package name and launchable activity out of
-    // the APK, which a caller that already named them skips.
-    if (_packageName == null && _explicitAapt2Path == null) aapt2Tool(),
-  ];
 
   @override
   NativePatchDelivery? get nativePatchDelivery {
@@ -1212,10 +1515,50 @@ class AndroidDevice extends Device {
     return outputs.first;
   }
 
+  /// The Android ABI this device runs apps as: `arm64-v8a`, `x86_64` or
+  /// `armeabi-v7a`.
+  ///
+  /// The platform the app is built for, so that its engine, `libapp.so` and
+  /// native libraries are the ones this device loads. Known once
+  /// [resolveBuildArgs] has asked the device, or when the constructor was told.
+  String get abi =>
+      _abi ??
+      (throw StateError(
+        'The ABI of $name is not known yet: resolveBuildArgs() asks the device.',
+      ));
+
+  /// Asks the device its ABI, unless it was told.
+  ///
+  /// The first ABI in the device's preference order (`ro.product.cpu.abilist`)
+  /// that rules_flutter builds for. An emulator on an x86_64 host lists
+  /// `x86_64` first, though it can translate arm64 code, and a phone lists its
+  /// own `arm64-v8a`; the first is the one the device runs natively.
+  @override
+  Future<void> resolveBuildArgs() async {
+    if (_abi != null) return;
+    final result = await _runProcess(
+      adbPath,
+      _adbArgs(['shell', 'getprop', 'ro.product.cpu.abilist']),
+    );
+    if (result.exitCode != 0) {
+      throw StateError(
+        _adbFailure('shell getprop ro.product.cpu.abilist', result.stderr),
+      );
+    }
+    _abi = androidAbiFromAbiList('${result.stdout}', deviceName: name);
+  }
+
   @override
   List<String> get buildArgs => [
-    '--platforms=@rules_flutter//flutter/platforms:android_$abi',
+    '--@rules_android//flags:android_platforms=@rules_android//:$abi',
   ];
+
+  @override
+  LaunchBundleParts? get launchBundleParts => LaunchBundleParts(
+    aspect: androidBundlePartsAspect,
+    assetsGroup: androidBundlePartsOutputGroup,
+    nativeLibsGroup: androidNativeLibsOutputGroup,
+  );
 
   /// Build the common adb prefix args (includes -s <deviceId> if set).
   List<String> _adbArgs(List<String> args) {
@@ -1233,6 +1576,27 @@ class AndroidDevice extends Device {
   ///
   /// Omitted entirely when no device was named, because there is then no serial
   /// to doubt: adb chose, and its message says so.
+  /// The time of the last record in the device's log, in the form `logcat -T`
+  /// takes, or null when the log is empty (and so can be read whole).
+  ///
+  /// adb passes each argument on to the device's shell quoted, so the time,
+  /// which has a space in it, goes as one argument as it is.
+  Future<String?> _lastLogcatTimestamp() async {
+    final result = await _runProcess(
+      adbPath,
+      _adbArgs(['logcat', '-v', 'time', '-t', '1']),
+    );
+    if (result.exitCode != 0) {
+      throw StateError(_adbFailure('logcat -t 1', result.stderr));
+    }
+    return _logcatRecordTime.firstMatch('${result.stdout}')?.group(0);
+  }
+
+  static final _logcatRecordTime = RegExp(
+    r'^\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}',
+    multiLine: true,
+  );
+
   String _adbFailure(String what, Object? stderr) => deviceId == null
       ? 'adb $what failed: $stderr'
       : 'adb $what failed (adb -s $deviceId): $stderr';
@@ -1271,9 +1635,22 @@ class AndroidDevice extends Device {
     // exceptions (`AndroidRuntime`), VM messages (`DartVM`) and native crashes
     // — exactly the output you most need when an app misbehaves. Matches
     // flutter_tools' AdbLogReader, which filters host-side for the same reason.
+    //
+    // Read from the last record already in the log, not from wherever the log
+    // has got to once logcat starts reading it (`-T 1`): the app is launched
+    // straight after this, and a logcat slow to start (a busy host, a busy
+    // adb) would miss the VM-service announcement and wait for it for good.
+    // The device keeps its log, so every record after that one is read
+    // whenever logcat gets to it. flutter_tools' AdbLogReader does the same.
+    final since = await _lastLogcatTimestamp();
     final logcat = await _startProcess(
       adbPath,
-      _adbArgs(['logcat', '-v', 'time', '-T', '1']),
+      _adbArgs([
+        'logcat',
+        '-v',
+        'time',
+        if (since != null) ...['-T', since],
+      ]),
     );
     // logcat has no stdout/stderr split: severity lives in the line's tag, so
     // [androidLogFilter] decides, and the raw stderr channel (adb's own
@@ -1285,30 +1662,38 @@ class AndroidDevice extends Device {
       transform: androidLogFilter,
     );
 
-    // Step 3: Launch the activity.
+    // Step 3: Launch the activity. `-W` makes `am` wait for the launch to
+    // complete and say how it went (`Status`, `LaunchState`), which is what
+    // tells a process that started from one that never did. It is not awaited
+    // here: it returns once the first frame is drawn, and an app started
+    // paused (or a debug app on a busy host) announces its VM service well
+    // before that, which is all the wait below is for.
     final activity = _activityName ?? '.MainActivity';
-    final startResult = await _runProcess(
+    final launched = _runProcess(
       adbPath,
       _adbArgs([
-        'shell', 'am', 'start',
+        'shell', 'am', 'start', '-W',
         // `--ez <key> <bool>` is an intent extra; the embedder reads
         // `start-paused` off the launch intent.
         if (startPaused) ...['--ez', 'start-paused', 'true'],
         '-n', '$packageName/$activity',
       ]),
-    );
-    if (startResult.exitCode != 0) {
-      throw StateError(_adbFailure('am start', startResult.stderr));
-    }
+    ).then(_readAmStart, onError: (Object e) => _AmStart.failed('$e'));
 
     // Step 4: Discover VM service URI from logcat — the announcement this
     // app's process made. logcat is the whole device's log, so another Flutter
-    // app starting meanwhile announces its own there too.
-    final deviceUri = await discoverOwnVmServiceUri(
-      logs,
-      parse: parseLogcatAnnouncement,
-      isOwnProcess: (pid) => _isProcessOf(packageName, pid),
-    );
+    // app starting meanwhile announces its own there too. A release app
+    // announces nothing, so there is nothing to wait for.
+    final Uri? deviceUri;
+    if (buildMode.servesVmService) {
+      deviceUri = await _awaitVmService(logs, packageName, launched);
+    } else {
+      final result = await launched;
+      if (result.failure case final failure?) {
+        throw StateError(_adbFailure('am start', failure));
+      }
+      deviceUri = null;
+    }
 
     // Port forwarding — the URI logcat announces is device-local, and a failed
     // forward has no usable second answer. `127.0.0.1:<devicePort>` on the host
@@ -1349,23 +1734,152 @@ class AndroidDevice extends Device {
     return AppInstance(process: logcat, vmServiceUri: vmServiceUri, logs: logs);
   }
 
-  /// Whether [pid] is a running process of [packageName].
+  /// Wait for the VM-service announcement of [packageName]'s process, for as
+  /// long as that process is there to make one.
   ///
-  /// Asked when an announcement arrives, so a process that made one is still
-  /// there to be found; `pidof` names an app's processes by its package name.
-  Future<bool> _isProcessOf(String packageName, int pid) async {
+  /// Logcat does not end when the app does, so what bounds the wait is the app
+  /// itself, asked every [_androidAppLivenessInterval] through `pidof`: a slow
+  /// start (a first launch, a busy host) is not a failed one, and it says so
+  /// every [_vmServiceSlowStartNotice] while it waits. The wait ends on the
+  /// announcement, or with a [StateError] naming what became of the app:
+  ///
+  ///  * `am start -W` ([launched]) reported the launch failed, or that the app
+  ///    was already running (so nothing will announce);
+  ///  * the process had been started, which `am` reported or `pidof` saw, and
+  ///    is gone — it crashed or exited, and the log's last lines are quoted.
+  ///
+  /// A process that has not been seen is not judged by a clock: `am` says
+  /// whether the launch completed, and until it does the wait goes on.
+  ///
+  /// Null when logcat itself ends first: the device went away, or the run is
+  /// being torn down.
+  Future<Uri?> _awaitVmService(
+    AppLogStream logs,
+    String packageName,
+    Future<_AmStart> launched,
+  ) async {
+    final gone = Completer<String>();
+    var seen = false;
+    var asking = false;
+    var failing = false;
+    unawaited(
+      launched.then((result) {
+        if (gone.isCompleted) return;
+        final failure = result.failure;
+        if (failure != null) {
+          gone.complete(_adbFailure('am start', failure));
+        } else if (result.newProcess) {
+          seen = true;
+        }
+      }),
+    );
+    final liveness = Timer.periodic(_androidAppLivenessInterval, (_) async {
+      if (gone.isCompleted || asking) return;
+      asking = true;
+      try {
+        final running = (await _pidsOf(packageName)).isNotEmpty;
+        failing = false;
+        if (running) {
+          seen = true;
+        } else if (seen && !gone.isCompleted) {
+          gone.complete(
+            '$packageName exited before announcing a VM service on $name.',
+          );
+        }
+      } on StateError catch (e) {
+        // Liveness is unknown while adb will not answer, which is not the app
+        // having died. Said once per spell of failure, not every poll.
+        if (!failing) {
+          _logger.warning({
+            'message': 'android_liveness_check_failed',
+            'text':
+                'Cannot tell whether $packageName is still running on $name, '
+                'so its VM service is waited for regardless: ${e.message}',
+            'device': name,
+          });
+        }
+        failing = true;
+      } finally {
+        asking = false;
+      }
+    });
+    try {
+      final uri = await discoverOwnVmServiceUri(
+        logs,
+        parse: parseLogcatAnnouncement,
+        isOwnProcess: (pid) => _isProcessOf(packageName, pid),
+        appGone: gone.future,
+      );
+      if (uri == null && gone.isCompleted) {
+        throw StateError('${await gone.future} ${_deviceLogTail(logs)}');
+      }
+      return uri;
+    } finally {
+      liveness.cancel();
+    }
+  }
+
+  /// The end of the device log, for a failure to quote.
+  String _deviceLogTail(AppLogStream logs) {
+    final tail = logs.read(-20).lines;
+    return tail.isEmpty
+        ? 'The device log had nothing in it.'
+        : 'The end of the device log, which other apps write to as '
+              'well:\n${tail.map((l) => '  ${l.text}').join('\n')}';
+  }
+
+  /// A process that announced its VM service and then died (an exception
+  /// after the engine started, say) leaves a service address nothing answers,
+  /// and the connection to it fails; this says the app is gone instead, with
+  /// the log's last words. Null while the process is there.
+  @override
+  Future<String?> whyAppExited(AppInstance instance) async {
+    final packageName = _packageName;
+    if (packageName == null) return null;
+    final List<int> pids;
+    try {
+      pids = await _pidsOf(packageName);
+    } on StateError catch (e) {
+      _logger.warning({
+        'message': 'android_liveness_check_failed',
+        'text':
+            'Cannot tell whether $packageName is still running on $name: '
+            '${e.message}',
+        'device': name,
+      });
+      return null;
+    }
+    if (pids.isNotEmpty) return null;
+    return '$packageName exited after announcing its VM service on $name. '
+        '${_deviceLogTail(instance.logs)}';
+  }
+
+  /// The pids of [packageName]'s main process: none when it is not running.
+  ///
+  /// `pidof` names an app's processes by its package name, and a service
+  /// declared `android:process=":x"` has another name.
+  Future<List<int>> _pidsOf(String packageName) async {
     final result = await _runProcess(
       adbPath,
       _adbArgs(['shell', 'pidof', packageName]),
     );
-    final pids = '${result.stdout}'.trim();
     // `pidof` exits 1, saying nothing, when no process has the name.
     final stderr = '${result.stderr}'.trim();
     if (result.exitCode != 0 && stderr.isNotEmpty) {
       throw StateError(_adbFailure('shell pidof $packageName', stderr));
     }
-    return pids.split(RegExp(r'\s+')).contains('$pid');
+    return [
+      for (final pid in '${result.stdout}'.trim().split(RegExp(r'\s+')))
+        if (int.tryParse(pid) case final parsed?) parsed,
+    ];
   }
+
+  /// Whether [pid] is a running process of [packageName].
+  ///
+  /// Asked when an announcement arrives, so a process that made one is still
+  /// there to be found.
+  Future<bool> _isProcessOf(String packageName, int pid) async =>
+      (await _pidsOf(packageName)).contains(pid);
 
   /// Read the package name (and launchable activity) out of the APK.
   ///
@@ -1639,6 +2153,7 @@ class AndroidDevice extends Device {
   /// `adb` that has to start its server first.
   ///
   /// Settable so a test can drive the expiry in milliseconds.
+  @override
   Duration screenshotBound = const Duration(seconds: 30);
 
   /// Whether this device is a local emulator rather than a physical one.
@@ -1675,9 +2190,11 @@ class AndroidDevice extends Device {
   /// Bounded by [screenshotBound]: see there for why an unbounded capture is
   /// the one failure this path must not have.
   @override
-  Future<void> screenshot(
+  Future<void> captureScreen(
     AppInstance instance,
-    String outputPath, {
+    String outputPath,
+    Screen screen,
+    ScreenshotDeadline deadline, {
     VmServiceClient? vmClient,
     String? window,
   }) async {
@@ -1686,14 +2203,14 @@ class AndroidDevice extends Device {
     }
     if (_isEmulator) return _consoleScreenshot(outputPath);
     const remotePath = '/sdcard/flutter_screenshot.png';
-    final deadline = DateTime.now().add(screenshotBound);
+    final giveUpAt = DateTime.now().add(screenshotBound);
     Future<ProcessResult> step(List<String> args, String what) =>
         runProcessBounded(
           _startScreenshotProcess,
           adbPath,
           _adbArgs(args),
           environment: const {},
-          bound: deadline.difference(DateTime.now()),
+          bound: giveUpAt.difference(DateTime.now()),
           what: what,
         );
 
@@ -1778,34 +2295,50 @@ class AndroidDevice extends Device {
       : Process.start(exe, args, environment: environment);
 }
 
+/// One attempt to reach a local TCP listener: completes when it accepts,
+/// throws when it does not. The seam [waitForLocalTcpPort] takes so a test can
+/// answer without a socket.
+typedef TcpProbe = Future<void> Function(int port);
+
+Future<void> _connectToLocalPort(int port) async {
+  final probe = await Socket.connect(
+    '127.0.0.1',
+    port,
+    timeout: const Duration(seconds: 1),
+  );
+  probe.destroy();
+}
+
 /// Wait until a local TCP listener on 127.0.0.1:[port] accepts connections.
 ///
 /// Port forwarders (iproxy, adb forward) bind their local listener
 /// asynchronously after `Process.start` returns; dialing the forward before
-/// it is bound gets ECONNREFUSED. Polls `Socket.connect` with exponential
-/// backoff and destroys each probe socket. Throws [StateError] naming [what]
-/// if the listener never accepts within [budget].
+/// it is bound gets ECONNREFUSED. Calls [probe] (a real connect that destroys
+/// its socket, by default) with exponential backoff. Throws [StateError]
+/// naming [what] if the listener never accepts within [budget].
+///
+/// The budget is read from the ambient `package:clock` and the backoff is the
+/// zone's timer, so a test under `fakeAsync` drives the whole wait with
+/// `elapse`.
 Future<void> waitForLocalTcpPort(
   int port, {
   required String what,
   Duration budget = const Duration(seconds: 10),
+  TcpProbe probe = _connectToLocalPort,
 }) async {
-  final deadline = DateTime.now().add(budget);
+  final deadline = clock.now().add(budget);
   var delay = const Duration(milliseconds: 50);
   while (true) {
     try {
-      final probe = await Socket.connect(
-        '127.0.0.1',
-        port,
-        timeout: const Duration(seconds: 1),
-      );
-      probe.destroy();
+      await probe(port);
       return;
-    } catch (_) {
-      if (DateTime.now().isAfter(deadline)) {
+    } catch (e) {
+      if (clock.now().isAfter(deadline)) {
+        // The last attempt's own words: a refusal, a firewall and a wrong
+        // address all read as "did not accept connections".
         throw StateError(
           '$what on 127.0.0.1:$port did not accept connections within '
-          '${budget.inSeconds}s of starting.',
+          '${budget.inSeconds}s of starting. The last attempt failed with: $e',
         );
       }
       await Future<void>.delayed(delay);
@@ -1945,8 +2478,76 @@ final vmServiceUriPattern = RegExp(
   r'The Dart VM service is listening on ((http|//)[a-zA-Z0-9:/=_\-\.\[\]]+)',
 );
 
-/// How long a launch waits for the VM-service announcement before giving up.
-const _vmServiceDiscoveryTimeout = Duration(seconds: 30);
+/// How often an Android launch asks, while awaiting the VM service, whether
+/// the app's process is still there.
+const _androidAppLivenessInterval = Duration(seconds: 2);
+
+/// What `am start -W` reported of a launch.
+class _AmStart {
+  /// Why the launch failed, or null when it did not.
+  final String? failure;
+
+  /// Whether the launch created the app's process (`LaunchState: COLD`, or an
+  /// `ok` status from an `am` that names no state).
+  final bool newProcess;
+
+  const _AmStart({this.newProcess = false}) : failure = null;
+
+  const _AmStart.failed(String this.failure) : newProcess = false;
+}
+
+/// Reads the output of `am start -W`.
+///
+/// `Status: ok` says the activity launched, and `LaunchState` how: `COLD` is a
+/// new process, the only kind whose VM service has not been announced already.
+/// `WARM` and `HOT` found the app running, so no announcement can follow and
+/// waiting for one would never end. Any other `Status` (`canceled`, `error`)
+/// and any `Error:` line is a launch that failed, said in `am`'s words. `Status:
+/// timeout` is `am` giving up on the first frame, which a loaded host causes
+/// and which says nothing about whether a process exists, so it is no verdict.
+/// Output with no `Status` line (an `am` older than the flag) is none either.
+///
+/// Read off a Pixel: a healthy cold start prints `Status: ok` and `LaunchState:
+/// COLD`; an app that threw in `onCreate` prints `Status: ok` and `LaunchState:
+/// UNKNOWN (0)` (the activity launched, and the process died before `am` could
+/// say how); an app that held the main thread past `am`'s ten seconds prints
+/// `Status: timeout` and `LaunchState: UNKNOWN (-1)`, its process alive. So an
+/// `ok` status of any state but `WARM` and `HOT` is a process that was
+/// started, alive or not, and the liveness check tells which.
+_AmStart _readAmStart(ProcessResult result) {
+  final output = '${result.stdout}${result.stderr}'.trim();
+  if (result.exitCode != 0) {
+    return _AmStart.failed(output.isEmpty ? 'exit ${result.exitCode}' : output);
+  }
+  String? field(String name) => RegExp(
+    '^$name:\\s*(.*)\$',
+    multiLine: true,
+  ).firstMatch(output)?.group(1)?.trim();
+  final errors = [
+    for (final line in output.split('\n'))
+      if (line.startsWith('Error')) line.trim(),
+  ];
+  if (errors.isNotEmpty) return _AmStart.failed(errors.join(' '));
+  final status = field('Status');
+  if (status == null || status == 'timeout') return const _AmStart();
+  if (status != 'ok') return _AmStart.failed('Status: $status\n$output');
+  final state = field('LaunchState');
+  if (state == 'WARM' || state == 'HOT') {
+    return _AmStart.failed(
+      'the app was already running (LaunchState: $state), so its VM service '
+      'was announced before this launch and nothing will announce it again',
+    );
+  }
+  return const _AmStart(newProcess: true);
+}
+
+/// How often a launch that is still waiting for the VM-service announcement
+/// says so.
+const _vmServiceSlowStartNotice = Duration(seconds: 30);
+
+/// How often a launched simulator app's process is checked for being alive
+/// while its VM service is awaited.
+const _simulatorAppLivenessInterval = Duration(seconds: 2);
 
 /// Watch [logs] for the VM-service announcement.
 ///
@@ -1964,15 +2565,17 @@ const _vmServiceDiscoveryTimeout = Duration(seconds: 30);
 /// kill all subsequent output and leave the OS pipes unread — see the library
 /// docs.
 ///
-/// Returns null if nothing announced a VM service within
-/// [_vmServiceDiscoveryTimeout] or the stream ended first.
-Future<Uri?> discoverVmServiceUri(
-  AppLogStream logs, {
-  Duration timeout = _vmServiceDiscoveryTimeout,
-}) => _watchForVmService(logs, timeout, (line) {
-  final match = vmServiceUriPattern.firstMatch(line);
-  return match == null ? null : Uri.parse(match.group(1)!);
-});
+/// There is no deadline: a slow start (a loaded host, a first launch) is not a
+/// failed one. The wait ends on the announcement, when the stream ends (the
+/// app's process exited, closing its stdout and stderr), or when the run is
+/// torn down and closes the stream. After each [_vmServiceSlowStartNotice]
+/// without one it logs that it is still waiting. Returns null if the stream
+/// ended first.
+Future<Uri?> discoverVmServiceUri(AppLogStream logs) =>
+    _watchForVmService(logs, null, null, (line) {
+      final match = vmServiceUriPattern.firstMatch(line);
+      return match == null ? null : Uri.parse(match.group(1)!);
+    });
 
 /// A VM-service announcement read off a log several processes write to, with
 /// the process that made it.
@@ -1991,30 +2594,55 @@ typedef VmServiceAnnouncement = ({int pid, Uri uri});
 /// Lines are checked in the order they arrive, one at a time, so an
 /// announcement is never chosen over an earlier one of this app's.
 ///
-/// Returns null if the app announced no VM service within [timeout] or the
-/// stream ended first.
+/// Waits for the announcement, the stream ending, [appGone] completing (the
+/// app exited; the caller knows how to tell), or [timeout] if one is given.
+/// With no [timeout] there is no deadline, and the wait says every
+/// [_vmServiceSlowStartNotice] that it is still going. Returns null when the
+/// wait ended any other way than an announcement.
 Future<Uri?> discoverOwnVmServiceUri(
   AppLogStream logs, {
   required VmServiceAnnouncement? Function(String line) parse,
   required Future<bool> Function(int pid) isOwnProcess,
-  Duration timeout = _vmServiceDiscoveryTimeout,
-}) => _watchForVmService(logs, timeout, (line) async {
+  Duration? timeout,
+  Future<void>? appGone,
+}) => _watchForVmService(logs, timeout, appGone, (line) async {
   final announcement = parse(line);
   if (announcement == null) return null;
   return await isOwnProcess(announcement.pid) ? announcement.uri : null;
 });
 
 /// The URI [accept] takes from the first line it accepts, read off [logs] in
-/// order; null on [timeout] or when the stream ends first.
+/// order; null on [timeout] (when given), when [appGone] completes, or when the
+/// stream ends first.
 Future<Uri?> _watchForVmService(
   AppLogStream logs,
-  Duration timeout,
+  Duration? timeout,
+  Future<void>? appGone,
   FutureOr<Uri?> Function(String line) accept,
 ) async {
   final completer = Completer<Uri?>();
-  final timer = Timer(timeout, () {
-    if (!completer.isCompleted) completer.complete(null);
-  });
+  final timer = timeout == null
+      ? null
+      : Timer(timeout, () {
+          if (!completer.isCompleted) completer.complete(null);
+        });
+  final sinceLaunch = Stopwatch()..start();
+  final notice = timeout != null
+      ? null
+      : Timer.periodic(_vmServiceSlowStartNotice, (_) {
+          _logger.warning({
+            'message': 'vm_service_slow_to_announce',
+            'text':
+                'The app has not announced its VM service '
+                '${sinceLaunch.elapsed.inSeconds}s after launch; still waiting.',
+            'elapsedMs': sinceLaunch.elapsedMilliseconds,
+          });
+        });
+  unawaited(
+    appGone?.then((_) {
+      if (!completer.isCompleted) completer.complete(null);
+    }),
+  );
 
   // Each line waits for the one before it, so an asynchronous [accept] cannot
   // let a later line win.
@@ -2041,7 +2669,8 @@ Future<Uri?> _watchForVmService(
   try {
     return await completer.future;
   } finally {
-    timer.cancel();
+    timer?.cancel();
+    notice?.cancel();
     await sub.cancel();
   }
 }
@@ -2068,7 +2697,52 @@ AppLogStream _startProcessLogs(
     transform: transform,
   );
   logs.closeWhen([pump.done]);
+  logs.own(pump);
   return logs;
+}
+
+/// How long a connection failure waits for an exit it may be the first sign of.
+///
+/// A process that dies right after announcing its VM service refuses the
+/// connection a moment before the operating system reports the exit to this
+/// tool, so asking "has it exited" at that instant can say no to a process that
+/// is already dead. The wait ends the moment the exit arrives; only a process
+/// that is really running spends all of it, on a launch that is failing anyway.
+const _exitReportSettle = Duration(seconds: 2);
+
+/// [process]'s exit code if it exits within [bound], else null.
+Future<int?> _exitCodeWithin(Process process, Duration bound) {
+  final result = Completer<int?>();
+  final timer = Timer(bound, () {
+    if (!result.isCompleted) result.complete(null);
+  });
+  process.exitCode.then((code) {
+    timer.cancel();
+    if (!result.isCompleted) result.complete(code);
+  });
+  return result.future;
+}
+
+/// Why a desktop app's VM service is unreachable when the app is the process
+/// this tool started and that process is gone: its exit, and its last output.
+/// Null while it runs.
+///
+/// A native desktop app has no state beyond its process, and the exit status
+/// the operating system reported for the child is the platform's own word on
+/// whether it is still there. [posix] says a negative code is a signal's
+/// number, which is what `dart:io` reports for a child killed by one.
+Future<String?> _desktopAppExit(
+  String name,
+  AppInstance instance, {
+  required bool posix,
+}) async {
+  final code = await _exitCodeWithin(instance.process, _exitReportSettle);
+  if (code == null) return null;
+  final how = posix && code < 0
+      ? 'was killed by signal ${-code}'
+      : 'exited with code $code';
+  return 'The $name app $how after announcing its VM service. '
+      '${_browserLastWords(instance.logs)}';
 }
 
 /// An empty log stream with [onLog] already attached.
@@ -2179,6 +2853,25 @@ class IOSSimulatorDevice extends Device {
   /// the run.
   String? _launchedBundleId;
 
+  /// The process `simctl launch` started, which is what the simulator's
+  /// liveness is asked of.
+  int? _launchedPid;
+
+  /// The simulator's records of how the last launch's app processes ended.
+  SimulatorTerminations? _terminations;
+
+  /// How long [howAppExited] waits for the simulator's record of an app's end
+  /// once the tool lost it, before asking whether the process is there at all.
+  /// The record is logged as the process goes; this bounds the wait for one
+  /// when the app has not gone. Settable so tests do not wait it out.
+  Duration terminationRecordBound = _exitReportSettle;
+
+  /// How long [howAppExited] waits for the record of a process known to be
+  /// gone. RunningBoard logs every app's end, but a host under load delivers
+  /// the log late: seconds, where the process check answers at once. Settable
+  /// so tests do not wait it out.
+  Duration goneRecordBound = const Duration(seconds: 30);
+
   IOSSimulatorDevice({
     required String udid,
     String? bundleId,
@@ -2204,6 +2897,13 @@ class IOSSimulatorDevice extends Device {
   @override
   NativePatchDelivery? get nativePatchDelivery =>
       IOSSimulatorPatchDelivery(run: _runProcess);
+
+  @override
+  LaunchBundleParts? get launchBundleParts => const LaunchBundleParts(
+    aspect: iosBundlePartsAspect,
+    assetsGroup: iosBundlePartsOutputGroup,
+    nativeLibsGroup: iosNativeLibsOutputGroup,
+  );
 
   @override
   String get name => 'iOS Simulator ($udid)';
@@ -2247,6 +2947,33 @@ class IOSSimulatorDevice extends Device {
     return process;
   }
 
+  /// A `log stream` of the simulator's records matching [predicate], in
+  /// [style], that also admits [marker] (see simulator_log_stream.dart).
+  Future<SimulatorLogStream> _startLogStream(
+    String style,
+    String predicate,
+    String marker,
+  ) async {
+    final helper = await _startHelper('xcrun', [
+      'simctl',
+      'spawn',
+      udid,
+      'log',
+      'stream',
+      '--style',
+      style,
+      '--predicate',
+      listeningPredicate(predicate, marker),
+    ]);
+    return SimulatorLogStream(
+      helper,
+      marker: marker,
+      messageOf: style == 'ndjson'
+          ? ndjsonEventMessage
+          : parseUnifiedLoggingLine,
+    );
+  }
+
   Future<AppInstance> _launch(String appPath, {AppLogListener? onLog}) async {
     // Extract .app from .ipa if needed — simctl install requires .app.
     String installPath = appPath;
@@ -2256,8 +2983,23 @@ class IOSSimulatorDevice extends Device {
       _scratch.hold(extracted.dir);
     }
 
-    // Boot sim (idempotent — no-op if already booted).
-    await _runProcess('xcrun', ['simctl', 'boot', udid]);
+    // Boot it if it is not booted, and wait for the boot to finish: `install`
+    // on a device that is still booting fails, and so does everything after
+    // it. `bootstatus -b` is one command for both, blocks on the boot rather
+    // than a clock, and exits nonzero when the boot fails, which is then the
+    // launch's failure and says so.
+    final boot = await _runProcess('xcrun', [
+      'simctl',
+      'bootstatus',
+      udid,
+      '-b',
+    ]);
+    if (boot.exitCode != 0) {
+      throw StateError(
+        'Booting the iOS Simulator $udid failed (simctl bootstatus -b exited '
+        '${boot.exitCode}): ${'${boot.stderr}'.trim()}${'${boot.stdout}'.trim()}',
+      );
+    }
 
     // Install.
     final installResult = await _runProcess('xcrun', [
@@ -2270,7 +3012,7 @@ class IOSSimulatorDevice extends Device {
       throw StateError('simctl install failed: ${installResult.stderr}');
     }
 
-    // Two log streams, deliberately.
+    // Three log streams, deliberately.
     //
     // Discovery matches on message content and nothing else. App output needs
     // a process-scoped predicate with several NOT(...) noise filters
@@ -2278,35 +3020,33 @@ class IOSSimulatorDevice extends Device {
     // VM-service discovery — which hot reload, screenshots and agent control
     // all depend on — contingent on those exclusion clauses continuing to
     // spare the announcement. Two narrow streams fail independently and
-    // visibly; one broad stream fails silently.
+    // visibly; one broad stream fails silently. The third is for how the app
+    // ends: the simulator's record of it is what tells a close from a crash
+    // (see simulator_terminations.dart).
     //
     // The discovery stream is the whole simulator's, so every Flutter app on
     // it announces there. ndjson puts each record's pid on the record's own
     // line, which is how discovery keeps to the pid `simctl launch` reports.
-    final discoveryLog = await _startHelper('xcrun', [
-      'simctl',
-      'spawn',
-      udid,
-      'log',
-      'stream',
-      '--style',
+    //
+    // Each also admits a marker this launch logs, and the app is launched only
+    // once every stream has delivered it: a stream not yet listening when the
+    // app announces its VM service never sees the announcement, and the run
+    // would wait for good. See simulator_log_stream.dart.
+    final marker = newListeningMarker();
+    final discovery = await _startLogStream(
       'ndjson',
-      '--predicate',
       'eventMessage contains "Observatory" or eventMessage contains "Dart VM service"',
-    ]);
+      marker,
+    );
+    final discoveryLog = discovery.process;
 
     final appName = p.basename(installPath).replaceAll('.app', '');
-    final outputLog = await _startHelper('xcrun', [
-      'simctl',
-      'spawn',
-      udid,
-      'log',
-      'stream',
-      '--style',
+    final output = await _startLogStream(
       'json',
-      '--predicate',
       iosSimulatorLogPredicate(appName),
-    ]);
+      marker,
+    );
+    final outputLog = output.process;
 
     // Unified logging carries no stdout/stderr split, so nothing is flagged as
     // an error channel here.
@@ -2317,9 +3057,43 @@ class IOSSimulatorDevice extends Device {
       transform: parseUnifiedLoggingLine,
     );
 
-    // Launch app.
     final bundleId = _launchedBundleId =
         _bundleId ?? await _extractBundleId(installPath, _runProcess);
+
+    final termination = await _startLogStream(
+      'ndjson',
+      simulatorTerminationPredicate(bundleId),
+      marker,
+    );
+    final terminationLog = termination.process;
+    _terminations = SimulatorTerminations(
+      terminationLog.stdout
+          .transform(utf8.decoder)
+          .transform(const LineSplitter()),
+    );
+    terminationLog.stderr.drain<void>().ignore();
+
+    await waitUntilListening([discovery, output, termination], () async {
+      final logged = await _runProcess('xcrun', [
+        'simctl',
+        'spawn',
+        udid,
+        'syslog',
+        '-s',
+        '-l',
+        'notice',
+        marker,
+      ]);
+      if (logged.exitCode != 0) {
+        throw StateError(
+          'Could not log a message on the iOS Simulator $udid to tell when '
+          'its log streams are listening (syslog exited ${logged.exitCode}): '
+          '${'${logged.stderr}'.trim()}',
+        );
+      }
+    });
+
+    // Launch app.
     final launchResult = await _runProcess('xcrun', [
       'simctl', 'launch', udid, bundleId,
       // Anything after the bundle id is passed to the app as argv, which is
@@ -2340,19 +3114,104 @@ class IOSSimulatorDevice extends Device {
       );
     }
 
-    final uri = await discoverVmServiceUriFromProcess(
-      discoveryLog,
-      parse: parseUnifiedLoggingAnnouncement,
-      isOwnProcess: (announcer) async => announcer == pid,
-    );
+    _launchedPid = pid;
+
+    // Waits for the app, not a clock: a first launch after a boot, or a host
+    // busy with a build, is slow, not failed. It ends on the announcement, on
+    // the app's process going away, or on the run's teardown killing the helper.
+    final exited = Completer<void>();
+    final liveness = Timer.periodic(_simulatorAppLivenessInterval, (_) async {
+      if (exited.isCompleted) return;
+      final alive = await _runProcess('kill', ['-0', '$pid']);
+      if (alive.exitCode != 0 && !exited.isCompleted) exited.complete();
+    });
+    final Uri? uri;
+    try {
+      uri = await discoverVmServiceUriFromProcess(
+        discoveryLog,
+        parse: parseUnifiedLoggingAnnouncement,
+        isOwnProcess: (announcer) async => announcer == pid,
+        appGone: exited.future,
+      );
+    } finally {
+      liveness.cancel();
+    }
+    if (uri == null && exited.isCompleted) {
+      throw StateError(
+        '$bundleId (pid $pid) exited before announcing a VM service on '
+        'the iOS Simulator $udid. ${_browserLastWords(logs, silence: 'It printed nothing.')}',
+      );
+    }
 
     _launchHelpers.clear();
     return AppInstance(
       process: discoveryLog,
       vmServiceUri: uri,
       logs: logs,
-      auxiliaryProcesses: [outputLog],
+      auxiliaryProcesses: [outputLog, terminationLog],
       scratchDirs: _scratch.handOver(),
+    );
+  }
+
+  /// An app that announced its VM service and then died (an exception once the
+  /// engine was up, say) leaves an address nothing answers; this says the app
+  /// is gone instead, with the end of its log. Null while the process is there.
+  @override
+  Future<String?> whyAppExited(AppInstance instance) async =>
+      (await howAppExited(instance))?.account;
+
+  /// The simulator's record of the app's end says how it went, and whether it
+  /// was closed or crashed.
+  ///
+  /// Without a record within [terminationRecordBound], the process is asked
+  /// after directly: the simulator's processes are the host's, so signal 0 to
+  /// the pid `simctl launch` named is the platform's own test for it. Only "No
+  /// such process" is a verdict, and then the record is waited for again, up
+  /// to [goneRecordBound]; with none, the app is taken to have crashed, since
+  /// nothing recorded a close. A refusal (EPERM) says the check could not be
+  /// made.
+  @override
+  Future<AppExit?> howAppExited(AppInstance instance) async {
+    final pid = _launchedPid;
+    final bundleId = _launchedBundleId;
+    if (pid == null || bundleId == null) return null;
+    Future<SimulatorTermination?> record(Duration bound) async =>
+        await _terminations
+            ?.of(pid)
+            .then<SimulatorTermination?>((t) => t)
+            .timeout(bound, onTimeout: () => null);
+    AppExit told(SimulatorTermination ended) {
+      final account = '$bundleId (pid $pid) ${ended.how} on $name.';
+      return ended.closed
+          ? AppExit.closed(account)
+          : AppExit.crashed(
+              '$account ${_browserLastWords(instance.logs, silence: 'It printed nothing.')}',
+            );
+    }
+
+    final ended = await record(terminationRecordBound);
+    if (ended != null) return told(ended);
+    final alive = await _runProcess('kill', ['-0', '$pid']);
+    if (alive.exitCode == 0) return null;
+    if ('${alive.stderr}'.contains('No such process')) {
+      final late = await record(goneRecordBound);
+      if (late != null) return told(late);
+    }
+    if (!'${alive.stderr}'.contains('No such process')) {
+      _logger.warning({
+        'message': 'ios_simulator_liveness_check_failed',
+        'text':
+            'Cannot tell whether $bundleId (pid $pid) is still running on '
+            '$name: kill -0 said "${'${alive.stderr}'.trim()}".',
+        'device': name,
+        'pid': pid,
+      });
+      return null;
+    }
+    return AppExit.crashed(
+      '$bundleId (pid $pid) exited after announcing its VM service on '
+      '$name, and the simulator recorded no termination for it. '
+      '${_browserLastWords(instance.logs, silence: 'It printed nothing.')}',
     );
   }
 
@@ -2371,30 +3230,40 @@ class IOSSimulatorDevice extends Device {
     await instance.disposeScratchDirs();
   }
 
-  /// iOS Simulator uses `simctl io screenshot` because `_flutter.screenshot`
-  /// returns "Could not capture image screenshot" on the Simulator rendering
-  /// pipeline. Waits for the first frame via VM service before capturing.
+  late final _devicectl = DevicectlScreens(
+    run: _runProcess,
+    device: () => udid,
+    deviceName: () => name,
+    isSimulator: true,
+  );
+
+  /// The simulator's displays: one, or on an iPhone Duo two built-in ones, of
+  /// which the app is drawing on the one the posture turns on.
   @override
-  Future<void> screenshot(
-    AppInstance instance,
-    String outputPath, {
-    VmServiceClient? vmClient,
-    String? window,
-  }) async {
+  Future<List<Screen>> screens({ScreenshotDeadline? deadline}) =>
+      _devicectl.list(deadline ?? ScreenshotDeadline(screenshotBound));
+
+  /// iOS Simulator is captured with `devicectl device capture screenshot`
+  /// because `_flutter.screenshot` returns "Could not capture image
+  /// screenshot" on the Simulator rendering pipeline, and `simctl io
+  /// screenshot` cannot choose between a multi-screen simulator's displays.
+  /// Waits for the first frame via VM service first.
+  @override
+  Future<void> prepareScreenshot(VmServiceClient? vmClient) async {
     if (vmClient != null) {
       await vmClient.waitForFirstFrame();
     }
-    final result = await _runProcess('xcrun', [
-      'simctl',
-      'io',
-      udid,
-      'screenshot',
-      outputPath,
-    ]);
-    if (result.exitCode != 0) {
-      throw StateError('simctl screenshot failed: ${result.stderr}');
-    }
   }
+
+  @override
+  Future<void> captureScreen(
+    AppInstance instance,
+    String outputPath,
+    Screen screen,
+    ScreenshotDeadline deadline, {
+    VmServiceClient? vmClient,
+    String? window,
+  }) => _devicectl.capture(screen, outputPath, deadline);
 }
 
 /// An [IOSSimulatorDevice] that resolves the UDID on first launch.
@@ -2500,12 +3369,16 @@ class IOSDeviceInfo {
   /// [MdnsVmServiceDiscovery.discover].
   final List<String> hostnames;
 
+  /// Its iOS version and build, `27.2 24B119`, when `devicectl` reports it.
+  final String? osVersion;
+
   IOSDeviceInfo({
     required this.udid,
     required this.coreDeviceId,
     required this.name,
     required this.transport,
     required this.hostnames,
+    this.osVersion,
   });
 
   /// Whether [identifier] names this device, in either identifier space.
@@ -2551,6 +3424,14 @@ List<IOSDeviceInfo> parseDevicectlDevices(String jsonText) {
         coreDeviceId: coreDeviceId,
         name: properties['name'] as String? ?? udid,
         transport: transport,
+        osVersion: switch ((
+          properties['osVersionNumber'],
+          properties['osBuildUpdate'],
+        )) {
+          (final String version, final String build) => '$version $build',
+          (final String version, _) => version,
+          _ => null,
+        },
         hostnames:
             ((connection['localHostnames'] as List?) ??
                     (connection['potentialHostnames'] as List?) ??
@@ -2570,6 +3451,7 @@ class IOSDevice extends Device {
   final ProcessRunSync _runProcess;
   final ProcessStarter _startProcess;
   final MdnsVmServiceDiscovery _mdns;
+  final TcpProbe _forwardProbe;
 
   /// Filled in by the first [_resolveInfo].
   IOSDeviceInfo? _info;
@@ -2589,6 +3471,10 @@ class IOSDevice extends Device {
   /// detaches and the app keeps running — so this is what [stop] terminates.
   int? _appPid;
 
+  /// The installed bundle's `installationURL`, which names the app's process
+  /// in the device's process list.
+  String? _installationUrl;
+
   /// What the current launch's lldb does with a stop, once the app runs.
   _LldbStops? _lldbStops;
 
@@ -2601,11 +3487,16 @@ class IOSDevice extends Device {
     ProcessRunSync? runProcess,
     ProcessStarter? startProcess,
     MdnsVmServiceDiscovery? mdns,
+
+    /// How a wired launch checks that the iproxy forward accepts connections;
+    /// a real connect by default.
+    TcpProbe? forwardProbe,
   }) : requestedUdid = udid,
        _bundleId = bundleId,
        _runProcess = runProcess ?? Process.run,
        _startProcess = startProcess ?? Process.start,
-       _mdns = mdns ?? MdnsVmServiceDiscovery();
+       _mdns = mdns ?? MdnsVmServiceDiscovery(),
+       _forwardProbe = forwardProbe ?? _connectToLocalPort;
 
   /// The UDID in play.
   ///
@@ -2648,6 +3539,13 @@ class IOSDevice extends Device {
       run: _runProcess,
     );
   }
+
+  @override
+  LaunchBundleParts? get launchBundleParts => const LaunchBundleParts(
+    aspect: iosBundlePartsAspect,
+    assetsGroup: iosBundlePartsOutputGroup,
+    nativeLibsGroup: iosNativeLibsOutputGroup,
+  );
 
   @override
   String get name => 'iOS (${udid ?? 'auto-detect'})';
@@ -2878,6 +3776,7 @@ class IOSDevice extends Device {
         _bundleId ?? await _extractBundleId(installPath, _runProcess);
     _launchedBundleId = bundleId;
     _launchedAppPath = installPath;
+    _installationUrl = installationUrl;
 
     // An iOS debug app needs a debugger (ptrace) attached before the Flutter
     // engine will start, because its JIT has to be given executable pages.
@@ -3175,6 +4074,7 @@ class IOSDevice extends Device {
           await waitForLocalTcpPort(
             record.port,
             what: 'iproxy forward for the iOS VM service',
+            probe: _forwardProbe,
           );
         } on StateError catch (e) {
           final said = iproxyOutput
@@ -3475,7 +4375,24 @@ if not error.Success():
   /// executable path is `file://…/<uuid>/Runner.app/Runner`, which contains
   /// the installation URL and never the bundle id, so a bundle-id match behind
   /// it would be dead code that made a broken URL match look recoverable.
-  Future<int> _findAppProcessId(String installationUrl) {
+  Future<int> _findAppProcessId(String installationUrl) async {
+    final found = await _appProcessIdOnDevice(installationUrl);
+    final pid = found.pid;
+    if (pid != null) return pid;
+    throw StateError(
+      'None of the ${found.listed} process(es) running on $name is the '
+      'app installed at $installationUrl. devicectl reported launching it, '
+      'so it should be among them; an app that crashed on launch will not '
+      'be.',
+    );
+  }
+
+  /// The process id of the app installed at [installationUrl] among the
+  /// processes `devicectl` lists on the device (null when none is running),
+  /// and how many processes were listed.
+  Future<({int? pid, int listed})> _appProcessIdOnDevice(
+    String installationUrl,
+  ) {
     return withTempDir('flutter_proc_', (jsonDir) async {
       final jsonPath = p.join(jsonDir.path, 'processes.json');
 
@@ -3530,15 +4447,10 @@ if not error.Success():
         // debugger that went elsewhere. Upstream hit exactly this:
         // flutter/flutter#183263.
         if (executable.contains('.appex')) continue;
-        return pid;
+        return (pid: pid, listed: processes.length);
       }
 
-      throw StateError(
-        'None of the ${processes.length} process(es) running on $name is the '
-        'app installed at $installationUrl. devicectl reported launching it, '
-        'so it should be among them; an app that crashed on launch will not '
-        'be.',
-      );
+      return (pid: null, listed: processes.length);
     });
   }
 
@@ -3576,6 +4488,44 @@ if not error.Success():
     }
     await _lldbOutput?.close();
     _lldbOutput = null;
+  }
+
+  /// An app that announced its VM service and then died (an exception once the
+  /// engine was up, say) leaves an address nothing answers; this says the app
+  /// is gone instead, with what lldb and devicectl last printed. Null while
+  /// the device lists the app's process, and when the device cannot be asked:
+  /// an unanswered question is not a verdict.
+  ///
+  /// The device's own process list is the platform's word on what runs there,
+  /// matched the way the launch found the app: by its bundle's installation
+  /// URL, so another process that has taken the pid does not stand in for it.
+  @override
+  Future<String?> whyAppExited(AppInstance instance) async {
+    final url = _installationUrl;
+    final pid = _appPid;
+    final bundleId = _launchedBundleId;
+    if (url == null || pid == null || bundleId == null) return null;
+    final ({int? pid, int listed}) found;
+    try {
+      found = await _appProcessIdOnDevice(url);
+    } on StateError catch (e) {
+      return _livenessUnknown(bundleId, e.message);
+    } on ProcessException catch (e) {
+      return _livenessUnknown(bundleId, '$e');
+    }
+    if (found.pid == pid) return null;
+    return '$bundleId (pid $pid) exited after announcing its VM service on '
+        '$name. ${_browserLastWords(instance.logs)}';
+  }
+
+  /// The "cannot tell" answer of [whyAppExited]: on the record, and no verdict.
+  String? _livenessUnknown(String bundleId, String why) {
+    _logger.warning({
+      'message': 'ios_liveness_check_failed',
+      'text': 'Cannot tell whether $bundleId is still running on $name: $why',
+      'device': name,
+    });
+    return null;
   }
 
   @override
@@ -3643,69 +4593,45 @@ if not error.Success():
     }
   }
 
-  /// How long `devicectl device capture screenshot` gets before it gives up.
-  ///
-  /// Passed as devicectl's own `--timeout`, so a device that stops answering
-  /// fails the capture with devicectl's error rather than holding the
-  /// screenshot request open.
-  Duration screenshotBound = const Duration(seconds: 30);
+  late final _devicectl = DevicectlScreens(
+    run: _runProcess,
+    device: () => _addressedUdid,
+    deviceName: () => name,
+  );
 
-  /// Captures the device's screen with `devicectl device capture screenshot`.
+  /// The device's screens as `devicectl device info displays` reports them.
   ///
+  /// An iPhone reports its own screen and may report a wireless display
+  /// beside it. The wireless one is listed and can be named, and is never the
+  /// default.
+  @override
+  Future<List<Screen>> screens({ScreenshotDeadline? deadline}) =>
+      _devicectl.list(deadline ?? ScreenshotDeadline(screenshotBound));
+
   /// `_flutter.screenshot` does not work on iOS: Impeller, always on there,
   /// cannot encode a compressed capture. devicectl captures the whole display,
   /// the way Xcode does.
   ///
-  /// `device capture` first shipped in Xcode 27's devicectl. An older one
-  /// does not know the subcommand, and its answer is what is detected here:
-  /// devicectl's version numbers are not documented against its commands.
-  /// See [_lacksDeviceCapture].
+  /// `device capture` and `device info displays` first shipped in Xcode 27's
+  /// devicectl. An older one does not know the subcommands, and its answer is
+  /// what is detected: devicectl's version numbers are not documented against
+  /// its commands.
   @override
-  Future<void> screenshot(
-    AppInstance instance,
-    String outputPath, {
-    VmServiceClient? vmClient,
-    String? window,
-  }) async {
+  Future<void> prepareScreenshot(VmServiceClient? vmClient) async {
     if (vmClient != null) {
       await vmClient.waitForFirstFrame();
     }
-    final result = await _runProcess('xcrun', [
-      'devicectl',
-      'device',
-      'capture',
-      'screenshot',
-      '--device',
-      _addressedUdid,
-      '--destination',
-      outputPath,
-      '--timeout',
-      '${screenshotBound.inSeconds}',
-      '--quiet',
-    ]);
-    if (result.exitCode == 0) return;
-    final err = '${result.stderr}${result.stdout}';
-    if (_lacksDeviceCapture(result.exitCode, err)) {
-      throw StateError(
-        'iPhone screenshots need Xcode 27 or later (devicectl device '
-        'capture). The selected Xcode\'s devicectl does not have it; select '
-        'a newer one with `xcode-select` or DEVELOPER_DIR.',
-      );
-    }
-    throw StateError('devicectl screenshot of $name failed: $err');
   }
 
-  /// Whether devicectl refused the command line as a usage error (exit 64,
-  /// `EX_USAGE`) without knowing `device capture screenshot`.
-  ///
-  /// The arguments are right for every devicectl that has the command, so a
-  /// usage error means it does not. A devicectl without the subcommand stops
-  /// parsing at `device`, rejects the first option after it ("Unknown option
-  /// '--device'") and prints `devicectl device`'s usage. A capture that runs
-  /// and fails exits 1 with a CoreDevice error instead.
-  static bool _lacksDeviceCapture(int exitCode, String output) =>
-      exitCode == 64 &&
-      !output.contains('Usage: devicectl device capture screenshot');
+  @override
+  Future<void> captureScreen(
+    AppInstance instance,
+    String outputPath,
+    Screen screen,
+    ScreenshotDeadline deadline, {
+    VmServiceClient? vmClient,
+    String? window,
+  }) => _devicectl.capture(screen, outputPath, deadline);
 }
 
 /// NSPredicate selecting an app's own log output on the iOS Simulator.
@@ -3802,7 +4728,8 @@ Future<Uri?> discoverVmServiceUriFromProcess(
   Process log, {
   required VmServiceAnnouncement? Function(String line) parse,
   required Future<bool> Function(int pid) isOwnProcess,
-  Duration timeout = _vmServiceDiscoveryTimeout,
+  Duration? timeout,
+  Future<void>? appGone,
 }) async {
   final logs = AppLogStream();
   final pump = pumpProcessLines(log, logs);
@@ -3816,6 +4743,7 @@ Future<Uri?> discoverVmServiceUriFromProcess(
       parse: parse,
       isOwnProcess: isOwnProcess,
       timeout: timeout,
+      appGone: appGone,
     );
   } finally {
     await pump.dispose();
@@ -3855,16 +4783,27 @@ class ChromeSession {
   ///
   /// A throwaway profile is what makes a run reproducible — no extensions, no
   /// restored tabs, no saved sign-ins. The cost is a real directory Chrome
-  /// fills with caches, so on success it goes into the instance's
-  /// [AppInstance.scratchDirs] and dies with the launch, and a failed launch
-  /// deletes it before rethrowing. Left behind they are not inert: a stale
-  /// profile belongs to a browser a `--user-data-dir` scan can still find, and
-  /// an orphaned window can serve a screenshot that makes a broken run look
-  /// fine.
-  final Directory userDataDir;
+  /// fills with caches, so a failed launch releases it before rethrowing and
+  /// [WebDevice.stop] releases it with the browser. Left behind they are not
+  /// inert: a stale profile belongs to a browser a `--user-data-dir` scan can
+  /// still find, and an orphaned window can serve a screenshot that makes a
+  /// broken run look fine. A run killed too hard to release its profile
+  /// leaves it for [ChromeProfiles.reapAbandoned].
+  final ChromeProfile profile;
+
+  Directory get userDataDir => profile.directory;
 
   /// The CDP debugging port announced on Chrome's stderr.
   final int cdpPort;
+
+  /// The reader of the browser's stdout and stderr.
+  ///
+  /// Held so that it can be let go of: Chrome's helper processes inherit those
+  /// pipes and can outlive the browser, and a reader still waiting for their
+  /// end-of-file keeps this tool's process from exiting after a clean
+  /// `daemon.shutdown`. The caller that takes over the session cancels it when
+  /// the browser is stopped ([AppInstance.outputPumps]).
+  final AppLogPump outputPump;
 
   /// The localhost URL the launched tab serves the app from — the URL every
   /// page-target lookup matches against.
@@ -3880,7 +4819,8 @@ class ChromeSession {
 
   ChromeSession._({
     required this.process,
-    required this.userDataDir,
+    required this.outputPump,
+    required this.profile,
     required this.cdpPort,
     required this.appUrl,
     required this.pageWebSocketDebuggerUrl,
@@ -3912,14 +4852,28 @@ class ChromeSession {
   /// Launch Chrome on [url] and wait until it is observably up: debugging
   /// port announced *and* the tab navigated to the app. A failed launch
   /// leaves nothing behind — no browser, no profile directory.
+  ///
+  /// Neither wait has a deadline: each ends on something Chrome does (it says
+  /// the port is open, shows the page, exits, or closes its debugging
+  /// connection) or on [abandoned]. [abandoned] completing means the run is
+  /// ending: the launch stops waiting, and fails after releasing what it
+  /// started. It is the only way the waits end other than Chrome acting — see
+  /// [_discoverCdpPort] and [waitForAppPage]. After [slowStartNotice] in
+  /// either wait a warning says Chrome is slow; it changes nothing about the
+  /// wait.
+  ///
+  /// [stopBound] is how long a browser being ended gets to exit on SIGTERM
+  /// before it is sent SIGKILL.
   static Future<ChromeSession> launch({
     required String url,
     required ProcessStarter startProcess,
     BrowserLaunchOptions options = const BrowserLaunchOptions(),
     String? chromePath,
-    Duration portTimeout = const Duration(seconds: 15),
-    Duration pageTimeout = const Duration(seconds: 15),
-    Duration pollInterval = const Duration(milliseconds: 50),
+    ChromeProfiles? profiles,
+    Future<void>? abandoned,
+    Duration slowStartNotice = const Duration(seconds: 10),
+    NoticeTimer startNotice = Timer.new,
+    Duration stopBound = const Duration(seconds: 5),
   }) async {
     final exe = chromePath ?? findChrome();
     if (exe == null) {
@@ -3927,17 +4881,38 @@ class ChromeSession {
         'Chrome not found. Install Chrome or use -d macos for desktop.',
       );
     }
-    final userDataDir = await createTempDir('flutter_chrome_');
+    // A rejection to race every wait against, so that an abandoned launch
+    // fails where it stands rather than when that wait would have ended.
+    const abandonedMessage =
+        'The Chrome launch was abandoned because the run is ending.';
+    var isAbandoned = false;
+    final Future<Never>? abandonment = abandoned?.then<Never>((_) {
+      isAbandoned = true;
+      throw StateError(abandonedMessage);
+    });
+    // Raced, so it may lose; its rejection is then nobody's to report.
+    abandonment?.ignore();
+    Future<T> unlessAbandoned<T>(Future<T> wait) =>
+        abandonment == null ? wait : Future.any([wait, abandonment]);
+
+    final profile = await (profiles ?? ChromeProfiles()).create();
+    // Checked once more before starting anything: a browser window that
+    // flashes up only to be killed is the one thing worse than not launching.
+    if (isAbandoned) {
+      await profile.release();
+      throw StateError(abandonedMessage);
+    }
     final Process chrome;
     try {
       chrome = await startProcess(
         exe,
-        launchArgs(url, options, userDataDir: userDataDir.path),
+        launchArgs(url, options, userDataDir: profile.directory.path),
       );
     } catch (_) {
-      await deleteTempDir(userDataDir);
+      await profile.release();
       rethrow;
     }
+    profile.browserStarted(chrome.pid);
 
     // Chrome's own process output — browser diagnostics, not app output.
     // Kept drained for the browser's lifetime so its pipes can never fill
@@ -3946,38 +4921,47 @@ class ChromeSession {
     // Deliberately *not* surfaced as app output: the app's console lives
     // inside the page, and Chrome's own chatter would bury it.
     final diagnostics = AppLogStream(capacity: 200);
-    diagnostics.closeWhen([pumpProcessLines(chrome, diagnostics).done]);
+    final outputPump = pumpProcessLines(chrome, diagnostics);
+    diagnostics.closeWhen([outputPump.done]);
 
     try {
-      final cdpPort = await _discoverCdpPort(
-        diagnostics,
-        timeout: portTimeout,
-        requestedPort: options.debugPort,
+      final announced = await unlessAbandoned(
+        _discoverCdpPort(
+          diagnostics,
+          slowStartNotice: slowStartNotice,
+          startNotice: startNotice,
+          requestedPort: options.debugPort,
+        ),
       );
+      final cdpPort = announced.port;
       // The announcement is the readiness signal, not merely the number, so
       // it is awaited even when the port was dictated. A browser that takes a
       // different one than it was given is a state nothing here can drive:
       // every CDP consumer would dial the port that was asked for.
       if (options.debugPort != null && cdpPort != options.debugPort) {
-        chrome.kill();
-        await chrome.exitCode;
-        await deleteTempDir(userDataDir);
         throw StateError(
           'Chrome was asked for --web-browser-debug-port '
           '${options.debugPort} and announced $cdpPort instead.',
         );
       }
-      // The same wait [resolveAppPage] does, done before the session exists
-      // so the page it found can be part of it.
-      final page = await resolveCdpPageTarget(
-        cdpPort,
-        appUrl: url,
-        timeout: pageTimeout,
-        pollInterval: pollInterval,
+      // Done before the session exists so the page it found can be part of
+      // it. A session whose app page never appeared is a failed launch, not a
+      // running one that every CDP consumer — screenshots, page reloads, the
+      // console — then mis-drives.
+      final page = await unlessAbandoned(
+        waitForAppPage(
+          browserEndpoint: announced.browserEndpoint,
+          appUrl: url,
+          browserExit: chrome.exitCode,
+          lastWords: () => _browserLastWords(diagnostics),
+          slowNotice: slowStartNotice,
+          startNotice: startNotice,
+        ),
       );
       final session = ChromeSession._(
         process: chrome,
-        userDataDir: userDataDir,
+        outputPump: outputPump,
+        profile: profile,
         cdpPort: cdpPort,
         appUrl: url,
         pageWebSocketDebuggerUrl: page,
@@ -3989,36 +4973,16 @@ class ChromeSession {
       // A launch with no debugging port or no app page produced nothing
       // usable; don't leave the browser and its throwaway profile running
       // behind the error.
-      chrome.kill();
-      await chrome.exitCode;
-      await deleteTempDir(userDataDir);
+      // Bounded and escalated like every other stop: a browser that is wedged
+      // is the one most likely to be why the launch failed, and one that
+      // ignores SIGTERM would otherwise hold the failure — and with it the
+      // teardown waiting on this launch — for good.
+      await _stopProcess('browser', chrome, stopBound);
+      await outputPump.dispose();
+      await profile.release();
       rethrow;
     }
   }
-
-  /// Wait until the launched tab is serving [appUrl] and return its CDP
-  /// WebSocket debugger URL.
-  ///
-  /// Right after launch the tab is still an `about:blank` that has not
-  /// navigated, and `/json` can list nothing at all, so this waits rather than
-  /// failing on the first look — see [pickCdpPageTarget] for why nothing less
-  /// than the app's own page will do. [launch] awaits it before declaring the
-  /// browser up: a session whose app page never appeared is a failed launch,
-  /// not a running one that every CDP consumer — screenshots, page reloads,
-  /// the console — then mis-drives.
-  ///
-  /// The waiting itself is [resolveCdpPageTarget]'s, not a second copy of it:
-  /// the states this rides out at launch are the same ones those consumers hit
-  /// mid-session.
-  Future<String> resolveAppPage({
-    Duration timeout = const Duration(seconds: 15),
-    Duration pollInterval = const Duration(milliseconds: 50),
-  }) => resolveCdpPageTarget(
-    cdpPort,
-    appUrl: appUrl,
-    timeout: timeout,
-    pollInterval: pollInterval,
-  );
 
   /// Lay the app out at [viewport], and prove that it did.
   ///
@@ -4057,6 +5021,13 @@ class ChromeSession {
 /// Web device — serves build output via HTTP and launches Chrome.
 class WebDevice extends Device {
   final ProcessStarter _startProcess;
+
+  /// Where this device's browser profiles live.
+  final ChromeProfiles _profiles;
+
+  /// The profile of the browser this device launched, until [stop] releases
+  /// it.
+  ChromeProfile? _profile;
 
   /// CDP debugging port discovered from Chrome stderr.
   int? _cdpPort;
@@ -4114,14 +5085,69 @@ class WebDevice extends Device {
   /// library docs.
   CdpConsoleClient? _consoleClient;
 
-  WebDevice({ProcessStarter? startProcess})
-    : _startProcess = startProcess ?? Process.start;
+  /// How the `app.*` agent commands reach the page's extensions when there is
+  /// no VM service to reach them through: a bundled debug build (`--wasm`, or
+  /// a debug `--no-hot` run), whose generated main installs a JavaScript
+  /// bridge. Null for the DDC dev loop, which has a VM service, and for a
+  /// bundle that is not a debug build, which compiles the extensions out.
+  BrowserExtensionChannel? browserChannel;
+
+  /// The browser to launch, or null to use the one [findChrome] finds on this
+  /// host. A test run names its own: the pinned browser it was given is the one
+  /// that runs, never another found on the host in its place.
+  final String? _chromePath;
+
+  WebDevice({
+    ProcessStarter? startProcess,
+    ChromeProfiles? profiles,
+    String? chromePath,
+  }) : _startProcess = startProcess ?? Process.start,
+       _profiles = profiles ?? ChromeProfiles(),
+       _chromePath = chromePath;
 
   @override
   String get name => 'Chrome';
 
   @override
-  Future<List<HostTool>> requiredHostTools() async => [chromeTool()];
+  Future<List<HostTool>> requiredHostTools() async {
+    final given = _chromePath;
+    if (given == null) return [chromeTool()];
+    // Only the browser that was named: were it missing, falling back to the
+    // host's own would run the test in a browser nobody chose.
+    return [
+      HostTool(
+        name: 'Chrome ($given)',
+        purpose: 'run the app in the browser this run was configured with',
+        candidates: [given],
+        pathNames: const [],
+        remedy:
+            'This run names its browser itself and does not look for another, '
+            'so the file is missing from where it was said to be.',
+      ),
+    ];
+  }
+
+  /// The bundle directory of a web app's build outputs: the `<name>_web`
+  /// directory, which holds the page, and not the files built beside it (its
+  /// `.serving.json`, the debug build's dev files). The output order is not the
+  /// choice.
+  @override
+  String pickArtifact(List<String> outputs) => findWebOutputDir(outputs);
+
+  /// Why the page is unreachable when the browser this tool started is gone: its
+  /// exit, and its last words. Null while it runs, since a browser that is up
+  /// and a page that is not is something only the page's own connection can
+  /// say.
+  @override
+  Future<String?> whyAppExited(AppInstance instance) async {
+    final code = await _exitCodeWithin(instance.process, _exitReportSettle);
+    if (code == null) return null;
+    final how = code < 0 && !Platform.isWindows
+        ? 'was killed by signal ${-code}'
+        : 'exited with code $code';
+    return 'Chrome $how while the app was running. '
+        '${_browserLastWords(instance.logs)}';
+  }
 
   /// Set the DDC module server for dev mode (hot restart support).
   void setModuleServer(WebModuleServer server) => _moduleServer = server;
@@ -4140,12 +5166,13 @@ class WebDevice extends Device {
 
   @override
   CompilerConfig? createCompilerConfig(
-    ToolchainPaths toolchain, {
+    String patchedSdkRoot, {
     WebToolchainPaths? webToolchain,
     List<String> fileSystemRoots = const [],
     String fileSystemScheme = '',
     List<String> dartDefines = const [],
     String dartPluginRegistrantUri = '',
+    bool trackWidgetCreation = false,
     List<String> enableExperiments = const [],
   }) {
     // Web builds its own filesystem roots (synthetic entrypoint dir + workspace)
@@ -4185,12 +5212,66 @@ class WebDevice extends Device {
     );
   }
 
+  /// Completed by [abandonLaunch]: the run is ending, so a browser launch in
+  /// flight stops waiting and releases what it started.
+  final _abandoned = Completer<void>();
+
+  /// A launch in flight, until it has returned or finished failing — by
+  /// which point it has released everything it did not hand over.
+  Future<void>? _launching;
+
   @override
   Future<AppInstance> launch(String appPath, {AppLogListener? onLog}) async {
-    if (_moduleServer != null) {
-      return _launchWithModuleServer(onLog);
+    final settled = Completer<void>();
+    _launching = settled.future;
+    try {
+      await _reapAbandonedProfiles();
+      if (_moduleServer != null) {
+        return await _launchWithModuleServer(onLog);
+      }
+      return await _launchStaticServer(appPath, onLog);
+    } finally {
+      settled.complete();
+      _launching = null;
     }
-    return _launchStaticServer(appPath, onLog);
+  }
+
+  /// Clear away the profiles of browsers that earlier runs, killed too hard
+  /// to clean up after themselves, left behind. Housekeeping: a failure to do
+  /// it is reported and does not fail the launch.
+  Future<void> _reapAbandonedProfiles() async {
+    try {
+      await _profiles.reapAbandoned();
+    } on FileSystemException catch (e) {
+      _logger.warning({
+        'message': 'chrome_profile_reap_failed',
+        'text':
+            'Could not look for Chrome profiles left by earlier runs in '
+            '${_profiles.parent.path}: ${e.osError?.message ?? e.message}.',
+        'error': '$e',
+      });
+    } on ProcessException catch (e) {
+      _logger.warning({
+        'message': 'chrome_profile_reap_failed',
+        'text':
+            'Could not tell whether the browsers of earlier runs are still '
+            'running, so their Chrome profiles were not cleared: $e.',
+        'error': '$e',
+      });
+    }
+  }
+
+  /// End a browser launch still in flight and wait until it has let go of
+  /// the browser and its profile.
+  ///
+  /// The wait for Chrome's debugging port has no deadline of its own (see
+  /// [_discoverCdpPort]), so this is what ends it when the run is stopped
+  /// first. A launch that already returned handed its browser to the
+  /// session, whose [stop] releases it.
+  @override
+  Future<void> abandonLaunch() async {
+    if (!_abandoned.isCompleted) _abandoned.complete();
+    await _launching;
   }
 
   /// What this run's web flags resolved to, or a failure naming what was
@@ -4223,8 +5304,13 @@ class WebDevice extends Device {
     final session = await ChromeSession.launch(
       url: url,
       startProcess: _startProcess,
+      chromePath: _chromePath,
       options: options.browser,
+      profiles: _profiles,
+      abandoned: _abandoned.future,
+      stopBound: teardownBound,
     );
+    _profile = session.profile;
     _cdpPort = session.cdpPort;
     _holdViewport(session.viewportHold);
     _pageWebSocketDebuggerUrl = session.pageWebSocketDebuggerUrl;
@@ -4237,7 +5323,7 @@ class WebDevice extends Device {
       // The app's own output has its own source — DWDS, wired by the caller —
       // so it does not close with the browser process.
       logs: _newAppLogs(onLog),
-      scratchDirs: [session.userDataDir],
+      outputPumps: [session.outputPump],
     );
   }
 
@@ -4260,7 +5346,11 @@ class WebDevice extends Device {
       session = await ChromeSession.launch(
         url: url,
         startProcess: _startProcess,
+        chromePath: _chromePath,
         options: options.browser,
+        profiles: _profiles,
+        abandoned: _abandoned.future,
+        stopBound: teardownBound,
       );
     } catch (_) {
       // The session cleans up after its own failures; this path additionally
@@ -4268,10 +5358,18 @@ class WebDevice extends Device {
       await staticServer.stop();
       rethrow;
     }
+    _profile = session.profile;
     _cdpPort = session.cdpPort;
     _holdViewport(session.viewportHold);
     _pageWebSocketDebuggerUrl = session.pageWebSocketDebuggerUrl;
     final logs = _newAppLogs(onLog);
+
+    if (buildMode == BuildMode.debug) {
+      browserChannel = BrowserExtensionChannel.forPage(
+        cdpPort: _cdpPort!,
+        appUrl: url,
+      );
+    }
 
     // No DWDS on this path (WASM / production JS), so CDP is the only source
     // of the app's console output.
@@ -4307,54 +5405,73 @@ class WebDevice extends Device {
       vmServiceUri: null,
       server: staticServer.server,
       logs: logs,
-      scratchDirs: [session.userDataDir],
+      outputPumps: [session.outputPump],
     );
   }
 
   @override
   Future<void> stop(AppInstance instance) async {
-    // Unbounded on purpose. A client-side `WebSocket.close()` returns the
-    // *outbound* sink's future and never waits for the peer's answering close
-    // frame, so neither a peer that never answers nor one wedged so hard it
-    // reads nothing can hold it. The one shape that does hang is a wedged peer
-    // with a full send buffer, and this client writes a single small
-    // `Runtime.enable` per connection, so it cannot build that backlog. The
-    // SDK's own 5s close timer does NOT rescue that shape, so this decision
-    // expires if the client ever grows chatty outbound traffic.
-    await _consoleClient?.close();
-    _consoleClient = null;
-    // Taken off first, so closing it is not reported as the viewport lost.
-    final viewportHold = _viewportHold;
-    _viewportHold = null;
-    await viewportHold?.close();
-    final moduleServer = _moduleServer;
-    if (moduleServer != null) {
-      // dwds is third-party and its `stop()` reaches peer-dependent awaits —
-      // `DebugService.close()` waits on a DDS shutdown, `DwdsVmClient.close()`
-      // on a VM-service client dispose. This sits *before* the kill, so an
-      // unbounded wait here means the browser is never even asked to exit.
-      await boundedTeardownStep(
-        'the web module server to shut down',
-        moduleServer.stop(),
-        teardownBound,
-      );
+    try {
+      // Unbounded on purpose. A client-side `WebSocket.close()` returns the
+      // *outbound* sink's future and never waits for the peer's answering
+      // close frame, so neither a peer that never answers nor one wedged so
+      // hard it reads nothing can hold it. The one shape that does hang is a
+      // wedged peer with a full send buffer, and this client writes a single
+      // small `Runtime.enable` per connection, so it cannot build that
+      // backlog. The SDK's own 5s close timer does NOT rescue that shape, so
+      // this decision expires if the client ever grows chatty outbound
+      // traffic.
+      await _consoleClient?.close();
+      _consoleClient = null;
+      await browserChannel?.close();
+      browserChannel = null;
+      // Taken off first, so closing it is not reported as the viewport lost.
+      final viewportHold = _viewportHold;
+      _viewportHold = null;
+      await viewportHold?.close();
+      final moduleServer = _moduleServer;
+      if (moduleServer != null) {
+        // dwds is third-party and its `stop()` reaches peer-dependent awaits —
+        // `DebugService.close()` waits on a DDS shutdown, `DwdsVmClient.close()`
+        // on a VM-service client dispose. The browser is released in the
+        // `finally` below, so a step here that throws still ends it.
+        await boundedTeardownStep(
+          'the web module server to shut down',
+          moduleServer.stop(),
+          teardownBound,
+        );
+      }
+      // Unbounded: `HttpServer.close(force: false)` returns promptly against an
+      // idle keep-alive connection, a held streaming response and an open
+      // WebSocket upgrade alike.
+      await instance.server?.close();
+    } finally {
+      // However the steps above ended, the browser and its profile go: they
+      // are the part of this run that outlives the process if it is missed, so
+      // nothing that can throw stands in front of them.
+      //
+      // The browser first, and the profile once it has exited: a browser that
+      // is still shutting down is still writing its caches, and deleting the
+      // tree under it leaves a half-removed directory and an error naming a
+      // file nobody asked about.
+      await _stopProcess('browser', instance.process, teardownBound);
+      // The browser has been asked to die; whatever a helper of it still
+      // writes is nobody's. Not waiting for its end-of-file is what lets this
+      // process exit when that helper is still alive.
+      await instance.disposeOutputPumps();
+      await instance.logs.close();
+      final profile = _profile;
+      _profile = null;
+      await profile?.release();
     }
-    // Unbounded: `HttpServer.close(force: false)` returns promptly against an
-    // idle keep-alive connection, a held streaming response and an open
-    // WebSocket upgrade alike.
-    await instance.server?.close();
-    // Before the profile goes: a browser that is still shutting down is still
-    // writing its caches, and deleting the tree under it leaves a half-removed
-    // directory and an error naming a file nobody asked about.
-    await _stopProcess('browser', instance.process, teardownBound);
-    await instance.logs.close();
-    await instance.disposeScratchDirs();
   }
 
   @override
-  Future<void> screenshot(
+  Future<void> captureScreen(
     AppInstance instance,
-    String outputPath, {
+    String outputPath,
+    Screen screen,
+    ScreenshotDeadline deadline, {
     VmServiceClient? vmClient,
     String? window,
   }) async {
@@ -4412,10 +5529,17 @@ class WebDevice extends Device {
   }
 }
 
-/// Chrome's announcement of its debugging port, printed to stderr when
-/// launched with `--remote-debugging-port=0`:
-/// `DevTools listening on ws://127.0.0.1:PORT/devtools/browser/...`
-final cdpPortPattern = RegExp(r'DevTools listening on ws://\S+?:(\d+)/');
+/// Chrome's announcement of its debugging server, printed to stderr once it
+/// is listening: `DevTools listening on ws://127.0.0.1:PORT/devtools/browser/ID`.
+/// Groups: the whole endpoint, its host, its port.
+final cdpPortPattern = RegExp(
+  r'DevTools listening on (ws://(\S+):(\d+)/\S*)',
+);
+
+/// What Chrome prints when it cannot open its debugging server on any
+/// address. It then carries on running without one, so this line is the only
+/// sign that the port will never be announced.
+const cdpServerFailedLine = 'Cannot start http server for devtools';
 
 /// Discover the CDP debugging port from Chrome's own diagnostic output.
 ///
@@ -4424,45 +5548,85 @@ final cdpPortPattern = RegExp(r'DevTools listening on ws://\S+?:(\d+)/');
 /// unread stderr on a browser as chatty as Chrome is the likeliest place for a
 /// full-pipe stall.
 ///
-/// Throws a [StateError] rather than returning null when the port never
-/// arrives. It is not optional equipment: DDC dev mode dials CDP to give DWDS
+/// Ends on something Chrome does, never on a clock: it announces the port, it
+/// says it cannot open the server, or it exits. How long a cold browser takes
+/// to get there is the machine's business — a loaded CI runner has taken
+/// longer than any deadline that is comfortable on a workstation — so a
+/// deadline here would turn a slow start into a failed run. A browser that is
+/// up and never answers is ended by whoever is waiting on the run (Ctrl-C,
+/// `daemon.shutdown`, a client's own patience), which reaches this launch
+/// through [ChromeSession.launch]'s `abandoned`. After [slowStartNotice] the
+/// person waiting is told, with what Chrome has said so far; that changes
+/// nothing about the wait.
+///
+/// Throws a [StateError] rather than returning null when the port cannot
+/// arrive. It is not optional equipment: DDC dev mode dials CDP to give DWDS
 /// its Chrome connection, and every web path uses it for screenshots and page
 /// reloads, so accepting null here would buy a run with none of that and no
-/// message. Upstream tool-exits in the same situation (`chrome.dart`'s "Unable to
-/// connect to Chrome debug port"). The two causes are reported separately
-/// because they call for different fixes.
-Future<int> _discoverCdpPort(
+/// message. Upstream tool-exits in the same situation (`chrome.dart`'s "Unable
+/// to connect to Chrome debug port").
+Future<({int port, Uri browserEndpoint})> _discoverCdpPort(
   AppLogStream browserDiagnostics, {
-  Duration timeout = const Duration(seconds: 15),
+  required Duration slowStartNotice,
+  required NoticeTimer startNotice,
   int? requestedPort,
 }) async {
-  final completer = Completer<int>();
-  final timer = Timer(timeout, () {
-    if (!completer.isCompleted) {
-      completer.completeError(
-        StateError(
-          'Chrome did not announce a DevTools debugging port within '
-          '${timeout.inSeconds}s of launch. Without it there is no debugging '
-          'connection: no DWDS VM service, no hot restart, no screenshots.'
-          // A dictated port is the one thing about this launch that can be
-          // wrong before Chrome even starts, and Chrome says nothing when it
-          // cannot take one.
-          '${requestedPort == null ? '' : ' --web-browser-debug-port '
-                    '$requestedPort may already be in use.'}'
-          // What a browser that is up but not announcing has printed so far
-          // shows how far its startup got, and on a CI runner this error is
-          // the only place it lands.
-          ' ${_browserLastWords(browserDiagnostics)}',
-        ),
-      );
-    }
+  final completer = Completer<({int port, Uri browserEndpoint})>();
+  void fail(String message) {
+    if (!completer.isCompleted) completer.completeError(StateError(message));
+  }
+
+  final sinceLaunch = Stopwatch()..start();
+  var noticeGiven = false;
+  final notice = startNotice(slowStartNotice, () {
+    noticeGiven = true;
+    _logger.warning({
+      'message': 'browser_slow_to_start',
+      'text':
+          'Chrome has not opened its DevTools debugging port '
+          '${sinceLaunch.elapsed.inSeconds}s after launch; still waiting. '
+          '${_browserLastWords(browserDiagnostics, silence: 'It has printed nothing so far.')}',
+      'elapsedMs': sinceLaunch.elapsedMilliseconds,
+    });
   });
+
+  // A dictated port is the one thing about this launch that can be wrong
+  // before Chrome even starts.
+  final portInUse = requestedPort == null
+      ? ''
+      : ' --web-browser-debug-port $requestedPort may already be in use.';
 
   final sub = browserDiagnostics.lines.listen(
     (line) {
       if (completer.isCompleted) return;
       final match = cdpPortPattern.firstMatch(line.text);
-      if (match != null) completer.complete(int.parse(match.group(1)!));
+      if (match != null) {
+        final host = match.group(2)!;
+        final port = int.parse(match.group(3)!);
+        // Chrome tries 127.0.0.1 first and falls back to [::1] when that is
+        // taken. Every CDP consumer here dials 127.0.0.1, so a server on any
+        // other address is one they would miss — or, on a dictated port, one
+        // where they would reach whatever holds 127.0.0.1 instead.
+        if (host != '127.0.0.1') {
+          fail(
+            'Chrome opened its DevTools debugging port on $host:$port '
+            'rather than 127.0.0.1, where this tool connects to it, which it '
+            'does when 127.0.0.1:$port is taken.$portInUse',
+          );
+          return;
+        }
+        completer.complete((
+          port: port,
+          browserEndpoint: Uri.parse(match.group(1)!),
+        ));
+      } else if (line.text.contains(cdpServerFailedLine)) {
+        fail(
+          'Chrome could not open its DevTools debugging server. Without it '
+          'there is no debugging connection: no DWDS VM service, no hot '
+          'restart, no screenshots.$portInUse '
+          '${_browserLastWords(browserDiagnostics)}',
+        );
+      }
     },
     onDone: () {
       // Chrome's output is this stream's only source, so it ending means the
@@ -4475,44 +5639,57 @@ Future<int> _discoverCdpPort(
       // under, a profile directory it cannot write, a missing shared library —
       // and on a CI runner the alternative to quoting them here is reproducing
       // the failure somewhere the log can be reached.
-      if (!completer.isCompleted) {
-        completer.completeError(
-          StateError(
-            'Chrome exited before announcing a DevTools debugging port. '
-            '${_browserLastWords(browserDiagnostics)}',
-          ),
-        );
-      }
+      fail(
+        'Chrome exited before announcing a DevTools debugging port. '
+        '${_browserLastWords(browserDiagnostics)}',
+      );
     },
   );
 
   try {
-    return await completer.future;
+    final announced = await completer.future;
+    final port = announced.port;
+    // How long the browser took is what says whether a slow machine is
+    // getting slower; worth a line at the default level only when the person
+    // waiting was already told it was slow.
+    final started = {
+      'message': 'browser_debug_port_open',
+      'text':
+          'Chrome opened its DevTools debugging port $port after '
+          '${sinceLaunch.elapsedMilliseconds}ms.',
+      'cdpPort': port,
+      'elapsedMs': sinceLaunch.elapsedMilliseconds,
+    };
+    noticeGiven ? _logger.info(started) : _logger.fine(started);
+    return announced;
   } finally {
-    timer.cancel();
+    notice.cancel();
     await sub.cancel();
   }
 }
 
-/// The tail of what the browser printed, phrased for the end of an error.
+/// The tail of what the browser printed, phrased for the end of a message.
 ///
 /// Read back off [AppLogStream] rather than accumulated by the listener above:
 /// the buffer survives the stream closing, so the lines are still there at the
-/// moment the launch is known to have failed, whether by exit or by timeout,
-/// and there is no second copy of the same output to keep in step with the
-/// first.
+/// moment the launch is known to have failed, and there is no second copy of
+/// the same output to keep in step with the first.
 ///
-/// Says so explicitly when there is nothing to quote. "Chrome printed nothing"
-/// is a real and different diagnosis from "Chrome exited" —
-/// it rules out every cause that announces itself, and says the search belongs
-/// somewhere other than the browser's output. An empty tail rendered as
-/// nothing at all would instead read as if the quoting had been forgotten.
-String _browserLastWords(AppLogStream browserDiagnostics, {int lines = 20}) {
+/// Says so explicitly when there is nothing to quote ([silence]). "Chrome
+/// exited and printed nothing" is a real and different diagnosis from "Chrome
+/// exited" — it rules out every cause that announces itself, and says the
+/// search belongs somewhere other than the browser's output. An empty tail
+/// rendered as nothing at all would instead read as if the quoting had been
+/// forgotten.
+String _browserLastWords(
+  AppLogStream browserDiagnostics, {
+  int lines = 20,
+  String silence =
+      'It printed nothing at all on the way out, so its own output does not '
+      'hold the reason.',
+}) {
   final tail = browserDiagnostics.read(-lines).lines;
-  if (tail.isEmpty) {
-    return 'It printed nothing at all, so its own output does not hold the '
-        'reason.';
-  }
+  if (tail.isEmpty) return silence;
   return 'It last said:\n${tail.map((l) => '  ${l.text}').join('\n')}';
 }
 
@@ -4635,14 +5812,19 @@ Future<Map<String, dynamic>> _sendCdpToPage(
 ///
 /// The target is resolved when the connection opens and not after, so hold
 /// one only for a single operation: see [pickCdpPageTarget].
-class CdpPageConnection {
+class CdpPageConnection implements CdpSender {
   final WebSocket _ws;
   final _pending = <int, Completer<Map<String, dynamic>>>{};
   var _nextId = 1;
   Object? _closedBy;
   final _done = Completer<void>();
+  final _events = StreamController<Map<String, dynamic>>.broadcast();
+
+  @override
+  Stream<Map<String, dynamic>> get events => _events.stream;
 
   /// Whether the socket has closed, from either end.
+  @override
   bool get isClosed => _closedBy != null;
 
   /// Completes when the socket closes, from either end — what a holder of a
@@ -4654,7 +5836,11 @@ class CdpPageConnection {
       (data) {
         final msg = json.decode(data as String) as Map<String, dynamic>;
         final id = msg['id'];
-        if (id is int) _pending.remove(id)?.complete(msg);
+        if (id is int) {
+          _pending.remove(id)?.complete(msg);
+        } else if (msg['method'] is String) {
+          _events.add(msg);
+        }
       },
       // A page that navigates away or a browser that exits closes the socket;
       // every command still waiting would otherwise spend its whole timeout
@@ -4670,7 +5856,10 @@ class CdpPageConnection {
       c.completeError(error);
     }
     _pending.clear();
-    if (!_done.isCompleted) _done.complete();
+    if (!_done.isCompleted) {
+      _done.complete();
+      unawaited(_events.close());
+    }
   }
 
   /// Connect to the page serving [appUrl] on [cdpPort].
@@ -4688,6 +5877,7 @@ class CdpPageConnection {
   ///
   /// Bounded: a browser that stops answering would otherwise hold the
   /// command pool's only slot for the rest of the run.
+  @override
   Future<Map<String, dynamic>> send(
     String method,
     Map<String, dynamic> params, {
@@ -4711,6 +5901,7 @@ class CdpPageConnection {
     return response;
   }
 
+  @override
   Future<void> close() {
     _fail(StateError('the page\'s CDP connection was closed here'));
     return _ws.close();

@@ -24,6 +24,22 @@ void main() {
     });
   });
 
+  group('jarEntryName', () {
+    test('joins a Windows path with /', () {
+      expect(
+        jarEntryName(r'lib\arm64-v8a\libflutter.so', r'\'),
+        'lib/arm64-v8a/libflutter.so',
+      );
+    });
+
+    test('keeps a POSIX path as it is', () {
+      expect(
+        jarEntryName('lib/arm64-v8a/libflutter.so', '/'),
+        'lib/arm64-v8a/libflutter.so',
+      );
+    });
+  });
+
   test('strips as the Android Gradle Plugin does', () {
     expect(stripArguments(input: 'in.so', output: 'out.so'), [
       '--strip-unneeded',

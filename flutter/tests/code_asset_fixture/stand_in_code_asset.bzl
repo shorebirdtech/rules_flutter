@@ -21,8 +21,8 @@ def _stand_in_code_asset_impl(ctx):
         DartCodeAssetInfo(
             asset_id = ctx.attr.asset_id,
             link_mode = ctx.attr.link_mode,
-            dynamic_library = library,
-            system_uri = ctx.attr.system_uri,
+            file = library,
+            uri = ctx.attr.uri,
         ),
     ]
 
@@ -32,6 +32,6 @@ stand_in_code_asset = rule(
         "asset_id": attr.string(mandatory = True),
         "library": attr.label(),
         "link_mode": attr.string(default = "dynamic_loading_bundle"),
-        "system_uri": attr.string(),
+        "uri": attr.string(),
     },
 )

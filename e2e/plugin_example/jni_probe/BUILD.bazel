@@ -1,0 +1,77 @@
+load("@rules_android//android:rules.bzl", "android_library")
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_dart//dart:defs.bzl", "dart_test")
+load("@rules_flutter//flutter:android.bzl", "flutter_android_app")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application", "flutter_plugin")
+
+# A plugin whose Android library builds its own shared library from source,
+# as a plugin's Gradle build does with CMake, and an app of it. The Android
+# C/C++ toolchain links it, and :verify_jni_probe_apk_test checks that it is in
+# the APK aligned for 16 KB pages.
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "jni_probe",
+)
+
+cc_binary(
+    name = "libjni_probe.so",
+    srcs = ["native/jni_probe.c"],
+    linkshared = True,
+    tags = ["manual"],
+)
+
+cc_library(
+    name = "jni_probe_cc",
+    srcs = [":libjni_probe.so"],
+    tags = ["manual"],
+)
+
+android_library(
+    name = "jni_probe_android",
+    srcs = ["android/src/main/java/com/example/jni_probe/JniProbe.java"],
+    tags = ["manual"],
+    deps = [":jni_probe_cc"],
+)
+
+flutter_plugin(
+    name = "jni_probe",
+    srcs = ["lib/jni_probe.dart"],
+    package = ":pubspec-metadata",
+    # Only an Android build analyses its Android library.
+    exports = select({
+        "@platforms//os:android": [":jni_probe_android"],
+        "//conditions:default": [],
+    }),
+)
+
+flutter_application(
+    name = "jni_probe_flutter",
+    srcs = ["lib/main.dart"],
+    main = "lib/main.dart",
+    package = ":pubspec-metadata",
+    deps = [
+        ":jni_probe",
+        "@deps//:flutter",
+    ],
+)
+
+flutter_android_app(
+    name = "jni_probe_android_app",
+    application = ":jni_probe_flutter",
+    application_id = "com.example.jniprobe",
+    tags = ["manual"],
+)
+
+dart_test(
+    name = "verify_jni_probe_apk_test",
+    data = [
+        ":jni_probe_android_app",
+        "@bazel_tools//tools/zip:zipper",
+    ],
+    env = {"ZIPPER_RUNFILE": "$(rlocationpath @bazel_tools//tools/zip:zipper)"},
+    main = "test/verify_jni_probe_apk_test.dart",
+    tags = ["android"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
+)

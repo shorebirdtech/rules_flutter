@@ -1,4 +1,9 @@
-load("//flutter:defs.bzl", "flutter_library")
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_library")
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "analyze_fixture",
+)
 
 # A `flutter_library` over code that imports `dart:ui`, analyzed with nothing
 # but its own sources.
@@ -10,6 +15,6 @@ load("//flutter:defs.bzl", "flutter_library")
 # fails here with `dart:ui` unresolved.
 flutter_library(
     name = "analyze_fixture",
-    package_name = "analyze_fixture",
     srcs = ["lib/geometry.dart"],
+    package = ":pubspec-metadata",
 )

@@ -22,87 +22,35 @@ library;
 // channel rather than a stray debugging statement.
 // ignore_for_file: avoid_print
 
-import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
+
+import 'package:rules_flutter_e2e_testing/app_process.dart';
+import 'package:rules_flutter_e2e_testing/macos_bundle.dart';
 
 const _summaryMarker = 'plugin_example_results';
 
 Future<void> main() async {
-  final testSrcDir = Platform.environment['TEST_SRCDIR'];
-  final testWorkspace = Platform.environment['TEST_WORKSPACE'];
-  if (testSrcDir == null || testWorkspace == null) {
-    stderr.writeln('Missing TEST_SRCDIR or TEST_WORKSPACE env vars');
-    exit(1);
-  }
-
-  final zipPath = '$testSrcDir/$testWorkspace/plugin_macos.zip';
-  if (!File(zipPath).existsSync()) {
-    stderr.writeln('Bundle zip not found at $zipPath');
-    exit(1);
-  }
-
-  final tmpDir = Directory.systemTemp.createTempSync('plugin_macos_test');
+  final bundle = MacosBundle.fromRunfiles(
+    'plugin_macos.zip',
+    appName: 'plugin_macos',
+    prefix: 'plugin_macos_test',
+  );
+  AppProcess? app;
   try {
-    final unzip = Process.runSync('unzip', ['-q', zipPath, '-d', tmpDir.path]);
-    if (unzip.exitCode != 0) {
-      stderr.writeln('Failed to extract zip: ${unzip.stderr}');
-      exit(1);
-    }
+    final launched = app = await AppProcess.start(bundle.runner, mirror: true);
 
-    final appPath = '${tmpDir.path}/plugin_macos.app';
-    final binaryPath = '$appPath/Contents/MacOS/plugin_macos';
-
-    if (!File(binaryPath).existsSync()) {
-      stderr.writeln('FAIL: runner binary not found at $binaryPath');
-      exit(1);
-    }
-
-    print('Launching $binaryPath ...');
-    final process = await Process.start(binaryPath, const []);
-
-    final summaryCompleter = Completer<String>();
-    final captured = StringBuffer();
-
-    void watch(Stream<List<int>> stream, IOSink mirror) {
-      stream
-          .transform(utf8.decoder)
-          .transform(const LineSplitter())
-          .listen(
-            (line) {
-              captured.writeln(line);
-              mirror.writeln(line);
-              if (!summaryCompleter.isCompleted &&
-                  line.contains(_summaryMarker)) {
-                summaryCompleter.complete(line);
-              }
-            },
-            onError: (Object e) {
-              if (!summaryCompleter.isCompleted) {
-                summaryCompleter.completeError(e);
-              }
-            },
-          );
-    }
-
-    watch(process.stdout, stdout);
-    watch(process.stderr, stderr);
-
-    final summary = await summaryCompleter.future.timeout(
-      const Duration(seconds: 30),
-      onTimeout: () {
-        return '';
-      },
+    final summary = await launched.waitForLine(
+      _summaryMarker,
+      timeout: const Duration(seconds: 30),
     );
 
-    process.kill();
-    await process.exitCode;
+    await launched.stop();
 
-    if (summary.isEmpty) {
+    if (summary == null) {
       stderr
         ..writeln('FAIL: $_summaryMarker line not seen within 30s')
         ..writeln('--- captured output ---')
-        ..writeln(captured.toString());
+        ..writeln(launched.output);
       exit(1);
     }
 
@@ -120,6 +68,9 @@ Future<void> main() async {
     }
     if (!summary.contains('launchOk=launch ok')) {
       fails.add('launchOk is not "launch ok"');
+    }
+    if (!summary.contains('prefs=roundtrip ok')) {
+      fails.add('prefs is not "roundtrip ok"');
     }
     if (!summary.contains('greeting=Hello from GreetingPlugin!')) {
       fails.add('greeting (regression case) did not register');
@@ -143,6 +94,7 @@ Future<void> main() async {
 
     print('PASS');
   } finally {
-    tmpDir.deleteSync(recursive: true);
+    await app?.stop();
+    bundle.dispose();
   }
 }

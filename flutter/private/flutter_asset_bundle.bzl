@@ -3,32 +3,26 @@
 Produces a `flutter_assets/` tree artifact containing:
 - AssetManifest.bin  (StandardMessageCodec binary manifest)
 - FontManifest.json  (font family declarations)
-- NOTICES.Z          (gzip-compressed license text)
+- NOTICES.Z          (gzip-compressed license text; `NOTICES` for the web)
 - Copied asset files (images, etc.)
 """
 
-load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
-load("//flutter:providers.bzl", "FlutterInfo")
+load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "program_assets_action_args")
+load("//flutter/private:asset_variants.bzl", "variant_scale")
 load("//flutter/private:exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
-load("//flutter/private:flutter_library.bzl", "aggregate_pub_contributions")
+load("//flutter/private:flutter_library.bzl", "aggregate_pub_contributions", "package_root_of", "path_in_package")
+load("//flutter/private:notices.bzl", "NOTICES_ATTRS", "additional_licenses_of", "flutter_notices_action", "notices_asset_key", "package_licenses_of")
 load("//flutter/private:path_mapping.bzl", "file_ref", "json_config_args")
 
 _TOOL = Label("//flutter/private/tools:generate_asset_manifest.dart")
 
-# Regex-like DPR directory patterns we detect in Starlark.
-# A directory named like "2x", "1.5x", "3.0x" indicates a resolution variant.
-_DPR_SUFFIXES = {
-    "1.5x": 1.5,
-    "2x": 2.0,
-    "2.0x": 2.0,
-    "3x": 3.0,
-    "3.0x": 3.0,
-    "4x": 4.0,
-    "4.0x": 4.0,
-}
-
 def detect_dpr(path):
-    """Detect device-pixel-ratio from a resolution variant directory name.
+    """Detect the device pixel ratio from the directory a file is in.
+
+    A file is a resolution variant of the file of the same name one directory
+    up when its immediate parent directory is named for a scale (`2x`, `1.5x`,
+    `0.75x`; see `variant_scale`). A directory further up, or below, makes no
+    variant of it.
 
     Args:
         path: Asset path string (e.g. "assets/2.0x/icon.png").
@@ -38,10 +32,10 @@ def detect_dpr(path):
         "assets/icon.png").  dpr is a float or None if not a variant.
     """
     parts = path.split("/")
-    for i, part in enumerate(parts):
-        if part in _DPR_SUFFIXES:
-            base = "/".join(parts[:i] + parts[i + 1:])
-            return base, _DPR_SUFFIXES[part]
+    if len(parts) >= 2:
+        dpr = variant_scale(parts[-2])
+        if dpr != None:
+            return "/".join(parts[:-2] + parts[-1:]), dpr
     return path, None
 
 def build_asset_manifest(assets):
@@ -79,34 +73,34 @@ def build_asset_manifest(assets):
 
     return manifest
 
-# Where the engine reads a bundle's code assets from (`NativeAssetsManager`).
-NATIVE_ASSETS_MANIFEST_BUNDLE_PATH = "NativeAssetsManifest.json"
-
 def flutter_asset_bundle_action(
         ctx,
         dart,
-        flutter_sdk_files,
+        dart_files,
         assets = [],
         fonts = [],
-        notices = "",
-        license_files = [],
         output_dir = None,
         const_finder = None,
         font_subset = None,
         kernel_dill = None,
         recorded_uses = None,
-        extra_asset_copies = {},
-        native_assets_manifest = None):
+        optional_code_points = [],
+        extra_asset_copies = [],
+        unlisted_asset_copies = [],
+        owner = None,
+        program_assets = None):
     """Create an action that generates the flutter_assets/ tree artifact.
 
     Args:
         ctx: Rule context.
         dart: The `dart` executable File from the Flutter SDK.
-        flutter_sdk_files: SDK files needed to run dart (for action inputs).
-        assets: list of File objects to include in the bundle.
+        dart_files: The files `dart` needs to run `generate_asset_manifest.dart`
+            from source, and to start `const_finder`'s snapshot: the `run` set
+            of the SDK (`DartSdkFilesInfo.run`).
+        assets: list of File objects of the target's package to include in the
+            bundle, each under its path from that package's root
+            (`assets/a.png`).
         fonts: list of font declaration dicts (FontManifest.json schema).
-        notices: License text string to compress into NOTICES.Z.
-        license_files: list of File objects containing license text to include in NOTICES.Z.
         output_dir: The already-declared directory (tree artifact) File to
             write the bundle into. Declared by the caller rather than here
             because an application has to know where its assets will land
@@ -119,19 +113,25 @@ def flutter_asset_bundle_action(
         const_finder: File for const_finder.dart.snapshot (enables icon tree shaking).
         font_subset: File for font-subset binary (enables icon tree shaking).
         kernel_dill: File for the compiled kernel .dill (needed for icon tree shaking).
-        recorded_uses: File the AOT kernel compile wrote with
-            `--recorded-uses`. With `font_subset` and no `const_finder`
-            (Flutter 3.50 on), icon tree shaking reads the `IconData`
-            instances from it instead of running const_finder over the kernel.
-        extra_asset_copies: dict mapping custom dest path → File for assets that
-            need a specific destination path (e.g. "fonts/MaterialIcons-Regular.otf").
-        native_assets_manifest: Optional File, the `native_assets.json` the
-            kernel compile was given. Copied to the bundle's
-            `NativeAssetsManifest.json`, where the engine looks code assets
-            up: from Flutter 3.50 (flutter/flutter#188947) it resolves them
-            only there, never from the mapping embedded in the kernel. Not
-            an asset, so not listed in the asset manifest, as flutter_tools
-            does not list it.
+        recorded_uses: File the compile wrote with `--recorded-uses`. With
+            `font_subset` and no `const_finder` (Flutter 3.50 on), icon tree
+            shaking reads the `IconData` instances from it instead of
+            running const_finder over the kernel.
+        optional_code_points: Code points every subset icon font keeps if the
+            font has a glyph for them, used or not (`optional:<n>` to
+            font-subset).
+        extra_asset_copies: list of (key, File) for assets that need a specific
+            key (e.g. "fonts/MaterialIcons-Regular.otf"). They are listed in the
+            asset manifest.
+        unlisted_asset_copies: the same, for files that are bundled without
+            being an entry of the asset manifest.
+        owner: What has the package `assets` are keyed in: anything with a
+            `label`, `ctx` when None. A program rebuilt under another target
+            (`flutter_application_variant`) keeps its own package's keys.
+        program_assets: Optional `DartProgramAssetsInfo`. The tool places each
+            data asset the program ships at `packages/<package>/<name>`,
+            the key flutter_tools gives a hook's data asset and the one
+            `rootBundle` loads it by, and lists it in the asset manifest.
 
     Returns:
         The `output_dir` it was given, so callers can chain.
@@ -144,24 +144,28 @@ def flutter_asset_bundle_action(
     # writes the config, path-mapped where the action is.
     refs = []
 
+    # Every file is claimed under its key. A key stands for one file: a second,
+    # different file claiming it would have the bundle hold one and the
+    # manifest name the other, so it fails here, naming both. The same file
+    # reached twice (a package behind two dependencies) is one claim.
+    claims = {}
+    listed = {}
+    owner = owner or ctx
+    owner_root = package_root_of(owner)
+    claimed = [(path_in_package(owner.label, owner_root, f), f, True) for f in assets]
+    claimed += [(key, f, True) for key, f in extra_asset_copies]
+    claimed += [(key, f, False) for key, f in unlisted_asset_copies]
+    for key, f, in_manifest in claimed:
+        seen = claims.get(key)
+        if seen != None and seen != f:
+            fail("%s: two files claim the asset key %s: %s and %s. A bundle can hold one of them." % (ctx.label, key, seen.short_path, f.short_path))
+        claims[key] = f
+        if in_manifest:
+            listed[key] = True
+
     # Build asset paths and copy map relative to the output directory.
-    asset_paths = []
-    copies = {}
-    for f in assets:
-        # Use short_path as the logical key inside flutter_assets/.
-        asset_paths.append(f.short_path)
-        copies[f.short_path] = file_ref(refs, f)
-
-    # Add extra copies with custom destination paths.
-    extra_files = []
-    for dest_path, f in extra_asset_copies.items():
-        asset_paths.append(dest_path)
-        copies[dest_path] = file_ref(refs, f)
-        extra_files.append(f)
-
-    if native_assets_manifest != None:
-        copies[NATIVE_ASSETS_MANIFEST_BUNDLE_PATH] = file_ref(refs, native_assets_manifest)
-        extra_files.append(native_assets_manifest)
+    asset_paths = list(listed.keys())
+    copies = {key: file_ref(refs, f) for key, f in claims.items()}
 
     # Build manifest structure.
     manifest = build_asset_manifest(asset_paths)
@@ -171,8 +175,6 @@ def flutter_asset_bundle_action(
         "assets": manifest,
         "fonts": fonts,
         "copies": copies,
-        "notices": notices,
-        "license_files": [file_ref(refs, f) for f in license_files],
     }
 
     # Icon tree shaking config.
@@ -181,6 +183,7 @@ def flutter_asset_bundle_action(
         config["icon_tree_shaking"] = {
             "font_subset": file_ref(refs, font_subset),
             "recorded_uses": file_ref(refs, recorded_uses),
+            "optional_code_points": optional_code_points,
         }
         extra_inputs.extend([font_subset, recorded_uses])
     elif const_finder and font_subset and kernel_dill:
@@ -189,6 +192,7 @@ def flutter_asset_bundle_action(
             "const_finder": file_ref(refs, const_finder),
             "font_subset": file_ref(refs, font_subset),
             "kernel_dill": file_ref(refs, kernel_dill),
+            "optional_code_points": optional_code_points,
         }
         extra_inputs.extend([const_finder, font_subset, kernel_dill])
 
@@ -196,13 +200,20 @@ def flutter_asset_bundle_action(
     args.add(tool)
     args.add_all("--output-dir", [output_dir], expand_directories = False)
     args.add("--config")
+    arguments = [args, json_config_args(ctx, config, refs)]
+    program_inputs = []
+    if program_assets != None:
+        # The bundle holds data assets only: no native library is an input.
+        program = program_assets_action_args(ctx.actions, program_assets, code = None)
+        arguments.append(program.args)
+        program_inputs = [program.inputs]
 
     ctx.actions.run(
         executable = dart,
-        arguments = [args, json_config_args(ctx, config, refs)],
+        arguments = arguments,
         inputs = depset(
-            direct = [tool] + assets + extra_files + license_files + extra_inputs,
-            transitive = [flutter_sdk_files],
+            direct = [tool] + claims.values() + extra_inputs,
+            transitive = [dart_files] + program_inputs,
         ),
         outputs = [output_dir],
         mnemonic = "FlutterAssetBundle",
@@ -216,26 +227,29 @@ def flutter_asset_bundle_action(
 def _flutter_asset_bundle_impl(ctx):
     tools = portable_tools(ctx)
 
-    # Collect assets from direct attr + transitive FlutterInfo deps.
-    all_assets = list(ctx.files.assets)
-    for dep in ctx.attr.deps:
-        if FlutterInfo in dep:
-            all_assets.extend(dep[FlutterInfo].asset_dirs.to_list())
-
     # Walk pub-package font/asset contributions from FlutterInfo. To get
     # MaterialIcons in the bundle, list `@rules_flutter//flutter:material_icons`
     # in deps — the same channel cupertino_icons et al. arrive through.
-    fonts, extra_asset_copies = aggregate_pub_contributions(ctx.attr.deps)
+    fonts, extra_asset_copies, unlisted_asset_copies = aggregate_pub_contributions(ctx.attr.deps, flavor = ctx.attr.flavor, program_root = package_root_of(ctx))
+
+    notices = flutter_notices_action(
+        ctx = ctx,
+        tools = tools,
+        packages = package_licenses_of(ctx.attr.deps),
+        additional = additional_licenses_of(ctx.attr.deps),
+        engine_license = ctx.file._engine_license,
+        web = False,
+    )
 
     output_dir = flutter_asset_bundle_action(
         ctx = ctx,
         dart = tools.dart,
-        flutter_sdk_files = tools.tool_files,
-        assets = all_assets,
+        dart_files = tools.sdk_files.run,
+        assets = ctx.files.assets,
         fonts = fonts,
-        notices = "",
         output_dir = ctx.actions.declare_directory(ctx.label.name),
         extra_asset_copies = extra_asset_copies,
+        unlisted_asset_copies = unlisted_asset_copies + [(notices_asset_key(False), notices)],
     )
 
     return [DefaultInfo(files = depset([output_dir]))]
@@ -250,11 +264,14 @@ flutter_asset_bundle = rule(
         "deps": attr.label_list(
             doc = "Flutter library dependencies whose assets to include.",
         ),
+        "flavor": attr.string(
+            doc = "The flavor the bundle is for: a pub package's `flavors:` entries naming it are bundled, other `flavors:` entries are not. Empty is no flavor.",
+        ),
         "_asset_bundle_tool": attr.label(
             default = _TOOL,
             allow_single_file = True,
         ),
-    },
+    } | NOTICES_ATTRS,
     exec_groups = PORTABLE_EXEC_GROUPS,
-    doc = "Generates a flutter_assets/ tree artifact with manifests and asset files.",
+    doc = "Generates a flutter_assets/ tree artifact with manifests and asset files. It is for no platform in particular, so it holds the assets of `deps` that a package restricts to some platforms (`platforms:`) too, and only those it restricts to flavors (`flavors:`) that name `flavor`.",
 )
