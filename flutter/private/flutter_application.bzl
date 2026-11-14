@@ -229,6 +229,7 @@ def _flutter_application_impl(ctx):
         recorded_uses = recorded_uses,
         is_debug = is_debug,
         data_assets = transitive_data_assets,
+        native_assets_manifest = native_assets_manifest_file,
     )
 
     # Aggregate the plugin channels from deps. These are what the platform

@@ -79,6 +79,9 @@ def build_asset_manifest(assets):
 
     return manifest
 
+# Where the engine reads a bundle's code assets from (`NativeAssetsManager`).
+NATIVE_ASSETS_MANIFEST_BUNDLE_PATH = "NativeAssetsManifest.json"
+
 def flutter_asset_bundle_action(
         ctx,
         dart,
@@ -92,7 +95,8 @@ def flutter_asset_bundle_action(
         font_subset = None,
         kernel_dill = None,
         recorded_uses = None,
-        extra_asset_copies = {}):
+        extra_asset_copies = {},
+        native_assets_manifest = None):
     """Create an action that generates the flutter_assets/ tree artifact.
 
     Args:
@@ -121,6 +125,13 @@ def flutter_asset_bundle_action(
             instances from it instead of running const_finder over the kernel.
         extra_asset_copies: dict mapping custom dest path → File for assets that
             need a specific destination path (e.g. "fonts/MaterialIcons-Regular.otf").
+        native_assets_manifest: Optional File, the `native_assets.json` the
+            kernel compile was given. Copied to the bundle's
+            `NativeAssetsManifest.json`, where the engine looks code assets
+            up: from Flutter 3.50 (flutter/flutter#188947) it resolves them
+            only there, never from the mapping embedded in the kernel. Not
+            an asset, so not listed in the asset manifest, as flutter_tools
+            does not list it.
 
     Returns:
         The `output_dir` it was given, so callers can chain.
@@ -147,6 +158,10 @@ def flutter_asset_bundle_action(
         asset_paths.append(dest_path)
         copies[dest_path] = file_ref(refs, f)
         extra_files.append(f)
+
+    if native_assets_manifest != None:
+        copies[NATIVE_ASSETS_MANIFEST_BUNDLE_PATH] = file_ref(refs, native_assets_manifest)
+        extra_files.append(native_assets_manifest)
 
     # Build manifest structure.
     manifest = build_asset_manifest(asset_paths)
