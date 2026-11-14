@@ -211,6 +211,7 @@ def _web_sdk(name, provenance):
     visibility = ["//visibility:public"],
 )
 """.format(repo = repo)
+
     # The release's web SDK repository finds the DDC SDK at whichever path its
     # release keeps it (flutter_web_sdk_repo.bzl), and names it by one alias.
     files = dict(WEB_TREE_FILES, **{"ddc_dart_sdk.js": "ddc_library_bundle_dart_sdk_js"})
