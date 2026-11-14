@@ -446,6 +446,15 @@ def _package_file_test_impl(ctx):
     other = package_file("glass_plugin", "packages/material_ui/x.png")
     asserts.equals(env, "packages/material_ui/x.png", other.file)
 
+    # A file at the path as written wins, as in flutter_tools.
+    literal = package_file(
+        "material_ui",
+        "packages/material_ui/shaders/ink_sparkle.frag",
+        literal_exists = True,
+    )
+    asserts.equals(env, "packages/material_ui/shaders/ink_sparkle.frag", literal.file)
+    asserts.equals(env, "packages/material_ui/shaders/ink_sparkle.frag", literal.bundle)
+
     own_dir = package_file("icons", "packages/icons/images/")
     asserts.equals(env, "lib/images/", own_dir.file)
     asserts.equals(env, "images/", own_dir.bundle)
