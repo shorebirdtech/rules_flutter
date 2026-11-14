@@ -53,7 +53,7 @@ class AndroidBuildMode {
   final bool kernelBlob;
 }
 
-/// Debug, profile, and release built two ways.
+/// Debug, profile and release.
 const androidBuildModes = [
   AndroidBuildMode(
     'debug (-c dbg)',
@@ -74,14 +74,6 @@ const androidBuildModes = [
   AndroidBuildMode(
     'release (default configuration)',
     'plugin_android_arm64.apk',
-    debug: false,
-    buildType: 'release',
-    internet: false,
-    kernelBlob: false,
-  ),
-  AndroidBuildMode(
-    'release (-c opt)',
-    'plugin_android_opt.apk',
     debug: false,
     buildType: 'release',
     internet: false,

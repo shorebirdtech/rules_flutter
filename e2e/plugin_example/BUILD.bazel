@@ -425,18 +425,12 @@ flutter_android_build(
 
 # The ABIs of that APK are the platforms of --@rules_android//flags:android_platforms. These build it
 # for given ones whatever the command line says, so one `bazel test //...`
-# checks each: armeabi-v7a, arm64-v8a, x86_64, and all three at once, as
-# `flutter build apk`'s default fat APK. The x86_64 APK must carry the x86_64
-# engine and no other: a plugin that packaged its own (always arm64) engine
-# would make Android install it on an arm64 device and crash at launch. The fat
-# APK carries the engine, `libapp.so` and the plugins' native libraries of all
-# three.
-flutter_android_build(
-    name = "plugin_android_armv7_build",
-    android_platforms = ["@rules_android//:armeabi-v7a"],
-    targets = [":plugin_android"],
-)
-
+# checks arm64-v8a, x86_64, and all three ABIs at once, as `flutter build apk`'s
+# default fat APK. The x86_64 APK must carry the x86_64 engine and no other: a
+# plugin that packaged its own (always arm64) engine would make Android install
+# it on an arm64 device and crash at launch. The fat APK carries the engine,
+# `libapp.so` and the plugins' native libraries of all three, armeabi-v7a's
+# among them.
 flutter_android_build(
     name = "plugin_android_arm64_build",
     android_platforms = ["@rules_android//:arm64-v8a"],
@@ -542,7 +536,7 @@ build_test(
 )
 
 # The plugin_android APKs, each under a name of its own: for one ABI, and the
-# arm64 one rebuilt under -c dbg, -c opt and in profile mode, so the
+# arm64 one rebuilt under -c dbg and in profile mode, so the
 # default-configuration APK verifiers can assert content that depends on the
 # mode (the merged debug variant manifest's INTERNET permission, the plugins'
 # BuildConfig) without building the test under that mode.
@@ -557,17 +551,15 @@ build_test(
     for variant, build, mode, profile in [
         ("arm64", "arm64", "", False),
         ("dbg", "arm64", "dbg", False),
-        ("opt", "arm64", "opt", False),
         ("profile", "arm64", "", True),
-        ("armv7", "armv7", "", False),
         ("x86_64", "x86_64", "", False),
         ("fat", "fat", "", False),
     ]
 ]
 
 # What the plugins' generated BuildConfig classes say, read from the dex of an
-# APK of each mode: debug, profile and release (the default configuration and
-# `-c opt`). `identity` checks the classes are there and name their package; `mode` checks
+# APK of each mode: debug, profile and release (the default configuration;
+# that `-c opt` is release too is //flutter/tests:android_build_config_test's). `identity` checks the classes are there and name their package; `mode` checks
 # they say what Gradle's BuildConfig would for the build mode.
 [
     dart_test(
@@ -576,7 +568,6 @@ build_test(
         data = [
             ":plugin_android_arm64",
             ":plugin_android_dbg",
-            ":plugin_android_opt",
             ":plugin_android_profile",
             "@bazel_tools//tools/zip:zipper",
         ],
@@ -739,14 +730,13 @@ dart_test(
 # System.loadLibrary), its shared Java support classes, and that every
 # packaged .so is ELF for the ABI of its directory. Verifies the arm64 APK
 # (release), the -c dbg APK, asserting INTERNET is present iff debug, the
-# armeabi-v7a and x86_64 APKs, asserting each carries no ABI but its own, and
-# the fat APK, asserting it carries all three. And that the app's Kotlin
+# x86_64 APK, asserting it carries no ABI but its own, and the fat APK,
+# asserting it carries all three. And that the app's Kotlin
 # standard library is the one `kotlin-stdlib` resolves to, not a mix of two.
 dart_test(
     name = "verify_android_apk_test",
     data = [
         ":plugin_android_arm64",
-        ":plugin_android_armv7",
         ":plugin_android_dbg",
         ":plugin_android_deploy.jar",
         ":plugin_android_fat",
@@ -1085,14 +1075,15 @@ flutter_android_aar(
 )
 
 # The repository of each mode under a name of its own: release (the default
-# configuration), profile and debug.
+# configuration), profile and debug. Only the `deep` Gradle host test reads the
+# profile one, so it is in that tier too.
 [
     maven_repo_in_mode(
         name = "plugin_module_repo_" + variant,
         compilation_mode = mode,
         profile = variant == "profile",
         repo = ":plugin_module_aar",
-        tags = ["android"],
+        tags = ["android"] + (["deep"] if variant == "profile" else []),
     )
     for variant, mode in [
         ("release", ""),

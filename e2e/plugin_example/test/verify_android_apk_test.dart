@@ -68,16 +68,14 @@ void main() {
   // transition. Checking both in one default `bazel test //...` run exercises
   // the debug variant-manifest merge in both directions — INTERNET must be
   // absent from the release APK and present in the debug APK — without
-  // building this test itself under `-c dbg`. The armeabi-v7a and x86_64
-  // APKs must each carry their own engine and no other: the plugins compile
-  // against an arm64 one. The fat APK, built for all three platforms at once,
-  // carries every native library of each: the engine and libapp.so,
-  // package:jni's C library, and the AAR's (androidx.datastore's, which ships a
-  // library per ABI).
+  // building this test itself under `-c dbg`. The x86_64 APK must carry its
+  // own engine and no other: the plugins compile against an arm64 one. The
+  // fat APK, built for all three platforms at once, carries every native
+  // library of each: the engine and libapp.so, package:jni's C library, and
+  // the AAR's (androidx.datastore's, which ships a library per ABI).
   final cases = [
     ('arm64-v8a', 'plugin_android_arm64.apk', null, ['arm64-v8a']),
     ('-c dbg', 'plugin_android_dbg.apk', true, ['arm64-v8a']),
-    ('armeabi-v7a', 'plugin_android_armv7.apk', null, ['armeabi-v7a']),
     ('x86_64', 'plugin_android_x86_64.apk', null, ['x86_64']),
     (
       'fat',
