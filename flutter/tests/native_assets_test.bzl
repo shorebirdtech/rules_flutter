@@ -478,7 +478,6 @@ def native_assets_test_suite(name):
     _bundles_manifest_test(
         name = name + "_test_bundles_manifest",
         target_under_test = "//flutter/tests/dart_asset_fixture/code_asset_test:code_asset_flutter_test",
-        target_compatible_with = ["@platforms//os:macos"],
     )
     _bundles_manifest_test(
         name = name + "_app_bundles_manifest",
