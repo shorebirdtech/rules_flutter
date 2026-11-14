@@ -542,6 +542,7 @@ def _program(ctx, kind, runner_tools, target_os, target_arch, layout):
         compiled_shaders,
         kernel_dill = kernel_dill,
         is_debug = True,
+        native_assets_manifest = native_assets_manifest,
         inputs = inputs,
     )
 
