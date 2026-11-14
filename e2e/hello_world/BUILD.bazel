@@ -541,15 +541,14 @@ flutter_test(
 # Windows.
 flutter_test(
     name = "leftover_child_test",
-    package_name = "hello_world",
     timeout = "short",
+    package = ":pubspec-metadata",
     main = "test/leftover_child_test.dart",
     target_compatible_with = select({
         "@platforms//os:windows": ["@platforms//:incompatible"],
         "//conditions:default": [],
     }),
     deps = [
-        "@deps//:flutter",
         "@deps//:flutter_test",
     ],
 )
